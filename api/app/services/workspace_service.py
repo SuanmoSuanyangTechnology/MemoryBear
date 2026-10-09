@@ -9,11 +9,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session, joinedload
 
 from app.config.default_ontology_initializer import DefaultOntologyInitializer
-from app.core.config import settings
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException, PermissionDeniedException
 from app.core.logging_config import get_business_logger
 from app.core.utils.datetime_utils import utcnow_naive
+from app.dependencies import CurrentUserSnapshot
+from app.i18n import t
+from app.invalidation_notify import notify_user_async, notify_user_sync
 from app.models.memory_config_model import MemoryConfig as MemoryConfigModel
 from app.models.models_model import LLM_FAMILY_TYPES, ModelBase, ModelConfig, ModelProvider, ModelType
 from app.models.user_model import User
@@ -42,6 +44,12 @@ from app.invalidation_notify import notify_user_async, notify_user_sync
 from app.services.channel_registry import candidate_channels_batch_sync
 from app.services.memory_config_service import MemoryConfigService
 from app.services.model_profile_view import profile_of
+from app.services.memory_reembed_service import (
+    create_reembed_job_async,
+    dispatch_reembed_job,
+    get_active_reembed_job_id,
+    get_active_reembed_job_id_async,
+)
 from app.services.session_service import SessionService
 from app.utils.redis_cache import (
     CACHE_MISS,
@@ -137,6 +145,26 @@ def _get_public_speedbear_models(
     return query.all()
 
 
+async def _get_accessible_workspace_models_async(
+    db: AsyncSession, tenant_id: uuid.UUID
+) -> list[ModelConfig]:
+    result = await db.execute(
+        select(ModelConfig)
+        .options(joinedload(ModelConfig.model_base))
+        .where(ModelConfig.is_active.is_(True))
+        .where(
+            or_(
+                ModelConfig.tenant_id == tenant_id,
+                (
+                    (ModelConfig.provider == ModelProvider.SPEEDBEAR)
+                    & ModelConfig.is_public.is_(True)
+                ),
+            )
+        )
+    )
+    return list(result.scalars().all())
+
+
 def _slot_matches(slot: str, model_type: str, profile: ModelProfile) -> bool:
     """纯判定：槽位 × 模型 type × 输入模态（分组/校验同口径，不做行级读取）。"""
     if slot == "llm":
@@ -183,6 +211,19 @@ def _get_default_workspace_preset(db: Session) -> WorkspaceDefaultModelPreset:
         db.query(WorkspaceDefaultModelPreset)
         .filter(WorkspaceDefaultModelPreset.singleton_key == DEFAULT_PRESET_KEY)
         .first()
+    )
+    if not preset:
+        raise BusinessException("默认模型配置未设置", BizCode.CONFIG_MISSING)
+    return preset
+
+
+async def _get_default_workspace_preset_async(
+    db: AsyncSession,
+) -> WorkspaceDefaultModelPreset:
+    preset = await db.scalar(
+        select(WorkspaceDefaultModelPreset).where(
+            WorkspaceDefaultModelPreset.singleton_key == DEFAULT_PRESET_KEY
+        )
     )
     if not preset:
         raise BusinessException("默认模型配置未设置", BizCode.CONFIG_MISSING)
@@ -248,7 +289,8 @@ def _model_issue(
     Args:
         slot: 模型位（llm / embedding / rerank / vision / audio / video）
         reason: 问题原因码（not_configured / not_found / inactive / not_accessible /
-            deprecated / capability_mismatch / no_api_key / api_verify_failed / verify_failed）
+            deprecated / capability_mismatch / no_api_key / api_verify_failed /
+            verify_failed / unsupported_dimension）
         locale: 语言代码（zh / en）
         model_id: 出问题的模型 ID
         model_name: 出问题的模型名称
@@ -313,6 +355,37 @@ def _serialize_provider(model: ModelConfig) -> str | None:
     return getattr(provider, "value", provider)
 
 
+async def _resolve_embedding_model_names(
+    old_model_config_id: str | None,
+    new_model_config_id: str | None,
+    tenant_id: uuid.UUID,
+) -> tuple[str | None, str | None]:
+    """解析新旧 embedding 模型配置的实际调用名（``ModelApiKey.model_name``）。
+
+    通过异步会话解析，避免在 async 端点的事件循环内执行阻塞的同步渠道解析。
+    解析不到时对应位置返回 ``None``，调用方按“模型名称不同”处理。
+    """
+    from app.db import get_async_db_context
+    from app.services.model_service import ModelApiKeyService
+
+    async def resolve_one(model_config_id: str | None) -> str | None:
+        if not model_config_id:
+            return None
+        try:
+            api_key = await ModelApiKeyService.get_available_api_key_async(
+                async_db, uuid.UUID(str(model_config_id)), tenant_id
+            )
+        except BusinessException:
+            return None
+        return api_key.model_name if api_key else None
+
+    async with get_async_db_context() as async_db:
+        return (
+            await resolve_one(old_model_config_id),
+            await resolve_one(new_model_config_id),
+        )
+
+
 def _diagnose_unavailable_model(
     db: Session | None,
     slot: str,
@@ -325,6 +398,49 @@ def _diagnose_unavailable_model(
     if db is not None:
         try:
             model = db.query(ModelConfig).filter(ModelConfig.id == uuid.UUID(str(model_id))).first()
+        except Exception:  # 无效 UUID 或查询异常时按“不存在”处理
+            model = None
+
+    if model is None:
+        return _model_issue(slot, reason="not_found", locale=locale, model_id=model_id)
+
+    common = {
+        "locale": locale,
+        "model_id": model_id,
+        "model_name": model.name,
+        "provider": _serialize_provider(model),
+        "model_type": str(getattr(model.type, "value", model.type)),
+    }
+    is_tenant_model = tenant_id is None or model.tenant_id == tenant_id
+    is_public_speedbear = (
+        model.provider == ModelProvider.SPEEDBEAR and bool(model.is_public)
+    )
+    if not (is_tenant_model or is_public_speedbear):
+        # 跨租户模型只返回请求中的模型 ID，不泄露名称、供应商或状态。
+        return _model_issue(slot, reason="not_accessible", locale=locale, model_id=model_id)
+    if not model.is_active:
+        return _model_issue(slot, reason="inactive", **common)
+    if getattr(model, "model_base", None) is not None and getattr(model.model_base, "is_deprecated", False):
+        return _model_issue(slot, reason="deprecated", **common)
+    return _model_issue(slot, reason="not_accessible", **common)
+
+
+async def _diagnose_unavailable_model_async(
+    db: AsyncSession | None,
+    slot: str,
+    model_id: str,
+    tenant_id: uuid.UUID | None,
+    locale: str,
+) -> dict:
+    """Async version of _diagnose_unavailable_model."""
+    model = None
+    if db is not None:
+        try:
+            model = await db.scalar(
+                select(ModelConfig)
+                .options(joinedload(ModelConfig.model_base))
+                .where(ModelConfig.id == uuid.UUID(str(model_id)))
+            )
         except Exception:  # 无效 UUID 或查询异常时按“不存在”处理
             model = None
 
@@ -400,6 +516,53 @@ def _collect_workspace_model_selection_issues(
     return normalized, issues
 
 
+async def _collect_workspace_model_selection_issues_async(
+    available_models: list[ModelConfig],
+    selection: dict[str, uuid.UUID | str | None],
+    *,
+    require_all_slots: bool,
+    locale: str = "zh",
+    db: AsyncSession | None = None,
+    tenant_id: uuid.UUID | None = None,
+) -> tuple[dict[str, str | None], list[dict]]:
+    """Async version of _collect_workspace_model_selection_issues."""
+    model_map = {str(model.id): model for model in available_models}
+    normalized: dict[str, str | None] = {}
+    issues: list[dict] = []
+
+    for slot in _WORKSPACE_MODEL_SLOTS:
+        raw_value = selection.get(slot)
+        if raw_value is None:
+            if require_all_slots or slot in _REQUIRED_WORKSPACE_MODEL_SLOTS:
+                issues.append(_model_issue(slot, reason="not_configured", locale=locale))
+            normalized[slot] = None
+            continue
+
+        model_id = str(raw_value)
+        model = model_map.get(model_id)
+        if not model:
+            issues.append(await _diagnose_unavailable_model_async(db, slot, model_id, tenant_id, locale))
+            normalized[slot] = None
+            continue
+        if not _slot_matches_model(slot, model):
+            issues.append(
+                _model_issue(
+                    slot,
+                    reason="capability_mismatch",
+                    locale=locale,
+                    model_id=model_id,
+                    model_name=model.name,
+                    provider=_serialize_provider(model),
+                    model_type=str(getattr(model.type, "value", model.type)),
+                )
+            )
+            normalized[slot] = None
+            continue
+        normalized[slot] = model_id
+
+    return normalized, issues
+
+
 def _validate_workspace_model_selection(
     available_models: list[ModelConfig],
     selection: dict[str, uuid.UUID | str | None],
@@ -437,6 +600,18 @@ def _assign_workspace_models(workspace: Workspace, values: dict[str, str | None]
 
 def _get_default_workspace_model_values(db: Session) -> dict[str, str]:
     preset = _get_default_workspace_preset(db)
+    return {
+        "llm": str(preset.llm_model_config_id),
+        "embedding": str(preset.embedding_model_config_id),
+        "rerank": str(preset.rerank_model_config_id),
+        "vision": str(preset.vision_model_config_id),
+        "audio": str(preset.audio_model_config_id),
+        "video": str(preset.video_model_config_id),
+    }
+
+
+async def _get_default_workspace_model_values_async(db: AsyncSession) -> dict[str, str]:
+    preset = await _get_default_workspace_preset_async(db)
     return {
         "llm": str(preset.llm_model_config_id),
         "embedding": str(preset.embedding_model_config_id),
@@ -506,6 +681,54 @@ def _resolve_workspace_model_update_target(
             }
             selection, issues = _collect_workspace_model_selection_issues(
                 _get_accessible_workspace_models(db, workspace.tenant_id),
+                merged_selection,
+                locale=locale,
+                db=db,
+                tenant_id=workspace.tenant_id,
+                require_all_slots=False,
+            )
+
+    validation_slots = (
+        _WORKSPACE_MODEL_SLOTS if target_is_default else _REQUIRED_WORKSPACE_MODEL_SLOTS
+    )
+    return target_is_default, selection, validation_slots, issues
+
+
+async def _resolve_workspace_model_update_target_async(
+    db: AsyncSession,
+    workspace: Workspace,
+    models_update: WorkspaceModelsUpdate | None,
+    *,
+    locale: str = "zh",
+) -> tuple[bool, dict[str, str | None], tuple[str, ...], list[dict]]:
+    """Async version of _resolve_workspace_model_update_target."""
+    selection = _extract_workspace_model_values(workspace)
+    target_is_default = bool(workspace.is_default_config)
+    issues: list[dict] = []
+
+    if models_update:
+        mode_explicit = models_update.is_default_config is not None
+        target_is_default = (
+            models_update.is_default_config
+            if mode_explicit
+            else (
+                False if any(slot in models_update.model_fields_set for slot in _WORKSPACE_MODEL_SLOTS)
+                else bool(workspace.is_default_config)
+            )
+        )
+        if target_is_default:
+            selection = await _get_default_workspace_model_values_async(db)
+        else:
+            merged_selection = {
+                slot: (
+                    str(getattr(models_update, slot))
+                    if getattr(models_update, slot) is not None
+                    else None
+                )
+                for slot in _WORKSPACE_MODEL_SLOTS
+            }
+            selection, issues = await _collect_workspace_model_selection_issues_async(
+                await _get_accessible_workspace_models_async(db, workspace.tenant_id),
                 merged_selection,
                 locale=locale,
                 db=db,
@@ -672,6 +895,28 @@ async def _validate_workspace_slot_runtime(
             detail=str(result.get("error") or result.get("message") or "Unknown error"),
             **issue_context,
         )
+
+    if slot == "embedding":
+        # 探针已经拿到真实维度，就在这里拦掉不受支持的维度：否则配置会先生效，
+        # 之后 ES 投影对每个向量抛错，而图侧写入成功，两边从此不一致。
+        from app.core.memory.storage.provider.elasticsearch.index.definitions import (
+            EMBEDDING_DIMENSIONS,
+            is_supported_embedding_dimension,
+        )
+
+        dimension = (result.get("usage") or {}).get("vector_dimension")
+        if not is_supported_embedding_dimension(
+            dimension if isinstance(dimension, int) else 0
+        ):
+            return _model_issue(
+                slot,
+                reason="unsupported_dimension",
+                detail=(
+                    f"vector_dimension={dimension}, "
+                    f"supported={list(EMBEDDING_DIMENSIONS)}"
+                ),
+                **issue_context,
+            )
     return None
 
 
@@ -708,7 +953,6 @@ async def validate_model_bindings_runtime_async(
 
 
 async def _validate_workspace_model_runtime(
-    db: Session,
     values: dict[str, str | None],
     tenant_id: uuid.UUID,
     workspace_id: uuid.UUID | None,
@@ -716,7 +960,6 @@ async def _validate_workspace_model_runtime(
     locale: str,
     slots_to_validate: tuple[str, ...],
 ) -> list[dict]:
-    _ = db
     return await validate_model_bindings_runtime_async(
         values,
         tenant_id,
@@ -957,7 +1200,6 @@ async def create_workspace(
         else _REQUIRED_WORKSPACE_MODEL_SLOTS
     )
     warnings = await _validate_workspace_model_runtime(
-        db,
         selection,
         user.tenant_id,
         None,
@@ -1340,6 +1582,15 @@ async def _check_workspace_member_permission_async(db: AsyncSession, workspace_i
     return db_workspace
 
 
+def require_workspace_admin(db: Session, workspace_id: uuid.UUID, user: User) -> Workspace | None:
+    """校验当前用户是该工作空间的管理员，不通过则抛业务异常。
+
+    供控制器直接当门禁用（存量重算的人工重试等有副作用的操作），避免外部去引用
+    本模块的私有校验函数。
+    """
+    return _check_workspace_admin_permission(db, workspace_id, user)
+
+
 def _check_workspace_admin_permission(db: Session, workspace_id: uuid.UUID, user: User) -> Workspace | None:
     """检查用户是否有工作空间管理员权限（使用统一权限服务）"""
     # 获取工作空间信息
@@ -1370,6 +1621,43 @@ def _check_workspace_admin_permission(db: Session, workspace_id: uuid.UUID, user
             Action.MANAGE,
             resource,
             error_message=f"用户 {user.username} 没有管理工作空间 {workspace_id} 的权限"
+        )
+        business_logger.debug(f"用户 {user.username} 有权限管理工作空间 {workspace_id}")
+    except PermissionDeniedException as e:
+        business_logger.warning(f"权限不足: 用户 {user.username} 尝试管理工作空间 {workspace_id}")
+        raise BusinessException(str(e), BizCode.WORKSPACE_ACCESS_DENIED)
+    return db_workspace
+
+
+async def _check_workspace_admin_permission_async(
+    db: AsyncSession, workspace_id: uuid.UUID, user: CurrentUserSnapshot
+) -> Workspace | None:
+    """Async version of _check_workspace_admin_permission."""
+    db_workspace = await db.scalar(select(Workspace).where(Workspace.id == workspace_id))
+    if not db_workspace:
+        raise BusinessException(message="Workspace not found", code=BizCode.WORKSPACE_NOT_FOUND)
+
+    member = await db.scalar(
+        select(WorkspaceMember).where(
+            WorkspaceMember.user_id == user.id,
+            WorkspaceMember.workspace_id == workspace_id,
+        )
+    )
+    workspace_memberships = (
+        {workspace_id} if (member and member.role == WorkspaceRole.manager) else set()
+    )
+
+    from app.core.permissions import Action, Resource, Subject, permission_service
+
+    subject = Subject.from_user(user, workspace_memberships=workspace_memberships)
+    resource = Resource.from_workspace(db_workspace)
+
+    try:
+        permission_service.require_permission(
+            subject,
+            Action.MANAGE,
+            resource,
+            error_message=f"用户 {user.username} 没有管理工作空间 {workspace_id} 的权限",
         )
         business_logger.debug(f"用户 {user.username} 有权限管理工作空间 {workspace_id}")
     except PermissionDeniedException as e:
@@ -1879,11 +2167,17 @@ def get_workspace_models_configs(
             message="工作空间不存在"
         )
 
+    response = _build_workspace_models_response(configs, locale=locale)
+    # 存量向量重算在途即"正在切换 embedding 模型"：前端据此禁用选择器，并拿这个
+    # job id 去查重算进度。
+    response["reembed_job_id"] = get_active_reembed_job_id(db, workspace_id)
+
     business_logger.info(
         f"成功获取工作空间 {workspace_id} 的模型配置: "
-        f"llm={configs.get('llm')}, embedding={configs.get('embedding')}, rerank={configs.get('rerank')}"
+        f"llm={configs.get('llm')}, embedding={configs.get('embedding')}, "
+        f"rerank={configs.get('rerank')}, reembed_job_id={response['reembed_job_id']}"
     )
-    return _build_workspace_models_response(configs, locale=locale)
+    return response
 
 
 async def get_workspace_models_configs_async(
@@ -1945,7 +2239,6 @@ async def validate_workspace_models_configs(
         warnings = selection_issues
     else:
         warnings = await _validate_workspace_model_runtime(
-            db,
             selection,
             db_workspace.tenant_id,
             db_workspace.id,
@@ -1970,10 +2263,10 @@ async def validate_workspace_models_configs(
 
 
 async def update_workspace_models_configs(
-        db: Session,
+        db: AsyncSession,
         workspace_id: uuid.UUID,
         models_update: WorkspaceModelsUpdate,
-        user: User,
+        user: CurrentUserSnapshot,
         locale: str = "zh",
 ) -> dict:
     """更新工作空间的模型配置，并按模式执行阻断校验。
@@ -1991,11 +2284,10 @@ async def update_workspace_models_configs(
     business_logger.info(f"用户 {user.username} 请求更新工作空间 {workspace_id} 的模型配置")
 
     # 检查用户是否有管理员权限
-    db_workspace = _check_workspace_admin_permission(db, workspace_id, user)
-    default_memory_config = MemoryConfigService(db).get_workspace_default_config(workspace_id=workspace_id)
+    db_workspace = await _check_workspace_admin_permission_async(db, workspace_id, user)
 
     try:
-        use_default_config, resolved_models, validation_slots, selection_issues = _resolve_workspace_model_update_target(
+        use_default_config, resolved_models, validation_slots, selection_issues = await _resolve_workspace_model_update_target_async(
             db,
             db_workspace,
             models_update,
@@ -2005,7 +2297,6 @@ async def update_workspace_models_configs(
             _raise_model_config_error(selection_issues, locale)
 
         warnings = await _validate_workspace_model_runtime(
-            db,
             resolved_models,
             db_workspace.tenant_id,
             db_workspace.id,
@@ -2014,49 +2305,114 @@ async def update_workspace_models_configs(
         )
         if warnings:
             _raise_model_config_error(warnings, locale)
+        # 并发切换必须串行化：两个并发请求各自读到"当前无在途任务"、各自插入新任务，
+        # 结果会留下两个同时写同一批向量的活动任务。锁住 workspace 行直到本事务提交，
+        # 后到者才能看到先到者刚插入的任务，并被下面的在途检查挡下。
+        await db.execute(
+            select(Workspace.id)
+            .where(Workspace.id == workspace_id)
+            .with_for_update()
+        )
+        # 锁后再读一次槽位：拿到的是本事务内的最新值，作为"变更前"的基准。
+        current_embedding_config_id = await db.scalar(
+            select(Workspace.embedding).where(Workspace.id == workspace_id)
+        )
+        reembed_job = None
+        if current_embedding_config_id != resolved_models["embedding"]:
+            old_embedding_config_id = current_embedding_config_id
+            new_embedding_config_id = resolved_models["embedding"]
+            old_embedding_name, new_embedding_name = await _resolve_embedding_model_names(
+                old_embedding_config_id,
+                new_embedding_config_id,
+                db_workspace.tenant_id,
+            )
+            if old_embedding_name != new_embedding_name:
+                # 在途重算未完成前禁止再次切换：存量向量还没全部用当前模型重建，
+                # 再换一次会让已重建的部分重新落回旧模型空间，等于永远追不上。
+                # 检查与建任务同处 workspace 行排他锁内，不存在"检查—插入"的空窗。
+                if await get_active_reembed_job_id_async(db, workspace_id):
+                    _raise_model_config_error(
+                        [
+                            _model_issue(
+                                "embedding",
+                                reason="embedding_switch_in_progress",
+                                locale=locale,
+                            )
+                        ],
+                        locale,
+                        code=BizCode.STATE_CONFLICT,
+                    )
+                # 存量向量由旧模型生成，与新模型写入的向量不再可比（同维会混在一起，
+                # 异维会从向量召回里消失），因此登记一次重算任务。
+                # 与模型变更写在同一个事务里：要么都成立，要么都不成立。
+                reembed_job = await create_reembed_job_async(
+                    db,
+                    workspace_id=db_workspace.id,
+                    tenant_id=db_workspace.tenant_id,
+                    old_embedding_config_id=old_embedding_config_id,
+                    new_embedding_config_id=new_embedding_config_id,
+                    old_model_name=old_embedding_name,
+                    new_model_name=new_embedding_name,
+                    created_by_user_id=getattr(user, "id", None),
+                )
+                business_logger.info(
+                    f"工作空间 embedding 底层模型变更，登记存量向量重算任务: "
+                    f"workspace_id={workspace_id}, job_id={reembed_job.id}, "
+                    f"{old_embedding_name} -> {new_embedding_name}"
+                )
+            else:
+                # 换的是配置而不是底层模型（同一模型的不同配置行），向量空间未变。
+                business_logger.info(
+                    f"工作空间 embedding 配置变更但底层模型名未变，跳过存量重算: "
+                    f"workspace_id={workspace_id}, model={new_embedding_name}"
+                )
 
         _assign_workspace_models(db_workspace, resolved_models, is_default_config=use_default_config)
 
-        if default_memory_config:
-            default_memory_config.llm_id = resolved_models["llm"]
-            default_memory_config.reflection_model_id = resolved_models["llm"]
-            default_memory_config.emotion_model_id = resolved_models["llm"]
-            default_memory_config.embedding_id = resolved_models["embedding"]
-            default_memory_config.rerank_id = resolved_models["rerank"]
-            default_memory_config.vision_id = resolved_models["vision"]
-            default_memory_config.audio_id = resolved_models["audio"]
-            default_memory_config.video_id = resolved_models["video"]
-
         db.add(db_workspace)
-        if default_memory_config:
-            db.add(default_memory_config)
-        db.commit()
-        db.refresh(db_workspace)
+        await db.commit()
+        await db.refresh(db_workspace)
+
+        # 提交后的副作用：派发新任务。派发不会抛异常，失败时 job 行保持 pending，
+        # 由 scan_reembed_jobs 对账任务补派。
+        if reembed_job is not None:
+            dispatch_reembed_job(reembed_job.id)
 
         # Invalidate all cached memory configs under the workspace so the new
         # models take effect immediately (not just the default config).
         config_ids = (
-            db.query(MemoryConfigModel.config_id)
-            .filter(MemoryConfigModel.workspace_id == db_workspace.id)
-            .all()
-        )
+            await db.execute(
+                select(MemoryConfigModel.config_id).where(
+                    MemoryConfigModel.workspace_id == db_workspace.id
+                )
+            )
+        ).all()
         for (config_id,) in config_ids:
             try:
                 await invalidate_cache(prefix=f"memory_config:{config_id}")
             except Exception:
                 pass
 
-        business_logger.info(
-            f"工作空间模型配置更新成功: workspace_id={workspace_id}, "
-            f"llm={db_workspace.llm}, embedding={db_workspace.embedding}, rerank={db_workspace.rerank}"
+        response = _build_workspace_models_response(db_workspace, locale=locale)
+        # 在途任务 id 让前端保存后立刻能轮询重算进度。这里回的是"本次请求之后
+        # 在途的那个任务"，而不是"本次请求是否新建了任务"：只改 llm 等槽位时
+        # 旧任务仍在跑，也必须给出 id，否则前端会把选择器错误地放开。
+        response["reembed_job_id"] = await get_active_reembed_job_id_async(
+            db, workspace_id
         )
 
-        return _build_workspace_models_response(db_workspace, locale=locale)
+        business_logger.info(
+            f"工作空间模型配置更新成功: workspace_id={workspace_id}, "
+            f"llm={db_workspace.llm}, embedding={db_workspace.embedding}, "
+            f"rerank={db_workspace.rerank}, reembed_job_id={response['reembed_job_id']}"
+        )
+
+        return response
 
     except BusinessException:
-        db.rollback()
+        await db.rollback()
         raise
     except Exception as e:
         business_logger.error(f"工作空间模型配置更新失败: workspace_id={workspace_id} - {str(e)}")
-        db.rollback()
+        await db.rollback()
         raise BusinessException(f"更新模型配置失败: {str(e)}", BizCode.INTERNAL_ERROR)

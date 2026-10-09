@@ -1,6 +1,7 @@
 import uuid
 
-from sqlalchemy import and_, func, or_, select, update
+from sqlalchemy import and_, any_, bindparam, func, or_, select, update
+from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
@@ -11,6 +12,49 @@ from app.models.memory_forget_model import ForgetAuditModel, ForgetTrigger
 from app.models.user_model import User
 
 logger = get_db_logger()
+
+
+async def _resolve_recover_embedder(db: AsyncSession, end_user_id: uuid.UUID):
+    """Resolve the workspace's current embedding model for a recovered node.
+
+    Returns a ``RedBearEmbeddings`` client, or ``None`` when the workspace has
+    no embedding model configured (nothing to recompute to). Best-effort: any
+    failure here only skips the vector refresh, never the recovery itself.
+    """
+    from app.core.memory.pipelines.base_pipeline import ModelClientMixin
+    from app.models.end_user_model import EndUser
+    from app.models.workspace_model import Workspace
+
+    try:
+        workspace_id = (
+            await db.execute(
+                select(EndUser.workspace_id).where(EndUser.id == end_user_id)
+            )
+        ).scalar_one_or_none()
+        if workspace_id is None:
+            return None
+        row = (
+            await db.execute(
+                select(Workspace.tenant_id, Workspace.embedding).where(
+                    Workspace.id == workspace_id
+                )
+            )
+        ).one_or_none()
+        if row is None or row.embedding is None:
+            return None
+        tenant_id, embedding_config_id = row
+        return await ModelClientMixin.get_embedding_client_async(
+            db,
+            uuid.UUID(str(embedding_config_id)),
+            tenant_id,
+        )
+    except Exception as exc:
+        logger.warning(
+            "memory recover embedder resolution failed: end_user=%s error=%s",
+            end_user_id,
+            exc,
+        )
+        return None
 
 
 class ForgetLogRepository:
@@ -118,9 +162,12 @@ class ForgetLogRepository:
             recover_forgotten_node_by_element_id,
         )
 
+        embedder = await _resolve_recover_embedder(db, end_user_id)
+
         recovered = await recover_forgotten_node_by_element_id(
             element_id,
             end_user_id=str(end_user_id),
+            embedder=embedder,
         )
 
         if recovered is None:
@@ -279,6 +326,26 @@ class ForgetLogRepository:
         result = await db.scalar(
             select(func.count()).select_from(ForgetAuditModel).where(
                 ForgetAuditModel.end_user_id == end_user_id
+            )
+        )
+        return int(result or 0)
+
+    @staticmethod
+    async def get_total_by_user_ids(
+        db: AsyncSession,
+        end_user_ids: list[uuid.UUID],
+    ) -> int:
+        """统计一批终端用户的遗忘日志总数。"""
+        if not end_user_ids:
+            return 0
+        end_user_ids_param = bindparam(
+            "workspace_statistics_end_user_ids",
+            value=end_user_ids,
+            type_=ARRAY(ForgetAuditModel.end_user_id.type),
+        )
+        result = await db.scalar(
+            select(func.count()).select_from(ForgetAuditModel).where(
+                ForgetAuditModel.end_user_id == any_(end_user_ids_param)
             )
         )
         return int(result or 0)

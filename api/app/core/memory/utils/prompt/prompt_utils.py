@@ -100,6 +100,27 @@ async def render_statement_extraction_prompt(
     })
 
     return rendered_prompt
+
+
+async def render_statement_classification_fallback_prompt(
+    statement_text: str,
+    language: str = "zh",
+) -> str:
+    """渲染备用 LLM 三字段分类 Prompt（statement 拆分阶段 2 兜底）。
+
+    小模型不可用/非法返回时，由大模型为单条 statement 补
+    statement_type / temporal_type / has_unsolved_reference 三个字段。
+    """
+    template = prompt_env.get_template("statement_classification_fallback.jinja2")
+    input_json = {"statement_text": statement_text}
+    rendered_prompt = template.render(
+        input_json=json.dumps(input_json, ensure_ascii=False),
+        language=language,
+    )
+    log_prompt_rendering('statement classification fallback', rendered_prompt)
+    return rendered_prompt
+
+
 def render_entity_dedup_prompt(
     entity_a: dict,
     entity_b: dict,

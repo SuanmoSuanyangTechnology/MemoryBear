@@ -353,7 +353,11 @@ class AppService:
                 tenant_id=tenant_id,
             )
             if not model_api_key:
-                raise ResourceNotFoundException("模型配置", str(multi_agent_config.default_model_config_id))
+                ModelConfigService.raise_model_unavailable(
+                    self.db,
+                    multi_agent_config.default_model_config_id,
+                    tenant_id=tenant_id,
+                )
 
         # 3. 检查子 Agent 配置
         if not multi_agent_config.sub_agents or len(multi_agent_config.sub_agents) == 0:

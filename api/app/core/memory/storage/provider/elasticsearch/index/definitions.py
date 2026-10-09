@@ -66,6 +66,16 @@ def embedding_field_suffix(field: str, dimension: int) -> str:
     return f"{field}_{dimension}"
 
 
+def is_supported_embedding_dimension(dimension: int) -> bool:
+    """Whether the index has a dense_vector field for this dimension.
+
+    Callers use this to reject a model *before* it becomes the workspace's
+    embedding model: an unsupported dimension only fails later, inside the
+    projection, after the graph write already succeeded.
+    """
+    return isinstance(dimension, int) and dimension in EMBEDDING_DIMENSIONS
+
+
 def _dense_vector_mapping(dimension: int) -> dict[str, Any]:
     """Build the dense_vector mapping for one embedding dimension."""
     return {

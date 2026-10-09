@@ -16,8 +16,6 @@ import { useTranslation } from 'react-i18next';
 import type { MemoryFormData, Memory, MemoryFormRef } from '../types';
 import RbModal from '@/components/RbModal'
 import { createMemoryConfig, updateMemoryConfig } from '@/api/memory'
-import { getOntologyScenesSimpleUrl } from '@/api/ontology'
-import CustomSelect from '@/components/CustomSelect';
 import { stringRegExp } from '@/utils/validator';
 
 const FormItem = Form.Item;
@@ -57,7 +55,6 @@ const MemoryForm = forwardRef<MemoryFormRef, MemoryFormProps>(({
       form.setFieldsValue({
         config_name: memory.config_name,
         config_desc: memory.config_desc,
-        scene_id: memory.scene_id
       });
     } else {
       form.resetFields();
@@ -127,20 +124,6 @@ const MemoryForm = forwardRef<MemoryFormRef, MemoryFormProps>(({
         >
           <Input.TextArea placeholder={t('common.pleaseEnter')} />
         </FormItem>
-
-        <Form.Item
-          name="scene_id"
-          label={t('memory.scene_id')}
-          rules={[{ required: true, message: t('common.pleaseSelect') }]}
-        >
-          <CustomSelect
-            placeholder={t('common.pleaseSelect')}
-            url={getOntologyScenesSimpleUrl}
-            hasAll={false}
-            valueKey='scene_id'
-            labelKey="scene_name"
-          />
-        </Form.Item>
       </Form>
     </RbModal>
   );

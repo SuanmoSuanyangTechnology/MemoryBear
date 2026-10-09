@@ -11,8 +11,7 @@ from app.core.models import RedBearModelConfig, RedBearImageGenerator, RedBearVi
 from app.core.exceptions import BusinessException
 from app.core.error_codes import BizCode
 from app.models.models_model import ModelType
-from app.repositories.model_repository import ModelConfigRepository
-from app.services.model_service import ModelApiKeyService
+from app.services.model_service import ModelApiKeyService, ModelConfigService
 
 
 class GenerationService:
@@ -42,9 +41,7 @@ class GenerationService:
             生成结果
         """
         # 获取模型配置
-        model_config = ModelConfigRepository.get_by_id(self.db, uuid.UUID(model_config_id))
-        if not model_config:
-            raise BusinessException("模型配置不存在", code=BizCode.NOT_FOUND)
+        model_config = ModelConfigService.get_model_by_id(self.db, uuid.UUID(model_config_id))
         
         if model_config.type != ModelType.IMAGE:
             raise BusinessException(
@@ -59,7 +56,9 @@ class GenerationService:
             tenant_id=tenant_id,
         )
         if not api_key_info:
-            raise BusinessException("没有可用的 API Key", code=BizCode.NOT_FOUND)
+            ModelConfigService.raise_model_unavailable(
+                self.db, uuid.UUID(model_config_id), tenant_id=tenant_id
+            )
         
         # 创建配置
         config = RedBearModelConfig.from_api_key(api_key_info, extra_params=api_key_info.config or {})
@@ -91,9 +90,7 @@ class GenerationService:
             生成结果（包含任务ID）
         """
         # 获取模型配置
-        model_config = ModelConfigRepository.get_by_id(self.db, uuid.UUID(model_config_id))
-        if not model_config:
-            raise BusinessException("模型配置不存在", code=BizCode.NOT_FOUND)
+        model_config = ModelConfigService.get_model_by_id(self.db, uuid.UUID(model_config_id))
         
         if model_config.type != ModelType.VIDEO:
             raise BusinessException(
@@ -108,7 +105,9 @@ class GenerationService:
             tenant_id=tenant_id,
         )
         if not api_key_info:
-            raise BusinessException("没有可用的 API Key", code=BizCode.NOT_FOUND)
+            ModelConfigService.raise_model_unavailable(
+                self.db, uuid.UUID(model_config_id), tenant_id=tenant_id
+            )
         
         # 创建配置
         config = RedBearModelConfig.from_api_key(api_key_info, extra_params=api_key_info.config or {})
@@ -136,9 +135,7 @@ class GenerationService:
             任务状态信息
         """
         # 获取模型配置
-        model_config = ModelConfigRepository.get_by_id(self.db, uuid.UUID(model_config_id))
-        if not model_config:
-            raise BusinessException("模型配置不存在", code=BizCode.NOT_FOUND)
+        model_config = ModelConfigService.get_model_by_id(self.db, uuid.UUID(model_config_id))
         
         # 获取 API Key
         api_key_info = ModelApiKeyService.get_available_api_key(
@@ -147,7 +144,9 @@ class GenerationService:
             tenant_id=tenant_id,
         )
         if not api_key_info:
-            raise BusinessException("没有可用的 API Key", code=BizCode.NOT_FOUND)
+            ModelConfigService.raise_model_unavailable(
+                self.db, uuid.UUID(model_config_id), tenant_id=tenant_id
+            )
         
         # 创建配置
         config = RedBearModelConfig.from_api_key(api_key_info, extra_params=api_key_info.config or {})

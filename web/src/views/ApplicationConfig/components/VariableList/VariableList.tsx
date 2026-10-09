@@ -91,12 +91,12 @@ interface VariableListProps {
                         render: (type) => t(`application.${type}`)
                       },
                       {
-                        title: t('application.variableKey'),
+                        title: t('application.variableName'),
                         dataIndex: 'name',
                         key: 'name',
                       },
                       {
-                        title: t('application.variableName'),
+                        title: t('application.displayName'),
                         dataIndex: 'display_name',
                         key: 'display_name',
                       },

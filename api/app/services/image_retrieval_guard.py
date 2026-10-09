@@ -556,6 +556,68 @@ def _validate_global_rerank(targets: Sequence[_ImageTarget], scope: _RequestScop
         )
 
 
+async def _expand_to_leaf_ids(
+    kb_ids: Sequence[uuid.UUID],
+    *,
+    db: AsyncSession | None,
+) -> list[uuid.UUID]:
+    """把文件夹型知识库展开为可检索的叶子知识库 ID（去重保序）。
+
+    展开口径与 knowledge_retrieval_preparation._expand_knowledge_to_leaf_refs_async
+    一致：叶子库 = 非文件夹且状态有效；文件夹按 parent_id 递归取子节点，并跳过环。
+    """
+
+    async def _expand(session: AsyncSession) -> list[uuid.UUID]:
+        result = await session.execute(
+            select(
+                Knowledge.id,
+                Knowledge.type,
+                Knowledge.parent_id,
+                Knowledge.status,
+                Knowledge.chunk_num,
+            ).where(Knowledge.id.in_(list(kb_ids)))
+        )
+        rows = {row.id: row for row in result.all()}
+
+        ordered: list[uuid.UUID] = []
+        seen: set[uuid.UUID] = set()
+        visited_folders: set[uuid.UUID] = set()
+
+        async def _descend(node_id: uuid.UUID) -> None:
+            row = rows.get(node_id)
+            if row is None or row.status != 1 or node_id in seen:
+                return
+            is_folder = row.type == "Folder"
+            if not is_folder:
+                seen.add(node_id)
+                ordered.append(node_id)
+                return
+            if node_id in visited_folders:
+                return
+            visited_folders.add(node_id)
+            child_result = await session.execute(
+                select(
+                    Knowledge.id,
+                    Knowledge.type,
+                    Knowledge.parent_id,
+                    Knowledge.status,
+                    Knowledge.chunk_num,
+                ).where(Knowledge.parent_id == node_id)
+            )
+            for child in child_result.all():
+                rows.setdefault(child.id, child)
+                await _descend(child.id)
+
+        for node_id in kb_ids:
+            await _descend(node_id)
+        return ordered
+
+    if db is not None:
+        return await _expand(db)
+    async with get_async_db_context() as session:
+        return await _expand(session)
+
+
 async def _evaluate_image_retrieval_boundaries(
     *,
     kb_ids: Sequence[Any],
@@ -572,12 +634,20 @@ async def _evaluate_image_retrieval_boundaries(
     if not normalized_kb_ids:
         return
 
+    # 先把文件夹型知识库展开到叶子库。文件夹自身不承载 chunk，检索时下游会递归
+    # 展开成其下子知识库，命中的图片能力取决于「叶子库自己绑定的模型」。若直接拿
+    # 文件夹 ID 去判定，会用文件夹那一层配置的（可能不支持视觉的）模型提前拦截，
+    # 导致文件夹内配置了视觉模型的子库根本没机会被评估。
+    leaf_kb_ids = await _expand_to_leaf_ids(normalized_kb_ids, db=db)
+    if not leaf_kb_ids:
+        return
+
     # 边界 1：图片 query 不做基于 LLM 的自动元数据过滤
     if _value_of(metadata_filter_mode) == MetadataFilterMode.AUTO.value:
         _reject("KB_IMAGE_AUTO_METADATA_UNSUPPORTED")
 
     targets, scope = await _load_targets(
-        kb_ids=normalized_kb_ids,
+        kb_ids=leaf_kb_ids,
         knowledge_bases=knowledge_bases,
         retrieve_type=retrieve_type,
         rerank_id=rerank_id,
@@ -678,4 +748,9 @@ async def ensure_image_retrieval_supported(
         raise BusinessException(reason, BizCode.INVALID_PARAMETER)
 
 
-__all__ = ["check_image_retrieval", "ensure_image_retrieval_supported"]
+__all__ = [
+    "check_image_retrieval",
+    "ensure_image_retrieval_supported",
+    "expand_knowledge_to_leaf_ids",
+]
+expand_knowledge_to_leaf_ids = _expand_to_leaf_ids

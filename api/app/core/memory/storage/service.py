@@ -1,9 +1,12 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import Self
 
-from app.core.memory.storage.enums import MemoryNodeLabel, MemoryRelationshipType
+from app.core.memory.storage.enums import (
+    MemoryNodeLabel,
+    MemoryRelationshipType,
+)
 from app.core.memory.storage.models import (
     GraphWriteResult,
     MemoryGraphWriteCommand,
@@ -17,6 +20,7 @@ from app.core.memory.storage.models import (
     StorageReadResult,
     StorageWriteResult,
 )
+from app.core.memory.storage.provider.base import SCAN_PAGE_SIZE
 from app.core.memory.storage.provider.factory import BackendFactory
 from app.core.memory.storage.router.read_router import ReadRouter
 from app.core.memory.storage.router.write_router import WriteRouter
@@ -26,9 +30,14 @@ memory_storage_service: "MemoryStorageService | None" = None
 
 class MemoryStorageService:
     def __init__(self, backend_factory: BackendFactory) -> None:
+        from app.core.memory.storage.custom.workspace_statistics import (
+            WorkspaceStatisticsStorage,
+        )
+
         self._backend_factory = backend_factory
         self._read_router = ReadRouter(backend_factory)
         self._write_router = WriteRouter(backend_factory)
+        self.workspace_statistics = WorkspaceStatisticsStorage(backend_factory)
 
     @classmethod
     async def create(cls) -> Self:
@@ -103,6 +112,49 @@ class MemoryStorageService:
             data: dict,
     ) -> StorageWriteResult:
         return await self._write_router.save_node(label, data)
+
+    async def scan_nodes(
+            self,
+            label: MemoryNodeLabel,
+            node_filter: NodeFilter,
+            cursor: str | None = None,
+            limit: int = SCAN_PAGE_SIZE,
+            projection: NodeProjection | None = None,
+    ) -> tuple[list[dict], str | None]:
+        """Read one page of nodes from the authoritative graph store.
+
+        Always reads Neo4j, never the configured read backend: Elasticsearch is
+        a projection of the graph and can lag behind it, so bulk rebuilds must
+        page the write of record to avoid rebuilding from stale text.
+
+        :return: ``(nodes, next_cursor)``; ``next_cursor`` is ``None`` on the
+            last page.
+        """
+        client = self._backend_factory.get_authoritative_node_reader(label)
+        return await client.scan_nodes(
+            label,
+            node_filter,
+            cursor,
+            limit,
+            projection,
+        )
+
+    async def update_node_embeddings(
+            self,
+            label: MemoryNodeLabel,
+            field: str,
+            updates: Sequence[tuple[str, Sequence[float]]],
+    ) -> StorageWriteResult:
+        """Overwrite one embedding property and re-project the affected nodes.
+
+        Goes through the write router so the graph write and its outbox
+        projection event stay paired.
+        """
+        return await self._write_router.update_node_embeddings(
+            label,
+            field,
+            updates,
+        )
 
     async def save_memory_graph(
             self,

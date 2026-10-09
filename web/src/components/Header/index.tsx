@@ -61,6 +61,11 @@ const AppHeader: FC<{ source?: 'space' | 'manage'; }> = ({ source = 'manage' }) 
       return 'space-detail';
     }
 
+    // Ontology details share the list route and provide their own breadcrumbs.
+    if (pathname === '/ontology' && allBreadcrumbs['ontology-detail']?.length) {
+      return 'ontology-detail';
+    }
+
     // Other pages use the passed source
     return source;
   };

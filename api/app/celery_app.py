@@ -167,6 +167,10 @@ celery_app.conf.update(
         'app.tasks.init_interest_distribution_for_users': {'queue': 'memory_heavy_tasks'},
         'app.tasks.init_community_clustering_for_users': {'queue': 'memory_heavy_tasks'},
         'app.tasks.run_incremental_clustering': {'queue': 'memory_heavy_tasks'},
+        # 存量记忆向量重算：驱动+单用户子任务都在 memory_heavy，对账扫描在 periodic
+        'app.tasks.run_reembed_job': {'queue': 'memory_heavy_tasks'},
+        'app.tasks.do_reembed_end_user': {'queue': 'memory_heavy_tasks'},
+        'app.tasks.scan_reembed_jobs': {'queue': 'periodic_tasks'},
     },
 )
 
@@ -364,6 +368,13 @@ beat_schedule_config = {
         "task": "app.tasks.scan_emotion_stats",
         "schedule": crontab(hour=17, minute=0),
         "args": (),
+    },
+    "scan-reembed-jobs": {
+        # 重算对账：终结已跑完的 job，并重新派发扇出丢失/worker 已死的 job。
+        # 周期需短于 JOB_HEARTBEAT_TTL_SECONDS，否则死掉的 job 会被判定为"仍在推进"。
+        "task": "app.tasks.scan_reembed_jobs",
+        "schedule": timedelta(minutes=5),
+        "options": {"queue": "periodic_tasks", "expires": 270},
     },
 }
 

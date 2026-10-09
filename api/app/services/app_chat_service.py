@@ -36,7 +36,7 @@ from app.services.conversation_service import ConversationService
 from app.services.context_engine_manager import ContextEngineManager
 from app.core.config import settings
 from app.services.draft_run_service import AgentRunService, build_uploaded_images_manifest
-from app.services.model_service import ModelApiKeyService
+from app.services.model_service import ModelApiKeyService, ModelConfigService
 from app.services.multi_agent_orchestrator import MultiAgentOrchestrator
 from app.services.multimodal_service import (
     MultimodalService,
@@ -529,6 +529,8 @@ class AppChatService:
                 conversation_id,
                 user_message={"id": user_message_id, "content": message, "meta_data": {"files": []}},
                 assistant_message={"id": message_id, "content": annotation_match["answer"], "meta_data": {"usage": {}}},
+                storage_type=storage_type or "neo4j",
+                user_rag_memory_id=user_rag_memory_id or "",
             )
             elapsed_time = time.time() - start_time
             return {
@@ -571,6 +573,10 @@ class AppChatService:
             model_config_id,
             tenant_id=tenant_id,
         )
+        if not api_key_obj:
+            await ModelConfigService.raise_model_unavailable_bridge_async(
+                self.db, model_config_id, tenant_id=tenant_id
+            )
         # 处理系统提示词（支持变量替换）
         system_prompt = config.system_prompt
         if variables:
@@ -1010,6 +1016,8 @@ class AppChatService:
                 conversation_id,
                 user_message={"id": user_message_id, "content": message, "meta_data": human_meta, "should_memorize": memory},
                 assistant_message={"id": message_id, "content": result["content"], "meta_data": assistant_meta, "should_memorize": memory},
+                storage_type=storage_type or "neo4j",
+                user_rag_memory_id=user_rag_memory_id or "",
             )
             if used_context_engine:
                 _ctx_kwargs = dict(
@@ -1131,6 +1139,8 @@ class AppChatService:
                     conversation_id,
                     user_message={"id": user_message_id, "content": message, "meta_data": {"files": []}},
                     assistant_message={"id": message_id, "content": annotation_match["answer"], "meta_data": {"usage": {}}},
+                    storage_type=storage_type or "neo4j",
+                    user_rag_memory_id=user_rag_memory_id or "",
                 )
                 yield f"event: start\ndata: {json.dumps({'conversation_id': str(conversation_id), 'message_id': str(message_id), 'user_message_id': str(user_message_id)}, ensure_ascii=False)}\n\n"
                 yield f"event: message\ndata: {json.dumps({'content': annotation_match['answer'], 'conversation_id': str(conversation_id)}, ensure_ascii=False)}\n\n"
@@ -1163,6 +1173,10 @@ class AppChatService:
                 model_config_id,
                 tenant_id=tenant_id,
             )
+            if not api_key_obj:
+                await ModelConfigService.raise_model_unavailable_bridge_async(
+                    self.db, model_config_id, tenant_id=tenant_id
+                )
             # 处理系统提示词（支持变量替换）
             system_prompt = config.system_prompt
             if variables:
@@ -1667,7 +1681,9 @@ class AppChatService:
                 await self.conversation_service.dispatch_memory_pair(
                     conversation_id,
                     user_message={"id": user_message_id, "content": message, "meta_data": human_meta, "should_memorize": memory},
-                    assistant_message={"id": message_id, "content": full_content, "meta_data": assistant_meta, "should_memorize": True},
+                    assistant_message={"id": message_id, "content": full_content, "meta_data": assistant_meta, "should_memorize": memory},
+                    storage_type=storage_type or "neo4j",
+                    user_rag_memory_id=user_rag_memory_id or "",
                 )
 
                 # Enqueue agent execution after messages so the FK is satisfied
@@ -1759,7 +1775,13 @@ class AppChatService:
 
             debug_id = self.agent_service._build_debug_id()
             public_error = classify_multimodal_exception(e, debug_id=debug_id)
-            display_error = public_error["message"] if public_error else str(e)
+            if public_error is not None:
+                display_error = public_error["message"]
+            elif isinstance(e, BusinessException):
+                # 业务异常给的是面向用户的文案，str(e) 会带上内部错误码前缀
+                display_error = e.message
+            else:
+                display_error = str(e)
 
             if public_error is not None:
                 logger.error(

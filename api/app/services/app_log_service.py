@@ -11,10 +11,12 @@ from app.core.utils.datetime_utils import utcnow_naive, to_timestamp_ms, parse_i
 from app.core.logging_config import get_business_logger
 from app.models.app_model import AppType
 from app.models.conversation_model import Conversation, Message
+from app.models.file_metadata_model import FileMetadata
 from app.models.workflow_model import WorkflowExecution
 from app.repositories.agent_execution_repository import AgentExecutionRepository
 from app.repositories.conversation_repository import ConversationRepository, MessageRepository
 from app.repositories.workflow_repository import WorkflowExecutionRepository
+from app.services.file_content_service import build_permanent_file_url
 from app.schemas.app_log_schema import (
     AppLogAgentSummary,
     AppLogConversation,
@@ -226,7 +228,9 @@ class AppLogService:
         )
 
         if app_type in (AppType.WORKFLOW, AppType.PURE_WORKFLOW):
-            messages, node_executions_map = self._get_workflow_messages_and_nodes(conversation_id)
+            messages, node_executions_map = self._get_workflow_messages_and_nodes(
+                conversation_id, workspace_id
+            )
         else:
             messages = self.message_repository.get_messages_by_conversation(
                 conversation_id=conversation_id
@@ -366,6 +370,7 @@ class AppLogService:
     def _get_workflow_messages_and_nodes(
         self,
         conversation_id: uuid.UUID,
+        workspace_id: uuid.UUID,
     ) -> Tuple[list[AppLogMessage], dict[str, list[AppLogNodeExecution]]]:
         """
         工作流应用专用：从 workflow_executions 构建 messages 和节点日志。
@@ -491,21 +496,50 @@ class AppLogService:
 
             files = input_data.get("files") or []
             file_infos = []
+
+            # 本地文件持久化时只存 upload_file_id、url 为空，批量解析为可访问 URL
+            local_file_url_map: dict[str, str] = {}
+            local_file_ids = set()
             for f in files:
-                if isinstance(f, dict) and f.get("url"):
+                if isinstance(f, dict) and not f.get("url") and f.get("upload_file_id"):
+                    try:
+                        local_file_ids.add(uuid.UUID(str(f["upload_file_id"])))
+                    except (ValueError, TypeError):
+                        continue
+            if local_file_ids:
+                completed_files = self.db.scalars(
+                    select(FileMetadata).where(
+                        FileMetadata.id.in_(local_file_ids),
+                        FileMetadata.workspace_id == workspace_id,
+                        FileMetadata.status == "completed",
+                    )
+                ).all()
+                local_file_url_map = {
+                    str(f.id): build_permanent_file_url(f.id) for f in completed_files
+                }
+
+            resolved_meta_files = []
+            for f in files:
+                if not isinstance(f, dict):
+                    continue
+                file_url = f.get("url") or local_file_url_map.get(str(f.get("upload_file_id")))
+                if file_url:
                     file_infos.append(LogFileInfo(
                         type=f.get("type", ""),
-                        url=f["url"],
+                        url=file_url,
                         name=f.get("name"),
                         size=f.get("size"),
                         file_type=f.get("file_type"),
                     ))
+                    # 同步注入响应的 meta_data.files：前端 ChatContent 直接读取该字段渲染
+                    resolved_meta_files.append({**f, "url": file_url})
+
             user_msg = AppLogMessage(
                 id=uuid.uuid5(execution.id, "user"),
                 conversation_id=conversation_id,
                 role="user",
                 content=input_content,
-                meta_data={"files": files} if files else None,
+                meta_data={"files": resolved_meta_files} if resolved_meta_files else None,
                 files=file_infos,
                 created_at=started_at,
             )

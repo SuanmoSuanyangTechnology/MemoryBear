@@ -116,6 +116,8 @@ export const home = {
       orderHistory: 'Order History',
       spaceConfig: 'Space Configuration',
       ontology: 'Ontology Engineering',
+      ontologySceneTypes: 'Ontology Scene Types',
+      ontologyConfigureScene: 'Configure Scene',
       prompt: 'Prompt Engineering',
       skills: 'Skill Library',
       workbench: 'Workbench',

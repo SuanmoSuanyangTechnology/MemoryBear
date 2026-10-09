@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.utils.datetime_utils import to_iso_z, utcnow_naive
+from app.core.workflow.node_cache import sanitize_json_text
 from app.core.agent.agent_middleware import AgentMiddleware
 from app.core.agent.langchain_agent import LangChainAgent
 from app.core.config import settings
@@ -49,7 +50,7 @@ from app.services.file_content_service import FileReference, resolve_image_retri
 from app.services.langchain_tool_server import Search
 from app.services.memory_config_service import MemoryConfigService
 from app.services.model_parameter_merger import ModelParameterMerger
-from app.services.model_service import ModelApiKeyService
+from app.services.model_service import ModelApiKeyService, ModelConfigService
 from app.services.multimodal_service import (
     MultimodalService,
     deserialize_file_reference,
@@ -325,20 +326,30 @@ async def _retrieve_chunks_via_standard(
     image_diagnostics: dict[str, Any] = {"requested": 0, "encoded": 0, "succeeded": 0, "failed": 0}
     if image_references:
         from app.integrations.knowledge.retrieval_policy import image_retrieval_supported
-        from app.services.image_retrieval_guard import check_image_retrieval
+        from app.services.image_retrieval_guard import (
+            check_image_retrieval,
+            expand_knowledge_to_leaf_ids,
+        )
 
         available_references = [ref for ref in image_references if ref.locator]
         # 按 locator 去重，保持首次出现顺序
         unique_references = list({ref.locator: ref for ref in available_references}.values())
         image_diagnostics["requested"] = len(unique_references)
+
+        # 文件夹型知识库要先展开到叶子库：图片能力取决于叶子库自己绑定的模型，
+        # 直接用文件夹 ID 会在文件夹层被提前拦截。
+        leaf_kb_ids = await expand_knowledge_to_leaf_ids(
+            [uuid.UUID(kid) for kid in kb_ids],
+            db=None,
+        )
         logger.info(
-            "知识库图片检索开始 kb_ids=%s retrieve_type=%s image_count=%s",
-            kb_ids, retrieve_type.value, len(unique_references),
+            "知识库图片检索开始 kb_ids=%s leaf_kb_ids=%s retrieve_type=%s image_count=%s",
+            kb_ids, leaf_kb_ids, retrieve_type.value, len(unique_references),
         )
         # 先按知识库侧的图片检索边界做本地前置校验，命中时给出与下游一致的具体原因。
         # agent 场景不中断主流程：图片检索降级，原因随 diagnostics 反馈给模型。
         rejection_reason = await check_image_retrieval(
-            kb_ids=kb_ids,
+            kb_ids=leaf_kb_ids,
             knowledge_bases=valid_kbs,
             retrieve_type=retrieve_type,
             rerank_id=rerank_id,
@@ -348,7 +359,7 @@ async def _retrieve_chunks_via_standard(
         )
         if rejection_reason is None and not await image_retrieval_supported(
             retriever,
-            kb_ids=[str(kb_id) for kb_id in kb_ids],
+            kb_ids=[str(kb_id) for kb_id in leaf_kb_ids],
             retrieve_type=retrieve_type,
             context=context,
             rerank_id=str(rerank_id) if rerank_id else None,
@@ -407,6 +418,11 @@ async def _retrieve_chunks_via_standard(
             continue
         if chunk_id:
             seen_chunk_ids.add(chunk_id)
+        # 与工作流知识库检索节点同口径：检索到内容后立即剥离 chunk 原文里的 NUL
+        # （PDF/Office 解析常混入 U+0000），避免后续组装 context / steps 写 jsonb 失败。
+        content = getattr(chunk, "page_content", None)
+        if isinstance(content, str):
+            chunk.page_content = sanitize_json_text(content)
         unique_results.append(chunk)
     return unique_results
 
@@ -1263,6 +1279,27 @@ class AgentRunService:
                         select(Knowledge.id, Knowledge.name).where(Knowledge.id.in_(kb_ids))
                     )
                     rows = result.all()
+
+                    # 文件夹型知识库检索时会被展开成其下的子知识库，命中 chunk 的
+                    # knowledge_id 是子知识库 ID。若名称映射只含文件夹 ID，子知识库
+                    # 会回退显示为 UUID。这里递归展开所选文件夹，补全所有后代的名称。
+                    pending = [r.id for r in rows]
+                    seen = set(pending)
+                    child_rows = []
+                    while pending:
+                        result = await db.execute(
+                            select(Knowledge.id, Knowledge.name).where(
+                                Knowledge.parent_id.in_(pending)
+                            )
+                        )
+                        level = result.all()
+                        pending = []
+                        for r in level:
+                            if r.id not in seen:
+                                seen.add(r.id)
+                                pending.append(r.id)
+                                child_rows.append(r)
+                    rows = rows + child_rows
                 kb_names = [{"id": str(r.id), "name": r.name} for r in rows]
 
                 # 对于共享知识库，chunk元数据中的knowledge_id是source_kb_id，
@@ -2967,7 +3004,7 @@ class AgentRunService:
             Dict: 包含 model_name, api_key, api_base 的字典
 
         Raises:
-            BusinessException: 当没有可用的 API Key 时
+            BusinessException: 当没有可用的 API Key 时（模型不存在/已弃用/未启用/缺少凭据）
         """
         async with get_async_db_context() as db:
             api_key = await ModelApiKeyService.get_available_api_key_async(
@@ -2977,7 +3014,9 @@ class AgentRunService:
             )
 
             if not api_key:
-                raise BusinessException("没有可用的 API Key", BizCode.AGENT_CONFIG_MISSING)
+                await ModelConfigService.raise_model_unavailable_async(
+                    db, model_config_id, tenant_id=tenant_id
+                )
 
             return {
                 "model_name": api_key.model_name,

@@ -1,6 +1,7 @@
 """工具服务 - 统一的工具管理和执行服务"""
 import uuid
 import time
+import json
 import importlib
 from typing import Dict, Any, List, Optional
 from sqlalchemy import select
@@ -1369,6 +1370,16 @@ class ToolService:
             "parameters": [serialize_tool_parameter(param) for param in tool_instance.parameters]
         }]
 
+    @staticmethod
+    def _normalize_schema_content(value: Any) -> Optional[Dict[str, Any]]:
+        """将前端文本域提交的 JSON 字符串规整为 dict。"""
+        if isinstance(value, str):
+            value = value.strip()
+            if not value:
+                return None
+            value = json.loads(value)
+        return value
+
     def _create_type_config(self, tool_config: ToolConfig, config: Dict[str, Any]):
         """创建类型特定配置"""
         if tool_config.tool_type == ToolType.CUSTOM.value:
@@ -1397,7 +1408,7 @@ class ToolService:
                 auth_type=config.get("auth_type", "none"),
                 auth_config=config.get("auth_config", {}),
                 timeout=config.get("timeout", 30),
-                schema_content=config.get("schema_content"),
+                schema_content=self._normalize_schema_content(config.get("schema_content")),
                 schema_url=config.get("schema_url")
             )
             self.db.add(custom_config)
@@ -1453,7 +1464,7 @@ class ToolService:
                 custom_config.auth_type = config.get("auth_type", "none")
                 custom_config.auth_config = config.get("auth_config", {})
                 custom_config.timeout = config.get("timeout", 30)
-                custom_config.schema_content = config.get("schema_content")
+                custom_config.schema_content = self._normalize_schema_content(config.get("schema_content"))
                 custom_config.schema_url = config.get("schema_url")
 
         elif tool_config.tool_type == ToolType.MCP.value:

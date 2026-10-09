@@ -50,6 +50,23 @@ class SharedChatService:
             rows = self.db.query(Knowledge.id, Knowledge.name).filter(
                 Knowledge.id.in_(kb_ids)
             ).all()
+
+            # 文件夹型知识库检索时会展开成子知识库，命中 chunk 的 knowledge_id 是
+            # 子知识库 ID；递归展开所选文件夹，补全后代名称，避免子库显示为 UUID。
+            pending = [r.id for r in rows]
+            seen = set(pending)
+            child_rows = []
+            while pending:
+                level = self.db.query(Knowledge.id, Knowledge.name).filter(
+                    Knowledge.parent_id.in_(pending)
+                ).all()
+                pending = []
+                for r in level:
+                    if r.id not in seen:
+                        seen.add(r.id)
+                        pending.append(r.id)
+                        child_rows.append(r)
+            rows = rows + child_rows
             kb_names = [{"id": str(r.id), "name": r.name} for r in rows]
 
             target_kb_ids = [uuid.UUID(kid) for kid in kb_ids]
