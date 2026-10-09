@@ -217,12 +217,6 @@ class UnsupportedModelProviderError(RedBearModelError):
         super().__init__(f"Unsupported model provider: {provider}")
 
 
-class ModelUsageRecordError(RedBearModelError):
-    def __init__(self, key_id: UUID, cause: Exception):
-        self.__cause__ = cause
-        super().__init__(f"Failed to record usage for model key {key_id}")
-
-
 class ProviderDependencyMissingError(RedBearModelError):
     def __init__(self, provider: str, extra: str):
         super().__init__(

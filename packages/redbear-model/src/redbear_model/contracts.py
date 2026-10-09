@@ -421,29 +421,6 @@ class ModelConfigSnapshot(ContractModel):
     config: dict[str, JsonValue] = Field(default_factory=dict)
 
 
-# deprecated（阶段一过渡）：mem-knowledge 旧读窗口消费；M3 切 model_channels 后由 ChannelSnapshot 取代，收尾任务删除
-class ModelKeySnapshot(ContractModel):
-    key_id: UUID
-    model_name: str = Field(min_length=1)
-    provider: ModelProvider
-    api_key: SecretStr
-    base_url: str | None = None
-    is_active: bool
-    priority: str = "1"
-    usage_count: int = Field(default=0, ge=0)
-    last_used_at_ms: int | None = Field(default=None, ge=0)
-    capabilities: tuple[ModelCapability, ...] = ()
-    is_omni: bool = False
-    config: dict[str, JsonValue] = Field(default_factory=dict)
-
-
-class PublicModelBindingSnapshot(ContractModel):
-    tenant_id: UUID
-    provider: ModelProvider
-    api_key: SecretStr
-    base_url: str | None = None
-
-
 class ResolvedModelConfig(ContractModel):
     model_config_id: UUID
     key_id: UUID | None  # v1 遗留：旧 usage 回写用，M3 渠道化后废弃
