@@ -7,8 +7,7 @@ from collections.abc import Mapping, Sequence
 from numbers import Integral
 from typing import Any
 
-from app.core.memory.storage.enums import BackendType, MemoryNodeType
-from app.core.memory.storage.provider.factory import BackendFactory
+from app.core.memory.storage.enums import MemoryNodeType
 from app.core.memory.storage.provider.elasticsearch.client import ElasticClient
 from app.core.memory.storage.provider.elasticsearch.index import get_index_name
 from app.core.memory.storage.provider.neo4j.client import Neo4jClient
@@ -264,10 +263,15 @@ async def get_neo4j_fallback_statistics(
 
 
 class WorkspaceStatisticsStorage:
-    """Workspace memory statistics over shared Elasticsearch and Neo4j clients."""
+    """Workspace memory statistics over caller-provided Elasticsearch and Neo4j clients."""
 
-    def __init__(self, backend_factory: BackendFactory) -> None:
-        self._backend_factory = backend_factory
+    def __init__(
+        self,
+        elastic_client: ElasticClient,
+        neo4j_client: Neo4jClient,
+    ) -> None:
+        self._elastic_client = elastic_client
+        self._neo4j_client = neo4j_client
 
     async def get_statistics(
         self,
@@ -283,25 +287,16 @@ class WorkspaceStatisticsStorage:
                 "implicit_count": 0,
             }
 
-        elastic_client = self._backend_factory.get_client(
-            BackendType.ELASTIC
-        )
-        if not isinstance(elastic_client, ElasticClient):
-            raise TypeError("ELASTIC backend must be an ElasticClient")
-        neo4j_client = self._backend_factory.get_client(BackendType.NEO4J)
-        if not isinstance(neo4j_client, Neo4jClient):
-            raise TypeError("NEO4J backend must be a Neo4jClient")
-
         async with asyncio.TaskGroup() as task_group:
             elastic_task = task_group.create_task(
                 get_elasticsearch_workspace_statistics(
-                    elastic_client,
+                    self._elastic_client,
                     end_user_ids,
                 )
             )
             implicit_task = task_group.create_task(
                 get_neo4j_implicit_memory_count(
-                    neo4j_client,
+                    self._neo4j_client,
                     end_user_ids,
                     minimum_summary_count,
                 )
@@ -327,7 +322,7 @@ class WorkspaceStatisticsStorage:
         ]
         if missing_ids:
             fallback = await get_neo4j_fallback_statistics(
-                neo4j_client,
+                self._neo4j_client,
                 missing_ids,
             )
             episodic_count += fallback["episodic_count"]

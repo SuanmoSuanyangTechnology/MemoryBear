@@ -21,7 +21,8 @@ from app.core.exceptions import BusinessException
 from app.core.memory.storage.custom.workspace_statistics import (
     WorkspaceStatisticsStorage,
 )
-from app.core.memory.storage.provider.factory import BackendFactory
+from app.core.memory.storage.provider.elasticsearch.client import ElasticClient
+from app.core.memory.storage.provider.neo4j.client import Neo4jClient
 from app.core.utils.datetime_utils import (
     parse_iso_to_utc_naive,
     parse_timestamp_to_utc_naive,
@@ -166,7 +167,8 @@ async def get_workspace_statistics_async(
     total_users = 0
     after_id: uuid.UUID | None = None
 
-    factory: BackendFactory | None = None
+    elastic_client: ElasticClient | None = None
+    neo4j_client: Neo4jClient | None = None
     workspace_statistics_storage: WorkspaceStatisticsStorage | None = None
     try:
         while True:
@@ -178,8 +180,14 @@ async def get_workspace_statistics_async(
                 break
 
             if workspace_statistics_storage is None:
-                factory = await BackendFactory.create()
-                workspace_statistics_storage = WorkspaceStatisticsStorage(factory)
+                elastic_client = ElasticClient()
+                elastic_client.client = await elastic_client.connect()
+                neo4j_client = Neo4jClient()
+                neo4j_client.client = await neo4j_client.connect()
+                workspace_statistics_storage = WorkspaceStatisticsStorage(
+                    elastic_client,
+                    neo4j_client,
+                )
 
             async with asyncio.TaskGroup() as task_group:
                 postgresql_task = task_group.create_task(
@@ -212,13 +220,19 @@ async def get_workspace_statistics_async(
                 break
             after_id = end_user_ids[-1]
     finally:
-        if factory is not None:
+        for backend_name, client in (
+            ("Elasticsearch", elastic_client),
+            ("Neo4j", neo4j_client),
+        ):
+            if client is None:
+                continue
             try:
-                await factory.close()
+                await client.close()
             except Exception:
                 logger.exception(
-                    "工作空间记忆统计后端客户端关闭失败: workspace_id=%s",
+                    "工作空间记忆统计后端客户端关闭失败: workspace_id=%s backend=%s",
                     workspace_id,
+                    backend_name,
                 )
 
     total_count = sum(totals.values())
