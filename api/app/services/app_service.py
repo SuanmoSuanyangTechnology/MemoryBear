@@ -605,6 +605,51 @@ class AppService:
             logger.error("应用本体聚合失败", extra={"error": str(e)}, exc_info=True)
             return None
 
+    def to_schemas_with_ontology(
+            self,
+            apps: List[App],
+            current_workspace_id: uuid.UUID
+    ) -> List[app_schema.App]:
+        """批量将 App 转为 Schema，并补齐当前生效本体（整批一次聚合，避免 N+1）。
+
+        社区版或本体聚合失败时，ontology 为 None。
+        """
+        ontology_map = self._load_ontology_map([a.id for a in apps])
+        return [
+            self._convert_to_schema(
+                a,
+                current_workspace_id,
+                ontology_map.get(a.id) if ontology_map is not None else None
+            )
+            for a in apps
+        ]
+
+    def to_schema_with_ontology(
+            self,
+            app: App,
+            current_workspace_id: uuid.UUID
+    ) -> app_schema.App:
+        """单个 App 转 Schema，并补齐当前生效本体。"""
+        return self.to_schemas_with_ontology([app], current_workspace_id)[0]
+
+    def share_schemas_with_ontology(
+            self,
+            shares: List["AppShare"]
+    ) -> List[app_schema.AppShare]:
+        """分享记录转 Schema，并按源应用补齐当前生效本体。
+
+        同一源应用分享给多个空间时只聚合一次；社区版或聚合失败时 ontology 为 None。
+        """
+        ontology_map = self._load_ontology_map(list({s.source_app_id for s in shares}))
+        items = []
+        for s in shares:
+            item = app_schema.AppShare.model_validate(s)
+            if ontology_map is not None:
+                ontology = ontology_map.get(s.source_app_id)
+                item.ontology = app_schema.AppOntologyInfo(**ontology) if ontology else None
+            items.append(item)
+        return items
+
     def _convert_to_schema(
             self,
             app: App,
@@ -1382,7 +1427,7 @@ class AppService:
                     )
                 )
             )
-        # 本体筛选：条件由企业版本体模块提供（涉及 premium 表），社区版忽略
+        # 本体筛选：条件由企业版本体模块提供（涉及 premium 表），社区版忽略，没有插件 则本体相关参数失效
         field_search = field_search.strip() if field_search else None
         if (ontology_status and ontology_status != "all") or field_search:
             binder = get_plugin(self.ONTOLOGY_BINDING_PLUGIN)

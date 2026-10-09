@@ -439,10 +439,9 @@ def create_app(
         tenant_id=current_user.tenant_id,
         data=payload,
     )
+    # 创建应用之后查询并返回绑定的本体信息（未输入ontolog_id绑定默认本体）
     service = app_service.AppService(db)
-    ontology_map = service._load_ontology_map([app.id])
-    ontology = ontology_map.get(app.id) if ontology_map is not None else None
-    return success(data=service._convert_to_schema(app, workspace_id, ontology))
+    return success(data=service.to_schema_with_ontology(app, workspace_id))
 
 
 @router.get("", summary="应用列表（分页）")
@@ -504,7 +503,7 @@ def list_apps(
         app_ids = [app_id.strip() for app_id in ids.split(',') if app_id.strip()]
         if app_ids:
             items_orm = app_service.get_apps_by_ids(db, app_ids, workspace_id)
-            items = _convert_apps_with_ontology(service, items_orm, workspace_id)
+            items = service.to_schemas_with_ontology(items_orm, workspace_id)
             # 返回标准分页格式
             meta = PageMeta(page=1, pagesize=len(items), total=len(items), hasnext=False)
             return success(data=PageData(page=meta, items=items))
@@ -529,21 +528,9 @@ def list_apps(
         field_search=field_search,
     )
 
-    items = _convert_apps_with_ontology(service, items_orm, workspace_id)
+    items = service.to_schemas_with_ontology(items_orm, workspace_id)
     meta = PageMeta(page=page, pagesize=pagesize, total=total, hasnext=(page * pagesize) < total)
     return success(data=PageData(page=meta, items=items))
-
-
-def _convert_apps_with_ontology(service, apps, workspace_id) -> list:
-    """批量补齐 ontology 子对象后转 Schema（本体数据整页一次聚合，避免 N+1）。"""
-    ontology_map = service._load_ontology_map([a.id for a in apps])
-    return [
-        service._convert_to_schema(
-            a, workspace_id, ontology_map.get(a.id) if ontology_map is not None else None
-        )
-        for a in apps
-    ]
-
 
 
 @router.get("/my-shared-out", summary="列出本工作空间主动分享出去的记录")
@@ -556,16 +543,7 @@ def list_my_shared_out(
     workspace_id = current_user.current_workspace_id
     service = app_service.AppService(db)
     shares = service.list_my_shared_out(workspace_id=workspace_id)
-    # 按源应用批量解析当前生效本体（同一应用分享给多个空间时只查一次）
-    ontology_map = service._load_ontology_map([s.source_app_id for s in shares])
-    data = []
-    for s in shares:
-        item = app_schema.AppShare.model_validate(s)
-        if ontology_map is not None:
-            ontology = ontology_map.get(s.source_app_id)
-            item.ontology = app_schema.AppOntologyInfo(**ontology) if ontology else None
-        data.append(item)
-    return success(data=data)
+    return success(data=service.share_schemas_with_ontology(shares))
 
 
 @router.delete("/share/{target_workspace_id}", summary="取消对某工作空间的所有应用分享")
