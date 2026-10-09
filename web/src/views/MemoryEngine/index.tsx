@@ -3,7 +3,7 @@ import { useParams } from 'react-router-dom'
 import {
     DynamicWeightEngine, AssociationEngine,
     ConsolidationEvolutionEngine, PredictionEngineSettings, PredictionEngine,
-    PreferenceEngine
+    PreferenceEngine, SceneCommunityEngine
 } from '@redbear/memory-brick'
 
 import { request } from '@/utils/request'
@@ -30,6 +30,9 @@ const MemoryEngine: FC = () => {
   }
   if (type === 'preference-engine') {
       return <PrivateWrap>{() => <PreferenceEngine request={request} />}</PrivateWrap>
+  }
+  if (type === 'scene-community-engine') {
+      return <PrivateWrap>{() => <SceneCommunityEngine request={request} />}</PrivateWrap>
   }
   return null
 }

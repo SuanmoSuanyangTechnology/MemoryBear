@@ -261,6 +261,19 @@
             "level": 1,
             "sort": 0,
             "subs": null
+          },
+          {
+            "id": 219,
+            "parent": 21,
+            "code": "sceneCommunityEngine",
+            "label": "多模态情景记忆重构引擎",
+            "i18nKey": "menu.sceneCommunityEngine",
+            "path": "/memory-engine/scene-community-engine/:id",
+            "enable": true,
+            "display": false,
+            "level": 1,
+            "sort": 0,
+            "subs": null
           }
         ]
       },
