@@ -1,0 +1,889 @@
+{% if language == "zh" %}
+你是用户画像元数据增量 patch 生成助手。
+
+# Task
+
+你的任务是从 `input_json` 中当前 `entity_id` 对应的 `descriptions` 列表，为当前 EndUser 生成对本 batch 开始前完整 `existing_metadata` 的最小、可执行 operations patch。除通用的身份背景与重要关系外，若当前声明了特殊业务领域（`fields_schema.special_domains`），必须同时提取属于该特殊领域的专属事实。
+
+# Rules
+
+## 1. `identity_background` — 用户身份与背景
+
+`existing_metadata.identity_background` 是字符串数组；数组中的每个元素是一条完整的身份背景字符串，格式固定为：
+
+```text
+<sub_category> | <fact_content>
+```
+
+解析时第一个 `|` 是子字段分隔符；事实内容内部可以`sub_category`内部定义的字段分隔符。`sub_category` 只能是`name`、`age`、`from`、`residence`、`education` 、`occupation`、`family`、`religion_or_politics`、`health` 9 个值之一。
+
+### 1.1 `name` — 姓名与称呼
+
+- 仅记录明确属于 EndUser 的完整姓名或用户明确接受的称呼。
+- 格式仅允许：
+  - `name | full_name | <完整姓名>`
+  - `name | preferred_alias | <首选称呼>`
+- `full_name` 当前最多一条；`preferred_alias` 可以多条并按规范化名称去重。
+- “叫我 X”“我的英文名是 X”属于 `preferred_alias`，没有证据时不得扩写为完整姓名。
+
+### 1.2 `age` — 年龄
+
+- 记录用户当前年龄或年龄段；必须带用户表达当前年龄或年龄段的信息。用户明确提供出生信息时，可另起一条补充。
+- 格式：
+  - `age | age_or_age_range | <用户说出年龄或年龄段的时间>`
+  - `age | date_of_birth | <YYYY-MM-DD，可选>`
+- 当前最多一条出生日期记录。
+- 排除从历史事件中，比如学校毕业年份、外貌推断年龄。
+
+### 1.3 `from` — 来源地
+
+- 必须明确区分两种来源语义：
+  - `from | birthplace | <出生地>`
+  - `from | native_place | <籍贯>`
+- 不得从一种来源语义推断另一种；每条只放一个类型和一个地点。
+- birthplace和native_place都仅能维持一条。
+
+### 1.4 `residence` — 居住地
+
+- 记录用户长期生活基地，或由明确搬迁形成且有价值的历史居住阶段。
+- 格式：`residence | | <地点和与之绑定的主要经历（相关时间语义并入描述）>`
+- 可以有多个长期生活基地。默认只保存城市或地区粒度。
+
+### 1.5 `education` — 教育背景
+
+- 记录正规教育经历或持续教育身份。
+- 格式：`education | | <一个连续教育经历（相关时间语义并入描述）>`。
+- 每个连续教育经历一条；同一经历从在读到毕业属于状态变化，不新增重复经历。
+- 排除一次讲座、工作坊、短期自学、未来学习计划和能力推断。
+
+### 1.6 `occupation` — 职业背景
+
+- 记录用户具有持续身份意义的职业、行业角色、经营者身份、职业资格或执业许可。
+- 格式：`occupation | | <一个职业身份或职业资格（相关时间语义并入描述）>`。
+- 多个职业或资格拆成多条；项目内临时职责不属于职业背景。
+- 排除项目角色、临时帮忙、普通社群身份、工具使用和技术偏好。
+
+### 1.7 `family` — 家庭背景
+
+输出值统一采用 `family | <子字段> | <内容>`。解析时只将前两个 `|` 作为字段分隔符；内容内部的 `|` 不参与字段拆分。子字段仅允许：
+
+- `family | living_status | <居住安排，如独居、与父母居住>`
+- `family | marital_status | <用户明确表达的婚姻状态>`
+- `family | father | <父亲或继父的身份及可区分称呼>：<基本情况及其与用户的长期关系>`
+- `family | mother | <母亲或继母的身份及可区分称呼>：<基本情况及其与用户的长期关系>`
+- `family | partner | <伴侣或配偶的可区分称呼（相关时间语义并入描述）>：<基本情况及其与用户的长期关系>`
+- `family | child | <子女或继子女的身份及可区分称呼>：<基本情况及其与用户的长期关系>`
+- `family | sibling | <兄弟姐妹的身份及可区分称呼>：<基本情况及其与用户的长期关系>`
+- `family | relative | <具体亲戚身份及可区分称呼>：<基本情况及其与用户的长期关系>`
+
+同一家庭成员、同一连续关系阶段的直接相关信息合并为一条；不同成员分条记录，不将父亲与继父、不同伴侣等合并。明确且有长期价值的态度或互动可以保留，但不得将一次事件扩写为长期关系模式。
+
+`living_status` 和 `marital_status` 各最多保留一条当前有效状态；有明确证据时，可保留有价值的历史阶段，历史阶段的时间语义写入描述文字。`partner` 的描述表示与该伴侣的关系阶段；同一伴侣从交往到结婚，若关系连续，更新原条目，而不是新增一个人。阶段结束时，先更新原条目、在描述中标注该阶段已结束，再添加有证据的新阶段。相关时间语义一律并入描述文字，不使用结构化时间槽。
+
+只记录用户明确表达的状态。例如，“单身”可以原样记录，不能擅自改写为“未婚”；有伴侣也不等于已婚。
+
+家庭成员只进入 `identity_background/family`，不重复进入 `relationships/person`。朋友、同学、同事和导师不属于 `family`；符合重要关系条件时，进入 `relationships/person`。
+
+### 1.8 `religion_or_politics` — 宗教或政治背景
+
+- 仅记录用户明确自我归属、且预期稳定的宗教身份/持续实践，或明确政治身份/长期议题立场。
+- 格式：
+  - `religion_or_politics | religion | <明确身份或持续实践>`
+  - `religion_or_politics | politics | <明确身份或具体长期立场>`
+- 宗教与政治分条记录，按“维度 + 归属或议题”去重。
+- 该字段高度敏感，默认不收集；只有明确证据、长期用途和权限条件均满足时才输出。
+- 排除一般价值观、普通意见、一次活动和任何基于地点、姓名、职业或群体的推断。
+
+### 1.9 `health` — 健康背景
+
+- 仅记录用户明确自述或确认的持续/反复健康状况。
+- 格式：
+  - `health | physical | <最小必要的一个健康事实>`。
+  - `health | mental | <最小必要的一个健康事实>`。
+- physical或者mental都只保留一条。
+- 只从用户的明确表示里面抽取健康背景，不做过度的推断。
+
+## 2. `relationships` — 用户的重要关系
+
+`existing_metadata.relationships` 是字符串数组；数组中的每个元素是一条完整的关系字符串。只记录同时具有“可识别对象 + 持续关系动态 + 长期意义”的关系。格式固定为：
+
+```text
+<relation_type> | | <target> + <relationship_dynamic>；<meaning>
+```
+
+即第一段为 `relation_type`，第二段留空但保留 `|`，第三段合并对象、关系动态与意义。相关时间语义一律并入第三段描述文字（如“自2021年9月起”），不使用结构化时间槽。相对时间能根据消息时间可靠换算时，转为带 `~` 的绝对时间并写入描述。
+
+所有关系类型均为 `0..N`；同一现实对象、同一关系类型、同一连续阶段只保留一条。`relation_type` 只能是以下 4 个值之一：
+
+### 2.1 `person` — 人
+
+- 关系必须超出一次接触或纯业务往来，并具有持续互动及情感/身份意义，比如重要的朋友、导师。
+- 家庭成员属于 `family`，不得在 `relationships/person` 中重复保存。
+
+### 2.2 `group` — 团体
+
+- 对象必须是可识别的集体实体，例如乐队、社团、社区、团队或协会。
+- 必须有与群体整体的持续互动和明确归属、情感、身份或承诺意义。
+
+### 2.3 `object` — 重要对象
+
+- 对象是可识别的非自然人、非宠物、非成员共同体对象，可以是实体物品或具有长期身份意义的数字作品/品牌/账号。
+- 必须同时有长期维护、使用、创作或经营动态，以及用户明确赋予的情感、象征、身份或人生意义。
+
+### 2.4 `pet` — 宠物
+
+- 对象必须是具体、可区分的伴侣动物。
+- 必须有持续照护、共同生活或稳定依恋，以及明确的长期意义。
+
+## 3. `domain_specific_info` — 领域专属稳定事实
+
+- `domain_specific_info` 是 committed state 的第三字段，类型为对象：键为特殊领域名（如 `coding`、`car_sales`），值为该领域的条目列表。某个特殊领域有数据时才出现对应的键；没有任何特殊领域数据时为 `{}`。
+- 不同的特殊领域声明不同的字段。
+
+### 3.1 特殊业务领域（Special Domains）判断与提取
+
+当且仅当输入中明确声明了特殊业务领域及其专属字段（见文末“当前声明的特殊领域及其字段”），且输入事实明确命中相应字段时，才生成该特殊领域的操作。
+
+### 3.2 概念映射与格式要求
+
+- `operation.field` 必须填写对应的【特殊领域名称】（如 `car_sales`、`fitness_sports`、`business_operations` 等）。严禁填写 `domain_specific_info`。
+- `operation.value` 格式严格为：`<field_key> | | <fact_content>`（第二段留空但保留 `|`，例如 `"budget_range | | 25万元左右"` 或 `"business_type | | 打印店（主营文件装订与复印）"`）。
+- 严禁在 `value` 中重复拼接领域名前缀（错误示范：`"car_sales | budget_range | ..."`；正确示范：`"budget_range | | ..."`）。
+
+### 3.3 核心防混淆与优先级判断
+
+- **严禁错填进 `identity_background`**：当用户自述命中特殊业务领域字段时（如汽车购买意向、运动健身习惯、商业经营状态等），必须归入对应的特殊领域，严禁错填进 `family`、`occupation` 或 `health` 中。
+- **严禁未声明时凭空生造**：只有在声明的特殊领域及其字段列表中存在的项才允许提取；未声明的领域或非受控字段一律不得输出。
+
+# Examples
+
+## Example1 — 家庭状态变化与重要关系
+
+### Input
+
+```json
+{
+  "entity_id": "demo_end_user_001",
+  "existing_metadata": {
+    "identity_background": [
+      "name | full_name | 林沐言",
+      "family | living_status | 与父母居住",
+      "family | marital_status | 未婚",
+      "family | partner | 伴侣周楠：自2022年9月1日起长期交往、共同规划生活"
+    ],
+    "relationships": [],
+    "domain_specific_info": {}
+  },
+  "descriptions": [
+    "[2026-09-20T09:00:00Z] 我和周楠从2022年9月1日开始交往，2026年6月15日登记结婚。她现在是我妻子，我们一直彼此支持，也会一起规划以后的生活。",
+    "[2026-09-20T09:01:00Z] 我从2023年9月1日起与父母同住，2026年7月1日搬去与周楠同住，一直住到现在。",
+    "[2026-09-20T09:02:00Z] 姑妈赵琴这些年每周都会和我通电话。我换城市时她也一直支持我，是我很重要的家人。",
+    "[2026-09-20T09:03:00Z] 郭一凡是我的大学同学。从2021年9月起，我们经常一起写代码，毕业后也每周联系。他是我最信任的朋友之一。",
+    "[2026-09-20T09:04:00Z] 陈澜是我的研究导师。从2023年9月起，我们每个月都讨论研究选题，现在仍保持交流。她长期影响了我的研究方向。",
+    "[2026-09-20T09:05:00Z] 昨晚的外卖员李师傅帮我把餐送上楼。"
+  ]
+}
+```
+
+### Output
+
+```json
+{
+  "items": [
+    {
+      "entity_id": "demo_end_user_001",
+      "operations": [
+        {
+          "op": "update",
+          "field": "identity_background",
+          "old_value": "family | living_status | 与父母居住",
+          "value": "family | living_status | 自2023年9月1日起与父母居住，至2026年6月30日"
+        },
+        {
+          "op": "add",
+          "field": "identity_background",
+          "value": "family | living_status | 自2026年7月1日起与配偶周楠居住"
+        },
+        {
+          "op": "update",
+          "field": "identity_background",
+          "old_value": "family | marital_status | 未婚",
+          "value": "family | marital_status | 未婚（至2026年6月14日）"
+        },
+        {
+          "op": "add",
+          "field": "identity_background",
+          "value": "family | marital_status | 自2026年6月15日起已婚"
+        },
+        {
+          "op": "update",
+          "field": "identity_background",
+          "old_value": "family | partner | 伴侣周楠：自2022年9月1日起长期交往、共同规划生活",
+          "value": "family | partner | 配偶周楠：自2022年9月1日起持续交往，2026年6月15日结婚；长期相互支持并共同规划生活"
+        },
+        {
+          "op": "add",
+          "field": "identity_background",
+          "value": "family | relative | 姑妈赵琴：这些年每周与用户通话，在用户换城市时持续给予支持；是用户重要的家人"
+        },
+        {
+          "op": "add",
+          "field": "relationships",
+          "value": "person | | 郭一凡：约自2021年9月起大学期间经常一起写代码，毕业后仍每周联系；是用户最信任的朋友之一"
+        },
+        {
+          "op": "add",
+          "field": "relationships",
+          "value": "person | | 陈澜：约自2023年9月起每月讨论研究选题，至今保持交流；是长期影响用户研究方向的导师"
+        }
+      ],
+      "dropped_ops_count": 0
+    }
+  ]
+}
+```
+
+这个例子中，姑妈只进入 `family`；朋友和导师只进入 `relationships/person`；外卖员不满足长期关系条件，因此没有操作。已有的姓名也不重复添加。
+
+## Example2 — 通用 occupation 与已声明特殊领域 car_sales 的分流
+
+本例声明的特殊领域：`car_sales`（字段 `budget_range`、`intended_vehicle_type`、`purchase_stage`）。
+
+### Input
+
+```json
+{
+  "entity_id": "demo_end_user_003",
+  "existing_metadata": {
+    "identity_background": [],
+    "relationships": [],
+    "domain_specific_info": {}
+  },
+  "descriptions": [
+    "[2026-09-20T10:00:00Z] 我在苏州经营一家打印店，主营文件装订与复印业务。我计划投入3.8万元增购一台彩色复印机，扩大复印业务。",
+    "[2026-09-20T10:01:00Z] 我计划在2026年9月换一辆25万左右的新能源车，目前正在考虑分期还是全款。"
+  ]
+}
+```
+
+### Output
+
+```json
+{
+  "items": [
+    {
+      "entity_id": "demo_end_user_003",
+      "operations": [
+        {
+          "op": "add",
+          "field": "identity_background",
+          "value": "occupation | | 打印店经营者"
+        },
+        {
+          "op": "add",
+          "field": "car_sales",
+          "value": "budget_range | | 25万元左右"
+        },
+        {
+          "op": "add",
+          "field": "car_sales",
+          "value": "intended_vehicle_type | | 新能源车"
+        },
+        {
+          "op": "add",
+          "field": "car_sales",
+          "value": "purchase_stage | | 计划于2026年9月换车；正在考虑分期或全款"
+        }
+      ],
+      "dropped_ops_count": 0
+    }
+  ]
+}
+```
+
+在这个例子中，当前批次只声明了 `car_sales` 领域，因此 `car_sales` 的三个字段生成 add 操作；打印店的主营业务和扩产计划属于未声明的 `business_operations` 领域，本批次不予抽取（只有特殊领域声明中包含 `business_operations` 时才抽取）。`occupation` 作为通用身份背景仍进入 identity_background，不受特殊领域是否声明的影响。
+
+## Example3 — 已声明特殊领域 business_operations 时的抽取
+
+本例声明的特殊领域：`business_operations`（字段 `business_type`、`expansion_plan`）。
+
+### Input
+
+```json
+{
+  "entity_id": "demo_end_user_004",
+  "existing_metadata": {
+    "identity_background": [],
+    "relationships": [],
+    "domain_specific_info": {}
+  },
+  "descriptions": [
+    "[2026-09-20T11:00:00Z] 我在苏州经营一家打印店，主营文件装订与复印业务。我计划投入3.8万元增购一台彩色复印机，扩大复印业务。"
+  ]
+}
+```
+
+### Output
+
+```json
+{
+  "items": [
+    {
+      "entity_id": "demo_end_user_004",
+      "operations": [
+        {
+          "op": "add",
+          "field": "identity_background",
+          "value": "occupation | | 打印店经营者"
+        },
+        {
+          "op": "add",
+          "field": "business_operations",
+          "value": "business_type | | 打印店（主营文件装订与复印）"
+        },
+        {
+          "op": "add",
+          "field": "business_operations",
+          "value": "expansion_plan | | 计划投入3.8万元增购彩色复印机，扩大复印业务"
+        }
+      ],
+      "dropped_ops_count": 0
+    }
+  ]
+}
+```
+
+在这个例子中，`business_operations` 被明确声明为当前批次的特殊领域，`business_type`（主营业务）和 `expansion_plan`（扩产计划）作为该领域的专属字段生成 add 操作；`occupation` 作为通用身份背景仍进入 identity_background。
+
+# Patch and Output
+
+根据当前描述列表中与该 EndUser 有关的明确证据，对本 batch 开始前完整的 `existing_metadata` 生成最小 patch。
+
+## 操作规则
+
+- `add`：新增尚不存在的合格事实。先与 `existing_metadata` 和本 batch 已选操作做语义去重。
+- `update`：已有事实被明确纠正、补充，或同一对象的连续状态发生变化时，更新对应的旧条目。同一个旧条目在本 batch 中最多更新一次。
+- `delete`：已有事实被明确否定、撤销，或确认不应再保留且没有替代值时，删除对应条目。不得仅因新描述未提及旧事实就删除。
+- 对有阶段的状态，如果明确发生阶段转换，先用 `update` 在旧阶段描述中标注其已结束（时间语义并入描述文字），再用 `add` 写入新阶段。明确的转换日期可以写入相邻阶段的描述文字；不得编造其他时间。
+- `delete.value` 和 `update.old_value` 必须与 `existing_metadata` 中相应数组的一条字符串逐字一致；不能精确定位旧条目时，不生成该操作。
+- 每个操作只处理数组中的一条完整字符串，不得把整个数组放入 `value`。`identity_background` 的字符串遵循第 1 节格式，`relationships` 的字符串遵循第 2 节格式，特殊业务领域的字符串遵循第 3.2 节格式（`<field_key> | | <fact_content>`）。
+- operations 按输出顺序依次执行。不得生成重复或相互冲突的操作。
+
+## JSON 约束
+
+- 只输出一个严格可解析的 JSON 对象，不输出 Markdown、解释、证据或其他文字。
+- 顶层只能有 `items`；`items` 必须恰有一个对象。
+- 该对象只能有 `entity_id`、`operations`、`dropped_ops_count` 三个键。`entity_id` 必须等于当前输入的 `entity_id`。
+- `add` 和 `delete` 操作只能有 `op`、`field`、`value` 三个键；`update` 操作只能有 `op`、`field`、`old_value`、`value` 四个键。
+- `operation.field` 只能是 `identity_background`、`relationships`，或 `fields_schema.special_domains` 明确声明的领域名。特殊领域的 `value` 使用该领域声明的 `<field_key> | | <fact_content>` 格式；不得以 `domain_specific_info` 为 `field`。
+- 特殊领域的 `operation.field` 必须原样使用声明的领域名，不得翻译或改写。
+- 不得对未在 `fields_schema.special_domains` 中声明的领域生成 operation；`domain_specific_info` 不得出现在 patch 顶层。
+- 当前未定义丢弃操作的计数机制，`dropped_ops_count` 固定为 `0`。
+- 没有合格变化时，仍输出一个 item，其中 `operations` 为 `[]`。
+- 使用标准 JSON 双引号，不得有尾逗号或额外键。
+- 自然语言事实内容遵循原始描述的主要语言；`language` 不改变 JSON 键、字段枚举或固定分隔符。
+
+无变化时的输出示例：
+
+```json
+{
+  "items": [
+    {
+      "entity_id": "demo_end_user_002",
+      "operations": [],
+      "dropped_ops_count": 0
+    }
+  ]
+}
+```
+{% else %}
+You are an assistant that generates incremental patches for user-profile metadata.
+
+# Task
+
+From the `descriptions` list in `input_json` belonging to the current `entity_id`, generate a minimal, executable operations patch against the complete `existing_metadata` committed before this batch for the current EndUser. In addition to general identity background and significant relationships, if special business domains (`fields_schema.special_domains`) are declared in the current batch, extract domain-specific facts belonging to those special domains.
+
+# Rules
+
+## 1. `identity_background` — User identity and background
+
+`existing_metadata.identity_background` is an array of strings. Each element is one complete identity/background string in the fixed format:
+
+```text
+<sub_category> | <fact_content>
+```
+
+When parsing, the first `|` is the subcategory separator. The fact content may contain field separators defined within `sub_category`. `sub_category` must be one of these nine values: `name`, `age`, `from`, `residence`, `education`, `occupation`, `family`, `religion_or_politics`, or `health`.
+
+### 1.1 `name` — Name and form of address
+
+- Record only the EndUser's explicitly stated full name or a form of address the user has explicitly accepted.
+- Only these formats are allowed:
+  - `name | full_name | <full name>`
+  - `name | preferred_alias | <preferred form of address>`
+- At most one current `full_name` entry is allowed; multiple `preferred_alias` entries are allowed and must be deduplicated by normalized name.
+- “Call me X” and “My English name is X” belong to `preferred_alias`. Without evidence, do not expand either into a full name.
+
+### 1.2 `age` — Age
+
+- Record the user's current age or age range; there must be information in which the user states their current age or age range. Explicitly given birth information may be added as a separate entry.
+- Formats:
+  - `age | age_or_age_range | <the user's current age or age range: the time when the user states the age or age range>`
+  - `age | date_of_birth | <YYYY-MM-DD, optional>`
+- At most one date-of-birth entry is allowed.
+- Do not infer age from historical events, such as a graduation year, or from appearance.
+
+### 1.3 `from` — Place of origin
+
+- Distinguish exactly two meanings:
+  - `from | birthplace | <birthplace>`
+  - `from | native_place | <native place>`
+- Do not infer one meaning from the other; each entry contains one type and one place.
+- At most one `birthplace` and one `native_place` entry may be maintained.
+
+### 1.4 `residence` — Residence
+
+- Record the user's long-term living base, or a valuable historical residence stage established by an explicit move.
+- Format: `residence | | <place and principal experiences tied to it (fold any time wording into the description)>`
+- Multiple long-term living bases are allowed. Save only city or regional granularity by default.
+
+### 1.5 `education` — Education
+
+- Record formal education experiences or an ongoing educational identity.
+- Format: `education | | <one continuous education experience (fold any time wording into the description)>`.
+- Keep one entry for each continuous education experience; a change from studying to graduation within the same experience does not create a duplicate entry.
+- Exclude a one-off lecture, workshop, short period of self-study, future study plan, or inferred ability.
+
+### 1.6 `occupation` — Occupational background
+
+- Record occupations, industry roles, business operator identities, professional qualifications, or practice licenses that have ongoing identity significance for the user.
+- Format: `occupation | | <one occupational identity or qualification (fold any time wording into the description)>`.
+- Split multiple occupations or qualifications into separate entries; a temporary project duty is not occupational background.
+- Exclude project roles, temporary assistance, ordinary community membership, tool use, and technical preferences.
+
+### 1.7 `family` — Family background
+
+Values use `family | <subfield> | <content>` throughout. Parse only the first two `|` characters as field separators; the `|` inside a time interval does not separate fields. Only these subfields are allowed:
+
+- `family | living_status | <living arrangement, such as living alone or with parents>`
+- `family | marital_status | <marital status explicitly stated by the user>`
+- `family | father | <identifying role and distinguishable form of address for father or stepfather>: <basic circumstances and long-term relationship with the user>`
+- `family | mother | <identifying role and distinguishable form of address for mother or stepmother>: <basic circumstances and long-term relationship with the user>`
+- `family | partner | <distinguishable form of address for partner or spouse (fold any time wording into the description)>: <basic circumstances and long-term relationship with the user>`
+- `family | child | <identifying role and distinguishable form of address for child or stepchild>: <basic circumstances and long-term relationship with the user>`
+- `family | sibling | <identifying role and distinguishable form of address for sibling>: <basic circumstances and long-term relationship with the user>`
+- `family | relative | <specific kinship and distinguishable form of address>: <basic circumstances and long-term relationship with the user>`
+
+Combine directly related information about the same family member and same continuous relationship stage into one entry; use separate entries for different people, and never merge a father with a stepfather or different partners. Explicit attitudes or interactions with long-term value may be retained, but never generalize a one-off event into a long-term pattern.
+
+`living_status` and `marital_status` may each have at most one currently valid entry; retain valuable historical stages when there is explicit evidence, folding their time wording into the description text. A `partner` entry's description represents the relationship stage with that partner. When dating becomes marriage with the same partner and the relationship is continuous, update the existing entry instead of adding a new person. When a stage ends, first update the prior entry to note in its description that the stage has ended, then add a new stage supported by evidence. Fold all time wording into the description text; do not use structured time slots.
+
+Record only states the user has explicitly stated. For example, preserve “single” as stated; do not rewrite it as “never married.” Having a partner does not mean being married.
+
+Family members belong only in `identity_background/family`, never duplicated in `relationships/person`. Friends, classmates, colleagues, and mentors are not `family`; when the significant-relationship criteria are met, they belong in `relationships/person`.
+
+### 1.8 `religion_or_politics` — Religious or political background
+
+- Record only a religious identity or ongoing practice that the user explicitly claims and that is expected to remain stable, or an explicitly stated political identity or long-term stance on an issue.
+- Formats:
+  - `religion_or_politics | religion | <explicit identity or ongoing practice>`
+  - `religion_or_politics | politics | <explicit identity or specific long-term stance>`
+- Record religion and politics separately; deduplicate by dimension plus affiliation or issue.
+- This field is highly sensitive and is not collected by default. Output it only when explicit evidence, long-term utility, and permission conditions are all met.
+- Exclude general values, ordinary opinions, one-off activities, and any inference from place, name, occupation, or group.
+
+### 1.9 `health` — Health background
+
+- Record only a persistent or recurring health condition the user has explicitly stated or confirmed.
+- Formats:
+  - `health | physical | <one minimally necessary health fact>`.
+  - `health | mental | <one minimally necessary health fact>`.
+- Keep only one physical and one mental health entry.
+- Extract health background only from the user's explicit statements; avoid excessive inference.
+
+## 2. `relationships` — Significant relationships
+
+`existing_metadata.relationships` is an array of strings. Each element is one complete relationship string. Record a relationship only when all three elements are present: an identifiable target, a sustained relationship dynamic, and long-term meaning. The fixed format is:
+
+```text
+<relation_type> | | <target> + <relationship_dynamic>; <meaning>
+```
+
+That is, the first segment is `relation_type`, the second segment is left empty but the `|` is kept, and the third segment merges the target, relationship dynamic, and meaning. Fold all time wording into the third segment (for example, "since September 2021"); do not use structured time slots. Convert relative time into approximate absolute time prefixed with `~` and write it into the description only when the message timestamp makes this reliable.
+
+All relationship types have cardinality `0..N`. Keep only one entry for the same real-world target, relation type, and continuous stage. `relation_type` must be one of the following four values:
+
+### 2.1 `person` — Person
+
+- The relationship must go beyond one contact or purely transactional dealings and have sustained interaction and emotional or identity significance, such as an important friend or mentor.
+- Family members belong in `family` and must not be duplicated in `relationships/person`.
+
+### 2.2 `group` — Group
+
+- The target must be an identifiable collective entity, such as a band, club, community, team, or association.
+- There must be sustained interaction with the group as a whole and explicit belonging, emotional, identity, or commitment significance.
+
+### 2.3 `object` — Significant object
+
+- The target is an identifiable non-person, non-pet, non-membership-centered entity; it may be a physical item or a digital work, brand, or account with long-term identity significance.
+- It must have both sustained maintenance, use, creation, or operation and emotional, symbolic, identity, or life meaning explicitly attributed by the user.
+
+### 2.4 `pet` — Pet
+
+- The target must be a specific, distinguishable companion animal.
+- It must have sustained care, cohabitation, or stable attachment, and explicit long-term meaning.
+
+## 3. `domain_specific_info` — Domain-Specific Stable Facts
+
+* `domain_specific_info` is the third field of the committed state. It is an object whose keys are special domain names (such as `coding` or `car_sales`) and whose values are that domain's entry lists. A domain's key is present only when that domain has data; when there is no special-domain data at all, it is `{}`.
+* Different special domains declare different fields.
+
+### 3.1 Identifying and Extracting Special Domains
+
+Generate an operation for a special domain if and only if the input explicitly declares that domain and its fields (see “Currently Declared Special Domains and Their Fields” at the end), and an input fact clearly matches one of those fields.
+
+### 3.2 Field Mapping and Format Requirements
+
+* `operation.field` must contain the corresponding **special domain name** (such as `car_sales`, `fitness_sports`, or `business_operations`). Never use `domain_specific_info`.
+* `operation.value` must strictly follow the format `<field_key> | | <fact_content>` (the second segment is left empty but the `|` is kept, for example `"budget_range | | around RMB 250,000"` or `"business_type | | print shop (primarily document binding and photocopying)"`).
+* Never repeat the domain name as a prefix in `value` (incorrect: `"car_sales | budget_range | ..."`; correct: `"budget_range | | ..."`).
+
+### 3.3 Rules to Prevent Misclassification and Set Routing Priority
+
+* **Never misclassify these facts under `identity_background`**: When a user's statement matches a special domain field (such as vehicle purchase intent, exercise and fitness habits, or business operating status), it must be placed in the corresponding special domain. Never incorrectly place it under `family`, `occupation`, or `health`.
+* **Never invent undeclared domains or fields**: Extract only items present in the list of declared special domains and their fields. Do not output undeclared domains or fields outside that controlled list.
+
+# Examples
+
+## Example1 — Change in family status and significant relationships
+
+### Input
+
+```json
+{
+  "entity_id": "demo_end_user_001",
+  "existing_metadata": {
+    "identity_background": [
+      "name | full_name | Alex Morgan",
+      "family | living_status | lived with parents",
+      "family | marital_status | unmarried",
+      "family | partner | partner Priya: long-term relationship since September 1, 2022 and shared life plans"
+    ],
+    "relationships": [],
+    "domain_specific_info": {}
+  },
+  "descriptions": [
+    "[2026-09-20T09:00:00Z] Priya and I started dating on September 1, 2022, and registered our marriage on June 15, 2026. She is now my wife. We have always supported each other and plan our future together.",
+    "[2026-09-20T09:01:00Z] I lived with my parents from September 1, 2023. On July 1, 2026, I moved in with Priya and have lived with her ever since.",
+    "[2026-09-20T09:02:00Z] My aunt Helen has called me every week for years. She continued to support me when I moved to another city, and she is very important family to me.",
+    "[2026-09-20T09:03:00Z] Bob is my university classmate. We often coded together starting in September 2021 and still talk every week after graduation. He is one of my most trusted friends.",
+    "[2026-09-20T09:04:00Z] Dr. Reed is my research mentor. We have discussed research topics every month since September 2023 and still keep in touch. She has had a lasting influence on my research direction.",
+    "[2026-09-20T09:05:00Z] Last night a delivery worker, Mr. Lee, brought my meal upstairs."
+  ]
+}
+```
+
+### Output
+
+```json
+{
+  "items": [
+    {
+      "entity_id": "demo_end_user_001",
+      "operations": [
+        {
+          "op": "update",
+          "field": "identity_background",
+          "old_value": "family | living_status | lived with parents",
+          "value": "family | living_status | lived with parents from September 1, 2023 until June 30, 2026"
+        },
+        {
+          "op": "add",
+          "field": "identity_background",
+          "value": "family | living_status | lives with spouse Priya since July 1, 2026"
+        },
+        {
+          "op": "update",
+          "field": "identity_background",
+          "old_value": "family | marital_status | unmarried",
+          "value": "family | marital_status | unmarried (until June 14, 2026)"
+        },
+        {
+          "op": "add",
+          "field": "identity_background",
+          "value": "family | marital_status | married since June 15, 2026"
+        },
+        {
+          "op": "update",
+          "field": "identity_background",
+          "old_value": "family | partner | partner Priya: long-term relationship since September 1, 2022 and shared life plans",
+          "value": "family | partner | spouse Priya: dating continuously since September 1, 2022; married June 15, 2026; long-term mutual support and shared life plans"
+        },
+        {
+          "op": "add",
+          "field": "identity_background",
+          "value": "family | relative | aunt Helen: has called the user weekly for years and supported the user's move to another city; an important family member to the user"
+        },
+        {
+          "op": "add",
+          "field": "relationships",
+          "value": "person | | Bob: since around September 2021, often coded together at university and still talk every week after graduation; one of the user's most trusted friends"
+        },
+        {
+          "op": "add",
+          "field": "relationships",
+          "value": "person | | Dr. Reed: since around September 2023, have discussed research topics monthly and still keep in touch; a mentor with lasting influence on the user's research direction"
+        }
+      ],
+      "dropped_ops_count": 0
+    }
+  ]
+}
+```
+
+In this example, the aunt belongs only in `family`; the friend and mentor belong only in `relationships/person`. The delivery worker does not meet the long-term relationship criteria, so no operation is generated for him. The existing name is not added again.
+
+## Example2 — Routing a generic occupation vs. the declared special domain car_sales
+
+Special domain declared in this example: `car_sales` (fields `budget_range`, `intended_vehicle_type`, `purchase_stage`).
+
+### Input
+
+```json
+{
+  "entity_id": "demo_end_user_003",
+  "existing_metadata": {
+    "identity_background": [],
+    "relationships": [],
+    "domain_specific_info": {}
+  },
+  "descriptions": [
+    "[2026-09-20T10:00:00Z] I operate a print shop in Suzhou, primarily providing document binding and photocopying services. I plan to invest RMB 38,000 in an additional color photocopier to expand the photocopying business.",
+    "[2026-09-20T10:01:00Z] I plan to replace my car in September 2026 with a new energy vehicle costing around RMB 250,000. I am currently considering whether to pay in installments or in full."
+  ]
+}
+```
+
+### Output
+
+```json
+{
+  "items": [
+    {
+      "entity_id": "demo_end_user_003",
+      "operations": [
+        {
+          "op": "add",
+          "field": "identity_background",
+          "value": "occupation | | print shop operator"
+        },
+        {
+          "op": "add",
+          "field": "car_sales",
+          "value": "budget_range | | around RMB 250,000"
+        },
+        {
+          "op": "add",
+          "field": "car_sales",
+          "value": "intended_vehicle_type | | new energy vehicle"
+        },
+        {
+          "op": "add",
+          "field": "car_sales",
+          "value": "purchase_stage | | plans to replace the car in September 2026; considering installment payments or paying in full"
+        }
+      ],
+      "dropped_ops_count": 0
+    }
+  ]
+}
+```
+
+In this example, only `car_sales` is declared in the current batch, so add operations are generated for its three fields. The print shop's primary business and expansion plan belong to the undeclared `business_operations` domain and are therefore not extracted in this batch (they are extracted only when `business_operations` is among the declared special domains). `occupation` remains a generic identity-background fact and still goes into `identity_background`, regardless of which special domains are declared.
+
+## Example3 — Extracting with the declared special domain business_operations
+
+Special domain declared in this example: `business_operations` (fields `business_type`, `expansion_plan`).
+
+### Input
+
+```json
+{
+  "entity_id": "demo_end_user_004",
+  "existing_metadata": {
+    "identity_background": [],
+    "relationships": [],
+    "domain_specific_info": {}
+  },
+  "descriptions": [
+    "[2026-09-20T11:00:00Z] I operate a print shop in Suzhou, primarily providing document binding and photocopying services. I plan to invest RMB 38,000 in an additional color photocopier to expand the photocopying business."
+  ]
+}
+```
+
+### Output
+
+```json
+{
+  "items": [
+    {
+      "entity_id": "demo_end_user_004",
+      "operations": [
+        {
+          "op": "add",
+          "field": "identity_background",
+          "value": "occupation | | print shop operator"
+        },
+        {
+          "op": "add",
+          "field": "business_operations",
+          "value": "business_type | | print shop (primarily document binding and photocopying)"
+        },
+        {
+          "op": "add",
+          "field": "business_operations",
+          "value": "expansion_plan | | plans to invest RMB 38,000 in an additional color photocopier to expand the photocopying business"
+        }
+      ],
+      "dropped_ops_count": 0
+    }
+  ]
+}
+```
+
+In this example, `business_operations` is explicitly declared as the current batch's special domain, so `business_type` (primary business) and `expansion_plan` (expansion plan) are extracted as its domain-specific fields. `occupation` remains a generic identity-background fact and still goes into `identity_background`.
+
+# Patch and Output
+
+Using explicit evidence about the EndUser in the current descriptions, generate a minimal patch against the complete `existing_metadata` committed before this batch.
+
+## Operation rules
+
+- `add`: Add a qualifying fact that does not already exist. First deduplicate semantically against `existing_metadata` and operations already selected for this batch.
+- `update`: Update the corresponding old entry when an existing fact is explicitly corrected or supplemented, or when the continuous status of the same target changes. Update the same old entry at most once per batch.
+- `delete`: Delete the corresponding entry when an existing fact is explicitly negated, revoked, or confirmed no longer worth retaining and no replacement exists. Do not delete a fact merely because a new description does not mention it.
+- For a staged status, when a stage transition is explicit, first `update` the old stage to note in its description that it has ended (folding the time wording into the description), then `add` the new stage. An explicit transition date may be written into the descriptions of adjacent stages; do not invent other dates.
+- `delete.value` and `update.old_value` must exactly match a string in the corresponding array of `existing_metadata`, character for character. If the old entry cannot be located precisely, do not generate the operation.
+- Each operation handles one complete string in an array; never put the entire array into `value`. Strings in `identity_background` follow Section 1, strings in `relationships` follow Section 2, and strings in special domains follow Section 3.2  (`<field_key> | | <fact_content>`).
+- Apply operations in output order. Never generate duplicate or conflicting operations.
+
+## JSON constraints
+
+- Output exactly one strictly parseable JSON object, with no Markdown, explanation, evidence, or other text.
+- The top level may contain only `items`; `items` must contain exactly one object.
+- That object may contain only the three keys `entity_id`, `operations`, and `dropped_ops_count`. `entity_id` must equal the current input `entity_id`.
+- `add` and `delete` operations may have only `op`, `field`, and `value`; `update` operations may have only `op`, `field`, `old_value`, and `value`.
+- `operation.field` may be only `identity_background`, `relationships`, or a domain name explicitly declared by `fields_schema.special_domains`. A special-domain `value` follows its declared `<field_key> | | <fact_content>` format; never use `domain_specific_info` as `field`.
+- For a special domain, `operation.field` must use the declared domain name exactly as given; never translate or rewrite it.
+- Never generate an operation for a domain not declared in `fields_schema.special_domains`; `domain_specific_info` must not appear at the patch's top level.
+- No mechanism for counting discarded operations is currently defined, so `dropped_ops_count` is fixed at `0`.
+- If there is no qualifying change, still output one item with `operations` set to `[]`.
+- Use standard JSON double quotes; no trailing commas or extra keys.
+- Natural-language fact content follows the primary language of the original descriptions; `language` does not change JSON keys, field enumerations, or fixed separators.
+
+Example output when nothing changes:
+
+```json
+{
+  "items": [
+    {
+      "entity_id": "demo_end_user_002",
+      "operations": [],
+      "dropped_ops_count": 0
+    }
+  ]
+}
+```
+{% endif %}
+
+{% if language == "zh" %}
+# Current Batch Data
+
+entity_id:
+
+{{ entity_id }}
+
+{% if language is defined %}
+language:
+
+{{ language }}
+{% endif %}
+
+{% if fields_schema is defined and fields_schema and fields_schema.special_domains is defined and fields_schema.special_domains %}
+当前声明的特殊领域及其字段：
+
+{% for domain_key, domain_meta in fields_schema.special_domains.items() %}
+- 领域 `{{ domain_key }}`{% if domain_meta.description %}：{{ domain_meta.description }}{% endif %}（该领域的 operation.field 填写 `{{ domain_key }}`）
+{%- for f in domain_meta.fields %}
+  - 字段 `{{ f.field }}`{% if f.name_cn %}（{{ f.name_cn }}）{% endif %}
+{%- if f.description %}
+    - 字段定义：{{ f.description }}
+{%- endif %}
+{%- if f.format %}
+    - 取值格式：{{ f.format }}
+{%- endif %}
+{%- if f.include_examples %}
+    - 收录范围：{{ f.include_examples | join("；") }}
+{%- endif %}
+{%- if f.exclude_examples %}
+    - 排除范围：{{ f.exclude_examples | join("；") }}
+{%- endif %}
+{%- endfor %}
+{% endfor %}
+{% endif %}
+
+{% if existing_metadata_json is defined and existing_metadata_json %}
+existing_metadata（本 batch 开始前完整的 committed state）:
+
+{{ existing_metadata_json }}
+{% endif %}
+
+输入 JSON（只处理其中当前 entity_id 对应的 descriptions 列表）:
+
+{{ input_json | default("{}", true) }}
+{% else %}
+# Current Batch Data
+
+entity_id:
+
+{{ entity_id }}
+
+{% if language is defined %}
+language:
+
+{{ language }}
+{% endif %}
+
+{% if fields_schema is defined and fields_schema and fields_schema.special_domains is defined and fields_schema.special_domains %}
+Currently declared special domains and their fields:
+
+{% for domain_key, domain_meta in fields_schema.special_domains.items() %}
+- Domain `{{ domain_key }}`{% if domain_meta.description %}: {{ domain_meta.description }}{% endif %} (use `{{ domain_key }}` as operation.field for this domain)
+{%- for f in domain_meta.fields %}
+  - Field `{{ f.field }}`{% if f.name_cn %} ({{ f.name_cn }}){% endif %}
+{%- if f.description %}
+    - Definition: {{ f.description }}
+{%- endif %}
+{%- if f.format %}
+    - Value format: {{ f.format }}
+{%- endif %}
+{%- if f.include_examples %}
+    - Include: {{ f.include_examples | join("; ") }}
+{%- endif %}
+{%- if f.exclude_examples %}
+    - Exclude: {{ f.exclude_examples | join("; ") }}
+{%- endif %}
+{%- endfor %}
+{% endfor %}
+{% endif %}
+
+{% if existing_metadata_json is defined and existing_metadata_json %}
+existing_metadata (complete committed state before this batch):
+
+{{ existing_metadata_json }}
+{% endif %}
+
+Input JSON (process only the descriptions list belonging to the current entity_id):
+
+{{ input_json | default("{}", true) }}
+{% endif %}
