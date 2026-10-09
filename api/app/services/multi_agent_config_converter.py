@@ -177,7 +177,8 @@ class MultiAgentConfigConverter:
         return {
             "app_id": str(app_id),
             "master_agent_id": None,
-            "orchestration_mode": "sequential",
+            # S9 增补：默认主管循环模式（旧值 "sequential" 属已废弃枚举，归一化会兜底到 collaboration，与产品默认意图不符）
+            "orchestration_mode": "supervisor_loop",
             "sub_agents": [],
             "routing_rules": [],
             "execution_config": {
@@ -186,6 +187,6 @@ class MultiAgentConfigConverter:
                 "enable_parallel": False,
                 "error_handling": "stop"
             },
-            "aggregation_strategy": "last",
+            "aggregation_strategy": "merge",
             "is_active": False
         }

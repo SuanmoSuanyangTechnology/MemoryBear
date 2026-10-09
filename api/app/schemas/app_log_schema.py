@@ -87,7 +87,7 @@ class AppLogNodeExecution(BaseModel):
     execution_id: Optional[str] = Field(default=None, description="该次执行的 agent_executions.id")
     parent_execution_id: Optional[str] = Field(default=None, description="主 Agent 的执行 ID")
     depth: Optional[int] = Field(default=None, description="调用层级，主 Agent 为 0，直接子 Agent 为 1")
-    orchestration_mode: Optional[str] = Field(default=None, description="supervisor | collaboration")
+    orchestration_mode: Optional[str] = Field(default=None, description="supervisor | supervisor_loop | collaboration")
 
 
 class AppLogAgentSummary(BaseModel):

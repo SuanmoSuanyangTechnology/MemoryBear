@@ -158,6 +158,7 @@ class AppDslService:
                 ] if config else [],
 
                 "execution_config": config.execution_config if config else {},
+                "supervisor_config": self._to_dict(config.supervisor_config) if config else None,
                 "aggregation_strategy": config.aggregation_strategy if config else "merge",
             } if config else {}
             dsl = {**meta, "app": app_meta, "multi_agent_config": config_data}
@@ -290,6 +291,11 @@ class AppDslService:
         if not agent_id:
             return None
         a = self.db.query(App).filter(App.id == agent_id).first()
+        if a is None:
+            # 旧数据的 sub_agents[*].agent_id 存的是 AppRelease.id，经所属应用取名
+            r = self.db.query(AppRelease).filter(AppRelease.id == agent_id).first()
+            if r is not None:
+                a = self.db.query(App).filter(App.id == r.app_id).first()
         return {"id": str(agent_id), "name": a.name} if a else {"id": str(agent_id)}
 
     def _release_ref(self, release_id) -> Optional[dict]:
@@ -421,7 +427,7 @@ class AppDslService:
         elif app_type == AppType.MULTI_AGENT:
             cfg = dsl.get("multi_agent_config") or {}
             fields = dict(
-                orchestration_mode=cfg.get("orchestration_mode", "collaboration"),
+                orchestration_mode=cfg.get("orchestration_mode", "supervisor_loop"),
                 master_agent_name=cfg.get("master_agent_name"),
                 model_parameters=cfg.get("model_parameters"),
                 default_model_config_id=self._resolve_model(cfg.get("default_model_config_ref"), tenant_id, warnings),
@@ -429,6 +435,7 @@ class AppDslService:
                 sub_agents=self._resolve_sub_agents(cfg.get("sub_agents", []), warnings),
                 routing_rules=self._resolve_routing_rules(cfg.get("routing_rules"), warnings),
                 execution_config=cfg.get("execution_config", {}),
+                supervisor_config=cfg.get("supervisor_config"),
                 aggregation_strategy=cfg.get("aggregation_strategy", "merge"),
                 updated_at=now,
             )
@@ -666,6 +673,9 @@ class AppDslService:
                 if not a:
                     warnings.append(f"子 Agent '{ref.get('name')}' 未匹配，已置空，请导入后手动配置")
                 entry["agent_id"] = str(a.id) if a else None
+                # agent_id 现为子 Agent 应用 ID。release_id 跨环境无效，导入后一律跟随最新发布版本
+                entry["release_policy"] = "current"
+                entry["release_id"] = None
             result.append(entry)
         return result
 

@@ -364,6 +364,7 @@ class ContextEngineManager:
             legacy_max_history: int = 10,
             scope_key: str = "conversation",
             model_config_id: str | uuid.UUID | None = None,
+            include_cross_session: bool = True,
     ) -> Optional[tuple[str, list[dict[str, Any]]]]:
         context_config = self._get_context_config(features)
         if context_config is None:
@@ -380,9 +381,17 @@ class ContextEngineManager:
                 conversation_id=conversation_id,
                 since_at=state.get("summarized_until_at") if state else None,
             )
-            cross_session_records = await self._get_cross_session_recent_records(
-                conversation_id=conversation_id,
-                context_config=context_config,
+            # 集群子 Agent（include_cross_session=False）禁止注入同用户其它会话的消息：
+            # 子 Agent 的任务上下文由编排器下发，历史只认当前集群会话。
+            # 否则开启 cross_session_recent 的应用里，子 Agent 会带着
+            # 其它会话的用户消息回答（此前实测出现的上下文串扰）。
+            cross_session_records = (
+                await self._get_cross_session_recent_records(
+                    conversation_id=conversation_id,
+                    context_config=context_config,
+                )
+                if include_cross_session
+                else []
             )
             recent_records = self._trim_messages_after_boundary(messages, state)
             recent_messages = [

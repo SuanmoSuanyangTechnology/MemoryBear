@@ -1866,6 +1866,9 @@ class AppChatService:
 
         start_time = time.time()
         user_message_id = uuid.uuid4()
+        # S1 轮次锚点：预生成 assistant 消息 ID，master 执行记录据此关联本轮消息，
+        # 日志详情按消息挂载节点不依赖时序吸附（多轮场景吸附会分散到别的消息）。
+        message_id = uuid.uuid4()
         actual_config_id = None
         config_id = actual_config_id
 
@@ -1883,7 +1886,11 @@ class AppChatService:
             variables=variables,
             use_llm_routing=True,  # 默认启用 LLM 路由
             web_search=web_search,  # 网络搜索参数
-            memory=memory  # 记忆功能参数
+            memory=memory,  # 记忆功能参数
+            # S5：这两个参数此前在非流式入口被丢弃（协作模式因此拿不到存储/记忆上下文）
+            storage_type=storage_type,
+            user_rag_memory_id=user_rag_memory_id,
+            message_id=message_id
         )
 
         elapsed_time = time.time() - start_time
@@ -1897,6 +1904,7 @@ class AppChatService:
         )
 
         ai_message = await self.conversation_service.add_message_async(
+            message_id=message_id,
             conversation_id=conversation_id,
             role="assistant",
             content=result.get("message", ""),
@@ -1911,17 +1919,34 @@ class AppChatService:
             }
         )
 
+        # S1 轮次锚点：消息落库后回填 master 执行记录的 message_id（幂等），
+        # 使日志详情精确按本轮 assistant 消息挂载节点。
+        _master_execution_id = getattr(orchestrator, "current_execution_id", None)
+        if _master_execution_id is not None:
+            try:
+                from app.services.batch_persist_queue import BatchPersistQueue, PersistTask
+                await BatchPersistQueue.enqueue(PersistTask(
+                    task_type="link_agent_execution_message",
+                    args={
+                        "execution_id": str(_master_execution_id),
+                        "message_id": str(message_id),
+                    },
+                ))
+            except Exception as e:
+                logger.warning("回填主执行记录 message_id 失败（不影响对话）", extra={"error": str(e)})
 
         return {
             "conversation_id": conversation_id,
             "message": result.get("message", ""),
             "message_id": str(ai_message.id),
             "user_message_id": str(user_message_id),
-            "usage": {
+            # S4：非流式返回真实 usage（orchestrator execute() 已改账本口径），
+            # 不再恒 0。
+            "usage": result.get("usage", {
                 "prompt_tokens": 0,
                 "completion_tokens": 0,
                 "total_tokens": 0
-            },
+            }),
             "elapsed_time": elapsed_time
         }
 
@@ -1974,36 +1999,48 @@ class AppChatService:
                     user_rag_memory_id=user_rag_memory_id,
                     message_id=message_id
             ):
-                # 拦截 sub_usage 事件，累加 token
-                if "event: sub_usage" in event:
-                    if "data:" in event:
-                        try:
-                            data_line = event.split("data: ", 1)[1].strip()
-                            data = json.loads(data_line)
-                            total_tokens += data.get("total_tokens", 0)
-                        except:
-                            pass
-                else:
-                    yield event
-                    # 累加主气泡正文：只认集群级的 `message` 事件。
-                    # 子 Agent 的正文走 `sub_agent_message`（已在各自区块展示），
-                    # 若一并累加，落库的 assistant 正文会比界面显示多出一份重复内容，
-                    # 刷新后主气泡会变长。
-                    _event_name = ""
-                    if event.startswith("event:"):
-                        _event_name = event[6:].split("\n", 1)[0].strip()
-                    if _event_name == "message" and "data:" in event:
-                        try:
-                            data_line = event.split("data: ", 1)[1].strip()
-                            data = json.loads(data_line)
-                            if "content" in data:
-                                full_content += data["content"]
-                        except:
-                            pass
+                # S4：不再拦截 sub_usage 字符串累加 token —— orchestrator 内建
+                # per-turn 账本（routing/sub/merge 分层）在 end 事件统一发布
+                # usage（唯一权威口径），本层从 end 读取后落库。
+                _event_name = ""
+                if event.startswith("event:"):
+                    _event_name = event[6:].split("\n", 1)[0].strip()
+
+                if _event_name == "end" and "data:" in event:
+                    try:
+                        data_line = event.split("data: ", 1)[1].strip()
+                        data = json.loads(data_line)
+                        total_tokens = int((data.get("usage") or {}).get("total_tokens") or 0)
+                    except:
+                        pass
+
+                yield event
+                # 累加主气泡正文：只认集群级的 `message` 事件。
+                # 子 Agent 的正文走 `sub_agent_message`（已在各自区块展示），
+                # 若一并累加，落库的 assistant 正文会比界面显示多出一份重复内容，
+                # 刷新后主气泡会变长。
+                # 注意：S3 之后子 Agent 事件已剥离子会话 conversation_id，
+                # 本层收集口径与 orchestrator 的 message 事件发布口径一一对应
+                #（supervisor=merge 输出，supervisor_loop=主管 ReAct 正文，
+                # collaboration=handoffs 主回复）。
+                if _event_name == "message" and "data:" in event:
+                    try:
+                        data_line = event.split("data: ", 1)[1].strip()
+                        data = json.loads(data_line)
+                        if "content" in data:
+                            full_content += data["content"]
+                    except:
+                        pass
 
             elapsed_time = time.time() - start_time
 
             # Enqueue async batch persist
+            # S3 落库收口：本入口（应用编排侧）是唯一的落库层——落库内容为
+            # full_content（orchestrator message 事件序列 = 前端主气泡的最终
+            # 展示内容），经 BatchPersistQueue 统一写入；MultiAgentService/
+            # SharedChatService 不再各自拼内容直存（同轮多条 assistant 的根因）。
+            # supervisor 单 Agent 透传场景的 message 事件即子 Agent 输出本身，
+            # 落库与展示同一口径，"长会话返回值不是最终内容"由此消除。
             from app.services.batch_persist_queue import BatchPersistQueue, PersistTask
             from app.services.chat_context import StreamResult as _StreamResult
             _result = _StreamResult()
@@ -2013,6 +2050,8 @@ class AppChatService:
             _result.total_tokens = total_tokens
             _result.assistant_meta = {
                 "elapsed_time": elapsed_time,
+                "mode": getattr(orchestrator, "_normalized_mode", None),
+                "merge_mode_actual": getattr(orchestrator, "_merge_mode_actual", None),
                 "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": total_tokens},
             }
             await BatchPersistQueue.enqueue(PersistTask(
@@ -2022,7 +2061,7 @@ class AppChatService:
                     "result": _result,
                     "user_message_id_override": user_message_id,
                     "user_message_content": message,
-                    "should_memorize": memory,
+                    "should_memorize": orchestrator.cluster_memory_enabled(),
                 },
             ))
             save_messages_enqueued = True

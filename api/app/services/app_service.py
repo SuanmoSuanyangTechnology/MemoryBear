@@ -315,7 +315,9 @@ class AppService:
                 "多智能体配置未激活，无法运行",
                 BizCode.AGENT_CONFIG_MISSING
             )
-        if multi_agent_config.orchestration_mode == "supervisor":
+        # S9：两个"主管类"模式都必须有可用主模型/主 Agent——
+        # supervisor 用于路由与整合，supervisor_loop 用于驱动主管 ReAct 引擎
+        if multi_agent_config.orchestration_mode in ("supervisor", "supervisor_loop"):
             if not multi_agent_config.default_model_config_id:
                 # # 2. 检查主 Agent 配置
                 if not multi_agent_config.master_agent_id:
@@ -376,18 +378,12 @@ class AppService:
                     BizCode.AGENT_CONFIG_MISSING
                 )
 
-            # 转换为 UUID
-            try:
-                from uuid import UUID
-                agent_uuid = UUID(agent_id) if isinstance(agent_id, str) else agent_id
-            except (ValueError, TypeError):
-                raise BusinessException(
-                    f"子 Agent #{idx + 1} 的 agent_id 格式无效: {agent_id}",
-                    BizCode.INVALID_PARAMETER
-                )
+            # 按版本策略解析出有效 release（agent_id 新形态=应用 ID，旧形态=release ID，由解析层判别）
+            from app.services.multi_agent_release_resolver import resolve_effective_release_id
+            effective_release_id = resolve_effective_release_id(self.db, sub_agent_data, strict=False)
 
             # 检查子 Agent 是否存在
-            sub_agent_release = self.db.get(AppRelease, agent_uuid)
+            sub_agent_release = self.db.get(AppRelease, effective_release_id)
             if not sub_agent_release:
                 raise BusinessException(
                     f"子 Agent 配置不存在: {agent_id} ({sub_agent_data.get('name', '未命名')})",
@@ -1509,10 +1505,17 @@ class AppService:
         except ValueError:
             return []
 
-        # 查询本工作空间的应用 + 分享给本工作空间的应用
+        # 查询本工作空间的应用 + 分享给本工作空间的应用（与 list_apps 的 include_shared 口径一致）
+        shared_app_ids_stmt = (
+            select(AppShare.source_app_id)
+            .where(AppShare.target_workspace_id == workspace_id, AppShare.is_active.is_(True))
+        )
         stmt = select(App).where(
             App.id.in_(uuid_ids),
-            App.workspace_id == workspace_id
+            or_(
+                App.workspace_id == workspace_id,
+                App.id.in_(shared_app_ids_stmt)
+            )
         )
 
         return list(self.db.scalars(stmt).all())
@@ -2147,6 +2150,39 @@ class AppService:
 
         return pinned_nodes
 
+    def _pin_multi_agent_sub_agents(
+            self,
+            sub_agents: list[dict[str, Any]] | None,
+    ) -> list[dict[str, Any]]:
+        """集群发布时把子 Agent 钉死到具体 AppRelease。
+
+        - current（跟随最新）：解析成子 Agent 应用此刻的发布版本，写入 release_id；
+        - pinned / 存量无 release_policy：沿用已固定的版本；
+        - 快照统一为新形态：agent_id=子 Agent 应用 ID，release_policy=pinned，release_id=具体版本，
+          已发布集群不会随子 Agent 再发布而变化。
+        解析失败（子 Agent 无可用发布版本）直接抛错，阻止发布。
+        """
+        from app.services.multi_agent_release_resolver import (
+            POLICY_PINNED,
+            resolve_effective_release_id,
+        )
+
+        pinned: list[dict[str, Any]] = []
+        for entry in sub_agents or []:
+            item = dict(entry)
+            effective_id = resolve_effective_release_id(self.db, item, strict=True)
+            release = self.db.get(AppRelease, effective_id)
+            if release is None:
+                raise BusinessException(
+                    f"子 Agent「{item.get('name') or item.get('agent_id')}」的发布版本不存在",
+                    BizCode.RELEASE_NOT_FOUND,
+                )
+            item["agent_id"] = str(release.app_id)
+            item["release_policy"] = POLICY_PINNED
+            item["release_id"] = str(effective_id)
+            pinned.append(item)
+        return pinned
+
     def _assert_publishable_models(
             self,
             config: dict[str, Any] | None,
@@ -2249,14 +2285,20 @@ class AppService:
             default_model_config_id = multi_agent_cfg.default_model_config_id
 
             # 4. 构建配置快照
+            # 子 Agent 版本在发布时钉死：current（跟随最新）解析成当前发布版本，
+            # 快照里一律是 pinned，已发布集群不会因子 Agent 再发布而悄悄变化。
+            pinned_sub_agents = self._pin_multi_agent_sub_agents(multi_agent_cfg.sub_agents)
 
             config = {
                 "model_parameters": model_parameters_to_dict(multi_agent_cfg.model_parameters),
                 "master_agent_id": str(multi_agent_cfg.master_agent_id),
                 "orchestration_mode": multi_agent_cfg.orchestration_mode,
-                "sub_agents": multi_agent_cfg.sub_agents,
+                "sub_agents": pinned_sub_agents,
                 "routing_rules": multi_agent_cfg.routing_rules,
                 "execution_config": multi_agent_cfg.execution_config,
+                # 主管配置（提示词/工具/记忆/知识库/集群变量）必须随快照发布，
+                # 否则已发布集群的读取端（multi_agent_config_4_app_release 等）永远拿到 None
+                "supervisor_config": multi_agent_cfg.supervisor_config,
                 "aggregation_strategy": multi_agent_cfg.aggregation_strategy,
             }
 

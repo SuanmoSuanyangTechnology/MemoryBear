@@ -1,22 +1,55 @@
 """多 Agent 相关的 Schema 定义"""
 import uuid
 import datetime
-from typing import Optional, List, Dict, Any, Union
-from pydantic import BaseModel, Field, ConfigDict, field_serializer
+from typing import Optional, List, Dict, Any, Union, Literal
+from pydantic import BaseModel, Field, ConfigDict, field_serializer, model_validator
 
 from app.core.utils.datetime_utils import to_timestamp_ms
-from app.schemas.app_schema import ModelParameters
+from app.schemas.app_schema import (
+    ModelParameters,
+    MemoryConfig,
+    KnowledgeRetrievalConfig,
+    ToolConfig,
+    SkillConfig,
+    VariableDefinition,
+)
 
 
 # ==================== 子 Agent 配置 ====================
 
 class SubAgentConfig(BaseModel):
-    """子 Agent 配置"""
+    """子 Agent 配置
+
+    版本策略（对齐工作流 Agent 节点的 AgentReferenceConfig）：
+    - current：跟随子 Agent 应用的当前发布版本；集群发布时才钉死为具体版本。
+    - pinned：固定到 release_id 指定的已发布版本。
+
+    入参 agent_id 是子 Agent 的应用 ID；落库时后端把它换成有效的 release ID
+    （current=保存时的当前发布版本，仅作锚点；pinned=release_id）。
+    存量 JSON 没有 release_policy，由解析层按 pinned 处理，行为不变。
+    """
     agent_id: uuid.UUID = Field(..., description="Agent ID")
     name: str = Field(..., description="Agent 名称")
     role: Optional[str] = Field(None, description="角色描述")
     priority: int = Field(default=1, ge=1, le=100, description="优先级（1-100）")
     capabilities: List[str] = Field(default_factory=list, description="能力列表")
+    release_policy: Literal["current", "pinned"] = Field(
+        default="current",
+        description="版本策略：current 跟随最新发布版本，pinned 固定版本",
+    )
+    release_id: Optional[uuid.UUID] = Field(
+        default=None,
+        description="固定的 AppRelease ID，仅 release_policy=pinned 时必填",
+    )
+
+    @model_validator(mode="after")
+    def _validate_release(self):
+        if self.release_policy == "pinned" and self.release_id is None:
+            raise ValueError("固定版本模式必须提供 release_id")
+        if self.release_policy == "current":
+            # 跟随最新时 release_id 无意义，统一清空避免歧义
+            self.release_id = None
+        return self
 
 
 class RoutingRule(BaseModel):
@@ -28,21 +61,53 @@ class RoutingRule(BaseModel):
 
 class ExecutionConfig(BaseModel):
     """执行配置"""
-    max_iterations: int = Field(default=5, ge=1, le=20, description="最大迭代次数")
-    timeout: int = Field(default=60, ge=10, le=300, description="超时时间（秒）")
-    parallel_limit: int = Field(default=3, ge=1, le=10, description="并行限制")
-    retry_on_failure: bool = Field(default=True, description="失败时是否重试")
-    max_retries: int = Field(default=3, ge=0, le=10, description="最大重试次数")
-
-    # 新增：路由模式配置
-    routing_mode: str = Field(
-        default="master_agent",
-        pattern="^(master_agent|llm_router|rule_only)$",
-        description="路由模式：master_agent（Master Agent决策）| llm_router（旧LLM路由器）| rule_only（仅规则路由）"
+    max_iterations: int = Field(
+        default=10,
+        ge=1,
+        le=20,
+        description="主管循环轮次上限（一轮=主管一次决策里发出的那批子 Agent 调用，同轮并发多个只算 1 轮），"
+                    "仅 orchestration_mode=supervisor_loop 生效；达到上限后新一轮的子 Agent 调用不再执行，"
+                    "把限制写进工具返回值让主管基于已有结果收尾；"
+                    "前端不提供配置入口，统一使用默认值 10"
     )
+    timeout: int = Field(
+        default=60,
+        ge=10,
+        le=300,
+        description="子 Agent 非流式执行的总超时（秒）。流式路径不用它——流式受 "
+                    "stream_idle_timeout 约束（长回答只要持续产出就不该被总时长杀掉）"
+    )
+    stream_idle_timeout: int = Field(
+        default=300,
+        ge=30,
+        le=3600,
+        description="子 Agent 流式执行的**事件间空闲**超时（秒）。"
+                    "取值需大于最慢工具的合法静默时长（沙箱代码执行 / 联网搜索在 "
+                    "tool_start→tool_end 之间完全无事件），设太小会误杀正常调用。"
+                    "作用是兜住真死锁（前端滚轮永久冻屏）"
+    )
+    parallel_limit: int = Field(default=3, ge=1, le=10, description="并行限制")
+    retry_on_failure: bool = Field(
+        default=False,
+        description="子 Agent 失败时是否重试。默认关：重试会重复消耗模型配额，"
+                    "且流式路径只在\"尚未产出任何事件\"时才安全重试"
+    )
+    max_retries: int = Field(
+        default=2,
+        ge=0,
+        le=10,
+        description="最大重试次数（不含首次）。仅对瞬时失败生效——配置类错误"
+                    "（BusinessException）、超时、取消都不重试，重跑必然同样失败"
+    )
+
+    # P0-5：routing_mode 已删除 —— 该字段从无消费点（路由始终走 MasterAgentRouter），
+    # 其枚举值 llm_router 对应的 LLMRouter 实现也已随死代码清理移除。
+    # 存量 execution_config JSON 里残留的 routing_mode 键由 Pydantic extra="ignore"
+    # 自动丢弃，不会导致反序列化失败。
     enable_rule_fast_path: bool = Field(
-        default=True,
-        description="是否启用规则快速路径（性能优化，高置信度关键词直接返回）"
+        default=False,
+        description="已废弃：关键词规则快路径不再生效，保留字段仅为兼容存量配置。"
+                    "确定性编排请使用 orchestration_mode 的声明式模式（pipeline/fanout/router）。"
     )
 
     # 新增：结果整合模式配置
@@ -57,6 +122,12 @@ class ExecutionConfig(BaseModel):
         le=32000,
         description="Master Agent 整合输出的最大 token 数（仅 result_merge_mode=master 生效）"
     )
+    supervisor_max_tool_calls: int = Field(
+        default=3,
+        ge=1,
+        le=10,
+        description="主管循环单轮内最多分派子 Agent 次数（tool_call_limit），仅 orchestration_mode=supervisor_loop 生效"
+    )
 
     # 新增：子 Agent 执行模式配置
     sub_agent_execution_mode: str = Field(
@@ -68,18 +139,92 @@ class ExecutionConfig(BaseModel):
 
 # ==================== 多 Agent 配置 ====================
 
+class SupervisorConfig(BaseModel):
+    """主管配置（全模式；supervisor_loop 模式下还含主管本体能力面）。
+
+    结构对齐单 Agent 应用的能力面；留空/缺省 = 现状"裸主管"行为
+    （硬编码 prompt + 仅 SubAgentTool），存量配置零迁移。
+
+    集群变量定义统一放在本模型的 variables 键（不再单列 MultiAgentConfig.variables）。
+    主管 prompt 与子 Agent 共用同一变量包，不另设"主管私有变量"
+    （避免两套变量定义打架）；缺省/空 = 运行时退化为子 Agent 变量并集。
+    """
+    model_config = ConfigDict(extra="ignore")
+
+    system_prompt: Optional[str] = Field(
+        default=None,
+        max_length=8000,
+        description="主管自定义系统提示词（渲染集群变量 {{var}} 后，自动段之前拼接）。留空 = 仅自动段（名册+分派纪律）",
+    )
+    memory: Optional[MemoryConfig] = Field(
+        default=None,
+        description="主管记忆配置（{'enabled': bool}；集群会话历史不受此开关控制，始终保留）",
+    )
+    knowledge_retrieval: Optional[KnowledgeRetrievalConfig] = Field(
+        default=None,
+        description="主管知识库检索配置（与单 Agent 应用 KnowledgeRetrievalConfig 同构）",
+    )
+    tools: Optional[List[ToolConfig]] = Field(
+        default=None,
+        description="主管工具配置（与单 Agent 应用 ToolConfig 同构）",
+    )
+    skills: Optional[SkillConfig] = Field(
+        default=None,
+        description="主管技能配置（与单 Agent 应用 SkillConfig 同构）",
+    )
+    variables: Optional[List[VariableDefinition]] = Field(
+        default=None,
+        description=(
+            "集群变量定义（对外契约，优先于子 Agent 变量并集）："
+            "[{'name': str, 'display_name': str, 'type': str, 'required': bool, "
+            "'default_value': '...'}]；None/空 = 退化为子 Agent 变量并集"
+        ),
+    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_skill_ids(cls, data: Any) -> Any:
+        """容错归一化 skill_ids（前端已做同样压缩，此为后端兜底）。
+
+        规则与 capabilityContract.compressSkills / Agent 运行时一致：
+        - all_skills=true 时 skill_ids 无意义 → 落 []（编辑器可能残留 null 元素）
+        - 对象元素取 id；丢弃 null / 非字符串元素
+
+        知识库/工具/变量的实体脏字段由各自模型 extra=ignore 自动丢弃，
+        只有 list[str] 的 skill_ids 遇到对象/None 会硬报错，故在此统一归一化。
+        """
+        if isinstance(data, dict):
+            skills = data.get("skills")
+            if isinstance(skills, dict) and isinstance(skills.get("skill_ids"), list):
+                if skills.get("all_skills"):
+                    skills["skill_ids"] = []
+                else:
+                    skills["skill_ids"] = [
+                        vo.get("id") if isinstance(vo, dict) else vo
+                        for vo in skills["skill_ids"]
+                    ]
+                    skills["skill_ids"] = [
+                        vo for vo in skills["skill_ids"] if isinstance(vo, str)
+                    ]
+        return data
+
+
 class MultiAgentConfigCreate(BaseModel):
     """创建多 Agent 配置"""
     master_agent_id: uuid.UUID = Field(..., description="主 Agent ID")
     master_agent_name: Optional[str] = Field(default=None, max_length=100, description="主 Agent 名称")
     orchestration_mode: str = Field(
-        default="collaboration",
-        pattern="^(collaboration|supervisor)$",
-        description="协作模式：collaboration（协作）| supervisor（监督）"
+        default="supervisor_loop",
+        pattern="^(collaboration|supervisor|supervisor_loop)$",
+        description="协作模式：supervisor_loop（主管 ReAct 循环，默认）| supervisor（主管三段式）| collaboration（协作）"
     )
     sub_agents: List[SubAgentConfig] = Field(..., description="子 Agent 列表")
     routing_rules: Optional[List[RoutingRule]] = Field(default=None, description="路由规则")
     execution_config: ExecutionConfig = Field(default_factory=ExecutionConfig, description="执行配置")
+    supervisor_config: Optional[SupervisorConfig] = Field(
+        default=None,
+        description="主管配置（全模式；含集群变量 variables；None=裸主管现状）",
+    )
     aggregation_strategy: str = Field(
         default="merge",
         pattern="^(merge|vote|priority|custom)$",
@@ -97,13 +242,17 @@ class MultiAgentConfigUpdate(BaseModel):
         description="模型参数配置（temperature、max_tokens 等）"
     )
     orchestration_mode: Optional[str] = Field(
-        default="collaboration",
-        pattern="^(collaboration|supervisor)$",
-        description="协作模式：collaboration（协作）| supervisor（监督）"
+        default="supervisor_loop",
+        pattern="^(collaboration|supervisor|supervisor_loop)$",
+        description="协作模式：supervisor_loop（主管 ReAct 循环，默认）| supervisor（主管三段式）| collaboration（协作）"
     )
     sub_agents: Optional[List[SubAgentConfig]] = None
     routing_rules: Optional[List[RoutingRule]] = None
     execution_config: Optional[ExecutionConfig] = None
+    supervisor_config: Optional[SupervisorConfig] = Field(
+        default=None,
+        description="主管配置（全模式；含集群变量 variables；None=不更新该字段）",
+    )
     aggregation_strategy: Optional[str] = Field(
         None,
         pattern="^(merge|vote|priority|custom)$"
@@ -128,6 +277,10 @@ class MultiAgentConfigSchema(BaseModel):
     sub_agents: List[Dict[str, Any]]
     routing_rules: Optional[List[Dict[str, Any]]]
     execution_config: Dict[str, Any]
+    supervisor_config: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="主管配置（全模式；含集群变量 variables；null=裸主管现状）",
+    )
     aggregation_strategy: str
     is_active: bool
     created_at: datetime.datetime
@@ -175,42 +328,8 @@ class MultiAgentRunResponse(BaseModel):
     usage: Optional[Dict[str, Any]] = Field(None, description="资源使用情况")
 
 
-# ==================== 智能路由测试 ====================
-
-class RoutingTestRequest(BaseModel):
-    """路由测试请求"""
-    message: str = Field(..., description="测试消息")
-    conversation_id: Optional[uuid.UUID] = Field(None, description="会话 ID（可选）")
-    routing_model_id: Optional[uuid.UUID] = Field(None, description="路由模型 ID（用于 LLM 路由）")
-    use_llm: bool = Field(default=False, description="是否启用 LLM 路由")
-    keyword_threshold: Optional[float] = Field(
-        default=0.8,
-        ge=0.0,
-        le=1.0,
-        description="关键词置信度阈值（0-1）"
-    )
-    force_new: bool = Field(default=False, description="是否强制重新路由")
-
-
-class RoutingTestCase(BaseModel):
-    """路由测试用例"""
-    message: str = Field(..., description="测试消息")
-    expected_agent_id: Optional[uuid.UUID] = Field(None, description="期望的 Agent ID")
-    description: Optional[str] = Field(None, description="测试用例描述")
-
-
-class BatchRoutingTestRequest(BaseModel):
-    """批量路由测试请求"""
-    test_cases: List[RoutingTestCase] = Field(..., description="测试用例列表")
-    routing_model_id: Optional[uuid.UUID] = Field(None, description="路由模型 ID")
-    use_llm: bool = Field(default=False, description="是否启用 LLM 路由")
-    keyword_threshold: Optional[float] = Field(
-        default=0.8,
-        ge=0.0,
-        le=1.0,
-        description="关键词置信度阈值"
-    )
-
+# P0-5：智能路由测试 schema（RoutingTestRequest/RoutingTestCase/BatchRoutingTestRequest）
+# 已随引用它们的死端点（test-routing/test-master-agent/batch-test-routing）一并移除。
 
 
 # ==================== Agent Handoffs ====================

@@ -1170,7 +1170,8 @@ async def config_query(
             "app_name": app_name,
             "app_icon": app_icon,
             "app_type": release.type,
-            "variables": [],
+            # 集群变量定义存于 supervisor_config.variables（与 /v1/app/variable 的读取口径一致）
+            "variables": (release.config.get("supervisor_config") or {}).get("variables") or [],
             "features": release.config.get("features")
         }
     else:
