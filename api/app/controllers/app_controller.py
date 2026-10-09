@@ -4,7 +4,7 @@ import io
 import json
 import time
 from dataclasses import dataclass
-from typing import Optional, Annotated
+from typing import Optional, Annotated, Literal
 
 import yaml
 from fastapi import APIRouter, Depends, Path, Form, UploadFile, File, Query
@@ -432,8 +432,16 @@ def create_app(
         current_user=Depends(get_current_user),
 ):
     workspace_id = current_user.current_workspace_id
-    app = app_service.create_app(db, user_id=current_user.id, workspace_id=workspace_id, data=payload)
-    return success(data=app_schema.App.model_validate(app))
+    app = app_service.create_app(
+        db,
+        user_id=current_user.id,
+        workspace_id=workspace_id,
+        tenant_id=current_user.tenant_id,
+        data=payload,
+    )
+    # 创建应用之后查询并返回绑定的本体信息（未输入ontolog_id绑定默认本体）
+    service = app_service.AppService(db)
+    return success(data=service.to_schema_with_ontology(app, workspace_id))
 
 
 @router.get("", summary="应用列表（分页）")
@@ -449,6 +457,12 @@ def list_apps(
         page: int = 1,
         pagesize: int = 10,
         ids: Optional[str] = None,
+        ontology_status: Literal["all", "bound", "default"] = Query(
+            "all", description="本体状态筛选：all 全部 / bound 已关联本体 / default 仅默认本体"
+        ),
+        field_search: Optional[str] = Query(
+            None, description="标签模式搜索：模糊匹配绑定本体的场景自定义字段展示名"
+        ),
         db: Session = Depends(get_db),
         current_user=Depends(get_current_user),
 ):
@@ -459,6 +473,8 @@ def list_apps(
     - 当提供 ids 参数时，按逗号分割获取指定应用，不分页
     - search 参数支持：应用名称模糊搜索、API Key 精确搜索
     - tag_search 参数支持：应用标签模糊搜索
+    - ontology_status / field_search：本体筛选（企业版生效；ids / API Key 精确查找不应用）
+    - 每个应用附带 ontology 子对象（当前生效本体；社区版为 null）
     """
     from sqlalchemy import select as sa_select
     from app.models.api_key_model import ApiKey
@@ -487,7 +503,7 @@ def list_apps(
         app_ids = [app_id.strip() for app_id in ids.split(',') if app_id.strip()]
         if app_ids:
             items_orm = app_service.get_apps_by_ids(db, app_ids, workspace_id)
-            items = [service._convert_to_schema(app, workspace_id) for app in items_orm]
+            items = service.to_schemas_with_ontology(items_orm, workspace_id)
             # 返回标准分页格式
             meta = PageMeta(page=1, pagesize=len(items), total=len(items), hasnext=False)
             return success(data=PageData(page=meta, items=items))
@@ -508,9 +524,11 @@ def list_apps(
         shared_only=shared_only,
         page=page,
         pagesize=pagesize,
+        ontology_status=ontology_status,
+        field_search=field_search,
     )
 
-    items = [service._convert_to_schema(app, workspace_id) for app in items_orm]
+    items = service.to_schemas_with_ontology(items_orm, workspace_id)
     meta = PageMeta(page=page, pagesize=pagesize, total=total, hasnext=(page * pagesize) < total)
     return success(data=PageData(page=meta, items=items))
 
@@ -525,8 +543,7 @@ def list_my_shared_out(
     workspace_id = current_user.current_workspace_id
     service = app_service.AppService(db)
     shares = service.list_my_shared_out(workspace_id=workspace_id)
-    data = [app_schema.AppShare.model_validate(s) for s in shares]
-    return success(data=data)
+    return success(data=service.share_schemas_with_ontology(shares))
 
 
 @router.delete("/share/{target_workspace_id}", summary="取消对某工作空间的所有应用分享")
