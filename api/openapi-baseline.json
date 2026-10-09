@@ -61,15 +61,6 @@
             "description": "每页数量，最大 100"
           }
         ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ApiKeyAuth"
-              }
-            }
-          }
-        },
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -4992,6 +4983,58 @@
         }
       }
     },
+    "/v1/memory_config/read_config_scene_community": {
+      "get": {
+        "tags": [
+          "V1 - Memory Config API"
+        ],
+        "summary": "Read Config Scene Community",
+        "description": "Read SceneCommunity settings for the API Key workspace.",
+        "operationId": "read_config_scene_community_v1_memory_config_read_config_scene_community_get",
+        "parameters": [
+          {
+            "name": "config_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "config_id",
+              "title": "Config Id"
+            },
+            "description": "config_id"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApiKeyAuth"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/memory_config/update_config_preference": {
       "put": {
         "tags": [
@@ -5005,6 +5048,45 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/Body_update_config_preference_v1_memory_config_update_config_preference_put"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/memory_config/update_config_scene_community": {
+      "put": {
+        "tags": [
+          "V1 - Memory Config API"
+        ],
+        "summary": "Update Config Scene Community",
+        "description": "Fully update SceneCommunity settings for the API Key workspace.",
+        "operationId": "update_config_scene_community_v1_memory_config_update_config_scene_community_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_update_config_scene_community_v1_memory_config_update_config_scene_community_put"
               }
             }
           }
@@ -8926,6 +9008,20 @@
         },
         "type": "object",
         "title": "Body_update_config_reflection_v1_memory_config_update_config_reflection_put"
+      },
+      "Body_update_config_scene_community_v1_memory_config_update_config_scene_community_put": {
+        "properties": {
+          "api_key_auth": {
+            "$ref": "#/components/schemas/ApiKeyAuth"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "description": "Request body"
+          }
+        },
+        "type": "object",
+        "title": "Body_update_config_scene_community_v1_memory_config_update_config_scene_community_put"
       },
       "Body_update_config_scene_v1_memory_config_update_config_scene_put": {
         "properties": {
