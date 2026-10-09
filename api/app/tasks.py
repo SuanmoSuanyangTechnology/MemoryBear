@@ -6804,6 +6804,8 @@ def generate_scene_summary(
     idle_high_watermark_message_id: str | None = None,
 ):
     from app.core.memory.scene.scene_summary_service import SceneSummaryService
+    from app.core.memory.storage.custom import SceneStorage
+    from app.core.memory.storage.provider.neo4j.client import Neo4jClient
     from app.schemas.scene_memory_schema import GenerateSceneSummaryTask
 
     payload = GenerateSceneSummaryTask(
@@ -6814,20 +6816,152 @@ def generate_scene_summary(
         idle_high_watermark_message_id=idle_high_watermark_message_id,
         close_reason=close_reason,
     )
+    started_at = time.monotonic()
+    stage = "generate_summary"
     loop = set_asyncio_event_loop()
+
+    async def _run():
+        storage_client = await Neo4jClient.create()
+        try:
+            writer = SceneStorage(storage_client)
+            return await SceneSummaryService(writer=writer).generate(payload)
+        finally:
+            await storage_client.close()
+
     try:
-        result = loop.run_until_complete(SceneSummaryService().generate(payload))
+        result = loop.run_until_complete(_run())
+        if result.get("community_dispatch_required"):
+            stage = "dispatch_scene_community"
+            community_task = run_scene_community_incremental.apply_async(
+                kwargs={"end_user_id": end_user_id}
+            )
+            result["scene_community_task_id"] = community_task.id
         logger.info(
-            "[SceneSummary] generation completed: scene_start=%s, "
-            "close_reason=%s, status=%s, reason=%s, summary_id=%s",
+            "[SceneSummary] generation completed: user=%s, scene_start=%s, "
+            "close_reason=%s, status=%s, reason=%s, summary_id=%s, "
+            "inactive=%s, dispatched=%s, elapsed_ms=%s",
+            end_user_id,
             scene_start_message_id,
             close_reason,
             result.get("status"),
             result.get("reason"),
             result.get("summary_id"),
+            result.get("inactive_count"),
+            bool(result.get("scene_community_task_id")),
+            int((time.monotonic() - started_at) * 1000),
         )
         return result
+    except Exception as exc:
+        logger.error(
+            "[SceneSummary] generation failed: user=%s scene_start=%s stage=%s "
+            "error_type=%s retry=%s elapsed_ms=%s",
+            end_user_id,
+            scene_start_message_id,
+            stage,
+            type(exc).__name__,
+            getattr(self.request, "retries", 0),
+            int((time.monotonic() - started_at) * 1000),
+        )
+        raise
     finally:
+        _shutdown_loop_gracefully(loop)
+
+
+@celery_app.task(
+    bind=True,
+    name="app.core.memory.run_scene_community_incremental",
+    acks_late=True,
+    autoretry_for=(Exception,),
+    retry_backoff=True,
+    retry_kwargs={"max_retries": 3},
+    time_limit=1800,
+    soft_time_limit=1700,
+)
+def run_scene_community_incremental(self, end_user_id: str):
+    """Process exactly one complete SceneCommunity batch for an end user."""
+    from app.core.memory.scene.scene_community_service import (
+        SceneCommunityIncrementalService,
+    )
+    from app.core.memory.storage.custom import SceneStorage
+    from app.core.memory.storage.provider.neo4j.client import Neo4jClient
+
+    started_at = time.monotonic()
+    stage = "acquire_lock"
+    loop = set_asyncio_event_loop()
+    write_lock = None
+
+    async def _run():
+        nonlocal stage
+        stage = "load_config"
+        with get_db_context() as db:
+            config_service = MemoryConfigService(db)
+            current_config_id = config_service.get_config_id_by_end_user(end_user_id)
+            memory_config = config_service.load_memory_config(current_config_id)
+
+        stage = "connect_neo4j"
+        storage_client = await Neo4jClient.create()
+        try:
+            stage = "run_incremental"
+            writer = SceneStorage(storage_client)
+            result = await SceneCommunityIncrementalService(
+                writer=writer,
+                memory_config=memory_config,
+            ).run(end_user_id)
+            result["config_id"] = str(current_config_id)
+            result["batch_trigger_count_snapshot"] = int(
+                memory_config.batch_trigger_count
+            )
+            result["candidate_community_limit_snapshot"] = int(
+                memory_config.candidate_community_limit
+            )
+            result["compare_all_same_category_communities_snapshot"] = bool(
+                memory_config.compare_all_same_category_communities
+            )
+            return result
+        finally:
+            await storage_client.close()
+
+    try:
+        end_user_id, write_lock = _acquire_community_clustering_lock(
+            end_user_id,
+            redis_client=get_thread_safe_sync_redis(),
+            expire=1800,
+        )
+        result = loop.run_until_complete(_run())
+        if result.get("dispatch_next"):
+            stage = "dispatch_next"
+            next_task = run_scene_community_incremental.apply_async(
+                kwargs={"end_user_id": end_user_id}
+            )
+            result["next_task_id"] = next_task.id
+        logger.info(
+            "[SceneCommunity] incremental task completed: user=%s status=%s "
+            "processed=%s communities=%s remaining=%s config=%s "
+            "dispatch_next=%s elapsed_ms=%s",
+            end_user_id,
+            result.get("status"),
+            result.get("processed"),
+            result.get("community_count"),
+            result.get("remaining_inactive_count", result.get("inactive_count")),
+            result.get("config_id"),
+            bool(result.get("next_task_id")),
+            int((time.monotonic() - started_at) * 1000),
+        )
+        return result
+    except Exception as exc:
+        logger.error(
+            "[SceneCommunity] incremental task failed: user=%s stage=%s "
+            "error_type=%s retry=%s elapsed_ms=%s",
+            end_user_id,
+            stage,
+            type(exc).__name__,
+            getattr(self.request, "retries", 0),
+            int((time.monotonic() - started_at) * 1000),
+        )
+        raise
+    finally:
+        if write_lock is not None:
+            write_lock.release()
         _shutdown_loop_gracefully(loop)
 
 
@@ -7024,3 +7158,84 @@ def consume_model_usage_task() -> Dict[str, Any]:
     except Exception as exc:
         logger.warning(f"consume_model_usage 本轮失败（下轮重试）: {exc}", exc_info=True)
         return {"status": "RETRY_LATER", "error": str(exc)}
+
+@celery_app.task(
+    name="app.tasks.run_reembed_job",
+    bind=True,
+    ignore_result=False,
+    max_retries=0,
+    acks_late=True,
+    time_limit=3600,
+    soft_time_limit=3300,
+)
+def run_reembed_job(self, job_id: str) -> Dict[str, Any]:
+    """驱动任务：自检 → 排空 → 枚举 end_user → 逐个扇出重算子任务。
+
+    可重复执行：已终态的 end_user 由 PG 行状态跳过，并发扇出由派发占位拦住，
+    因此崩溃或超时后重新派发即可从断点继续。
+
+    Args:
+        job_id: memory_reembed_jobs.id
+    """
+    from app.services.memory_reembed_orchestrator import run_job
+
+    owner = f"{socket.gethostname()[:60]}:{os.getpid()}:{uuid.uuid4()}"
+    loop = set_asyncio_event_loop()
+    try:
+        result = loop.run_until_complete(run_job(job_id, owner))
+        result["task_id"] = self.request.id
+        return result
+    finally:
+        _shutdown_loop_gracefully(loop)
+
+
+@celery_app.task(
+    name="app.tasks.do_reembed_end_user",
+    bind=True,
+    ignore_result=False,
+    max_retries=0,
+    acks_late=False,
+    time_limit=3600,
+    soft_time_limit=3300,
+)
+def do_reembed_end_user(self, job_id: str, end_user_id: str) -> Dict[str, Any]:
+    """重算单个 end_user 下全部带向量节点的向量。
+
+    写入走 Neo4j（权威）+ outbox 投影：向量回写到图中不带维度后缀的属性上，
+    ES 侧由既有的维度路由与整档替换自行收敛。
+    """
+    from app.services.memory_reembed_orchestrator import process_end_user
+
+    owner = f"{socket.gethostname()[:60]}:{os.getpid()}:{uuid.uuid4()}"
+    loop = set_asyncio_event_loop()
+    try:
+        result = loop.run_until_complete(
+            process_end_user(job_id, end_user_id, owner)
+        )
+        result["task_id"] = self.request.id
+        return result
+    finally:
+        _shutdown_loop_gracefully(loop)
+
+
+@celery_app.task(
+    name="app.tasks.scan_reembed_jobs",
+    queue="periodic_tasks",
+    bind=True,
+    ignore_result=False,
+    max_retries=0,
+    acks_late=False,
+    time_limit=300,
+    soft_time_limit=270,
+)
+def scan_reembed_jobs(self) -> Dict[str, Any]:
+    """对账任务：终结核验已完成的重算 job，并重新派发丢失或需要重试的 job。
+
+    判据全部落在 PG：end_user 行全部终态才算跑完；心跳过期（worker 死了 /
+    在排空 / 还有失败待重试）就重新派发。无活跃 job 时只多一次索引查询。
+    """
+    from app.services.memory_reembed_orchestrator import reconcile_active_jobs
+
+    result = reconcile_active_jobs()
+    result["task_id"] = self.request.id
+    return result
