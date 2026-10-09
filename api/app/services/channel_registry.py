@@ -16,7 +16,7 @@
 - 换渠道计划（spec §11.2）：resolve_config_plan_sync/async、resolve_composite_plan_sync/async
   返回 ResolvedWithPlan(resolved, FailoverPlan)——与解析同路径同查询次数；plan 只含快照/
   密文候选（candidates[0] 恒为实际首发渠道），cipher 由消费方注入
-- 密文解密收敛在 resolve_from_channel_pool / resolve_composite_head（cipher 注入）；本模块不落明文
+- 密文解密收敛在 resolve_and_chain_from_pool / resolve_composite_head（cipher 注入）；本模块不落明文
 - 候选探测（管理面脱敏展示/渠道可用性/启用预检共用）：candidate_channels_sync/async
   （单 config）与 candidate_channels_batch_sync（列表页，两次查询上限）；只匹配不解密，
   组合可用性 = 成员候选并集非空

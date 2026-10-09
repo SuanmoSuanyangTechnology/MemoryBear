@@ -237,6 +237,16 @@ class ModelServiceSettings(BaseSettings):
         ge=1,
         validation_alias="MODEL_USAGE_BACKLOG_WARN",
     )
+    # 渠道熔断冷却（M9）：失败置冷时长与开关；读侧软排除（部分冷却跳过，全冷却放行整链）
+    model_channel_cooldown_enabled: bool = Field(
+        default=True,
+        validation_alias="MODEL_CHANNEL_COOLDOWN_ENABLED",
+    )
+    model_channel_cooldown_seconds: int = Field(
+        default=60,
+        ge=1,
+        validation_alias="MODEL_CHANNEL_COOLDOWN_SECONDS",
+    )
     # 内部面鉴权：direct（社区默认，信任 X-Model-* 内部头 + NetworkPolicy）；
     # gateway（企业，auth-sdk 内部 token 验签，M10 收紧批次落地）
     model_service_auth_mode: Literal["direct", "gateway"] = Field(

@@ -10,11 +10,15 @@
 成员传 `model_name` 锚点）。流式走 `run_failover_plan_stream{,_async}`：invoke 返回
 惰性迭代器，本模块在候选循环内 eager 拉首块——首块前失败照常换渠道/同渠道重试，
 首块产出即锁定（其后失败由消费方透传为终态）。
+
+``on_candidate_failure`` 为观测面回调（放弃决策点：解密失败/瞬时重试耗尽/可换渠道），
+默认 None 零行为变化；回调异常吞掉，不干扰编排主流程。
 """
 
 from __future__ import annotations
 
 import itertools
+import logging
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterator, Sequence
 from dataclasses import dataclass
 from typing import Generic, TypeVar
@@ -30,6 +34,8 @@ from .errors import (
 from .resolver import build_resolved_from_channel
 
 R = TypeVar("R")
+
+logger = logging.getLogger(__name__)
 
 _TRANSIENT_NAME_TOKENS = (
     "connection",
@@ -148,6 +154,24 @@ class FallbackOutcome(Generic[R]):
     failures: tuple[tuple[UUID | None, str], ...]
 
 
+def _notify_candidate_failure(
+    hook: Callable[[FailoverCandidate, BaseException], None] | None,
+    candidate: FailoverCandidate,
+    exc: BaseException,
+) -> None:
+    """观测面回调：仅在「放弃该候选」决策点触发；回调异常吞掉（不动主流程）。"""
+    if hook is None:
+        return
+    try:
+        hook(candidate, exc)
+    except Exception:
+        logger.warning(
+            "on_candidate_failure hook raised for channel %s",
+            candidate.channel.id,
+            exc_info=True,
+        )
+
+
 def run_candidate_fallback(
     candidates: Sequence[FailoverCandidate],
     *,
@@ -157,6 +181,8 @@ def run_candidate_fallback(
     invoke: Callable[[ResolvedModelConfig], R],
     is_candidate_available: Callable[[FailoverCandidate], bool] | None = None,
     max_attempts_per_channel: int = 3,
+    on_candidate_failure: Callable[[FailoverCandidate, BaseException], None]
+    | None = None,
 ) -> FallbackOutcome[R]:
     """§11.2 非流式 pair 编排：沿候选链执行，返回首个成功结果与归因。
 
@@ -203,6 +229,7 @@ def run_candidate_fallback(
             except CredentialDecryptError as exc:  # 凭据无效：立即顺延，不占瞬时重试预算
                 last_error = exc
                 failures.append((candidate.channel.id, type(exc).__name__))
+                _notify_candidate_failure(on_candidate_failure, candidate, exc)
                 break
             except Exception as exc:
                 last_error = exc
@@ -210,9 +237,11 @@ def run_candidate_fallback(
                     if attempt < max_attempts_per_channel - 1:
                         continue
                     failures.append((candidate.channel.id, type(exc).__name__))
+                    _notify_candidate_failure(on_candidate_failure, candidate, exc)
                     break
                 if is_switchable_channel_error(exc):
                     failures.append((candidate.channel.id, type(exc).__name__))
+                    _notify_candidate_failure(on_candidate_failure, candidate, exc)
                     break
                 raise  # terminal 或不可分类：原样透传
     if not attempted:
@@ -240,6 +269,8 @@ async def run_candidate_fallback_async(
     invoke: Callable[[ResolvedModelConfig], Awaitable[R]],
     is_candidate_available: Callable[[FailoverCandidate], bool] | None = None,
     max_attempts_per_channel: int = 3,
+    on_candidate_failure: Callable[[FailoverCandidate, BaseException], None]
+    | None = None,
 ) -> FallbackOutcome[R]:
     """run_candidate_fallback 的 async 态（异步宿主运行解析面，GC#11）。"""
     available = (
@@ -279,6 +310,7 @@ async def run_candidate_fallback_async(
             except CredentialDecryptError as exc:
                 last_error = exc
                 failures.append((candidate.channel.id, type(exc).__name__))
+                _notify_candidate_failure(on_candidate_failure, candidate, exc)
                 break
             except Exception as exc:
                 last_error = exc
@@ -286,9 +318,11 @@ async def run_candidate_fallback_async(
                     if attempt < max_attempts_per_channel - 1:
                         continue
                     failures.append((candidate.channel.id, type(exc).__name__))
+                    _notify_candidate_failure(on_candidate_failure, candidate, exc)
                     break
                 if is_switchable_channel_error(exc):
                     failures.append((candidate.channel.id, type(exc).__name__))
+                    _notify_candidate_failure(on_candidate_failure, candidate, exc)
                     break
                 raise
     if not attempted:
@@ -314,6 +348,8 @@ def run_failover_plan(
     invoke: Callable[[ResolvedModelConfig], R],
     is_candidate_available: Callable[[FailoverCandidate], bool] | None = None,
     max_attempts_per_channel: int = 3,
+    on_candidate_failure: Callable[[FailoverCandidate, BaseException], None]
+    | None = None,
 ) -> FallbackOutcome[R]:
     """宿主门面入口：FailoverPlan → 编排（cipher 由消费方注入，plan 本身上下文无关）。"""
     return run_candidate_fallback(
@@ -324,6 +360,7 @@ def run_failover_plan(
         invoke=invoke,
         is_candidate_available=is_candidate_available,
         max_attempts_per_channel=max_attempts_per_channel,
+        on_candidate_failure=on_candidate_failure,
     )
 
 
@@ -334,6 +371,8 @@ async def run_failover_plan_async(
     invoke: Callable[[ResolvedModelConfig], Awaitable[R]],
     is_candidate_available: Callable[[FailoverCandidate], bool] | None = None,
     max_attempts_per_channel: int = 3,
+    on_candidate_failure: Callable[[FailoverCandidate, BaseException], None]
+    | None = None,
 ) -> FallbackOutcome[R]:
     """run_failover_plan 的 async 态。"""
     return await run_candidate_fallback_async(
@@ -344,6 +383,7 @@ async def run_failover_plan_async(
         invoke=invoke,
         is_candidate_available=is_candidate_available,
         max_attempts_per_channel=max_attempts_per_channel,
+        on_candidate_failure=on_candidate_failure,
     )
 
 
@@ -392,6 +432,8 @@ def run_failover_plan_stream(
     invoke: Callable[[ResolvedModelConfig], Iterator[R]],
     is_candidate_available: Callable[[FailoverCandidate], bool] | None = None,
     max_attempts_per_channel: int = 3,
+    on_candidate_failure: Callable[[FailoverCandidate, BaseException], None]
+    | None = None,
 ) -> FallbackOutcome[Iterator[R]]:
     """run_failover_plan 的流式形态：invoke 返回惰性迭代器，本入口在候选循环内 eager 拉首块。
 
@@ -405,6 +447,7 @@ def run_failover_plan_stream(
         invoke=lambda resolved: open_stream(lambda: invoke(resolved)),
         is_candidate_available=is_candidate_available,
         max_attempts_per_channel=max_attempts_per_channel,
+        on_candidate_failure=on_candidate_failure,
     )
 
 
@@ -415,6 +458,8 @@ async def run_failover_plan_stream_async(
     invoke: Callable[[ResolvedModelConfig], AsyncIterator[R]],
     is_candidate_available: Callable[[FailoverCandidate], bool] | None = None,
     max_attempts_per_channel: int = 3,
+    on_candidate_failure: Callable[[FailoverCandidate, BaseException], None]
+    | None = None,
 ) -> FallbackOutcome[AsyncIterator[R]]:
     """run_failover_plan_stream 的 async 态（候选循环的 await 内完成首块拉取）。
 
@@ -427,6 +472,7 @@ async def run_failover_plan_stream_async(
         invoke=lambda resolved: open_astream(lambda: invoke(resolved)),
         is_candidate_available=is_candidate_available,
         max_attempts_per_channel=max_attempts_per_channel,
+        on_candidate_failure=on_candidate_failure,
     )
 
 
@@ -440,6 +486,8 @@ def run_with_channel_fallback(
     model_name: str | None = None,
     is_candidate_available: Callable[[ChannelSnapshot], bool] | None = None,
     max_attempts_per_channel: int = 3,
+    on_candidate_failure: Callable[[ChannelSnapshot, BaseException], None]
+    | None = None,
 ) -> R:
     """§11.2 非流式编排（兼容口）：单 config + 渠道链形状，返回首个成功结果。
 
@@ -454,6 +502,11 @@ def run_with_channel_fallback(
         if is_candidate_available is None
         else (lambda candidate: is_candidate_available(candidate.channel))
     )
+    failure_hook = (
+        None
+        if on_candidate_failure is None
+        else (lambda candidate, exc: on_candidate_failure(candidate.channel, exc))
+    )
     outcome = run_candidate_fallback(
         [
             FailoverCandidate(config=config, channel=channel, model_name=model_name)
@@ -465,6 +518,7 @@ def run_with_channel_fallback(
         invoke=invoke,
         is_candidate_available=hook,
         max_attempts_per_channel=max_attempts_per_channel,
+        on_candidate_failure=failure_hook,
     )
     return outcome.result
 
@@ -479,6 +533,8 @@ async def run_with_channel_fallback_async(
     model_name: str | None = None,
     is_candidate_available: Callable[[ChannelSnapshot], bool] | None = None,
     max_attempts_per_channel: int = 3,
+    on_candidate_failure: Callable[[ChannelSnapshot, BaseException], None]
+    | None = None,
 ) -> R:
     """run_with_channel_fallback 的 async 态（异步宿主运行解析面，GC#11）。
 
@@ -488,6 +544,11 @@ async def run_with_channel_fallback_async(
         None
         if is_candidate_available is None
         else (lambda candidate: is_candidate_available(candidate.channel))
+    )
+    failure_hook = (
+        None
+        if on_candidate_failure is None
+        else (lambda candidate, exc: on_candidate_failure(candidate.channel, exc))
     )
     outcome = await run_candidate_fallback_async(
         [
@@ -500,5 +561,6 @@ async def run_with_channel_fallback_async(
         invoke=invoke,
         is_candidate_available=hook,
         max_attempts_per_channel=max_attempts_per_channel,
+        on_candidate_failure=failure_hook,
     )
     return outcome.result

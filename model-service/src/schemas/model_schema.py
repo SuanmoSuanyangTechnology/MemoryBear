@@ -179,6 +179,7 @@ class ApiKeyItem(BaseModel):
     remark: Optional[str] = None
     created_at_ms: Optional[int] = None
     updated_at_ms: Optional[int] = None
+    cooldown_until_ms: Optional[int] = None
 
 
 class ProviderApiKeyCreate(ApiKeyRegister):

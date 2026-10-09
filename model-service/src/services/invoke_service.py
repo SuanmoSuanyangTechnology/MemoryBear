@@ -88,8 +88,9 @@ from redbear_model.runtime import (
     normalize_runtime_flags,
 )
 from redbear_model.runtime.client_pool import ModelClientPool
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from ..config import current_settings
 from ..errors import BizCode, http_status_for
 from ..infrastructure.model_provider_config import get_default_provider_api_base
 from ..repositories.model_repository import ModelConfigRepository
@@ -112,6 +113,7 @@ from ..schemas.invoke_schema import (
     VideoParams,
 )
 from ..sensitive import SensitiveDataFilter
+from .channel_cooldown import CooldownTracker, build_availability_hook
 from .channel_registry import (
     SOURCE,
     resolve_composite_plan_async,
@@ -1005,6 +1007,7 @@ async def invoke(
     idle_timeout_s: float | None = None,
     chunk_sink: asyncio.Queue[dict[str, Any]] | None = None,
     client_pool: ModelClientPool | None = None,
+    cooldown_sessionmaker: async_sessionmaker[AsyncSession] | None = None,
     media_poll_interval_s: float = _MEDIA_POLL_INTERVAL_S,
     media_poll_timeout_s: float = _MEDIA_POLL_TIMEOUT_S,
 ) -> InvokeOutcome:
@@ -1015,6 +1018,10 @@ async def invoke(
 
     ``client_pool`` = 进程级模型客户端池（端点注入 ``runtime.model_runtime.pool``）：
     缺省时各 runtime 自建 httpx 客户端，逐请求握手且绕过进程并发闸门。
+
+    ``cooldown_sessionmaker`` = 熔断冷却落库会话工厂（端点注入 ``runtime.database.async_session``）：
+    缺省时不置冷。放弃决策点（解密失败/瞬时耗尽/可换渠道）经 ``on_candidate_failure``
+    零 IO 收集，``finally`` 后台落库 + 失效广播（best-effort，见 channel_cooldown）。
 
     ``first_result_timeout_s`` = 首块档超时（§2.9 服务侧第一档），**按候选生效**：
     超时归瞬时错误 → 同候选重试 → 仍失败则换渠道。非流式族（G1 embedding/rerank、G2 llm）
@@ -1051,6 +1058,12 @@ async def invoke(
     if row is None:
         raise _not_found(request.config_id)
     entry = SOURCE.config_snapshot(row)
+    cooldown_settings = current_settings()
+    tracker = CooldownTracker(
+        sessionmaker=cooldown_sessionmaker,
+        enabled=cooldown_settings.model_channel_cooldown_enabled,
+        seconds=cooldown_settings.model_channel_cooldown_seconds,
+    )
 
     started = time.perf_counter()
     attempts = 0
@@ -1092,6 +1105,11 @@ async def invoke(
             tenant_id=tenant_id,
             cipher=cipher_from_env(),
             invoke=_call,
+            is_candidate_available=build_availability_hook(
+                plan.candidates,
+                enabled=cooldown_settings.model_channel_cooldown_enabled,
+            ),
+            on_candidate_failure=tracker.record,
         )
 
     try:
@@ -1157,6 +1175,9 @@ async def invoke(
             )
             await _report_usage(failure.usage_event)
         raise failure from exc
+    finally:
+        # 成功/耗尽/取消三路径统一落库：后台任务写入 + 失效广播（best-effort）
+        tracker.flush()
 
     latency_ms = int((time.perf_counter() - started) * 1000)
     status = UsageStatus.FALLBACK_SUCCEEDED if outcome.switched else UsageStatus.OK

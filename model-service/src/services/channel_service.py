@@ -67,6 +67,7 @@ def describe_channel(row: ModelChannel) -> dict:
         "remark": row.remark,
         "created_at_ms": created_ms,
         "updated_at_ms": updated_ms,
+        "cooldown_until_ms": row.cooldown_until_ms,
     }
 
 

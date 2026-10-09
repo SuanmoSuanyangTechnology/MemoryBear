@@ -40,6 +40,27 @@ def is_provider_rate_limit_error(exc: BaseException) -> bool:
     return False
 
 
+def provider_http_status(exc: BaseException) -> int | None:
+    """Return the first provider HTTP status found along the exception chain."""
+
+    pending: list[BaseException] = [exc]
+    seen: set[int] = set()
+    while pending:
+        current = pending.pop()
+        if id(current) in seen:
+            continue
+        seen.add(id(current))
+        status = _status_code(current)
+        if status is None:
+            status = _status_code(getattr(current, "response", None))
+        if status is not None:
+            return status
+        for wrapped in (current.__cause__, current.__context__):
+            if isinstance(wrapped, BaseException):
+                pending.append(wrapped)
+    return None
+
+
 class RedBearModelError(Exception):
     """Base class for public model errors."""
 

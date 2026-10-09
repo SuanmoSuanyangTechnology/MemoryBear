@@ -31,7 +31,6 @@ from .composite import (
     CompositeCandidate,
     CompositeMemberConfig,
     composite_candidate_chain,
-    resolve_composite_candidates,
     resolve_composite_head,
 )
 from .crypto import AESGCMEnvCipher, CredentialCipher, credential_sha256
@@ -65,6 +64,8 @@ from .errors import (
     SpeedbearChannelMissingError,
     UnsupportedModelProviderError,
     UnsupportedMultimodalModelError,
+    is_provider_rate_limit_error,
+    provider_http_status,
 )
 from .media_contracts import (
     AudioTask,
@@ -111,7 +112,6 @@ from .resolver import (
     order_channel_candidates,
     ordered_channel_candidates,
     resolve_and_chain_from_pool,
-    resolve_from_channel_pool,
 )
 from .telemetry import (
     NoOpUsagePublisher,
@@ -207,6 +207,7 @@ __all__ = [
     "VideoUnderstandingResult",
     "composite_candidate_chain",
     "credential_sha256",
+    "is_provider_rate_limit_error",
     "is_qwen3_vl_embedding",
     "is_qwen3_vl_reranker",
     "is_switchable_channel_error",
@@ -219,12 +220,11 @@ __all__ = [
     "open_stream",
     "order_channel_candidates",
     "ordered_channel_candidates",
+    "provider_http_status",
     "publish_usage_safely",
     "reset_usage_publish_stats",
     "resolve_and_chain_from_pool",
-    "resolve_composite_candidates",
     "resolve_composite_head",
-    "resolve_from_channel_pool",
     "run_candidate_fallback",
     "run_candidate_fallback_async",
     "run_failover_plan",

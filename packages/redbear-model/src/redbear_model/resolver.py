@@ -233,8 +233,8 @@ def resolve_and_chain_from_pool(
     候选逐个尝试解密、跳过坏密文（与组合 resolve_composite_head 对齐；运行期编排层本就
     顺延坏密文候选，构建期不再提前中止），切片头部恒为实际首发渠道。全候选失败抛首个
     CredentialDecryptError（宿主按模式映射：only → 4014；prefer → 记 fallback 走旧表）。
-    其余错误与 resolve_from_channel_pool 同形（speedbear 公共空链 → SpeedbearChannelMissingError，
-    其余空链 → NoAvailableChannelError）。
+    其余错误语义：speedbear 公共空链 → SpeedbearChannelMissingError，
+    其余空链 → NoAvailableChannelError。
     """
     anchor = model_name or config.name
     ordered = ordered_channel_candidates(
@@ -270,31 +270,3 @@ def resolve_and_chain_from_pool(
             continue
         return resolved, ordered[index:]
     raise failures[0]
-
-
-def resolve_from_channel_pool(
-    config: ModelConfigSnapshot,
-    channels: Sequence[ChannelSnapshot],
-    *,
-    tenant_id: UUID,
-    cipher: CredentialCipher,
-    model_name: str | None = None,
-    runtime_options: ModelRuntimeOptions | None = None,
-    loads: Mapping[UUID, int] | None = None,
-) -> ResolvedModelConfig:
-    """v2 解析门面（M3 宿主把 resolve_model 内部切到这里）。
-
-    锚点名 = 显式 model_name（组合编排传成员声明名）or config.name（普通模型真实调用名）。
-    组合 config 无单渠道解析（成员编排在 composite 模块），直接命中此处视为调用方错误。
-    委托 resolve_and_chain_from_pool 取首元素（坏密文顺延，错误类型/入参不变）。
-    """
-    resolved, _chain = resolve_and_chain_from_pool(
-        config,
-        channels,
-        tenant_id=tenant_id,
-        cipher=cipher,
-        model_name=model_name,
-        runtime_options=runtime_options,
-        loads=loads,
-    )
-    return resolved

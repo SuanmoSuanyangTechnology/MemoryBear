@@ -1783,6 +1783,7 @@ def get_app_statistics(
     result = stats_service.get_app_statistics(
         app_id=app_id,
         workspace_id=workspace_id,
+        tenant_id=current_user.tenant_id,
         start_date=start_date,
         end_date=end_date
     )

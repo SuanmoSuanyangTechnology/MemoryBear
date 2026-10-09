@@ -328,6 +328,7 @@ async def invoke_model(
                 idle_timeout_s=settings.invoke_llm_idle_timeout_s,
                 chunk_sink=sink,
                 client_pool=runtime.model_runtime.pool,
+                cooldown_sessionmaker=runtime.database.async_session,
             )
         )
         return StreamingResponse(
@@ -344,6 +345,7 @@ async def invoke_model(
         attribution=attribution,
         first_result_timeout_s=first_result_timeout_s,
         client_pool=runtime.model_runtime.pool,
+        cooldown_sessionmaker=runtime.database.async_session,
         media_poll_interval_s=settings.invoke_media_poll_interval_s,
         media_poll_timeout_s=settings.invoke_media_poll_timeout_s,
     )
