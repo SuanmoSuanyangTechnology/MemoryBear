@@ -169,6 +169,12 @@ export const home = {
       forgettingExecutionRate: '遗忘执行率',
 
       memoryClassificationDistribution: '记忆分类分布',
+      memoryScaleDistribution: '记忆规模 · 分类分布',
+      memoryScaleCoreMetrics: '记忆规模 · 核心指标',
+      byMemoryType: '按记忆类型',
+      topFiveMemoryTypes: '展示前五类记忆',
+      activeMemory: '活跃记忆',
+      updatedToday: '今日更新',
       knowledgeBaseTypeDistribution: '知识库类型分布',
       memoryGrowthTrend: '记忆增长趋势',
       corporateMemory: '企业记忆',

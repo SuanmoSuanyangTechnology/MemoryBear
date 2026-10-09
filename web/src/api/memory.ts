@@ -53,8 +53,8 @@ export const getRecentActivityStats = () => {
   return request.get(`/memory-storage/analytics/recent_activity_stats`)
 }
 // Memory Dashboard - Memory growth trend
-export const getMemoryIncrement = (limit: number) => {
-  return request.get(`/dashboard/memory_increment`, { limit })
+export const getMemoryIncrement = (data: { start_time: number; end_time: number; }) => {
+  return request.get(`/dashboard/memory_increment`, data)
 }
 // Memory Dashboard - API call trend
 export const getApiTrend = () => {
@@ -63,6 +63,10 @@ export const getApiTrend = () => {
 // Memory Dashboard - Total data
 export const getDashboardData = () => {
   return request.get(`/dashboard/dashboard_data`)
+}
+// Workspace user memory categories
+export const getWorkspaceStatistics = () => {
+  return request.get(`/memory/analytics/workspace_statistics`)
 }
 /*************** end Memory Dashboard APIs ******************************/
 
