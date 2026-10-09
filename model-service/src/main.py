@@ -117,6 +117,7 @@ def create_app(settings: ModelServiceSettings | None = None) -> FastAPI:
             auth_mode=service_settings.model_service_auth_mode,
             service_name=service_settings.model_service_internal_name,
             jwks_url=service_settings.model_service_jwks_url,
+            redis=runtime.redis.client,
         ),
     )
     # 语言解析最外层：401 等鉴权期响应也带正确 Content-Language（鉴权内部自取 lang 头）

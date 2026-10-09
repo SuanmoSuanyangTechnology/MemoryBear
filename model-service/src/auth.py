@@ -1,11 +1,15 @@
-"""模型服务内部面鉴权（D-M7-3）：direct 内置（社区）/ gateway 企业扩展。
+"""Model-service internal-plane auth: direct built-in (community) / gateway enterprise extension.
 
-direct：信任宿主代理注入的 `X-Model-*` 内部头（通道 2 语义，网络隔离
-NetworkPolicy 兜底，只放行宿主 api pod）；缺头即 401 fail-closed。
-gateway：企业策略，实现位于私有 enterprise-extensions 包
-（enterprise_ext.model.ModelGatewayAuth，经 _load_gateway_auth 惰性加载委托，
-缺失即 RuntimeError——misconfiguration 响亮暴露，不静默降级；开源构建装不到
-该包，AUTH_MODE=gateway 属配置错误）。M10 收紧批次落地内部 token 验签。
+direct: trusts the `X-Model-*` internal headers injected by the host proxy
+(channel-2 semantics, NetworkPolicy as the network-level safety net, only the
+host api pod is admitted); missing headers -> 401 fail-closed.
+gateway: enterprise policy implemented in the private enterprise-extensions
+package (enterprise_ext.model.ModelGatewayAuth, loaded lazily and delegated
+through _load_gateway_auth; a missing package raises RuntimeError - loud
+misconfiguration rather than silent downgrade; open-source builds cannot
+install it, so AUTH_MODE=gateway is a configuration error there). Internal
+token verification and ACL rule checks are performed by that handler; ACL
+rules come from the shared Redis `acl:rules` key (see ModelAuthConfig.redis).
 """
 from __future__ import annotations
 
@@ -13,6 +17,7 @@ import logging
 from dataclasses import dataclass
 
 from fastapi import HTTPException, Request
+from pydantic import ValidationError
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 
@@ -57,6 +62,11 @@ class ModelAuthConfig:
     auth_mode: str = "direct"
     service_name: str = "model-service"
     jwks_url: str | None = None
+    # ACL rule source for gateway mode: a redis.asyncio client, or a zero-arg
+    # async callable returning one (main.py wires runtime.redis.client lazily so
+    # no Redis connection is made at app build time). None -> no rules loaded
+    # (fail-safe: every request denied). Consumed by the gateway handler only.
+    redis: object | None = None
 
 
 def is_public_path(path: str, method: str) -> bool:
@@ -141,12 +151,19 @@ class ModelAuthMiddleware(BaseHTTPMiddleware):
         if ctx is None:
             # 通道 2：宿主代理直连豁免（过渡态，NetworkPolicy 兜底受信来源）
             return await call_next(request)
-        request.state.principal = Principal(
-            actor_id=ctx.user_id,
-            actor_name=None,
-            tenant_id=ctx.tenant_id,
-            workspace_id=ctx.workspace_id,
-        )
+        # Empty strings are a valid wire form for absent optional claims (the
+        # interpreter defaults a missing workspace_id to ""); normalize them and
+        # fail closed if the remaining identity claims cannot form a Principal.
+        try:
+            principal = Principal(
+                actor_id=ctx.user_id,
+                actor_name=None,
+                tenant_id=ctx.tenant_id,
+                workspace_id=ctx.workspace_id or None,
+            )
+        except ValidationError as exc:
+            return _auth_error(request, 401, "invalid token claims", exception=exc)
+        request.state.principal = principal
         return await call_next(request)
 
 

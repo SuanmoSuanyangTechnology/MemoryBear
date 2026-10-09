@@ -1,10 +1,12 @@
-"""ServiceBase 外部 FK 锚点（非认领表，仅满足 SQLAlchemy 的 FK 解析要求）。
+"""External FK anchors for ServiceBase (non-owned tables; only satisfy SQLAlchemy FK resolution).
 
-`model_configs.tenant_id` / `model_channels.tenant_id` 引用 `tenants.id`：该表归老单体，
-不在本服务 target_metadata 内。SQLAlchemy 解析 FK 目标时要求同 metadata 存在目标表，
-否则 `metadata.sorted_tables` / DDL 编译抛 NoReferencedTableError —— alembic autogenerate
-与 baseline 生成都会走到。故此处只放最小锚点（id 单列）：迁移链按 `base.OWNED_TABLES`
-白名单过滤，锚点既不参与 autogenerate 对比，也不会被本链创建/删除。
+`model_configs.tenant_id` / `model_channels.tenant_id` reference `tenants.id`, a monolith
+table absent from this service's target_metadata. SQLAlchemy requires the target table in
+the same metadata when resolving FKs; otherwise `metadata.sorted_tables` / DDL compilation
+raises NoReferencedTableError — hit by both alembic autogenerate and baseline generation.
+Hence only a minimal anchor is placed here (single id column): the migration chain excludes
+it via base.HOST_OWNED_TABLES, so it takes part in neither autogenerate comparison nor
+create/drop by this chain.
 """
 from sqlalchemy import Column, Table
 from sqlalchemy.dialects.postgresql import UUID

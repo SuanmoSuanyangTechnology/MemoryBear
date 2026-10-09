@@ -1,12 +1,18 @@
-"""model-service 本地模型基类。
+"""model-service local model bases.
 
-- ServiceBase：本服务认领表（model_configs / model_bases / model_channels /
-  model_usage_records），挂 alembic target_metadata —— M7 后四表 DDL 只走服务链
-  （老单体链不再生成模型表迁移）；`fk_anchors.py` 中的 tenants 锚点注册在同一
-  metadata，仅供 FK 解析，由迁移链 include_object 排除
-- ReadOnlyBase：只读映射其他服务/老单体表（apps / app_releases / workspaces /
-  workspace_default_model_presets / tenant_subscriptions），表结构归其归属方管理，
-  不生成迁移；映射不声明 FK、不建 relationship，对侧改列名/删列时须同步
+- ServiceBase: tables mapped by this service. The four model tables
+  (model_configs / model_bases / model_channels / model_usage_records) are
+  written by this service at runtime, but their DDL is managed by the host
+  (enterprise) migration chain again — see HOST_OWNED_TABLES, the denylist the
+  service chain's include_object excludes. The service chain only ever manages
+  tables born in it. The `tenants` anchor from `fk_anchors.py` shares this
+  metadata for FK resolution only and is excluded the same way.
+- ReadOnlyBase: read-only mappings of tables owned by other services / the
+  monolith (apps / app_releases / workspaces / workspace_default_model_presets /
+  tenant_subscriptions). Their schema is managed by the owning side and no
+  migrations are generated here. The mappings declare no FK and no
+  relationships; keep them in sync when the owning side renames or drops
+  columns.
 """
 from datetime import UTC, datetime
 
@@ -21,15 +27,30 @@ class ReadOnlyBase(DeclarativeBase):
     pass
 
 
-# 迁移链 include_object 的白名单：M7 后这四张表的 DDL 只走服务链。
-# 同一 metadata 内的 model_api_keys / model_config_api_key_association（过渡期冻结实体，
-# 随 M6 退役）与 tenants 锚点不属认领范围，服务链既不对比也不创建/删除。
-OWNED_TABLES = frozenset(
+# Tables this service writes at runtime — the only DML targets allowed by
+# scripts/check_no_host_writes.py. Their DDL is managed by the host
+# (enterprise) migration chain (ownership moved back there).
+SERVICE_WRITE_TABLES = frozenset(
     {
         "model_configs",
         "model_bases",
         "model_channels",
         "model_usage_records",
+    }
+)
+
+# Denylist for the service migration chain's include_object: tables present in
+# ServiceBase.metadata whose DDL is managed by the host chain — the service
+# chain neither compares nor creates/drops them.
+# - the four model tables above: born in the monolith chain, host-managed again
+# - model_api_keys / model_config_api_key_association: frozen transitional
+#   entities (retired with the old write path), host-managed
+# - tenants: minimal FK anchor, monolith table
+HOST_OWNED_TABLES = SERVICE_WRITE_TABLES | frozenset(
+    {
+        "model_api_keys",
+        "model_config_api_key_association",
+        "tenants",
     }
 )
 

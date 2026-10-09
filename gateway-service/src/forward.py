@@ -118,10 +118,13 @@ class Forwarder:
         for name, value in request.headers.items():
             low = name.lower()
             if low.startswith("x-") and low not in ("x-api-key", "x-internal-token"):
-                if internal and low.startswith("x-kb"):
-                    # gateway 模式：claims 只注入 x-user-id/x-tenant-id/x-workspace-id，
-                    # 客户端 X-KB-* 一律剥除——透传会让 kb 公开路径 fallback 授信客户端
-                    # 伪造身份头（跨工作区拉取），下游只见权威身份
+                if internal and low.startswith(("x-kb", "x-model")):
+                    # Gateway mode: claims inject only x-user-id/x-tenant-id/x-workspace-id;
+                    # client-supplied X-KB-* / X-Model-* headers are always stripped — passing
+                    # them through would let a client forge identity headers on kb's
+                    # public-path fallback (cross-workspace file reads) or against a
+                    # model-service mistakenly left in direct auth mode (its channel 2
+                    # trusts X-Model-*). Downstream sees only authoritative identities.
                     continue
                 headers[name] = value
         if internal:

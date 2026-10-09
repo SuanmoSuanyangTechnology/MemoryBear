@@ -90,14 +90,6 @@ import_all_models_from_package('app.models') # <--- NEW CALL
 # ... etc.
 
 
-# 模型服务（core/model-service）认领的四表：DDL 归服务链（M7 D-M7-8），本链
-# autogenerate 不再产出它们的任何 DDL。宿主 ORM 仍引用这四张表（M8 前读路径要用），
-# 故只在 autogenerate 过滤层排除，不摘 Base.metadata。
-MODEL_SERVICE_TABLES = frozenset(
-    {"model_configs", "model_bases", "model_channels", "model_usage_records"}
-)
-
-
 def include_object(obj, name, type_, reflected, compare_to):
     """autogenerate 只对比老单体链自有表，避免把微服务同库自有表判为删除。
 
@@ -107,11 +99,14 @@ def include_object(obj, name, type_, reflected, compare_to):
     误执行即毁微服务数据。identity 侧已做对称过滤（identity-service/migrations/env.py）。
     仅影响 autogenerate 对比；upgrade/downgrade 按脚本执行不受影响。
 
-    模型服务四表（MODEL_SERVICE_TABLES）另按 D-M7-8 排除：该表的列/索引/约束比较
-    均嵌在表级过滤命中之后执行，表级返回 False 即整表不参与对比。
+    Model tables (model_configs / model_bases / model_channels /
+    model_usage_records) are compared by this chain again — their DDL moved back
+    from the model-service chain. The metadata-membership whitelist below keeps
+    every table absent from Base.metadata out of the comparison, including any
+    table a future model-service chain may add.
     """
     if type_ == "table":
-        return name in Base.metadata.tables and name not in MODEL_SERVICE_TABLES
+        return name in Base.metadata.tables
     return True
 
 

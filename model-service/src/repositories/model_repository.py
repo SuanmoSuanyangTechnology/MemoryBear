@@ -9,14 +9,12 @@ from sqlalchemy.orm import Session, joinedload
 
 from ..models.models_model import (
     LLM_FAMILY_TYPES,
-    ModelApiKey,
     ModelBase,
     ModelConfig,
     ModelProvider,
     ModelType,
 )
 from ..schemas.model_schema import ModelBaseQuery, ModelConfigQuery, ModelConfigQueryNew
-from ..utils.datetime_utils import utcnow_naive
 
 # 获取数据库专用日志器
 db_logger = logging.getLogger("database")
@@ -523,34 +521,6 @@ class ModelConfigRepository:
             
         except Exception as e:
             db_logger.error(f"查询model_config_id列表失败: {str(e)}")
-            raise
-
-
-class ModelApiKeyRepository:
-    """旧表 API Key Repository（M6 退役：仅保留 off 模式 usage 计数，关联/CRUD 已随 Task 13 删除）"""
-
-    @staticmethod
-    def update_usage(db: Session, api_key_id: uuid.UUID) -> bool:
-        """更新API Key使用统计（仅 `MODEL_CHANNEL_RESOLUTION=off` 回滚窗口写入）"""
-        db_logger.debug(f"更新API Key使用统计: api_key_id={api_key_id}")
-        
-        try:
-            db_api_key = db.query(ModelApiKey).filter(ModelApiKey.id == api_key_id).first()
-            if not db_api_key:
-                return False
-            
-            # 更新使用次数和最后使用时间
-            current_count = int(db_api_key.usage_count or "0")
-            db_api_key.usage_count = str(current_count + 1)
-            db_api_key.last_used_at = utcnow_naive()
-            
-            db.flush()
-            db_logger.debug(f"API Key使用统计更新成功: api_key_id={api_key_id}")
-            return True
-            
-        except Exception as e:
-            db.rollback()
-            db_logger.error(f"更新API Key使用统计失败: api_key_id={api_key_id} - {str(e)}")
             raise
 
 

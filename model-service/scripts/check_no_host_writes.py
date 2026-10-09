@@ -1,17 +1,19 @@
 #!/usr/bin/env python
-"""静态核对雏形（M7-2）：本服务不得碰宿主域（老单体 core/api）。
+"""Static guard: this service must not reach into the host domain (monolith core/api).
 
-两项硬检查（AST + SQL 字面量）：
+Two hard checks (AST + SQL literals):
 
-1. **不依赖宿主包**：`src/` 内出现 `import app` / `from app... import` 即失败——服务只
-   允许依赖自身模块、`packages/`（redbear-model / auth-sdk）与三方库
-2. **不写非认领表**：源码字符串中的 `INSERT INTO / UPDATE / DELETE FROM` 目标表必须属于
-   `src.models.base.OWNED_TABLES`（四表）；对 model_api_keys 等冻结实体或他域表的写操作
-   一律命中（这类写属老单体链，服务侧只读）
+1. **No host package imports**: `import app` / `from app... import` inside `src/` fails —
+   the service may only depend on its own modules, `packages/` (redbear-model / auth-sdk)
+   and third-party libraries
+2. **No DML against non-owned tables**: `INSERT INTO / UPDATE / DELETE FROM` targets in
+   source strings must belong to `src.models.base.SERVICE_WRITE_TABLES` (the four runtime
+   tables); writes to frozen entities such as model_api_keys or tables of other domains
+   are flagged (those writes belong to the monolith chain, the service is read-only here)
 
-只读检查，不改文件。退出码 0 = 通过，1 = 命中（逐条打印 文件:行 与原因）。
+Read-only check, never modifies files. Exit code 0 = pass, 1 = hits (prints file:line and reason).
 
-用法：`.venv/bin/python scripts/check_no_host_writes.py [--root src]`
+Usage: `.venv/bin/python scripts/check_no_host_writes.py [--root src]`
 """
 from __future__ import annotations
 
@@ -22,7 +24,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from src.models.base import OWNED_TABLES  # noqa: E402
+from src.models.base import SERVICE_WRITE_TABLES  # noqa: E402
 
 HOST_PACKAGE = "app"
 DML_PATTERN = re.compile(
@@ -60,7 +62,7 @@ def _dml_targets(tree: ast.AST) -> list[tuple[int, str]]:
             table = match.group(1)
             if table.lower() in SQL_KEYWORDS:
                 continue
-            if table not in OWNED_TABLES:
+            if table not in SERVICE_WRITE_TABLES:
                 hits.append((node.lineno, f"{match.group(0).strip()} -> {table}（非认领表）"))
     return hits
 

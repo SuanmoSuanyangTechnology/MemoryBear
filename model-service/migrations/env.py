@@ -1,10 +1,15 @@
-"""model-service 独立迁移链（D-M7-8）。
+"""model-service standalone migration chain.
 
-- target_metadata 只挂 ServiceBase.metadata，且 include_object 只放行 OWNED_TABLES
-  （model_configs / model_bases / model_channels / model_usage_records）
-- version_table = alembic_version_model：与老单体链（alembic_version）同库共存互不覆盖
-- `import src.models` 触发四表与 tenants FK 锚点注册（锚点仅供 FK 解析，白名单外）
-- 同步 engine（psycopg）：迁移是运维动作，无需异步链路
+- target_metadata carries ServiceBase.metadata; include_object only admits
+  tables registered there and absent from HOST_OWNED_TABLES — the four model
+  tables (host-managed again) and the shared read-only entities never take
+  part in this chain's comparison or DDL. The chain only ever manages tables
+  born in it.
+- version_table = alembic_version_model: coexists with the monolith chain
+  (alembic_version) in the same database without overwriting it
+- `import src.models` registers the four tables and the tenants FK anchor
+  (anchor serves FK resolution only, excluded by include_object)
+- sync engine (psycopg): migrations are operational actions, no async needed
 """
 from logging.config import fileConfig
 
@@ -13,7 +18,7 @@ from sqlalchemy import create_engine, pool
 
 import src.models  # noqa: F401  注册四表 + FK 锚点
 from src.bootstrap import get_settings
-from src.models.base import OWNED_TABLES, ServiceBase
+from src.models.base import HOST_OWNED_TABLES, ServiceBase
 
 config = context.config
 if config.config_file_name is not None:
@@ -24,13 +29,14 @@ VERSION_TABLE = "alembic_version_model"
 
 
 def include_object(obj, name, type_, reflected, compare_to):
-    """autogenerate 只对比四表：库中存在但非本链自有的表不判删除。
+    """Compare only tables this chain owns; other chains' tables are never judged for drop.
 
-    与老单体链共库，不做过滤时 autogenerate 会把 model_api_keys / tenants / apps
-    等上百张他域表生成 drop_table。
+    Shares the database with the monolith chain — without filtering, autogenerate
+    would emit drop_table for the hundreds of tables it does not own
+    (model_api_keys, tenants, apps, ...).
     """
     if type_ == "table":
-        return name in OWNED_TABLES
+        return name in ServiceBase.metadata.tables and name not in HOST_OWNED_TABLES
     return True
 
 
