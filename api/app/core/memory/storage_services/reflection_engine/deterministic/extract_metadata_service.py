@@ -311,9 +311,6 @@ async def _run_chunk_llm(
             [{"role": "user", "content": prompt}],
             MetadataExtractionResponse,
         )
-        if raw and getattr(raw, "operations", None):
-            return list(raw.operations)
-        return []
     except Exception as exc:
         logger.warning(f"[Metadata] 分片提取调用异常: {exc}")
         raise ReflectionBusinessError(
@@ -321,6 +318,15 @@ async def _run_chunk_llm(
             "metadata_chunk_call",
             model_type=ReflectionModelType.LLM,
         ) from exc
+
+    if raw is None:
+        logger.warning("[Metadata] 分片提取结构化结果为空")
+        raise ReflectionBusinessError(
+            ReflectionFailureReason.RESULT_PARSE_FAILED,
+            "metadata_chunk_parse",
+            model_type=ReflectionModelType.LLM,
+        )
+    return list(raw.operations or [])
 
 
 # ── 3. 主服务入口 ──
