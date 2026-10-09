@@ -3878,6 +3878,30 @@ def do_gds_topology_score(self, end_user_id: str, inflight_token: Optional[str] 
         result["end_user_id"] = end_user_id
         result["elapsed_time"] = time.time() - start_time
         result["task_id"] = self.request.id
+
+        # 价值评估展示事件：GDS 成功且实际写入节点属性后 best effort 落 PG。
+        # 用户写锁已在 _run 的 finally 中释放；展示写入失败只记日志，不改变任务结果。
+        if (
+            result.get("status") == "success"
+            and int(result.get("node_properties_written") or 0) > 0
+        ):
+            try:
+                from app.services.memory_engine_display_service import (
+                    MemoryEngineDisplayService,
+                )
+                loop.run_until_complete(
+                    MemoryEngineDisplayService.save_memory_value_event(
+                        end_user_id=end_user_id,
+                        result=result,
+                        task_id=self.request.id,
+                    )
+                )
+            except Exception as e:
+                logger.warning(
+                    f"[EngineDisplay] 价值评估展示写入异常（不影响主流程）: {e}",
+                    exc_info=True,
+                )
+
         return result
     except Exception as e:
         # GDS 投影 / eigenvector.write / drop 抛错，re-raise 让 Celery 标记 FAILURE（带 traceback）

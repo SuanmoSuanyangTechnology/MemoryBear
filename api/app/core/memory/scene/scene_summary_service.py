@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -25,6 +26,8 @@ from app.schemas.scene_memory_schema import (
 from app.services.memory_config_service import MemoryConfigService
 
 _PROMPT_PATH = Path(__file__).parents[1] / "utils/prompt/prompts/scene_summary_detail.jinja2"
+
+logger = logging.getLogger(__name__)
 
 
 class SceneSummaryService:
@@ -131,6 +134,24 @@ class SceneSummaryService:
                 if result.affected_count != 1 or result.ids != [summary.id]:
                     raise RuntimeError("SceneSummary storage write returned no row")
                 summary_id = result.ids[0]
+
+                # 长期固化展示事件：摘要成功写入 Neo4j 后 best effort 落 PG。
+                # 使用内存中已有的 summary 组装，不回查 Neo4j；写入失败只记日志，
+                # 不能把已成功的 SceneSummary 改判为失败，也不触发摘要重新生成。
+                try:
+                    from app.services.memory_engine_display_service import (
+                        MemoryEngineDisplayService,
+                    )
+                    await MemoryEngineDisplayService.save_scene_summary_event(
+                        end_user_id=task.end_user_id,
+                        summary=summary,
+                    )
+                except Exception as e:
+                    logger.warning(
+                        f"[EngineDisplay] 长期固化展示写入异常（不影响主流程）: {e}",
+                        exc_info=True,
+                    )
+
                 return {"status": "success", "summary_id": summary_id}
             finally:
                 await storage.close()
