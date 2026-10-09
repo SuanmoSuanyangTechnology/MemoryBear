@@ -7059,6 +7059,86 @@ def consume_model_usage_task() -> Dict[str, Any]:
         logger.warning(f"consume_model_usage 本轮失败（下轮重试）: {exc}", exc_info=True)
         return {"status": "RETRY_LATER", "error": str(exc)}
 
+@celery_app.task(
+    name="app.tasks.run_reembed_job",
+    bind=True,
+    ignore_result=False,
+    max_retries=0,
+    acks_late=True,
+    time_limit=3600,
+    soft_time_limit=3300,
+)
+def run_reembed_job(self, job_id: str) -> Dict[str, Any]:
+    """驱动任务：自检 → 排空 → 枚举 end_user → 逐个扇出重算子任务。
+
+    可重复执行：已终态的 end_user 由 PG 行状态跳过，并发扇出由派发占位拦住，
+    因此崩溃或超时后重新派发即可从断点继续。
+
+    Args:
+        job_id: memory_reembed_jobs.id
+    """
+    from app.services.memory_reembed_orchestrator import run_job
+
+    owner = f"{socket.gethostname()[:60]}:{os.getpid()}:{uuid.uuid4()}"
+    loop = set_asyncio_event_loop()
+    try:
+        result = loop.run_until_complete(run_job(job_id, owner))
+        result["task_id"] = self.request.id
+        return result
+    finally:
+        _shutdown_loop_gracefully(loop)
+
+
+@celery_app.task(
+    name="app.tasks.do_reembed_end_user",
+    bind=True,
+    ignore_result=False,
+    max_retries=0,
+    acks_late=False,
+    time_limit=3600,
+    soft_time_limit=3300,
+)
+def do_reembed_end_user(self, job_id: str, end_user_id: str) -> Dict[str, Any]:
+    """重算单个 end_user 下全部带向量节点的向量。
+
+    写入走 Neo4j（权威）+ outbox 投影：向量回写到图中不带维度后缀的属性上，
+    ES 侧由既有的维度路由与整档替换自行收敛。
+    """
+    from app.services.memory_reembed_orchestrator import process_end_user
+
+    owner = f"{socket.gethostname()[:60]}:{os.getpid()}:{uuid.uuid4()}"
+    loop = set_asyncio_event_loop()
+    try:
+        result = loop.run_until_complete(
+            process_end_user(job_id, end_user_id, owner)
+        )
+        result["task_id"] = self.request.id
+        return result
+    finally:
+        _shutdown_loop_gracefully(loop)
+
+
+@celery_app.task(
+    name="app.tasks.scan_reembed_jobs",
+    queue="periodic_tasks",
+    bind=True,
+    ignore_result=False,
+    max_retries=0,
+    acks_late=False,
+    time_limit=300,
+    soft_time_limit=270,
+)
+def scan_reembed_jobs(self) -> Dict[str, Any]:
+    """对账任务：终结核验已完成的重算 job，并重新派发丢失或需要重试的 job。
+
+    判据全部落在 PG：end_user 行全部终态才算跑完；心跳过期（worker 死了 /
+    在排空 / 还有失败待重试）就重新派发。无活跃 job 时只多一次索引查询。
+    """
+    from app.services.memory_reembed_orchestrator import reconcile_active_jobs
+
+    result = reconcile_active_jobs()
+    result["task_id"] = self.request.id
+    return result
 
 _WORKSPACE_STATISTICS_SCAN_PAGE_SIZE = 500
 _WORKSPACE_STATISTICS_INFLIGHT_KEY = "workspace_statistics:inflight:{workspace_id}"
