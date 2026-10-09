@@ -26,10 +26,6 @@ export interface Query {
   is_deprecated?: boolean;
   /** Search keyword */
   search?: string;
-  /** Page size */
-  pagesize?: number;
-  /** Page number */
-  page?: number;
 }
 
 /**

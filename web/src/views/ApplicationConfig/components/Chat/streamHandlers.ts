@@ -169,6 +169,7 @@ export const createRegenerateStreamHandler = (deps: RegenerateStreamDeps) => {
           updateChatList(prev => addRunStartMessage(prev, { ...(item.data as any), model_config_id: modelConfigId }))
           break
         case 'tool_end':
+        case 'tool_error':
           updateChatList(prev => addRunEndMessage(prev, { ...(item.data as any), model_config_id: modelConfigId }))
           break
         case 'reasoning':

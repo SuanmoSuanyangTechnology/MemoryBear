@@ -243,12 +243,13 @@ class ChannelApiKeyService:
     # ---- 启用预检（列表/详情可用性探测在 channel_registry，不解密、不落库）----
     @staticmethod
     def assert_enableable(db: Session, model_config: ModelConfig, tenant_id: uuid.UUID) -> None:
-        """启用预检三态：普通模型需候选非空（409）；组合模型需成员声明非空（400）。
+        """启用预检三态：普通模型与组合模型均需候选非空（409 系）；组合模型另需成员声明非空（400）。
 
         speedbear 公共模型（M5 起并入渠道）候选 = 该租户 platform 渠道，与普通模型同一
         口径；候选为空时引导绑定（租户不能自助登记，通用"补充 API Key"文案会误导）。
         候选为空但存在覆盖渠道（未按 is_active 过滤）时判为"全部停用"（CHANNEL_DISABLED），
-        与"从未登记"区分。禁用不校验（关闭永远放行）。
+        与"从未登记"区分。组合模型候选为空时按成员声明逐个探测覆盖渠道，口径同上。
+        禁用不校验（关闭永远放行）。
 
         弃用模型（model_bases.is_deprecated）任何情况下不可启用（2026-09-16 治理批次 G：
         下游已下线的模型重启用无意义；恢复 is_deprecated=false 即自动放行）。
@@ -258,15 +259,31 @@ class ChannelApiKeyService:
                 "模型已弃用或已下线，无法启用",
                 BizCode.MODEL_DEPRECATED,
             )
+        pairs: list[tuple[str, str]] | None = None
         if model_config.provider == ModelProvider.COMPOSITE:
-            if not parse_members(model_config.config):
+            pairs = parse_members(model_config.config)
+            if not pairs:
                 raise BusinessException(
                     "组合模型缺少成员，无法启用", BizCode.INVALID_PARAMETER
                 )
-            return
         if candidate_channels_sync(db, model_config, tenant_id=tenant_id):
             return
         repo = ModelChannelRepository(db)
+        if pairs is not None:
+            if any(
+                repo.exists_covering(
+                    tenant_id=tenant_id, provider=member_provider, model_name=member_name
+                )
+                for member_provider, member_name in pairs
+            ):
+                raise BusinessException(
+                    "组合模型成员渠道已全部停用，请前往渠道管理启用渠道后重试",
+                    BizCode.CHANNEL_DISABLED,
+                )
+            raise BusinessException(
+                "组合模型成员没有可解析的渠道凭据，请先为成员模型补充 API Key 后启用",
+                BizCode.NO_AVAILABLE_CHANNEL,
+            )
         provider = _provider_value(model_config.provider)
         if model_config.provider == ModelProvider.SPEEDBEAR and model_config.is_public:
             if repo.exists_covering(

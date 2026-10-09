@@ -1,0 +1,264 @@
+import { useEffect, useRef, useState, type MouseEvent } from 'react';
+import { Button, Checkbox, Spin } from 'antd';
+import ReactMarkdown from 'react-markdown';
+import { useTranslation } from 'react-i18next';
+// import { useNavigate } from 'react-router-dom';
+import clsx from 'clsx';
+import InfiniteScroll from 'react-infinite-scroll-component';
+
+import {
+  useNotification,
+  type NotificationMessage,
+  type NotificationMessageTab,
+} from '@/store/notification';
+import { getNotificationDetail } from '@/api/notification';
+import styles from './index.module.css';
+import { formatDateTime } from '@/utils/format';
+import Empty from '@/components/Empty';
+import RbMarkdown from '@/components/Markdown';
+import Tag, { type TagProps } from '@/components/Tag';
+import RbModal from '@/components/RbModal'
+
+const severityColors: Record<NotificationMessage['alert_severity'], TagProps['color']> = {
+  P0: 'error',
+  P1: 'error',
+  P2: 'warning',
+  P3: 'processing',
+};
+
+interface NotificationPanelProps {
+  open: boolean;
+}
+
+const NotificationPanel = ({ open }: NotificationPanelProps) => {
+  const { t } = useTranslation();
+  // const navigate = useNavigate();
+  const {
+    messages,
+    loading,
+    notificationStats,
+    pagination,
+    markAsRead,
+    markAllAsRead,
+    confirmMessage,
+    snoozeModalMessage,
+    fetchMessages,
+    loadMore,
+    cursor,
+    generation
+  } = useNotification();
+  const [tab, setTab] = useState<NotificationMessageTab>('system');
+  const [unreadOnly, setUnreadOnly] = useState(false);
+  const [selected, setSelected] = useState<NotificationMessage | null>(null);
+
+  const listRef = useRef<HTMLDivElement | null>(null);
+  const NOTIFICATION_SCROLL_ID = 'notification-list-scroll';
+
+  useEffect(() => {
+    if (!open) return;
+    const filter: { tab: NotificationMessageTab; is_read?: boolean } = { tab };
+    if (unreadOnly) filter.is_read = false;
+    void fetchMessages(filter);
+  }, [open, tab, unreadOnly, fetchMessages, cursor, generation]);
+
+  // react-infinite-scroll-component invokes `next` as long as `hasMore=true`
+  // and no scrollbar is present. Guard so we never queue parallel loads.
+  const handleNext = () => {
+    if (loading || pagination.loadingMore || !pagination.hasMore) return;
+    void loadMore();
+  };
+
+  const openDetail = (message: NotificationMessage) => {
+    if (!message.is_read && !message.requires_confirmation) {
+      void markAsRead(message.id);
+    }
+    getNotificationDetail(message.id)
+      .then(res => {
+        setSelected(res as NotificationMessage);
+      })
+  };
+
+  const handleConfirm = (event: MouseEvent, id: string) => {
+    event.stopPropagation();
+    void confirmMessage(id);
+  };
+
+  const handleMarkAllRead = () => {
+    void markAllAsRead();
+  };
+  const handleConfirmOk = async () => {
+    if (!selected || !(selected?.requires_confirmation && !selected?.is_confirmed)) return;
+    try {
+      await confirmMessage(selected.id);
+    } finally {
+      setSelected(null);
+    }
+  };
+  const handleConfirmCancel = () => {
+    if (!selected) return;
+    // Handles both the 稍后 button AND closable=true X-close; requires_confirmation
+    // uses okCancel=true so onCancel is only fired by those two interactions.
+    snoozeModalMessage(selected.id, 1);
+    setSelected(null);
+  };
+  console.log('pagination', pagination)
+
+  return (
+    <div className={styles.panel}>
+      <div className={styles.panelHeader}>
+        <span className={styles.panelTitle}>{t('notificationCenter.title')}</span>
+        <Button
+          type="link"
+          size="small"
+          onClick={handleMarkAllRead}
+          // disabled={notificationStats.total === 0}
+        >
+          {t('notificationCenter.actions.markAllRead')}
+        </Button>
+      </div>
+      <div className={styles.tabs} role="tablist">
+        {(['system', 'announcement'] as NotificationMessageTab[]).map((item) => (
+          <button
+            key={item}
+            type="button"
+            role="tab"
+            aria-selected={tab === item}
+            className={clsx(styles.tab, tab === item && styles.tabActive)}
+            onClick={() => setTab(item)}
+          >
+            {t(`notificationCenter.tabs.${item}`)}
+            <span className={styles.tabCount}>{notificationStats[item]}</span>
+          </button>
+        ))}
+      </div>
+      <div className={styles.toolbar}>
+        <Checkbox checked={unreadOnly} onChange={(event) => setUnreadOnly(event.target.checked)}>
+          {t('notificationCenter.actions.unreadOnly')}
+        </Checkbox>
+        <span className="rb:text-[11px] rb:text-[#A8A9AA]">{messages.length}</span>
+      </div>
+      <div
+        id={NOTIFICATION_SCROLL_ID}
+        ref={listRef}
+        className={styles.list}
+      >
+        {messages.length === 0 ? (
+          <Empty
+            size={88}
+            subTitle={t(unreadOnly ? 'notificationCenter.empty.unread' : 'notificationCenter.empty.all')}
+            className="rb:py-10!"
+          />
+        ) : (
+          <InfiniteScroll
+            dataLength={messages.length}
+            next={handleNext}
+            hasMore={pagination.hasMore}
+            scrollableTarget={NOTIFICATION_SCROLL_ID}
+            style={{ overflow: 'visible' }}
+            loader={
+              <div key="loader" className="rb:py-5 rb:flex rb:justify-center">
+                <Spin size="small" />
+              </div>
+            }
+            endMessage={
+              pagination.hasMore ? null : (
+                <div key="end" className="rb:py-2 rb:text-center rb:text-[11px] rb:text-[#B8BAC0]">
+                  — {unreadOnly && pagination.has_more ? t('notificationCenter.empty.hasMore', { total: pagination.total }) : t('notificationCenter.empty.noMore')} —
+                </div>
+              )
+            }
+          >
+            {messages.map((message) => (
+              <div
+                key={message.id}
+                className={clsx(styles.item, !message.is_read && styles.itemUnread)}
+                role="button"
+                tabIndex={0}
+                onClick={() => openDetail(message)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' || event.key === ' ') openDetail(message);
+                }}
+              >
+                <div className={styles.itemContent}>
+                  <div className={styles.itemTitleLine}>
+                    {!message.is_read && <span className={styles.unreadDot} />}
+                    {message.priority !== 'normal' && (
+                      <Tag
+                        color={message.priority === 'pinned' ? 'error' : 'warning'}
+                        className="rb:text-[10px]! rb:leading-4! rb:m-0!"
+                      >
+                        {t(`notificationCenter.priorities.${message.priority}`)}
+                      </Tag>
+                    )}
+                    {message.alert_severity &&
+                      <Tag color={severityColors[message.alert_severity]}>{message.alert_severity}</Tag>
+                    }
+                    {message.type !== 'announcement' &&
+                      <Tag
+                        color={message.type === 'activity' ? 'warning' : 'default'}
+                        className="rb:text-[10px]! rb:leading-4! rb:m-0!"
+                      >
+                        {t(`notificationCenter.types.${message.type}`)}
+                      </Tag>
+                    }
+                    <span className={styles.itemTitle}>{message.title}</span>
+                  </div>
+                  <div className={styles.itemSummary}>
+                    <RbMarkdown content={message.summary} />
+                  </div>
+                  <div className={styles.itemMeta}>
+                    <span>{formatDateTime(message.published_at)}</span>
+                    {message.requires_confirmation &&
+                      (message.is_confirmed ? (
+                        <span className="rb:text-[#12B76A]">
+                          {t('notificationCenter.actions.confirmed')}
+                        </span>
+                      ) : (
+                        <Button danger size="small" onClick={(event) => handleConfirm(event, message.id)}>
+                          {t('notificationCenter.actions.confirm')}
+                        </Button>
+                      ))}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </InfiniteScroll>
+        )}
+      </div>
+
+      <RbModal
+        open={Boolean(selected)}
+        title={t('notificationCenter.detail.title')}
+        footer={
+          selected?.requires_confirmation && !selected?.is_confirmed
+          ? [
+            <Button key="remindLater" onClick={handleConfirmCancel}>
+              {t('notificationCenter.actions.remindLater')}
+            </Button>,
+            <Button key="confirm" type="primary" onClick={handleConfirmOk}>
+              {t('notificationCenter.actions.confirm')}
+            </Button>
+          ]
+          : null
+        }
+        onCancel={() => setSelected(null)}
+      >
+        {selected && (
+          <>
+            <h3 className="rb:text-[17px] rb:font-semibold rb:mt-2 rb:mb-0">{selected.title}</h3>
+            <div className={styles.detailMeta}>
+              <span>
+                {t('notificationCenter.detail.publishedAt')}: {formatDateTime(selected.published_at)}
+              </span>
+            </div>
+            <div className={styles.markdown}>
+              <ReactMarkdown>{selected.content}</ReactMarkdown>
+            </div>
+          </>
+        )}
+      </RbModal>
+    </div>
+  );
+};
+
+export default NotificationPanel;

@@ -180,7 +180,6 @@ export const space = {
 
       recursiveChunker: 'Recursive Chunker',
       tokenChunker: 'Token Chunker',
-      llmChunker: 'LLM Chunker',
       sentenceChunker: 'Sentence Chunker',
       debug: 'Debug',
       clearChat: 'Clear',

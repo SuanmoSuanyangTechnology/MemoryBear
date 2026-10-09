@@ -16,7 +16,6 @@ class ChunkerStrategy(Enum):
     """Supported chunking strategies."""
     RECURSIVE = "RecursiveChunker"
     TOKEN = "TokenChunker"
-    LLM = "LLMChunker"
     SENTENCE = "SentenceChunker"
 
     @classmethod
@@ -32,14 +31,13 @@ class DialogueChunker:
     of different chunking strategies to dialogue data.
     """
 
-    def __init__(self, chunker_strategy: str = "RecursiveChunker", llm_client: Optional[Any] = None):
+    def __init__(self, chunker_strategy: str = "RecursiveChunker"):
         """Initialize the DialogueChunker with a specific chunking strategy.
 
         Args:
             chunker_strategy: The chunking strategy to use (default: RecursiveChunker)
-                             Options: RecursiveChunker, TokenChunker, LLMChunker, SentenceChunker
-            llm_client: LLM client instance (required for LLMChunker strategy)
-            
+                             Options: RecursiveChunker, TokenChunker, SentenceChunker
+
         Raises:
             ValueError: If chunker_strategy is invalid or required parameters are missing
         """
@@ -61,15 +59,10 @@ class DialogueChunker:
                 raise ValueError(f"Failed to load configuration for strategy: {chunker_strategy}")
             
             self.chunker_config = ChunkerConfig.model_validate(chunker_config_dict)
-            
+
             # Initialize chunker client
-            if self.chunker_config.chunker_strategy == "LLMChunker":
-                if not llm_client:
-                    raise ValueError("llm_client is required for LLMChunker strategy")
-                self.chunker_client = ChunkerClient(self.chunker_config, llm_client)
-            else:
-                self.chunker_client = ChunkerClient(self.chunker_config)
-            
+            self.chunker_client = ChunkerClient(self.chunker_config)
+
             logger.debug(f"DialogueChunker initialized successfully with strategy: {chunker_strategy}")
             
         except Exception as e:

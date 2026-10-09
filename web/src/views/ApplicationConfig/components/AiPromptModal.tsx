@@ -38,6 +38,8 @@ interface AiPromptModalProps {
   refresh: (value: string) => void;
   /** Default model to pre-select */
   defaultModel?: Model | null;
+  /** Default model ID when the caller does not own a full model object */
+  defaultModelId?: string | null;
   source?: 'application' | 'skills'
 }
 
@@ -48,6 +50,7 @@ interface AiPromptModalProps {
 const AiPromptModal = forwardRef<AiPromptModalRef, AiPromptModalProps>(({
   refresh,
   defaultModel,
+  defaultModelId,
   source = 'application'
 }, ref) => {
   const { t } = useTranslation();
@@ -86,8 +89,10 @@ const AiPromptModal = forwardRef<AiPromptModalRef, AiPromptModalProps>(({
         const response = res as { id: string }
         setPromptSession(response.id)
 
-        if (!values.model_id && defaultModel?.id) {
-          form.setFieldValue('model_id', defaultModel?.id)
+        if (defaultModelId !== undefined) {
+          form.setFieldValue('model_id', defaultModelId || undefined)
+        } else if (!values.model_id && defaultModel?.id) {
+          form.setFieldValue('model_id', defaultModel.id)
         }
         setVisible(true);
       })
@@ -201,7 +206,6 @@ const AiPromptModal = forwardRef<AiPromptModalRef, AiPromptModalProps>(({
     setIsFocus(false)
   }
 
-  console.log(values)
   return (
     <RbModal
       title={t(`${source}.AIPromptAssistant`)}

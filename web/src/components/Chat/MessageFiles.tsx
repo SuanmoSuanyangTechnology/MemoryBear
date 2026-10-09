@@ -19,7 +19,7 @@ const DOC_ICONS: [string[], string][] = [
 ]
 
 const getDocIcon = (parts: string[]) => {
-  const match = DOC_ICONS.find(([keys]) => keys.some(k => parts.includes(k)))
+  const match = DOC_ICONS.find(([keys]) => keys.some(k => parts.some(key => key.includes(k))))
   return match ? match[1] : "rb:bg-[url('@/assets/images/file/txt.svg')]"
 }
 
@@ -73,7 +73,7 @@ const MessageFiles = ({ files, contentClassNames, onDownload }: MessageFilesProp
             />
             <div className="rb:flex-1 rb:w-32.5">
               <div className="rb:leading-4 rb:text-ellipsis rb:overflow-hidden rb:whitespace-nowrap">{file.name}</div>
-              <div className="rb:leading-3.5 rb:mt-0.5 rb:text-[#5B6167] rb:text-ellipsis rb:overflow-hidden rb:whitespace-nowrap">
+              <div className="rb:leading-3.5 rb:mt-0.5 rb:text-gray-600 rb:text-ellipsis rb:overflow-hidden rb:whitespace-nowrap">
                 {documentType?.[documentType.length - 1]} · {file.size}
               </div>
             </div>
