@@ -135,6 +135,7 @@ export const home = {
       predictionEngine: '记忆预测推演引擎',
       predictionProgress: '预测推演流程',
       preferenceEngine: '偏好引擎',
+      sceneCommunityEngine: '多模态情景记忆重构引擎',
     },
     dashboard: {
       total_models: '可用模型总数',

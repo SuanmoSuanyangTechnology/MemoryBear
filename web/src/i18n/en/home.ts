@@ -135,6 +135,7 @@ export const home = {
       predictionEngine: 'Memory Prediction Workbench',
       predictionProgress: 'Prediction Process',
       preferenceEngine: 'Preference Engine',
+      sceneCommunityEngine: 'Multimodal Episodic Memory Reconstruction Engine',
     },
     dashboard: {
       total_models: 'Available Models',
