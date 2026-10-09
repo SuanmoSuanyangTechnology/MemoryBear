@@ -81,6 +81,9 @@ export const computeInitVariables = (type: string | undefined, config: any): Var
     case 'agent':
       initVariables = config.variables as Variable[]
       break
+    case 'multi_agent':
+      initVariables = config.supervisor_config?.variables || []
+      break
   }
   return initVariables
 }
@@ -114,7 +117,7 @@ export const addAssistantMessage = (prev: ChatList, type?: string): ChatList => 
     role: 'assistant',
     content: '',
     created_at: Date.now(),
-    subContent: type?.includes('workflow') || type === 'multi_agent' ? [] : undefined,
+    subContent: type?.includes('workflow') ? [] : undefined,
   },
 ]
 
