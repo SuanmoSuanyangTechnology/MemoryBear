@@ -9,9 +9,8 @@ from app.core.utils.datetime_utils import to_timestamp_ms
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
 from app.core.logging_config import get_business_logger
-from app.core.models import RedBearModelConfig
-from app.core.models.llm import RedBearLLM
-from app.models import ModelConfig, ModelApiKey, ModelType, PromptOptimizerSessionHistory
+from app.core.models import RedBearChatModel
+from app.models import ModelConfig, PromptOptimizerSessionHistory
 from app.models.prompt_optimizer_model import (
     PromptOptimizerSession,
     RoleType
@@ -21,7 +20,7 @@ from app.repositories.prompt_optimizer_repository import (
     PromptReleaseRepository
 )
 from app.schemas.prompt_optimizer_schema import OptimizePromptResult
-from app.services.model_service import ModelApiKeyService, ModelConfigService as ModelSvc
+from app.services.model_service import ModelConfigService as ModelSvc
 from app.services.prompt import prompt_manager
 
 logger = get_business_logger()
@@ -169,22 +168,11 @@ class PromptOptimizerService:
 
         logger.info(f"Prompt optimization started, user_id={user_id}, session_id={session_id}")
 
-        # Create LLM instance
-        # api_keys = ModelApiKeyRepository.get_by_model_config(self.db, model_config.id)
-        # api_config: ModelApiKey = api_keys[0] if api_keys else None
-        api_config: ModelApiKey = ModelApiKeyService.get_available_api_key(
-            self.db,
-            model_config.id,
-            tenant_id=tenant_id,
+        # Create LLM instance（远端接缝：视图只带配置 id 与租户，凭据在模型服务）
+        view = ModelSvc.get_runtime_model_view(
+            self.db, model_config.id, tenant_id=tenant_id
         )
-        if not api_config:
-            ModelSvc.raise_model_unavailable(
-                self.db, model_config.id, tenant_id=tenant_id
-            )
-        llm = RedBearLLM(
-            RedBearModelConfig.from_api_key(api_config),
-            type=ModelType(model_config.type),
-        )
+        llm = RedBearChatModel.for_invoke(view, streaming=True)
         try:
             rendered_system_message = prompt_manager.render(
                 'prompt_optimizer_system',
@@ -338,7 +326,6 @@ class PromptOptimizerService:
             desc_text = "Prompt optimized successfully."
 
         logger.info(f"Optimized prompt length: {len(prompt_text)}, desc: {desc_text}")
-        ModelApiKeyService.record_api_key_usage(self.db, api_config.id)
         self.create_message(
             tenant_id=tenant_id,
             session_id=session_id,

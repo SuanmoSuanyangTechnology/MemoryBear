@@ -5,16 +5,13 @@ from typing import Any
 import json_repair
 from jinja2 import Template
 
-from app.core.error_codes import BizCode
-from app.core.exceptions import BusinessException
-from app.core.models import RedBearChatModel, RedBearLLM, RedBearModelConfig
+from app.core.models import RedBearChatModel
 from app.core.workflow.engine.state_manager import WorkflowState
 from app.core.workflow.engine.variable_pool import VariablePool
 from app.core.workflow.nodes.base_node import BaseNode
 from app.core.workflow.nodes.parameter_extractor.config import ParameterExtractorNodeConfig, InferenceMode
 from app.core.workflow.variable.base_variable import VariableType, DEFAULT_VALUE
-from app.db import get_async_db_context, get_db_read
-from app.models import ModelType
+from app.db import get_async_db_context
 from app.models.models_model import ModelFeature
 from app.schemas.model_schema import ModelInfo
 from app.services.model_service import ModelConfigService
@@ -101,39 +98,6 @@ class ParameterExtractorNode(BaseNode):
             user_prompt = f.read()
         return system_prompt, user_prompt
 
-    def _get_llm_instance(self, variable_pool: VariablePool) -> RedBearLLM:
-        """
-        Retrieve a configured LLM instance based on the model ID from database.
-
-        Responsibilities:
-        - Validate that the model exists and can resolve runtime credentials.
-        - Construct RedBearLLM instance with proper credentials and model type.
-        - Raise clear BusinessException if configuration is invalid.
-
-        Returns:
-            RedBearLLM: Configured LLM instance ready to be invoked.
-
-        Raises:
-            BusinessException: If the model is missing or lacks valid API key.
-        """
-        model_id = self.typed_config.model_id
-
-        with get_db_read() as db:
-            config = ModelConfigService.get_model_by_id(db=db, model_id=model_id)
-
-            if not config:
-                raise BusinessException("Configured model does not exist", BizCode.NOT_FOUND)
-
-            api_config = self.get_runtime_api_config(db, config, variable_pool)
-            features = api_config.features
-            model_type = config.type
-            model_config = RedBearModelConfig.from_api_key(api_config)
-
-        self._model_features = features or []
-
-        llm = RedBearLLM(model_config, type=ModelType(model_type))
-        return llm
-
     async def _load_model_info_async(
         self,
         variable_pool: VariablePool,
@@ -146,35 +110,6 @@ class ParameterExtractorNode(BaseNode):
                 self.typed_config.model_id,
                 tenant_id=tenant_id,
             )
-
-    def _get_model_info_sync(self, variable_pool: VariablePool) -> ModelInfo:
-        with get_db_read() as db:
-            config = ModelConfigService.get_model_by_id(db=db, model_id=self.typed_config.model_id)
-            if not config:
-                raise BusinessException("Configured model does not exist", BizCode.NOT_FOUND)
-
-            api_config = self.get_runtime_api_config(db, config, variable_pool)
-            return ModelInfo(
-                model_name=api_config.model_name,
-                model_type=ModelType(config.type),
-                api_key=api_config.api_key,
-                api_base=api_config.api_base,
-                provider=api_config.provider,
-                input_modalities=[str(item) for item in (api_config.input_modalities or [])],
-                output_modalities=[str(item) for item in (api_config.output_modalities or [])],
-                features=[str(item) for item in (api_config.features or [])],
-                tenant_id=api_config.tenant_id,
-                model_config_id=api_config.model_config_id,
-                channel_id=api_config.channel_id,
-                failover_plan=api_config.failover_plan,
-            )
-
-    def _build_llm_from_model_info(self, model_info: ModelInfo) -> RedBearLLM:
-        self._model_features = model_info.features or []
-        return RedBearLLM(
-            RedBearModelConfig.from_api_key(model_info),
-            type=model_info.model_type
-        )
 
     def _get_field_desc(self) -> dict[str, str]:
         """

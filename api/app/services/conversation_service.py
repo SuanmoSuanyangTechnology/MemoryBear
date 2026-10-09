@@ -15,10 +15,10 @@ from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
 from app.core.exceptions import ResourceNotFoundException
 from app.core.logging_config import get_business_logger
-from app.core.models import RedBearLLM, RedBearModelConfig
+from app.core.models import RedBearChatModel
 from app.core.utils.datetime_utils import to_timestamp_ms, utcnow, utcnow_naive
 from app.db import get_db
-from app.models import Conversation, Message, MessageFeedback, User, ModelType
+from app.models import Conversation, Message, MessageFeedback, User
 from app.models.conversation_model import ConversationDetail
 from app.models.prompt_optimizer_model import RoleType
 from app.repositories.conversation_repository import ConversationRepository, MessageRepository
@@ -27,7 +27,7 @@ from app.repositories.tool_repository import ToolRepository
 from app.schemas.conversation_schema import ConversationOut
 from app.services import workspace_service
 from app.services.memory_config_service import MemoryConfigService
-from app.services.model_service import ModelConfigService, ModelApiKeyService
+from app.services.model_service import ModelConfigService
 from app.services.prompt import prompt_manager
 from app.utils.redis_cache import redis_cache
 
@@ -1563,29 +1563,13 @@ class ConversationService:
         if not model_id:
             logger.error(f"Workspace model configuration not found for workspace_id={workspace_id}")
             raise BusinessException("Workspace model configuration not found. Please configure a model first.", code=BizCode.MODEL_NOT_FOUND)
-        config = await ModelConfigService.get_model_by_id_async(db=self.db, model_id=model_id)
-
-        if not config:
-            logger.error("Configured model not found for model_id={model_id}")
-            raise BusinessException("Configured model does not exist.", BizCode.NOT_FOUND)
-
         tenant_id = await ToolRepository.get_tenant_id_by_workspace_id_async(self.db, str(workspace_id))
-        api_config = await ModelApiKeyService.get_available_api_key_async(
-            self.db,
-            model_id,
-            tenant_id=tenant_id,
+        view = await ModelConfigService.get_runtime_model_view_bridge_async(
+            self.db, model_id, tenant_id=tenant_id
         )
-        if not api_config:
-            logger.error(f"Model API keys missing for model_id={model_id}")
-            raise BusinessException("Model configuration missing API keys.", BizCode.INVALID_PARAMETER)
+        provider = view.provider
 
-        provider = api_config.provider
-        model_type = config.type
-
-        llm = RedBearLLM(
-            RedBearModelConfig.from_api_key(api_config),
-            type=ModelType(model_type)
-        )
+        llm = RedBearChatModel.for_invoke(view)
 
         conversation_messages = await self.get_conversation_history(
             conversation_id=conversation_id,

@@ -128,9 +128,6 @@ celery_app.conf.update(
         'app.tasks.do_layer2_dedup_full_scan': {'queue': 'reflection_tasks'},
         'app.tasks.scan_reflection_retry': {'queue': 'periodic_tasks'},
         'app.tasks.regenerate_memory_cache': {'queue': 'periodic_tasks'},
-        # 用量事件消费（M4，spec §13.2）：beat 排期已停（消费端迁入 model-service），
-        # 保留路由仅供手工触发兜底，G5 随任务壳删除
-        'app.tasks.consume_model_usage': {'queue': 'periodic_tasks'},
         # 网关告警评估（B9）：独立消费组读 model:usage，喂宿主企业告警插件
         'app.tasks.consume_model_gateway_alerts': {'queue': 'periodic_tasks'},
 

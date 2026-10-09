@@ -27,14 +27,13 @@ from app.core.rag.retrieval.models import (
 from app.core.rag.vdb.elasticsearch.elasticsearch_vector import ElasticSearchVectorIndexOps
 from app.db import get_async_db_context
 from app.models import knowledge_model, knowledgeshare_model
-from app.models.models_model import ModelConfig
 from app.repositories import knowledge_repository
 from app.schemas.chunk_schema import KnowledgeBaseConfig, RetrieveType
 from app.schemas.knowledge_metadata_schema import MetadataFilterMode
 from app.schemas.knowledge_retrieval_schema import KnowledgeRetrievalRequest
 from app.services import knowledge_service, knowledgeshare_service
 from app.services.knowledge_metadata_service import KnowledgeMetadataService
-from app.services.model_service import ModelApiKeyService, ModelConfigService
+from app.services.model_service import ModelConfigService
 
 logger = logging.getLogger(__name__)
 
@@ -540,32 +539,6 @@ class KnowledgeRetrievalPreparation:
         return ModelRuntimeSnapshot.from_model_view(view)
 
     @classmethod
-    async def _snapshot_model_runtime_legacy(
-        cls,
-        db: AsyncSession,
-        model_id: uuid.UUID | None,
-        tenant_id: uuid.UUID | None,
-    ) -> ModelRuntimeSnapshot | None:
-        """明文快照（仅 LEGACY 图检索桥需要：``GraphRetrievalBridge`` 自持凭据调用）。
-
-        G5 例外：LEGACY 管道整体保留明文；EVIDENCE 与其余消费一律走非解密版。
-        """
-        del cls
-        if model_id is None:
-            return None
-        model_config = await db.get(ModelConfig, model_id)
-        if not model_config:
-            return None
-        api_key = await ModelApiKeyService.get_available_api_key_async(
-            db,
-            model_id,
-            tenant_id=tenant_id,
-        )
-        if not api_key:
-            return None
-        return ModelRuntimeSnapshot.from_api_key(api_key, model_type=model_config.type)
-
-    @classmethod
     async def _build_metadata_llm_snapshot(
         cls,
         db: AsyncSession,
@@ -647,15 +620,8 @@ class KnowledgeRetrievalPreparation:
 
         target_snapshots: list[GraphTargetSnapshot] = []
         for target, knowledge, pipeline in resolved_targets:
-            if pipeline is GraphPipeline.LEGACY:
-                # LEGACY 桥自持凭据调用（G5 例外）：llm/embedding 均需明文快照
-                llm = await cls._snapshot_model_runtime_legacy(db, knowledge.llm_id, tenant_id)
-                embedding = await cls._snapshot_model_runtime_legacy(
-                    db, knowledge.embedding_id, tenant_id
-                )
-            else:
-                llm = await cls._snapshot_model_runtime(db, knowledge.llm_id, tenant_id)
-                embedding = target.embedding
+            llm = await cls._snapshot_model_runtime(db, knowledge.llm_id, tenant_id)
+            embedding = target.embedding
             if not llm:
                 raise KnowledgeRetrievalConfigError(
                     f"No LLM api key found for knowledge {knowledge.id}",

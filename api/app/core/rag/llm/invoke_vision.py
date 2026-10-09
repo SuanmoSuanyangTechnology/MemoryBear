@@ -131,12 +131,19 @@ def build_chunk_vision_model(
 ) -> InvokeVisionModel | InvokeTranscriptionModel:
     """按文件类别构造 chunk 管线模型：audio → asr 转写；video / image → llm 多模态理解。
 
-    ``media_url`` 仅音频 / 视频消费（外部可达的签名 URL）；非 http(s) 视为无 URL，
-    由调用（``transcription`` / ``chat``）在需要时响亮报错。
+    ``media_url`` 仅音频 / 视频消费（外部可达的签名 URL）；非 http(s) 视为无 URL。
+    audio 缺 URL 在此即响亮拒止（asr 族只收公网 URL，本地存储返回的相对路径不能空转：
+    chunk 管线的兜底 except 会把转写期报错吞成零分块）；video / image 无 URL 仍有
+    ≤1MB 内联兜底，由调用（``chat``）在需要时响亮报错。
     """
 
     ref = ref_from_model_info(view)
     if kind == "audio":
+        if externally_reachable_media_url(media_url) is None:
+            raise RuntimeError(
+                "音频分块需要可外部访问的文件 URL（asr 族只收公网 URL，当前存储未返回；"
+                "本地存储的音频请迁移至可给出公网 URL 的对象存储）"
+            )
         return InvokeTranscriptionModel(ref, file_url=media_url, lang=lang)
     return InvokeVisionModel(ref, lang=lang, media_url=media_url)
 

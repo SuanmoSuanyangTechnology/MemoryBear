@@ -439,7 +439,7 @@ class ModelConfigRepository:
 
     @staticmethod
     def update(db: Session, model_id: uuid.UUID, update_data: dict, tenant_id: uuid.UUID | None = None) -> Optional[ModelConfig]:
-        """更新模型配置（update_data 由服务层构造：含三新列换算，见 model_service._config_update_payload）"""
+        """更新模型配置（update_data 由写侧构造：含三新列换算；宿主写服务方法已随 G5 删除）"""
         db_logger.debug(f"更新模型配置: model_id={model_id}, tenant_id={tenant_id}")
 
         try:

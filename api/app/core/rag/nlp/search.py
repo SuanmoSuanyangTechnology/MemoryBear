@@ -12,8 +12,7 @@ from sqlalchemy.orm import Session
 from langchain_core.documents import Document
 
 from app.db import get_db_read
-from app.core.models import RedBearLLM, RedBearRerank
-from app.models.models_model import ModelApiKey
+from app.core.models import RedBearRerank
 from app.models import knowledge_model
 from app.core.rag.models.chunk import DocumentChunk
 from app.repositories import knowledge_repository, knowledgeshare_repository
@@ -25,43 +24,10 @@ from app.core.rag.utils.doc_store_conn import DocStoreConnection, MatchDenseExpr
 from app.core.rag.common.string_utils import remove_redundant_spaces
 from app.core.rag.common.float_utils import get_float
 from app.core.rag.common.constants import PAGERANK_FLD, TAG_FLD
-from app.core.rag.llm.chat_model import Base
-from app.core.rag.llm.embedding_model import OpenAIEmbed
-from app.repositories.tool_repository import ToolRepository
 from app.services.model_service import ModelApiKeyService
 import logging
 
 logger = logging.getLogger(__name__)
-
-
-def _resolve_tenant_id(db: Session, workspace_id: str | uuid.UUID | None) -> uuid.UUID | None:
-    if not workspace_id:
-        return None
-    return ToolRepository.get_tenant_id_by_workspace_id(db, str(workspace_id))
-
-
-def _ensure_legacy_kg_models(db: Session, db_knowledge, chat_model, embedding_model):
-    """KB-graph LEGACY（G5 清理对象）：KGSearch 按旧式 .chat()/.encode_queries() 接口
-    消费模型对象，壳不提供该接口，故此处保留明文构造；仅图检索分支触发时才构造，
-    普通检索路径（participle/semantic/hybrid）不再解密任何凭据。"""
-    tenant_id = _resolve_tenant_id(db, db_knowledge.workspace_id)
-    if not chat_model and db_knowledge.llm_id:
-        llm_key = ModelApiKeyService.get_available_api_key(db, db_knowledge.llm_id, tenant_id=tenant_id)
-        if llm_key:
-            chat_model = Base(
-                key=llm_key.api_key,
-                model_name=llm_key.model_name,
-                base_url=llm_key.api_base,
-            )
-    if not embedding_model and db_knowledge.embedding_id:
-        emb_key = ModelApiKeyService.get_available_api_key(db, db_knowledge.embedding_id, tenant_id=tenant_id)
-        if emb_key:
-            embedding_model = OpenAIEmbed(
-                key=emb_key.api_key,
-                model_name=emb_key.model_name,
-                base_url=emb_key.api_base,
-            )
-    return chat_model, embedding_model
 
 
 def knowledge_retrieval(
@@ -115,8 +81,6 @@ def knowledge_retrieval(
 
             kb_ids = []
             workspace_ids = []
-            chat_model = None
-            embedding_model = None
             all_results = []
             # Search each knowledge base
             for kb_config in knowledge_bases:
@@ -126,13 +90,11 @@ def knowledge_retrieval(
                     db_knowledge = knowledge_repository.get_knowledge_by_id(db, knowledge_id=kb_id)
                     if db_knowledge and db_knowledge.chunk_num > 0 and db_knowledge.status == 1:
                         # Process shared knowledge base
-                        rs, chat_model, embedding_model = _retrieve_for_knowledge(
+                        rs = _retrieve_for_knowledge(
                             db=db,
                             db_knowledge=db_knowledge,
                             kb_config={**kb_config, "query": query},  # 或改为单独参数
                             file_names_filter=file_names_filter,
-                            chat_model=chat_model,
-                            embedding_model=embedding_model,
                             kb_ids=kb_ids,
                             workspace_ids=workspace_ids,
                             use_graph=use_graph,
@@ -160,17 +122,12 @@ def knowledge_retrieval(
                     )
 
             if use_graph:
-                try:
-                    from app.core.rag.common.settings import kg_retriever
-                    doc = kg_retriever.retrieval(question=query, workspace_ids=workspace_ids, kb_ids=kb_ids, emb_mdl=embedding_model, llm=chat_model)
-                    if doc:
-                        all_results.insert(0, DocumentChunk(
-                            page_content=doc.get("page_content", ""),
-                            metadata=doc.get("metadata", {})
-                        ))
-                except Exception as graph_error:
-                    print(f"Failed to retrieve from knowledge graph: {str(graph_error)}")
-            
+                # G5：本函数不再解密凭据，图检索在此不可用；活跃调用方（content_search）
+                # 不传 use_graph。图检索走 KnowledgeRetrievalPreparation → GraphRetrievalBridge
+                # 远端接缝，此处仅告警跳过而非静默忽略参数。
+                logger.warning(
+                    "knowledge_retrieval 不再支持 use_graph 图检索（请走 knowledge_retrieval 服务接缝），已跳过"
+                )
             return all_results
 
         except Exception as e:
@@ -182,18 +139,16 @@ def _retrieve_for_knowledge(
     db_knowledge,
     kb_config: Dict[str, Any],
     file_names_filter: list[str],
-    chat_model: Base | None,
-    embedding_model: OpenAIEmbed | None,
     kb_ids: list[str],
     workspace_ids: list[str],
     *,
     use_graph: bool = False,
-) -> tuple[list[DocumentChunk], Base | None, OpenAIEmbed | None]:
+) -> list[DocumentChunk]:
     """
     对单个知识库进行检索。
     - 处理共享知识库
     - 如果是 Folder，则递归检索其子知识库
-    - 返回本知识库(含子库)的检索结果和可能更新后的 chat_model/embedding_model
+    - 返回本知识库(含子库)的检索结果
     """
     results: list[DocumentChunk] = []
 
@@ -201,11 +156,11 @@ def _retrieve_for_knowledge(
     if db_knowledge.permission_id.lower() == knowledge_model.PermissionType.Share.lower():
         knowledgeshare = knowledgeshare_repository.get_knowledgeshare_by_id(db=db, knowledgeshare_id=db_knowledge.id)
         if not knowledgeshare:
-            return results, chat_model, embedding_model
+            return results
 
         db_knowledge = knowledge_repository.get_knowledge_by_id(db, knowledge_id=knowledgeshare.source_kb_id)
         if not (db_knowledge and db_knowledge.chunk_num > 0 and db_knowledge.status == 1):
-            return results, chat_model, embedding_model
+            return results
 
     # Folder 类型：递归处理子知识库
     if db_knowledge.type == knowledge_model.KnowledgeType.FOLDER:
@@ -214,19 +169,17 @@ def _retrieve_for_knowledge(
             if not (child and child.chunk_num > 0 and child.status == 1):
                 continue
             # 递归处理子知识库（子库如果还是 Folder，会继续往下）
-            child_results, chat_model, embedding_model = _retrieve_for_knowledge(
+            child_results = _retrieve_for_knowledge(
                 db=db,
                 db_knowledge=child,
                 kb_config=kb_config,
                 file_names_filter=file_names_filter,
-                chat_model=chat_model,
-                embedding_model=embedding_model,
                 kb_ids=kb_ids,
                 workspace_ids=workspace_ids,
                 use_graph=use_graph,
             )
             results.extend(child_results)
-        return results, chat_model, embedding_model
+        return results
 
     # 普通知识库，执行一次检索
     if str(db_knowledge.id) not in kb_ids:
@@ -234,9 +187,12 @@ def _retrieve_for_knowledge(
     if str(db_knowledge.workspace_id) not in workspace_ids:
         workspace_ids.append(str(db_knowledge.workspace_id))
 
-    if use_graph or kb_config["retrieve_type"] == "graph":
-        chat_model, embedding_model = _ensure_legacy_kg_models(
-            db, db_knowledge, chat_model, embedding_model
+    if (use_graph or kb_config["retrieve_type"] == "graph"):
+        # G5：本函数不再解密凭据，图检索在此不可用（活跃调用方不传图参数）；
+        # 图检索走 KnowledgeRetrievalPreparation → GraphRetrievalBridge 远端接缝。
+        logger.warning(
+            "kb %s 请求图检索（use_graph/retrieve_type=graph）已跳过：请走 knowledge_retrieval 服务接缝",
+            db_knowledge.id,
         )
 
     vector_service = ElasticSearchVectorFactory().init_vector(knowledge=db_knowledge)
@@ -287,28 +243,12 @@ def _retrieve_for_knowledge(
                     docs=unique_rs,
                     top_k=kb_config["top_k"]
                 )
-            if kb_config["retrieve_type"] == "graph":
-                try:
-                    from app.core.rag.common.settings import kg_retriever
-                    graph_doc = kg_retriever.retrieval(
-                        question=kb_config["query"],
-                        workspace_ids=[str(db_knowledge.workspace_id)],
-                        kb_ids=[str(db_knowledge.id)],
-                        emb_mdl=embedding_model,
-                        llm=chat_model,
-                    )
-                    if graph_doc:
-                        rs.insert(0, DocumentChunk(
-                            page_content=graph_doc.get("page_content", ""),
-                            metadata=graph_doc.get("metadata", {})
-                        ))
-                except Exception as graph_error:
-                    logger.warning(f"Graph retrieval failed for kb {db_knowledge.id}: {graph_error}")
+            # retrieve_type=graph 的图检索同 G5 口径跳过（见上方 warning），本分支只走混合召回
 
     # local rerank 之后解析父块，保证 rerank 在子块上做精确评分
     rs = vector_service.resolve_parent_chunks(rs)
     results.extend(rs)
-    return results, chat_model, embedding_model
+    return results
 
 
 def rerank(

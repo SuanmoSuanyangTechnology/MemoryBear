@@ -42,6 +42,7 @@ from app.models.knowledgeshare_model import KnowledgeShare
 from app.models.models_model import Modality, ModelFeature, ModelType
 from app.repositories.tool_repository import ToolRepository
 from app.schemas.app_schema import FileInput, Citation, FileType, TransferMethod
+from app.schemas.model_schema import ModelInfo
 from app.schemas.prompt_schema import PromptMessageRole, render_prompt_message
 from app.services.context_engine_manager import ContextEngineManager
 from app.services.annotation_service import AnnotationService
@@ -1843,7 +1844,7 @@ class AgentRunService:
 
             # 生成建议问题（在保存消息前生成，以便存入 meta_data）
             suggested_questions = (await self._generate_suggested_questions(
-                features_config, result["content"], api_key_config, effective_params
+                features_config, result["content"], model_view, effective_params
             )) if not sub_agent else []
 
             # 10. 保存会话消息（skip_save=True 时由调用方自行保存版本化消息，跳过 run 内部重复保存）
@@ -2493,7 +2494,7 @@ class AgentRunService:
             filtered_citations = self._filter_citations(features_config, citations_collector)
 
             suggested_questions = (await self._generate_suggested_questions(
-                features_config, full_content, api_key_config, effective_params
+                features_config, full_content, model_view, effective_params
             )) if not sub_agent else []
 
             # 11. 保存会话消息（skip_save=True 时由调用方自行保存版本化消息，跳过 run_stream 内部重复保存）
@@ -3453,7 +3454,7 @@ class AgentRunService:
             self,
             features_config: Dict[str, Any],
             assistant_message: str,
-            api_key_config: Dict[str, Any],
+            model_view: ModelInfo,
             effective_params: Dict[str, Any]
     ) -> List[str]:
         """根据 suggested_questions_after_answer 配置生成下一步建议问题"""
@@ -3463,13 +3464,9 @@ class AgentRunService:
             return []
         try:
             from langchain_core.messages import HumanMessage
-            from app.core.models import RedBearLLM, RedBearModelConfig
-            llm = RedBearLLM(
-                RedBearModelConfig.from_api_key(
-                    api_key_config,
-                    extra_params={"temperature": 0.5, "max_tokens": 200},
-                ),
-                type=ModelType.LLM
+            from app.core.models import RedBearChatModel
+            llm = RedBearChatModel.for_invoke(
+                model_view, params={"temperature": 0.5, "max_tokens": 200}
             )
             prompt = (
                 f"根据以下AI回复，生成3个用户可能继续追问的简短问题，每行一个，不加序号：\n\n{assistant_message}"

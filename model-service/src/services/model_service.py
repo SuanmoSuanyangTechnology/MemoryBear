@@ -163,6 +163,10 @@ def _shared_validation_config(
     from redbear_model import ModelRuntimeOptions
 
     shared_provider = ContractModelProvider(_enum_value(provider))
+    # 渠道域（provider 级）探活 api_base 恒空：物化 provider 公共基地址（与 invoke 面
+    # `_materialize_default_base` 同口径），否则 OpenAI 兼容面落到 SDK 默认 api.openai.com。
+    # 本地部署 provider 无默认地址保持空允许下游响亮失败；文案 official 展示即此值。
+    effective_base_url = api_base or get_default_provider_api_base(provider, model_type)
     return ResolvedModelConfig(
         model_config_id=_MODEL_VALIDATION_CONFIG_ID,
         key_id=_MODEL_VALIDATION_KEY_ID,
@@ -170,7 +174,7 @@ def _shared_validation_config(
         provider=shared_provider,
         model_name=model_name,
         api_key=SecretStr(api_key),
-        base_url=api_base,
+        base_url=effective_base_url,
         profile=ContractModelProfile.from_stored_fields(
             model_id=_MODEL_VALIDATION_CONFIG_ID,
             tenant_id=_MODEL_VALIDATION_TENANT_ID,

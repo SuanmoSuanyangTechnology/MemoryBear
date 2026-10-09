@@ -31,7 +31,7 @@ from app.core.workflow.nodes.llm.config import strip_unsupported_llm_params, val
 from app.core.workflow.variable.base_variable import FileObject, VariableType
 from app.db import get_async_db_context, get_db_read
 from app.integrations.knowledge.contracts import KnowledgeRetrievalSource
-from app.models import ModelFeature, ModelType
+from app.models import ModelFeature
 from app.models.workspace_model import Workspace
 from app.schemas.app_schema import FileInput, TransferMethod
 from app.schemas.model_schema import ModelInfo
@@ -210,28 +210,6 @@ class AgentNode(BaseNode):
 
         logger.debug(f"节点 {self.node_id} 加载了 {len(langchain_tools)} 个工具")
         return langchain_tools
-
-    def _load_model_info_sync(self, model_id: str, variable_pool: VariablePool) -> ModelInfo:
-        with get_db_read() as db:
-            config = ModelConfigService.get_model_by_id(db=db, model_id=model_id)
-            if not config:
-                raise BusinessException("配置的模型不存在", BizCode.NOT_FOUND)
-
-            api_config = self.get_runtime_api_config(db, config, variable_pool)
-            return ModelInfo(
-                model_name=api_config.model_name,
-                model_type=ModelType(config.type),
-                api_key=api_config.api_key,
-                api_base=api_config.api_base,
-                provider=api_config.provider,
-                input_modalities=list(api_config.input_modalities or []),
-                output_modalities=list(api_config.output_modalities or []),
-                features=list(api_config.features or []),
-                tenant_id=api_config.tenant_id,
-                model_config_id=api_config.model_config_id,
-                channel_id=api_config.channel_id,
-                failover_plan=api_config.failover_plan,
-            )
 
     async def _load_model_info_async(self, model_id: uuid.UUID, variable_pool: VariablePool) -> ModelInfo:
         # 非解密视图（G3）：凭据解密与选路在模型服务，宿主只带配置引用与逐请求参数

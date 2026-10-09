@@ -4,6 +4,7 @@ from typing import List, Optional
 
 from dotenv import load_dotenv
 from fastapi import APIRouter, Depends, File, Form, Query, UploadFile
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 from starlette.responses import StreamingResponse
 
@@ -11,7 +12,7 @@ from app.core.error_codes import BizCode
 from app.core.logging_config import get_api_logger
 from app.core.rag.llm.invoke_vision import InvokeVisionModel
 from app.core.response_utils import fail, success
-from app.db import get_db
+from app.db import get_async_db, get_db
 from app.dependencies import get_current_user
 from app.integrations.model.invoke_backend import ref_from_model_info
 from app.models.user_model import User
@@ -121,7 +122,7 @@ async def file_update(
         model_id: str = Form(..., description="模型ID"),
         metadata: Optional[str] = Form(None, description="文件元数据 (JSON格式)"),
         current_user: User = Depends(get_current_user),
-        db: Session = Depends(get_db),
+        db: AsyncSession = Depends(get_async_db),
 ):
     """
     文件上传接口 - 支持图片识别
@@ -135,8 +136,8 @@ async def file_update(
         文件处理结果
     """
     api_logger.info(f"File upload requested, file count: {len(files)}")
-    # 非解密视图 + 远端壳（G4a）：凭据与选路在模型服务，宿主只持视图
-    model_view = ModelConfigService.get_runtime_model_view(
+    # 非解密视图 + 远端壳（G4a）：凭据与选路在模型服务，宿主只持视图（async 路由走 async 孪生）
+    model_view = await ModelConfigService.get_runtime_model_view_async(
         db, uuid.UUID(model_id), tenant_id=current_user.tenant_id
     )
     vision_model = InvokeVisionModel(ref_from_model_info(model_view), lang="Chinese")

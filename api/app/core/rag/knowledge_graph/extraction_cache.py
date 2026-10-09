@@ -39,7 +39,6 @@ class GraphExtractionCache:
             "workspace_id": runtime.workspace_id,
             "provider": runtime.llm.provider,
             "model_name": runtime.llm.model_name,
-            "api_base": runtime.llm.api_base or "",
             "prompt_version": EXTRACTION_PROMPT_VERSION,
             "schema_version": _CACHE_SCHEMA_VERSION,
             "scene_name": " ".join(runtime.scene_name.split()),

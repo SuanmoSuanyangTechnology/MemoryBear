@@ -6,6 +6,7 @@ from urllib.parse import urlparse, unquote
 import json_repair
 import langid
 from sqlalchemy.orm import Session
+from starlette.concurrency import run_in_threadpool
 
 from app.core.utils.datetime_utils import to_timestamp_ms
 from app.core.error_codes import BizCode
@@ -283,19 +284,24 @@ class MemoryPerceptualService:
             _PerceptualSnapshot | None（两种模式统一返回内存快照）
         """
         # 用 DB：解析 tenant_id + 取非解密模型视图（凭据不出宿主）。
-        workspace_id = None
-        with get_db_read() as db:
-            if persist:
-                end_user = get_end_user_by_id(db, end_user_id)
-                workspace_id = end_user.workspace_id
-                workspace = get_workspace_by_id(db, workspace_id)
-                tenant_id = workspace.tenant_id
-            else:
-                workspace_id = memory_config.workspace_id
-                tenant_id = memory_config.tenant_id
-            llm, model_view = self._get_mutlimodal_client(db, file.type, memory_config, tenant_id)
-            if model_view is None or llm is None:
-                return None
+        # 同步 Session 卸载到线程池：async 面不得直调同步 DB（同步/异步边界铁律）
+        def _resolve_multimodal_client() -> tuple[
+            uuid.UUID | None, tuple[RedBearChatModel | None, ModelInfo | None]
+        ]:
+            with get_db_read() as db:
+                if persist:
+                    end_user = get_end_user_by_id(db, end_user_id)
+                    workspace_id = end_user.workspace_id
+                    workspace = get_workspace_by_id(db, workspace_id)
+                    tenant_id = workspace.tenant_id
+                else:
+                    workspace_id = memory_config.workspace_id
+                    tenant_id = memory_config.tenant_id
+                return workspace_id, self._get_mutlimodal_client(db, file.type, memory_config, tenant_id)
+
+        workspace_id, (llm, model_view) = await run_in_threadpool(_resolve_multimodal_client)
+        if model_view is None or llm is None:
+            return None
 
         # 用 DB：文件预处理（本地文件通过 workspace/tenant 范围水合）。
         with get_db_read() as db:

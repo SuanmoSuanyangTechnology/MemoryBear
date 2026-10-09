@@ -95,6 +95,9 @@ class Settings:
 
     DB_AUTO_UPGRADE = os.getenv("DB_AUTO_UPGRADE", "false").lower() == "true"
 
+    # 测试路由开关（/api/test/*，内部调试用）：默认关闭（全路由 404）；本地调试在 .env 显式置 true
+    ENABLE_TEST_ROUTES: bool = os.getenv("ENABLE_TEST_ROUTES", "false").lower() == "true"
+
     # Health probe configuration
     READINESS_CHECK_TIMEOUT_SECONDS: float = float(
         os.getenv("READINESS_CHECK_TIMEOUT_SECONDS", "2.0")
@@ -639,10 +642,6 @@ class Settings:
     # ========================================================================
     # Model Usage Metering (M4，spec §13)
     # ========================================================================
-    # 用量事件消费 beat 周期（秒）
-    MODEL_USAGE_CONSUME_INTERVAL_SECONDS: int = int(
-        os.getenv("MODEL_USAGE_CONSUME_INTERVAL_SECONDS", "5")
-    )
     # least-used 选路负载窗口（分钟）：model_usage_records 按 channel_id 滚动聚合
     MODEL_USAGE_LOAD_WINDOW_MINUTES: int = int(
         os.getenv("MODEL_USAGE_LOAD_WINDOW_MINUTES", "15")

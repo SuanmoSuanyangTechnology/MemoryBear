@@ -78,8 +78,7 @@ from app.core.rag.integrations.feishu.client import FeishuAPIClient
 from app.core.rag.integrations.feishu.models import FileInfo
 from app.core.rag.integrations.yuque.client import YuqueAPIClient
 from app.core.rag.integrations.yuque.models import YuqueDocInfo
-from app.core.rag.llm.chat_model import Base
-from app.core.rag.llm.embedding_model import OpenAIEmbed
+from app.core.rag.llm.invoke_legacy import InvokeLegacyChat, InvokeLegacyEmbed
 from app.core.rag.llm.invoke_vision import (
     build_chunk_vision_model,
     vision_media_kind,
@@ -105,7 +104,7 @@ from app.core.utils.datetime_utils import (
     utcnow_naive,
 )
 from app.db import get_db_context, get_db_read
-from app.integrations.model.invoke_backend import ref_from_snapshot
+from app.integrations.model.invoke_backend import ref_from_model_info, ref_from_snapshot
 from app.models import App, AppRelease, Document, File, Knowledge, User, Workspace
 from app.models.end_user_model import EndUser
 from app.models.file_model import FILE_ROLE_SOURCE
@@ -113,7 +112,7 @@ from app.repositories.end_user_repository import get_active_end_users_by_workspa
 from app.schemas import document_schema, file_schema
 from app.services.memory_config_service import MemoryConfigService
 from app.services.memory_forget_service import MemoryForgetService
-from app.services.model_service import ModelApiKeyService, ModelConfigService
+from app.services.model_service import ModelConfigService
 from app.utils.redis_lock import UNLOCK_SCRIPT, RedisFairLock
 
 
@@ -780,40 +779,14 @@ def _run_guarded_evidence_graph_rebuild(
     return result
 
 
-def _resolve_model_api_key(db, model_config_id, tenant_id, role: str):
-    if not model_config_id:
-        raise RuntimeError(f"{role} model config is unavailable")
-    api_key = ModelApiKeyService.get_available_api_key(db, model_config_id, tenant_id=tenant_id)
-    if not api_key:
-        raise RuntimeError(f"No available {role} api key found")
-    return api_key
-
-
-def _build_llm_config(db, llm_id, tenant_id):
-    llm_key = _resolve_model_api_key(db, llm_id, tenant_id, "llm")
-    return {
-        "key": llm_key.api_key,
-        "model_name": llm_key.model_name,
-        "base_url": llm_key.api_base,
-    }
-
-
 def _build_chat_model(db, llm_id, tenant_id):
-    llm_key = _resolve_model_api_key(db, llm_id, tenant_id, "llm")
-    return Base(
-        key=llm_key.api_key,
-        model_name=llm_key.model_name,
-        base_url=llm_key.api_base,
-    )
+    view = ModelConfigService.get_runtime_model_view(db, llm_id, tenant_id=tenant_id)
+    return InvokeLegacyChat(ref_from_model_info(view), model_name=view.model_name)
 
 
 def _build_embedding_model(db, embedding_id, tenant_id):
-    embedding_key = _resolve_model_api_key(db, embedding_id, tenant_id, "embedding")
-    return OpenAIEmbed(
-        key=embedding_key.api_key,
-        model_name=embedding_key.model_name,
-        base_url=embedding_key.api_base,
-    )
+    view = ModelConfigService.get_runtime_model_view(db, embedding_id, tenant_id=tenant_id)
+    return InvokeLegacyEmbed(ref_from_model_info(view), model_name=view.model_name)
 
 
 def _get_estimated_pages(file_name: str, file_binary: bytes) -> int | None:
@@ -1191,9 +1164,15 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
                 "parent_child_mode": bool(db_document.is_parent_child_mode),
             }
             tenant_id = db_workspace.tenant_id
-            llm_config = None
+            llm_view = None
             if auto_questions_topn:
-                llm_config = _build_llm_config(db, db_knowledge.llm_id, tenant_id)
+                if not db_knowledge.llm_id:
+                    raise RuntimeError(
+                        "auto_questions is enabled but llm model config is unavailable"
+                    )
+                llm_view = ModelConfigService.get_runtime_model_view(
+                    db, db_knowledge.llm_id, tenant_id=tenant_id
+                )
             knowledge_id = str(db_knowledge.id)
             # 视觉/转写模型按文件类别选配置槽（G4a：宿主只持非解密视图，凭据与选路在模型服务）
             vision_kind = vision_media_kind(file_name)
@@ -1335,14 +1314,10 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
             qa_prompt = parser_config.get("qa_prompt", None)
             chat_model = None
             if auto_questions_topn:
-                if llm_config is None:
-                    raise RuntimeError("auto_questions is enabled but LLM config is unavailable")
-                chat_model = Base(
-                    key=llm_config["key"],
-                    model_name=llm_config["model_name"],
-                    base_url=llm_config["base_url"],
+                chat_model = InvokeLegacyChat(
+                    ref_from_model_info(llm_view), model_name=llm_view.model_name
                 )
-                logger.info(f"[QA] LLM model: {llm_config['model_name']}, base_url: {llm_config['base_url']}")
+                logger.info(f"[QA] LLM model: {llm_view.model_name}")
                 if qa_prompt:
                     logger.info(f"[QA] Using custom prompt ({len(qa_prompt)} chars)")
 
@@ -7028,31 +7003,6 @@ def scan_scene_summary_idle(
                 )
             except Exception as exc:
                 logger.warning("[SceneSummary] idle scanner lock release failed: %s", exc)
-
-
-@celery_app.task(
-    name="app.tasks.consume_model_usage",
-    bind=False,
-    ignore_result=False,
-    max_retries=0,
-    acks_late=False,
-    time_limit=60,
-    soft_time_limit=50,
-)
-def consume_model_usage_task() -> Dict[str, Any]:
-    """定时任务：消费 model:usage 用量事件落 model_usage_records（spec §13.2）。
-
-    每轮先领 idle > 60s 的遗留 pending，再按「批量 200 × 最多 20 批 / 10s」读新消息；
-    beat 周期由 settings.MODEL_USAGE_CONSUME_INTERVAL_SECONDS（默认 5s）驱动。
-    消费失败（Redis/PG 短暂不可用）不抛：消息留在 pending，下轮 XAUTOCLAIM 重领。
-    """
-    from app.services.usage_consumer import consume_model_usage
-
-    try:
-        return consume_model_usage()
-    except Exception as exc:
-        logger.warning(f"consume_model_usage 本轮失败（下轮重试）: {exc}", exc_info=True)
-        return {"status": "RETRY_LATER", "error": str(exc)}
 
 
 @celery_app.task(

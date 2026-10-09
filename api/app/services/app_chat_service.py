@@ -872,7 +872,7 @@ class AppChatService:
         if isinstance(sq_config, dict) and sq_config.get("enabled"):
             suggested_questions = await self.agent_service._generate_suggested_questions(
                 features_config, result["content"],
-                _api_key_config, {}
+                model_view, {}
             )
 
         audio_url = await self.agent_service._generate_tts(
@@ -1502,7 +1502,7 @@ class AppChatService:
             if isinstance(sq_config, dict) and sq_config.get("enabled"):
                 suggested_questions = await self.agent_service._generate_suggested_questions(
                     features_config, full_content,
-                    _api_key_config, {}
+                    model_view, {}
                 )
                 end_data["suggested_questions"] = suggested_questions
             end_data["audio_url"] = stream_audio_url

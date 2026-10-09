@@ -6,18 +6,16 @@ import io
 from typing import Any, Optional
 import uuid
 
-from fastapi import APIRouter, Body, Depends, HTTPException, status, Query, UploadFile, File, Request
+from fastapi import APIRouter, Depends, HTTPException, status, Query, UploadFile, File, Request
 from fastapi.encoders import jsonable_encoder
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.logging_config import get_api_logger
 from app.core.rag.chunk.hierarchy import GroupedChildChunks, validate_parent_child_result
 from app.core.rag.chunk.metadata import merge_parser_metadata
 from app.core.rag.knowledge_graph.dispatch import dispatch_document_graph_sync
-from app.core.rag.llm.cv_model import QWenCV
 from app.core.rag.llm.invoke_vision import (
     build_chunk_vision_model,
     vision_media_kind,
@@ -39,8 +37,7 @@ from app.schemas.response_schema import ApiResponse
 from app.services import knowledge_service, document_service
 from app.services.file_storage_service import FileStorageService, get_file_storage_service, generate_kb_file_key
 from app.services.knowledge_retrieval_service import KnowledgeRetrievalAccessDenied
-from app.services.model_service import ModelApiKeyService, ModelConfigService
-from app.core.rag.utils.preview_utils import _build_preview_hierarchy
+from app.services.model_service import ModelConfigService
 from app.core.utils.datetime_utils import to_timestamp_ms
 from app.integrations.knowledge.call_profile import CallProfile
 from app.integrations.knowledge.contracts import (
@@ -80,26 +77,6 @@ def _dispatch_document_graph_sync_best_effort(
 
 def _list_all_segments(vector_service: Any, **kwargs: Any) -> list[DocumentChunk]:
     return list(vector_service.iter_by_segment(**kwargs))
-
-
-def _build_image2text_vision_model(db: Session, image2text_id: uuid.UUID, tenant_id: uuid.UUID):
-    if not image2text_id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="image2text model config is unavailable",
-        )
-    api_key = ModelApiKeyService.get_available_api_key(db, image2text_id, tenant_id=tenant_id)
-    if not api_key:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="No available image2text api key found",
-        )
-    return QWenCV(
-        key=api_key.api_key,
-        model_name=api_key.model_name,
-        lang="Chinese",
-        base_url=api_key.api_base,
-    )
 
 
 router = APIRouter(
@@ -363,180 +340,6 @@ async def get_preview_chunks(
     }
     api_logger.info(f"Querying the document block preview list successful: total={total}, returned={len(chunks)} records")
     return success(data=jsonable_encoder(result), msg="Querying the document block preview list succeeded")
-
-
-# @router.post("/{kb_id}/{document_id}/preview", response_model=ApiResponse)
-async def get_preview_chunks_hierarchy(
-        kb_id: uuid.UUID,
-        document_id: uuid.UUID,
-        page: int = Query(1, gt=0),
-        pagesize: int = Query(20, gt=0, le=100),
-        keywords: Optional[str] = Query(None, description="The keywords used to match chunk content"),
-        parser_config_param: Optional[dict] = Body(None, description="Parser config overrides, e.g. {\"layout_recognize\":\"mineru\",\"chunk_token_num\":130,\"parent_child_mode\":true,\"parent_chunk_mode\":\"full-doc\"}"),
-        db: AsyncSession = Depends(get_async_db),
-        current_user: User = Depends(get_current_user_async)
-):
-    """
-    Paged query document chunk preview (nested structure)
-    - Supports three modes: normal chunk, parent-child chunk, and QA chunk
-    - Returns nested DocumentChunk structure, children field contains sub-chunks
-    - Pagination slices at the parent chunk (top-level chunk) level
-    """
-    api_logger.info(f"Paged query document chunk preview hierarchy: kb_id={kb_id}, document_id={document_id}, page={page}, pagesize={pagesize}")
-
-    if page < 1 or pagesize < 1:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="The paging parameter must be greater than 0"
-        )
-
-    db_knowledge = await knowledge_service.get_knowledge_by_id_async(db, knowledge_id=kb_id, current_user=current_user)
-    if not db_knowledge:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="The knowledge base does not exist or access is denied"
-        )
-
-    db_document = await _require_document_in_knowledge(
-        db=db,
-        kb_id=kb_id,
-        document_id=document_id,
-        current_user=current_user,
-    )
-
-    db_file = await db.get(FileModel, db_document.file_id)
-    if not db_file or db_file.kb_id != kb_id:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="The file does not exist or you do not have permission to access it"
-        )
-
-    if not db_file.file_key:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="File has no storage key (legacy data not migrated)"
-        )
-
-    from app.services.file_storage_service import FileStorageService
-    storage_service = FileStorageService()
-
-    try:
-        file_binary = await storage_service.download_file(db_file.file_key)
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"File not found in storage: {e}"
-        )
-
-    def progress_callback(prog=None, msg=None):
-        print(f"prog: {prog} msg: {msg}\n")
-
-    vision_model = _build_image2text_vision_model(db, db_knowledge.image2text_id, current_user.tenant_id)
-    from app.core.rag.chunk import chunk_pipeline as chunk
-    from app.core.rag.chunk.context import ChunkOutputMode
-
-    parser_config = dict(db_document.parser_config)
-
-    if parser_config_param and isinstance(parser_config_param, dict):
-        # 兼容 {"parser_config": {...}} 和直接 {...} 两种传法
-        actual_config = parser_config_param.get("parser_config", parser_config_param)
-        if isinstance(actual_config, dict):
-            parser_config.update(actual_config)
-
-    chunk_mode = parser_config.get("chunk_mode", "normal")
-    parent_child_mode = parser_config.get("parent_child_mode", False)
-
-    if parent_child_mode:
-        chunk_mode = "parent_child"
-
-    try:
-        if chunk_mode == "parent_child":
-            child_res, parent_res, parent_id_map = await asyncio.to_thread(
-                chunk,
-                filename=db_file.file_name,
-                binary=file_binary,
-                from_page=0,
-                to_page=5,
-                callback=progress_callback,
-                vision_model=vision_model,
-                parser_config=parser_config,
-                is_root=False,
-                chunk_output_mode=ChunkOutputMode.PARENT_CHILD,
-                tenant_id=str(current_user.tenant_id),
-                workspace_id=str(db_knowledge.workspace_id),
-                knowledge_id=str(db_document.kb_id),
-                document_id=str(db_document.id),
-                source_file_id=str(db_document.file_id),
-                source_file_name=db_file.file_name,
-            )
-            hierarchy = _build_preview_hierarchy(
-                child_res,
-                chunk_mode="parent_child",
-                parent_chunks=parent_res,
-                parent_id_map=parent_id_map,
-                parent_chunk_mode=str(parser_config.get("parent_chunk_mode") or "paragraph"),
-            )
-        elif chunk_mode == "qa":
-            res = await asyncio.to_thread(
-                chunk,
-                filename=db_file.file_name,
-                binary=file_binary,
-                from_page=0,
-                to_page=5,
-                callback=progress_callback,
-                vision_model=vision_model,
-                parser_config=parser_config,
-                is_root=False,
-                tenant_id=str(current_user.tenant_id),
-                workspace_id=str(db_knowledge.workspace_id),
-                knowledge_id=str(db_document.kb_id),
-                document_id=str(db_document.id),
-                source_file_id=str(db_document.file_id),
-                source_file_name=db_file.file_name,
-            )
-            hierarchy = _build_preview_hierarchy(res, chunk_mode="qa")
-        else:
-            res = await asyncio.to_thread(
-                chunk,
-                filename=db_file.file_name,
-                binary=file_binary,
-                from_page=0,
-                to_page=5,
-                callback=progress_callback,
-                vision_model=vision_model,
-                parser_config=parser_config,
-                is_root=False,
-                tenant_id=str(current_user.tenant_id),
-                workspace_id=str(db_knowledge.workspace_id),
-                knowledge_id=str(db_document.kb_id),
-                document_id=str(db_document.id),
-                source_file_id=str(db_document.file_id),
-                source_file_name=db_file.file_name,
-            )
-            hierarchy = _build_preview_hierarchy(res, chunk_mode="normal")
-    except Exception as e:
-        api_logger.error(f"Document parsing failed: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Document parsing failed: {str(e)}"
-        )
-
-    total = len(hierarchy)
-    start_index = (page - 1) * pagesize
-    end_index = start_index + pagesize
-    paginated = hierarchy[start_index:end_index]
-
-    result = {
-        "items": paginated,
-        "page": {
-            "page": page,
-            "pagesize": pagesize,
-            "total": total,
-            "has_next": page * pagesize < total
-        }
-    }
-    api_logger.info(f"Querying document chunk preview hierarchy succeeded: total={total}, returned={len(paginated)}")
-    return success(data=jsonable_encoder(result), msg="Querying document chunk preview hierarchy succeeded")
 
 
 @router.get("/{kb_id}/{document_id}/chunks", response_model=ApiResponse)
