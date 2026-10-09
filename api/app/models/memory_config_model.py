@@ -102,11 +102,11 @@ class MemoryConfig(Base):
         comment="单条 SceneSummary 的候选社区数量上限",
     )
     compare_all_same_category_communities = Column(
-        Boolean, nullable=False, default=False, server_default="false",
+        Boolean, nullable=False, default=False, server_default=text("false"),
         comment="是否比较同一 L1 下全部已有 SceneCommunity",
     )
     rebuild_new_scene_community_count_enabled = Column(
-        Boolean, nullable=False, default=True, server_default="true",
+        Boolean, nullable=False, default=True, server_default=text("true"),
         comment="是否按新增 SceneCommunity 数量触发重建（本期仅存储）",
     )
     rebuild_new_scene_community_count = Column(
@@ -114,7 +114,7 @@ class MemoryConfig(Base):
         comment="SceneCommunity 重建新增数量（本期仅存储）",
     )
     rebuild_interval_enabled = Column(
-        Boolean, nullable=False, default=True, server_default="true",
+        Boolean, nullable=False, default=True, server_default=text("true"),
         comment="是否按时间间隔触发 SceneCommunity 重建（本期仅存储）",
     )
     rebuild_interval_days = Column(

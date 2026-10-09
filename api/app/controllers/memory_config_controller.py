@@ -15,7 +15,6 @@ from uuid import UUID
 
 from fastapi import APIRouter, Body, Depends, Header, HTTPException, Query, status
 from fastapi.responses import JSONResponse
-from pydantic import ValidationError as PydanticValidationError
 
 from app.controllers.emotion_config_controller import EmotionConfigUpdate
 from app.core.error_codes import BizCode
@@ -43,7 +42,6 @@ from app.schemas.scene_community_schema import (
     CommunityPreviewRequest,
     SceneCommunityConfigUpdate,
 )
-from app.schemas.scene_memory_schema import SceneConfig, SceneConfigUpdate
 from app.services.emotion_config_service import EmotionConfigService
 from app.services.memory_forget_service import MemoryForgetService
 from app.services.memory_storage_service import DataConfigService
@@ -827,17 +825,7 @@ async def update_config_scene_community(
     current_user: CurrentUserSnapshot = Depends(get_current_user_async),
 ):
     """全量更新 SceneCommunity 配置，仅持久化配置字段。"""
-    try:
-        validated = SceneCommunityConfigUpdate.model_validate(payload or {})
-    except PydanticValidationError as exc:
-        return JSONResponse(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            content=fail(
-                BizCode.INVALID_PARAMETER,
-                "SceneCommunity 配置参数不正确",
-                str(exc),
-            ),
-        )
+    validated = SceneCommunityConfigUpdate.model_validate(payload or {})
 
     async with get_async_db_context() as db:
         config = await SceneCommunityConfigService(db).update(

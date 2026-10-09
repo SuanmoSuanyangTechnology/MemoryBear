@@ -589,7 +589,7 @@ async def update_config_scene_community(
     # validated by the shared controller.
     logger.info(
         "V1 update SceneCommunity config - config_id: %s, workspace: %s",
-        body.get("config_id"),
+        body.get("config_id", "unknown"),
         api_key_auth.workspace_id,
     )
     async with get_async_db_context() as auth_db:

@@ -1,6 +1,4 @@
 {
-  "version": "2.2",
-  "frozen_at": "2026-09-20",
   "notice": "L1 唯一真相源：categories 同时包含 O1 分类知识和 P2/P3 社区边界规则。O1 只使用分类字段；P2/P3 只使用当前类别的 community_boundary。",
   "classification_priority": [
     "先判断'这件事最终要完成什么'，再选类目；不以出现的器物、人物或关键词选类目。",
