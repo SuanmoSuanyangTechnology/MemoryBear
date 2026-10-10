@@ -2552,24 +2552,23 @@ class MultiAgentOrchestrator:
             getattr(self, "current_conversation_id", None), _supervisor_prompt, api_key_config
         )
 
-        # ModelApiKey 运行时壳（非 dict），统一走 getattr 读取
+        # 远端模式（G3）：主管与单 Agent 应用同源——只带非解密模型视图，凭据解密/选路/
+        # 换渠道全在模型服务。api_key_config 仍保留给多模态/TTS 等既有凭据消费者，不再进引擎。
+        # 调用方已保证 default_model_config_id 存在（_resolve_supervisor_api_key 前置校验）。
+        model_view = await ModelConfigService.get_runtime_model_view_bridge_async(
+            self.db,
+            self.default_model_config_id,
+            tenant_id=self.tenant_id,
+        )
         return LangChainAgent(
-            model_name=api_key_config.model_name,
-            api_key=api_key_config.api_key,
-            provider=getattr(api_key_config, "provider", None) or "openai",
-            api_base=api_key_config.api_base,
-            input_modalities=list(getattr(api_key_config, "input_modalities", None) or []),
-            output_modalities=list(getattr(api_key_config, "output_modalities", None) or []),
-            features=getattr(api_key_config, "features", None),
+            model_name=model_view.model_name,
+            model_view=model_view,
+            provider=model_view.provider,
             temperature=_get("temperature", 0.7),
             max_tokens=_get("max_tokens", 4096),
             system_prompt=_supervisor_prompt,
             tools=tools,
             streaming=True,
-            tenant_id=getattr(api_key_config, "tenant_id", None),
-            model_config_id=getattr(api_key_config, "model_config_id", None),
-            channel_id=getattr(api_key_config, "channel_id", None),
-            failover_plan=getattr(api_key_config, "failover_plan", None),
             tool_call_limit=max(1, tool_call_limit),
             # S10：显式配置则覆盖引擎动态值；None=引擎按工具数动态算
             max_iterations=loop_max_iterations,
