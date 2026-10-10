@@ -9,13 +9,12 @@ Layer 2 反思引擎第 4 阶段：
    domain_specific_info 三个键，不写 Neo4j；
 2. 结构：通用字段（identity_background, relationships）与 App 绑定的特殊场景（domain_specific_info.<场景名>）并列；
 3. 短会话：数据库读写使用独立短会话，LLM 调用期间不持有 DB 连接；
-4. 门控与时序：碎片数 >= min_fragments（默认 5）才触发；碎片按 dialog_at 升序排序后分片，
+4. 门控与分片：碎片数 >= min_fragments（默认 5）才触发；碎片按 description 中的存储顺序分片，
    每个分片以上一分片的结果作为 existing_metadata 输入。
 """
 
 import json
 import logging
-import re
 import uuid
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -36,18 +35,6 @@ logger = logging.getLogger(__name__)
 
 # 默认每 10 条碎片形成一个分片
 METADATA_CHUNK_SIZE: int = 10
-
-# 碎片时间戳前缀匹配正则：[2026-09-15T10:00:00+08:00]
-_TIME_PREFIX_PATTERN = re.compile(r"^\[([0-9]{4}-[0-9]{2}-[0-9]{2}[^\]]*)\]")
-
-
-def _sort_fragments_by_timestamp(fragments: List[str]) -> List[str]:
-    """按碎片开头的 [dialog_at] 时间戳严格升序排序（保证因果时序传递）。"""
-    def _extract_ts(f: str) -> str:
-        m = _TIME_PREFIX_PATTERN.match(f.strip())
-        return m.group(1) if m else ""
-
-    return sorted(fragments, key=_extract_ts)
 
 
 # ── 1. 数据库短会话辅助函数 ──
@@ -394,11 +381,9 @@ async def extract_metadata_for_user(
     entity_id = target_entity["entity_id"]
     entity_name = target_entity.get("entity_name", "用户")
 
-    # ── Step 2.1 碎片按 dialog_at 严格升序排序（保证因果时序）──
-    target_fragments = _sort_fragments_by_timestamp(target_fragments)
     logger.info(
         f"[Metadata] 实体 {entity_name}({entity_id}) 触发提取，"
-        f"碎片总数: {len(target_fragments)} (已按时间升序排序)"
+        f"碎片总数: {len(target_fragments)}"
     )
 
     try:
