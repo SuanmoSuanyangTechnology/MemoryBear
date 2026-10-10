@@ -31,7 +31,8 @@ export interface ReembedInfo {
 interface EmbeddingAlertProps {
   reembedJobId?: string | null;
   source?: 'space' | 'user';
-  onChange?: Dispatch<SetStateAction<string | null | undefined>>
+  onChange?: Dispatch<SetStateAction<string | null | undefined>>;
+  className?: string;
 }
 
 interface SpaceAlertConfig {
@@ -95,6 +96,7 @@ const EmbeddingAlert: FC<EmbeddingAlertProps> = ({
   reembedJobId,
   source = 'space',
   onChange,
+  className,
 }) => {
   const { t } = useTranslation();
   const embeddingRebuildModalRef = useRef<EmbeddingRebuildModalRef>(null)
@@ -168,7 +170,7 @@ const EmbeddingAlert: FC<EmbeddingAlertProps> = ({
 
   return (
     <>
-      <RbAlert color={alertColors[reembedInfo.status]}>
+      <RbAlert color={alertColors[reembedInfo.status]} className={className}>
         <Flex align="center" justify="space-between" gap={12} className="rb:w-full!">
           {source === 'space' && spaceAlertConfig && (
             <div className="rb:flex-1!">
