@@ -1,18 +1,20 @@
-"""鉴权策略抽象（评审稿 4.2.1）：direct 内置（社区版）/ gateway 企业扩展。
+"""Auth strategy abstraction: direct built-in (community) / gateway enterprise plugin.
 
-direct：网关不终结凭据——透传 Authorization/X-API-Key 给下游服务自验（SDK 入站），
-网关只做 Redis 限流（按 IP 计数，评审焦点 #12）。
-gateway：终结凭据 → 验签/快照/黑名单 → 签发内部 token + 注入身份头。
-企业版 gateway 策略不在本仓库：实现位于私有 enterprise-extensions 包
-（AUTH_STRATEGY=gateway 时经 load_strategy 惰性加载，缺失即配置错误响亮暴露），
-遵循企业/开源拆分规范（docs 见外层仓库）。
+Both strategies terminate credentials at the gateway and inject identity
+headers; they differ only in the exit:
+- direct: run the shared termination pipeline (src/termination.py) — verify,
+  snapshot, blacklist, rate limit — and inject identity headers, no internal token;
+- gateway: the same pipeline plus internal-token issuance. Not in this repo:
+  implemented by the private enterprise-extensions package (lazily loaded when
+  AUTH_STRATEGY=gateway; absence is a loud RuntimeError because an open-source
+  build cannot install that package).
 
-协议契约（AuthStrategy/AuthResult）是企业策略与开源侧的唯一接口，须保持稳定；
-新增企业策略域时只加 name 分支 + 私有包模块，不改 middleware 骨架。
+The protocol contract (AuthStrategy/AuthResult) is the only interface between
+the enterprise strategy and the open-source side; adding a new strategy domain
+only adds a name branch + private package module, never a middleware rework.
 """
 from __future__ import annotations
 
-import logging
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Protocol
 
@@ -22,12 +24,9 @@ if TYPE_CHECKING:
     # 仅注解用：middleware.py 模块级 import 本模块，运行时反引会成环（部分初始化失败）
     from .middleware import GatewayDeps
 
-logger = logging.getLogger(__name__)
-
 
 @dataclass
 class AuthResult:
-    direct: bool = False
     internal_token: str | None = None
     identity_headers: dict[str, str] = field(default_factory=dict)
     status_code: int | None = None          # 非 None = 拒绝响应
@@ -41,20 +40,14 @@ class AuthStrategy(Protocol):
 
 
 class DirectAuthStrategy:
-    """社区版：透传凭据 + 按 IP 限流。不读快照/黑名单，不签发内部 token。"""
+    """Community shape: terminate credentials via the shared pipeline and inject
+    identity headers only (no internal token; downstream trusts the headers)."""
 
     async def authenticate(self, request: Request, deps: GatewayDeps) -> AuthResult:
-        ip = request.client.host if request.client else "unknown"
-        # 固定窗口按 IP 限流（fail-open：Redis 故障旁路，评审稿 4.2.2）
-        try:
-            allowed, headers = await deps.limiter.check_qps(f"ip:{ip}", 100)
-            if not allowed:
-                # 限流头随 429 回包（middleware 透出，与 gateway 语义一致）
-                return AuthResult(status_code=429, detail="rate limit exceeded",
-                                  headers=headers)
-        except Exception:
-            logger.warning("rate limit bypassed (redis down): ip=%s", ip)
-        return AuthResult(direct=True)
+        # Deferred import: termination.py imports AuthResult from this module at
+        # module level — a top-level import here would close the cycle.
+        from .termination import terminate
+        return await terminate(request, deps)
 
 
 def load_strategy(name: str, deps: GatewayDeps) -> AuthStrategy:

@@ -117,11 +117,6 @@ def create_app(settings: ModelServiceSettings | None = None) -> FastAPI:
             auth_mode=service_settings.model_service_auth_mode,
             service_name=service_settings.model_service_internal_name,
             jwks_url=service_settings.model_service_jwks_url,
-            secret=(
-                service_settings.model_service_secret.get_secret_value()
-                if service_settings.model_service_secret is not None
-                else None
-            ),
             redis=runtime.redis.client,
         ),
     )

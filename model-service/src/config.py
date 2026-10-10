@@ -264,14 +264,6 @@ class ModelServiceSettings(BaseSettings):
         default=None,
         validation_alias="MODEL_SERVICE_JWKS_URL",
     )
-    # Community direct mode: HS256 secret for verifying caller bearer JWTs locally.
-    # Must carry the same value as the monolith's SECRET_KEY (tokens are signed
-    # there; mirrors the kb KB_SECRET precedent). Unused in gateway mode, where
-    # internal tokens are verified through MODEL_SERVICE_JWKS_URL instead.
-    model_service_secret: SecretStr | None = Field(
-        default=None,
-        validation_alias="MODEL_SERVICE_SECRET",
-    )
 
     @classmethod
     def settings_customise_sources(

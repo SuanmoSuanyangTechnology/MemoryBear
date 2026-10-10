@@ -69,16 +69,9 @@ def create_app(settings: KnowledgeSettings | None = None) -> FastAPI:
         KbAuthMiddleware,
         kb_auth=KbAuthConfig(
             auth_mode=service_settings.kb_auth_mode,
-            direct_jwt_verify_enabled=service_settings.kb_direct_jwt_verify_enabled,
             service_name=service_settings.kb_service_name,
             kill_switch_file=service_settings.kb_kill_switch_file,
             jwks_url=service_settings.kb_jwks_url,
-            secret=(
-                service_settings.kb_secret.get_secret_value()
-                if service_settings.kb_secret is not None
-                else None
-            ),
-            api_key_verify_url=service_settings.kb_api_key_verify_url,
             redis=runtime.redis.client,
         ),
     )
