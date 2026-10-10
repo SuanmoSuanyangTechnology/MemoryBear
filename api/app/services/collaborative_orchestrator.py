@@ -81,14 +81,19 @@ class CollaborativeOrchestrator:
         Returns:
             Agent ID 到配置的映射
         """
+        from app.services.multi_agent_release_resolver import resolve_effective_release_id
+
         agents = {}
         for agent_data in sub_agents_data:
-            agent_id = agent_data.get("agent_id")
-            if agent_id:
-                agents[str(agent_id)] = {
-                    "info": agent_data,
-                    "config": None  # 稍后加载
-                }
+            if not agent_data.get("agent_id"):
+                continue
+            # 库里 agent_id 是子 Agent 的应用 ID（旧数据为 release ID），
+            # 这里按版本策略解析成有效 release ID，后续加载/handoff 都以它为键。
+            effective_id = str(resolve_effective_release_id(self.db, agent_data, strict=False))
+            agents[effective_id] = {
+                "info": {**agent_data, "agent_id": effective_id},
+                "config": None  # 稍后加载
+            }
         return agents
     
     async def execute_with_handoffs(

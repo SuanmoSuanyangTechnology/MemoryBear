@@ -1,24 +1,41 @@
-"""Handoffs 服务 - 基于 LangGraph 的多 Agent 协作"""
+"""Handoffs 服务 - 基于 LangGraph 的多 Agent 协作
+
+P0-2：图状态（checkpointer）从进程内 `MemorySaver` 外置到 Redis，thread_id
+由裸 conversation_id 改为 `{tenant}:{conversation}`（租户隔离 + 长度有界）。
+效果是重启 / 多 worker 交替处理同一会话时 handoff 历史不再丢失；代价是
+`messages` 通道会跨轮累积，故 reducer 改为有界追加（见 `append_messages`）。
+checkpointer 由编排层注入，Redis 不可用时退回 MemorySaver（行为等同改造前）。
+"""
 import json
+import os
 import uuid
 import threading
 from collections import OrderedDict
 from typing import List, Dict, Any, Optional, AsyncGenerator, Annotated
 from typing_extensions import TypedDict
 
-from langchain_core.messages import HumanMessage, AIMessage, BaseMessage, AIMessageChunk
+from langchain_core.messages import (
+    HumanMessage,
+    AIMessage,
+    BaseMessage,
+    AIMessageChunk,
+    ToolMessage,
+)
 from langgraph.graph import StateGraph, START, END
 from langgraph.types import Command
 from langgraph.checkpoint.memory import MemorySaver
 from langchain_core.tools import tool
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
-import operator
 
 from app.core.logging_config import get_business_logger
 from app.core.models import RedBearLLM, RedBearModelConfig
 from app.models.models_model import ModelType
 from app.services.model_service import ModelApiKeyService
+from app.services.multi_agent_variable_contract import (
+    render_messages,
+    render_template,
+)
 
 logger = get_business_logger()
 
@@ -30,21 +47,70 @@ def replace_value(current, new):
     return new
 
 
+# ==================== 常量 ====================
+
+MAX_HANDOFFS = 5  # 最大 handoff 次数
+
+# P0-2：checkpoint 外置后，HandoffState.messages（原 operator.add）会跨轮无限累积
+# ——此前每请求一个 MemorySaver，协作模式实际上是无历史的。历史延续正是外置的
+# 目的，但无界增长既撑爆模型上下文、也让 checkpoint 体积失控。因此在 reducer 层
+# 就做有界追加：状态里最多保留最近 STATE_HISTORY_MESSAGES 条。
+STATE_HISTORY_MESSAGES = int(os.getenv("CLUSTER_HANDOFFS_STATE_HISTORY", "60"))
+# 送进 LLM 的窗口可更小（省 token）；默认与状态上限一致。
+MAX_HISTORY_MESSAGES = int(
+    os.getenv("CLUSTER_HANDOFFS_MAX_HISTORY", str(STATE_HISTORY_MESSAGES))
+)
+
+
+def _drop_orphan_tool_messages(messages: List[BaseMessage]) -> List[BaseMessage]:
+    """头部若是 ToolMessage（其配对的 AIMessage.tool_calls 已被裁掉），继续前移。
+
+    部分 provider 见到"无配对 tool_call 的 ToolMessage"会直接报错，
+    因此裁剪点必须落在一条非 ToolMessage 上。
+    """
+    start = 0
+    while start < len(messages) and isinstance(messages[start], ToolMessage):
+        start += 1
+    return messages[start:] if start else messages
+
+
+def append_messages(current: Optional[List[BaseMessage]], new) -> List[BaseMessage]:
+    """有界消息追加 reducer（替代 operator.add）。
+
+    current 可能为 None（首轮），new 可能是单条或列表。合并后裁到
+    STATE_HISTORY_MESSAGES，并避免头部留下孤儿 ToolMessage。
+    """
+    base = list(current or [])
+    if new is None:
+        merged = base
+    elif isinstance(new, list):
+        merged = base + list(new)
+    else:
+        merged = base + [new]
+    if len(merged) > STATE_HISTORY_MESSAGES:
+        merged = merged[-STATE_HISTORY_MESSAGES:]
+    return _drop_orphan_tool_messages(merged)
+
+
+def trim_history(messages: List[BaseMessage]) -> List[BaseMessage]:
+    """把送进 LLM 的消息裁到最近 MAX_HISTORY_MESSAGES 条（并去孤儿 ToolMessage）。"""
+    if not messages:
+        return messages
+    if len(messages) > MAX_HISTORY_MESSAGES:
+        messages = messages[-MAX_HISTORY_MESSAGES:]
+    return _drop_orphan_tool_messages(messages)
+
+
 # ==================== 状态定义 ====================
 
 class HandoffState(TypedDict):
     """Handoff 状态"""
-    messages: Annotated[List[BaseMessage], operator.add]  # 消息列表追加
+    messages: Annotated[List[BaseMessage], append_messages]  # 有界追加（P0-2）
     active_agent: Annotated[Optional[str], replace_value]
     handoff_count: Annotated[int, replace_value]
     handoff_history: Annotated[List[str], replace_value]
     pending_question: Annotated[Optional[str], replace_value]
     previous_answer: Annotated[Optional[str], replace_value]
-
-
-# ==================== 常量 ====================
-
-MAX_HANDOFFS = 5  # 最大 handoff 次数
 
 
 # ==================== 工具输入模型 ====================
@@ -124,13 +190,26 @@ def create_tools_for_agent(agent_name: str, configs: Dict) -> List:
 # ==================== Agent 节点创建 ====================
 
 def create_agent_node(agent_name: str, system_prompt: str, tools: List,
-                      model_config: RedBearModelConfig):
-    """创建 Agent 节点（非流式）"""
+                      model_config: RedBearModelConfig,
+                      variables: Optional[Dict[str, Any]] = None,
+                      run_config: Optional[Dict[str, Any]] = None):
+    """创建 Agent 节点（非流式）
+
+    Args:
+        variables: 集群变量值包（S5）。非空时：
+            1) system_prompt 走 Jinja 全渲染（与单 Agent 应用 AgentRunService 同口径）；
+            2) 消息正文做保守渲染（只替换包里存在的 {{name}}）。
+        run_config: 透传给 LangChain 调用的运行时配置（metadata/tags），
+            承载 user_id / memory / storage_type / user_rag_memory_id 的调用上下文。
+    """
     llm = RedBearLLM(model_config, type=ModelType.LLM)
     
     # 绑定工具
     if tools:
         llm = llm.bind_tools(tools)
+
+    # 变量渲染在建节点时做一次即可（system_prompt 本轮不变），避免每次 aitoken 重复解析
+    rendered_system_prompt = render_template(system_prompt, variables)
 
     async def agent_node(state: HandoffState) -> Dict[str, Any]:
         """Agent 节点执行函数"""
@@ -169,11 +248,17 @@ def create_agent_node(agent_name: str, system_prompt: str, tools: List,
             effective_messages = [HumanMessage(content=context_msg)]
             logger.info(f"Agent {agent_name} 收到转交问题（非流式）: {pending_question[:100]}...")
         else:
-            effective_messages = messages
+            # P0-2：checkpoint 外置后 messages 跨轮累积，送 LLM 前裁窗口
+            effective_messages = trim_history(messages)
         
-        full_messages = [{"role": "system", "content": system_prompt}] + effective_messages
+        # S5：用户消息 / 转交上下文里的 {{变量}} 渲染（保守替换，未定义的占位符保持原样）
+        if variables:
+            effective_messages = render_messages(effective_messages, variables)
+
+        full_messages = [{"role": "system", "content": rendered_system_prompt}] + effective_messages
         
-        response = await llm.ainvoke(full_messages)
+        response = await llm.ainvoke(full_messages, config=run_config) if run_config \
+            else await llm.ainvoke(full_messages)
         
         # 检查工具调用
         if hasattr(response, 'tool_calls') and response.tool_calls:
@@ -248,13 +333,21 @@ def create_agent_node(agent_name: str, system_prompt: str, tools: List,
 
 
 def create_streaming_agent_node(agent_name: str, system_prompt: str, tools: List,
-                                 model_config: RedBearModelConfig):
-    """创建支持流式输出的 Agent 节点"""
+                                 model_config: RedBearModelConfig,
+                                 variables: Optional[Dict[str, Any]] = None,
+                                 run_config: Optional[Dict[str, Any]] = None):
+    """创建支持流式输出的 Agent 节点
+
+    Args:
+        variables / run_config: 同 create_agent_node（S5 变量契约与上下文透传）。
+    """
     llm = RedBearLLM(model_config, type=ModelType.LLM)
     
     # 绑定工具
     if tools:
         llm = llm.bind_tools(tools)
+
+    rendered_system_prompt = render_template(system_prompt, variables)
 
     async def agent_node(state: HandoffState):
         """Agent 节点执行函数（流式）"""
@@ -295,14 +388,20 @@ def create_streaming_agent_node(agent_name: str, system_prompt: str, tools: List
             effective_messages = [HumanMessage(content=context_msg)]
             logger.info(f"Agent {agent_name} 收到转交问题（流式）: {pending_question[:100]}...")
         else:
-            effective_messages = messages
+            # P0-2：checkpoint 外置后 messages 跨轮累积，送 LLM 前裁窗口
+            effective_messages = trim_history(messages)
         
-        full_messages = [{"role": "system", "content": system_prompt}] + effective_messages
+        # S5：用户消息 / 转交上下文里的 {{变量}} 渲染（保守替换，未定义的占位符保持原样）
+        if variables:
+            effective_messages = render_messages(effective_messages, variables)
+
+        full_messages = [{"role": "system", "content": rendered_system_prompt}] + effective_messages
 
         full_content = ""
         collected_tool_calls = {}
         
-        async for chunk in llm.astream(full_messages):
+        _chunks = llm.astream(full_messages, config=run_config) if run_config else llm.astream(full_messages)
+        async for chunk in _chunks:
             if hasattr(chunk, 'content') and chunk.content:
                 full_content += chunk.content
             
@@ -538,7 +637,16 @@ async def convert_multi_agent_config_to_handoffs(
         if agent_id:
             try:
                 from sqlalchemy.ext.asyncio import AsyncSession
-                agent_id_uuid = uuid.UUID(agent_id) if isinstance(agent_id, str) else agent_id
+                # 版本策略：orchestrator 传入的是解析后的条目（agent_id=有效 release ID）；
+                # 直接传库内原始条目时 agent_id 可能是应用 ID——pinned 且带 release_id 取该固定版本，
+                # 否则沿用下方"先按 release_id 查，找不到按 app_id 取当前发布版本"。
+                _pinned_release_id = (
+                    sub_agent.get("release_id")
+                    if sub_agent.get("release_policy") == "pinned"
+                    else None
+                )
+                _lookup_id = _pinned_release_id or agent_id
+                agent_id_uuid = uuid.UUID(_lookup_id) if isinstance(_lookup_id, str) else _lookup_id
                 is_async = isinstance(db, AsyncSession)
 
                 # 先尝试作为 release_id 查询
@@ -655,16 +763,37 @@ class HandoffsService:
     def __init__(
         self,
         agent_configs: Dict[str, Dict],
-        streaming: bool = True
+        streaming: bool = True,
+        variables: Optional[Dict[str, Any]] = None,
+        runtime_context: Optional[Dict[str, Any]] = None,
+        checkpointer: Optional[Any] = None,
+        thread_prefix: Optional[str] = None
     ):
         """初始化 Handoffs 服务
         
         Args:
             agent_configs: Agent 配置字典，每个 Agent 包含自己的 model_config
             streaming: 是否启用流式输出
+            variables: 集群变量值包（S5）。此前协作链路**完全没有变量**——集群入口传进来的
+                variables 在 orchestrator 层就被丢掉了，协作模式等于"裸 LLM 群聊"。这里
+                收下后交给各 Agent 节点做 system_prompt / 消息渲染，体感与单 Agent 应用对齐。
+            runtime_context: 集群调用上下文 {user_id, memory, storage_type, user_rag_memory_id}。
+                同样是被丢弃的一批参数；现阶段以 LangChain 调用 metadata/tags 的形式挂在每次
+                LLM 调用上（可观测归因），后续接入记忆/知识库时不必再改链路签名。
+            checkpointer: 图状态后端（P0-2）。由编排层通过
+                `create_async_checkpointer()` 注入 —— Redis 可用时状态外置，
+                多 worker / 重启后同一会话的 handoff 历史延续；不可用时传 None，
+                退化为进程内 `MemorySaver`（等同改造前）。这里不在本类内部建连接，
+                是为了让降级决策集中在编排层一处。
+            thread_prefix: thread_id 的租户前缀（`{tenant}:{conversation}`）。
+                租户隔离靠它 —— 跨租户拼不出同一 thread_id，就读不到彼此的 checkpoint。
         """
         self.agent_configs = agent_configs
         self.streaming = streaming
+        self.variables = variables or None
+        self.runtime_context = runtime_context or None
+        self.checkpointer = checkpointer
+        self.thread_prefix = thread_prefix or None
         self._graph = None
         
         # 验证每个 Agent 都有模型配置
@@ -672,7 +801,40 @@ class HandoffsService:
             if not config.get("model_config"):
                 raise ValueError(f"Agent {agent_name} 没有配置模型")
         
-        logger.info(f"HandoffsService 初始化, agents: {list(self.agent_configs.keys())}")
+        logger.info(
+            f"HandoffsService 初始化, agents: {list(self.agent_configs.keys())}",
+            extra={
+                "variable_count": len(self.variables or {}),
+                "runtime_context": sorted((self.runtime_context or {}).keys()),
+                "checkpoint_backend": type(self.checkpointer).__name__ if self.checkpointer else "memory",
+                "thread_prefix": self.thread_prefix,
+            },
+        )
+
+    def _thread_id(self, conversation_id: str) -> str:
+        """构造 checkpoint thread_id：`{tenant}:{conversation}`，超长自动摘要。
+
+        P0-2：此前直接用裸 conversation_id —— 一是没有租户隔离（不同租户的
+        同 UUID 会撞），二是外置到 Redis 后 key 长度需要有界。
+        """
+        from app.core.agent.redis_checkpoint import build_thread_id
+
+        return build_thread_id(self.thread_prefix, conversation_id)
+
+    def _build_run_config(self) -> Optional[Dict[str, Any]]:
+        """把集群调用上下文转成 LangChain 运行时配置。
+
+        没有上下文时返回 None（保持改造前的调用形态，不多传一个空 config）。
+        """
+        if not self.runtime_context:
+            return None
+        metadata = {k: v for k, v in self.runtime_context.items() if v not in (None, "")}
+        metadata["graph"] = "handoffs"
+        tags = ["cluster:collaboration"]
+        user_id = metadata.get("user_id")
+        if user_id:
+            tags.append(f"end_user:{user_id}")
+        return {"metadata": metadata, "tags": tags}
     
     def _build_graph(self):
         """构建 LangGraph 图"""
@@ -683,6 +845,7 @@ class HandoffsService:
             
             raise ValueError("至少需要一个 Agent 配置")
         
+        run_config = self._build_run_config()
         for agent_name in agent_names:
             config = self.agent_configs[agent_name]
             tools = create_tools_for_agent(agent_name, self.agent_configs)
@@ -695,14 +858,18 @@ class HandoffsService:
                     agent_name=agent_name,
                     system_prompt=config.get("system_prompt", f"你是 {agent_name}"),
                     tools=tools,
-                    model_config=agent_model_config
+                    model_config=agent_model_config,
+                    variables=self.variables,
+                    run_config=run_config,
                 )
             else:
                 agent_node = create_agent_node(
                     agent_name=agent_name,
                     system_prompt=config.get("system_prompt", f"你是 {agent_name}"),
                     tools=tools,
-                    model_config=agent_model_config
+                    model_config=agent_model_config,
+                    variables=self.variables,
+                    run_config=run_config,
                 )
             builder.add_node(agent_name, agent_node)
 
@@ -713,8 +880,10 @@ class HandoffsService:
         for agent_name in agent_names:
             builder.add_conditional_edges(agent_name, route_after_agent, agent_names + [END])
 
-        memory = MemorySaver()
-        return builder.compile(checkpointer=memory)
+        # P0-2：checkpointer 外置。注入什么就用什么（Redis 版由编排层探测后传入）；
+        # 未注入时保持 MemorySaver —— 行为等同改造前，图状态仅本进程有效。
+        checkpointer = self.checkpointer or MemorySaver()
+        return builder.compile(checkpointer=checkpointer)
     
     @property
     def graph(self):
@@ -733,9 +902,16 @@ class HandoffsService:
         message: str,
         conversation_id: str = None
     ) -> Dict[str, Any]:
-        """非流式聊天"""
+        """非流式聊天
+
+        P0-2：thread_id 带租户前缀。注意 checkpoint 持久化带来的语义变化——
+        此前每请求新建 HandoffsService + MemorySaver，图状态每轮清零（协作模式
+        实际无历史）；现在同一会话跨轮延续：messages 累积（有界）、active_agent
+        沿用上一轮结束时的 Agent（上下文连续性）。handoff_count / handoff_history /
+        pending_question 在入参里显式归零，因此"本轮转交预算"不受上一轮影响。
+        """
         conversation_id = conversation_id or f"conv-{uuid.uuid4().hex[:8]}"
-        config = {"configurable": {"thread_id": str(conversation_id)}}
+        config = {"configurable": {"thread_id": self._thread_id(conversation_id)}}
         
         logger.info(f"Handoffs chat: conversation_id={conversation_id}, message={message[:50]}...")
         
@@ -748,10 +924,19 @@ class HandoffsService:
         }, config=config)
         
         # 提取响应
+        # P0-2：checkpoint 外置后 result["messages"] 含跨轮历史，取"第一条 AIMessage"
+        # 会拿到上一轮的回复。改为从尾部倒序找，且只在本轮入参的 HumanMessage 之后找——
+        # 本轮若没有产出带内容的 AIMessage，宁可返回空，也不回退成上一轮的回复。
         response_content = ""
         total_tokens = 0
-        for msg in result.get("messages", []):
-            if isinstance(msg, AIMessage):
+        all_messages = result.get("messages", [])
+        turn_start = 0
+        for i in range(len(all_messages) - 1, -1, -1):
+            if isinstance(all_messages[i], HumanMessage):
+                turn_start = i + 1
+                break
+        for msg in reversed(all_messages[turn_start:]):
+            if isinstance(msg, AIMessage) and msg.content:
                 response_content = msg.content
                 response_meta = msg.response_metadata if hasattr(msg, 'response_metadata') else None
                 total_tokens = response_meta.get("token_usage", {}).get("total_tokens", 0) if response_meta else 0
@@ -763,6 +948,9 @@ class HandoffsService:
             "response": response_content,
             "message_count": len(result.get("messages", [])),
             "handoff_count": result.get("handoff_count", 0),
+            # 本次运行依次激活过的 Agent（发起过 handoff 的按序追加自己）；
+            # 编排层用它为每个激活补一条子执行记录（与流式路径的树结构对齐）
+            "handoff_history": list(result.get("handoff_history", [])),
             "usage": {
                     "prompt_tokens": 0,
                     "completion_tokens": 0,
@@ -775,9 +963,9 @@ class HandoffsService:
         message: str,
         conversation_id: str = None
     ) -> AsyncGenerator[str, None]:
-        """流式聊天"""
+        """流式聊天（P0-2：thread_id 带租户前缀，图状态跨轮延续，语义同 `chat`）"""
         conversation_id = conversation_id or f"conv-{uuid.uuid4().hex[:8]}"
-        config = {"configurable": {"thread_id": str(conversation_id)}}
+        config = {"configurable": {"thread_id": self._thread_id(conversation_id)}}
         
         logger.info(f"Handoffs stream chat: conversation_id={conversation_id}, message={message[:50]}...")
         
@@ -862,9 +1050,19 @@ class HandoffsService:
                 elif kind == "on_chat_model_end":
                     output_message = event.get("data", {}).get("output", {})
                     if isinstance(output_message, AIMessageChunk):
-                        response_meta = output_message.response_metadata if hasattr(output_message, 'response_metadata') else None
-                        total_tokens = response_meta.get("token_usage", {}).get("total_tokens",
-                                                                                0) if response_meta else 0
+                        # S4：token usage 兼容三层取值（LangChain 新版在
+                        # usage_metadata，OpenAI 系在 response_metadata.token_usage，
+                        # 部分 provider 在 response_metadata.usage）。
+                        total_tokens = 0
+                        usage_meta = getattr(output_message, 'usage_metadata', None)
+                        if isinstance(usage_meta, dict):
+                            total_tokens = usage_meta.get("total_tokens", 0)
+                        else:
+                            response_meta = output_message.response_metadata if hasattr(output_message, 'response_metadata') else None
+                            if response_meta:
+                                _tu = response_meta.get("token_usage") or response_meta.get("usage") or {}
+                                if isinstance(_tu, dict):
+                                    total_tokens = _tu.get("total_tokens", 0)
                         usage_payload = json.dumps({"total_tokens": total_tokens}, ensure_ascii=False)
                         yield f"event: sub_usage\ndata: {usage_payload}\n\n"
                     if collected_tool_calls:

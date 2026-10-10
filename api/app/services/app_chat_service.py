@@ -206,6 +206,123 @@ class AppChatService:
         )
         return len(existing_messages) > 0
 
+    async def _resolve_cluster_opening(
+            self,
+            orchestrator: Any,
+            conversation_id: uuid.UUID,
+            variables: Optional[Dict[str, Any]],
+    ) -> tuple:
+        """集群新会话开场白：仅 features.opening_statement 开启时才查库判断新会话。
+
+        向后兼容：存量集群没有 features → 直接返回 (None, [])，不产生任何额外查询。
+        失败降级为无开场白，不阻断对话。
+        """
+        features = getattr(orchestrator, "_features", None) or {}
+        opening_cfg = features.get("opening_statement")
+        if not (isinstance(opening_cfg, dict) and opening_cfg.get("enabled") and opening_cfg.get("statement")):
+            return None, []
+        try:
+            is_new_conversation = not await self._conversation_has_messages(conversation_id)
+            from app.services.cluster_chat_features import resolve_opening
+
+            return resolve_opening(features, variables, is_new_conversation)
+        except Exception as e:  # noqa: BLE001 - 开场白是增量能力
+            logger.warning(f"集群开场白解析失败（已跳过）: {e}")
+            return None, []
+
+    async def _cluster_annotation_hit(
+            self,
+            config: Any,
+            message: str,
+            conversation_id: uuid.UUID,
+            message_id: uuid.UUID,
+            user_message_id: uuid.UUID,
+            storage_type: Optional[str] = None,
+            user_rag_memory_id: Optional[str] = None,
+            source: str = "",
+    ) -> Optional[dict]:
+        """集群标注命中（对齐 Agent 应用）：命中则落库 user/assistant 消息并返回标注结果。
+
+        向后兼容：按 app_id 查 AppAnnotationSetting，未配置/未启用/无标注一律返回 None，
+        调用方继续走正常编排；任何异常也降级为 None（标注是增量能力，不阻断对话）。
+        记忆派发只在集群记忆开关（supervisor_config.memory.enabled）开启时进行。
+        """
+        try:
+            from app.models.annotation_model import HitLogSource
+
+            match = await self._check_annotation_match_async(
+                config.app_id, message, source=source or HitLogSource.EXTERNAL
+            )
+            if not match:
+                return None
+            answer = match["answer"]
+            await self.conversation_service.add_message_async(
+                message_id=user_message_id,
+                conversation_id=conversation_id,
+                role="user",
+                content=message,
+                meta_data={"files": []},
+            )
+            await self.conversation_service.add_message_async(
+                message_id=message_id,
+                conversation_id=conversation_id,
+                role="assistant",
+                content=answer,
+                meta_data={"usage": {}},
+            )
+            supervisor_config = getattr(config, "supervisor_config", None)
+            if hasattr(supervisor_config, "model_dump"):
+                supervisor_config = supervisor_config.model_dump()
+            memory_cfg = (supervisor_config or {}).get("memory") if isinstance(supervisor_config, dict) else None
+            if isinstance(memory_cfg, dict) and memory_cfg.get("enabled"):
+                await self.conversation_service.dispatch_memory_pair(
+                    conversation_id,
+                    user_message={"id": user_message_id, "content": message, "meta_data": {"files": []}},
+                    assistant_message={"id": message_id, "content": answer, "meta_data": {"usage": {}}},
+                    storage_type=storage_type or "neo4j",
+                    user_rag_memory_id=user_rag_memory_id or "",
+                )
+            return match
+        except Exception as e:  # noqa: BLE001 - 标注是增量能力
+            logger.warning(f"集群标注命中处理失败（已跳过，走正常编排）: {e}")
+            return None
+
+    async def _build_cluster_files_persist(
+            self,
+            files: list[FileInput],
+            orchestrator: Any,
+    ) -> tuple:
+        """集群本轮附件的落库内容（与 Agent 应用同口径）。
+
+        Returns:
+            (files_meta, history_files)：files_meta 写 user 消息 meta.files；
+            history_files 仅在主管实际处理过附件时非空（供后续轮次水合历史）。
+        """
+        files_meta: list = []
+        local_ids = [
+            f.upload_file_id for f in files
+            if f.transfer_method.value == "local_file" and f.upload_file_id
+            and (not f.name or not f.size)
+        ]
+        meta_map = await self._fetch_completed_file_metadata(local_ids) if local_ids else {}
+        for f in files:
+            name, size = f.name, f.size
+            if f.transfer_method.value == "local_file" and f.upload_file_id and (not name or not size):
+                meta = meta_map.get(str(f.upload_file_id))
+                if meta:
+                    name = name or meta.file_name
+                    size = size or meta.file_size
+            files_meta.append(serialize_file_reference(f, name=name, size=size))
+
+        history_files = None
+        processed_files = getattr(orchestrator, "_turn_processed_files", None)
+        if processed_files:
+            history_files = {
+                "content": sanitize_processed_files_for_history(processed_files),
+                "provider": getattr(orchestrator, "_turn_files_provider", None),
+            }
+        return files_meta, history_files
+
     async def _record_api_key_usage(self, api_key_id: uuid.UUID | None) -> bool:
         if not api_key_id:
             return False
@@ -1861,19 +1978,48 @@ class AppChatService:
             memory: bool = True,
             storage_type: Optional[str] = None,
             user_rag_memory_id: Optional[str] = None,
+            thinking: bool = False,
+            execution_mode: Optional[str] = None,
+            files: Optional[List[FileInput]] = None,
     ) -> Dict[str, Any]:
-        """多 Agent 聊天（非流式）"""
+        """多 Agent 聊天（非流式）
+
+        thinking / execution_mode / files 为对齐 Agent 应用新增的可选参数，缺省 = 旧行为。
+        """
 
         start_time = time.time()
         user_message_id = uuid.uuid4()
+        # S1 轮次锚点：预生成 assistant 消息 ID，master 执行记录据此关联本轮消息，
+        # 日志详情按消息挂载节点不依赖时序吸附（多轮场景吸附会分散到别的消息）。
+        message_id = uuid.uuid4()
         actual_config_id = None
         config_id = actual_config_id
 
         if variables is None:
             variables = {}
 
+        # 标注命中（按 app_id 取 AppAnnotationSetting；未配置/未启用直接返回 None，老集群无影响）。
+        # 命中则不进编排器，直接落库返回标注答案（与 Agent 应用一致）。
+        _annotation_hit = await self._cluster_annotation_hit(
+            config, message, conversation_id, message_id, user_message_id
+        )
+        if _annotation_hit is not None:
+            return {
+                "conversation_id": conversation_id,
+                "message": _annotation_hit["answer"],
+                "message_id": str(message_id),
+                "user_message_id": str(user_message_id),
+                "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+                "elapsed_time": time.time() - start_time,
+            }
+
         # 2. 创建编排器
         orchestrator = await MultiAgentOrchestrator.create(self.db, config)
+
+        # 新会话开场白（features.opening_statement 开启才查库；老集群 features 为空，零开销）
+        opening_statement, opening_suggested_questions = await self._resolve_cluster_opening(
+            orchestrator, conversation_id, variables
+        )
 
         # 3. 执行任务
         result = await orchestrator.execute(
@@ -1883,20 +2029,55 @@ class AppChatService:
             variables=variables,
             use_llm_routing=True,  # 默认启用 LLM 路由
             web_search=web_search,  # 网络搜索参数
-            memory=memory  # 记忆功能参数
+            memory=memory,  # 记忆功能参数
+            # S5：这两个参数此前在非流式入口被丢弃（协作模式因此拿不到存储/记忆上下文）
+            storage_type=storage_type,
+            user_rag_memory_id=user_rag_memory_id,
+            message_id=message_id,
+            thinking=thinking,
+            opening_statement=opening_statement,
+            execution_mode=execution_mode,
+            files=files or None,  # 附件（缺省空 = 旧行为）
+            user_message_id=user_message_id,  # 情绪感知缓存键（features.emotion_reply 开启才用）
         )
 
         elapsed_time = time.time() - start_time
 
+        # 新会话开场白作为第一条 assistant 消息先落库（与 Agent 非流式一致）
+        if opening_statement:
+            await self.conversation_service.add_message_async(
+                conversation_id=conversation_id,
+                role="assistant",
+                content=opening_statement,
+                meta_data={"suggested_questions": opening_suggested_questions},
+            )
+
         # 保存消息
+        # 附件落库（与 Agent 应用一致）；无 files 时不传 meta_data，老集群落库不变
+        _user_meta_kwargs: Dict[str, Any] = {}
+        if files:
+            _files_meta, _history_files = await self._build_cluster_files_persist(files, orchestrator)
+            _user_meta = {"files": _files_meta}
+            if _history_files:
+                _user_meta["history_files"] = _history_files
+            _user_meta_kwargs["meta_data"] = _user_meta
         await self.conversation_service.add_message_async(
             message_id=user_message_id,
             conversation_id=conversation_id,
             role="user",
-            content=message
+            content=message,
+            **_user_meta_kwargs,
         )
 
+        # 对话能力附加字段（建议问题/引用/语音）：仅对应 features 开启时 result 才带这些键，
+        # 老集群 _cluster_extras 为空，落库与返回均不变
+        _cluster_extras: Dict[str, Any] = {
+            _k: result[_k]
+            for _k in ("suggested_questions", "citations", "audio_url", "audio_status")
+            if _k in result
+        }
         ai_message = await self.conversation_service.add_message_async(
+            message_id=message_id,
             conversation_id=conversation_id,
             role="assistant",
             content=result.get("message", ""),
@@ -1907,22 +2088,51 @@ class AppChatService:
                     "prompt_tokens": 0,
                     "completion_tokens": 0,
                     "total_tokens": 0
-                })
+                }),
+                **_cluster_extras,
             }
         )
 
+        # 上下文引擎 after_turn（仅本轮实际走了 features.context_engine 才入队；老集群恒为 None）
+        _ctx_after_turn = orchestrator.context_engine_after_turn_args(conversation_id)
+        if _ctx_after_turn:
+            try:
+                from app.services.batch_persist_queue import BatchPersistQueue, PersistTask
+                await BatchPersistQueue.enqueue(PersistTask(task_type="after_turn", args=_ctx_after_turn))
+            except Exception as e:
+                logger.warning("入队 context_engine after_turn 失败（不影响对话）", extra={"error": str(e)})
+
+        # S1 轮次锚点：消息落库后回填 master 执行记录的 message_id（幂等），
+        # 使日志详情精确按本轮 assistant 消息挂载节点。
+        _master_execution_id = getattr(orchestrator, "current_execution_id", None)
+        if _master_execution_id is not None:
+            try:
+                from app.services.batch_persist_queue import BatchPersistQueue, PersistTask
+                await BatchPersistQueue.enqueue(PersistTask(
+                    task_type="link_agent_execution_message",
+                    args={
+                        "execution_id": str(_master_execution_id),
+                        "message_id": str(message_id),
+                    },
+                ))
+            except Exception as e:
+                logger.warning("回填主执行记录 message_id 失败（不影响对话）", extra={"error": str(e)})
 
         return {
             "conversation_id": conversation_id,
             "message": result.get("message", ""),
             "message_id": str(ai_message.id),
             "user_message_id": str(user_message_id),
-            "usage": {
+            # S4：非流式返回真实 usage（orchestrator execute() 已改账本口径），
+            # 不再恒 0。
+            "usage": result.get("usage", {
                 "prompt_tokens": 0,
                 "completion_tokens": 0,
                 "total_tokens": 0
-            },
-            "elapsed_time": elapsed_time
+            }),
+            "elapsed_time": elapsed_time,
+            # 建议问题 / 引用 / 语音：仅对应 features 开启时 orchestrator 才会带这些键，老集群返回不变
+            **{k: result[k] for k in ("suggested_questions", "citations", "audio_url", "audio_status") if k in result},
         }
 
     @bind_usage("app", "config.app_id")
@@ -1937,8 +2147,14 @@ class AppChatService:
             memory: bool = True,
             storage_type: Optional[str] = None,
             user_rag_memory_id: Optional[str] = None,
+            thinking: bool = False,
+            execution_mode: Optional[str] = None,
+            files: Optional[List[FileInput]] = None,
     ) -> AsyncGenerator[str, None]:
-        """多 Agent 聊天（流式）"""
+        """多 Agent 聊天（流式）
+
+        thinking / execution_mode 为对齐 Agent 应用新增的可选参数，缺省 = 旧行为。
+        """
 
         start_time = time.time()
 
@@ -1955,9 +2171,28 @@ class AppChatService:
 
             full_content = ""
             total_tokens = 0
+            # end 事件携带的对话能力附加字段（建议问题/引用/语音）；features 未开启时为空
+            end_extras: Dict[str, Any] = {}
+
+            # 标注命中（未配置/未启用标注返回 None，老集群无影响）；命中则不进编排器，
+            # 直接落库并下发 message/end（与 Agent 应用一致）。
+            _annotation_hit = await self._cluster_annotation_hit(
+                config, message, conversation_id, message_id, user_message_id,
+                storage_type=storage_type, user_rag_memory_id=user_rag_memory_id,
+            )
+            if _annotation_hit is not None:
+                _answer = _annotation_hit["answer"]
+                yield f"event: message\ndata: {json.dumps({'content': _answer, 'conversation_id': str(conversation_id)}, ensure_ascii=False)}\n\n"
+                yield f"event: end\ndata: {json.dumps({'elapsed_time': time.time() - start_time, 'conversation_id': str(conversation_id), 'message_id': str(message_id), 'message_length': len(_answer), 'usage': {'prompt_tokens': 0, 'completion_tokens': 0, 'total_tokens': 0}}, ensure_ascii=False)}\n\n"
+                return
 
             # 2. 创建编排器
             orchestrator = await MultiAgentOrchestrator.create(self.db, config)
+
+            # 新会话开场白（features.opening_statement 开启才查库；老集群 features 为空，零开销）
+            opening_statement, opening_suggested_questions = await self._resolve_cluster_opening(
+                orchestrator, conversation_id, variables
+            )
 
             # 3. 流式执行任务
             # message_id 下传：主执行记录据此带上本轮 assistant message_id，
@@ -1972,38 +2207,59 @@ class AppChatService:
                     memory=memory,  # 记忆功能参数
                     storage_type=storage_type,
                     user_rag_memory_id=user_rag_memory_id,
-                    message_id=message_id
+                    message_id=message_id,
+                    thinking=thinking,
+                    opening_statement=opening_statement,
+                    execution_mode=execution_mode,
+                    files=files or None,
+                    user_message_id=user_message_id,  # 情绪感知缓存键（features.emotion_reply 开启才用）
             ):
-                # 拦截 sub_usage 事件，累加 token
-                if "event: sub_usage" in event:
-                    if "data:" in event:
-                        try:
-                            data_line = event.split("data: ", 1)[1].strip()
-                            data = json.loads(data_line)
-                            total_tokens += data.get("total_tokens", 0)
-                        except:
-                            pass
-                else:
-                    yield event
-                    # 累加主气泡正文：只认集群级的 `message` 事件。
-                    # 子 Agent 的正文走 `sub_agent_message`（已在各自区块展示），
-                    # 若一并累加，落库的 assistant 正文会比界面显示多出一份重复内容，
-                    # 刷新后主气泡会变长。
-                    _event_name = ""
-                    if event.startswith("event:"):
-                        _event_name = event[6:].split("\n", 1)[0].strip()
-                    if _event_name == "message" and "data:" in event:
-                        try:
-                            data_line = event.split("data: ", 1)[1].strip()
-                            data = json.loads(data_line)
-                            if "content" in data:
-                                full_content += data["content"]
-                        except:
-                            pass
+                # S4：不再拦截 sub_usage 字符串累加 token —— orchestrator 内建
+                # per-turn 账本（routing/sub/merge 分层）在 end 事件统一发布
+                # usage（唯一权威口径），本层从 end 读取后落库。
+                _event_name = ""
+                if event.startswith("event:"):
+                    _event_name = event[6:].split("\n", 1)[0].strip()
+
+                if _event_name == "end" and "data:" in event:
+                    try:
+                        data_line = event.split("data: ", 1)[1].strip()
+                        data = json.loads(data_line)
+                        total_tokens = int((data.get("usage") or {}).get("total_tokens") or 0)
+                        # 对话能力附加字段（仅对应 features 开启时 end 才带这些键）
+                        for _k in ("suggested_questions", "citations", "audio_url", "audio_status"):
+                            if _k in data:
+                                end_extras[_k] = data[_k]
+                    except:
+                        pass
+
+                yield event
+                # 累加主气泡正文：只认集群级的 `message` 事件。
+                # 子 Agent 的正文走 `sub_agent_message`（已在各自区块展示），
+                # 若一并累加，落库的 assistant 正文会比界面显示多出一份重复内容，
+                # 刷新后主气泡会变长。
+                # 注意：S3 之后子 Agent 事件已剥离子会话 conversation_id，
+                # 本层收集口径与 orchestrator 的 message 事件发布口径一一对应
+                #（supervisor=merge 输出，supervisor_loop=主管 ReAct 正文，
+                # collaboration=handoffs 主回复）。
+                if _event_name == "message" and "data:" in event:
+                    try:
+                        data_line = event.split("data: ", 1)[1].strip()
+                        data = json.loads(data_line)
+                        if "content" in data:
+                            full_content += data["content"]
+                    except:
+                        pass
 
             elapsed_time = time.time() - start_time
 
             # Enqueue async batch persist
+            # S3 落库收口：本入口（应用编排侧）是唯一的落库层——落库内容为
+            # full_content（orchestrator message 事件序列 = 前端主气泡的最终
+            # 展示内容），经 BatchPersistQueue 统一写入；MultiAgentService/
+            # SharedChatService 不再各自拼内容直存（同轮多条 assistant 的根因）。
+            # supervisor 单 Agent 透传场景的 message 事件即子 Agent 输出本身，
+            # 落库与展示同一口径，"长会话返回值不是最终内容"由此消除。
             from app.services.batch_persist_queue import BatchPersistQueue, PersistTask
             from app.services.chat_context import StreamResult as _StreamResult
             _result = _StreamResult()
@@ -2013,19 +2269,48 @@ class AppChatService:
             _result.total_tokens = total_tokens
             _result.assistant_meta = {
                 "elapsed_time": elapsed_time,
+                "mode": getattr(orchestrator, "_normalized_mode", None),
+                "merge_mode_actual": getattr(orchestrator, "_merge_mode_actual", None),
                 "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": total_tokens},
             }
+            _persist_args = {
+                "conversation_id": str(conversation_id),
+                "result": _result,
+                "user_message_id_override": user_message_id,
+                "user_message_content": message,
+                "should_memorize": orchestrator.cluster_memory_enabled(),
+            }
+            # 新会话开场白落库（与 Agent 应用一致）；无开场白时不加任何新键，老集群落库不变
+            if opening_statement:
+                _persist_args["is_new_conversation"] = True
+                _persist_args["opening_statement"] = opening_statement
+                _persist_args["opening_message_id"] = uuid.uuid4()
+                _persist_args["opening_suggested_questions"] = opening_suggested_questions
+            # 附件落库（与 Agent 应用一致）；无 files 时不加任何新键，老集群落库不变
+            if files:
+                _files_meta, _history_files = await self._build_cluster_files_persist(files, orchestrator)
+                _persist_args["files_meta"] = _files_meta
+                if _history_files:
+                    _result.history_files = _history_files
+            # 建议问题 / 引用 / 语音落库（与 Agent 应用一致）；对应 features 未开启时 end_extras 为空，不写任何字段
+            if end_extras:
+                if "suggested_questions" in end_extras:
+                    _result.suggested_questions = end_extras.get("suggested_questions") or []
+                if "citations" in end_extras:
+                    _result.citations = end_extras.get("citations") or []
+                if end_extras.get("audio_url"):
+                    _result.audio_url = end_extras.get("audio_url")
+                    _result.audio_status = end_extras.get("audio_status")
             await BatchPersistQueue.enqueue(PersistTask(
                 task_type="save_messages",
-                args={
-                    "conversation_id": str(conversation_id),
-                    "result": _result,
-                    "user_message_id_override": user_message_id,
-                    "user_message_content": message,
-                    "should_memorize": memory,
-                },
+                args=_persist_args,
             ))
             save_messages_enqueued = True
+
+            # context_engine 轮后摘要（仅本轮实际走了上下文引擎才有参数；老集群恒为 None，不入队）
+            _ctx_after_args = orchestrator.context_engine_after_turn_args(conversation_id)
+            if _ctx_after_args:
+                await BatchPersistQueue.enqueue(PersistTask(task_type="after_turn", args=_ctx_after_args))
 
             # 主执行记录的 message_id 回填：记录在流式开始时就已创建（子 Agent 记录
             # 需要它作为 parent 外键），当时本轮 assistant message 还没落库，写 message_id
