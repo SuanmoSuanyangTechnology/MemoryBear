@@ -54,7 +54,7 @@ export const getRecentActivityStats = () => {
 }
 // Memory Dashboard - Memory growth trend
 export const getMemoryIncrement = (data: { start_time: number; end_time: number; }) => {
-  return request.get(`/dashboard/memory_increment`, data)
+  return request.get(`/dashboard/memory_increment_daily`, data)
 }
 // Memory Dashboard - API call trend
 export const getApiTrend = () => {

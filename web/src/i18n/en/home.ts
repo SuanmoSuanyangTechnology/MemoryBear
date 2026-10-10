@@ -176,7 +176,7 @@ export const home = {
       activeMemory: 'Active Memory',
       updatedToday: 'Updated Today',
       knowledgeBaseTypeDistribution: 'Distribution of Knowledge Base Types',
-      memoryGrowthTrend: 'Memory Growth Trend',
+      memoryGrowthTrend: 'Memory Scale · Trend',
       corporateMemory: 'Corporate Memory',
       recentMemoryActivities: 'Recent Memory Activities',
       apiCallTrend: 'API call trend',

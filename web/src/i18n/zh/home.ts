@@ -176,7 +176,7 @@ export const home = {
       activeMemory: '活跃记忆',
       updatedToday: '今日更新',
       knowledgeBaseTypeDistribution: '知识库类型分布',
-      memoryGrowthTrend: '记忆增长趋势',
+      memoryGrowthTrend: '记忆规模 · 趋势',
       corporateMemory: '企业记忆',
       recentMemoryActivities: '最近记忆活动',
       apiCallTrend: 'API调用趋势',
