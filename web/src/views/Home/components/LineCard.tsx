@@ -13,7 +13,7 @@
 import { type FC } from 'react'
 import { useTranslation } from 'react-i18next'
 import { DatePicker } from 'antd'
-import type { Dayjs } from 'dayjs'
+import dayjs, { type Dayjs } from 'dayjs'
 
 import Card from './Card'
 import AreaLineChart, { type ChartData } from '@/components/Charts/AreaLineChart';
@@ -48,6 +48,16 @@ const LineCard: FC<LineCardProps> = ({ chartData, dateRange, onChange, type, cla
       headerOperate={
         <DatePicker.RangePicker
           value={dateRange}
+          disabledDate={(current, { from }) => {
+            if (current.isAfter(dayjs(), 'day')) {
+              return true
+            }
+            if (!from) {
+              return false
+            }
+            return current.isBefore(from.subtract(30, 'day'), 'day')
+              || current.isAfter(from.add(30, 'day'), 'day')
+          }}
           onChange={(dates) => {
             if (dates?.[0] && dates[1]) {
               onChange([dates[0].format('YYYY-MM-DD'), dates[1].format('YYYY-MM-DD')], type)
@@ -68,7 +78,7 @@ const LineCard: FC<LineCardProps> = ({ chartData, dateRange, onChange, type, cla
         grid={{
           top: 4,
           left: 4,
-          right: 4,
+          right: 20,
           bottom: 0,
           containLabel: true
         }}

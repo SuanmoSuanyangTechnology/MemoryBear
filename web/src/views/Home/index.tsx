@@ -70,7 +70,7 @@ const Home = () => {
   const [workspaceStatisticsLoading, setWorkspaceStatisticsLoading] = useState(true)
   const [workspaceStatistics, setWorkspaceStatistics] = useState<WorkspaceStatistics>({} as WorkspaceStatistics)
   const [knowledgeTypeDistribution, setKnowledgeTypeDistribution] = useState<Array<{ name: string; value: number }>>([]);
-  const [memoryIncrement, setMemoryIncrement] = useState<Array<{ updated_at: string; total_num: number; }>>([]);
+  const [memoryIncrement, setMemoryIncrement] = useState<Array<{ date: string; total_num: number; }>>([]);
   const [dateRange, setDateRange] = useState<[Dayjs, Dayjs]>([
     dayjs().subtract(6, 'day'),
     dayjs(),
@@ -139,8 +139,8 @@ const Home = () => {
       start_time: dateRange[0].startOf('d').valueOf(),
       end_time: dateRange[1].endOf('d').valueOf(),
     }).then(res => {
-      const response = res as { updated_at: string; total_num: number; }[]
-      setMemoryIncrement(response || [])
+      const response = res as {items: { date: string; total_num: number; }[]}
+      setMemoryIncrement(response.items || [])
     })
   }
 
