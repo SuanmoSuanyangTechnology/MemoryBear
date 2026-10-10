@@ -142,7 +142,7 @@ const EmbeddingAlert: FC<EmbeddingAlertProps> = ({
     if (reembedInfo.status === 'running' || reembedInfo.status === 'pending') {
       intervalIdRef.current = setInterval(() => {
         getCurrentReembed()
-      }, 300)
+      }, 3000)
     }
 
     return stopPolling
