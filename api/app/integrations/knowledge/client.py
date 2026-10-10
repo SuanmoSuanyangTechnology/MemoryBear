@@ -12,9 +12,12 @@ from urllib.parse import unquote, urlencode
 
 import httpx
 from fastapi import Request
+from fastapi.exceptions import RequestValidationError
+from pydantic import ValidationError
 from starlette.datastructures import UploadFile
 from starlette.responses import StreamingResponse
 
+from app.schemas.chunk_schema import ApiChunkRetrieve, V1ChunkRetrieve
 from app.schemas.knowledge_retrieval_schema import (
     KnowledgeRetrievalRequest,
     KnowledgeRetrievalResult,
@@ -31,6 +34,10 @@ from .errors import (
 from .transport import KnowledgeHttpTransport
 
 logger = logging.getLogger(__name__)
+_HTTP_RETRIEVAL_REQUEST_SCHEMAS = {
+    "/api/chunks/retrieval": ApiChunkRetrieve,
+    "/v1/chunks/retrieval": V1ChunkRetrieve,
+}
 _REQUEST_RERANK_WIRE_FIELDS = ("rerank_id", "rerank_mode", "rerank_weights")
 _KNOWLEDGE_BASE_RERANK_WIRE_FIELDS = ("rerank_mode", "rerank_weights")
 
@@ -138,6 +145,15 @@ class KnowledgeServiceClient:
         else:
             body = await request.body()
             if body:
+                schema = _HTTP_RETRIEVAL_REQUEST_SCHEMAS.get(request.url.path)
+                if request.method == "POST" and schema is not None:
+                    try:
+                        retrieval_request = schema.model_validate(await request.json())
+                    except ValidationError as exc:
+                        raise RequestValidationError(exc.errors()) from exc
+                    body = retrieval_request.model_dump_json(
+                        exclude_unset=True,
+                    ).encode("utf-8")
                 send_kwargs["content"] = body
         upstream = await self._transport.send(
             method=request.method,

@@ -1285,12 +1285,14 @@ async def retrieve_chunks_with_source(
 @cur_workspace_access_guard_async()
 @route_through_knowledge_service(source=KnowledgeRetrievalSource.MANAGER_API)
 async def retrieve_chunks(
-        retrieve_data: chunk_schema.ChunkRetrieve,
+        retrieve_data: chunk_schema.ApiChunkRetrieve,
         current_user: User = Depends(get_current_user_async),
         request: Request = None,
 ):
     return await retrieve_chunks_with_source(
-        retrieve_data=retrieve_data,
+        retrieve_data=chunk_schema.ChunkRetrieve.model_validate(
+            retrieve_data.model_dump(exclude_unset=True)
+        ),
         principal=RetrievalPrincipal.from_user(current_user),
         source=chunk_schema.KnowledgeRetrievalSource.MANAGER_API,
         trace_id=getattr(getattr(request, "state", None), "trace_id", None),
