@@ -215,14 +215,22 @@ class _ChunkRetrieveBase(BaseModel):
         return normalize_retrieval_query(self.query)
 
 
-class V1ChunkRetrieve(_ChunkRetrieveBase):
-    """Supported request parameters for API Key retrieval."""
+class _HttpChunkRetrieve(_ChunkRetrieveBase):
+    """Supported request parameters for HTTP retrieval routes."""
 
     @model_validator(mode="after")
-    def validate_knowledge_ids(self) -> "V1ChunkRetrieve":
+    def validate_knowledge_ids(self) -> "_HttpChunkRetrieve":
         if not self.kb_ids and not self.ex_ids:
             raise ValueError("kb_ids and ex_ids cannot both be empty")
         return self
+
+
+class ApiChunkRetrieve(_HttpChunkRetrieve):
+    """Supported request parameters for JWT retrieval."""
+
+
+class V1ChunkRetrieve(_HttpChunkRetrieve):
+    """Supported request parameters for API Key retrieval."""
 
 
 class ChunkRetrieve(_ChunkRetrieveBase):
