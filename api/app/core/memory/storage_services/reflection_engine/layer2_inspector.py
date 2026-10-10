@@ -601,9 +601,9 @@ class Layer2Inspector:
                                        language: str = "zh") -> Dict[str, Any]:
         """子问题 7：用户实体元数据提取。
 
-        从 Neo4j 中读取当前用户的 User 实体及其 description，
-        调用 MetadataExtractionStep 进行 LLM 结构化提取，
-        将 patch operations 回写 Neo4j 并同步 PostgreSQL。
+        从 Neo4j 中读取当前用户的 User 实体及其 description 碎片，
+        调用 extract_metadata_for_user 按分片串行增量 Patch 提取，
+        结果只写回 PostgreSQL end_user_info.meta_data（不回写 Neo4j）。
 
         门控：description 碎片数 >= min_fragments（默认 5）才触发提取，
         与 description_merge 共用同一阈值配置。
@@ -622,7 +622,6 @@ class Layer2Inspector:
                 end_user_id=end_user_id,
                 language=language,
                 min_fragments=self.desc_config.min_fragments,
-                neo4j_client=await self._get_reflection_client(),
                 collect_trace=want_trace,
             )
 
