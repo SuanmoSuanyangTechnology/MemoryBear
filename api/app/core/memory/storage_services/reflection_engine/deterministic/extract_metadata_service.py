@@ -43,7 +43,7 @@ _ONTOLOGY_TABLES_AVAILABLE: Optional[bool] = None
 
 
 def _check_ontology_tables_available(db: Any) -> bool:
-    """检测本体工程 4 张表是否存在。检测成功时结果进程级缓存；检测异常时本次按不可用处理，不写缓存，下次调用重新检测。"""
+    """检测本体工程 4 张表是否存在。仅在检测到表存在时进程级缓存；表不存在或检测异常时本次按不可用处理，不写缓存，下次调用重新检测。"""
     global _ONTOLOGY_TABLES_AVAILABLE
     if _ONTOLOGY_TABLES_AVAILABLE is not None:
         return _ONTOLOGY_TABLES_AVAILABLE
@@ -56,9 +56,10 @@ def _check_ontology_tables_available(db: Any) -> bool:
                AND to_regclass('ontology_scene_type') IS NOT NULL
                AND to_regclass('ontology_profile_field') IS NOT NULL AS available;
         """)
-        res = db.execute(sql).scalar()
-        _ONTOLOGY_TABLES_AVAILABLE = bool(res)
-        return _ONTOLOGY_TABLES_AVAILABLE
+        available = bool(db.execute(sql).scalar())
+        if available:
+            _ONTOLOGY_TABLES_AVAILABLE = True
+        return available
     except Exception as e:
         logger.warning(f"[Metadata] 检测本体表可用性异常，本次按不可用处理: {e}")
         try:
