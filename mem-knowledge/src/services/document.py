@@ -505,6 +505,8 @@ async def delete_document_resources(
         # Cover the existing parse-task lifetime while storage cleanup runs.
         ex=PARSE_TASK_TTL,
     )
+    storage_cleaned = False
+    records_deleted = False
     try:
         await redis.delete(task_key)
 
@@ -533,12 +535,33 @@ async def delete_document_resources(
                     )
             if failed:
                 raise KnowledgeError.from_code("KB_STORAGE_UNAVAILABLE")
+            storage_cleaned = True
             # Retain the refreshed asset keys until storage cleanup succeeds,
             # while keeping ES mutations fenced until the database commit.
             await guard.ensure_owned()
             await delete_records(snapshot)
+            records_deleted = True
             await guard.ensure_owned()
     except (TimeoutError, DocumentMutationLeaseLost) as exc:
+        if storage_cleaned:
+            # Storage deletion is irreversible. Once it succeeded, reacquire
+            # the lease and finish the matching durable deletion if possible.
+            try:
+                async with async_document_mutation_guard(redis, snapshot.document_id) as guard:
+                    await guard.ensure_owned()
+                    await delete_search()
+                    await guard.ensure_owned()
+                    if not records_deleted:
+                        await delete_records(snapshot)
+                    await guard.ensure_owned()
+                return
+            except Exception as recovery_exc:
+                logger.warning(
+                    "Document deletion recovery failed: document=%s error_type=%s",
+                    snapshot.document_id,
+                    type(recovery_exc).__name__,
+                )
+                raise KnowledgeError.from_code("KB_SEARCH_UNAVAILABLE") from recovery_exc
         raise KnowledgeError.from_code("KB_SEARCH_UNAVAILABLE") from exc
     finally:
         # Retain the normal short grace period after success or failure.

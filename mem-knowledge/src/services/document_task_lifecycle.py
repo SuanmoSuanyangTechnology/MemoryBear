@@ -115,7 +115,7 @@ async def _reconcile_chunk_write(
         return False
 
 
-def cleanup_after_lost_lease(
+def cleanup_interrupted_task_vectors(
     runtime: ProcessRuntime,
     knowledge_id: uuid.UUID,
     document_id: uuid.UUID,
@@ -162,7 +162,7 @@ def cleanup_after_lost_lease(
             raise RuntimeError("Elasticsearch late-write cleanup failed")
         guard.ensure_owned()
         logger.warning(
-            "Removed late document vectors after lease loss: knowledge=%s document=%s deleted=%s",
+            "Removed interrupted document task vectors: knowledge=%s document=%s deleted=%s",
             knowledge_id,
             document_id,
             result.get("deleted", 0),
@@ -171,7 +171,7 @@ def cleanup_after_lost_lease(
 
 __all__ = [
     "DocumentTaskAborted",
-    "cleanup_after_lost_lease",
+    "cleanup_interrupted_task_vectors",
     "ensure_document_active",
     "guard_chunk_mutation",
 ]

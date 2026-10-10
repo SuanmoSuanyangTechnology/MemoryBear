@@ -13,6 +13,7 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from io import BytesIO
+from threading import Event
 from typing import Any
 
 from jinja2 import Environment
@@ -53,7 +54,7 @@ from .document_mutation_guard import (
 )
 from .document_task_lifecycle import (
     DocumentTaskAborted,
-    cleanup_after_lost_lease,
+    cleanup_interrupted_task_vectors,
     ensure_document_active,
 )
 from .knowledge_file_storage import KnowledgeFileStorage
@@ -676,6 +677,7 @@ def _write_chunks_with_retry(
     vector_store: TaskVectorStore,
     batches: list[list[DocumentChunk]],
     document_id: uuid.UUID,
+    write_started: Event | None = None,
 ) -> None:
     batch_errors: dict[int, Exception] = {}
     total_batches = len(batches)
@@ -691,6 +693,8 @@ def _write_chunks_with_retry(
                 if _should_abort(runtime, document_id):
                     raise _ParseAborted
                 guard.ensure_owned()
+                if write_started is not None:
+                    write_started.set()
                 vector_store.write_prepared_batches([prepared])
                 guard.ensure_owned()
 
@@ -816,6 +820,7 @@ def process_document(
     document_label = file_name or str(document_id)
     normalized_document_id: uuid.UUID | None = None
     all_chunks: list[DocumentChunk] = []
+    write_started = Event()
     try:
         normalized_document_id = uuid.UUID(str(document_id))
         with run.stage("load_snapshot"):
@@ -976,7 +981,7 @@ def process_document(
             total_batches = len(batches)
             with run.stage("embedding"):
                 _write_chunks_with_retry(
-                    runtime, vector_store, batches, normalized_document_id
+                    runtime, vector_store, batches, normalized_document_id, write_started
                 )
             if _should_abort(runtime, normalized_document_id):
                 raise _ParseAborted
@@ -1022,18 +1027,15 @@ def process_document(
             counts={"chunks": total_chunks},
         )
         return f"parse document '{snapshot.source_file_name}' processed successfully."
-    except _ParseAborted:
-        logger.info("Document parsing aborted: document=%s", normalized_document_id)
-        run.finish(
-            BusinessOutcome.ABORTED,
-            error_code="KB_DOC_PARSE_ABORTED",
-            detail="document_deleted_or_cancelled",
-        )
-        return f"parse document '{document_label}' aborted (deleted or cancelled)."
     except Exception as exc:  # noqa: BLE001 - task returns a legacy failure string.
-        if isinstance(exc, DocumentMutationLeaseLost) and normalized_document_id is not None:
+        aborted = isinstance(exc, _ParseAborted)
+        if (
+            isinstance(exc, (DocumentMutationLeaseLost, _ParseAborted))
+            and normalized_document_id is not None
+            and write_started.is_set()
+        ):
             try:
-                cleanup_after_lost_lease(
+                cleanup_interrupted_task_vectors(
                     runtime, snapshot.knowledge_id, normalized_document_id,
                     [str(chunk.metadata["doc_id"]) for chunk in all_chunks],
                 )
@@ -1043,6 +1045,17 @@ def process_document(
                     normalized_document_id,
                     type(cleanup_exc).__name__,
                 )
+                if aborted:
+                    aborted = False
+                    exc = RuntimeError("Document cancellation cleanup failed")
+        if aborted:
+            logger.info("Document parsing aborted: document=%s", normalized_document_id)
+            run.finish(
+                BusinessOutcome.ABORTED,
+                error_code="KB_DOC_PARSE_ABORTED",
+                detail="document_deleted_or_cancelled",
+            )
+            return f"parse document '{document_label}' aborted (deleted or cancelled)."
         logger.error(
             "Document parsing failed: document=%s error_type=%s",
             normalized_document_id or document_id,

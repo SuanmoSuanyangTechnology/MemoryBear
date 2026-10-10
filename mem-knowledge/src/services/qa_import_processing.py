@@ -26,7 +26,7 @@ from ..utils.datetime_utils import to_iso_z, to_timestamp_ms, utcnow, utcnow_nai
 from .document_mutation_guard import DocumentMutationLeaseLost, sync_document_mutation_guard
 from .document_task_lifecycle import (
     DocumentTaskAborted,
-    cleanup_after_lost_lease,
+    cleanup_interrupted_task_vectors,
     ensure_document_active,
 )
 from .knowledge_file_storage import KnowledgeFileStorage
@@ -283,6 +283,7 @@ def process_qa_import(
     progress_lines = [f"{_progress_ts()} QA import task has been received."]
     normalized_document_id: uuid.UUID | None = None
     chunks: list[DocumentChunk] = []
+    write_started = False
     error_code = "KB_QA_PROCESSING_FAILED"
     try:
         try:
@@ -410,6 +411,7 @@ def process_qa_import(
                 ) as guard:
                     ensure_document_active(runtime, normalized_document_id)
                     guard.ensure_owned()
+                    write_started = True
                     vector_store.write_prepared_batches(prepared_batches)
                     guard.ensure_owned()
         except (DocumentTaskAborted, DocumentMutationLeaseLost):
@@ -445,18 +447,15 @@ def process_qa_import(
             counts={"chunks": len(chunks), "failed": len(failed_rows)},
         )
         return {"imported": len(chunks), "failed_rows": failed_rows}
-    except DocumentTaskAborted:
-        logger.info("QA import aborted: document=%s", normalized_document_id or document_id)
-        run.finish(
-            BusinessOutcome.ABORTED,
-            error_code="KB_QA_IMPORT_ABORTED",
-            detail="document_deleted_or_cancelled",
-        )
-        return {"error": "document deleted or cancelled", "imported": 0}
     except Exception as exc:
-        if isinstance(exc, DocumentMutationLeaseLost) and normalized_document_id is not None:
+        aborted = isinstance(exc, DocumentTaskAborted)
+        if (
+            isinstance(exc, (DocumentMutationLeaseLost, DocumentTaskAborted))
+            and normalized_document_id is not None
+            and write_started
+        ):
             try:
-                cleanup_after_lost_lease(
+                cleanup_interrupted_task_vectors(
                     runtime, normalized_kb_id, normalized_document_id,
                     [str(chunk.metadata["doc_id"]) for chunk in chunks],
                 )
@@ -466,6 +465,18 @@ def process_qa_import(
                     normalized_document_id,
                     type(cleanup_exc).__name__,
                 )
+                if aborted:
+                    aborted = False
+                    exc = _SafeQAImportError("QA cancellation cleanup failed")
+                    error_code = "KB_QA_VECTOR_WRITE_FAILED"
+        if aborted:
+            logger.info("QA import aborted: document=%s", normalized_document_id or document_id)
+            run.finish(
+                BusinessOutcome.ABORTED,
+                error_code="KB_QA_IMPORT_ABORTED",
+                detail="document_deleted_or_cancelled",
+            )
+            return {"error": "document deleted or cancelled", "imported": 0}
         safe_error = (
             exc
             if isinstance(exc, _SafeQAImportError)
