@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
 from dataclasses import dataclass
@@ -13,6 +14,7 @@ from sqlalchemy import delete, select
 from ...bootstrap import get_settings
 from ...models.owned import FILE_ROLE_DERIVED_IMAGE, Document, File
 from ...services.knowledge_file_storage import KnowledgeFileStorage, generate_kb_file_key
+from ...tasks.state import is_parse_cancelled
 
 LOGGER = logging.getLogger(__name__)
 
@@ -48,6 +50,10 @@ def store_mineru_v3_image(
         LOGGER.warning("MinerU image storage skipped because required context is missing")
         return None
 
+    if _parse_cancel_requested(runtime, document_uuid):
+        LOGGER.info("MinerU image upload skipped for cancelled document=%s", document_uuid)
+        return None
+
     with runtime.database.sync_session() as session:
         document = session.get(Document, document_uuid)
         context = (
@@ -74,33 +80,93 @@ def store_mineru_v3_image(
     )
     file_key = generate_kb_file_key(context.kb_id, file_id, file_ext)
     storage = KnowledgeFileStorage(runtime.storage)
-    runtime.run_async(
-        lambda: storage.upload(
-            file_key,
-            mineru_image.binary,
-            mineru_image.content_type,
-        )
-    )
+    fields = {
+        "kb_id": context.kb_id,
+        "created_by": context.created_by,
+        "parent_id": None,
+        "file_key": file_key,
+        "file_name": file_name,
+        "file_ext": file_ext,
+        "file_size": len(mineru_image.binary),
+        "file_role": FILE_ROLE_DERIVED_IMAGE,
+        "source_document_id": document_uuid,
+    }
 
-    with runtime.database.sync_session() as session:
-        record = session.get(File, file_id)
-        if record is None:
-            record = File(id=file_id)
-            session.add(record)
-        record.kb_id = context.kb_id
-        record.created_by = context.created_by
-        record.parent_id = None
-        record.file_key = file_key
-        record.file_name = file_name
-        record.file_ext = file_ext
-        record.file_size = len(mineru_image.binary)
-        record.file_role = FILE_ROLE_DERIVED_IMAGE
-        record.source_document_id = document_uuid
-        session.commit()
+    async def upload_image() -> bool:
+        await storage.upload(file_key, mineru_image.binary, mineru_image.content_type)
+        await asyncio.to_thread(_persist_image_record, runtime, file_id, fields)
+        if await asyncio.to_thread(_image_upload_cancelled, runtime, document_uuid):
+            # The delete request may have already removed the File row. Delete
+            # this upload's known key directly before removing its record.
+            await storage.delete(file_key)
+            await asyncio.to_thread(_remove_image_record, runtime, document_uuid, file_id, file_key)
+            return False
+        return True
+
+    # Keep compensation in the actual IO coroutine, even if its synchronous
+    # caller is interrupted while the upload is already running.
+    if not runtime.run_async(upload_image):
+        return None
     return StoredMinerUImageAsset(
         file_id=file_id,
         download_url=_build_image_download_url(file_id),
     )
+
+
+def _parse_cancel_requested(runtime, document_id: uuid.UUID) -> bool:
+    try:
+        return is_parse_cancelled(runtime.redis.sync_client(), document_id)
+    except Exception as exc:
+        LOGGER.warning(
+            "MinerU cancel check unavailable: document=%s error_type=%s",
+            document_id,
+            type(exc).__name__,
+        )
+        return False
+
+
+def _image_upload_cancelled(runtime, document_id: uuid.UUID) -> bool:
+    with runtime.database.sync_session() as session:
+        if session.get(Document, document_id) is None:
+            return True
+    return _parse_cancel_requested(runtime, document_id)
+
+
+def _persist_image_record(runtime, file_id: uuid.UUID, fields: dict[str, Any]) -> None:
+    with runtime.database.sync_session() as session:
+        try:
+            record = session.get(File, file_id)
+            if record is None:
+                record = File(id=file_id)
+                session.add(record)
+            for name, value in fields.items():
+                setattr(record, name, value)
+            session.commit()
+        except Exception:
+            session.rollback()
+            raise
+
+
+def _remove_image_record(
+    runtime,
+    document_id: uuid.UUID,
+    file_id: uuid.UUID,
+    file_key: str,
+) -> None:
+    with runtime.database.sync_session() as session:
+        try:
+            session.execute(
+                delete(File).where(
+                    File.id == file_id,
+                    File.source_document_id == document_id,
+                    File.file_role == FILE_ROLE_DERIVED_IMAGE,
+                    File.file_key == file_key,
+                )
+            )
+            session.commit()
+        except Exception:
+            session.rollback()
+            raise
 
 
 def cleanup_mineru_v3_images(
@@ -117,9 +183,7 @@ def cleanup_mineru_v3_images(
             )
         ).all()
         candidates = [
-            (file_id, file_key)
-            for file_id, file_key in records
-            if file_id not in retained
+            (file_id, file_key) for file_id, file_key in records if file_id not in retained
         ]
     if not candidates:
         return 0

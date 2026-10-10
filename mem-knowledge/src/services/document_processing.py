@@ -210,7 +210,8 @@ def _clear_parse_state(runtime: ProcessRuntime, document_id: object) -> None:
     try:
         redis = runtime.redis.sync_client()
         redis.delete(PARSE_TASK_KEY.format(doc_id=document_id))
-        redis.delete(PARSE_CANCEL_KEY.format(doc_id=document_id))
+        # Let the existing cancellation marker expire naturally so an upload
+        # still running after a worker interruption can observe it.
     except Exception as exc:  # noqa: BLE001 - cleanup must not replace task results.
         logger.warning(
             "Failed to clear parse state: document=%s error_type=%s",
@@ -244,7 +245,7 @@ def _should_abort(runtime: ProcessRuntime, document_id: uuid.UUID) -> bool:
             document_id,
             type(exc).__name__,
         )
-    return False
+    return not _document_exists(runtime, document_id)
 
 
 def _download_file(runtime: ProcessRuntime, file_key: str) -> bytes:
