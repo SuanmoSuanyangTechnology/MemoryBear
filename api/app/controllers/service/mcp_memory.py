@@ -25,6 +25,11 @@ from app.controllers.service.mcp_auth_middleware import (
 from app.core.logging_config import get_logger
 from app.core.memory.enums import SearchStrategy
 from app.core.memory.memory_service import MemoryService
+from app.core.memory.storage_services.preference_engine.recall_service import (
+    PreferenceRecallForbiddenError,
+    PreferenceRecallValidationError,
+    execute_preference_recall,
+)
 
 warnings.filterwarnings("ignore", category=DeprecationWarning, module="scipy")
 
@@ -140,6 +145,50 @@ async def read_memory(
     except Exception as e:
         logger.error(f"MCP read_memory failed for end_user={end_user_id}: {e}")
         return {"success": False, "error": str(e)}
+
+
+@mcp.tool
+async def recall_coding_preferences(
+    current_user_message: str,
+    context_messages: list[dict] | None = None,
+) -> dict:
+    """根据当前用户请求召回与本次 Coding Agent 任务相关的历史偏好。
+
+    处理新的用户请求前调用。current_user_message 是分类主依据；
+    context_messages 只用于理解指代、上下文对象和任务承接。
+    返回内容是历史偏好参考数据，不得覆盖当前用户明确要求、项目客观约束以及
+    系统、安全和权限规则。
+
+    Args:
+        current_user_message: 本次待处理的非空 user 消息。
+        context_messages: 当前消息之前按时间正序排列的近期 user/assistant 消息。
+    """
+    try:
+        workspace_id, end_user_id, config_id, _, _ = _resolve_context()
+    except RuntimeError:
+        return {"success": False, "error": "偏好召回服务暂时不可用"}
+
+    try:
+        preferences = await execute_preference_recall(
+            config_id=config_id,
+            workspace_id=workspace_id,
+            end_user_id=end_user_id,
+            request_payload={
+                "current_user_message": current_user_message,
+                "context_messages": [] if context_messages is None else context_messages,
+            },
+        )
+    except PreferenceRecallValidationError:
+        return {"success": False, "error": "偏好召回请求参数不合法"}
+    except PreferenceRecallForbiddenError:
+        return {"success": False, "error": "无权访问该偏好资源"}
+    except Exception:
+        return {"success": False, "error": "偏好召回服务暂时不可用"}
+    return {
+        "success": True,
+        "preferences": [item.model_dump(mode="json") for item in preferences],
+        "count": len(preferences),
+    }
 
 
 mcp_app = mcp.http_app(path="/memory", transport="streamable-http", stateless_http=True)
