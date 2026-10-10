@@ -67,6 +67,11 @@ logger = logging.getLogger(__name__)
 # checkpoint 值上限告警阈值（Redis 单 value 上限 512MB，实际远早于此就该告警）
 _BLOB_WARN_BYTES = 8 * 1024 * 1024
 
+# 读路径遇到"值已损坏/格式不兼容"时的异常集合：JSONDecodeError、UnicodeDecodeError、
+# msgpack 解包错误均为 ValueError 子类。刻意不含 Redis 连接异常——连接故障要照常上抛，
+# 只有"这一条 checkpoint 读不出来"才降级（读路径跳过该条，而不是让整个会话失败）。
+_CORRUPT_ERRORS = (ValueError, KeyError, IndexError)
+
 
 # ───────────────────────── 二进制编解码 ─────────────────────────
 
@@ -340,6 +345,28 @@ class RedisCheckpointSaver(BaseCheckpointSaver[str]):
         blob_map: dict[bytes, bytes],
         config: Optional[RunnableConfig] = None,
     ) -> Optional[CheckpointTuple]:
+        """解码失败（值损坏/格式不兼容）时记警告并返回 None，由调用方跳过该条。"""
+        try:
+            return self._assemble_tuple_unchecked(
+                thread_id, ns, checkpoint_id, cp_raw, write_raws, blob_map, config
+            )
+        except _CORRUPT_ERRORS as exc:
+            logger.warning(
+                "checkpoint 数据损坏，已跳过: thread=%s ns=%s checkpoint_id=%s error=%s",
+                thread_id, ns, checkpoint_id, exc,
+            )
+            return None
+
+    def _assemble_tuple_unchecked(
+        self,
+        thread_id: str,
+        ns: str,
+        checkpoint_id: str,
+        cp_raw: Optional[bytes],
+        write_raws: Sequence[bytes],
+        blob_map: dict[bytes, bytes],
+        config: Optional[RunnableConfig] = None,
+    ) -> Optional[CheckpointTuple]:
         if not cp_raw:
             return None
         cp_typed, md_typed, parent_id = _decode_checkpoint_bundle(cp_raw)
@@ -410,8 +437,15 @@ class RedisCheckpointSaver(BaseCheckpointSaver[str]):
             return None
 
         write_raws = await client.hvals(self._writes_key(thread_id, ns, checkpoint_id))
-        checkpoint_typed, _md, _parent = _decode_checkpoint_bundle(cp_raw)
-        blob_map = await self._aload_blobs(thread_id, ns, checkpoint_typed)
+        try:
+            checkpoint_typed, _md, _parent = _decode_checkpoint_bundle(cp_raw)
+            blob_map = await self._aload_blobs(thread_id, ns, checkpoint_typed)
+        except _CORRUPT_ERRORS as exc:
+            logger.warning(
+                "checkpoint 数据损坏，已跳过: thread=%s ns=%s checkpoint_id=%s error=%s",
+                thread_id, ns, checkpoint_id, exc,
+            )
+            return None
 
         return self._assemble_tuple(
             thread_id, ns, checkpoint_id, cp_raw, write_raws, blob_map
@@ -449,17 +483,24 @@ class RedisCheckpointSaver(BaseCheckpointSaver[str]):
             cp_raw = await client.hget(self._cp_key(thread_id, ns), checkpoint_id)
             if not cp_raw:
                 continue
-            cp_typed, md_typed, _parent = _decode_checkpoint_bundle(cp_raw)
-            if filter:
-                metadata = self.serde.loads_typed(md_typed)
-                if not all(
-                    metadata.get(k) == v for k, v in filter.items()
-                ):
-                    continue
-            write_raws = await client.hvals(
-                self._writes_key(thread_id, ns, checkpoint_id)
-            )
-            blob_map = await self._aload_blobs(thread_id, ns, cp_typed)
+            try:
+                cp_typed, md_typed, _parent = _decode_checkpoint_bundle(cp_raw)
+                if filter:
+                    metadata = self.serde.loads_typed(md_typed)
+                    if not all(
+                        metadata.get(k) == v for k, v in filter.items()
+                    ):
+                        continue
+                write_raws = await client.hvals(
+                    self._writes_key(thread_id, ns, checkpoint_id)
+                )
+                blob_map = await self._aload_blobs(thread_id, ns, cp_typed)
+            except _CORRUPT_ERRORS as exc:
+                logger.warning(
+                    "checkpoint 数据损坏，已跳过: thread=%s ns=%s checkpoint_id=%s error=%s",
+                    thread_id, ns, checkpoint_id, exc,
+                )
+                continue
             tup = self._assemble_tuple(thread_id, ns, checkpoint_id, cp_raw, write_raws, blob_map)
             if tup is not None:
                 out.append(tup)
@@ -659,8 +700,15 @@ class RedisCheckpointSaver(BaseCheckpointSaver[str]):
             return None
 
         write_raws = client.hvals(self._writes_key(thread_id, ns, checkpoint_id))
-        checkpoint_typed, _md, _parent = _decode_checkpoint_bundle(cp_raw)
-        checkpoint: Checkpoint = self.serde.loads_typed(checkpoint_typed)
+        try:
+            checkpoint_typed, _md, _parent = _decode_checkpoint_bundle(cp_raw)
+            checkpoint: Checkpoint = self.serde.loads_typed(checkpoint_typed)
+        except _CORRUPT_ERRORS as exc:
+            logger.warning(
+                "checkpoint 数据损坏，已跳过: thread=%s ns=%s checkpoint_id=%s error=%s",
+                thread_id, ns, checkpoint_id, exc,
+            )
+            return None
         versions = checkpoint.get("channel_versions") or {}
         blob_map: dict[bytes, bytes] = {}
         if versions:
@@ -704,13 +752,20 @@ class RedisCheckpointSaver(BaseCheckpointSaver[str]):
             cp_raw = client.hget(self._cp_key(thread_id, ns), checkpoint_id)
             if not cp_raw:
                 continue
-            cp_typed, md_typed, _parent = _decode_checkpoint_bundle(cp_raw)
-            if filter:
-                metadata = self.serde.loads_typed(md_typed)
-                if not all(metadata.get(k) == v for k, v in filter.items()):
-                    continue
+            try:
+                cp_typed, md_typed, _parent = _decode_checkpoint_bundle(cp_raw)
+                if filter:
+                    metadata = self.serde.loads_typed(md_typed)
+                    if not all(metadata.get(k) == v for k, v in filter.items()):
+                        continue
+                checkpoint_: Checkpoint = self.serde.loads_typed(cp_typed)
+            except _CORRUPT_ERRORS as exc:
+                logger.warning(
+                    "checkpoint 数据损坏，已跳过: thread=%s ns=%s checkpoint_id=%s error=%s",
+                    thread_id, ns, checkpoint_id, exc,
+                )
+                continue
             write_raws = client.hvals(self._writes_key(thread_id, ns, checkpoint_id))
-            checkpoint_: Checkpoint = self.serde.loads_typed(cp_typed)
             versions = checkpoint_.get("channel_versions") or {}
             blob_map: dict[bytes, bytes] = {}
             if versions:

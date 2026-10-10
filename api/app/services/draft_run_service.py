@@ -2037,8 +2037,15 @@ class AgentRunService:
                         error_message="执行被取消（超时或外部取消）",
                         agent_log=_trace if sub_agent else None,
                     )
-                except Exception:
-                    pass
+                except Exception as update_err:
+                    # 收尾失败不能掩盖 CancelledError，但要留痕，便于排查僵尸 running 记录
+                    logger.error(
+                        "取消收尾：更新执行记录失败",
+                        extra={
+                            "agent_execution_id": str(agent_execution_id),
+                            "error": str(update_err),
+                        },
+                    )
             raise
 
         except Exception as e:
@@ -2747,8 +2754,15 @@ class AgentRunService:
                         error_message="执行被取消（空闲超时或外部取消）",
                         agent_log=_trace if sub_agent else None,
                     )
-                except Exception:
-                    pass
+                except Exception as update_err:
+                    logger.error(
+                        "流式执行取消收尾记录失败",
+                        extra={
+                            "execution_id": str(_agent_execution_id),
+                            "error": str(update_err),
+                        },
+                    )
+
             raise
 
         except Exception as e:
