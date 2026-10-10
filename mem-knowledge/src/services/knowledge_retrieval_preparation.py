@@ -656,9 +656,11 @@ class KnowledgeRetrievalPreparation:
         if not config.is_active:
             exc = ModelConfigInactiveError(model_id)
             raise map_model_error(exc, visibility_proven=True) from exc
+        # Invocation tenant (caller), not the config owner: public models are owned by
+        # the system tenant while platform channels resolve under the caller's tenant.
         return ModelRuntimeSnapshot(
             model_config_id=config.model_config_id,
-            tenant_id=config.tenant_id,
+            tenant_id=tenant_id,
             model_name=config.name,
             provider=config.provider.value,
             profile=config.profile,

@@ -16,10 +16,14 @@ from ..models.chunk import DocumentChunk
 
 @dataclass(frozen=True)
 class ModelRuntimeSnapshot:
-    """非解密模型视图：调用只带配置 id 与租户，凭据与选路在模型服务侧（§2.2）。
+    """Non-decrypting model view: invocations carry only the config id and tenant;
+    credentials and routing live in the model service.
 
-    字段拼写对齐契约快照（``model_config_id``）便于 ``ref_from_view`` 双用；
-    ``profile`` 供能力判定（视图谓词）消费。
+    ``tenant_id`` is the invoking tenant, not the config owner: public models are
+    owned by the system tenant, while the model service resolves platform channels
+    under the invoking tenant (the owner tenant yields an empty chain). Field names
+    align with the contract snapshot (``model_config_id``) so ``ref_from_view`` can
+    be reused; ``profile`` feeds capability predicates.
     """
 
     model_config_id: uuid.UUID
@@ -29,13 +33,16 @@ class ModelRuntimeSnapshot:
     profile: ModelProfile = field(repr=False)
 
     @classmethod
-    def from_view(cls, view: Any) -> ModelRuntimeSnapshot:
-        """``ModelConfigSnapshot`` → 快照（字段名对齐；provider 取枚举值）。"""
+    def from_view(cls, view: Any, tenant_id: uuid.UUID) -> ModelRuntimeSnapshot:
+        """``ModelConfigSnapshot`` + invoking tenant → runtime snapshot.
+
+        ``tenant_id`` comes from the caller, not from the view's owner tenant.
+        """
 
         provider = getattr(view, "provider", "")
         return cls(
             model_config_id=view.model_config_id,
-            tenant_id=view.tenant_id,
+            tenant_id=tenant_id,
             model_name=view.name,
             provider=getattr(provider, "value", provider),
             profile=view.profile,
