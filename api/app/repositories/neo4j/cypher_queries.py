@@ -2364,11 +2364,10 @@ USER_ENTITY_FOR_METADATA = """
 MATCH (n:ExtractedEntity)
 WHERE n.end_user_id = $end_user_id
   AND n.delete_at IS NULL
-  AND n.entity_type = '用户'
+  AND (n.entity_type = '用户' OR toLower(n.name) IN ['用户', '我', 'user', 'i'])
 RETURN n.id AS entity_id,
        n.name AS entity_name,
        n.description AS description,
-       n.description_timeline AS description_timeline,
        n.end_user_id AS end_user_id
 """
 
