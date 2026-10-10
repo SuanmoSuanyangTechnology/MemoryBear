@@ -216,10 +216,9 @@ export function useAgent(
    * Fetch available models list
    */
   const getModels = () => {
-    getModelList({ type: 'llm', pagesize: 100, page: 1 })
+    getModelList({ type: 'llm' })
       .then(res => {
-        const response = res as { items: Model[] }
-        setModelList(response.items)
+        setModelList(res as Model[])
       })
   }
   /**

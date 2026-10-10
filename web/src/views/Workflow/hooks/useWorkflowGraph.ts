@@ -1779,16 +1779,23 @@ export const useWorkflowGraph = ({
                 }
               } else if (key === 'knowledge_retrieval' && data.config[key] && 'defaultValue' in data.config[key]) {
                 const { knowledge_bases, ...rest } = data.config[key].defaultValue || {}
-                itemConfig = {
-                  ...itemConfig,
-                  knowledge_retrieval: {
+                // itemConfig = {
+                //   ...itemConfig,
+                //   knowledge_retrieval: {
+                //     ...rest,
+                //     knowledge_bases: knowledge_bases?.map((vo: any) => {
+                //       const kb_config = vo.config || vo
+                //       return { kb_id: vo.kb_id || vo.id, ...kb_config, }
+                //     })
+                //   }
+                // }
+                itemConfig['knowledge_retrieval'] = {
                     ...rest,
                     knowledge_bases: knowledge_bases?.map((vo: any) => {
                       const kb_config = vo.config || vo
                       return { kb_id: vo.kb_id || vo.id, ...kb_config, }
                     })
                   }
-                }
               } else if (data.config[key] && 'defaultValue' in data.config[key]) {
                 itemConfig[key] = data.config[key].defaultValue
               }

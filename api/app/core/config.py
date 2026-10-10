@@ -443,6 +443,13 @@ class Settings:
     MEMORY_CACHE_REGENERATION_MINUTE: int = TypeAdapter(
         Annotated[int, Field(ge=0, le=59, description="memory cache regeneration cron minute [0, 59]")]
     ).validate_python(int(os.getenv("MEMORY_CACHE_REGENERATION_MINUTE", "0")))
+    # 工作空间记忆统计快照扫描时间（UTC，默认 17:00 = 北京时间次日 01:00）
+    WORKSPACE_STATISTICS_SCAN_HOUR: int = TypeAdapter(
+        Annotated[int, Field(ge=0, le=23, description="workspace statistics scan cron hour [0, 23]")]
+    ).validate_python(int(os.getenv("WORKSPACE_STATISTICS_SCAN_HOUR", "17")))
+    WORKSPACE_STATISTICS_SCAN_MINUTE: int = TypeAdapter(
+        Annotated[int, Field(ge=0, le=59, description="workspace statistics scan cron minute [0, 59]")]
+    ).validate_python(int(os.getenv("WORKSPACE_STATISTICS_SCAN_MINUTE", "0")))
     # 用户名片 Tag 定时刷新时间（UTC，默认 18:30，北京时间次日 02:30）
     USER_TAG_REFRESH_HOUR: int = TypeAdapter(
         Annotated[int, Field(ge=0, le=23, description="user tag refresh cron hour [0, 23]")]

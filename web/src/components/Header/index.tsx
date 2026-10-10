@@ -27,6 +27,7 @@ import SettingModal, { type SettingModalRef } from './SettingModal'
 import UserInfoModal, { type UserInfoModalRef } from './UserInfoModal'
 import { openHelpCenter } from '@/utils/help';
 import NotificationBell from '@/components/NotificationCenter';
+import PrivateWrap from '../PrivateWrap';
 
 const { Header } = Layout;
 
@@ -188,7 +189,9 @@ const AppHeader: FC<{ source?: 'space' | 'manage'; }> = ({ source = 'manage' }) 
       <Breadcrumb separator="<" items={formatBreadcrumbNames() as BreadcrumbProps['items']} className="rb:font-medium!" />
 
       <Flex gap={12} align="center">
-        <NotificationBell />
+        <PrivateWrap>
+          {() => <NotificationBell />}
+        </PrivateWrap>
         <Button
           icon={<div className="rb:size-3.5 rb:bg-cover rb:bg-[url('@/assets/images/common/question.svg')]"></div>}
           className="rb:px-2! rb:rounded-[10px]!"

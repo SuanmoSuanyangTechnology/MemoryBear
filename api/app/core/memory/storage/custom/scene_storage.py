@@ -7,6 +7,7 @@ and SceneSummary assignments share one transaction.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any, Sequence
 
 from app.core.memory.storage.enums import MemoryNodeType
@@ -15,6 +16,7 @@ from app.core.memory.storage.outbox.producer import enqueue_events
 from app.core.memory.storage.outbox.repository import OutboxRepository
 from app.core.memory.storage.outbox.types import OutboxEventInput, OutboxOperation
 from app.core.memory.storage.provider.neo4j.client import Neo4jClient
+from app.core.utils.datetime_utils import as_utc_aware
 
 
 SCENE_SUMMARY_CREATE_IF_ABSENT_WITH_IDENTITY = """
@@ -76,7 +78,7 @@ MERGE (c:SceneCommunity {id: row.id, end_user_id: $end_user_id})
 ON CREATE SET c.created_at = row.created_at
 WITH c, row, c.created_at AS original_created_at
 SET c += row,
-    c.created_at = original_created_at
+    c.created_at = localdatetime(original_created_at)
 RETURN elementId(c) AS element_id,
        toString(c.id) AS node_id
 ORDER BY node_id
@@ -93,11 +95,34 @@ MATCH (c:SceneCommunity {id: row.scene_community_id, end_user_id: $end_user_id})
 SET s.scene_community_id = c.id,
     s.community_category_l1 = row.category_l1,
     s.community_status = 'ACTIVE',
+    s.started_at = localdatetime(s.started_at),
+    s.ended_at = localdatetime(s.ended_at),
+    s.created_at = localdatetime(s.created_at),
     s.updated_at = row.updated_at
 RETURN elementId(s) AS element_id,
        toString(s.id) AS node_id
 ORDER BY node_id
 """
+
+_SCENE_TIME_FIELDS = ("started_at", "ended_at", "created_at", "updated_at")
+
+
+def _local_datetime_properties(
+    properties: dict[str, Any], *, fields: Sequence[str] = _SCENE_TIME_FIELDS,
+    strict: bool = True,
+) -> dict[str, Any]:
+    """Store scene timestamps as UTC wall time without a Neo4j timezone."""
+    normalized = dict(properties)
+    for field in fields:
+        value = normalized.get(field)
+        if value is None:
+            continue
+        if not isinstance(value, datetime):
+            if strict:
+                raise TypeError(f"{field} must be a datetime")
+            continue
+        normalized[field] = as_utc_aware(value).replace(tzinfo=None)
+    return normalized
 
 
 @dataclass(frozen=True, slots=True)
@@ -201,7 +226,7 @@ class SceneStorage:
                 label=MemoryNodeType.SCENE_SUMMARY,
                 expected_ids={scene_summary_id},
             ),
-            summary=summary,
+            summary=_local_datetime_properties(summary),
         )
         await self._publish(identities)
         return identities[0]
@@ -258,7 +283,10 @@ class SceneStorage:
             end_user_id=_nonblank(end_user_id, "end_user_id"),
             batch_size=batch_size,
         )
-        return [dict(row["scene_summary"]) for row in rows]
+        return [
+            _local_datetime_properties(dict(row["scene_summary"]), strict=False)
+            for row in rows
+        ]
 
     async def load_candidate_communities(
         self,
@@ -288,7 +316,10 @@ class SceneStorage:
             candidate_limit=candidate_limit,
         )
         return [
-            {**dict(row["community"]), "_similarity": float(row.get("similarity") or 0.0)}
+            {
+                **_local_datetime_properties(dict(row["community"]), strict=False),
+                "_similarity": float(row.get("similarity") or 0.0),
+            }
             for row in rows
         ]
 
@@ -307,7 +338,9 @@ class SceneStorage:
             community_ids=unique_ids,
         )
         for row in rows:
-            grouped[str(row["scene_community_id"])].append(dict(row["scene_summary"]))
+            grouped[str(row["scene_community_id"])].append(
+                _local_datetime_properties(dict(row["scene_summary"]), strict=False)
+            )
         return grouped
 
     async def commit_batch(
@@ -349,7 +382,7 @@ class SceneStorage:
                 tx,
                 SCENE_COMMUNITY_UPSERT_BATCH,
                 end_user_id=end_user_id,
-                communities=list(communities),
+                communities=[_local_datetime_properties(row) for row in communities],
             )
             community_identities = _parse_identities(
                 community_rows,
@@ -360,7 +393,10 @@ class SceneStorage:
                 tx,
                 SCENE_SUMMARY_ASSIGN_BATCH,
                 end_user_id=end_user_id,
-                assignments=list(assignments),
+                assignments=[
+                    _local_datetime_properties(row, fields=("updated_at",))
+                    for row in assignments
+                ],
             )
             scene_identities = _parse_identities(
                 scene_rows,

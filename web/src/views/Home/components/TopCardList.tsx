@@ -40,7 +40,7 @@ const list = [
 const TopCardList: FC<{data?: DashboardData}> = ({ data }) => {
   const { t } = useTranslation()
   return (
-    <div className="rb:grid rb:grid-cols-2 rb:gap-3">
+    <div className="rb:grid rb:grid-cols-2 rb:gap-3 rb:h-full!">
       {list.map((item) => {
         return (
           <div 

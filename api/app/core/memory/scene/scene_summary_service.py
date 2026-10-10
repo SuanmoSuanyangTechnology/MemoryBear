@@ -159,6 +159,24 @@ class SceneSummaryService:
         await self.writer.create_scene_summary_if_absent(
             summary.model_dump(exclude_none=True)
         )
+
+        # 长期固化展示事件：摘要成功落库后 best effort 落 PG。
+        # 使用内存中已有的 summary 组装，不回查 Neo4j；写入失败只记日志，
+        # 不能把已成功的 SceneSummary 改判为失败，也不触发摘要重新生成。
+        try:
+            from app.services.memory_engine_display_service import (
+                MemoryEngineDisplayService,
+            )
+            await MemoryEngineDisplayService.save_scene_summary_event(
+                end_user_id=task.end_user_id,
+                summary=summary,
+            )
+        except Exception as e:
+            logger.warning(
+                f"[EngineDisplay] 长期固化展示写入异常（不影响主流程）: {e}",
+                exc_info=True,
+            )
+
         inactive_count = await self.writer.count_inactive(task.end_user_id)
         logger.info(
             "[SceneSummary] P1V scene=%s decision=%s reason=%s confidence=%s",

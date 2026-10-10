@@ -90,7 +90,7 @@ const ReleasePage: FC<{data: Application; refresh: () => void}> = ({data, refres
       <Flex gap={12} vertical className="rb:w-101 rb:h-full! rb:overflow-hidden!">
         <div className="rb:px-1">
           <div className="rb:text-[16px] rb:leading-5.5 rb:font-medium">{t('application.versionList')}</div>
-          <div className="rb:text-[12px] rb:text-[#5B6167] rb:leading-4.5">{t('application.versionListDesc')}</div>
+          <div className="rb:text-[12px] rb:text-gray-600 rb:leading-4.5">{t('application.versionListDesc')}</div>
         </div>
         <div className="rb:flex-1! rb:overflow-y-auto">
           {releaseList.length === 0
@@ -112,7 +112,7 @@ const ReleasePage: FC<{data: Application; refresh: () => void}> = ({data, refres
                     </>}
                     className={clsx("rb:hover:shadow-[0px_2px_8px_0px_rgba(0,0,0,0.2)]! rb:cursor-pointer rb:bg-white", {
                       'rb:border! rb:border-[#171719]!': version.id === selectedVersion.id,
-                      'rb:border-[#DFE4ED] ': version.id !== selectedVersion.id
+                      'rb:border-gray-400 ': version.id !== selectedVersion.id
                     })}
                     headerType="borderless"
                     onClick={() => setSelectedVersion(version)}
@@ -122,10 +122,10 @@ const ReleasePage: FC<{data: Application; refresh: () => void}> = ({data, refres
                         <Markdown content={version.release_notes} />
                       </div>
                     }
-                    <div className="rb:mt-4 rb:text-[12px] rb:text-[#5B6167] rb:leading-4.5">
+                    <div className="rb:mt-4 rb:text-[12px] rb:text-gray-600 rb:leading-4.5">
                       {t('application.publishedOn')} {formatDateTime(version.published_at, 'YYYY-MM-DD HH:mm:ss')}
                     </div>
-                    <div className="rb:text-[12px] rb:text-[#5B6167] rb:leading-4.5">
+                    <div className="rb:text-[12px] rb:text-gray-600 rb:leading-4.5">
                       {t('application.publisher')}: {version.publisher_name}
                     </div>
                   </RbCard>
@@ -141,11 +141,11 @@ const ReleasePage: FC<{data: Application; refresh: () => void}> = ({data, refres
             'rb:justify-between': selectedVersion,
             'rb:justify-end': !selectedVersion
           })}>
-            {selectedVersion && t('application.detailsOfVersion', { version: selectedVersion.version_name && selectedVersion.version_name[0].toLocaleLowerCase() === 'v' ? selectedVersion.version_name : selectedVersion.version_name ? `v${selectedVersion.version_name}` : `v${selectedVersion.version}` || '-' })}
+            {selectedVersion && t('application.detailsOfVersion', { version: selectedVersion.version_name && selectedVersion.version_name[0].toLocaleLowerCase() === 'v' ? selectedVersion.version_name : selectedVersion.version_name ? `v${selectedVersion.version_name}` : selectedVersion.version ? `v${selectedVersion.version}` : '-' })}
 
             <Space size={10}>
               {selectedVersion && <>
-                {data?.type !== 'multi_agent' && <RbButton onClick={handleExport}>{t('common.export')}</RbButton>}
+                {data?.type && data?.type !== 'multi_agent' && <RbButton onClick={handleExport}>{t('common.export')}</RbButton>}
                 {data.current_release_id !== selectedVersion.id && <RbButton onClick={handleRollback}>{t('application.willRollToThisVersion')}</RbButton>}
                 {data?.type !== 'pure_workflow' && <>
                   <RbButton type="primary" ghost onClick={() => releaseShareModalRef.current?.handleOpen()}>{t('application.share')}</RbButton>
@@ -187,7 +187,7 @@ const ReleasePage: FC<{data: Application; refresh: () => void}> = ({data, refres
             <Flex gap={16} vertical className="rb:flex-1! rb:overflow-y-auto">
               <RbCard
                 title={() => <Flex>{t('application.VersionInformation')}
-                  <Flex align="center" className="rb:text-[#5B6167] rb:text-[12px]">
+                  <Flex align="center" className="rb:text-gray-600 rb:text-[12px]">
                     (ID: {selectedVersion.id}
                       <div className="rb:size-4.5 rb:ml-1 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/common/copy_dark.svg')]"
                         onClick={() => handleCopy(selectedVersion.id)}
@@ -232,12 +232,12 @@ const ReleasePage: FC<{data: Application; refresh: () => void}> = ({data, refres
                   <RbCard
                     headerType="borderless"
                     title={<div className="rb:text-[14px]">{formatDateTime(selectedVersion.published_at, 'YYYY-MM-DD HH:mm:ss')}</div>}
-                    extra={<span className="rb:text-[12px] rb:text-[#5B6167] rb:leading-4">{selectedVersion.publisher_name}</span>}
+                    extra={<span className="rb:text-[12px] rb:text-gray-600 rb:leading-4">{selectedVersion.publisher_name}</span>}
                     bodyClassName="rb:pt-0! rb:pb-3! rb:px-4!"
                     variant="outlined"
                   >
                     {selectedVersion.release_notes &&
-                      <div className="rb:font-regular rb:text-[#5B6167] rb:leading-4">
+                      <div className="rb:font-regular rb:text-gray-600 rb:leading-4">
                         <Markdown content={selectedVersion.release_notes} />
                       </div>
                     }

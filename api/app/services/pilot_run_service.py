@@ -457,7 +457,7 @@ async def _run_chunking(
 
     await emit("chunking_extract", "开始分块", {"chunker_strategy": memory_config.chunker_strategy})
 
-    chunker = DialogueChunker(memory_config.chunker_strategy, llm_client=llm_client)
+    chunker = DialogueChunker(memory_config.chunker_strategy)
     chunked_dialogs: list[DialogData] = []
     for dlg in pruned_dialogs:
         dlg.chunks = await chunker.process_dialogue(dlg)

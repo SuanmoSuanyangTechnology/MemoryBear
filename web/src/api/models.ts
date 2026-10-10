@@ -9,7 +9,7 @@ import type { MultiKeyForm, Query, KeyConfigModalForm, CompositeModelForm, Custo
 
 // Model list
 export const getModelListUrl = '/models'
-export const getModelList = (data: Query) => {
+export const getModelList = (data?: Query) => {
   return request.get(getModelListUrl, data)
 }
 // Model type list

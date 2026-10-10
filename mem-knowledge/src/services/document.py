@@ -478,7 +478,8 @@ async def delete_document_resources(
     dispatcher: TaskDispatcher,
     storage: KnowledgeFileStorage,
     delete_search: Callable[[], Awaitable[Any]],
-    delete_records: Callable[[], Awaitable[None]],
+    delete_records: Callable[[DocumentDeletionSnapshot], Awaitable[None]],
+    refresh_assets: Callable[[], Awaitable[DocumentDeletionSnapshot]],
 ) -> None:
     task_key = PARSE_TASK_KEY.format(doc_id=snapshot.document_id)
     task_id = await redis.get(task_key)
@@ -487,28 +488,47 @@ async def delete_document_resources(
     await redis.set(
         PARSE_CANCEL_KEY.format(doc_id=snapshot.document_id),
         "1",
-        ex=PARSE_CANCEL_TTL,
+        # Cover the existing parse-task lifetime while storage cleanup runs.
+        ex=PARSE_TASK_TTL,
     )
-    await redis.delete(task_key)
+    try:
+        await redis.delete(task_key)
 
-    await dispatch_document_graph_sync(
-        dispatcher,
-        snapshot.knowledge_id,
-        snapshot.document_id,
-        snapshot.parser_config,
-        dispatch_legacy=False,
-        document_deleted=True,
-    )
-    await delete_search()
-    for storage_key in snapshot.storage_keys:
+        await dispatch_document_graph_sync(
+            dispatcher,
+            snapshot.knowledge_id,
+            snapshot.document_id,
+            snapshot.parser_config,
+            dispatch_legacy=False,
+            document_deleted=True,
+        )
+        snapshot = await refresh_assets()
+        await delete_search()
+        failed = False
+        for storage_key in snapshot.storage_keys:
+            try:
+                await storage.delete(storage_key)
+            except Exception:
+                failed = True
+                logger.warning(
+                    "Failed to delete document storage object: key=%s",
+                    storage_key,
+                )
+        if failed:
+            raise KnowledgeError.from_code("KB_STORAGE_UNAVAILABLE")
+        await delete_records(snapshot)
+    finally:
+        # Retain the normal short grace period after success or failure.
         try:
-            await storage.delete(storage_key)
-        except Exception:
-            logger.warning(
-                "Failed to delete document storage object: key=%s",
-                storage_key,
+            await redis.expire(
+                PARSE_CANCEL_KEY.format(doc_id=snapshot.document_id), PARSE_CANCEL_TTL
             )
-    await delete_records()
+        except Exception as exc:
+            logger.warning(
+                "Failed to shorten document cancellation expiry: document=%s error_type=%s",
+                snapshot.document_id,
+                type(exc).__name__,
+            )
 
 
 __all__ = [

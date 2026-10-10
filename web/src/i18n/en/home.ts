@@ -135,6 +135,7 @@ export const home = {
       predictionEngine: 'Memory Prediction Workbench',
       predictionProgress: 'Prediction Process',
       preferenceEngine: 'Preference Engine',
+      sceneCommunityEngine: 'Multimodal Episodic Memory Reconstruction Engine',
     },
     dashboard: {
       total_models: 'Available Models',
@@ -169,8 +170,14 @@ export const home = {
       forgettingExecutionRate: 'Forgetting Execution Rate',
 
       memoryClassificationDistribution: 'Memory classification distribution',
+      memoryScaleDistribution: 'Memory Scale · Category Distribution',
+      memoryScaleCoreMetrics: 'Memory Scale · Core Metrics',
+      byMemoryType: 'By Memory Type',
+      topFiveMemoryTypes: 'Top Five Memory Types',
+      activeMemory: 'Active Memory',
+      updatedToday: 'Updated Today',
       knowledgeBaseTypeDistribution: 'Distribution of Knowledge Base Types',
-      memoryGrowthTrend: 'Memory Growth Trend',
+      memoryGrowthTrend: 'Memory Scale · Trend',
       corporateMemory: 'Corporate Memory',
       recentMemoryActivities: 'Recent Memory Activities',
       apiCallTrend: 'API call trend',

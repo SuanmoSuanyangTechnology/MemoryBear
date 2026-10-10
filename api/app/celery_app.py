@@ -158,6 +158,8 @@ celery_app.conf.update(
         'app.tasks.do_soft_delete_end_users': {'queue': 'memory_heavy_tasks'},
         # 'app.tasks.run_forgetting_cycle_task': {'queue': 'memory_heavy_tasks'},# NOTE：已废弃，保留路由防 unregistered
         'app.tasks.write_all_workspaces_memory_task': {'queue': 'memory_heavy_tasks'}, #NOTE：定时任务，记忆增量统计
+        'app.tasks.scan_workspace_statistics_snapshots': {'queue': 'periodic_tasks'},
+        'app.tasks.do_workspace_statistics_snapshot': {'queue': 'memory_heavy_tasks'},
         'app.tasks.write_total_memory_task': {'queue': 'memory_heavy_tasks'},  # NOTE：单 workspace 记忆增量统计
         'app.tasks.scan_implicit_emotions_storage': {'queue': 'periodic_tasks'},  # NOTE：扫描器，枚举+派发
         'app.tasks.do_implicit_emotions_for_user': {'queue': 'memory_heavy_tasks'},  # NOTE：单用户隐性记忆+情绪建议
@@ -242,6 +244,10 @@ memory_cache_regeneration_schedule = crontab(
     hour=settings.MEMORY_CACHE_REGENERATION_HOUR,
     minute=settings.MEMORY_CACHE_REGENERATION_MINUTE,
 )
+workspace_statistics_scan_schedule = crontab(
+    hour=settings.WORKSPACE_STATISTICS_SCAN_HOUR,
+    minute=settings.WORKSPACE_STATISTICS_SCAN_MINUTE,
+)
 user_tag_refresh_schedule = crontab(
     hour=settings.USER_TAG_REFRESH_HOUR,
     minute=settings.USER_TAG_REFRESH_MINUTE,
@@ -314,6 +320,11 @@ beat_schedule_config = {
     "write-all-workspaces-memory": {
         "task": "app.tasks.write_all_workspaces_memory_task",
         "schedule": memory_increment_schedule,
+        "args": (),
+    },
+    "scan-workspace-statistics-snapshots": {
+        "task": "app.tasks.scan_workspace_statistics_snapshots",
+        "schedule": workspace_statistics_scan_schedule,
         "args": (),
     },
     "scan-implicit-emotions-storage": {

@@ -17,7 +17,7 @@
  * @component
  */
 
-import { useState, type FC, useCallback, useRef } from 'react';
+import { useState, type FC, useCallback, useEffect, useRef } from 'react';
 import { Input, type InputProps } from 'antd';
 import { useTranslation } from 'react-i18next';
 
@@ -62,13 +62,23 @@ const SearchInput: FC<SearchInputProps> = ({
   const throttleRef = useRef<boolean>(false);
   const lastCallRef = useRef<number>(0);
 
+  useEffect(() => {
+    return () => {
+      if (timerRef.current !== null) {
+        window.clearTimeout(timerRef.current);
+        timerRef.current = null;
+      }
+    };
+  }, []);
+
   /** Debounce function - delays callback execution until after delay period */
   const debounce = useCallback(<T extends (...args: any[]) => void>(callback: T, delay: number) => {
     return (...args: Parameters<T>) => {
-      if (timerRef.current) {
+      if (timerRef.current !== null) {
         window.clearTimeout(timerRef.current);
       }
       timerRef.current = window.setTimeout(() => {
+        timerRef.current = null;
         callback(...args);
       }, delay);
     };

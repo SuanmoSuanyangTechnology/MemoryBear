@@ -11,7 +11,8 @@ from app.core.memory.storage.outbox.exceptions import OutboxEnqueueError
 from app.core.memory.storage.outbox.producer import enqueue_events
 from app.core.memory.storage.outbox.repository import OutboxRepository
 from app.core.memory.storage.outbox.types import OutboxEventInput, OutboxOperation
-from app.core.memory.storage.provider.neo4j.client import Neo4jClient
+from app.core.memory.storage.provider.neo4j.client import Neo4jClient, _to_native
+from app.core.utils.datetime_utils import utcnow_naive
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +38,7 @@ MATCH (n:Preference)
 WHERE elementId(n) = $element_id
   AND n.end_user_id = $source_id
 SET n.end_user_id = $target_id,
-    n.updated_at = datetime()
+    n.updated_at = $updated_at
 RETURN elementId(n) AS element_id
 """
 
@@ -298,7 +299,7 @@ def _parse_preference_snapshot(
         element_id = str(row.get("element_id") or "")
         if not element_id or element_id in element_ids:
             raise ValueError(f"{owner} contains an invalid Preference element ID")
-        node = PreferenceNode.model_validate(dict(row.get("properties") or {}))
+        node = PreferenceNode.model_validate(_to_native(dict(row.get("properties") or {})))
         if node.end_user_id != end_user_id:
             raise ValueError(f"{owner} contains a Preference owned by another user")
         business_key = (node.domain, node.subject, node.situation_key)
@@ -421,6 +422,7 @@ async def _merge_preference_buckets(
                 element_id=source_bucket.element_id,
                 source_id=source_id,
                 target_id=target_id,
+                updated_at=utcnow_naive(),
             )
             if len(rows) != 1 or rows[0].get("element_id") != source_bucket.element_id:
                 raise RuntimeError(

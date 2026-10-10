@@ -3844,6 +3844,30 @@ def do_gds_topology_score(self, end_user_id: str, inflight_token: Optional[str] 
         result["end_user_id"] = end_user_id
         result["elapsed_time"] = time.time() - start_time
         result["task_id"] = self.request.id
+
+        # 价值评估展示事件：GDS 成功且实际写入节点属性后 best effort 落 PG。
+        # 用户写锁已在 _run 的 finally 中释放；展示写入失败只记日志，不改变任务结果。
+        if (
+            result.get("status") == "success"
+            and int(result.get("node_properties_written") or 0) > 0
+        ):
+            try:
+                from app.services.memory_engine_display_service import (
+                    MemoryEngineDisplayService,
+                )
+                loop.run_until_complete(
+                    MemoryEngineDisplayService.save_memory_value_event(
+                        end_user_id=end_user_id,
+                        result=result,
+                        task_id=self.request.id,
+                    )
+                )
+            except Exception as e:
+                logger.warning(
+                    f"[EngineDisplay] 价值评估展示写入异常（不影响主流程）: {e}",
+                    exc_info=True,
+                )
+
         return result
     except Exception as e:
         # GDS 投影 / eigenvector.write / drop 抛错，re-raise 让 Celery 标记 FAILURE（带 traceback）
@@ -7239,3 +7263,217 @@ def scan_reembed_jobs(self) -> Dict[str, Any]:
     result = reconcile_active_jobs()
     result["task_id"] = self.request.id
     return result
+
+_WORKSPACE_STATISTICS_SCAN_PAGE_SIZE = 500
+_WORKSPACE_STATISTICS_INFLIGHT_KEY = "workspace_statistics:inflight:{workspace_id}"
+_WORKSPACE_STATISTICS_INFLIGHT_TTL_SECONDS = 12 * 60 * 60
+
+
+@celery_app.task(
+    name="app.tasks.scan_workspace_statistics_snapshots",
+    bind=True,
+    ignore_result=False,
+    max_retries=0,
+    acks_late=False,
+    time_limit=600,
+    soft_time_limit=540,
+)
+def scan_workspace_statistics_snapshots(self) -> Dict[str, Any]:
+    """分页枚举活跃空间，向 heavy worker 派发独立统计任务。"""
+    from app.repositories.workspace_repository import WorkspaceRepository
+
+    redis_client = get_sync_redis_client()
+    if redis_client is None:
+        raise RuntimeError("Redis unavailable for workspace statistics dispatch")
+
+    after_id: uuid.UUID | None = None
+    dispatched = 0
+    skipped_inflight = 0
+    failed = 0
+    while True:
+        with get_db_read() as db:
+            workspace_ids = WorkspaceRepository(db).get_active_workspace_ids_page(
+                after_id, _WORKSPACE_STATISTICS_SCAN_PAGE_SIZE
+            )
+        if not workspace_ids:
+            break
+
+        for workspace_id in workspace_ids:
+            inflight_key = _WORKSPACE_STATISTICS_INFLIGHT_KEY.format(
+                workspace_id=workspace_id
+            )
+            token = uuid.uuid4().hex
+            try:
+                acquired = redis_client.set(
+                    inflight_key,
+                    token,
+                    nx=True,
+                    ex=_WORKSPACE_STATISTICS_INFLIGHT_TTL_SECONDS,
+                )
+            except Exception:
+                logger.exception(
+                    "工作空间记忆统计在途锁获取失败: workspace_id=%s",
+                    workspace_id,
+                )
+                failed += 1
+                continue
+            if not acquired:
+                skipped_inflight += 1
+                continue
+
+            try:
+                do_workspace_statistics_snapshot.apply_async(
+                    kwargs={
+                        "workspace_id": str(workspace_id),
+                        "inflight_token": token,
+                    },
+                    queue="memory_heavy_tasks",
+                )
+                dispatched += 1
+            except Exception:
+                logger.exception(
+                    "工作空间记忆统计任务派发失败: workspace_id=%s",
+                    workspace_id,
+                )
+                try:
+                    redis_client.eval(UNLOCK_SCRIPT, 1, inflight_key, token)
+                except Exception:
+                    logger.exception(
+                        "工作空间记忆统计派发失败后解锁失败: workspace_id=%s",
+                        workspace_id,
+                    )
+                failed += 1
+
+        if len(workspace_ids) < _WORKSPACE_STATISTICS_SCAN_PAGE_SIZE:
+            break
+        after_id = workspace_ids[-1]
+
+    result = {
+        "dispatched": dispatched,
+        "skipped_inflight": skipped_inflight,
+        "failed": failed,
+        "task_id": self.request.id,
+    }
+    logger.info("工作空间记忆统计扫描完成: %s", result)
+    if failed:
+        raise RuntimeError(f"Failed to dispatch {failed} workspace statistics tasks")
+    return result
+
+
+@celery_app.task(
+    name="app.tasks.do_workspace_statistics_snapshot",
+    bind=True,
+    ignore_result=False,
+    max_retries=1,
+    acks_late=False,
+    time_limit=3600,
+    soft_time_limit=3300,
+)
+def do_workspace_statistics_snapshot(
+    self,
+    workspace_id: str,
+    inflight_token: str,
+    baseline_version: str | None = None,
+    baseline_captured: bool = False,
+) -> Dict[str, Any]:
+    """串行刷新一个空间的统计快照；失败时最多补偿一次。"""
+    from app.services.workspace_memory_statistics_service import (
+        get_or_refresh_workspace_statistics_async,
+        get_workspace_statistics_snapshot_version_async,
+    )
+
+    inflight_key = _WORKSPACE_STATISTICS_INFLIGHT_KEY.format(
+        workspace_id=workspace_id
+    )
+    redis_client = None
+    loop = None
+    retry_scheduled = False
+    attempt_baseline_version = baseline_version
+    attempt_baseline_captured = baseline_captured
+
+    async def _run() -> Dict[str, Any]:
+        nonlocal attempt_baseline_captured, attempt_baseline_version
+
+        workspace_uuid = uuid.UUID(workspace_id)
+        if not attempt_baseline_captured:
+            attempt_baseline_version = (
+                await get_workspace_statistics_snapshot_version_async(
+                    workspace_uuid
+                )
+            )
+            attempt_baseline_captured = True
+
+        response, generated = await get_or_refresh_workspace_statistics_async(
+            workspace_uuid,
+            allow_cached_response=False,
+            baseline_version=attempt_baseline_version,
+            baseline_captured=True,
+        )
+        return {
+            "status": "SUCCESS" if generated else "SKIPPED_COALESCED",
+            "workspace_id": workspace_id,
+            "total_count": response["total_count"],
+            "total_users": response["total_users"],
+            "generated_at": response["generated_at"],
+        }
+
+    try:
+        redis_client = get_sync_redis_client()
+        if redis_client is None:
+            raise RuntimeError(
+                "Redis unavailable for workspace statistics snapshot"
+            )
+        if redis_client.get(inflight_key) != inflight_token:
+            return {
+                "status": "SKIPPED_STALE_INFLIGHT",
+                "workspace_id": workspace_id,
+            }
+
+        loop = set_asyncio_event_loop()
+        result = loop.run_until_complete(_run())
+        logger.info("工作空间记忆统计快照任务完成: %s", result)
+        return result
+    except Exception as exc:
+        if self.request.retries < self.max_retries:
+            logger.warning(
+                "工作空间记忆统计快照失败，60 秒后补偿一次: "
+                "workspace_id=%s, retry=%s/%s",
+                workspace_id,
+                self.request.retries + 1,
+                self.max_retries,
+                exc_info=True,
+            )
+            retry_error = self.retry(
+                exc=exc,
+                countdown=60,
+                kwargs={
+                    "workspace_id": workspace_id,
+                    "inflight_token": inflight_token,
+                    "baseline_version": attempt_baseline_version,
+                    "baseline_captured": attempt_baseline_captured,
+                },
+                throw=False,
+            )
+            retry_scheduled = True
+            raise retry_error
+        logger.exception(
+            "工作空间记忆统计快照补偿后仍失败: workspace_id=%s",
+            workspace_id,
+        )
+        raise
+    finally:
+        if loop is not None:
+            _shutdown_loop_gracefully(loop)
+        if redis_client is not None and not retry_scheduled:
+            try:
+                redis_client.eval(
+                    UNLOCK_SCRIPT,
+                    1,
+                    inflight_key,
+                    inflight_token,
+                )
+            except Exception:
+                logger.exception(
+                    "工作空间记忆统计在途锁释放失败: workspace_id=%s",
+                    workspace_id,
+                )

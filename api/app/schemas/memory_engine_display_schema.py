@@ -18,6 +18,8 @@ class EngineDisplayCardItem(BaseModel):
         "EMOTION",
         "FORGETTING",
         "REFLECTION",
+        "SCENE_SUMMARY",
+        "MEMORY_VALUE",
     ] = Field(
         ...,
         description="稳定英文引擎枚举，由前端负责文案映射",
