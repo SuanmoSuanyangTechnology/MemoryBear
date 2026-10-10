@@ -37,7 +37,9 @@ class ModelServiceSettings(BaseSettings):
     redis_host: str = Field(default="127.0.0.1", validation_alias="REDIS_HOST")
     redis_port: int = Field(default=6379, ge=1, le=65535, validation_alias="REDIS_PORT")
     redis_password: SecretStr = Field(default=SecretStr(""), validation_alias="REDIS_PASSWORD")
-    redis_db: int = Field(default=1, ge=0, validation_alias="REDIS_DB")
+    # Must match the host api's Redis DB: model:usage stream (host alert bridge),
+    # acl:rules (identity-written) and runtime_model_info invalidation keys are shared.
+    redis_db: int = Field(default=0, ge=0, validation_alias="REDIS_DB")
 
     # 渠道凭据主密钥（base64 32B，与 core/api 同一把）：model_channels 凭据解密用，
     # AAD = provider:tenant_id
@@ -231,7 +233,8 @@ class ModelServiceSettings(BaseSettings):
         default=True,
         validation_alias="MODEL_USAGE_LEAST_USED_ENABLED",
     )
-    # 用量消费积压告警阈值：stream 长度 / 消费组 pending 超此值打 WARNING
+    # Usage-backlog warning threshold: consumer-group lag / pending above this
+    # value logs a WARNING (XLEN is not a backlog gauge and is not checked).
     model_usage_backlog_warn: int = Field(
         default=50_000,
         ge=1,
@@ -260,6 +263,14 @@ class ModelServiceSettings(BaseSettings):
     model_service_jwks_url: str | None = Field(
         default=None,
         validation_alias="MODEL_SERVICE_JWKS_URL",
+    )
+    # Community direct mode: HS256 secret for verifying caller bearer JWTs locally.
+    # Must carry the same value as the monolith's SECRET_KEY (tokens are signed
+    # there; mirrors the kb KB_SECRET precedent). Unused in gateway mode, where
+    # internal tokens are verified through MODEL_SERVICE_JWKS_URL instead.
+    model_service_secret: SecretStr | None = Field(
+        default=None,
+        validation_alias="MODEL_SERVICE_SECRET",
     )
 
     @classmethod

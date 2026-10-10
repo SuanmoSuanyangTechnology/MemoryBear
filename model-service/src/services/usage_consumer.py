@@ -244,14 +244,29 @@ async def _reclaim_stale(
 
 
 async def _warn_on_backlog(client: Redis) -> None:
+    """Backlog = own group's lag (undelivered) + pending (delivered, unacked).
+
+    XLEN is deliberately not checked: XACK does not delete entries and the stream
+    is only trimmed by the publisher at MODEL_USAGE_STREAM_MAXLEN, so its length
+    grows monotonically below that cap regardless of consumer health. `lag`
+    requires Redis >= 7; on older servers the undelivered check is skipped and
+    the pending check still applies.
+    """
     threshold = current_settings().model_usage_backlog_warn
     try:
-        length = await client.xlen(MODEL_USAGE_STREAM)
+        groups = await client.xinfo_groups(MODEL_USAGE_STREAM)
     except RedisError as exc:
-        logger.warning("用量 stream 长度查询失败: %s", exc)
+        logger.warning("用量消费组查询失败: %s", exc)
         return
-    if length and length > threshold:
-        logger.warning("用量 stream 积压: xlen=%d 超阈值 %d", length, threshold)
+    for group in groups:
+        name = group.get("name")
+        if isinstance(name, bytes):  # redis-py: dict keys str, group name value bytes
+            name = name.decode()
+        if name != MODEL_USAGE_CONSUMER_GROUP:
+            continue
+        lag = group.get("lag")
+        if lag and lag > threshold:
+            logger.warning("用量消费组 lag 积压: lag=%d 超阈值 %d", lag, threshold)
     try:
         pending = await client.xpending(MODEL_USAGE_STREAM, MODEL_USAGE_CONSUMER_GROUP)
     except ResponseError:

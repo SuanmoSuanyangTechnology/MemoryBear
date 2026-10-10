@@ -1,8 +1,11 @@
 """Model-service internal-plane auth: direct built-in (community) / gateway enterprise extension.
 
-direct: trusts the `X-Model-*` internal headers injected by the host proxy
-(channel-2 semantics, NetworkPolicy as the network-level safety net, only the
-host api pod is admitted); missing headers -> 401 fail-closed.
+direct: a caller bearer JWT is verified locally against the shared HS256 secret
+(MODEL_SERVICE_SECRET, same value as the monolith's SECRET_KEY) and its claims
+are authoritative; requests without a bearer fall back to trusting the
+`X-Model-*` internal headers injected by the host proxy (channel-2 semantics,
+NetworkPolicy as the network-level safety net, only the host api pod is
+admitted); missing credentials -> 401 fail-closed.
 gateway: enterprise policy implemented in the private enterprise-extensions
 package (enterprise_ext.model.ModelGatewayAuth, loaded lazily and delegated
 through _load_gateway_auth; a missing package raises RuntimeError - loud
@@ -16,6 +19,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 
+from auth_sdk.token import TokenVerifier
 from fastapi import HTTPException, Request
 from pydantic import ValidationError
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -62,6 +66,9 @@ class ModelAuthConfig:
     auth_mode: str = "direct"
     service_name: str = "model-service"
     jwks_url: str | None = None
+    # Community direct mode: HS256 secret for local bearer-JWT verification
+    # (same value as the monolith's SECRET_KEY). Unused in gateway mode.
+    secret: str | None = None
     # ACL rule source for gateway mode: a redis.asyncio client, or a zero-arg
     # async callable returning one (main.py wires runtime.redis.client lazily so
     # no Redis connection is made at app build time). None -> no rules loaded
@@ -126,16 +133,56 @@ class ModelAuthMiddleware(BaseHTTPMiddleware):
         self._gateway = (
             _load_gateway_auth(model_auth) if model_auth.auth_mode == "gateway" else None
         )
+        # direct mode (non-gateway): local HS256 verifier for caller bearer JWTs.
+        # gateway mode verifies internal tokens inside the enterprise handler.
+        if model_auth.auth_mode != "gateway" and model_auth.secret is not None:
+            self._verifier: TokenVerifier | None = TokenVerifier(secret=model_auth.secret)
+        else:
+            self._verifier: TokenVerifier | None = None
 
     async def dispatch(self, request: Request, call_next):
         if is_public_path(request.url.path, request.method):
             return await call_next(request)
         if self._gateway is not None:
             return await self._gateway_dispatch(request, call_next)
+        auth = request.headers.get("authorization", "")
+        if auth.startswith("Bearer "):
+            return await self._bearer_dispatch(request, call_next, auth)
         try:
             principal = _parse_principal(request)
         except HTTPException as exc:
             return _auth_error(request, 401, "invalid principal headers", exception=exc)
+        request.state.principal = principal
+        return await call_next(request)
+
+    async def _bearer_dispatch(self, request: Request, call_next, auth: str):
+        """Local JWT verification (direct mode): bearer claims are authoritative.
+
+        Strict token_type="access" rejects refresh tokens (same secret, longer
+        TTL). The principal shape follows the same per-path rule as the header
+        path: actor required on the management plane, optional on invoke/validate.
+        """
+        token = auth.removeprefix("Bearer ").strip()
+        if self._verifier is None:
+            return _auth_error(request, 500, "auth misconfigured")
+        try:
+            payload = await self._verifier.verify_jwt(token, token_type="access")
+        except Exception as exc:
+            return _auth_error(request, 401, "invalid token", exception=exc)
+        path = request.url.path.rstrip("/") or "/"
+        principal_model = InvokePrincipal if path in _ACTOR_OPTIONAL_PATHS else Principal
+        try:
+            principal = principal_model.model_validate(
+                {
+                    "actor_id": payload.get("sub"),
+                    "actor_name": None,
+                    "tenant_id": payload.get("tenant_id"),
+                    "workspace_id": payload.get("workspace_id"),
+                    "source": None,
+                }
+            )
+        except ValidationError as exc:
+            return _auth_error(request, 401, "invalid token", exception=exc)
         request.state.principal = principal
         return await call_next(request)
 

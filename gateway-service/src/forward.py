@@ -1,7 +1,8 @@
 """转发目标解析：路径前缀 → 目标服务（首期 static 配置 → K8s Service DNS）。
 
 Forwarder：统一转发——外部路径 /api|/v1 → 内部 /internal/v1，白名单请求头透传 +
-x-* 身份头透传。凭据头按部署模式处理（设计 4.1.2 / 4.2.1）：gateway 模式把中间件
+x-* 头透传（X-Model-* 两策略下均剥除；X-KB-* 仅 gateway 模式剥除）。凭据头按部署
+模式处理（设计 4.1.2 / 4.2.1）：gateway 模式把中间件
 注入的内部 token 改写为 authorization: Bearer（x-internal-token 不透传，避免双凭据
 信源）；direct 模式原样透传外部 authorization / x-api-key 供下游自验。
 
@@ -118,13 +119,18 @@ class Forwarder:
         for name, value in request.headers.items():
             low = name.lower()
             if low.startswith("x-") and low not in ("x-api-key", "x-internal-token"):
-                if internal and low.startswith(("x-kb", "x-model")):
+                if low.startswith("x-model"):
+                    # Always stripped, in both strategies: model-service's direct auth
+                    # mode trusts X-Model-* as channel-2 identities, and the direct
+                    # strategy injects none (no internal token exists there), so a
+                    # passthrough would let any client forge identity downstream.
+                    continue
+                if internal and low.startswith("x-kb"):
                     # Gateway mode: claims inject only x-user-id/x-tenant-id/x-workspace-id;
-                    # client-supplied X-KB-* / X-Model-* headers are always stripped — passing
-                    # them through would let a client forge identity headers on kb's
-                    # public-path fallback (cross-workspace file reads) or against a
-                    # model-service mistakenly left in direct auth mode (its channel 2
-                    # trusts X-Model-*). Downstream sees only authoritative identities.
+                    # client-supplied X-KB-* headers would let a client forge identity
+                    # headers on kb's public-path fallback (cross-workspace file reads).
+                    # direct mode keeps the legacy X-KB-* passthrough (kb verifies
+                    # caller JWTs itself).
                     continue
                 headers[name] = value
         if internal:
