@@ -483,6 +483,32 @@ async def _check_quota_async(
     )
 
 
+async def check_knowledge_capacity_quota_async(
+        db: AsyncSession,
+        tenant_id: UUID,
+        workspace_id: UUID,
+) -> None:
+    """Async 版知识库容量配额检查，供 SSO 等非 HTTP 装饰器场景复用。
+
+    语义与 @check_knowledge_capacity_quota 装饰器一致（同一个 _check_quota）。
+    知识库容量是按工作空间计量的配额，tenant_id / workspace_id 均必填；
+    缺失时与装饰器一致地拒绝请求，避免退化为租户级用量对比每空间额度。
+    """
+    if not tenant_id:
+        logger.error("配额检查失败：check_knowledge_capacity_quota_async 缺少 tenant_id，拒绝请求")
+        raise InternalServerError()
+    if not workspace_id:
+        logger.error("配额检查失败：check_knowledge_capacity_quota_async 缺少 workspace_id，拒绝请求")
+        raise InternalServerError()
+    await _check_quota_async(
+        db,
+        tenant_id,
+        "knowledge_capacity_quota",
+        "knowledge_capacity",
+        workspace_id=workspace_id,
+    )
+
+
 async def check_end_user_quota_async(
         db: AsyncSession,
         tenant_id: UUID,
