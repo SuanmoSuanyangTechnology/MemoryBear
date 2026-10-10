@@ -22,7 +22,7 @@ from app.core.error_codes import BizCode
 from app.core.logging_config import get_business_logger
 from app.core.utils.datetime_utils import utcnow_naive
 from app.repositories.tool_repository import ToolRepository
-from app.services.model_service import ModelConfigService
+from app.services.model_service import ModelApiKeyService, ModelConfigService
 from app.services.multi_agent_variable_contract import (
     ClusterVariableBag,
     build_cluster_variable_bag,
@@ -2424,11 +2424,20 @@ class MultiAgentOrchestrator:
         if not self.default_model_config_id:
             return None
         try:
-            api_key_config = await ModelApiKeyService.get_available_api_key_bridge_async(
-                self.db,
-                self.default_model_config_id,
-                tenant_id=self.tenant_id,
-            )
+            # ModelApiKeyService 无“返回 None”的 bridge 方法，按会话类型分支
+            # （分支同 resolve_runtime_api_key_bridge_or_raise_async 内部实现）
+            if isinstance(self.db, AsyncSession):
+                api_key_config = await ModelApiKeyService.get_available_api_key_async(
+                    self.db,
+                    self.default_model_config_id,
+                    tenant_id=self.tenant_id,
+                )
+            else:
+                api_key_config = ModelApiKeyService.get_available_api_key(
+                    self.db,
+                    self.default_model_config_id,
+                    tenant_id=self.tenant_id,
+                )
             return api_key_config or None
         except Exception as e:
             logger.warning(f"S9 supervisor_loop：主管模型凭据获取失败: {e}")
