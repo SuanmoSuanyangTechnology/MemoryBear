@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import json
+import logging
 import math
+import re
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
@@ -28,6 +31,16 @@ from redbear_model.providers.dashscope import (
 
 _SAFE_USAGE_KEYS = frozenset(
     {"input_tokens", "image_tokens", "text_tokens", "total_tokens", "output_tokens"}
+)
+logger = logging.getLogger(__name__)
+_MAX_FAILURE_FIELD_LENGTH = 512
+_SENSITIVE_FAILURE_TEXT = re.compile(
+    r"(?i)\b(?:Bearer|Basic)\s+[A-Za-z0-9._~+/=-]+"
+    r"|\bsk-[A-Za-z0-9_-]+"
+    r"|(?:https?://|data:)[^\s\"'<>]+"
+    r"|\b[a-z0-9_-]*(?:api[_-]?key|authorization|password|passwd|secret|token|cookie)"
+    r"[a-z0-9_-]*[\"']?\s*(?:[:=]|\bis\b)\s*"
+    r"(?:\"(?:\\.|[^\"\\])*\"|'(?:\\.|[^'\\])*'|[^\s,;]+)"
 )
 
 
@@ -59,6 +72,35 @@ def _safe_usage(response: Any) -> dict[str, int]:
     }
 
 
+def _safe_failure_field(
+    response: Any,
+    field: str,
+    api_key: str,
+    request: EmbeddingRequest,
+) -> str | None:
+    value = _value(response, field)
+    if not isinstance(value, str):
+        return None
+    if api_key:
+        value = value.replace(api_key, "[REDACTED]")
+    for item in request.contents:
+        if isinstance(item, TextEmbeddingContent):
+            # Providers may echo text literally, JSON-escaped, or with collapsed whitespace.
+            variants = {
+                item.text,
+                " ".join(item.text.split()),
+                json.dumps(item.text, ensure_ascii=False)[1:-1],
+                json.dumps(item.text, ensure_ascii=True)[1:-1],
+            }
+        else:
+            variants = {item.data_uri}
+        for variant in sorted(variants, key=len, reverse=True):
+            if variant:
+                value = value.replace(variant, "[REDACTED]")
+    value = _SENSITIVE_FAILURE_TEXT.sub("[REDACTED]", value)
+    return " ".join(value.split())[:_MAX_FAILURE_FIELD_LENGTH]
+
+
 class DashScopeMultimodalEmbeddingAdapter:
     def __init__(
         self,
@@ -70,6 +112,34 @@ class DashScopeMultimodalEmbeddingAdapter:
             raise UnsupportedMultimodalModelError("qwen3-vl embedding")
         self._config = config
         self._call = call or _load_call()
+
+    def _log_failure(self, response: Any, request: EmbeddingRequest) -> None:
+        try:
+            api_key = self._config.api_key.get_secret_value()
+            status_code = _value(response, "status_code")
+            diagnostics = {
+                "status_code": status_code
+                if isinstance(status_code, int) and not isinstance(status_code, bool)
+                else None,
+                "provider_code": _safe_failure_field(
+                    response, "code", api_key, request
+                ),
+                "provider_message": _safe_failure_field(
+                    response, "message", api_key, request
+                ),
+                "provider_request_id": _safe_failure_field(
+                    response, "request_id", api_key, request
+                ),
+            }
+            logger.warning(
+                "event=embedding_provider_failure provider=%s model=%s purpose=%s diagnostics=%s",
+                self._config.provider.value,
+                self._config.model_name,
+                request.purpose.value,
+                json.dumps(diagnostics, ensure_ascii=True),
+            )
+        except Exception:  # noqa: BLE001 - diagnostics must not replace the provider failure.
+            return
 
     def embed(self, request: EmbeddingRequest) -> EmbeddingResult:
         contents = []
@@ -88,6 +158,8 @@ class DashScopeMultimodalEmbeddingAdapter:
             enable_fusion=request.fusion,
             request_timeout=self._config.runtime.timeout_s,
         )
+        if _value(response, "status_code") != 200:
+            self._log_failure(response, request)
         if is_dashscope_multimodal_input_limit(response):
             raise MultimodalInputLimitError("embedding")
         status_code = _value(response, "status_code")
@@ -101,19 +173,27 @@ class DashScopeMultimodalEmbeddingAdapter:
         if not isinstance(embeddings, Sequence) or isinstance(embeddings, (str, bytes)):
             raise InvalidProviderResponseError("embedding", "missing embeddings")
         if len(embeddings) != 1:
-            raise InvalidProviderResponseError("embedding", "expected one fusion result")
+            raise InvalidProviderResponseError(
+                "embedding", "expected one fusion result"
+            )
         item = embeddings[0]
         if _value(item, "index") != 0 or _value(item, "type") != "fusion":
-            raise InvalidProviderResponseError("embedding", "invalid fusion result identity")
+            raise InvalidProviderResponseError(
+                "embedding", "invalid fusion result identity"
+            )
         raw_vector = _value(item, "embedding")
         if not isinstance(raw_vector, Sequence) or isinstance(raw_vector, (str, bytes)):
             raise InvalidProviderResponseError("embedding", "missing vector")
         try:
             vector = tuple(float(value) for value in raw_vector)
         except (TypeError, ValueError) as exc:
-            raise InvalidProviderResponseError("embedding", "non-numeric vector") from exc
+            raise InvalidProviderResponseError(
+                "embedding", "non-numeric vector"
+            ) from exc
         if len(vector) != QWEN3_VL_EMBEDDING_DIMENSION:
-            raise InvalidProviderResponseError("embedding", "unexpected vector dimension")
+            raise InvalidProviderResponseError(
+                "embedding", "unexpected vector dimension"
+            )
         if not all(math.isfinite(value) for value in vector):
             raise InvalidProviderResponseError("embedding", "non-finite vector")
         return EmbeddingResult(
