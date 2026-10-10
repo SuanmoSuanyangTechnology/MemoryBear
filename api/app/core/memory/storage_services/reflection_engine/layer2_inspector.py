@@ -622,7 +622,6 @@ class Layer2Inspector:
                 end_user_id=end_user_id,
                 language=language,
                 min_fragments=self.desc_config.min_fragments,
-                neo4j_client=await self._get_reflection_client(),
                 collect_trace=want_trace,
             )
 

@@ -325,7 +325,6 @@ async def extract_metadata_for_user(
     end_user_id: str,
     language: str = "zh",
     min_fragments: int = 5,
-    neo4j_client: Any = None,
     collect_trace: bool = False,
     **kwargs: Any,
 ) -> Dict[str, Any]:
@@ -334,7 +333,7 @@ async def extract_metadata_for_user(
     流程：
     1. Neo4j 扫描 User 节点并获取 description；
     2. 碎片数 >= min_fragments (默认 5) 门控检查，< 5 时跳过；
-    3. 按 dialog_at 严格升序排序碎片列表，保证时序因果序；
+    3. 碎片保持 description 中的存储顺序；
     4. 独立短会话读 PG：获取初始已有元数据 current_meta 与应用特殊领域 Schema；
     5. 切片并串行迭代：每轮输入当前分片碎片与上轮最新的 current_meta，调用 LLM 产出增量 operations；
     6. 内存中本地有序应用 Patch 并执行白名单校验清洗，结果作为下一分片的基准状态；
