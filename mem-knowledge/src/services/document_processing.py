@@ -821,6 +821,7 @@ def process_document(
     normalized_document_id: uuid.UUID | None = None
     all_chunks: list[DocumentChunk] = []
     write_started = Event()
+    completion_persisted = False
     try:
         normalized_document_id = uuid.UUID(str(document_id))
         with run.stage("load_snapshot"):
@@ -1011,7 +1012,7 @@ def process_document(
             document.run = 0
 
         with run.stage("persist_document"):
-            _update_document(runtime, normalized_document_id, mark_done)
+            completion_persisted = _update_document(runtime, normalized_document_id, mark_done)
         if _should_abort(runtime, normalized_document_id):
             raise _ParseAborted
         with run.stage("dispatch_graph"):
@@ -1037,7 +1038,12 @@ def process_document(
             try:
                 cleanup_interrupted_task_vectors(
                     runtime, snapshot.knowledge_id, normalized_document_id,
-                    [str(chunk.metadata["doc_id"]) for chunk in all_chunks],
+                    # A surviving document already accounts for finalized
+                    # output. Only remove it if the document itself is gone.
+                    (
+                        [] if completion_persisted
+                        else [str(chunk.metadata["doc_id"]) for chunk in all_chunks]
+                    ),
                 )
             except Exception as cleanup_exc:
                 logger.warning(
