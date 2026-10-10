@@ -25,6 +25,8 @@
   - `name | preferred_alias | <首选称呼>`
 - `full_name` 当前最多一条；`preferred_alias` 可以多条并按规范化名称去重。
 - “叫我 X”“我的英文名是 X”属于 `preferred_alias`，没有证据时不得扩写为完整姓名。
+- `<完整姓名>` 和 `<首选称呼>` 必须是描述中逐字出现的具体名字。只说明“这是用户的名字/称呼”而未给出具体名字的描述（如“用户的名字”“朋友对用户的称呼”），不是姓名证据，不得据此 `add` 或 `update` 任何 `name` 条目，也不得把“用户的名字”“说话者”这类说明文字当作名字写入。
+  - 反例：描述为 `[2026-01-01T00:00:00Z] 用户的名字`，其中没有具体名字，不生成任何 `name` 操作；若当前 batch 没有其他可提取事实，输出空 `operations`。
 
 ### 1.2 `age` — 年龄
 
@@ -423,6 +425,8 @@ When parsing, the first `|` is the subcategory separator. The fact content may c
   - `name | preferred_alias | <preferred form of address>`
 - At most one current `full_name` entry is allowed; multiple `preferred_alias` entries are allowed and must be deduplicated by normalized name.
 - “Call me X” and “My English name is X” belong to `preferred_alias`. Without evidence, do not expand either into a full name.
+- `<full name>` and `<preferred form of address>` must be a concrete name that appears verbatim in the descriptions. A description that only states “this is the user's name/form of address” without giving the actual name (e.g., “the user's name”, “what friends call the user”) is not name evidence: do not `add` or `update` any `name` entry based on it, and never write explanatory text such as “the user's name” or “the speaker” as a name.
+  - Counterexample: a description `[2026-01-01T00:00:00Z] the user's name` contains no concrete name, so generate no `name` operation; if the batch has no other extractable fact, output empty `operations`.
 
 ### 1.2 `age` — Age
 
