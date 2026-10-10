@@ -6,7 +6,14 @@
  */
 import { request } from '@/utils/request'
 import type { ApplicationModalData } from '@/views/ApplicationManagement/types'
-import type { Config, AppSharingForm, AnnotationSettingForm, AnnotationForm, ReleaseModalData } from '@/views/ApplicationConfig/types'
+import type {
+  Config,
+  MultiAgentConfigUpdate,
+  AppSharingForm,
+  AnnotationSettingForm,
+  AnnotationForm,
+  ReleaseModalData,
+} from '@/views/ApplicationConfig/types'
 import { handleSSE, type SSEMessage } from '@/utils/stream'
 import type { QueryParams, ReportMessageData } from '@/views/Conversation/types'
 import type { WorkflowConfig } from '@/views/Workflow/types'
@@ -46,7 +53,7 @@ export const saveAgentConfig = (app_id: string, values: Config) => {
   return request.put(`/apps/${app_id}/config`, values)
 }
 // Save multi-agent config
-export const saveMultiAgentConfig = (app_id: string, values: Config) => {
+export const saveMultiAgentConfig = (app_id: string, values: MultiAgentConfigUpdate) => {
   return request.put(`/apps/${app_id}/multi-agent`, values)
 }
 // Save workflow config

@@ -45,6 +45,7 @@ from app.services.shared_chat_service import SharedChatService
 from app.services.workflow_service import WorkflowService
 from app.services.app_log_service import AppLogService
 from app.models.file_metadata_model import FileMetadata
+from app.services.file_content_service import build_permanent_file_url
 from app.utils.app_config_utils import workflow_config_4_app_release, \
     agent_config_4_app_release, multi_agent_config_4_app_release
 from app.utils.redis_cache import CACHE_MISS, get_json_async, set_json_async, redis_cache
@@ -521,6 +522,42 @@ def get_conversation(
         )
         feedback_map = {row[0]: (row[1], row[2]) for row in feedback_rows}
 
+    # 收集本地附件 ID，批量查询后解析为可访问 URL（本地文件持久化时只存 upload_file_id、url 为空）
+    local_file_ids: set[uuid.UUID] = set()
+    for m in messages:
+        msg_list = m if isinstance(m, list) else [m]
+        for msg in msg_list:
+            if isinstance(msg.meta_data, dict):
+                for f in msg.meta_data.get("files") or []:
+                    if isinstance(f, dict) and not f.get("url") and f.get("upload_file_id"):
+                        try:
+                            local_file_ids.add(uuid.UUID(str(f["upload_file_id"])))
+                        except (ValueError, TypeError):
+                            continue
+    local_file_url_map: dict[str, str] = {}
+    if local_file_ids:
+        completed_files = db.query(FileMetadata).filter(
+            FileMetadata.id.in_(local_file_ids),
+            FileMetadata.workspace_id == conversation.workspace_id,
+            FileMetadata.status == "completed",
+        ).all()
+        local_file_url_map = {
+            str(f.id): build_permanent_file_url(f.id) for f in completed_files
+        }
+
+    def _resolve_meta(msg) -> dict | None:
+        """将 meta_data.files 中的本地附件解析为可访问 URL，不改动 ORM 原始数据"""
+        meta = msg.meta_data
+        if not isinstance(meta, dict) or not meta.get("files"):
+            return meta
+        resolved_files = []
+        for f in meta["files"]:
+            if not isinstance(f, dict):
+                continue
+            file_url = f.get("url") or local_file_url_map.get(str(f.get("upload_file_id")))
+            resolved_files.append({**f, "url": file_url} if file_url else f)
+        return {**meta, "files": resolved_files}
+
     # 构建消息响应列表
     message_responses = []
     for m in messages:
@@ -535,7 +572,7 @@ def get_conversation(
                     role=ver_msg.role,
                     content=ver_msg.content,
                     status=ver_msg.status,
-                    meta_data=ver_msg.meta_data,
+                    meta_data=_resolve_meta(ver_msg),
                     created_at=ver_msg.created_at,
                     feedback_type=fb_type,
                     feedback_content=fb_content,
@@ -554,7 +591,7 @@ def get_conversation(
                 role=m.role,
                 content=m.content,
                 status=m.status,
-                meta_data=m.meta_data,
+                meta_data=_resolve_meta(m),
                 created_at=m.created_at,
                 feedback_type=fb_type,
                 feedback_content=fb_content,

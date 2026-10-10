@@ -35,6 +35,7 @@ from ..repositories.knowledge_share import (
 )
 from ..repositories.reference import ReferenceRepository
 from ..utils.datetime_utils import utcnow_naive
+from .knowledge_model_validation import validate_requested_knowledge_models
 
 logger = logging.getLogger(__name__)
 
@@ -566,6 +567,11 @@ async def create_knowledge(
         parent = await get_knowledge(db, requested_parent_id, principal)
         if parent is None:
             raise _not_found("KB_PARENT_KNOWLEDGE_NOT_FOUND")
+    await validate_requested_knowledge_models(
+        db,
+        create_data.model_dump(exclude_unset=True),
+        principal.tenant_id,
+    )
     knowledge = await _prepare_knowledge_create(
         db,
         create_data,
@@ -668,6 +674,7 @@ async def prepare_knowledge_update(
             raise KnowledgeError.from_code(
                 "KB_KNOWLEDGE_PARSER_CONFIG_INVALID",
             ) from exc
+    await validate_requested_knowledge_models(db, update_dict, principal.tenant_id)
     embedding_changed = (
         "embedding_id" in update_dict and update_dict["embedding_id"] != knowledge.embedding_id
     )

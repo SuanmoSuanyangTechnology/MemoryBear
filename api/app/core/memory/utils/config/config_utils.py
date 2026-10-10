@@ -95,16 +95,6 @@ def get_chunker_config(chunker_strategy: str) -> dict:
             "embedding_model": "BAAI/bge-m3",
             "chunk_size": 512,
         },
-        "LLMChunker": {
-            "chunker_strategy": "LLMChunker",
-            "embedding_model": "BAAI/bge-m3",
-            "chunk_size": 1000,
-            "threshold": 0.8,
-            "min_sentences": 2,
-            "language": "zh",
-            "skip_window": 1,
-            "min_characters_per_chunk": 100,
-        },
     }
     if chunker_strategy in default_configs:
         return default_configs[chunker_strategy]

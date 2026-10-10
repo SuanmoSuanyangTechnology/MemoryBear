@@ -84,46 +84,148 @@ export interface Config extends MultiAgentConfig {
   features?: FeaturesConfigForm;
 }
 
+export type OrchestrationMode = 'supervisor_loop' | 'supervisor' | 'collaboration';
+
+export type AggregationStrategy = 'merge' | 'vote' | 'priority';
+
+export type ReleasePolicy = 'current' | 'pinned';
+
 /**
- * Multi-agent configuration
+ * Multi-agent routing rule
  */
-export interface MultiAgentConfig {
-  /** Configuration ID */
-  id: string;
-  /** Application ID */
-  app_id: string;
-  /** Default model configuration ID */
-  default_model_config_id?: string;
-  /** Model parameters */
-  model_parameters: ModelConfig;
-  /** Sub-agents list */
-  sub_agents?: SubAgentItem[];
-  /** Routing rules */
-  routing_rules: null;
-  /** Orchestration mode */
-  orchestration_mode: 'supervisor' | 'collaboration';
-  /** Execution configuration */
-  execution_config: {
-    /** Sub-agent execution mode */
-    sub_agent_execution_mode: 'sequential' | 'parallel';
-  };
-  /** Aggregation strategy */
-  aggregation_strategy: 'merge' | 'vote' | 'priority'
+export interface RoutingRule {
+  condition: string;
+  target_agent_id: string;
+  priority?: number;
 }
 
 /**
- * Sub-agent item data
+ * Multi-agent execution safeguards
  */
-export interface SubAgentItem {
-  /** Agent ID */
+export interface ExecutionConfig {
+  max_iterations: number;
+  supervisor_max_tool_calls?: number;
+  stream_idle_timeout?: number;
+  retry_on_failure?: boolean;
+  max_retries?: number;
+  timeout?: number;
+  parallel_limit?: number;
+  result_merge_mode?: 'master' | 'smart';
+  merge_max_tokens?: number;
+  sub_agent_execution_mode?: 'parallel' | 'sequential';
+}
+
+/**
+ * Supervisor capabilities
+ */
+export interface SupervisorConfig {
+  system_prompt?: string | null;
+  memory?: { enabled: boolean } | null;
+  knowledge_retrieval?: KnowledgeConfig | null;
+  tools?: ToolOption[] | null;
+  skills?: SkillConfigForm | null;
+  variables?: Variable[] | null;
+}
+
+/**
+ * Shared writable fields for a sub-agent
+ */
+export interface SubAgentConfigInputBase {
   agent_id: string;
-  /** Agent name */
-  name: string;
-  /** Agent role */
-  role: string;
-  /** Agent capabilities */
+  name?: string;
+  role?: string | null;
+  priority?: number;
+  capabilities?: string[];
+}
+
+/**
+ * Sub-agent data accepted by the update API
+ */
+export type SubAgentConfigInput = SubAgentConfigInputBase & (
+  | {
+      release_policy?: 'current';
+      release_id?: null;
+    }
+  | {
+      release_policy: 'pinned';
+      release_id: string;
+    }
+);
+
+/**
+ * Sub-agent data returned by the configuration API
+ */
+export interface SubAgentConfigResponse extends SubAgentConfigInputBase {
+  role: string | null;
+  priority: number;
   capabilities: string[];
-  /** Whether agent is active */
+  release_policy: ReleasePolicy;
+  release_id: string | null;
+  readonly current_release_id: string | null;
+  readonly has_newer_release: boolean | null;
+}
+
+/**
+ * Multi-agent configuration returned by the API
+ */
+export interface MultiAgentConfig {
+  /** Configuration ID; absent when the API returns the default template */
+  id?: string;
+  /** Application ID */
+  app_id: string;
+  /** Default model configuration ID */
+  default_model_config_id?: string | null;
+  /** Model parameters */
+  model_parameters: ModelConfig | null;
+  /** Sub-agents list */
+  sub_agents: SubAgentConfigResponse[];
+  /** Routing rules */
+  routing_rules: RoutingRule[];
+  /** Orchestration mode */
+  orchestration_mode: OrchestrationMode;
+  /** Reserved master-agent release ID */
+  master_agent_id: string | null;
+  /** Master-agent name */
+  master_agent_name: string | null;
+  /** Execution safeguards */
+  execution_config: ExecutionConfig;
+  /** Supervisor capabilities; null means all defaults */
+  supervisor_config: SupervisorConfig | null;
+  /** Only the default template may retain this deprecated top-level key */
+  /** Aggregation strategy */
+  aggregation_strategy: AggregationStrategy;
+  /** Whether the saved configuration is active */
+  is_active?: boolean;
+  /** Creation timestamp in milliseconds */
+  created_at?: number;
+  /** Last update timestamp in milliseconds */
+  updated_at?: number;
+}
+
+/**
+ * Multi-agent configuration fields accepted by the update API
+ */
+export interface MultiAgentConfigUpdate {
+  orchestration_mode?: OrchestrationMode;
+  master_agent_name?: string | null;
+  default_model_config_id?: string | null;
+  model_parameters?: ModelConfig | null;
+  sub_agents?: SubAgentConfigInput[];
+  routing_rules?: RoutingRule[];
+  execution_config?: Partial<ExecutionConfig>;
+  supervisor_config?: SupervisorConfig | null;
+  aggregation_strategy?: AggregationStrategy;
+}
+
+/**
+ * Editable sub-agent item used by the configuration UI
+ */
+export interface SubAgentItem extends SubAgentConfigInputBase {
+  release_policy?: ReleasePolicy;
+  release_id?: string | null;
+  readonly current_release_id?: string | null;
+  readonly has_newer_release?: boolean | null;
+  /** Whether the referenced application is active */
   is_active?: boolean;
 }
 

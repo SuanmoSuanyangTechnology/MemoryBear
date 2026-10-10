@@ -22,11 +22,13 @@
 - 文案与 ``mem-knowledge/src/locales/zh.json:116-123`` 逐字一致，这样前置拦与下游拦
   对用户呈现的是同一句话，排查时不会被两套措辞带偏。
 - 模型能力判定复用 ``redbear_model`` 的 ``is_qwen3_vl_embedding`` / ``is_qwen3_vl_reranker``，
-  喂进去的快照字段口径与 mem-knowledge 的模型 registry 一致（provider / type / name /
-  capability，其中 name 即解析锚点名），因此两侧判定结果不会漂移。
+  喂进去的快照与契约 v2 ``ResolvedModelConfig`` 的判定面同构（provider / model_name /
+  profile）：profile 由 ``ModelProfile.from_stored_fields`` 从模型行换算（三新列
+  input/output_modalities、features 优先，为空回退旧 capability 列），与 api 侧
+  model_service 同口径，因此两侧判定结果不会漂移。
 
 命中模型类边界（#5/#7/#9）时，报错会带上「实际生效的模型记录」与「缺失的具体条件」
-（provider / type / 名称 / vision 能力）——模型显示名看着对、但记录上没勾选「视觉」能力
+（provider / type / 名称 / 输入模态）——模型显示名看着对、但记录的输入模态不含图片
 是最常见的坑，只给一句「所选重排模型不支持图片检索」根本定位不到。
 
 本模块只读「KB 绑定了哪个模型」用于判定，不承担授权职责：检索时的租户/空间校验仍在
@@ -70,13 +72,16 @@ _IMAGE_BOUNDARY_MESSAGES: dict[str, str] = {
 
 @dataclass(frozen=True, slots=True)
 class _ModelAbility:
-    """能力判定所需的模型快照（有意不含凭据，判定不碰密钥）。"""
+    """能力判定所需的模型快照（有意不含凭据，判定不碰密钥）。
+
+    ``profile`` 与契约 v2 ``ResolvedModelConfig.profile`` 同构，是 ``is_qwen3_vl_*``
+    判定函数唯一读取的能力载体（判定面：profile.type / profile.input_modalities）。
+    """
 
     model_config_id: str
     provider: Any
-    model_type: Any
     model_name: str | None
-    capabilities: tuple[Any, ...]
+    profile: Any
 
 
 @dataclass(frozen=True, slots=True)
@@ -127,12 +132,12 @@ def _shared_qwen3_vl_checkers() -> tuple[Callable[[Any], bool], Callable[[Any], 
 
 
 def _shared_enums() -> tuple[Any, Any, Any]:
-    """取共享枚举 (ModelProvider, ModelType, ModelCapability)，用于生成缺失项说明。"""
+    """取共享枚举 (ModelProvider, ModelType, Modality)，用于生成缺失项说明。"""
     global _SHARED_ENUMS
     if _SHARED_ENUMS is None:
-        from redbear_model import ModelCapability, ModelProvider, ModelType
+        from redbear_model import Modality, ModelProvider, ModelType
 
-        _SHARED_ENUMS = (ModelProvider, ModelType, ModelCapability)
+        _SHARED_ENUMS = (ModelProvider, ModelType, Modality)
     return _SHARED_ENUMS
 
 
@@ -206,40 +211,43 @@ def _reject(code: str, *, detail: str | None = None) -> None:
 
 
 def _to_ability(row: Any) -> _ModelAbility | None:
-    """DB 行 → 能力快照；枚举转换失败按「不可能匹配」处理，与 registry 同口径。"""
+    """DB 行 → 能力快照；枚举/profile 构造失败按「不可能匹配」处理，与 registry 同口径。
+
+    profile 换算与 api 侧 model_service 相同，走 ``ModelProfile.from_stored_fields``：
+    三新列（input/output_modalities、features）非空读新列，为空回退旧 capability 列。
+    """
     from redbear_model import (
-        ModelCapability as SharedModelCapability,
+        ModelProfile as SharedModelProfile,
     )
     from redbear_model import (
         ModelProvider as SharedModelProvider,
-    )
-    from redbear_model import (
-        ModelType as SharedModelType,
     )
 
     try:
         provider = SharedModelProvider(_value_of(row.provider))
     except (ValueError, TypeError):
         provider = None
-    try:
-        model_type = SharedModelType(_value_of(row.type))
-    except (ValueError, TypeError):
-        model_type = None
 
-    capabilities = []
-    for item in row.capability or []:
-        try:
-            capabilities.append(SharedModelCapability(_value_of(item)))
-        except (ValueError, TypeError):
-            # 未识别的能力标签直接跳过（与 mem-knowledge 的 _capabilities 一致）
-            continue
+    try:
+        profile = SharedModelProfile.from_stored_fields(
+            model_id=row.id,
+            tenant_id=None,
+            type=row.type,
+            provider=row.provider,
+            input_modalities=tuple(row.input_modalities or ()),
+            output_modalities=tuple(row.output_modalities or ()),
+            features=tuple(row.features or ()),
+            capabilities=tuple(row.capability or ()),
+            is_omni=bool(getattr(row, "is_omni", False)),
+        )
+    except (ValueError, TypeError):
+        return None
 
     return _ModelAbility(
         model_config_id=str(row.id),
         provider=provider,
-        model_type=model_type,
         model_name=row.name,
-        capabilities=tuple(capabilities),
+        profile=profile,
     )
 
 
@@ -253,7 +261,8 @@ def _ability_mismatch(
     负责把不一致的地方逐条说清楚，供报错与日志定位。
     """
     _, expected_name, expected_type = expectation
-    model_provider, model_type, model_capability = _shared_enums()
+    model_provider, model_type, modality = _shared_enums()
+    profile = ability.profile
     try:
         expected_type_enum = model_type(expected_type)
     except ValueError:  # pragma: no cover - 共享枚举固定含 embedding/rerank
@@ -264,13 +273,16 @@ def _ability_mismatch(
         problems.append(
             f"provider={_value_of(ability.provider) or '空'}≠dashscope"
         )
-    if ability.model_type is not expected_type_enum:
-        problems.append(f"type={_value_of(ability.model_type) or '空'}≠{expected_type}")
+    if profile.type is not expected_type_enum:
+        problems.append(f"type={_value_of(profile.type) or '空'}≠{expected_type}")
     if ability.model_name != expected_name:
         problems.append(f"名称={ability.model_name or '空'}≠{expected_name}")
-    if model_capability.VISION not in ability.capabilities:
-        current = ",".join(_value_of(item) or "?" for item in ability.capabilities) or "无"
-        problems.append(f"未勾选「视觉」能力（当前能力：{current}）")
+    if modality.IMAGE not in profile.input_modalities:
+        current = (
+            ",".join(_value_of(item) or "?" for item in profile.input_modalities)
+            or "无"
+        )
+        problems.append(f"输入模态不含图片（当前：{current}）")
     return problems
 
 
@@ -295,9 +307,8 @@ def _probe(
             checker(
                 SimpleNamespace(
                     provider=ability.provider,
-                    model_type=ability.model_type,
                     model_name=ability.model_name,
-                    capabilities=ability.capabilities,
+                    profile=ability.profile,
                 )
             )
         )
@@ -335,6 +346,10 @@ async def _load_model_abilities(
                 ModelConfig.type,
                 ModelConfig.name,
                 ModelConfig.capability,
+                ModelConfig.is_omni,
+                ModelConfig.input_modalities,
+                ModelConfig.output_modalities,
+                ModelConfig.features,
                 ModelConfig.is_active,
             ).where(ModelConfig.id.in_(model_ids))
         )

@@ -257,6 +257,7 @@ class StatementType(StrEnum):
     OPINION = "OPINION"
     PREDICTION = "PREDICTION"
     SUGGESTION = "SUGGESTION"
+    OTHER = "OTHER"
 
 class TemporalInfo(StrEnum):
     ATEMPORAL = "ATEMPORAL"
