@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
+from contextlib import AbstractAsyncContextManager, nullcontext
 from dataclasses import replace
 from typing import Any, Protocol
 
@@ -65,6 +66,7 @@ class AsyncChunkStore:
         embedding_dimension: int | None = None,
         vector_indexed: bool = True,
         multimodal: bool | None = None,
+        mutation_context: Callable[[], AbstractAsyncContextManager[None]] | None = None,
     ):
         self.client = client
         self.index = collection_name_for_knowledge(knowledge_id)
@@ -74,6 +76,7 @@ class AsyncChunkStore:
         self.image_resolver = image_resolver
         self.embedding_dimension = embedding_dimension
         self.vector_indexed = vector_indexed
+        self._mutation_context = mutation_context or nullcontext
         # Unit-layout index marker. Read-only callers (chunk list) set this
         # without wiring embedders so they still collapse/filter units correctly.
         self.multimodal = (
@@ -269,8 +272,6 @@ class AsyncChunkStore:
             await self.add_unit_chunks(chunks)
             return
         embeddings = await self._embed_chunks(chunks)
-        if not await self.client.indices.exists(index=self.index):
-            await self._create_index(embeddings)
         actions = []
         for chunk, vector in zip(chunks, embeddings, strict=True):
             metadata = dict(chunk.metadata or {})
@@ -289,7 +290,10 @@ class AsyncChunkStore:
                 if metadata.get(key):
                     source[field.value] = metadata[key]
             actions.append({"_index": self.index, "_source": source})
-        await async_bulk(self.client, actions)
+        async with self._mutation_context():
+            if not await self.client.indices.exists(index=self.index):
+                await self._create_index(embeddings)
+            await async_bulk(self.client, actions)
 
     async def update_chunk(self, chunk: DocumentChunk) -> int:
         metadata = chunk.metadata or {}
@@ -313,12 +317,13 @@ class AsyncChunkStore:
             )
             params["new_question"] = metadata.get("question", "")
             params["new_answer"] = metadata.get("answer", "")
-        response = await self.client.update_by_query(
-            index=self.index,
-            script={"source": source, "params": params},
-            query={"term": {Field.DOC_ID.value: metadata["doc_id"]}},
-        )
-        self._raise_on_failed_response(response, "segment update")
+        async with self._mutation_context():
+            response = await self.client.update_by_query(
+                index=self.index,
+                script={"source": source, "params": params},
+                query={"term": {Field.DOC_ID.value: metadata["doc_id"]}},
+            )
+            self._raise_on_failed_response(response, "segment update")
         return int(response.get("updated", 0))
 
     async def _update_unit_chunk(self, chunk: DocumentChunk) -> int:
@@ -394,39 +399,43 @@ class AsyncChunkStore:
 
         # All external preparation has succeeded. Stable IDs replace documents
         # in place; failed writes never trigger removal of the previous unit set.
-        await async_bulk(self.client, actions, refresh="wait_for")
-        stale_ids = existing.keys() - retained_ids
-        if stale_ids:
-            await async_bulk(
-                self.client,
-                [
-                    {"_op_type": "delete", "_index": self.index, "_id": unit_id}
-                    for unit_id in stale_ids
-                ],
-                refresh="wait_for",
-            )
+        async with self._mutation_context():
+            await async_bulk(self.client, actions, refresh="wait_for")
+            stale_ids = existing.keys() - retained_ids
+            if stale_ids:
+                await async_bulk(
+                    self.client,
+                    [
+                        {"_op_type": "delete", "_index": self.index, "_id": unit_id}
+                        for unit_id in stale_ids
+                    ],
+                    refresh="wait_for",
+                )
         return 1
 
     async def delete_by_ids(self, ids: list[str], *, refresh: bool = False) -> int:
-        if not ids or not await self.client.indices.exists(index=self.index):
+        if not ids:
             return 0
-        if self.multimodal:
-            # ids are chunk doc_ids; unit docs key off chunk_id.
-            deleted = await self.delete_units_by_chunk_ids(ids)
+        async with self._mutation_context():
+            if not await self.client.indices.exists(index=self.index):
+                return 0
+            if self.multimodal:
+                # ids are chunk doc_ids; unit docs key off chunk_id.
+                deleted = await self.delete_units_by_chunk_ids(ids)
+                if refresh:
+                    await self.client.indices.refresh(index=self.index)
+                return deleted
+            response = await self.client.delete_by_query(
+                index=self.index,
+                query={"terms": {Field.DOC_ID.value: ids}},
+                refresh=False,
+                conflicts="abort",
+                wait_for_completion=True,
+            )
+            self._raise_on_failed_response(response, "segment delete")
             if refresh:
                 await self.client.indices.refresh(index=self.index)
-            return deleted
-        response = await self.client.delete_by_query(
-            index=self.index,
-            query={"terms": {Field.DOC_ID.value: ids}},
-            refresh=False,
-            conflicts="abort",
-            wait_for_completion=True,
-        )
-        self._raise_on_failed_response(response, "segment delete")
-        if refresh:
-            await self.client.indices.refresh(index=self.index)
-        return int(response.get("deleted", 0))
+            return int(response.get("deleted", 0))
 
     async def _embed_chunks(self, chunks: list[DocumentChunk]) -> list[list[float] | None]:
         if self.embed_chunks is not None:
@@ -520,8 +529,6 @@ class AsyncChunkStore:
 
         if not chunks:
             return
-        if not await self.client.indices.exists(index=self.index):
-            await self._create_index([])
         resolver = image_resolver if image_resolver is not None else self.image_resolver
         asset_ids = collect_asset_file_ids(chunks)
         images = (
@@ -544,7 +551,10 @@ class AsyncChunkStore:
                     }
                 )
         if actions:
-            await async_bulk(self.client, actions)
+            async with self._mutation_context():
+                if not await self.client.indices.exists(index=self.index):
+                    await self._create_index([])
+                await async_bulk(self.client, actions)
 
     @staticmethod
     def _unit_source(unit: RetrievalUnit, vector: list[float] | None) -> dict[str, Any]:
