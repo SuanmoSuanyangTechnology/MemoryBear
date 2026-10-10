@@ -2,7 +2,8 @@
 
 宿主只声明「探测哪个配置、代表哪个租户」（``RemoteInvokeRef`` 同形），凭据解密、渠道选路与
 活体探针全在服务侧（设计 §2.2：明文不出宿主边界）。结果按**中性 kind** 返回，域内 reason
-枚举与文案由调用方翻译，本层不认业务文案。
+枚举与文案由调用方翻译，本层不认业务文案；``valid`` 时另附服务侧实测的中性 ``usage``
+（如 embedding 的 ``vector_dimension``），供调用方在本侧做形态守卫。
 
 失败面契约（B8 已定，见服务侧 ``_resolve_stored_probe_inputs``）：4003 行缺失 / 4012 无可用
 凭据 → ``no_credential``；4013 SpeedBear 缺绑 / 4014 解密失败 / 其余 → ``unavailable``；
@@ -27,10 +28,15 @@ _NO_CREDENTIAL_CODES = frozenset({BizCode.MODEL_NOT_FOUND, BizCode.NO_AVAILABLE_
 
 
 class StoredValidationOutcome(NamedTuple):
-    """既有配置探活的中性结果：``kind`` 由调用方翻译为域内 reason。"""
+    """既有配置探活的中性结果：``kind`` 由调用方翻译为域内 reason。
+
+    ``usage`` 原样透传服务侧返还的中性用量体（探针实测事实，如 embedding 的
+    ``vector_dimension``），字段名不做翻译；探针不产出用量或形态不符时为 ``None``。
+    """
 
     kind: Literal["valid", "probe_failed", "no_credential", "unavailable"]
     detail: str | None = None
+    usage: dict[str, Any] | None = None
 
 
 def _detail(value: Any) -> str | None:
@@ -58,7 +64,10 @@ async def aprobe_stored_config(
         data = envelope.get("data")
         data = data if isinstance(data, dict) else {}
         if data.get("valid"):
-            return StoredValidationOutcome("valid")
+            usage = data.get("usage")
+            return StoredValidationOutcome(
+                "valid", usage=usage if isinstance(usage, dict) else None
+            )
         return StoredValidationOutcome(
             "probe_failed", _detail(data.get("error") or data.get("message"))
         )

@@ -886,7 +886,7 @@ async def _validate_workspace_slot_runtime(
             is_supported_embedding_dimension,
         )
 
-        dimension = (result.get("usage") or {}).get("vector_dimension")
+        dimension = (outcome.usage or {}).get("vector_dimension")
         if not is_supported_embedding_dimension(
             dimension if isinstance(dimension, int) else 0
         ):
