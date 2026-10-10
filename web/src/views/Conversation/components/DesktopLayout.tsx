@@ -1,7 +1,3 @@
-/**
- * DesktopLayout
- * 桌面端（非 iframe / 大屏）会话布局：左侧历史列表 + 右侧会话区。
- */
 import { type FC } from 'react'
 import InfiniteScroll from 'react-infinite-scroll-component'
 import { Flex, Skeleton, Tooltip } from 'antd'
@@ -31,7 +27,7 @@ const DesktopLayout: FC<DesktopLayoutProps> = ({ ctx }) => {
   return (
     <Flex className="rb:w-full rb:p-[-16px]!">
       {!isShare &&
-        <div className="rb:w-80 rb:h-screen rb:bg-[#F6F6F6] rb:overflow-hidden">
+        <div className="rb:w-80 rb:h-screen rb:bg-gray-100 rb:overflow-hidden">
           <Flex align="center" gap={8} className="rb:p-5!">
             <div
               className="rb:size-6 rb:bg-cover rb:rounded-md rb:bg-[url('@/assets/images/conversation/redbear.png')]"
@@ -71,7 +67,7 @@ const DesktopLayout: FC<DesktopLayoutProps> = ({ ctx }) => {
               >
                 {Object.entries(groupHistoryList).map(([date, items]) => (
                   <div key={date} className="rb:mt-6 rb:first:mt-0">
-                    <div className="rb:leading-5 rb:text-[#5B6167] rb:mb-2 rb:pl-1 rb:font-regular">{date.replace(/\u200e|\u200f/g, '')}</div>
+                    <div className="rb:leading-5 rb:text-gray-600 rb:mb-2 rb:pl-1 rb:font-regular">{date.replace(/\u200e|\u200f/g, '')}</div>
 
                     <Flex vertical gap={4}>
                       {items.map(item => (
@@ -96,7 +92,7 @@ const DesktopLayout: FC<DesktopLayoutProps> = ({ ctx }) => {
 
       <div className="rb:relative rb:h-screen rb:px-4 rb:flex-[1_1_auto]">
         {!isShare &&
-          <div className="rb:text-[#212332] rb:text-[16px] rb:leading-6 rb:font-medium rb:text-center rb:h-16 rb:py-5 rb:relative">
+          <div className="rb:text-gray-800 rb:text-[16px] rb:leading-6 rb:font-medium rb:text-center rb:h-16 rb:py-5 rb:relative">
             <div className="rb:w-190 rb:mx-auto">{chatTitle || t('memoryConversation.newConversation')}</div>
 
             {chatTitle &&
@@ -111,13 +107,13 @@ const DesktopLayout: FC<DesktopLayoutProps> = ({ ctx }) => {
         }
         <div className={clsx("rb:w-190 rb:mx-auto rb:pb-3", {
           'rb:h-[calc(100vh-64px)]': !isShare,
-          'rb:h-full': isShare,
+          'rb:h-full rb:py-3': isShare,
         })}>
           <Chat
             {...buildSharedChatProps(ctx)}
             empty={<Empty url={ChatEmpty} className="rb:h-full" size={[320, 180]} title={t('memoryConversation.chatEmpty')} subTitle={t('memoryConversation.emptyDesc')} />}
             labelFormat={(item) => formatDateTime(item.created_at, 'MMMM D, YYYY [at] h:mm A', 'en')}
-            readOnly={disabled}
+            readOnly={disabled || isShare}
           >
             <ChatToolbar
               ref={toolbarCallbackRef}
