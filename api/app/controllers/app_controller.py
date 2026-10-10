@@ -1234,7 +1234,13 @@ async def draft_run(
             conversation_id=payload.conversation_id,
             user_id=payload.user_id or current_user_id,
             variables=payload.variables or {},
-            use_llm_routing=True
+            use_llm_routing=True,
+            # 深度思考：缺省 False = 旧行为；需集群 model_parameters.deep_thinking 同时开启才生效
+            thinking=bool(getattr(payload, "thinking", False)),
+            # 联网：缺省 False = 旧行为；需集群 features.web_search.enabled 同时开启，仅主管生效
+            web_search=bool(getattr(payload, "web_search", False)),
+            # 附件：缺省空 = 旧行为；需集群 features.file_upload 开启才放行
+            files=list(getattr(payload, "files", None) or []),
         )
 
         if payload.stream:

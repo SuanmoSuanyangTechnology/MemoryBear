@@ -770,6 +770,9 @@ class DraftRunRequest(BaseModel):
     variables: Optional[Dict[str, Any]] = Field(default=None, description="自定义变量参数值")
     stream: bool = Field(default=False, description="是否流式返回")
     files: Optional[List[FileInput]] = Field(default_factory=list, description="附件列表（支持多文件）")
+    # 集群（multi_agent）对话能力：缺省 False = 旧行为；Agent/工作流试运行不读取这两个字段
+    thinking: bool = Field(default=False, description="是否启用深度思考（集群需 model_parameters.deep_thinking 同时开启）")
+    web_search: bool = Field(default=False, description="是否启用联网搜索（集群需 features.web_search.enabled 同时开启，仅主管生效）")
     trigger_payload: Optional[Dict[str, Any]] = Field(default=None, description="触发器 payload，webhook 试运行时传入")
     from_message_id: Optional[str] = Field(default=None, description="从指定分支消息继续聊天（多分支场景）：以该消息对应 execution 的输出作为历史上下文起点")
 

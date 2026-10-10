@@ -12,6 +12,8 @@ from app.schemas.app_schema import (
     ToolConfig,
     SkillConfig,
     VariableDefinition,
+    AppFeatures,
+    FileInput,
 )
 
 
@@ -180,6 +182,14 @@ class SupervisorConfig(BaseModel):
             "'default_value': '...'}]；None/空 = 退化为子 Agent 变量并集"
         ),
     )
+    features: Optional[AppFeatures] = Field(
+        default=None,
+        description=(
+            "对话功能特性（与单 Agent 应用 AppFeatures 同构）：file_upload / opening_statement / "
+            "suggested_questions_after_answer / text_to_speech / citation / web_search / "
+            "context_engine / emotion_reply。None = 全部关闭（存量集群行为不变，零迁移）"
+        ),
+    )
 
     @model_validator(mode="before")
     @classmethod
@@ -307,6 +317,11 @@ class MultiAgentRunRequest(BaseModel):
     stream: bool = Field(default=False, description="是否流式返回")
     web_search: bool = Field(default=False, description="是否启用网络搜索")
     memory: bool = Field(default=True, description="是否启用记忆功能")
+    thinking: bool = Field(default=False, description="是否启用深度思考（需集群 model_parameters.deep_thinking 同时开启）")
+    files: List[FileInput] = Field(
+        default_factory=list,
+        description="附件列表（需 supervisor_config.features.file_upload 开启；仅 supervisor_loop 模式给主管）",
+    )
 
 
 class SubAgentResult(BaseModel):

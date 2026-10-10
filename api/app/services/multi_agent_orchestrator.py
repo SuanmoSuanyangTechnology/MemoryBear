@@ -464,6 +464,331 @@ class MultiAgentOrchestrator:
         self._loop_rounds: int = 0
         self._loop_inflight: int = 0
         self._loop_iteration_limit_hit: bool = False
+        # 对话能力（features）：对齐 Agent 应用。存量集群无 features → 空 dict = 全部关闭，行为不变。
+        from app.services.cluster_chat_features import get_features as _get_cluster_features
+        self._features: Dict[str, Any] = _get_cluster_features(self._supervisor_config_snapshot)
+        # 主管联网 = features.web_search.enabled 且请求 web_search（子 Agent 联网仍走 _loop_web_search）
+        self._loop_supervisor_web_search: bool = False
+        # 深度思考 = model_parameters.deep_thinking 且请求 thinking
+        self._loop_deep_thinking: bool = False
+        # 新会话开场白（入口解析后传入，拼到主管历史末尾；None = 不注入）
+        self._loop_opening_statement: Optional[str] = None
+        # 执行模式：集群主管目前只有 in_process 实现，sandbox 请求会回退并在 end 事件显式标注
+        self._execution_mode_requested: Optional[str] = None
+        self._execution_mode_actual: str = "in_process"
+        # F5-F8 本轮运行态（建议问题/引用/TTS/情绪）；每轮在 _prepare_turn_chat_features 重置
+        self._loop_citations: list = []
+        self._turn_extras: Dict[str, Any] = {}
+        self._turn_emotion_detection: Any = None
+        self._turn_user_message_id: Optional[uuid.UUID] = None
+        # F10 context_engine：仅 features.context_engine.enabled 且插件可用时才会被填充
+        self._turn_ctx_history: Optional[List[Dict[str, Any]]] = None
+        self._turn_used_context_engine: bool = False
+        self._turn_ctx_provider: Optional[str] = None
+        self._turn_ctx_model_config_id: Any = None
+
+    def _prepare_turn_chat_features(
+        self,
+        web_search: bool,
+        thinking: bool,
+        opening_statement: Optional[str],
+        execution_mode: Optional[str],
+        user_message_id: Optional[uuid.UUID] = None,
+    ) -> None:
+        """每轮开始时解析"对话能力"运行态（对齐 Agent 应用）。
+
+        向后兼容：存量集群无 features、请求不带 thinking/opening/execution_mode 时，
+        结果全部为关闭/None，主管行为与改动前完全一致。
+        """
+        from app.services.cluster_chat_features import (
+            effective_execution_mode,
+            is_deep_thinking_on,
+            is_supervisor_web_search_on,
+        )
+
+        self._loop_supervisor_web_search = is_supervisor_web_search_on(self._features, web_search)
+        self._loop_deep_thinking = is_deep_thinking_on(self.model_parameters, thinking)
+        self._loop_opening_statement = opening_statement or None
+        self._execution_mode_requested = execution_mode
+        actual, fell_back = effective_execution_mode(execution_mode)
+        self._execution_mode_actual = actual
+        if fell_back:
+            logger.warning("集群主管暂不支持 sandbox 执行模式，已回退 in_process")
+        # F5-F8：每轮重置，避免多轮复用同一 orchestrator 时串轮
+        self._loop_citations = []
+        self._turn_extras = {}
+        self._turn_emotion_detection = None
+        self._turn_user_message_id = user_message_id
+        # F10：每轮重置 context_engine 运行态
+        self._turn_ctx_history = None
+        self._turn_used_context_engine = False
+        self._turn_ctx_provider = None
+        self._turn_ctx_model_config_id = None
+
+    def context_engine_after_turn_args(self, conversation_id: Any) -> Optional[Dict[str, Any]]:
+        """本轮若走了 context_engine，返回 BatchPersistQueue "after_turn" 任务参数；否则 None（老集群恒为 None）。"""
+        if not self._turn_used_context_engine or not conversation_id:
+            return None
+        return {
+            "conversation_id": str(conversation_id),
+            "features_config": self._features,
+            "api_key_provider": self._turn_ctx_provider,
+            "model_config_id": str(self._turn_ctx_model_config_id) if self._turn_ctx_model_config_id else None,
+            "scope_key": "cluster",
+        }
+
+    async def _prepare_context_engine(
+        self,
+        conversation_id: Optional[uuid.UUID],
+        system_prompt: str,
+        api_key_config: Any,
+    ) -> str:
+        """features.context_engine 开启时，用上下文引擎生成主管 system_prompt（含摘要）与历史。
+
+        未开启 / 插件缺失 / 任何异常 → 原样返回 system_prompt，history 留空，
+        调用方继续走 _load_cluster_history（与改动前一致）。
+        """
+        ctx_cfg = (self._features or {}).get("context_engine")
+        if not (isinstance(ctx_cfg, dict) and ctx_cfg.get("enabled")) or not conversation_id or self.db is None:
+            return system_prompt
+        try:
+            from app.core.config import settings
+            from app.services.context_engine_manager import ContextEngineManager
+
+            provider = getattr(api_key_config, "provider", None)
+            model_config_id = getattr(api_key_config, "model_config_id", None) or self.default_model_config_id
+            prepared = await ContextEngineManager(self.db).prepare_app_agent_input(
+                features=self._features,
+                conversation_id=conversation_id if isinstance(conversation_id, uuid.UUID) else uuid.UUID(str(conversation_id)),
+                system_prompt=system_prompt,
+                current_input=getattr(self, "_loop_entry_message", "") or "",
+                current_provider=provider,
+                legacy_max_history=settings.AGENT_MAX_HISTORY,
+                scope_key="cluster",
+                model_config_id=model_config_id,
+            )
+            if not prepared:
+                return system_prompt
+            new_prompt, history = prepared
+            # 与 _load_cluster_history 同口径：主管链路只吃纯文本轮
+            self._turn_ctx_history = [
+                {"role": h["role"], "content": h["content"]}
+                for h in (history or [])
+                if isinstance(h.get("content"), str)
+            ]
+            self._turn_used_context_engine = True
+            self._turn_ctx_provider = provider
+            self._turn_ctx_model_config_id = model_config_id
+            return new_prompt or system_prompt
+        except Exception as e:  # noqa: BLE001 - 上下文引擎是增量能力，降级回旧历史
+            logger.warning(f"集群 context_engine 准备失败（已降级为旧历史）: {e}")
+            self._turn_ctx_history = None
+            self._turn_used_context_engine = False
+            return system_prompt
+
+    async def _resolve_loop_history(self, conversation_id: Optional[uuid.UUID]) -> List[Dict[str, Any]]:
+        """主管历史：context_engine 本轮生效则用其结果，否则沿用集群 20 轮历史；再拼开场白。"""
+        if self._turn_used_context_engine and self._turn_ctx_history is not None:
+            return self._with_opening(list(self._turn_ctx_history))
+        return self._with_opening(await self._load_cluster_history(conversation_id))
+
+    def _turn_end_extras(self) -> Dict[str, Any]:
+        """end 事件的对话能力附加字段；无任何新能力生效时为空 dict（旧前端/旧契约不变）。"""
+        extras: Dict[str, Any] = {}
+        if self._execution_mode_requested:
+            extras["execution_mode_actual"] = self._execution_mode_actual
+        # suggested_questions / citations / audio_url / audio_status：仅对应 features 开启时才有键
+        extras.update(self._turn_extras or {})
+        return extras
+
+    def _supervisor_api_key_dict(self, api_key_config: Any) -> Dict[str, Any]:
+        """主管 ModelApiKey 运行时壳 → dict（建议问题 / TTS 复用 Agent 应用的同形状构造）。"""
+
+        def _strs(items: Any) -> List[str]:
+            return [str(i) for i in (items or [])]
+
+        return {
+            "model_name": getattr(api_key_config, "model_name", None),
+            "api_key": getattr(api_key_config, "api_key", None),
+            "provider": getattr(api_key_config, "provider", None) or "openai",
+            "api_base": getattr(api_key_config, "api_base", None),
+            "input_modalities": _strs(getattr(api_key_config, "input_modalities", None)),
+            "output_modalities": _strs(getattr(api_key_config, "output_modalities", None)),
+            "features": _strs(getattr(api_key_config, "features", None)),
+            "tenant_id": getattr(api_key_config, "tenant_id", None),
+            "model_config_id": getattr(api_key_config, "model_config_id", None),
+            "channel_id": getattr(api_key_config, "channel_id", None),
+        }
+
+    def _start_turn_emotion_detection(self, message: str) -> None:
+        """features.emotion_reply 开启才起后台情绪识别任务；关闭返回 None，零开销。"""
+        try:
+            from app.core.memory.emotion.emotion_resolver import start_detection
+
+            self._turn_emotion_detection = start_detection(self._features, message)
+        except Exception as e:  # noqa: BLE001 - 情绪感知是增量能力，失败不阻断对话
+            logger.warning(f"集群情绪识别启动失败（已跳过）: {e}")
+            self._turn_emotion_detection = None
+
+    async def _setup_turn_tts(self, api_key_dict: Dict[str, Any]):
+        """features.text_to_speech 开启才建流式 TTS；返回 (text_queue, audio_url, tts_task)。"""
+        tts_cfg = (self._features or {}).get("text_to_speech")
+        if not (isinstance(tts_cfg, dict) and tts_cfg.get("enabled")):
+            return None, None, None
+        try:
+            from app.services.draft_run_service import AgentRunService
+
+            text_queue: asyncio.Queue = asyncio.Queue()
+            audio_url, tts_task = await AgentRunService(self.db)._generate_tts_streaming(
+                self._features,
+                api_key_dict,
+                text_queue=text_queue,
+                tenant_id=self.tenant_id,
+                workspace_id=await self._cluster_workspace_id(),
+            )
+            if tts_task is None:
+                return None, None, None
+            return text_queue, audio_url, tts_task
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"集群 TTS 初始化失败（已跳过）: {e}")
+            return None, None, None
+
+    async def _finalize_turn_extras(
+        self,
+        final_content: str,
+        api_key_dict: Dict[str, Any],
+        audio_url: Optional[str] = None,
+        tts_task: Optional["asyncio.Task"] = None,
+        non_stream_tts: bool = False,
+    ) -> None:
+        """主管正文结束后产出 end 附加字段：建议问题 / 引用 / 语音。
+
+        各项仅在对应 features 开启时才写入 self._turn_extras（缺省关闭 = 无任何新键，契约不变）。
+        任何一项失败只记 warning，不影响正文与 end 事件。
+        """
+        features = self._features or {}
+        extras: Dict[str, Any] = {}
+        try:
+            from app.services.draft_run_service import AgentRunService
+
+            agent_service = AgentRunService(self.db)
+
+            sq_cfg = features.get("suggested_questions_after_answer")
+            if isinstance(sq_cfg, dict) and sq_cfg.get("enabled"):
+                extras["suggested_questions"] = await agent_service._generate_suggested_questions(
+                    features, final_content, api_key_dict, {}
+                )
+
+            cit_cfg = features.get("citation")
+            if isinstance(cit_cfg, dict) and cit_cfg.get("enabled"):
+                # 仅主管自己知识库的引用；子 Agent 内部检索不聚合
+                extras["citations"] = agent_service._filter_citations(
+                    features, list(self._loop_citations or [])
+                )
+
+            tts_cfg = features.get("text_to_speech")
+            if non_stream_tts and isinstance(tts_cfg, dict) and tts_cfg.get("enabled"):
+                audio_url = await agent_service._generate_tts(
+                    features,
+                    final_content,
+                    api_key_dict,
+                    tenant_id=self.tenant_id,
+                    workspace_id=await self._cluster_workspace_id(),
+                )
+                tts_task = None
+            if audio_url:
+                status = "pending"
+                if tts_task is not None and tts_task.done():
+                    try:
+                        tts_task.result()
+                        status = "completed"
+                    except Exception:  # noqa: BLE001
+                        status = "failed"
+                extras["audio_url"] = audio_url
+                extras["audio_status"] = status
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"集群对话附加能力（建议问题/引用/TTS）生成失败（已跳过）: {e}")
+        self._turn_extras = extras
+
+    def _with_opening(self, history: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """新会话开场白拼到历史末尾（与 Agent 应用一致）；无开场白时原样返回。"""
+        if not self._loop_opening_statement:
+            return history
+        return list(history or []) + [{"role": "assistant", "content": self._loop_opening_statement}]
+
+    async def _prepare_loop_files(
+        self,
+        files: Optional[List[Any]],
+        api_key_config: Any,
+        message: str,
+        supervisor: Any,
+    ) -> tuple:
+        """主管本轮附件处理（对齐 Agent 应用：校验 → MultimodalService → 图片清单）。
+
+        文件只给主管（子 Agent 不接收）。向后兼容：无 files 直接返回 (message, None)，
+        不触发任何新逻辑；有 files 但集群未开启 features.file_upload 则明确报错，
+        与 Agent 应用"该应用未开启文件上传功能"同口径。
+
+        Returns:
+            (llm_message, processed_files)：llm_message 为追加了图片清单的用户消息；
+            processed_files 为 LLM 可用的多模态内容（供 chat/chat_stream 的 files 参数）。
+        """
+        # 本轮落库用（入口层读取 history_files / provider）
+        self._turn_processed_files = None
+        self._turn_files_provider = None
+        if not files:
+            return message, None
+
+        fu = self._features.get("file_upload") if isinstance(self._features, dict) else None
+        if not (isinstance(fu, dict) and fu.get("enabled")):
+            raise BusinessException("该集群未开启文件上传功能", BizCode.BAD_REQUEST)
+
+        from app.models import ModelType
+        from app.schemas.model_schema import ModelInfo
+        from app.services.draft_run_service import AgentRunService, build_uploaded_images_manifest
+        from app.services.multimodal_service import MultimodalService
+
+        AgentRunService._validate_file_upload(self._features, files)
+
+        provider = getattr(api_key_config, "provider", None) or "openai"
+        model_info = ModelInfo(
+            model_name=api_key_config.model_name,
+            provider=provider,
+            api_key=api_key_config.api_key,
+            api_base=api_key_config.api_base,
+            input_modalities=[str(i) for i in (getattr(api_key_config, "input_modalities", None) or [])],
+            output_modalities=[str(i) for i in (getattr(api_key_config, "output_modalities", None) or [])],
+            features=[str(i) for i in (getattr(api_key_config, "features", None) or [])],
+            model_type=ModelType.LLM,
+            tenant_id=getattr(api_key_config, "tenant_id", None),
+            model_config_id=getattr(api_key_config, "model_config_id", None),
+            channel_id=getattr(api_key_config, "channel_id", None),
+            failover_plan=getattr(api_key_config, "failover_plan", None),
+        )
+        multimodal_service = MultimodalService(self.db, model_info)
+        processed_files = await multimodal_service.process_files(
+            files,
+            document_image_recognition=bool(fu.get("document_image_recognition", False)),
+            workspace_id=await self._cluster_workspace_id(),
+            file_upload_config=fu,
+        )
+        logger.info(f"集群主管处理了 {len(processed_files)} 个文件")
+
+        # 本轮图片白名单回注给主管的知识库工具（以图搜图）
+        for tool in getattr(supervisor, "tools", None) or []:
+            set_uploaded_files = getattr(tool, "set_uploaded_files", None)
+            if callable(set_uploaded_files):
+                set_uploaded_files(files)
+
+        # 用户消息里列出本轮图片及编号，供模型按需显式触发图片检索（不污染入库原文）
+        llm_message = message
+        image_manifest, _ = build_uploaded_images_manifest(files)
+        if image_manifest:
+            llm_message = f"{message}\n\n{image_manifest}"
+
+        self._turn_processed_files = processed_files
+        self._turn_files_provider = provider
+        return llm_message, processed_files
 
     def _build_cluster_variables(
         self,
@@ -910,7 +1235,12 @@ class MultiAgentOrchestrator:
         memory: bool = True,
         storage_type: str = '',
         user_rag_memory_id: str = '',
-        message_id: Optional[uuid.UUID] = None
+        message_id: Optional[uuid.UUID] = None,
+        thinking: bool = False,
+        opening_statement: Optional[str] = None,
+        execution_mode: Optional[str] = None,
+        files: Optional[List[Any]] = None,
+        user_message_id: Optional[uuid.UUID] = None,
     ):
         """执行多 Agent 任务（流式返回）
 
@@ -940,6 +1270,10 @@ class MultiAgentOrchestrator:
         self._turn_merge_tokens = 0
         # S8/S9：每轮重置主管循环运行态（护栏判定不跨轮）
         self._loop_stop_reason = None
+        # 对话能力运行态（联网/深度思考/开场白/执行模式）；全部缺省 = 旧行为
+        self._prepare_turn_chat_features(
+            web_search, thinking, opening_statement, execution_mode, user_message_id
+        )
 
         # S5：入口变量契约 —— 一次校验 + 默认值兜底 + 渲染本轮消息。
         # 两模式共用同一份变量包，用户"配了变量就该生效"的感知因此与单 Agent 应用一致。
@@ -1023,6 +1357,7 @@ class MultiAgentOrchestrator:
                     memory,
                     storage_type,
                     user_rag_memory_id,
+                    files=files,
                 ):
                     yield event
             else:
@@ -1055,6 +1390,8 @@ class MultiAgentOrchestrator:
                 # direct_answer=主管自答（零 dispatch）；final_after_dispatch=派发后收尾；
                 # tool_call_limit/max_iterations=护栏触发；error=异常。
                 "loop_stop_reason": self._loop_stop_reason,
+                # 对话能力附加字段（execution_mode_actual 等）；无新能力生效时为空，契约不变
+                **self._turn_end_extras(),
                 "usage": {
                     "routing_tokens": self._turn_routing_tokens,
                     "sub_tokens": self._turn_sub_tokens,
@@ -1116,6 +1453,11 @@ class MultiAgentOrchestrator:
         message_id: Optional[uuid.UUID] = None,
         storage_type: str = '',
         user_rag_memory_id: str = '',
+        thinking: bool = False,
+        opening_statement: Optional[str] = None,
+        execution_mode: Optional[str] = None,
+        files: Optional[List[Any]] = None,
+        user_message_id: Optional[uuid.UUID] = None,
     ) -> Dict[str, Any]:
         """执行多 Agent 任务（基于 Master Agent 决策）
 
@@ -1148,6 +1490,11 @@ class MultiAgentOrchestrator:
         )
 
         await self._ensure_master_execution(conversation_id, message_id)
+
+        # 对话能力运行态（联网/深度思考/开场白/执行模式）；全部缺省 = 旧行为
+        self._prepare_turn_chat_features(
+            web_search, thinking, opening_statement, execution_mode, user_message_id
+        )
 
         # S4：每轮重置 token 账本（与流式同口径）
         self._turn_routing_tokens = 0
@@ -1196,6 +1543,8 @@ class MultiAgentOrchestrator:
                     user_id,
                     storage_type,
                     user_rag_memory_id,
+                    web_search=web_search,
+                    files=files,
                 )
                 elapsed_time = time.time() - start_time
                 total_tokens = (
@@ -1225,6 +1574,8 @@ class MultiAgentOrchestrator:
                         "completion_tokens": 0,
                         "total_tokens": total_tokens,
                     },
+                    # 建议问题 / 引用 / 语音：仅对应 features 开启时才有键，老集群返回不变
+                    **(self._turn_extras or {}),
                 }
 
             # Supervisor 模式（三段式，S9 恢复原功能）：路由→集合执行→整合。
@@ -2168,6 +2519,30 @@ class MultiAgentOrchestrator:
         if own_tools:
             tools = own_tools + tools
 
+        # 情绪感知（features.emotion_reply）：等待识别结果并注入主管提示词；
+        # 未开启时 _turn_emotion_detection 为 None，原样返回，老集群不受影响。
+        _supervisor_prompt = self._build_supervisor_system_prompt()
+        if self._turn_emotion_detection is not None:
+            try:
+                from app.core.memory.emotion.emotion_resolver import apply_detection
+
+                _supervisor_prompt = await apply_detection(
+                    _supervisor_prompt,
+                    self._turn_emotion_detection,
+                    self._turn_user_message_id,
+                    write_cache=self.cluster_memory_enabled(),
+                )
+            except Exception as e:  # noqa: BLE001 - 情绪感知失败不阻断对话
+                logger.warning(f"集群情绪注入失败（已跳过）: {e}")
+            finally:
+                self._turn_emotion_detection = None
+
+        # 上下文引擎（features.context_engine）：未开启/插件缺失/异常均原样返回提示词，
+        # 历史由 _resolve_loop_history 回落到集群 20 轮历史，老集群行为不变。
+        _supervisor_prompt = await self._prepare_context_engine(
+            getattr(self, "current_conversation_id", None), _supervisor_prompt, api_key_config
+        )
+
         # ModelApiKey 运行时壳（非 dict），统一走 getattr 读取
         return LangChainAgent(
             model_name=api_key_config.model_name,
@@ -2179,7 +2554,7 @@ class MultiAgentOrchestrator:
             features=getattr(api_key_config, "features", None),
             temperature=_get("temperature", 0.7),
             max_tokens=_get("max_tokens", 4096),
-            system_prompt=self._build_supervisor_system_prompt(),
+            system_prompt=_supervisor_prompt,
             tools=tools,
             streaming=True,
             tenant_id=getattr(api_key_config, "tenant_id", None),
@@ -2189,6 +2564,17 @@ class MultiAgentOrchestrator:
             tool_call_limit=max(1, tool_call_limit),
             # S10：显式配置则覆盖引擎动态值；None=引擎按工具数动态算
             max_iterations=loop_max_iterations,
+            # 深度思考：model_parameters.deep_thinking 且请求 thinking 同时为真才开
+            #（_prepare_turn_chat_features 解析）；缺省 False/None = 与改动前一致。
+            # json_output：model_parameters.json_output（前端模型配置开关，模型需支持 json_output 能力，
+            # 引擎侧会按模型能力归一化）；缺省 False = 与改动前一致。
+            json_output=bool(_get("json_output", False)),
+            deep_thinking=bool(getattr(self, "_loop_deep_thinking", False)),
+            thinking_budget_tokens=(
+                _get("thinking_budget_tokens", None)
+                if getattr(self, "_loop_deep_thinking", False)
+                else None
+            ),
         )
 
     async def _load_supervisor_own_tools(self) -> list:
@@ -2219,13 +2605,15 @@ class MultiAgentOrchestrator:
         run_svc = AgentRunService(self.db)
         tools: list = []
 
-        # 1. 普通工具（集群暂不支持联网搜索，load_tools_config 固定关）
+        # 1. 普通工具 + 主管联网（features.web_search.enabled 且请求 web_search 才开；
+        #    存量集群无 features → False，与改动前一致）
         try:
             tools_config = supervisor_config.get("tools") or []
-            if tools_config:
+            _sup_web = bool(getattr(self, "_loop_supervisor_web_search", False))
+            if tools_config or _sup_web:
                 own = await run_svc.load_tools_config(
                     tools_config,
-                    False,
+                    _sup_web,
                     self.tenant_id,
                     user_id=user_id,
                     workspace_id=await self._cluster_workspace_id(),
@@ -2252,8 +2640,9 @@ class MultiAgentOrchestrator:
         except Exception as e:
             logger.warning(f"主管技能加载失败（已跳过技能段）: {e}")
 
-        # 3. 知识库检索（citations_collector 丢弃：集群链路的引用聚合走子 Agent
-        # 各自的 citations，主管侧暂不聚合引用——后续需要时再接）
+        # 3. 知识库检索。citations_collector 保存到 self._loop_citations，仅供
+        # features.citation 开启时输出主管自己知识库的引用；不聚合子 Agent 的引用
+        # （主管只吸收子 Agent 的返回内容，其内部检索不关注）。
         try:
             knowledge_config = supervisor_config.get("knowledge_retrieval")
             if knowledge_config and isinstance(knowledge_config, dict):
@@ -2270,6 +2659,8 @@ class MultiAgentOrchestrator:
                         source=KnowledgeRetrievalSource.AGENT,
                     )
                     tools.extend(kb_tools)
+                    # 引用收集器随检索工具调用被就地填充；结束时由 citation 开关过滤输出
+                    self._loop_citations = _citations if _citations is not None else []
         except Exception as e:
             logger.warning(f"主管知识库加载失败（已跳过知识库段）: {e}")
 
@@ -2376,6 +2767,7 @@ class MultiAgentOrchestrator:
         memory: bool = True,
         storage_type: str = '',
         user_rag_memory_id: str = '',
+        files: Optional[List[Any]] = None,
     ):
         """S8/S9 主管监督循环（流式）：主管 ReAct 引擎 + SubAgentTool 桥接。
 
@@ -2423,8 +2815,16 @@ class MultiAgentOrchestrator:
 
         self._set_merge_mode_actual("loop", "supervisor_loop 模式（主管 ReAct 循环）")
 
+        # 情绪感知：features.emotion_reply 开启才起后台识别任务（与构建主管并发），
+        # 结果在 _build_supervisor_agent 里注入主管提示词；关闭时为 None，零开销。
+        self._start_turn_emotion_detection(message)
         supervisor = await self._build_supervisor_agent(api_key_config)
-        history = await self._load_cluster_history(conversation_id)
+        # 历史：context_engine 本轮生效则用其结果，否则沿用集群 20 轮历史；再拼开场白（无开场白原样返回）
+        history = await self._resolve_loop_history(conversation_id)
+        # 文件上传（features.file_upload）：无 files 时 llm_message=message、processed_files=None，与改动前一致
+        llm_message, processed_files = await self._prepare_loop_files(
+            files, api_key_config, message, supervisor
+        )
 
         # 子 Agent 可观测事件队列：SubAgentTool 执行体 → 主管循环 → SSE。
         # 挂接走 _loop_tool_instances 实例列表（_build_supervisor_agent 填充），
@@ -2445,7 +2845,7 @@ class MultiAgentOrchestrator:
             """主管引擎流 → merged 队列（异常转成 error 标记，不让它炸在 task 里）。"""
             try:
                 async for item in supervisor.chat_stream(
-                    message=message, history=history or None
+                    message=llm_message, history=history or None, files=processed_files or None
                 ):
                     await merged.put(item)
             except Exception as exc:  # noqa: BLE001 - 统一交给下方降级判定
@@ -2467,6 +2867,11 @@ class MultiAgentOrchestrator:
         supervisor_tokens = 0
         loop_error: Optional[BaseException] = None
 
+        # 流式 TTS（features.text_to_speech 开启才建；关闭时三者均为 None，零开销）。
+        # 只喂主管最终正文 chunk，不喂子 Agent 内容。
+        _api_key_dict = self._supervisor_api_key_dict(api_key_config)
+        tts_queue, tts_audio_url, tts_task = await self._setup_turn_tts(_api_key_dict)
+
         try:
             while True:
                 item = await merged.get()
@@ -2484,6 +2889,8 @@ class MultiAgentOrchestrator:
                 # list=node_executions
                 if isinstance(item, str):
                     final_content += item
+                    if tts_queue is not None:
+                        tts_queue.put_nowait(item)
                     yield self._format_sse_event("message", {"content": item})
                 elif isinstance(item, int):
                     supervisor_tokens = max(supervisor_tokens, int(item))
@@ -2497,6 +2904,12 @@ class MultiAgentOrchestrator:
                     # agent_log/agent_complete 专属区块（事件由工具执行体经
                     # event_sink 回推），这里再转发会造成同一调用展示两份。
                     _item_type = item.get("type")
+                    # 深度思考内容：仅在 deep_thinking 生效时引擎才会产出 reasoning；
+                    # 老集群（未开启）不会出现该事件，契约不变。格式与 Agent 一致。
+                    if _item_type == "reasoning":
+                        _reasoning_chunk = item.get("content")
+                        if _reasoning_chunk:
+                            yield self._format_sse_event("reasoning", {"content": _reasoning_chunk})
                     if _item_type in ("tool_start", "tool_end", "tool_error"):
                         _tool_name = str(item.get("name") or "")
                         _sub_agent_tool_names = {
@@ -2540,6 +2953,15 @@ class MultiAgentOrchestrator:
 
         # 主管 token 记账（S4：routing 层 = 主管决策与生成；sub 层 = 子 Agent）
         self._turn_routing_tokens += int(supervisor_tokens or 0)
+
+        # 正文结束：通知 TTS 队列收尾，并产出 end 附加字段（建议问题 / 引用 / 语音）。
+        # 各项仅在对应 features 开启时才有值；无正文（将抛错）时不生成。
+        if tts_queue is not None:
+            tts_queue.put_nowait(None)
+        if final_content.strip():
+            await self._finalize_turn_extras(
+                final_content, _api_key_dict, audio_url=tts_audio_url, tts_task=tts_task
+            )
 
         if loop_error is not None:
             logger.error(
@@ -2607,6 +3029,8 @@ class MultiAgentOrchestrator:
         user_id: Optional[str],
         storage_type: str = '',
         user_rag_memory_id: str = '',
+        web_search: bool = False,
+        files: Optional[List[Any]] = None,
     ) -> Dict[str, Any]:
         """S8/S9 主管监督循环（非流式）：语义与流式版一致（引擎 chat()）。
 
@@ -2618,8 +3042,8 @@ class MultiAgentOrchestrator:
             dict：{content, usage, loop_stop_reason}（loop 正常完成）。
         """
         self._loop_user_id = user_id
-        # 非流式入口无会话级搜索参数：子 Agent 不挂搜索
-        self._loop_web_search = False
+        # 子 Agent 联网：请求级透传（web_search 缺省 False，老调用方行为不变）
+        self._loop_web_search = bool(web_search)
         self._loop_memory = self.cluster_memory_enabled()
         self._loop_storage_type = storage_type
         self._loop_user_rag_memory_id = user_rag_memory_id
@@ -2640,8 +3064,15 @@ class MultiAgentOrchestrator:
 
         self._set_merge_mode_actual("loop", "supervisor_loop 模式（主管 ReAct 循环）")
 
+        # 情绪感知：features.emotion_reply 开启才起后台识别任务；关闭时为 None，零开销
+        self._start_turn_emotion_detection(message)
         supervisor = await self._build_supervisor_agent(api_key_config)
-        history = await self._load_cluster_history(conversation_id)
+        # 历史：context_engine 本轮生效则用其结果，否则沿用集群 20 轮历史；再拼开场白
+        history = await self._resolve_loop_history(conversation_id)
+        # 文件上传（features.file_upload）：无 files 时 llm_message=message、processed_files=None，与改动前一致
+        llm_message, processed_files = await self._prepare_loop_files(
+            files, api_key_config, message, supervisor
+        )
 
         # 非流式 loop：sink 不挂接（无 SSE 出口），子 Agent 事件自然丢弃；
         # S2 执行树仍由 run_stream 内部落库，日志视图不缺数据。
@@ -2654,7 +3085,7 @@ class MultiAgentOrchestrator:
             wrapper.event_sink = None
         try:
             result = await supervisor.chat(
-                message=message, history=history or None
+                message=llm_message, history=history or None, files=processed_files or None
             )
             content = (result or {}).get("content", "")
             # 非流式的 usage 同样只含末次 LLM 调用（引擎口径），多轮会漏；
@@ -2671,6 +3102,12 @@ class MultiAgentOrchestrator:
                     " supervisor_max_tool_calls；需要确定性编排可改用主管模式（三段式）",
                     BizCode.LLM_ERROR,
                 )
+            # 建议问题 / 引用 / TTS：仅对应 features 开启时才产生（缺省关闭 = 无新键）
+            await self._finalize_turn_extras(
+                content,
+                self._supervisor_api_key_dict(api_key_config),
+                non_stream_tts=True,
+            )
             return {
                 "content": content,
                 "usage": {

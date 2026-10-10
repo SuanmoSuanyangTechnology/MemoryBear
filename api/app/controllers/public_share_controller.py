@@ -888,7 +888,10 @@ async def chat(
                             web_search=payload.web_search,
                             memory=payload.memory,
                             storage_type=storage_type,
-                            user_rag_memory_id=user_rag_memory_id
+                            user_rag_memory_id=user_rag_memory_id,
+                            thinking=bool(getattr(payload, "thinking", False)),
+                            execution_mode="sandbox" if settings.E2B_ENABLED else "in_process",
+                            files=payload.files,
                     ):
                         yield event
                 finally:
@@ -916,7 +919,10 @@ async def chat(
                 web_search=payload.web_search,
                 memory=payload.memory,
                 storage_type=storage_type,
-                user_rag_memory_id=user_rag_memory_id
+                user_rag_memory_id=user_rag_memory_id,
+                thinking=bool(getattr(payload, "thinking", False)),
+                execution_mode="sandbox" if settings.E2B_ENABLED else "in_process",
+                files=payload.files,
             )
 
         return success(data=conversation_schema.ChatResponse(**result).model_dump(mode="json"))
@@ -1172,7 +1178,9 @@ async def config_query(
             "app_type": release.type,
             # 集群变量定义存于 supervisor_config.variables（与 /v1/app/variable 的读取口径一致）
             "variables": (release.config.get("supervisor_config") or {}).get("variables") or [],
-            "features": release.config.get("features")
+            # features 优先读 supervisor_config.features（集群配置口径），兼容顶层 features
+            "features": (release.config.get("supervisor_config") or {}).get("features")
+            or release.config.get("features")
         }
     else:
         return fail(msg="Unsupported app type", code=BizCode.APP_TYPE_NOT_SUPPORTED)

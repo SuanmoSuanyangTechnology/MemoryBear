@@ -513,7 +513,10 @@ class MultiAgentService:
             use_llm_routing=getattr(request, 'use_llm_routing', True),  # 默认启用 LLM 路由
             web_search=getattr(request, 'web_search', False),  # 网络搜索参数
             memory=getattr(request, 'memory', True),  # 记忆功能参数
-            message_id=message_id
+            message_id=message_id,
+            thinking=getattr(request, 'thinking', False),  # 深度思考（缺省 False = 旧行为）
+            files=getattr(request, 'files', None) or None,  # 附件（缺省空 = 旧行为）
+            user_message_id=user_message_id,  # 情绪感知缓存键（features.emotion_reply 开启才用）
         )
 
         # S3 落库收口：非流式同样经 BatchPersistQueue 统一落库（与流式同一口径），
@@ -536,6 +539,14 @@ class MultiAgentService:
                 "total_tokens": 0
             })
         }
+        # 建议问题 / 引用 / 语音落库（与 Agent 应用一致）；对应 features 未开启时 result 无这些键，不写任何字段
+        if "suggested_questions" in result:
+            _result.suggested_questions = result.get("suggested_questions") or []
+        if "citations" in result:
+            _result.citations = result.get("citations") or []
+        if result.get("audio_url"):
+            _result.audio_url = result.get("audio_url")
+            _result.audio_status = result.get("audio_status")
         if request.conversation_id is not None:
             await BatchPersistQueue.enqueue(PersistTask(
                 task_type="save_messages",
@@ -547,6 +558,14 @@ class MultiAgentService:
                     "should_memorize": orchestrator.cluster_memory_enabled(),
                 },
             ))
+
+        # 上下文引擎 after_turn（仅本轮实际走了 features.context_engine 才入队；老集群恒为 None）
+        _ctx_after_turn = orchestrator.context_engine_after_turn_args(request.conversation_id)
+        if _ctx_after_turn:
+            try:
+                await BatchPersistQueue.enqueue(PersistTask(task_type="after_turn", args=_ctx_after_turn))
+            except Exception as e:
+                logger.warning("入队 context_engine after_turn 失败（不影响对话）", extra={"error": str(e)})
 
         # S1 轮次锚点：消息落库后回填 master 执行记录的 message_id（幂等）。
         master_execution_id = getattr(orchestrator, "current_execution_id", None)
@@ -607,6 +626,8 @@ class MultiAgentService:
         # per-turn 账本（routing/sub/merge 分层），在 end 事件统一发布
         # usage（唯一权威口径）。本层只透传事件 + 累计 message 正文。
         total_tokens = 0
+        # end 事件携带的对话能力附加字段（建议问题/引用/语音）；features 未开启时为空
+        end_extras: dict = {}
         async for event in orchestrator.execute_stream(
             message=request.message,
             conversation_id=request.conversation_id,
@@ -617,7 +638,10 @@ class MultiAgentService:
             memory=getattr(request, 'memory', True) , # 记忆功能参数
             storage_type=storage_type,
             user_rag_memory_id=user_rag_memory_id,
-            message_id=message_id
+            message_id=message_id,
+            thinking=getattr(request, 'thinking', False),  # 深度思考（缺省 False = 旧行为）
+            files=getattr(request, 'files', None) or None,  # 附件（缺省空 = 旧行为）
+            user_message_id=user_message_id,  # 情绪感知缓存键（features.emotion_reply 开启才用）
         ):
             _event_name = ""
             if event.startswith("event:"):
@@ -630,6 +654,10 @@ class MultiAgentService:
                     data_line = event.split("data: ", 1)[1].strip()
                     data = json.loads(data_line)
                     total_tokens = int((data.get("usage") or {}).get("total_tokens") or 0)
+                    # 对话能力附加字段（仅对应 features 开启时 end 才带这些键）
+                    for _k in ("suggested_questions", "citations", "audio_url", "audio_status"):
+                        if _k in data:
+                            end_extras[_k] = data[_k]
                 except Exception:
                     pass
 
@@ -667,6 +695,15 @@ class MultiAgentService:
             "merge_mode_actual": getattr(orchestrator, "_merge_mode_actual", None),
             "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": total_tokens},
         }
+        # 建议问题 / 引用 / 语音落库（与 Agent 应用一致）；对应 features 未开启时 end_extras 为空，不写任何字段
+        if end_extras:
+            if "suggested_questions" in end_extras:
+                _result.suggested_questions = end_extras.get("suggested_questions") or []
+            if "citations" in end_extras:
+                _result.citations = end_extras.get("citations") or []
+            if end_extras.get("audio_url"):
+                _result.audio_url = end_extras.get("audio_url")
+                _result.audio_status = end_extras.get("audio_status")
         await BatchPersistQueue.enqueue(PersistTask(
             task_type="save_messages",
             args={
@@ -677,6 +714,11 @@ class MultiAgentService:
                 "should_memorize": orchestrator.cluster_memory_enabled(),
             },
         ))
+
+        # context_engine 轮后摘要（仅本轮实际走了上下文引擎才入队；老集群恒为 None）
+        _ctx_after_args = orchestrator.context_engine_after_turn_args(request.conversation_id)
+        if _ctx_after_args:
+            await BatchPersistQueue.enqueue(PersistTask(task_type="after_turn", args=_ctx_after_args))
 
         # S1 轮次锚点：消息落库后把 master 执行记录关联到本轮 assistant 消息
         #（执行记录在流式开始时创建，当时消息尚未落库写 message_id 会 FK 违例，

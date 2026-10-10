@@ -497,7 +497,10 @@ async def chat(
                             web_search=web_search,
                             memory=memory,
                             storage_type=storage_type,
-                            user_rag_memory_id=user_rag_memory_id
+                            user_rag_memory_id=user_rag_memory_id,
+                            thinking=bool(getattr(payload, "thinking", False)),
+                            execution_mode="sandbox" if settings.E2B_ENABLED else "in_process",
+                            files=payload.files,
                     ):
                         yield event
                 finally:
@@ -525,7 +528,10 @@ async def chat(
                 web_search=web_search,
                 memory=memory,
                 storage_type=storage_type,
-                user_rag_memory_id=user_rag_memory_id
+                user_rag_memory_id=user_rag_memory_id,
+                thinking=bool(getattr(payload, "thinking", False)),
+                execution_mode="sandbox" if settings.E2B_ENABLED else "in_process",
+                files=payload.files,
             )
 
         return success(data=conversation_schema.ChatResponse(**result).model_dump(mode="json"))
