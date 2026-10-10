@@ -12,6 +12,8 @@ from urllib.parse import unquote, urlencode
 
 import httpx
 from fastapi import Request
+from fastapi.exceptions import RequestValidationError
+from pydantic import ValidationError
 from starlette.datastructures import UploadFile
 from starlette.responses import StreamingResponse
 
@@ -145,7 +147,11 @@ class KnowledgeServiceClient:
             if body:
                 schema = _HTTP_RETRIEVAL_REQUEST_SCHEMAS.get(request.url.path)
                 if request.method == "POST" and schema is not None:
-                    body = schema.model_validate_json(body).model_dump_json(
+                    try:
+                        retrieval_request = schema.model_validate(await request.json())
+                    except ValidationError as exc:
+                        raise RequestValidationError(exc.errors()) from exc
+                    body = retrieval_request.model_dump_json(
                         exclude_unset=True,
                     ).encode("utf-8")
                 send_kwargs["content"] = body
