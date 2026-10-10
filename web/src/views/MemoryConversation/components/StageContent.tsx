@@ -1,4 +1,4 @@
-import type { FC, ReactNode } from 'react'
+import type { FC } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Flex } from 'antd'
 
@@ -94,10 +94,10 @@ const RequestModeContent: FC<{ log: LogItem }> = ({ log }) => {
     <Flex vertical gap={10}>
       <div className="rb:rounded-lg rb:bg-gray-100 rb:py-2.5 rb:px-3">
         <Flex align="center" justify="space-between" gap={8}>
-          <p className="rb:text-[12px] rb:font-medium rb:text-[#171719]">
+          <p className="rb:text-[12px] rb:font-medium rb:text-gray-900">
             {t(`memoryConversation.requestMode.${modeKey}`)}
           </p>
-          <Flex align="center" className="rb:shrink-0 rb:rounded-sm rb:bg-[#171719] rb:h-4 rb:px-1! rb:text-[12px] rb:text-white">
+          <Flex align="center" className="rb:shrink-0 rb:rounded-sm rb:bg-gray-900 rb:h-4 rb:px-1! rb:text-[12px] rb:text-white">
             search_switch={searchSwitch}
           </Flex>
         </Flex>
@@ -139,7 +139,7 @@ const QueryPreprocessContent: FC<{ log: LogItem }> = ({ log }) => {
         <p className="rb:mt-0.5 rb:text-gray-500">
           {t('memoryConversation.queryPreprocess.original')}
         </p>
-        <p className="rb:text-[#171719]">
+        <p className="rb:text-gray-900">
           {textValue(original)}
         </p>
       </div>
@@ -188,7 +188,7 @@ const ProblemSplitContent: FC<{ log: LogItem }> = ({ log }) => {
         <p className="rb:mb-0.5 rb:text-gray-500">
           {t('memoryConversation.queryPreprocess.original')}
         </p>
-        <p className="rb:text-[#171719]">
+        <p className="rb:text-gray-900">
           {textValue(original)}
         </p>
       </div>
@@ -227,7 +227,7 @@ const FinalAnswerContent: FC<{ log: LogItem }> = ({ log }) => {
           <Flex gap={8} wrap>
             {stages.map((stage, index) => (
               <span
-                className="rb:rounded-md rb:border rb:border-dashed rb:border-[#EBEBEB] rb:px-2 rb:py-1 rb:text-[12px] rb:text-gray-600"
+                className="rb:rounded-md rb:border rb:border-dashed rb:border-gray-200 rb:px-2 rb:py-1 rb:text-[12px] rb:text-gray-600"
                 key={`${stage}-${index}`}
               >
                 {stage}
@@ -240,7 +240,7 @@ const FinalAnswerContent: FC<{ log: LogItem }> = ({ log }) => {
         <p className="rb:mb-2 rb:text-[12px] rb:leading-4.5 rb:text-gray-600">
           {t('memoryConversation.finalAnswer.answer')}
         </p>
-        <p className="rb:text-[12px] rb:leading-4.5 rb:text-[#171719]">
+        <p className="rb:text-[12px] rb:leading-4.5 rb:text-gray-900">
           {textValue(firstValue(data, ['answer', 'content']))}
         </p>
       </div>

@@ -1,4 +1,4 @@
-import { type FC, type ReactNode, useEffect, useMemo, useState, useRef } from 'react'
+import { type FC, useEffect, useMemo, useState, useRef } from 'react'
 import { App, Flex, Tooltip, Skeleton, Segmented } from 'antd'
 import { useTranslation } from 'react-i18next'
 import clsx from 'clsx'
@@ -11,16 +11,14 @@ import { getMemoryStages } from './constants'
 import { markIncompleteStagesFailed, markLastAssistantMessageFailed } from './state'
 import { parseStreamEvents, getStageIndex } from './stream'
 import type { LogItem, MemoryItem } from './types'
-import StageContent from './components/StageContent'
 import RbCard from '@/components/RbCard/Card';
 import SearchInput from '@/components/SearchInput'
 import Empty from '@/components/Empty'
 import ConversationEmptyIcon from '@/assets/images/conversation/conversationEmpty.svg'
-import AnalysisEmptyIcon from '@/assets/images/conversation/analysisEmpty.svg'
 import { formatDateTime } from '@/utils/format'
 import RequestSummaryCard from './components/RequestSummaryCard'
 import styles from './index.module.css'
-import Tag from '@/components/Tag'
+import StageCard from './components/StageCard'
 
 /** Search mode configuration */
 const searchSwitchList = [
@@ -45,12 +43,6 @@ const searchSwitchList = [
     key: 'quickReplyPlus'
   },
 ]
-
-const ContentWrapper: FC<{ children: ReactNode }> = ({ children }) => (
-  <div className="rb-border-t rb:bg-white rb:px-3 rb:py-2.5 rb:text-[11px] rb:leading-[1.65] rb:text-[#697481] [&>p]:rb:m-0">
-    {children}
-  </div>
-)
 
 const MemoryConversation: FC = () => {
   const { t } = useTranslation()
@@ -105,6 +97,7 @@ const MemoryConversation: FC = () => {
   }
 
   const handleClearSelection = () => {
+    cancelCurrentRequest()
     setSelected(undefined)
     setChatData([])
     setLogs([])
@@ -357,7 +350,14 @@ const MemoryConversation: FC = () => {
       >
         <Chat
           empty={
-            <Empty url={ConversationEmptyIcon} className="rb:h-full" size={[140, 100]} title={t('memoryConversation.conversationContentEmpty')} subTitle={t('memoryConversation.conversationContentSubEmpty')} />
+            <Empty
+              url={ConversationEmptyIcon}
+              className="rb:h-full"
+              subClassName="rb:text-gray-500 rb:mt-1!"
+              size={[148, 104]}
+              title={t('memoryConversation.conversationContentEmpty')}
+              subTitle={t('memoryConversation.conversationContentSubEmpty')}
+            />
           }
           className="rb:pt-0!"
           contentClassName='rb:h-[calc(100%-144px)] rb:px-4!'
@@ -401,93 +401,27 @@ const MemoryConversation: FC = () => {
                 />
               }
               <Flex vertical gap={12}>
-                {stageKeys.map((stageKey, index) => {
-                  const stage = t(`memoryConversation.stages.${stageKey}`)
-                  const log = stageKey === 'problemSplit' && index > 0 && logs[index] ? {
-                    ...logs[index],
-                    data: {
-                      ...(logs[index]?.data || {}),
-                      original_query: (logs[index-1]?.data as {original_query?: string})?.original_query,
-                    }
-                  } : logs[index]
-                  const canExpand = stageKey !== 'hybridRetrieval' && log?.status !== 'failed'
-                  const isOpen = canExpand && (expanded[index] ?? Boolean(log))
-                  const statusKey = !log
-                    ? loading
-                      ? 'running'
-                      : 'waiting'
-                    : log.status === 'failed'
-                      ? 'failed'
-                      : log.status === 'completed'
-                        ? 'completed'
-                        : 'running'
-                  const stageBadge = t(`memoryConversation.${statusKey}`)
-                  return (
-                    <Flex key={stageKey} gap={12}
-                      className="rb:relative rb:after:absolute rb:after:top-9 rb:after:-bottom-4 rb:after:left-2.5 rb:after:content-[''] rb:after:w-[0.5px] rb:after:bg-gray-500 rb:last:after:hidden"
-                    >
-                      <Flex
-                        align="center"
-                        justify="center"
-                        className={clsx("rb:size-5 rb:rounded-full rb:text-[12px] rb:mt-3!", {
-                          'rb:bg-gray-100 rb:text-gray-600': statusKey === 'waiting',
-                          'rb:bg-[#171719] rb:text-white': statusKey === 'running',
-                          'rb:bg-[rgba(54,159,33)] rb:text-white': statusKey === 'completed',
-                          'rb:bg-[rgba(255,138,76)] rb:text-white': statusKey === 'failed',
-                        })}
-                      >
-                        {index + 1}
-                      </Flex>
-                      <div className="rb:flex-1 rb:overflow-hidden rb:rounded-xl rb-border rb:bg-gray-100">
-                        <Flex align="center" gap={8}
-                          className={clsx('rb:py-2.5! rb:w-full rb:border-0 rb:bg-transparent rb:px-3! rb:text-left', {
-                            'rb:cursor-pointer': canExpand,
-                            'rb:cursor-default': !canExpand,
-                          })}
-                          onClick={() => {
-                            if (canExpand) {
-                              setExpanded(previous => ({ ...previous, [index]: !isOpen }))
-                            }
-                          }}
-                        >
-                          <b className="rb:flex-1 rb:text-xs rb:font-semibold">{stage}</b>
-                          <Tag
-                            color={
-                              statusKey === 'completed'
-                                ? 'success'
-                                : statusKey === 'failed'
-                                  ? 'error'
-                                  : statusKey === 'waiting'
-                                    ? 'default'
-                                    : 'processing'
-                            }
-                            size="small"
-                            className="rb:shrink-0"
-                          >
-                            {stageBadge}
-                          </Tag>
-                          {canExpand && (
-                            <div
-                              className={clsx("rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/common/arrow_up.svg')] rb:transition-transform", {
-                                'rb:rotate-180': !isOpen,
-                                'rb:rotate-0': isOpen,
-                              })}
-                            />
-                          )}
-                        </Flex>
-                        {canExpand && isOpen && log &&
-                          <ContentWrapper>
-                            <StageContent stage={stageKey} log={log} />
-                          </ContentWrapper>
-                        }
-                      </div>
-                    </Flex>
-                  )
-                })}
+                {stageKeys.map((stageKey, index) => (
+                  <StageCard
+                    key={stageKey}
+                    stageKey={stageKey}
+                    index={index}
+                    log={stageKey === 'problemSplit' && index > 0 && logs[index] ? {
+                      ...logs[index],
+                      data: {
+                        ...(logs[index]?.data || {}),
+                        original_query: (logs[index - 1]?.data as { original_query?: string })?.original_query,
+                      },
+                    } : logs[index]}
+                    loading={loading}
+                    expanded={expanded[index]}
+                    onToggle={() => setExpanded(previous => ({ ...previous, [index]: !(previous[index] ?? Boolean(logs[index])) }))}
+                  />
+                ))}
               </Flex>
             </Flex>
           )
-          : <Empty url={AnalysisEmptyIcon} className="rb:h-full!" />
+          : <Empty size={104} className="rb:h-full!" />
         }
       </RbCard>
     </Flex>

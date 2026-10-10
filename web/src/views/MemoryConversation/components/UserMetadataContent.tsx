@@ -2,7 +2,6 @@ import type { FC } from 'react'
 import { Flex, Tooltip } from 'antd'
 import { useTranslation } from 'react-i18next'
 
-import RbAlert from '@/components/RbAlert'
 import ScoreBreakdown from './ScoreBreakdown'
 import type { LogItem } from '../types'
 
@@ -86,7 +85,7 @@ const UserMetadataContent: FC<{ log: LogItem }> = ({ log }) => {
           is_metadata: true,
         }}
       />
-      <p className="rb:border-t rb:border-dashed rb:border-[#E7D8C6] rb:mt-1 rb:pt-3 rb:text-[12px] rb:leading-4 rb:text-gray-600">
+      <p className="rb:border-t rb:border-dashed rb:border-gray-200 rb:mt-1 rb:pt-3 rb:text-[12px] rb:leading-4 rb:text-gray-600">
         {t('memoryConversation.scoreMerge.source', {
           id: nodeId,
           source: 'ExtractedEntity',

@@ -110,12 +110,12 @@ const RbCard: FC<RbCardProps> = ({
                     )
                   }>
                     <div className={`rb:w-full rb:text-ellipsis rb:overflow-hidden rb:whitespace-nowrap ${titleClassName}`}>{title}</div>
-                    {subTitle && <div className="rb:w-full rb:text-[#5B6167] rb:text-[12px]">{subTitle}</div>}
+                    {subTitle && <div className="rb:w-full rb:text-gray-600 rb:font-normal! rb:text-[12px]">{subTitle}</div>}
                   </div>
                 </Flex> : null
               }
             </div>
-            {subTitle && <div className="rb:text-[12px] rb:text-[#5B6167] rb:font-regular rb:leading-4">{subTitle}</div>}
+            {subTitle && <div className="rb:text-[12px] rb:text-gray-600 rb:font-normal! rb:leading-4">{subTitle}</div>}
           </Flex>
           {extra}
         </Flex>
@@ -149,7 +149,7 @@ const RbCard: FC<RbCardProps> = ({
               <div className={`rb:w-full rb:text-ellipsis rb:overflow-hidden rb:whitespace-nowrap ${titleClassName}`}>{title}</div>
             </Tooltip>
             {/* Optional subtitle */}
-            {subTitle && <div className="rb:text-[#5B6167] rb:text-[12px]">{subTitle}</div>}
+            {subTitle && <div className="rb:text-gray-600 rb:font-normal! rb:text-[12px]">{subTitle}</div>}
           </div>
         </Flex> : null
       }
@@ -167,9 +167,9 @@ const RbCard: FC<RbCardProps> = ({
             'rb:text-[18px] rb:p-[0]! rb:border-b-[0.5px]!': headerType === 'border' && !avatarUrl && !avatar && !headerClassName?.includes('rb:m-'),
             'rb:m-[0_20px]!': headerType === 'border' && !avatarUrl && !avatar && !headerClassName?.includes('rb:m-'),
             /** Border bottom-left style */
-            "rb:m-[0_16px]! rb:p-[0]! rb:relative rb:before:content-[''] rb:before:w-[4px] rb:before:h-[16px] rb:before:bg-[#5B6167] rb:before:absolute rb:before:top-[50%] rb:before:left-[-16px] rb:before:translate-y-[-50%] rb:before:bg-[#5B6167]! rb:before:h-[16px]!": headerType === 'borderBL',
+            "rb:m-[0_16px]! rb:p-[0]! rb:relative rb:before:content-[''] rb:before:w-[4px] rb:before:h-[16px] rb:before:bg-gray-600 rb:before:absolute rb:before:top-[50%] rb:before:left-[-16px] rb:before:translate-y-[-50%] rb:before:bg-gray-600! rb:before:h-[16px]!": headerType === 'borderBL',
             /** Border left style */
-            "rb:m-[0_16px]! rb:p-[0]! rb:leading-[20px] rb:relative rb:border-[0]! rb:before:content-[''] rb:before:w-[4px] rb:before:h-[16px] rb:before:bg-[#5B6167] rb:before:absolute rb:before:top-[50%] rb:before:left-[-16px] rb:before:translate-y-[-50%] rb:before:bg-[#5B6167]! rb:before:h-[16px]!": headerType === 'borderL',
+            "rb:m-[0_16px]! rb:p-[0]! rb:leading-[20px] rb:relative rb:border-[0]! rb:before:content-[''] rb:before:w-[4px] rb:before:h-[16px] rb:before:bg-gray-600 rb:before:absolute rb:before:top-[50%] rb:before:left-[-16px] rb:before:translate-y-[-50%] rb:before:bg-gray-600! rb:before:h-[16px]!": headerType === 'borderL',
             'rb:min-h-[48px]!': headerType === 'borderL' && !headerClassName?.includes('rb:min-h-'),
           },
           headerClassName,

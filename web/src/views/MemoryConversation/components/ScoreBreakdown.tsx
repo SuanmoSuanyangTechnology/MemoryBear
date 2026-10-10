@@ -31,7 +31,7 @@ const ScoreField: FC<ScoreFieldProps> = ({ label, value, badge, highlighted }) =
       <div>
         <p className={clsx("rb:font-semibold rb:leading-5 rb:break-all rb:font-[MiSans-Demibold]", {
           'rb:text-blue-500': highlighted,
-          'rb:text-[#171719]': !highlighted
+          'rb:text-gray-900': !highlighted
         })}>
           {formatValue(value)}
         </p>
@@ -41,10 +41,12 @@ const ScoreField: FC<ScoreFieldProps> = ({ label, value, badge, highlighted }) =
           </span>
         )}
       </div>
-      <div className={clsx("rb:mt-1 rb:text-[11px] rb:leading-3.5", {
+      <div
+        className={clsx("rb:mt-1 rb:text-[11px] rb:leading-3.5", {
           'rb:text-[rgba(21,94,239,0.65)]': highlighted,
-        'rb:text-[#8C9095]': !highlighted
-      })}>{label}</div>
+          'rb:text-[#8C9095]': !highlighted
+        })}
+      >{label}</div>
     </Flex>
   </Col>
 )

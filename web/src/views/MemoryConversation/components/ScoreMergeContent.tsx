@@ -31,7 +31,7 @@ const textValue = (value: unknown, fallback = '—'): string => {
 }
 
 const SourceLine: FC<{ children: ReactNode }> = ({ children }) => (
-  <p className="rb:text-[10px] rb:leading-4 rb:text-[#697481]">
+  <p className="rb:text-[10px] rb:leading-4 rb:text-gray-600">
     {children}
   </p>
 )
@@ -52,7 +52,7 @@ const ResultItem: FC<{ item: RecordValue; index: number }> = ({ item, index }) =
           <Flex
             align="center"
             justify="center"
-            className="rb:size-5 rb:shrink-0 rb:rounded-md rb:bg-[#171719] rb:font-medium rb:text-white"
+            className="rb:size-5 rb:shrink-0 rb:rounded-md rb:bg-gray-900 rb:font-medium rb:text-white"
           >
             {rank as string}
           </Flex>
@@ -94,7 +94,7 @@ const ScoreMergeContent: FC<{ log: LogItem }> = ({ log }) => {
     <Flex vertical gap={16}>
       {items.map((item, index) => (
         <div
-          className="rb:not-last:border-b rb:not-last:border-b-[#EBEBEB] rb:not-last:pb-4"
+          className="rb:not-last:border-b rb:not-last:border-b-gray-200 rb:not-last:pb-4"
           key={String(item.memory_id ?? item.id ?? item.node_id ?? index)}
         >
           <ResultItem item={item} index={index} />
