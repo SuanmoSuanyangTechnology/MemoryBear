@@ -26,6 +26,10 @@ import { stringRegExp } from '@/utils/validator';
 import { getMemoryConfigList } from '@/api/memory'
 import type { Memory } from '@/views/MemoryManagement/types'
 import ActiveMemoryConfig from '@/components/ActiveMemoryConfig'
+import CustomSelect from '@/components/CustomSelect';
+import { types } from '../constants'
+import { ONTOLOGY_LIST } from '@redbear/memory-brick';
+import PrivateWrap from '@/components/PrivateWrap';
 
 const FormItem = Form.Item;
 
@@ -36,16 +40,6 @@ interface ApplicationModalProps {
   /** Callback to refresh application list */
   refresh: () => void;
 }
-
-/**
- * Supported application types
- */
-export const types = [
-  'agent',
-  'multi_agent',
-  'workflow',
-  'pure_workflow'
-]
 /**
  * Application type icon mapping
  */
@@ -146,6 +140,9 @@ const ApplicationModal = forwardRef<ApplicationModalRef, ApplicationModalProps>(
       <Form
         form={form}
         layout="vertical"
+        initialValues={{
+          ontology_id: null
+        }}
       >
         <FormItem
           name="name"
@@ -189,9 +186,33 @@ const ApplicationModal = forwardRef<ApplicationModalRef, ApplicationModalProps>(
           />
         </FormItem>
 
+        {ONTOLOGY_LIST &&
+          <PrivateWrap>
+            {() => (
+              <FormItem
+                name="ontology_id"
+                label={<>{t('application.ontology_id')} <span className="rb:text-gray-600 rb:text-[12px] rb:font-normal rb:ml-1">({t('application.ontologySubTitle')})</span></>}
+                extra={t('application.ontologyExtra')}
+              >
+                <CustomSelect
+                  url={ONTOLOGY_LIST}
+                  placeholder={t('common.pleaseSelect')}
+                  allTitle={t('application.ontologyUnassociated')}
+                  format={(options) => {
+                    return options.map(item => ({
+                      value: item.ontology_id,
+                      label: <div> {item.ontology_name} ({item.scene_name} · {t('application.ontologyEmotionCount', { count: item.emotion_count })}) </div>
+                    }))
+                  }}
+                />
+              </FormItem>
+            )}
+          </PrivateWrap>
+        }
+
         <>
           <div className="rb:font-medium">{t('application.memoryConfiguration')}</div>
-          <div className="rb:text-[12px] rb:text-[#5B6167]">{t('application.memoryConfigurationDesc')}</div>
+          <div className="rb:text-[12px] rb:text-gray-600">{t('application.memoryConfigurationDesc')}</div>
 
           <ActiveMemoryConfig
             activeMemoryConfig={activeMemoryConfig}

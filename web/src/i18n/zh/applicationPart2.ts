@@ -47,4 +47,9 @@ export const applicationPart2 = {
       weight_balance: '权重分配',
       semantic_label: '语义',
       keyword_label: '关键词',
+      ontology_id: '关联本体',
+      ontologySubTitle: '可选，默认本体始终生效',
+      ontologyExtra: '本体包含一个本体场景类型与若干配置好的情绪，关联后即同时获得画像与情绪能力，创建后可在「应用列表」中调整。',
+      ontologyUnassociated: '不关联（仅默认本体兜底）',
+      ontologyEmotionCount: '{{count}} 类情绪',
 }
