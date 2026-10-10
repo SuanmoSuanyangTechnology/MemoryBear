@@ -25,22 +25,22 @@ import Tag from '@/components/Tag'
 /** Search mode configuration */
 const searchSwitchList = [
   {
-    icon: <div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/conversation/deepThinking.svg')]"></div>,
+    icon: <div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/conversation/deepThinking.svg')]" />,
     value: '0',
     key: 'deepThinking'
   },
   {
-    icon: <div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/conversation/normalReply.svg')]"></div>,
+    icon: <div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/conversation/normalReply.svg')]" />,
     value: '1',
     key: 'normalReply'
   },
   {
-    icon: <div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/conversation/quickReply.svg')]"></div>,
+    icon: <div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/conversation/quickReply.svg')]" />,
     value: '2',
     key: 'quickReply'
   },
   {
-    icon: <div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/conversation/quickReplyPlus.svg')]"></div>,
+    icon: <div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/conversation/quickReplyPlus.svg')]" />,
     value: '5',
     key: 'quickReplyPlus'
   },
@@ -66,10 +66,8 @@ const MemoryConversation: FC = () => {
   const [expanded, setExpanded] = useState<Record<number, boolean>>({})
   const [loading, setLoading] = useState(false)
   const [sessionId, setSessionId] = useState<string>()
-  const [layoutMode, setLayoutMode] = useState<'vertical' | 'mixed' | 'horizontal'>('horizontal')
   const abortRef = useRef<(() => void)>()
   const requestGenerationRef = useRef(0)
-  console.log('layoutMode', layoutMode)
 
   const selectedId = selected?.end_user?.id || selected?.end_user_id
   const currentName = selected?.end_user?.other_name || selectedId || ''
@@ -92,20 +90,6 @@ const MemoryConversation: FC = () => {
     setLoading(false)
   }
 
-  useEffect(() => {
-    const computeLayoutMode = () => {
-      const width = window.innerWidth
-      if (width >= 1280) return 'horizontal'
-      if (width >= 1024) return 'mixed'
-      return 'vertical'
-    }
-    const handleResize = () => setLayoutMode(computeLayoutMode())
-    handleResize()
-    window.addEventListener('resize', handleResize)
-    return () => {
-      window.removeEventListener('resize', handleResize)
-    }
-  }, [])
   useEffect(() => () => {
     requestGenerationRef.current += 1
     abortRef.current?.()
@@ -259,42 +243,57 @@ const MemoryConversation: FC = () => {
   }
 
   return (
-    <Flex gap={16} vertical={layoutMode === 'vertical'}
-      className={clsx("rb:h-full! rb:w-full!", {
-        'rb:overflow-hidden!': layoutMode !== 'vertical',
-        'rb:overflow-y-auto!': layoutMode === 'vertical',
-      })}
+    <Flex gap={12}
+      className="rb:h-full! rb:w-full! rb:overflow-hidden!"
     >
       <RbCard
-        avatar={
-          <Flex align="center" justify="center" className="rb:bg-[#171719] rb:size-8 rb:rounded-lg">
-            <div className="rb:size-5 rb:bg-cover rb:bg-[url('@/assets/images/menuNew/userMemory_active.svg')]" />
-          </Flex>
-        }
         title={t('memoryConversation.selectMemory')}
         subTitle={t('memoryConversation.switchReset')}
-        headerType="borderless"
-        headerClassName="rb:py-2! rb:px-3! rb:min-h-[64px]!"
-        className={clsx("rb:h-full! rb:shrink-0! rb:overflow-hidden!", {
-          'rb:w-72!': layoutMode !== 'vertical',
-          'rb:w-full!': layoutMode === 'vertical'
-        })}
-        bodyClassName="rb:h-[calc(100%-64px)]! rb:overflow-hidden! rb:px-3! rb:pt-1! rb:pb-3!"
+        headerClassName="rb:py-2! rb:px-0! rb:m-[0_16px]! rb:min-h-[64px]!"
+        className="rb:h-full! rb:shrink-0! rb:overflow-hidden! rb:w-[24%]"
+        bodyClassName="rb:h-[calc(100%-64px)]! rb:overflow-hidden! rb:py-3! rb:px-2!"
       >
-        <Flex vertical justify="space-between" gap={8} className="rb:h-full! rb:overflow-hidden">
-          <div>
-            <div className="rb:mb-2 rb:text-[12px] rb:text-[#5B6167]">
-              {t('memoryConversation.memoryId')}
-            </div>
+        <Flex vertical justify="space-between" gap={12} className="rb:h-full! rb:overflow-hidden">
+          <div className="rb:mx-2 rb-border-b">
+            <Flex align="center" justify="space-between" className="rb:text-gray-600 rb:leading-5">
+              {t('memoryConversation.currentContext')}
+              {selected &&
+                <div className="rb:size-4.5 rb:bg-cover rb:bg-[url('@/assets/images/common/delete_red.svg')]" onClick={handleClearSelection} />
+              }
+            </Flex>
+
+            {selected
+              ? <div>
+                <Flex align="center" justify="space-between" gap={24} className="rb:mt-3! rb:leading-4">
+                  <Tooltip title={currentName}>
+                    <span className="rb:font-medium rb:overflow-hidden rb:text-ellipsis rb:whitespace-nowrap rb:flex-1">
+                      {currentName}
+                    </span>
+                  </Tooltip>
+                  <span className="rb:text-gray-500 rb:text-[12px] rb:shrink-0">{selected?.memory_num?.total ?? 0} {t('userMemory.memoryNum')}</span>
+                </Flex>
+                <p className="rb:text-[12px] rb:text-gray-600 rb:overflow-hidden rb:text-ellipsis rb:whitespace-nowrap rb:mt-3">
+                  ID: <Tooltip title={selectedId || '-'}>{selectedId || '-'}</Tooltip>
+                </p>
+                <p className="rb:text-[12px] rb:text-gray-600 rb:overflow-hidden rb:text-ellipsis rb:whitespace-nowrap rb:mt-1 rb:mb-3">
+                  {t('memoryConversation.memoryConfig')}: <Tooltip title={selected?.memory_config?.memory_config_name || t('memoryConversation.memoryNotConnected')}>{selected?.memory_config?.memory_config_name || t('memoryConversation.memoryNotConnected')}</Tooltip>
+                </p>
+              </div>
+              : <div className="rb:my-9.5 rb:px-3 rb:text-gray-500 rb:text-[12px] rb:text-center">{t('memoryConversation.noSelectMemory')}</div>
+            }
+
+          </div>
+          
+          <div className="rb:mx-2">
             <SearchInput
               value={keyword}
               onChange={event => setKeyword(event.target.value)}
               placeholder={t('memoryConversation.searchSupport')}
-              className="rb:w-full! rb:mb-2!  "
+              className="rb:w-full! rb:h-7! rb:mb-3"
               size="small"
               variant="outlined"
             />
-            <Flex align="center" justify="space-between" className="rb:text-[12px] rb:text-[#5B6167]">
+            <Flex align="center" justify="space-between" className="rb:text-[12px] rb:leading-4 rb:text-gray-600">
               <span>{t('memoryConversation.availableMemory')}</span>
               <span>{t('memoryConversation.resultCount', { count: total ?? 0 })}</span>
             </Flex>
@@ -315,27 +314,27 @@ const MemoryConversation: FC = () => {
                   align="center"
                   gap={8}
                   className={clsx(`rb:w-full rb:cursor-pointer rb:rounded-lg rb:p-2!`, {
-                    'rb:bg-[rgba(21,94,239,0.04)] rb:hover:bg-[rgba(21,94,239,0.08)]': active,
-                    'rb:bg-[rgba(255,255,255,0.04)] rb:hover:bg-[#F6F6F6]': !active,
+                    'rb:bg-[rgba(21,94,239,0.08)]': active,
+                    'rb:hover:bg-gray-100': !active,
                   })}
                   onClick={() => handleSelect(item)}
                 >
-                  <div className={clsx("rb:size-6 rb:text-center rb:font-semibold rb:leading-6 rb:rounded-md rb:shrink-0", {
-                    'rb:bg-[#171719] rb:text-white': active,
-                    'rb:bg-[#EBEBEB]': !active,
+                  <div className={clsx("rb:size-7 rb:text-center rb:font-medium rb:leading-7 rb:rounded-md rb:shrink-0", {
+                    'rb:bg-blue-500 rb:text-white': active,
+                    'rb:bg-gray-200': !active,
                   })}>
                     {name[0]}
                   </div>
                   <div className="rb:flex-1 rb:overflow-hidden">
                     <Tooltip title={name}>
-                      <div className="rb:overflow-hidden rb:text-xs rb:text-ellipsis rb:whitespace-nowrap">{name}</div>
+                      <div className="rb:overflow-hidden rb:text-[12px] rb:font-medium rb:text-ellipsis rb:whitespace-nowrap">{name}</div>
                     </Tooltip>
                     <Tooltip title={id}>
-                      <div className="rb:overflow-hidden rb:text-[10px] rb:text-ellipsis rb:whitespace-nowrap rb:text-[#5B6167]">{id}</div>
+                      <div className="rb:overflow-hidden rb:mt-0.5 rb:text-[10px] rb:text-ellipsis rb:whitespace-nowrap rb:text-gray-600">{id}</div>
                     </Tooltip>
                   </div>
                   {active &&
-                    <div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/common/check_green.svg')] rb:shrink-0" />
+                    <div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/common/check_blue.svg')] rb:shrink-0" />
                   }
                 </Flex>
               )
@@ -346,202 +345,151 @@ const MemoryConversation: FC = () => {
             }
             onTotalChange={setTotal}
           />
-          {selected &&
-            <div className="rb:cursor-pointer rb-border-t rb:pt-2 rb:text-[12px] rb:text-[#5B6167] rb:hover:text-[#171719] rb:text-center"
-              onClick={handleClearSelection}
-            >
-              {t('memoryConversation.clearSelection')}
-            </div>
-          }
-          <div className="rb-border-t rb:px-0.75 rb:pt-2 rb:text-[12px]">
-            <Flex gap={8} align="center">
-              <div className="rb:size-1.5 rb:rounded-full rb:bg-[#369F21]"></div>
-              {t('memoryConversation.currentContext')}
-            </Flex>
-            <p className="rb:mt-1.5 rb:mb-0.5 rb:font-medium">
-              {selected ? currentName : t('memoryConversation.noSelectMemory')}
-            </p>
-            <p className="rb:text-[10px] rb:mb-0.5">
-              {selectedId || '-'}
-            </p>
-            <Flex align="center" gap={12} className="rb:text-[10px] rb:text-[#5B6167]">
-              <span>{selected?.memory_num?.total ?? 0} {t('userMemory.memoryNum')}</span>
-              <span>{selected?.memory_config?.memory_config_name || t('memoryConversation.memoryNotConnected')}</span>
-            </Flex>
-          </div>
         </Flex>
       </RbCard>
-      
-      <Flex vertical={layoutMode !== 'horizontal'}
-        className={clsx({
-          'rb:h-full! rb:min-h-0! rb:overflow-y-auto! rb:flex-1!': layoutMode === 'mixed',
-          'rb:gap-x-4! rb:flex-1!': layoutMode === 'horizontal',
-          'rb:gap-y-4!': layoutMode !== 'horizontal',
-        })}
+      <RbCard
+        title={t('memoryConversation.conversationContent')}
+        subTitle={t('memoryConversation.sendQuery')}
+        headerType="borderless"
+        headerClassName="rb:py-2! rb:min-h-[64px]!"
+        className="rb:overflow-hidden! rb:flex-1! rb:h-full!"
+        bodyClassName="rb:h-[calc(100%-64px)]! rb:overflow-hidden! rb:px-0! rb:pt-1! rb:pb-0!"
       >
-        <RbCard
-          title={t('memoryConversation.conversationContent')}
-          subTitle={t('memoryConversation.sendQuery')}
-          extra={
-            <Tag color="default" className="rb:text-[10px] rb:w-[150px]!">
-              {selectedId || t('memoryConversation.selectMemoryFirst')}
-            </Tag>
+        <Chat
+          empty={
+            <Empty url={ConversationEmptyIcon} className="rb:h-full" size={[140, 100]} title={t('memoryConversation.conversationContentEmpty')} subTitle={t('memoryConversation.conversationContentSubEmpty')} />
           }
-          headerType="borderless"
-          headerClassName="rb:py-2! rb:min-h-[64px]!"
-          className={clsx("rb:overflow-hidden!", {
-            'rb:h-full! rb:flex-1!': layoutMode === 'horizontal',
-            'rb:shrink-0!': layoutMode === 'mixed',
-            'rb:h-[500px]! rb:w-full! ': layoutMode === 'vertical',
-          })}
-          bodyClassName="rb:h-[calc(100%-64px)]! rb:overflow-hidden! rb:px-0! rb:pt-1! rb:pb-0!"
+          className="rb:pt-0!"
+          contentClassName='rb:h-[calc(100%-144px)] rb:px-4!'
+          data={chatData}
+          message={input}
+          onChange={setInput}
+          onSend={handleSend}
+          loading={loading}
+          streamLoading={loading}
+          labelFormat={(item) => formatDateTime(item.created_at, 'MMMM D, YYYY [at] h:mm A')}
         >
-          <Chat
-            empty={
-              <Empty url={ConversationEmptyIcon} className="rb:h-full" size={[140, 100]} title={t('memoryConversation.conversationContentEmpty')} isNeedSubTitle={false} />
-            }
-            className="rb:pt-0!"
-            contentClassName='rb:h-[calc(100%-144px)] rb:px-4!'
-            data={chatData}
-            message={input}
-            onChange={setInput}
-            onSend={handleSend}
-            loading={loading}
-            streamLoading={loading}
-            labelFormat={(item) => formatDateTime(item.created_at, 'MMMM D, YYYY [at] h:mm A')}
-          >
-            <Segmented
-              options={searchSwitchList.map(item => ({
-                ...item,
-                icon: <Tooltip title={t(`memoryConversation.${item.key}`)}>{item.icon}</Tooltip>
-              }))}
-              value={search_switch}
-              shape="round"
-              className={styles.segmented}
-              onChange={handleChange}
-            />
-          </Chat>
-        </RbCard>
+          <Segmented
+            options={searchSwitchList.map(item => ({
+              ...item,
+              icon: <Tooltip title={t(`memoryConversation.${item.key}`)}>{item.icon}</Tooltip>
+            }))}
+            value={search_switch}
+            shape="round"
+            className={styles.segmented}
+            onChange={handleChange}
+          />
+        </Chat>
+      </RbCard>
 
-        <RbCard
-          title={t('memoryConversation.analysis')}
-          subTitle={selectedId || t('memoryConversation.waitingValidation')}
-          headerType="borderless"
-          headerClassName="rb:py-2! rb:min-h-[64px]!"
-          className={clsx("rb:shrink-0! rb:overflow-hidden!", {
-            'rb:w-100! rb:h-full!': layoutMode === 'horizontal',
-            'rb:shrink-0! rb:h-[500px]! rb:w-full!': layoutMode === 'mixed',
-            'rb:h-[500px]! rb:w-full!': layoutMode === 'vertical',
-          })}
-          bodyClassName="rb:h-[calc(100%-64px)]! rb:overflow-hidden! rb:px-3! rb:pt-1! rb:pb-3!"
-        >
-          {selected
-            ? (
-              <Flex vertical gap={12} className="rb:h-full! rb:overflow-auto!">
-                {currentQuery &&
-                  <RequestSummaryCard
-                    log={logs[0]}
-                    query={currentQuery}
-                    searchSwitch={search_switch}
-                  />
-                }
-                <Flex vertical gap={8}>
-                  {stageKeys.map((stageKey, index) => {
-                    const stage = t(`memoryConversation.stages.${stageKey}`)
-                    const log = stageKey === 'problemSplit' && index > 0 ? {
-                      ...logs[index],
-                      data: {
-                        ...(logs[index]?.data || {}),
-                        original_query: (logs[index-1]?.data as {original_query?: string})?.original_query,
-                      }
-                    } : logs[index]
-                    const canExpand = stageKey !== 'hybridRetrieval' && log?.status !== 'failed'
-                    const isOpen = canExpand && (expanded[index] ?? Boolean(log))
-                    const statusKey = !log
-                      ? loading
-                        ? 'running'
-                        : 'waiting'
-                      : log.status === 'failed'
-                        ? 'failed'
-                        : log.status === 'completed'
-                          ? 'completed'
-                          : 'running'
-                    const stageBadge = t(`memoryConversation.${statusKey}`)
-                    return (
-                      <Flex key={stageKey} gap={10}
-                        className="rb:relative rb:after:absolute rb:after:top-8 rb:after:-bottom-2 rb:after:left-[11.5px] rb:after:content-[''] rb:after:w-px rb:after:bg-[#EBEBEB] rb:last:after:hidden"
+      <RbCard
+        title={t('memoryConversation.analysis')}
+        subTitle={selectedId || t('memoryConversation.waitingValidation')}
+        headerType="borderless"
+        headerClassName="rb:py-2! rb:min-h-[64px]!"
+        className="rb:shrink-0! rb:overflow-hidden! rb:w-[33%]! rb:h-full!"
+        bodyClassName="rb:h-[calc(100%-64px)]! rb:overflow-hidden! rb:px-3! rb:pt-1! rb:pb-3!"
+      >
+        {selected
+          ? (
+            <Flex vertical gap={12} className="rb:h-full! rb:overflow-auto!">
+              {currentQuery &&
+                <RequestSummaryCard
+                  log={logs[0]}
+                  query={currentQuery}
+                  searchSwitch={search_switch}
+                />
+              }
+              <Flex vertical gap={12}>
+                {stageKeys.map((stageKey, index) => {
+                  const stage = t(`memoryConversation.stages.${stageKey}`)
+                  const log = stageKey === 'problemSplit' && index > 0 && logs[index] ? {
+                    ...logs[index],
+                    data: {
+                      ...(logs[index]?.data || {}),
+                      original_query: (logs[index-1]?.data as {original_query?: string})?.original_query,
+                    }
+                  } : logs[index]
+                  const canExpand = stageKey !== 'hybridRetrieval' && log?.status !== 'failed'
+                  const isOpen = canExpand && (expanded[index] ?? Boolean(log))
+                  const statusKey = !log
+                    ? loading
+                      ? 'running'
+                      : 'waiting'
+                    : log.status === 'failed'
+                      ? 'failed'
+                      : log.status === 'completed'
+                        ? 'completed'
+                        : 'running'
+                  const stageBadge = t(`memoryConversation.${statusKey}`)
+                  return (
+                    <Flex key={stageKey} gap={12}
+                      className="rb:relative rb:after:absolute rb:after:top-9 rb:after:-bottom-4 rb:after:left-2.5 rb:after:content-[''] rb:after:w-[0.5px] rb:after:bg-gray-500 rb:last:after:hidden"
+                    >
+                      <Flex
+                        align="center"
+                        justify="center"
+                        className={clsx("rb:size-5 rb:rounded-full rb:text-[12px] rb:mt-3!", {
+                          'rb:bg-gray-100 rb:text-gray-600': statusKey === 'waiting',
+                          'rb:bg-[#171719] rb:text-white': statusKey === 'running',
+                          'rb:bg-[rgba(54,159,33)] rb:text-white': statusKey === 'completed',
+                          'rb:bg-[rgba(255,138,76)] rb:text-white': statusKey === 'failed',
+                        })}
                       >
-                        <Flex
-                          align="center"
-                          justify="center"
-                          className="rb:size-6 rb-border rb:rounded-full rb:mt-1! rb:relative rb:z-1"
-                        >
-                          <Flex
-                            align="center"
-                            justify="center"
-                            className={clsx("rb:size-4 rb:rounded-full rb:text-[10px] rb:text-white", {
-                              'rb:bg-[#B9BEC6]': statusKey === 'waiting',
-                              'rb:bg-[#171719]': statusKey === 'running',
-                              'rb:bg-[rgba(54,159,33)]': statusKey === 'completed',
-                              'rb:bg-[rgba(255,138,76)]': statusKey === 'failed',
-                            })}
-                          >
-                            {index + 1}
-                          </Flex>
-                        </Flex>
-                        <div className="rb:flex-1 rb:overflow-hidden rb:rounded-lg rb-border rb:bg-[#F6F6F6]">
-                          <Flex align="center" gap={8}
-                            className={clsx('rb:min-h-10.5 rb:w-full rb:border-0 rb:bg-transparent rb:px-2.75! rb:text-left', {
-                              'rb:cursor-pointer': canExpand,
-                              'rb:cursor-default': !canExpand,
-                            })}
-                            onClick={() => {
-                              if (canExpand) {
-                                setExpanded(previous => ({ ...previous, [index]: !isOpen }))
-                              }
-                            }}
-                          >
-                            <b className="rb:flex-1 rb:text-xs rb:font-semibold">{log?.title || stage}</b>
-                            <Tag
-                              color={
-                                statusKey === 'completed'
-                                  ? 'success'
-                                  : statusKey === 'failed'
-                                    ? 'error'
-                                    : statusKey === 'waiting'
-                                      ? 'default'
-                                      : 'processing'
-                              }
-                              size="small"
-                              className="rb:shrink-0"
-                            >
-                              {stageBadge}
-                            </Tag>
-                            {canExpand && (
-                              <div
-                                className={clsx("rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/common/arrow_up.svg')] rb:transition-transform", {
-                                  'rb:rotate-180': !isOpen,
-                                  'rb:rotate-0': isOpen,
-                                })}
-                              />
-                            )}
-                          </Flex>
-                          {canExpand && isOpen && log &&
-                            <ContentWrapper>
-                              <StageContent stage={stageKey} log={log} />
-                            </ContentWrapper>
-                          }
-                        </div>
+                        {index + 1}
                       </Flex>
-                    )
-                  })}
-                </Flex>
+                      <div className="rb:flex-1 rb:overflow-hidden rb:rounded-xl rb-border rb:bg-gray-100">
+                        <Flex align="center" gap={8}
+                          className={clsx('rb:py-2.5! rb:w-full rb:border-0 rb:bg-transparent rb:px-3! rb:text-left', {
+                            'rb:cursor-pointer': canExpand,
+                            'rb:cursor-default': !canExpand,
+                          })}
+                          onClick={() => {
+                            if (canExpand) {
+                              setExpanded(previous => ({ ...previous, [index]: !isOpen }))
+                            }
+                          }}
+                        >
+                          <b className="rb:flex-1 rb:text-xs rb:font-semibold">{stage}</b>
+                          <Tag
+                            color={
+                              statusKey === 'completed'
+                                ? 'success'
+                                : statusKey === 'failed'
+                                  ? 'error'
+                                  : statusKey === 'waiting'
+                                    ? 'default'
+                                    : 'processing'
+                            }
+                            size="small"
+                            className="rb:shrink-0"
+                          >
+                            {stageBadge}
+                          </Tag>
+                          {canExpand && (
+                            <div
+                              className={clsx("rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/common/arrow_up.svg')] rb:transition-transform", {
+                                'rb:rotate-180': !isOpen,
+                                'rb:rotate-0': isOpen,
+                              })}
+                            />
+                          )}
+                        </Flex>
+                        {canExpand && isOpen && log &&
+                          <ContentWrapper>
+                            <StageContent stage={stageKey} log={log} />
+                          </ContentWrapper>
+                        }
+                      </div>
+                    </Flex>
+                  )
+                })}
               </Flex>
-            )
-            : <Empty url={AnalysisEmptyIcon} className="rb:h-full!" />
-          }
-        </RbCard>
-      </Flex>
+            </Flex>
+          )
+          : <Empty url={AnalysisEmptyIcon} className="rb:h-full!" />
+        }
+      </RbCard>
     </Flex>
   )
 }

@@ -1,6 +1,7 @@
 import type { FC } from 'react'
-import { Col, Row } from 'antd'
+import { Col, Row, Flex } from 'antd'
 import { useTranslation } from 'react-i18next'
+import clsx from 'clsx'
 
 interface ScoreBreakdownProps {
   data: Record<string, unknown>
@@ -9,7 +10,6 @@ interface ScoreBreakdownProps {
 interface ScoreFieldProps {
   label: string
   value: unknown
-  fieldKey?: string
   badge?: string
   highlighted?: boolean
 }
@@ -21,29 +21,31 @@ const formatValue = (value: unknown): string => {
   return String(value)
 }
 
-const ScoreField: FC<ScoreFieldProps> = ({ label, value, fieldKey, badge, highlighted }) => (
+const ScoreField: FC<ScoreFieldProps> = ({ label, value, badge, highlighted }) => (
   <Col span={8}>
-    <div className={highlighted
-      ? 'rb:h-full rb:rounded-lg rb:bg-[#EEF4FF] rb:px-2 rb:py-1.5'
-      : 'rb:h-full rb:rounded-lg rb:bg-[#F6F6F6] rb:px-2 rb:py-1.5'}
+    <Flex vertical justify="space-between" className={clsx('rb:h-full rb:rounded-lg rb:px-2! rb:py-1.5!', {
+      'rb:bg-[rgba(21,94,239,0.08)] ': highlighted,
+      'rb:bg-gray-100': !highlighted
+    })}
     >
-      <p className="rb:flex rb:flex-wrap rb:items-center rb:gap-1 rb:text-[9px] rb:leading-4 rb:text-[#A0A4AA]">
-        <span>{label}</span>
-        {fieldKey && (
-          <code className="rb:rounded rb:bg-[#E8EEF5] rb:px-1 rb:text-[8px] rb:text-[#697481]">
-            {fieldKey}
-          </code>
-        )}
+      <div>
+        <p className={clsx("rb:font-semibold rb:leading-5 rb:break-all rb:font-[MiSans-Demibold]", {
+          'rb:text-blue-500': highlighted,
+          'rb:text-[#171719]': !highlighted
+        })}>
+          {formatValue(value)}
+        </p>
         {badge && (
-          <span className="rb:rounded rb:bg-[#FFF1D6] rb:px-1 rb:py-0.5 rb:text-[8px] rb:text-[#B7791F]">
+          <span className="rb:rounded-xs rb:bg-blue-500 rb:px-0.5 rb:text-[11px] rb:text-white">
             {badge}
           </span>
         )}
-      </p>
-      <p className="rb:text-[11px] rb:font-semibold rb:leading-5 rb:text-[#171719] rb:break-all">
-        {formatValue(value)}
-      </p>
-    </div>
+      </div>
+      <div className={clsx("rb:mt-1 rb:text-[11px] rb:leading-3.5", {
+          'rb:text-[rgba(21,94,239,0.65)]': highlighted,
+        'rb:text-[#8C9095]': !highlighted
+      })}>{label}</div>
+    </Flex>
   </Col>
 )
 
@@ -52,7 +54,7 @@ const ScoreBreakdown: FC<ScoreBreakdownProps> = ({ data }) => {
   const isMetadata = data.is_metadata === true
 
   return (
-    <Row gutter={[8, 8]} className="rb:my-2">
+    <Row gutter={[10, 10]} className="rb:my-3">
       <ScoreField
         label={t('memoryConversation.scoreMerge.normalizedKeyword')}
         value={isMetadata ? 1 : data.normalized_keyword_score ?? data.keyword_score ?? data.kw_score}

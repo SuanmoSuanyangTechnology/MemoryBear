@@ -92,23 +92,21 @@ const RequestModeContent: FC<{ log: LogItem }> = ({ log }) => {
 
   return (
     <Flex vertical gap={10}>
-      <div className="rb:rounded-lg rb:bg-[#F6F6F6] rb:p-2.5">
+      <div className="rb:rounded-lg rb:bg-gray-100 rb:py-2.5 rb:px-3">
         <Flex align="center" justify="space-between" gap={8}>
-          <div>
-            <p className="rb:text-[12px] rb:font-medium rb:text-[#171719]">
-              {t(`memoryConversation.requestMode.${modeKey}`)}
-            </p>
-            <p className="rb:mt-1! rb:text-[10px] rb:text-[#5B6167]">
-              {t(`memoryConversation.requestMode.${modeKey}Desc`)}
-            </p>
-          </div>
-          <div className="rb:shrink-0 rb:rounded-md rb:bg-[#171719] rb:px-2 rb:py-1 rb:text-[10px] rb:text-white">
+          <p className="rb:text-[12px] rb:font-medium rb:text-[#171719]">
+            {t(`memoryConversation.requestMode.${modeKey}`)}
+          </p>
+          <Flex align="center" className="rb:shrink-0 rb:rounded-sm rb:bg-[#171719] rb:h-4 rb:px-1! rb:text-[12px] rb:text-white">
             search_switch={searchSwitch}
-          </div>
+          </Flex>
         </Flex>
+        <p className="rb:mt-2! rb:text-[12px] rb:text-gray-600">
+          {t(`memoryConversation.requestMode.${modeKey}Desc`)}
+        </p>
       </div>
       <div>
-        <p className="rb:mb-1 rb:text-[10px] rb:text-[#5B6167]">
+        <p className="rb:mt-2.5 rb:mb-1 rb:text-[10px] rb:text-gray-600">
           {t('memoryConversation.requestMode.requestFields')}
         </p>
         <CodeBlock
@@ -136,23 +134,23 @@ const QueryPreprocessContent: FC<{ log: LogItem }> = ({ log }) => {
   const results = Array.isArray(result) ? result : [result ?? original]
 
   return (
-    <Flex vertical gap={10}>
+    <Flex vertical gap={10} className="rb:text-[12px] rb:leading-4">
       <div>
-        <p className="rb:mb-1 rb:text-[10px] rb:text-[#5B6167]">
+        <p className="rb:mt-0.5 rb:text-gray-500">
           {t('memoryConversation.queryPreprocess.original')}
         </p>
-        <p className="rb:text-xs rb:text-[#171719]">
+        <p className="rb:text-[#171719]">
           {textValue(original)}
         </p>
       </div>
       <div>
-        <p className="rb:mb-1 rb:text-[10px] rb:text-[#5B6167]">
+        <p className="rb:mb-0.5 rb:text-gray-500">
           {t('memoryConversation.queryPreprocess.result')}
         </p>
         <Flex wrap gap={6}>
           {results.map((item, index) => (
             <span
-              className="rb:inline-block rb:rounded-md rb:bg-[#F2F5FA] rb:px-2 rb:py-1 rb:text-[12px] rb:text-[#5B6167]"
+              className="rb:inline-block rb:rounded-md rb:bg-[#ECF2FE] rb:px-2 rb:py-1"
               key={`${textValue(item)}-${index}`}
             >
               {textValue(item, textValue(original))}
@@ -187,21 +185,21 @@ const ProblemSplitContent: FC<{ log: LogItem }> = ({ log }) => {
   return (
     <Flex vertical gap={10}>
       <div>
-        <p className="rb:mb-1 rb:text-[10px] rb:text-[#5B6167]">
+        <p className="rb:mb-0.5 rb:text-gray-500">
           {t('memoryConversation.queryPreprocess.original')}
         </p>
-        <p className="rb:text-xs rb:text-[#171719]">
+        <p className="rb:text-[#171719]">
           {textValue(original)}
         </p>
       </div>
       <div>
-        <p className="rb:mb-1 rb:text-[10px] rb:text-[#5B6167]">
+        <p className="rb:mb-0.5 rb:text-gray-500">
           {t('memoryConversation.queryPreprocess.result')}
         </p>
         <Flex wrap gap={6}>
           {(questions.length ? questions : ['—']).map((question, index) => (
             <span
-              className="rb:inline-block rb:rounded-md rb:bg-[#F2F5FA] rb:px-2 rb:py-1 rb:text-[12px] rb:text-[#5B6167]"
+              className="rb:inline-block rb:rounded-md rb:bg-[#ECF2FE] rb:px-2 rb:py-1"
               key={`${question}-${index}`}
             >
               {question}
@@ -223,13 +221,13 @@ const FinalAnswerContent: FC<{ log: LogItem }> = ({ log }) => {
     <Flex vertical gap={10}>
       {stages.length > 0 && (
         <div>
-          <p className="rb:mb-1 rb:text-[12px] rb:text-[#5B6167]">
+          <p className="rb:mb-1 rb:text-[12px] rb:leading-4.5 rb:text-gray-600">
             {t('memoryConversation.finalAnswer.intermediate')}
           </p>
           <Flex gap={8} wrap>
             {stages.map((stage, index) => (
               <span
-                className="rb:rounded-md rb:border rb:border-dashed rb:border-[#EBEBEB] rb:px-2 rb:py-1 rb:text-[12px] rb:text-[#5B6167]"
+                className="rb:rounded-md rb:border rb:border-dashed rb:border-[#EBEBEB] rb:px-2 rb:py-1 rb:text-[12px] rb:text-gray-600"
                 key={`${stage}-${index}`}
               >
                 {stage}
@@ -239,10 +237,10 @@ const FinalAnswerContent: FC<{ log: LogItem }> = ({ log }) => {
         </div>
       )}
       <div>
-        <p className="rb:mb-1 rb:text-[12px] rb:text-[#5B6167]">
+        <p className="rb:mb-2 rb:text-[12px] rb:leading-4.5 rb:text-gray-600">
           {t('memoryConversation.finalAnswer.answer')}
         </p>
-        <p className="rb:text-xs rb:leading-5 rb:text-[#171719]">
+        <p className="rb:text-[12px] rb:leading-4.5 rb:text-[#171719]">
           {textValue(firstValue(data, ['answer', 'content']))}
         </p>
       </div>

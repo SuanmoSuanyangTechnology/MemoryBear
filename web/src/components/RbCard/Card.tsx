@@ -164,9 +164,10 @@ const RbCard: FC<RbCardProps> = ({
             /** Header with avatar */
             'rb:border-[0]! rb:text-[16px] rb:p-[16px_16px_0_16px]!': avatarUrl || avatar,
             /** Standard border header */
-            'rb:text-[18px] rb:p-[0]! rb:m-[0_20px]! rb:border-b-[0.5px]!': headerType === 'border' && !avatarUrl && !avatar,
+            'rb:text-[18px] rb:p-[0]! rb:border-b-[0.5px]!': headerType === 'border' && !avatarUrl && !avatar && !headerClassName?.includes('rb:m-'),
+            'rb:m-[0_20px]!': headerType === 'border' && !avatarUrl && !avatar && !headerClassName?.includes('rb:m-'),
             /** Border bottom-left style */
-            "rb:m-[0_16px]!  rb:p-[0]! rb:relative rb:before:content-[''] rb:before:w-[4px] rb:before:h-[16px] rb:before:bg-[#5B6167] rb:before:absolute rb:before:top-[50%] rb:before:left-[-16px] rb:before:translate-y-[-50%] rb:before:bg-[#5B6167]! rb:before:h-[16px]!": headerType === 'borderBL',
+            "rb:m-[0_16px]! rb:p-[0]! rb:relative rb:before:content-[''] rb:before:w-[4px] rb:before:h-[16px] rb:before:bg-[#5B6167] rb:before:absolute rb:before:top-[50%] rb:before:left-[-16px] rb:before:translate-y-[-50%] rb:before:bg-[#5B6167]! rb:before:h-[16px]!": headerType === 'borderBL',
             /** Border left style */
             "rb:m-[0_16px]! rb:p-[0]! rb:leading-[20px] rb:relative rb:border-[0]! rb:before:content-[''] rb:before:w-[4px] rb:before:h-[16px] rb:before:bg-[#5B6167] rb:before:absolute rb:before:top-[50%] rb:before:left-[-16px] rb:before:translate-y-[-50%] rb:before:bg-[#5B6167]! rb:before:h-[16px]!": headerType === 'borderL',
             'rb:min-h-[48px]!': headerType === 'borderL' && !headerClassName?.includes('rb:min-h-'),

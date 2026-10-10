@@ -1,5 +1,5 @@
 import type { FC, ReactNode } from 'react'
-import { Flex } from 'antd'
+import { Flex, Tooltip } from 'antd'
 import { useTranslation } from 'react-i18next'
 
 import Tag from '@/components/Tag'
@@ -31,7 +31,7 @@ const textValue = (value: unknown, fallback = '—'): string => {
 }
 
 const SourceLine: FC<{ children: ReactNode }> = ({ children }) => (
-  <p className="rb:border-t rb:border-dashed rb:border-[#EBEBEB] rb:pt-2 rb:text-[10px] rb:leading-4 rb:text-[#697481]">
+  <p className="rb:text-[10px] rb:leading-4 rb:text-[#697481]">
     {children}
   </p>
 )
@@ -47,8 +47,8 @@ const ResultItem: FC<{ item: RecordValue; index: number }> = ({ item, index }) =
 
   return (
     <div className="rb:w-full">
-      <Flex align="center" justify="space-between" gap={8} className="rb:mb-2!">
-        <Flex align="center" gap={8} className="rb:min-w-0">
+      <Flex align="center" justify="space-between" gap={16} className="rb:mb-3!">
+        <Flex align="center" gap={8} className="rb:min-w-0 rb:flex-1!">
           <Flex
             align="center"
             justify="center"
@@ -56,15 +56,17 @@ const ResultItem: FC<{ item: RecordValue; index: number }> = ({ item, index }) =
           >
             {rank as string}
           </Flex>
-          <p className="rb:overflow-hidden rb:text-xs rb:font-medium rb:text-ellipsis rb:whitespace-nowrap">
-            {String(id)}
-          </p>
+          <Tooltip title={String(id)}>
+            <p className="rb:overflow-hidden rb:text-xs rb:font-medium rb:text-ellipsis rb:whitespace-nowrap">
+              {String(id)}
+            </p>
+          </Tooltip>
         </Flex>
         <Tag size="small" variant="borderless" className="rb:shrink-0!">
           {retrievalType}
         </Tag>
       </Flex>
-      <p className="rb:text-[11px] rb:leading-5 rb:text-[#5B6167]">
+      <p className="rb:text-[11px] rb:leading-5 rb:text-gray-600">
         {textValue(item.content ?? item.text)}
       </p>
       <ScoreBreakdown data={{ ...item, rank }} />
@@ -89,10 +91,10 @@ const ScoreMergeContent: FC<{ log: LogItem }> = ({ log }) => {
   const items = Array.isArray(raw) ? raw.map(asRecord) : []
 
   return (
-    <Flex vertical gap={8}>
+    <Flex vertical gap={16}>
       {items.map((item, index) => (
         <div
-          className="rb:rounded-lg rb:border rb:border-[#EBEBEB] rb:bg-white rb:p-2.5"
+          className="rb:not-last:border-b rb:not-last:border-b-[#EBEBEB] rb:not-last:pb-4"
           key={String(item.memory_id ?? item.id ?? item.node_id ?? index)}
         >
           <ResultItem item={item} index={index} />
