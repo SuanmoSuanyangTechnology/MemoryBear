@@ -1,17 +1,14 @@
-"""Validate caller-supplied knowledge model IDs through the shared model resolver."""
+"""Validate caller-supplied knowledge model IDs against the shared model registry."""
 
 from __future__ import annotations
 
 import uuid
 from collections.abc import Mapping
 
-from cryptography.exceptions import InvalidTag
 from redbear_model import (
+    ModelConfigSnapshot,
     ModelProvider,
     ModelType,
-    RedBearModelError,
-    ResolvedModelConfig,
-    resolve_model_async,
 )
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -33,7 +30,7 @@ _MEDIA_INPUT_MODALITIES = {
 _DASHSCOPE_MEDIA_FIELDS = frozenset({"audio2text_id", "video2text_id"})
 
 
-def _matches_knowledge_model_field(field_name: str, model: ResolvedModelConfig) -> bool:
+def _matches_knowledge_model_field(field_name: str, model: ModelConfigSnapshot) -> bool:
     """Match the same media capabilities and providers used by knowledge processing."""
     if model.profile.type != _MODEL_FIELD_TYPES[field_name]:
         return False
@@ -58,20 +55,23 @@ async def validate_requested_knowledge_models(
         return
 
     registry = AsyncSQLModelRegistry(db)
-    resolved_models: dict[uuid.UUID, ResolvedModelConfig] = {}
+    configs: dict[uuid.UUID, ModelConfigSnapshot] = {}
     for field_name, model_id in requested.items():
-        if model_id not in resolved_models:
+        if model_id not in configs:
             try:
-                resolved_models[model_id] = await resolve_model_async(
-                    registry, model_config_id=model_id, tenant_id=tenant_id
-                )
-            except (RedBearModelError, ValueError, InvalidTag) as exc:
-                # The resolver checks state before visibility; use one public error to
-                # avoid disclosing private model state or credential details.
+                config = await registry.get_model_config(model_id, tenant_id)
+            except Exception as exc:
                 raise KnowledgeError.from_code(
                     "KB_KNOWLEDGE_MODEL_UNAVAILABLE", params={"model_field": field_name}
                 ) from exc
-        model = resolved_models[model_id]
+            # Fold missing, invisible, deprecated and inactive configs into one public
+            # error to avoid disclosing model state.
+            if config is None or config.is_deprecated or not config.is_active:
+                raise KnowledgeError.from_code(
+                    "KB_KNOWLEDGE_MODEL_UNAVAILABLE", params={"model_field": field_name}
+                )
+            configs[model_id] = config
+        model = configs[model_id]
         if not _matches_knowledge_model_field(field_name, model):
             raise KnowledgeError.from_code(
                 "KB_KNOWLEDGE_MODEL_CAPABILITY_MISMATCH", params={"model_field": field_name}
