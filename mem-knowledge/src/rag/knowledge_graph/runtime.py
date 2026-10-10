@@ -61,9 +61,11 @@ def snapshot_graph_runtime(runtime: object, knowledge_id: str) -> GraphIndexRunt
         chunk_index_name=collection_name_for_knowledge(knowledge_uuid),
         entity_types=entity_types,
         scene_name=scene_name,
-        llm=ModelRuntimeSnapshot.from_view(factory.resolve_chat(llm_id, tenant_id)),
+        llm=ModelRuntimeSnapshot.from_view(
+            factory.resolve_chat(llm_id, tenant_id), tenant_id
+        ),
         embedding=ModelRuntimeSnapshot.from_view(
-            factory.resolve_embedding(embedding_id, tenant_id)
+            factory.resolve_embedding(embedding_id, tenant_id), tenant_id
         ),
     )
 
