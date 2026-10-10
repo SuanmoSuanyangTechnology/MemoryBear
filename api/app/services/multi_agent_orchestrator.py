@@ -22,7 +22,7 @@ from app.core.error_codes import BizCode
 from app.core.logging_config import get_business_logger
 from app.core.utils.datetime_utils import utcnow_naive
 from app.repositories.tool_repository import ToolRepository
-from app.services.model_service import ModelConfigService
+from app.services.model_service import ModelApiKeyService, ModelConfigService
 from app.services.multi_agent_variable_contract import (
     ClusterVariableBag,
     build_cluster_variable_bag,
@@ -32,7 +32,7 @@ from app.services.multi_agent_variable_contract import (
 logger = get_business_logger()
 
 if TYPE_CHECKING:
-    from app.models.models_model import ModelApiKey
+    from app.schemas.model_schema import ModelInfo
 
 # ──────────────────────────────────────────────────────────────────
 # S8：supervisor 监督循环（ReAct 化）—— SubAgentTool 桥接层
@@ -541,7 +541,7 @@ class MultiAgentOrchestrator:
         self,
         conversation_id: Optional[uuid.UUID],
         system_prompt: str,
-        api_key_config: Any,
+        model_view: Any,
     ) -> str:
         """features.context_engine 开启时，用上下文引擎生成主管 system_prompt（含摘要）与历史。
 
@@ -555,8 +555,8 @@ class MultiAgentOrchestrator:
             from app.core.config import settings
             from app.services.context_engine_manager import ContextEngineManager
 
-            provider = getattr(api_key_config, "provider", None)
-            model_config_id = getattr(api_key_config, "model_config_id", None) or self.default_model_config_id
+            provider = getattr(model_view, "provider", None)
+            model_config_id = getattr(model_view, "model_config_id", None) or self.default_model_config_id
             prepared = await ContextEngineManager(self.db).prepare_app_agent_input(
                 features=self._features,
                 conversation_id=conversation_id if isinstance(conversation_id, uuid.UUID) else uuid.UUID(str(conversation_id)),
@@ -602,7 +602,7 @@ class MultiAgentOrchestrator:
         return extras
 
     def _supervisor_api_key_dict(self, api_key_config: Any) -> Dict[str, Any]:
-        """主管 ModelApiKey 运行时壳 → dict（建议问题 / TTS 复用 Agent 应用的同形状构造）。"""
+        """主管渠道解析壳 → TTS dict（G3 起仅 TTS 本地合成消费明文；其余消费者走非解密视图）。"""
 
         def _strs(items: Any) -> List[str]:
             return [str(i) for i in (items or [])]
@@ -630,7 +630,7 @@ class MultiAgentOrchestrator:
             logger.warning(f"集群情绪识别启动失败（已跳过）: {e}")
             self._turn_emotion_detection = None
 
-    async def _setup_turn_tts(self, api_key_dict: Dict[str, Any]):
+    async def _setup_turn_tts(self):
         """features.text_to_speech 开启才建流式 TTS；返回 (text_queue, audio_url, tts_task)。"""
         tts_cfg = (self._features or {}).get("text_to_speech")
         if not (isinstance(tts_cfg, dict) and tts_cfg.get("enabled")):
@@ -641,7 +641,7 @@ class MultiAgentOrchestrator:
             text_queue: asyncio.Queue = asyncio.Queue()
             audio_url, tts_task = await AgentRunService(self.db)._generate_tts_streaming(
                 self._features,
-                api_key_dict,
+                await self._resolve_supervisor_tts_dict(),
                 text_queue=text_queue,
                 tenant_id=self.tenant_id,
                 workspace_id=await self._cluster_workspace_id(),
@@ -656,7 +656,7 @@ class MultiAgentOrchestrator:
     async def _finalize_turn_extras(
         self,
         final_content: str,
-        api_key_dict: Dict[str, Any],
+        model_view: "ModelInfo",
         audio_url: Optional[str] = None,
         tts_task: Optional["asyncio.Task"] = None,
         non_stream_tts: bool = False,
@@ -676,7 +676,7 @@ class MultiAgentOrchestrator:
             sq_cfg = features.get("suggested_questions_after_answer")
             if isinstance(sq_cfg, dict) and sq_cfg.get("enabled"):
                 extras["suggested_questions"] = await agent_service._generate_suggested_questions(
-                    features, final_content, api_key_dict, {}
+                    features, final_content, model_view, {}
                 )
 
             cit_cfg = features.get("citation")
@@ -691,7 +691,7 @@ class MultiAgentOrchestrator:
                 audio_url = await agent_service._generate_tts(
                     features,
                     final_content,
-                    api_key_dict,
+                    await self._resolve_supervisor_tts_dict(),
                     tenant_id=self.tenant_id,
                     workspace_id=await self._cluster_workspace_id(),
                 )
@@ -719,7 +719,7 @@ class MultiAgentOrchestrator:
     async def _prepare_loop_files(
         self,
         files: Optional[List[Any]],
-        api_key_config: Any,
+        model_view: "ModelInfo",
         message: str,
         supervisor: Any,
     ) -> tuple:
@@ -743,29 +743,13 @@ class MultiAgentOrchestrator:
         if not (isinstance(fu, dict) and fu.get("enabled")):
             raise BusinessException("该集群未开启文件上传功能", BizCode.BAD_REQUEST)
 
-        from app.models import ModelType
-        from app.schemas.model_schema import ModelInfo
         from app.services.draft_run_service import AgentRunService, build_uploaded_images_manifest
         from app.services.multimodal_service import MultimodalService
 
         AgentRunService._validate_file_upload(self._features, files)
 
-        provider = getattr(api_key_config, "provider", None) or "openai"
-        model_info = ModelInfo(
-            model_name=api_key_config.model_name,
-            provider=provider,
-            api_key=api_key_config.api_key,
-            api_base=api_key_config.api_base,
-            input_modalities=[str(i) for i in (getattr(api_key_config, "input_modalities", None) or [])],
-            output_modalities=[str(i) for i in (getattr(api_key_config, "output_modalities", None) or [])],
-            features=[str(i) for i in (getattr(api_key_config, "features", None) or [])],
-            model_type=ModelType.LLM,
-            tenant_id=getattr(api_key_config, "tenant_id", None),
-            model_config_id=getattr(api_key_config, "model_config_id", None),
-            channel_id=getattr(api_key_config, "channel_id", None),
-            failover_plan=getattr(api_key_config, "failover_plan", None),
-        )
-        multimodal_service = MultimodalService(self.db, model_info)
+        provider = getattr(model_view, "provider", None) or "openai"
+        multimodal_service = MultimodalService(self.db, model_view)
         processed_files = await multimodal_service.process_files(
             files,
             document_image_recognition=bool(fu.get("document_image_recognition", False)),
@@ -1166,7 +1150,7 @@ class MultiAgentOrchestrator:
         orchestrator._effective_sub_agent_entries = effective_entries
 
         # S9：两个"主管类"模式都必须有主模型——supervisor 用于路由/整合，
-        # supervisor_loop 用于驱动主管 ReAct 引擎（_resolve_supervisor_api_key）。
+        # supervisor_loop 用于驱动主管 ReAct 引擎（_resolve_supervisor_model_view）。
         if orchestrator._normalized_mode in (
             OrchestrationMode.SUPERVISOR,
             OrchestrationMode.SUPERVISOR_LOOP,
@@ -1345,7 +1329,7 @@ class MultiAgentOrchestrator:
                     yield event
             # Supervisor Loop 模式（S9 新增）：主管=ReAct 引擎、子 Agent=工具。
             # 分派全权归主管 LLM，可自答、可多轮追加指派；不走路由、不走整合
-            #（final 即最终答案）。**不回退三段式**——凭据缺失/无子 Agent/无正文
+            #（final 即最终答案）。**不回退三段式**——主模型不可用/无子 Agent/无正文
             # 由循环内部抛 BusinessException，本方法末尾的 except 统一收尾
             #（_finalize_master_execution(failed) + error 事件），错误可归因。
             elif self._normalized_mode == OrchestrationMode.SUPERVISOR_LOOP:
@@ -2302,7 +2286,7 @@ class MultiAgentOrchestrator:
     # S9 起本段只服务 orchestration_mode="supervisor_loop"：
     # - supervisor（三段式）不再分流到循环，MasterAgentRouter/result_merge_mode/
     #   aggregation_strategy 恢复全量生效；
-    # - 循环**不回退**三段式：凭据缺失/无子 Agent/无正文直接抛 BusinessException，
+    # - 循环**不回退**三段式：主模型不可用/无子 Agent/无正文直接抛 BusinessException，
     #   由 execute_stream/execute 的统一收尾落 failed 记录并发 error 事件。
     # ──────────────────────────────────────────────────────────────────
 
@@ -2419,20 +2403,30 @@ class MultiAgentOrchestrator:
             return {}
         return raw
 
-    async def _resolve_supervisor_api_key(self) -> Optional["ModelApiKey"]:
-        """主管模型凭据（merge 路径同款桥接；S9 后仅供 supervisor_loop 模式，None=调用方抛错）。"""
-        if not self.default_model_config_id:
-            return None
+    async def _resolve_supervisor_model_view(self) -> "ModelInfo":
+        """主管模型非解密运行期视图（G3：凭据不上送，选路与凭据可用性由模型服务判定）。
+
+        默认模型未配置 / 不存在 / 已弃用 → 前置校验失败抛错（终止原因落 error，不回退其他模式）。
+        """
         try:
-            api_key_config = await ModelApiKeyService.get_available_api_key_bridge_async(
-                self.db,
-                self.default_model_config_id,
-                tenant_id=self.tenant_id,
+            if not self.default_model_config_id:
+                raise BusinessException(
+                    "主管循环模式需要可用的主模型（默认模型未配置）",
+                    BizCode.AGENT_CONFIG_MISSING,
+                )
+            return await ModelConfigService.get_runtime_model_view_bridge_async(
+                self.db, self.default_model_config_id, tenant_id=self.tenant_id
             )
-            return api_key_config or None
-        except Exception as e:
-            logger.warning(f"S9 supervisor_loop：主管模型凭据获取失败: {e}")
-            return None
+        except BusinessException:
+            self._loop_stop_reason = "error"
+            raise
+
+    async def _resolve_supervisor_tts_dict(self) -> Dict[str, Any]:
+        """TTS 本地合成需要明文的既有消费者（G3 例外）：渠道解析壳 → dict，失败抛精确错误。"""
+        api_key_obj = await ModelApiKeyService.resolve_runtime_api_key_bridge_or_raise_async(
+            self.db, self.default_model_config_id, tenant_id=self.tenant_id
+        )
+        return self._supervisor_api_key_dict(api_key_obj)
 
     def _resolve_loop_max_iterations(self) -> int:
         """解析 supervisor_loop 模式的**主管循环轮次**上限（execution_config.max_iterations）。
@@ -2456,7 +2450,7 @@ class MultiAgentOrchestrator:
             return default
         return val if val >= 1 else default
 
-    async def _build_supervisor_agent(self, api_key_config: "ModelApiKey"):
+    async def _build_supervisor_agent(self, model_view: "ModelInfo"):
         """构造主管 LangChainAgent（工具 = 主管自带工具 + SubAgentTool×N）。
 
         主管即 Agent：主管工具面与子 Agent 工具合并成同一列表（与
@@ -2540,27 +2534,20 @@ class MultiAgentOrchestrator:
         # 上下文引擎（features.context_engine）：未开启/插件缺失/异常均原样返回提示词，
         # 历史由 _resolve_loop_history 回落到集群 20 轮历史，老集群行为不变。
         _supervisor_prompt = await self._prepare_context_engine(
-            getattr(self, "current_conversation_id", None), _supervisor_prompt, api_key_config
+            getattr(self, "current_conversation_id", None), _supervisor_prompt, model_view
         )
 
-        # ModelApiKey 运行时壳（非 dict），统一走 getattr 读取
+        # 远端模式（G3）：身份/能力取非解密视图（api_key/api_base 恒空），凭据解密、选路与
+        # 换渠道全在模型服务（与 Agent 应用构建口径一致）
         return LangChainAgent(
-            model_name=api_key_config.model_name,
-            api_key=api_key_config.api_key,
-            provider=getattr(api_key_config, "provider", None) or "openai",
-            api_base=api_key_config.api_base,
-            input_modalities=list(getattr(api_key_config, "input_modalities", None) or []),
-            output_modalities=list(getattr(api_key_config, "output_modalities", None) or []),
-            features=getattr(api_key_config, "features", None),
+            model_name=model_view.model_name,
+            model_view=model_view,
+            provider=model_view.provider or "openai",
             temperature=_get("temperature", 0.7),
             max_tokens=_get("max_tokens", 4096),
             system_prompt=_supervisor_prompt,
             tools=tools,
             streaming=True,
-            tenant_id=getattr(api_key_config, "tenant_id", None),
-            model_config_id=getattr(api_key_config, "model_config_id", None),
-            channel_id=getattr(api_key_config, "channel_id", None),
-            failover_plan=getattr(api_key_config, "failover_plan", None),
             tool_call_limit=max(1, tool_call_limit),
             # S10：显式配置则覆盖引擎动态值；None=引擎按工具数动态算
             max_iterations=loop_max_iterations,
@@ -2785,7 +2772,7 @@ class MultiAgentOrchestrator:
         就谈不上"运行"。因此把主管流放进独立 task，与子 Agent 事件泵一起汇入同一个
         merged 队列，本生成器只做"顺序消费 + 分类下发"。
 
-        失败语义（S9 修订，**不回退三段式**）：凭据缺失 / 无子 Agent / 异常且无正文 /
+        失败语义（S9 修订，**不回退三段式**）：主模型不可用 / 无子 Agent / 异常且无正文 /
         收尾零正文 → 抛 BusinessException，由 execute_stream 的统一 except 收尾
         （落 failed 执行记录 + error 事件）。已有部分正文的异常保留输出不抛错。
         """
@@ -2805,25 +2792,19 @@ class MultiAgentOrchestrator:
         if not self.sub_agents:
             self._loop_stop_reason = "error"
             raise BusinessException("没有可用的子 Agent", BizCode.AGENT_CONFIG_MISSING)
-        api_key_config = await self._resolve_supervisor_api_key()
-        if api_key_config is None:
-            self._loop_stop_reason = "error"
-            raise BusinessException(
-                "主管循环模式需要可用的主模型凭据（默认模型未配置或 API Key 不可用）",
-                BizCode.AGENT_CONFIG_MISSING,
-            )
+        model_view = await self._resolve_supervisor_model_view()
 
         self._set_merge_mode_actual("loop", "supervisor_loop 模式（主管 ReAct 循环）")
 
         # 情绪感知：features.emotion_reply 开启才起后台识别任务（与构建主管并发），
         # 结果在 _build_supervisor_agent 里注入主管提示词；关闭时为 None，零开销。
         self._start_turn_emotion_detection(message)
-        supervisor = await self._build_supervisor_agent(api_key_config)
+        supervisor = await self._build_supervisor_agent(model_view)
         # 历史：context_engine 本轮生效则用其结果，否则沿用集群 20 轮历史；再拼开场白（无开场白原样返回）
         history = await self._resolve_loop_history(conversation_id)
         # 文件上传（features.file_upload）：无 files 时 llm_message=message、processed_files=None，与改动前一致
         llm_message, processed_files = await self._prepare_loop_files(
-            files, api_key_config, message, supervisor
+            files, model_view, message, supervisor
         )
 
         # 子 Agent 可观测事件队列：SubAgentTool 执行体 → 主管循环 → SSE。
@@ -2869,8 +2850,7 @@ class MultiAgentOrchestrator:
 
         # 流式 TTS（features.text_to_speech 开启才建；关闭时三者均为 None，零开销）。
         # 只喂主管最终正文 chunk，不喂子 Agent 内容。
-        _api_key_dict = self._supervisor_api_key_dict(api_key_config)
-        tts_queue, tts_audio_url, tts_task = await self._setup_turn_tts(_api_key_dict)
+        tts_queue, tts_audio_url, tts_task = await self._setup_turn_tts()
 
         try:
             while True:
@@ -2960,7 +2940,7 @@ class MultiAgentOrchestrator:
             tts_queue.put_nowait(None)
         if final_content.strip():
             await self._finalize_turn_extras(
-                final_content, _api_key_dict, audio_url=tts_audio_url, tts_task=tts_task
+                final_content, model_view, audio_url=tts_audio_url, tts_task=tts_task
             )
 
         if loop_error is not None:
@@ -3035,7 +3015,7 @@ class MultiAgentOrchestrator:
         """S8/S9 主管监督循环（非流式）：语义与流式版一致（引擎 chat()）。
 
         仅 orchestration_mode="supervisor_loop" 调用（S9）。**不回退三段式**：
-        凭据缺失 / 无子 Agent / 无正文 / 异常 → 抛 BusinessException，由
+        主模型不可用 / 无子 Agent / 无正文 / 异常 → 抛 BusinessException，由
         execute() 的统一 except 收尾（落 failed 执行记录）。
 
         Returns:
@@ -3054,24 +3034,18 @@ class MultiAgentOrchestrator:
         if not self.sub_agents:
             self._loop_stop_reason = "error"
             raise BusinessException("没有可用的子 Agent", BizCode.AGENT_CONFIG_MISSING)
-        api_key_config = await self._resolve_supervisor_api_key()
-        if api_key_config is None:
-            self._loop_stop_reason = "error"
-            raise BusinessException(
-                "主管循环模式需要可用的主模型凭据（默认模型未配置或 API Key 不可用）",
-                BizCode.AGENT_CONFIG_MISSING,
-            )
+        model_view = await self._resolve_supervisor_model_view()
 
         self._set_merge_mode_actual("loop", "supervisor_loop 模式（主管 ReAct 循环）")
 
         # 情绪感知：features.emotion_reply 开启才起后台识别任务；关闭时为 None，零开销
         self._start_turn_emotion_detection(message)
-        supervisor = await self._build_supervisor_agent(api_key_config)
+        supervisor = await self._build_supervisor_agent(model_view)
         # 历史：context_engine 本轮生效则用其结果，否则沿用集群 20 轮历史；再拼开场白
         history = await self._resolve_loop_history(conversation_id)
         # 文件上传（features.file_upload）：无 files 时 llm_message=message、processed_files=None，与改动前一致
         llm_message, processed_files = await self._prepare_loop_files(
-            files, api_key_config, message, supervisor
+            files, model_view, message, supervisor
         )
 
         # 非流式 loop：sink 不挂接（无 SSE 出口），子 Agent 事件自然丢弃；
@@ -3105,7 +3079,7 @@ class MultiAgentOrchestrator:
             # 建议问题 / 引用 / TTS：仅对应 features 开启时才产生（缺省关闭 = 无新键）
             await self._finalize_turn_extras(
                 content,
-                self._supervisor_api_key_dict(api_key_config),
+                model_view,
                 non_stream_tts=True,
             )
             return {
