@@ -1,9 +1,3 @@
-/*
- * @Author: ZhaoYing 
- * @Date: 2026-02-03 16:26:32 
- * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-25 17:10:30
- */
 /**
  * Variable List Component
  * Manages application input variables configuration
@@ -25,6 +19,8 @@ import VariableEditModal from './VariableEditModal'
  * Component props
  */
 interface VariableListProps {
+  /** Form.List field path */
+  name?: string | Array<string | number>;
   /** Current variable list */
   value?: Variable[];
   /** Callback when variables change */
@@ -33,7 +29,8 @@ interface VariableListProps {
 
 /**
  * Variable list management component
- */const VariableList: FC<VariableListProps> = ({value = [], onChange}) => {
+ */
+const VariableList: FC<VariableListProps> = ({ name = 'variables', value = [], onChange }) => {
   const { t } = useTranslation()
   const variableEditModalRef = useRef<VariableEditModalRef>(null)
   
@@ -69,10 +66,10 @@ interface VariableListProps {
     >
       <div className="rb:leading-4.5 rb:text-[12px] rb:mb-2">
         <span className="rb:font-medium">{t('application.variableManagement')}</span>
-        <span className="rb:font-regular rb:text-[#5B6167]"> ({t('application.variableManagementDesc')})</span>
+        <span className="rb:font-regular rb:text-gray-600"> ({t('application.variableManagementDesc')})</span>
       </div>
 
-      <Form.List name="variables" initialValue={value}>
+      <Form.List name={name} initialValue={value}>
         {(fields, { remove }) => {
           return (
             <>

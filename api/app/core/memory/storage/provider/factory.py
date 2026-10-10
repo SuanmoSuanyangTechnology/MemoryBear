@@ -183,6 +183,22 @@ class BackendFactory:
         """Return the transactional graph writer client."""
         return self.get_client(BackendType.NEO4J)
 
+    def get_authoritative_node_reader(
+        self,
+        label: MemoryNodeLabel,
+    ) -> BaseClient:
+        """Return the authoritative graph reader for node scanning.
+
+        Always returns Neo4j, never the configured read backend: Elasticsearch
+        is a projection of the graph and can lag behind it, so bulk rebuilds
+        must page the write of record to avoid rebuilding from stale text.
+
+        :param label: Reserved for future per-node overrides.
+        :return: the Neo4j client as the authoritative source of truth.
+        """
+        del label  # FEATURE: Reserved for future per-node overrides.
+        return self.get_client(BackendType.NEO4J)
+
     async def close(self) -> None:
         async with self._lock:
             clients = tuple(self._clients.values())

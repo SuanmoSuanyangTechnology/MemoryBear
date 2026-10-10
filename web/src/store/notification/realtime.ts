@@ -209,7 +209,7 @@ const extractEventGeneration = (
 
 const isNotificationSyncRetryBlocked = () => Date.now() < syncRetryBlockedUntil;
 
-const performNotificationSync = async (
+export const performNotificationSync = async (
   targetCursor: string | null,
   allowResponseCursor: boolean,
 ): Promise<boolean> => {

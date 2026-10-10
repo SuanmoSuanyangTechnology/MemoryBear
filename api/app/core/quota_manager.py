@@ -107,13 +107,16 @@ async def _get_tenant_id_from_kwargs_async(db: AsyncSession, kwargs: dict):
 
 # 按工作空间计量的配额：套餐额度与资源包额度都是「每个工作空间」的上限
 # （与 :func:`_check_quota` 的口径一致），租户总额度需要乘以活跃空间数。
+# ontology_project_quota 为租户级（每租户自定义本体数），不在此列。
 PER_WORKSPACE_QUOTA_KEYS = frozenset({
     "app_quota",
     "knowledge_capacity_quota",
     "memory_engine_quota",
     "end_user_quota",
-    "ontology_project_quota",
 })
+
+# 企业版本体模块注册的本体配额计数器（社区版不存在）
+ONTOLOGY_QUOTA_PLUGIN = "memory.ontology_quota"
 
 
 def _merge_quota_overlay(base: Optional[Dict[str, Any]], overlay: Dict[str, Any]) -> Dict[str, Any]:
@@ -378,17 +381,16 @@ class QuotaUsageRepository:
         ).count()
 
     def count_ontology_projects(self, tenant_id: UUID, workspace_id: Optional[UUID] = None) -> int:
-        from app.models.ontology_scene import OntologyScene
-        from app.models.workspace_model import Workspace
-        if workspace_id:
-            return self.db.query(OntologyScene).filter(
-                OntologyScene.workspace_id == workspace_id
-            ).count()
-        return self.db.query(OntologyScene).join(
-            Workspace, OntologyScene.workspace_id == Workspace.id
-        ).filter(
-            Workspace.tenant_id == tenant_id
-        ).count()
+        """租户自定义本体数（tenant 级配额，workspace_id 仅为兼容分发签名，忽略）。
+
+        统计新本体模块的 ontology 表，经 plugin 反向调用；社区版无本体模块返回 0。
+        """
+        from app.plugins import get_plugin
+
+        counter = get_plugin(ONTOLOGY_QUOTA_PLUGIN)
+        if counter is None:
+            return 0
+        return counter.count_in_session(self.db, tenant_id)
 
     def get_usage_by_quota_type(self, tenant_id: UUID, quota_type: str, workspace_id: Optional[UUID] = None):
         """按配额类型分发，返回当前使用量"""
@@ -478,6 +480,32 @@ async def _check_quota_async(
             usage_func,
             workspace_id,
         )
+    )
+
+
+async def check_knowledge_capacity_quota_async(
+        db: AsyncSession,
+        tenant_id: UUID,
+        workspace_id: UUID,
+) -> None:
+    """Async 版知识库容量配额检查，供 SSO 等非 HTTP 装饰器场景复用。
+
+    语义与 @check_knowledge_capacity_quota 装饰器一致（同一个 _check_quota）。
+    知识库容量是按工作空间计量的配额，tenant_id / workspace_id 均必填；
+    缺失时与装饰器一致地拒绝请求，避免退化为租户级用量对比每空间额度。
+    """
+    if not tenant_id:
+        logger.error("配额检查失败：check_knowledge_capacity_quota_async 缺少 tenant_id，拒绝请求")
+        raise InternalServerError()
+    if not workspace_id:
+        logger.error("配额检查失败：check_knowledge_capacity_quota_async 缺少 workspace_id，拒绝请求")
+        raise InternalServerError()
+    await _check_quota_async(
+        db,
+        tenant_id,
+        "knowledge_capacity_quota",
+        "knowledge_capacity",
+        workspace_id=workspace_id,
     )
 
 
@@ -722,36 +750,9 @@ def check_end_user_quota(func: Callable) -> Callable:
     return async_wrapper if asyncio.iscoroutinefunction(func) else sync_wrapper
 
 
-def check_ontology_project_quota(func: Callable) -> Callable:
-    @wraps(func)
-    async def async_wrapper(*args, **kwargs):
-        db: Session = kwargs.get("db")
-        user = _get_user_from_kwargs(kwargs)
-        if not db or not user:
-            logger.error(f"配额检查失败：{func.__name__} 缺少 db 或 user 参数，拒绝请求")
-            raise InternalServerError()
-        workspace_id = _get_workspace_id_from_kwargs(kwargs)
-        if not workspace_id:
-            logger.error(f"配额检查失败：{func.__name__} 无法获取 workspace_id，拒绝请求")
-            raise InternalServerError()
-        _check_quota(db, user.tenant_id, "ontology_project_quota", "ontology_project", workspace_id=workspace_id)
-        return await func(*args, **kwargs)
-
-    @wraps(func)
-    def sync_wrapper(*args, **kwargs):
-        db: Session = kwargs.get("db")
-        user = _get_user_from_kwargs(kwargs)
-        if not db or not user:
-            logger.error(f"配额检查失败：{func.__name__} 缺少 db 或 user 参数，拒绝请求")
-            raise InternalServerError()
-        workspace_id = _get_workspace_id_from_kwargs(kwargs)
-        if not workspace_id:
-            logger.error(f"配额检查失败：{func.__name__} 无法获取 workspace_id，拒绝请求")
-            raise InternalServerError()
-        _check_quota(db, user.tenant_id, "ontology_project_quota", "ontology_project", workspace_id=workspace_id)
-        return func(*args, **kwargs)
-
-    return async_wrapper if asyncio.iscoroutinefunction(func) else sync_wrapper
+# ontology_project_quota 不再提供装饰器：准入在企业版本体模块
+# OntologyService.create_ontology 内完成（AsyncSession、tenant 级），
+# 用量计数见 QuotaUsageRepository.count_ontology_projects。
 
 
 def check_model_quota(func: Callable) -> Callable:
@@ -1081,10 +1082,6 @@ check_memory_engine_quota = _with_post_success_quota_alert(
     check_memory_engine_quota,
     "memory_engine_quota",
 )
-check_ontology_project_quota = _with_post_success_quota_alert(
-    check_ontology_project_quota,
-    "ontology_project_quota",
-)
 check_model_quota = _with_post_success_quota_alert(check_model_quota, "model_quota")
 check_model_activation_quota = _with_post_success_quota_alert(
     check_model_activation_quota,
@@ -1140,7 +1137,8 @@ async def get_quota_usage(db: Session, tenant_id: UUID) -> dict:
     knowledge_effective_limit = effective_workspace_limit("knowledge_capacity_quota")
     memory_effective_limit = effective_workspace_limit("memory_engine_quota")
     end_user_effective_limit = effective_workspace_limit("end_user_quota")
-    ontology_effective_limit = effective_workspace_limit("ontology_project_quota")
+    # 本体配额为租户级，额度不按活跃空间数折算
+    ontology_limit = quota_config.get("ontology_project_quota")
 
     def limit_source(quota_type: str) -> dict:
         """返回额度构成，便于前端区分套餐与资源包贡献。"""
@@ -1193,8 +1191,8 @@ async def get_quota_usage(db: Session, tenant_id: UUID) -> dict:
         },
         "ontology_project_quota": {
             "used": ontology_count,
-            "limit": ontology_effective_limit,
-            "percentage": pct(ontology_count, ontology_effective_limit),
+            "limit": ontology_limit,
+            "percentage": pct(ontology_count, ontology_limit),
             "limit_source": limit_source("ontology_project_quota"),
         },
         "model_quota": {

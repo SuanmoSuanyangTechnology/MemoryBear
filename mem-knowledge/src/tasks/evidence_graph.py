@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import random
 import time
 import uuid
 from collections.abc import Callable, Mapping
@@ -20,6 +21,7 @@ from ..rag.knowledge_graph.config import (
     GraphDocumentDeletionPending,
     GraphPipelineConfigError,
 )
+from ..rag.knowledge_graph.lock import KnowledgeGraphLockBusy
 from ..runtime import get_worker_runtime
 from ..usage_context import bind_usage
 from .celery_app import celery_app
@@ -41,6 +43,11 @@ from .state import (
 )
 
 logger = logging.getLogger(__name__)
+
+_FAILURE_RETRIES_HEADER = "kb_graph_failure_retries"
+_LOCK_DEFERRALS_HEADER = "kb_graph_lock_deferrals"
+_LOCK_RETRY_MIN_SECONDS = 15
+_LOCK_RETRY_MAX_SECONDS = 30
 
 
 def process_evidence_document(*args: Any, **kwargs: Any) -> dict[str, Any]:
@@ -69,16 +76,77 @@ def _safe_identifier(value: object) -> str:
 
 
 def _retry_countdown(task: Any) -> int:
-    return min(300, 2 ** int(task.request.retries or 0))
+    return min(300, 2 ** min(9, _failure_retries(task)))
+
+
+def _retry_headers(task: Any) -> dict[str, Any]:
+    headers = getattr(task.request, "headers", None)
+    return dict(headers) if isinstance(headers, Mapping) else {}
+
+
+def _header_count(headers: Mapping[str, Any], name: str, default: int) -> int:
+    value = headers.get(name, default)
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise GraphPipelineConfigError(f"invalid {name}")
+    return value
+
+
+def _failure_retries(task: Any) -> int:
+    return _header_count(
+        _retry_headers(task),
+        _FAILURE_RETRIES_HEADER,
+        int(task.request.retries or 0),
+    )
 
 
 def _retry_available(task: Any, *, max_retries: int | None = None) -> bool:
     retry_limit = task.max_retries if max_retries is None else max_retries
-    return retry_limit is None or int(task.request.retries or 0) < retry_limit
+    return retry_limit is None or _failure_retries(task) < retry_limit
 
 
 def _redacted_exception(exc: Exception) -> RuntimeError:
     return RuntimeError(f"{type(exc).__name__}: message redacted")
+
+
+def _schedule_retry(
+    task: Any,
+    run: TaskRun,
+    *,
+    exc: Exception,
+    countdown: int,
+    error_code: str,
+    lock_busy: bool = False,
+) -> None:
+    headers = _retry_headers(task)
+    failures = _failure_retries(task)
+    deferrals = _header_count(headers, _LOCK_DEFERRALS_HEADER, 0)
+    headers[_FAILURE_RETRIES_HEADER] = failures + (0 if lock_busy else 1)
+    headers[_LOCK_DEFERRALS_HEADER] = deferrals + (1 if lock_busy else 0)
+    try:
+        # Celery's attempt count includes lock deferrals. The business budget
+        # has already been checked separately before permitting this publish.
+        retry = task.retry(
+            exc=None if lock_busy else _redacted_exception(exc),
+            countdown=countdown,
+            headers=headers,
+            max_retries=int(task.request.retries or 0) + 1,
+            throw=False,
+        )
+    except Exception as publish_error:
+        run.finish(
+            BusinessOutcome.FAILURE,
+            error_code="KB_GRAPH_TASK_RETRY_DISPATCH_FAILED",
+            exc=publish_error,
+            detail="retry_dispatch_failed",
+        )
+        raise
+    run.finish(
+        BusinessOutcome.RETRY,
+        error_code=error_code,
+        exc=None if lock_busy else exc,
+        detail="lock_busy_rescheduled" if lock_busy else f"retry_countdown_{countdown}s",
+    )
+    raise retry from None
 
 
 def _run_observed(
@@ -96,10 +164,40 @@ def _run_observed(
     safe_task_id = _safe_identifier(task_id)
     safe_knowledge_id = _safe_identifier(knowledge_id)
     safe_document_id = _safe_identifier(document_id) if document_id is not None else "none"
-    retry = int(getattr(task.request, "retries", 0) or 0)
+    retry = _failure_retries(task)
     try:
         with run.stage(task_name):
             result = operation()
+    except KnowledgeGraphLockBusy as exc:
+        countdown = random.randint(_LOCK_RETRY_MIN_SECONDS, _LOCK_RETRY_MAX_SECONDS)
+        logger.info(
+            "[EvidenceGraph] task_deferred task=%s task_id=%s kb_id=%s "
+            "document_id=%s reason=lock_busy wait_duration_ms=%d delay_seconds=%d "
+            "failure_retries=%d lock_deferrals=%d",
+            task_name,
+            safe_task_id,
+            safe_knowledge_id,
+            safe_document_id,
+            exc.wait_duration_ms,
+            countdown,
+            retry,
+            _header_count(_retry_headers(task), _LOCK_DEFERRALS_HEADER, 0) + 1,
+        )
+        run.progress(
+            stage="lock_wait",
+            fraction=None,
+            detail="lock_busy_rescheduled",
+            wait_duration_ms=exc.wait_duration_ms,
+            force=True,
+        )
+        _schedule_retry(
+            task,
+            run,
+            exc=exc,
+            countdown=countdown,
+            error_code="KB_GRAPH_LOCK_BUSY",
+            lock_busy=True,
+        )
     except GraphPipelineConfigError as exc:
         logger.error(
             "[EvidenceGraph] task_failed task=%s task_id=%s kb_id=%s "
@@ -193,21 +291,21 @@ def _run_observed(
                 retry,
                 int((time.perf_counter() - started_at) * 1000),
             )
+        if will_retry:
+            _schedule_retry(
+                task,
+                run,
+                exc=exc,
+                countdown=countdown,
+                error_code="KB_GRAPH_TASK_RETRY",
+            )
         run.finish(
-            BusinessOutcome.RETRY if will_retry else BusinessOutcome.FAILURE,
-            error_code=(
-                "KB_GRAPH_TASK_RETRY"
-                if will_retry
-                else "KB_GRAPH_TASK_RETRIES_EXHAUSTED"
-            ),
+            BusinessOutcome.FAILURE,
+            error_code="KB_GRAPH_TASK_RETRIES_EXHAUSTED",
             exc=exc,
-            detail=f"retry_countdown_{countdown}s" if will_retry else "retries_exhausted",
+            detail="retries_exhausted",
         )
-        raise task.retry(
-            exc=_redacted_exception(exc),
-            countdown=countdown,
-            **retry_options,
-        ) from None
+        raise _redacted_exception(exc) from None
     logger.info(
         "[EvidenceGraph] task_done task=%s task_id=%s kb_id=%s document_id=%s "
         "status=%s elapsed_ms=%d",
@@ -250,17 +348,21 @@ def _retry_guard(
             _safe_identifier(knowledge_id),
             type(exc).__name__,
         )
+    if will_retry:
+        _schedule_retry(
+            task,
+            run,
+            exc=exc,
+            countdown=countdown,
+            error_code="KB_GRAPH_GUARD_RETRY",
+        )
     run.finish(
-        BusinessOutcome.RETRY if will_retry else BusinessOutcome.FAILURE,
-        error_code=(
-            "KB_GRAPH_GUARD_RETRY"
-            if will_retry
-            else "KB_GRAPH_GUARD_RETRIES_EXHAUSTED"
-        ),
+        BusinessOutcome.FAILURE,
+        error_code="KB_GRAPH_GUARD_RETRIES_EXHAUSTED",
         exc=exc,
-        detail=f"retry_countdown_{countdown}s" if will_retry else "retries_exhausted",
+        detail="retries_exhausted",
     )
-    raise task.retry(exc=_redacted_exception(exc), countdown=countdown) from None
+    raise _redacted_exception(exc) from None
 
 
 def _release_execution(redis: Any, knowledge_id: str, owner_token: str) -> None:

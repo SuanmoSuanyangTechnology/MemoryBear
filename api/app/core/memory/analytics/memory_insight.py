@@ -367,7 +367,8 @@ async def validate_neo4j_memory_insight_workspace(
             raw_storage_type,
         )
 
-    storage_type = (raw_storage_type or "").lower()
+    # storage_type 为 NULL（创建空间时未传类型）视为 neo4j
+    storage_type = "neo4j" if raw_storage_type is None else raw_storage_type.lower()
     if storage_type != "neo4j":
         return MemoryInsightWorkspaceValidation(
             False,

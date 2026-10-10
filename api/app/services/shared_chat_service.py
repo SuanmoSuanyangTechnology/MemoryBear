@@ -788,22 +788,10 @@ class SharedChatService:
         elapsed_time = time.time() - start_time
 
         # 保存消息
-        self.conversation_service.add_message(
-            conversation_id=conversation.id,
-            role="user",
-            content=message,
-        )
-
-        self.conversation_service.add_message(
-            conversation_id=conversation.id,
-            role="assistant",
-            content=result.get("message", ""),
-            meta_data={
-                "mode": result.get("mode"),
-                "elapsed_time": result.get("elapsed_time"),
-                "sub_results": result.get("sub_results")
-            },
-        )
+        # S3 落库收口：MultiAgentService.run 已按轮次锚点经 BatchPersistQueue
+        # 统一写入（message_id 与集群锚点一致）；本层（deprecated 入口）不再
+        # add_message 直存 —— 否则同一轮出现两条 assistant（外层这份还没有
+        # message_id，前端复制/反馈按 id 定位会指向不存在的消息）。
 
         return {
             "conversation_id": conversation.id,
@@ -915,6 +903,7 @@ class SharedChatService:
                 # 落库正文只认集群级的 `message` 事件（按事件名判定）。
                 # 子 Agent 的正文走 `sub_agent_message`：若一并累加，公开分享会话的
                 # assistant 正文会比界面显示多出一份重复内容（刷新后主气泡变长）。
+                # sub_usage 不透传（MultiAgentService 内部已消费），此处不统计。
                 _event_name = ""
                 if event.startswith("event:"):
                     _event_name = event[6:].split("\n", 1)[0].strip()
@@ -930,27 +919,17 @@ class SharedChatService:
             elapsed_time = time.time() - start_time
 
             # 保存消息
-            self.conversation_service.add_message(
-                conversation_id=conversation.id,
-                role="user",
-                content=message,
-            )
-
-            self.conversation_service.add_message(
-                conversation_id=conversation.id,
-                role="assistant",
-                content=full_content,
-                meta_data={
-                    "elapsed_time": elapsed_time
-                },
-            )
-
+            # S3 落库收口：本入口（体验分享层）不再直接 add_message 落一份——
+            # MultiAgentService.run_stream 已按轮次锚点把同一对消息
+            # 经 BatchPersistQueue 统一写入（message_id 与前端 start 事件一致），
+            # 外层再直存一次会得到"同轮两条 assistant"（刷新后气泡翻倍）。
+            # 这里仅记录日志；观测需要时读取该 conversation 的 messages 即可。
             logger.info(
                 "多 Agent 流式聊天完成",
                 extra={
                     "conversation_id": str(conversation.id),
                     "elapsed_time": elapsed_time,
-                    "message_length": len(full_content)
+                    "message_length": len(full_content),
                 }
             )
 

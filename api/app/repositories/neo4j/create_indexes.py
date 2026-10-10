@@ -15,6 +15,7 @@ FULLTEXT_DEFS: List[Tuple[str, str, List[str], str]] = [
     ("chunksFulltext", "Chunk", ["content"], "cjk"),
     ("summariesFulltext", "MemorySummary", ["content"], "cjk"),
     ("sceneSummariesFulltext", "SceneSummary", ["content"], "cjk"),
+    ("sceneCommunitiesFulltext", "SceneCommunity", ["topic_name", "topic_scope", "summary"], "cjk"),
     ("communitiesFulltext", "Community", ["name", "summary"], "cjk"),
     ("perceptualFulltext", "Perceptual", ["summary", "topic", "domain", "keywords"], "cjk"),
     ("assistantPrunedFulltext", "AssistantPruned", ["text"], "cjk"),
@@ -28,6 +29,7 @@ VECTOR_DEFS: List[Tuple[str, str, str, int]] = [
     ("entity_embedding_index", "ExtractedEntity", "name_embedding", 1024),
     ("summary_embedding_index", "MemorySummary", "summary_embedding", 1024),
     ("scene_summary_embedding_index", "SceneSummary", "summary_embedding", 1024),
+    ("scene_community_embedding_index", "SceneCommunity", "summary_embedding", 1024),
     ("community_summary_embedding_index", "Community", "summary_embedding", 1024),
     ("dialogue_embedding_index", "Dialogue", "dialog_embedding", 1024),
     ("perceptual_summary_embedding_index", "Perceptual", "summary_embedding", 1024),
@@ -46,6 +48,7 @@ RANGE_DEFS: List[Tuple[str, str]] = [
     ("user_memorysummary", "MemorySummary"),
     ("user_scenesummary", "SceneSummary"),
     ("user_preference", "Preference"),
+    ("user_scenecommunity", "SceneCommunity"),
 ]
 
 COMPOSITE_DEFS: List[Tuple[str, str, str]] = [
@@ -57,6 +60,9 @@ COMPOSITE_DEFS: List[Tuple[str, str, str]] = [
     ("user_community_id", "Community", "community_id"),
     ("user_source_id", "UserSource", "id"),
     ("user_preference_status", "Preference", "status"),
+    ("scene_summary_community_queue", "SceneSummary", "community_status"),
+    ("scene_summary_scene_community_lookup", "SceneSummary", "scene_community_id"),
+    ("scene_community_category_lookup", "SceneCommunity", "category_l1"),
 ]
 
 DELETE_AT_DEFS: List[Tuple[str, str, str]] = [
@@ -76,6 +82,7 @@ CONSTRAINT_DEFS: List[Tuple[str, str, str]] = [
     ("entity_id_unique", "ExtractedEntity", "id"),
     ("memory_summary_id_unique", "MemorySummary", "id"),
     ("scene_summary_id_unique", "SceneSummary", "id"),
+    ("scene_community_id_unique", "SceneCommunity", "id"),
     ("perceptual_id_unique", "Perceptual", "id"),
     ("community_id_unique", "Community", "community_id"),
     ("user_source_id_unique", "UserSource", "id"),

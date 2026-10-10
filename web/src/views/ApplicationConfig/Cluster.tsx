@@ -19,7 +19,8 @@ import type {
   SubAgentItem,
   ClusterRef,
   ModelConfigModalRef,
-  FeaturesConfigForm
+  FeaturesConfigForm,
+  ChatVariableConfigModalRef
 } from './types'
 import Chat from './components/Chat'
 import RbCard from '@/components/RbCard/Card'
@@ -28,7 +29,14 @@ import Empty from '@/components/Empty'
 import RadioGroupCard from '@/components/RadioGroupCard'
 import ModelSelect from '@/components/ModelSelect'
 import ModelConfigModal from './components/ModelConfigModal'
+import ChatVariableConfigModal from './components/ChatVariableConfigModal'
+import SupervisorCapabilityConfig from './components/SupervisorCapabilityConfig'
+import type { Variable } from './components/VariableList/types'
 import type { Application } from '@/views/ApplicationManagement/types'
+import {
+  normalizeSupervisorConfigForForm,
+  normalizeSupervisorConfigForSave,
+} from './utils/supervisorConfig'
 // import FeaturesConfig from './components/FeaturesConfig'
 
 const MAX_LENGTH = 5;
@@ -51,6 +59,25 @@ const Cluster = forwardRef<ClusterRef, { onFeaturesLoad?: (features: FeaturesCon
     },
   ])
   const [loading, setLoading] = useState(false)
+  const chatVariableConfigModalRef = useRef<ChatVariableConfigModalRef>(null)
+  const [chatVariables, setChatVariables] = useState<Variable[]>([])
+  const supervisorVariables = values?.supervisor_config?.variables as Variable[] | undefined
+
+  useEffect(() => {
+    setChatVariables(
+      values?.orchestration_mode === 'supervisor_loop'
+        ? supervisorVariables || []
+        : []
+    )
+  }, [supervisorVariables, values?.orchestration_mode])
+
+  const handleOpenVariableConfig = () => {
+    chatVariableConfigModalRef.current?.handleOpen(chatVariables)
+  }
+
+  const handleSaveChatVariable = (variables: Variable[]) => {
+    setChatVariables(variables)
+  }
 
   /**
    * Save cluster configuration
@@ -59,7 +86,7 @@ const Cluster = forwardRef<ClusterRef, { onFeaturesLoad?: (features: FeaturesCon
    */
   const handleSave = (flag = true) => {
     if (!data) return Promise.resolve()
-    if (!values.default_model_config_id && values.orchestration_mode === 'supervisor') {
+    if (!values.default_model_config_id && values.orchestration_mode !== 'collaboration') {
       message.warning(t('common.selectPlaceholder', { title: t('application.model') }))
       return Promise.resolve()
     }
@@ -68,10 +95,11 @@ const Cluster = forwardRef<ClusterRef, { onFeaturesLoad?: (features: FeaturesCon
       id: data.id,
       app_id: data.app_id,
       ...values,
-      sub_agents: (subAgents || []).map(item => ({
-        ...item,
-        priority: 1,
-      }))
+      supervisor_config: normalizeSupervisorConfigForSave(
+        values.supervisor_config,
+        data.supervisor_config
+      ),
+      sub_agents: (subAgents || [])
     }
 
     return new Promise((resolve, reject) => {
@@ -109,10 +137,10 @@ const Cluster = forwardRef<ClusterRef, { onFeaturesLoad?: (features: FeaturesCon
       setData(response)
       form.setFieldsValue({
         ...response,
+        supervisor_config: normalizeSupervisorConfigForForm(response.supervisor_config),
       })
-      let sub_agents = response.sub_agents || []
+      const sub_agents = response.sub_agents || []
       if (sub_agents.length > 0) {
-        console.log({ ids: sub_agents?.map(item => item.agent_id) })
         getApplicationList({ ids: sub_agents?.map(item => item.agent_id).join(',')})
           .then(res => {
             const applicationList = ((res as { items: Application[] }).items) || []
@@ -208,7 +236,7 @@ const Cluster = forwardRef<ClusterRef, { onFeaturesLoad?: (features: FeaturesCon
                   {t('common.save')}
                 </Button>
               </Flex>
-              <Flex gap={12} vertical className="rb:h-[calc(100%-68px)]! rb:overflow-y-auto!">
+              <Flex gap={12} vertical className="rb:flex-1! rb:overflow-y-auto!">
                 <Form.Item name="features" hidden noStyle></Form.Item>
                 <Card title={t('application.collaboration')}>
                   <Form.Item
@@ -216,7 +244,7 @@ const Cluster = forwardRef<ClusterRef, { onFeaturesLoad?: (features: FeaturesCon
                     noStyle
                   >
                     <RadioGroupCard
-                      options={['supervisor', 'collaboration'].map((type) => ({
+                      options={['supervisor', 'supervisor_loop', 'collaboration'].map((type) => ({
                         value: type,
                         label: t(`application.${type}`),
                         labelDesc: t(`application.${type}Desc`),
@@ -243,12 +271,12 @@ const Cluster = forwardRef<ClusterRef, { onFeaturesLoad?: (features: FeaturesCon
                         >
                           <Flex justify="center" vertical className="rb:max-w-[calc(100%-60px)]">
                             <div>
-                              <span className="rb:text-[#212332] rb:leading-5">{agent.name}</span>
+                              <span className="rb:text-gray-800 rb:leading-5">{agent.name}</span>
                               <Tag color={agent.is_active ? 'success' : 'warning'} className="rb:ml-2">
                                 {agent.is_active ? t('common.enable') : t('common.deleted')}
                               </Tag>
                             </div>
-                            {agent.role && <div className="rb:font-regular rb:leading-5 rb:text-[#5B6167] rb:text-[12px] rb:mt-1">{agent.role || '-'}</div>}
+                            {agent.role && <div className="rb:font-regular rb:leading-5 rb:text-gray-600 rb:text-[12px] rb:mt-1">{agent.role || '-'}</div>}
                             {agent.capabilities && <Flex wrap gap={8} className="rb:mt-2.5!">
                               {agent.capabilities.map((tag, tagIndex) => <Tag key={tagIndex} color="dark" className="rb:py-0!">{tag}</Tag>)}
                             </Flex>}
@@ -270,55 +298,64 @@ const Cluster = forwardRef<ClusterRef, { onFeaturesLoad?: (features: FeaturesCon
                   }
                 </Card>
 
-                {values?.orchestration_mode !== 'collaboration' && <Card title={t('application.masterConfig')}>
-                  <Form.Item
-                    label={<span className="rb:text-[#5B6167]">{t('application.model')}</span>}
-                    required={true}
-                    className="rb:mb-4!"
-                  >
-                    <Flex align="center" gap={12}>
-                      <Form.Item name="default_model_config_id" noStyle>
-                        <ModelSelect
-                          params={{ type: 'llm' }}
-                          className="rb:w-full!"
-                        />
-                      </Form.Item>
-                      <Form.Item name="model_parameters" noStyle>
-                        <Button
-                          className="rb:w-33"
-                          icon={<div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/application/set.svg')]"></div>}
-                          onClick={handleEditModelConfig}
-                        >{t('application.modelConfig')}</Button>
-                      </Form.Item>
-                    </Flex>
-                  </Form.Item>
-                  <Form.Item
-                    name={['execution_config', "sub_agent_execution_mode"]}
-                    label={<span className="rb:text-[#5B6167]">{t('application.orchestrationMode')}</span>}
-                    className="rb:mb-4!"
-                  >
-                    <Select
-                      options={['sequential', 'parallel'].map((type) => ({
-                        value: type,
-                        label: t(`application.${type}`),
-                      }))}
-                      placeholder={t('common.pleaseSelect')}
-                    />
-                  </Form.Item>
-                  <Form.Item
-                    name="aggregation_strategy"
-                    label={<span className="rb:text-[#5B6167]">{t('application.aggregationStrategy')}</span>}
-                    className="rb:mb-0!"
-                  >
-                    <Select
-                      options={['merge', 'vote', 'priority'].map((type) => ({
-                        value: type,
-                        label: t(`application.${type}`),
-                      }))}
-                      placeholder={t('common.pleaseSelect')}
-                    />
-                  </Form.Item>
-                </Card>}
+                {values?.orchestration_mode !== 'collaboration' &&
+                  <Card title={t('application.masterConfig')}>
+                    <Form.Item
+                      label={<span className="rb:text-gray-600">{t('application.model')}</span>}
+                      required={true}
+                      className={values?.orchestration_mode === 'supervisor' ? "rb:mb-4!" : 'rb:mb-0!'}
+                    >
+                      <Flex align="center" gap={12}>
+                        <Form.Item name="default_model_config_id" noStyle>
+                          <ModelSelect
+                            params={{ type: 'llm' }}
+                            className="rb:w-full!"
+                          />
+                        </Form.Item>
+                        <Form.Item name="model_parameters" noStyle>
+                          <Button
+                            className="rb:w-33"
+                            icon={<div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/application/set.svg')]"></div>}
+                            onClick={handleEditModelConfig}
+                          >{t('application.modelConfig')}</Button>
+                        </Form.Item>
+                      </Flex>
+                    </Form.Item>
+                    {values?.orchestration_mode === 'supervisor' &&
+                      <>
+                        <Form.Item
+                          name={['execution_config', "sub_agent_execution_mode"]}
+                          label={<span className="rb:text-gray-600">{t('application.orchestrationMode')}</span>}
+                          className="rb:mb-4!"
+                        >
+                          <Select
+                            options={['sequential', 'parallel'].map((type) => ({
+                              value: type,
+                              label: t(`application.${type}`),
+                            }))}
+                            placeholder={t('common.pleaseSelect')}
+                          />
+                        </Form.Item>
+                        <Form.Item
+                          name="aggregation_strategy"
+                          label={<span className="rb:text-gray-600">{t('application.aggregationStrategy')}</span>}
+                          className="rb:mb-0!"
+                        >
+                          <Select
+                            options={['merge', 'vote', 'priority'].map((type) => ({
+                              value: type,
+                              label: t(`application.${type}`),
+                            }))}
+                            placeholder={t('common.pleaseSelect')}
+                          />
+                        </Form.Item>
+                      </>
+                    }
+                  </Card>
+                }
+                {values?.orchestration_mode === 'supervisor_loop' &&
+                  <SupervisorCapabilityConfig />
+                }
               </Flex>
             </Flex>
           </Form>
@@ -338,6 +375,8 @@ const Cluster = forwardRef<ClusterRef, { onFeaturesLoad?: (features: FeaturesCon
               updateChatList={setChatList}
               handleSave={handleSave}
               source="multi_agent"
+              chatVariables={chatVariables}
+              handleEditVariables={handleOpenVariableConfig}
             />
           </RbCard>
         </Col>
@@ -350,6 +389,10 @@ const Cluster = forwardRef<ClusterRef, { onFeaturesLoad?: (features: FeaturesCon
           data={values as Config}
           ref={modelConfigModalRef}
           refresh={handleSaveModelConfig}
+        />
+        <ChatVariableConfigModal
+          ref={chatVariableConfigModalRef}
+          refresh={handleSaveChatVariable}
         />
       </Row>
     </>

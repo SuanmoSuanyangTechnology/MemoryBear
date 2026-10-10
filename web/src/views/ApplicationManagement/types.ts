@@ -61,6 +61,21 @@ export interface Application {
   source_workspace_icon?: string;
   source_app_version?: string;
   source_app_is_active?: boolean;
+
+  share_id: null | string;
+  shared_by: null | string;
+  shared_by_name: null | string;
+  shared_at: null | number;
+  ontology: {
+    bound: boolean;
+    is_fallback_default: false,
+    ontology_id: string
+    ontology_name: string
+    scene_type_id: string
+    scene_name: string
+    custom_field_labels: string[];
+    emotion_count: number;
+  },
 }
 
 /**

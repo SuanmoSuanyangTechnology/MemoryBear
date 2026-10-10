@@ -46,6 +46,11 @@ from app.core.memory.storage.custom.community_mutations import (
     CommunityNodeIdentity,
     CommunityReconcileStats,
 )
+from app.core.memory.storage.custom.scene_storage import (
+    SceneMutationIdentity,
+    SceneStorage,
+    SceneStorageOutboxError,
+)
 from app.core.memory.storage.custom.topology_score import compute_topology_score
 from app.core.memory.storage.custom.forget_recovery import (
     ForgetRecoveryTarget,
@@ -77,6 +82,9 @@ __all__ = [
     "CommunityMutationWriter",
     "CommunityNodeIdentity",
     "CommunityReconcileStats",
+    "SceneMutationIdentity",
+    "SceneStorage",
+    "SceneStorageOutboxError",
     "DeletedEndUserNodeIdentity",
     "EndUserDeleteOutboxError",
     "EndUserMergeNodeIdentity",

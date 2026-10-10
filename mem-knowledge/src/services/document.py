@@ -34,6 +34,10 @@ from ..tasks.dispatch import TaskDispatcher
 from ..utils.datetime_utils import to_iso_z, utcnow, utcnow_naive
 from . import file as file_service
 from . import knowledge as knowledge_service
+from .document_mutation_guard import (
+    DocumentMutationLeaseLost,
+    async_document_mutation_guard,
+)
 from .knowledge_file_storage import KnowledgeFileStorage
 from .qa_export import collection_name_for_knowledge
 
@@ -271,19 +275,29 @@ async def delete_document_search_data(
     index = collection_name_for_knowledge(knowledge_id)
     if not await client.indices.exists(index=index):
         return 0
+    refresh_result = await client.indices.refresh(index=index)
+    if refresh_result.get("_shards", {}).get("failed", 0):
+        raise KnowledgeError.from_code("KB_SEARCH_UNAVAILABLE")
     result = await client.delete_by_query(
         index=index,
         query={"term": {"metadata.document_id": str(document_id)}},
-        refresh=False,
+        refresh=True,
         conflicts="abort",
         wait_for_completion=True,
     )
     failures = result.get("failures") or []
-    if failures:
+    if result.get("timed_out") or failures or result.get("_shards", {}).get("failed", 0):
         raise KnowledgeError.from_code(
             "KB_SEARCH_UNAVAILABLE",
         )
-    return int(result.get("deleted", 0))
+    deleted = int(result.get("deleted", 0))
+    logger.info(
+        "Document search data deleted: knowledge=%s document=%s deleted=%s",
+        knowledge_id,
+        document_id,
+        deleted,
+    )
+    return deleted
 
 
 async def dispatch_document_graph_sync(
@@ -478,7 +492,8 @@ async def delete_document_resources(
     dispatcher: TaskDispatcher,
     storage: KnowledgeFileStorage,
     delete_search: Callable[[], Awaitable[Any]],
-    delete_records: Callable[[], Awaitable[None]],
+    delete_records: Callable[[DocumentDeletionSnapshot], Awaitable[None]],
+    refresh_assets: Callable[[], Awaitable[DocumentDeletionSnapshot]],
 ) -> None:
     task_key = PARSE_TASK_KEY.format(doc_id=snapshot.document_id)
     task_id = await redis.get(task_key)
@@ -487,28 +502,79 @@ async def delete_document_resources(
     await redis.set(
         PARSE_CANCEL_KEY.format(doc_id=snapshot.document_id),
         "1",
-        ex=PARSE_CANCEL_TTL,
+        # Cover the existing parse-task lifetime while storage cleanup runs.
+        ex=PARSE_TASK_TTL,
     )
-    await redis.delete(task_key)
+    storage_cleaned = False
+    records_deleted = False
+    try:
+        await redis.delete(task_key)
 
-    await dispatch_document_graph_sync(
-        dispatcher,
-        snapshot.knowledge_id,
-        snapshot.document_id,
-        snapshot.parser_config,
-        dispatch_legacy=False,
-        document_deleted=True,
-    )
-    await delete_search()
-    for storage_key in snapshot.storage_keys:
+        await dispatch_document_graph_sync(
+            dispatcher,
+            snapshot.knowledge_id,
+            snapshot.document_id,
+            snapshot.parser_config,
+            dispatch_legacy=False,
+            document_deleted=True,
+        )
+        async with async_document_mutation_guard(redis, snapshot.document_id) as guard:
+            snapshot = await refresh_assets()
+            await guard.ensure_owned()
+            await delete_search()
+            await guard.ensure_owned()
+            failed = False
+            for storage_key in snapshot.storage_keys:
+                try:
+                    await storage.delete(storage_key)
+                except Exception:
+                    failed = True
+                    logger.warning(
+                        "Failed to delete document storage object: key=%s",
+                        storage_key,
+                    )
+            if failed:
+                raise KnowledgeError.from_code("KB_STORAGE_UNAVAILABLE")
+            storage_cleaned = True
+            # Retain the refreshed asset keys until storage cleanup succeeds,
+            # while keeping ES mutations fenced until the database commit.
+            await guard.ensure_owned()
+            await delete_records(snapshot)
+            records_deleted = True
+            await guard.ensure_owned()
+    except (TimeoutError, DocumentMutationLeaseLost) as exc:
+        if storage_cleaned:
+            # Storage deletion is irreversible. Once it succeeded, reacquire
+            # the lease and finish the matching durable deletion if possible.
+            try:
+                async with async_document_mutation_guard(redis, snapshot.document_id) as guard:
+                    await guard.ensure_owned()
+                    await delete_search()
+                    await guard.ensure_owned()
+                    if not records_deleted:
+                        await delete_records(snapshot)
+                    await guard.ensure_owned()
+                return
+            except Exception as recovery_exc:
+                logger.warning(
+                    "Document deletion recovery failed: document=%s error_type=%s",
+                    snapshot.document_id,
+                    type(recovery_exc).__name__,
+                )
+                raise KnowledgeError.from_code("KB_SEARCH_UNAVAILABLE") from recovery_exc
+        raise KnowledgeError.from_code("KB_SEARCH_UNAVAILABLE") from exc
+    finally:
+        # Retain the normal short grace period after success or failure.
         try:
-            await storage.delete(storage_key)
-        except Exception:
-            logger.warning(
-                "Failed to delete document storage object: key=%s",
-                storage_key,
+            await redis.expire(
+                PARSE_CANCEL_KEY.format(doc_id=snapshot.document_id), PARSE_CANCEL_TTL
             )
-    await delete_records()
+        except Exception as exc:
+            logger.warning(
+                "Failed to shorten document cancellation expiry: document=%s error_type=%s",
+                snapshot.document_id,
+                type(exc).__name__,
+            )
 
 
 __all__ = [

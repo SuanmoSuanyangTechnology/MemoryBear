@@ -38,7 +38,6 @@ class MasterAgentRouter:
         sub_agents: Dict[str, Any],
         state_manager: ConversationStateManager,
         tenant_id: uuid.UUID | None = None,
-        enable_rule_fast_path: bool = True
     ):
         """初始化 Master Agent 路由器
 
@@ -47,7 +46,11 @@ class MasterAgentRouter:
             master_model_config: Master Agent 使用的模型配置
             sub_agents: 子 Agent 配置字典
             state_manager: 会话状态管理器
-            enable_rule_fast_path: 是否启用规则快速路径（性能优化）
+
+        注：关键词规则快路径（`enable_rule_fast_path`）已删除——它与主管监督循环
+        "分派全权归主管 LLM"语义冲突，且硬编码规则与真实配置零交集（置信度阈值
+        0.9 与"命中 1/4 关键词=0.25"自相矛盾，实际从不命中）。确定性编排的需求
+        由声明式模式（pipeline/fanout/router）承载，不在本路由器内开旁路。
         """
         self.db = db
         self.master_model_config = master_model_config
@@ -55,14 +58,10 @@ class MasterAgentRouter:
         self.sub_agents = sub_agents
         self.state_manager = state_manager
         self.tenant_id = tenant_id
-        self.enable_rule_fast_path = enable_rule_fast_path
 
         logger.info(
             "Master Agent 路由器初始化",
-            extra={
-                "sub_agent_count": len(sub_agents),
-                "enable_rule_fast_path": enable_rule_fast_path
-            }
+            extra={"sub_agent_count": len(sub_agents)}
         )
 
     async def route(
@@ -89,41 +88,18 @@ class MasterAgentRouter:
             }
         )
 
-        # 1. 获取会话状态
+        # 1. 获取会话状态（P0-1：走异步接口，生产后端是 Redis；读失败不阻断路由）
         state = None
         if conversation_id:
-            state = self.state_manager.get_state(conversation_id)
+            state = await self.state_manager.aget_state(conversation_id)
 
-        # 2. 尝试规则快速路径（可选的性能优化）
-        if self.enable_rule_fast_path:
-            rule_result = self._try_rule_fast_path(message, state)
-            if rule_result:
-                logger.info(
-                    "规则快速路径命中",
-                    extra={
-                        "agent_id": rule_result["selected_agent_id"],
-                        "confidence": rule_result["confidence"]
-                    }
-                )
-
-                # 更新会话状态
-                if conversation_id:
-                    self.state_manager.update_state(
-                        conversation_id,
-                        rule_result["selected_agent_id"],
-                        message,
-                        rule_result.get("topic"),
-                        rule_result["confidence"]
-                    )
-
-                return rule_result
-
-        # 3. 调用 Master Agent 做决策
+        # 2. 调用 Master Agent 做决策
+        # （原"关键词规则快路径"分支已删除，见类注释）
         decision = await self._master_agent_decide(message, state, variables)
 
         # 4. 更新会话状态
         if conversation_id:
-            self.state_manager.update_state(
+            await self.state_manager.aupdate_state(
                 conversation_id,
                 decision["selected_agent_id"],
                 message,
@@ -141,71 +117,6 @@ class MasterAgentRouter:
         )
 
         return decision
-
-    def _try_rule_fast_path(
-        self,
-        message: str,
-        state: Optional[Dict[str, Any]]
-    ) -> Optional[Dict[str, Any]]:
-        """尝试规则快速路径（性能优化）
-
-        对于明确的关键词匹配，直接返回结果，不调用 Master Agent
-
-        Args:
-            message: 用户消息
-            state: 会话状态
-
-        Returns:
-            如果命中规则返回决策结果，否则返回 None
-        """
-        # 定义高置信度关键词规则
-        high_confidence_rules = [
-            {
-                "keywords": ["数学", "方程", "计算", "求解"],
-                "agent_role": "数学",
-                "confidence_threshold": 0.9
-            },
-            {
-                "keywords": ["物理", "力学", "电路", "光学"],
-                "agent_role": "物理",
-                "confidence_threshold": 0.9
-            },
-            {
-                "keywords": ["订单", "发货", "物流", "快递"],
-                "agent_role": "订单",
-                "confidence_threshold": 0.9
-            },
-            {
-                "keywords": ["退款", "退货", "售后"],
-                "agent_role": "退款",
-                "confidence_threshold": 0.9
-            }
-        ]
-
-        message_lower = message.lower()
-
-        for rule in high_confidence_rules:
-            matched_keywords = [kw for kw in rule["keywords"] if kw in message_lower]
-
-            if matched_keywords:
-                confidence = len(matched_keywords) / len(rule["keywords"])
-
-                if confidence >= rule["confidence_threshold"]:
-                    # 查找对应的 agent
-                    for agent_id, agent_data in self.sub_agents.items():
-                        agent_info = agent_data.get("info", {})
-                        if agent_info.get("role") == rule["agent_role"]:
-                            return {
-                                "selected_agent_id": agent_id,
-                                "confidence": confidence,
-                                "strategy": "rule_fast_path",
-                                "reasoning": f"关键词匹配: {', '.join(matched_keywords)}",
-                                "topic": rule["agent_role"],
-                                "need_collaboration": False,
-                                "routing_method": "rule"
-                            }
-
-        return None
 
     async def _master_agent_decide(
         self,
@@ -285,6 +196,11 @@ class MasterAgentRouter:
             current_agent = state.get("current_agent_id")
             last_topic = state.get("last_topic")
             same_turns = state.get("same_agent_turns", 0)
+
+            # 版本策略：子 Agent 重新发布后 release ID 会变，会话状态里记的旧 ID
+            # 可能已不在名册里；失效则不作为"当前 Agent"提示，交给 LLM 重新路由
+            if current_agent and str(current_agent) not in self.sub_agents:
+                current_agent = None
 
             if current_agent:
                 context_text = f"""

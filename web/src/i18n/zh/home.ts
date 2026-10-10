@@ -135,6 +135,7 @@ export const home = {
       predictionEngine: '记忆预测推演引擎',
       predictionProgress: '预测推演流程',
       preferenceEngine: '偏好引擎',
+      sceneCommunityEngine: '多模态情景记忆重构引擎',
     },
     dashboard: {
       total_models: '可用模型总数',
@@ -169,8 +170,14 @@ export const home = {
       forgettingExecutionRate: '遗忘执行率',
 
       memoryClassificationDistribution: '记忆分类分布',
+      memoryScaleDistribution: '记忆规模 · 分类分布',
+      memoryScaleCoreMetrics: '记忆规模 · 核心指标',
+      byMemoryType: '按记忆类型',
+      topFiveMemoryTypes: '展示前五类记忆',
+      activeMemory: '活跃记忆',
+      updatedToday: '今日更新',
       knowledgeBaseTypeDistribution: '知识库类型分布',
-      memoryGrowthTrend: '记忆增长趋势',
+      memoryGrowthTrend: '记忆规模 · 趋势',
       corporateMemory: '企业记忆',
       recentMemoryActivities: '最近记忆活动',
       apiCallTrend: 'API调用趋势',

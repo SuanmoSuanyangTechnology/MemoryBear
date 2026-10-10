@@ -353,6 +353,35 @@ class ReadPipeLine(ModelClientMixin, BasePipeline):
                 exc_info=True,
             )
 
+    async def _should_degrade_semantic(self) -> bool:
+        """判断该 end_user 的存量向量是否尚未用当前 embedding 模型重建完成。
+
+        切换 embedding 底层模型后、重算任务完成前，用新模型向量去搜旧模型空间
+        的存量向量会得到语义不相关的结果；此期间应降级为纯全文检索。
+        """
+        from app.services.memory_reembed_service import should_degrade_semantic
+
+        cfg = self.ctx.memory_config
+        workspace_id = getattr(cfg, "workspace_id", None)
+        embedding_model_id = getattr(cfg, "embedding_model_id", None)
+        if workspace_id is None or embedding_model_id is None:
+            return False
+        try:
+            async with get_async_db_context() as db:
+                return await should_degrade_semantic(
+                    db,
+                    workspace_id=workspace_id,
+                    end_user_id=self.ctx.end_user_id,
+                    embedding_model_id=embedding_model_id,
+                )
+        except Exception:
+            # 降级判定失败不应阻断检索：按不降级处理，让向量检索照常尝试。
+            logger.warning(
+                "[ReadPipeLine] degrade check failed, falling back to no degrade",
+                exc_info=True,
+            )
+            return False
+
     async def _get_search_service(
             self,
             includes=None,
@@ -370,6 +399,11 @@ class ReadPipeLine(ModelClientMixin, BasePipeline):
                 embedder = (await self._get_embedding_client()) if need_embedder else None
                 llm = (await self._get_llm_client()) if need_llm else None
 
+            # 切换 embedding 模型后、该用户向量重建完成前，跳过向量检索。
+            semantic_degraded = (
+                await self._should_degrade_semantic() if need_embedder else False
+            )
+
             reranker = None
             if enable_rerank:
                 reranker = await self._get_rerank_client()
@@ -386,6 +420,7 @@ class ReadPipeLine(ModelClientMixin, BasePipeline):
                 reranker=reranker,
                 includes=includes,
                 on_error=self._record_retrieval_error,
+                semantic_degraded=semantic_degraded,
             )
         else:
             return RAGSearchService(self.ctx)

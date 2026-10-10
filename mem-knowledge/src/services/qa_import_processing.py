@@ -25,6 +25,12 @@ from ..runtime import ProcessRuntime
 from ..tasks.observability import BusinessOutcome, TaskRun
 from ..tasks.state import PARSE_TASK_KEY
 from ..utils.datetime_utils import to_iso_z, to_timestamp_ms, utcnow, utcnow_naive
+from .document_mutation_guard import DocumentMutationLeaseLost, sync_document_mutation_guard
+from .document_task_lifecycle import (
+    DocumentTaskAborted,
+    cleanup_interrupted_task_vectors,
+    ensure_document_active,
+)
 from .knowledge_file_storage import KnowledgeFileStorage
 
 logger = logging.getLogger(__name__)
@@ -278,6 +284,8 @@ def process_qa_import(
     start_time = time.time()
     progress_lines = [f"{_progress_ts()} QA import task has been received."]
     normalized_document_id: uuid.UUID | None = None
+    chunks: list[DocumentChunk] = []
+    write_started = False
     error_code = "KB_QA_PROCESSING_FAILED"
     try:
         try:
@@ -298,6 +306,7 @@ def process_qa_import(
                 error_code="KB_QA_DOCUMENT_NOT_FOUND",
             )
             return snapshot
+        ensure_document_active(runtime, normalized_document_id)
 
         with run.stage("load_contents"):
             loaded_contents = _load_contents(runtime, contents, file_key)
@@ -312,6 +321,7 @@ def process_qa_import(
         if not pairs:
             logger.warning("No valid QA pairs found: document=%s", normalized_document_id)
             raise _SafeQAImportError("No valid QA pairs found")
+        ensure_document_active(runtime, normalized_document_id)
         progress_lines.append(f"{_progress_ts()} Parsed {len(pairs)} QA pairs.")
         run.progress(
             stage="parse_file",
@@ -370,6 +380,7 @@ def process_qa_import(
             batch_size = min(runtime.settings.embedding_batch_size or 10, 20)
             prepared_batches = []
             for start in range(0, len(chunks), batch_size):
+                ensure_document_active(runtime, normalized_document_id)
                 prepared_batches.append(
                     vector_store.prepare_chunks(chunks[start : start + batch_size])
                 )
@@ -387,16 +398,32 @@ def process_qa_import(
                 raise RuntimeError("Prepared chunk count does not match input count")
             if clear_parse_task:
                 with run.stage("delete_old_chunks"):
-                    vector_store.delete_by_metadata_field(
-                        "document_id",
-                        str(normalized_document_id),
-                    )
+                    with sync_document_mutation_guard(
+                        runtime.redis.sync_client(), normalized_document_id
+                    ) as guard:
+                        ensure_document_active(runtime, normalized_document_id)
+                        guard.ensure_owned()
+                        vector_store.delete_by_metadata_field(
+                            "document_id",
+                            str(normalized_document_id),
+                        )
+                        guard.ensure_owned()
             with run.stage("write_elasticsearch"):
-                vector_store.write_prepared_batches(prepared_batches)
+                with sync_document_mutation_guard(
+                    runtime.redis.sync_client(), normalized_document_id
+                ) as guard:
+                    ensure_document_active(runtime, normalized_document_id)
+                    guard.ensure_owned()
+                    write_started = True
+                    vector_store.write_prepared_batches(prepared_batches)
+                    guard.ensure_owned()
+        except (DocumentTaskAborted, DocumentMutationLeaseLost):
+            raise
         except Exception:
             raise _SafeQAImportError("QA vector processing failed") from None
 
         error_code = "KB_TASK_STATE_PERSIST_FAILED"
+        ensure_document_active(runtime, normalized_document_id)
         with run.stage("persist_document"):
             completion_error = _mark_complete(
                 runtime,
@@ -408,8 +435,8 @@ def process_qa_import(
             )
         if completion_error is not None:
             run.finish(
-                BusinessOutcome.FAILURE,
-                error_code=error_code,
+                BusinessOutcome.ABORTED,
+                error_code="KB_QA_IMPORT_ABORTED",
             )
             return completion_error
         logger.info(
@@ -424,6 +451,35 @@ def process_qa_import(
         )
         return {"imported": len(chunks), "failed_rows": failed_rows}
     except Exception as exc:
+        aborted = isinstance(exc, DocumentTaskAborted)
+        if (
+            isinstance(exc, (DocumentMutationLeaseLost, DocumentTaskAborted))
+            and normalized_document_id is not None
+            and write_started
+        ):
+            try:
+                cleanup_interrupted_task_vectors(
+                    runtime, normalized_kb_id, normalized_document_id,
+                    [str(chunk.metadata["doc_id"]) for chunk in chunks],
+                )
+            except Exception as cleanup_exc:
+                logger.warning(
+                    "Late QA vector cleanup failed: document=%s error_type=%s",
+                    normalized_document_id,
+                    type(cleanup_exc).__name__,
+                )
+                if aborted:
+                    aborted = False
+                    exc = _SafeQAImportError("QA cancellation cleanup failed")
+                    error_code = "KB_QA_VECTOR_WRITE_FAILED"
+        if aborted:
+            logger.info("QA import aborted: document=%s", normalized_document_id or document_id)
+            run.finish(
+                BusinessOutcome.ABORTED,
+                error_code="KB_QA_IMPORT_ABORTED",
+                detail="document_deleted_or_cancelled",
+            )
+            return {"error": "document deleted or cancelled", "imported": 0}
         safe_error = (
             exc
             if isinstance(exc, _SafeQAImportError)

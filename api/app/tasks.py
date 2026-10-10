@@ -2595,10 +2595,6 @@ def write_message_task(
         skip_cursor_advance: bool = False,
         dispatch_at: str = "",  # 任务执行时间
         source: str = "",  # 写入来源（agent/service_api/mcp/workflow）
-        # MCP 入口兼容字段（不经过 memory_messages 表，直接写入）
-        messages: Optional[List[dict]] = None,
-        storage_type: str = "neo4j",
-        user_rag_memory_id: str = "",
 ) -> Dict[str, Any]:
     """统一写入任务 — 纯净入口，接收完整参数直接写入。
 
@@ -2614,21 +2610,11 @@ def write_message_task(
         language: 语言
         skip_cursor_advance: 是否跳过 cursor 推进（MCP 等直接写入路径）
         dispatch_at: 任务派发时刻的 UTC ISO 8601 时间戳，由 push_write_task 自动注入
-        messages: MCP 入口兼容字段，单条消息列表 [{"role", "content", "dialog_at"}]
-        storage_type: MCP 入口兼容字段，存储类型（neo4j / rag）
-        user_rag_memory_id: MCP 入口兼容字段，RAG 记忆 ID
 
     Returns:
         Dict containing status, result, elapsed_time, task_id
     """
     loop = set_asyncio_event_loop()
-    # MCP 入口兼容：收到 messages 但无 target_message 时，转换为新格式
-    if target_message is None and messages:
-        msg = messages[0] if messages else {"role": "user", "content": ""}
-        target_message = msg
-        context_before = []
-        context_after = []
-        skip_cursor_advance = True
 
     # 解析 end_user_id：若排队期间用户已被合并，自动路由到目标用户
     resolved_end_user_id = end_user_id
@@ -2649,27 +2635,7 @@ def write_message_task(
             f"falling back to original ID"
         )
 
-    # RAG 存储类型走独立路径
-    if storage_type and storage_type.lower() == "rag":
-        try:
-            async def _rag_write():
-                from app.core.memory.memory_service import MemoryService
-                await MemoryService.write_messages_to_rag(
-                    messages=messages,
-                    end_user_id=resolved_end_user_id,
-                    user_rag_memory_id=user_rag_memory_id,
-                )
-
-            loop.run_until_complete(_rag_write())
-            return {"status": "SUCCESS", "result": "rag_write_complete", "task_id": self.request.id}
-        except Exception as e:
-            logger.error(f"[CELERY WRITE] RAG write failed: {e}", exc_info=True)
-            return {"status": "FAILURE", "error": str(e), "task_id": self.request.id}
-        finally:
-            if loop:
-                _shutdown_loop_gracefully(loop)
-
-    # 新格式：直接调用 MemoryService.write()
+    # 调用 Neo4j MemoryService.write()；RAG 已在 dispatcher 层完成分流。
     logger.info(
         f"[CELERY WRITE] Starting - end_user_id={resolved_end_user_id}, "
         f"config_id={config_id}, conv={conversation_id or '-'}, "
@@ -3848,6 +3814,30 @@ def do_gds_topology_score(self, end_user_id: str, inflight_token: Optional[str] 
         result["end_user_id"] = end_user_id
         result["elapsed_time"] = time.time() - start_time
         result["task_id"] = self.request.id
+
+        # 价值评估展示事件：GDS 成功且实际写入节点属性后 best effort 落 PG。
+        # 用户写锁已在 _run 的 finally 中释放；展示写入失败只记日志，不改变任务结果。
+        if (
+            result.get("status") == "success"
+            and int(result.get("node_properties_written") or 0) > 0
+        ):
+            try:
+                from app.services.memory_engine_display_service import (
+                    MemoryEngineDisplayService,
+                )
+                loop.run_until_complete(
+                    MemoryEngineDisplayService.save_memory_value_event(
+                        end_user_id=end_user_id,
+                        result=result,
+                        task_id=self.request.id,
+                    )
+                )
+            except Exception as e:
+                logger.warning(
+                    f"[EngineDisplay] 价值评估展示写入异常（不影响主流程）: {e}",
+                    exc_info=True,
+                )
+
         return result
     except Exception as e:
         # GDS 投影 / eigenvector.write / drop 抛错，re-raise 让 Celery 标记 FAILURE（带 traceback）
@@ -6808,6 +6798,8 @@ def generate_scene_summary(
     idle_high_watermark_message_id: str | None = None,
 ):
     from app.core.memory.scene.scene_summary_service import SceneSummaryService
+    from app.core.memory.storage.custom import SceneStorage
+    from app.core.memory.storage.provider.neo4j.client import Neo4jClient
     from app.schemas.scene_memory_schema import GenerateSceneSummaryTask
 
     payload = GenerateSceneSummaryTask(
@@ -6818,20 +6810,152 @@ def generate_scene_summary(
         idle_high_watermark_message_id=idle_high_watermark_message_id,
         close_reason=close_reason,
     )
+    started_at = time.monotonic()
+    stage = "generate_summary"
     loop = set_asyncio_event_loop()
+
+    async def _run():
+        storage_client = await Neo4jClient.create()
+        try:
+            writer = SceneStorage(storage_client)
+            return await SceneSummaryService(writer=writer).generate(payload)
+        finally:
+            await storage_client.close()
+
     try:
-        result = loop.run_until_complete(SceneSummaryService().generate(payload))
+        result = loop.run_until_complete(_run())
+        if result.get("community_dispatch_required"):
+            stage = "dispatch_scene_community"
+            community_task = run_scene_community_incremental.apply_async(
+                kwargs={"end_user_id": end_user_id}
+            )
+            result["scene_community_task_id"] = community_task.id
         logger.info(
-            "[SceneSummary] generation completed: scene_start=%s, "
-            "close_reason=%s, status=%s, reason=%s, summary_id=%s",
+            "[SceneSummary] generation completed: user=%s, scene_start=%s, "
+            "close_reason=%s, status=%s, reason=%s, summary_id=%s, "
+            "inactive=%s, dispatched=%s, elapsed_ms=%s",
+            end_user_id,
             scene_start_message_id,
             close_reason,
             result.get("status"),
             result.get("reason"),
             result.get("summary_id"),
+            result.get("inactive_count"),
+            bool(result.get("scene_community_task_id")),
+            int((time.monotonic() - started_at) * 1000),
         )
         return result
+    except Exception as exc:
+        logger.error(
+            "[SceneSummary] generation failed: user=%s scene_start=%s stage=%s "
+            "error_type=%s retry=%s elapsed_ms=%s",
+            end_user_id,
+            scene_start_message_id,
+            stage,
+            type(exc).__name__,
+            getattr(self.request, "retries", 0),
+            int((time.monotonic() - started_at) * 1000),
+        )
+        raise
     finally:
+        _shutdown_loop_gracefully(loop)
+
+
+@celery_app.task(
+    bind=True,
+    name="app.core.memory.run_scene_community_incremental",
+    acks_late=True,
+    autoretry_for=(Exception,),
+    retry_backoff=True,
+    retry_kwargs={"max_retries": 3},
+    time_limit=1800,
+    soft_time_limit=1700,
+)
+def run_scene_community_incremental(self, end_user_id: str):
+    """Process exactly one complete SceneCommunity batch for an end user."""
+    from app.core.memory.scene.scene_community_service import (
+        SceneCommunityIncrementalService,
+    )
+    from app.core.memory.storage.custom import SceneStorage
+    from app.core.memory.storage.provider.neo4j.client import Neo4jClient
+
+    started_at = time.monotonic()
+    stage = "acquire_lock"
+    loop = set_asyncio_event_loop()
+    write_lock = None
+
+    async def _run():
+        nonlocal stage
+        stage = "load_config"
+        with get_db_context() as db:
+            config_service = MemoryConfigService(db)
+            current_config_id = config_service.get_config_id_by_end_user(end_user_id)
+            memory_config = config_service.load_memory_config(current_config_id)
+
+        stage = "connect_neo4j"
+        storage_client = await Neo4jClient.create()
+        try:
+            stage = "run_incremental"
+            writer = SceneStorage(storage_client)
+            result = await SceneCommunityIncrementalService(
+                writer=writer,
+                memory_config=memory_config,
+            ).run(end_user_id)
+            result["config_id"] = str(current_config_id)
+            result["batch_trigger_count_snapshot"] = int(
+                memory_config.batch_trigger_count
+            )
+            result["candidate_community_limit_snapshot"] = int(
+                memory_config.candidate_community_limit
+            )
+            result["compare_all_same_category_communities_snapshot"] = bool(
+                memory_config.compare_all_same_category_communities
+            )
+            return result
+        finally:
+            await storage_client.close()
+
+    try:
+        end_user_id, write_lock = _acquire_community_clustering_lock(
+            end_user_id,
+            redis_client=get_thread_safe_sync_redis(),
+            expire=1800,
+        )
+        result = loop.run_until_complete(_run())
+        if result.get("dispatch_next"):
+            stage = "dispatch_next"
+            next_task = run_scene_community_incremental.apply_async(
+                kwargs={"end_user_id": end_user_id}
+            )
+            result["next_task_id"] = next_task.id
+        logger.info(
+            "[SceneCommunity] incremental task completed: user=%s status=%s "
+            "processed=%s communities=%s remaining=%s config=%s "
+            "dispatch_next=%s elapsed_ms=%s",
+            end_user_id,
+            result.get("status"),
+            result.get("processed"),
+            result.get("community_count"),
+            result.get("remaining_inactive_count", result.get("inactive_count")),
+            result.get("config_id"),
+            bool(result.get("next_task_id")),
+            int((time.monotonic() - started_at) * 1000),
+        )
+        return result
+    except Exception as exc:
+        logger.error(
+            "[SceneCommunity] incremental task failed: user=%s stage=%s "
+            "error_type=%s retry=%s elapsed_ms=%s",
+            end_user_id,
+            stage,
+            type(exc).__name__,
+            getattr(self.request, "retries", 0),
+            int((time.monotonic() - started_at) * 1000),
+        )
+        raise
+    finally:
+        if write_lock is not None:
+            write_lock.release()
         _shutdown_loop_gracefully(loop)
 
 
@@ -7032,3 +7156,298 @@ def consume_model_gateway_alerts_task() -> dict[str, Any]:
             f"consume_model_gateway_alerts 本轮失败（下轮重试）: {exc}", exc_info=True
         )
         return {"status": "RETRY_LATER", "error": str(exc)}
+
+@celery_app.task(
+    name="app.tasks.run_reembed_job",
+    bind=True,
+    ignore_result=False,
+    max_retries=0,
+    acks_late=True,
+    time_limit=3600,
+    soft_time_limit=3300,
+)
+def run_reembed_job(self, job_id: str) -> Dict[str, Any]:
+    """驱动任务：自检 → 排空 → 枚举 end_user → 逐个扇出重算子任务。
+
+    可重复执行：已终态的 end_user 由 PG 行状态跳过，并发扇出由派发占位拦住，
+    因此崩溃或超时后重新派发即可从断点继续。
+
+    Args:
+        job_id: memory_reembed_jobs.id
+    """
+    from app.services.memory_reembed_orchestrator import run_job
+
+    owner = f"{socket.gethostname()[:60]}:{os.getpid()}:{uuid.uuid4()}"
+    loop = set_asyncio_event_loop()
+    try:
+        result = loop.run_until_complete(run_job(job_id, owner))
+        result["task_id"] = self.request.id
+        return result
+    finally:
+        _shutdown_loop_gracefully(loop)
+
+
+@celery_app.task(
+    name="app.tasks.do_reembed_end_user",
+    bind=True,
+    ignore_result=False,
+    max_retries=0,
+    acks_late=False,
+    time_limit=3600,
+    soft_time_limit=3300,
+)
+def do_reembed_end_user(self, job_id: str, end_user_id: str) -> Dict[str, Any]:
+    """重算单个 end_user 下全部带向量节点的向量。
+
+    写入走 Neo4j（权威）+ outbox 投影：向量回写到图中不带维度后缀的属性上，
+    ES 侧由既有的维度路由与整档替换自行收敛。
+    """
+    from app.services.memory_reembed_orchestrator import process_end_user
+
+    owner = f"{socket.gethostname()[:60]}:{os.getpid()}:{uuid.uuid4()}"
+    loop = set_asyncio_event_loop()
+    try:
+        result = loop.run_until_complete(
+            process_end_user(job_id, end_user_id, owner)
+        )
+        result["task_id"] = self.request.id
+        return result
+    finally:
+        _shutdown_loop_gracefully(loop)
+
+
+@celery_app.task(
+    name="app.tasks.scan_reembed_jobs",
+    queue="periodic_tasks",
+    bind=True,
+    ignore_result=False,
+    max_retries=0,
+    acks_late=False,
+    time_limit=300,
+    soft_time_limit=270,
+)
+def scan_reembed_jobs(self) -> Dict[str, Any]:
+    """对账任务：终结核验已完成的重算 job，并重新派发丢失或需要重试的 job。
+
+    判据全部落在 PG：end_user 行全部终态才算跑完；心跳过期（worker 死了 /
+    在排空 / 还有失败待重试）就重新派发。无活跃 job 时只多一次索引查询。
+    """
+    from app.services.memory_reembed_orchestrator import reconcile_active_jobs
+
+    result = reconcile_active_jobs()
+    result["task_id"] = self.request.id
+    return result
+
+_WORKSPACE_STATISTICS_SCAN_PAGE_SIZE = 500
+_WORKSPACE_STATISTICS_INFLIGHT_KEY = "workspace_statistics:inflight:{workspace_id}"
+_WORKSPACE_STATISTICS_INFLIGHT_TTL_SECONDS = 12 * 60 * 60
+
+
+@celery_app.task(
+    name="app.tasks.scan_workspace_statistics_snapshots",
+    bind=True,
+    ignore_result=False,
+    max_retries=0,
+    acks_late=False,
+    time_limit=600,
+    soft_time_limit=540,
+)
+def scan_workspace_statistics_snapshots(self) -> Dict[str, Any]:
+    """分页枚举活跃空间，向 heavy worker 派发独立统计任务。"""
+    from app.repositories.workspace_repository import WorkspaceRepository
+
+    redis_client = get_sync_redis_client()
+    if redis_client is None:
+        raise RuntimeError("Redis unavailable for workspace statistics dispatch")
+
+    after_id: uuid.UUID | None = None
+    dispatched = 0
+    skipped_inflight = 0
+    failed = 0
+    while True:
+        with get_db_read() as db:
+            workspace_ids = WorkspaceRepository(db).get_active_workspace_ids_page(
+                after_id, _WORKSPACE_STATISTICS_SCAN_PAGE_SIZE
+            )
+        if not workspace_ids:
+            break
+
+        for workspace_id in workspace_ids:
+            inflight_key = _WORKSPACE_STATISTICS_INFLIGHT_KEY.format(
+                workspace_id=workspace_id
+            )
+            token = uuid.uuid4().hex
+            try:
+                acquired = redis_client.set(
+                    inflight_key,
+                    token,
+                    nx=True,
+                    ex=_WORKSPACE_STATISTICS_INFLIGHT_TTL_SECONDS,
+                )
+            except Exception:
+                logger.exception(
+                    "工作空间记忆统计在途锁获取失败: workspace_id=%s",
+                    workspace_id,
+                )
+                failed += 1
+                continue
+            if not acquired:
+                skipped_inflight += 1
+                continue
+
+            try:
+                do_workspace_statistics_snapshot.apply_async(
+                    kwargs={
+                        "workspace_id": str(workspace_id),
+                        "inflight_token": token,
+                    },
+                    queue="memory_heavy_tasks",
+                )
+                dispatched += 1
+            except Exception:
+                logger.exception(
+                    "工作空间记忆统计任务派发失败: workspace_id=%s",
+                    workspace_id,
+                )
+                try:
+                    redis_client.eval(UNLOCK_SCRIPT, 1, inflight_key, token)
+                except Exception:
+                    logger.exception(
+                        "工作空间记忆统计派发失败后解锁失败: workspace_id=%s",
+                        workspace_id,
+                    )
+                failed += 1
+
+        if len(workspace_ids) < _WORKSPACE_STATISTICS_SCAN_PAGE_SIZE:
+            break
+        after_id = workspace_ids[-1]
+
+    result = {
+        "dispatched": dispatched,
+        "skipped_inflight": skipped_inflight,
+        "failed": failed,
+        "task_id": self.request.id,
+    }
+    logger.info("工作空间记忆统计扫描完成: %s", result)
+    if failed:
+        raise RuntimeError(f"Failed to dispatch {failed} workspace statistics tasks")
+    return result
+
+
+@celery_app.task(
+    name="app.tasks.do_workspace_statistics_snapshot",
+    bind=True,
+    ignore_result=False,
+    max_retries=1,
+    acks_late=False,
+    time_limit=3600,
+    soft_time_limit=3300,
+)
+def do_workspace_statistics_snapshot(
+    self,
+    workspace_id: str,
+    inflight_token: str,
+    baseline_version: str | None = None,
+    baseline_captured: bool = False,
+) -> Dict[str, Any]:
+    """串行刷新一个空间的统计快照；失败时最多补偿一次。"""
+    from app.services.workspace_memory_statistics_service import (
+        get_or_refresh_workspace_statistics_async,
+        get_workspace_statistics_snapshot_version_async,
+    )
+
+    inflight_key = _WORKSPACE_STATISTICS_INFLIGHT_KEY.format(
+        workspace_id=workspace_id
+    )
+    redis_client = None
+    loop = None
+    retry_scheduled = False
+    attempt_baseline_version = baseline_version
+    attempt_baseline_captured = baseline_captured
+
+    async def _run() -> Dict[str, Any]:
+        nonlocal attempt_baseline_captured, attempt_baseline_version
+
+        workspace_uuid = uuid.UUID(workspace_id)
+        if not attempt_baseline_captured:
+            attempt_baseline_version = (
+                await get_workspace_statistics_snapshot_version_async(
+                    workspace_uuid
+                )
+            )
+            attempt_baseline_captured = True
+
+        response, generated = await get_or_refresh_workspace_statistics_async(
+            workspace_uuid,
+            allow_cached_response=False,
+            baseline_version=attempt_baseline_version,
+            baseline_captured=True,
+        )
+        return {
+            "status": "SUCCESS" if generated else "SKIPPED_COALESCED",
+            "workspace_id": workspace_id,
+            "total_count": response["total_count"],
+            "total_users": response["total_users"],
+            "generated_at": response["generated_at"],
+        }
+
+    try:
+        redis_client = get_sync_redis_client()
+        if redis_client is None:
+            raise RuntimeError(
+                "Redis unavailable for workspace statistics snapshot"
+            )
+        if redis_client.get(inflight_key) != inflight_token:
+            return {
+                "status": "SKIPPED_STALE_INFLIGHT",
+                "workspace_id": workspace_id,
+            }
+
+        loop = set_asyncio_event_loop()
+        result = loop.run_until_complete(_run())
+        logger.info("工作空间记忆统计快照任务完成: %s", result)
+        return result
+    except Exception as exc:
+        if self.request.retries < self.max_retries:
+            logger.warning(
+                "工作空间记忆统计快照失败，60 秒后补偿一次: "
+                "workspace_id=%s, retry=%s/%s",
+                workspace_id,
+                self.request.retries + 1,
+                self.max_retries,
+                exc_info=True,
+            )
+            retry_error = self.retry(
+                exc=exc,
+                countdown=60,
+                kwargs={
+                    "workspace_id": workspace_id,
+                    "inflight_token": inflight_token,
+                    "baseline_version": attempt_baseline_version,
+                    "baseline_captured": attempt_baseline_captured,
+                },
+                throw=False,
+            )
+            retry_scheduled = True
+            raise retry_error
+        logger.exception(
+            "工作空间记忆统计快照补偿后仍失败: workspace_id=%s",
+            workspace_id,
+        )
+        raise
+    finally:
+        if loop is not None:
+            _shutdown_loop_gracefully(loop)
+        if redis_client is not None and not retry_scheduled:
+            try:
+                redis_client.eval(
+                    UNLOCK_SCRIPT,
+                    1,
+                    inflight_key,
+                    inflight_token,
+                )
+            except Exception:
+                logger.exception(
+                    "工作空间记忆统计在途锁释放失败: workspace_id=%s",
+                    workspace_id,
+                )

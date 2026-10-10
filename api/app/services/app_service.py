@@ -37,6 +37,7 @@ from app.models import (
     Workspace,
 )
 from app.models.app_model import AppStatus, AppType
+from app.plugins import get_plugin
 from app.repositories.app_repository import get_apps_by_id, AppRepository
 from app.repositories.workflow_repository import WorkflowConfigRepository
 from app.schemas import app_schema
@@ -314,7 +315,9 @@ class AppService:
                 "多智能体配置未激活，无法运行",
                 BizCode.AGENT_CONFIG_MISSING
             )
-        if multi_agent_config.orchestration_mode == "supervisor":
+        # S9：两个"主管类"模式都必须有可用主模型/主 Agent——
+        # supervisor 用于路由与整合，supervisor_loop 用于驱动主管 ReAct 引擎
+        if multi_agent_config.orchestration_mode in ("supervisor", "supervisor_loop"):
             if not multi_agent_config.default_model_config_id:
                 # # 2. 检查主 Agent 配置
                 if not multi_agent_config.master_agent_id:
@@ -375,18 +378,12 @@ class AppService:
                     BizCode.AGENT_CONFIG_MISSING
                 )
 
-            # 转换为 UUID
-            try:
-                from uuid import UUID
-                agent_uuid = UUID(agent_id) if isinstance(agent_id, str) else agent_id
-            except (ValueError, TypeError):
-                raise BusinessException(
-                    f"子 Agent #{idx + 1} 的 agent_id 格式无效: {agent_id}",
-                    BizCode.INVALID_PARAMETER
-                )
+            # 按版本策略解析出有效 release（agent_id 新形态=应用 ID，旧形态=release ID，由解析层判别）
+            from app.services.multi_agent_release_resolver import resolve_effective_release_id
+            effective_release_id = resolve_effective_release_id(self.db, sub_agent_data, strict=False)
 
             # 检查子 Agent 是否存在
-            sub_agent_release = self.db.get(AppRelease, agent_uuid)
+            sub_agent_release = self.db.get(AppRelease, effective_release_id)
             if not sub_agent_release:
                 raise BusinessException(
                     f"子 Agent 配置不存在: {agent_id} ({sub_agent_data.get('name', '未命名')})",
@@ -576,16 +573,91 @@ class AppService:
         max_ver = self.db.execute(stmt).scalar()
         return 1 if max_ver is None else int(max_ver) + 1
 
-    def _convert_to_schema(
+    # 企业版本体模块注册的同步门面（社区版不存在）
+    ONTOLOGY_BINDING_PLUGIN = "memory.ontology_binding"
+
+    def _load_ontology_map(
+            self,
+            app_ids: List[uuid.UUID]
+    ) -> Optional[Dict[uuid.UUID, dict]]:
+        """批量取应用当前生效本体（ontology 子对象）。
+
+        Returns:
+            - 社区版（无本体模块）：None，调用方把 ontology 置为 null
+            - 企业版：{app_id: ontology dict}，未绑定的应用为系统默认本体兜底块
+            聚合失败时记错误日志并降级为 None，不影响列表主流程。
+        """
+        binder = get_plugin(self.ONTOLOGY_BINDING_PLUGIN)
+        if binder is None:
+            return None
+        if not app_ids:
+            return {}
+        try:
+            # 包一层 SAVEPOINT：聚合 SQL 失败时只回滚到保存点，外层事务保持可用，
+            # 否则 PG 事务进入 aborted 状态，后续 _convert_to_schema 的查询会连带报错。
+            with self.db.begin_nested():
+                return binder.load_app_ontology_batch(self.db, app_ids)
+        except Exception as e:
+            logger.error("应用本体聚合失败", extra={"error": str(e)}, exc_info=True)
+            return None
+
+    def to_schemas_with_ontology(
+            self,
+            apps: List[App],
+            current_workspace_id: uuid.UUID
+    ) -> List[app_schema.App]:
+        """批量将 App 转为 Schema，并补齐当前生效本体（整批一次聚合，避免 N+1）。
+
+        社区版或本体聚合失败时，ontology 为 None。
+        """
+        ontology_map = self._load_ontology_map([a.id for a in apps])
+        return [
+            self._convert_to_schema(
+                a,
+                current_workspace_id,
+                ontology_map.get(a.id) if ontology_map is not None else None
+            )
+            for a in apps
+        ]
+
+    def to_schema_with_ontology(
             self,
             app: App,
             current_workspace_id: uuid.UUID
+    ) -> app_schema.App:
+        """单个 App 转 Schema，并补齐当前生效本体。"""
+        return self.to_schemas_with_ontology([app], current_workspace_id)[0]
+
+    def share_schemas_with_ontology(
+            self,
+            shares: List["AppShare"]
+    ) -> List[app_schema.AppShare]:
+        """分享记录转 Schema，并按源应用补齐当前生效本体。
+
+        同一源应用分享给多个空间时只聚合一次；社区版或聚合失败时 ontology 为 None。
+        """
+        ontology_map = self._load_ontology_map(list({s.source_app_id for s in shares}))
+        items = []
+        for s in shares:
+            item = app_schema.AppShare.model_validate(s)
+            if ontology_map is not None:
+                ontology = ontology_map.get(s.source_app_id)
+                item.ontology = app_schema.AppOntologyInfo(**ontology) if ontology else None
+            items.append(item)
+        return items
+
+    def _convert_to_schema(
+            self,
+            app: App,
+            current_workspace_id: uuid.UUID,
+            ontology: Optional[dict] = None
     ) -> app_schema.App:
         """将 App 模型转换为 Schema，并设置 is_shared 字段
 
         Args:
             app: App 模型实例
             current_workspace_id: 当前工作空间ID
+            ontology: 应用当前生效本体（由 _load_ontology_map 批量取得），社区版为 None
 
         Returns:
             app_schema.App: 应用 Schema
@@ -650,6 +722,7 @@ class AppService:
             "shared_by": shared_by,
             "shared_by_name": shared_by_name,
             "shared_at": shared_at,
+            "ontology": ontology,
             "created_at": app.created_at,
             "updated_at": app.updated_at
         }
@@ -755,7 +828,8 @@ class AppService:
             *,
             user_id: uuid.UUID,
             workspace_id: uuid.UUID,
-            data: app_schema.AppCreate
+            data: app_schema.AppCreate,
+            tenant_id: Optional[uuid.UUID] = None
     ) -> App:
         """创建应用
 
@@ -763,6 +837,7 @@ class AppService:
             user_id: 创建者用户ID
             workspace_id: 工作空间ID
             data: 应用创建数据
+            tenant_id: 当前用户租户ID（绑定本体时做跨租户校验）
 
         Returns:
             App: 创建的应用对象
@@ -813,16 +888,45 @@ class AppService:
                 wf_data = WorkflowConfigCreate(**data.workflow_config) if isinstance(data.workflow_config, dict) else data.workflow_config
                 self._create_workflow_config(app.id, wf_data, now)
 
+            # 可选绑定本体：与应用、配置同一事务提交，任一步失败整体回滚
+            if data.ontology_id:
+                self._bind_ontology_in_session(app.id, tenant_id, data.ontology_id)
+
             self.db.commit()
             self.db.refresh(app)
 
             logger.info("应用创建成功", extra={"app_id": str(app.id), "app_name": app.name})
             return app
 
+        except BusinessException:
+            # 业务校验错误（如本体不存在 4000 / 跨租户 3001）保留原业务码，不包装成 10001
+            self.db.rollback()
+            raise
         except Exception as e:
             self.db.rollback()
             logger.error("应用创建失败", extra={"app_name": data.name, "error": str(e)})
             raise BusinessException(f"应用创建失败: {str(e)}", BizCode.INTERNAL_ERROR, cause=e)
+
+    def _bind_ontology_in_session(
+            self,
+            app_id: uuid.UUID,
+            tenant_id: Optional[uuid.UUID],
+            ontology_id: uuid.UUID
+    ) -> None:
+        """在当前事务内写入应用-本体绑定（不 commit）。
+
+        社区版无本体模块时忽略入参并记 warning。
+        """
+        binder = get_plugin(self.ONTOLOGY_BINDING_PLUGIN)
+        if binder is None:
+            logger.warning(
+                "未加载本体模块，忽略 ontology_id",
+                extra={"app_id": str(app_id), "ontology_id": str(ontology_id)}
+            )
+            return
+        if tenant_id is None:
+            raise BusinessException("缺少租户信息，无法绑定本体", BizCode.INVALID_PARAMETER)
+        binder.bind_in_session(self.db, app_id, tenant_id, ontology_id)
 
     def update_app(
             self,
@@ -1258,6 +1362,8 @@ class AppService:
             shared_only: bool = False,
             page: int = 1,
             pagesize: int = 10,
+            ontology_status: str = "all",
+            field_search: Optional[str] = None,
     ) -> Tuple[List[App], int]:
         """列出工作空间中的应用（分页）
 
@@ -1275,6 +1381,8 @@ class AppService:
             include_shared: 是否包含分享的应用
             page: 页码（从1开始）
             pagesize: 每页数量
+            ontology_status: 本体状态筛选 all | bound（已关联本体）| default（仅默认本体）
+            field_search: 标签模式搜索，模糊匹配绑定本体的场景自定义字段展示名
 
         Returns:
             Tuple[List[App], int]: (应用列表, 总数)
@@ -1315,6 +1423,17 @@ class AppService:
                     )
                 )
             )
+        # 本体筛选：条件由企业版本体模块提供（涉及 premium 表），社区版忽略，没有插件 则本体相关参数失效
+        field_search = field_search.strip() if field_search else None
+        if (ontology_status and ontology_status != "all") or field_search:
+            binder = get_plugin(self.ONTOLOGY_BINDING_PLUGIN)
+            if binder is None:
+                logger.warning(
+                    "未加载本体模块，忽略本体筛选参数",
+                    extra={"ontology_status": ontology_status, "field_search": field_search}
+                )
+            else:
+                filters.extend(binder.build_list_filters(ontology_status, field_search))
         # shared_only implies include_shared; enforce to avoid confusing API usage
         if shared_only:
             include_shared = True
@@ -1386,10 +1505,17 @@ class AppService:
         except ValueError:
             return []
 
-        # 查询本工作空间的应用 + 分享给本工作空间的应用
+        # 查询本工作空间的应用 + 分享给本工作空间的应用（与 list_apps 的 include_shared 口径一致）
+        shared_app_ids_stmt = (
+            select(AppShare.source_app_id)
+            .where(AppShare.target_workspace_id == workspace_id, AppShare.is_active.is_(True))
+        )
         stmt = select(App).where(
             App.id.in_(uuid_ids),
-            App.workspace_id == workspace_id
+            or_(
+                App.workspace_id == workspace_id,
+                App.id.in_(shared_app_ids_stmt)
+            )
         )
 
         return list(self.db.scalars(stmt).all())
@@ -2024,6 +2150,39 @@ class AppService:
 
         return pinned_nodes
 
+    def _pin_multi_agent_sub_agents(
+            self,
+            sub_agents: list[dict[str, Any]] | None,
+    ) -> list[dict[str, Any]]:
+        """集群发布时把子 Agent 钉死到具体 AppRelease。
+
+        - current（跟随最新）：解析成子 Agent 应用此刻的发布版本，写入 release_id；
+        - pinned / 存量无 release_policy：沿用已固定的版本；
+        - 快照统一为新形态：agent_id=子 Agent 应用 ID，release_policy=pinned，release_id=具体版本，
+          已发布集群不会随子 Agent 再发布而变化。
+        解析失败（子 Agent 无可用发布版本）直接抛错，阻止发布。
+        """
+        from app.services.multi_agent_release_resolver import (
+            POLICY_PINNED,
+            resolve_effective_release_id,
+        )
+
+        pinned: list[dict[str, Any]] = []
+        for entry in sub_agents or []:
+            item = dict(entry)
+            effective_id = resolve_effective_release_id(self.db, item, strict=True)
+            release = self.db.get(AppRelease, effective_id)
+            if release is None:
+                raise BusinessException(
+                    f"子 Agent「{item.get('name') or item.get('agent_id')}」的发布版本不存在",
+                    BizCode.RELEASE_NOT_FOUND,
+                )
+            item["agent_id"] = str(release.app_id)
+            item["release_policy"] = POLICY_PINNED
+            item["release_id"] = str(effective_id)
+            pinned.append(item)
+        return pinned
+
     def _assert_publishable_models(
             self,
             config: dict[str, Any] | None,
@@ -2126,14 +2285,20 @@ class AppService:
             default_model_config_id = multi_agent_cfg.default_model_config_id
 
             # 4. 构建配置快照
+            # 子 Agent 版本在发布时钉死：current（跟随最新）解析成当前发布版本，
+            # 快照里一律是 pinned，已发布集群不会因子 Agent 再发布而悄悄变化。
+            pinned_sub_agents = self._pin_multi_agent_sub_agents(multi_agent_cfg.sub_agents)
 
             config = {
                 "model_parameters": model_parameters_to_dict(multi_agent_cfg.model_parameters),
                 "master_agent_id": str(multi_agent_cfg.master_agent_id),
                 "orchestration_mode": multi_agent_cfg.orchestration_mode,
-                "sub_agents": multi_agent_cfg.sub_agents,
+                "sub_agents": pinned_sub_agents,
                 "routing_rules": multi_agent_cfg.routing_rules,
                 "execution_config": multi_agent_cfg.execution_config,
+                # 主管配置（提示词/工具/记忆/知识库/集群变量）必须随快照发布，
+                # 否则已发布集群的读取端（multi_agent_config_4_app_release 等）永远拿到 None
+                "supervisor_config": multi_agent_cfg.supervisor_config,
                 "aggregation_strategy": multi_agent_cfg.aggregation_strategy,
             }
 
@@ -2762,10 +2927,11 @@ class AppService:
 # ==================== 向后兼容的函数接口 ====================
 # 保留函数接口以兼容现有代码，但内部使用服务类
 
-def create_app(db: Session, *, user_id: uuid.UUID, workspace_id: uuid.UUID, data: app_schema.AppCreate) -> App:
+def create_app(db: Session, *, user_id: uuid.UUID, workspace_id: uuid.UUID, data: app_schema.AppCreate,
+               tenant_id: Optional[uuid.UUID] = None) -> App:
     """创建应用（向后兼容接口）"""
     service = AppService(db)
-    return service.create_app(user_id=user_id, workspace_id=workspace_id, data=data)
+    return service.create_app(user_id=user_id, workspace_id=workspace_id, data=data, tenant_id=tenant_id)
 
 
 def update_app(db: Session, *, app_id: uuid.UUID, data: app_schema.AppUpdate,
@@ -2859,6 +3025,8 @@ def list_apps(
         shared_only: bool = False,
         page: int = 1,
         pagesize: int = 10,
+        ontology_status: str = "all",
+        field_search: Optional[str] = None,
 ) -> Tuple[List[App], int]:
     """列出应用（向后兼容接口）"""
     service = AppService(db)
@@ -2873,6 +3041,8 @@ def list_apps(
         shared_only=shared_only,
         page=page,
         pagesize=pagesize,
+        ontology_status=ontology_status,
+        field_search=field_search,
     )
 
 

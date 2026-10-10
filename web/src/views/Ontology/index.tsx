@@ -16,8 +16,6 @@ const MemoryEngine: FC = () => {
   const setCustomBreadcrumbs = useMenu(state => state.setCustomBreadcrumbs);
 
   useEffect(() => {
-    if (!scene) return;
-
     const createBreadcrumb = (id: number, i18nKey: string, onClick?: MenuItem['onClick']): MenuItem => ({
       id,
       parent: 0,
@@ -32,17 +30,21 @@ const MemoryEngine: FC = () => {
       onClick,
     });
 
-    setCustomBreadcrumbs([
-      createBreadcrumb(1, 'menu.ontology', () => {
-        setDefaultActiveTab('ontology');
-        setScene(undefined);
-      }),
-      createBreadcrumb(2, 'menu.ontologySceneTypes', () => {
-        setDefaultActiveTab('scene');
-        setScene(undefined);
-      }),
-      createBreadcrumb(3, 'menu.ontologyConfigureScene'),
-    ], 'ontology-detail');
+    const breadcrumbs = scene
+      ? [
+          createBreadcrumb(1, 'menu.ontology', () => {
+            setDefaultActiveTab('ontology');
+            setScene(undefined);
+          }),
+          createBreadcrumb(2, 'menu.ontologySceneTypes', () => {
+            setDefaultActiveTab('scene');
+            setScene(undefined);
+          }),
+          createBreadcrumb(3, 'menu.ontologyConfigureScene'),
+        ]
+      : [createBreadcrumb(1, 'menu.ontology')];
+
+    setCustomBreadcrumbs(breadcrumbs, 'ontology-detail');
 
     return () => setCustomBreadcrumbs([], 'ontology-detail');
   }, [scene, setCustomBreadcrumbs]);

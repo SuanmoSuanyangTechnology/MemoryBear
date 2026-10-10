@@ -196,6 +196,11 @@ def process_evidence_document(
 ) -> dict[str, Any]:
     knowledge_id = _canonical_uuid(knowledge_id, "knowledge id")
     document_id = _canonical_uuid(document_id, "document id")
+    state = load_graph_task_state(runtime, knowledge_id, document_id)
+    if state.pipeline is not GraphPipeline.EVIDENCE:
+        return {"status": "skipped", "reason": "pipeline_changed"}
+    if not state.graph_enabled:
+        return {"status": "skipped", "reason": "graph_disabled"}
     with create_knowledge_graph_lock(
         runtime,
         knowledge_id,
@@ -236,6 +241,11 @@ def process_evidence_rebuild(
     on_stage: GraphStageCallback | None = None,
 ) -> dict[str, Any]:
     knowledge_id = _canonical_uuid(knowledge_id, "knowledge id")
+    state = load_graph_task_state(runtime, knowledge_id)
+    if state.pipeline is not GraphPipeline.EVIDENCE:
+        return {"status": "skipped", "reason": "pipeline_changed"}
+    if not state.graph_enabled:
+        return {"status": "skipped", "reason": "graph_disabled"}
     with create_knowledge_graph_lock(
         runtime,
         knowledge_id,
@@ -273,6 +283,9 @@ def process_clear_graph(
     on_stage: GraphStageCallback | None = None,
 ) -> dict[str, Any]:
     knowledge_id = _canonical_uuid(knowledge_id, "knowledge id")
+    state = load_graph_task_state(runtime, knowledge_id)
+    if state.graph_enabled and not force:
+        return {"status": "skipped", "reason": "graph_reenabled"}
     with create_knowledge_graph_lock(
         runtime,
         knowledge_id,

@@ -106,6 +106,7 @@ celery_app.conf.update(
         # Fast Write tasks → memory_fast_tasks queue (threads worker，独立队列，避免与普通写入互相阻塞)
         'app.core.memory.fast_write_message': {'queue': 'memory_fast_tasks'},
         'app.core.memory.generate_scene_summary': {'queue': 'memory_heavy_tasks'},
+        'app.core.memory.run_scene_community_incremental': {'queue': 'memory_heavy_tasks'},
         'app.tasks.scan_scene_summary_idle': {'queue': 'periodic_tasks'},
 
         # Document tasks → document_tasks queue (prefork worker)
@@ -157,6 +158,8 @@ celery_app.conf.update(
         'app.tasks.do_soft_delete_end_users': {'queue': 'memory_heavy_tasks'},
         # 'app.tasks.run_forgetting_cycle_task': {'queue': 'memory_heavy_tasks'},# NOTE：已废弃，保留路由防 unregistered
         'app.tasks.write_all_workspaces_memory_task': {'queue': 'memory_heavy_tasks'}, #NOTE：定时任务，记忆增量统计
+        'app.tasks.scan_workspace_statistics_snapshots': {'queue': 'periodic_tasks'},
+        'app.tasks.do_workspace_statistics_snapshot': {'queue': 'memory_heavy_tasks'},
         'app.tasks.write_total_memory_task': {'queue': 'memory_heavy_tasks'},  # NOTE：单 workspace 记忆增量统计
         'app.tasks.scan_implicit_emotions_storage': {'queue': 'periodic_tasks'},  # NOTE：扫描器，枚举+派发
         'app.tasks.do_implicit_emotions_for_user': {'queue': 'memory_heavy_tasks'},  # NOTE：单用户隐性记忆+情绪建议
@@ -167,6 +170,10 @@ celery_app.conf.update(
         'app.tasks.init_interest_distribution_for_users': {'queue': 'memory_heavy_tasks'},
         'app.tasks.init_community_clustering_for_users': {'queue': 'memory_heavy_tasks'},
         'app.tasks.run_incremental_clustering': {'queue': 'memory_heavy_tasks'},
+        # 存量记忆向量重算：驱动+单用户子任务都在 memory_heavy，对账扫描在 periodic
+        'app.tasks.run_reembed_job': {'queue': 'memory_heavy_tasks'},
+        'app.tasks.do_reembed_end_user': {'queue': 'memory_heavy_tasks'},
+        'app.tasks.scan_reembed_jobs': {'queue': 'periodic_tasks'},
     },
 )
 
@@ -236,6 +243,10 @@ memory_increment_schedule = crontab(hour=settings.MEMORY_INCREMENT_HOUR, minute=
 memory_cache_regeneration_schedule = crontab(
     hour=settings.MEMORY_CACHE_REGENERATION_HOUR,
     minute=settings.MEMORY_CACHE_REGENERATION_MINUTE,
+)
+workspace_statistics_scan_schedule = crontab(
+    hour=settings.WORKSPACE_STATISTICS_SCAN_HOUR,
+    minute=settings.WORKSPACE_STATISTICS_SCAN_MINUTE,
 )
 user_tag_refresh_schedule = crontab(
     hour=settings.USER_TAG_REFRESH_HOUR,
@@ -311,6 +322,11 @@ beat_schedule_config = {
         "schedule": memory_increment_schedule,
         "args": (),
     },
+    "scan-workspace-statistics-snapshots": {
+        "task": "app.tasks.scan_workspace_statistics_snapshots",
+        "schedule": workspace_statistics_scan_schedule,
+        "args": (),
+    },
     "scan-implicit-emotions-storage": {
         "task": "app.tasks.scan_implicit_emotions_storage",
         "schedule": implicit_emotions_update_schedule,
@@ -364,6 +380,13 @@ beat_schedule_config = {
         "task": "app.tasks.scan_emotion_stats",
         "schedule": crontab(hour=17, minute=0),
         "args": (),
+    },
+    "scan-reembed-jobs": {
+        # 重算对账：终结已跑完的 job，并重新派发扇出丢失/worker 已死的 job。
+        # 周期需短于 JOB_HEARTBEAT_TTL_SECONDS，否则死掉的 job 会被判定为"仍在推进"。
+        "task": "app.tasks.scan_reembed_jobs",
+        "schedule": timedelta(minutes=5),
+        "options": {"queue": "periodic_tasks", "expires": 270},
     },
 }
 

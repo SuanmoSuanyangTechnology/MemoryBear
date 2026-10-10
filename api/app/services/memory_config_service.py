@@ -394,6 +394,22 @@ def _build_memory_config(
         scene_idle_timeout_seconds=int(memory_config_row.scene_idle_timeout_seconds if memory_config_row.scene_idle_timeout_seconds is not None else 86400),
         scene_min_chars_to_summary=int(memory_config_row.scene_min_chars_to_summary if memory_config_row.scene_min_chars_to_summary is not None else 0),
         time_decay_penalty=float(memory_config_row.time_decay_penalty if memory_config_row.time_decay_penalty is not None else 0.1),
+        # Pipeline config: SceneCommunity
+        batch_trigger_count=int(memory_config_row.batch_trigger_count if memory_config_row.batch_trigger_count is not None else 20),
+        candidate_community_limit=int(memory_config_row.candidate_community_limit if memory_config_row.candidate_community_limit is not None else 3),
+        compare_all_same_category_communities=bool(memory_config_row.compare_all_same_category_communities),
+        rebuild_new_scene_community_count_enabled=(
+            bool(memory_config_row.rebuild_new_scene_community_count_enabled)
+            if memory_config_row.rebuild_new_scene_community_count_enabled is not None
+            else True
+        ),
+        rebuild_new_scene_community_count=int(memory_config_row.rebuild_new_scene_community_count if memory_config_row.rebuild_new_scene_community_count is not None else 50),
+        rebuild_interval_enabled=(
+            bool(memory_config_row.rebuild_interval_enabled)
+            if memory_config_row.rebuild_interval_enabled is not None
+            else True
+        ),
+        rebuild_interval_days=int(memory_config_row.rebuild_interval_days if memory_config_row.rebuild_interval_days is not None else 1),
         # Pipeline config: Emotion extraction
         emotion_enabled=bool(
             memory_config_row.emotion_enabled) if memory_config_row.emotion_enabled is not None else False,

@@ -23,7 +23,7 @@ Classes:
 
 import re
 from datetime import datetime, timezone
-from typing import Any, List, Literal, Optional
+from typing import List, Literal, Optional
 from uuid import uuid4
 
 from app.core.memory.utils.alias_utils import validate_aliases
@@ -251,6 +251,7 @@ class SceneSummaryNode(BaseModel):
     end_user_id: str
     conversation_id: str | None = None
     content: str
+    topic_scope: str | None = None
     summary_embedding: List[float]
     source_message_ids: List[str]
     start_message_id: str
@@ -260,6 +261,32 @@ class SceneSummaryNode(BaseModel):
     turn_count: int
     close_reason: str
     config_id: str | None = None
+    community_eligibility: Literal["ELIGIBLE", "NOT_ELIGIBLE"]
+    community_category_l1: str | None = None
+    scene_community_id: str | None = None
+    community_status: Literal["INACTIVE", "ACTIVE"] | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class SceneCommunityNode(BaseModel):
+    """A bounded community of SceneSummary nodes for one end user."""
+
+    id: str = Field(min_length=1)
+    end_user_id: str = Field(min_length=1)
+    category_l1: str = Field(min_length=1)
+    topic_name: str | None = None
+    topic_scope: str | None = None
+    boundary_instance_anchor: str | None = None
+    boundary_lifecycle_anchor: str | None = None
+    boundary_primary_matter: str | None = None
+    boundary_include_rule: str | None = None
+    boundary_exclude_rule: str | None = None
+    summary: str = Field(min_length=1)
+    summary_embedding: List[float] = Field(min_length=1)
+    member_count: int = Field(ge=1)
+    started_at: datetime
+    ended_at: datetime
     created_at: datetime
     updated_at: datetime
 
@@ -759,8 +786,8 @@ class PreferenceNode(BaseModel):
     preference_text: list[str]
     preference_text_all: str | None = None
     status: Literal["active", "inactive"] = "active"
-    created_at: Any | None = None
-    updated_at: Any | None = None
+    created_at: datetime
+    updated_at: datetime
 
     @model_validator(mode="after")
     def validate_aligned_items(self):

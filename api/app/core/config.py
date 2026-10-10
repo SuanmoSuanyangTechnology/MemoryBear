@@ -110,6 +110,18 @@ class Settings:
     REDIS_PASSWORD: str = os.getenv("REDIS_PASSWORD", "")
     REDIS_POOL_SIZE: int = int(os.getenv("REDIS_POOL_SIZE", "100"))
 
+    # LangGraph checkpoint 外置存储（P0-2）
+    # 协作模式（handoffs）与 workflow 引擎的图状态后端。默认 redis：
+    # 多 worker / 重启后同一会话的 handoff 历史与中断恢复点不丢，TTL 自动回收。
+    # 设为 memory 可退回进程内 InMemorySaver（单进程调试用）。
+    LANGGRAPH_CHECKPOINT_BACKEND: str = os.getenv("LANGGRAPH_CHECKPOINT_BACKEND", "redis")
+    # checkpoint 复用 Redis 实例，默认与 REDIS_DB 同库；与业务缓存的隔离靠 key 前缀
+    # （cluster: / workflow:）。需要物理隔离时显式设置本变量指向独立 DB。
+    LANGGRAPH_CHECKPOINT_REDIS_DB: int = int(os.getenv("LANGGRAPH_CHECKPOINT_REDIS_DB", os.getenv("REDIS_DB", "1")))
+    LANGGRAPH_CHECKPOINT_POOL_SIZE: int = int(os.getenv("LANGGRAPH_CHECKPOINT_POOL_SIZE", "20"))
+    # 滑动 TTL（秒），默认 7 天：每次写入刷新，会话静默后自动回收，取代 Cron prune。
+    LANGGRAPH_CHECKPOINT_TTL: int = int(os.getenv("LANGGRAPH_CHECKPOINT_TTL", str(7 * 24 * 3600)))
+
     # ElasticSearch configuration
     ELASTICSEARCH_HOST: str = os.getenv("ELASTICSEARCH_HOST", "https://127.0.0.1")
     ELASTICSEARCH_PORT: int = int(os.getenv("ELASTICSEARCH_PORT", "9200"))
@@ -486,6 +498,13 @@ class Settings:
     MEMORY_CACHE_REGENERATION_MINUTE: int = TypeAdapter(
         Annotated[int, Field(ge=0, le=59, description="memory cache regeneration cron minute [0, 59]")]
     ).validate_python(int(os.getenv("MEMORY_CACHE_REGENERATION_MINUTE", "0")))
+    # 工作空间记忆统计快照扫描时间（UTC，默认 17:00 = 北京时间次日 01:00）
+    WORKSPACE_STATISTICS_SCAN_HOUR: int = TypeAdapter(
+        Annotated[int, Field(ge=0, le=23, description="workspace statistics scan cron hour [0, 23]")]
+    ).validate_python(int(os.getenv("WORKSPACE_STATISTICS_SCAN_HOUR", "17")))
+    WORKSPACE_STATISTICS_SCAN_MINUTE: int = TypeAdapter(
+        Annotated[int, Field(ge=0, le=59, description="workspace statistics scan cron minute [0, 59]")]
+    ).validate_python(int(os.getenv("WORKSPACE_STATISTICS_SCAN_MINUTE", "0")))
     # 用户名片 Tag 定时刷新时间（UTC，默认 18:30，北京时间次日 02:30）
     USER_TAG_REFRESH_HOUR: int = TypeAdapter(
         Annotated[int, Field(ge=0, le=23, description="user tag refresh cron hour [0, 23]")]
