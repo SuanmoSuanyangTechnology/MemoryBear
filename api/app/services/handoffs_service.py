@@ -925,10 +925,17 @@ class HandoffsService:
         
         # 提取响应
         # P0-2：checkpoint 外置后 result["messages"] 含跨轮历史，取"第一条 AIMessage"
-        # 会拿到上一轮的回复。改为从尾部倒序找——本轮产出必然在末尾。
+        # 会拿到上一轮的回复。改为从尾部倒序找，且只在本轮入参的 HumanMessage 之后找——
+        # 本轮若没有产出带内容的 AIMessage，宁可返回空，也不回退成上一轮的回复。
         response_content = ""
         total_tokens = 0
-        for msg in reversed(result.get("messages", [])):
+        all_messages = result.get("messages", [])
+        turn_start = 0
+        for i in range(len(all_messages) - 1, -1, -1):
+            if isinstance(all_messages[i], HumanMessage):
+                turn_start = i + 1
+                break
+        for msg in reversed(all_messages[turn_start:]):
             if isinstance(msg, AIMessage) and msg.content:
                 response_content = msg.content
                 response_meta = msg.response_metadata if hasattr(msg, 'response_metadata') else None
