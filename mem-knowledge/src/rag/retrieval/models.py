@@ -6,6 +6,8 @@ import uuid
 from dataclasses import dataclass, field, replace
 from typing import Any
 
+from redbear_model.contracts import ModelProfile
+
 from ...api.schemas.chunk import RetrieveType
 from ...api.schemas.rerank import RerankMode
 from ..knowledge_graph.config import GraphPipeline
@@ -14,11 +16,30 @@ from ..models.chunk import DocumentChunk
 
 @dataclass(frozen=True)
 class ModelRuntimeSnapshot:
+    """非解密模型视图：调用只带配置 id 与租户，凭据与选路在模型服务侧（§2.2）。
+
+    字段拼写对齐契约快照（``model_config_id``）便于 ``ref_from_view`` 双用；
+    ``profile`` 供能力判定（视图谓词）消费。
+    """
+
+    model_config_id: uuid.UUID
+    tenant_id: uuid.UUID
     model_name: str
     provider: str
-    api_key: str = field(repr=False)
-    api_base: str | None = None
-    resolved: Any = field(default=None, repr=False, compare=False)
+    profile: ModelProfile = field(repr=False)
+
+    @classmethod
+    def from_view(cls, view: Any) -> ModelRuntimeSnapshot:
+        """``ModelConfigSnapshot`` → 快照（字段名对齐；provider 取枚举值）。"""
+
+        provider = getattr(view, "provider", "")
+        return cls(
+            model_config_id=view.model_config_id,
+            tenant_id=view.tenant_id,
+            model_name=view.name,
+            provider=getattr(provider, "value", provider),
+            profile=view.profile,
+        )
 
 
 @dataclass(frozen=True)

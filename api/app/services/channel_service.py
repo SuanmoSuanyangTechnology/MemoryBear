@@ -17,6 +17,7 @@ from redbear_model.crypto import AESGCMEnvCipher, credential_sha256
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.core.utils.datetime_utils import to_timestamp_ms
 from app.models.models_model import ModelChannel
 from app.repositories.model_channel_repository import ModelChannelRepository
 from app.utils.redis_cache import invalidate_runtime_model_info_batch
@@ -50,8 +51,8 @@ def _aad(provider: str, tenant_id: uuid.UUID) -> str:
 
 def describe_channel(row: ModelChannel) -> dict:
     """渠道脱敏视图（时间毫秒）——详情/列表/删除影响面前置提示共用（纯函数，无查询）。"""
-    created_ms = int(row.created_at.timestamp() * 1000) if row.created_at else None
-    updated_ms = int(row.updated_at.timestamp() * 1000) if row.updated_at else None
+    created_ms = to_timestamp_ms(row.created_at)
+    updated_ms = to_timestamp_ms(row.updated_at)
     return {
         "id": str(row.id),
         "provider": row.provider,

@@ -23,6 +23,7 @@ from ..rag.knowledge_graph.config import (
 )
 from ..rag.knowledge_graph.lock import KnowledgeGraphLockBusy
 from ..runtime import get_worker_runtime
+from ..usage_context import bind_usage
 from .celery_app import celery_app
 from .observability import (
     BusinessOutcome,
@@ -558,6 +559,7 @@ def _graph_stage_callback(
     name="app.core.rag.tasks.sync_evidence_graph_document",
     max_retries=5,
 )
+@bind_usage("document", "document_id")
 def sync_evidence_graph_document(
     self: Any,
     knowledge_id: str,
@@ -595,6 +597,7 @@ def sync_evidence_graph_document(
     reject_on_worker_lost=False,
     track_started=False,
 )
+@bind_usage("kb", "knowledge_id")
 def rebuild_evidence_graph_knowledge(
     self: Any,
     knowledge_id: str,
@@ -608,6 +611,7 @@ def rebuild_evidence_graph_knowledge(
     name="app.core.rag.tasks.clear_all_knowledge_graph_data",
     max_retries=5,
 )
+@bind_usage("kb", "knowledge_id")
 def clear_all_knowledge_graph_data(
     self: Any,
     knowledge_id: str,

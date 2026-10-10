@@ -8,14 +8,9 @@ from dataclasses import dataclass, replace
 from typing import Any
 
 from redbear_model import (
-    ModelAccessDeniedError,
+    ModelConfigDeprecatedError,
+    ModelConfigInactiveError,
     ModelConfigNotFoundError,
-    ModelConfigSnapshot,
-    ModelProvider,
-    ResolvedModelConfig,
-    is_qwen3_vl_embedding,
-    is_qwen3_vl_reranker,
-    resolve_model_async,
 )
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -34,6 +29,10 @@ from ..api.schemas.knowledge_retrieval import KnowledgeRetrievalRequest
 from ..api.schemas.rerank import RerankMode, RerankWeights
 from ..error_mapping import map_model_error
 from ..errors import KnowledgeError
+from ..integrations.model.views import (
+    is_qwen3_vl_embedding_view,
+    is_qwen3_vl_rerank_view,
+)
 from ..models.owned import Knowledge, KnowledgeShare, PermissionType
 from ..rag.knowledge_graph.config import (
     GraphPipeline,
@@ -75,51 +74,12 @@ class _RetrievalPreparationWithModelError(RetrievalPreparation):
     request_reranker_error_code: str | None = None
 
 
-class _CachedConfigModelRegistry:
-    """Reuse the visibility snapshot when the shared resolver reads it again."""
-
-    def __init__(
-        self,
-        delegate: AsyncSQLModelRegistry,
-        config: ModelConfigSnapshot,
-    ) -> None:
-        self._delegate = delegate
-        self._config = config
-
-    async def get_model_config(
-        self,
-        model_config_id: uuid.UUID,
-        tenant_id: uuid.UUID,
-    ) -> ModelConfigSnapshot:
-        del model_config_id, tenant_id
-        return self._config
-
-    async def list_active_keys(self, model_config_id: uuid.UUID):
-        return await self._delegate.list_active_keys(model_config_id)
-
-    async def get_public_binding(
-        self,
-        tenant_id: uuid.UUID,
-        provider: ModelProvider,
-    ):
-        return await self._delegate.get_public_binding(tenant_id, provider)
-
-    async def record_key_usage(self, key_id: uuid.UUID) -> None:
-        await self._delegate.record_key_usage(key_id)
-
-
 def _supports_qwen3_vl_embedding(snapshot: ModelRuntimeSnapshot) -> bool:
-    return isinstance(snapshot.resolved, ResolvedModelConfig) and is_qwen3_vl_embedding(
-        snapshot.resolved
-    )
+    return is_qwen3_vl_embedding_view(snapshot)
 
 
 def _supports_qwen3_vl_rerank(snapshot: ModelRuntimeSnapshot | None) -> bool:
-    return (
-        snapshot is not None
-        and isinstance(snapshot.resolved, ResolvedModelConfig)
-        and is_qwen3_vl_reranker(snapshot.resolved)
-    )
+    return snapshot is not None and is_qwen3_vl_rerank_view(snapshot)
 
 
 def select_effective_reranker(
@@ -686,27 +646,22 @@ class KnowledgeRetrievalPreparation:
             config = await registry.get_model_config(model_id, tenant_id)
         except Exception as exc:
             raise map_model_error(exc) from exc
+        # 可见性已在 registry 本地过滤（None = 不存在或跨租户不可见，统一按 NotFound 出码）
         if config is None:
             exc = ModelConfigNotFoundError(model_id)
             raise map_model_error(exc) from exc
-        visibility_proven = config.tenant_id == tenant_id or config.is_public
-        if not visibility_proven:
-            exc = ModelAccessDeniedError(model_id, tenant_id)
-            raise map_model_error(exc) from exc
-        try:
-            resolved: ResolvedModelConfig = await resolve_model_async(
-                _CachedConfigModelRegistry(registry, config),
-                model_config_id=model_id,
-                tenant_id=tenant_id,
-            )
-        except Exception as exc:
+        if config.is_deprecated:
+            exc = ModelConfigDeprecatedError(model_id)
+            raise map_model_error(exc, visibility_proven=True) from exc
+        if not config.is_active:
+            exc = ModelConfigInactiveError(model_id)
             raise map_model_error(exc, visibility_proven=True) from exc
         return ModelRuntimeSnapshot(
-            model_name=resolved.model_name,
-            provider=resolved.provider.value,
-            api_key=resolved.api_key.get_secret_value(),
-            api_base=resolved.base_url,
-            resolved=resolved,
+            model_config_id=config.model_config_id,
+            tenant_id=config.tenant_id,
+            model_name=config.name,
+            provider=config.provider.value,
+            profile=config.profile,
         )
 
     @staticmethod
@@ -822,11 +777,10 @@ class KnowledgeRetrievalPreparation:
     @staticmethod
     def _embedding_space_key(
         snapshot: ModelRuntimeSnapshot,
-    ) -> tuple[str, str, str]:
+    ) -> tuple[str, str]:
         return (
             snapshot.provider.strip().lower(),
             snapshot.model_name.strip(),
-            (snapshot.api_base or "").rstrip("/"),
         )
 
     @classmethod

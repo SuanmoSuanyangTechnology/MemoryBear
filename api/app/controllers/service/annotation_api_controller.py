@@ -61,8 +61,7 @@ async def _generate_embedding(
     text: str,
     tenant_id: Optional[uuid.UUID],
 ):
-    """加载 Embedding 模型配置并生成向量。tenant_id 来自 API Key 认证的工作空间归属。"""
-    from app.core.models.base import RedBearModelConfig
+    """加载 Embedding 模型引用并生成向量。tenant_id 来自 API Key 认证的工作空间归属。"""
     from app.services.model_service import ModelApiKeyService
 
     if tenant_id is None:
@@ -72,14 +71,13 @@ async def _generate_embedding(
         )
         return None
 
-    api_key_obj = await ModelApiKeyService.get_available_api_key_async(
+    embedding_ref = await ModelApiKeyService.resolve_invoke_ref_async(
         db, model_config_id, tenant_id=tenant_id
     )
-    if not api_key_obj:
+    if not embedding_ref:
         return None
 
-    config = RedBearModelConfig.from_api_key(api_key_obj, timeout=60, max_retries=3)
-    return AnnotationService(db).generate_embedding(text, config)
+    return AnnotationService(db).generate_embedding(text, embedding_ref)
 
 
 @router.get("", summary="获取标注列表")

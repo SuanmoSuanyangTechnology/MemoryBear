@@ -6,6 +6,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.exceptions import BusinessException
 from app.core.rag.knowledge_graph.config import (
     GraphPipeline,
     GraphPipelineConfigError,
@@ -26,14 +27,13 @@ from app.core.rag.retrieval.models import (
 from app.core.rag.vdb.elasticsearch.elasticsearch_vector import ElasticSearchVectorIndexOps
 from app.db import get_async_db_context
 from app.models import knowledge_model, knowledgeshare_model
-from app.models.models_model import ModelConfig
 from app.repositories import knowledge_repository
 from app.schemas.chunk_schema import KnowledgeBaseConfig, RetrieveType
 from app.schemas.knowledge_metadata_schema import MetadataFilterMode
 from app.schemas.knowledge_retrieval_schema import KnowledgeRetrievalRequest
 from app.services import knowledge_service, knowledgeshare_service
 from app.services.knowledge_metadata_service import KnowledgeMetadataService
-from app.services.model_service import ModelApiKeyService
+from app.services.model_service import ModelConfigService
 
 logger = logging.getLogger(__name__)
 
@@ -523,20 +523,20 @@ class KnowledgeRetrievalPreparation:
         model_id: uuid.UUID | None,
         tenant_id: uuid.UUID | None,
     ) -> ModelRuntimeSnapshot | None:
+        """非解密快照（G4a）：经运行时视图构造，凭据与选路在模型服务。
+
+        模型缺失/弃用/跨租户按旧口径软降级为 None（调用方回退既有错误语义）。
+        """
         del cls
         if model_id is None:
             return None
-        model_config = await db.get(ModelConfig, model_id)
-        if not model_config:
+        try:
+            view = await ModelConfigService.get_runtime_model_view_async(
+                db, model_id, tenant_id=tenant_id
+            )
+        except BusinessException:
             return None
-        api_key = await ModelApiKeyService.get_available_api_key_async(
-            db,
-            model_id,
-            tenant_id=tenant_id,
-        )
-        if not api_key:
-            return None
-        return ModelRuntimeSnapshot.from_api_key(api_key, model_type=model_config.type)
+        return ModelRuntimeSnapshot.from_model_view(view)
 
     @classmethod
     async def _build_metadata_llm_snapshot(
@@ -620,14 +620,15 @@ class KnowledgeRetrievalPreparation:
 
         target_snapshots: list[GraphTargetSnapshot] = []
         for target, knowledge, pipeline in resolved_targets:
-            llm = await cls._snapshot_model_runtime(
-                db,
-                knowledge.llm_id,
-                tenant_id,
-            )
+            llm = await cls._snapshot_model_runtime(db, knowledge.llm_id, tenant_id)
+            embedding = target.embedding
             if not llm:
                 raise KnowledgeRetrievalConfigError(
                     f"No LLM api key found for knowledge {knowledge.id}",
+                )
+            if not embedding:
+                raise KnowledgeRetrievalConfigError(
+                    f"No embedding api key found for knowledge {knowledge.id}",
                 )
             target_snapshots.append(
                 GraphTargetSnapshot(
@@ -637,7 +638,7 @@ class KnowledgeRetrievalPreparation:
                     graph_index_name=f"graphrag_{target.workspace_id}",
                     pipeline=pipeline,
                     llm=llm,
-                    embedding=target.embedding,
+                    embedding=embedding,
                 )
             )
 

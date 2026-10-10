@@ -19,7 +19,7 @@ from app.core.logging_config import get_api_logger
 from app.core.rag.common import settings
 from app.core.rag.integrations.feishu.client import FeishuAPIClient
 from app.core.rag.integrations.yuque.client import YuqueAPIClient
-from app.core.rag.llm.chat_model import Base
+from app.core.rag.llm.invoke_legacy import InvokeLegacyChat
 from app.core.rag.knowledge_graph.config import (
     GraphPipeline,
     GraphPipelineConfigError,
@@ -67,6 +67,7 @@ from app.core.quota_stub import check_knowledge_capacity_quota
 from app.integrations.knowledge.call_profile import CallProfile
 from app.integrations.knowledge.contracts import KnowledgeRetrievalSource
 from app.integrations.knowledge.route_proxy import route_through_knowledge_service
+from app.integrations.model.invoke_backend import ref_from_model_info
 
 # Obtain a dedicated API logger
 api_logger = get_api_logger()
@@ -251,41 +252,28 @@ async def get_knowledge_graph_entity_types(
     api_logger.info(f"Obtain details of the knowledge graph: llm_id={llm_id}, username: {current_user.username}")
 
     try:
-        # 1. Check whether the model exists
+        # 1. 远端接缝：配置存在且启用（凭据缺失由模型服务在调用期响亮失败）
         api_logger.debug(f"Check whether the model exists: {llm_id}")
-        config = await ModelConfigService.get_model_by_id_async(db=db, model_id=llm_id)
-        if not config:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Model config does not exist",
-            )
-        api_key = await ModelApiKeyService.get_available_api_key_async(
+        invoke_ref = await ModelApiKeyService.resolve_invoke_ref_async(
             db,
             llm_id,
             tenant_id=current_user.tenant_id,
         )
-        if api_key is None or not api_key.api_key:
-            api_logger.warning(
-                "No available API key for graph entity type generation"
-                " llm_id=%s username=%s",
-                str(llm_id),
-                current_user.username,
+        if invoke_ref is None:
+            await ModelConfigService.raise_model_unavailable_async(
+                db,
+                llm_id,
+                tenant_id=current_user.tenant_id,
             )
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="No available API key for the selected model",
-            )
-        # 2. Prepare to configure chat_mdl information
-        chat_model = Base(
-            key=api_key.api_key,
-            model_name=api_key.model_name,
-            base_url=api_key.api_base
+        # 2. 非解密视图：模型名供远端适配器，凭据与选路在模型服务
+        view = await ModelConfigService.get_runtime_model_view_async(
+            db,
+            llm_id,
+            tenant_id=current_user.tenant_id,
         )
-        # response = graph_entity_types(chat_model, scenario)
+        chat_model = InvokeLegacyChat(ref_from_model_info(view), model_name=view.model_name)
         response = await asyncio.to_thread(graph_entity_types, chat_model, scenario)
         return success(data=response, msg="Successfully obtained knowledge graph entity types")
-    except HTTPException:
-        raise
     except Exception as e:
         api_logger.error(f"get knowledge graph entity types failed: llm_id={llm_id} - {str(e)}")
         raise

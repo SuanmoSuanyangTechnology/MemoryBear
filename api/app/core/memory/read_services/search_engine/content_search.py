@@ -55,7 +55,7 @@ from app.core.memory.storage.enums import MemoryNodeType, MemoryNodeLabel
 from app.core.memory.storage.models import StorageReadResult
 from app.core.memory.storage.models.dto import StorageItem
 from app.core.memory.storage.service import get_storage_service
-from app.core.models import RedBearEmbeddings, RedBearLLM, RedBearRerank
+from app.core.models import RedBearChatModel, RedBearEmbeddings, RedBearRerank
 from app.core.models.llm import StructResponse
 from app.db import get_async_db_context
 from app.integrations.knowledge.contracts import (
@@ -67,6 +67,7 @@ from app.integrations.knowledge.runtime import get_knowledge_retriever
 from app.models import Conversation, MemoryMessage
 from app.repositories import knowledge_repository
 from app.schemas.app_schema import FileInput, FileType, TransferMethod
+from app.schemas.model_schema import ModelInfo
 from app.schemas.chunk_schema import RetrieveType
 from app.schemas.knowledge_retrieval_schema import KnowledgeRetrievalRequest
 from app.utils.redis_cache import redis_cache
@@ -88,7 +89,7 @@ class Neo4jSearchService:
             self,
             ctx: MemoryContext,
             embedder: RedBearEmbeddings | None = None,
-            llm: RedBearLLM | None = None,
+            llm: RedBearChatModel | None = None,
             reranker: RedBearRerank | None = None,
             includes: list[MemoryNodeLabel] | None = None,
             on_error: Callable[[MemoryRetrievalBusinessError], None] | None = None,
@@ -105,7 +106,7 @@ class Neo4jSearchService:
         self.content_score_threshold = content_score_threshold
 
         self.embedder: RedBearEmbeddings | None = embedder
-        self.llm: RedBearLLM | None = llm
+        self.llm: RedBearChatModel | None = llm
         self.reranker: RedBearRerank | None = reranker
         self.on_error = on_error
         self.semantic_degraded = semantic_degraded
@@ -954,12 +955,14 @@ class Neo4jSearchService:
             self,
             query: str,
             perceptual_memories: list[Memory],
-            llm: RedBearLLM,
+            llm: RedBearChatModel,
+            model_view: ModelInfo,
     ) -> list[Memory]:
         """对 Perceptual 类型的记忆调用多模态模型解析实际文件内容。
 
         增强模型上下文，并单独保留公开展示文本（不改变 score / id / source）。
-        失败时保留原 summary，不中断主流程。
+        失败时保留原 summary，不中断主流程。``model_view`` 为非解密视图，
+        仅提供 provider / 模态门控（凭据在模型服务侧）。
         """
         enhanced = []
         for mem in perceptual_memories:
@@ -979,7 +982,7 @@ class Neo4jSearchService:
 
             try:
                 parsed = await self._call_multimodal_for_query(
-                    file_path, file_name, file_type, perceptual_type, query, llm,
+                    file_path, file_name, file_type, perceptual_type, query, llm, model_view,
                     on_error=self.on_error,
                 )
 
@@ -1010,7 +1013,8 @@ class Neo4jSearchService:
             file_type: str,
             perceptual_type: str | int,
             query: str,
-            llm: RedBearLLM,
+            llm: RedBearChatModel,
+            model_view: ModelInfo,
             on_error: Callable[[MemoryRetrievalBusinessError], None] | None = None,
     ) -> str:
         """调用多模态 LLM，让模型针对 query 解析文件内容。
@@ -1044,11 +1048,8 @@ class Neo4jSearchService:
             file_type=file_type or "",
         )
 
-        # 使用 MultimodalService 格式化文件内容
-        multimodal_svc = MultimodalService(
-            db=None,
-            api_config=llm.get_config(),
-        )
+        # 使用 MultimodalService 格式化文件内容（非解密视图，不再经 llm.get_config()）
+        multimodal_svc = MultimodalService(db=None, model_view=model_view)
         formatted = await multimodal_svc.process_files(
             files=[file_input],
             document_image_recognition=True,

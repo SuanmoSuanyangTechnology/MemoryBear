@@ -1,25 +1,27 @@
+import asyncio
 import uuid
 from typing import List, Optional
 
 from dotenv import load_dotenv
 from fastapi import APIRouter, Depends, File, Form, Query, UploadFile
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 from starlette.responses import StreamingResponse
 
 from app.core.error_codes import BizCode
 from app.core.logging_config import get_api_logger
-from app.core.rag.llm.cv_model import QWenCV
+from app.core.rag.llm.invoke_vision import InvokeVisionModel
 from app.core.response_utils import fail, success
-from app.db import get_db
+from app.db import get_async_db, get_db
 from app.dependencies import get_current_user
-from app.models import ModelApiKey
+from app.integrations.model.invoke_backend import ref_from_model_info
 from app.models.user_model import User
 from app.repositories.end_user_repository import get_end_user_by_id
 from app.schemas.memory_agent_schema import Write_UserInput
 from app.schemas.response_schema import ApiResponse
 from app.services.memory_agent_service import MemoryAgentService
 from app.services.memory_config_service import MemoryConfigService
-from app.services.model_service import ModelApiKeyService, ModelConfigService
+from app.services.model_service import ModelConfigService
 
 load_dotenv()
 api_logger = get_api_logger()
@@ -120,7 +122,7 @@ async def file_update(
         model_id: str = Form(..., description="模型ID"),
         metadata: Optional[str] = Form(None, description="文件元数据 (JSON格式)"),
         current_user: User = Depends(get_current_user),
-        db: Session = Depends(get_db),
+        db: AsyncSession = Depends(get_async_db),
 ):
     """
     文件上传接口 - 支持图片识别
@@ -134,12 +136,11 @@ async def file_update(
         文件处理结果
     """
     api_logger.info(f"File upload requested, file count: {len(files)}")
-    config = ModelConfigService.get_model_by_id(db=db, model_id=model_id)
-    apiConfig: ModelApiKey = ModelApiKeyService.get_available_api_key(
-        db, config.id, tenant_id=current_user.tenant_id
+    # 非解密视图 + 远端壳（G4a）：凭据与选路在模型服务，宿主只持视图（async 路由走 async 孪生）
+    model_view = await ModelConfigService.get_runtime_model_view_async(
+        db, uuid.UUID(model_id), tenant_id=current_user.tenant_id
     )
-    if not apiConfig:
-        return fail(BizCode.INVALID_PARAMETER, "模型配置缺少 API Key")
+    vision_model = InvokeVisionModel(ref_from_model_info(model_view), lang="Chinese")
     file_content = []
     try:
         for file in files:
@@ -147,13 +148,7 @@ async def file_update(
             content = await file.read()
 
             if file.content_type and file.content_type.startswith("image/"):
-                vision_model = QWenCV(
-                    key=apiConfig.api_key,
-                    model_name=apiConfig.model_name,
-                    lang="Chinese",
-                    base_url=apiConfig.api_base
-                )
-                description, token_count = vision_model.describe(content)
+                description, token_count = await asyncio.to_thread(vision_model.describe, content)
                 file_content.append(description)
                 api_logger.info(f"Image processed: {file.filename}, tokens: {token_count}")
             else:

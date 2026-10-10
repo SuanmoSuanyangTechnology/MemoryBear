@@ -11,13 +11,10 @@ from pydantic import SecretStr
 from .contracts import (
     ChannelSnapshot,
     ChannelSource,
-    LoadBalanceStrategy,
     ModelConfigSnapshot,
-    ModelKeySnapshot,
     ModelProfile,
     ModelProvider,
     ModelRuntimeOptions,
-    PublicModelBindingSnapshot,
     ResolvedModelConfig,
 )
 from .crypto import CredentialCipher
@@ -26,14 +23,9 @@ from .errors import (
     ModelAccessDeniedError,
     ModelConfigDeprecatedError,
     ModelConfigInactiveError,
-    ModelConfigNotFoundError,
-    ModelCredentialNotFoundError,
-    ModelUsageRecordError,
     NoAvailableChannelError,
-    PublicCredentialUnavailableError,
     SpeedbearChannelMissingError,
 )
-from .ports import AsyncModelRegistryRepository, ModelRegistryRepository
 from .runtime.flags import normalize_runtime_flags
 
 logger = logging.getLogger(__name__)
@@ -49,24 +41,6 @@ def _validate_config_access(
         raise ModelConfigInactiveError(config.model_config_id)
     if config.tenant_id != tenant_id and not config.is_public:
         raise ModelAccessDeniedError(config.model_config_id, tenant_id)
-
-
-def _select_key(
-    config: ModelConfigSnapshot,
-    keys: Sequence[ModelKeySnapshot],
-) -> ModelKeySnapshot:
-    active_keys = [key for key in keys if key.is_active]
-    if not active_keys:
-        raise ModelCredentialNotFoundError(config.model_config_id)
-    if config.load_balance_strategy is LoadBalanceStrategy.ROUND_ROBIN:
-        return min(
-            active_keys,
-            key=lambda key: (
-                key.usage_count,
-                key.last_used_at_ms if key.last_used_at_ms is not None else -1,
-            ),
-        )
-    return active_keys[0]
 
 
 def _runtime_flags(
@@ -119,145 +93,7 @@ def _build_resolved(
     )
 
 
-def _profile_with_key_facts(
-    config: ModelConfigSnapshot,
-    key: ModelKeySnapshot,
-) -> ModelProfile:
-    """v1 key 侧能力事实（旧表遗留）覆盖 config：key 无事实时恒复用 config.profile。"""
-    if not key.capabilities and not key.is_omni:
-        return config.profile
-    capabilities, is_omni = config.profile.legacy_capability_view(config.provider)
-    return ModelProfile.from_legacy_fields(
-        model_id=config.profile.model_id,
-        tenant_id=config.profile.tenant_id,
-        type=config.profile.type,
-        provider=key.provider,
-        capabilities=key.capabilities or capabilities,
-        is_omni=key.is_omni or is_omni,
-        members=config.profile.members,
-    )
-
-
-def _build_from_key(
-    config: ModelConfigSnapshot,
-    key: ModelKeySnapshot,
-    tenant_id: UUID,
-    runtime_options: ModelRuntimeOptions | None,
-) -> ResolvedModelConfig:
-    return _build_resolved(
-        config,
-        key_id=key.key_id,
-        tenant_id=tenant_id,
-        provider=key.provider,
-        model_name=key.model_name,
-        api_key=key.api_key,
-        base_url=key.base_url,
-        profile=_profile_with_key_facts(config, key),
-        params=dict(key.config or config.config),
-        runtime_options=runtime_options,
-    )
-
-
-def _build_from_binding(
-    config: ModelConfigSnapshot,
-    binding: PublicModelBindingSnapshot,
-    tenant_id: UUID,
-    runtime_options: ModelRuntimeOptions | None,
-) -> ResolvedModelConfig:
-    return _build_resolved(
-        config,
-        key_id=None,
-        tenant_id=tenant_id,
-        provider=binding.provider,
-        model_name=config.name,
-        api_key=binding.api_key,
-        base_url=binding.base_url,
-        profile=config.profile,
-        params={},
-        runtime_options=runtime_options,
-    )
-
-
-def resolve_model(
-    repository: ModelRegistryRepository,
-    *,
-    model_config_id: UUID,
-    tenant_id: UUID,
-    runtime_options: ModelRuntimeOptions | None = None,
-) -> ResolvedModelConfig:
-    config = repository.get_model_config(model_config_id, tenant_id)
-    if config is None:
-        raise ModelConfigNotFoundError(model_config_id)
-    _validate_config_access(config, tenant_id)
-    if config.provider is ModelProvider.SPEEDBEAR and config.is_public:
-        binding = repository.get_public_binding(tenant_id, ModelProvider.SPEEDBEAR)
-        if binding is None:
-            raise PublicCredentialUnavailableError(model_config_id, tenant_id)
-        return _build_from_binding(config, binding, tenant_id, runtime_options)
-    return _build_from_key(
-        config,
-        _select_key(config, repository.list_active_keys(model_config_id)),
-        tenant_id,
-        runtime_options,
-    )
-
-
-async def resolve_model_async(
-    repository: AsyncModelRegistryRepository,
-    *,
-    model_config_id: UUID,
-    tenant_id: UUID,
-    runtime_options: ModelRuntimeOptions | None = None,
-) -> ResolvedModelConfig:
-    config = await repository.get_model_config(model_config_id, tenant_id)
-    if config is None:
-        raise ModelConfigNotFoundError(model_config_id)
-    _validate_config_access(config, tenant_id)
-    if config.provider is ModelProvider.SPEEDBEAR and config.is_public:
-        binding = await repository.get_public_binding(
-            tenant_id,
-            ModelProvider.SPEEDBEAR,
-        )
-        if binding is None:
-            raise PublicCredentialUnavailableError(model_config_id, tenant_id)
-        return _build_from_binding(config, binding, tenant_id, runtime_options)
-    keys = await repository.list_active_keys(model_config_id)
-    return _build_from_key(
-        config,
-        _select_key(config, keys),
-        tenant_id,
-        runtime_options,
-    )
-
-
-def record_model_usage(
-    repository: ModelRegistryRepository,
-    *,
-    key_id: UUID | None,
-) -> None:
-    if key_id is None:
-        return
-    try:
-        repository.record_key_usage(key_id)
-    except Exception as exc:
-        raise ModelUsageRecordError(key_id, exc) from exc
-
-
-async def record_model_usage_async(
-    repository: AsyncModelRegistryRepository,
-    *,
-    key_id: UUID | None,
-) -> None:
-    if key_id is None:
-        return
-    try:
-        await repository.record_key_usage(key_id)
-    except Exception as exc:
-        raise ModelUsageRecordError(key_id, exc) from exc
-
-
 # ---- v2 渠道解析核（spec §10.1/§11.1）：输入为本租户活跃渠道快照池，纯函数无 I/O ----
-# v1（resolve_model / ports / ModelKeySnapshot）在 M3 宿主切流前原样保留。
 
 
 def match_channel_candidates(
@@ -397,8 +233,8 @@ def resolve_and_chain_from_pool(
     候选逐个尝试解密、跳过坏密文（与组合 resolve_composite_head 对齐；运行期编排层本就
     顺延坏密文候选，构建期不再提前中止），切片头部恒为实际首发渠道。全候选失败抛首个
     CredentialDecryptError（宿主按模式映射：only → 4014；prefer → 记 fallback 走旧表）。
-    其余错误与 resolve_from_channel_pool 同形（speedbear 公共空链 → SpeedbearChannelMissingError，
-    其余空链 → NoAvailableChannelError）。
+    其余错误语义：speedbear 公共空链 → SpeedbearChannelMissingError，
+    其余空链 → NoAvailableChannelError。
     """
     anchor = model_name or config.name
     ordered = ordered_channel_candidates(
@@ -434,31 +270,3 @@ def resolve_and_chain_from_pool(
             continue
         return resolved, ordered[index:]
     raise failures[0]
-
-
-def resolve_from_channel_pool(
-    config: ModelConfigSnapshot,
-    channels: Sequence[ChannelSnapshot],
-    *,
-    tenant_id: UUID,
-    cipher: CredentialCipher,
-    model_name: str | None = None,
-    runtime_options: ModelRuntimeOptions | None = None,
-    loads: Mapping[UUID, int] | None = None,
-) -> ResolvedModelConfig:
-    """v2 解析门面（M3 宿主把 resolve_model 内部切到这里）。
-
-    锚点名 = 显式 model_name（组合编排传成员声明名）or config.name（普通模型真实调用名）。
-    组合 config 无单渠道解析（成员编排在 composite 模块），直接命中此处视为调用方错误。
-    委托 resolve_and_chain_from_pool 取首元素（坏密文顺延，错误类型/入参不变）。
-    """
-    resolved, _chain = resolve_and_chain_from_pool(
-        config,
-        channels,
-        tenant_id=tenant_id,
-        cipher=cipher,
-        model_name=model_name,
-        runtime_options=runtime_options,
-        loads=loads,
-    )
-    return resolved

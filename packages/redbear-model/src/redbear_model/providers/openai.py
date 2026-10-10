@@ -86,6 +86,9 @@ _CONFIG_ONLY_KEYS = {
     "response_format",
     "json_output",
     "default_headers",
+    # 流式提示：唯一效果是下方 stream_usage=True（末帧带 usage）；不进 ChatOpenAI 构造，
+    # 免得 streaming=True 字段反过来强制内部走流式（非流式 invoke 也要能带此提示）。
+    "streaming",
 }
 _PROVIDER_SPECIFIC_KEYS = {
     "top_k",

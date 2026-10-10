@@ -138,12 +138,51 @@ class KnowledgeSettings(BaseSettings):
         default=SecretStr(""),
         validation_alias="SPEEDBEAR_AUTH_KEY",
     )
-    # 渠道凭据主密钥（base64 32B，与 core/api 同一把）：platform 渠道凭据解密用，
-    # AAD = provider:tenant_id（M5 起 speedbear 公共凭据落 model_channels 密文）
-    model_credentials_key: SecretStr = Field(
-        default=SecretStr(""),
-        validation_alias="MODEL_CREDENTIALS_KEY",
+
+    # 模型服务 invoke 接缝（G4b 起凭据与选路全在 model-service；env 命名对齐宿主 core/api）
+    model_service_base_url: str = Field(
+        default="http://127.0.0.1:8080",
+        validation_alias="MODEL_SERVICE_BASE_URL",
     )
+    model_service_pool_timeout_seconds: float = Field(
+        default=5.0,
+        gt=0,
+        validation_alias="MODEL_SERVICE_POOL_TIMEOUT_SECONDS",
+    )
+    # invoke IDLE 映射 httpx read，语义为**帧间隔**：LLM 档按服务侧 120s 首块档 + 余量
+    model_service_invoke_connect_timeout_seconds: float = Field(
+        default=5.0,
+        gt=0,
+        validation_alias="MODEL_SERVICE_INVOKE_CONNECT_TIMEOUT_SECONDS",
+    )
+    model_service_invoke_idle_timeout_seconds: float = Field(
+        default=180.0,
+        gt=0,
+        validation_alias="MODEL_SERVICE_INVOKE_IDLE_TIMEOUT_SECONDS",
+    )
+    model_service_invoke_write_timeout_seconds: float = Field(
+        default=60.0,
+        gt=0,
+        validation_alias="MODEL_SERVICE_INVOKE_WRITE_TIMEOUT_SECONDS",
+    )
+    # 媒体族（asr/image/video）档：IDLE 须大于服务侧媒体总档（≈660s = 600s 轮询上限 + 余量），
+    # 否则 km 先断开而服务侧仍在轮询
+    model_service_invoke_media_idle_timeout_seconds: float = Field(
+        default=720.0,
+        gt=0,
+        validation_alias="MODEL_SERVICE_INVOKE_MEDIA_IDLE_TIMEOUT_SECONDS",
+    )
+    model_service_max_connections: int = Field(
+        default=100,
+        ge=1,
+        validation_alias="MODEL_SERVICE_MAX_CONNECTIONS",
+    )
+    model_service_max_keepalive_connections: int = Field(
+        default=20,
+        ge=0,
+        validation_alias="MODEL_SERVICE_MAX_KEEPALIVE_CONNECTIONS",
+    )
+
     llm_timeout: float = Field(default=120.0, gt=0, validation_alias="LLM_TIMEOUT")
     llm_max_retries: int = Field(default=2, ge=0, validation_alias="LLM_MAX_RETRIES")
     embedding_batch_size: int = Field(
@@ -358,23 +397,15 @@ class KnowledgeSettings(BaseSettings):
     # Auth gateway cut-over (评审稿 4.3)：direct 社区默认（独立部署无需企业包）；
     # gateway（企业版双通道）需私有 enterprise-extensions 包，缺失即启动期报错——
     # 企业部署须显式设 KB_AUTH_MODE=gateway（外层仓库 k8s 已显式声明，不依赖默认值）
-    kb_auth_mode: str = Field(default="direct", validation_alias="KB_AUTH_MODE")
-    kb_direct_jwt_verify_enabled: bool = Field(
-        default=True,
-        validation_alias="KB_DIRECT_JWT_VERIFY_ENABLED",
+    kb_auth_mode: Literal["direct", "gateway"] = Field(
+        default="direct",
+        validation_alias="KB_AUTH_MODE",
     )
     kb_service_name: str = Field(default="kb", validation_alias="KB_SERVICE_NAME")
     kb_jwks_url: str | None = Field(default=None, validation_alias="KB_JWKS_URL")
-    kb_secret: SecretStr | None = Field(default=None, validation_alias="KB_SECRET")
     kb_kill_switch_file: str | None = Field(
         default=None,
         validation_alias="KB_KILL_SWITCH_FILE",
-    )
-    # direct 模式 API key 集中校验端点（identity POST /internal/api-key-verify）；None 时
-    # direct 模式 x-api-key 请求 fail-closed 拒绝
-    kb_api_key_verify_url: str | None = Field(
-        default=None,
-        validation_alias="KB_API_KEY_VERIFY_URL",
     )
 
     # Knowledge business environment variables

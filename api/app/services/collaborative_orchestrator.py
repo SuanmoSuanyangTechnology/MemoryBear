@@ -21,11 +21,10 @@ from app.services.dynamic_handoff_tools import DynamicHandoffToolCreator
 from app.core.logging_config import get_business_logger
 from app.core.exceptions import BusinessException
 from app.core.error_codes import BizCode
-from app.core.models import RedBearLLM
-from app.core.models.base import RedBearModelConfig
-from app.models import App, ModelType
+from app.core.models import RedBearChatModel
+from app.models import App
 from app.repositories.tool_repository import ToolRepository
-from app.services.model_service import ModelApiKeyService, ModelConfigService
+from app.services.model_service import ModelConfigService
 
 logger = get_business_logger()
 
@@ -370,8 +369,6 @@ class CollaborativeOrchestrator:
                 "is_final_answer": True
             }
 
-            ModelApiKeyService.record_api_key_usage(self.db, agent_config.get("api_key_id"))
-            
             # 检查是否有工具调用（handoff）
             tool_calls = response.get("tool_calls", [])
             if tool_calls:
@@ -439,35 +436,26 @@ class CollaborativeOrchestrator:
                     BizCode.AGENT_CONFIG_MISSING
                 )
             
-            # 获取 API Key
-            api_key_config = ModelApiKeyService.get_available_api_key(
+            # 获取模型视图（非解密视图，调用经模型服务 invoke 接缝）
+            model_view = ModelConfigService.get_runtime_model_view(
                 self.db,
                 model_config_id,
                 tenant_id=self.tenant_id,
             )
-            if not api_key_config:
-                ModelConfigService.raise_model_unavailable(
-                    self.db,
-                    model_config_id,
-                    tenant_id=self.tenant_id,
-                )
-            
+
             return {
                 "agent_id": agent_id,
                 "name": release.name,
                 "system_prompt": config_data.get("system_prompt", ""),
-                "model_name": api_key_config.model_name,
-                "provider": api_key_config.provider,
-                "api_key": api_key_config.api_key,
-                "api_base": api_key_config.api_base,
-                "input_modalities": list(api_key_config.input_modalities or []),
-                "output_modalities": list(api_key_config.output_modalities or []),
-                "features": list(api_key_config.features or []),
+                "model_name": model_view.model_name,
+                "provider": model_view.provider,
+                "input_modalities": list(model_view.input_modalities or []),
+                "output_modalities": list(model_view.output_modalities or []),
+                "features": list(model_view.features or []),
                 "model_parameters": config_data.get("model_parameters", {}),
-                "api_key_id": api_key_config.id,
-                "tenant_id": api_key_config.tenant_id,
-                "model_config_id": api_key_config.model_config_id,
-                "channel_id": api_key_config.channel_id,
+                "tenant_id": model_view.tenant_id,
+                "model_config_id": model_view.model_config_id,
+                "model_view": model_view,
             }
             
         except ValueError:
@@ -517,24 +505,17 @@ class CollaborativeOrchestrator:
             
             # 配置 LLM
             model_params = agent_config.get("model_parameters", {})
-            extra_params = {
+            params = {
                 "temperature": model_params.get("temperature", 0.7),
                 "max_tokens": model_params.get("max_tokens", 2000)
             }
-            
-            # 如果有工具，添加到配置中
+
+            llm = RedBearChatModel.for_invoke(agent_config["model_view"], params=params)
+
+            # 如果有工具，绑定到模型
             if tools:
-                extra_params["tools"] = tools
-                extra_params["tool_choice"] = "auto"
-            
-            model_config = RedBearModelConfig.from_api_key(
-                agent_config,
-                extra_params=extra_params,
-            )
-            
-            # 创建 LLM 实例
-            llm = RedBearLLM(model_config, type=ModelType.LLM)
-            
+                llm = llm.bind_tools(tools)
+
             # 调用 LLM
             response = await llm.ainvoke(messages)
             
@@ -550,12 +531,26 @@ class CollaborativeOrchestrator:
             else:
                 result["content"] = str(response)
             
-            # 提取工具调用
+            # 提取工具调用（AIMessage.tool_calls 元素为 plain dict：{"name", "args", ...}）
             if hasattr(response, 'tool_calls') and response.tool_calls:
                 for tool_call in response.tool_calls:
+                    if isinstance(tool_call, dict):
+                        name = tool_call.get("name")
+                        arguments = tool_call.get("args")
+                    else:
+                        function = getattr(tool_call, "function", None)
+                        name = function.name if function is not None else getattr(tool_call, "name", None)
+                        arguments = function.arguments if function is not None else getattr(tool_call, "args", None)
+
+                    if isinstance(arguments, str):
+                        try:
+                            arguments = json.loads(arguments)
+                        except (json.JSONDecodeError, ValueError):
+                            arguments = {}
+
                     result["tool_calls"].append({
-                        "name": tool_call.function.name if hasattr(tool_call, 'function') else tool_call.name,
-                        "arguments": json.loads(tool_call.function.arguments) if hasattr(tool_call, 'function') else tool_call.arguments
+                        "name": name,
+                        "arguments": arguments or {}
                     })
             
             # 提取 usage

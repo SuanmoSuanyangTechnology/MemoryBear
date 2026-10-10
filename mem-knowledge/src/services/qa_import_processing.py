@@ -9,9 +9,11 @@ import time
 import uuid
 from dataclasses import dataclass
 
-from redbear_model import QWEN3_VL_EMBEDDING_DIMENSION, is_qwen3_vl_embedding
-from redbear_model.runtime import RedBearEmbeddings
+from redbear_model import QWEN3_VL_EMBEDDING_DIMENSION
 
+from ..integrations.model.embedding import RedBearEmbeddings
+from ..integrations.model.invoke_backend import ref_from_view
+from ..integrations.model.views import is_qwen3_vl_embedding_view
 from ..models.owned import Document, Knowledge
 from ..models.references import Workspace
 from ..rag.models.chunk import DocumentChunk
@@ -337,11 +339,12 @@ def process_qa_import(
                     snapshot.embedding_id,
                     snapshot.tenant_id,
                 )
-                embeddings = RedBearEmbeddings(
-                    embedding_config,
-                    client_pool=runtime.model_runtime.pool,
+                multimodal = is_qwen3_vl_embedding_view(embedding_config)
+                embeddings = RedBearEmbeddings.for_invoke_ref(
+                    ref_from_view(embedding_config, snapshot.tenant_id),
+                    pool=runtime.model_runtime,
+                    multimodal=multimodal,
                 )
-                multimodal = is_qwen3_vl_embedding(embedding_config)
         except Exception:
             raise _SafeQAImportError("QA model initialization failed") from None
 

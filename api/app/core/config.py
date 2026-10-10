@@ -95,6 +95,9 @@ class Settings:
 
     DB_AUTO_UPGRADE = os.getenv("DB_AUTO_UPGRADE", "false").lower() == "true"
 
+    # 测试路由开关（/api/test/*，内部调试用）：默认关闭（全路由 404）；本地调试在 .env 显式置 true
+    ENABLE_TEST_ROUTES: bool = os.getenv("ENABLE_TEST_ROUTES", "false").lower() == "true"
+
     # Health probe configuration
     READINESS_CHECK_TIMEOUT_SECONDS: float = float(
         os.getenv("READINESS_CHECK_TIMEOUT_SECONDS", "2.0")
@@ -179,6 +182,46 @@ class Settings:
     )
     MEM_KNOWLEDGE_HEALTH_TIMEOUT_SECONDS: float = float(
         os.getenv("MEM_KNOWLEDGE_HEALTH_TIMEOUT_SECONDS", "3")
+    )
+
+    # Independent model service routing（/api/models* 前缀代理；无开关：服务不可用即 fail-fast）
+    MODEL_SERVICE_BASE_URL: str = os.getenv("MODEL_SERVICE_BASE_URL", "http://127.0.0.1:8080")
+    MODEL_SERVICE_CONNECT_TIMEOUT_SECONDS: float = float(
+        os.getenv("MODEL_SERVICE_CONNECT_TIMEOUT_SECONDS", "5")
+    )
+    MODEL_SERVICE_POOL_TIMEOUT_SECONDS: float = float(
+        os.getenv("MODEL_SERVICE_POOL_TIMEOUT_SECONDS", "5")
+    )
+    MODEL_SERVICE_READ_TIMEOUT_SECONDS: float = float(
+        os.getenv("MODEL_SERVICE_READ_TIMEOUT_SECONDS", "120")
+    )
+    MODEL_SERVICE_WRITE_TIMEOUT_SECONDS: float = float(
+        os.getenv("MODEL_SERVICE_WRITE_TIMEOUT_SECONDS", "60")
+    )
+    MODEL_SERVICE_MAX_CONNECTIONS: int = int(
+        os.getenv("MODEL_SERVICE_MAX_CONNECTIONS", "100")
+    )
+    MODEL_SERVICE_MAX_KEEPALIVE_CONNECTIONS: int = int(
+        os.getenv("MODEL_SERVICE_MAX_KEEPALIVE_CONNECTIONS", "20")
+    )
+    # invoke 通道独立超时（服务连接池独立，口径不可与管理面整响应语义混用）：
+    # IDLE 映射 httpx read，语义为**帧间隔**（管理面 READ=120 按整响应计，长文生成必破）；
+    # 总时长不设上限——长文流式由业务侧取消决定，硬上限会截断正常生成。
+    # IDLE=180：LLM 非流式（G2）整段无帧、首块即终块，服务侧 120s 首块档 + 网络抖动需留余量。
+    MODEL_SERVICE_INVOKE_CONNECT_TIMEOUT_SECONDS: float = float(
+        os.getenv("MODEL_SERVICE_INVOKE_CONNECT_TIMEOUT_SECONDS", "5")
+    )
+    MODEL_SERVICE_INVOKE_IDLE_TIMEOUT_SECONDS: float = float(
+        os.getenv("MODEL_SERVICE_INVOKE_IDLE_TIMEOUT_SECONDS", "180")
+    )
+    MODEL_SERVICE_INVOKE_WRITE_TIMEOUT_SECONDS: float = float(
+        os.getenv("MODEL_SERVICE_INVOKE_WRITE_TIMEOUT_SECONDS", "60")
+    )
+    # 媒体族（asr/image/video）invoke 档：媒体调用是「整段媒体操作」——上游任务式完成前
+    # 宿主无帧可收（asr 服务侧轮询 1s/600s、image/video 任务轮询），IDLE 须大于服务侧
+    # 媒体总档（≈660s = 600s 轮询上限 + 余量），否则宿主先断开而服务侧仍在轮询。
+    MODEL_SERVICE_INVOKE_MEDIA_IDLE_TIMEOUT_SECONDS: float = float(
+        os.getenv("MODEL_SERVICE_INVOKE_MEDIA_IDLE_TIMEOUT_SECONDS", "720")
     )
 
     # Xinference configuration
@@ -573,9 +616,6 @@ class Settings:
     # official environment system version
     SYSTEM_VERSION: str = os.getenv("SYSTEM_VERSION", "v0.2.1")
 
-    # model square loading
-    LOAD_MODEL: bool = os.getenv("LOAD_MODEL", "false").lower() == "true"
-
     # workflow config
     WORKFLOW_IMPORT_CACHE_TIMEOUT: int = int(os.getenv("WORKFLOW_IMPORT_CACHE_TIMEOUT", 1800))
     WORKFLOW_NODE_TIMEOUT: int = int(os.getenv("WORKFLOW_NODE_TIMEOUT", 600))
@@ -621,10 +661,6 @@ class Settings:
     # ========================================================================
     # Model Usage Metering (M4，spec §13)
     # ========================================================================
-    # 用量事件消费 beat 周期（秒）
-    MODEL_USAGE_CONSUME_INTERVAL_SECONDS: int = int(
-        os.getenv("MODEL_USAGE_CONSUME_INTERVAL_SECONDS", "5")
-    )
     # least-used 选路负载窗口（分钟）：model_usage_records 按 channel_id 滚动聚合
     MODEL_USAGE_LOAD_WINDOW_MINUTES: int = int(
         os.getenv("MODEL_USAGE_LOAD_WINDOW_MINUTES", "15")
@@ -635,6 +671,11 @@ class Settings:
     )
     # 消费积压告警阈值（xlen / xpending 超此值记 warning）
     MODEL_USAGE_BACKLOG_WARN: int = int(os.getenv("MODEL_USAGE_BACKLOG_WARN", "50000"))
+    # 网关告警评估 beat 周期（秒，B9）：宿主消费组读 model:usage 喂企业告警插件；
+    # 社区版无 premium 插件时不排期
+    MODEL_USAGE_ALERT_INTERVAL_SECONDS: int = int(
+        os.getenv("MODEL_USAGE_ALERT_INTERVAL_SECONDS", "30")
+    )
 
     def get_memory_output_path(self, filename: str = "") -> str:
         """

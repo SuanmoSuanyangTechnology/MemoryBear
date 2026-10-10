@@ -108,9 +108,11 @@ class PublishedAgentRunner:
         if not release.default_model_config_id:
             raise BusinessException("Agent 发布版本缺少模型配置", BizCode.AGENT_CONFIG_MISSING)
 
-        # 走运行时读数入口：模型不存在 / 已弃用在此拒止（db.get 不预加载 model_base）。
+        # 运行时读数走 ModelConfigService：不存在/已弃用在此精确报码，且 model_base 已 joinedload
         model_config = await ModelConfigService.get_model_by_id_async(
-            db, release.default_model_config_id
+            db,
+            release.default_model_config_id,
+            tenant_id=None,
         )
         if not model_config.is_active:
             raise BusinessException("Agent 发布版本引用的模型不存在或已停用", BizCode.NOT_FOUND)

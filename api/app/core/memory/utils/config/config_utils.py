@@ -1,9 +1,6 @@
 """
 Configuration utilities - Backward compatibility layer
 
-DEPRECATED: These functions now require a db session parameter.
-New code should use MemoryConfigService(db) instance directly.
-
 For functions that don't require db (get_pipeline_config, get_pruning_config),
 they are still re-exported here.
 """
@@ -15,26 +12,6 @@ from app.services.memory_config_service import MemoryConfigService
 # These functions don't require db - safe to re-export as static methods
 get_pipeline_config = MemoryConfigService.get_pipeline_config
 get_pruning_config = MemoryConfigService.get_pruning_config
-
-
-def get_model_config(model_id: str, db=None):
-    """DEPRECATED: Use MemoryConfigService(db).get_model_config(model_id) directly."""
-    if db is None:
-        raise ValueError(
-            "get_model_config now requires a db session. "
-            "Use MemoryConfigService(db).get_model_config(model_id) directly."
-        )
-    return MemoryConfigService(db).get_model_config(model_id)
-
-
-def get_embedder_config(embedding_id: str, db=None):
-    """DEPRECATED: Use MemoryConfigService(db).get_embedder_config(embedding_id) directly."""
-    if db is None:
-        raise ValueError(
-            "get_embedder_config now requires a db session. "
-            "Use MemoryConfigService(db).get_embedder_config(embedding_id) directly."
-        )
-    return MemoryConfigService(db).get_embedder_config(embedding_id)
 
 
 def get_picture_config(llm_name: str) -> dict:

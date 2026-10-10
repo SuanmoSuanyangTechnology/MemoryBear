@@ -10,7 +10,7 @@ from app.schemas.app_schema import ModelParameters
 from app.services.conversation_state_manager import ConversationStateManager
 from app.models import ModelConfig, AgentConfig
 from app.core.logging_config import get_business_logger
-from app.services.model_service import ModelApiKeyService, ModelConfigService
+from app.services.model_service import ModelConfigService
 
 logger = get_business_logger()
 
@@ -263,29 +263,20 @@ class MasterAgentRouter:
             LLM 响应
         """
         try:
-            from app.core.models import RedBearLLM
-            from app.core.models.base import RedBearModelConfig
-            from app.models import ModelApiKey, ModelType
+            from app.core.models import RedBearChatModel
 
-            # 获取 API Key 配置
-            api_key_config = await ModelApiKeyService.get_available_api_key_bridge_async(
+            # 远端模式（G3）：宿主不再解凭据，身份/能力取非解密视图（选路与调用事实在模型服务）
+            model_view = await ModelConfigService.get_runtime_model_view_bridge_async(
                 self.db,
                 self.master_model_config.id,
                 tenant_id=self.tenant_id,
             )
 
-            if not api_key_config:
-                await ModelConfigService.raise_model_unavailable_bridge_async(
-                    self.db,
-                    self.master_model_config.id,
-                    tenant_id=self.tenant_id,
-                )
-
             logger.info(
                 "调用 Master Agent LLM",
                 extra={
-                    "provider": api_key_config.provider,
-                    "model_name": api_key_config.model_name
+                    "provider": model_view.provider,
+                    "model_name": model_view.model_name
                 }
             )
             # temperature = 0.3  # 决策任务使用较低温度
@@ -313,15 +304,12 @@ class MasterAgentRouter:
             #                     }
             extra_params = {"temperature": temperature, "max_tokens": max_tokens}
 
-            # 创建 RedBearModelConfig
-            model_config = RedBearModelConfig.from_api_key(api_key_config, extra_params=extra_params)
-
             # 创建 LLM 实例
-            llm = RedBearLLM(model_config, type=ModelType.LLM)
+            llm = RedBearChatModel.for_invoke(model_view, params=extra_params)
 
             # 调用模型
             response = await llm.ainvoke(prompt)
-            await ModelApiKeyService.record_api_key_usage_bridge_async(self.db, api_key_config.id)
+            # G3 起不再记渠道密钥用量：调用无凭据（渠道计数由模型服务按 usage 事件落账）
 
             # 提取 token 消耗
             self._last_routing_tokens = 0

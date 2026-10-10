@@ -1,6 +1,6 @@
 """组合模型成员候选编排（spec §10.1#1 / §10.3 / §11.2）。
 
-组合 config 无单渠道解析（resolver.resolve_from_channel_pool 直接拒绝），候选来自
+组合 config 无单渠道解析（单链解析直接拒绝，见 resolver.ordered_channel_candidates），候选来自
 config JSON `members[]` 声明的成员模型：每个成员是一个普通 config 快照，其渠道按普通
 规则自动匹配（provider 相等 + 覆盖集命中 + is_active），随后「成员声明顺序 × 成员内
 有序渠道链」展平为统一候选链。宿主负责成员 config 查找与渠道池查询；本模块纯函数。
@@ -31,7 +31,6 @@ from .contracts import (
     ContractModel,
     ModelConfigSnapshot,
     ModelProvider,
-    ModelRuntimeOptions,
     ResolvedModelConfig,
 )
 from .crypto import CredentialCipher
@@ -108,56 +107,6 @@ def composite_candidate_chain(
     return chain
 
 
-def resolve_composite_candidates(
-    composite: ModelConfigSnapshot,
-    members: Sequence[CompositeMemberConfig],
-    channel_pool: Sequence[ChannelSnapshot],
-    *,
-    tenant_id: UUID,
-    cipher: CredentialCipher,
-    runtime_options: ModelRuntimeOptions | None = None,
-    loads: Mapping[UUID, int] | None = None,
-) -> list[ResolvedModelConfig]:
-    """候选链逐个解密，返回可用有序列表（坏凭据跳过不阻断，全败 → NoAvailableChannelError）。
-
-    返回项的 model_config_id 取自传入的成员快照——usage 归因口径由宿主决定（组合入口
-    统一改写为组合 id，见宿主 channel_registry）。loads 为渠道滚动窗口用量（宿主派生）。
-    """
-    chain = composite_candidate_chain(
-        composite, members, channel_pool, tenant_id=tenant_id, loads=loads
-    )
-    resolved: list[ResolvedModelConfig] = []
-    for candidate in chain:
-        try:
-            resolved.append(
-                build_resolved_from_channel(
-                    candidate.member,
-                    candidate.channel,
-                    tenant_id=tenant_id,
-                    model_name=candidate.model_name,
-                    cipher=cipher,
-                    runtime_options=runtime_options,
-                )
-            )
-        except CredentialDecryptError as exc:
-            logger.warning(
-                "composite %s member %s channel %s credential decrypt failed: %s",
-                composite.model_config_id,
-                candidate.model_name,
-                candidate.channel.id,
-                exc,
-            )
-            continue
-    if not resolved:
-        raise NoAvailableChannelError(
-            composite.model_config_id,
-            str(composite.provider),
-            composite.name,
-            "all composite member channels failed credential decryption",
-        )
-    return resolved
-
-
 def resolve_composite_head(
     composite: ModelConfigSnapshot,
     members: Sequence[CompositeMemberConfig],
@@ -169,9 +118,9 @@ def resolve_composite_head(
 ) -> tuple[ResolvedModelConfig, list[CompositeCandidate]]:
     """首个可解密候选及其后有序切片（failover plan 构建用）。
 
-    保持 resolve_composite_candidates 的「首个可解密」壳语义，但不预解整链：仅自链头
-    逐个解密到首个成功为止，返回 (该 resolved, 自该位的候选切片)，故切片头部恒等于
-    实际首发渠道。坏凭据跳过不阻断（warning）；全败 → NoAvailableChannelError（同文案）。
+    保持「首个可解密」壳语义，但不预解整链：仅自链头逐个解密到首个成功为止，返回
+    (该 resolved, 自该位的候选切片)，故切片头部恒等于实际首发渠道。坏凭据跳过不阻断
+    （warning）；全败 → NoAvailableChannelError。
     """
     chain = composite_candidate_chain(
         composite, members, channel_pool, tenant_id=tenant_id, loads=loads

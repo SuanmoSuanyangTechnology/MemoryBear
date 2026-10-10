@@ -12,19 +12,15 @@ from langgraph.config import get_stream_writer
 from langgraph.errors import GraphInterrupt
 
 from app.core.config import settings
-from app.core.error_codes import BizCode
-from app.core.exceptions import BusinessException
 from app.core.workflow.node_cache import DEFAULT_CACHEABLE_NODE_TYPES, WorkflowNodeCacheManager
 from app.core.workflow.engine.state_manager import WorkflowState
 from app.core.workflow.engine.variable_pool import VariablePool
 from app.core.workflow.nodes.enums import BRANCH_NODES
 from app.core.workflow.variable.base_variable import VariableType, FileObject
-from app.db import get_async_db_context, get_db_read
-from app.models import ModelConfig, ModelApiKey
+from app.db import get_async_db_context
 from app.repositories.tool_repository import ToolRepository
 from app.schemas import FileInput
 from app.schemas.model_schema import ModelInfo
-from app.services.model_service import ModelApiKeyService
 from app.services.multimodal_service import MultimodalService
 
 logger = logging.getLogger(__name__)
@@ -944,11 +940,11 @@ class BaseNode(ABC):
 
     @staticmethod
     async def process_message(
-            api_config: ModelInfo,
+            model_view: ModelInfo,
             content: str | dict | FileObject,
             enable_file=False
     ) -> list | str | None:
-        provider = api_config.provider
+        provider = model_view.provider
         if isinstance(content, dict):
             content = FileObject(
                 type=content.get("type"),
@@ -968,11 +964,11 @@ class BaseNode(ABC):
             # （支持 audio 的模型产出音频段，不支持的应过滤掉）。若漏掉 input_modalities，
             # 先被支持 audio 的模型处理过的内容会被不支持 audio 的模型直接复用，
             # 导致语音信息未过滤就传入不支持的模型。
-            cache_key = f"{provider}_{'-'.join(sorted(api_config.input_modalities or []))}"
+            cache_key = f"{provider}_{'-'.join(sorted(model_view.input_modalities or []))}"
             if content.content_cache.get(cache_key):
                 return content.content_cache[cache_key]
             async with get_async_db_context() as db:
-                multimodal_service = MultimodalService(db, api_config=api_config)
+                multimodal_service = MultimodalService(db, model_view=model_view)
                 try:
                     upload_file_id = uuid.UUID(content.file_id) if content.file_id else None
                 except ValueError:
@@ -1010,21 +1006,6 @@ class BaseNode(ABC):
             return content
         return result
 
-    def resolve_tenant_id(self, variable_pool: VariablePool) -> uuid.UUID | None:
-        # tenant_id = self.get_variable("sys.tenant_id", variable_pool, strict=False)
-        # if tenant_id:
-        #     return uuid.UUID(str(tenant_id))
-
-        workspace_id = self.get_variable("sys.workspace_id", variable_pool, strict=False)
-        if not workspace_id:
-            return None
-
-        with get_db_read() as db:
-            tenant_id = ToolRepository.get_tenant_id_by_workspace_id(db, str(workspace_id))
-        if tenant_id:
-            return uuid.UUID(str(tenant_id))
-        return None
-
     async def resolve_tenant_id_async(self, variable_pool: VariablePool) -> uuid.UUID | None:
         tenant_id = self.get_variable("sys.tenant_id", variable_pool, strict=False)
         if tenant_id:
@@ -1041,14 +1022,3 @@ class BaseNode(ABC):
         if tenant_id:
             return uuid.UUID(str(tenant_id))
         return None
-
-    def get_runtime_api_config(self, db, model_config: ModelConfig, variable_pool: VariablePool) -> ModelApiKey:
-        tenant_id = self.resolve_tenant_id(variable_pool)
-        api_config = ModelApiKeyService.get_available_api_key(
-            db,
-            model_config.id,
-            tenant_id=tenant_id,
-        )
-        if not api_config:
-            raise BusinessException("模型配置缺少 API Key", BizCode.INVALID_PARAMETER)
-        return api_config

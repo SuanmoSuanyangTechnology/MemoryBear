@@ -12,9 +12,8 @@ from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
 from app.core.usage_context import bind_usage
 from app.core.models import (
+    RedBearChatModel,
     RedBearEmbeddings,
-    RedBearLLM,
-    RedBearModelConfig,
     RedBearRerank,
 )
 from app.core.rag.knowledge_graph.config import GraphPipeline
@@ -46,7 +45,7 @@ from app.core.rag.retrieval.models import (
     RetrievalTarget,
     RetrievalTimings,
 )
-from app.models.models_model import ModelType
+from app.integrations.model.invoke_backend import ref_from_snapshot
 from app.schemas.chunk_schema import RetrieveType
 from app.schemas.knowledge_metadata_schema import MetadataFilterMode
 from app.schemas.knowledge_retrieval_schema import (
@@ -108,30 +107,17 @@ class KnowledgeRetrievalService:
             return "[" + ",".join(cls._format_log_value(item) for item in value) + "]"
         return str(value)
 
-    @staticmethod
-    def _model_config(
-        snapshot: ModelRuntimeSnapshot,
-        *,
-        extra_params: dict[str, Any] | None = None,
-    ) -> RedBearModelConfig:
-        """Map a request-local snapshot to the shared model configuration."""
-
-        return RedBearModelConfig.from_api_key(
-            snapshot,
-            extra_params=dict(extra_params or {}),
-        )
-
     @classmethod
     def _metadata_llm(
         cls,
         snapshot: ModelRuntimeSnapshot,
         *,
         extra_params: dict[str, Any] | None = None,
-    ) -> RedBearLLM:
-        # 2d-1 迁移后 chat 行已归一为 llm，运行时按 LLM 适配器族构造
-        return RedBearLLM(
-            cls._model_config(snapshot, extra_params=extra_params),
-            type=ModelType.LLM,
+    ) -> RedBearChatModel:
+        # 远端壳（G4a）：只带配置 id 与租户，凭据与选路在模型服务
+        return RedBearChatModel.for_invoke_ref(
+            ref_from_snapshot(snapshot),
+            params=dict(extra_params or {}),
         )
 
     @classmethod
@@ -156,9 +142,7 @@ class KnowledgeRetrievalService:
                 )
                 for index, chunk in enumerate(chunks)
             ]
-            reranker = RedBearRerank(
-                cls._model_config(snapshot, extra_params={"top_n": top_k})
-            )
+            reranker = RedBearRerank.for_invoke(ref_from_snapshot(snapshot))
             reranked_documents = list(
                 await reranker.acompress_documents(documents, query)
             )
@@ -588,7 +572,7 @@ class KnowledgeRetrievalService:
             top_k=target.params.top_k if target_type == RetrieveType.SEMANTIC else target.params.top_n,
             score_threshold=target.params.vector_similarity_weight,
         )
-        embedding = RedBearEmbeddings(cls._model_config(target.embedding))
+        embedding = RedBearEmbeddings.for_invoke(ref_from_snapshot(target.embedding))
         if target_type == RetrieveType.SEMANTIC:
             chunks = await store.search_by_vector(embedding, request.query, vector_options)
             cls._log_target_done(target, len(chunks), 0, len(chunks), len(chunks), started_at, timings=timings)
@@ -741,15 +725,12 @@ class KnowledgeRetrievalService:
         try:
             client = await AsyncElasticsearchClientProvider.get_shared_client()
             graph_store = GraphElasticsearchStore(client)
-            llm = RedBearLLM(
-                cls._model_config(
-                    graph_target.llm,
-                    extra_params={"temperature": 0},
-                ),
-                type=ModelType.LLM,
+            llm = RedBearChatModel.for_invoke_ref(
+                ref_from_snapshot(graph_target.llm),
+                params={"temperature": 0},
             )
-            embedding = RedBearEmbeddings(
-                cls._model_config(graph_target.embedding)
+            embedding = RedBearEmbeddings.for_invoke(
+                ref_from_snapshot(graph_target.embedding)
             )
             pipeline = KnowledgeGraphRetrievalPipeline(
                 graph_store,

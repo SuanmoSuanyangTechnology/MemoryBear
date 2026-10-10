@@ -7,7 +7,6 @@ from typing import Any, ClassVar, Dict, List, Optional, TypeVar
 
 import httpx
 from langchain_aws import ChatBedrock
-from langchain_core.embeddings import Embeddings
 from langchain_core.language_models import BaseLLM
 from langchain_ollama import OllamaLLM
 from langchain_openai import ChatOpenAI, OpenAI
@@ -555,26 +554,6 @@ class RedBearModelFactory:
         else:
             raise BusinessException(f"不支持的提供商: {provider}", code=BizCode.PROVIDER_NOT_SUPPORTED)
 
-    @classmethod
-    def get_rerank_model_params(cls, config: RedBearModelConfig) -> Dict[str, Any]:
-        """根据提供商获取模型参数"""
-        provider = config.provider.lower()
-        if provider in [ModelProvider.XINFERENCE, ModelProvider.GPUSTACK, ModelProvider.SPEEDBEAR]:
-            return {
-                "model": config.model_name,
-                "jina_api_key": config.api_key,
-                **config.extra_params
-            }
-        elif provider == ModelProvider.DASHSCOPE:
-            return {
-                "model": config.model_name,
-                "dashscope_api_key": config.api_key,
-                **config.extra_params
-            }
-        else:
-            raise BusinessException(f"不支持的提供商: {provider}", code=BizCode.PROVIDER_NOT_SUPPORTED)
-
-
 def get_provider_llm_class(config: RedBearModelConfig, type: ModelType = ModelType.LLM) -> type[BaseLLM]:
     """根据模型提供商获取对应的模型类"""
     provider = config.provider.lower()
@@ -598,41 +577,3 @@ def get_provider_llm_class(config: RedBearModelConfig, type: ModelType = ModelTy
         raise BusinessException(f"不支持的模型提供商: {provider}", code=BizCode.PROVIDER_NOT_SUPPORTED)
 
 
-def get_provider_embedding_class(provider: str) -> type[Embeddings]:
-    """根据模型提供商获取对应的模型类"""
-    provider = provider.lower()
-    if provider in [
-        ModelProvider.OPENAI,
-        ModelProvider.XINFERENCE,
-        ModelProvider.GPUSTACK,
-        ModelProvider.SPEEDBEAR,
-    ]:
-        from langchain_openai import OpenAIEmbeddings
-        return OpenAIEmbeddings
-    elif provider == ModelProvider.DASHSCOPE:
-        from langchain_community.embeddings import DashScopeEmbeddings
-        return DashScopeEmbeddings
-    elif provider == ModelProvider.OLLAMA:
-        from langchain_ollama import OllamaEmbeddings
-        return OllamaEmbeddings
-    elif provider == ModelProvider.BEDROCK:
-        from langchain_aws import BedrockEmbeddings
-        return BedrockEmbeddings
-    else:
-        raise BusinessException(f"不支持的模型提供商: {provider}", code=BizCode.PROVIDER_NOT_SUPPORTED)
-
-
-def get_provider_rerank_class(provider: str):
-    """根据模型提供商获取对应的模型类"""
-    provider = provider.lower()
-    if provider in [ModelProvider.XINFERENCE, ModelProvider.GPUSTACK, ModelProvider.SPEEDBEAR]:
-        from langchain_community.document_compressors import JinaRerank
-        return JinaRerank
-    elif provider == ModelProvider.DASHSCOPE:
-        from langchain_community.document_compressors.dashscope_rerank import DashScopeRerank
-        return DashScopeRerank
-        # elif provider == ModelProvider.OLLAMA:
-    #     from langchain_ollama import OllamaEmbeddings
-    #     return OllamaEmbeddings
-    else:
-        raise BusinessException(f"不支持的模型提供商: {provider}", code=BizCode.PROVIDER_NOT_SUPPORTED)

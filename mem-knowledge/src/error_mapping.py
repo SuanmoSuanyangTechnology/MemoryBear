@@ -34,12 +34,45 @@ from redbear_model import (
 from redbear_model.errors import is_provider_rate_limit_error
 
 from .errors import KnowledgeError
+from .integrations.model.errors import (
+    ModelInvokeFailedError,
+    ModelInvokeProtocolError,
+    ModelInvokeTimeoutError,
+    ModelInvokeUnavailableError,
+)
 
 
 def _with_cause(code: str, exc: BaseException) -> KnowledgeError:
     mapped = KnowledgeError.from_code(code)
     mapped.__cause__ = exc
     return mapped
+
+
+# 服务侧 invoke 失败码（SSE 帧给名 / JSON 信封给数值，名字与数值双键）→ km KB_* 词表。
+# 4011 在 invoke 路径仅由 ModelConfigInactiveError 产生（invoke_service._FAILURE_CODES），
+# 因此归 INACTIVE 而非渠道类。
+_REMOTE_CODE_MODEL_ERRORS: dict[str | int, str] = {
+    "MODEL_NOT_FOUND": "KB_RETRIEVAL_MODEL_NOT_FOUND",
+    4003: "KB_RETRIEVAL_MODEL_NOT_FOUND",
+    "MODEL_DEPRECATED": "KB_RETRIEVAL_MODEL_INACTIVE",
+    4010: "KB_RETRIEVAL_MODEL_INACTIVE",
+    "CHANNEL_DISABLED": "KB_RETRIEVAL_MODEL_INACTIVE",
+    4011: "KB_RETRIEVAL_MODEL_INACTIVE",
+    "NO_AVAILABLE_CHANNEL": "KB_RETRIEVAL_MODEL_CHANNEL_UNAVAILABLE",
+    4012: "KB_RETRIEVAL_MODEL_CHANNEL_UNAVAILABLE",
+    "SPEEDBEAR_CHANNEL_MISSING": "KB_RETRIEVAL_MODEL_CHANNEL_UNAVAILABLE",
+    4013: "KB_RETRIEVAL_MODEL_CHANNEL_UNAVAILABLE",
+    "CREDENTIAL_DECRYPT_ERROR": "KB_RETRIEVAL_MODEL_CREDENTIAL_INVALID",
+    4014: "KB_RETRIEVAL_MODEL_CREDENTIAL_INVALID",
+    "API_KEY_INVALID": "KB_RETRIEVAL_MODEL_CREDENTIAL_INVALID",
+    3009: "KB_RETRIEVAL_MODEL_CREDENTIAL_INVALID",
+}
+
+
+def _is_remote_rate_limited(exc: ModelInvokeFailedError) -> bool:
+    if exc.remote_code in ("RATE_LIMITED", 10004):
+        return True
+    return exc.http_status == HTTPStatus.TOO_MANY_REQUESTS
 
 
 def map_model_error(
@@ -77,6 +110,9 @@ def map_model_error(
         return _with_cause("KB_MULTIMODAL_INPUT_LIMIT", exc)
     if isinstance(exc, InvalidProviderResponseError):
         return _with_cause("KB_MODEL_PROVIDER_RESPONSE_INVALID", exc)
+    if isinstance(exc, ModelInvokeFailedError):
+        code = _REMOTE_CODE_MODEL_ERRORS.get(exc.remote_code)
+        return _with_cause(code or "KB_MODEL_UNAVAILABLE", exc)
     return _with_cause("KB_MODEL_UNAVAILABLE", exc)
 
 
@@ -119,6 +155,18 @@ def _ark_embedding_errors() -> tuple[tuple[type[BaseException], ...], ...]:
     return (ArkAPITimeoutError,), (ArkAPIConnectionError,), (ArkAPIStatusError,)
 
 
+def _embedding_invoke_failure_code(exc: ModelInvokeFailedError) -> str:
+    if _is_remote_rate_limited(exc):
+        return "KB_EMBEDDING_RATE_LIMITED"
+    code = _REMOTE_CODE_MODEL_ERRORS.get(exc.remote_code)
+    if code is not None:
+        return code
+    status = exc.http_status
+    if status is not None and HTTPStatus.INTERNAL_SERVER_ERROR <= status <= 599:
+        return "KB_EMBEDDING_SERVICE_UNAVAILABLE"
+    return "KB_EMBEDDING_REQUEST_FAILED"
+
+
 def map_text_embedding_error(exc: BaseException) -> KnowledgeError | None:
     """Classify known provider failures; leave unknown program errors untouched."""
     if isinstance(exc, KnowledgeError):
@@ -153,6 +201,12 @@ def map_text_embedding_error(exc: BaseException) -> KnowledgeError | None:
             if status is not None and HTTPStatus.INTERNAL_SERVER_ERROR <= status <= 599:
                 return _with_cause("KB_EMBEDDING_SERVICE_UNAVAILABLE", exc)
             return _with_cause("KB_EMBEDDING_REQUEST_FAILED", exc)
+        if isinstance(cause, ModelInvokeTimeoutError):
+            return _with_cause("KB_EMBEDDING_TIMEOUT", exc)
+        if isinstance(cause, ModelInvokeUnavailableError):
+            return _with_cause("KB_EMBEDDING_CONNECTION_FAILED", exc)
+        if isinstance(cause, ModelInvokeFailedError):
+            return _with_cause(_embedding_invoke_failure_code(cause), exc)
         if isinstance(
             cause,
             (
@@ -189,6 +243,17 @@ def map_multimodal_error(
     prefix = f"KB_MULTIMODAL_{operation.upper()}"
     if isinstance(exc, InvalidProviderResponseError):
         return _with_cause(f"{prefix}_RESPONSE_INVALID", exc)
+    if isinstance(exc, ModelInvokeProtocolError):
+        return _with_cause(f"{prefix}_RESPONSE_INVALID", exc)
+    if isinstance(exc, ModelInvokeTimeoutError):
+        return _with_cause(f"{prefix}_TIMEOUT", exc)
+    if isinstance(exc, ModelInvokeUnavailableError):
+        return _with_cause(f"{prefix}_CONNECTION_FAILED", exc)
+    if isinstance(exc, ModelInvokeFailedError):
+        if _is_remote_rate_limited(exc):
+            return _with_cause(f"{prefix}_RATE_LIMITED", exc)
+        code = _REMOTE_CODE_MODEL_ERRORS.get(exc.remote_code)
+        return _with_cause(code or f"{prefix}_FAILED", exc)
     if is_provider_rate_limit_error(exc):
         return _with_cause(f"{prefix}_RATE_LIMITED", exc)
     if _exception_matches(

@@ -1,4 +1,5 @@
 import asyncio
+import contextvars
 import logging
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -6,14 +7,14 @@ from typing import ClassVar
 
 from app.core.config import settings
 from app.core.rag.knowledge_graph.config import GraphPipeline
-from app.core.rag.llm.chat_model import Base
-from app.core.rag.llm.embedding_model import OpenAIEmbed
+from app.core.rag.llm.invoke_legacy import InvokeLegacyChat, InvokeLegacyEmbed
 from app.core.rag.models.chunk import DocumentChunk
 from app.core.rag.retrieval.models import (
     GraphRetrievalSnapshot,
     ModelRuntimeSnapshot,
     RetrievalTimings,
 )
+from app.integrations.model.invoke_backend import ref_from_snapshot
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +58,12 @@ class GraphRetrievalBridge:
         graph_started_at = time.perf_counter()
         try:
             loop = asyncio.get_running_loop()
-            future = loop.run_in_executor(cls._get_executor(), cls._retrieve_sync, snapshot)
+            # 对 worker 线程传播 contextvar（对齐 asyncio.to_thread 语义）：用量归因
+            # 与 trace 均按调用时刻在 worker 内读取，不传播则远端事件归因头为空。
+            context = contextvars.copy_context()
+            future = loop.run_in_executor(
+                cls._get_executor(), context.run, cls._retrieve_sync, snapshot
+            )
         except BaseException:
             semaphore.release()
             raise
@@ -103,20 +109,12 @@ class GraphRetrievalBridge:
         )
 
     @staticmethod
-    def _build_chat_model(snapshot: ModelRuntimeSnapshot) -> Base:
-        return Base(
-            key=snapshot.api_key,
-            model_name=snapshot.model_name,
-            base_url=snapshot.api_base,
-        )
+    def _build_chat_model(snapshot: ModelRuntimeSnapshot) -> InvokeLegacyChat:
+        return InvokeLegacyChat(ref_from_snapshot(snapshot), model_name=snapshot.model_name)
 
     @staticmethod
-    def _build_embedding_model(snapshot: ModelRuntimeSnapshot) -> OpenAIEmbed:
-        return OpenAIEmbed(
-            key=snapshot.api_key,
-            model_name=snapshot.model_name,
-            base_url=snapshot.api_base,
-        )
+    def _build_embedding_model(snapshot: ModelRuntimeSnapshot) -> InvokeLegacyEmbed:
+        return InvokeLegacyEmbed(ref_from_snapshot(snapshot), model_name=snapshot.model_name)
 
     @classmethod
     def shutdown(cls) -> None:

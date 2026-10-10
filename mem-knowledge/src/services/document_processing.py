@@ -18,9 +18,17 @@ from typing import Any
 
 from jinja2 import Environment
 from pypdf import PdfReader
-from redbear_model import QWEN3_VL_EMBEDDING_DIMENSION, is_qwen3_vl_embedding
-from redbear_model.runtime import RedBearEmbeddings
+from redbear_model import QWEN3_VL_EMBEDDING_DIMENSION
 
+from ..integrations.model.asr_video import (
+    AudioTranscriptionChunkModel,
+    VideoUnderstandingChunkModel,
+)
+from ..integrations.model.chat import RedBearChatModel
+from ..integrations.model.embedding import RedBearEmbeddings
+from ..integrations.model.invoke_backend import ref_from_view
+from ..integrations.model.views import is_qwen3_vl_embedding_view
+from ..integrations.model.vision import QWenCV as ImageQWenCV
 from ..models.owned import Document, Knowledge
 from ..models.references import Workspace
 from ..rag.chunk.context import (
@@ -36,12 +44,7 @@ from ..rag.chunk.router import FileTypeRouter
 from ..rag.chunk.token_utils import num_tokens_from_string, truncate
 from ..rag.knowledge_graph import GraphPipeline, is_graph_enabled, resolve_graph_pipeline
 from ..rag.models.chunk import DocumentChunk
-from ..rag.models.media_runtime import (
-    AudioTranscriptionChunkModel,
-    VideoUnderstandingChunkModel,
-)
 from ..rag.models.task_runtime import TaskModelFactory
-from ..rag.models.vision import QWenCV as ImageQWenCV
 from ..rag.vdb.vector_store import TaskVectorStore
 from ..runtime import ProcessRuntime
 from ..tasks.dispatch import TaskDispatcher
@@ -276,29 +279,24 @@ def _build_vision_model(
     snapshot: ParseDocumentSnapshot,
     file_key: str,
 ):
+    factory = TaskModelFactory(runtime)
     if _AUDIO_PATTERN.search(snapshot.file_name):
         if snapshot.audio2text_id is None:
             return None
-        factory = TaskModelFactory(runtime)
-        transcriber = factory.create_audio_transcriber(
-            snapshot.audio2text_id,
-            snapshot.tenant_id,
-        )
-        return AudioTranscriptionChunkModel(
-            transcriber,
-            _media_file_url(runtime, file_key, snapshot.source_file_name),
+        config = factory.resolve_view(snapshot.audio2text_id, snapshot.tenant_id)
+        return AudioTranscriptionChunkModel.for_invoke_sync_ref(
+            ref_from_view(config, snapshot.tenant_id),
+            pool=runtime.model_runtime,
+            file_url=_media_file_url(runtime, file_key, snapshot.source_file_name),
         )
     if _VIDEO_PATTERN.search(snapshot.file_name):
         if snapshot.video2text_id is None:
             return None
-        factory = TaskModelFactory(runtime)
-        video_runtime = factory.create_video_understanding(
-            snapshot.video2text_id,
-            snapshot.tenant_id,
-        )
-        return VideoUnderstandingChunkModel(
-            video_runtime,
-            _media_file_url(runtime, file_key, snapshot.source_file_name),
+        config = factory.resolve_view(snapshot.video2text_id, snapshot.tenant_id)
+        return VideoUnderstandingChunkModel.for_invoke_sync_ref(
+            ref_from_view(config, snapshot.tenant_id),
+            pool=runtime.model_runtime,
+            video_url=_media_file_url(runtime, file_key, snapshot.source_file_name),
             lang="Chinese",
         )
     needs_image_model = (
@@ -312,13 +310,13 @@ def _build_vision_model(
         return None
     if snapshot.image2text_id is None:
         return None
-    config = TaskModelFactory(runtime).resolve_image(
+    config = factory.resolve_image(
         snapshot.image2text_id,
         snapshot.tenant_id,
     )
-    image_model = ImageQWenCV(
-        config,
-        client_pool=runtime.model_runtime.pool,
+    image_model = ImageQWenCV.for_invoke_sync_ref(
+        ref_from_view(config, snapshot.tenant_id),
+        pool=runtime.model_runtime,
         lang="Chinese",
     )
     return image_model
@@ -335,7 +333,11 @@ def _preflight_document(
     if auto_questions_topn:
         if snapshot.llm_id is None:
             raise RuntimeError("llm model config is unavailable")
-        chat_model = factory.create_llm(snapshot.llm_id, snapshot.tenant_id)
+        llm_config = factory.resolve_chat(snapshot.llm_id, snapshot.tenant_id)
+        chat_model = RedBearChatModel.for_invoke_sync_ref(
+            ref_from_view(llm_config, snapshot.tenant_id),
+            pool=runtime.model_runtime,
+        )
 
     vision_model = _build_vision_model(runtime, snapshot, file_key)
     if snapshot.embedding_id is None:
@@ -344,14 +346,12 @@ def _preflight_document(
         snapshot.embedding_id,
         snapshot.tenant_id,
     )
-    try:
-        embeddings = RedBearEmbeddings(
-            embedding_config,
-            client_pool=runtime.model_runtime.pool,
-        )
-    except Exception:
-        raise RuntimeError("Failed to initialize embedding model") from None
-    structured_multimodal = is_qwen3_vl_embedding(embedding_config)
+    structured_multimodal = is_qwen3_vl_embedding_view(embedding_config)
+    embeddings = RedBearEmbeddings.for_invoke_ref(
+        ref_from_view(embedding_config, snapshot.tenant_id),
+        pool=runtime.model_runtime,
+        multimodal=structured_multimodal,
+    )
     vector_store = TaskVectorStore(
         runtime.elasticsearch.sync_client(),
         snapshot.knowledge_id,
@@ -480,7 +480,8 @@ def _model_name(model: Any) -> str:
     direct = getattr(model, "model_name", None)
     if direct:
         return str(direct)
-    return str(getattr(getattr(model, "_config", None), "model_name", "unknown"))
+    # 远端壳无配置对象：以配置 id 作为缓存指纹（同名不同配置也必须区分）
+    return str(getattr(model, "config_id", "unknown"))
 
 
 def _fit_qa_messages(system_prompt: str, content: str, max_length: int) -> tuple[str, str]:

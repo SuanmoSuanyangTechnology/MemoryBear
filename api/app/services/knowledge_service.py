@@ -512,6 +512,8 @@ async def create_knowledge_async(
             workspace.id,
             locale="zh",
             slots_to_validate=("llm", "embedding", "rerank", "image2text"),
+            actor_id=current_user.id,
+            actor_name=current_user.username,
         )
         if model_warnings:
             raise BusinessException(

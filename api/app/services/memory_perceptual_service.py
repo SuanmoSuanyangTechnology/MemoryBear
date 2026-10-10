@@ -6,14 +6,14 @@ from urllib.parse import urlparse, unquote
 import json_repair
 import langid
 from sqlalchemy.orm import Session
+from starlette.concurrency import run_in_threadpool
 
 from app.core.utils.datetime_utils import to_timestamp_ms
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
 from app.core.logging_config import get_business_logger
-from app.core.models import RedBearLLM, RedBearModelConfig
+from app.core.models import RedBearChatModel
 from app.db import get_db_context, get_db_read
-from app.models import ModelApiKey, ModelType
 from app.models.memory_perceptual_model import PerceptualType, FileStorageService
 from app.models.prompt_optimizer_model import RoleType
 from app.repositories.end_user_repository import get_end_user_by_id
@@ -28,7 +28,7 @@ from app.schemas.memory_perceptual_schema import (
     AudioModal, Content, VideoModal, TextModal
 )
 from app.schemas.model_schema import ModelInfo
-from app.services.model_service import ModelApiKeyService
+from app.services.model_service import ModelConfigService
 from app.services.multimodal_service import MultimodalService
 from app.services.prompt import prompt_manager
 
@@ -233,37 +233,32 @@ class MemoryPerceptualService:
             file_type: FileType,
             config: MemoryConfig,
             tenant_id: uuid.UUID,
-    ) -> tuple[RedBearLLM | None, ModelApiKey | None]:
-        """取多模态模型客户端。db 由调用方在事务内传入。"""
-        model_config = None
+    ) -> tuple[RedBearChatModel | None, ModelInfo | None]:
+        """取多模态模型客户端（非解密视图 + 远端壳；凭据与选路在模型服务侧）。
+
+        db 由调用方在事务内传入。模型缺失/弃用/未启用按旧口径软降级为
+        ``(None, None)``（调用方跳过该感知记忆）。
+        """
         if file_type == FileType.AUDIO:
-            model_config = ModelApiKeyService.get_available_api_key(
-                db,
-                config.audio_model_id,
-                tenant_id=tenant_id
-            )
+            model_id = config.audio_model_id
         elif file_type == FileType.VIDEO:
-            model_config = ModelApiKeyService.get_available_api_key(
-                db,
-                config.video_model_id,
-                tenant_id=tenant_id
-            )
+            model_id = config.video_model_id
         elif file_type == FileType.DOCUMENT:
-            model_config = ModelApiKeyService.get_available_api_key(
-                db,
-                config.llm_model_id,
-                tenant_id=tenant_id
-            )
+            model_id = config.llm_model_id
         elif file_type == FileType.IMAGE:
-            model_config = ModelApiKeyService.get_available_api_key(
-                db,
-                config.vision_model_id,
-                tenant_id=tenant_id
+            model_id = config.vision_model_id
+        else:
+            model_id = None
+        if not model_id:
+            return None, None
+        try:
+            model_view = ModelConfigService.get_runtime_model_view(db, model_id, tenant_id=tenant_id)
+        except BusinessException:
+            business_logger.warning(
+                f"Perceptual model unavailable: file_type={file_type}, model_id={model_id}"
             )
-        llm = None
-        if model_config:
-            llm = RedBearLLM(RedBearModelConfig.from_api_key(model_config))
-        return llm, model_config
+            return None, None
+        return RedBearChatModel.for_invoke(model_view), model_view
 
     async def generate_perceptual_memory(
             self,
@@ -288,43 +283,34 @@ class MemoryPerceptualService:
         返回：
             _PerceptualSnapshot | None（两种模式统一返回内存快照）
         """
-        # 用 DB：解析 tenant_id + 取模型配置。ModelApiKey 出块即废，块内固化成 ModelInfo。
-        workspace_id = None
-        with get_db_read() as db:
-            if persist:
-                end_user = get_end_user_by_id(db, end_user_id)
-                workspace_id = end_user.workspace_id
-                workspace = get_workspace_by_id(db, workspace_id)
-                tenant_id = workspace.tenant_id
-            else:
-                workspace_id = memory_config.workspace_id
-                tenant_id = memory_config.tenant_id
-            llm, model_config = self._get_mutlimodal_client(db, file.type, memory_config, tenant_id)
-            if model_config is None or llm is None:
-                return None
-            api_config = ModelInfo(
-                model_name=model_config.model_name,
-                provider=model_config.provider,
-                api_key=model_config.api_key,
-                api_base=model_config.api_base,
-                input_modalities=[str(item) for item in (model_config.input_modalities or [])],
-                output_modalities=[str(item) for item in (model_config.output_modalities or [])],
-                features=[str(item) for item in (model_config.features or [])],
-                model_type=ModelType.LLM,
-                tenant_id=model_config.tenant_id,
-                model_config_id=model_config.model_config_id,
-                channel_id=model_config.channel_id,
-                failover_plan=model_config.failover_plan,
-            )
+        # 用 DB：解析 tenant_id + 取非解密模型视图（凭据不出宿主）。
+        # 同步 Session 卸载到线程池：async 面不得直调同步 DB（同步/异步边界铁律）
+        def _resolve_multimodal_client() -> tuple[
+            uuid.UUID | None, tuple[RedBearChatModel | None, ModelInfo | None]
+        ]:
+            with get_db_read() as db:
+                if persist:
+                    end_user = get_end_user_by_id(db, end_user_id)
+                    workspace_id = end_user.workspace_id
+                    workspace = get_workspace_by_id(db, workspace_id)
+                    tenant_id = workspace.tenant_id
+                else:
+                    workspace_id = memory_config.workspace_id
+                    tenant_id = memory_config.tenant_id
+                return workspace_id, self._get_mutlimodal_client(db, file.type, memory_config, tenant_id)
+
+        workspace_id, (llm, model_view) = await run_in_threadpool(_resolve_multimodal_client)
+        if model_view is None or llm is None:
+            return None
 
         # 用 DB：文件预处理（本地文件通过 workspace/tenant 范围水合）。
         with get_db_read() as db:
-            file_message = await MultimodalService(db, api_config).process_files(
+            file_message = await MultimodalService(db, model_view).process_files(
                 files=[file],
                 workspace_id=workspace_id,
             )
         if not file_message:
-            business_logger.warning(f"Unsupported file type {file}, model input modalities: {api_config.input_modalities}")
+            business_logger.warning(f"Unsupported file type {file}, model input modalities: {model_view.input_modalities}")
             return None
         file_message = file_message[0]
         try:

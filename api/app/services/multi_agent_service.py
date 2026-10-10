@@ -322,12 +322,12 @@ class MultiAgentService:
             from app.repositories.tool_repository import ToolRepository
 
             tenant_id = ToolRepository.get_tenant_id_by_workspace_id(self.db, str(app.workspace_id))
-            model_api_key = ModelApiKeyService.get_available_api_key(
+            invoke_ref = ModelApiKeyService.resolve_invoke_ref(
                 self.db,
                 data.default_model_config_id,
                 tenant_id=tenant_id,
             )
-            if not model_api_key:
+            if invoke_ref is None:
                 ModelConfigService.raise_model_unavailable(
                     self.db,
                     data.default_model_config_id,

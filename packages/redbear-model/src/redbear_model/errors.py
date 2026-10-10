@@ -40,6 +40,27 @@ def is_provider_rate_limit_error(exc: BaseException) -> bool:
     return False
 
 
+def provider_http_status(exc: BaseException) -> int | None:
+    """Return the first provider HTTP status found along the exception chain."""
+
+    pending: list[BaseException] = [exc]
+    seen: set[int] = set()
+    while pending:
+        current = pending.pop()
+        if id(current) in seen:
+            continue
+        seen.add(id(current))
+        status = _status_code(current)
+        if status is None:
+            status = _status_code(getattr(current, "response", None))
+        if status is not None:
+            return status
+        for wrapped in (current.__cause__, current.__context__):
+            if isinstance(wrapped, BaseException):
+                pending.append(wrapped)
+    return None
+
+
 class RedBearModelError(Exception):
     """Base class for public model errors."""
 
@@ -217,15 +238,63 @@ class UnsupportedModelProviderError(RedBearModelError):
         super().__init__(f"Unsupported model provider: {provider}")
 
 
-class ModelUsageRecordError(RedBearModelError):
-    def __init__(self, key_id: UUID, cause: Exception):
-        self.__cause__ = cause
-        super().__init__(f"Failed to record usage for model key {key_id}")
-
-
 class ProviderDependencyMissingError(RedBearModelError):
     def __init__(self, provider: str, extra: str):
         super().__init__(
             f"Provider '{provider}' requires optional dependency extra "
             f"'redbear-model[{extra}]'"
         )
+
+
+class RemoteInvokeError(RedBearModelError):
+    """Base class for remote invoke transport failures."""
+
+
+class RemoteInvokeUnavailableError(RemoteInvokeError):
+    """The model service could not be reached, or the connection dropped mid-stream."""
+
+    def __init__(self, detail: str = "remote invoke endpoint is unavailable"):
+        super().__init__(detail)
+
+
+class RemoteInvokeIdleTimeoutError(RemoteInvokeError):
+    """No frame arrived within the configured inter-chunk idle window."""
+
+    def __init__(self, idle_seconds: float):
+        self.idle_seconds = idle_seconds
+        super().__init__(
+            f"Remote invoke produced no frame within the {idle_seconds:g}s idle window"
+        )
+
+
+class RemoteInvokeProtocolError(RemoteInvokeError):
+    """The peer violated the frame contract: unknown kind, malformed JSON, truncation."""
+
+    def __init__(self, detail: str):
+        super().__init__(f"Remote invoke protocol error: {detail}")
+
+
+class RemoteInvokeFailedError(RemoteInvokeError):
+    """Terminal failure reported by the service (``error`` frame or failure envelope).
+
+    ``code`` 原样承载服务侧 BizCode（SSE 帧为名字、JSON 信封为数值），包内不做映射：
+    调用方按自己的错误词汇翻译，包不复制宿主的 BizCode 表。
+    """
+
+    def __init__(
+        self,
+        *,
+        code: str | int | None,
+        message: str,
+        attempts: int | None = None,
+        channel_id: UUID | None = None,
+        retryable: bool = False,
+        http_status: int | None = None,
+    ):
+        self.code = code
+        self.message = message
+        self.attempts = attempts
+        self.channel_id = channel_id
+        self.retryable = retryable
+        self.http_status = http_status
+        super().__init__(f"Remote invoke failed (code={code}): {message}")

@@ -21,6 +21,7 @@ import redis
 from pydantic import BaseModel, Field
 from sqlalchemy import func
 from sqlalchemy.orm import Session, load_only
+from starlette.concurrency import run_in_threadpool
 
 from app.core.config import settings
 from app.core.logging_config import get_config_logger, get_logger
@@ -36,6 +37,7 @@ from app.repositories.end_user_repository import get_tenant_id_by_end_user_id
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 from app.schemas.memory_agent_schema import Write_UserInput
 from app.services.memory_config_service import MemoryConfigService
+from app.services.model_service import ModelConfigService
 
 logger = get_logger(__name__)
 config_logger = get_config_logger()
@@ -323,38 +325,41 @@ class MemoryAgentService:
             生成的答案文本
         """
         # Always get workspace_id from end_user for fallback, even if config_id is provided
-        with get_db_read() as db:
-            try:
-                config_service = MemoryConfigService(db)
-                config_id = config_service.get_config_id_by_end_user(end_user_id)
-                logger.info(f"Resolved config from end_user: config_id = {config_id}")
+        def _load_model_view() -> Any:
+            resolved_id = config_id
+            with get_db_read() as db:
+                try:
+                    config_service = MemoryConfigService(db)
+                    resolved_id = config_service.get_config_id_by_end_user(end_user_id)
+                    logger.info(f"Resolved config from end_user: config_id = {resolved_id}")
 
-                memory_config = config_service.load_memory_config(
-                    config_id=config_id
-                )
-                tenant_id = get_tenant_id_by_end_user_id(db, end_user_id)
-                model_config = config_service.get_model_config(str(memory_config.llm_model_id), tenant_id)
-            except Exception as e:
-                if "No memory configuration found" in str(e):
-                    raise  # Re-raise our specific error
-                logger.error(f"Failed to get connected config for end_user_id {end_user_id}: {e}")
-                if config_id is None:
-                    raise ValueError(f"Unable to determine memory configuration for end_user_id {end_user_id}: {e}")
-                # If config_id was provided, continue without workspace_id fallback
-                raise e
+                    memory_config = config_service.load_memory_config(
+                        config_id=resolved_id
+                    )
+                    tenant_id = get_tenant_id_by_end_user_id(db, end_user_id)
+                    return ModelConfigService.get_runtime_model_view(
+                        db, memory_config.llm_model_id, tenant_id=tenant_id
+                    )
+                except Exception as e:
+                    if "No memory configuration found" in str(e):
+                        raise  # Re-raise our specific error
+                    logger.error(f"Failed to get connected config for end_user_id {end_user_id}: {e}")
+                    if resolved_id is None:
+                        raise ValueError(f"Unable to determine memory configuration for end_user_id {end_user_id}: {e}")
+                    # If config_id was provided, continue without workspace_id fallback
+                    raise e
+
+        # 同步 Session 卸载到线程池：async 面不得直调同步 DB（同步/异步边界铁律）
+        model_view = await run_in_threadpool(_load_model_view)
 
         logger.info(f"Generating summary from retrieve info for query: {query[:50]}...")
 
         try:
-            from app.core.models import RedBearLLM, RedBearModelConfig
+            from app.core.models import RedBearChatModel
             from app.core.memory.agent.utils.llm_tools import PROJECT_ROOT_
             from app.core.memory.agent.utils.template_tools import TemplateService
-            from app.models.models_model import ModelType
 
-            llm = RedBearLLM(
-                RedBearModelConfig.from_api_key(model_config),
-                type=ModelType.LLM
-            )
+            llm = RedBearChatModel.for_invoke(model_view)
 
             template_root = os.path.join(PROJECT_ROOT_, 'memory', 'agent', 'utils', 'prompt')
             template_service = TemplateService(template_root)

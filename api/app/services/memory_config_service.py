@@ -8,7 +8,7 @@ This service eliminates code duplication between MemoryAgentService and MemorySt
 import asyncio
 import time
 import uuid
-from typing import Any, Optional
+from typing import Optional
 from uuid import UUID
 
 from sqlalchemy import select
@@ -22,6 +22,8 @@ from app.core.validators.memory_config_validators import (
     validate_and_resolve_model_id,
 )
 from app.i18n.service import t
+from app.integrations.model.invoke_backend import RemoteInvokeRef
+from app.integrations.model.validate_backend import aprobe_stored_config
 from app.models import Workspace, WorkspaceDefaultModelPreset
 from app.models.app_model import AppType
 from app.models.memory_config_model import MemoryConfig as MemoryConfigModel
@@ -40,6 +42,13 @@ from app.utils.redis_cache import redis_cache
 
 logger = get_logger(__name__)
 config_logger = get_config_logger()
+
+# 服务侧探活结果 kind → 宿主 ModelInactiveError 文案键（闭集，见 aprobe_stored_config 契约）
+_REMOTE_PROBE_MESSAGE_KEYS = {
+    "probe_failed": "memory_config.model.api_verify_failed",
+    "no_credential": "memory_config.model.no_api_key",
+    "unavailable": "memory_config.model.api_verify_failed",
+}
 
 
 def _validate_config_id(config_id, db: Session):
@@ -434,7 +443,7 @@ class MemoryConfigService:
     Usage:
         config_service = MemoryConfigService(db)
         memory_config = config_service.load_memory_config(config_id)
-        model_config = config_service.get_model_config(model_id)
+        invoke_ref = config_service.resolve_model_ref(model_id)
     """
 
     def __init__(self, db: Session | AsyncSession):
@@ -534,7 +543,7 @@ class MemoryConfigService:
             workspace_id=workspace_id,
         )
 
-    async def _resolve_model_credentials(
+    async def _resolve_model_ref(
             self,
             model_id: str,
             model_type_label: str,
@@ -542,8 +551,8 @@ class MemoryConfigService:
             config_id: UUID,
             workspace_id: UUID | None,
             locale: str = "zh",
-    ) -> Any:
-        """串行解析模型配置与可用 API Key（仅 DB 查询）。
+    ) -> tuple[RemoteInvokeRef, str]:
+        """串行解析模型运行引用（仅 DB 查询；非解密接缝，凭据与选路在模型服务侧）。
 
         ``AsyncSession`` 不是并发安全的，本方法只执行 DB 查询，必须在单会话上
         串行调用，不能放进 :func:`asyncio.gather` 与其它 DB 查询并发。
@@ -557,11 +566,11 @@ class MemoryConfigService:
             locale: 语言代码（zh / en），用于 i18n 错误消息
 
         Returns:
-            ModelApiKey: 可用 API Key 配置
+            tuple[RemoteInvokeRef, str]: 运行面引用与模型名（错误文案用）
 
         Raises:
             ModelNotFoundError: 模型不存在
-            ModelInactiveError: 没有可用 API Key
+            ModelInactiveError: 模型未启用
         """
         from app.services.model_service import ModelConfigService as ModelSvc
         from app.services.model_service import ModelApiKeyService
@@ -579,11 +588,11 @@ class MemoryConfigService:
                           model_type=model_type_label, model_id=model_id, error=str(e)),
             )
 
-        # 2. 获取可用 API Key
-        api_key_config = await ModelApiKeyService.get_available_api_key_async(
+        # 2. 非解密引用（缺失/停用为 None；凭据缺失由服务侧调用期响亮失败）
+        invoke_ref = await ModelApiKeyService.resolve_invoke_ref_async(
             self.db, model_config.id, tenant_id
         )
-        if not api_key_config:
+        if invoke_ref is None:
             raise ModelInactiveError(
                 model_id=model_id,
                 model_name=model_config.name,
@@ -594,26 +603,28 @@ class MemoryConfigService:
                           model_type=model_type_label, model_name=model_config.name),
             )
 
-        return api_key_config
+        return invoke_ref, model_config.name
 
     async def _validate_model_connectivity(
             self,
             model_id: str,
             model_type_label: str,
-            api_key_config: Any,
+            invoke_ref: RemoteInvokeRef,
+            model_name: str,
             config_id: UUID,
             workspace_id: UUID | None,
             locale: str = "zh",
     ) -> None:
-        """调用 validate_model_config 验证模型 API 连通性（纯 HTTP，不碰 DB）。
+        """经模型服务对既有配置做活体探测（纯 HTTP，不碰 DB）。
 
-        本方法不执行任何 DB 查询（``validate_model_config`` 内部忽略 db 参数），
-        因此可以安全地放进 :func:`asyncio.gather` 并发执行。
+        凭据解密与选路在服务侧（设计 §2.2），中性的探测结果 kind 在此翻译回域内文案。
+        本方法不执行任何 DB 查询，因此可以安全地放进 :func:`asyncio.gather` 并发执行。
 
         Args:
             model_id: 模型配置 ID（用于错误上下文）
             model_type_label: 模型类型标签（llm / embedding / rerank）
-            api_key_config: 已解析出的可用 API Key 配置
+            invoke_ref: 已解析的运行面引用（config_id + 租户）
+            model_name: 模型名（用于错误文案）
             config_id: 记忆配置 ID（用于错误上下文）
             workspace_id: 工作空间 ID（用于错误上下文）
             locale: 语言代码（zh / en），用于 i18n 错误消息
@@ -621,31 +632,18 @@ class MemoryConfigService:
         Raises:
             ModelInactiveError: API 连通性验证失败
         """
-        from app.services.model_service import ModelConfigService as ModelSvc
+        outcome = await aprobe_stored_config(invoke_ref, model_type=model_type_label)
 
-        # 实际 API 连通性验证
-        result = await ModelSvc.validate_model_config(
-            self.db,
-            model_name=api_key_config.model_name,
-            provider=api_key_config.provider,
-            api_key=api_key_config.api_key,
-            api_base=api_key_config.api_base,
-            model_type=model_type_label,
-            input_modalities=list(api_key_config.input_modalities or []),
-            output_modalities=list(api_key_config.output_modalities or []),
-            features=list(api_key_config.features or []),
-        )
-
-        if not result.get("valid"):
+        if outcome.kind != "valid":
             raise ModelInactiveError(
                 model_id=model_id,
-                model_name=api_key_config.model_name,
+                model_name=model_name,
                 model_type=model_type_label,
                 config_id=config_id,
                 workspace_id=workspace_id,
-                message=t("memory_config.model.api_verify_failed", locale=locale,
-                          model_type=model_type_label, model_name=api_key_config.model_name,
-                          error=result.get('error', 'Unknown error')),
+                message=t(_REMOTE_PROBE_MESSAGE_KEYS[outcome.kind], locale=locale,
+                          model_type=model_type_label, model_name=model_name,
+                          error=outcome.detail or outcome.kind),
             )
 
     async def valid_config(self, config_id: uuid.UUID, locale: str = "zh") -> dict:
@@ -706,14 +704,14 @@ class MemoryConfigService:
 
         _VALIDATE_AS_LLM = {"vision", "video", "audio", "reflection", "emotion"}
 
-        # 第一步：串行解析所有模型的 DB 凭据（AsyncSession 不能并发共享）
-        resolved: list[tuple[str, str, str, str, Any]] = []
+        # 第一步：串行解析所有模型的 DB 引用（AsyncSession 不能并发共享）
+        resolved: list[tuple[str, str, str, str, RemoteInvokeRef, str]] = []
         for model_type, model_id, source in all_models:
             if not model_id:
                 continue
             validate_type = "llm" if model_type in _VALIDATE_AS_LLM else model_type
             try:
-                api_key_config = await self._resolve_model_credentials(
+                invoke_ref, model_name = await self._resolve_model_ref(
                     model_id,
                     validate_type,
                     tenant_id,
@@ -733,7 +731,7 @@ class MemoryConfigService:
                     "message": e.err_message,
                 })
             else:
-                resolved.append((model_type, model_id, source, validate_type, api_key_config))
+                resolved.append((model_type, model_id, source, validate_type, invoke_ref, model_name))
 
         # 第二步：并发执行纯 HTTP 的连通性校验
         async def _validate_http(
@@ -741,13 +739,15 @@ class MemoryConfigService:
                 model_id: str,
                 source: str,
                 validate_type: str,
-                api_key_config: Any,
+                invoke_ref: RemoteInvokeRef,
+                model_name: str,
         ) -> dict | None:
             try:
                 await self._validate_model_connectivity(
                     model_id,
                     validate_type,
-                    api_key_config,
+                    invoke_ref,
+                    model_name,
                     config_id,
                     workspace_id,
                     locale=locale,
@@ -1025,93 +1025,34 @@ class MemoryConfigService:
             else:
                 raise ConfigurationError(f"Failed to load configuration {config_id}: {e}")
 
-    def get_model_config(self, model_id: str, tenant_id: UUID | None = None) -> dict:
-        """Get LLM model configuration by ID.
-        
+    def resolve_model_ref(self, model_id: str, tenant_id: UUID | None = None) -> RemoteInvokeRef:
+        """非解密的运行面模型引用（凭据解密与选路在模型服务，交付设计 §2.2）。
+
+        只认「配置存在且已激活」；弃用/停用/无可用渠道由模型服务在调用时拒绝。
+
         Args:
             model_id: Model ID to look up
-            tenant_id: 当前租户 ID，用于解析公共 SpeedBear 模型运行时 key
-            
+            tenant_id: 当前租户 ID
+
         Returns:
-            Dict with model configuration including api_key, base_url, etc.
+            RemoteInvokeRef: 调用方声明「哪个配置、代表哪个租户」
         """
         from fastapi import status
         from fastapi.exceptions import HTTPException
 
-        from app.core.config import settings
-        from app.services.model_service import ModelConfigService as ModelSvc
         from app.services.model_service import ModelApiKeyService
 
-        config = ModelSvc.get_model_by_id(db=self.db, model_id=model_id, tenant_id=tenant_id)
-        if not config:
-            logger.warning(f"Model ID {model_id} not found")
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="模型ID不存在")
+        try:
+            config_id = uuid.UUID(str(model_id))
+        except (TypeError, ValueError) as exc:
+            logger.warning(f"Model ID {model_id} is not a valid UUID")
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="模型ID不存在") from exc
 
-        api_config = ModelApiKeyService.get_available_api_key(
-            self.db,
-            config.id,
-            tenant_id=tenant_id,
-        )
-        if not api_config:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="模型没有可用的API密钥")
-
-        return {
-            "model_name": api_config.model_name,
-            "provider": api_config.provider,
-            "api_key": api_config.api_key,
-            "base_url": api_config.api_base,
-            "model_config_id": str(config.id),
-            "type": config.type,
-            "timeout": settings.LLM_TIMEOUT,
-            "max_retries": settings.LLM_MAX_RETRIES,
-            "input_modalities": list(api_config.input_modalities or []),
-            "output_modalities": list(api_config.output_modalities or []),
-            "features": list(api_config.features or []),
-            "tenant_id": api_config.tenant_id,
-            "channel_id": api_config.channel_id,
-        }
-
-    def get_embedder_config(self, embedding_id: str, tenant_id: UUID | None = None) -> dict:
-        """Get embedding model configuration by ID.
-        
-        Args:
-            embedding_id: Embedding model ID to look up
-            tenant_id: 当前租户 ID，用于解析公共 SpeedBear 模型运行时 key
-            
-        Returns:
-            Dict with embedder configuration including api_key, base_url, etc.
-        """
-        from fastapi import status
-        from fastapi.exceptions import HTTPException
-
-        from app.services.model_service import ModelConfigService as ModelSvc
-        from app.services.model_service import ModelApiKeyService
-
-        config = ModelSvc.get_model_by_id(db=self.db, model_id=embedding_id)
-        if not config:
-            logger.warning(f"Embedding model ID {embedding_id} not found")
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="嵌入模型ID不存在")
-
-        api_config = ModelApiKeyService.get_available_api_key(
-            self.db,
-            config.id,
-            tenant_id=tenant_id,
-        )
-        if not api_config:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="嵌入模型没有可用的API密钥")
-
-        return {
-            "model_name": api_config.model_name,
-            "provider": api_config.provider,
-            "api_key": api_config.api_key,
-            "base_url": api_config.api_base,
-            "model_config_id": str(config.id),
-            "type": config.type,
-            "timeout": 120.0,
-            "max_retries": 5,
-            "tenant_id": api_config.tenant_id,
-            "channel_id": api_config.channel_id,
-        }
+        ref = ModelApiKeyService.resolve_invoke_ref(self.db, config_id, tenant_id=tenant_id)
+        if ref is None:
+            logger.warning(f"Model ID {model_id} not found or inactive")
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="模型配置不可用")
+        return ref
 
     @staticmethod
     def get_pipeline_config(memory_config: MemoryConfig):

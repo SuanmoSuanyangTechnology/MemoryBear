@@ -40,6 +40,8 @@ from app.schemas.workspace_schema import (
     WorkspaceUpdate,
 )
 from app.i18n import t
+from app.integrations.model.invoke_backend import RemoteInvokeRef
+from app.integrations.model.validate_backend import aprobe_stored_config
 from app.invalidation_notify import notify_user_async, notify_user_sync
 from app.services.channel_registry import candidate_channels_batch_sync
 from app.services.memory_config_service import MemoryConfigService
@@ -779,17 +781,30 @@ def _invalidate_default_config_memory_caches(db: Session) -> None:
 
 _VALIDATE_AS_LLM_SLOTS = {*_MODALITY_SLOTS, *_SLOT_ALIASES}
 
+# 服务侧探活结果 → 宿主 reason（闭集不变，见 _model_issue docstring）
+_REMOTE_PROBE_REASONS = {
+    "probe_failed": "api_verify_failed",
+    "no_credential": "no_api_key",
+    "unavailable": "verify_failed",
+}
+
 
 async def _validate_workspace_slot_runtime(
     async_db: AsyncSession,
     slot: str,
     model_id: str,
-    tenant_id: uuid.UUID | None,
+    tenant_id: uuid.UUID,
     *,
     locale: str,
+    workspace_id: uuid.UUID | None = None,
+    actor_id: uuid.UUID | None = None,
+    actor_name: str | None = None,
 ) -> dict | None:
-    """校验单个模型位的运行时可用性，返回精确的问题详情（可用则返回 None）。"""
-    from app.services.model_service import ModelApiKeyService
+    """校验单个模型位的运行时可用性，返回精确的问题详情（可用则返回 None）。
+
+    静态检查（可见性/停用/能力匹配）读同一库、留在本地；凭据解密与活体探测走模型服务
+    （设计 §2.2：宿主不持有明文）。
+    """
     from app.services.model_service import ModelConfigService as ModelSvc
 
     try:
@@ -824,7 +839,7 @@ async def _validate_workspace_slot_runtime(
         "model_type": str(getattr(model_config.type, "value", model_config.type)),
     }
 
-    is_tenant_model = tenant_id is None or model_config.tenant_id == tenant_id
+    is_tenant_model = model_config.tenant_id == tenant_id
     is_public_speedbear = (
         model_config.provider == ModelProvider.SPEEDBEAR and bool(model_config.is_public)
     )
@@ -844,55 +859,22 @@ async def _validate_workspace_slot_runtime(
     if not _slot_matches_model(_SLOT_ALIASES.get(slot, slot), model_config):
         return _model_issue(slot, reason="capability_mismatch", **issue_context)
 
-    try:
-        api_key_config = await ModelApiKeyService.get_available_api_key_async(
-            async_db, model_config.id, tenant_id
-        )
-    except BusinessException as exc:
-        reason = "no_api_key" if exc.code == BizCode.AGENT_CONFIG_MISSING else "verify_failed"
-        return _model_issue(
-            slot,
-            reason=reason,
-            detail=exc.message,
-            **issue_context,
-        )
-    except Exception as exc:
-        return _model_issue(
-            slot,
-            reason="verify_failed",
-            detail=str(exc),
-            **issue_context,
-        )
-
-    if not api_key_config:
-        return _model_issue(slot, reason="no_api_key", **issue_context)
-
     validate_type = "llm" if slot in _VALIDATE_AS_LLM_SLOTS else slot
-    try:
-        result = await ModelSvc.validate_model_config(
-            async_db,
-            model_name=api_key_config.model_name,
-            provider=api_key_config.provider,
-            api_key=api_key_config.api_key,
-            api_base=api_key_config.api_base,
-            model_type=validate_type,
-            input_modalities=list(api_key_config.input_modalities or []),
-            output_modalities=list(api_key_config.output_modalities or []),
-            features=list(api_key_config.features or []),
-        )
-    except Exception as exc:
+    outcome = await aprobe_stored_config(
+        RemoteInvokeRef(
+            config_id=model_config.id,
+            tenant_id=tenant_id,
+            workspace_id=workspace_id,
+            actor_id=actor_id,
+            actor_name=actor_name,
+        ),
+        model_type=validate_type,
+    )
+    if outcome.kind != "valid":
         return _model_issue(
             slot,
-            reason="verify_failed",
-            detail=str(exc),
-            **issue_context,
-        )
-
-    if not result.get("valid"):
-        return _model_issue(
-            slot,
-            reason="api_verify_failed",
-            detail=str(result.get("error") or result.get("message") or "Unknown error"),
+            reason=_REMOTE_PROBE_REASONS[outcome.kind],
+            detail=outcome.detail,
             **issue_context,
         )
 
@@ -927,6 +909,8 @@ async def validate_model_bindings_runtime_async(
     *,
     locale: str,
     slots_to_validate: tuple[str, ...],
+    actor_id: uuid.UUID | None = None,
+    actor_name: str | None = None,
 ) -> list[dict]:
     """校验最终绑定模型的可见性、能力、API Key 与连通性，并聚合问题。"""
     from app.db import get_async_db_context
@@ -940,7 +924,14 @@ async def validate_model_bindings_runtime_async(
                 continue
 
             issue = await _validate_workspace_slot_runtime(
-                async_db, slot, str(model_id), tenant_id, locale=locale
+                async_db,
+                slot,
+                str(model_id),
+                tenant_id,
+                locale=locale,
+                workspace_id=workspace_id,
+                actor_id=actor_id,
+                actor_name=actor_name,
             )
             if issue is not None:
                 business_logger.warning(
@@ -959,6 +950,8 @@ async def _validate_workspace_model_runtime(
     *,
     locale: str,
     slots_to_validate: tuple[str, ...],
+    actor_id: uuid.UUID | None = None,
+    actor_name: str | None = None,
 ) -> list[dict]:
     return await validate_model_bindings_runtime_async(
         values,
@@ -966,6 +959,8 @@ async def _validate_workspace_model_runtime(
         workspace_id,
         locale=locale,
         slots_to_validate=slots_to_validate,
+        actor_id=actor_id,
+        actor_name=actor_name,
     )
 
 
@@ -1205,6 +1200,8 @@ async def create_workspace(
         None,
         locale=language,
         slots_to_validate=validation_slots,
+        actor_id=user.id,
+        actor_name=user.username,
     )
     if warnings:
         _raise_model_config_error(warnings, language)
@@ -2244,6 +2241,8 @@ async def validate_workspace_models_configs(
             db_workspace.id,
             locale=locale,
             slots_to_validate=validation_slots,
+            actor_id=user.id,
+            actor_name=user.username,
         )
     workspace_payload = _build_workspace_models_response(
         {
@@ -2302,6 +2301,8 @@ async def update_workspace_models_configs(
             db_workspace.id,
             locale=locale,
             slots_to_validate=validation_slots,
+            actor_id=user.id,
+            actor_name=user.username,
         )
         if warnings:
             _raise_model_config_error(warnings, locale)
