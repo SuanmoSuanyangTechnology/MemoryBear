@@ -213,8 +213,8 @@ const SpaceConfig: FC = () => {
                   className="rb:flex-1! rb:overflow-hidden!"
                 > 
                   <Flex vertical gap={4} className="rb:h-full! rb:overflow-hidden!">
-                    <EmbeddingAlert reembedJobId={reembedJobId} onChange={setReembedJobId} />
-                    <div className="rb:flex-1! rb:mt-4 rb:overflow-x-hidden rb:overflow-y-auto">
+                    <EmbeddingAlert reembedJobId={reembedJobId} onChange={setReembedJobId} className="rb:mb-4!" />
+                    <div className="rb:flex-1! rb:overflow-x-hidden rb:overflow-y-auto">
                       {isPrivateAvailable && Object.keys(defaultModels).length > 0 &&
                         <Form.Item name="is_default_config" className="rb:mb-6!">
                           <RadioGroupCard
