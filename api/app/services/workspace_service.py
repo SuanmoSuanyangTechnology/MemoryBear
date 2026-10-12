@@ -362,24 +362,27 @@ async def _resolve_embedding_model_names(
     new_model_config_id: str | None,
     tenant_id: uuid.UUID,
 ) -> tuple[str | None, str | None]:
-    """解析新旧 embedding 模型配置的实际调用名（``ModelApiKey.model_name``）。
+    """Resolve embedding model configs to their runtime call names via the non-decrypting view.
 
-    通过异步会话解析，避免在 async 端点的事件循环内执行阻塞的同步渠道解析。
-    解析不到时对应位置返回 ``None``，调用方按“模型名称不同”处理。
+    This path only needs the model name for the re-embed comparison — going through
+    the credential resolver would drag channel resolution (and, in rollback mode, the
+    legacy association fallback) into a normal admin request path. Async session keeps
+    the event loop free; a resolution failure yields ``None`` (caller treats the names
+    as different).
     """
     from app.db import get_async_db_context
-    from app.services.model_service import ModelApiKeyService
+    from app.services.model_service import ModelConfigService
 
     async def resolve_one(model_config_id: str | None) -> str | None:
         if not model_config_id:
             return None
         try:
-            api_key = await ModelApiKeyService.get_available_api_key_async(
+            view = await ModelConfigService.get_runtime_model_view_async(
                 async_db, uuid.UUID(str(model_config_id)), tenant_id
             )
         except BusinessException:
             return None
-        return api_key.model_name if api_key else None
+        return view.model_name if view else None
 
     async with get_async_db_context() as async_db:
         return (
