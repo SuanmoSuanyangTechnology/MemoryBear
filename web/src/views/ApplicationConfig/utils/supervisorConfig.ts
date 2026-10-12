@@ -61,6 +61,7 @@ export const normalizeSupervisorConfigForForm = (
       ...variable,
       index,
     })),
+    tools: supervisorConfig?.tools ?? []
   }
 }
 
@@ -86,6 +87,19 @@ export const normalizeSupervisorConfigForSave = (
       delete normalizedVariable.index
       delete normalizedVariable.key
       return normalizedVariable
+    }),
+    tools: (supervisorConfig.tools ?? []).map(vo => {
+      if (!vo.operation) {
+        return {
+          tool_id: vo.tool_id,
+          enabled: vo.enabled
+        }
+      }
+      return {
+        tool_id: vo.tool_id,
+        operation: vo.operation,
+        enabled: vo.enabled
+      }
     }),
   }
 }

@@ -12,6 +12,9 @@ export const applicationPart1 = {
       applicationType: 'Application Type',
       applicationTypePlaceholder: 'App Type',
       allType: 'All types',
+      ontologyStatusPlaceholder: 'Ontology Status',
+      ontology_bound: 'Ontology Linked',
+      ontology_default: 'Default Ontology Only',
 
       agent: 'Agent',
       agentDesc: 'Create a single intelligent agent',
