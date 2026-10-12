@@ -3686,6 +3686,10 @@ class MultiAgentOrchestrator:
             # 入参 memory 仅为兼容既有签名，不再参与决策
             memory=self.cluster_memory_enabled(),
             sub_agent=True,
+            # 子 Agent 上下文只来自本轮主管派发的任务书 + 变量包，不携带集群
+            # 会话历史（含主管消息与该子 Agent 上一轮）。显式空历史，跳过
+            # run_stream 内部按共享 conversation_id 的查库/上下文引擎加载。
+            history=[],
             parent_execution_id=self.current_execution_id,
             orchestration_mode=self._normalized_mode,
             execution_owner=self._resolve_agent_identity(agent_config),
@@ -3753,6 +3757,8 @@ class MultiAgentOrchestrator:
             storage_type=storage_type,
             user_rag_memory_id=user_rag_memory_id,
             sub_agent=True,
+            # 与流式路径一致：子 Agent 只看本轮任务书，不携带集群会话历史
+            history=[],
             parent_execution_id=self.current_execution_id,
             orchestration_mode=self._normalized_mode,
             execution_owner=self._resolve_agent_identity(agent_config),
