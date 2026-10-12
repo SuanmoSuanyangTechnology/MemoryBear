@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from ..retrieval.models import ModelRuntimeSnapshot
 
@@ -48,6 +49,18 @@ class ExtractedRelation(BaseModel):
 class ExtractionResult(BaseModel):
     entities: list[ExtractedEntity] = Field(default_factory=list)
     relations: list[ExtractedRelation] = Field(default_factory=list)
+
+    @field_validator("entities", "relations", mode="before")
+    @classmethod
+    def parse_json_array(cls, value: Any) -> Any:
+        """Decode JSON-encoded arrays before applying the full item contracts."""
+
+        if isinstance(value, str):
+            parsed = json.loads(value)
+            if not isinstance(parsed, list):
+                raise ValueError("Expected a JSON array")
+            return parsed
+        return value
 
 
 class GraphQueryPlan(BaseModel):
