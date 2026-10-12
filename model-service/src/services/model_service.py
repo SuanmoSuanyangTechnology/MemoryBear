@@ -72,6 +72,7 @@ from ..schemas.model_schema import (
     ModelConfigUpdate,
     ModelInfo,
 )
+from ..sensitive import SensitiveDataFilter
 from .channel_registry import (
     candidate_channels_batch_sync,
     candidate_channels_sync,
@@ -459,7 +460,7 @@ def _require_api_base_for_local_provider(provider: ModelProvider | str, api_base
         isinstance(api_base, str) and api_base.strip()
     ):
         raise BusinessException(
-            f"本地部署提供商 {getattr(provider, 'value', provider)} 必须配置 API Base URL",
+            f"模型配置验证失败: 本地部署提供商 {getattr(provider, 'value', provider)} 必须配置 API Base URL",
             BizCode.INVALID_PARAMETER,
         )
 
@@ -484,7 +485,7 @@ def _require_wellformed_api_base(
     default = get_default_provider_api_base(provider, model_type)
     hint = f"；如需使用官方地址请留空（默认 {default}）" if default else ""
     raise BusinessException(
-        f"API Base URL 格式不正确：需要以 http:// 或 https:// 开头的完整地址{hint}",
+        f"模型配置验证失败: API Base URL 格式不正确：需要以 http:// 或 https:// 开头的完整地址{hint}",
         BizCode.INVALID_PARAMETER,
     )
 
@@ -503,7 +504,7 @@ def _require_wellformed_bedrock_credential(
     if sep and access_key_id.strip() and secret.strip():
         return
     raise BusinessException(
-        "Bedrock 的 API Key 格式不正确：需要按 access_key_id:secret_access_key 填写"
+        "模型配置验证失败: Bedrock 的 API Key 格式不正确：需要按 access_key_id:secret_access_key 填写"
         "（英文冒号分隔，两者都不可为空）",
         BizCode.INVALID_PARAMETER,
     )
@@ -517,7 +518,9 @@ def _require_supported_api_base(
     """运行时不读取自定义 api_base 的组合，只允许留空或官方基地址。"""
     error = validate_api_base_against_default(provider, api_base, model_type)
     if error:
-        raise BusinessException(error, BizCode.INVALID_PARAMETER)
+        raise BusinessException(
+            f"模型配置验证失败: {error}", BizCode.INVALID_PARAMETER
+        )
 
 
 def _model_option_cache_state(model: ModelConfig) -> tuple[uuid.UUID | None, bool]:
@@ -1105,13 +1108,13 @@ class ModelConfigService:
                 }
 
         except Exception as e:
-            # 分类匹配一律基于原始异常文本（raw）：VL 链路的展示文案被统一覆盖为
-            # 通用提示，若用覆盖后的 error_message 匹配会吞掉鉴权/连接等标记。
+            # 分类匹配一律基于原始异常文本（raw）：默认展示文案恒为通用提示（不回显
+            # 原文），若用覆盖后的 error_message 匹配会吞掉鉴权/连接等标记。
             raw_error_message = str(e)
             error_message = (
                 "Qwen3-VL 模型验证失败"
                 if is_qwen3_vl_request
-                else raw_error_message
+                else "未知错误: 调用模型服务失败，请检查模型配置后重试"
             )
             error_type = type(e).__name__
             # 特殊处理常见的错误类型
@@ -1123,7 +1126,7 @@ class ModelConfigService:
                 if "access denied" in raw_error_message.lower():
                     error_message = "访问被拒绝: 请检查 API 凭证和权限配置"
                 else:
-                    error_message = f"验证失败: {raw_error_message}"
+                    error_message = "验证失败: 请检查模型配置参数是否正确"
             elif any(
                 marker in f"{error_type} {raw_error_message}".lower()
                 for marker in _AUTH_ERROR_MARKERS
@@ -1163,14 +1166,24 @@ class ModelConfigService:
                     )
             elif "RateLimitError" in error_type or "rate limit" in raw_error_message.lower():
                 error_message = "请求频率限制: 已超过 API 调用限制"
+            elif (
+                "ModelNotFound" in error_type
+                or "model not exist" in raw_error_message.lower()
+                or "model not found" in raw_error_message.lower()
+            ):
+                # 首选类名（langchain_openai 对 404+模型缺失抛 OpenAIModelNotFoundError，
+                # 语义信号不随上游文案漂移）；文本标记兜底其他提供商/旧式空格文案。
+                # 均无法进一步区分名称错误/未开通/无权限
+                error_message = "模型不存在: 请确认模型名称，或该模型未开通/不支持此接入方式"
             elif "InvalidRequestError" in error_type or "invalid request" in raw_error_message.lower():
-                error_message = f"无效请求: {raw_error_message}"
+                error_message = "无效请求: 请确认模型名称与参数是否正确"
             elif "model_copy" in raw_error_message:
                 error_message = "模型消息格式错误: 请确保使用正确的模型类型（LLM/Chat）"
 
-            # 记录详细错误日志
+            # 记录详细错误日志（原始异常文本脱敏后仅落服务端日志，不回显客户端）
             logger.error("模型验证失败 - 类型: %s, 模型: %s, 提供商: %s", error_type, model_name, provider)
             logger.error("错误详情: %s", error_message)
+            logger.error("上游原始异常: %s", SensitiveDataFilter.filter_string(raw_error_message)[:500])
             logger.debug("完整堆栈: %s", traceback.format_exc())
 
             return {
