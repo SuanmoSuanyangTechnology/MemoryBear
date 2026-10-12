@@ -40,6 +40,7 @@ export const space = {
       embeddingRebuildTitle: 'Embedding model changed',
       embeddingRebuildContent: 'Because the workspace embedding model has changed, the memory library needs to rebuild its vector indexes with the new model. During rebuilding, vector search may be temporarily unavailable and fall back to keyword/full-text search.',
       reembedding: {
+        allTask: 'Total tasks',
         status: {
           pending: 'Pending',
           queued: 'Queued',

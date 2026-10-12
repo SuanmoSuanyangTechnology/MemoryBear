@@ -113,6 +113,7 @@ export const memoryConversation = {
       stopAudioRecorder: 'Stop Recording',
       startAudioRecorder: 'Start Recording',
       citations: 'Citations',
+      waitingModelResponse: 'Waiting for the response',
       reasoning_content: 'Deep reasoning Content',
       history: 'History',
       likeMsg: 'Thank you for your positive feedback',

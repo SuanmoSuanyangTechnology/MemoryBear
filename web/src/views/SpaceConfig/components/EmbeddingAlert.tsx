@@ -50,6 +50,11 @@ const alertColors: Record<Status, RbAlertProps['color']> = {
 }
 
 const spaceAlertConfigs: Partial<Record<Status, SpaceAlertConfig>> = {
+  pending: {
+    titleKey: 'space.reembedding.alert.runningTitle',
+    descriptionKey: 'space.reembedding.alert.runningDescription',
+    showProgress: true,
+  },
   running: {
     titleKey: 'space.reembedding.alert.runningTitle',
     descriptionKey: 'space.reembedding.alert.runningDescription',
