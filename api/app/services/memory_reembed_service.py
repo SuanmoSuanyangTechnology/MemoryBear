@@ -1515,6 +1515,26 @@ def empty_job_retry_result() -> dict:
     }
 
 
+def _reopen_failed_job(db: Session, job: MemoryReembedJob) -> bool:
+    """把终态失败的任务重新打开，返回是否真的重开了。
+
+    重开是必需的，不是可选的：子任务入口会拒绝终态任务
+    （``_REEMBED_TERMINAL_STATUSES`` → ``ABORTED``），不重开就点了没反应。
+
+    行级与任务级两条重试通路共用本函数：各写一份会分叉，而它们必须在"清
+    finished_at / error"上完全一致。
+    """
+    if job.status != ReembedJobStatus.failed.value:
+        return False
+    job.status = ReembedJobStatus.running.value
+    job.finished_at = None
+    # 旧失败原因必须清掉：finalize_job_if_complete 里是
+    # ``existing_error or (...)``，留着它会让重算成功后仍带着上一轮的失败文案。
+    job.error = None
+    db.add(job)
+    return True
+
+
 def retry_job_users(
         db: Session,
         *,
@@ -1528,6 +1548,11 @@ def retry_job_users(
     重开任务是必需的，不是可选的：子任务入口会拒绝终态任务
     （``_REEMBED_TERMINAL_STATUSES`` → ``ABORTED``），不重开就点了没反应。重开后
     全部行完成时 :func:`finalize_job_if_complete` 会把它重新收尾为 ``succeeded``。
+
+    两条通路：有终态失败的行就逐行重置并重派**子任务**；一行都没有但任务停在
+    ``failed``（前置换算在建行之前失败）时改走**任务级**重试——重开任务并重派
+    **驱动**，由 ``run_job`` 重跑探测。后者在 ``end_user_ids`` 指名时仍报 409：
+    任务里根本没有该用户的行，那不是"可以重试"的状态。
     """
     job = get_reembed_job(db, job_id)
     if job is None:
@@ -1564,17 +1589,41 @@ def retry_job_users(
             code=BizCode.STATE_CONFLICT,
         )
     if not rows:
-        return {"retried": 0, "reopened": False, "job_status": job.status, "end_user_ids": []}
+        # 查不到终态失败的行，但任务本身停在 failed：这只可能是**前置换算**在建行
+        # 之前就拒绝了任务（orchestrator 的维度探测 / 扇出自检），于是
+        # ``memory_reembed_job_users`` 一行都没有。
+        #
+        # 为什么二者等价：``finalize_job_if_complete`` 只在"每行都终态、且至少一行
+        # 重试耗尽"时才写 failed，而 ``mark_job_failed`` 的生产调用点只有那两处前置
+        # 换算。所以「failed 且查不到终态失败行」⇔ 零行。
+        #
+        # 这种任务没有行可以承载重试，要重试的是**任务本身**：重开后重新派发驱动，
+        # 由 run_job 重跑探测。否则它既点不动重试（行级重试查不到行），也不会被对账
+        # 补派（对账只捞 pending/running），而读路径会因为"该 end_user 没有 done 行"
+        # 把整个工作空间持续降级为纯全文检索（should_degrade_semantic），没有出口。
+        if not _reopen_failed_job(db, job):
+            return {
+                "retried": 0,
+                "reopened": False,
+                "job_status": job.status,
+                "end_user_ids": [],
+            }
+        db.commit()
+        # 与行级重试同理：提交后才派发。状态已落库，派发失败由对账任务兜底
+        # （running 且无心跳会被重新派发）。
+        dispatch_reembed_job(job_id)
+        logger.info(
+            "[MemoryReembed] job-level retry: job=%s end_user_rows=0 (pre-flight failure)",
+            job_id,
+        )
+        return {
+            "retried": 0,
+            "reopened": True,
+            "job_status": job.status,
+            "end_user_ids": [],
+        }
 
-    reopened = False
-    if job.status == ReembedJobStatus.failed.value:
-        job.status = ReembedJobStatus.running.value
-        job.finished_at = None
-        # 旧失败原因必须清掉：finalize_job_if_complete 里是
-        # ``existing_error or (...)``，留着它会让重算成功后仍带着上一轮的失败文案。
-        job.error = None
-        reopened = True
-    db.add(job)
+    reopened = _reopen_failed_job(db, job)
 
     retried_ids: list[str] = []
     for row in rows:
