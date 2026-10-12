@@ -12,6 +12,7 @@ import RbAlert from '@/components/RbAlert';
 import RbTable, { type TableRef } from '@/components/Table'
 import StatusTag, { type StatusTagProps } from '@/components/StatusTag';
 import type { Status } from './EmbeddingAlert'
+import BtnTabs from '@/components/BtnTabs';
 
 interface DetailItem {
   end_user_id: string;
@@ -62,6 +63,8 @@ interface LoadResponse {
 
 type SummaryDisplayMode = Exclude<Status, 'pending'>
 
+const summaryStatuses: SummaryDisplayMode[] = ['running', 'queued', 'failed', 'succeeded']
+
 const getSummaryDisplayMode = ({ job_status, summary }: LoadResponse): SummaryDisplayMode | null => {
   if (job_status === 'pending') {
     return 'queued'
@@ -94,9 +97,8 @@ const EmbeddingRebuildDetailModal = forwardRef<EmbeddingRebuildDetailModalRef, {
     setVisible(true);
   };
 
-  const handleLoad = (res: any) => {
-    const { summary, job_id, job_status } = res as LoadResponse
-    setReembedInfo({ summary, job_id, job_status })
+  const handleLoad = (res: LoadResponse) => {
+    setReembedInfo(res)
   }
 
   const handleRetry = (record: DetailItem) => {
@@ -222,28 +224,58 @@ const EmbeddingRebuildDetailModal = forwardRef<EmbeddingRebuildDetailModalRef, {
       footer={null}
       width={1000}
     >
-      {summaryConfig && (
-        <RbAlert color={summaryConfig.color}>
-          <Flex vertical gap={4} className="rb:w-full!">
-            <div>
-              <span className="rb:font-medium">{t('space.reembedding.detail.taskBackground')}</span>
-              {t('space.reembedding.detail.background')}
-            </div>
-            <div>
-              <span className="rb:font-medium">{t('space.reembedding.detail.currentImpactLabel')}</span>
-              {summaryConfig.content}
-            </div>
-          </Flex>
-        </RbAlert>
-      )}
-      <RbTable<DetailItem>
-        ref={tableRef}
-        apiUrl={getWorkspaceReembedCurrenEndUsersUrl}
-        columns={columns}
-        rowKey="end_user_id"
-        className="rb:mt-3!"
-        onLoad={handleLoad}
-      />
+      <Flex vertical gap={12} className="rb:h-[calc(100vh-202px)]! rb:overflow-hidden!">
+        {summaryConfig && (
+          <RbAlert
+            color={summaryConfig.color}
+            className="rb:shrink-0!"
+          >
+            <Flex vertical gap={4} className="rb:w-full!">
+              <div>
+                <span className="rb:font-medium">{t('space.reembedding.detail.taskBackground')}</span>
+                {t('space.reembedding.detail.background')}
+              </div>
+              <div>
+                <span className="rb:font-medium">{t('space.reembedding.detail.currentImpactLabel')}</span>
+                {summaryConfig.content}
+              </div>
+            </Flex>
+          </RbAlert>
+        )}
+        <BtnTabs
+          items={[
+            {
+              key: 'all',
+              label: <>
+                {t(`space.reembedding.allTask`)}
+                <span className="rb:font-medium rb:text-[14px] rb:ml-1">{reembedInfo?.page?.total ?? 0}</span>
+              </>
+            },
+            ...summaryStatuses.map(status => {
+              return {
+                key: status,
+                label: <>
+                  {t(`space.reembedding.status.${status}`)}
+                  <span className="rb:font-medium rb:text-[14px] rb:ml-1">{reembedInfo?.summary?.[status] ?? 0}</span>
+                </>
+              }
+            })
+          ]}
+          circle={false}
+          disabled={true}
+          className="rb:shrink-0!"
+        />
+        <div className="rb:flex-1! rb:overflow-hidden">
+          <RbTable<DetailItem>
+            ref={tableRef}
+            apiUrl={getWorkspaceReembedCurrenEndUsersUrl}
+            columns={columns}
+            rowKey="end_user_id"
+            onLoad={handleLoad}
+            fillHeight={true}
+          />
+        </div>
+      </Flex>
     </RbModal>
   );
 });
