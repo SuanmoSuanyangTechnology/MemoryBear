@@ -9,10 +9,10 @@ from typing import Any
 from redbear_model.contracts import ModelProvider, ResolvedModelConfig
 from redbear_model.errors import UnsupportedModelProviderError
 from redbear_model.providers.volcengine import (
+    build_ark_client,
     build_content_generation_tool,
     build_optimize_prompt_options,
     build_sequential_image_options,
-    load_ark_class,
 )
 from redbear_model.telemetry import (
     ModelTelemetry,
@@ -84,17 +84,14 @@ class RedBearImageGenerator(_ObservedGenerator):
     def _create_client(config: ResolvedModelConfig):
         if config.provider is not ModelProvider.VOLCANO:
             raise UnsupportedModelProviderError(config.provider.value)
-        return load_ark_class()(
-            api_key=config.api_key.get_secret_value(),
-            base_url=config.base_url,
-        )
+        return build_ark_client(config)
 
     def generate(
         self,
         prompt: str,
         image: Any | None = None,
         size: str | None = "2K",
-        output_format: str = "png",
+        output_format: str | None = None,
         response_format: str = "url",
         watermark: bool = False,
         sequential_image_generation: str | None = None,
@@ -104,15 +101,17 @@ class RedBearImageGenerator(_ObservedGenerator):
         stream: bool = False,
         **kwargs: Any,
     ) -> dict[str, Any]:
+        # output_format 非全模型支持（如 seedream 4.0 拒收该参数），缺省不下发，交上游默认
         params: dict[str, Any] = {
             "model": self._config.model_name,
             "prompt": prompt,
             "size": size,
-            "output_format": output_format,
             "response_format": response_format,
             "watermark": watermark,
             **kwargs,
         }
+        if output_format is not None:
+            params["output_format"] = output_format
         if image is not None:
             params["image"] = image
         if sequential_image_generation:
@@ -171,10 +170,7 @@ class RedBearVideoGenerator(_ObservedGenerator):
     def _create_client(config: ResolvedModelConfig):
         if config.provider is not ModelProvider.VOLCANO:
             raise UnsupportedModelProviderError(config.provider.value)
-        return load_ark_class()(
-            api_key=config.api_key.get_secret_value(),
-            base_url=config.base_url,
-        )
+        return build_ark_client(config)
 
     def generate(
         self,

@@ -125,6 +125,27 @@ const Chat: FC<ChatProps> = ({
     updateChatList(prev => applyAudioStatus(prev, audioStatusMap))
   }, [chatList.length, audioStatusMap])
 
+  /** Resolves a valid message and its runtime variable values before sending. */
+  const resolveSendContext = (msg?: string) => {
+    if (!msg?.trim()) {
+      setLoading(false)
+      compareLoadingRef.current = false
+      return null
+    }
+
+    const variableResult = collectVariableParams(chatVariables)
+    if (variableResult.needRequired.length) {
+      messageApi.error(`${variableResult.needRequired.join(',')} ${t('workflow.variableRequired')}`)
+    }
+    if (!variableResult.isCanSend) {
+      setLoading(false)
+      compareLoadingRef.current = false
+      return null
+    }
+
+    return { message: msg, params: variableResult.params }
+  }
+
   /** Send message for agent comparison mode */
   const handleSend = (msg?: string) => {
     if (loading || !id) return
@@ -133,18 +154,9 @@ const Chat: FC<ChatProps> = ({
     const files = (fileList || []).filter(item => !['uploading', 'error'].includes(item.status))
     handleSave(false)
       .then(() => {
-        const message = msg
-        if (!message?.trim()) return
-        // Validate required variables before sending
-        const { isCanSend, params, needRequired } = collectVariableParams(chatVariables)
-        if (needRequired.length) {
-          messageApi.error(`${needRequired.join(',')} ${t('workflow.variableRequired')}`)
-        }
-        if (!isCanSend) {
-          setLoading(false)
-          compareLoadingRef.current = false
-          return
-        }
+        const sendContext = resolveSendContext(msg)
+        if (!sendContext) return
+        const { message, params } = sendContext
 
         updateChatList(prev => addUserMessage(prev, message, files))
         setMessage(undefined)
@@ -204,8 +216,10 @@ const Chat: FC<ChatProps> = ({
     const files = (fileList || []).filter(item => !['uploading', 'error'].includes(item.status))
     handleSave(false)
       .then(() => {
-        const message = msg
-        if (!message || message.trim() === '') return
+        const sendContext = resolveSendContext(msg)
+        if (!sendContext) return
+        const { message, params } = sendContext
+
         updateChatList(prev => addUserMessage(prev, message, files))
         setMessage(undefined)
         toolbarRef.current?.setFiles([])
@@ -228,6 +242,7 @@ const Chat: FC<ChatProps> = ({
               conversation_id: conversationId,
               stream: true,
               files: formatFiles(files),
+              variables: params,
             },
             handleStreamMessage,
             (abort) => { abortRef.current = abort }
@@ -381,15 +396,15 @@ const Chat: FC<ChatProps> = ({
             {chatList.map((chat, index) => (
               <Flex key={index} vertical
                 className={clsx('rb:h-full! rb:overflow-hidden', {
-                  "rb:border-r rb:border-[#DFE4ED]": index !== chatList.length - 1 && chatList.length > 1,
+                  "rb:border-r rb:border-gray-400": index !== chatList.length - 1 && chatList.length > 1,
                 })}
               >
                 {chat.label &&
                   <div className={clsx(
-                    "rb:grid rb:bg-[#F6F6F6] rb:text-center rb:flex-[0_0_auto]"
+                    "rb:grid rb:bg-gray-100 rb:text-center rb:flex-[0_0_auto]"
                   )}>
                     <div className='rb:relative rb:py-2.5 rb:px-3 rb:overflow-hidden'>
-                      <div className="rb:text-[#212332] rb:font-medium rb:text-ellipsis rb:overflow-hidden rb:whitespace-nowrap rb:w-[calc(100%-24px)]">{chat.label}</div>
+                      <div className="rb:text-gray-800 rb:font-medium rb:text-ellipsis rb:overflow-hidden rb:whitespace-nowrap rb:w-[calc(100%-24px)]">{chat.label}</div>
                       <div
                         className="rb:w-4 rb:h-4 rb:cursor-pointer rb:absolute rb:top-3 rb:right-3 rb:bg-cover rb:bg-[url('@/assets/images/close.svg')] rb:hover:bg-[url('@/assets/images/close_hover.svg')]"
                         onClick={() => handleDelete(index)}

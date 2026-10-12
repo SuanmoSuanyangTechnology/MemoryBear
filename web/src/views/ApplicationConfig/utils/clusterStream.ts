@@ -1,12 +1,25 @@
 import type { ChatItem } from '@/components/Chat/types'
 import type { SSEMessage } from '@/utils/stream'
 
+export interface AgentToolCall extends Record<string, unknown> {
+  step_id?: string;
+  name?: string;
+  input?: unknown;
+  output?: unknown;
+  meta?: Record<string, unknown>;
+  error?: unknown;
+  status?: 'running' | 'completed' | 'failed';
+}
+
+export interface AgentTraceIteration extends Record<string, unknown> {
+  index: number;
+  llm: { output?: unknown; [key: string]: unknown };
+  tool_calls: AgentToolCall[];
+}
+
 export interface AgentTrace {
   meta?: Record<string, unknown>;
-  iterations: Array<{
-    llm?: { output?: unknown; [key: string]: unknown };
-    [key: string]: unknown;
-  }>;
+  iterations: AgentTraceIteration[];
   [key: string]: unknown;
 }
 
@@ -22,8 +35,12 @@ export interface ClusterEventData {
   agent_id?: string | null;
   agent_name?: string | null;
   task?: unknown;
+  step_id?: string;
+  name?: string;
+  input?: unknown;
   status?: string;
   output?: unknown;
+  meta?: Record<string, unknown>;
   elapsed_time?: number;
   token_usage?: Record<string, number>;
   error?: unknown;
@@ -45,6 +62,14 @@ export interface ClusterAgentBlock extends Record<string, unknown> {
   orchestration_mode?: string | null;
   content: { input?: unknown; output?: unknown; error?: string };
   agent_log: AgentTrace;
+}
+
+interface ClusterToolBlock extends Record<string, unknown> {
+  node_id: string;
+  node_type: 'tool';
+  node_name?: string;
+  status: 'pending' | 'completed' | 'failed';
+  content: { input?: unknown; output?: unknown; error?: string };
 }
 
 export interface ClusterStreamAdapter {
@@ -70,11 +95,97 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 const hasAgentOwner = (payload: ClusterEventData) =>
   AGENT_OWNER_KEYS.some(key => Object.prototype.hasOwnProperty.call(payload, key))
 
+const normalizeIteration = (value: unknown, fallbackIndex: number): AgentTraceIteration => {
+  const iteration = isRecord(value) ? value : {}
+  const toolCalls = Array.isArray(iteration.tool_calls)
+    ? iteration.tool_calls.filter(isRecord) as AgentToolCall[]
+    : []
+
+  return {
+    ...iteration,
+    index: typeof iteration.index === 'number' ? iteration.index : fallbackIndex,
+    llm: isRecord(iteration.llm) ? iteration.llm : {},
+    tool_calls: toolCalls,
+  }
+}
+
 const normalizeTrace = (payload: ClusterEventData): AgentTrace => {
   const trace = isRecord(payload.data) ? payload.data : payload
   return Array.isArray(trace.iterations)
-    ? { ...trace, iterations: trace.iterations as AgentTrace['iterations'] }
+    ? {
+        ...trace,
+        meta: isRecord(trace.meta) ? trace.meta : {},
+        iterations: trace.iterations.map(normalizeIteration),
+      }
     : { ...EMPTY_AGENT_TRACE }
+}
+
+const mergeToolCalls = (
+  currentCalls: AgentToolCall[],
+  incomingCalls: AgentToolCall[],
+): AgentToolCall[] => {
+  const mergedCalls = [...currentCalls]
+
+  incomingCalls.forEach(incomingCall => {
+    const targetIndex = incomingCall.step_id
+      ? mergedCalls.findIndex(call => call.step_id === incomingCall.step_id)
+      : -1
+    if (targetIndex === -1) {
+      mergedCalls.push(incomingCall)
+    } else {
+      mergedCalls[targetIndex] = {
+        ...mergedCalls[targetIndex],
+        ...incomingCall,
+        meta: {
+          ...mergedCalls[targetIndex].meta,
+          ...incomingCall.meta,
+        },
+      }
+    }
+  })
+
+  return mergedCalls
+}
+
+const mergeTrace = (currentTrace: AgentTrace, incomingTrace: AgentTrace): AgentTrace => {
+  const mergedIterations = currentTrace.iterations.map((iteration, index) =>
+    normalizeIteration(iteration, index)
+  )
+
+  incomingTrace.iterations.forEach((incomingIteration, index) => {
+    const normalizedIncoming = normalizeIteration(incomingIteration, index)
+    const targetIndex = mergedIterations.findIndex(
+      iteration => iteration.index === normalizedIncoming.index
+    )
+    if (targetIndex === -1) {
+      mergedIterations.push(normalizedIncoming)
+      return
+    }
+
+    const currentIteration = mergedIterations[targetIndex]
+    mergedIterations[targetIndex] = {
+      ...currentIteration,
+      ...normalizedIncoming,
+      llm: {
+        ...currentIteration.llm,
+        ...normalizedIncoming.llm,
+      },
+      tool_calls: mergeToolCalls(
+        currentIteration.tool_calls,
+        normalizedIncoming.tool_calls
+      ),
+    }
+  })
+
+  return {
+    ...currentTrace,
+    ...incomingTrace,
+    meta: {
+      ...currentTrace.meta,
+      ...incomingTrace.meta,
+    },
+    iterations: mergedIterations.sort((left, right) => left.index - right.index),
+  }
 }
 
 const getErrorText = (error: unknown): string | undefined => {
@@ -134,16 +245,24 @@ const findAgentBlockIndex = (
   return -1
 }
 
+const keepAssistantStatus = (message: ChatItem) =>
+  message.status === 'completed' || message.status === 'failed'
+    ? message.status
+    : 'running'
+
 export const createClusterStreamProcessor = (adapter: ClusterStreamAdapter) => {
   let placeholderIndex = 0
 
   const updateAgentBlock = (
     payload: ClusterEventData,
     updater: (block: ClusterAgentBlock) => ClusterAgentBlock,
+    createIfMissing = true,
   ) => {
     adapter.updateAssistant(message => {
       const blocks = [...(message.subContent || [])] as ClusterAgentBlock[]
       let targetIndex = findAgentBlockIndex(blocks, payload)
+      if (targetIndex === -1 && !createIfMissing) return message
+
       if (targetIndex === -1) {
         const identity = payload.agent_id || payload.agent_name || 'unknown'
         blocks.push({
@@ -177,7 +296,62 @@ export const createClusterStreamProcessor = (adapter: ClusterStreamAdapter) => {
           ? payload.orchestration_mode
           : current.orchestration_mode,
       })
-      return { ...message, status: 'running', subContent: blocks }
+      return {
+        ...message,
+        status: keepAssistantStatus(message),
+        subContent: blocks,
+      }
+    })
+  }
+
+  const updateToolBlock = (
+    payload: ClusterEventData,
+    event: 'tool_start' | 'tool_end' | 'tool_error',
+  ) => {
+    if (!payload.step_id) return
+
+    adapter.updateAssistant(message => {
+      const blocks = [...(message.subContent || [])]
+      const targetIndex = blocks.findIndex(block =>
+        block.node_type === 'tool' && block.node_id === payload.step_id
+      )
+      const current = targetIndex === -1
+        ? undefined
+        : blocks[targetIndex] as ClusterToolBlock
+      const status = event === 'tool_start'
+        ? current?.status === 'completed' || current?.status === 'failed'
+          ? current.status
+          : 'pending'
+        : event === 'tool_error' || payload.error !== undefined
+          ? 'failed'
+          : 'completed'
+      const nextBlock: ClusterToolBlock = {
+        ...current,
+        node_id: payload.step_id as string,
+        node_type: 'tool',
+        node_name: payload.name || current?.node_name,
+        status,
+        content: {
+          ...current?.content,
+          ...(payload.input !== undefined ? { input: payload.input } : {}),
+          ...(payload.output !== undefined ? { output: payload.output } : {}),
+          ...(payload.error !== undefined ? { error: getErrorText(payload.error) } : {}),
+        },
+        ...(payload.meta !== undefined
+          ? { meta: { ...(isRecord(current?.meta) ? current?.meta : {}), ...payload.meta } }
+          : {}),
+      }
+
+      if (targetIndex === -1) {
+        blocks.push(nextBlock)
+      } else {
+        blocks[targetIndex] = nextBlock
+      }
+      return {
+        ...message,
+        status: keepAssistantStatus(message),
+        subContent: blocks,
+      }
     })
   }
 
@@ -188,7 +362,7 @@ export const createClusterStreamProcessor = (adapter: ClusterStreamAdapter) => {
       status,
       ...(error ? { error } : {}),
       subContent: message.subContent?.map(block =>
-        block.status === 'running'
+        block.status === 'running' || block.status === 'pending'
           ? { ...block, status: status === 'failed' ? 'failed' : 'completed' }
           : block,
       ),
@@ -207,11 +381,7 @@ export const createClusterStreamProcessor = (adapter: ClusterStreamAdapter) => {
           adapter.syncConversationId(payload.conversation_id)
           adapter.applyMessageId(payload.message_id)
           adapter.applyUserMessageId(payload.user_message_id)
-          adapter.updateAssistant(message => ({
-            ...message,
-            status: 'running',
-            subContent: message.subContent || [],
-          }))
+          adapter.updateAssistant(message => ({ ...message, status: 'running' }))
           break
         case 'message':
           adapter.stopInitialLoading?.()
@@ -226,7 +396,10 @@ export const createClusterStreamProcessor = (adapter: ClusterStreamAdapter) => {
           break
         case 'agent_log':
         case 'agent_log_final':
-          updateAgentBlock(payload, block => ({ ...block, agent_log: normalizeTrace(payload) }))
+          updateAgentBlock(payload, block => ({
+            ...block,
+            agent_log: mergeTrace(block.agent_log, normalizeTrace(payload)),
+          }))
           break
         case 'agent_complete': {
           const error = getErrorText(payload.error)
@@ -243,12 +416,17 @@ export const createClusterStreamProcessor = (adapter: ClusterStreamAdapter) => {
           }))
           break
         }
+        case 'tool_start':
+        case 'tool_end':
+        case 'tool_error':
+          updateToolBlock(payload, item.event)
+          break
         case 'end':
           if (ownedByAgent) {
             updateAgentBlock(payload, block => ({
               ...block,
               status: block.status === 'running' ? 'completed' : block.status,
-            }))
+            }), false)
           } else {
             finishCluster('completed')
           }
@@ -260,7 +438,7 @@ export const createClusterStreamProcessor = (adapter: ClusterStreamAdapter) => {
               ...block,
               status: 'failed',
               content: { ...block.content, ...(error ? { error } : {}) },
-            }))
+            }), false)
           } else {
             finishCluster('failed', error)
           }

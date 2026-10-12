@@ -1,12 +1,14 @@
 """记忆引擎展示 Service
 
 负责：
-- 从 ExtractionResult 组装 0~3 个有效引擎事件（EXTRACTION / CROSS_MODAL / EMOTION）
+- 从 ExtractionResult 组装 0~3 个有效基础引擎事件（EXTRACTION / CROSS_MODAL / EMOTION）；
+  另有每条最终永久 Statement 各追加一条 PERMANENT_ADDED 事件（数量随语句数，无上限）
 - 从遗忘、反思引擎的汇总结果组装 FORGETTING / REFLECTION 事件
 - 查询时按用户时区日期聚合事件并生成卡片文案
 - 异常隔离（PG 写入失败不影响主流程）
 """
 
+import hashlib
 import logging
 import uuid
 from collections import defaultdict
@@ -22,6 +24,14 @@ from app.repositories.memory_engine_display_event_repository import (
 )
 
 logger = logging.getLogger(__name__)
+
+# 事件级稳定 operation_id 的 UUIDv5 命名空间。
+# 三类新事件（长期固化 / 永久记忆增量 / 价值评估）都以此命名空间派生，
+# 保证同一业务对象跨任务重放得到同一个 operation_id，从而被唯一约束拦截。
+_ENGINE_EVENT_NAMESPACE = uuid.uuid5(
+    uuid.NAMESPACE_DNS,
+    "memory-bear.engine-display.events",
+)
 
 # 通用角色实体排除列表（跨模态主题过滤）
 _ROLE_ENTITY_NAMES = frozenset({
@@ -110,8 +120,10 @@ class MemoryEngineDisplayService:
     ) -> None:
         """从 ExtractionResult 组装引擎事件并写入 PG。
 
-        一次最多产生 3 条事件（萃取、跨模态、情感），
-        共用同一个 operation_id 和 occurred_at。
+        一轮最多产生 3 条基础事件（萃取、跨模态、情感），共用同一个
+        随机 operation_id 和 occurred_at；另有每条最终 ``is_permanent = true``
+        的 Statement 各产生一条 MEMORY_VALUE / PERMANENT_ADDED 事件，
+        各自携带由 Statement ID 派生的稳定 operation_id（重放不重复累计）。
 
         PG 写入只执行一次，不重试。失败时记录日志后立即结束。
 
@@ -133,14 +145,25 @@ class MemoryEngineDisplayService:
             emotion_event = _build_emotion_event(extraction_result)
             if emotion_event is not None:
                 events_data.append(emotion_event)
-
-            if not events_data:
-                return
         except Exception as e:
             logger.error(
                 f"[EngineDisplay] 事件组装失败: end_user_id={end_user_id}, error={e}",
                 exc_info=True,
             )
+            events_data = []
+
+        # 永久记忆增量：容量分配完成后的最终 StatementNode.is_permanent。
+        # 组装失败只丢 PERMANENT_ADDED，不影响上面已组装好的老引擎事件。
+        try:
+            events_data.extend(_build_permanent_added_events(extraction_result))
+        except Exception as e:
+            logger.error(
+                f"[EngineDisplay] 永久记忆增量事件组装失败: "
+                f"end_user_id={end_user_id}, error={e}",
+                exc_info=True,
+            )
+
+        if not events_data:
             return
 
         await _persist_events(end_user_id, events_data)
@@ -191,6 +214,67 @@ class MemoryEngineDisplayService:
         except Exception as e:
             logger.error(
                 f"[EngineDisplay] 反思事件组装失败: end_user_id={end_user_id}, error={e}",
+                exc_info=True,
+            )
+            return
+        if event is None:
+            return
+        await _persist_events(end_user_id, [event])
+
+    @staticmethod
+    async def save_scene_summary_event(
+        end_user_id: str,
+        summary: Any,
+    ) -> None:
+        """场景摘要（长期固化）写入 Neo4j 成功后调用。
+
+        只在摘要成功落库、``summary_id`` 非空且 ``turn_count > 0`` 时写入一条
+        SCENE_SUMMARY 事件；跳过分支（interval 无效、内容过短、来源未变化、
+        模型或写入失败）都不产生事件。
+
+        operation_id 由 ``场景 ID + 来源版本`` 派生，同一版本重放不重复写入。
+
+        Args:
+            end_user_id: 终端用户 ID（字符串形式 UUID）
+            summary: SceneSummaryService.generate() 中已成功写入的 SceneSummaryNode
+        """
+        try:
+            event = _build_scene_summary_event(summary)
+        except Exception as e:
+            logger.error(
+                f"[EngineDisplay] 长期固化事件组装失败: end_user_id={end_user_id}, error={e}",
+                exc_info=True,
+            )
+            return
+        if event is None:
+            return
+        await _persist_events(end_user_id, [event])
+
+    @staticmethod
+    async def save_memory_value_event(
+        end_user_id: str,
+        result: dict,
+        task_id: str,
+    ) -> None:
+        """GDS 拓扑价值评估完成后调用。
+
+        只有 ``status = success`` 且 ``node_properties_written > 0`` 才写入一条
+        MEMORY_VALUE / VALUE_EVALUATED 事件；空图、算法失败、锁超时、
+        计数不一致、Outbox 入队失败等分支都不产生事件。
+
+        operation_id 优先直接使用可解析为 UUID 的 Celery ``task_id``，
+        否则按 ``memory-value:{task_id}`` 派生，保证同一任务重放不重复写入。
+
+        Args:
+            end_user_id: 终端用户 ID（字符串形式 UUID）
+            result: compute_topology_score() 的返回值
+            task_id: Celery 任务 ID（self.request.id）
+        """
+        try:
+            event = _build_memory_value_event(result, task_id)
+        except Exception as e:
+            logger.error(
+                f"[EngineDisplay] 价值评估事件组装失败: end_user_id={end_user_id}, error={e}",
                 exc_info=True,
             )
             return
@@ -260,11 +344,20 @@ class MemoryEngineDisplayService:
 # ──────────────────────────────────────────────
 
 
-async def _persist_events(end_user_id: str, events_data: List[Dict[str, Any]]) -> None:
-    """生成共享标识、批量写入 PG、异常隔离。三个入口共用。
+async def _persist_events(
+    end_user_id: str,
+    events_data: List[Dict[str, Any]],
+    operation_id: uuid.UUID | None = None,
+) -> None:
+    """生成共享标识、批量写入 PG、异常隔离。各入口共用。
 
-    每次调用新生成 operation_id，因此不会撞唯一约束
-    uq_engine_display_user_type_op；本方案不要求跨调用幂等。
+    operation_id 取值优先级：
+    1. 事件自身的 ``operation_id``（Scene 版本 / 永久 Statement / 价值评估任务的稳定 UUID）；
+    2. 方法入参 ``operation_id``；
+    3. 本次调用共享的随机 UUID（存量萃取、跨模态、情感、遗忘、反思事件走这里）。
+
+    因此可以按引擎类型混用：同一批事件里既可有稳定的、也可有随机的 operation_id。
+    唯一约束 uq_engine_display_user_type_op + ON CONFLICT DO NOTHING 保证重放幂等；
     PG 写入只执行一次，不重试，失败只记日志。
     """
     from app.db import get_db_context
@@ -282,14 +375,14 @@ async def _persist_events(end_user_id: str, events_data: List[Dict[str, Any]]) -
         )
         return
 
-    operation_id = uuid.uuid4()
+    shared_operation_id = operation_id or uuid.uuid4()
     occurred_at = utcnow_naive()
 
     try:
         with get_db_context() as db:
-            # 冗余列 workspace_id：三个写入入口（写入/遗忘/反思）的上下文形态不一，
-            # 统一在此按 end_user_id 主键回查 end_users.workspace_id，保证一致落库。
-            # 查不到时置 NULL，不影响尽力写入语义。
+            # 冗余列 workspace_id：各写入入口（写入/遗忘/反思/长期固化/价值评估）
+            # 的上下文形态不一，统一在此按 end_user_id 主键回查
+            # end_users.workspace_id，保证一致落库。查不到时置 NULL，不影响尽力写入语义。
             from app.models.end_user_model import EndUser
             workspace_uuid = (
                 db.query(EndUser.workspace_id)
@@ -302,7 +395,7 @@ async def _persist_events(end_user_id: str, events_data: List[Dict[str, Any]]) -
                     id=uuid.uuid4(),
                     end_user_id=user_uuid,
                     workspace_id=workspace_uuid,
-                    operation_id=operation_id,
+                    operation_id=data.get("operation_id") or shared_operation_id,
                     engine_type=data["engine_type"],
                     details=data["details"],
                     occurred_at=occurred_at,
@@ -313,7 +406,7 @@ async def _persist_events(end_user_id: str, events_data: List[Dict[str, Any]]) -
             MemoryEngineDisplayEventRepository(db).bulk_insert_events(records)
         logger.info(
             f"[EngineDisplay] PG 写入成功: end_user_id={end_user_id}, "
-            f"operation_id={operation_id}, "
+            f"operation_ids={[str(r.operation_id) for r in records]}, "
             f"engines={[d['engine_type'] for d in events_data]}"
         )
     except Exception as e:
@@ -539,6 +632,118 @@ def _build_reflection_event(
     return {"engine_type": "REFLECTION", "details": details}
 
 
+def _build_permanent_added_events(result: Any) -> List[Dict[str, Any]]:
+    """为每条最终永久 Statement 组装一条 PERMANENT_ADDED 事件。
+
+    只在 WritePipeline 完成永久容量分配后调用，此时 statement_nodes 上的
+    is_permanent 已是最终值。每条永久 Statement 使用自身稳定业务 ID 派生
+    operation_id，因此同一 Statement 重放不会重复累计；details 不写入
+    Statement ID 或正文。
+    """
+    statement_nodes = getattr(result, "statement_nodes", None) or []
+    events: List[Dict[str, Any]] = []
+    for node in statement_nodes:
+        if not bool(getattr(node, "is_permanent", False)):
+            continue
+        statement_id = getattr(node, "id", None)
+        if not statement_id:
+            continue
+        events.append({
+            "engine_type": "MEMORY_VALUE",
+            "details": {
+                "activity_type": "PERMANENT_ADDED",
+                "permanent_added_count": 1,
+            },
+            "operation_id": uuid.uuid5(
+                _ENGINE_EVENT_NAMESPACE,
+                f"permanent-memory:{statement_id}",
+            ),
+        })
+    return events
+
+
+def _build_scene_summary_event(summary: Any) -> Optional[Dict[str, Any]]:
+    """组装长期固化（SCENE_SUMMARY）事件。
+
+    summary_id 非空且 turn_count > 0 才生成；source_version 由有序
+    source_message_ids 做 SHA-256，用于区分同一场景的不同来源版本。
+    """
+    summary_id = _field(summary, "id")
+    turn_count = _as_count(_field(summary, "turn_count"))
+    if not summary_id or turn_count <= 0:
+        return None
+
+    source_ids = _field(summary, "source_message_ids") or []
+    source_version = hashlib.sha256(
+        "|".join(str(item) for item in source_ids).encode("utf-8")
+    ).hexdigest()
+
+    return {
+        "engine_type": "SCENE_SUMMARY",
+        "details": {
+            "scene_summary_id": str(summary_id),
+            "source_version": source_version,
+            "turn_count": turn_count,
+            "source_message_count": len(source_ids),
+        },
+        "operation_id": uuid.uuid5(
+            _ENGINE_EVENT_NAMESPACE,
+            f"scene-summary:{summary_id}:{source_version}",
+        ),
+    }
+
+
+def _build_memory_value_event(
+    result: Any,
+    task_id: Any,
+) -> Optional[Dict[str, Any]]:
+    """组装记忆价值评估（MEMORY_VALUE / VALUE_EVALUATED）事件。
+
+    只有 GDS 任务最终成功且实际写入属性数 > 0 才生成；缺少 task_id 时
+    无法派生稳定 operation_id，直接返回 None，避免用随机值造成重复累计。
+    """
+    if not task_id or not isinstance(result, dict):
+        return None
+    if result.get("status") != "success":
+        return None
+
+    written = _as_count(result.get("node_properties_written"))
+    if written <= 0:
+        return None
+
+    label_counts = result.get("affected_counts_by_label")
+    statement_count = (
+        _as_count(label_counts.get("Statement"))
+        if isinstance(label_counts, dict)
+        else 0
+    )
+
+    return {
+        "engine_type": "MEMORY_VALUE",
+        "details": {
+            "activity_type": "VALUE_EVALUATED",
+            "evaluated_node_count": written,
+            "statement_count": statement_count,
+        },
+        "operation_id": _stable_task_operation_id(task_id),
+    }
+
+
+def _stable_task_operation_id(task_id: Any) -> uuid.UUID:
+    """Celery task_id 可解析为 UUID 则直接使用，否则按命名空间派生。"""
+    try:
+        return uuid.UUID(str(task_id))
+    except (ValueError, AttributeError, TypeError):
+        return uuid.uuid5(_ENGINE_EVENT_NAMESPACE, f"memory-value:{task_id}")
+
+
+def _field(obj: Any, key: str, default: Any = None) -> Any:
+    """兼容 pydantic 模型与 dict 的字段读取。"""
+    if isinstance(obj, dict):
+        return obj.get(key, default)
+    return getattr(obj, key, default)
+
+
 def _as_count(value: Any) -> int:
     """把任意来源的计数安全转为非负 int；无法转换按 0。"""
     try:
@@ -689,6 +894,63 @@ def _merge_event_details(
                 merged_counts[key] += _as_count(d.get(key))
         return merged_counts
 
+    elif engine_type == "SCENE_SUMMARY":
+        # 按 scene_summary_id 去重，只取当天 occurred_at 最新的版本；
+        # scene_count 为不同场景数，turn_count 对各场景当天最后版本求和。
+        latest_by_scene: Dict[str, Dict[str, Any]] = {}
+        for e in events:
+            d = e.details or {}
+            scene_id = d.get("scene_summary_id")
+            if not scene_id:
+                continue
+            current = latest_by_scene.get(str(scene_id))
+            if current is None or (
+                e.occurred_at is not None and e.occurred_at > current["_last_at"]
+            ):
+                latest_by_scene[str(scene_id)] = {
+                    "turn_count": _as_count(d.get("turn_count")),
+                    "source_message_count": _as_count(d.get("source_message_count")),
+                    "_last_at": e.occurred_at,
+                }
+
+        return {
+            "scene_count": len(latest_by_scene),
+            "turn_count": sum(v["turn_count"] for v in latest_by_scene.values()),
+            "source_message_count": sum(
+                v["source_message_count"] for v in latest_by_scene.values()
+            ),
+        }
+
+    elif engine_type == "MEMORY_VALUE":
+        # 两种子类型按 activity_type 分流：
+        # 永久记忆增量求和，评估次数计数，覆盖数只取最近一次（不求和）。
+        # 事件按 occurred_at 倒序迭代，第一条 VALUE_EVALUATED 即最近一次。
+        permanent_added_count = 0
+        evaluation_count = 0
+        evaluated_node_count = 0
+        statement_count = 0
+        for e in sorted(
+            events,
+            key=lambda item: item.occurred_at or datetime.min,
+            reverse=True,
+        ):
+            d = e.details or {}
+            activity_type = d.get("activity_type")
+            if activity_type == "PERMANENT_ADDED":
+                permanent_added_count += _as_count(d.get("permanent_added_count"))
+            elif activity_type == "VALUE_EVALUATED":
+                evaluation_count += 1
+                if evaluation_count == 1:
+                    evaluated_node_count = _as_count(d.get("evaluated_node_count"))
+                    statement_count = _as_count(d.get("statement_count"))
+
+        return {
+            "permanent_added_count": permanent_added_count,
+            "evaluation_count": evaluation_count,
+            "evaluated_node_count": evaluated_node_count,
+            "statement_count": statement_count,
+        }
+
     return {}
 
 
@@ -797,6 +1059,50 @@ def _generate_card_text_zh(
             content = parts[0] + "。"
         else:
             content = "，".join(parts[:-1]) + "，并" + parts[-1] + "。"
+        return name, content
+
+    elif engine_type == "SCENE_SUMMARY":
+        name = "我把完整的交流整理成了长期记忆"
+        scene_count = _as_count(merged.get("scene_count"))
+        turn_count = _as_count(merged.get("turn_count"))
+        if scene_count <= 0:
+            return ("", "")
+        if scene_count == 1:
+            content = "这一天的 1 个完整交流场景已整理成了长期记忆，方便以后更连贯地回忆。"
+        else:
+            content = (
+                f"这一天整理了 {scene_count} 个完整交流场景，"
+                f"覆盖 {turn_count} 轮交流，方便以后更连贯地回忆。"
+            )
+        return name, content
+
+    elif engine_type == "MEMORY_VALUE":
+        added = _as_count(merged.get("permanent_added_count"))
+        evaluations = _as_count(merged.get("evaluation_count"))
+        covered = _as_count(merged.get("evaluated_node_count"))
+        if added <= 0 and evaluations <= 0:
+            return ("", "")
+
+        if added > 0 and evaluations <= 0:
+            # 只有新增永久记忆，不编造覆盖数量
+            name = "我保留了值得长期记住的信息"
+            content = f"这一天新增了 {added} 条永久记忆，我会长期保留这些重要信息。"
+        elif added <= 0:
+            # 只有价值评估，省略新增分句
+            name = "我重新整理了记忆的重要程度"
+            content = f"这一天完成了 {evaluations} 次价值评估；最近一次覆盖 {covered} 项记忆内容。"
+        else:
+            name = "我重新整理了记忆的重要程度"
+            if evaluations == 1:
+                content = (
+                    f"这一天新增了 {added} 条永久记忆，"
+                    f"并重新评估了 {covered} 项记忆内容的重要程度。"
+                )
+            else:
+                content = (
+                    f"这一天新增了 {added} 条永久记忆，"
+                    f"完成了 {evaluations} 次价值评估；最近一次覆盖 {covered} 项记忆内容。"
+                )
         return name, content
 
     return ("", "")
@@ -922,6 +1228,66 @@ def _generate_card_text_en(
             labels[key](count) for key, count in _rank_reflection_counts(merged)
         ]
         content = f"I {_join_english(parts)}." if parts else ""
+        return name, content
+
+    if engine_type == "SCENE_SUMMARY":
+        name = "I turned complete conversations into long-term memories"
+        scene_count = _as_count(merged.get("scene_count"))
+        turn_count = _as_count(merged.get("turn_count"))
+        if scene_count <= 0:
+            return ("", "")
+        if scene_count == 1:
+            content = (
+                "I turned the 1 complete conversation from that day into a "
+                "long-term memory so I can recall it more coherently later."
+            )
+        else:
+            content = (
+                f"I organized {scene_count} complete conversations that day, "
+                f"covering {turn_count} conversation "
+                f"{_pluralize('turn', turn_count)}, so I can recall them more "
+                "coherently later."
+            )
+        return name, content
+
+    if engine_type == "MEMORY_VALUE":
+        added = _as_count(merged.get("permanent_added_count"))
+        evaluations = _as_count(merged.get("evaluation_count"))
+        covered = _as_count(merged.get("evaluated_node_count"))
+        if added <= 0 and evaluations <= 0:
+            return ("", "")
+
+        added_phrase = (
+            f"added {added} permanent "
+            f"{_pluralize('memory', added, 'memories')}"
+        )
+        if added > 0 and evaluations <= 0:
+            name = "I kept information worth remembering long-term"
+            content = (
+                f"I {added_phrase} that day, and I will keep this important "
+                "information for the long term."
+            )
+        elif added <= 0:
+            name = "I re-evaluated how important my memories are"
+            content = (
+                f"I completed {evaluations} value "
+                f"{_pluralize('evaluation', evaluations)} that day; the most "
+                f"recent one covered {covered} memory "
+                f"{_pluralize('item', covered)}."
+            )
+        else:
+            name = "I re-evaluated how important my memories are"
+            if evaluations == 1:
+                content = (
+                    f"I {added_phrase} that day and re-evaluated how important "
+                    f"{covered} memory {_pluralize('item', covered)} are."
+                )
+            else:
+                content = (
+                    f"I {added_phrase} that day and completed {evaluations} value "
+                    f"{_pluralize('evaluation', evaluations)}; the most recent one "
+                    f"covered {covered} memory {_pluralize('item', covered)}."
+                )
         return name, content
 
     return ("", "")

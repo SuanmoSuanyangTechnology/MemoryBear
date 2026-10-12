@@ -13,6 +13,7 @@ from fastapi import APIRouter, Depends, Header, Query
 
 from app.cache.memory.interest_memory import InterestMemoryCache
 from app.core.error_codes import BizCode
+from app.core.exceptions import BusinessException
 from app.core.language_utils import get_language_from_header
 from app.core.logging_config import get_api_logger
 from app.core.memory.constants.graph_data_constants import (
@@ -33,7 +34,7 @@ from app.services.user_memory_service import (
     analytics_memory_types_async,
 )
 from app.services.workspace_memory_statistics_service import (
-    get_workspace_statistics_async,
+    get_cached_workspace_statistics_async,
 )
 
 api_logger = get_api_logger()
@@ -243,8 +244,10 @@ async def get_workspace_statistics_api(
         return fail(BizCode.INVALID_PARAMETER, "请先切换到一个工作空间")
 
     try:
-        result = await get_workspace_statistics_async(workspace_id)
+        result = await get_cached_workspace_statistics_async(workspace_id)
         return success(data=result, msg="查询成功")
+    except BusinessException:
+        raise
     except Exception as e:
         api_logger.error(
             "工作空间记忆统计查询失败: workspace_id=%s, error=%s",

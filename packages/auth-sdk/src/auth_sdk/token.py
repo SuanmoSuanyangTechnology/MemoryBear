@@ -52,11 +52,13 @@ class TokenIssuer(Protocol):
 
 
 class LocalTokenIssuer:
-    """首期签发实现：本地持 RS256 私钥签发内部 token（决策 #5）。
+    """Local RS256 issuer: signs internal tokens with the in-process private key.
 
-    UserContext → sub=user_id；ApiKeyContext → sub=user_id（key 创建者，老单体"key 代理
-    creator"语义），user_id 缺失（creator 已删/旧快照）退化为 "ak:{api_key_id}" 防与用户
-    sub 撞车 + auth_type="api_key" + scopes。下游验签后按 auth_type 区分身份类型。
+    UserContext → sub=user_id. ApiKeyContext → sub=user_id (the key creator, the
+    monolith's "key acts for its creator" semantics) + auth_type="api_key" +
+    scopes, so downstreams can tell credential types apart. The "ak:{api_key_id}"
+    fallback for a missing user_id is defense in depth only: the gateway pipeline
+    fails closed (401) before issuance.
     """
 
     def __init__(self, private_key: str, kid: str, ttl: int = 120, leeway: int = 30,

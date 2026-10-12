@@ -6,7 +6,7 @@ export type ActivityDateGroup = 'today' | 'yesterday' | 'earlier';
 
 export type MemoryType = 'conversation' | 'dialogue' | 'project_work' | 'learning' | 'decision' | 'important_event';
 
-export type EngineType = 'EXTRACTION' | 'CROSS_MODAL' | 'EMOTION';
+export type EngineType = 'EXTRACTION' | 'CROSS_MODAL' | 'EMOTION' | 'FORGETTING' | 'REFLECTION' | 'SCENE_SUMMARY' | 'MEMORY_VALUE';
 
 export type SearchMode = 'deep' | 'normal' | 'quick' | 'express'
 export interface MemoryActivityProps {

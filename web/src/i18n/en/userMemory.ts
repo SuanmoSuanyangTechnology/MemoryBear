@@ -303,6 +303,8 @@ export const userMemory = {
       EMOTION: 'Emotion Engine',
       FORGETTING: 'Forgotten Engine',
       REFLECTION: 'Self-Reflexion Engine',
+      SCENE_SUMMARY: 'Long-term Consolidation Evolution Engine',
+      MEMORY_VALUE: 'Memory Value Dynamic Weight Engine',
       memorySubject: 'Memory Subject',
       basicInfo: 'Basic Information',
       subjectId: 'Subject ID',

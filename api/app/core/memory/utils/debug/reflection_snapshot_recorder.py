@@ -1,7 +1,7 @@
 """ReflectionSnapshotRecorder — 反思引擎 Layer2 各子问题快照记录器。
 
-把反思每个子问题的 input / llm_raw / changes 落盘到 OSS，供人工核对字段级变更
-与「被过滤/跳过/拒绝」的中间命运。复用写链路的 OSS 落盘底座
+把反思每个子问题的 input / llm_raw / changes 落盘到对象存储（后端跟随 STORAGE_TYPE），
+供人工核对字段级变更与「被过滤/跳过/拒绝」的中间命运。复用写链路的落盘底座
 (`pipeline_snapshot.upload_stage_snapshot`)，自管独立前缀 `reflection_snapshot/`。
 
 受 env 变量 REFLECTION_SNAPSHOT_ENABLED 控制（默认 false），关闭时全部方法 no-op。
@@ -22,8 +22,8 @@ logger = logging.getLogger(__name__)
 
 _ENABLED: Optional[bool] = None
 
-# 反思快照 OSS 根前缀
-_OSS_REFLECTION_PREFIX = "reflection_snapshot"
+# 反思快照根前缀
+_REFLECTION_PREFIX = "reflection_snapshot"
 
 
 def _is_enabled() -> bool:
@@ -81,7 +81,7 @@ class ReflectionSnapshotRecorder:
     ):
         """
         Args:
-            end_user_id: 终端用户 ID，OSS 第一级目录。
+            end_user_id: 终端用户 ID，第一级目录。
             scan_type: "layer2_frequent"（高频 run）/ "dedup_full_scan"（低频全量）。
             run_id: 运行标识，写入 0_summary.json；不传则生成。
             baseline: 反思基线，写入 0_summary.json。
@@ -93,25 +93,26 @@ class ReflectionSnapshotRecorder:
         self.run_id = run_id or uuid.uuid4().hex
         self.baseline = baseline
         self.extra_metadata: Dict[str, Any] = dict(extra_metadata or {})
-        self._oss_prefix: Optional[str] = None
+        self._prefix: Optional[str] = None
         self._wrote_any: bool = False  # 本轮是否落过任意 stage 文件
 
         if self.enabled:
             ts = utcnow_naive().strftime("%Y%m%d_%H%M%S")
-            self._oss_prefix = (
-                f"{_OSS_REFLECTION_PREFIX}/{end_user_id}/{scan_type}/{ts}"
+            self._prefix = (
+                f"{_REFLECTION_PREFIX}/{end_user_id}/{scan_type}/{ts}"
             )
-            logger.debug(f"[ReflectionSnapshot] 已启用，OSS 前缀: {self._oss_prefix}")
+            logger.debug(f"[ReflectionSnapshot] 已启用，前缀: {self._prefix}")
 
     @property
     def directory(self) -> Optional[str]:
-        return self._oss_prefix
+        """对象存储前缀路径，未启用时返回 None。"""
+        return self._prefix
 
     def record_stage(self, subproblem: str, stage: str, data: Any) -> None:
         """落 <subproblem>/<stage>.json（如 unresolved_entity/1_input）。"""
-        if not self.enabled or self._oss_prefix is None:
+        if not self.enabled or self._prefix is None:
             return
-        upload_stage_snapshot(f"{self._oss_prefix}/{subproblem}", stage, data)
+        upload_stage_snapshot(f"{self._prefix}/{subproblem}", stage, data)
         self._wrote_any = True  # 标记本轮确有反思活动产生了快照
 
     def record_changes(self, subproblem: str, change_records: List[Dict[str, Any]]) -> None:
@@ -124,7 +125,7 @@ class ReflectionSnapshotRecorder:
         仅在本轮**确有 stage 文件落盘**（`_wrote_any`）时才写：纯空转轮（无任何
         子问题召回/处理）一个文件都不产生，连 0_summary 也不写。
         """
-        if not self.enabled or self._oss_prefix is None:
+        if not self.enabled or self._prefix is None:
             return
         if not self._wrote_any:
             logger.debug("[ReflectionSnapshot] 本轮无任何快照活动，跳过 0_summary")
@@ -139,8 +140,8 @@ class ReflectionSnapshotRecorder:
         }
         if self.extra_metadata:
             summary.update(self.extra_metadata)
-        # 注意：0_summary 落在 run 根目录，subproblem 传空串即可
-        upload_stage_snapshot(self._oss_prefix, "0_summary", summary)
+        # 注意：0_summary 直接落在 run 根前缀下，不经过 subproblem 子目录
+        upload_stage_snapshot(self._prefix, "0_summary", summary)
 
     @staticmethod
     def truncate_vectors(data: Any, dims: int = 5) -> Any:

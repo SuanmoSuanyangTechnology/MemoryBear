@@ -1,6 +1,6 @@
 import uuid
 
-from app.core.models import RedBearModelConfig
+from app.core.exceptions import BusinessException
 from app.core.rag.knowledge_graph.config import (
     GraphPipelineConfigError,
     is_graph_enabled,
@@ -13,32 +13,25 @@ from app.core.rag.vdb.elasticsearch.elasticsearch_vector import (
 )
 from app.db import get_db_context
 from app.models.knowledge_model import Knowledge
-from app.models.models_model import ModelConfig
 from app.models.workspace_model import Workspace
-from app.services.model_service import ModelApiKeyService
+from app.services.model_service import ModelConfigService
 
 
-def build_model_config(snapshot: ModelRuntimeSnapshot) -> RedBearModelConfig:
-    return RedBearModelConfig.from_api_key(snapshot)
+def _require_runtime_model_view(
+    db, model_id: uuid.UUID, tenant_id: uuid.UUID | None, model_role: str
+):
+    """非解密视图（G4a）：凭据与选路在模型服务，宿主只取能力与归属。
 
-
-def _require_runtime_api_key(api_key: object | None, model_role: str) -> object:
-    if api_key is None:
-        raise GraphPipelineConfigError(
-            f"no available {model_role} API key for graph runtime"
+    可见性问题（不存在/弃用/跨租户）统一转 :class:`GraphPipelineConfigError`。
+    """
+    try:
+        return ModelConfigService.get_runtime_model_view(
+            db, model_id, tenant_id=tenant_id
         )
-    return api_key
-
-
-def _require_model_config(db, model_id: uuid.UUID, model_role: str) -> ModelConfig:
-    model_config = db.query(ModelConfig).filter(
-        ModelConfig.id == model_id
-    ).first()
-    if model_config is None:
+    except BusinessException as exc:
         raise GraphPipelineConfigError(
-            f"{model_role} model config does not exist: {model_id}"
-        )
-    return model_config
+            f"no available {model_role} model for graph runtime: {model_id}"
+        ) from exc
 
 
 def snapshot_graph_runtime(knowledge_id: str) -> GraphIndexRuntime:
@@ -74,31 +67,16 @@ def snapshot_graph_runtime(knowledge_id: str) -> GraphIndexRuntime:
                 "graph runtime requires both LLM and embedding models"
             )
 
-        llm_config = _require_model_config(
+        llm_view = _require_runtime_model_view(
             db,
             knowledge.llm_id,
+            workspace.tenant_id,
             "LLM",
         )
-        embedding_config = _require_model_config(
+        embedding_view = _require_runtime_model_view(
             db,
             knowledge.embedding_id,
-            "embedding",
-        )
-
-        llm_api_key = _require_runtime_api_key(
-            ModelApiKeyService.get_available_api_key(
-                db,
-                knowledge.llm_id,
-                tenant_id=workspace.tenant_id,
-            ),
-            "LLM",
-        )
-        embedding_api_key = _require_runtime_api_key(
-            ModelApiKeyService.get_available_api_key(
-                db,
-                knowledge.embedding_id,
-                tenant_id=workspace.tenant_id,
-            ),
+            workspace.tenant_id,
             "embedding",
         )
 
@@ -122,14 +100,8 @@ def snapshot_graph_runtime(knowledge_id: str) -> GraphIndexRuntime:
                 if str(entity_type).strip()
             ),
             scene_name=str(graph_config.get("scene_name") or ""),
-            llm=ModelRuntimeSnapshot.from_api_key(
-                llm_api_key,
-                model_type=str(llm_config.type),
-            ),
-            embedding=ModelRuntimeSnapshot.from_api_key(
-                embedding_api_key,
-                model_type=str(embedding_config.type),
-            ),
+            llm=ModelRuntimeSnapshot.from_model_view(llm_view),
+            embedding=ModelRuntimeSnapshot.from_model_view(embedding_view),
         )
 
     return snapshot

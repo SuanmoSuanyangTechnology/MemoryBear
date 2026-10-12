@@ -64,7 +64,9 @@
       "capability_mismatch": "{slot} does not support the selected model \"{model_name}\" (model type: {model_type}), please choose a matching model",
       "no_api_key": "{slot} \"{model_name}\" has no available API key, please configure one in Model Management",
       "api_verify_failed": "{slot} \"{model_name}\" connectivity check failed: {error}",
-      "verify_failed": "{slot} \"{model_name}\" validation error: {error}"
+      "verify_failed": "{slot} \"{model_name}\" validation error: {error}",
+      "unsupported_dimension": "{slot}: the vector dimension of \"{model_name}\" is not supported ({error}), please pick a supported embedding model",
+      "embedding_switch_in_progress": "{slot} is switching, please wait until the existing memory vectors finish rebuilding before switching again"
     }
   }
 }

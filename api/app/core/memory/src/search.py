@@ -25,7 +25,6 @@ from app.core.memory.utils.config.config_utils import (
 from app.core.memory.utils.data.text_utils import extract_plain_query
 from app.core.memory.utils.data.time_utils import normalize_date_safe
 # from app.core.memory.utils.llm.llm_utils import get_reranker_client
-from app.core.models.base import RedBearModelConfig
 from app.db import get_db_context
 from app.repositories.neo4j.graph_search import (
     search_graph,
@@ -763,19 +762,18 @@ async def run_hybrid_search(
             # Embedding-based search
             logger.info("[PERF] Starting embedding search...")
 
-            # 从数据库读取嵌入器配置（按 ID）并构建 RedBearModelConfig
+            # 从数据库读取嵌入器引用（按 ID，非解密：凭据在模型服务）
             config_load_start = time.time()
             try:
                 with get_db_context() as db:
                     config_service = MemoryConfigService(db)
-                    embedder_config_dict = config_service.get_embedder_config(str(memory_config.embedding_model_id))
-                rb_config = RedBearModelConfig.from_api_key(embedder_config_dict)
+                    embedder_ref = config_service.resolve_model_ref(str(memory_config.embedding_model_id))
                 config_load_time = time.time() - config_load_start
                 logger.info(f"[PERF] Config loading took {config_load_time:.4f}s")
 
                 # Init embedder
                 embedder_init_start = time.time()
-                embedder = OpenAIEmbedderClient(model_config=rb_config)
+                embedder = OpenAIEmbedderClient(remote=embedder_ref)
                 embedder_init_time = time.time() - embedder_init_start
                 logger.info(f"[PERF] Embedder init took {embedder_init_time:.4f}s")
 

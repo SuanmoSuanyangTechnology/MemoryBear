@@ -6,6 +6,8 @@ import uuid
 from dataclasses import dataclass, field, replace
 from typing import Any
 
+from redbear_model.contracts import ModelProfile
+
 from ...api.schemas.chunk import RetrieveType
 from ...api.schemas.rerank import RerankMode
 from ..knowledge_graph.config import GraphPipeline
@@ -14,11 +16,37 @@ from ..models.chunk import DocumentChunk
 
 @dataclass(frozen=True)
 class ModelRuntimeSnapshot:
+    """Non-decrypting model view: invocations carry only the config id and tenant;
+    credentials and routing live in the model service.
+
+    ``tenant_id`` is the invoking tenant, not the config owner: public models are
+    owned by the system tenant, while the model service resolves platform channels
+    under the invoking tenant (the owner tenant yields an empty chain). Field names
+    align with the contract snapshot (``model_config_id``) so ``ref_from_view`` can
+    be reused; ``profile`` feeds capability predicates.
+    """
+
+    model_config_id: uuid.UUID
+    tenant_id: uuid.UUID
     model_name: str
     provider: str
-    api_key: str = field(repr=False)
-    api_base: str | None = None
-    resolved: Any = field(default=None, repr=False, compare=False)
+    profile: ModelProfile = field(repr=False)
+
+    @classmethod
+    def from_view(cls, view: Any, tenant_id: uuid.UUID) -> ModelRuntimeSnapshot:
+        """``ModelConfigSnapshot`` + invoking tenant → runtime snapshot.
+
+        ``tenant_id`` comes from the caller, not from the view's owner tenant.
+        """
+
+        provider = getattr(view, "provider", "")
+        return cls(
+            model_config_id=view.model_config_id,
+            tenant_id=tenant_id,
+            model_name=view.name,
+            provider=getattr(provider, "value", provider),
+            profile=view.profile,
+        )
 
 
 @dataclass(frozen=True)

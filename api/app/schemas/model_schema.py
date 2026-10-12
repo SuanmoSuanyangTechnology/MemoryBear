@@ -381,7 +381,9 @@ class ModelInfo(BaseModel):
     """模型信息Schema（运行期壳；能力载体为契约 v2 三列）"""
     model_name: str = Field(..., description="模型名称")
     provider: str = Field(..., description="模型提供商")
-    api_key: str = Field(..., description="API密钥")
+    api_key: Optional[str] = Field(
+        None, description="API密钥；运行期非解密视图为 None（凭据不出模型服务）"
+    )
     api_base: Optional[str] = Field(None, description="API基础URL；空=使用提供商默认地址")
     model_type: ModelType = Field(..., description="模型类型")
     input_modalities: List[str] = Field(default_factory=list, description="输入模态（契约 v2）")

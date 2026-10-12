@@ -6,8 +6,7 @@ from typing import Any
 
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
-from app.core.models import RedBearLLM, RedBearModelConfig
-from app.core.rag.retrieval.models import ModelRuntimeSnapshot
+from app.core.models import RedBearChatModel
 from app.core.workflow.engine.state_manager import WorkflowState
 from app.core.workflow.engine.variable_pool import VariablePool
 from app.core.workflow.nodes.base_node import BaseNode
@@ -19,14 +18,15 @@ from app.integrations.knowledge.context_factory import build_app_knowledge_conte
 from app.integrations.knowledge.contracts import KnowledgeRetrievalSource
 from app.integrations.knowledge.runtime import get_knowledge_retriever
 from app.schemas.chunk_schema import RetrieveType
-from app.models.models_model import LLM_FAMILY_TYPES, ModelFeature, ModelType
+from app.models.models_model import ModelFeature
 from app.schemas.knowledge_metadata_schema import FilterCondition, FilterGroup, MetadataFilterMode
 from app.schemas.knowledge_retrieval_schema import KnowledgeRetrievalRequest
+from app.schemas.model_schema import ModelInfo
 from app.services.file_content_service import FileReference, resolve_image_retrieval_query
 from app.services.knowledge_metadata_service import KnowledgeMetadataService
 from app.services.knowledge_retrieval_preparation import KnowledgeRetrievalPreparation
 from app.services.metadata_auto_filter_service import MetadataAutoFilterService
-from app.services.model_service import ModelApiKeyService, ModelConfigService
+from app.services.model_service import ModelConfigService
 
 logger = logging.getLogger(__name__)
 
@@ -215,7 +215,7 @@ class KnowledgeRetrievalNode(BaseNode):
     async def _prepare_auto_filter_state_async(
         self,
         variable_pool: VariablePool,
-    ) -> tuple[dict[str, Any], ModelRuntimeSnapshot, dict[str, Any]] | None:
+    ) -> tuple[dict[str, Any], ModelInfo, dict[str, Any]] | None:
         """Snapshot the Workflow AUTO filter inputs in a short async DB context."""
         cfg = self._get_typed_config()
         async with get_async_db_context() as db:
@@ -242,30 +242,11 @@ class KnowledgeRetrievalNode(BaseNode):
                     "auto 模式必须配置 metadata_model.model_id",
                     code=BizCode.INVALID_PARAMETER,
                 )
-            model_config = await ModelConfigService.get_model_by_id_async(
+            # 非解密视图：凭据解密与选路在模型服务（G2）；能力事实由 profile 派生
+            model = await ModelConfigService.get_runtime_model_view_async(
                 db,
                 model_cfg.model_id,
-            )
-            api_key = await ModelApiKeyService.get_available_api_key_async(
-                db,
-                model_config.id,
                 tenant_id=await self.resolve_tenant_id_async(variable_pool),
-            )
-            if not api_key:
-                raise BusinessException("模型配置缺少 API Key", BizCode.INVALID_PARAMETER)
-            model = ModelRuntimeSnapshot(
-                model_name=api_key.model_name,
-                provider=api_key.provider or model_config.provider,
-                api_key=api_key.api_key,
-                api_base=api_key.api_base,
-                input_modalities=tuple(api_key.input_modalities or ()),
-                output_modalities=tuple(api_key.output_modalities or ()),
-                features=tuple(api_key.features or ()),
-                model_type=model_config.type,
-                tenant_id=api_key.tenant_id,
-                model_config_id=api_key.model_config_id,
-                channel_id=api_key.channel_id,
-                failover_plan=getattr(api_key, "failover_plan", None),
             )
 
         return (
@@ -276,7 +257,7 @@ class KnowledgeRetrievalNode(BaseNode):
 
     def _build_auto_filter_generation_options(
         self,
-        model: ModelRuntimeSnapshot,
+        model: ModelInfo,
     ) -> dict[str, Any]:
         """Normalize Workflow completion parameters for the native metadata adapter."""
         params = self._get_typed_config().metadata_model.completion_params
@@ -352,13 +333,7 @@ class KnowledgeRetrievalNode(BaseNode):
             return []
 
         common_metadata_defs, model, generation_options = prepared
-        model_type = ModelType.LLM
-        if str(model.model_type) in LLM_FAMILY_TYPES:
-            model_type = ModelType(model.model_type)
-        llm = RedBearLLM(
-            RedBearModelConfig.from_api_key(model, extra_params=generation_options),
-            type=model_type,
-        )
+        llm = RedBearChatModel.for_invoke(model, params=generation_options)
         filter_groups = await MetadataAutoFilterService.generate_filter_groups_async(
             query=query,
             metadata_defs=common_metadata_defs,

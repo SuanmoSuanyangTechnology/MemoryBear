@@ -21,6 +21,10 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
+from app.schemas.scene_community_schema import (
+    BatchTriggerCount,
+    CandidateCommunityLimit,
+)
 from app.schemas.scene_memory_schema import (
     SceneHistoryWindowSize,
     SceneIdleTimeoutSeconds,
@@ -441,6 +445,15 @@ class MemoryConfig(BaseModel):
     scene_idle_timeout_seconds: SceneIdleTimeoutSeconds = 86400
     scene_min_chars_to_summary: SceneMinCharsToSummary = 0
     time_decay_penalty: SceneTimeDecayPenalty = 0.1
+
+    # Pipeline config: SceneCommunity (rebuild settings are storage-only in v0.4.8)
+    batch_trigger_count: BatchTriggerCount = 20
+    candidate_community_limit: CandidateCommunityLimit = 3
+    compare_all_same_category_communities: bool = False
+    rebuild_new_scene_community_count_enabled: bool = True
+    rebuild_new_scene_community_count: int = 50
+    rebuild_interval_enabled: bool = True
+    rebuild_interval_days: int = 1
 
     # Pipeline config: Emotion extraction
     emotion_enabled: bool = False

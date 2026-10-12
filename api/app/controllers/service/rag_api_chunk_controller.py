@@ -264,7 +264,7 @@ async def get_retrieval_policy(
 @route_through_knowledge_service(source=KnowledgeRetrievalSource.EXTERNAL_API)
 async def retrieve_chunks(
     request: Request,
-    retrieve_data: chunk_schema.ChunkRetrieve,
+    retrieve_data: chunk_schema.V1ChunkRetrieve,
 ):
     """
     retrieve chunk
@@ -273,7 +273,9 @@ async def retrieve_chunks(
         api_key_auth = get_current_api_key_auth()
         principal = await get_api_key_retrieval_principal_async(api_key_auth)
         return await chunk_controller.retrieve_chunks_with_source(
-            retrieve_data=retrieve_data,
+            retrieve_data=chunk_schema.ChunkRetrieve.model_validate(
+                retrieve_data.model_dump(exclude_unset=True)
+            ),
             principal=principal,
             source=chunk_schema.KnowledgeRetrievalSource.EXTERNAL_API,
             trace_id=getattr(request.state, "trace_id", None),

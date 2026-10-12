@@ -1281,7 +1281,7 @@ class WritePipeline:
             file_data = {k: v for k, v in file_info.items() if k != "url"}
             file_input = FileInput(**file_data)
             with get_db_read() as db:
-                url = await MultimodalService(db, api_config=None).get_file_url(file_input)
+                url = await MultimodalService(db).get_file_url(file_input)
             return url or ""
         except Exception as e:
             logger.warning(

@@ -19,7 +19,7 @@ Memory 模块工具函数包
 
 使用示例：
     # 配置管理
-    from app.core.memory.utils.config import get_model_config
+    from app.core.memory.utils.config import get_pipeline_config
     from app.core.memory.utils.config.definitions import SELECTED_LLM_ID
     
     # 日志管理
@@ -29,7 +29,7 @@ Memory 模块工具函数包
     from app.core.memory.utils.prompt import render_statement_extraction_prompt
     
     # LLM 工具
-    from app.core.memory.utils.llm import get_llm_client
+    from app.core.memory.utils.llm import handle_response
     
     # 数据处理
     from app.core.memory.utils.data import text_utils, time_utils

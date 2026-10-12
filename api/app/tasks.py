@@ -1,7 +1,6 @@
 import asyncio
 import json
 import os
-import re
 import shutil
 import socket
 import tempfile
@@ -29,7 +28,7 @@ from app.celery_app import celery_app
 from app.core.config import settings
 from app.core.logging_config import get_logger
 from app.core.memory.exceptions import MemoryExtractionBusinessError
-from app.core.models import RedBearEmbeddings, RedBearLLM
+from app.core.models import RedBearChatModel, RedBearEmbeddings
 from app.core.memory.storage.outbox.consumer import (
     cleanup_outbox_events,
     consume_outbox_batch,
@@ -45,7 +44,6 @@ from app.core.memory.storage_services.reflection_engine.errors import (
     ReflectionFailureReason,
     ReflectionRetriesExhausted,
 )
-from app.core.models import RedBearEmbeddings, RedBearLLM
 from app.core.rag.chunk.hierarchy import GroupedChildChunks, validate_parent_child_result
 from app.core.rag.chunk.metadata import merge_parser_metadata
 from app.core.rag.chunk.parser.image_storage import cleanup_mineru_v3_images
@@ -71,10 +69,7 @@ from app.core.rag.knowledge_graph.rebuild_task_guard import (
     release_rebuild_execution,
     release_rebuild_job,
 )
-from app.core.rag.knowledge_graph.runtime import (
-    build_model_config,
-    snapshot_graph_runtime,
-)
+from app.core.rag.knowledge_graph.runtime import snapshot_graph_runtime
 from app.core.rag.parser_config import set_graph_pipeline_for_migration
 from app.core.rag.retrieval.async_elasticsearch import (
     build_async_elasticsearch_client_config,
@@ -83,10 +78,12 @@ from app.core.rag.integrations.feishu.client import FeishuAPIClient
 from app.core.rag.integrations.feishu.models import FileInfo
 from app.core.rag.integrations.yuque.client import YuqueAPIClient
 from app.core.rag.integrations.yuque.models import YuqueDocInfo
-from app.core.rag.llm.chat_model import Base
-from app.core.rag.llm.cv_model import QWenCV
-from app.core.rag.llm.embedding_model import OpenAIEmbed
-from app.core.rag.llm.sequence2txt_model import QWenSeq2txt
+from app.core.rag.llm.invoke_legacy import InvokeLegacyChat, InvokeLegacyEmbed
+from app.core.rag.llm.invoke_vision import (
+    build_chunk_vision_model,
+    vision_media_kind,
+    vision_slot_id,
+)
 from app.core.rag.models.chunk import DocumentChunk
 from app.core.rag.prompts.generator import qa_proposal
 from app.core.rag.utils.chunk_write_order import (
@@ -107,15 +104,15 @@ from app.core.utils.datetime_utils import (
     utcnow_naive,
 )
 from app.db import get_db_context, get_db_read
+from app.integrations.model.invoke_backend import ref_from_model_info, ref_from_snapshot
 from app.models import App, AppRelease, Document, File, Knowledge, User, Workspace
 from app.models.end_user_model import EndUser
 from app.models.file_model import FILE_ROLE_SOURCE
-from app.models.models_model import ModelType
 from app.repositories.end_user_repository import get_active_end_users_by_workspace, get_end_users_by_workspace, get_all_active_workspaces
 from app.schemas import document_schema, file_schema
 from app.services.memory_config_service import MemoryConfigService
 from app.services.memory_forget_service import MemoryForgetService
-from app.services.model_service import ModelApiKeyService
+from app.services.model_service import ModelConfigService
 from app.utils.redis_lock import UNLOCK_SCRIPT, RedisFairLock
 
 
@@ -142,15 +139,7 @@ def setup_logger(logger, *args, **kwargs):
 
 logger = get_logger(__name__)
 
-# ── 预编译文件类型正则 & 常量 ──────────────────────────────────
-AUDIO_PATTERN = re.compile(
-    r"\.(da|wave|wav|mp3|aac|flac|ogg|aiff|au|midi|wma|realaudio|vqf|oggvorbis|ape?)$",
-    re.IGNORECASE,
-)
-VIDEO_PATTERN = re.compile(
-    r"\.(mp4|mov|avi|flv|mpeg|mpg|webm|wmv|3gp|3gpp|mkv?)$",
-    re.IGNORECASE,
-)
+# ── 解析常量 ──────────────────────────────────────────────────
 DEFAULT_PARSE_LANGUAGE = "Chinese"
 DEFAULT_PARSE_TO_PAGE = 100_000
 EMBEDDING_BATCH_SIZE = settings.EMBEDDING_BATCH_SIZE
@@ -276,9 +265,8 @@ def _load_graph_task_state(
 
 
 def _build_evidence_index_pipeline(runtime, client, lock_guard):
-    # 2d-1 迁移后 chat 行已归一为 llm，运行时按 LLM 适配器族构造
-    llm = RedBearLLM(build_model_config(runtime.llm), type=ModelType.LLM)
-    embedding = RedBearEmbeddings(build_model_config(runtime.embedding))
+    llm = RedBearChatModel.for_invoke_ref(ref_from_snapshot(runtime.llm))
+    embedding = RedBearEmbeddings.for_invoke(ref_from_snapshot(runtime.embedding))
     extractor = LLMEntityRelationExtractor(
         llm,
         runtime.entity_types,
@@ -791,40 +779,14 @@ def _run_guarded_evidence_graph_rebuild(
     return result
 
 
-def _resolve_model_api_key(db, model_config_id, tenant_id, role: str):
-    if not model_config_id:
-        raise RuntimeError(f"{role} model config is unavailable")
-    api_key = ModelApiKeyService.get_available_api_key(db, model_config_id, tenant_id=tenant_id)
-    if not api_key:
-        raise RuntimeError(f"No available {role} api key found")
-    return api_key
-
-
-def _build_llm_config(db, llm_id, tenant_id):
-    llm_key = _resolve_model_api_key(db, llm_id, tenant_id, "llm")
-    return {
-        "key": llm_key.api_key,
-        "model_name": llm_key.model_name,
-        "base_url": llm_key.api_base,
-    }
-
-
 def _build_chat_model(db, llm_id, tenant_id):
-    llm_key = _resolve_model_api_key(db, llm_id, tenant_id, "llm")
-    return Base(
-        key=llm_key.api_key,
-        model_name=llm_key.model_name,
-        base_url=llm_key.api_base,
-    )
+    view = ModelConfigService.get_runtime_model_view(db, llm_id, tenant_id=tenant_id)
+    return InvokeLegacyChat(ref_from_model_info(view), model_name=view.model_name)
 
 
 def _build_embedding_model(db, embedding_id, tenant_id):
-    embedding_key = _resolve_model_api_key(db, embedding_id, tenant_id, "embedding")
-    return OpenAIEmbed(
-        key=embedding_key.api_key,
-        model_name=embedding_key.model_name,
-        base_url=embedding_key.api_base,
-    )
+    view = ModelConfigService.get_runtime_model_view(db, embedding_id, tenant_id=tenant_id)
+    return InvokeLegacyEmbed(ref_from_model_info(view), model_name=view.model_name)
 
 
 def _get_estimated_pages(file_name: str, file_binary: bytes) -> int | None:
@@ -863,6 +825,29 @@ def _download_storage_file(file_key: str) -> bytes:
         loop = asyncio.new_event_loop()
         try:
             return loop.run_until_complete(_download())
+        finally:
+            loop.close()
+
+
+def _storage_file_url(file_key: str) -> str | None:
+    """取文件的外部可达 URL（媒体族 asr / 视频理解只收公网 URL）。
+
+    本地存储返回相对路径（非 http(s)），调用侧按「无 URL」处理——见
+    ``invoke_vision.externally_reachable_media_url``。
+    """
+    from app.services.file_storage_service import FileStorageService
+
+    storage_service = FileStorageService()
+
+    async def _get_url():
+        return await storage_service.get_file_url(file_key)
+
+    try:
+        return asyncio.run(_get_url())
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        try:
+            return loop.run_until_complete(_get_url())
         finally:
             loop.close()
 
@@ -1100,42 +1085,6 @@ def process_item(item: dict):
     return result
 
 
-def _build_image_vision_model(db, image2text_id, tenant_id):
-    """Build the knowledge-base image-to-text model for document parsing."""
-    image2text_key = _resolve_model_api_key(db, image2text_id, tenant_id, "image2text")
-    return QWenCV(
-        key=image2text_key.api_key,
-        model_name=image2text_key.model_name,
-        lang=DEFAULT_PARSE_LANGUAGE,
-        base_url=image2text_key.api_base,
-    )
-
-
-def _build_media_model(file_path: str):
-    """Build the existing audio or video model when the file type requires one."""
-    if AUDIO_PATTERN.search(file_path):
-        omni_key = os.getenv("QWEN3_OMNI_API_KEY", "")
-        omni_model = os.getenv("QWEN3_OMNI_MODEL_NAME", "qwen3-omni-flash")
-        omni_base = os.getenv("QWEN3_OMNI_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1")
-        return QWenSeq2txt(
-            key=omni_key,
-            model_name=omni_model,
-            lang=DEFAULT_PARSE_LANGUAGE,
-            base_url=omni_base,
-        )
-    if VIDEO_PATTERN.search(file_path):
-        omni_key = os.getenv("QWEN3_OMNI_API_KEY", "")
-        omni_model = os.getenv("QWEN3_OMNI_MODEL_NAME", "qwen3-omni-flash")
-        omni_base = os.getenv("QWEN3_OMNI_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1")
-        return QWenCV(
-            key=omni_key,
-            model_name=omni_model,
-            lang=DEFAULT_PARSE_LANGUAGE,
-            base_url=omni_base,
-        )
-    return None
-
-
 @celery_app.task(name="app.core.rag.tasks.parse_document")
 def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
     """
@@ -1215,12 +1164,26 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
                 "parent_child_mode": bool(db_document.is_parent_child_mode),
             }
             tenant_id = db_workspace.tenant_id
-            llm_config = None
+            llm_view = None
             if auto_questions_topn:
-                llm_config = _build_llm_config(db, db_knowledge.llm_id, tenant_id)
+                if not db_knowledge.llm_id:
+                    raise RuntimeError(
+                        "auto_questions is enabled but llm model config is unavailable"
+                    )
+                llm_view = ModelConfigService.get_runtime_model_view(
+                    db, db_knowledge.llm_id, tenant_id=tenant_id
+                )
             knowledge_id = str(db_knowledge.id)
-            image_vision_model = _build_image_vision_model(db, db_knowledge.image2text_id, tenant_id)
-            vision_model = _build_media_model(file_name) or image_vision_model
+            # 视觉/转写模型按文件类别选配置槽（G4a：宿主只持非解密视图，凭据与选路在模型服务）
+            vision_kind = vision_media_kind(file_name)
+            vision_config_id = vision_slot_id(db_knowledge, vision_kind)
+            if not vision_config_id:
+                raise RuntimeError(
+                    f"{vision_kind} model config is unavailable for knowledge {db_knowledge.id}"
+                )
+            vision_view = ModelConfigService.get_runtime_model_view(
+                db, vision_config_id, tenant_id=tenant_id
+            )
             vector_service = ElasticSearchVectorFactory().init_vector(knowledge=db_knowledge)
 
             progress_lines.append(f"{_progress_ts()} Start to parse.")
@@ -1240,6 +1203,17 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
         if not file_binary:
             raise IOError(f"Downloaded empty file from storage: {file_key}")
         logger.info(f"[ParseDoc] Downloaded {len(file_binary)} bytes from storage key: {file_key}")
+
+        # 音频 / 视频理解需要外部可达 URL（asr 族只收公网 URL；视频超 1MB 无 URL 拒止）
+        media_url = (
+            _storage_file_url(file_key) if vision_kind in ("audio", "video") else None
+        )
+        vision_model = build_chunk_vision_model(
+            vision_view,
+            kind=vision_kind,
+            lang=DEFAULT_PARSE_LANGUAGE,
+            media_url=media_url,
+        )
 
         estimated_pages = _get_estimated_pages(file_name, file_binary)
         logger.info(f"[ParseDoc] document={document_id} estimated_pages={estimated_pages}")
@@ -1340,14 +1314,10 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
             qa_prompt = parser_config.get("qa_prompt", None)
             chat_model = None
             if auto_questions_topn:
-                if llm_config is None:
-                    raise RuntimeError("auto_questions is enabled but LLM config is unavailable")
-                chat_model = Base(
-                    key=llm_config["key"],
-                    model_name=llm_config["model_name"],
-                    base_url=llm_config["base_url"],
+                chat_model = InvokeLegacyChat(
+                    ref_from_model_info(llm_view), model_name=llm_view.model_name
                 )
-                logger.info(f"[QA] LLM model: {llm_config['model_name']}, base_url: {llm_config['base_url']}")
+                logger.info(f"[QA] LLM model: {llm_view.model_name}")
                 if qa_prompt:
                     logger.info(f"[QA] Using custom prompt ({len(qa_prompt)} chars)")
 
@@ -2625,10 +2595,6 @@ def write_message_task(
         skip_cursor_advance: bool = False,
         dispatch_at: str = "",  # 任务执行时间
         source: str = "",  # 写入来源（agent/service_api/mcp/workflow）
-        # MCP 入口兼容字段（不经过 memory_messages 表，直接写入）
-        messages: Optional[List[dict]] = None,
-        storage_type: str = "neo4j",
-        user_rag_memory_id: str = "",
 ) -> Dict[str, Any]:
     """统一写入任务 — 纯净入口，接收完整参数直接写入。
 
@@ -2644,21 +2610,11 @@ def write_message_task(
         language: 语言
         skip_cursor_advance: 是否跳过 cursor 推进（MCP 等直接写入路径）
         dispatch_at: 任务派发时刻的 UTC ISO 8601 时间戳，由 push_write_task 自动注入
-        messages: MCP 入口兼容字段，单条消息列表 [{"role", "content", "dialog_at"}]
-        storage_type: MCP 入口兼容字段，存储类型（neo4j / rag）
-        user_rag_memory_id: MCP 入口兼容字段，RAG 记忆 ID
 
     Returns:
         Dict containing status, result, elapsed_time, task_id
     """
     loop = set_asyncio_event_loop()
-    # MCP 入口兼容：收到 messages 但无 target_message 时，转换为新格式
-    if target_message is None and messages:
-        msg = messages[0] if messages else {"role": "user", "content": ""}
-        target_message = msg
-        context_before = []
-        context_after = []
-        skip_cursor_advance = True
 
     # 解析 end_user_id：若排队期间用户已被合并，自动路由到目标用户
     resolved_end_user_id = end_user_id
@@ -2679,27 +2635,7 @@ def write_message_task(
             f"falling back to original ID"
         )
 
-    # RAG 存储类型走独立路径
-    if storage_type and storage_type.lower() == "rag":
-        try:
-            async def _rag_write():
-                from app.core.memory.memory_service import MemoryService
-                await MemoryService.write_messages_to_rag(
-                    messages=messages,
-                    end_user_id=resolved_end_user_id,
-                    user_rag_memory_id=user_rag_memory_id,
-                )
-
-            loop.run_until_complete(_rag_write())
-            return {"status": "SUCCESS", "result": "rag_write_complete", "task_id": self.request.id}
-        except Exception as e:
-            logger.error(f"[CELERY WRITE] RAG write failed: {e}", exc_info=True)
-            return {"status": "FAILURE", "error": str(e), "task_id": self.request.id}
-        finally:
-            if loop:
-                _shutdown_loop_gracefully(loop)
-
-    # 新格式：直接调用 MemoryService.write()
+    # 调用 Neo4j MemoryService.write()；RAG 已在 dispatcher 层完成分流。
     logger.info(
         f"[CELERY WRITE] Starting - end_user_id={resolved_end_user_id}, "
         f"config_id={config_id}, conv={conversation_id or '-'}, "
@@ -3878,6 +3814,30 @@ def do_gds_topology_score(self, end_user_id: str, inflight_token: Optional[str] 
         result["end_user_id"] = end_user_id
         result["elapsed_time"] = time.time() - start_time
         result["task_id"] = self.request.id
+
+        # 价值评估展示事件：GDS 成功且实际写入节点属性后 best effort 落 PG。
+        # 用户写锁已在 _run 的 finally 中释放；展示写入失败只记日志，不改变任务结果。
+        if (
+            result.get("status") == "success"
+            and int(result.get("node_properties_written") or 0) > 0
+        ):
+            try:
+                from app.services.memory_engine_display_service import (
+                    MemoryEngineDisplayService,
+                )
+                loop.run_until_complete(
+                    MemoryEngineDisplayService.save_memory_value_event(
+                        end_user_id=end_user_id,
+                        result=result,
+                        task_id=self.request.id,
+                    )
+                )
+            except Exception as e:
+                logger.warning(
+                    f"[EngineDisplay] 价值评估展示写入异常（不影响主流程）: {e}",
+                    exc_info=True,
+                )
+
         return result
     except Exception as e:
         # GDS 投影 / eigenvector.write / drop 抛错，re-raise 让 Celery 标记 FAILURE（带 traceback）
@@ -6838,6 +6798,8 @@ def generate_scene_summary(
     idle_high_watermark_message_id: str | None = None,
 ):
     from app.core.memory.scene.scene_summary_service import SceneSummaryService
+    from app.core.memory.storage.custom import SceneStorage
+    from app.core.memory.storage.provider.neo4j.client import Neo4jClient
     from app.schemas.scene_memory_schema import GenerateSceneSummaryTask
 
     payload = GenerateSceneSummaryTask(
@@ -6848,20 +6810,152 @@ def generate_scene_summary(
         idle_high_watermark_message_id=idle_high_watermark_message_id,
         close_reason=close_reason,
     )
+    started_at = time.monotonic()
+    stage = "generate_summary"
     loop = set_asyncio_event_loop()
+
+    async def _run():
+        storage_client = await Neo4jClient.create()
+        try:
+            writer = SceneStorage(storage_client)
+            return await SceneSummaryService(writer=writer).generate(payload)
+        finally:
+            await storage_client.close()
+
     try:
-        result = loop.run_until_complete(SceneSummaryService().generate(payload))
+        result = loop.run_until_complete(_run())
+        if result.get("community_dispatch_required"):
+            stage = "dispatch_scene_community"
+            community_task = run_scene_community_incremental.apply_async(
+                kwargs={"end_user_id": end_user_id}
+            )
+            result["scene_community_task_id"] = community_task.id
         logger.info(
-            "[SceneSummary] generation completed: scene_start=%s, "
-            "close_reason=%s, status=%s, reason=%s, summary_id=%s",
+            "[SceneSummary] generation completed: user=%s, scene_start=%s, "
+            "close_reason=%s, status=%s, reason=%s, summary_id=%s, "
+            "inactive=%s, dispatched=%s, elapsed_ms=%s",
+            end_user_id,
             scene_start_message_id,
             close_reason,
             result.get("status"),
             result.get("reason"),
             result.get("summary_id"),
+            result.get("inactive_count"),
+            bool(result.get("scene_community_task_id")),
+            int((time.monotonic() - started_at) * 1000),
         )
         return result
+    except Exception as exc:
+        logger.error(
+            "[SceneSummary] generation failed: user=%s scene_start=%s stage=%s "
+            "error_type=%s retry=%s elapsed_ms=%s",
+            end_user_id,
+            scene_start_message_id,
+            stage,
+            type(exc).__name__,
+            getattr(self.request, "retries", 0),
+            int((time.monotonic() - started_at) * 1000),
+        )
+        raise
     finally:
+        _shutdown_loop_gracefully(loop)
+
+
+@celery_app.task(
+    bind=True,
+    name="app.core.memory.run_scene_community_incremental",
+    acks_late=True,
+    autoretry_for=(Exception,),
+    retry_backoff=True,
+    retry_kwargs={"max_retries": 3},
+    time_limit=1800,
+    soft_time_limit=1700,
+)
+def run_scene_community_incremental(self, end_user_id: str):
+    """Process exactly one complete SceneCommunity batch for an end user."""
+    from app.core.memory.scene.scene_community_service import (
+        SceneCommunityIncrementalService,
+    )
+    from app.core.memory.storage.custom import SceneStorage
+    from app.core.memory.storage.provider.neo4j.client import Neo4jClient
+
+    started_at = time.monotonic()
+    stage = "acquire_lock"
+    loop = set_asyncio_event_loop()
+    write_lock = None
+
+    async def _run():
+        nonlocal stage
+        stage = "load_config"
+        with get_db_context() as db:
+            config_service = MemoryConfigService(db)
+            current_config_id = config_service.get_config_id_by_end_user(end_user_id)
+            memory_config = config_service.load_memory_config(current_config_id)
+
+        stage = "connect_neo4j"
+        storage_client = await Neo4jClient.create()
+        try:
+            stage = "run_incremental"
+            writer = SceneStorage(storage_client)
+            result = await SceneCommunityIncrementalService(
+                writer=writer,
+                memory_config=memory_config,
+            ).run(end_user_id)
+            result["config_id"] = str(current_config_id)
+            result["batch_trigger_count_snapshot"] = int(
+                memory_config.batch_trigger_count
+            )
+            result["candidate_community_limit_snapshot"] = int(
+                memory_config.candidate_community_limit
+            )
+            result["compare_all_same_category_communities_snapshot"] = bool(
+                memory_config.compare_all_same_category_communities
+            )
+            return result
+        finally:
+            await storage_client.close()
+
+    try:
+        end_user_id, write_lock = _acquire_community_clustering_lock(
+            end_user_id,
+            redis_client=get_thread_safe_sync_redis(),
+            expire=1800,
+        )
+        result = loop.run_until_complete(_run())
+        if result.get("dispatch_next"):
+            stage = "dispatch_next"
+            next_task = run_scene_community_incremental.apply_async(
+                kwargs={"end_user_id": end_user_id}
+            )
+            result["next_task_id"] = next_task.id
+        logger.info(
+            "[SceneCommunity] incremental task completed: user=%s status=%s "
+            "processed=%s communities=%s remaining=%s config=%s "
+            "dispatch_next=%s elapsed_ms=%s",
+            end_user_id,
+            result.get("status"),
+            result.get("processed"),
+            result.get("community_count"),
+            result.get("remaining_inactive_count", result.get("inactive_count")),
+            result.get("config_id"),
+            bool(result.get("next_task_id")),
+            int((time.monotonic() - started_at) * 1000),
+        )
+        return result
+    except Exception as exc:
+        logger.error(
+            "[SceneCommunity] incremental task failed: user=%s stage=%s "
+            "error_type=%s retry=%s elapsed_ms=%s",
+            end_user_id,
+            stage,
+            type(exc).__name__,
+            getattr(self.request, "retries", 0),
+            int((time.monotonic() - started_at) * 1000),
+        )
+        raise
+    finally:
+        if write_lock is not None:
+            write_lock.release()
         _shutdown_loop_gracefully(loop)
 
 
@@ -7036,7 +7130,7 @@ def scan_scene_summary_idle(
 
 
 @celery_app.task(
-    name="app.tasks.consume_model_usage",
+    name="app.tasks.consume_model_gateway_alerts",
     bind=False,
     ignore_result=False,
     max_retries=0,
@@ -7044,17 +7138,316 @@ def scan_scene_summary_idle(
     time_limit=60,
     soft_time_limit=50,
 )
-def consume_model_usage_task() -> Dict[str, Any]:
-    """定时任务：消费 model:usage 用量事件落 model_usage_records（spec §13.2）。
+def consume_model_gateway_alerts_task() -> dict[str, Any]:
+    """定时任务：消费 model:usage 事件做网关健康告警评估（B9）。
 
-    每轮先领 idle > 60s 的遗留 pending，再按「批量 200 × 最多 20 批 / 10s」读新消息；
-    beat 周期由 settings.MODEL_USAGE_CONSUME_INTERVAL_SECONDS（默认 5s）驱动。
-    消费失败（Redis/PG 短暂不可用）不抛：消息留在 pending，下轮 XAUTOCLAIM 重领。
+    服务侧（model-service）的调用终态只进 stream，本任务用独立消费组
+    `model-usage-alerts` 读该 stream 喂给宿主企业告警插件；beat 周期由
+    settings.MODEL_USAGE_ALERT_INTERVAL_SECONDS（默认 30s）驱动。
+    社区版无 premium 插件时插件层直接跳过（不建组不读流）；Redis 层异常不抛，
+    下轮重试（事件已 ACK 的不重放，属尽力而为 + 新鲜度优先口径）。
     """
-    from app.services.usage_consumer import consume_model_usage
+    from app.core.alert_metric_bridge import consume_model_gateway_alerts
 
     try:
-        return consume_model_usage()
+        return consume_model_gateway_alerts()
     except Exception as exc:
-        logger.warning(f"consume_model_usage 本轮失败（下轮重试）: {exc}", exc_info=True)
+        logger.warning(
+            f"consume_model_gateway_alerts 本轮失败（下轮重试）: {exc}", exc_info=True
+        )
         return {"status": "RETRY_LATER", "error": str(exc)}
+
+@celery_app.task(
+    name="app.tasks.run_reembed_job",
+    bind=True,
+    ignore_result=False,
+    max_retries=0,
+    acks_late=True,
+    time_limit=3600,
+    soft_time_limit=3300,
+)
+def run_reembed_job(self, job_id: str) -> Dict[str, Any]:
+    """驱动任务：自检 → 排空 → 枚举 end_user → 逐个扇出重算子任务。
+
+    可重复执行：已终态的 end_user 由 PG 行状态跳过，并发扇出由派发占位拦住，
+    因此崩溃或超时后重新派发即可从断点继续。
+
+    Args:
+        job_id: memory_reembed_jobs.id
+    """
+    from app.services.memory_reembed_orchestrator import run_job
+
+    owner = f"{socket.gethostname()[:60]}:{os.getpid()}:{uuid.uuid4()}"
+    loop = set_asyncio_event_loop()
+    try:
+        result = loop.run_until_complete(run_job(job_id, owner))
+        result["task_id"] = self.request.id
+        return result
+    finally:
+        _shutdown_loop_gracefully(loop)
+
+
+@celery_app.task(
+    name="app.tasks.do_reembed_end_user",
+    bind=True,
+    ignore_result=False,
+    max_retries=0,
+    acks_late=False,
+    time_limit=3600,
+    soft_time_limit=3300,
+)
+def do_reembed_end_user(self, job_id: str, end_user_id: str) -> Dict[str, Any]:
+    """重算单个 end_user 下全部带向量节点的向量。
+
+    写入走 Neo4j（权威）+ outbox 投影：向量回写到图中不带维度后缀的属性上，
+    ES 侧由既有的维度路由与整档替换自行收敛。
+    """
+    from app.services.memory_reembed_orchestrator import process_end_user
+
+    owner = f"{socket.gethostname()[:60]}:{os.getpid()}:{uuid.uuid4()}"
+    loop = set_asyncio_event_loop()
+    try:
+        result = loop.run_until_complete(
+            process_end_user(job_id, end_user_id, owner)
+        )
+        result["task_id"] = self.request.id
+        return result
+    finally:
+        _shutdown_loop_gracefully(loop)
+
+
+@celery_app.task(
+    name="app.tasks.scan_reembed_jobs",
+    queue="periodic_tasks",
+    bind=True,
+    ignore_result=False,
+    max_retries=0,
+    acks_late=False,
+    time_limit=300,
+    soft_time_limit=270,
+)
+def scan_reembed_jobs(self) -> Dict[str, Any]:
+    """对账任务：终结核验已完成的重算 job，并重新派发丢失或需要重试的 job。
+
+    判据全部落在 PG：end_user 行全部终态才算跑完；心跳过期（worker 死了 /
+    在排空 / 还有失败待重试）就重新派发。无活跃 job 时只多一次索引查询。
+    """
+    from app.services.memory_reembed_orchestrator import reconcile_active_jobs
+
+    result = reconcile_active_jobs()
+    result["task_id"] = self.request.id
+    return result
+
+_WORKSPACE_STATISTICS_SCAN_PAGE_SIZE = 500
+_WORKSPACE_STATISTICS_INFLIGHT_KEY = "workspace_statistics:inflight:{workspace_id}"
+_WORKSPACE_STATISTICS_INFLIGHT_TTL_SECONDS = 12 * 60 * 60
+
+
+@celery_app.task(
+    name="app.tasks.scan_workspace_statistics_snapshots",
+    bind=True,
+    ignore_result=False,
+    max_retries=0,
+    acks_late=False,
+    time_limit=600,
+    soft_time_limit=540,
+)
+def scan_workspace_statistics_snapshots(self) -> Dict[str, Any]:
+    """分页枚举活跃空间，向 heavy worker 派发独立统计任务。"""
+    from app.repositories.workspace_repository import WorkspaceRepository
+
+    redis_client = get_sync_redis_client()
+    if redis_client is None:
+        raise RuntimeError("Redis unavailable for workspace statistics dispatch")
+
+    after_id: uuid.UUID | None = None
+    dispatched = 0
+    skipped_inflight = 0
+    failed = 0
+    while True:
+        with get_db_read() as db:
+            workspace_ids = WorkspaceRepository(db).get_active_workspace_ids_page(
+                after_id, _WORKSPACE_STATISTICS_SCAN_PAGE_SIZE
+            )
+        if not workspace_ids:
+            break
+
+        for workspace_id in workspace_ids:
+            inflight_key = _WORKSPACE_STATISTICS_INFLIGHT_KEY.format(
+                workspace_id=workspace_id
+            )
+            token = uuid.uuid4().hex
+            try:
+                acquired = redis_client.set(
+                    inflight_key,
+                    token,
+                    nx=True,
+                    ex=_WORKSPACE_STATISTICS_INFLIGHT_TTL_SECONDS,
+                )
+            except Exception:
+                logger.exception(
+                    "工作空间记忆统计在途锁获取失败: workspace_id=%s",
+                    workspace_id,
+                )
+                failed += 1
+                continue
+            if not acquired:
+                skipped_inflight += 1
+                continue
+
+            try:
+                do_workspace_statistics_snapshot.apply_async(
+                    kwargs={
+                        "workspace_id": str(workspace_id),
+                        "inflight_token": token,
+                    },
+                    queue="memory_heavy_tasks",
+                )
+                dispatched += 1
+            except Exception:
+                logger.exception(
+                    "工作空间记忆统计任务派发失败: workspace_id=%s",
+                    workspace_id,
+                )
+                try:
+                    redis_client.eval(UNLOCK_SCRIPT, 1, inflight_key, token)
+                except Exception:
+                    logger.exception(
+                        "工作空间记忆统计派发失败后解锁失败: workspace_id=%s",
+                        workspace_id,
+                    )
+                failed += 1
+
+        if len(workspace_ids) < _WORKSPACE_STATISTICS_SCAN_PAGE_SIZE:
+            break
+        after_id = workspace_ids[-1]
+
+    result = {
+        "dispatched": dispatched,
+        "skipped_inflight": skipped_inflight,
+        "failed": failed,
+        "task_id": self.request.id,
+    }
+    logger.info("工作空间记忆统计扫描完成: %s", result)
+    if failed:
+        raise RuntimeError(f"Failed to dispatch {failed} workspace statistics tasks")
+    return result
+
+
+@celery_app.task(
+    name="app.tasks.do_workspace_statistics_snapshot",
+    bind=True,
+    ignore_result=False,
+    max_retries=1,
+    acks_late=False,
+    time_limit=3600,
+    soft_time_limit=3300,
+)
+def do_workspace_statistics_snapshot(
+    self,
+    workspace_id: str,
+    inflight_token: str,
+    baseline_version: str | None = None,
+    baseline_captured: bool = False,
+) -> Dict[str, Any]:
+    """串行刷新一个空间的统计快照；失败时最多补偿一次。"""
+    from app.services.workspace_memory_statistics_service import (
+        get_or_refresh_workspace_statistics_async,
+        get_workspace_statistics_snapshot_version_async,
+    )
+
+    inflight_key = _WORKSPACE_STATISTICS_INFLIGHT_KEY.format(
+        workspace_id=workspace_id
+    )
+    redis_client = None
+    loop = None
+    retry_scheduled = False
+    attempt_baseline_version = baseline_version
+    attempt_baseline_captured = baseline_captured
+
+    async def _run() -> Dict[str, Any]:
+        nonlocal attempt_baseline_captured, attempt_baseline_version
+
+        workspace_uuid = uuid.UUID(workspace_id)
+        if not attempt_baseline_captured:
+            attempt_baseline_version = (
+                await get_workspace_statistics_snapshot_version_async(
+                    workspace_uuid
+                )
+            )
+            attempt_baseline_captured = True
+
+        response, generated = await get_or_refresh_workspace_statistics_async(
+            workspace_uuid,
+            allow_cached_response=False,
+            baseline_version=attempt_baseline_version,
+            baseline_captured=True,
+        )
+        return {
+            "status": "SUCCESS" if generated else "SKIPPED_COALESCED",
+            "workspace_id": workspace_id,
+            "total_count": response["total_count"],
+            "total_users": response["total_users"],
+            "generated_at": response["generated_at"],
+        }
+
+    try:
+        redis_client = get_sync_redis_client()
+        if redis_client is None:
+            raise RuntimeError(
+                "Redis unavailable for workspace statistics snapshot"
+            )
+        if redis_client.get(inflight_key) != inflight_token:
+            return {
+                "status": "SKIPPED_STALE_INFLIGHT",
+                "workspace_id": workspace_id,
+            }
+
+        loop = set_asyncio_event_loop()
+        result = loop.run_until_complete(_run())
+        logger.info("工作空间记忆统计快照任务完成: %s", result)
+        return result
+    except Exception as exc:
+        if self.request.retries < self.max_retries:
+            logger.warning(
+                "工作空间记忆统计快照失败，60 秒后补偿一次: "
+                "workspace_id=%s, retry=%s/%s",
+                workspace_id,
+                self.request.retries + 1,
+                self.max_retries,
+                exc_info=True,
+            )
+            retry_error = self.retry(
+                exc=exc,
+                countdown=60,
+                kwargs={
+                    "workspace_id": workspace_id,
+                    "inflight_token": inflight_token,
+                    "baseline_version": attempt_baseline_version,
+                    "baseline_captured": attempt_baseline_captured,
+                },
+                throw=False,
+            )
+            retry_scheduled = True
+            raise retry_error
+        logger.exception(
+            "工作空间记忆统计快照补偿后仍失败: workspace_id=%s",
+            workspace_id,
+        )
+        raise
+    finally:
+        if loop is not None:
+            _shutdown_loop_gracefully(loop)
+        if redis_client is not None and not retry_scheduled:
+            try:
+                redis_client.eval(
+                    UNLOCK_SCRIPT,
+                    1,
+                    inflight_key,
+                    inflight_token,
+                )
+            except Exception:
+                logger.exception(
+                    "工作空间记忆统计在途锁释放失败: workspace_id=%s",
+                    workspace_id,
+                )

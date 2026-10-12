@@ -1,12 +1,18 @@
-"""转发目标解析：路径前缀 → 目标服务（首期 static 配置 → K8s Service DNS）。
+"""Forward target resolution: path prefix → target service (static config → K8s Service DNS).
 
-Forwarder：统一转发——外部路径 /api|/v1 → 内部 /internal/v1，白名单请求头透传 +
-x-* 身份头透传。凭据头按部署模式处理（设计 4.1.2 / 4.2.1）：gateway 模式把中间件
-注入的内部 token 改写为 authorization: Bearer（x-internal-token 不透传，避免双凭据
-信源）；direct 模式原样透传外部 authorization / x-api-key 供下游自验。
+Forwarder: unified forwarding — external paths /api|/v1 → internal /internal/v1,
+forward-whitelisted request headers plus all x-* headers (identity headers were
+sanitized and re-injected by the middleware after termination). Credential face:
+both strategies terminate credentials in the middleware, so this layer never
+carries external authorization / x-api-key; the enterprise gateway rewrites the
+middleware-injected internal token as authorization: Bearer (the
+x-internal-token header itself is not forwarded — avoids a second credential
+source downstream).
 
-流式/缓冲不分路径配置：一律 send(stream=True) 后按上游响应头分流（响应头驱动，
-见 is_streaming_response）——下载/导出等流式响应逐块透传，JSON 等缓冲交付。
+Streaming/buffered is not route-configured: every request goes send(stream=True)
+and the split follows upstream response headers (response-header driven, see
+is_streaming_response) — download/export stream chunk by chunk, JSON etc. are
+buffered.
 """
 from __future__ import annotations
 
@@ -110,30 +116,21 @@ class Forwarder:
             value = request.headers.get(name)
             if value is not None:
                 headers[name] = value
-        # 身份头（x-user-id / x-tenant-id / ...）已由中间件 _rewrite_headers 注入
-        # request.scope["headers"]（claims 权威，设计 2.4），此处从 scope headers 重序列化透传；
-        # 内部 token 在 request.state.internal_token，凭据头走下方双模式分支：
-        # x-internal-token 仅策略内部使用，不透传（设计 4.1.2）
+        # Identity headers (x-user-id / x-tenant-id / x-kb-* / x-model-* ...) were
+        # sanitized and injected by the middleware after termination; re-serialize
+        # them from the scope here. Credential headers no longer reach this layer:
+        # only the enterprise internal token is rewritten as Authorization below,
+        # and x-api-key / x-internal-token stay gateway-internal (defense in depth).
         internal = getattr(request.state, "internal_token", None)
         for name, value in request.headers.items():
             low = name.lower()
             if low.startswith("x-") and low not in ("x-api-key", "x-internal-token"):
-                if internal and low.startswith("x-kb"):
-                    # gateway 模式：claims 只注入 x-user-id/x-tenant-id/x-workspace-id，
-                    # 客户端 X-KB-* 一律剥除——透传会让 kb 公开路径 fallback 授信客户端
-                    # 伪造身份头（跨工作区拉取），下游只见权威身份
-                    continue
                 headers[name] = value
         if internal:
-            # gateway 模式：外部凭据已由中间件终结销毁，转发层改写为
-            # authorization: Bearer <内部 token>（设计 4.1.2 凭据行；x-internal-token 不透传）
+            # Enterprise gateway mode: rewrite the internal token as
+            # authorization: Bearer <internal token> (the x-internal-token header
+            # itself is not forwarded — avoids a second credential source downstream).
             headers["authorization"] = f"Bearer {internal}"
-        else:
-            # direct 模式：透传外部凭据给下游服务自验（设计 4.2.1：透传原样附到上游请求）
-            if "authorization" in request.headers:
-                headers["authorization"] = request.headers["authorization"]
-            if "x-api-key" in request.headers:
-                headers["x-api-key"] = request.headers["x-api-key"]
         return headers
 
     async def forward(self, request: Request, route: TargetRoute) -> Response:

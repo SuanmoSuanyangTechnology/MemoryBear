@@ -19,11 +19,13 @@ class UserContext:
 
 @dataclass
 class ApiKeyContext:
-    """API Key 请求的上下文：服务对服务调用（老单体 service_router 语义）。
+    """API Key request context: service-to-service calls (monolith service_router semantics).
 
-    user_id = key 创建者用户：老单体语义中 API key 只是受限凭证，认证后代理其
-    creator 访问（scopes/workspace_id/type/resource_id 收窄权限）。签发内部 token
-    时 sub 用 user_id；creator 缺失（已删除/旧快照）时退化为 ak: 主体由下游拒绝。
+    user_id = the key creator: an API key is a restricted credential that acts on
+    behalf of its creator (scopes/workspace_id/type/resource_id narrow the
+    permissions). The internal token uses user_id as sub. A missing creator
+    (deleted user / stale snapshot) now fails closed (401) at the gateway before
+    issuance; the issuer's `ak:` fallback is defense in depth only.
     """
     api_key_id: str
     workspace_id: str

@@ -6,7 +6,6 @@ This module provides centralized functions for creating embedder clients.
 from typing import TYPE_CHECKING
 
 from app.core.memory.llm_tools.openai_embedder import OpenAIEmbedderClient
-from app.core.models.base import RedBearModelConfig
 from app.db import get_db_context
 from app.services.memory_config_service import MemoryConfigService
 
@@ -68,20 +67,13 @@ def get_embedder_client(embedding_id: str) -> OpenAIEmbedderClient:
 
     try:
         with get_db_context() as db:
-            embedder_config_dict = MemoryConfigService(db).get_embedder_config(embedding_id)
+            ref = MemoryConfigService(db).resolve_model_ref(embedding_id)
     except Exception as e:
         raise ValueError(f"Invalid embedding ID '{embedding_id}': {str(e)}") from e
 
     try:
-        embedder_config = RedBearModelConfig.from_api_key(
-            embedder_config_dict,
-            timeout=embedder_config_dict.get("timeout", 120.0),
-            max_retries=embedder_config_dict.get("max_retries", 5),
-        )
-        embedder_client = OpenAIEmbedderClient(embedder_config)
-        return embedder_client
+        return OpenAIEmbedderClient(remote=ref)
     except Exception as e:
-        model_name = embedder_config_dict.get('model_name', 'unknown')
         raise ValueError(
-            f"Failed to initialize embedder client for model '{model_name}': {str(e)}"
+            f"Failed to initialize embedder client for model '{embedding_id}': {str(e)}"
         ) from e

@@ -219,8 +219,9 @@ async def get_engine_display_cards(
     - 不传 end_user_id：返回 API Key 所属工作空间的全部引擎卡片（空间级，
       仍按用户维度拆分），每张卡片额外携带 end_user_id。
 
-    按"指定时区下的自然日 + 引擎类型"聚合事件并返回卡片。engine_type 始终返回
-    EXTRACTION、CROSS_MODAL 或 EMOTION，由前端负责展示文案映射；X-Language-Type
+    按"指定时区下的自然日 + 引擎类型"聚合事件并返回卡片。engine_type 为
+    EXTRACTION、CROSS_MODAL、EMOTION、FORGETTING、REFLECTION、SCENE_SUMMARY
+    或 MEMORY_VALUE，由前端负责展示文案映射；X-Language-Type
     仅控制 name/content 文案。
 
     聚合边界必须在服务端确定，因此 X-Timezone 为必传请求头，

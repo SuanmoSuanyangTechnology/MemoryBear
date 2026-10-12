@@ -51,6 +51,12 @@ from .memory_display_record_model import MemoryDisplayRecord
 from .memory_engine_display_event_model import MemoryEngineDisplayEvent
 from .dialogue_emotion_raw_model import DialogueEmotionRaw
 from .outbox_model import OutboxEvent
+from .memory_reembed_job_model import (
+    MemoryReembedJob,
+    MemoryReembedJobUser,
+    ReembedJobStatus,
+    ReembedUserStatus,
+)
 
 __all__ = [
     "Tenants",
@@ -130,4 +136,8 @@ __all__ = [
     "MemoryEngineDisplayEvent",
     "DialogueEmotionRaw",
     "OutboxEvent",
+    "MemoryReembedJob",
+    "MemoryReembedJobUser",
+    "ReembedJobStatus",
+    "ReembedUserStatus",
 ]

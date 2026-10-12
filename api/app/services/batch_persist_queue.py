@@ -567,6 +567,8 @@ async def _handle_after_turn(
             features=kwargs.get("features_config", {}),
             conversation_id=kwargs.get("conversation_id"),
             current_provider=kwargs.get("api_key_provider"),
+            # 集群传 "cluster"，Agent 应用不传 = 默认 "conversation"（行为不变）
+            scope_key=kwargs.get("scope_key") or "conversation",
             model_config_id=kwargs.get("model_config_id"),
         )
     except Exception:

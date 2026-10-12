@@ -18,6 +18,7 @@ def build_ollama_params(config: ResolvedModelConfig) -> dict[str, Any]:
         "response_format",
         "json_output",
         "default_headers",
+        "streaming",
     }
     provider_specific = {
         "top_k",

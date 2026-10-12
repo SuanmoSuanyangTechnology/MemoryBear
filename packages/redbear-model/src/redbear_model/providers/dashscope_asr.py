@@ -187,7 +187,7 @@ class DashScopeASRAdapter:
     ):
         if config.provider is not ModelProvider.DASHSCOPE:
             raise UnsupportedModelProviderError(config.provider.value)
-        if config.model_type is not ModelType.ASR:
+        if config.profile.type is not ModelType.ASR:
             raise UnsupportedMultimodalModelError("audio transcription")
         self._base = resolve_dashscope_asr_base_address(config.base_url)
         self._config = config

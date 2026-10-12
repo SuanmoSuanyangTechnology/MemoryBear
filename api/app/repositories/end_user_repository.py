@@ -1737,7 +1737,7 @@ class EndUserRepository:
                 EndUser.workspace_id == workspace_id,
                 EndUser.is_active.is_(True),
                 Workspace.is_active.is_(True),
-                Workspace.storage_type == "neo4j",
+                sa.or_(Workspace.storage_type.is_(None), Workspace.storage_type == "neo4j"),  # NULL 视为 neo4j
             )
             .limit(1)
         )
@@ -1774,7 +1774,7 @@ class EndUserRepository:
                 EndUser.workspace_id == workspace_id,
                 EndUser.is_active.is_(True),
                 Workspace.is_active.is_(True),
-                Workspace.storage_type == "neo4j",
+                sa.or_(Workspace.storage_type.is_(None), Workspace.storage_type == "neo4j"),  # NULL 视为 neo4j
             )
             .limit(1)
         )
@@ -1804,7 +1804,7 @@ class EndUserRepository:
         workspace_active = sa.exists().where(
             Workspace.id == workspace_id,
             Workspace.is_active.is_(True),
-            Workspace.storage_type == "neo4j",
+            sa.or_(Workspace.storage_type.is_(None), Workspace.storage_type == "neo4j"),  # NULL 视为 neo4j
         )
         metadata_exists = sa.exists().where(EndUserInfo.end_user_id == end_user_id)
         if expected_metadata_row_exists:
@@ -1856,7 +1856,7 @@ class EndUserRepository:
         workspace_active = sa.exists().where(
             Workspace.id == workspace_id,
             Workspace.is_active.is_(True),
-            Workspace.storage_type == "neo4j",
+            sa.or_(Workspace.storage_type.is_(None), Workspace.storage_type == "neo4j"),  # NULL 视为 neo4j
         )
         metadata_exists = sa.exists().where(EndUserInfo.end_user_id == end_user_id)
         if expected_metadata_row_exists:
@@ -1913,7 +1913,7 @@ class EndUserRepository:
                 EndUser.workspace_id == workspace_id,
                 EndUser.is_active.is_(True),
                 Workspace.is_active.is_(True),
-                Workspace.storage_type == "neo4j",
+                sa.or_(Workspace.storage_type.is_(None), Workspace.storage_type == "neo4j"),  # NULL 视为 neo4j
             )
             .all()
         )

@@ -20,10 +20,7 @@ from redbear_model import (
     MultimodalInputLimitError,
     RerankCandidateView,
     TextEmbeddingContent,
-    is_qwen3_vl_embedding,
-    is_qwen3_vl_reranker,
 )
-from redbear_model.runtime import RedBearEmbeddings, RedBearLLM, RedBearRerank
 
 from ..api.dependencies import Principal
 from ..api.schemas.chunk import ImageRetrievalQuery, RetrieveType
@@ -35,6 +32,14 @@ from ..api.schemas.knowledge_retrieval import (
 from ..api.schemas.rerank import RerankMode
 from ..error_mapping import map_multimodal_error, map_text_embedding_error
 from ..errors import KnowledgeError
+from ..integrations.model.chat import RedBearChatModel
+from ..integrations.model.embedding import RedBearEmbeddings
+from ..integrations.model.invoke_backend import ref_from_view
+from ..integrations.model.rerank import RedBearRerank
+from ..integrations.model.views import (
+    is_qwen3_vl_embedding_view,
+    is_qwen3_vl_rerank_view,
+)
 from ..rag.chunk.token_utils import num_tokens_from_string
 from ..rag.knowledge_graph.config import GraphPipeline
 from ..rag.metadata.auto_filter import generate_filter_groups
@@ -80,6 +85,7 @@ from ..rag.retrieval.unit_collapse import (
     select_units_for_rerank,
 )
 from ..runtime import ProcessRuntime
+from ..usage_context import bind_usage
 from .knowledge_retrieval_preparation import KnowledgeRetrievalPreparation
 from .multimodal_image import resolve_storage_images_async, validate_image_data_uri
 
@@ -218,6 +224,7 @@ class _TimedElasticSearchRetrieval(AsyncElasticSearchRetrieval):
 
 class KnowledgeRetrievalService:
     @classmethod
+    @bind_usage("rag_service", "principal.workspace_id", only_if_unbound=True)
     async def retrieve_async(
         cls,
         runtime: ProcessRuntime,
@@ -540,7 +547,7 @@ class KnowledgeRetrievalService:
                 raise KnowledgeError.from_code(
                     "KB_IMAGE_PARTICIPLE_UNSUPPORTED",
                 )
-            if is_qwen3_vl_embedding(target.embedding.resolved):
+            if is_qwen3_vl_embedding_view(target.embedding):
                 # Multimodal KB stores units: full-text hits text units only,
                 # then collapse back to chunks (single-channel, no rerank).
                 unit_candidates = await store.search_units_full_text(
@@ -575,13 +582,14 @@ class KnowledgeRetrievalService:
                 )
             )
 
-        if target.embedding.resolved is None:
-            raise KnowledgeError.from_code(
-                "KB_MODEL_UNAVAILABLE",
-            )
-        embedding = RedBearEmbeddings(
-            target.embedding.resolved,
-            client_pool=runtime.model_runtime.pool,
+        embedding = RedBearEmbeddings.for_invoke_ref(
+            ref_from_view(
+                target.embedding,
+                target.embedding.tenant_id,
+                workspace_id=target.workspace_id,
+            ),
+            pool=runtime.model_runtime,
+            multimodal=is_qwen3_vl_embedding_view(target.embedding),
         )
         vector_options = cls._search_options(
             request,
@@ -597,7 +605,7 @@ class KnowledgeRetrievalService:
                     image_query,
                     timings,
                 )
-                if is_qwen3_vl_embedding(target.embedding.resolved):
+                if is_qwen3_vl_embedding_view(target.embedding):
                     unit_candidates = await store.search_units_by_vector(
                         query_vector,
                         vector_options,
@@ -613,7 +621,7 @@ class KnowledgeRetrievalService:
                     raise KnowledgeError.from_code(
                         "KB_RETRIEVAL_TEXT_QUERY_REQUIRED",
                     )
-                if is_qwen3_vl_embedding(target.embedding.resolved):
+                if is_qwen3_vl_embedding_view(target.embedding):
                     # Keep unit identity for any subsequent global ranking stage.
                     query_vector = await _embed_text_query(embedding, text_query)
                     unit_candidates = await store.search_units_by_vector(
@@ -656,7 +664,7 @@ class KnowledgeRetrievalService:
                 image_query,
                 timings,
             )
-            if is_qwen3_vl_embedding(target.embedding.resolved):
+            if is_qwen3_vl_embedding_view(target.embedding):
                 unit_candidates = await store.search_units_by_vector(
                     query_vector,
                     vector_options,
@@ -677,7 +685,7 @@ class KnowledgeRetrievalService:
                 raise KnowledgeError.from_code(
                     "KB_RETRIEVAL_TEXT_QUERY_REQUIRED",
                 )
-            multimodal_kb = is_qwen3_vl_embedding(target.embedding.resolved)
+            multimodal_kb = is_qwen3_vl_embedding_view(target.embedding)
 
             async def search_vector() -> list[DocumentChunk] | list[UnitCandidate]:
                 nonlocal query_vector
@@ -843,19 +851,21 @@ class KnowledgeRetrievalService:
             )
         vector = result.query_vector
         if vector is None:
-            if target.embedding.resolved is None:
-                raise KnowledgeError.from_code(
-                    "KB_MODEL_UNAVAILABLE", "Embedding model is unavailable"
-                )
             started_at = time.perf_counter()
             try:
-                embedding = RedBearEmbeddings(
-                    target.embedding.resolved, client_pool=runtime.model_runtime.pool
+                embedding = RedBearEmbeddings.for_invoke_ref(
+                    ref_from_view(
+                        target.embedding,
+                        target.embedding.tenant_id,
+                        workspace_id=target.workspace_id,
+                    ),
+                    pool=runtime.model_runtime,
+                    multimodal=is_qwen3_vl_embedding_view(target.embedding),
                 )
                 vector = tuple(await _embed_text_query(embedding, query))
             finally:
                 cls._record_timing(timings, "embedding_ms", started_at)
-        multimodal = is_qwen3_vl_embedding(target.embedding.resolved)
+        multimodal = is_qwen3_vl_embedding_view(target.embedding)
 
         def score_key(candidate: RetrievalCandidate) -> tuple[str, str]:
             metadata = candidate.chunk.metadata or {}
@@ -1137,8 +1147,8 @@ class KnowledgeRetrievalService:
     ) -> ModelRerankResult:
         if top_k <= 0 or not chunks:
             return ModelRerankResult(chunks=(), used_fallback=False)
-        if isinstance(query, ImageEmbeddingContent) or (
-            snapshot.resolved is not None and is_qwen3_vl_reranker(snapshot.resolved)
+        if isinstance(query, ImageEmbeddingContent) or is_qwen3_vl_rerank_view(
+            snapshot
         ):
             unit_candidates = cls._chunks_to_unit_candidates(chunks)
             try:
@@ -1161,9 +1171,6 @@ class KnowledgeRetrievalService:
                 )
                 fallback = cls._apply_rerank_fallback(chunks, top_k)
                 return ModelRerankResult(chunks=tuple(fallback), used_fallback=True)
-        if snapshot.resolved is None:
-            fallback = cls._apply_rerank_fallback(chunks, top_k)
-            return ModelRerankResult(chunks=tuple(fallback), used_fallback=True)
         documents = [
             LangChainDocument(
                 page_content=chunk_retrieval_content(chunk),
@@ -1172,7 +1179,10 @@ class KnowledgeRetrievalService:
             for index, chunk in enumerate(chunks)
         ]
         try:
-            reranker = RedBearRerank(snapshot.resolved)
+            reranker = RedBearRerank.for_invoke_ref(
+                ref_from_view(snapshot, snapshot.tenant_id),
+                pool=runtime.model_runtime,
+            )
             reranked = list(await reranker.acompress_documents(documents, query))
         except asyncio.CancelledError:
             raise
@@ -1329,10 +1339,7 @@ class KnowledgeRetrievalService:
         a warning instead of failing the request.
         """
 
-        if (
-            snapshot.resolved is None
-            or not is_qwen3_vl_reranker(snapshot.resolved)
-        ):
+        if not is_qwen3_vl_rerank_view(snapshot):
             raise KnowledgeError.from_code(
                 "KB_IMAGE_RERANK_MODEL_UNSUPPORTED",
             )
@@ -1403,7 +1410,10 @@ class KnowledgeRetrievalService:
             return ModelRerankResult(chunks=(), used_fallback=False)
 
         try:
-            reranker = RedBearRerank(snapshot.resolved)
+            reranker = RedBearRerank.for_invoke_ref(
+                ref_from_view(snapshot, snapshot.tenant_id),
+                pool=runtime.model_runtime,
+            )
             scores = await reranker.arerank_multimodal(
                 query,
                 tuple(views),
@@ -1494,11 +1504,14 @@ class KnowledgeRetrievalService:
             or request.metadata_filters_resolved
         ):
             return groups
-        if preparation.metadata_llm is None or preparation.metadata_llm.resolved is None:
+        if preparation.metadata_llm is None:
             return []
-        llm = RedBearLLM(
-            preparation.metadata_llm.resolved,
-            client_pool=runtime.model_runtime.pool,
+        llm = RedBearChatModel.for_invoke_ref(
+            ref_from_view(
+                preparation.metadata_llm,
+                preparation.metadata_llm.tenant_id,
+            ),
+            pool=runtime.model_runtime,
         )
         return await generate_filter_groups(
             request.query_text or "",
@@ -1819,10 +1832,7 @@ class KnowledgeRetrievalService:
                 raise KnowledgeError.from_code(
                     "KB_IMAGE_TARGET_CONFIG_UNSUPPORTED",
                 )
-            if (
-                target.embedding.resolved is None
-                or not is_qwen3_vl_embedding(target.embedding.resolved)
-            ):
+            if not is_qwen3_vl_embedding_view(target.embedding):
                 raise KnowledgeError.from_code(
                     "KB_IMAGE_EMBEDDING_MODEL_UNSUPPORTED",
                 )
@@ -1832,10 +1842,8 @@ class KnowledgeRetrievalService:
                     raise KnowledgeError.from_code(
                         "KB_IMAGE_HYBRID_RERANK_REQUIRED",
                     )
-                if (
-                    local_plan.model is None
-                    or local_plan.model.resolved is None
-                    or not is_qwen3_vl_reranker(local_plan.model.resolved)
+                if local_plan.model is None or not is_qwen3_vl_rerank_view(
+                    local_plan.model
                 ):
                     request_error_code = getattr(
                         preparation,
@@ -1854,10 +1862,8 @@ class KnowledgeRetrievalService:
             raise KnowledgeError.from_code(
                 "KB_IMAGE_WEIGHTED_GLOBAL_RERANK_UNSUPPORTED",
             )
-        if (
-            global_plan.model is None
-            or global_plan.model.resolved is None
-            or not is_qwen3_vl_reranker(global_plan.model.resolved)
+        if global_plan.model is None or not is_qwen3_vl_rerank_view(
+            global_plan.model
         ):
             request_error_code = getattr(
                 preparation,

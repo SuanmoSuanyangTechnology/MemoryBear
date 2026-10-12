@@ -90,7 +90,7 @@ const ToolList: FC<{ value?: ToolOption[]; onChange?: (config: ToolOption[]) => 
                   parameters: customFilterItem?.parameters
                 }
             }
-          } catch (error) {
+          } catch {
             return item
           }
         }
@@ -112,13 +112,13 @@ const ToolList: FC<{ value?: ToolOption[]; onChange?: (config: ToolOption[]) => 
       is_active: true,
     }]
     setToolList(list)
-    onChange && onChange(list)
+    onChange?.(list)
   }
   /** Remove tool from list */
   const handleDeleteTool = (index: number) => {
     const list = toolList.filter((_item, idx) => idx !== index)
     setToolList([...list])
-    onChange && onChange(list)
+    onChange?.(list)
   }
   /** Toggle tool enabled state */
   const handleChangeEnabled = (index: number) => {
@@ -132,13 +132,13 @@ const ToolList: FC<{ value?: ToolOption[]; onChange?: (config: ToolOption[]) => 
       return item
     })
     setToolList([...list])
-    onChange && onChange(list)
+    onChange?.(list)
   }
   return (
     <Card 
       title={t('application.toolConfiguration')}
       extra={
-        <Button className="rb:h-6! rb:py-0! rb:px-2! rb:rounded-md! rb:text-[#212332]" onClick={handleAddTool}>+ {t('application.addTool')}</Button>
+        <Button className="rb:h-6! rb:py-0! rb:px-2! rb:rounded-md! rb:text-gray-800" onClick={handleAddTool}>+ {t('application.addTool')}</Button>
       }
     >
       <div className="rb:leading-4.5 rb:text-[12px] rb:mb-2 rb:font-medium">

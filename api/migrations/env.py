@@ -98,6 +98,12 @@ def include_object(obj, name, type_, reflected, compare_to):
     过滤时，autogenerate 会把库中存在但不在 Base.metadata 的这些表生成 drop_table，
     误执行即毁微服务数据。identity 侧已做对称过滤（identity-service/migrations/env.py）。
     仅影响 autogenerate 对比；upgrade/downgrade 按脚本执行不受影响。
+
+    Model tables (model_configs / model_bases / model_channels /
+    model_usage_records) are compared by this chain again — their DDL moved back
+    from the model-service chain. The metadata-membership whitelist below keeps
+    every table absent from Base.metadata out of the comparison, including any
+    table a future model-service chain may add.
     """
     if type_ == "table":
         return name in Base.metadata.tables

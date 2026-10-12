@@ -1,7 +1,3 @@
-/**
- * MobileLayout
- * 移动端 / iframe / 浮窗（floatBtn）/ 小屏会话布局。
- */
 import { type FC } from 'react'
 import InfiniteScroll from 'react-infinite-scroll-component'
 import { Flex, Skeleton, Tooltip, Space, Popover } from 'antd'
@@ -58,13 +54,13 @@ const MobileLayout: FC<MobileLayoutProps> = ({ ctx }) => {
           {historyList.map(item => (
             <div
               key={item.id}
-              className={clsx("rb:cursor-pointer rb:px-4 rb:py-2 rb:hover:bg-[#F6F6F6]", {
-                "rb:bg-[rgba(21,94,239,0.08)]! rb:relative rb:border-l-[3px] rb:border-[#155EEF]": item.id === conversation_id,
+              className={clsx("rb:cursor-pointer rb:px-4 rb:py-2 rb:hover:bg-gray-100", {
+                "rb:bg-[rgba(21,94,239,0.08)]! rb:relative rb:border-l-[3px] rb:border-blue-500": item.id === conversation_id,
               })}
               onClick={() => handleChangeHistory(item.id)}
             >
               <div className="rb:text-[12px] rb:font-medium rb:mb-1">{item.title}</div>
-              <Flex justify="space-between" className="rb:text-[12px] rb:text-[#5B6167]">
+              <Flex justify="space-between" className="rb:text-[12px] rb:text-gray-600">
                 <span>{formatDateTime(item.updated_at, 'MM-DD')}</span>
                 <span>{formatDateTime(item.updated_at, 'HH:mm')}</span>
               </Flex>
@@ -80,7 +76,7 @@ const MobileLayout: FC<MobileLayoutProps> = ({ ctx }) => {
       'rb:rounded-tl-2xl! rb:h-full! rb:w-full!': isFloatBtn,
       'rb:w-full rb:h-full': !isFloatBtn,
       'rb:bg-[#FFFFFF]': !isMemorySkills,
-      'rb:bg-[#F5F6F6]': isMemorySkills
+      'rb:bg-slate-50': isMemorySkills
     })}>
       <div className={!isNarrowScreen && showHistory ? "rb:flex-1" : 'rb:w-full!'}>
         {!isShare &&
@@ -154,7 +150,7 @@ const MobileLayout: FC<MobileLayoutProps> = ({ ctx }) => {
 
         <div className={clsx({
           "rb:h-[calc(100%-45px)]": !isShare,
-          'rb:h-full': isShare,
+          'rb:h-full rb:py-3': isShare,
         })}>
           <Chat
             {...buildSharedChatProps(ctx)}
@@ -169,7 +165,7 @@ const MobileLayout: FC<MobileLayoutProps> = ({ ctx }) => {
                 subClassName={isMemorySkills ? "rb:text-[10px]!" : ''}
               />}
             labelFormat={(item) => isFloatBtn ? formatDateTime(item.created_at, 'HH:mm') : formatDateTime(item.created_at, 'MMMM D, YYYY [at] h:mm A', 'en')}
-            readOnly={disabled}
+            readOnly={disabled || isShare}
             contentClassName="rb:px-4 rb:pt-4"
           >
             <ChatToolbar

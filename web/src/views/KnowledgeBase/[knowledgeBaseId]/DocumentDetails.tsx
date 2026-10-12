@@ -53,7 +53,7 @@ const DocumentDetails: FC = () => {
   const [hasMore, setHasMore] = useState(true);
   const [total, setTotal] = useState(0);
   const [chunkLoading, setChunkLoading] = useState(false);
-  const [keywords, setKeywords] = useState('');
+  const [keywords, setKeywords] = useState<string | undefined>(undefined);
   const [fileUrl, setFileUrl] = useState('');
   const [parserMode, setParserMode] = useState(0);
   const insertModalRef = useRef<InsertModalRef>(null);
@@ -85,7 +85,7 @@ const DocumentDetails: FC = () => {
 
   // Listen to keywords changes and re-search
   useEffect(() => {
-    if (documentId && keywords && document?.progress === 1) {
+    if (documentId && document?.progress === 1) {
       setPage(1); // Reset page number
       setChunkList([]); // Clear list
       ChunkList(1, false); // Reload first page
@@ -266,7 +266,7 @@ const DocumentDetails: FC = () => {
     }
   };
   const handleSearch = (value?: string) => {
-    setKeywords(value || '');
+    setKeywords(value);
   };
   const handleInsert = (parentChunkId?: string) => {
     if (!documentId) {
@@ -433,7 +433,7 @@ const DocumentDetails: FC = () => {
     );
   }
 
-  return (<>
+  return (
     <Flex vertical className="rb:h-full! rb:p-1!">
       {/* Header */}
       <Flex vertical className="rb:text-left rb:mb-4!">
@@ -452,6 +452,7 @@ const DocumentDetails: FC = () => {
             <SearchInput 
               placeholder={t('knowledgeBase.search')} 
               onSearch={handleSearch}
+              debounceDelay={300}
               defaultValue={keywords}
             />
             <Button type='primary' onClick={handleAdjustmentParameter}>{t('knowledgeBase.adjustmentParameter')}</Button>
@@ -515,7 +516,7 @@ const DocumentDetails: FC = () => {
         onSuccess={handleInsertSuccess}
       />
     </Flex>
-  </>);
+  );
 };
 
 export default DocumentDetails;

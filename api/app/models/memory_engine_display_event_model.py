@@ -20,11 +20,13 @@ class MemoryEngineDisplayEvent(Base):
     记录每一次有效引擎触发的结构化事件。
 
     两类触发链路：
-    - 记忆写入（WritePipeline）：一轮最多三条事件
-      （EXTRACTION / CROSS_MODAL / EMOTION）；
-    - Celery 定时任务：一轮最多一条事件
-      （FORGETTING 来自配额驱动的定时遗忘整理，
-      REFLECTION 来自 Layer 2 高频巡检或每日全量去重）。
+    - 记忆写入（WritePipeline）：一轮最多三条基础事件
+      （EXTRACTION / CROSS_MODAL / EMOTION），另有每条最终永久 Statement
+      各一条 MEMORY_VALUE / PERMANENT_ADDED 增量事件；
+    - Celery 定时/异步任务：一轮最多一条事件
+      （FORGETTING 来自配额驱动的定时遗忘整理，REFLECTION 来自 Layer 2
+      高频巡检或每日全量去重，SCENE_SUMMARY 来自场景摘要生成成功，
+      MEMORY_VALUE / VALUE_EVALUATED 来自 GDS 拓扑评估任务）。
 
     engine_type 的取值范围只由代码约定，PG 没有枚举类型也没有 CHECK 约束，
     新增引擎类型不需要 migration。
@@ -45,7 +47,8 @@ class MemoryEngineDisplayEvent(Base):
         nullable=True,
     )
     operation_id = Column(UUID(as_uuid=True), nullable=False)
-    # EXTRACTION / CROSS_MODAL / EMOTION / FORGETTING / REFLECTION
+    # EXTRACTION / CROSS_MODAL / EMOTION / FORGETTING / REFLECTION /
+    # SCENE_SUMMARY / MEMORY_VALUE
     engine_type = Column(String(32), nullable=False)
     details = Column(JSONB, nullable=False, server_default="{}")
     occurred_at = Column(

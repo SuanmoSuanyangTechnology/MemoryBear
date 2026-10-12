@@ -15,10 +15,10 @@ from .config import KnowledgeSettings
 from .db import DatabaseManager
 from .infrastructure import (
     ElasticsearchManager,
-    ModelRuntimeManager,
     RedisManager,
     StorageManager,
 )
+from .integrations.model.runtime import ModelInvokeRuntime
 
 T = TypeVar("T")
 
@@ -192,7 +192,7 @@ class ProcessRuntime:
         self.redis = RedisManager(self.settings)
         self.elasticsearch = ElasticsearchManager(self.settings)
         self.storage = StorageManager(self.settings)
-        self.model_runtime = ModelRuntimeManager(self.settings)
+        self.model_runtime = ModelInvokeRuntime(self.settings)
 
     @property
     def pid(self) -> int:

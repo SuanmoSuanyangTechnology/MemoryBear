@@ -6,9 +6,8 @@ import json
 import logging
 import re
 import threading
-import time
 import uuid
-from collections import OrderedDict, defaultdict
+from collections import defaultdict
 from functools import lru_cache
 from typing import Any, Iterable, Callable
 
@@ -20,55 +19,42 @@ from langgraph.types import Send
 from app.core.workflow.engine.state_manager import WorkflowState
 from app.core.workflow.nodes.enums import NodeType
 
-# Bounded checkpointer cache: bounds both entry count (LRU) and entry age (TTL).
-# Each entry holds a full WorkflowState snapshot (messages, accumulated node_outputs,
-# plus per-super-step copies), ~1.1MB. An unbounded dict here grows until OOM whenever
-# cleanup is skipped on exception / client-disconnect paths.
-_CHECKPOINTER_MAX_SIZE = 1000
-_CHECKPOINTER_TTL_SECONDS = 24 * 60 * 60
-
-# thread_id -> (InMemorySaver, last_accessed_monotonic)
-_checkpointer_cache: "OrderedDict[str, tuple[InMemorySaver, float]]" = OrderedDict()
-_checkpointer_cache_lock = threading.Lock()
+# P0-2：checkpointer 缓存。
+# 人工干预流程需要跨请求恢复，优先使用进程级共享 Redis checkpointer；
+# Redis 不可用时由工厂降级为 InMemorySaver。普通流程不注入 checkpointer，
+# GraphBuilder 编译时创建随图回收的本地 InMemorySaver，避免无谓 Redis 写入。
+_checkpointer_cache: dict[str, Any] = {}
+_shared_checkpointer: Any = None
+_shared_checkpointer_lock = threading.Lock()
 
 
-def _evict_expired_checkpointers(now: float) -> None:
-    while _checkpointer_cache:
-        _, (_, last_accessed) = next(iter(_checkpointer_cache.items()))
-        if now - last_accessed < _CHECKPOINTER_TTL_SECONDS:
-            break
-        _checkpointer_cache.popitem(last=False)
+def get_shared_checkpointer() -> Any:
+    """进程级共享 checkpointer：Redis 可用则外置，否则退回 InMemorySaver。"""
+    global _shared_checkpointer
+    if _shared_checkpointer is not None:
+        return _shared_checkpointer
+    with _shared_checkpointer_lock:
+        if _shared_checkpointer is None:
+            from app.core.agent.redis_checkpoint import create_sync_checkpointer
+
+            _shared_checkpointer = create_sync_checkpointer(prefix="workflow")
+    return _shared_checkpointer
 
 
-def get_or_create_checkpointer(thread_id: str) -> InMemorySaver:
-    now = time.monotonic()
-    with _checkpointer_cache_lock:
-        entry = _checkpointer_cache.get(thread_id)
-        if entry is not None:
-            saver, _ = entry
-            _checkpointer_cache.move_to_end(thread_id)
-            _checkpointer_cache[thread_id] = (saver, now)
-            return saver
-        _evict_expired_checkpointers(now)
-        saver = InMemorySaver()
-        _checkpointer_cache[thread_id] = (saver, now)
-        while len(_checkpointer_cache) > _CHECKPOINTER_MAX_SIZE:
-            _checkpointer_cache.popitem(last=False)
-        return saver
+def get_or_create_checkpointer(thread_id: str) -> Any:
+    """按 thread_id 获取 checkpointer；Redis 后端下所有线程共享同一实例。"""
+    if thread_id not in _checkpointer_cache:
+        _checkpointer_cache[thread_id] = get_shared_checkpointer()
+    return _checkpointer_cache[thread_id]
 
 
 def remove_checkpointer(thread_id: str):
-    with _checkpointer_cache_lock:
-        _checkpointer_cache.pop(thread_id, None)
+    """丢弃 thread_id 的缓存项；Redis 中的状态由 TTL 回收。"""
+    _checkpointer_cache.pop(thread_id, None)
 
 
 def workflow_requires_checkpointer(workflow_config: dict[str, Any]) -> bool:
-    """Only workflows containing a human-intervention node need a persistent checkpointer.
-
-    Human intervention suspends execution and resumes later via the same thread_id, so
-    its checkpoint must survive across requests. Every other workflow can use a local
-    InMemorySaver that is reclaimed with the compiled graph.
-    """
+    """仅包含人工干预节点的流程需要持久 checkpointer。"""
     return any(
         node.get("type") == NodeType.HUMAN_INTERVENTION
         for node in workflow_config.get("nodes", [])
@@ -587,7 +573,7 @@ class GraphBuilder:
                 self.graph.add_edge(node, END)
         return
 
-    def build(self, checkpointer: InMemorySaver = None) -> CompiledStateGraph:
+    def build(self, checkpointer: Any = None) -> CompiledStateGraph:
         nodes = self.workflow_config.get("nodes", [])
         edges = self.workflow_config.get("edges", [])
 
@@ -629,5 +615,9 @@ class GraphBuilder:
         self.add_edges()
 
         self._analyze_end_node_output()
+        # 未显式传 checkpointer 的只有 cycle 子图（`cycle_graph/iteration.py`）——
+        # 那是单次执行内即弃的临时图，用进程内 InMemorySaver 是正确的，
+        # 不该外置（会白写一批 Redis key）。主图一律由 executor 通过
+        # `get_or_create_checkpointer` 注入。
         _cp = checkpointer or InMemorySaver()
         return self.graph.compile(checkpointer=_cp)

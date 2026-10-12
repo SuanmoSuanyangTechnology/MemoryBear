@@ -630,11 +630,10 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
             tenant_id: uuid.UUID | None = None,
     ) -> AsyncGenerator[str, None]:
         """按附件类型分别解析，再由文本模型合并生成流式回答。"""
-        from app.core.models import RedBearLLM, RedBearModelConfig
+        from app.core.models import RedBearChatModel
         from app.db import get_async_db_context
-        from app.models.models_model import ModelType
         from app.schemas.model_schema import ModelInfo
-        from app.services.model_service import ModelApiKeyService
+        from app.services.model_service import ModelConfigService
         from app.services.multimodal_service import MultimodalService
         from langchain.agents import create_agent
         from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
@@ -675,53 +674,35 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
         def group_failure_text(refs: list[dict[str, Any]], reason: str) -> str:
             return "\n".join(f"{attachment_label(ref)}\n{reason}" for ref in refs)
 
-        def snapshot_runtime(api_key_obj) -> tuple[ModelInfo, uuid.UUID]:
-            return (
-                ModelInfo(
-                    model_name=api_key_obj.model_name,
-                    provider=api_key_obj.provider,
-                    api_key=api_key_obj.api_key,
-                    api_base=api_key_obj.api_base or "",
-                    input_modalities=[str(item) for item in (api_key_obj.input_modalities or [])],
-                    output_modalities=[str(item) for item in (api_key_obj.output_modalities or [])],
-                    features=[str(item) for item in (api_key_obj.features or [])],
-                    model_type=ModelType.LLM,
-                    tenant_id=api_key_obj.tenant_id,
-                    model_config_id=api_key_obj.model_config_id,
-                    channel_id=api_key_obj.channel_id,
-                    failover_plan=api_key_obj.failover_plan,
-                ),
-                api_key_obj.id,
-            )
-
-        def build_llm(model_info: ModelInfo, *, streaming: bool, max_tokens: int) -> RedBearLLM:
-            return RedBearLLM(
-                RedBearModelConfig.from_api_key(
-                    model_info,
-                    extra_params={
-                        "temperature": 0.2 if not streaming else 0.7,
-                        "max_tokens": max_tokens,
-                        "streaming": streaming,
-                    },
-                ),
-                type=ModelType.LLM,
+        def build_llm(model_info: ModelInfo, *, streaming: bool, max_tokens: int) -> RedBearChatModel:
+            """远端壳：凭据与选路在模型服务；streaming=True 使 astream_events 回调面出 token 事件。"""
+            return RedBearChatModel.for_invoke(
+                model_info,
+                params={
+                    "temperature": 0.2 if not streaming else 0.7,
+                    "max_tokens": max_tokens,
+                },
+                streaming=streaming,
             )
 
         try:
             async with get_async_db_context() as db:
                 memory_config = await MemoryConfigService(db).load_memory_config_async(payload.config_id)
-                runtime_cache: dict[uuid.UUID, tuple[ModelInfo, uuid.UUID] | None] = {}
+                runtime_cache: dict[uuid.UUID, ModelInfo | None] = {}
 
                 async def get_runtime(model_config_id: uuid.UUID):
+                    """非解密视图缓存；模型缺失/弃用/未启用按旧口径软降级为 None。"""
                     if model_config_id not in runtime_cache:
-                        api_key_obj = await ModelApiKeyService.get_available_api_key_bridge_async(
-                            db,
-                            model_config_id,
-                            tenant_id=memory_config.tenant_id,
-                        )
-                        runtime_cache[model_config_id] = (
-                            snapshot_runtime(api_key_obj) if api_key_obj else None
-                        )
+                        try:
+                            runtime_cache[model_config_id] = (
+                                await ModelConfigService.get_runtime_model_view_bridge_async(
+                                    db,
+                                    model_config_id,
+                                    tenant_id=memory_config.tenant_id,
+                                )
+                            )
+                        except BusinessException:
+                            runtime_cache[model_config_id] = None
                     return runtime_cache[model_config_id]
 
                 final_runtime = await get_runtime(memory_config.llm_model_id)
@@ -729,7 +710,7 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
                     yield format_sse_message("error", self._trial_run_chat_error_data(language))
                     return
 
-                media_runtimes: dict[FileType, tuple[ModelInfo, uuid.UUID] | None] = {}
+                media_runtimes: dict[FileType, ModelInfo | None] = {}
                 required_modalities = {
                     FileType.IMAGE: "image",
                     FileType.AUDIO: "audio",
@@ -741,18 +722,18 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
                     model_config_id = self._trial_run_media_model_id(memory_config, file_type)
                     runtime = await get_runtime(model_config_id)
                     required = required_modalities[file_type]
-                    if runtime is not None and required not in self._normalize_modalities(runtime[0].input_modalities):
+                    if runtime is not None and required not in self._normalize_modalities(runtime.input_modalities):
                         runtime = None
                     if runtime is None and model_config_id != memory_config.llm_model_id:
                         fallback = final_runtime
-                        if required in self._normalize_modalities(fallback[0].input_modalities):
+                        if required in self._normalize_modalities(fallback.input_modalities):
                             runtime = fallback
                     media_runtimes[file_type] = runtime
 
                 config_workspace_id = memory_config.workspace_id
                 config_tenant_id = memory_config.tenant_id
 
-            final_model_info, final_api_key_id = final_runtime
+            final_model_info = final_runtime
 
             yield format_sse_message("start", {
                 "conversation_id": "",
@@ -775,7 +756,7 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
                         "classified": classified,
                     }
 
-                model_info, api_key_id = runtime
+                model_info = runtime
                 # 附件在进入试运行前已经完成输入校验，加载与格式化异常不在这里转换为 LLM 错误。
                 multimodal_service = MultimodalService(None, model_info)
                 parts = await self._process_trial_run_files(
@@ -835,7 +816,6 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
                 return {
                     "text": response_text,
                     "tokens": self._extract_total_tokens(response),
-                    "api_key_id": api_key_id,
                 }
 
             async def extract_document_group() -> dict[str, Any]:
@@ -853,7 +833,7 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
                         )
                     text = await multimodal_service.extract_document_text(file)
                     documents.append(f"{attachment_label(ref)}\n{text}")
-                return {"text": "\n\n".join(documents), "tokens": 0, "api_key_id": None}
+                return {"text": "\n\n".join(documents), "tokens": 0}
 
             analysis_tasks = [
                 analyze_media_group(file_type)
@@ -898,11 +878,6 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
                 result["text"] for result in analysis_results if result.get("text")
             )
             total_tokens = sum(int(result.get("tokens") or 0) for result in analysis_results)
-            usage_api_key_ids = [
-                result["api_key_id"]
-                for result in analysis_results
-                if result.get("api_key_id") is not None
-            ]
 
             history_round_limit = self._trial_run_history_round_limit()
             limited_history = self._latest_trial_run_history(
@@ -982,18 +957,6 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
                     yield format_sse_message("message", {"content": details_chunk})
 
             total_tokens += final_tokens
-            usage_api_key_ids.append(final_api_key_id)
-
-            try:
-                async with get_async_db_context() as db:
-                    for api_key_id in usage_api_key_ids:
-                        await ModelApiKeyService.record_api_key_usage_bridge_async(db, api_key_id)
-            except asyncio.CancelledError:
-                raise
-            except Exception:
-                # Usage accounting is observability metadata. A write failure here must
-                # not turn an already completed model response into an SSE error event.
-                logger.error("[TRIAL_RUN_CHAT_STREAM] Failed to record API key usage", exc_info=True)
 
             yield format_sse_message("end", {
                 "elapsed_time": time.perf_counter() - start_time,

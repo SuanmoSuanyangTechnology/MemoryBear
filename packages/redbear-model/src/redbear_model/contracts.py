@@ -296,6 +296,7 @@ class ModelProfile(ContractModel):
 class ModelProvider(StrEnum):
     OPENAI = "openai"
     SPEEDBEAR = "speedbear"
+    MINIMAX = "minimax"
     DASHSCOPE = "dashscope"
     OLLAMA = "ollama"
     XINFERENCE = "xinference"
@@ -418,29 +419,6 @@ class ModelConfigSnapshot(ContractModel):
     load_balance_strategy: LoadBalanceStrategy = LoadBalanceStrategy.NONE
     profile: ModelProfile
     config: dict[str, JsonValue] = Field(default_factory=dict)
-
-
-# deprecated（阶段一过渡）：mem-knowledge 旧读窗口消费；M3 切 model_channels 后由 ChannelSnapshot 取代，收尾任务删除
-class ModelKeySnapshot(ContractModel):
-    key_id: UUID
-    model_name: str = Field(min_length=1)
-    provider: ModelProvider
-    api_key: SecretStr
-    base_url: str | None = None
-    is_active: bool
-    priority: str = "1"
-    usage_count: int = Field(default=0, ge=0)
-    last_used_at_ms: int | None = Field(default=None, ge=0)
-    capabilities: tuple[ModelCapability, ...] = ()
-    is_omni: bool = False
-    config: dict[str, JsonValue] = Field(default_factory=dict)
-
-
-class PublicModelBindingSnapshot(ContractModel):
-    tenant_id: UUID
-    provider: ModelProvider
-    api_key: SecretStr
-    base_url: str | None = None
 
 
 class ResolvedModelConfig(ContractModel):

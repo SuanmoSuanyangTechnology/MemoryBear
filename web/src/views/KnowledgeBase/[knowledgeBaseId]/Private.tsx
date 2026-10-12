@@ -832,8 +832,8 @@ const Private: FC = () => {
           </div>
           <Switch checkedChildren={t('common.enable')} unCheckedChildren={t('common.disable')} defaultChecked={knowledgeBase.status === 1} onChange={onChange}/>
         </Flex>
-        <Flex align="center" justify="space-between" className='rb:mb-4!'>
-          <SearchInput placeholder={t('knowledgeBase.search')} variant="outlined" onSearch={handleSearch} />
+        <Flex align="center" justify={isGraph ? 'flex-end' : "space-between"} className='rb:mb-4!'>
+          {!isGraph && <SearchInput placeholder={t('knowledgeBase.search')} variant="outlined" onSearch={handleSearch} />}
           <Flex align="center" justify="flex-end" gap={12} className='rb:flex-1'>
             <Radio.Group value={isGraph} onChange={(e) => setIsGraph(e.target.value)}>
               <Radio.Button value={false} className="rb:px-2!">

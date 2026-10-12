@@ -864,7 +864,14 @@ class AgentRunService:
             error_message: Optional[str] = None,
             message_id: Optional[uuid.UUID] = None,
             agent_log: Optional[dict] = None,
+            meta_patch: Optional[dict] = None,
     ) -> None:
+        """收尾 Agent 执行记录。
+
+        Args:
+            meta_patch: 追加/覆盖进 meta_data 的观测字段（S5：集群变量契约的
+                缺失必填 / 未定义变量等留痕就走这里）。不传则完全保持既有行为。
+        """
         async with get_async_db_context() as db:
             result = await db.execute(
                 select(AgentExecution).where(AgentExecution.id == execution_id)
@@ -886,6 +893,11 @@ class AgentRunService:
                 record.message_id = message_id
             if agent_log is not None:
                 record.agent_log = agent_log
+            if meta_patch:
+                # JSON 列：直接赋值新 dict 触发变更标记（原地改 dict 不会被 SQLAlchemy 感知）
+                merged_meta = dict(record.meta_data or {})
+                merged_meta.update(meta_patch)
+                record.meta_data = merged_meta
 
             await db.commit()
 
@@ -1046,29 +1058,19 @@ class AgentRunService:
                     return None
 
                 tenant_id = await self._resolve_app_tenant_id_async(app_id)
-                api_key_obj = await ModelApiKeyService.get_available_api_key_async(
+                embedding_ref = await ModelApiKeyService.resolve_invoke_ref_async(
                     db,
                     setting.model_config_id,
                     tenant_id=tenant_id,
                 )
-                if not api_key_obj:
+                if not embedding_ref:
                     return None
 
                 threshold = setting.similarity_threshold
-                api_key_data = {
-                    "model_name": api_key_obj.model_name,
-                    "provider": api_key_obj.provider,
-                    "api_key": api_key_obj.api_key,
-                    "api_base": api_key_obj.api_base,
-                    "tenant_id": api_key_obj.tenant_id,
-                    "model_config_id": api_key_obj.model_config_id,
-                    "channel_id": api_key_obj.channel_id,
-                }
 
-            from app.core.models.base import RedBearModelConfig
-            config = RedBearModelConfig.from_api_key(api_key_data, timeout=60, max_retries=3)
-
-            query_embedding = await asyncio.to_thread(AnnotationService.generate_embedding, message, config)
+            query_embedding = await asyncio.to_thread(
+                AnnotationService.generate_embedding, message, embedding_ref
+            )
             best_match = None
             best_similarity = 0.0
             for annotation in annotations:
@@ -1126,26 +1128,15 @@ class AgentRunService:
                 ))).scalars().all()))
                 if not annotations:
                     return []
-                api_key_obj = await ModelApiKeyService.get_available_api_key_async(
+                embedding_ref = await ModelApiKeyService.resolve_invoke_ref_async(
                     db, setting.model_config_id,
                     tenant_id=await self._resolve_app_tenant_id_async(app_id),
                 )
-                if not api_key_obj:
+                if not embedding_ref:
                     return []
-                api_key_data = {
-                    "model_name": api_key_obj.model_name,
-                    "provider": api_key_obj.provider,
-                    "api_key": api_key_obj.api_key,
-                    "api_base": api_key_obj.api_base,
-                    "tenant_id": api_key_obj.tenant_id,
-                    "model_config_id": api_key_obj.model_config_id,
-                    "channel_id": api_key_obj.channel_id,
-                }
-            from app.core.models.base import RedBearModelConfig
-            model_config = RedBearModelConfig.from_api_key(api_key_data, timeout=60, max_retries=3)
             candidates = await asyncio.to_thread(
                 AnnotationService.find_context_candidates,
-                message, annotations, model_config, 0.6, 3,
+                message, annotations, embedding_ref, 0.6, 3,
             )
             logger.info(
                 "[上下文组装] 标注候选 | "
@@ -1172,6 +1163,41 @@ class AgentRunService:
             if variable.get("required") and variable.get("name") not in input_vars:
                 raise ValueError(f"The required parameter '{variable.get('name')}' was not provided")
         return input_vars
+
+    @staticmethod
+    def prepare_variables_for_cluster(
+            input_vars: dict | None,
+            variables_config: dict
+    ) -> dict:
+        """集群子 Agent 的变量合并策略。
+
+        与 `prepare_variables`（独立应用的入口校验）语义不同 —— 集群场景下子 Agent 不是
+        入口，它拿到的 variables 是集群统一下发的包：
+
+        1. **集群传入的值优先**：集群是调用方，子 Agent 没有反客为主的道理；
+        2. **子 Agent 定义补默认值**：集群没传/传空的变量用本 Agent 定义里的默认值兜底，
+           这正是此前"定义了变量却不生效"的一类原因（集群口径的应用通常不知道子 Agent
+           内部还需要哪些变量）；
+        3. **不再因子 Agent 的 required 规则中断整轮集群**：旧实现会对缺失的 required 抛
+           ValueError，导致"集群里某个子 Agent 声明了必填变量 → 整轮对话直接 500"。是否
+           必填应由集群入口（见 multi_agent_variable_contract.build_cluster_variable_bag）
+           裁决，子 Agent 层只负责补默认值与留痕观测。
+
+        Returns:
+            合并后的变量 dict（未定义变量一律保留，不在此丢弃）。
+        """
+        from app.services.multi_agent_variable_contract import merge_sub_agent_variables
+
+        merged, missing_required, undefined = merge_sub_agent_variables(input_vars, variables_config)
+        if missing_required or undefined:
+            logger.warning(
+                "子 Agent 变量合并：存在待确认项",
+                extra={
+                    "missing_required": missing_required,
+                    "undefined_values": undefined,
+                },
+            )
+        return merged
 
     async def load_tools_config(self, tools_config, web_search, tenant_id, user_id=None, workspace_id=None) -> list:
         """加载工具配置"""
@@ -1506,7 +1532,7 @@ class AgentRunService:
             stateless: 是否以无会话、无消息持久化方式执行子 Agent
             execution_mode: 执行模式 (in_process / sandbox)
             parent_execution_id: 集群编排中父（主）Agent 的执行 ID；sub_agent=True 时由编排器透传
-            orchestration_mode: 编排模式 supervisor / collaboration（仅集群场景）
+            orchestration_mode: 编排模式 supervisor / supervisor_loop / collaboration（仅集群场景）
             execution_owner: {"release_id": UUID, "agent_name": str}，规避 AgentConfigProxy.id 外键坑
 
         Returns:
@@ -1543,6 +1569,10 @@ class AgentRunService:
         try:
             # 1. 获取 API Key 配置
             api_key_config = await self._get_api_key(model_config.id, tenant_id=tenant_id)
+            # 远端模式（G3）：非解密视图供 invoke 接缝与多模态格式化使用；凭据仍供沙箱/用量等既有消费者
+            model_view = await ModelConfigService.get_runtime_model_view_bridge_async(
+                self.db, model_config.id, tenant_id=tenant_id
+            )
             logger.debug(
                 "API Key 配置获取成功",
                 extra={
@@ -1559,7 +1589,7 @@ class AgentRunService:
             )
 
             if sub_agent:
-                variables = self.prepare_variables(variables, agent_config.variables)
+                variables = self.prepare_variables_for_cluster(variables, agent_config.variables)
             else:
                 # FIXME: subagent input valid
                 variables = variables or {}
@@ -1575,7 +1605,7 @@ class AgentRunService:
 
             # 4. 并行加载工具/技能/知识库/记忆配置（各自独立 DB 会话，无相互依赖）
             tools = []
-            parallel_results = await asyncio.gather(
+            parallel_coros = [
                 self.load_tools_config(tools_config, web_search, tenant_id, user_id, workspace_id),
                 self.load_skill_config(skills_config, message, tenant_id, user_id, workspace_id),
                 self.load_knowledge_retrieval_config(
@@ -1585,15 +1615,17 @@ class AgentRunService:
                     workspace_id=workspace_id,
                     source=KnowledgeRetrievalSource.AGENT if sub_agent else KnowledgeRetrievalSource.DRAFT,
                 ),
-                self.load_memory_config(memory_config, user_id, workspace_id, storage_type, user_rag_memory_id)
-                if memory else None,
-                return_exceptions=True,
-            )
+            ]
+            if memory:
+                parallel_coros.append(
+                    self.load_memory_config(memory_config, user_id, workspace_id, storage_type, user_rag_memory_id)
+                )
+            parallel_results = await asyncio.gather(*parallel_coros, return_exceptions=True)
 
             base_tools = parallel_results[0]
             skill_result = parallel_results[1]
             kb_result = parallel_results[2]
-            memory_result = parallel_results[3]
+            memory_result = parallel_results[3] if memory else None
 
             if not isinstance(base_tools, Exception):
                 tools.extend(base_tools)
@@ -1686,21 +1718,6 @@ class AgentRunService:
                         }
                     }
 
-            model_info = ModelInfo(
-                model_name=api_key_config["model_name"],
-                provider=api_key_config["provider"],
-                api_key=api_key_config["api_key"],
-                api_base=api_key_config["api_base"],
-                input_modalities=list(api_key_config.get("input_modalities") or []),
-                output_modalities=list(api_key_config.get("output_modalities") or []),
-                features=list(api_key_config.get("features") or []),
-                model_type=model_config.type,
-                tenant_id=api_key_config.get("tenant_id"),
-                model_config_id=api_key_config.get("model_config_id"),
-                channel_id=api_key_config.get("channel_id"),
-                failover_plan=api_key_config.get("failover_plan"),
-            )
-
             # 6. 加载历史消息（包含开场白）
             used_context_engine = False
             if history is None:
@@ -1713,6 +1730,8 @@ class AgentRunService:
                     current_provider=api_key_config.get("provider"),
                     legacy_max_history=settings.AGENT_MAX_HISTORY,
                     model_config_id=model_config.id,
+                    # 集群子 Agent：禁止 cross_session 跨会话注入，历史只认集群会话
+                    include_cross_session=not sub_agent,
                 )
                 if prepared_input:
                     system_prompt, history = prepared_input
@@ -1732,7 +1751,7 @@ class AgentRunService:
             llm_message = message
             if files:
                 provider = api_key_config.get("provider", "openai")
-                multimodal_service = MultimodalService(self.db, model_info)
+                multimodal_service = MultimodalService(self.db, model_view)
                 fu_config = features_config.get("file_upload", {})
                 if hasattr(fu_config, "model_dump"):
                     fu_config = fu_config.model_dump()
@@ -1783,8 +1802,7 @@ class AgentRunService:
                     system_prompt=system_prompt,
                     message=llm_message,
                     history=history,
-                    api_key_config=api_key_config,
-                    model_config=model_config,
+                    model_view=model_view,
                     effective_params=effective_params,
                     processed_files=processed_files,
                     context_evidence_loader=load_annotation_context,
@@ -1793,12 +1811,8 @@ class AgentRunService:
 
             agent = LangChainAgent(
                 model_name=api_key_config["model_name"],
-                api_key=api_key_config["api_key"],
+                model_view=model_view,
                 provider=api_key_config.get("provider", "openai"),
-                api_base=api_key_config.get("api_base"),
-                input_modalities=list(api_key_config.get("input_modalities") or []),
-                output_modalities=list(api_key_config.get("output_modalities") or []),
-                features=features,
                 temperature=effective_params.get("temperature", 0.7),
                 max_tokens=effective_params.get("max_tokens", 2000),
                 system_prompt=system_prompt,
@@ -1806,10 +1820,6 @@ class AgentRunService:
                 deep_thinking=effective_params.get("deep_thinking", False),
                 thinking_budget_tokens=effective_params.get("thinking_budget_tokens"),
                 json_output=effective_params.get("json_output", False),
-                tenant_id=api_key_config.get("tenant_id"),
-                model_config_id=api_key_config.get("model_config_id"),
-                channel_id=api_key_config.get("channel_id"),
-                failover_plan=api_key_config.get("failover_plan"),
                 context_query=message,
                 context_base_text=system_prompt + "\n" + str(history) + "\n" + message,
                 context_evidence_loader=load_annotation_context,
@@ -1883,7 +1893,7 @@ class AgentRunService:
 
             # 生成建议问题（在保存消息前生成，以便存入 meta_data）
             suggested_questions = (await self._generate_suggested_questions(
-                features_config, result["content"], api_key_config, effective_params
+                features_config, result["content"], model_view, effective_params
             )) if not sub_agent else []
 
             # 10. 保存会话消息（skip_save=True 时由调用方自行保存版本化消息，跳过 run 内部重复保存）
@@ -1968,6 +1978,37 @@ class AgentRunService:
 
             return response
 
+        except asyncio.CancelledError:
+            # P0-4：编排层用 asyncio.wait_for 施加总超时，超时会 cancel 本协程；
+            # CancelledError 属 BaseException，不单独处理会穿透下方 except Exception，
+            # 执行记录将永久停留在 running（僵尸记录）。
+            # 收尾走独立 DB context（get_async_db_context），不受 self.db 状态影响；
+            # 完成后必须 re-raise，保持取消语义（吞掉会破坏优雅关闭与 wait_for 契约）。
+            logger.warning(
+                "LangChain Agent 调用被取消（超时或外部取消），收尾执行记录",
+                extra={"agent_execution_id": str(agent_execution_id) if agent_execution_id else None},
+            )
+            if agent_execution_id is not None:
+                try:
+                    await self._update_agent_execution_completed_async(
+                        execution_id=agent_execution_id,
+                        steps=[],
+                        status="failed",
+                        elapsed_time=time.time() - start_time,
+                        error_message="执行被取消（超时或外部取消）",
+                        agent_log=_trace if sub_agent else None,
+                    )
+                except Exception as update_err:
+                    # 收尾失败不能掩盖 CancelledError，但要留痕，便于排查僵尸 running 记录
+                    logger.error(
+                        "取消收尾：更新执行记录失败",
+                        extra={
+                            "agent_execution_id": str(agent_execution_id),
+                            "error": str(update_err),
+                        },
+                    )
+            raise
+
         except Exception as e:
             logger.error("LangChain Agent 调用失败", extra={"error": str(e), "error_type": type(e).__name__})
             # 更新 Agent 执行记录为 failed
@@ -1984,6 +2025,15 @@ class AgentRunService:
                     )
                 except Exception:
                     pass
+            # 模型配置类异常保留自身错误码（模型不存在/已弃用/未启用/缺 Key），不降级为 INTERNAL_ERROR
+            if isinstance(e, BusinessException) and e.code in (
+                BizCode.MODEL_NOT_FOUND,
+                BizCode.MODEL_DEPRECATED,
+                BizCode.MODEL_CONFIG_INVALID,
+                BizCode.API_KEY_MISSING,
+                BizCode.AGENT_CONFIG_MISSING,
+            ):
+                raise
             raise BusinessException(f"Agent 调用失败: {str(e)}", BizCode.INTERNAL_ERROR, cause=e)
 
     @bind_usage("app", "agent_config.app_id")
@@ -2027,7 +2077,7 @@ class AgentRunService:
             history: 外部传入的历史消息（可选，用于重新生成场景）
             skip_save: 是否跳过保存消息
             parent_execution_id: 集群编排中父（主）Agent 的执行 ID；sub_agent=True 时由编排器透传
-            orchestration_mode: 编排模式 supervisor / collaboration（仅集群场景）
+            orchestration_mode: 编排模式 supervisor / supervisor_loop / collaboration（仅集群场景）
             execution_owner: {"release_id": UUID, "agent_name": str}，规避 AgentConfigProxy.id 外键坑
 
         Yields:
@@ -2066,12 +2116,18 @@ class AgentRunService:
         orchestrator_node_executions: list = []
         node_executions: list = []
         total_tokens = 0
+        full_content = ""
 
         try:
             # 1. 获取 API Key 配置
             api_key_config = await self._get_api_key(model_config.id, tenant_id=tenant_id)
+            # 远端模式（G3）：非解密视图供 invoke 接缝与多模态格式化使用；凭据仍供沙箱/用量等既有消费者
+            model_view = await ModelConfigService.get_runtime_model_view_bridge_async(
+                self.db, model_config.id, tenant_id=tenant_id
+            )
             if sub_agent:
-                variables = self.prepare_variables(variables, agent_config.variables)
+                # S5：集群子 Agent 走合并策略（见 prepare_variables_for_cluster 注释）
+                variables = self.prepare_variables_for_cluster(variables, agent_config.variables)
             else:
                 variables = variables or {}
 
@@ -2094,7 +2150,7 @@ class AgentRunService:
 
             # 4. 并行加载工具/技能/知识库/记忆配置（各自独立 DB 会话，无相互依赖）
             tools = []
-            parallel_results = await asyncio.gather(
+            parallel_coros = [
                 self.load_tools_config(tools_config, web_search, tenant_id, user_id, workspace_id),
                 self.load_skill_config(skills_config, message, tenant_id, user_id, workspace_id),
                 self.load_knowledge_retrieval_config(
@@ -2104,15 +2160,17 @@ class AgentRunService:
                     workspace_id=workspace_id,
                     source=KnowledgeRetrievalSource.AGENT if sub_agent else KnowledgeRetrievalSource.DRAFT,
                 ),
-                self.load_memory_config(memory_config, user_id, workspace_id, storage_type, user_rag_memory_id)
-                if memory else None,
-                return_exceptions=True,
-            )
+            ]
+            if memory:
+                parallel_coros.append(
+                    self.load_memory_config(memory_config, user_id, workspace_id, storage_type, user_rag_memory_id)
+                )
+            parallel_results = await asyncio.gather(*parallel_coros, return_exceptions=True)
 
             base_tools = parallel_results[0]
             skill_result = parallel_results[1]
             kb_result = parallel_results[2]
-            memory_result = parallel_results[3]
+            memory_result = parallel_results[3] if memory else None
 
             if not isinstance(base_tools, Exception):
                 tools.extend(base_tools)
@@ -2212,21 +2270,6 @@ class AgentRunService:
                     yield self._format_sse_event("end", end_data)
                     return
 
-            model_info = ModelInfo(
-                model_name=api_key_config["model_name"],
-                provider=api_key_config["provider"],
-                api_key=api_key_config["api_key"],
-                api_base=api_key_config["api_base"],
-                input_modalities=list(api_key_config.get("input_modalities") or []),
-                output_modalities=list(api_key_config.get("output_modalities") or []),
-                features=list(api_key_config.get("features") or []),
-                model_type=model_config.type,
-                tenant_id=api_key_config.get("tenant_id"),
-                model_config_id=api_key_config.get("model_config_id"),
-                channel_id=api_key_config.get("channel_id"),
-                failover_plan=api_key_config.get("failover_plan"),
-            )
-
             # 6. 加载历史消息
             used_context_engine = False
             if history is None:
@@ -2257,7 +2300,7 @@ class AgentRunService:
             llm_message = message
             if files:
                 provider = api_key_config.get("provider", "openai")
-                multimodal_service = MultimodalService(self.db, model_info)
+                multimodal_service = MultimodalService(self.db, model_view)
                 fu_config = features_config.get("file_upload", {})
                 if hasattr(fu_config, "model_dump"):
                     fu_config = fu_config.model_dump()
@@ -2308,8 +2351,7 @@ class AgentRunService:
                     system_prompt=system_prompt,
                     message=llm_message,
                     history=history,
-                    api_key_config=api_key_config,
-                    model_config=model_config,
+                    model_view=model_view,
                     effective_params=effective_params,
                     processed_files=processed_files,
                     context_evidence_loader=load_annotation_context,
@@ -2346,12 +2388,8 @@ class AgentRunService:
             else:
                 agent = LangChainAgent(
                     model_name=api_key_config["model_name"],
-                    api_key=api_key_config["api_key"],
+                    model_view=model_view,
                     provider=api_key_config.get("provider", "openai"),
-                    api_base=api_key_config.get("api_base"),
-                    input_modalities=list(api_key_config.get("input_modalities") or []),
-                    output_modalities=list(api_key_config.get("output_modalities") or []),
-                    features=features,
                     temperature=effective_params.get("temperature", 0.7),
                     max_tokens=effective_params.get("max_tokens", 2000),
                     system_prompt=system_prompt,
@@ -2360,10 +2398,6 @@ class AgentRunService:
                     deep_thinking=effective_params.get("deep_thinking", False),
                     thinking_budget_tokens=effective_params.get("thinking_budget_tokens"),
                     json_output=effective_params.get("json_output", False),
-                    tenant_id=api_key_config.get("tenant_id"),
-                    model_config_id=api_key_config.get("model_config_id"),
-                    channel_id=api_key_config.get("channel_id"),
-                    failover_plan=api_key_config.get("failover_plan"),
                     context_query=message,
                     context_base_text=system_prompt + "\n" + str(history) + "\n" + message,
                     context_evidence_loader=load_annotation_context,
@@ -2541,7 +2575,7 @@ class AgentRunService:
             filtered_citations = self._filter_citations(features_config, citations_collector)
 
             suggested_questions = (await self._generate_suggested_questions(
-                features_config, full_content, api_key_config, effective_params
+                features_config, full_content, model_view, effective_params
             )) if not sub_agent else []
 
             # 11. 保存会话消息（skip_save=True 时由调用方自行保存版本化消息，跳过 run_stream 内部重复保存）
@@ -2641,6 +2675,46 @@ class AgentRunService:
                     "message_length": len(full_content)
                 }
             )
+
+        except asyncio.CancelledError:
+            # P0-4：编排层对每个事件施加 stream_idle_timeout（asyncio.wait_for），
+            # 空闲超时会把 CancelledError 抛进本生成器的当前 await 点。它属
+            # BaseException，不单独处理会穿透下方 except Exception，执行记录将
+            # 永久停留在 running（前端区块也永久停在 running）。
+            # 这里只做 DB 收尾，不 yield —— 消费方已经因超时离开，向已关闭的
+            # 生成器 yield 无意义；前端收尾事件由编排层护栏负责发。
+            # 收尾走独立 DB context，不受 self.db 状态影响；完成后必须 re-raise。
+            logger.warning(
+                "流式 Agent 调用被取消（空闲超时或外部取消），收尾执行记录",
+                extra={
+                    "agent_execution_id": str(_agent_execution_id) if _agent_execution_id else None,
+                    "content_length": len(full_content) if full_content else 0,
+                },
+            )
+            try:
+                await self.db.rollback()
+            except Exception:
+                pass
+            if _agent_execution_id is not None:
+                try:
+                    await self._update_agent_execution_completed_async(
+                        execution_id=_agent_execution_id,
+                        steps=orchestrator_node_executions + node_executions,
+                        status="failed",
+                        elapsed_time=time.time() - start_time,
+                        error_message="执行被取消（空闲超时或外部取消）",
+                        agent_log=_trace if sub_agent else None,
+                    )
+                except Exception as update_err:
+                    logger.error(
+                        "流式执行取消收尾记录失败",
+                        extra={
+                            "execution_id": str(_agent_execution_id),
+                            "error": str(update_err),
+                        },
+                    )
+
+            raise
 
         except Exception as e:
             debug_id = self._build_debug_id()
@@ -3007,7 +3081,7 @@ class AgentRunService:
             BusinessException: 当没有可用的 API Key 时（模型不存在/已弃用/未启用/缺少凭据）
         """
         async with get_async_db_context() as db:
-            api_key = await ModelApiKeyService.get_available_api_key_async(
+            api_key = await ModelApiKeyService.resolve_runtime_api_key_bridge_or_raise_async(
                 db,
                 model_config_id,
                 tenant_id=tenant_id,
@@ -3501,7 +3575,7 @@ class AgentRunService:
             self,
             features_config: Dict[str, Any],
             assistant_message: str,
-            api_key_config: Dict[str, Any],
+            model_view: ModelInfo,
             effective_params: Dict[str, Any]
     ) -> List[str]:
         """根据 suggested_questions_after_answer 配置生成下一步建议问题"""
@@ -3511,13 +3585,9 @@ class AgentRunService:
             return []
         try:
             from langchain_core.messages import HumanMessage
-            from app.core.models import RedBearLLM, RedBearModelConfig
-            llm = RedBearLLM(
-                RedBearModelConfig.from_api_key(
-                    api_key_config,
-                    extra_params={"temperature": 0.5, "max_tokens": 200},
-                ),
-                type=ModelType.LLM
+            from app.core.models import RedBearChatModel
+            llm = RedBearChatModel.for_invoke(
+                model_view, params={"temperature": 0.5, "max_tokens": 200}
             )
             prompt = (
                 f"根据以下AI回复，生成3个用户可能继续追问的简短问题，每行一个，不加序号：\n\n{assistant_message}"

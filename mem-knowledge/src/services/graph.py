@@ -7,12 +7,13 @@ import re
 import uuid
 from typing import Any
 
-from redbear_model.runtime import RedBearLLM
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
 
 from ..errors import KnowledgeError
+from ..integrations.model.chat import RedBearChatModel
+from ..integrations.model.invoke_backend import ref_from_view
 from ..models.owned import Knowledge
 from ..rag.knowledge_graph.config import GraphPipeline, is_graph_enabled, resolve_graph_pipeline
 from ..rag.knowledge_graph.elasticsearch_store import graph_index_name
@@ -21,7 +22,12 @@ from ..rag.parser_config import set_graph_pipeline_for_migration
 logger = logging.getLogger(__name__)
 
 
-async def graph_entity_types(runtime: Any, model_config: Any, scenario: str) -> str:
+async def graph_entity_types(
+    runtime: Any,
+    model_config: Any,
+    tenant_id: uuid.UUID,
+    scenario: str,
+) -> str:
     prompt = (
         "## Role\nYou are a knowledge graph entity type identifier.\n\n"
         "## Task\nIdentify and extract all relevant entity types for constructing a "
@@ -33,7 +39,10 @@ async def graph_entity_types(runtime: Any, model_config: Any, scenario: str) -> 
         "- Output only the entity types, no explanations or additional text.\n\n"
         f"## Real Data\n\n**Scenario:**\n\n{scenario}\n"
     )
-    model = RedBearLLM(model_config, client_pool=runtime.model_runtime.pool)
+    model = RedBearChatModel.for_invoke_ref(
+        ref_from_view(model_config, tenant_id),
+        pool=runtime.model_runtime,
+    )
     response = await model.ainvoke(prompt)
     content = getattr(response, "content", response)
     text = str(content)

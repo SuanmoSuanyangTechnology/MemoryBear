@@ -1,0 +1,305 @@
+import uuid
+from enum import StrEnum
+
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    Column,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Table,
+    Text,
+    UniqueConstraint,
+    text,
+)
+from sqlalchemy.dialects.postgresql import ARRAY, JSON, JSONB, UUID
+from sqlalchemy.orm import relationship
+
+from ..utils.datetime_utils import utcnow_naive
+from .base import ServiceBase
+
+
+class BaseModel(ServiceBase):
+    """基础模型（抽象类，提取公共字段）"""
+    __abstract__ = True  # 标记为抽象类，不生成表
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    created_at = Column(DateTime, default=utcnow_naive, comment="创建时间")
+    updated_at = Column(DateTime, default=utcnow_naive, onupdate=utcnow_naive, comment="更新时间")
+    is_active = Column(Boolean, default=True, nullable=False, comment="是否激活")
+
+
+class ModelType(StrEnum):
+    """模型类型枚举"""
+    LLM = "llm"
+    EMBEDDING = "embedding"
+    RERANK = "rerank"
+    ASR = "asr"
+    # TTS = "tts"
+    # SPEECH2TEXT = "speech2text"
+    IMAGE = "image"
+    # AUDIO = "audio"
+    VIDEO = "video"
+
+    @classmethod
+    def _missing_(cls, value):
+        """存量字符串读侧归一：`"chat"` → LLM（DB/YAML 旧行兼容）；`"asr"` → ASR（大小写容忍）。"""
+        if isinstance(value, str):
+            if value.lower() == "chat":
+                return cls.LLM
+            if value.lower() == "asr":
+                return cls.ASR
+        return None
+
+    @classmethod
+    def __get_pydantic_json_schema__(cls, core_schema, handler):
+        schema = handler(core_schema)
+        schema["enum"] = list(dict.fromkeys([*schema.get("enum", []), "asr"]))
+        return schema
+
+
+# 存量类型读侧兼容（2e：CHAT 成员已删；旧 YAML/旧镜像仍可能传/落 "chat"）：
+# 集合/SQL 比较一律用本常量，勿再引 ModelType.CHAT
+LEGACY_CHAT_TYPE = "chat"
+# LLM 族（含存量 chat）：集合判断 / SQL IN 共用；元组顺序即 SQL 字面量顺序
+LLM_FAMILY_TYPES = (ModelType.LLM.value, LEGACY_CHAT_TYPE)
+
+
+class ModelCapability(StrEnum):
+    """deprecated（契约 v2 起拆为三列，读侧旧列兼容窗口内保留，M10 随列删）"""
+    VISION = "vision"
+    AUDIO = "audio"
+    VIDEO = "video"
+    THINKING = "thinking"
+    THINKING_ONLY = "thinking_only"
+    JSON_OUTPUT = "json_output"
+    FUNCTION_CALL = "function_call"
+
+
+class Modality(StrEnum):
+    """模态（契约 v2 三列 input/output_modalities 值域，与 redbear-model 包同口径）"""
+    TEXT = "text"
+    IMAGE = "image"
+    AUDIO = "audio"
+    VIDEO = "video"
+
+
+class ModelFeature(StrEnum):
+    """能力特征（契约 v2 三列 features 值域，与 redbear-model 包同口径）"""
+    THINKING = "thinking"
+    THINKING_ONLY = "thinking_only"
+    JSON_OUTPUT = "json_output"
+    FUNCTION_CALL = "function_call"
+
+
+class ModelProvider(StrEnum):
+    """模型提供商枚举"""
+    OPENAI = "openai"
+    SPEEDBEAR = "speedbear"
+    MINIMAX = "minimax"
+    # ANTHROPIC = "anthropic"
+    # GOOGLE = "google"
+    # BAIDU = "baidu"
+    DASHSCOPE = "dashscope"
+    # ZHIPU = "zhipu"
+    # MOONSHOT = "moonshot"
+    # DEEPSEEK = "deepseek"
+    OLLAMA = "ollama"
+    XINFERENCE = "xinference"
+    GPUSTACK = "gpustack"
+    BEDROCK = "bedrock"
+    VOLCANO = "volcano"
+    COMPOSITE = "composite"
+
+
+class LoadBalanceStrategy(StrEnum):
+    """API Key负载均衡策略枚举"""
+    ROUND_ROBIN = "round_robin"  # 轮询
+    NONE = "none"  # 无
+
+
+# 过渡期实体（阶段一收敛后冻结；切流稳定后独立迁移删除，见 spec §8.3）
+# 多对多关联表
+model_config_api_key_association = Table(
+    'model_config_api_key_association',
+    ServiceBase.metadata,
+    Column('model_config_id', UUID(as_uuid=True), ForeignKey('model_configs.id'), primary_key=True),
+    Column('api_key_id', UUID(as_uuid=True), ForeignKey('model_api_keys.id'), primary_key=True),
+    Column('created_at', DateTime, default=utcnow_naive)
+)
+
+
+class ModelConfig(BaseModel):
+    """模型配置表"""
+    __tablename__ = "model_configs"
+
+    model_id = Column(UUID(as_uuid=True), ForeignKey("model_bases.id"), nullable=True, index=True, comment="基础模型ID")
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False, index=True, comment="租户ID")
+    logo = Column(String(255), nullable=True, comment="模型logo图片URL")
+    name = Column(String, nullable=False, comment="模型显示名称")
+    provider = Column(String, nullable=False, comment="供应商", server_default=ModelProvider.COMPOSITE)
+    type = Column(String, nullable=False, index=True, comment="模型类型")
+    is_composite = Column(Boolean, default=False, server_default="false", nullable=False, comment="是否为组合模型")
+    description = Column(String, comment="模型描述")
+    
+    # 模型配置参数
+    capability = Column(ARRAY(String), default=list, nullable=False, server_default=text("'{}'::varchar[]"),
+                        comment="模型能力列表（如['vision', 'audio', 'video', 'thinking']）")
+    is_omni = Column(Boolean, default=False, nullable=False, server_default="false", comment="是否为Omni模型（使用特殊API调用）")
+    input_modalities = Column(ARRAY(String), default=list, nullable=False, server_default=text("'{}'::varchar[]"),
+                              comment="输入模态（如['text','image','audio','video']）")
+    output_modalities = Column(ARRAY(String), default=list, nullable=False, server_default=text("'{}'::varchar[]"),
+                               comment="输出模态（如['text','image','audio']）")
+    features = Column(ARRAY(String), default=list, nullable=False, server_default=text("'{}'::varchar[]"),
+                      comment="能力特征（如['thinking','json_output','function_call']）")
+    config = Column(JSON, comment="模型配置参数")
+    # - temperature : 控制生成文本的随机性。值越高，输出越随机、越有创造性；值越低，输出越确定、越保守。
+    # - top_p : 一种替代 temperature 的采样方法，控制模型从概率最高的词中选择的范围。
+    # - presence_penalty : 对新出现的主题进行惩罚，鼓励模型谈论已经提到过的话题。
+    # - frequency_penalty : 对高频词进行惩罚，降低重复相同词语的可能性。
+    # - stop 或 stop_sequences : 一个或多个字符串序列，当模型生成这些序列时会停止输出。
+    # - 特定于提供商的参数 : 比如某些模型可能支持的 stream (流式输出) 开关、 seed (随机种子) 等。
+    
+    # # 模型能力参数
+    # max_tokens = Column(String, comment="最大token数")
+    # context_length = Column(String, comment="上下文长度")
+    
+    # 状态管理
+    is_public = Column(Boolean, default=False, nullable=False, comment="是否公开")
+    load_balance_strategy = Column(String, nullable=True, comment="负载均衡策略", default=LoadBalanceStrategy.NONE,
+                                   server_default=LoadBalanceStrategy.NONE)
+    
+    # 关联关系
+    model_base = relationship("ModelBase", back_populates="configs")
+    api_keys = relationship(
+        "ModelApiKey",
+        secondary=model_config_api_key_association,
+        back_populates="model_configs"
+    )
+
+    def __repr__(self):
+        return f"<ModelConfig(id={self.id}, name={self.name}, type={self.type})>"
+
+
+# 过渡期实体（阶段一收敛后冻结；切流稳定后独立迁移删除，见 spec §8.3）
+class ModelApiKey(BaseModel):
+    """模型API密钥表"""
+    __tablename__ = "model_api_keys"
+    
+    # API Key 信息
+    model_name = Column(String, nullable=False, comment="模型实际名称")
+    description = Column(String, comment="备注")
+    provider = Column(String, nullable=False, comment="API Key提供商")
+    api_key = Column(String, nullable=False, comment="API密钥")
+    api_base = Column(String, comment="API基础URL")
+    
+    # 模型能力参数
+    capability = Column(ARRAY(String), default=list, nullable=False, server_default=text("'{}'::varchar[]"),
+                        comment="模型能力列表（如['vision', 'audio', 'video']）")
+    is_omni = Column(Boolean, default=False, nullable=False, server_default="false", comment="是否为Omni模型（使用特殊API调用）")
+    
+    # 配置参数
+    config = Column(JSON, comment="API Key特定配置")
+    
+    # 使用统计
+    usage_count = Column(String, default="0", comment="使用次数")
+    last_used_at = Column(DateTime, comment="最后使用时间")
+    
+    # 状态管理
+    priority = Column(String, default="1", comment="优先级")
+
+    # 用量事件归属透传（spec §13.2）：由 ModelApiKeyService 在返回运行时壳时填充，
+    # 非 ORM 列、不参与 flush；消费方将其透传给 RedBearModelConfig
+    tenant_id = None
+    model_config_id = None
+    channel_id = None
+
+    # 能力载体（契约 v2 三列）：旧表无此列，运行时壳由 ModelApiKeyService 按 profile 填充，
+    # 非映射属性、不落库；消费方与 RedBearModelConfig 同口径读取
+    input_modalities = None
+    output_modalities = None
+    features = None
+
+    # 请求内换渠道计划（spec §11.2）：非映射类属、不落库/不序列化，
+    # 由 ModelApiKeyService 在返回运行时壳时挂载，消费方透传给 RedBearModelConfig
+    failover_plan = None
+
+    # 关联关系
+    model_configs = relationship(
+        "ModelConfig",
+        secondary=model_config_api_key_association,
+        back_populates="api_keys"
+    )
+
+
+    def __repr__(self):
+        return f"<ModelApiKey(id={self.id}, model_name={self.model_name}, provider={self.provider})>"
+
+
+class ModelBase(ServiceBase):
+    """基础模型信息表（模型广场）"""
+    __tablename__ = "model_bases"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    logo = Column(String(255), nullable=True, comment="模型logo图片URL")
+    name = Column(String, nullable=False, comment="模型唯一标识（如gpt-3.5-turbo）")
+    type = Column(String, nullable=False, index=True, comment="模型类型")
+    provider = Column(String, nullable=False, index=True)
+    description = Column(Text, comment="模型描述")
+    is_deprecated = Column(Boolean, default=False, nullable=False, comment="是否弃用")
+    is_official = Column(Boolean, default=True, comment="是否供应商官方模型（区分自定义）")
+    tags = Column(ARRAY(String), default=list, nullable=False, comment="模型标签（如['聊天', '创作']）")
+    add_count = Column(Integer, default=0, nullable=False, comment="模型被用户添加的次数")
+    created_at = Column(DateTime, default=utcnow_naive, comment="创建时间", )
+    capability = Column(ARRAY(String), default=list, nullable=False, server_default=text("'{}'::varchar[]"),
+                        comment="模型能力列表（如['vision', 'audio', 'video']）")
+    is_omni = Column(Boolean, default=False, nullable=False, server_default="false", comment="是否为Omni模型（使用特殊API调用）")
+    input_modalities = Column(ARRAY(String), default=list, nullable=False, server_default=text("'{}'::varchar[]"),
+                              comment="输入模态（如['text','image','audio','video']）")
+    output_modalities = Column(ARRAY(String), default=list, nullable=False, server_default=text("'{}'::varchar[]"),
+                               comment="输出模态（如['text','image','audio']）")
+    features = Column(ARRAY(String), default=list, nullable=False, server_default=text("'{}'::varchar[]"),
+                      comment="能力特征（如['thinking','json_output','function_call']）")
+
+    # 关联关系
+    configs = relationship("ModelConfig", back_populates="model_base", cascade="all, delete-orphan")
+
+    __table_args__ = (
+        UniqueConstraint("name", "provider", name="uk_model_name_provider"),
+    )
+
+    def __repr__(self):
+        return f"<ModelBase(name={self.name}, provider={self.provider}, type={self.type})>"
+
+
+class ModelChannel(BaseModel):
+    """渠道凭据登记表（阶段一新增；model_api_keys 的收敛目标，spec §7）
+
+    继承 BaseModel 获取 id/created_at/updated_at/is_active；软停用 = is_active=False（只影响新解析）。
+    """
+    __tablename__ = "model_channels"
+
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False, comment="凭据归属租户")
+    provider = Column(String(50), nullable=False, comment="供应商（不允许 composite）")
+    model_names = Column(JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb"), comment="覆盖模型集；[]=provider 级默认渠道")
+    api_base = Column(String(512), nullable=True, comment="执行端点；空=provider 默认 base_url（不参与覆盖匹配）")
+    credential_encrypted = Column(Text, nullable=False, comment="信封 v{ver}:iv:tag:ct")
+    credential_sha256 = Column(String(64), nullable=False, comment="凭据指纹（幂等合并键）")
+    credential_masked = Column(String(255), nullable=False, comment="展示用掩码 sk-****abcd")
+    priority = Column(Integer, nullable=False, default=0, server_default="0", comment="同精确度主备权重")
+    cooldown_until_ms = Column(BigInteger, nullable=True, comment="熔断预留（阶段一恒空）")
+    source = Column(String(20), nullable=False, default="manual", server_default="manual", comment="manual|platform")
+    extra = Column(JSONB, nullable=False, default=dict, server_default=text("'{}'::jsonb"), comment="speedbear 等企业语义")
+    remark = Column(Text, nullable=True)
+    created_by = Column(UUID(as_uuid=True), nullable=True, comment="登记人弱引用（不建 FK）")
+
+    __table_args__ = (
+        UniqueConstraint("provider", "tenant_id", "api_base", "credential_sha256",
+                         name="uq_channel_credential", postgresql_nulls_not_distinct=True),
+        Index("ix_channel_tenant_provider", "tenant_id", "provider"),
+    )
+
+    def __repr__(self):
+        return f"<ModelChannel(id={self.id}, provider={self.provider}, tenant_id={self.tenant_id})>"

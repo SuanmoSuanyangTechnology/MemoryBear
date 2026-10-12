@@ -129,6 +129,7 @@ def multi_agent_config_4_app_release(release: AppRelease) -> MultiAgentConfig:
         sub_agents=config_dict.get("sub_agents", []),
         routing_rules=config_dict.get("routing_rules"),
         execution_config=config_dict.get("execution_config", {}),
+        supervisor_config=config_dict.get("supervisor_config"),
         aggregation_strategy=config_dict.get("aggregation_strategy", "merge"),
 
     )

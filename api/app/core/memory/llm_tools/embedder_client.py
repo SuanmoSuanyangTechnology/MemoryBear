@@ -5,7 +5,7 @@ Embedder 客户端抽象基类
 """
 
 from abc import ABC, abstractmethod
-from typing import List, Optional
+from typing import List
 import asyncio
 import logging
 from tenacity import (
@@ -16,9 +16,9 @@ from tenacity import (
     before_sleep_log,
 )
 
-from app.core.models.base import RedBearModelConfig
 from app.core.exceptions import BusinessException
 from app.core.error_codes import BizCode
+from app.integrations.model.invoke_backend import RemoteInvokeRef
 
 logger = logging.getLogger(__name__)
 
@@ -37,27 +37,27 @@ class EmbedderClient(ABC):
     - 批量文本嵌入（response）
     - 自动重试机制
     - 错误处理
+
+    运行面只有远端模式：``remote`` 非解密配置引用，凭据解密、重试与选路都在模型服务，
+    宿主不持有 api_key。
     """
 
-    def __init__(self, model_config: RedBearModelConfig):
+    def __init__(self, *, remote: RemoteInvokeRef):
         """
         初始化 Embedder 客户端
 
         Args:
-            model_config: 模型配置，包含模型名称、提供商、API密钥等信息
+            remote: 非解密配置引用（宿主不持有凭据）
         """
-        self.config = model_config
-        self.model_name = model_config.model_name
-        self.provider = model_config.provider
-        self.api_key = model_config.api_key
-        self.base_url = model_config.base_url
-        self.max_retries = model_config.max_retries
-        self.timeout = model_config.timeout
-
-        logger.info(
-            f"初始化 Embedder 客户端: provider={self.provider}, "
-            f"model={self.model_name}, max_retries={self.max_retries}"
-        )
+        self.remote = remote
+        # 宿主不感知 provider/模型名（设计 §2.2），重试在模型服务，宿主不叠加退避
+        self.model_name = ""
+        self.provider = ""
+        self.api_key = ""
+        self.base_url = None
+        self.max_retries = 1
+        self.timeout = None
+        logger.info(f"初始化远端 Embedder 客户端: config_id={remote.config_id}")
 
     @abstractmethod
     async def response(

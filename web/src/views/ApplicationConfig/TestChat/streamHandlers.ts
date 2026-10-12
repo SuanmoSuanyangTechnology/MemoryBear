@@ -75,6 +75,7 @@ export const createAgentStreamHandler = (deps: AgentStreamDeps) => {
           setChatList(prev => addRunStartMessage(prev, item.data))
           break
         case 'tool_end':
+        case 'tool_error':
           setChatList(prev => addRunEndMessage(prev, item.data))
           break
         case 'reasoning':

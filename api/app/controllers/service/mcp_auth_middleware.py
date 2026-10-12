@@ -7,7 +7,8 @@ Intercepts requests to /v1/mcp/* and:
 3. Resolves other_id + workspace_id → end_user.
 4. Resolves config_id: end_user.memory_config_id → workspace default.
 5. Resolves storage_type from workspace configuration.
-6. Stores workspace_id, end_user_id, config_id, storage_type via contextvars.
+6. Resolves the workspace RAG memory knowledge ID when required.
+7. Stores the resolved values via contextvars.
 
 All identity and configuration is determined server-side from headers —
 the client never passes end_user_id, config_id, or storage_type as tool
@@ -45,6 +46,9 @@ mcp_config_id: ContextVar[uuid.UUID | None] = ContextVar(
 mcp_storage_type: ContextVar[str | None] = ContextVar(
     "mcp_storage_type", default=None
 )
+mcp_user_rag_memory_id: ContextVar[str] = ContextVar(
+    "mcp_user_rag_memory_id", default=""
+)
 
 
 class MCPAuthMiddleware(BaseHTTPMiddleware):
@@ -59,6 +63,7 @@ class MCPAuthMiddleware(BaseHTTPMiddleware):
       - end_user_id:  looked up from (workspace_id, other_id)
       - config_id:    end_user.memory_config_id, or workspace default
       - storage_type: from workspace configuration (defaults to "neo4j")
+      - user_rag_memory_id: workspace RAG memory knowledge ID, when applicable
     """
 
     async def dispatch(self, request: Request, call_next):
@@ -112,13 +117,23 @@ class MCPAuthMiddleware(BaseHTTPMiddleware):
                     BizCode.MEMORY_CONFIG_NOT_FOUND,
                 )
 
-            # 5. Resolve storage_type from workspace
+            # 5. Resolve storage_type and the workspace RAG memory knowledge ID
             storage_type = self._resolve_storage_type(db, workspace_id)
+            user_rag_memory_id = ""
+            if storage_type.lower() == "rag":
+                user_rag_memory_id = self._resolve_user_rag_memory_id(db, workspace_id)
+                if not user_rag_memory_id:
+                    logger.warning(
+                        "RAG workspace has no USER_RAG_MERORY knowledge, "
+                        "RAG writes will fail until it is configured: workspace_id=%s",
+                        workspace_id,
+                    )
 
         mcp_workspace_id.set(workspace_id)
         mcp_end_user_id.set(end_user_id)
         mcp_config_id.set(config_id)
         mcp_storage_type.set(storage_type)
+        mcp_user_rag_memory_id.set(user_rag_memory_id)
 
         return await call_next(request)
 
@@ -138,6 +153,17 @@ class MCPAuthMiddleware(BaseHTTPMiddleware):
 
         storage_type = get_workspace_storage_type_without_auth(db, workspace_id)
         return storage_type if storage_type else "neo4j"
+
+    @staticmethod
+    def _resolve_user_rag_memory_id(db, workspace_id: uuid.UUID) -> str:
+        from app.repositories.knowledge_repository import get_knowledge_by_name
+
+        knowledge = get_knowledge_by_name(
+            db=db,
+            name="USER_RAG_MERORY",
+            workspace_id=workspace_id,
+        )
+        return str(knowledge.id) if knowledge else ""
 
     @staticmethod
     def _unauthorized(message: str, code: BizCode) -> JSONResponse:

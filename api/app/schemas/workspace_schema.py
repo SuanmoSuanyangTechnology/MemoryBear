@@ -12,6 +12,7 @@ from pydantic import (
 
 from app.core.utils.datetime_utils import to_timestamp_ms
 from app.models.workspace_model import InviteStatus, WorkspaceRole
+from app.schemas.response_schema import PageMeta
 
 
 class WorkspaceBase(BaseModel):
@@ -234,6 +235,29 @@ class WorkspaceModelsConfig(BaseModel):
     default_config_notice: str | None = Field(default=None, description="默认配置更新提示")
 
 
+class WorkspaceModelsResponse(WorkspaceModelsConfig):
+    """模型配置 + embedding 切换状态（``reembed_job_id``）。
+
+    用在两个接口上，该字段含义一致：
+
+    - ``GET /workspace_models``：作为顶层 ``data`` 返回；
+    - ``PUT /workspace_models``：嵌在 ``data.workspace`` 里返回，值是该请求提交后
+      仍在途的重算任务——本次新建的那个，或此前就在跑的那个。
+
+    ``POST /workspace_models/validate`` 是纯预演、不落库，仍用基类
+    ``WorkspaceModelsConfig``，不带这个字段。
+    """
+
+    reembed_job_id: str | None = Field(
+        default=None,
+        description=(
+            "正在切换 embedding 模型时的存量记忆向量重算任务 id，"
+            "null 表示未在切换；可拿去查 "
+            "GET /api/workspaces/workspace_reembed/{job_id} 的进度"
+        ),
+    )
+
+
 class WorkspaceModelOptionItem(BaseModel):
     """候选/默认模型条目（能力载体为契约 v2 三列，与 `_serialize_model_option` 输出对齐）。"""
 
@@ -267,6 +291,103 @@ class WorkspaceDefaultModelPresetResponse(BaseModel):
     vision: WorkspaceModelOptionItem
     audio: WorkspaceModelOptionItem
     video: WorkspaceModelOptionItem
+
+
+class MemoryReembedJobResponse(BaseModel):
+    """存量记忆向量重算任务的状态与进度。"""
+
+    id: uuid.UUID
+    workspace_id: uuid.UUID
+    status: str = Field(..., description="pending/running/succeeded/failed")
+    old_model_name: str | None = Field(None, description="变更前的 embedding 底层模型名")
+    new_model_name: str | None = Field(None, description="变更后的 embedding 底层模型名")
+    total_end_users: int = 0
+    processed_end_users: int = 0
+    failed_nodes: int = 0
+    end_users: dict[str, int] = Field(
+        default_factory=dict,
+        description=(
+            "按状态分组的 end_user 计数，键与 end-user 列表端点的 summary 一致"
+            "（queued/running/succeeded/failed，恒四键）。划分标准是**有没有被处理过**："
+            "queued 只含从未被处理过的行；跑过且未终态的（正在跑、失败后仍有重试余额"
+            "会被自动重派、worker 猝死后待回收）都算 running；failed 指终态失败"
+            "（重试余额耗尽，可人工重试）。"
+        ),
+    )
+    error: str | None = None
+    created_at: datetime.datetime
+    started_at: datetime.datetime | None = None
+    finished_at: datetime.datetime | None = None
+
+    @field_serializer("created_at", "started_at", "finished_at", when_used="json")
+    def _serialize_times(self, dt: datetime.datetime | None):
+        return None if dt is None else to_timestamp_ms(dt)
+
+
+class MemoryReembedEndUserItem(BaseModel):
+    """任务内单个 end_user 的重算状态。"""
+
+    end_user_id: str
+    name: str | None = Field(None, description="终端用户名称")
+    external_id: str | None = Field(None, description="外部用户 ID")
+    status: str = Field(
+        ...,
+        description=(
+            "queued（从未被处理过，还没轮到它）/ "
+            "running（处理中：正在跑，或失败后仍有重试余额、会被自动重派）/ "
+            "succeeded（成功）/ failed（终态失败：重试余额耗尽，可人工重试）"
+        ),
+    )
+    attempts: int = 0
+    max_attempts: int = 0
+    total_nodes: int = Field(0, description="该用户的分母（扇出时快照）")
+    processed_nodes: int = Field(
+        0, description="最近一次执行的写入量；人工重试过的行只反映最后一次"
+    )
+    failed_nodes: int = 0
+    last_error: str | None = None
+    updated_at: datetime.datetime | None = None
+
+    @field_serializer("updated_at", when_used="json")
+    def _serialize_updated_at(self, dt: datetime.datetime | None):
+        return None if dt is None else to_timestamp_ms(dt)
+
+
+class MemoryReembedEndUserListResponse(BaseModel):
+    """某个重算任务下按 end_user 的状态列表。
+
+    ``page`` 用项目统一的 :class:`~app.schemas.response_schema.PageMeta`（而**不是**
+    曾经那三个扁平的 ``page``/``pagesize``/``total``）：扁平的 ``page: int`` 与标准
+    结构里的 ``page: PageMeta`` 同名不同型，按标准分页写的客户端会读不出来，也拿不到
+    ``hasnext``。``job_id``/``job_status``/``summary`` 是分页结构之外的同级领域字段，
+    与 ``PermanentMemoryList``（``page`` + ``quota`` + ``items``）同一形态。
+
+    ``job_id`` 可空：无当前任务时（从未重算，或最新那一条已过期——终态且结束超过
+    ``REEMBED_CURRENT_JOB_VISIBLE_SECONDS``）返回的是空分页信封，此时没有真
+    job_id，调用方靠它是否为 ``None`` 区分"无任务"与"任务里恰好没有行"。
+    """
+
+    job_id: uuid.UUID | None = Field(
+        None, description="任务 id；无当前任务时为 null"
+    )
+    job_status: str = Field("", description="任务状态；无当前任务时为空串")
+    page: PageMeta = Field(..., description="分页信息（page/pagesize/total/hasnext）")
+    summary: dict[str, int] = Field(
+        default_factory=dict,
+        description="整个任务的四态计数（queued/running/succeeded/failed），不受 status 过滤影响",
+    )
+    items: list[MemoryReembedEndUserItem] = Field(default_factory=list)
+
+
+class MemoryReembedRetryResponse(BaseModel):
+    """人工重试的结果。"""
+
+    retried: int = Field(0, description="本次重新排队的 end_user 数")
+    reopened: bool = Field(
+        False, description="是否把终态失败的任务重新打开（重试生效的前提）"
+    )
+    job_status: str
+    end_user_ids: list[str] = Field(default_factory=list)
 
 
 class WorkspaceModelOptionsResponse(BaseModel):

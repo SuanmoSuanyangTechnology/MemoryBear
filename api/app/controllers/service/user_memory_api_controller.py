@@ -33,7 +33,7 @@ from app.db import get_async_db_context
 from app.schemas.api_key_schema import ApiKeyAuth
 from app.schemas.memory_storage_schema import GenerateCacheRequest
 from app.services.workspace_memory_statistics_service import (
-    get_workspace_statistics_async,
+    get_cached_workspace_statistics_async,
 )
 
 # 包装内部服务 controller
@@ -132,8 +132,12 @@ async def get_workspace_statistics(
 ):
     """Get memory statistics for the API Key workspace."""
     try:
-        result = await get_workspace_statistics_async(api_key_auth.workspace_id)
+        result = await get_cached_workspace_statistics_async(
+            api_key_auth.workspace_id
+        )
         return success(data=result, msg="查询成功")
+    except BusinessException:
+        raise
     except Exception as e:
         logger.error(
             "工作空间记忆统计查询失败: workspace_id=%s, error=%s",

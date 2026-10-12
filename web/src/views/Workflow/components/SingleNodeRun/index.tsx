@@ -336,7 +336,7 @@ const SingleNodeRun: FC<SingleNodeRunProps> = ({ open, onClose, selectedNode, ap
                             placeholder={t('common.pleaseSelect')}
                             options={v.default.map((item: string) => ({ label: item, value: item }))}
                           />
-                          : v.dataType.includes('string') && nodeData.type === 'knowledge-retrieval'
+                          : v.dataType.includes('string') && nodeData?.type === 'knowledge-retrieval'
                             ? <Input.TextArea
                               placeholder={t('common.pleaseEnter')}
                               size="small"

@@ -1,8 +1,11 @@
-"""桩转发与 catch-all 转发：/stub、/v1/stub 回显身份上下文（e2e 断言剥凭据/身份头），
-其余未注册路径经中间件解析 target_route 后由 Forwarder 真实转发到目标服务。
+"""Stub and catch-all forwarding: /stub and /v1/stub echo the identity context
+(e2e asserts credential stripping / identity-header injection); any other
+unregistered path is resolved to a target route by the middleware and forwarded
+to the target service by the Forwarder.
 
-/stub 为用户 JWT 桩（/api/ 语义），/v1/stub 为 API key 桩（/v1/ 外部集成流量）——
-两条路径由中间件按 API_KEY_PATH_PREFIXES 判定，此处仅回显各自注入的身份头。
+/stub is the user-JWT stub (/api/ semantics), /v1/stub the API-key stub (/v1/
+external-integration traffic) — the middleware routes them via
+API_KEY_PATH_PREFIXES; these handlers only echo the injected identity.
 """
 import logging
 
@@ -22,36 +25,38 @@ async def healthz():
 
 
 def _stub_identity(request: Request, expected: type) -> object | None:
-    """direct 模式（默认 AUTH_STRATEGY=direct）不终结凭据——中间件不解析身份、
-    不注入身份头，request.state 无 identity/internal_token；stub 回显仅对 gateway
-    终结策略有定义。身份缺失返回 None，由调用方给明确 400（而非 500 AttributeError）。
-    """
+    """Echo helper for the stub endpoints. The middleware's termination pipeline
+    writes request.state.identity for both strategies (direct and gateway); a
+    missing or mismatched context here is a wiring error, surfaced by callers as
+    an explicit 400 instead of a 500 AttributeError."""
     identity = getattr(request.state, "identity", None)
     if not isinstance(identity, expected):
         return None
     return identity
 
 
+def _echo_headers(request: Request) -> dict[str, str]:
+    """Echo every x-* header after termination (stripped credentials are gone,
+    injected identity headers — generic trio plus a resolved route's service
+    profile — are visible) for e2e/unit assertions."""
+    return {k.lower(): v for k, v in request.headers.items()
+            if k.lower().startswith("x-")}
+
+
 @router.get("/stub")
 async def stub(request: Request):
     identity = _stub_identity(request, UserContext)
     if identity is None:
-        # direct 模式无身份可回显；非 API key 身份（防御）同样拒绝
         return JSONResponse(status_code=400, content={
             "error": "expects user identity",
-            "detail": "identity not resolved: /stub requires AUTH_STRATEGY=gateway "
-                      "(direct mode passes credentials through for downstream verification)"})
+            "detail": "identity not resolved: termination pipeline did not attach "
+                      "a user identity context"})
     return {
         "user_id": identity.user_id, "tenant_id": identity.tenant_id,
         "workspace_id": identity.workspace_id,
         "internal_token": getattr(request.state, "internal_token", None),
         "has_user_authorization": "authorization" in request.headers,
-        # 中间件注入后的下游请求头回显（供 e2e/单测断言身份头注入）
-        "x_headers": {
-            "x-user-id": request.headers.get("x-user-id"),
-            "x-tenant-id": request.headers.get("x-tenant-id"),
-            "x-workspace-id": request.headers.get("x-workspace-id"),
-        },
+        "x_headers": _echo_headers(request),
     }
 
 
@@ -61,20 +66,16 @@ async def api_key_stub(request: Request):
     if identity is None:
         return JSONResponse(status_code=400, content={
             "error": "expects api key identity",
-            "detail": "identity not resolved: /v1/stub requires AUTH_STRATEGY=gateway "
-                      "(direct mode passes credentials through for downstream verification)"})
+            "detail": "identity not resolved: termination pipeline did not attach "
+                      "an api key identity context"})
     return {
         "api_key_id": identity.api_key_id,
         "tenant_id": identity.tenant_id,
         "workspace_id": identity.workspace_id,
         "scopes": identity.scopes,
         "internal_token": getattr(request.state, "internal_token", None),
-        "has_x_api_key": "x-api-key" in request.headers,   # 剥除后应为 False
-        "x_headers": {
-            "x-api-key-id": request.headers.get("x-api-key-id"),
-            "x-tenant-id": request.headers.get("x-tenant-id"),
-            "x-workspace-id": request.headers.get("x-workspace-id"),
-        },
+        "has_x_api_key": "x-api-key" in request.headers,   # stripped → False
+        "x_headers": _echo_headers(request),
     }
 
 

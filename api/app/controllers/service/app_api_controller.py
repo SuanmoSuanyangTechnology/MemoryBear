@@ -257,7 +257,8 @@ def _variables_from_release(release: AppRelease) -> list:
     elif release.type in (AppType.WORKFLOW, AppType.PURE_WORKFLOW):
         variables = WorkflowService.get_start_node_variables(config)
     elif release.type == AppType.MULTI_AGENT:
-        variables = config.get("variables") or []
+        supervisor_cfg = config.get("supervisor_config")
+        variables = (supervisor_cfg or {}).get("variables") or []
     else:
         raise BusinessException(f"不支持的应用类型: {release.type}", BizCode.APP_TYPE_NOT_SUPPORTED)
     return _get_standard_variables(variables, release.type)
@@ -496,7 +497,10 @@ async def chat(
                             web_search=web_search,
                             memory=memory,
                             storage_type=storage_type,
-                            user_rag_memory_id=user_rag_memory_id
+                            user_rag_memory_id=user_rag_memory_id,
+                            thinking=bool(getattr(payload, "thinking", False)),
+                            execution_mode="sandbox" if settings.E2B_ENABLED else "in_process",
+                            files=payload.files,
                     ):
                         yield event
                 finally:
@@ -524,7 +528,10 @@ async def chat(
                 web_search=web_search,
                 memory=memory,
                 storage_type=storage_type,
-                user_rag_memory_id=user_rag_memory_id
+                user_rag_memory_id=user_rag_memory_id,
+                thinking=bool(getattr(payload, "thinking", False)),
+                execution_mode="sandbox" if settings.E2B_ENABLED else "in_process",
+                files=payload.files,
             )
 
         return success(data=conversation_schema.ChatResponse(**result).model_dump(mode="json"))

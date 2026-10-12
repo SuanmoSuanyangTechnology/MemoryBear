@@ -16,7 +16,7 @@ import { Button, App, Select, Space, Dropdown, type SegmentedProps, Flex, Form }
 import clsx from 'clsx';
 import { useSearchParams } from 'react-router-dom'
 
-import ApplicationModal, { types } from './components/ApplicationModal';
+import ApplicationModal from './components/ApplicationModal';
 import type { Application, ApplicationModalRef, Query, UploadWorkflowModalRef } from './types';
 import SearchInput from '@/components/SearchInput'
 import { getApplicationListUrl, deleteApplication, copyApplication } from '@/api/application'
@@ -31,7 +31,9 @@ import RbButton from '@/components/RbButton'
 import RbDescriptions from '@/components/RbDescriptions'
 import OverflowTags from '@/components/OverflowTags'
 import Tag from '@/components/Tag'
-
+import { types } from './constants'
+import PrivateWrap from '@/components/PrivateWrap';
+import { AppOntology } from '@redbear/memory-brick';
 
 const tabKeys = ['apps', 'sharing', 'myShare']
 /**
@@ -227,6 +229,7 @@ const ApplicationManagement: React.FC = () => {
           ref={scrollListRef}
           url={getApplicationListUrl}
           needLoading={false}
+          column={3}
           query={formatQuery()}
           heightClass="rb:flex-1!"
           renderItem={(item) => (
@@ -244,10 +247,10 @@ const ApplicationManagement: React.FC = () => {
                     <RbButton block onClick={() => handleEdit(item)}>{t('common.view')}</RbButton>
                     {item.share_permission === 'editable' && <RbButton type="primary" ghost className="rb:w-[calc(100%-46px)]" onClick={() => handleCopy(item)}>{t('common.copy')}</RbButton>}
                   </Flex>
-                  : <Flex justify="space-between" gap={12}>
-                    <RbButton danger className="rb:w-22.25" onClick={() => handleDelete(item)}>{t('common.delete')}</RbButton>
-                    <RbButton type="primary" ghost className="rb:flex-1" onClick={() => handleEdit(item)}>{t('application.configuration')}</RbButton>
-                  </Flex>
+                  : <div className="rb:grid rb:grid-cols-2 rb:gap-3">
+                    <RbButton danger block onClick={() => handleDelete(item)}>{t('common.delete')}</RbButton>
+                    <RbButton type="primary" ghost block onClick={() => handleEdit(item)}>{t('application.configuration')}</RbButton>
+                  </div>
               }
             >
               <RbDescriptions
@@ -255,7 +258,7 @@ const ApplicationManagement: React.FC = () => {
                   key,
                   label: t(`application.${key}`),
                   children: <span className={clsx('rb:font-medium', {
-                    'rb:text-[#155EEF]': key === 'type',
+                    'rb:text-blue-500': key === 'type',
                   })}>
                     {key === 'source' && item.is_shared
                       ? item.source_workspace_name
@@ -272,6 +275,12 @@ const ApplicationManagement: React.FC = () => {
                   </span>
                 }))}
               />
+
+              {item.ontology &&
+                <PrivateWrap>
+                  {() => <AppOntology app={item} className="rb:mt-3!" />}
+                </PrivateWrap>
+              }
             </RbCard>
           )}
         />

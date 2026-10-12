@@ -1,0 +1,32 @@
+{
+  "errors": {
+    "common": {
+      "internal_error": "服务器内部错误",
+      "network_error": "网络连接错误",
+      "timeout": "请求超时",
+      "service_unavailable": "服务暂时不可用",
+      "bad_request": "请求参数错误",
+      "unauthorized": "未授权访问",
+      "forbidden": "没有权限访问",
+      "not_found": "请求的资源不存在",
+      "method_not_allowed": "不支持的请求方法",
+      "conflict": "资源冲突",
+      "too_many_requests": "请求过于频繁，请稍后再试",
+      "validation_failed": "数据验证失败",
+      "database_error": "数据库操作失败",
+      "file_operation_error": "文件操作失败"
+    },
+    "api": {
+      "quota_exceeded": "{resource} 配额已超限"
+    },
+    "validation": {
+      "missing_field": "缺少必需字段：{field}",
+      "invalid_field": "字段无效：{field}",
+      "field_too_long": "字段过长：{field}",
+      "field_too_short": "字段过短：{field}"
+    },
+    "quota_resources": {
+      "model": "模型"
+    }
+  }
+}

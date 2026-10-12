@@ -62,8 +62,7 @@ class MultiAgentHandoffsService:
 
             # 2. 检查是否启用 handoffs
             execution_config = config.execution_config or {}
-            print("="*50)
-            print(execution_config)
+            logger.debug("handoffs execution_config: %s", execution_config)
             enable_handoffs = execution_config.get("enable_handoffs", False)
 
             if not enable_handoffs:

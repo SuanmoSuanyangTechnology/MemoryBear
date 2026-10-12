@@ -2,15 +2,15 @@ from fastapi import APIRouter, Depends, status, HTTPException, Body, Path
 from fastapi.responses import StreamingResponse
 from langchain_core.prompts import ChatPromptTemplate
 from sqlalchemy.orm import Session
+from starlette.concurrency import run_in_threadpool
 import uuid
 
-from app.core.models import RedBearLLM, RedBearRerank
-from app.core.models.base import RedBearModelConfig
+from app.core.models import RedBearChatModel, RedBearRerank
 from app.core.models.embedding import RedBearEmbeddings
+from app.core.config import settings
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
 from app.db import get_db
-from app.models.models_model import ModelApiKey
 from app.core.response_utils import success
 from app.schemas.response_schema import ApiResponse
 from app.schemas.app_schema import AppChatRequest
@@ -23,9 +23,17 @@ from app.dependencies import get_current_user
 # 获取API专用日志器
 api_logger = get_api_logger()
 
+
+def _require_test_routes_enabled() -> None:
+    """环境门禁：ENABLE_TEST_ROUTES 关闭时全部 /test 路由按 404 隐藏（默认关闭）。"""
+    if not settings.ENABLE_TEST_ROUTES:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not Found")
+
+
 router = APIRouter(
     prefix="/test",
     tags=["test"],
+    dependencies=[Depends(_require_test_routes_enabled)],
 )
 
 
@@ -41,11 +49,11 @@ def test_llm(
         api_logger.error(f"模型ID {model_id} 不存在")
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="模型ID不存在")
     try:
-        apiConfig: ModelApiKey = ModelApiKeyService.get_available_api_key(db, config.id, tenant_id=config.tenant_id)
-        if not apiConfig:
-            raise BusinessException("模型配置缺少 API Key", BizCode.INVALID_PARAMETER)
-        llm = RedBearLLM(RedBearModelConfig.from_api_key(apiConfig), type=config.type)
-        print(llm.dict())
+        ref = ModelApiKeyService.resolve_invoke_ref(db, config.id, tenant_id=config.tenant_id)
+        if not ref:
+            raise BusinessException("模型配置不可用", BizCode.INVALID_PARAMETER)
+        # sync def 路由（线程池执行）：同步站点用阻塞面构造，异步面未装
+        llm = RedBearChatModel.for_invoke_sync_ref(ref)
 
         template = """Question: {question}
 
@@ -71,10 +79,10 @@ def test_embedding(
         api_logger.error(f"模型ID {model_id} 不存在")
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="模型ID不存在")
 
-    apiConfig: ModelApiKey = ModelApiKeyService.get_available_api_key(db, config.id, tenant_id=config.tenant_id)
-    if not apiConfig:
-        raise BusinessException("模型配置缺少 API Key", BizCode.INVALID_PARAMETER)
-    model = RedBearEmbeddings(RedBearModelConfig.from_api_key(apiConfig))
+    ref = ModelApiKeyService.resolve_invoke_ref(db, config.id, tenant_id=config.tenant_id)
+    if not ref:
+        raise BusinessException("模型配置不可用", BizCode.INVALID_PARAMETER)
+    model = RedBearEmbeddings.for_invoke(ref)
 
     data = [
         "最近哪家咖啡店评价最好？",
@@ -102,10 +110,10 @@ def test_rerank(
         api_logger.error(f"模型ID {model_id} 不存在")
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="模型ID不存在")
 
-    apiConfig: ModelApiKey = ModelApiKeyService.get_available_api_key(db, config.id, tenant_id=config.tenant_id)
-    if not apiConfig:
-        raise BusinessException("模型配置缺少 API Key", BizCode.INVALID_PARAMETER)
-    model = RedBearRerank(RedBearModelConfig.from_api_key(apiConfig))
+    ref = ModelApiKeyService.resolve_invoke_ref(db, config.id, tenant_id=config.tenant_id)
+    if not ref:
+        raise BusinessException("模型配置不可用", BizCode.INVALID_PARAMETER)
+    model = RedBearRerank.for_invoke(ref)
     query = "最近哪家咖啡店评价最好？"
     data = [
         "最近哪家咖啡店评价最好？",
@@ -147,30 +155,35 @@ async def test_handoffs(
     """
     try:
         workspace_id = current_user.current_workspace_id
-        
-        # 获取或创建会话
+
+        # 获取或创建会话（同步 DB 工具卸载到线程池，避免阻塞事件循环）
         conversation_service = ConversationService(db)
-        
+
         if request.conversation_id:
             # 验证会话存在
-            conversation = conversation_service.get_conversation(uuid.UUID(request.conversation_id))
+            conversation = await run_in_threadpool(
+                conversation_service.get_conversation, uuid.UUID(request.conversation_id)
+            )
             if not conversation:
                 raise HTTPException(status_code=404, detail="会话不存在")
             conversation_id = str(conversation.id)
         else:
             # 创建新会话
-            conversation = conversation_service.create_or_get_conversation(
+            conversation = await run_in_threadpool(
+                conversation_service.create_or_get_conversation,
                 app_id=app_id,
                 workspace_id=workspace_id,
                 user_id=request.user_id,
                 is_draft=True
             )
             conversation_id = str(conversation.id)
-        
+
         # 根据 stream 参数决定返回方式
         if request.stream:
             # 流式返回
-            service = get_handoffs_service_for_app(app_id, db, streaming=True)
+            service = await run_in_threadpool(
+                get_handoffs_service_for_app, app_id, db, streaming=True
+            )
             return StreamingResponse(
                 service.chat_stream(
                     message=request.message,
@@ -185,7 +198,9 @@ async def test_handoffs(
             )
         else:
             # 非流式返回
-            service = get_handoffs_service_for_app(app_id, db, streaming=False)
+            service = await run_in_threadpool(
+                get_handoffs_service_for_app, app_id, db, streaming=False
+            )
             result = await service.chat(
                 message=request.message,
                 conversation_id=conversation_id

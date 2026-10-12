@@ -13,13 +13,22 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from io import BytesIO
+from threading import Event
 from typing import Any
 
 from jinja2 import Environment
 from pypdf import PdfReader
-from redbear_model import QWEN3_VL_EMBEDDING_DIMENSION, is_qwen3_vl_embedding
-from redbear_model.runtime import RedBearEmbeddings
+from redbear_model import QWEN3_VL_EMBEDDING_DIMENSION
 
+from ..integrations.model.asr_video import (
+    AudioTranscriptionChunkModel,
+    VideoUnderstandingChunkModel,
+)
+from ..integrations.model.chat import RedBearChatModel
+from ..integrations.model.embedding import RedBearEmbeddings
+from ..integrations.model.invoke_backend import ref_from_view
+from ..integrations.model.views import is_qwen3_vl_embedding_view
+from ..integrations.model.vision import QWenCV as ImageQWenCV
 from ..models.owned import Document, Knowledge
 from ..models.references import Workspace
 from ..rag.chunk.context import (
@@ -35,18 +44,22 @@ from ..rag.chunk.router import FileTypeRouter
 from ..rag.chunk.token_utils import num_tokens_from_string, truncate
 from ..rag.knowledge_graph import GraphPipeline, is_graph_enabled, resolve_graph_pipeline
 from ..rag.models.chunk import DocumentChunk
-from ..rag.models.media_runtime import (
-    AudioTranscriptionChunkModel,
-    VideoUnderstandingChunkModel,
-)
 from ..rag.models.task_runtime import TaskModelFactory
-from ..rag.models.vision import QWenCV as ImageQWenCV
 from ..rag.vdb.vector_store import TaskVectorStore
 from ..runtime import ProcessRuntime
 from ..tasks.dispatch import TaskDispatcher
 from ..tasks.observability import BusinessOutcome, TaskRun
-from ..tasks.state import PARSE_CANCEL_KEY, PARSE_TASK_KEY
+from ..tasks.state import PARSE_TASK_KEY
 from ..utils.datetime_utils import to_iso_z, to_timestamp_ms, utcnow, utcnow_naive
+from .document_mutation_guard import (
+    DocumentMutationLeaseLost,
+    sync_document_mutation_guard,
+)
+from .document_task_lifecycle import (
+    DocumentTaskAborted,
+    cleanup_interrupted_task_vectors,
+    ensure_document_active,
+)
 from .knowledge_file_storage import KnowledgeFileStorage
 from .multimodal_image import StorageImageResolver
 
@@ -210,7 +223,8 @@ def _clear_parse_state(runtime: ProcessRuntime, document_id: object) -> None:
     try:
         redis = runtime.redis.sync_client()
         redis.delete(PARSE_TASK_KEY.format(doc_id=document_id))
-        redis.delete(PARSE_CANCEL_KEY.format(doc_id=document_id))
+        # Let the existing cancellation marker expire naturally so an upload
+        # still running after a worker interruption can observe it.
     except Exception as exc:  # noqa: BLE001 - cleanup must not replace task results.
         logger.warning(
             "Failed to clear parse state: document=%s error_type=%s",
@@ -219,32 +233,13 @@ def _clear_parse_state(runtime: ProcessRuntime, document_id: object) -> None:
         )
 
 
-def _document_exists(runtime: ProcessRuntime, document_id: uuid.UUID) -> bool:
-    with runtime.database.sync_session() as session:
-        return session.get(Document, document_id) is not None
-
-
 def _should_abort(runtime: ProcessRuntime, document_id: uuid.UUID) -> bool:
     try:
-        redis = runtime.redis.sync_client()
-    except Exception as exc:  # noqa: BLE001 - DB presence is the legacy fallback.
-        logger.warning(
-            "Parse cancellation client unavailable: document=%s error_type=%s",
-            document_id,
-            type(exc).__name__,
-        )
-        return not _document_exists(runtime, document_id)
-    try:
-        if redis.get(PARSE_CANCEL_KEY.format(doc_id=document_id)) is not None:
-            logger.info("Document parsing cancelled: document=%s", document_id)
-            return True
-    except Exception as exc:  # noqa: BLE001 - RedisDB.get was best effort.
-        logger.warning(
-            "Parse cancellation state unavailable: document=%s error_type=%s",
-            document_id,
-            type(exc).__name__,
-        )
-    return False
+        ensure_document_active(runtime, document_id)
+        return False
+    except DocumentTaskAborted:
+        logger.info("Document parsing cancelled: document=%s", document_id)
+        return True
 
 
 def _download_file(runtime: ProcessRuntime, file_key: str) -> bytes:
@@ -284,29 +279,24 @@ def _build_vision_model(
     snapshot: ParseDocumentSnapshot,
     file_key: str,
 ):
+    factory = TaskModelFactory(runtime)
     if _AUDIO_PATTERN.search(snapshot.file_name):
         if snapshot.audio2text_id is None:
             return None
-        factory = TaskModelFactory(runtime)
-        transcriber = factory.create_audio_transcriber(
-            snapshot.audio2text_id,
-            snapshot.tenant_id,
-        )
-        return AudioTranscriptionChunkModel(
-            transcriber,
-            _media_file_url(runtime, file_key, snapshot.source_file_name),
+        config = factory.resolve_view(snapshot.audio2text_id, snapshot.tenant_id)
+        return AudioTranscriptionChunkModel.for_invoke_sync_ref(
+            ref_from_view(config, snapshot.tenant_id),
+            pool=runtime.model_runtime,
+            file_url=_media_file_url(runtime, file_key, snapshot.source_file_name),
         )
     if _VIDEO_PATTERN.search(snapshot.file_name):
         if snapshot.video2text_id is None:
             return None
-        factory = TaskModelFactory(runtime)
-        video_runtime = factory.create_video_understanding(
-            snapshot.video2text_id,
-            snapshot.tenant_id,
-        )
-        return VideoUnderstandingChunkModel(
-            video_runtime,
-            _media_file_url(runtime, file_key, snapshot.source_file_name),
+        config = factory.resolve_view(snapshot.video2text_id, snapshot.tenant_id)
+        return VideoUnderstandingChunkModel.for_invoke_sync_ref(
+            ref_from_view(config, snapshot.tenant_id),
+            pool=runtime.model_runtime,
+            video_url=_media_file_url(runtime, file_key, snapshot.source_file_name),
             lang="Chinese",
         )
     needs_image_model = (
@@ -320,13 +310,13 @@ def _build_vision_model(
         return None
     if snapshot.image2text_id is None:
         return None
-    config = TaskModelFactory(runtime).resolve_image(
+    config = factory.resolve_image(
         snapshot.image2text_id,
         snapshot.tenant_id,
     )
-    image_model = ImageQWenCV(
-        config,
-        client_pool=runtime.model_runtime.pool,
+    image_model = ImageQWenCV.for_invoke_sync_ref(
+        ref_from_view(config, snapshot.tenant_id),
+        pool=runtime.model_runtime,
         lang="Chinese",
     )
     return image_model
@@ -343,7 +333,11 @@ def _preflight_document(
     if auto_questions_topn:
         if snapshot.llm_id is None:
             raise RuntimeError("llm model config is unavailable")
-        chat_model = factory.create_llm(snapshot.llm_id, snapshot.tenant_id)
+        llm_config = factory.resolve_chat(snapshot.llm_id, snapshot.tenant_id)
+        chat_model = RedBearChatModel.for_invoke_sync_ref(
+            ref_from_view(llm_config, snapshot.tenant_id),
+            pool=runtime.model_runtime,
+        )
 
     vision_model = _build_vision_model(runtime, snapshot, file_key)
     if snapshot.embedding_id is None:
@@ -352,14 +346,12 @@ def _preflight_document(
         snapshot.embedding_id,
         snapshot.tenant_id,
     )
-    try:
-        embeddings = RedBearEmbeddings(
-            embedding_config,
-            client_pool=runtime.model_runtime.pool,
-        )
-    except Exception:
-        raise RuntimeError("Failed to initialize embedding model") from None
-    structured_multimodal = is_qwen3_vl_embedding(embedding_config)
+    structured_multimodal = is_qwen3_vl_embedding_view(embedding_config)
+    embeddings = RedBearEmbeddings.for_invoke_ref(
+        ref_from_view(embedding_config, snapshot.tenant_id),
+        pool=runtime.model_runtime,
+        multimodal=structured_multimodal,
+    )
     vector_store = TaskVectorStore(
         runtime.elasticsearch.sync_client(),
         snapshot.knowledge_id,
@@ -488,7 +480,8 @@ def _model_name(model: Any) -> str:
     direct = getattr(model, "model_name", None)
     if direct:
         return str(direct)
-    return str(getattr(getattr(model, "_config", None), "model_name", "unknown"))
+    # 远端壳无配置对象：以配置 id 作为缓存指纹（同名不同配置也必须区分）
+    return str(getattr(model, "config_id", "unknown"))
 
 
 def _fit_qa_messages(system_prompt: str, content: str, max_length: int) -> tuple[str, str]:
@@ -684,13 +677,32 @@ def _write_chunks_with_retry(
     runtime: ProcessRuntime,
     vector_store: TaskVectorStore,
     batches: list[list[DocumentChunk]],
+    document_id: uuid.UUID,
+    write_started: Event | None = None,
 ) -> None:
     batch_errors: dict[int, Exception] = {}
     total_batches = len(batches)
 
     def write(batch_index: int, chunks: list[DocumentChunk]) -> None:
+        def prepare_and_write() -> None:
+            if _should_abort(runtime, document_id):
+                raise _ParseAborted
+            prepared = vector_store.prepare_chunks(chunks)
+            with sync_document_mutation_guard(
+                runtime.redis.sync_client(), document_id
+            ) as guard:
+                if _should_abort(runtime, document_id):
+                    raise _ParseAborted
+                guard.ensure_owned()
+                if write_started is not None:
+                    write_started.set()
+                vector_store.write_prepared_batches([prepared])
+                guard.ensure_owned()
+
         try:
-            vector_store.add_chunks(chunks)
+            prepare_and_write()
+        except (_ParseAborted, DocumentMutationLeaseLost):
+            raise
         except Exception as exc:  # noqa: BLE001 - exactly one retry is required.
             logger.warning(
                 "Document vector batch failed; retrying: batch=%s error_type=%s",
@@ -698,7 +710,9 @@ def _write_chunks_with_retry(
                 type(exc).__name__,
             )
             try:
-                vector_store.add_chunks(chunks)
+                prepare_and_write()
+            except (_ParseAborted, DocumentMutationLeaseLost):
+                raise
             except Exception as retry_exc:  # noqa: BLE001 - aggregate batch failures.
                 logger.error(
                     "Document vector batch retry failed: batch=%s error_type=%s",
@@ -720,8 +734,19 @@ def _write_chunks_with_retry(
 
     with ThreadPoolExecutor(max_workers=runtime.settings.embedding_max_workers) as executor:
         futures = [executor.submit(write, index, chunks) for index, chunks in enumerate(batches)]
+        interrupted = []
         for future in futures:
-            future.result()
+            try:
+                future.result()
+            except (_ParseAborted, DocumentMutationLeaseLost) as exc:
+                interrupted.append(exc)
+    # Wait for every batch before cleanup, including when cancellation and
+    # lease loss occur concurrently. Do not let an abort hide a possible late write.
+    for exc in interrupted:
+        if isinstance(exc, DocumentMutationLeaseLost):
+            raise exc
+    if interrupted:
+        raise interrupted[0]
     if batch_errors:
         details = "; ".join(
             f"batch {index}: {type(error).__name__}: {error}"
@@ -795,6 +820,9 @@ def process_document(
     started_at = time.time()
     document_label = file_name or str(document_id)
     normalized_document_id: uuid.UUID | None = None
+    all_chunks: list[DocumentChunk] = []
+    write_started = Event()
+    completion_persisted = False
     try:
         normalized_document_id = uuid.UUID(str(document_id))
         with run.stage("load_snapshot"):
@@ -901,10 +929,17 @@ def process_document(
         else:
             vector_store = preflight.vector_store
             with run.stage("delete_old_vectors"):
-                vector_store.delete_by_metadata_field(
-                    "document_id",
-                    str(normalized_document_id),
-                )
+                with sync_document_mutation_guard(
+                    runtime.redis.sync_client(), normalized_document_id
+                ) as guard:
+                    if _should_abort(runtime, normalized_document_id):
+                        raise _ParseAborted
+                    guard.ensure_owned()
+                    vector_store.delete_by_metadata_field(
+                        "document_id",
+                        str(normalized_document_id),
+                    )
+                    guard.ensure_owned()
             with run.stage("prepare_chunks"):
                 if snapshot.parent_child_mode:
                     all_chunks = _parent_child_chunks(
@@ -947,7 +982,11 @@ def process_document(
             ]
             total_batches = len(batches)
             with run.stage("embedding"):
-                _write_chunks_with_retry(runtime, vector_store, batches)
+                _write_chunks_with_retry(
+                    runtime, vector_store, batches, normalized_document_id, write_started
+                )
+            if _should_abort(runtime, normalized_document_id):
+                raise _ParseAborted
             progress_lines.append(
                 f"{_progress_ts()} All {total_batches} batches embedded "
                 f"(workers={runtime.settings.embedding_max_workers})."
@@ -974,7 +1013,9 @@ def process_document(
             document.run = 0
 
         with run.stage("persist_document"):
-            _update_document(runtime, normalized_document_id, mark_done)
+            completion_persisted = _update_document(runtime, normalized_document_id, mark_done)
+        if _should_abort(runtime, normalized_document_id):
+            raise _ParseAborted
         with run.stage("dispatch_graph"):
             _dispatch_graph(runtime, snapshot, progress_lines)
         logger.info(
@@ -988,15 +1029,40 @@ def process_document(
             counts={"chunks": total_chunks},
         )
         return f"parse document '{snapshot.source_file_name}' processed successfully."
-    except _ParseAborted:
-        logger.info("Document parsing aborted: document=%s", normalized_document_id)
-        run.finish(
-            BusinessOutcome.ABORTED,
-            error_code="KB_DOC_PARSE_ABORTED",
-            detail="document_deleted_or_cancelled",
-        )
-        return f"parse document '{document_label}' aborted (deleted or cancelled)."
     except Exception as exc:  # noqa: BLE001 - task returns a legacy failure string.
+        aborted = isinstance(exc, _ParseAborted)
+        if (
+            isinstance(exc, (DocumentMutationLeaseLost, _ParseAborted))
+            and normalized_document_id is not None
+            and write_started.is_set()
+        ):
+            try:
+                cleanup_interrupted_task_vectors(
+                    runtime, snapshot.knowledge_id, normalized_document_id,
+                    # A surviving document already accounts for finalized
+                    # output. Only remove it if the document itself is gone.
+                    (
+                        [] if completion_persisted
+                        else [str(chunk.metadata["doc_id"]) for chunk in all_chunks]
+                    ),
+                )
+            except Exception as cleanup_exc:
+                logger.warning(
+                    "Late document vector cleanup failed: document=%s error_type=%s",
+                    normalized_document_id,
+                    type(cleanup_exc).__name__,
+                )
+                if aborted:
+                    aborted = False
+                    exc = RuntimeError("Document cancellation cleanup failed")
+        if aborted:
+            logger.info("Document parsing aborted: document=%s", normalized_document_id)
+            run.finish(
+                BusinessOutcome.ABORTED,
+                error_code="KB_DOC_PARSE_ABORTED",
+                detail="document_deleted_or_cancelled",
+            )
+            return f"parse document '{document_label}' aborted (deleted or cancelled)."
         logger.error(
             "Document parsing failed: document=%s error_type=%s",
             normalized_document_id or document_id,

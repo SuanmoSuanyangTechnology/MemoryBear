@@ -59,6 +59,7 @@ interface TableComponentProps<T = Record<string, unknown>, Q = Record<string, un
   currentPageKey?: string;
   /** Auto fill parent container height, tbody scrolls when content overflows */
   fillHeight?: boolean;
+  onLoad?: (res: any) => void;
 }
 
 /** Ref methods exposed to parent component */
@@ -98,6 +99,7 @@ const RbTable = forwardRef(<T = Record<string, unknown>, Q = Record<string, unkn
   scrollY,
   currentPageKey = 'page',
   fillHeight = false,
+  onLoad,
   ...props
 }: TableComponentProps<T, Q>, ref: React.Ref<TableRef>) => {
   const { t } = useTranslation();
@@ -190,6 +192,7 @@ const RbTable = forwardRef(<T = Record<string, unknown>, Q = Record<string, unkn
         setData(Array.isArray(res.items) ? res.items : Array.isArray(res.hosts) ? res.hosts : Array.isArray(res.list) ? res.list : res || [])
         setLoading(false)
         setTimeout(measureHeight, 50)
+        onLoad?.(res)
       })
       .catch(err => {
         if (err.name !== 'AbortError') {

@@ -9,6 +9,10 @@ from typing import Any
 
 from sqlalchemy import select
 
+from ..integrations.model.chat import RedBearChatModel
+from ..integrations.model.embedding import RedBearEmbeddings
+from ..integrations.model.invoke_backend import ref_from_view
+from ..integrations.model.views import is_qwen3_vl_embedding_view
 from ..models.owned import Document, Knowledge
 from ..rag.knowledge_graph.config import (
     GraphDocumentDeletionPending,
@@ -96,14 +100,16 @@ async def _build_pipeline(
     lock_guard: Any,
     stage_callback: GraphStageCallback | None = None,
 ):
-    from redbear_model.runtime import RedBearEmbeddings, RedBearLLM
-
     client = await runtime.elasticsearch.client()
     redis = await runtime.redis.client()
-    llm = RedBearLLM(graph_runtime.llm, client_pool=runtime.model_runtime.pool)
-    embedding = RedBearEmbeddings(
-        graph_runtime.embedding,
-        client_pool=runtime.model_runtime.pool,
+    llm = RedBearChatModel.for_invoke_ref(
+        ref_from_view(graph_runtime.llm, graph_runtime.llm.tenant_id),
+        pool=runtime.model_runtime,
+    )
+    embedding = RedBearEmbeddings.for_invoke_ref(
+        ref_from_view(graph_runtime.embedding, graph_runtime.embedding.tenant_id),
+        pool=runtime.model_runtime,
+        multimodal=is_qwen3_vl_embedding_view(graph_runtime.embedding),
     )
     extractor = LLMEntityRelationExtractor(
         llm,
@@ -190,6 +196,11 @@ def process_evidence_document(
 ) -> dict[str, Any]:
     knowledge_id = _canonical_uuid(knowledge_id, "knowledge id")
     document_id = _canonical_uuid(document_id, "document id")
+    state = load_graph_task_state(runtime, knowledge_id, document_id)
+    if state.pipeline is not GraphPipeline.EVIDENCE:
+        return {"status": "skipped", "reason": "pipeline_changed"}
+    if not state.graph_enabled:
+        return {"status": "skipped", "reason": "graph_disabled"}
     with create_knowledge_graph_lock(
         runtime,
         knowledge_id,
@@ -230,6 +241,11 @@ def process_evidence_rebuild(
     on_stage: GraphStageCallback | None = None,
 ) -> dict[str, Any]:
     knowledge_id = _canonical_uuid(knowledge_id, "knowledge id")
+    state = load_graph_task_state(runtime, knowledge_id)
+    if state.pipeline is not GraphPipeline.EVIDENCE:
+        return {"status": "skipped", "reason": "pipeline_changed"}
+    if not state.graph_enabled:
+        return {"status": "skipped", "reason": "graph_disabled"}
     with create_knowledge_graph_lock(
         runtime,
         knowledge_id,
@@ -267,6 +283,9 @@ def process_clear_graph(
     on_stage: GraphStageCallback | None = None,
 ) -> dict[str, Any]:
     knowledge_id = _canonical_uuid(knowledge_id, "knowledge id")
+    state = load_graph_task_state(runtime, knowledge_id)
+    if state.graph_enabled and not force:
+        return {"status": "skipped", "reason": "graph_reenabled"}
     with create_knowledge_graph_lock(
         runtime,
         knowledge_id,

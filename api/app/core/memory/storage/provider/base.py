@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 import asyncio
+from collections.abc import Sequence
 from typing import Self
 
 from app.core.memory.storage.enums import MemoryNodeLabel, MemoryRelationshipType
@@ -15,6 +16,9 @@ from app.core.memory.storage.models import (
     StorageReadResult,
     StorageWriteResult,
 )
+
+SCAN_PAGE_SIZE = 500
+MAX_SCAN_PAGE_SIZE = 5_000
 
 
 class BaseClient(ABC):
@@ -69,22 +73,44 @@ class BaseClient(ABC):
 
     @abstractmethod
     async def delete_node(
-        self,
-        label: MemoryNodeLabel,
-        node_filter: NodeFilter,
-        draft: bool = False,
+            self,
+            label: MemoryNodeLabel,
+            node_filter: NodeFilter,
+            draft: bool = False,
     ) -> StorageWriteResult:
         pass
 
     @abstractmethod
     async def get_node(
-        self,
-        label: MemoryNodeLabel,
-        node_filter: NodeFilter,
-        projection: NodeProjection | None = None,
-        node_sort: NodeSort | None = None,
+            self,
+            label: MemoryNodeLabel,
+            node_filter: NodeFilter,
+            projection: NodeProjection | None = None,
+            node_sort: NodeSort | None = None,
     ) -> StorageReadResult:
         pass
+
+    async def scan_nodes(
+            self,
+            label: MemoryNodeLabel,
+            node_filter: NodeFilter,
+            cursor: str | None = None,
+            limit: int = SCAN_PAGE_SIZE,
+            projection: NodeProjection | None = None,
+    ) -> tuple[list[dict], str | None]:
+        raise NotImplementedError(
+            f"{type(self).__name__} does not support paged node scans"
+        )
+
+    async def update_node_embeddings(
+            self,
+            label: MemoryNodeLabel,
+            field: str,
+            updates: Sequence[tuple[str, Sequence[float]]],
+    ) -> StorageWriteResult:
+        raise NotImplementedError(
+            f"{type(self).__name__} does not support bulk embedding writes"
+        )
 
     @abstractmethod
     async def search_by_fulltext(
@@ -145,41 +171,41 @@ class BaseClient(ABC):
         )))
 
     async def save_relationship(
-        self,
-        relationship_type: MemoryRelationshipType,
-        source: str,
-        target: str,
-        data: dict,
+            self,
+            relationship_type: MemoryRelationshipType,
+            source: str,
+            target: str,
+            data: dict,
     ) -> StorageWriteResult:
         raise NotImplementedError(
             f"{type(self).__name__} does not support relationship writes"
         )
 
     async def get_relationship(
-        self,
-        pattern: RelationshipPattern,
-        rel_filter: RelationshipFilter,
-        projection: RelationshipProjection | None = None,
-        sort: RelationshipSort | None = None,
+            self,
+            pattern: RelationshipPattern,
+            rel_filter: RelationshipFilter,
+            projection: RelationshipProjection | None = None,
+            sort: RelationshipSort | None = None,
     ) -> StorageReadResult:
         raise NotImplementedError(
             f"{type(self).__name__} does not support relationship queries"
         )
 
     async def update_relationship(
-        self,
-        relationship_type: MemoryRelationshipType,
-        data: dict,
-        rel_filter: RelationshipFilter,
+            self,
+            relationship_type: MemoryRelationshipType,
+            data: dict,
+            rel_filter: RelationshipFilter,
     ) -> StorageWriteResult:
         raise NotImplementedError(
             f"{type(self).__name__} does not support relationship updates"
         )
 
     async def delete_relationship(
-        self,
-        relationship_type: MemoryRelationshipType,
-        rel_filter: RelationshipFilter,
+            self,
+            relationship_type: MemoryRelationshipType,
+            rel_filter: RelationshipFilter,
     ) -> StorageWriteResult:
         raise NotImplementedError(
             f"{type(self).__name__} does not support relationship deletes"

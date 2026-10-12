@@ -30,6 +30,7 @@ import { formatQuotaStatus, StatusProgress } from './components/StatusProgress'
 import OverflowTags from '@/components/OverflowTags'
 import PageTabs from '@/components/PageTabs';
 import { formatDateTime } from '@/utils/format'
+import EmbeddingAlert from '@/views/SpaceConfig/components/EmbeddingAlert';
 
 export default function UserMemory() {
   const { t } = useTranslation();
@@ -95,6 +96,7 @@ export default function UserMemory() {
 
   return (
     <Flex vertical gap={16} className="rb:h-full!">
+      <EmbeddingAlert source="user" />
       <Form form={form}>
         <Flex align="center" justify="space-between">
           <PageTabs

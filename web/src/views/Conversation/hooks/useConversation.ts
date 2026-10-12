@@ -122,6 +122,7 @@ export function useConversation() {
 
   useEffect(() => {
     if (!shareUuid) return
+    setConfigLoading(false)
     setIsShare(true)
     accessShareConversation(shareUuid)
       .then(res => {

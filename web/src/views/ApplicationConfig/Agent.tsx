@@ -22,7 +22,7 @@ import ActiveMemoryConfig from '@/components/ActiveMemoryConfig'
 import ChatVariableConfigModal from './components/ChatVariableConfigModal';
 import SwitchFormItem from '@/components/FormItem/SwitchFormItem'
 import FeaturesConfig from './components/FeaturesConfig'
-import Editor from './components/Editor'
+import PromptConfigurationCard from './components/PromptConfigurationCard'
 import { useAgent } from './hooks/useAgent'
 import ModelStatusTag from '@/components/ModelSelect/ModelStatusTag';
 
@@ -84,40 +84,25 @@ const Agent = forwardRef<AgentRef, { onFeaturesLoad?: (features: FeaturesConfigF
                 </Space>
               </Flex>
 
-              <Flex gap={12} vertical className="rb:h-[calc(100%-68px)]! rb:overflow-y-auto!">
+              <Flex gap={12} vertical className="rb:h-flex-1! rb:overflow-y-auto!">
                 <Form.Item name="default_model_config_id" hidden noStyle></Form.Item>
                 <Form.Item name="input_modalities" hidden noStyle></Form.Item>
                 <Form.Item name="output_modalities" hidden noStyle></Form.Item>
                 <Form.Item name="model_parameters" hidden noStyle></Form.Item>
                 <Form.Item name="features" hidden noStyle></Form.Item>
-                <Card
+                <PromptConfigurationCard
                   title={t('application.promptConfiguration')}
-                  extra={
-                    <Space
-                      size={1}
-                      className="rb:px-2 rb:h-5.5 rb:rounded-md rb:cursor-pointer rb:border rb:border-[rgba(21,94,239,0.3)] rb:text-[#155EEF]"
-                      onClick={handlePrompt}
-                    >
-                      <div className="rb:size-5 rb:bg-cover rb:bg-[url('@/assets/images/application/aiPrompt.png')]"></div>
-                      <span className="rb:font-[PingFangSC, PingFang_SC]!">{t('application.aiPrompt')}</span>
-                    </Space>
-                  }
-                >
-                  <div className="rb:leading-4.5 rb:text-[12px] rb:mb-2">
-                    <span className="rb:font-medium">{t('application.configuration')}</span>
-                    <span className="rb:font-regular rb:text-gray-600"> ({t('application.configurationDesc')})</span>
-                  </div>
-
-                  <Form.Item name="system_prompt" className="rb:mb-0!">
-                    <Editor
-                      options={chatVariables.map(v => ({ label: v.display_name, value: `{{${v.name}}}` }))}
-                      placeholder={t('application.promptPlaceholder')}
-                      className="rb:h-50 rb:bg-[#FFFFFF]"
-                      onBlur={updateVariables}
-                      disabled={false}
-                    />
-                  </Form.Item>
-                </Card>
+                  promptLabel={t('application.configuration')}
+                  promptDescription={t('application.configurationDesc')}
+                  fieldName="system_prompt"
+                  variableOptions={chatVariables.map(variable => ({
+                    label: variable.display_name,
+                    value: `{{${variable.name}}}`,
+                  }))}
+                  onPromptBlur={updateVariables}
+                  onAiPromptClick={handlePrompt}
+                  editorClassName="rb:h-50 rb:bg-[#FFFFFF]"
+                />
 
                 <Form.Item name="knowledge_retrieval" noStyle>
                   <Knowledge />

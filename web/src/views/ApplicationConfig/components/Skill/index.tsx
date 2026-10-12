@@ -9,9 +9,7 @@ import { useTranslation } from 'react-i18next'
 import { Space, Switch, Form, Flex } from 'antd'
 import clsx from 'clsx'
 
-import type {
-  SkillConfigForm,
-} from './types'
+import type { SkillConfigForm } from './types'
 import RbCard from '@/components/RbCard/Card'
 import SkillsItem from './SkillsItem'
 import { getSkillList } from '@/api/skill'
@@ -28,6 +26,19 @@ const processObj = [
   'executeTask'       // Step 4: Execute the task
 ]
 
+const DEFAULT_SKILLS_PATH = ['skills']
+
+interface SkillListProps {
+  /**  Current skill configuration values */
+  value?: SkillConfigForm;
+  /** Callback function when configuration changes */
+  onChange?: (config: SkillConfigForm) => void;
+  /** Parent form path for the skill configuration. */
+  name?: string[];
+  /** Whether users may enable all skills at once. */
+  supportAll?: boolean;
+}
+
 /**
  * Skill Configuration Component
  * 
@@ -36,77 +47,68 @@ const processObj = [
  * - Configuring dynamic skill binding
  * - Displaying skill execution process flow
  * - Managing skill selection and assignment
- * 
- * @param value - Current skill configuration values
- * @param onChange - Callback function when configuration changes
  */
-const SkillList: FC<{value?: SkillConfigForm; onChange?: (config: SkillConfigForm) => void}> = () => {
+const SkillList: FC<SkillListProps> = ({
+  name = DEFAULT_SKILLS_PATH,
+  supportAll = true,
+}) => {
   const { t } = useTranslation()
   const form = Form.useFormInstance()
-  const skillConfig = Form.useWatch(['skills'], form)
+  const skillConfig = (Form.useWatch(name, form) as SkillConfigForm | undefined) || {}
 
   /**
    * Effect: Fetch and populate skill details for skills without names
    * Ensures all selected skills have complete information by fetching from API
    */
   useEffect(() => {
-    const { skill_ids = [] } = skillConfig || {}
+    const skillIds = skillConfig?.skill_ids ?? []
+    const normalizedSkills = skillIds.map(skill => (
+      typeof skill === 'string' ? { id: skill } : skill
+    ))
+    const skillsWithoutName = normalizedSkills.filter(skill => !(skill as Skill).name)
 
-    // Filter skills that don't have name property
-    const skillsWithoutName = skill_ids.filter((vo: Skill) => !vo.name)
+    if (skillsWithoutName.length === 0) return
 
-    if (skillsWithoutName.length > 0) {
-      getSkillList({ page: 1, pagesize: 100 })
-        .then(res => {
-          const response = res as { items: Skill[] }
-          // Create a map of skill ID to skill object for quick lookup
-          const map = response.items.reduce((prev: any, curr: any) => {
-            prev[curr.id] = curr
-            return prev
-          }, {})
+    getSkillList({ page: 1, pagesize: 100 })
+      .then(res => {
+        const response = res as { items: Skill[] }
+        const skillMap = new Map(response.items.map(skill => [skill.id, skill]))
+        const completedSkills = normalizedSkills.map(skill => ({
+          ...skill,
+          ...skillMap.get(skill.id),
+        }))
+        const hasChanges = skillIds.some((skill, index) => (
+          typeof skill === 'string'
+          || (Boolean(skillMap.get(normalizedSkills[index].id)) && !(normalizedSkills[index] as Skill).name)
+        ))
 
-          // Merge fetched skill details with existing skill IDs
-          const newSkillIds = skill_ids.map((vo: any) => {
-            return {
-              ...vo,
-              ...map[vo.id]
-            }
-          })
+        if (hasChanges) {
+          form.setFieldValue([...name, 'skill_ids'], completedSkills)
+        }
+      })
+  }, [form, name, skillConfig?.skill_ids])
 
-          form.setFieldValue(['skills', 'skill_ids'], newSkillIds)
-        })
-    }
-
-  }, [skillConfig?.skill_ids])
-
-  /**
-   * Effect: Reset skill configuration when skill functionality is disabled
-   * Clears all_skills flag and skill_ids array when enabled is set to false
-   */
   useEffect(() => {
     if (skillConfig?.enabled === false) {
       form.setFields([
-        { name: ['skills', 'all_skills'], value: false },
-        { name: ['skills', 'skill_ids'], value: [] }
+        { name: [...name, 'all_skills'], value: false },
+        { name: [...name, 'skill_ids'], value: [] }
       ])
     }
-  }, [skillConfig?.enabled, form])
+  }, [name, skillConfig?.enabled, form])
 
 
   return (
     <RbCard
       title={<>
         <div className="rb:font-[MiSans-Bold] rb:font-bold">{t('application.skill')}</div>
-        <div className="rb:font-regular! rb:text-[12px] rb:text-[#5B6167]"> {t('application.skillTitle')}</div>
+        <div className="rb:font-regular! rb:text-[12px] rb:text-gray-600">{t('application.skillTitle')}</div>
       </>}
       extra={
         <Space>
-          {/* Help button for skill configuration guidance */}
-          {/* <Button className="rb:py-0! rb:px-2! rb:h-6!">{t('application.skillHelp')}</Button> */}
-          {/* Toggle switch to enable/disable skill functionality */}
-          <Form.Item 
+          <Form.Item
             valuePropName="checked"
-            name={['skills', 'enabled']}
+            name={[...name, 'enabled']}
             noStyle
           >
             <Switch />
@@ -114,40 +116,48 @@ const SkillList: FC<{value?: SkillConfigForm; onChange?: (config: SkillConfigFor
         </Space>
       }
       headerType="borderless"
-      headerClassName={clsx("rb:py-[16px]! rb:leading-[22px]! rb:font-regular", {
+      headerClassName={clsx('rb:py-[16px]! rb:leading-[22px]! rb:font-regular', {
         'rb:h-[76px]! rb:py-[16px]!': !skillConfig?.enabled,
         'rb:h-[68px]! rb:pb-2!': skillConfig?.enabled,
       })}
     >
-      {/* Render skill configuration UI only when enabled */}
-      {skillConfig?.enabled && <Flex vertical gap={8} className="rb:bg-[#FAFAFA] rb:rounded-xl rb:pt-2.5! rb:pb-3! rb:px-3!">
-        <div className="rb:text-[#212332] rb:font-medium rb:leading-4.5 rb:px-1">{t('application.executeProcessPreview')}</div>
-        <Flex align="center" justify="space-between" gap={14} className="rb:text-[12px] rb:bg-[#FFFFFF]! rb:rounded-lg rb-border rb:py-2.5! rb:pl-4! rb:pr-3.25! rb:mb-2!">
-          {/* Render each step in the process flow with numbered badges */}
-          {processObj.map((key, index) => (
-            <Fragment key={index}>
-              <Flex align="center" gap={8}>
-                {/* Step number badge */}
-                <Flex align="center" justify="center" className="rb:size-4 rb:rounded-full rb:bg-[#171719] rb:text-white rb:font-medium">{index + 1}</Flex>
-                {/* Step label */}
-                <span className="rb:inline-block rb:max-w-16">{t(`application.${key}`)}</span>
-              </Flex>
-              {/* Arrow separator between steps (except after last step) */}
-              {index !== processObj.length - 1 && <div className="rb:w-10 rb:h-4.5 rb:bg-cover rb:bg-[url('@/assets/images/application/arrow_right.svg')]"></div>}
-            </Fragment>
-          ))}
+      {skillConfig?.enabled && (
+        <Flex vertical gap={8} className="rb:bg-gray-50 rb:rounded-xl rb:pt-2.5! rb:pb-3! rb:px-3!">
+          <div className="rb:text-gray-800 rb:font-medium rb:leading-4.5 rb:px-1">
+            {t('application.executeProcessPreview')}
+          </div>
+          <Flex
+            align="center"
+            justify="space-between"
+            gap={14}
+            className="rb:text-[12px] rb:bg-[#FFFFFF]! rb:rounded-lg rb-border rb:py-2.5! rb:pl-4! rb:pr-3.25! rb:mb-2!"
+          >
+            {processObj.map((key, index) => (
+              <Fragment key={index}>
+                <Flex align="center" gap={8}>
+                  <Flex align="center" justify="center" className="rb:size-4 rb:rounded-full rb:bg-[#171719] rb:text-white rb:font-medium">
+                    {index + 1}
+                  </Flex>
+                  <span className="rb:inline-block rb:max-w-16">{t(`application.${key}`)}</span>
+                </Flex>
+                {index !== processObj.length - 1 && (
+                  <div className="rb:w-10 rb:h-4.5 rb:bg-cover rb:bg-[url('@/assets/images/application/arrow_right.svg')]" />
+                )}
+              </Fragment>
+            ))}
+          </Flex>
+          <Form.Item noStyle>
+            <SkillsItem
+              title={t('application.dynamicBindingSkill')}
+              parentName={name}
+              supportAll={supportAll}
+              emptyTitle={t('application.dynamicBindingSkill_empty')}
+            />
+          </Form.Item>
         </Flex>
-        {/* Dynamic skill binding configuration section */}
-        <Form.Item noStyle>
-          <SkillsItem
-            title={t('application.dynamicBindingSkill')}
-            parentName={['skills']}
-            supportAll={true}
-            emptyTitle={t('application.dynamicBindingSkill_empty')}
-          />
-        </Form.Item>
-      </Flex>}
+      )}
     </RbCard>
   )
 }
+
 export default SkillList

@@ -68,7 +68,7 @@ const ApiLineCard: FC = () => {
       <LineChart
         chartData={chartData}
         seriesList={formatSeriesList()}
-        height={239}
+        height={259}
       />
     </Card>
   )

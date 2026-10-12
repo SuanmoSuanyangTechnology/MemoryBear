@@ -41,6 +41,12 @@ CONV_ACTIVE_TTL_SECONDS = 300
 PENDING_CONVERSATIONS_SET_KEY = "pending_conversations"
 
 
+def _is_rag_storage(storage_type: Any) -> bool:
+    """兼容字符串和枚举形式的存储类型。"""
+    storage_type_value = getattr(storage_type, "value", storage_type)
+    return str(storage_type_value or "neo4j").strip().lower() == "rag"
+
+
 async def refresh_active_key(conversation_id: str) -> None:
     """刷新对话活跃 key 的 TTL。"""
     try:
@@ -287,6 +293,7 @@ async def check_fast_write_permission(
     *,
     role: str,
     should_memorize: bool,
+    storage_type: str = "neo4j",
     app_id: Optional[str] = None,
     require_app_gate: bool = False,
 ) -> bool:
@@ -295,7 +302,12 @@ async def check_fast_write_permission(
     workflow:should_memorize,role;
     api:role;
     mcp:无;
+
+    FastWritePipeline 只写 Neo4j，因此 RAG 记忆空间不派发快速写入。
     """
+    if _is_rag_storage(storage_type):
+        return False
+
     if role != "user" or not should_memorize:
         return False
 
@@ -312,6 +324,7 @@ async def safe_push_fast_write(
     *,
     role: str,
     should_memorize: bool,
+    storage_type: str = "neo4j",
     app_id: Optional[str] = None,
     require_app_gate: bool = False,
     end_user_id: str,
@@ -328,6 +341,7 @@ async def safe_push_fast_write(
         if not await check_fast_write_permission(
             role=role,
             should_memorize=should_memorize,
+            storage_type=storage_type,
             app_id=app_id,
             require_app_gate=require_app_gate,
         ):
@@ -382,10 +396,12 @@ async def dispatch_api_service_async(
     config_id: str,
     workspace_id: str,
     language: str = "zh",
+    storage_type: str = "neo4j",
+    user_rag_memory_id: str = "",
 ) -> List[str]:
-    """API Service 异步写入入口（仅写 memory_messages，无 conversation）。
+    """API Service 异步写入入口；RAG 直写知识库，Neo4j 进入任务流水线。
 
-    流程（对应设计文档 §3.5）：
+    Neo4j 流程（对应设计文档 §3.5）：
     1. 批量写入 memory_messages 表（conversation_id=NULL, source=service_api）
     2. 逐条对 user 消息派发 WritePipeline 任务，邻近 assistant 消息作为上下文
 
@@ -396,6 +412,20 @@ async def dispatch_api_service_async(
     Returns:
         派发的任务 ID 列表
     """
+    if _is_rag_storage(storage_type):
+        rag_messages = [
+            message for message in messages
+            if bool(message.get("should_memorize", True))
+            and str(message.get("content", "") or "").strip()
+        ]
+        if rag_messages:
+            await write_messages_to_rag(
+                messages=rag_messages,
+                end_user_id=end_user_id,
+                user_rag_memory_id=user_rag_memory_id,
+            )
+        return []
+
     with get_db_context() as db:
         repo = MemoryMessageRepository(db)
         written_mms = repo.write_batch(
@@ -452,6 +482,7 @@ async def dispatch_api_service_async(
         await safe_push_fast_write(
             role=str(msg.get("role", "user")),
             should_memorize=True,
+            storage_type=storage_type,
             require_app_gate=False,
             end_user_id=end_user_id,
             target_message=msg,
@@ -479,8 +510,10 @@ async def ingest_agent_messages(
     workspace_id: str = "",
     end_user_id: str = "",
     language: str = "zh",
+    storage_type: str = "neo4j",
+    user_rag_memory_id: str = "",
 ) -> bool:
-    """批量 Agent 消息摄入：一次事务写入 memory_messages + 一次滑动窗口派发。
+    """批量 Agent 消息摄入；RAG 直写知识库，Neo4j 进入消息/任务流水线。
 
     专用于同一回合的多条消息（典型场景：user + assistant 一起入队），确保：
     1. 一次 pg_advisory_xact_lock，seq 按 messages 顺序连续递增（消除并发派发的
@@ -498,6 +531,21 @@ async def ingest_agent_messages(
 
     if not await check_memory_enabled(app_id):
         return False
+
+    if _is_rag_storage(storage_type):
+        rag_messages = [
+            message for message in messages
+            if bool(getattr(message, "should_memorize", True))
+            and str(getattr(message, "content", "") or "").strip()
+        ]
+        if not rag_messages:
+            return False
+        await write_messages_to_rag(
+            messages=rag_messages,
+            end_user_id=end_user_id,
+            user_rag_memory_id=user_rag_memory_id,
+        )
+        return True
 
     # 构建 write_batch 输入 + 记录原始 role/should_memorize（用于后续 Fast Write）。
     # write_batch 内部会过滤空 content，此处用相同规则同步 role_and_flag 列表，
@@ -561,6 +609,7 @@ async def ingest_agent_messages(
             await safe_push_fast_write(
                 role=role,
                 should_memorize=should_memorize,
+                storage_type=storage_type,
                 app_id=app_id,
                 require_app_gate=True,
                 end_user_id=end_user_id,
@@ -602,14 +651,30 @@ async def ingest_workflow_messages(
     config_id: str,
     workspace_id: str,
     language: str = "zh",
+    storage_type: str = "neo4j",
+    user_rag_memory_id: str = "",
 ) -> None:
-    """Workflow 消息摄入：批量写入 memory_messages 表 + 触发滑动窗口派发。
+    """Workflow 消息摄入；RAG 直写知识库，Neo4j 进入消息/任务流水线。
 
     MemoryWriteNode 仅存在于对话流 workflow 中，执行前已由 create_or_get_conversation
     在 conversations 表创建真实会话，sys.conversation_id 始终有效（与 MemoryReadNode
     的假设一致）。pure_workflow（策略工作流）没有记忆存储节点、无会话，不会走到这里。
     因此直接走 conversation 通道，无需空值守卫或哨兵兜底。
     """
+    if _is_rag_storage(storage_type):
+        rag_messages = [
+            message for message in messages
+            if bool(message.get("should_memorize", True))
+            and str(message.get("content", "") or "").strip()
+        ]
+        if rag_messages:
+            await write_messages_to_rag(
+                messages=rag_messages,
+                end_user_id=end_user_id,
+                user_rag_memory_id=user_rag_memory_id,
+            )
+        return
+
     # 按 write_batch 的空内容过滤规则构造原始消息列表，保证与返回值一一对齐
     _persistable_inputs = [
         msg for msg in messages
@@ -638,6 +703,7 @@ async def ingest_workflow_messages(
             await safe_push_fast_write(
                 role=str(_raw_mm.get("role", "user")),
                 should_memorize=bool(_raw_mm.get("should_memorize", True)),
+                storage_type=storage_type,
                 require_app_gate=False,
                 end_user_id=end_user_id,
                 target_message=_written_mm,
@@ -1036,12 +1102,14 @@ async def dispatch_mcp_write(
     end_user_id: str,
     config_id: uuid.UUID,
     workspace_id: str,
+    storage_type: str = "neo4j",
+    user_rag_memory_id: str = "",
     dialog_at: str = "",
 ) -> str:
-    """MCP 写入入口。
+    """MCP 写入入口；RAG 直写知识库，Neo4j 进入任务流水线。
 
     MCP 每次仅写入单条 user message，不需要上下文窗口。
-    流程（对应设计文档 §3.5）：
+    Neo4j 流程（对应设计文档 §3.5）：
     1. 写入 memory_messages 表（conversation_id=NULL, source=mcp, end_user_id=X）
     2. 直接派发写入任务（context_before=[], context_after=[]）
 
@@ -1050,11 +1118,22 @@ async def dispatch_mcp_write(
         end_user_id: 终端用户 ID
         config_id: 记忆配置 ID
         workspace_id: 工作空间 ID
+        storage_type: 记忆空间存储类型
+        user_rag_memory_id: RAG 记忆知识库 ID
         dialog_at: 对话发生时间（ISO 8601）
 
     Returns:
         派发的任务 msg_id
     """
+    if _is_rag_storage(storage_type):
+        if str(message or "").strip():
+            await write_messages_to_rag(
+                messages=[{"role": "user", "content": message, "dialog_at": dialog_at}],
+                end_user_id=end_user_id,
+                user_rag_memory_id=user_rag_memory_id,
+            )
+        return ""
+
     with get_db_context() as db:
         repo = MemoryMessageRepository(db)
         written = repo.write_batch(
@@ -1094,6 +1173,7 @@ async def dispatch_mcp_write(
     await safe_push_fast_write(
         role="user",
         should_memorize=True,
+        storage_type="neo4j",
         require_app_gate=False,
         end_user_id=end_user_id,
         target_message=target_msg,

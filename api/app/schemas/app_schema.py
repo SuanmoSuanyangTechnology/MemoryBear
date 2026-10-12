@@ -391,6 +391,10 @@ class AppCreate(BaseModel):
 
     workflow_config: Optional[WorkflowConfigCreate] = None
 
+    # 可选：创建时绑定的本体（app 级绑定，与版本无关）；不传则展示时回落系统默认本体。
+    # 社区版无本体模块时忽略。
+    ontology_id: Optional[uuid.UUID] = Field(default=None, description="绑定的本体ID（可选）")
+
 
 class AppUpdate(BaseModel):
     name: Optional[str] = None
@@ -435,6 +439,19 @@ class AgentConfigUpdate(BaseModel):
 
 # ---------- Output Schemas ----------
 
+class AppOntologyInfo(BaseModel):
+    """应用当前生效本体（由企业版本体模块经 plugin 提供，社区版为 None）。"""
+
+    bound: bool = Field(description="是否有有效的自定义绑定；false 表示走系统默认本体兜底")
+    is_fallback_default: bool = Field(description="是否为系统默认本体兜底")
+    ontology_id: Optional[uuid.UUID] = Field(default=None, description="当前生效本体ID")
+    ontology_name: Optional[str] = Field(default=None, description="当前生效本体名称")
+    scene_type_id: Optional[uuid.UUID] = Field(default=None, description="本体关联场景ID")
+    scene_name: Optional[str] = Field(default=None, description="本体关联场景名称")
+    custom_field_labels: List[str] = Field(default_factory=list, description="场景自定义字段展示名列表")
+    emotion_count: int = Field(default=0, description="本体情绪策略（emotion_code）数量")
+
+
 class App(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -461,6 +478,7 @@ class App(BaseModel):
     shared_by: Optional[uuid.UUID] = None        # 分享者用户ID
     shared_by_name: Optional[str] = None         # 分享者名称
     shared_at: Optional[datetime.datetime] = None  # 分享时间
+    ontology: Optional[AppOntologyInfo] = None     # 当前生效本体（社区版为 None）
     created_at: datetime.datetime
     updated_at: datetime.datetime
 
@@ -662,6 +680,8 @@ class AppShare(BaseModel):
     source_app_is_active: Optional[bool] = None
     target_workspace_name: Optional[str] = None
     target_workspace_icon: Optional[str] = None
+    # 源应用当前生效本体（社区版为 None）
+    ontology: Optional[AppOntologyInfo] = None
 
     @classmethod
     def model_validate(cls, obj, **kwargs):
@@ -750,6 +770,9 @@ class DraftRunRequest(BaseModel):
     variables: Optional[Dict[str, Any]] = Field(default=None, description="自定义变量参数值")
     stream: bool = Field(default=False, description="是否流式返回")
     files: Optional[List[FileInput]] = Field(default_factory=list, description="附件列表（支持多文件）")
+    # 集群（multi_agent）对话能力：缺省 False = 旧行为；Agent/工作流试运行不读取这两个字段
+    thinking: bool = Field(default=False, description="是否启用深度思考（集群需 model_parameters.deep_thinking 同时开启）")
+    web_search: bool = Field(default=False, description="是否启用联网搜索（集群需 features.web_search.enabled 同时开启，仅主管生效）")
     trigger_payload: Optional[Dict[str, Any]] = Field(default=None, description="触发器 payload，webhook 试运行时传入")
     from_message_id: Optional[str] = Field(default=None, description="从指定分支消息继续聊天（多分支场景）：以该消息对应 execution 的输出作为历史上下文起点")
 

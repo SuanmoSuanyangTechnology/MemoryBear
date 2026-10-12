@@ -1,0 +1,960 @@
+"""宿主渠道 registry 适配 + 运行期解析入口（M3，spec §10/§11）。
+
+- 包内 SQL registry 基座 + 本库 ORM 注入：RegistrySQLSource 投影（ModelConfig/
+  ModelChannel 行 → 包契约快照；时间列 DateTime → unix ms 在边界换算）
+- 进程级共享 ChannelSnapshotCache（TTL 60s）：per-request registry 复用同一实例，
+  写路径（ChannelService）经 notify_channel_change 主动失效（本地 + 跨副本广播），
+  不依赖 TTL 兜底
+- 多副本失效广播（M8 §2.7）：写副本 publish `model:channel-invalidations`，各副本常驻
+  订阅（run_channel_invalidation_listener）→ 本地失效；无广播时他副本只能等 TTL 兜底。
+  广播是 best-effort（Redis 不可用只告警），订阅断连退避重连，二者都不阻塞写读主流程
+- sync/async 双读：管理面/worker/同步链路用 resolve_config_sync；异步链路用
+  resolve_config_async（GC#11：async 上下文禁止 sync session）
+- 宿主 tenant_id 在入口归一为 UUID（_normalize_tenant_id）：同一租户身份在宿主存在
+  str 形态（如 Redis 缓存命中的 workspace→tenant 查询），包内身份比较按 UUID 语义
+- 组合 config（provider=composite）走 resolve_composite_sync/async：config JSON `members[]`
+  → 成员 config 批量查（本租户/非组合；config 为可选增强，缺失时按声明合成快照；成员快照
+  model_config_id 统一归到组合 id——usage 归因口径 = 调用入口 config）
+  → 成员渠道匹配与展平编排在包内（resolve_composite_head），本层取首个可解密候选
+  及其后候选切片
+- 换渠道计划（spec §11.2）：resolve_config_plan_sync/async、resolve_composite_plan_sync/async
+  返回 ResolvedWithPlan(resolved, FailoverPlan)——与解析同路径同查询次数；plan 只含快照/
+  密文候选（candidates[0] 恒为实际首发渠道），cipher 由消费方注入
+- 密文解密收敛在 resolve_and_chain_from_pool / resolve_composite_head（cipher 注入）；本模块不落明文
+- 候选探测（管理面脱敏展示/渠道可用性/启用预检共用）：candidate_channels_sync/async
+  （单 config）与 candidate_channels_batch_sync（列表页，两次查询上限）；只匹配不解密，
+  组合可用性 = 成员候选并集非空
+- least-used（D14/§11.1）：同精确度同 priority 内按 usage_load 派生的窗口用量升序选路
+  （渠道行不落计数器）；开关/窗口/降级语义在 app.services.usage_load，关闭或聚合失败时
+  退化为 created_at asc
+
+错误契约：config 行不存在返回 None；存在但不可解析（未启用/无候选/解密失败等）
+抛 RedBearModelError 子类，由调用方按解析开关决定兜底或降级。
+"""
+from __future__ import annotations
+
+import asyncio
+import contextlib
+import json
+import logging
+import os
+import socket
+import uuid
+from collections.abc import Sequence
+from dataclasses import dataclass
+
+from redbear_model import (
+    AsyncSQLChannelRegistry,
+    ChannelSnapshot,
+    ChannelSnapshotCache,
+    CompositeMember,
+    CompositeMemberConfig,
+    FailoverCandidate,
+    FailoverPlan,
+    LoadBalanceStrategy,
+    ModelConfigSnapshot,
+    ModelProfile,
+    ModelProvider,
+    NoAvailableChannelError,
+    RegistrySQLSource,
+    ResolvedModelConfig,
+    SyncSQLChannelRegistry,
+    match_channel_candidates,
+    order_channel_candidates,
+    ordered_channel_candidates,
+    resolve_and_chain_from_pool,
+    resolve_composite_head,
+)
+from sqlalchemy import select, tuple_
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Session, joinedload
+
+from ..infrastructure.redis import get_async_client, get_sync_client
+from ..infrastructure.redis_cache import invalidate_workspace_model_options
+from ..models.models_model import ModelBase, ModelChannel, ModelConfig
+from ..utils.datetime_utils import to_timestamp_ms
+from .channel_service import cipher_from_env
+from .usage_load import channel_loads_async, channel_loads_sync
+
+_CHANNEL_CACHE_TTL_MS = 60_000
+_shared_cache = ChannelSnapshotCache(ttl_ms=_CHANNEL_CACHE_TTL_MS)
+
+# 多副本失效广播：写副本 publish、各副本订阅后本地失效（M8 §2.7）
+CHANNEL_INVALIDATION_CHANNEL = "model:channel-invalidations"
+_INSTANCE_ID = f"{socket.gethostname()}:{os.getpid()}"
+_RECONNECT_BASE_DELAY_S = 1.0
+_RECONNECT_MAX_DELAY_S = 30.0
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class ResolvedWithPlan:
+    """运行期解析结果 + 换渠道计划（plan.candidates[0] 恒为本次实际首发渠道）。"""
+
+    resolved: ResolvedModelConfig
+    plan: FailoverPlan
+
+
+def _normalize_tenant_id(tenant_id: uuid.UUID | str | None) -> uuid.UUID | None:
+    """宿主租户身份过包边界归一为 UUID。
+
+    宿主多处（如 Redis 缓存的 workspace→tenant 查询）会把同一身份以 str 传递，
+    而包内身份比较是 UUID 直接比较：str 会被误判为跨租户（ModelAccessDeniedError）
+    或令组合成员全部不可见。归一后语义不变，非法输入按编程错误快速失败。
+    """
+    if tenant_id is None or isinstance(tenant_id, uuid.UUID):
+        return tenant_id
+    return uuid.UUID(str(tenant_id))
+
+
+def _created_ms(value) -> int:
+    """裸 datetime 按 UTC 解释（DB 存裸 UTC）；快照契约非可选，缺省 0。"""
+
+    ms = to_timestamp_ms(value)
+    return ms if ms is not None else 0
+
+
+def _profile_members(row: ModelConfig) -> tuple[CompositeMember, ...]:
+    """组合声明装配（provider=composite 才解析 members[]，其余恒空）。"""
+    try:
+        provider = ModelProvider(row.provider)
+    except ValueError:
+        return ()
+    if provider is not ModelProvider.COMPOSITE:
+        return ()
+    return tuple(
+        CompositeMember(provider=member_provider, model_name=model_name)
+        for member_provider, model_name in parse_members(row.config)
+    )
+
+
+def to_profile(row: ModelConfig) -> ModelProfile:
+    """ORM 行 → 契约 profile（读侧唯一构造点，spec §13.5）。
+
+    两态（`from_stored_fields`）：三新列非空 = 新口径行只读新列；为空回退旧列换算
+    （回滚窗口旧镜像写入行）；chat→llm 归一、未知枚举跳过在包内收敛。
+    """
+    return ModelProfile.from_stored_fields(
+        model_id=row.id,
+        tenant_id=row.tenant_id,
+        type=row.type,
+        provider=row.provider,
+        input_modalities=getattr(row, "input_modalities", None) or (),
+        output_modalities=getattr(row, "output_modalities", None) or (),
+        features=getattr(row, "features", None) or (),
+        capabilities=row.capability or (),
+        is_omni=bool(row.is_omni),
+        members=_profile_members(row),
+    )
+
+
+#: 运行期不外发的 config JSON 簿记键：``model_configs.config`` 的运行期语义 = provider
+#: 透传参数（openai 兼容族并进构造器 kwargs，dashscope 分桶 extra_body），企业侧
+#: SpeedBear 导入（enterprise_ext.model.build_model_row）在同一 JSON 里追加上游登记
+#: 簿记——簿记键透传会在 provider 构造/SDK create() 处以 unexpected keyword 崩掉
+#: （2026-10-08 回归：系统公共 speedbear 模型 invoke 全挂）。在 ORM→快照单一构造点
+#: 剥除，LLM/embedding/rerank/媒体全族覆盖；写入侧保留（查重等管理逻辑仍读原行）。
+_CONFIG_BOOKKEEPING_KEYS = frozenset({"upstream_model_id", "provider_type"})
+
+
+def _config_snapshot(row: ModelConfig) -> ModelConfigSnapshot:
+    return ModelConfigSnapshot(
+        model_config_id=row.id,
+        tenant_id=row.tenant_id,
+        provider=ModelProvider(row.provider),
+        name=row.name,
+        is_active=row.is_active,
+        is_public=row.is_public,
+        is_deprecated=bool(row.model_base and row.model_base.is_deprecated),
+        load_balance_strategy=LoadBalanceStrategy(
+            row.load_balance_strategy or LoadBalanceStrategy.NONE
+        ),
+        profile=to_profile(row),
+        config={
+            key: value
+            for key, value in dict(row.config or {}).items()
+            if key not in _CONFIG_BOOKKEEPING_KEYS
+        },
+    )
+
+
+def _channel_snapshot(row: ModelChannel) -> ChannelSnapshot:
+    return ChannelSnapshot(
+        id=row.id,
+        tenant_id=row.tenant_id,
+        provider=row.provider,
+        model_names=tuple(row.model_names or []),
+        api_base=row.api_base,
+        credential_encrypted=row.credential_encrypted,
+        credential_sha256=row.credential_sha256,
+        credential_masked=row.credential_masked,
+        is_active=row.is_active,
+        priority=row.priority,
+        cooldown_until_ms=row.cooldown_until_ms,
+        source=row.source,
+        extra=dict(row.extra or {}),
+        created_at_ms=_created_ms(row.created_at),
+        updated_at_ms=_created_ms(row.updated_at),
+    )
+
+
+SOURCE = RegistrySQLSource(
+    config_mapper=ModelConfig,
+    channel_mapper=ModelChannel,
+    config_snapshot=_config_snapshot,
+    channel_snapshot=_channel_snapshot,
+    config_load_options=(joinedload(ModelConfig.model_base),),
+)
+
+
+def _resolve_plan_sync(
+    registry: SyncSQLChannelRegistry,
+    config_id: uuid.UUID,
+    tenant_id: uuid.UUID | None,
+    config_row: ModelConfig | None = None,
+) -> ResolvedWithPlan | None:
+    # config_row：调用方已加载 ORM 行时直接投影，省一次 SELECT（两者语义一致）
+    config = SOURCE.config_snapshot(config_row) if config_row is not None else registry.get_config(config_id)
+    if config is None:
+        return None
+    effective_tenant = _normalize_tenant_id(tenant_id) or config.tenant_id
+    channels = registry.get_active_channels(effective_tenant, provider=config.provider)
+    loads = channel_loads_sync(registry.db, effective_tenant)
+    resolved, chain = resolve_and_chain_from_pool(
+        config,
+        channels,
+        tenant_id=effective_tenant,
+        cipher=cipher_from_env(),
+        loads=loads,
+    )
+    plan = FailoverPlan(
+        entry=config,
+        tenant_id=effective_tenant,
+        candidates=tuple(
+            FailoverCandidate(config=config, channel=channel) for channel in chain
+        ),
+    )
+    return ResolvedWithPlan(resolved=resolved, plan=plan)
+
+
+async def _resolve_plan_async(
+    registry: AsyncSQLChannelRegistry,
+    config_id: uuid.UUID,
+    tenant_id: uuid.UUID | None,
+    config_row: ModelConfig | None = None,
+) -> ResolvedWithPlan | None:
+    """异步镜像（GC#11）：AsyncSQLChannelRegistry 的两个读方法均为协程，必须 await。"""
+    config = (
+        SOURCE.config_snapshot(config_row)
+        if config_row is not None
+        else await registry.get_config(config_id)
+    )
+    if config is None:
+        return None
+    effective_tenant = _normalize_tenant_id(tenant_id) or config.tenant_id
+    channels = await registry.get_active_channels(effective_tenant, provider=config.provider)
+    loads = await channel_loads_async(registry.db, effective_tenant)
+    resolved, chain = resolve_and_chain_from_pool(
+        config,
+        channels,
+        tenant_id=effective_tenant,
+        cipher=cipher_from_env(),
+        loads=loads,
+    )
+    plan = FailoverPlan(
+        entry=config,
+        tenant_id=effective_tenant,
+        candidates=tuple(
+            FailoverCandidate(config=config, channel=channel) for channel in chain
+        ),
+    )
+    return ResolvedWithPlan(resolved=resolved, plan=plan)
+
+
+def resolve_config_sync(
+    db: Session,
+    config_id: uuid.UUID,
+    tenant_id: uuid.UUID | None = None,
+    config_row: ModelConfig | None = None,
+) -> ResolvedModelConfig | None:
+    """同步解析（管理面/worker/同步链路）：快照池命中即不查库。
+
+    config_row 非空时直接投影该行（调用方已持有 ORM 实例，省一次 SELECT）。
+    """
+    outcome = _resolve_plan_sync(
+        SyncSQLChannelRegistry(db, SOURCE, cache=_shared_cache),
+        config_id,
+        tenant_id,
+        config_row,
+    )
+    return None if outcome is None else outcome.resolved
+
+
+async def resolve_config_async(
+    db: AsyncSession,
+    config_id: uuid.UUID,
+    tenant_id: uuid.UUID | None = None,
+    config_row: ModelConfig | None = None,
+) -> ResolvedModelConfig | None:
+    """异步解析（运行期 async 链路）；config_row 语义同 sync 版。"""
+    outcome = await _resolve_plan_async(
+        AsyncSQLChannelRegistry(db, SOURCE, cache=_shared_cache),
+        config_id,
+        tenant_id,
+        config_row,
+    )
+    return None if outcome is None else outcome.resolved
+
+
+def resolve_config_plan_sync(
+    db: Session,
+    config_id: uuid.UUID,
+    tenant_id: uuid.UUID | None = None,
+    config_row: ModelConfig | None = None,
+) -> ResolvedWithPlan | None:
+    """同步解析 + 换渠道计划（spec §11.2）；与 resolve_config_sync 同路径同查询次数。"""
+    return _resolve_plan_sync(
+        SyncSQLChannelRegistry(db, SOURCE, cache=_shared_cache),
+        config_id,
+        tenant_id,
+        config_row,
+    )
+
+
+async def resolve_config_plan_async(
+    db: AsyncSession,
+    config_id: uuid.UUID,
+    tenant_id: uuid.UUID | None = None,
+    config_row: ModelConfig | None = None,
+) -> ResolvedWithPlan | None:
+    """异步态解析 + 换渠道计划（GC#11：async 链路禁止 sync session）。"""
+    return await _resolve_plan_async(
+        AsyncSQLChannelRegistry(db, SOURCE, cache=_shared_cache),
+        config_id,
+        tenant_id,
+        config_row,
+    )
+
+
+def invalidate_channel_cache(
+    tenant_id: uuid.UUID | None = None,
+    provider: str | None = None,
+) -> None:
+    """本地失效渠道快照缓存（同租户全量键一并失效，见包内缓存语义）。
+
+    订阅端与回滚补偿路径用本函数；写路径用 ``notify_channel_change``（本地 + 广播）。
+    """
+    _shared_cache.invalidate(tenant_id, provider)
+    # workspace 模型候选按渠道可用性过滤，渠道态变更须同步失效（tenant_id 为空时 no-op）
+    invalidate_workspace_model_options((tenant_id,))
+
+
+def notify_channel_change(
+    tenant_id: uuid.UUID | None = None,
+    provider: str | None = None,
+) -> None:
+    """写路径入口：本地失效 + 跨副本失效广播。
+
+    先本地后广播：广播是 best-effort，Redis 不可用时本副本已生效，他副本退回 TTL 兜底。
+    """
+    invalidate_channel_cache(tenant_id, provider)
+    broadcast_channel_invalidation(tenant_id, provider)
+
+
+def broadcast_channel_invalidation(
+    tenant_id: uuid.UUID | None = None,
+    provider: str | None = None,
+) -> None:
+    """向其他副本广播渠道失效；广播失败只告警，不影响写路径与本地失效。"""
+    payload = json.dumps(
+        {
+            "origin": _INSTANCE_ID,
+            "tenant_id": str(tenant_id) if tenant_id is not None else None,
+            "provider": provider,
+        },
+        separators=(",", ":"),
+    )
+    try:
+        get_sync_client().publish(CHANNEL_INVALIDATION_CHANNEL, payload)
+    except Exception:
+        logger.warning(
+            "渠道失效广播失败（本地已失效，他副本退回 TTL 兜底）: tenant=%s provider=%s",
+            tenant_id,
+            provider,
+            exc_info=True,
+        )
+
+
+def apply_channel_invalidation(payload: str | bytes) -> bool:
+    """订阅侧：广播载荷 → 本地失效；返回是否实际失效。
+
+    畸形/未知/自环载荷告警后忽略（前向兼容，单条坏消息不炸订阅循环）。tenant_id 必须
+    存在且合法：广播由写路径发出，恒有租户；缺租户的载荷若当全量失效处理，会把一次
+    脏消息放大成整进程缓存清空。
+    """
+    if isinstance(payload, bytes):
+        payload = payload.decode("utf-8", errors="replace")
+    try:
+        parsed = json.loads(payload)
+    except (TypeError, ValueError):
+        logger.warning("渠道失效广播载荷非 JSON，已忽略: %r", payload)
+        return False
+    if not isinstance(parsed, dict):
+        logger.warning("渠道失效广播载荷非对象，已忽略: %r", payload)
+        return False
+    if parsed.get("origin") == _INSTANCE_ID:
+        return False  # 自身广播：写路径已本地失效（防自环）
+    try:
+        tenant_id = uuid.UUID(str(parsed["tenant_id"]))
+    except (KeyError, TypeError, ValueError, AttributeError):
+        logger.warning("渠道失效广播 tenant_id 缺失或非法，已忽略: %r", payload)
+        return False
+    provider = parsed.get("provider")
+    if provider is not None and not isinstance(provider, str):
+        logger.warning("渠道失效广播 provider 非法，已忽略: %r", payload)
+        return False
+    invalidate_channel_cache(tenant_id, provider)
+    logger.info(
+        "已应用他副本渠道失效: tenant=%s provider=%s origin=%s",
+        tenant_id,
+        provider,
+        parsed.get("origin"),
+    )
+    return True
+
+
+async def run_channel_invalidation_listener() -> None:
+    """常驻订阅他副本的渠道失效广播；断订阅退避重连，不阻塞主流程。
+
+    本地失效经 ``asyncio.to_thread``：``invalidate_channel_cache`` 内含同步 Redis 删除，
+    事件循环内直调会阻塞（GC#11）。取消（进程收尾）即退出，重连退避不吞取消。
+    """
+    delay = _RECONNECT_BASE_DELAY_S
+    while True:
+        pubsub = None
+        try:
+            client = await get_async_client()
+            pubsub = client.pubsub(ignore_subscribe_messages=True)
+            await pubsub.subscribe(CHANNEL_INVALIDATION_CHANNEL)
+            delay = _RECONNECT_BASE_DELAY_S
+            logger.info(
+                "渠道失效订阅就绪: channel=%s instance=%s",
+                CHANNEL_INVALIDATION_CHANNEL,
+                _INSTANCE_ID,
+            )
+            async for message in pubsub.listen():
+                data = message.get("data") if isinstance(message, dict) else None
+                if data is None:
+                    continue
+                try:
+                    await asyncio.to_thread(apply_channel_invalidation, data)
+                except Exception:
+                    logger.warning("应用渠道失效广播失败: %r", data, exc_info=True)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.warning("渠道失效订阅中断，%.1fs 后重连: %s", delay, exc)
+            await asyncio.sleep(delay)
+            delay = min(delay * 2, _RECONNECT_MAX_DELAY_S)
+        finally:
+            if pubsub is not None:
+                with contextlib.suppress(Exception):
+                    await pubsub.aclose()
+
+
+def parse_members(config: dict | None) -> list[tuple[str, str]]:
+    """组合 config JSON `members[]` → [(provider, model_name)]，脏项跳过告警，去重保序。"""
+    raw = (config or {}).get("members")
+    if not isinstance(raw, list):
+        return []
+    parsed: list[tuple[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for item in raw:
+        if not isinstance(item, dict):
+            logger.warning("composite member entry is not an object: %r", item)
+            continue
+        provider = item.get("provider")
+        model_name = item.get("model_name")
+        if not isinstance(provider, str) or not provider or not isinstance(model_name, str) or not model_name:
+            logger.warning("composite member entry missing provider/model_name: %r", item)
+            continue
+        pair = (provider, model_name)
+        if pair in seen:
+            continue
+        seen.add(pair)
+        parsed.append(pair)
+    return parsed
+
+
+def _member_pairs(config: ModelConfigSnapshot) -> list[tuple[str, str]]:
+    """组合成员声明 pairs：读自 profile.members（单一来源，与展示/探测/运行期同口径）。"""
+    return [(member.provider, member.model_name) for member in config.profile.members]
+
+
+@dataclass(frozen=True)
+class _MemberIndex:
+    """成员解析索引（D15④）：config 行 + 已弃用 pair 集合，供 `_composite_members` 单点剔除。"""
+
+    rows: dict[tuple[str, str], ModelConfig]
+    deprecated_pairs: frozenset[tuple[str, str]]
+
+    def is_deprecated(self, pair: tuple[str, str]) -> bool:
+        """有同租户 config 的按该行 base 判（base 缺失 = 自定义模型，无弃用标记）；
+        无 config 的合成成员按 (provider, name) 查 model_bases。"""
+        row = self.rows.get(pair)
+        if row is not None:
+            base = getattr(row, "model_base", None)
+            return base is not None and base.is_deprecated
+        return pair in self.deprecated_pairs
+
+
+def _deprecated_base_pairs_sync(
+    db: Session, pairs: Sequence[tuple[str, str]]
+) -> frozenset[tuple[str, str]]:
+    """声明 pair 中已弃用/下线的 model_bases（合成成员唯一权威来源；单查询）。"""
+    stmt = select(ModelBase.provider, ModelBase.name).where(
+        ModelBase.is_deprecated.is_(True),
+        tuple_(ModelBase.provider, ModelBase.name).in_(list(pairs)),
+    )
+    return frozenset((row[0], row[1]) for row in db.execute(stmt).all())
+
+
+async def _deprecated_base_pairs_async(
+    db: AsyncSession, pairs: Sequence[tuple[str, str]]
+) -> frozenset[tuple[str, str]]:
+    stmt = select(ModelBase.provider, ModelBase.name).where(
+        ModelBase.is_deprecated.is_(True),
+        tuple_(ModelBase.provider, ModelBase.name).in_(list(pairs)),
+    )
+    result = await db.execute(stmt)
+    return frozenset((row[0], row[1]) for row in result.all())
+
+
+def _member_configs_sync(
+    db: Session,
+    tenant_id: uuid.UUID,
+    pairs: Sequence[tuple[str, str]],
+) -> _MemberIndex:
+    """成员解析索引批量查询（两查询：config 行 + 弃用 pair）：本租户 + 非组合。
+
+    不看 `config.is_active`（成员可用性由渠道与凭据活跃决定）；同 (provider, name)
+    多行时优先启用、较新者，与写路径校验同口径。弃用成员剔除见 `_composite_members`。
+    """
+    stmt = (
+        select(ModelConfig)
+        .options(joinedload(ModelConfig.model_base))
+        .where(
+            ModelConfig.tenant_id == tenant_id,
+            ModelConfig.provider != ModelProvider.COMPOSITE,
+            tuple_(ModelConfig.provider, ModelConfig.name).in_(list(pairs)),
+        )
+        .order_by(
+            ModelConfig.is_active.desc(),
+            ModelConfig.created_at.desc().nullslast(),
+        )
+    )
+    index: dict[tuple[str, str], ModelConfig] = {}
+    for row in db.execute(stmt).scalars().all():
+        index.setdefault((row.provider, row.name), row)
+    return _MemberIndex(
+        rows=index, deprecated_pairs=_deprecated_base_pairs_sync(db, pairs)
+    )
+
+
+async def _member_configs_async(
+    db: AsyncSession,
+    tenant_id: uuid.UUID,
+    pairs: Sequence[tuple[str, str]],
+) -> _MemberIndex:
+    stmt = (
+        select(ModelConfig)
+        .options(joinedload(ModelConfig.model_base))
+        .where(
+            ModelConfig.tenant_id == tenant_id,
+            ModelConfig.provider != ModelProvider.COMPOSITE,
+            tuple_(ModelConfig.provider, ModelConfig.name).in_(list(pairs)),
+        )
+        .order_by(
+            ModelConfig.is_active.desc(),
+            ModelConfig.created_at.desc().nullslast(),
+        )
+    )
+    result = await db.execute(stmt)
+    index: dict[tuple[str, str], ModelConfig] = {}
+    for row in result.scalars().all():
+        index.setdefault((row.provider, row.name), row)
+    return _MemberIndex(
+        rows=index, deprecated_pairs=await _deprecated_base_pairs_async(db, pairs)
+    )
+
+
+def _synthesized_member(
+    composite: ModelConfigSnapshot,
+    tenant_id: uuid.UUID,
+    pair: tuple[str, str],
+) -> ModelConfigSnapshot | None:
+    """无同租户 config 的成员声明 → 按声明合成快照（config 为可选增强）。
+
+    组合 name 是别名而非真实模型名，成员声明的 (provider, model_name) 即真实调用名
+    （回填来源：association 绑定 key 行的 provider/model_name）。合成口径：类型随组合、
+    能力/参数留空（不虚报，人工补 config 后自然增强）、usage 归因到组合 id；
+    provider 非枚举 / 嵌套组合 → 跳过告警。
+    """
+    try:
+        provider = ModelProvider(pair[0])
+    except ValueError:
+        logger.warning("composite member provider unknown, skipped: %s/%s", pair[0], pair[1])
+        return None
+    if provider is ModelProvider.COMPOSITE:
+        logger.warning("nested composite member skipped: %s/%s", pair[0], pair[1])
+        return None
+    return ModelConfigSnapshot(
+        model_config_id=composite.model_config_id,
+        tenant_id=tenant_id,
+        provider=provider,
+        name=pair[1],
+        is_active=True,
+        is_public=False,
+        profile=ModelProfile.from_legacy_fields(
+            model_id=composite.model_config_id,
+            tenant_id=tenant_id,
+            type=composite.profile.type,
+            provider=provider,
+        ),
+    )
+
+
+def _composite_members(
+    composite: ModelConfigSnapshot,
+    tenant_id: uuid.UUID,
+    index: _MemberIndex,
+    pairs: Sequence[tuple[str, str]],
+) -> list[CompositeMemberConfig]:
+    """成员声明 → CompositeMemberConfig（声明顺序）：有同租户 config 用其快照，缺失按声明合成。
+
+    弃用成员在解析期单点剔除（D15④，声明保留可逆）：config 行以 `model_base` 为准，
+    无 config 的合成成员按 (provider, name) 查 model_bases。成员快照的 model_config_id
+    统一归到组合 id（usage 归因口径 = 调用入口 config，spec §13.1
+    `config_id` 注释）：真实成员配置与合成成员一致，命中成员身份留在事件的
+    provider/model_name/channel_id 供应面快照里（§5.2）。
+    """
+    members: list[CompositeMemberConfig] = []
+    for pair in pairs:
+        if index.is_deprecated(pair):
+            logger.warning("composite member deprecated, skipped: %s/%s", pair[0], pair[1])
+            continue
+        row = index.rows.get(pair)
+        snapshot = SOURCE.config_snapshot(row) if row is not None else _synthesized_member(
+            composite, tenant_id, pair
+        )
+        if snapshot is None:
+            continue
+        if snapshot.model_config_id != composite.model_config_id:
+            snapshot = snapshot.model_copy(
+                update={
+                    "model_config_id": composite.model_config_id,
+                    "profile": snapshot.profile.model_copy(
+                        update={"model_id": composite.model_config_id}
+                    ),
+                }
+            )
+        members.append(CompositeMemberConfig(config=snapshot, model_name=pair[1]))
+    return members
+
+
+def _composite_unresolvable(composite: ModelConfigSnapshot, detail: str) -> NoAvailableChannelError:
+    return NoAvailableChannelError(
+        composite.model_config_id,
+        str(composite.provider),
+        composite.name,
+        detail,
+    )
+
+
+def resolve_composite_sync(
+    db: Session,
+    config_row: ModelConfig,
+    tenant_id: uuid.UUID | None = None,
+) -> ResolvedModelConfig:
+    """组合 config 解析（sync）：members → 成员 config 批量查/按声明合成 → 全量渠道池 → 包内编排取首候选。"""
+    return resolve_composite_plan_sync(db, config_row, tenant_id).resolved
+
+
+async def resolve_composite_async(
+    db: AsyncSession,
+    config_row: ModelConfig,
+    tenant_id: uuid.UUID | None = None,
+) -> ResolvedModelConfig:
+    """组合 config 解析（async，GC#11：异步链路禁止 sync session）。"""
+    return (await resolve_composite_plan_async(db, config_row, tenant_id)).resolved
+
+
+def resolve_composite_plan_sync(
+    db: Session,
+    config_row: ModelConfig,
+    tenant_id: uuid.UUID | None = None,
+) -> ResolvedWithPlan:
+    """组合解析 + 换渠道计划（sync）：取首个可解密候选，计划链自该位切片。"""
+    effective_tenant = _normalize_tenant_id(tenant_id) or config_row.tenant_id
+    composite = SOURCE.config_snapshot(config_row)
+    pairs = _member_pairs(composite)
+    if not pairs:
+        raise _composite_unresolvable(composite, "composite config declares no members")
+    members = _composite_members(
+        composite, effective_tenant, _member_configs_sync(db, effective_tenant, pairs), pairs
+    )
+    if not members:
+        raise _composite_unresolvable(
+            composite, "composite members unresolved (deprecated/nested/invalid provider)"
+        )
+    channels = SyncSQLChannelRegistry(db, SOURCE, cache=_shared_cache).get_active_channels(
+        effective_tenant, provider=None
+    )
+    resolved, chain = resolve_composite_head(
+        composite,
+        members,
+        channels,
+        tenant_id=effective_tenant,
+        cipher=cipher_from_env(),
+        loads=channel_loads_sync(db, effective_tenant),
+    )
+    plan = FailoverPlan(
+        entry=composite,
+        tenant_id=effective_tenant,
+        candidates=tuple(
+            FailoverCandidate(
+                config=candidate.member,
+                channel=candidate.channel,
+                model_name=candidate.model_name,
+            )
+            for candidate in chain
+        ),
+    )
+    return ResolvedWithPlan(resolved=resolved, plan=plan)
+
+
+async def resolve_composite_plan_async(
+    db: AsyncSession,
+    config_row: ModelConfig,
+    tenant_id: uuid.UUID | None = None,
+) -> ResolvedWithPlan:
+    """组合解析 + 换渠道计划（async，GC#11：异步链路禁止 sync session）。"""
+    effective_tenant = _normalize_tenant_id(tenant_id) or config_row.tenant_id
+    composite = SOURCE.config_snapshot(config_row)
+    pairs = _member_pairs(composite)
+    if not pairs:
+        raise _composite_unresolvable(composite, "composite config declares no members")
+    members = _composite_members(
+        composite, effective_tenant, await _member_configs_async(db, effective_tenant, pairs), pairs
+    )
+    if not members:
+        raise _composite_unresolvable(
+            composite, "composite members unresolved (deprecated/nested/invalid provider)"
+        )
+    channels = (
+        await AsyncSQLChannelRegistry(db, SOURCE, cache=_shared_cache).get_active_channels(
+            effective_tenant, provider=None
+        )
+    )
+    resolved, chain = resolve_composite_head(
+        composite,
+        members,
+        channels,
+        tenant_id=effective_tenant,
+        cipher=cipher_from_env(),
+        loads=await channel_loads_async(db, effective_tenant),
+    )
+    plan = FailoverPlan(
+        entry=composite,
+        tenant_id=effective_tenant,
+        candidates=tuple(
+            FailoverCandidate(
+                config=candidate.member,
+                channel=candidate.channel,
+                model_name=candidate.model_name,
+            )
+            for candidate in chain
+        ),
+    )
+    return ResolvedWithPlan(resolved=resolved, plan=plan)
+
+
+def _single_candidate_chain(
+    config: ModelConfigSnapshot,
+    pool: Sequence[ChannelSnapshot],
+    loads: dict[uuid.UUID, int] | None = None,
+) -> list[ChannelSnapshot]:
+    """普通模型候选链（锚点名 = config.name）；speedbear 公共模型走 §10.1.4 platform 匹配。
+
+    探测路径：validate_access=False（inactive/跨租户不在此报错，空链自解释）。
+    """
+    return ordered_channel_candidates(
+        config,
+        pool,
+        tenant_id=config.tenant_id,
+        loads=loads,
+        validate_access=False,
+    )
+
+
+def _composite_candidate_chain(
+    composite: ModelConfigSnapshot,
+    tenant_id: uuid.UUID,
+    index: _MemberIndex,
+    pairs: Sequence[tuple[str, str]],
+    pool: Sequence[ChannelSnapshot],
+    loads: dict[uuid.UUID, int] | None = None,
+) -> list[ChannelSnapshot]:
+    """组合候选链：成员声明 × 成员内有序渠道链展平，按渠道 id 去重（展示/探测口径）。
+
+    成员集合与运行期一致（弃用成员已剔除，D15④），故可用性探测/详情候选与轮换同源。
+    """
+    chain: list[ChannelSnapshot] = []
+    seen: set[uuid.UUID] = set()
+    for member in _composite_members(composite, tenant_id, index, pairs):
+        candidates = match_channel_candidates(member.config, pool, model_name=member.model_name)
+        for channel in order_channel_candidates(
+            candidates, model_name=member.model_name, loads=loads
+        ):
+            if channel.id in seen:
+                continue
+            seen.add(channel.id)
+            chain.append(channel)
+    return chain
+
+
+def candidate_channels_sync(
+    db: Session,
+    config_row: ModelConfig,
+    tenant_id: uuid.UUID | None = None,
+) -> list[ChannelSnapshot]:
+    """单 config 渠道候选探测（脱敏展示 / 可用性 / 启用预检三处共用；不解密、不落库）。
+
+    普通模型 = provider 活跃池 × 覆盖匹配（provider 级 [] 记公共备援）；组合 = 成员声明
+    分别匹配后展平。空列表 = 运行期不可解析（组合成员全部不可用同理）。
+    """
+    effective_tenant = _normalize_tenant_id(tenant_id) or config_row.tenant_id
+    config = SOURCE.config_snapshot(config_row)
+    registry = SyncSQLChannelRegistry(db, SOURCE, cache=_shared_cache)
+    loads = channel_loads_sync(db, effective_tenant)
+    if config.provider is ModelProvider.COMPOSITE:
+        pairs = _member_pairs(config)
+        if not pairs:
+            return []
+        pool = registry.get_active_channels(effective_tenant, provider=None)
+        index = _member_configs_sync(db, effective_tenant, pairs)
+        return _composite_candidate_chain(config, effective_tenant, index, pairs, pool, loads)
+    pool = registry.get_active_channels(effective_tenant, provider=config.provider)
+    return _single_candidate_chain(config, pool, loads)
+
+
+async def candidate_channels_async(
+    db: AsyncSession,
+    config_row: ModelConfig,
+    tenant_id: uuid.UUID | None = None,
+) -> list[ChannelSnapshot]:
+    """异步态候选探测（GC#11：async 上下文禁止 sync session）。"""
+    effective_tenant = _normalize_tenant_id(tenant_id) or config_row.tenant_id
+    config = SOURCE.config_snapshot(config_row)
+    registry = AsyncSQLChannelRegistry(db, SOURCE, cache=_shared_cache)
+    loads = await channel_loads_async(db, effective_tenant)
+    if config.provider is ModelProvider.COMPOSITE:
+        pairs = _member_pairs(config)
+        if not pairs:
+            return []
+        pool = await registry.get_active_channels(effective_tenant, provider=None)
+        index = await _member_configs_async(db, effective_tenant, pairs)
+        return _composite_candidate_chain(config, effective_tenant, index, pairs, pool, loads)
+    pool = await registry.get_active_channels(effective_tenant, provider=config.provider)
+    return _single_candidate_chain(config, pool, loads)
+
+
+def candidate_channels_batch_sync(
+    db: Session,
+    config_rows: Sequence[ModelConfig],
+    tenant_id: uuid.UUID,
+) -> dict[uuid.UUID, list[ChannelSnapshot]]:
+    """批量候选探测（列表页专用）：固定上限三次查询（全量活跃池 + 成员 config/弃用 pair）。
+
+    普通模型按 provider 在内存匹配（池含全部 provider），组合复用同一成员索引；
+    租户语义 = 调用方（effective_tenant），与 resolve_* 的 tenant_id 参数一致。
+    """
+    if not config_rows:
+        return {}
+    tenant_id = _normalize_tenant_id(tenant_id)
+    pool = SyncSQLChannelRegistry(db, SOURCE, cache=_shared_cache).get_active_channels(
+        tenant_id, provider=None
+    )
+    loads = channel_loads_sync(db, tenant_id)
+    snapshots = {row.id: SOURCE.config_snapshot(row) for row in config_rows}
+    composite_pairs: set[tuple[str, str]] = set()
+    for config in snapshots.values():
+        if config.provider is ModelProvider.COMPOSITE:
+            composite_pairs.update(_member_pairs(config))
+    member_index = (
+        _member_configs_sync(db, tenant_id, sorted(composite_pairs))
+        if composite_pairs
+        else _MemberIndex(rows={}, deprecated_pairs=frozenset())
+    )
+
+    result: dict[uuid.UUID, list[ChannelSnapshot]] = {}
+    for row in config_rows:
+        config = snapshots[row.id]
+        if config.provider is ModelProvider.COMPOSITE:
+            pairs = _member_pairs(config)
+            result[row.id] = (
+                _composite_candidate_chain(config, tenant_id, member_index, pairs, pool, loads)
+                if pairs
+                else []
+            )
+        else:
+            result[row.id] = _single_candidate_chain(config, pool, loads)
+    return result
+
+
+def affected_config_ids(
+    db: Session,
+    *,
+    tenant_id: uuid.UUID,
+    provider: str,
+    model_names: Sequence[str] | None,
+) -> list[uuid.UUID]:
+    """渠道变更影响面反查（供写路径失效 Redis 运行时缓存）。
+
+    model_names=None → provider 级渠道，影响该租户该 provider 全部 config；
+    非 None → 点名渠道，仅 name ∈ model_names 的 config（保守超集）。
+    """
+    stmt = select(ModelConfig.id).where(
+        ModelConfig.tenant_id == tenant_id,
+        ModelConfig.provider == provider,
+    )
+    if model_names is not None:
+        stmt = stmt.where(ModelConfig.name.in_(list(model_names)))
+    return list(db.execute(stmt).scalars().all())
+
+
+__all__ = [
+    "CHANNEL_INVALIDATION_CHANNEL",
+    "SOURCE",
+    "ResolvedWithPlan",
+    "affected_config_ids",
+    "apply_channel_invalidation",
+    "broadcast_channel_invalidation",
+    "candidate_channels_async",
+    "candidate_channels_batch_sync",
+    "candidate_channels_sync",
+    "invalidate_channel_cache",
+    "notify_channel_change",
+    "parse_members",
+    "resolve_composite_async",
+    "resolve_composite_plan_async",
+    "resolve_composite_plan_sync",
+    "resolve_composite_sync",
+    "resolve_config_async",
+    "resolve_config_plan_async",
+    "resolve_config_plan_sync",
+    "resolve_config_sync",
+    "run_channel_invalidation_listener",
+    "to_profile",
+]

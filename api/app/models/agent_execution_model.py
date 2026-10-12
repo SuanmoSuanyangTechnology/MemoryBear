@@ -123,7 +123,7 @@ class AgentExecution(Base):
     orchestration_mode = Column(
         String(20),
         nullable=True,
-        comment="编排模式: supervisor（主管）| collaboration（协作）；非集群执行时为 NULL"
+        comment="编排模式: supervisor（主管三段式）| supervisor_loop（主管 ReAct 循环）| collaboration（协作）；非集群执行时为 NULL"
     )
 
     # 整体状态

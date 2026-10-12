@@ -116,24 +116,31 @@ class ModelRuntimeSnapshot:
     failover_plan: Any = field(default=None, repr=False)
 
     @classmethod
-    def from_api_key(
+    def from_model_view(
         cls,
-        api_key: Any,
+        view: Any,
         model_type: str | None = None,
     ) -> "ModelRuntimeSnapshot":
+        """非解密运行时视图（G4a invoke 接缝）→ 快照。
+
+        ``api_key`` 恒空串、不带换线计划与渠道：凭据解密与选路在模型服务；
+        消费方只应使用 ``model_config_id`` / ``tenant_id`` 等非密字段。
+        """
+        view_type = getattr(view, "model_type", None)
+        if model_type is None and view_type is not None:
+            model_type = getattr(view_type, "value", None) or str(view_type)
         return cls(
-            model_name=api_key.model_name,
-            provider=api_key.provider,
-            api_key=api_key.api_key,
-            api_base=api_key.api_base,
-            input_modalities=tuple(getattr(api_key, "input_modalities", None) or ()),
-            output_modalities=tuple(getattr(api_key, "output_modalities", None) or ()),
-            features=tuple(getattr(api_key, "features", None) or ()),
-            model_type=model_type if model_type is not None else getattr(api_key, "model_type", None),
-            tenant_id=getattr(api_key, "tenant_id", None),
-            model_config_id=getattr(api_key, "model_config_id", None),
-            channel_id=getattr(api_key, "channel_id", None),
-            failover_plan=getattr(api_key, "failover_plan", None),
+            model_name=view.model_name,
+            provider=view.provider,
+            api_key="",
+            api_base=None,
+            input_modalities=tuple(getattr(view, "input_modalities", None) or ()),
+            output_modalities=tuple(getattr(view, "output_modalities", None) or ()),
+            features=tuple(getattr(view, "features", None) or ()),
+            model_type=model_type,
+            tenant_id=getattr(view, "tenant_id", None),
+            model_config_id=getattr(view, "model_config_id", None),
+            channel_id=None,
         )
 
 

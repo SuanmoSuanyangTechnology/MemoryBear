@@ -9,15 +9,16 @@
  * Allows adding or editing sub-agents in multi-agent cluster configuration
  */
 
-import { forwardRef, useImperativeHandle, useState, type Key } from 'react';
-import { Form, Select, Input } from 'antd';
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState, type Key } from 'react';
+import { Form, Select, Input, InputNumber } from 'antd';
 import type { DefaultOptionType } from 'antd/es/select'
 import { useTranslation } from 'react-i18next';
 
 import type { SubAgentModalRef, SubAgentItem } from '../types'
 import RbModal from '@/components/RbModal'
 import CustomSelect from '@/components/CustomSelect';
-import { getApplicationListUrl } from '@/api/application';
+import { getApplicationListUrl, getReleaseList } from '@/api/application';
+import type { Release } from '@/views/ApplicationConfig/types/release'
 
 const FormItem = Form.Item;
 
@@ -37,40 +38,116 @@ const SubAgentModal = forwardRef<SubAgentModalRef, SubAgentModalProps>(({
 }, ref) => {
   const { t } = useTranslation();
   const [visible, setVisible] = useState(false);
-  const [form] = Form.useForm();
+  const [form] = Form.useForm<SubAgentItem>();
   const [loading, setLoading] = useState(false)
   const [editVo, setEditVo] = useState<SubAgentItem>()
-  const values = Form.useWatch([], form)
+  const appId = Form.useWatch('agent_id', form)
+  const releasePolicy = Form.useWatch('release_policy', form) ?? 'current'
+  const [referencedReleases, setReferencedReleases] = useState<Release[]>([])
+  const [referencedReleasesLoading, setReferencedReleasesLoading] = useState(false)
+  const releaseRequestRef = useRef(0)
+
+  useEffect(() => {
+    const requestId = ++releaseRequestRef.current
+
+    if (!appId) {
+      setReferencedReleases([])
+      setReferencedReleasesLoading(false)
+      return
+    }
+
+    setReferencedReleases([])
+    setReferencedReleasesLoading(true)
+    getReleaseList(appId)
+      .then(response => {
+        if (requestId !== releaseRequestRef.current) return
+
+        const releaseList = Array.isArray(response)
+          ? response
+          : (response as { items?: Release[] } | undefined)?.items ?? []
+        setReferencedReleases(releaseList)
+
+        const selectedReleaseId = form.getFieldValue('release_id')
+        if (
+          form.getFieldValue('release_policy') === 'pinned'
+          && selectedReleaseId
+          && !releaseList.some(item => item.id === selectedReleaseId)
+        ) {
+          form.setFieldValue('release_id', undefined)
+        }
+      })
+      .catch(() => {
+        if (requestId === releaseRequestRef.current) {
+          setReferencedReleases([])
+        }
+      })
+      .finally(() => {
+        if (requestId === releaseRequestRef.current) {
+          setReferencedReleasesLoading(false)
+        }
+      })
+
+    return () => {
+      if (requestId === releaseRequestRef.current) {
+        releaseRequestRef.current += 1
+      }
+    }
+  }, [appId, form])
 
   /** Close modal and reset form */
   const handleClose = () => {
+    releaseRequestRef.current += 1
     setVisible(false);
     form.resetFields();
+    setEditVo(undefined)
+    setReferencedReleases([])
+    setReferencedReleasesLoading(false)
     setLoading(false)
   };
 
   /** Open modal with optional agent data */
   const handleOpen = (agent?: SubAgentItem) => {
-    setVisible(true);
-    form.setFieldsValue(agent)
+    form.setFieldsValue({
+      capabilities: [],
+      priority: 1,
+      release_policy: 'current',
+      release_id: null,
+      ...agent,
+    })
     setEditVo(agent)
+    setVisible(true);
   };
+
   /** Save sub-agent configuration */
   const handleSave = () => {
-    form.validateFields().then(() => {
-      setLoading(false)
-      refresh({
-        ...values,
-        is_active: true
+    setLoading(true)
+    form.validateFields()
+      .then(formValues => {
+        const policy = formValues.release_policy ?? 'current'
+        refresh({
+          ...formValues,
+          release_policy: policy,
+          release_id: policy === 'pinned' ? formValues.release_id : null,
+          is_active: true,
+        })
+        handleClose()
       })
-      handleClose()
-    })
+      .finally(() => {
+        setLoading(false)
+      })
   }
+
   /** Handle agent selection change */
-  const handleChange = (value: Key, option?: DefaultOptionType | DefaultOptionType[] | undefined) => {
-    console.log(value, option)
+  const handleChange = (_value: Key, option?: DefaultOptionType | DefaultOptionType[]) => {
+    form.setFieldValue('release_id', undefined)
     if (option && !Array.isArray(option)) {
-      form.setFieldsValue({ name: option.children })
+      form.setFieldValue('name', option.children)
+    }
+  }
+
+  const handlePolicyChange = (policy: SubAgentItem['release_policy']) => {
+    if (policy !== releasePolicy) {
+      form.setFieldValue('release_id', undefined)
     }
   }
 
@@ -128,6 +205,61 @@ const SubAgentModal = forwardRef<SubAgentModalRef, SubAgentModalProps>(({
           <Select
             mode="tags"
             placeholder={t('common.pleaseEnter')}
+            className="rb:w-full!"
+          />
+        </FormItem>
+
+        <Form.Item
+          name="release_policy"
+          label={t('workflow.config.agent.releasePolicy')}
+          rules={[
+            { required: true, message: t('common.pleaseSelect') },
+          ]}
+        >
+          <Select
+            options={[
+              { label: t('workflow.config.agent.currentRelease'), value: 'current' },
+              { label: t('workflow.config.agent.pinnedRelease'), value: 'pinned' },
+            ]}
+            className="rb:w-full"
+            onChange={handlePolicyChange}
+          />
+        </Form.Item>
+        {releasePolicy === 'pinned' && (
+          <Form.Item
+            name="release_id"
+            label={t('workflow.config.agent.releaseVersion')}
+            rules={[
+              { required: true, message: t('common.pleaseSelect') },
+            ]}
+          >
+            <Select
+              allowClear
+              loading={referencedReleasesLoading}
+              disabled={!appId}
+              options={referencedReleases.map(item => ({
+                label: item.version_name || item.name || (item.version ? `v${item.version}` : item.id),
+                value: item.id,
+              }))}
+              placeholder={t('workflow.config.agent.releaseVersionPlaceholder')}
+              className="rb:w-full"
+            />
+          </Form.Item>
+        )}
+
+        <FormItem
+          name="priority"
+          label={t('application.priority')}
+          rules={[
+            { required: true, message: t('common.pleaseEnter') },
+          ]}
+        >
+          <InputNumber
+            placeholder={t('common.pleaseEnter')}
+            min={1}
+            max={100}
+            precision={0}
+            step={1}
             className="rb:w-full!"
           />
         </FormItem>

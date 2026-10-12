@@ -151,6 +151,8 @@ class MemoryWriteNode(BaseNode):
             config_id=str(config_id),
             workspace_id=workspace_id,
             language="zh",
+            storage_type=state.get("memory_storage_type") or "neo4j",
+            user_rag_memory_id=state.get("user_rag_memory_id") or "",
         )
 
         return "success"

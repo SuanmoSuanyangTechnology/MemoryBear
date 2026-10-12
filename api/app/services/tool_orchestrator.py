@@ -17,6 +17,7 @@ from app.core.memory.retrieval_trace.stage_events import (
 )
 
 from app.core.logging_config import get_business_logger
+from app.schemas.model_schema import ModelInfo
 
 logger = get_business_logger()
 
@@ -190,8 +191,7 @@ class ToolOrchestrator:
         system_prompt: str,
         message: str,
         history: List[Dict],
-        api_key_config: Dict[str, Any],
-        model_config: Any,
+        model_view: ModelInfo,
         effective_params: Dict[str, Any],
         processed_files: Optional[List[Dict]] = None,
         context_evidence: Optional[List[Any]] = None,
@@ -206,7 +206,7 @@ class ToolOrchestrator:
             - updated_system_prompt: 包含工具调用结果的 system_prompt
             - node_executions: 工具调用步骤记录列表
         """
-        from app.core.models import RedBearLLM, RedBearModelConfig
+        from app.core.models import RedBearChatModel
 
         orchestrator = cls(tools, max_rounds=max_rounds)
         orchestrator.context_collector.add(context_evidence or [])
@@ -214,14 +214,13 @@ class ToolOrchestrator:
         orchestrator.context_evidence_loaded = False
         react_system_prompt = orchestrator.build_react_system_prompt(system_prompt)
 
-        _react_llm = RedBearLLM(
-            RedBearModelConfig.from_api_key(
-                api_key_config,
-                deep_thinking=effective_params.get("deep_thinking", False),
-                thinking_budget_tokens=effective_params.get("thinking_budget_tokens"),
-                extra_params={"temperature": effective_params.get("temperature", 0.7)},
-            ),
-            type=model_config.type if hasattr(model_config, 'type') else model_config.model_type
+        _react_llm = RedBearChatModel.for_invoke(
+            model_view,
+            params={
+                "temperature": effective_params.get("temperature", 0.7),
+                "deep_thinking": effective_params.get("deep_thinking", False),
+                "thinking_budget_tokens": effective_params.get("thinking_budget_tokens"),
+            },
         )
 
         from app.services.context_assembler import (

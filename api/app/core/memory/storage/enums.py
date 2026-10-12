@@ -35,6 +35,7 @@ class MemoryNodeType(MemoryNodeLabel):
     MEMORY_SUMMARY = 'MemorySummary'
     PERCEPTUAL = 'Perceptual'
     PREFERENCE = 'Preference'
+    SCENE_COMMUNITY = 'SceneCommunity'
     SCENE_SUMMARY = 'SceneSummary'
     STATEMENT = 'Statement'
     USER_SOURCE = 'UserSource'

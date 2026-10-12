@@ -1,0 +1,23 @@
+.tabs:global(.ant-tabs-top >.ant-tabs-nav .ant-tabs-ink-bar) {
+  height: 3px;
+}
+.tabs:global(.ant-tabs .ant-tabs-tab) {
+  font-weight: 500;
+  color: #A8A9AA;
+}
+.tabs:gloabl(.ant-tabs .ant-tabs-tab.ant-tabs-tab-active .ant-tabs-tab-btn) {
+  font-weight: 500;
+  color: #171719;
+}
+
+.descriptions:global(.ant-descriptions.ant-descriptions-bordered.ant-descriptions-small .ant-descriptions-row >.ant-descriptions-item-label) {
+  padding: 12px 16px;
+}
+.descriptions:global(.ant-descriptions.ant-descriptions-bordered >.ant-descriptions-view .ant-descriptions-row >.ant-descriptions-item-label) {
+  background-color: #F6F6F6;
+  color: #5B6167;
+}
+.descriptions:global(.ant-descriptions .ant-descriptions-item-content) {
+  font-weight: 500;
+  text-align: right;
+}

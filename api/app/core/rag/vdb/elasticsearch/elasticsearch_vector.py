@@ -2,7 +2,6 @@ import logging
 import os
 import threading
 from collections.abc import Iterator, Mapping
-from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlparse
 
@@ -15,11 +14,10 @@ from packaging.version import parse as parse_version
 # from langchain_community.embeddings import XinferenceEmbeddings
 # from langchain_xinference import XinferenceRerank
 from langchain_core.documents import Document
-from app.core.models.base import RedBearModelConfig
 from app.core.models import RedBearRerank
 from app.core.models.embedding import RedBearEmbeddings
 from app.db import get_db_context
-from app.models.models_model import ModelApiKey
+from app.integrations.model.invoke_backend import RemoteInvokeRef
 from app.services.model_service import ModelApiKeyService
 
 from app.models.knowledge_model import Knowledge
@@ -86,44 +84,17 @@ def _delete_by_metadata_field(
     return True
 
 
-@dataclass(frozen=True)
-class ModelApiKeyRuntimeConfig:
-    model_name: str
-    provider: str
-    api_key: str
-    api_base: str | None
-    tenant_id: str | None = None
-    model_config_id: str | None = None
-    channel_id: str | None = None
-
-    @classmethod
-    def from_api_key(cls, api_key: ModelApiKey) -> "ModelApiKeyRuntimeConfig":
-        return cls(
-            model_name=api_key.model_name,
-            provider=api_key.provider,
-            api_key=api_key.api_key,
-            api_base=api_key.api_base,
-            tenant_id=getattr(api_key, "tenant_id", None),
-            model_config_id=getattr(api_key, "model_config_id", None),
-            channel_id=getattr(api_key, "channel_id", None),
-        )
-
-
 class ElasticSearchVector(BaseVector):
     def __init__(self, index_name: str, client: Elasticsearch,
-                 embedding_config: ModelApiKey | ModelApiKeyRuntimeConfig,
-                 reranker_config: ModelApiKey | ModelApiKeyRuntimeConfig):
+                 embedding_ref: RemoteInvokeRef,
+                 reranker_ref: RemoteInvokeRef):
         super().__init__(index_name.lower())
 
-        # 初始化 Embedding 模型（自动支持火山引擎多模态）
-        self.embeddings = RedBearEmbeddings(
-            RedBearModelConfig.from_api_key(embedding_config)
-        )
+        # 初始化 Embedding 模型（多模态能力由模型服务侧决定，远端壳不感知 provider）
+        self.embeddings = RedBearEmbeddings.for_invoke(embedding_ref)
         self.is_multimodal_embedding = self.embeddings.is_multimodal_supported()
 
-        self.reranker = RedBearRerank(
-            RedBearModelConfig.from_api_key(reranker_config)
-        )
+        self.reranker = RedBearRerank.for_invoke(reranker_ref)
         # 使用外部传入的共享客户端
         self._client = client
 
@@ -1178,31 +1149,16 @@ class ElasticSearchVectorFactory:
 
         tenant_id = cls._resolve_tenant_id(knowledge)
 
-        embedding_config = cls._resolve_api_key(knowledge.embedding_id, knowledge.id, "embedding", tenant_id)
-        reranker_config = cls._resolve_api_key(knowledge.reranker_id, knowledge.id, "reranker", tenant_id)
+        embedding_ref = cls._resolve_ref(knowledge.embedding_id, knowledge.id, "embedding", tenant_id)
+        reranker_ref = cls._resolve_ref(knowledge.reranker_id, knowledge.id, "reranker", tenant_id)
 
         return ElasticSearchVector(
             index_name=collection_name,
             client=client,
-            embedding_config=embedding_config,
-            reranker_config=reranker_config,
+            embedding_ref=embedding_ref,
+            reranker_ref=reranker_ref,
         )
 
-    @classmethod
-    def init_vector_from_configs(
-        cls,
-        index_name: str,
-        embedding_config: ModelApiKey | ModelApiKeyRuntimeConfig,
-        reranker_config: ModelApiKey | ModelApiKeyRuntimeConfig,
-    ) -> ElasticSearchVector:
-        """Create a vector service from resolved model config snapshots."""
-        client = ElasticSearchVectorClientProvider.get_shared_client()
-        return ElasticSearchVector(
-            index_name=index_name,
-            client=client,
-            embedding_config=embedding_config,
-            reranker_config=reranker_config,
-        )
     @staticmethod
     def _resolve_tenant_id(knowledge: Knowledge):
         """Look up tenant_id via the knowledge's workspace."""
@@ -1212,10 +1168,10 @@ class ElasticSearchVectorFactory:
             return ws.tenant_id if ws else None
 
     @staticmethod
-    def _resolve_api_key(model_config_id, knowledge_id, role: str, tenant_id) -> ModelApiKeyRuntimeConfig:
-        """Resolve ModelApiKey through the shared model-key selector."""
+    def _resolve_ref(model_config_id, knowledge_id, role: str, tenant_id) -> RemoteInvokeRef:
+        """Resolve a non-decrypting model reference (credentials stay in the model service)."""
         with get_db_context() as db:
-            api_key = ModelApiKeyService.get_available_api_key(db, model_config_id, tenant_id=tenant_id)
-            if not api_key:
-                raise ValueError(f"No {role} api key found for knowledge {knowledge_id}")
-            return ModelApiKeyRuntimeConfig.from_api_key(api_key)
+            ref = ModelApiKeyService.resolve_invoke_ref(db, model_config_id, tenant_id=tenant_id)
+            if not ref:
+                raise ValueError(f"No {role} model config found for knowledge {knowledge_id}")
+            return ref

@@ -55,13 +55,21 @@ from app.core.memory.storage.enums import MemoryNodeType, MemoryNodeLabel
 from app.core.memory.storage.models import StorageReadResult
 from app.core.memory.storage.models.dto import StorageItem
 from app.core.memory.storage.service import get_storage_service
-from app.core.models import RedBearEmbeddings, RedBearLLM, RedBearRerank
+from app.core.models import RedBearChatModel, RedBearEmbeddings, RedBearRerank
 from app.core.models.llm import StructResponse
-from app.core.rag.nlp.search import knowledge_retrieval
 from app.db import get_async_db_context
+from app.integrations.knowledge.contracts import (
+    KnowledgeCallContext,
+    KnowledgePrincipal,
+    KnowledgeRetrievalSource,
+)
+from app.integrations.knowledge.runtime import get_knowledge_retriever
 from app.models import Conversation, MemoryMessage
 from app.repositories import knowledge_repository
 from app.schemas.app_schema import FileInput, FileType, TransferMethod
+from app.schemas.model_schema import ModelInfo
+from app.schemas.chunk_schema import RetrieveType
+from app.schemas.knowledge_retrieval_schema import KnowledgeRetrievalRequest
 from app.utils.redis_cache import redis_cache
 
 logger = logging.getLogger(__name__)
@@ -81,10 +89,11 @@ class Neo4jSearchService:
             self,
             ctx: MemoryContext,
             embedder: RedBearEmbeddings | None = None,
-            llm: RedBearLLM | None = None,
+            llm: RedBearChatModel | None = None,
             reranker: RedBearRerank | None = None,
             includes: list[MemoryNodeLabel] | None = None,
             on_error: Callable[[MemoryRetrievalBusinessError], None] | None = None,
+            semantic_degraded: bool = False,
             alpha: float = DEFAULT_ALPHA,
             fulltext_score_threshold: float = DEFAULT_FULLTEXT_SCORE_THRESHOLD,
             cosine_score_threshold: float = DEFAULT_COSINE_SCORE_THRESHOLD,
@@ -97,9 +106,10 @@ class Neo4jSearchService:
         self.content_score_threshold = content_score_threshold
 
         self.embedder: RedBearEmbeddings | None = embedder
-        self.llm: RedBearLLM | None = llm
+        self.llm: RedBearChatModel | None = llm
         self.reranker: RedBearRerank | None = reranker
         self.on_error = on_error
+        self.semantic_degraded = semantic_degraded
 
         self.includes = includes
         if includes is None:
@@ -556,8 +566,15 @@ class Neo4jSearchService:
             apply_source_dedup: bool = False,
     ) -> MemorySearchResult:
         kw_task = self._keyword_search(query, limit)
-        emb_task = self._embedding_search(query, limit)
-        kw_results, emb_results = await asyncio.gather(kw_task, emb_task, return_exceptions=True)
+        if self.semantic_degraded:
+            # 该用户存量向量尚未重建完成：跳过向量检索，仅用全文召回。
+            (kw_results,) = await asyncio.gather(kw_task, return_exceptions=True)
+            emb_results = StorageReadResult()
+        else:
+            emb_task = self._embedding_search(query, limit)
+            kw_results, emb_results = await asyncio.gather(
+                kw_task, emb_task, return_exceptions=True
+            )
 
         keyword_failed = isinstance(kw_results, BaseException)
         semantic_failed = isinstance(emb_results, BaseException)
@@ -583,6 +600,8 @@ class Neo4jSearchService:
             degraded_reasons.append("keyword_search_failed")
         if semantic_failed:
             degraded_reasons.append("semantic_search_failed")
+        if self.semantic_degraded:
+            degraded_reasons.append("reembedding_in_progress")
 
         if self.reranker is not None:
             memories, rerank_status, rerank_reasons, dedup_summary = await self._hybrid_search_with_model_rerank(
@@ -634,12 +653,17 @@ class Neo4jSearchService:
             memories.sort(key=lambda x: x.score, reverse=True)
             memories = memories[:limit]
 
+        semantic_status = (
+            "degraded"
+            if self.semantic_degraded
+            else ("failed" if semantic_failed else "completed")
+        )
         return MemorySearchResult(
             memories=memories,
             dedup_summary=dedup_summary,
             execution_trace=RetrievalExecutionTrace(
                 keyword_status="failed" if keyword_failed else "completed",
-                semantic_status="failed" if semantic_failed else "completed",
+                semantic_status=semantic_status,
                 rerank_status=rerank_status,
                 keyword_hit_count=kw_results.total,
                 semantic_hit_count=emb_results.total,
@@ -931,12 +955,14 @@ class Neo4jSearchService:
             self,
             query: str,
             perceptual_memories: list[Memory],
-            llm: RedBearLLM,
+            llm: RedBearChatModel,
+            model_view: ModelInfo,
     ) -> list[Memory]:
         """对 Perceptual 类型的记忆调用多模态模型解析实际文件内容。
 
         增强模型上下文，并单独保留公开展示文本（不改变 score / id / source）。
-        失败时保留原 summary，不中断主流程。
+        失败时保留原 summary，不中断主流程。``model_view`` 为非解密视图，
+        仅提供 provider / 模态门控（凭据在模型服务侧）。
         """
         enhanced = []
         for mem in perceptual_memories:
@@ -956,7 +982,7 @@ class Neo4jSearchService:
 
             try:
                 parsed = await self._call_multimodal_for_query(
-                    file_path, file_name, file_type, perceptual_type, query, llm,
+                    file_path, file_name, file_type, perceptual_type, query, llm, model_view,
                     on_error=self.on_error,
                 )
 
@@ -987,7 +1013,8 @@ class Neo4jSearchService:
             file_type: str,
             perceptual_type: str | int,
             query: str,
-            llm: RedBearLLM,
+            llm: RedBearChatModel,
+            model_view: ModelInfo,
             on_error: Callable[[MemoryRetrievalBusinessError], None] | None = None,
     ) -> str:
         """调用多模态 LLM，让模型针对 query 解析文件内容。
@@ -1021,11 +1048,8 @@ class Neo4jSearchService:
             file_type=file_type or "",
         )
 
-        # 使用 MultimodalService 格式化文件内容
-        multimodal_svc = MultimodalService(
-            db=None,
-            api_config=llm.get_config(),
-        )
+        # 使用 MultimodalService 格式化文件内容（非解密视图，不再经 llm.get_config()）
+        multimodal_svc = MultimodalService(db=None, model_view=model_view)
         formatted = await multimodal_svc.process_files(
             files=[file_input],
             document_image_recognition=True,
@@ -1070,7 +1094,7 @@ class RAGSearchService:
         """RAG 不支持纯全文检索，回退到 hybrid_search。"""
         return await self.hybrid_search(query, limit)
 
-    async def get_kb_config(self, db: AsyncSession, limit: int) -> dict:
+    async def _get_kb_reranker_id(self, db: AsyncSession) -> uuid.UUID | None:
         if self.ctx.user_rag_memory_id is None:
             raise RuntimeError("Knowledge base ID not specified")
         knowledge_config = await knowledge_repository.get_knowledge_by_id_async(
@@ -1079,34 +1103,56 @@ class RAGSearchService:
         )
         if knowledge_config is None:
             raise RuntimeError("Knowledge base not exist")
-        reranker_id = knowledge_config.reranker_id
+        return knowledge_config.reranker_id
 
-        return {
-            "knowledge_bases": [
-                {
-                    "kb_id": self.ctx.user_rag_memory_id,
-                    "similarity_threshold": 0.7,
-                    "vector_similarity_weight": 0.5,
-                    "top_k": limit,
-                    "retrieve_type": "participle"
-                }
-            ],
-            "merge_strategy": "weight",
-            "reranker_id": reranker_id,
-            "reranker_top_k": limit
-        }
+    def _build_request(
+            self,
+            query: str,
+            limit: int,
+            reranker_id: uuid.UUID | None,
+    ) -> KnowledgeRetrievalRequest:
+        return KnowledgeRetrievalRequest(
+            query=query,
+            kb_ids=[uuid.UUID(self.ctx.user_rag_memory_id)],
+            retrieve_type=RetrieveType.HYBRID,
+            similarity_threshold=0.7,
+            vector_similarity_weight=0.5,
+            top_k=limit,
+            file_names_filter=[f"{self.ctx.end_user_id}.txt"],
+            rerank_id=reranker_id,
+            source=KnowledgeRetrievalSource.GENERAL,
+        )
+
+    def _build_context(self) -> KnowledgeCallContext:
+        cfg = self.ctx.memory_config
+        return KnowledgeCallContext(
+            principal=KnowledgePrincipal(
+                actor_id=uuid.UUID(str(self.ctx.end_user_id)),
+                actor_name=None,
+                tenant_id=cfg.tenant_id,
+                workspace_id=cfg.workspace_id,
+            ),
+            source=KnowledgeRetrievalSource.GENERAL,
+            trace_id=uuid.uuid4().hex,
+        )
 
     async def hybrid_search(self, query: str, limit: int, **kwargs) -> MemorySearchResult:
         try:
             async with get_async_db_context() as db:
-                kb_config = await self.get_kb_config(db, limit)
+                reranker_id = await self._get_kb_reranker_id(db)
+            request = self._build_request(query, limit, reranker_id)
+            context = self._build_context()
+            retrieve_result = await get_knowledge_retriever().retrieve(request, context)
         except RuntimeError as e:
             logger.error(f"[MemorySearch] get_kb_config error: {self.ctx.user_rag_memory_id} - {e}")
             return MemorySearchResult(memories=[])
-        retrieve_chunks_result = knowledge_retrieval(query, kb_config, [self.ctx.end_user_id])
+        except Exception as e:
+            logger.error(f"[MemorySearch] rag search error: {e}")
+            return MemorySearchResult(memories=[])
+
         res = []
         try:
-            for chunk in retrieve_chunks_result:
+            for chunk in retrieve_result.chunks:
                 memory = Memory(
                     content=chunk.page_content,
                     query=query,
@@ -1130,15 +1176,15 @@ class RAGSearchService:
                 memories=res,
                 execution_trace=RetrievalExecutionTrace(
                     backend="rag",
-                    keyword_status="skipped",
+                    keyword_status="completed",
                     semantic_status="completed",
-                    rerank_status="skipped",
+                    rerank_status="completed" if reranker_id else "skipped",
                     semantic_hit_count=len(res),
                     raw_hit_count=len(res),
                     merged_count=len(res),
                 ),
             )
-        except RuntimeError as e:
+        except Exception as e:
             logger.error(f"[MemorySearch] rag search error: {e}")
             return MemorySearchResult(memories=[])
 

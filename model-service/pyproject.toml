@@ -1,0 +1,67 @@
+[build-system]
+requires = ["hatchling>=1.26"]
+build-backend = "hatchling.build"
+
+[project]
+name = "model-service"
+version = "0.1.0"
+description = "Independent MemoryBear model service"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "alembic>=1.17,<2",
+    "asyncpg>=0.31,<1",
+    "auth-sdk>=0.1",
+    "fastapi>=0.119,<1",
+    "httpx>=0.28,<1",
+    "psycopg[binary]>=3.2,<4",
+    "pydantic>=2.12,<3",
+    "pydantic-settings>=2.11,<3",
+    "python-dotenv>=1.1,<2",
+    "pyyaml>=6.0,<7",
+    "redbear-model[all]",
+    "redis>=6.4,<7",
+    "sqlalchemy[asyncio]>=2.0.44,<3",
+    "uvicorn[standard]>=0.37,<1",
+]
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28,<1",
+    "pytest>=9,<10",
+    "pytest-asyncio>=1.3,<2",
+    "ruff>=0.16,<1",
+]
+
+[tool.uv.sources]
+redbear-model = { path = "../packages/redbear-model" }
+auth-sdk = { path = "../packages/auth-sdk" }
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "ASYNC"]
+
+[tool.ruff.lint.per-file-ignores]
+# 版本文件是 alembic 渲染的冻结快照（列注释常超行宽），不按项目行长重排
+"migrations/versions/*.py" = ["E501"]
+# 自老单体机械复制（D-M7-1 冻结副本）：保持与宿主逐字可比，不做行程式风格现代化；
+# 宿主副本随 M7-4/M7-5 退役时一并收敛。新写的服务模块文件不受此豁免。
+"src/models/models_model.py" = ["E501", "UP006", "UP035", "UP045"]
+"src/schemas/model_schema.py" = ["E501", "UP006", "UP035", "UP045"]
+"src/repositories/model_repository.py" = ["E501", "UP006", "UP035", "UP045"]
+"src/services/channel_registry.py" = ["E501"]
+"src/services/channel_service.py" = ["E501"]
+"src/services/model_profile_view.py" = ["E501"]
+"src/services/model_service.py" = ["E501", "UP006", "UP035", "UP037", "UP045", "I001"]
+"src/infrastructure/model_provider_config.py" = ["UP045"]
+# 27 端点逐条移植自宿主 model_controller（含 FastAPI 参数默认值写法），保持与宿主
+# 逐行可比便于 M7-4 代理核对与 M8 sync→async 整改；M8 整改时一并收敛。
+"src/api/routes/models.py" = ["B008", "E501", "UP045"]

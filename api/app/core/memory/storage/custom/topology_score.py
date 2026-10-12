@@ -161,10 +161,20 @@ async def compute_topology_score(
     )
 
     assert summary is not None
+    affected_counts_by_label: Dict[str, int] = {}
+    for node in affected_nodes:
+        label_value = node.label.value
+        affected_counts_by_label[label_value] = (
+            affected_counts_by_label.get(label_value, 0) + 1
+        )
+
     return {
         "status": "success",
         "node_properties_written": summary.get("nodePropertiesWritten", 0),
         "did_converge": summary.get("didConverge"),
         "ran_iterations": summary.get("ranIterations"),
         "outbox_events": len(event_ids),
+        # 本次投影且成功写入 topology_score 的节点按标签计数，
+        # 供价值评估展示事件使用（不新增 Neo4j 查询）。
+        "affected_counts_by_label": affected_counts_by_label,
     }

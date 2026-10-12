@@ -83,6 +83,7 @@ interface AreaLineChartProps {
   lineStyle?: any;
   showLegend?: boolean;
   smooth?: boolean;
+  emptySize?: number;
 }
 
 /**
@@ -124,7 +125,8 @@ const AreaLineChart: FC<AreaLineChartProps> = ({
   },
   lineStyle,
   showLegend = true,
-  smooth = true
+  smooth = true,
+  emptySize = 120
 }) => {
   /** Reference to the ECharts instance for programmatic control */
   const chartRef = useRef<ReactEcharts>(null);
@@ -181,7 +183,7 @@ const AreaLineChart: FC<AreaLineChartProps> = ({
    * Formats series list for display in chart legend
    */
   const formatSeriesList = useMemo(() => {
-    return Object.entries(seriesList).map(([_key, name]) => ({
+    return Object.entries(seriesList).map(([, name]) => ({
       ...SeriesConfig,
       name: name,
     }))
@@ -297,7 +299,7 @@ const AreaLineChart: FC<AreaLineChartProps> = ({
           notMerge={true}
           lazyUpdate={true}
         />
-        : <Empty size={120} className="rb:h-full!" />
+        : <Empty size={emptySize} className="rb:h-full!" />
       }
     </div>
   )

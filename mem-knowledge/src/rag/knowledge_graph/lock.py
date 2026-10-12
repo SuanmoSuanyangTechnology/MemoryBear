@@ -12,7 +12,8 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 _LOCK_TTL_SECONDS = 120
-_LOCK_WAIT_SECONDS = 10 * 60
+_LOCK_WAIT_SECONDS = 1
+_LOCK_POLL_INTERVAL_SECONDS = 0.1
 _LOCK_RENEW_INTERVAL_SECONDS = 40
 
 _COMPARE_AND_DELETE = """
@@ -28,6 +29,14 @@ if redis.call('get', KEYS[1]) == ARGV[1] then
 end
 return 0
 """.strip()
+
+
+class KnowledgeGraphLockBusy(TimeoutError):
+    """The acquisition window elapsed while another owner held the KB lock."""
+
+    def __init__(self, *, wait_duration_ms: int) -> None:
+        super().__init__("knowledge graph lock is busy")
+        self.wait_duration_ms = wait_duration_ms
 
 
 class KnowledgeGraphLock:
@@ -55,8 +64,7 @@ class KnowledgeGraphLock:
         started_at = self._clock()
         deadline = started_at + _LOCK_WAIT_SECONDS
         waiting_reported = False
-        last_wait_report_seconds = 0.0
-        while self._clock() < deadline:
+        while True:
             if self._redis.set(
                 self._key,
                 self._token,
@@ -85,18 +93,12 @@ class KnowledgeGraphLock:
                 waiting_reported = True
                 if self._on_wait is not None:
                     self._on_wait("lock_wait_started", 0)
-            elif (
-                self._on_wait is not None
-                and waited_seconds >= 10
-                and (
-                    last_wait_report_seconds == 0
-                    or waited_seconds - last_wait_report_seconds >= 30
+            remaining_seconds = deadline - self._clock()
+            if remaining_seconds <= 0:
+                raise KnowledgeGraphLockBusy(
+                    wait_duration_ms=int(waited_seconds * 1000),
                 )
-            ):
-                self._on_wait("lock_waiting", int(waited_seconds * 1000))
-                last_wait_report_seconds = waited_seconds
-            self._sleep(1)
-        raise TimeoutError("knowledge graph lock acquisition timed out")
+            self._sleep(min(_LOCK_POLL_INTERVAL_SECONDS, remaining_seconds))
 
     def __exit__(self, exc_type: object, exc: object, traceback: object) -> None:
         del exc_type, exc, traceback
@@ -165,4 +167,4 @@ def create_knowledge_graph_lock(
     )
 
 
-__all__ = ["KnowledgeGraphLock", "create_knowledge_graph_lock"]
+__all__ = ["KnowledgeGraphLock", "KnowledgeGraphLockBusy", "create_knowledge_graph_lock"]

@@ -1,84 +1,43 @@
-import time
+"""Rerank 壳（远端模式）：宿主只持有配置引用，凭据、选路与 failover 在模型服务。
+
+运行面调用一律经 ``for_invoke(ref)`` 构造 → ``POST /internal/v1/invoke``（设计 §2.2），
+结果下标为原文稿下标；多模态重排随 G4 接入服务侧。
+"""
+
 from typing import Any, Dict, List, Optional, Sequence, Union
 from copy import deepcopy
-from langchain_core.documents import BaseDocumentCompressor, Document
+
 from langchain_core.callbacks import Callbacks
-from redbear_model import ResolvedModelConfig
-from app.core.alert_metric_bridge import (
-    report_model_gateway_failure,
-    report_model_gateway_success,
-)
-from app.core.models.base import RedBearModelConfig, get_provider_rerank_class, RedBearModelFactory
-from app.core.models.failover import (
-    FailoverStats,
-    attempt_config,
-    is_initial_candidate,
-    run_plan,
-)
-from app.core.models.network_retry import network_retry
-from app.core.usage_bridge import report_usage_failure, report_usage_success
-from app.models import ModelProvider
+from langchain_core.documents import BaseDocumentCompressor, Document
 
-_USAGE_CAPABILITY = "rerank"
-
-
-_DEFAULT_JINA_RERANK_URL = "https://api.jina.ai/v1/rerank"
-_JINA_RERANK_PROVIDERS = frozenset(
-    {
-        ModelProvider.XINFERENCE.value,
-        ModelProvider.GPUSTACK.value,
-        ModelProvider.SPEEDBEAR.value,
-    }
+from app.integrations.model.invoke_backend import (
+    RemoteInvokeRef,
+    acall_rerank,
+    call_rerank_sync,
 )
 
 
-def _normalize_jina_rerank_url(base_url: Optional[str]) -> str:
-    if not base_url:
-        return _DEFAULT_JINA_RERANK_URL
-    url = base_url.rstrip("/")
-    if url.endswith("/v1/rerank"):
-        return url
-    if url.endswith("/v1"):
-        return f"{url}/rerank"
-    return f"{url}/v1/rerank"
+def _document_texts(documents: Sequence[Any]) -> List[str]:
+    """屏蔽载体差异：Document 取正文，其余按字符串用（服务侧只认文本）。"""
 
-
-class _EndpointBoundSession:
-    """Route a provider session to one immutable rerank endpoint."""
-
-    def __init__(self, session: Any, endpoint: str) -> None:
-        self._session = session
-        self._endpoint = endpoint
-
-    def post(self, _url: str, **kwargs: Any) -> Any:
-        return self._session.post(self._endpoint, **kwargs)
-
-    def __getattr__(self, name: str) -> Any:
-        return getattr(self._session, name)
+    return [
+        document.page_content if isinstance(document, Document) else str(document)
+        for document in documents
+    ]
 
 
 class RedBearRerank(BaseDocumentCompressor):
-    """ Rerank → 作为 Runnable 插入任意 LCEL 链"""
+    """ Rerank → 作为 Runnable 插入任意 LCEL 链
 
-    def __init__(self, config: RedBearModelConfig):
-        self._model = self._create_model(config)
-        self._config = config
+    唯一构造入口 ``for_invoke(ref)``（远端模式，结果下标为原文稿下标）；
+    宿主不再持有 api_key / 模型实例。
+    """
 
-    def _create_model(self, config: RedBearModelConfig):
-        """创建内部模型实例"""
-        provider = config.provider.lower()
-        model_class = get_provider_rerank_class(config.provider)
-        model_params = RedBearModelFactory.get_rerank_model_params(config)
-        instance = model_class(**model_params)
-        if provider in _JINA_RERANK_PROVIDERS:
-            instance.session = _EndpointBoundSession(
-                instance.session,
-                _normalize_jina_rerank_url(config.base_url),
-            )
-        # DashScopeRerank.validate_environment always overwrites `model` with the
-        # default gte_rerank — restore the user-specified model name here.
-        if provider == ModelProvider.DASHSCOPE and hasattr(instance, "model"):
-            instance.model = config.model_name
+    @classmethod
+    def for_invoke(cls, ref: RemoteInvokeRef) -> "RedBearRerank":
+        """远端模式：宿主不再持有凭据（设计 §2.2），调用只带配置 id 与租户。"""
+        instance = cls.model_construct()
+        instance._remote = ref
         return instance
 
     def compress_documents(
@@ -90,7 +49,7 @@ class RedBearRerank(BaseDocumentCompressor):
             top_n: Optional[int] = -1,
     ) -> Sequence[Document]:
         """
-        Compress documents using Jina's Rerank API.
+        重排并压缩文档（远端调用，结果下标为原文稿下标）。
 
         Args:
             documents: A sequence of documents to compress.
@@ -101,23 +60,32 @@ class RedBearRerank(BaseDocumentCompressor):
         Returns:
             A sequence of compressed documents.
         """
+        return self._compressed(documents, self.rerank(documents, query, top_n=top_n))
+
+    async def acompress_documents(
+            self,
+            documents: Sequence[Document],
+            query: str,
+            callbacks: Optional[Callbacks] = None,
+    ) -> Sequence[Document]:
+        """异步压缩：走异步通道（签名与基类一致，基类无 ``top_n``，全量重排由调用方截取）。"""
+        ranked = await acall_rerank(
+            self._remote, query=query, documents=_document_texts(documents)
+        )
+        return self._compressed(documents, ranked)
+
+    @staticmethod
+    def _compressed(
+            documents: Sequence[Document],
+            ranked: Sequence[Dict[str, Any]],
+    ) -> List[Document]:
         compressed = []
-        for res in self.rerank(documents, query, top_n=top_n):
+        for res in ranked:
             doc = documents[res["index"]]
             doc_copy = Document(doc.page_content, metadata=deepcopy(doc.metadata))
             doc_copy.metadata["relevance_score"] = res["relevance_score"]
             compressed.append(doc_copy)
         return compressed
-
-    def _attempt_target(self, resolved: ResolvedModelConfig) -> tuple[Any, RedBearModelConfig]:
-        """本次候选的（模型实例, 配置）：首候选沿用现实例，换渠道后按候选重建。
-
-        dashscope 分支直接读配置的 model_name/api_key，故配置须随候选走。
-        """
-        if is_initial_candidate(self._config, resolved):
-            return self._model, self._config
-        config = attempt_config(self._config, resolved)
-        return self._create_model(config), config
 
     def rerank(
             self,
@@ -126,163 +94,9 @@ class RedBearRerank(BaseDocumentCompressor):
             *,
             top_n: Optional[int] = -1,
     ) -> List[Dict[str, Any]]:
-        started = time.perf_counter()
-        stats = FailoverStats()
-        plan = self._config.failover_plan
-        try:
-            if plan is None:
-                result = self._rerank_with_retry(documents, query, top_n)
-            else:
-                outcome = run_plan(
-                    plan,
-                    invoke=lambda resolved: self._rerank_attempt(
-                        documents, query, top_n, *self._attempt_target(resolved)
-                    ),
-                    stats=stats,
-                )
-                result = outcome.result
-        except Exception as exc:
-            attrib = stats.attribution_config(self._config)
-            report_model_gateway_failure(attrib, "rerank", exc, started)
-            report_usage_failure(
-                attrib, _USAGE_CAPABILITY, "rerank", exc, started,
-                attempts=stats.counted(),
-            )
-            raise
-        # 成功路径保持既有语义（仅 usage 事件，不触发网关恢复探测）
-        report_usage_success(
-            stats.attribution_config(self._config), _USAGE_CAPABILITY, "rerank", started,
-            result=result, attempts=stats.counted(), fallback=stats.switched,
-        )
-        return result
-
-    @staticmethod
-    def _dashscope_response_value(response: Any, key: str, default: Any = None) -> Any:
-        """同时兼容 DashScope 响应对象和普通字典的字段读取。"""
-        if response is None:
-            return default
-        if isinstance(response, dict):
-            return response.get(key, default)
-
-        try:
-            getter = getattr(response, "get", None)
-        except (AttributeError, KeyError):
-            getter = None
-        if callable(getter):
-            try:
-                return getter(key, default)
-            except (AttributeError, KeyError, TypeError):
-                pass
-
-        try:
-            return getattr(response, key)
-        except (AttributeError, KeyError):
-            return default
-
-    @classmethod
-    def _dashscope_error_message(cls, response: Any, detail: Optional[str] = None) -> str:
-        """保留 DashScope 失败响应中的状态码、错误码和错误信息。"""
-        fields = []
-        for key in ("status_code", "code", "message"):
-            value = cls._dashscope_response_value(response, key)
-            if value not in (None, ""):
-                fields.append(f"{key}: {value}")
-        if detail:
-            fields.append(f"detail: {detail}")
-        return " \n ".join(fields) if fields else (
-            f"DashScope rerank 请求失败: {detail or '未返回可用的错误信息'}"
-        )
-
-    def _rerank_with_dashscope(
-            self,
-            documents: Sequence[Union[str, Document, dict]],
-            query: str,
-            top_n: int,
-            config: RedBearModelConfig,
-    ) -> List[Dict[str, Any]]:
-        """直接解析 DashScope 响应，避免第三方适配器掩盖供应商错误。"""
-        from dashscope import TextReRank
-
-        if not documents:
-            return []
-
-        normalized_documents = [
-            document.page_content if isinstance(document, Document) else document
-            for document in documents
-        ]
-        effective_top_n = (
-            top_n
-            if top_n is None or top_n > 0
-            else self._model.top_n
-        )
-        response = TextReRank.call(
-            model=config.model_name,
+        return call_rerank_sync(
+            self._remote,
             query=query,
-            documents=normalized_documents,
-            top_n=effective_top_n,
-            return_documents=False,
-            api_key=config.api_key,
+            documents=_document_texts(documents),
+            top_n=top_n,
         )
-
-        status_code = self._dashscope_response_value(response, "status_code")
-        if status_code not in (None, 200, "200"):
-            raise RuntimeError(self._dashscope_error_message(response))
-
-        output = self._dashscope_response_value(response, "output")
-        results = self._dashscope_response_value(output, "results")
-        if results is None:
-            raise RuntimeError(
-                self._dashscope_error_message(
-                    response,
-                    "响应中缺少 output.results",
-                )
-            )
-
-        parsed_results = []
-        for result in results:
-            index = self._dashscope_response_value(result, "index")
-            relevance_score = self._dashscope_response_value(
-                result,
-                "relevance_score",
-            )
-            if index is None or relevance_score is None:
-                raise RuntimeError(
-                    self._dashscope_error_message(
-                        response,
-                        "响应中的 rerank 结果缺少 index 或 relevance_score",
-                    )
-                )
-            parsed_results.append(
-                {
-                    "index": index,
-                    "relevance_score": relevance_score,
-                }
-            )
-        return parsed_results
-
-    @network_retry
-    def _rerank_with_retry(
-            self,
-            documents: Sequence[Union[str, Document, dict]],
-            query: str,
-            top_n: int,
-    ) -> List[Dict[str, Any]]:
-        """无换渠道 plan 的既有路径（网络重试由装饰器承担）。"""
-        return self._rerank_attempt(documents, query, top_n, self._model, self._config)
-
-    def _rerank_attempt(
-            self,
-            documents: Sequence[Union[str, Document, dict]],
-            query: str,
-            top_n: int,
-            model: Any,
-            config: RedBearModelConfig,
-    ) -> List[Dict[str, Any]]:
-        provider = config.provider.lower()
-        if provider in _JINA_RERANK_PROVIDERS:
-            from langchain_community.document_compressors import JinaRerank
-            model_instance: JinaRerank = model
-            return model_instance.rerank(documents=documents, query=query, top_n=top_n)
-        if provider == ModelProvider.DASHSCOPE:
-            return self._rerank_with_dashscope(documents, query, top_n, config)
-        raise ValueError(f"不支持的模型提供商: {provider}")

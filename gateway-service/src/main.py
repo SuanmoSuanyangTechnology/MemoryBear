@@ -1,8 +1,10 @@
 """网关服务入口。
 
-首期职责：验签用户 JWT（HS256 + type=access）→ 读 Redis 用户快照（fail-closed，
-决策 #14）→ 剥除用户凭据 → 本地签发内部 token（RS256，TTL 120s）→ 注入身份头
-转发。deps 经 app.state 动态注入，便于测试替换（ASGITransport 不触发 lifespan）。
+Termination + forwarding pipeline: user JWT verification (HS256 + type=access)
+→ Redis user snapshot (fail-closed) → credential stripping → identity-header
+injection. Enterprise gateway mode additionally signs an internal token (RS256,
+TTL 120s); direct mode does not. deps are injected via app.state so tests can
+replace them (ASGITransport does not trigger lifespan).
 """
 import httpx
 from contextlib import asynccontextmanager

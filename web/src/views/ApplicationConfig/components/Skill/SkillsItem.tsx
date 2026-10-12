@@ -1,9 +1,3 @@
-/*
- * @Author: ZhaoYing 
- * @Date: 2026-02-05 10:43:03 
- * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-25 15:36:14
- */
 import { type FC, useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Space, Button, Form, Flex, Tooltip, Checkbox } from 'antd'
@@ -81,13 +75,15 @@ const SkillsItem: FC<SkillsItemProps> = ({
    * Effect: Clear skill list when "all skills" is enabled
    */
   useEffect(() => {
-    form.setFieldValue([...parentName, 'skill_ids'], [])
-  }, [allSkills])
+    if (allSkills === true) {
+      form.setFieldValue([...parentName, 'skill_ids'], [])
+    }
+  }, [allSkills, form, parentName])
 
   return (
     <div>
       <Flex align="center" justify="space-between" className="rb:mb-2!">
-        <div className="rb:text-[#212332] rb:font-medium rb:leading-4.5 rb:px-1">{title}</div>
+        <div className="rb:text-gray-800 rb:font-medium rb:leading-4.5 rb:px-1">{title}</div>
 
         <Space size={16}>
           {/* "Allow all skills" checkbox - only shown if supportAll is true */}
@@ -95,7 +91,7 @@ const SkillsItem: FC<SkillsItemProps> = ({
             <Checkbox className="rb:text-[12px]!">{t('application.allSkill')}</Checkbox>
           </Form.Item>}
           {/* Add skill button - disabled when all skills are enabled */}
-          <Button disabled={allSkills} type="link" className="rb:h-4! rb:p-0! rb:font-medium! rb:text-[12px]! rb:text-[#212332]" onClick={handleAddSkill}>+ {t('application.addSkill')}</Button>
+          <Button disabled={allSkills} type="link" className="rb:h-4! rb:p-0! rb:font-medium! rb:text-[12px]! rb:text-gray-800" onClick={handleAddSkill}>+ {t('application.addSkill')}</Button>
         </Space>
       </Flex>
       {/* Show alert when all skills enabled, otherwise show skill list */}
@@ -118,9 +114,9 @@ const SkillsItem: FC<SkillsItemProps> = ({
                         <Flex className="rb:flex-1  rb:max-w-[calc(100%-186px)]!">
                           {/* Skill name and description */}
                           <div className="rb:flex-1 rb:max-w-[calc(100%-60px)]">
-                            <div className="rb:font-medium rb:text-[#212332] rb:leading-5 rb:wrap-break-word rb:line-clamp-1">{skill.name}</div>
+                            <div className="rb:font-medium rb:text-gray-800 rb:leading-5 rb:wrap-break-word rb:line-clamp-1">{skill.name}</div>
                             <Tooltip title={skill.description}>
-                              <div className="rb:text-[#5B6167] rb:text-[12px] rb:leading-4.25 rb:font-regular rb:mt-1 rb:wrap-break-word rb:line-clamp-1">{skill.description}</div>
+                              <div className="rb:text-gray-600 rb:text-[12px] rb:leading-4.25 rb:font-regular rb:mt-1 rb:wrap-break-word rb:line-clamp-1">{skill.description}</div>
                             </Tooltip>
                           </div>
                         </Flex>

@@ -1,4 +1,10 @@
-"""Synchronous model resolution for Knowledge worker tasks."""
+"""Synchronous non-decrypting model view resolution for Knowledge worker tasks.
+
+km 侧只剩「用哪个配置、代表哪个租户」：resolve 产出**非解密视图**
+（``ModelConfigSnapshot``），凭据解密、渠道选路与 failover 全在模型服务侧
+（设计 §2.2）。状态语义与旧 resolver 访问校验对齐：不存在/不可见 → NotFound、
+下线 → Deprecated、停用 → Inactive（映射词表见 ``error_mapping``）。
+"""
 
 from __future__ import annotations
 
@@ -6,154 +12,47 @@ import uuid
 from typing import TYPE_CHECKING
 
 from redbear_model import (
+    ModelConfigDeprecatedError,
+    ModelConfigInactiveError,
     ModelConfigNotFoundError,
-    ResolvedModelConfig,
-    resolve_from_channel_pool,
-    resolve_model,
+    ModelConfigSnapshot,
 )
 
-from ...repositories.model_registry import (
-    AsyncSQLModelRegistry,
-    SyncSQLModelRegistry,
-    credential_cipher,
-)
+from ...repositories.model_registry import SyncSQLModelRegistry
 
 if TYPE_CHECKING:
-    from redbear_model.runtime import (
-        RedBearAudioTranscriber,
-        RedBearEmbeddings,
-        RedBearLLM,
-        RedBearVideoUnderstanding,
-    )
-
     from ...runtime import ProcessRuntime
 
 
 class TaskModelFactory:
-    """Resolve credential snapshots in short sessions before model construction."""
+    """Resolve model views in short sync sessions before shell construction."""
 
     def __init__(self, runtime: ProcessRuntime):
         self._runtime = runtime
 
-    def resolve_config(
+    def resolve_view(
         self,
         model_config_id: uuid.UUID,
         tenant_id: uuid.UUID,
-    ) -> ResolvedModelConfig:
-        with self._runtime.database.sync_session() as session:
-            return resolve_model(
-                SyncSQLModelRegistry(session),
-                model_config_id=model_config_id,
-                tenant_id=tenant_id,
-            )
-
-    def resolve_embedding(
-        self,
-        model_config_id: uuid.UUID,
-        tenant_id: uuid.UUID,
-    ) -> ResolvedModelConfig:
-        return self.resolve_config(model_config_id, tenant_id)
-
-    def resolve_chat(
-        self,
-        model_config_id: uuid.UUID,
-        tenant_id: uuid.UUID,
-    ) -> ResolvedModelConfig:
-        return self.resolve_config(model_config_id, tenant_id)
-
-    def resolve_image(
-        self,
-        model_config_id: uuid.UUID,
-        tenant_id: uuid.UUID,
-    ) -> ResolvedModelConfig:
-        return self.resolve_config(model_config_id, tenant_id)
-
-    def _resolve_media(
-        self, model_config_id: uuid.UUID, tenant_id: uuid.UUID,
-    ) -> ResolvedModelConfig:
+    ) -> ModelConfigSnapshot:
         if model_config_id is None:
-            raise ValueError("Media model ID is required")
+            raise ValueError("Model config ID is required")
         with self._runtime.database.sync_session() as session:
-            registry = SyncSQLModelRegistry(session)
-            config = registry.get_model_config(model_config_id, tenant_id)
-            if config is None:
-                raise ModelConfigNotFoundError(model_config_id)
-            channels = registry.list_active_channels(tenant_id, config.provider.value)
-            return resolve_from_channel_pool(
-                config, channels, tenant_id=tenant_id, cipher=credential_cipher(),
+            config = SyncSQLModelRegistry(session).get_model_config(
+                model_config_id, tenant_id
             )
+        if config is None:
+            raise ModelConfigNotFoundError(model_config_id)
+        if config.is_deprecated:
+            raise ModelConfigDeprecatedError(model_config_id)
+        if not config.is_active:
+            raise ModelConfigInactiveError(model_config_id)
+        return config
 
-    async def _aresolve_media(
-        self, model_config_id: uuid.UUID, tenant_id: uuid.UUID,
-    ) -> ResolvedModelConfig:
-        if model_config_id is None:
-            raise ValueError("Media model ID is required")
-        async with self._runtime.database.async_session() as session:
-            registry = AsyncSQLModelRegistry(session)
-            config = await registry.get_model_config(model_config_id, tenant_id)
-            if config is None:
-                raise ModelConfigNotFoundError(model_config_id)
-            channels = await registry.list_active_channels(tenant_id, config.provider.value)
-            return resolve_from_channel_pool(
-                config, channels, tenant_id=tenant_id, cipher=credential_cipher(),
-            )
-
-    def create_audio_transcriber(
-        self, model_config_id: uuid.UUID, tenant_id: uuid.UUID,
-    ) -> RedBearAudioTranscriber:
-        from redbear_model.runtime import RedBearAudioTranscriber
-        config = self._resolve_media(model_config_id, tenant_id)
-        return RedBearAudioTranscriber(config, client_pool=self._runtime.model_runtime.pool)
-
-    async def acreate_audio_transcriber(
-        self, model_config_id: uuid.UUID, tenant_id: uuid.UUID,
-    ) -> RedBearAudioTranscriber:
-        from redbear_model.runtime import RedBearAudioTranscriber
-        config = await self._aresolve_media(model_config_id, tenant_id)
-        return RedBearAudioTranscriber(config, client_pool=self._runtime.model_runtime.pool)
-
-    def create_video_understanding(
-        self, model_config_id: uuid.UUID, tenant_id: uuid.UUID,
-    ) -> RedBearVideoUnderstanding:
-        from redbear_model.runtime import RedBearVideoUnderstanding
-        config = self._resolve_media(model_config_id, tenant_id)
-        return RedBearVideoUnderstanding(config, client_pool=self._runtime.model_runtime.pool)
-
-    async def acreate_video_understanding(
-        self, model_config_id: uuid.UUID, tenant_id: uuid.UUID,
-    ) -> RedBearVideoUnderstanding:
-        from redbear_model.runtime import RedBearVideoUnderstanding
-        config = await self._aresolve_media(model_config_id, tenant_id)
-        return RedBearVideoUnderstanding(config, client_pool=self._runtime.model_runtime.pool)
-
-    def create_embeddings(
-        self,
-        model_config_id: uuid.UUID,
-        tenant_id: uuid.UUID,
-    ) -> RedBearEmbeddings:
-        from redbear_model.runtime import RedBearEmbeddings
-
-        config = self.resolve_embedding(model_config_id, tenant_id)
-        try:
-            return RedBearEmbeddings(
-                config,
-                client_pool=self._runtime.model_runtime.pool,
-            )
-        except Exception:
-            raise RuntimeError("Failed to initialize embedding model") from None
-
-    def create_llm(
-        self,
-        model_config_id: uuid.UUID,
-        tenant_id: uuid.UUID,
-    ) -> RedBearLLM:
-        from redbear_model.runtime import RedBearLLM
-
-        config = self.resolve_chat(model_config_id, tenant_id)
-        try:
-            return RedBearLLM(config, client_pool=self._runtime.model_runtime.pool)
-        except Exception:
-            raise RuntimeError("Failed to initialize chat model") from None
+    # 词表别名（存量站点调用名）：三族解析已是同一「行 → 视图」操作
+    resolve_embedding = resolve_view
+    resolve_chat = resolve_view
+    resolve_image = resolve_view
 
 
 __all__ = ["TaskModelFactory"]

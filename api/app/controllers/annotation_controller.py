@@ -24,19 +24,10 @@ logger = get_business_logger()
 
 
 def _build_annotation_embedding_config(db: Session, model_config_id: uuid.UUID, tenant_id: uuid.UUID):
-    from app.models.models_model import ModelConfig
+    """标注命中检查用的嵌入模型引用（非解密：凭据解密与选路在模型服务）。"""
     from app.services.model_service import ModelApiKeyService
-    from app.core.models.base import RedBearModelConfig
 
-    model_config = db.query(ModelConfig).filter(ModelConfig.id == model_config_id).first()
-    if not model_config:
-        return None
-
-    api_key_obj = ModelApiKeyService.get_available_api_key(db, model_config_id, tenant_id=tenant_id)
-    if not api_key_obj:
-        return None
-
-    return RedBearModelConfig.from_api_key(api_key_obj, timeout=60, max_retries=3)
+    return ModelApiKeyService.resolve_invoke_ref(db, model_config_id, tenant_id=tenant_id)
 
 
 @router.post("", summary="创建标注")

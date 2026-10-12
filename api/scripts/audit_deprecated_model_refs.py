@@ -40,7 +40,11 @@ _REPO_CANDIDATES = [
     Path(__file__).resolve().parents[3] / ".env",   # MemoryBear-Enterprise 根
     Path(__file__).resolve().parents[1] / ".env",   # core/api
 ]
-_YAML_PATH = Path(__file__).resolve().parents[1] / "app/core/models/scripts/dashscope_models.yaml"
+# 模型清单单一事实源在 model-service（M7-4 起宿主不再持 YAML 副本）
+_YAML_PATH = (
+    Path(__file__).resolve().parents[3]
+    / "core/model-service/src/infrastructure/loader_yaml/dashscope_models.yaml"
+)
 
 BATCH_LABEL = "阿里云 2026-10-10 下线批次"
 

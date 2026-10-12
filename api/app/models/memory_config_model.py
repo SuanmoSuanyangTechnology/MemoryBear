@@ -92,6 +92,36 @@ class MemoryConfig(Base):
     scene_min_chars_to_summary = Column(Integer, nullable=False, default=0, server_default="0", comment="SceneSummary 最小有效字符数")
     time_decay_penalty = Column(Float, nullable=False, default=0.1, server_default="0.1",comment="时间衰减惩罚（0-0.2），仅存储，暂不参与计算",)
 
+    # SceneCommunity 配置（重建字段本期仅供接口读写）
+    batch_trigger_count = Column(
+        Integer, nullable=False, default=20, server_default="20",
+        comment="SceneSummary 社区归类批量触发数量",
+    )
+    candidate_community_limit = Column(
+        Integer, nullable=False, default=3, server_default="3",
+        comment="单条 SceneSummary 的候选社区数量上限",
+    )
+    compare_all_same_category_communities = Column(
+        Boolean, nullable=False, default=False, server_default=text("false"),
+        comment="是否比较同一 L1 下全部已有 SceneCommunity",
+    )
+    rebuild_new_scene_community_count_enabled = Column(
+        Boolean, nullable=False, default=True, server_default=text("true"),
+        comment="是否按新增 SceneCommunity 数量触发重建（本期仅存储）",
+    )
+    rebuild_new_scene_community_count = Column(
+        Integer, nullable=False, default=50, server_default="50",
+        comment="SceneCommunity 重建新增数量（本期仅存储）",
+    )
+    rebuild_interval_enabled = Column(
+        Boolean, nullable=False, default=True, server_default=text("true"),
+        comment="是否按时间间隔触发 SceneCommunity 重建（本期仅存储）",
+    )
+    rebuild_interval_days = Column(
+        Integer, nullable=False, default=1, server_default="1",
+        comment="SceneCommunity 重建时间间隔天数（本期仅存储）",
+    )
+
     # 情绪引擎配置
     emotion_enabled = Column(Boolean, default=True, comment="是否启用情绪提取")
     emotion_model_id = Column(String, nullable=True, comment="情绪分析专用模型ID")

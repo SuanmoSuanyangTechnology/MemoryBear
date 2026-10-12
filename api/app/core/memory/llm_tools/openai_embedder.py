@@ -1,8 +1,7 @@
 """
 OpenAI Embedder 客户端实现
 
-基于 LangChain 和 RedBearEmbeddings 的 OpenAI 嵌入模型客户端实现。
-自动支持火山引擎的多模态 Embedding。
+基于 RedBearEmbeddings 远端壳的嵌入模型客户端实现。
 """
 
 from typing import List
@@ -12,9 +11,8 @@ from app.core.memory.llm_tools.embedder_client import (
     EmbedderClient,
     EmbedderClientException
 )
-from app.core.models.base import RedBearModelConfig
 from app.core.models.embedding import RedBearEmbeddings
-from app.models.models_model import ModelProvider
+from app.integrations.model.invoke_backend import RemoteInvokeRef
 
 logger = logging.getLogger(__name__)
 
@@ -23,27 +21,27 @@ class OpenAIEmbedderClient(EmbedderClient):
     """
     OpenAI Embedder 客户端实现
 
-    基于 LangChain 和 RedBearEmbeddings 的实现，支持：
+    基于 RedBearEmbeddings 远端壳的实现，支持：
     - 批量文本嵌入
-    - 自动重试机制
     - 错误处理
-    - 火山引擎多模态 Embedding（自动识别）
+
+    凭据解密、渠道选路与重试都在模型服务侧（宿主只持有非解密引用）；
+    多模态 Embedding 随 G4 接入服务侧。
     """
 
-    def __init__(self, model_config: RedBearModelConfig):
+    def __init__(self, *, remote: RemoteInvokeRef):
         """
         初始化 OpenAI Embedder 客户端
 
         Args:
-            model_config: 模型配置
+            remote: 非解密配置引用（凭据在模型服务）
         """
-        super().__init__(model_config)
+        super().__init__(remote=remote)
 
-        # 初始化 RedBearEmbeddings（自动支持火山引擎多模态；基类已保存原始 config，直接复用）
-        self.model = RedBearEmbeddings(self.config)
-        self.is_multimodal = self.model.is_multimodal_supported()
+        # 远端壳：宿主不持有凭据
+        self.model = RedBearEmbeddings.for_invoke(remote)
 
-        logger.info(f"OpenAI Embedder 客户端初始化完成 (provider={self.provider}, multimodal={self.is_multimodal})")
+        logger.info(f"OpenAI Embedder 客户端初始化完成 (remote, config_id={remote.config_id})")
 
     async def response(
         self,
@@ -58,7 +56,8 @@ class OpenAIEmbedderClient(EmbedderClient):
             **kwargs: 额外参数
 
         Returns:
-            嵌入向量列表
+            嵌入向量列表；入参中的空白文本按位返回 ``None``（与入参等长，
+            调用方自行判定）
 
         Raises:
             EmbedderClientException: 嵌入向量生成失败
@@ -71,15 +70,7 @@ class OpenAIEmbedderClient(EmbedderClient):
                 logger.warning("输入文本列表为空，返回空结果")
                 return []
 
-            # 生成嵌入向量
-            if self.is_multimodal:
-                # 火山引擎多模态 Embedding
-                embeddings = await self.model.aembed_multimodal(
-                    [{"type": "text", "text": text} for text in texts]
-                )
-            else:
-                # 普通 Embedding
-                embeddings = await self.model.aembed_documents(texts)
+            embeddings = await self.model.aembed_documents(texts)
 
             logger.debug(f"成功生成 {len(embeddings)} 个嵌入向量")
             return embeddings

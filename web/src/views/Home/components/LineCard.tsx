@@ -12,7 +12,8 @@
 
 import { type FC } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Select } from 'antd'
+import { DatePicker } from 'antd'
+import dayjs, { type Dayjs } from 'dayjs'
 
 import Card from './Card'
 import AreaLineChart, { type ChartData } from '@/components/Charts/AreaLineChart';
@@ -22,22 +23,15 @@ import AreaLineChart, { type ChartData } from '@/components/Charts/AreaLineChart
  */
 interface LineCardProps {
   chartData: ChartData[];
-  limit: number;
-  onChange: (value: string, type: string) => void;
+  dateRange: [Dayjs, Dayjs];
+  onChange: (value: [string, string], type: string) => void;
   type: string;
   className?: string;
   seriesList: string[];
 }
 
-const LineCard: FC<LineCardProps> = ({ chartData, limit, onChange, type, className, seriesList }) => {
+const LineCard: FC<LineCardProps> = ({ chartData, dateRange, onChange, type, className, seriesList }) => {
   const { t } = useTranslation()
-  const options = [
-    { label: t('dashboard.lastDays', { days: 7 }), value: 7 },
-    { label: t('dashboard.lastDays', { days: 30 }), value: 30 },
-    { label: t('dashboard.lastDays', { days: 90 }), value: 90 },
-    { label: t('dashboard.lastHalfYear'), value: 180 },
-    { label: t('dashboard.lastYear'), value: 365 },
-  ]
   /** Format series list for legend */
   const formatSeriesList = () => {
     const list: Record<string, string> = {}
@@ -52,11 +46,25 @@ const LineCard: FC<LineCardProps> = ({ chartData, limit, onChange, type, classNa
     <Card
       title={t(`dashboard.${type}`)}
       headerOperate={
-        <Select 
-          value={limit}
-          options={options} 
-          onChange={(value) => onChange(String(value), type)}
-          className="rb:w-35!"
+        <DatePicker.RangePicker
+          value={dateRange}
+          disabledDate={(current, { from }) => {
+            if (current.isAfter(dayjs(), 'day')) {
+              return true
+            }
+            if (!from) {
+              return false
+            }
+            return current.isBefore(from.subtract(30, 'day'), 'day')
+              || current.isAfter(from.add(30, 'day'), 'day')
+          }}
+          onChange={(dates) => {
+            if (dates?.[0] && dates[1]) {
+              onChange([dates[0].format('YYYY-MM-DD'), dates[1].format('YYYY-MM-DD')], type)
+            }
+          }}
+          size="small"
+          className="rb:w-52!"
         />
       }
       className={`rb:pb-6 ${className}`}
@@ -65,7 +73,16 @@ const LineCard: FC<LineCardProps> = ({ chartData, limit, onChange, type, classNa
         xAxisKey="date"
         chartData={chartData}
         seriesList={formatSeriesList()}
-        height={239}
+        height={127}
+        showLegend={false}
+        grid={{
+          top: 4,
+          left: 4,
+          right: 20,
+          bottom: 0,
+          containLabel: true
+        }}
+        emptySize={88}
       />
     </Card>
   )

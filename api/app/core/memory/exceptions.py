@@ -1,8 +1,15 @@
-"""记忆萃取与检索链路的稳定业务异常定义。"""
+"""记忆模块的异常定义。
+
+包含萃取/检索链路的稳定业务异常，以及存储/重算等链路的控制流异常。
+"""
 from __future__ import annotations
 
 from enum import Enum
 from typing import Optional
+
+
+class JobSupersededError(RuntimeError):
+    """The job lost ownership, so its remaining pages must not be written."""
 
 
 class MemoryExtractionErrorCode(str, Enum):

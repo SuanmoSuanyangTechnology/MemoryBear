@@ -23,13 +23,12 @@ from app.db import get_db, get_async_db_context
 from app.integrations.knowledge.contracts import KnowledgeRetrievalSource
 from app.models import (
     App,
-    MultiAgentConfig, AgentConfig, ModelType, WorkflowConfig,
+    MultiAgentConfig, AgentConfig, WorkflowConfig,
     Modality, ModelFeature, AgentExecution, Message, Conversation)
 from app.repositories.agent_execution_repository import AgentExecutionRepository
 from app.repositories.tool_repository import ToolRepository
 from app.schemas import DraftRunRequest
 from app.schemas.app_schema import FileInput, FileType, TransferMethod
-from app.schemas.model_schema import ModelInfo
 from app.schemas.prompt_schema import render_prompt_message, PromptMessageRole
 from app.services.annotation_service import AnnotationService
 from app.services.conversation_service import ConversationService
@@ -206,6 +205,123 @@ class AppChatService:
         )
         return len(existing_messages) > 0
 
+    async def _resolve_cluster_opening(
+            self,
+            orchestrator: Any,
+            conversation_id: uuid.UUID,
+            variables: Optional[Dict[str, Any]],
+    ) -> tuple:
+        """集群新会话开场白：仅 features.opening_statement 开启时才查库判断新会话。
+
+        向后兼容：存量集群没有 features → 直接返回 (None, [])，不产生任何额外查询。
+        失败降级为无开场白，不阻断对话。
+        """
+        features = getattr(orchestrator, "_features", None) or {}
+        opening_cfg = features.get("opening_statement")
+        if not (isinstance(opening_cfg, dict) and opening_cfg.get("enabled") and opening_cfg.get("statement")):
+            return None, []
+        try:
+            is_new_conversation = not await self._conversation_has_messages(conversation_id)
+            from app.services.cluster_chat_features import resolve_opening
+
+            return resolve_opening(features, variables, is_new_conversation)
+        except Exception as e:  # noqa: BLE001 - 开场白是增量能力
+            logger.warning(f"集群开场白解析失败（已跳过）: {e}")
+            return None, []
+
+    async def _cluster_annotation_hit(
+            self,
+            config: Any,
+            message: str,
+            conversation_id: uuid.UUID,
+            message_id: uuid.UUID,
+            user_message_id: uuid.UUID,
+            storage_type: Optional[str] = None,
+            user_rag_memory_id: Optional[str] = None,
+            source: str = "",
+    ) -> Optional[dict]:
+        """集群标注命中（对齐 Agent 应用）：命中则落库 user/assistant 消息并返回标注结果。
+
+        向后兼容：按 app_id 查 AppAnnotationSetting，未配置/未启用/无标注一律返回 None，
+        调用方继续走正常编排；任何异常也降级为 None（标注是增量能力，不阻断对话）。
+        记忆派发只在集群记忆开关（supervisor_config.memory.enabled）开启时进行。
+        """
+        try:
+            from app.models.annotation_model import HitLogSource
+
+            match = await self._check_annotation_match_async(
+                config.app_id, message, source=source or HitLogSource.EXTERNAL
+            )
+            if not match:
+                return None
+            answer = match["answer"]
+            await self.conversation_service.add_message_async(
+                message_id=user_message_id,
+                conversation_id=conversation_id,
+                role="user",
+                content=message,
+                meta_data={"files": []},
+            )
+            await self.conversation_service.add_message_async(
+                message_id=message_id,
+                conversation_id=conversation_id,
+                role="assistant",
+                content=answer,
+                meta_data={"usage": {}},
+            )
+            supervisor_config = getattr(config, "supervisor_config", None)
+            if hasattr(supervisor_config, "model_dump"):
+                supervisor_config = supervisor_config.model_dump()
+            memory_cfg = (supervisor_config or {}).get("memory") if isinstance(supervisor_config, dict) else None
+            if isinstance(memory_cfg, dict) and memory_cfg.get("enabled"):
+                await self.conversation_service.dispatch_memory_pair(
+                    conversation_id,
+                    user_message={"id": user_message_id, "content": message, "meta_data": {"files": []}},
+                    assistant_message={"id": message_id, "content": answer, "meta_data": {"usage": {}}},
+                    storage_type=storage_type or "neo4j",
+                    user_rag_memory_id=user_rag_memory_id or "",
+                )
+            return match
+        except Exception as e:  # noqa: BLE001 - 标注是增量能力
+            logger.warning(f"集群标注命中处理失败（已跳过，走正常编排）: {e}")
+            return None
+
+    async def _build_cluster_files_persist(
+            self,
+            files: list[FileInput],
+            orchestrator: Any,
+    ) -> tuple:
+        """集群本轮附件的落库内容（与 Agent 应用同口径）。
+
+        Returns:
+            (files_meta, history_files)：files_meta 写 user 消息 meta.files；
+            history_files 仅在主管实际处理过附件时非空（供后续轮次水合历史）。
+        """
+        files_meta: list = []
+        local_ids = [
+            f.upload_file_id for f in files
+            if f.transfer_method.value == "local_file" and f.upload_file_id
+            and (not f.name or not f.size)
+        ]
+        meta_map = await self._fetch_completed_file_metadata(local_ids) if local_ids else {}
+        for f in files:
+            name, size = f.name, f.size
+            if f.transfer_method.value == "local_file" and f.upload_file_id and (not name or not size):
+                meta = meta_map.get(str(f.upload_file_id))
+                if meta:
+                    name = name or meta.file_name
+                    size = size or meta.file_size
+            files_meta.append(serialize_file_reference(f, name=name, size=size))
+
+        history_files = None
+        processed_files = getattr(orchestrator, "_turn_processed_files", None)
+        if processed_files:
+            history_files = {
+                "content": sanitize_processed_files_for_history(processed_files),
+                "provider": getattr(orchestrator, "_turn_files_provider", None),
+            }
+        return files_meta, history_files
+
     async def _record_api_key_usage(self, api_key_id: uuid.UUID | None) -> bool:
         if not api_key_id:
             return False
@@ -269,7 +385,6 @@ class AppChatService:
             return self._check_annotation_match(app_id, message, source)
 
         try:
-            from app.core.models.base import RedBearModelConfig
             from app.models.annotation_model import AppAnnotation, AppAnnotationHitLog, AppAnnotationSetting
 
             async with get_async_db_context() as db:
@@ -291,18 +406,18 @@ class AppChatService:
                     return None
 
                 tenant_id = await self._resolve_app_tenant_id_async(app_id)
-                api_key_obj = await ModelApiKeyService.get_available_api_key_async(
+                embedding_ref = await ModelApiKeyService.resolve_invoke_ref_async(
                     db,
                     setting.model_config_id,
                     tenant_id=tenant_id,
                 )
-                if not api_key_obj:
+                if not embedding_ref:
                     return None
                 threshold = setting.similarity_threshold
 
-            config = RedBearModelConfig.from_api_key(api_key_obj, timeout=60, max_retries=3)
-
-            query_embedding = await asyncio.to_thread(AnnotationService.generate_embedding, message, config)
+            query_embedding = await asyncio.to_thread(
+                AnnotationService.generate_embedding, message, embedding_ref
+            )
             best_match = None
             best_similarity = 0.0
             for annotation in annotations:
@@ -368,30 +483,20 @@ class AppChatService:
             if not annotations:
                 return None
 
-            from app.models.models_model import ModelConfig
-            model_cfg = self.db.query(ModelConfig).filter(
-                ModelConfig.id == setting.model_config_id
-            ).first()
-            if not model_cfg:
-                return None
-
             tenant_id = self._resolve_app_tenant_id(app_id)
-            api_key_obj = ModelApiKeyService.get_available_api_key(
+            embedding_ref = ModelApiKeyService.resolve_invoke_ref(
                 self.db,
                 setting.model_config_id,
                 tenant_id=tenant_id,
             )
-            if not api_key_obj:
+            if not embedding_ref:
                 return None
-
-            from app.core.models.base import RedBearModelConfig
-            model_config = RedBearModelConfig.from_api_key(api_key_obj, timeout=60, max_retries=3)
 
             result = service.find_best_match(
                 query=message,
                 annotations=annotations,
                 threshold=setting.similarity_threshold,
-                model_config=model_config,
+                embedding_ref=embedding_ref,
                 app_id=app_id,
                 source=source,
             )
@@ -403,9 +508,8 @@ class AppChatService:
     async def _load_annotation_context_evidence(self, app_id: uuid.UUID, message: str) -> List[ContextEvidence]:
         """延迟查询候选标注；只由成功产生证据的知识库/记忆工具触发。"""
         try:
-            from app.core.models.base import RedBearModelConfig
             from app.models.annotation_model import AppAnnotation, AppAnnotationSetting
-            api_key_config: dict[str, Any] | None = None
+            embedding_ref = None
             if self._uses_async_session():
                 async with get_async_db_context() as db:
                     setting = (await db.execute(select(AppAnnotationSetting).where(
@@ -415,42 +519,21 @@ class AppChatService:
                     annotations = _snapshot_annotations(list((await db.execute(select(AppAnnotation).where(
                         AppAnnotation.app_id == app_id, AppAnnotation.is_active == 1))).scalars().all()))
                     tenant_id = await self._resolve_app_tenant_id_async(app_id)
-                    api_key_obj = await ModelApiKeyService.get_available_api_key_async(
+                    embedding_ref = await ModelApiKeyService.resolve_invoke_ref_async(
                         db, setting.model_config_id, tenant_id=tenant_id)
-                    if api_key_obj:
-                        api_key_config = {
-                            "model_name": api_key_obj.model_name,
-                            "provider": api_key_obj.provider,
-                            "api_key": api_key_obj.api_key,
-                            "api_base": api_key_obj.api_base,
-                            "tenant_id": api_key_obj.tenant_id,
-                            "model_config_id": api_key_obj.model_config_id,
-                            "channel_id": api_key_obj.channel_id,
-                        }
             else:
                 service = AnnotationService(self.db)
                 setting = service.get_setting(app_id)
                 if not setting or not setting.enabled or not setting.model_config_id:
                     return []
                 annotations = service.repo.get_all_active_by_app(app_id)
-                api_key_obj = ModelApiKeyService.get_available_api_key(
+                embedding_ref = ModelApiKeyService.resolve_invoke_ref(
                     self.db, setting.model_config_id, tenant_id=self._resolve_app_tenant_id(app_id))
-                if api_key_obj:
-                    api_key_config = {
-                        "model_name": api_key_obj.model_name,
-                        "provider": api_key_obj.provider,
-                        "api_key": api_key_obj.api_key,
-                        "api_base": api_key_obj.api_base,
-                        "tenant_id": api_key_obj.tenant_id,
-                        "model_config_id": api_key_obj.model_config_id,
-                        "channel_id": api_key_obj.channel_id,
-                    }
-            if not annotations or not api_key_config:
+            if not annotations or not embedding_ref:
                 return []
-            model_config = RedBearModelConfig.from_api_key(api_key_config, timeout=60, max_retries=3)
             candidates = await asyncio.to_thread(
                 AnnotationService.find_context_candidates,
-                message, annotations, model_config, 0.6, 3,
+                message, annotations, embedding_ref, 0.6, 3,
             )
             logger.info(
                 "[上下文组装] 标注候选 | "
@@ -529,6 +612,8 @@ class AppChatService:
                 conversation_id,
                 user_message={"id": user_message_id, "content": message, "meta_data": {"files": []}},
                 assistant_message={"id": message_id, "content": annotation_match["answer"], "meta_data": {"usage": {}}},
+                storage_type=storage_type or "neo4j",
+                user_rag_memory_id=user_rag_memory_id or "",
             )
             elapsed_time = time.time() - start_time
             return {
@@ -566,7 +651,7 @@ class AppChatService:
         # 获取模型配置ID
         model_config_id = config.default_model_config_id
         tenant_id = await self._resolve_tenant_id_async(workspace_id)
-        api_key_obj = await ModelApiKeyService.get_available_api_key_bridge_async(
+        api_key_obj = await ModelApiKeyService.resolve_runtime_api_key_bridge_or_raise_async(
             self.db,
             model_config_id,
             tenant_id=tenant_id,
@@ -575,6 +660,12 @@ class AppChatService:
             await ModelConfigService.raise_model_unavailable_bridge_async(
                 self.db, model_config_id, tenant_id=tenant_id
             )
+        # 远端模式（G3）：非解密视图供 invoke 接缝与多模态格式化使用；凭据仍供沙箱/用量等既有消费者
+        model_view = await ModelConfigService.get_runtime_model_view_bridge_async(
+            self.db,
+            model_config_id,
+            tenant_id=tenant_id,
+        )
         # 处理系统提示词（支持变量替换）
         system_prompt = config.system_prompt
         if variables:
@@ -643,21 +734,6 @@ class AppChatService:
 
         system_prompt = append_external_context_rule(system_prompt)
 
-        model_info = ModelInfo(
-            model_name=api_key_obj.model_name,
-            provider=api_key_obj.provider,
-            api_key=api_key_obj.api_key,
-            api_base=api_key_obj.api_base,
-            input_modalities=[str(item) for item in (api_key_obj.input_modalities or [])],
-            output_modalities=[str(item) for item in (api_key_obj.output_modalities or [])],
-            features=[str(item) for item in (api_key_obj.features or [])],
-            model_type=ModelType.LLM,
-            tenant_id=api_key_obj.tenant_id,
-            model_config_id=api_key_obj.model_config_id,
-            channel_id=api_key_obj.channel_id,
-            failover_plan=api_key_obj.failover_plan,
-        )
-
         # 加载历史消息（包含开场白）
         used_context_engine = False
         if history is None:
@@ -704,7 +780,7 @@ class AppChatService:
         # 仅用于发给 LLM 的用户消息（追加本轮图片清单），不污染入库原文 message
         llm_message = message
         if files:
-            multimodal_service = MultimodalService(self.db, model_info)
+            multimodal_service = MultimodalService(self.db, model_view)
             fu_config = features_config.get("file_upload", {})
             if hasattr(fu_config, "model_dump"):
                 fu_config = fu_config.model_dump()
@@ -765,8 +841,7 @@ class AppChatService:
                 system_prompt=system_prompt,
                 message=message,
                 history=history,
-                api_key_config=_api_key_config,
-                model_config=model_info,
+                model_view=model_view,
                 effective_params=model_parameters,
                 processed_files=processed_files,
                 context_evidence_loader=load_annotation_context,
@@ -838,15 +913,11 @@ class AppChatService:
                 )
                 raise
         else:
-            # 创建 LangChain Agent
+            # 创建 LangChain Agent（远端模式：身份/能力事实取非解密视图，凭据不上送）
             agent = LangChainAgent(
                 model_name=api_key_obj.model_name,
-                api_key=api_key_obj.api_key,
+                model_view=model_view,
                 provider=api_key_obj.provider,
-                api_base=api_key_obj.api_base,
-                input_modalities=[str(item) for item in (api_key_obj.input_modalities or [])],
-                output_modalities=[str(item) for item in (api_key_obj.output_modalities or [])],
-                features=features,
                 temperature=model_parameters.get("temperature", 0.7),
                 max_tokens=model_parameters.get("max_tokens", 2000),
                 system_prompt=system_prompt,
@@ -854,10 +925,6 @@ class AppChatService:
                 deep_thinking=model_parameters.get("deep_thinking", False),
                 thinking_budget_tokens=model_parameters.get("thinking_budget_tokens"),
                 json_output=model_parameters.get("json_output", False),
-                tenant_id=api_key_obj.tenant_id,
-                model_config_id=api_key_obj.model_config_id,
-                channel_id=api_key_obj.channel_id,
-                failover_plan=api_key_obj.failover_plan,
                 context_query=message,
                 context_base_text=system_prompt + "\n" + str(history) + "\n" + message,
                 context_evidence_loader=load_annotation_context,
@@ -924,7 +991,7 @@ class AppChatService:
         if isinstance(sq_config, dict) and sq_config.get("enabled"):
             suggested_questions = await self.agent_service._generate_suggested_questions(
                 features_config, result["content"],
-                _api_key_config, {}
+                model_view, {}
             )
 
         audio_url = await self.agent_service._generate_tts(
@@ -1014,6 +1081,8 @@ class AppChatService:
                 conversation_id,
                 user_message={"id": user_message_id, "content": message, "meta_data": human_meta, "should_memorize": memory},
                 assistant_message={"id": message_id, "content": result["content"], "meta_data": assistant_meta, "should_memorize": memory},
+                storage_type=storage_type or "neo4j",
+                user_rag_memory_id=user_rag_memory_id or "",
             )
             if used_context_engine:
                 _ctx_kwargs = dict(
@@ -1135,6 +1204,8 @@ class AppChatService:
                     conversation_id,
                     user_message={"id": user_message_id, "content": message, "meta_data": {"files": []}},
                     assistant_message={"id": message_id, "content": annotation_match["answer"], "meta_data": {"usage": {}}},
+                    storage_type=storage_type or "neo4j",
+                    user_rag_memory_id=user_rag_memory_id or "",
                 )
                 yield f"event: start\ndata: {json.dumps({'conversation_id': str(conversation_id), 'message_id': str(message_id), 'user_message_id': str(user_message_id)}, ensure_ascii=False)}\n\n"
                 yield f"event: message\ndata: {json.dumps({'content': annotation_match['answer'], 'conversation_id': str(conversation_id)}, ensure_ascii=False)}\n\n"
@@ -1162,7 +1233,7 @@ class AppChatService:
             # 获取模型配置ID
             model_config_id = config.default_model_config_id
             tenant_id = await self._resolve_tenant_id_async(workspace_id)
-            api_key_obj = await ModelApiKeyService.get_available_api_key_bridge_async(
+            api_key_obj = await ModelApiKeyService.resolve_runtime_api_key_bridge_or_raise_async(
                 self.db,
                 model_config_id,
                 tenant_id=tenant_id,
@@ -1171,6 +1242,12 @@ class AppChatService:
                 await ModelConfigService.raise_model_unavailable_bridge_async(
                     self.db, model_config_id, tenant_id=tenant_id
                 )
+            # 远端模式（G3）：非解密视图供 invoke 接缝使用；凭据仍供沙箱/多模态/用量等既有消费者
+            model_view = await ModelConfigService.get_runtime_model_view_bridge_async(
+                self.db,
+                model_config_id,
+                tenant_id=tenant_id,
+            )
             # 处理系统提示词（支持变量替换）
             system_prompt = config.system_prompt
             if variables:
@@ -1239,21 +1316,6 @@ class AppChatService:
 
             system_prompt = append_external_context_rule(system_prompt)
 
-            model_info = ModelInfo(
-                model_name=api_key_obj.model_name,
-                provider=api_key_obj.provider,
-                api_key=api_key_obj.api_key,
-                api_base=api_key_obj.api_base,
-                input_modalities=[str(item) for item in (api_key_obj.input_modalities or [])],
-                output_modalities=[str(item) for item in (api_key_obj.output_modalities or [])],
-                features=[str(item) for item in (api_key_obj.features or [])],
-                model_type=ModelType.LLM,
-                tenant_id=api_key_obj.tenant_id,
-                model_config_id=api_key_obj.model_config_id,
-                channel_id=api_key_obj.channel_id,
-                failover_plan=api_key_obj.failover_plan,
-            )
-
             # 加载历史消息（包含开场白）
             used_context_engine = False
             if history is None:
@@ -1297,7 +1359,7 @@ class AppChatService:
             # 仅用于发给 LLM 的用户消息（追加本轮图片清单），不污染入库原文 message
             llm_message = message
             if files:
-                multimodal_service = MultimodalService(self.db, model_info)
+                multimodal_service = MultimodalService(self.db, model_view)
                 fu_config = features_config.get("file_upload", {})
                 if hasattr(fu_config, "model_dump"):
                     fu_config = fu_config.model_dump()
@@ -1360,8 +1422,7 @@ class AppChatService:
                         system_prompt=system_prompt,
                         message=message,
                         history=history,
-                        api_key_config=_api_key_config,
-                        model_config=model_info,
+                        model_view=model_view,
                         effective_params=model_parameters,
                         processed_files=processed_files,
                         context_evidence_loader=load_annotation_context,
@@ -1415,15 +1476,11 @@ class AppChatService:
                     adapter=_sandbox_adapter,
                 )
             else:
-                # 创建 LangChain Agent
+                # 创建 LangChain Agent（远端模式：身份/能力事实取非解密视图，凭据不上送）
                 agent = LangChainAgent(
                     model_name=api_key_obj.model_name,
-                    api_key=api_key_obj.api_key,
+                    model_view=model_view,
                     provider=api_key_obj.provider,
-                    api_base=api_key_obj.api_base,
-                    input_modalities=[str(item) for item in (api_key_obj.input_modalities or [])],
-                    output_modalities=[str(item) for item in (api_key_obj.output_modalities or [])],
-                    features=features,
                     temperature=model_parameters.get("temperature", 0.7),
                     max_tokens=model_parameters.get("max_tokens", 2000),
                     system_prompt=system_prompt,
@@ -1432,10 +1489,6 @@ class AppChatService:
                     deep_thinking=model_parameters.get("deep_thinking", False),
                     thinking_budget_tokens=model_parameters.get("thinking_budget_tokens"),
                     json_output=model_parameters.get("json_output", False),
-                    tenant_id=api_key_obj.tenant_id,
-                    model_config_id=api_key_obj.model_config_id,
-                    channel_id=api_key_obj.channel_id,
-                    failover_plan=api_key_obj.failover_plan,
                     context_query=message,
                     context_base_text=system_prompt + "\n" + str(history) + "\n" + message,
                     context_evidence_loader=load_annotation_context,
@@ -1572,7 +1625,7 @@ class AppChatService:
             if isinstance(sq_config, dict) and sq_config.get("enabled"):
                 suggested_questions = await self.agent_service._generate_suggested_questions(
                     features_config, full_content,
-                    _api_key_config, {}
+                    model_view, {}
                 )
                 end_data["suggested_questions"] = suggested_questions
             end_data["audio_url"] = stream_audio_url
@@ -1675,7 +1728,9 @@ class AppChatService:
                 await self.conversation_service.dispatch_memory_pair(
                     conversation_id,
                     user_message={"id": user_message_id, "content": message, "meta_data": human_meta, "should_memorize": memory},
-                    assistant_message={"id": message_id, "content": full_content, "meta_data": assistant_meta, "should_memorize": True},
+                    assistant_message={"id": message_id, "content": full_content, "meta_data": assistant_meta, "should_memorize": memory},
+                    storage_type=storage_type or "neo4j",
+                    user_rag_memory_id=user_rag_memory_id or "",
                 )
 
                 # Enqueue agent execution after messages so the FK is satisfied
@@ -1853,19 +1908,48 @@ class AppChatService:
             memory: bool = True,
             storage_type: Optional[str] = None,
             user_rag_memory_id: Optional[str] = None,
+            thinking: bool = False,
+            execution_mode: Optional[str] = None,
+            files: Optional[List[FileInput]] = None,
     ) -> Dict[str, Any]:
-        """多 Agent 聊天（非流式）"""
+        """多 Agent 聊天（非流式）
+
+        thinking / execution_mode / files 为对齐 Agent 应用新增的可选参数，缺省 = 旧行为。
+        """
 
         start_time = time.time()
         user_message_id = uuid.uuid4()
+        # S1 轮次锚点：预生成 assistant 消息 ID，master 执行记录据此关联本轮消息，
+        # 日志详情按消息挂载节点不依赖时序吸附（多轮场景吸附会分散到别的消息）。
+        message_id = uuid.uuid4()
         actual_config_id = None
         config_id = actual_config_id
 
         if variables is None:
             variables = {}
 
+        # 标注命中（按 app_id 取 AppAnnotationSetting；未配置/未启用直接返回 None，老集群无影响）。
+        # 命中则不进编排器，直接落库返回标注答案（与 Agent 应用一致）。
+        _annotation_hit = await self._cluster_annotation_hit(
+            config, message, conversation_id, message_id, user_message_id
+        )
+        if _annotation_hit is not None:
+            return {
+                "conversation_id": conversation_id,
+                "message": _annotation_hit["answer"],
+                "message_id": str(message_id),
+                "user_message_id": str(user_message_id),
+                "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+                "elapsed_time": time.time() - start_time,
+            }
+
         # 2. 创建编排器
         orchestrator = await MultiAgentOrchestrator.create(self.db, config)
+
+        # 新会话开场白（features.opening_statement 开启才查库；老集群 features 为空，零开销）
+        opening_statement, opening_suggested_questions = await self._resolve_cluster_opening(
+            orchestrator, conversation_id, variables
+        )
 
         # 3. 执行任务
         result = await orchestrator.execute(
@@ -1875,20 +1959,55 @@ class AppChatService:
             variables=variables,
             use_llm_routing=True,  # 默认启用 LLM 路由
             web_search=web_search,  # 网络搜索参数
-            memory=memory  # 记忆功能参数
+            memory=memory,  # 记忆功能参数
+            # S5：这两个参数此前在非流式入口被丢弃（协作模式因此拿不到存储/记忆上下文）
+            storage_type=storage_type,
+            user_rag_memory_id=user_rag_memory_id,
+            message_id=message_id,
+            thinking=thinking,
+            opening_statement=opening_statement,
+            execution_mode=execution_mode,
+            files=files or None,  # 附件（缺省空 = 旧行为）
+            user_message_id=user_message_id,  # 情绪感知缓存键（features.emotion_reply 开启才用）
         )
 
         elapsed_time = time.time() - start_time
 
+        # 新会话开场白作为第一条 assistant 消息先落库（与 Agent 非流式一致）
+        if opening_statement:
+            await self.conversation_service.add_message_async(
+                conversation_id=conversation_id,
+                role="assistant",
+                content=opening_statement,
+                meta_data={"suggested_questions": opening_suggested_questions},
+            )
+
         # 保存消息
+        # 附件落库（与 Agent 应用一致）；无 files 时不传 meta_data，老集群落库不变
+        _user_meta_kwargs: Dict[str, Any] = {}
+        if files:
+            _files_meta, _history_files = await self._build_cluster_files_persist(files, orchestrator)
+            _user_meta = {"files": _files_meta}
+            if _history_files:
+                _user_meta["history_files"] = _history_files
+            _user_meta_kwargs["meta_data"] = _user_meta
         await self.conversation_service.add_message_async(
             message_id=user_message_id,
             conversation_id=conversation_id,
             role="user",
-            content=message
+            content=message,
+            **_user_meta_kwargs,
         )
 
+        # 对话能力附加字段（建议问题/引用/语音）：仅对应 features 开启时 result 才带这些键，
+        # 老集群 _cluster_extras 为空，落库与返回均不变
+        _cluster_extras: Dict[str, Any] = {
+            _k: result[_k]
+            for _k in ("suggested_questions", "citations", "audio_url", "audio_status")
+            if _k in result
+        }
         ai_message = await self.conversation_service.add_message_async(
+            message_id=message_id,
             conversation_id=conversation_id,
             role="assistant",
             content=result.get("message", ""),
@@ -1899,22 +2018,51 @@ class AppChatService:
                     "prompt_tokens": 0,
                     "completion_tokens": 0,
                     "total_tokens": 0
-                })
+                }),
+                **_cluster_extras,
             }
         )
 
+        # 上下文引擎 after_turn（仅本轮实际走了 features.context_engine 才入队；老集群恒为 None）
+        _ctx_after_turn = orchestrator.context_engine_after_turn_args(conversation_id)
+        if _ctx_after_turn:
+            try:
+                from app.services.batch_persist_queue import BatchPersistQueue, PersistTask
+                await BatchPersistQueue.enqueue(PersistTask(task_type="after_turn", args=_ctx_after_turn))
+            except Exception as e:
+                logger.warning("入队 context_engine after_turn 失败（不影响对话）", extra={"error": str(e)})
+
+        # S1 轮次锚点：消息落库后回填 master 执行记录的 message_id（幂等），
+        # 使日志详情精确按本轮 assistant 消息挂载节点。
+        _master_execution_id = getattr(orchestrator, "current_execution_id", None)
+        if _master_execution_id is not None:
+            try:
+                from app.services.batch_persist_queue import BatchPersistQueue, PersistTask
+                await BatchPersistQueue.enqueue(PersistTask(
+                    task_type="link_agent_execution_message",
+                    args={
+                        "execution_id": str(_master_execution_id),
+                        "message_id": str(message_id),
+                    },
+                ))
+            except Exception as e:
+                logger.warning("回填主执行记录 message_id 失败（不影响对话）", extra={"error": str(e)})
 
         return {
             "conversation_id": conversation_id,
             "message": result.get("message", ""),
             "message_id": str(ai_message.id),
             "user_message_id": str(user_message_id),
-            "usage": {
+            # S4：非流式返回真实 usage（orchestrator execute() 已改账本口径），
+            # 不再恒 0。
+            "usage": result.get("usage", {
                 "prompt_tokens": 0,
                 "completion_tokens": 0,
                 "total_tokens": 0
-            },
-            "elapsed_time": elapsed_time
+            }),
+            "elapsed_time": elapsed_time,
+            # 建议问题 / 引用 / 语音：仅对应 features 开启时 orchestrator 才会带这些键，老集群返回不变
+            **{k: result[k] for k in ("suggested_questions", "citations", "audio_url", "audio_status") if k in result},
         }
 
     @bind_usage("app", "config.app_id")
@@ -1929,8 +2077,14 @@ class AppChatService:
             memory: bool = True,
             storage_type: Optional[str] = None,
             user_rag_memory_id: Optional[str] = None,
+            thinking: bool = False,
+            execution_mode: Optional[str] = None,
+            files: Optional[List[FileInput]] = None,
     ) -> AsyncGenerator[str, None]:
-        """多 Agent 聊天（流式）"""
+        """多 Agent 聊天（流式）
+
+        thinking / execution_mode 为对齐 Agent 应用新增的可选参数，缺省 = 旧行为。
+        """
 
         start_time = time.time()
 
@@ -1947,9 +2101,28 @@ class AppChatService:
 
             full_content = ""
             total_tokens = 0
+            # end 事件携带的对话能力附加字段（建议问题/引用/语音）；features 未开启时为空
+            end_extras: Dict[str, Any] = {}
+
+            # 标注命中（未配置/未启用标注返回 None，老集群无影响）；命中则不进编排器，
+            # 直接落库并下发 message/end（与 Agent 应用一致）。
+            _annotation_hit = await self._cluster_annotation_hit(
+                config, message, conversation_id, message_id, user_message_id,
+                storage_type=storage_type, user_rag_memory_id=user_rag_memory_id,
+            )
+            if _annotation_hit is not None:
+                _answer = _annotation_hit["answer"]
+                yield f"event: message\ndata: {json.dumps({'content': _answer, 'conversation_id': str(conversation_id)}, ensure_ascii=False)}\n\n"
+                yield f"event: end\ndata: {json.dumps({'elapsed_time': time.time() - start_time, 'conversation_id': str(conversation_id), 'message_id': str(message_id), 'message_length': len(_answer), 'usage': {'prompt_tokens': 0, 'completion_tokens': 0, 'total_tokens': 0}}, ensure_ascii=False)}\n\n"
+                return
 
             # 2. 创建编排器
             orchestrator = await MultiAgentOrchestrator.create(self.db, config)
+
+            # 新会话开场白（features.opening_statement 开启才查库；老集群 features 为空，零开销）
+            opening_statement, opening_suggested_questions = await self._resolve_cluster_opening(
+                orchestrator, conversation_id, variables
+            )
 
             # 3. 流式执行任务
             # message_id 下传：主执行记录据此带上本轮 assistant message_id，
@@ -1964,38 +2137,59 @@ class AppChatService:
                     memory=memory,  # 记忆功能参数
                     storage_type=storage_type,
                     user_rag_memory_id=user_rag_memory_id,
-                    message_id=message_id
+                    message_id=message_id,
+                    thinking=thinking,
+                    opening_statement=opening_statement,
+                    execution_mode=execution_mode,
+                    files=files or None,
+                    user_message_id=user_message_id,  # 情绪感知缓存键（features.emotion_reply 开启才用）
             ):
-                # 拦截 sub_usage 事件，累加 token
-                if "event: sub_usage" in event:
-                    if "data:" in event:
-                        try:
-                            data_line = event.split("data: ", 1)[1].strip()
-                            data = json.loads(data_line)
-                            total_tokens += data.get("total_tokens", 0)
-                        except:
-                            pass
-                else:
-                    yield event
-                    # 累加主气泡正文：只认集群级的 `message` 事件。
-                    # 子 Agent 的正文走 `sub_agent_message`（已在各自区块展示），
-                    # 若一并累加，落库的 assistant 正文会比界面显示多出一份重复内容，
-                    # 刷新后主气泡会变长。
-                    _event_name = ""
-                    if event.startswith("event:"):
-                        _event_name = event[6:].split("\n", 1)[0].strip()
-                    if _event_name == "message" and "data:" in event:
-                        try:
-                            data_line = event.split("data: ", 1)[1].strip()
-                            data = json.loads(data_line)
-                            if "content" in data:
-                                full_content += data["content"]
-                        except:
-                            pass
+                # S4：不再拦截 sub_usage 字符串累加 token —— orchestrator 内建
+                # per-turn 账本（routing/sub/merge 分层）在 end 事件统一发布
+                # usage（唯一权威口径），本层从 end 读取后落库。
+                _event_name = ""
+                if event.startswith("event:"):
+                    _event_name = event[6:].split("\n", 1)[0].strip()
+
+                if _event_name == "end" and "data:" in event:
+                    try:
+                        data_line = event.split("data: ", 1)[1].strip()
+                        data = json.loads(data_line)
+                        total_tokens = int((data.get("usage") or {}).get("total_tokens") or 0)
+                        # 对话能力附加字段（仅对应 features 开启时 end 才带这些键）
+                        for _k in ("suggested_questions", "citations", "audio_url", "audio_status"):
+                            if _k in data:
+                                end_extras[_k] = data[_k]
+                    except:
+                        pass
+
+                yield event
+                # 累加主气泡正文：只认集群级的 `message` 事件。
+                # 子 Agent 的正文走 `sub_agent_message`（已在各自区块展示），
+                # 若一并累加，落库的 assistant 正文会比界面显示多出一份重复内容，
+                # 刷新后主气泡会变长。
+                # 注意：S3 之后子 Agent 事件已剥离子会话 conversation_id，
+                # 本层收集口径与 orchestrator 的 message 事件发布口径一一对应
+                #（supervisor=merge 输出，supervisor_loop=主管 ReAct 正文，
+                # collaboration=handoffs 主回复）。
+                if _event_name == "message" and "data:" in event:
+                    try:
+                        data_line = event.split("data: ", 1)[1].strip()
+                        data = json.loads(data_line)
+                        if "content" in data:
+                            full_content += data["content"]
+                    except:
+                        pass
 
             elapsed_time = time.time() - start_time
 
             # Enqueue async batch persist
+            # S3 落库收口：本入口（应用编排侧）是唯一的落库层——落库内容为
+            # full_content（orchestrator message 事件序列 = 前端主气泡的最终
+            # 展示内容），经 BatchPersistQueue 统一写入；MultiAgentService/
+            # SharedChatService 不再各自拼内容直存（同轮多条 assistant 的根因）。
+            # supervisor 单 Agent 透传场景的 message 事件即子 Agent 输出本身，
+            # 落库与展示同一口径，"长会话返回值不是最终内容"由此消除。
             from app.services.batch_persist_queue import BatchPersistQueue, PersistTask
             from app.services.chat_context import StreamResult as _StreamResult
             _result = _StreamResult()
@@ -2005,19 +2199,48 @@ class AppChatService:
             _result.total_tokens = total_tokens
             _result.assistant_meta = {
                 "elapsed_time": elapsed_time,
+                "mode": getattr(orchestrator, "_normalized_mode", None),
+                "merge_mode_actual": getattr(orchestrator, "_merge_mode_actual", None),
                 "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": total_tokens},
             }
+            _persist_args = {
+                "conversation_id": str(conversation_id),
+                "result": _result,
+                "user_message_id_override": user_message_id,
+                "user_message_content": message,
+                "should_memorize": orchestrator.cluster_memory_enabled(),
+            }
+            # 新会话开场白落库（与 Agent 应用一致）；无开场白时不加任何新键，老集群落库不变
+            if opening_statement:
+                _persist_args["is_new_conversation"] = True
+                _persist_args["opening_statement"] = opening_statement
+                _persist_args["opening_message_id"] = uuid.uuid4()
+                _persist_args["opening_suggested_questions"] = opening_suggested_questions
+            # 附件落库（与 Agent 应用一致）；无 files 时不加任何新键，老集群落库不变
+            if files:
+                _files_meta, _history_files = await self._build_cluster_files_persist(files, orchestrator)
+                _persist_args["files_meta"] = _files_meta
+                if _history_files:
+                    _result.history_files = _history_files
+            # 建议问题 / 引用 / 语音落库（与 Agent 应用一致）；对应 features 未开启时 end_extras 为空，不写任何字段
+            if end_extras:
+                if "suggested_questions" in end_extras:
+                    _result.suggested_questions = end_extras.get("suggested_questions") or []
+                if "citations" in end_extras:
+                    _result.citations = end_extras.get("citations") or []
+                if end_extras.get("audio_url"):
+                    _result.audio_url = end_extras.get("audio_url")
+                    _result.audio_status = end_extras.get("audio_status")
             await BatchPersistQueue.enqueue(PersistTask(
                 task_type="save_messages",
-                args={
-                    "conversation_id": str(conversation_id),
-                    "result": _result,
-                    "user_message_id_override": user_message_id,
-                    "user_message_content": message,
-                    "should_memorize": memory,
-                },
+                args=_persist_args,
             ))
             save_messages_enqueued = True
+
+            # context_engine 轮后摘要（仅本轮实际走了上下文引擎才有参数；老集群恒为 None，不入队）
+            _ctx_after_args = orchestrator.context_engine_after_turn_args(conversation_id)
+            if _ctx_after_args:
+                await BatchPersistQueue.enqueue(PersistTask(task_type="after_turn", args=_ctx_after_args))
 
             # 主执行记录的 message_id 回填：记录在流式开始时就已创建（子 Agent 记录
             # 需要它作为 parent 外键），当时本轮 assistant message 还没落库，写 message_id

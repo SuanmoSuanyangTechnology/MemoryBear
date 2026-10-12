@@ -23,6 +23,7 @@ FULLTEXT_FIELDS: dict[MemoryNodeLabel, tuple[str, ...]] = {
         "description_timeline",
     ),
     MemoryNodeType.MEMORY_SUMMARY: ("content",),
+    MemoryNodeType.SCENE_COMMUNITY: ("topic_name", "topic_scope", "summary"),
     MemoryNodeType.SCENE_SUMMARY: ("content",),
     MemoryNodeType.COMMUNITY: ("name", "summary"),
     MemoryNodeType.PERCEPTUAL: ("summary", "topic", "domain", "keywords"),
@@ -36,6 +37,7 @@ EMBEDDING_FIELDS: dict[MemoryNodeLabel, str] = {
     MemoryNodeType.CHUNK: "chunk_embedding",
     MemoryNodeType.EXTRACTED_ENTITY: "name_embedding",
     MemoryNodeType.MEMORY_SUMMARY: "summary_embedding",
+    MemoryNodeType.SCENE_COMMUNITY: "summary_embedding",
     MemoryNodeType.SCENE_SUMMARY: "summary_embedding",
     MemoryNodeType.COMMUNITY: "summary_embedding",
     MemoryNodeType.PERCEPTUAL: "summary_embedding",
@@ -64,6 +66,16 @@ class IndexDefinition:
 def embedding_field_suffix(field: str, dimension: int) -> str:
     """Return the dimension-suffixed field name for a non-default dimension."""
     return f"{field}_{dimension}"
+
+
+def is_supported_embedding_dimension(dimension: int) -> bool:
+    """Whether the index has a dense_vector field for this dimension.
+
+    Callers use this to reject a model *before* it becomes the workspace's
+    embedding model: an unsupported dimension only fails later, inside the
+    projection, after the graph write already succeeded.
+    """
+    return isinstance(dimension, int) and dimension in EMBEDDING_DIMENSIONS
 
 
 def _dense_vector_mapping(dimension: int) -> dict[str, Any]:
@@ -325,15 +337,32 @@ INDEX_DEFINITIONS: dict[MemoryNodeLabel, IndexDefinition] = {
             "updated_at": {"type": "date"},
         },
     ),
+    MemoryNodeType.SCENE_COMMUNITY: _index_definition(
+        "scene_community",
+        MemoryNodeType.SCENE_COMMUNITY,
+        schema_version=1,
+        generation=1,
+        prop={
+            "id": {"type": "keyword"},
+            "end_user_id": {"type": "keyword"},
+            "category_l1": {"type": "keyword"},
+            "member_count": {"type": "long"},
+            "started_at": {"type": "date"},
+            "ended_at": {"type": "date"},
+            "created_at": {"type": "date"},
+            "updated_at": {"type": "date"},
+        },
+    ),
     MemoryNodeType.SCENE_SUMMARY: _index_definition(
         "scene_summary",
         MemoryNodeType.SCENE_SUMMARY,
-        schema_version=2,
+        schema_version=3,
         generation=1,
         prop={
             "id": {"type": "keyword"},
             "end_user_id": {"type": "keyword"},
             "conversation_id": {"type": "keyword"},
+            "topic_scope": {"type": "text", "analyzer": "cjk"},
             "source_message_ids": {"type": "keyword"},
             "start_message_id": {"type": "keyword"},
             "end_message_id": {"type": "keyword"},
@@ -342,6 +371,10 @@ INDEX_DEFINITIONS: dict[MemoryNodeLabel, IndexDefinition] = {
             "turn_count": {"type": "long"},
             "close_reason": {"type": "keyword"},
             "config_id": {"type": "keyword"},
+            "community_eligibility": {"type": "keyword"},
+            "community_category_l1": {"type": "keyword"},
+            "scene_community_id": {"type": "keyword"},
+            "community_status": {"type": "keyword"},
             "created_at": {"type": "date"},
             "updated_at": {"type": "date"},
         },

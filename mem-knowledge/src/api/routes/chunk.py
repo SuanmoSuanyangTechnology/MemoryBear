@@ -84,6 +84,7 @@ async def get_preview_chunks(
         snapshot,
         binary,
         vision_config,
+        tenant_id=principal.tenant_id,
     )
     chunks = chunk_service.materialize_preview_chunks(snapshot, parsed)
     if keywords:
@@ -133,7 +134,7 @@ async def get_chunks(
         # Listing must resolve the embedding config so multimodal (unit) indexes
         # are recognized and collapsed to chunk records; otherwise every unit of
         # a chunk would surface as a duplicate row.
-        resolved_embedding = await chunk_service.resolve_embedding_config(
+        embedding_config = await chunk_service.resolve_embedding_config(
             db,
             snapshot,
             principal,
@@ -142,7 +143,8 @@ async def get_chunks(
         runtime,
         await runtime.elasticsearch.client(),
         snapshot,
-        resolved_embedding,
+        embedding_config,
+        tenant_id=principal.tenant_id,
         for_mutation=False,
     )
     return _success(
@@ -164,7 +166,7 @@ async def _mutation_store(
     principal: Principal,
 ):
     async with runtime.database.async_session() as db:
-        resolved_embedding = await chunk_service.resolve_embedding_config(
+        embedding_config = await chunk_service.resolve_embedding_config(
             db,
             snapshot,
             principal,
@@ -173,7 +175,8 @@ async def _mutation_store(
         runtime,
         await runtime.elasticsearch.client(),
         snapshot,
-        resolved_embedding,
+        embedding_config,
+        tenant_id=principal.tenant_id,
     )
 
 
@@ -290,7 +293,7 @@ async def get_chunk(
             document_id,
             principal,
         )
-        resolved_embedding = await chunk_service.resolve_embedding_config(
+        embedding_config = await chunk_service.resolve_embedding_config(
             db,
             snapshot,
             principal,
@@ -299,7 +302,8 @@ async def get_chunk(
         runtime,
         await runtime.elasticsearch.client(),
         snapshot,
-        resolved_embedding,
+        embedding_config,
+        tenant_id=principal.tenant_id,
         for_mutation=False,
     )
     chunk = await chunk_service.require_owned_chunk(store, snapshot, doc_id)
@@ -365,6 +369,7 @@ async def delete_chunk(
         runtime,
         await runtime.elasticsearch.client(),
         snapshot,
+        tenant_id=principal.tenant_id,
     )
     await chunk_service.require_owned_chunk(store, snapshot, doc_id)
     await store.delete_by_ids([doc_id], refresh=force_refresh)

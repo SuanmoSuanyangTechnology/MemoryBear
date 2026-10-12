@@ -41,7 +41,6 @@ from app.models.file_metadata_model import FileMetadata
 from app.models.models_model import Modality
 from app.schemas.app_schema import FileInput, FileType, FileUploadConfig, TransferMethod
 from app.schemas.model_schema import ModelInfo
-from app.services.audio_transcription_service import AudioTranscriptionService
 from app.services.file_content_service import extract_permanent_file_id
 from app.services.file_storage_service import FileStorageService
 
@@ -394,17 +393,11 @@ class BedrockFormatStrategy(MultimodalFormatStrategy):
             file_type: str,
             url: str | None,
             content: bytes | None = None,
-            transcription: Optional[str] = None,
     ) -> tuple[bool, Dict[str, Any]]:
-        """Bedrock/Anthropic 不支持原生音频，必须转录为文本。"""
-        if transcription:
-            return True, {
-                "type": "text",
-                "text": f"[音频转录]\n{transcription}",
-            }
+        """Bedrock/Anthropic 不支持原生音频。"""
         return False, {
             "type": "text",
-            "text": "[音频文件：Bedrock 不支持原生音频，请启用音频转文本功能]",
+            "text": "[音频文件：当前 provider 不支持原生音频]",
         }
 
     async def format_video(self, url: str | None, content: bytes | None = None) -> tuple[bool, Dict[str, Any]]:
@@ -442,15 +435,8 @@ class OpenAIFormatStrategy(MultimodalFormatStrategy):
             file_type: str,
             url: str | None,
             content: bytes | None = None,
-            transcription: Optional[str] = None,
     ) -> tuple[bool, Dict[str, Any]]:
         """OpenAI 音频格式。"""
-        if transcription:
-            return True, {
-                "type": "text",
-                "text": f"[音频转录]\n{transcription}",
-            }
-
         try:
             audio_data = content
             if audio_data is None:
@@ -520,37 +506,28 @@ class MultimodalService:
 
     Attributes:
         db (Session): Database session.
-        model_api_key (str): API key for the model provider.
+        model_view (ModelInfo | None): 非解密运行时模型视图（G4a：不再持有凭据）。
         provider (str): Name of the model provider.
-        capability (list): Capability configuration of the model.
-        audio_api_key (str | None): API key used for audio transcription.
-        enable_audio_transcription (bool): Whether audio transcription is enabled.
+        input_modalities (list): Input modality configuration of the model.
     """
 
     def __init__(
             self,
             db: Session | AsyncSession,
-            api_config: ModelInfo | None = None,
-            audio_api_key: Optional[str] = None,
-            enable_audio_transcription: bool = False,
+            model_view: ModelInfo | None = None,
     ):
         """
         Initialize the multimodal service.
 
         Args:
             db (Session): Database session.
-            api_config (ModelApiKey | None): Model API configuration.
-            audio_api_key (str | None): API key for audio transcription.
-            enable_audio_transcription (bool): Enable audio transcription.
+            model_view (ModelInfo | None): 非解密运行时模型视图（凭据在模型服务侧）。
         """
         self.db = db
-        self.api_config = api_config
-        if self.api_config is not None:
-            self.model_api_key = api_config.api_key
-            self.provider = api_config.provider.lower()
-            self.input_modalities = list(getattr(api_config, "input_modalities", None) or [])
-        self.audio_api_key = audio_api_key
-        self.enable_audio_transcription = enable_audio_transcription
+        self.model_view = model_view
+        if self.model_view is not None:
+            self.provider = model_view.provider.lower()
+            self.input_modalities = list(getattr(model_view, "input_modalities", None) or [])
 
     def _uses_async_session(self) -> bool:
         return isinstance(self.db, AsyncSession)
@@ -586,7 +563,7 @@ class MultimodalService:
         if self.db is None:
             raise BusinessException("缺少读取本地文件所需的数据库上下文", BizCode.FILE_READ_ERROR)
 
-        tenant_id = getattr(self.api_config, "tenant_id", None) if self.api_config else None
+        tenant_id = getattr(self.model_view, "tenant_id", None) if self.model_view else None
         if workspace_id is None and tenant_id is None:
             raise BusinessException(
                 "缺少工作空间或租户上下文，无法读取本地文件",
@@ -887,27 +864,12 @@ class MultimodalService:
         return await strategy.format_document(file.name or "unknown", text)
 
     async def _process_audio(self, file: FileInput, strategy) -> tuple[bool, Dict[str, Any]]:
-        """处理音频文件。"""
+        """处理音频文件（原生音频内联；转写需求走模型服务 asr 族，不在此内联转换）。"""
         try:
-            transcription = None
-            if self.enable_audio_transcription and self.audio_api_key:
-                if not _requires_inline_bearer(file) and file.url:
-                    logger.info(f"开始音频转文本: {file.url}")
-                    if self.provider == "dashscope":
-                        transcription = await AudioTranscriptionService.transcribe_dashscope(file.url, self.audio_api_key)
-                    elif self.provider == "openai":
-                        transcription = await AudioTranscriptionService.transcribe_openai(file.url, self.audio_api_key)
-                    else:
-                        logger.warning(f"Provider {self.provider} 不支持音频转文本")
-                elif file.get_content() is not None:
-                    # 本地附件不能把内网 URL 交给公网 ASR；支持原生音频的策略会使用 Data URL。
-                    logger.info("本地音频使用 provider 原生内容输入，跳过基于 URL 的转写接口")
-
             return await strategy.format_audio(
                 file.file_type or "",
                 file.url,
                 file.get_content(),
-                transcription,
             )
         except Exception as e:
             logger.error(f"处理音频失败: {e}", exc_info=True)

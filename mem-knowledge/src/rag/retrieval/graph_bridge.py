@@ -6,8 +6,10 @@ import logging
 import time
 from typing import Any
 
-from redbear_model.runtime import RedBearEmbeddings, RedBearLLM
-
+from ...integrations.model.chat import RedBearChatModel
+from ...integrations.model.embedding import RedBearEmbeddings
+from ...integrations.model.invoke_backend import ref_from_view
+from ...integrations.model.views import is_qwen3_vl_embedding_view
 from ...runtime import ProcessRuntime
 from ..knowledge_graph.config import GraphPipeline
 from ..knowledge_graph.elasticsearch_store import GraphElasticsearchStore
@@ -42,7 +44,6 @@ class GraphRetrievalBridge:
         graph_store = GraphElasticsearchStore(client)
         chunk_store = AsyncElasticSearchRetrieval(client)
         query_plan_cache = GraphQueryPlanCache(runtime.redis.client)
-        model_pool = runtime.model_runtime.pool
 
         async def resolve_parent_chunks(
             chunks: list[DocumentChunk],
@@ -67,18 +68,18 @@ class GraphRetrievalBridge:
                     snapshot.timings.parent_resolution_ms += elapsed_ms
 
         for target in snapshot.targets:
-            if target.llm.resolved is None or target.embedding.resolved is None:
-                raise ValueError("graph retrieval model snapshot is unavailable")
-            llm_params = dict(target.llm.resolved.provider_params)
-            llm_params["temperature"] = 0
-            llm_config = target.llm.resolved.model_copy(
-                update={"provider_params": llm_params},
-                deep=True,
-            )
             pipeline = KnowledgeGraphRetrievalPipeline(
                 graph_store,
-                RedBearLLM(llm_config, client_pool=model_pool),
-                RedBearEmbeddings(target.embedding.resolved, client_pool=model_pool),
+                RedBearChatModel.for_invoke_ref(
+                    ref_from_view(target.llm, target.llm.tenant_id),
+                    pool=runtime.model_runtime,
+                    params={"temperature": 0},
+                ),
+                RedBearEmbeddings.for_invoke_ref(
+                    ref_from_view(target.embedding, target.embedding.tenant_id),
+                    pool=runtime.model_runtime,
+                    multimodal=is_qwen3_vl_embedding_view(target.embedding),
+                ),
                 resolve_parent_chunks,
                 query_plan_cache,
                 timeout_ms=runtime.settings.knowledge_graph_retrieval_timeout_ms,
@@ -93,8 +94,8 @@ class GraphRetrievalBridge:
                         chunk_index_name=target.chunk_index_name,
                         entity_types=(),
                         scene_name="",
-                        llm=llm_config,
-                        embedding=target.embedding.resolved,
+                        llm=target.llm,
+                        embedding=target.embedding,
                     ),
                     allowed_document_ids=allowed_document_ids,
                     file_names=file_names,

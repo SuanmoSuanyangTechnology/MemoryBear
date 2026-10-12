@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from ..bootstrap import get_settings
 from ..runtime import get_worker_runtime
+from ..usage_context import bind_usage
 from .celery_app import celery_app
 from .observability import (
     DocumentProgressSink,
@@ -28,6 +29,7 @@ def process_qa_import(*args, **kwargs):
 
 
 @celery_app.task(name="app.core.rag.tasks.import_qa_chunks", queue="qa_import")
+@bind_usage("document", "document_id")
 def import_qa_chunks(
     kb_id: str,
     document_id: str,

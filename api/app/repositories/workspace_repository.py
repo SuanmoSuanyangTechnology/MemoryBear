@@ -164,6 +164,17 @@ class WorkspaceRepository:
             db_logger.error(f"异步查询工作空间失败: workspace_id={workspace_id} - {str(e)}")
             raise
 
+    def get_active_workspace_ids_page(
+        self,
+        after_id: uuid.UUID | None,
+        limit: int,
+    ) -> list[uuid.UUID]:
+        """按主键游标分页读取活跃工作空间 ID。"""
+        stmt = select(Workspace.id).where(Workspace.is_active.is_(True))
+        if after_id is not None:
+            stmt = stmt.where(Workspace.id > after_id)
+        return list(self.db.scalars(stmt.order_by(Workspace.id).limit(limit)))
+
     def get_workspace_models_configs(self, workspace_id: uuid.UUID) -> Optional[dict]:
         """根据workspace_id获取模型配置（llm, embedding, rerank）
         

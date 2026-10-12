@@ -1,6 +1,7 @@
 import asyncio
 import heapq
 import traceback
+from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any, Awaitable, Callable, Self, TypeVar
 
 import numpy as np
@@ -26,7 +27,11 @@ from app.core.memory.storage.models import (
     StorageReadResult,
     StorageWriteResult,
 )
-from app.core.memory.storage.provider.base import BaseClient
+from app.core.memory.storage.provider.base import (
+    BaseClient,
+    MAX_SCAN_PAGE_SIZE,
+    SCAN_PAGE_SIZE,
+)
 from app.core.memory.storage.provider.neo4j.compiler.filter_compiler import (
     compile_neo4j_filter,
     compile_neo4j_relationship_filter,
@@ -34,6 +39,14 @@ from app.core.memory.storage.provider.neo4j.compiler.filter_compiler import (
 from app.core.memory.storage.provider.neo4j.compiler.projection_compiler import (
     compile_neo4j_projection,
     compile_neo4j_relationship_projection,
+)
+from app.core.memory.storage.provider.neo4j.compiler.scan_compiler import (
+    ScanCursor,
+    compile_neo4j_scan_page,
+    compile_neo4j_scan_preflight,
+    decode_scan_cursor,
+    encode_scan_cursor,
+    resolve_scan_native_cursor,
 )
 from app.core.memory.storage.provider.neo4j.compiler.sort_compiler import (
     compile_neo4j_relationship_sort,
@@ -62,6 +75,15 @@ def _to_native(value: Any) -> Any:
     if isinstance(value, (list, tuple)):
         return [_to_native(item) for item in value]
     return value
+
+
+def _validate_scan_limit(limit: int) -> None:
+    if not isinstance(limit, int) or isinstance(limit, bool):
+        raise ValueError("scan limit must be an integer")
+    if not 1 <= limit <= MAX_SCAN_PAGE_SIZE:
+        raise ValueError(
+            f"scan limit must be between 1 and {MAX_SCAN_PAGE_SIZE}"
+        )
 
 
 class Neo4jClient(BaseClient):
@@ -462,6 +484,95 @@ class Neo4jClient(BaseClient):
             records = await stmt.data()
             items = [_to_native(record["n"]) for record in records]
         return StorageReadResult.from_items(items, label=label, backend=self.name)
+
+    async def scan_nodes(
+            self,
+            label: MemoryNodeLabel,
+            node_filter: NodeFilter,
+            cursor: str | None = None,
+            limit: int = SCAN_PAGE_SIZE,
+            projection: NodeProjection | None = None,
+    ) -> tuple[list[dict], str | None]:
+        self.verify_label(label)
+        _validate_scan_limit(limit)
+        scan_cursor = decode_scan_cursor(cursor)
+        native_cursor = scan_cursor.native
+        if scan_cursor.value is None:
+            # A fresh scan probes id typing once: string comparison can use the
+            # id index, legacy mixed-type ids need the toString form.
+            preflight, preflight_parameters = compile_neo4j_scan_preflight(
+                label,
+                node_filter,
+            )
+            async with self.client.session() as session:
+                stmt = await session.run(preflight, **preflight_parameters)
+                preflight_rows = await stmt.data()
+            native_cursor = resolve_scan_native_cursor(
+                label,
+                preflight_rows[0] if preflight_rows else {},
+            )
+
+        query, parameters = compile_neo4j_scan_page(
+            label,
+            node_filter,
+            cursor=ScanCursor(native=native_cursor, value=scan_cursor.value),
+            limit=limit,
+            projection=projection,
+        )
+        async with self.client.session() as session:
+            stmt = await session.run(query, **parameters)
+            records = await stmt.data()
+
+        items = [
+            _to_native(record["n"])
+            for record in records
+            if record.get("n") is not None
+        ]
+        if len(records) < limit:
+            return items, None
+        last_cursor = records[-1].get("cursor")
+        if last_cursor is None:
+            raise RuntimeError(
+                f"{label.value} scan returned a full page without a cursor"
+            )
+        return items, encode_scan_cursor(native_cursor, str(last_cursor))
+
+    async def update_node_embeddings(
+            self,
+            label: MemoryNodeLabel,
+            field: str,
+            updates: Sequence[tuple[str, Sequence[float]]],
+    ) -> StorageWriteResult:
+        self.verify_label(label)
+        # Deduplicate by node id: the write router requires one unique id per
+        # affected node, and a repeated node would otherwise count twice.
+        deduped: dict[str, list[float]] = {}
+        for node_id, vector in updates:
+            deduped[str(node_id)] = list(vector)
+        if not deduped:
+            return StorageWriteResult(backend=self.name)
+        # The property name rides along as map data, so it is never interpolated
+        # into the statement: same shape as update_node's ``SET n += $properties``.
+        rows = [
+            {"id": node_id, "properties": {field: vector}}
+            for node_id, vector in deduped.items()
+        ]
+        query = f"""
+        UNWIND $rows AS row
+        MATCH (n:`{label.value}` {{id: row.id}})
+        SET n += row.properties
+        RETURN collect(n.id) AS updated_ids
+        """
+        async with self.client.session() as session:
+            stmt = await session.run(query, rows=rows)
+            records = await stmt.data()
+        raw_ids = records[0].get("updated_ids") if records else None
+        ids = [str(node_id) for node_id in (raw_ids or [])]
+        return StorageWriteResult(
+            backend=self.name,
+            affected_count=len(ids),
+            ids=ids,
+        )
 
     async def delete_node(
             self,

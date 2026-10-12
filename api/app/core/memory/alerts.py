@@ -1,4 +1,4 @@
-"""记忆萃取异常的安全异步入队封装。"""
+"""记忆模块到企业版通知中心的桥接。"""
 from __future__ import annotations
 
 import asyncio
@@ -152,3 +152,158 @@ async def enqueue_memory_retrieval_alert_safely(
             error.code,
         )
         return False
+
+
+# ── reembed errors ──────────────────────────────────────────────────────
+UNSUPPORTED_EMBEDDING_DIMENSION = "UNSUPPORTED_EMBEDDING_DIMENSION"
+EMBEDDING_PROBE_FAILED = "EMBEDDING_PROBE_FAILED"
+END_USER_REBUILD_FAILED = "END_USER_REBUILD_FAILED"
+WORKER_CRASHED = "WORKER_CRASHED"
+
+REEMBED_FAILURE_REASONS = frozenset({
+    UNSUPPORTED_EMBEDDING_DIMENSION,
+    EMBEDDING_PROBE_FAILED,
+    END_USER_REBUILD_FAILED,
+    WORKER_CRASHED,
+})
+
+
+def report_reembed_job_failure_safely(
+    *,
+    job_id: str,
+    workspace_id: str,
+    reason_code: str,
+    old_model_name: str | None,
+    new_model_name: str | None,
+    total_end_users: int,
+    failed_end_users: int,
+    total_nodes: int,
+    processed_nodes: int,
+    failed_nodes: int,
+    error: str | None,
+    failed_at_ms: int,
+) -> bool:
+    """把「任务已永久失败」交给可选的通知中心插件。
+
+    调用方必须**已经提交**终态（见 ``mark_job_failed`` /
+    ``finalize_job_if_complete`` 的原子 UPDATE），否则通知会先于事实到达用户。
+
+    :return: 是否成功建立通知义务。``False`` 只说明这次上报没走通（社区版未
+        注册插件、原因不在白名单、通知链路故障），任务状态不受影响。
+    """
+    if reason_code not in REEMBED_FAILURE_REASONS:
+        logger.error(
+            "[MemoryReembedAlert] unsupported failure reason; alert skipped "
+            "job=%s reason_code=%s",
+            job_id,
+            reason_code,
+        )
+        return False
+
+    reporter = get_plugin("memory_reembed_failure_reporter")
+    if reporter is None:
+        # 社区版没有通知中心，静默跳过。
+        logger.debug(
+            "[MemoryReembedAlert] reporter unavailable; alert skipped job=%s",
+            job_id,
+        )
+        return False
+
+    try:
+        reporter.report(
+            job_id=job_id,
+            workspace_id=workspace_id,
+            reason_code=reason_code,
+            old_model_name=old_model_name,
+            new_model_name=new_model_name,
+            total_end_users=int(total_end_users or 0),
+            failed_end_users=int(failed_end_users or 0),
+            total_nodes=int(total_nodes or 0),
+            processed_nodes=int(processed_nodes or 0),
+            failed_nodes=int(failed_nodes or 0),
+            error=error,
+            failed_at_ms=int(failed_at_ms),
+        )
+    except Exception:
+        logger.exception(
+            "[MemoryReembedAlert] alert report failed without changing job state "
+            "job=%s reason_code=%s",
+            job_id,
+            reason_code,
+        )
+        return False
+
+    logger.info(
+        "[MemoryReembedAlert] job failure handed to notification center "
+        "job=%s reason_code=%s",
+        job_id,
+        reason_code,
+    )
+    return True
+
+
+def report_reembed_job_completion_safely(
+    *,
+    job_id: str,
+    workspace_id: str,
+    old_model_name: str | None,
+    new_model_name: str | None,
+    total_end_users: int,
+    total_nodes: int,
+    processed_nodes: int,
+    completed_at_ms: int,
+) -> bool:
+    """把「任务已成功完成」交给可选的通知中心插件。
+
+    与 :func:`report_reembed_job_failure_safely` 成对：同一个任务只会走其中一条。
+    调用方必须**已经提交**终态（见 ``finalize_job_if_complete`` 的原子 UPDATE），
+    否则通知会先于事实到达用户。
+
+    没有 reason code 白名单——完成只有一种结局。
+
+    :return: 是否成功建立通知义务。``False`` 只说明这次上报没走通（社区版未
+        注册插件、身份缺失、通知链路故障），任务状态不受影响。
+    """
+    if not job_id or not workspace_id:
+        logger.error(
+            "[MemoryReembedAlert] completion without identity; alert skipped "
+            "job=%s workspace=%s",
+            job_id,
+            workspace_id,
+        )
+        return False
+
+    reporter = get_plugin("memory_reembed_success_reporter")
+    if reporter is None:
+        # 社区版没有通知中心，静默跳过。
+        logger.debug(
+            "[MemoryReembedAlert] completion reporter unavailable; alert skipped "
+            "job=%s",
+            job_id,
+        )
+        return False
+
+    try:
+        reporter.report(
+            job_id=job_id,
+            workspace_id=workspace_id,
+            old_model_name=old_model_name,
+            new_model_name=new_model_name,
+            total_end_users=int(total_end_users or 0),
+            total_nodes=int(total_nodes or 0),
+            processed_nodes=int(processed_nodes or 0),
+            completed_at_ms=int(completed_at_ms),
+        )
+    except Exception:
+        logger.exception(
+            "[MemoryReembedAlert] completion report failed without changing job "
+            "state job=%s",
+            job_id,
+        )
+        return False
+
+    logger.info(
+        "[MemoryReembedAlert] job completion handed to notification center job=%s",
+        job_id,
+    )
+    return True

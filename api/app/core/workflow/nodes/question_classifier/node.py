@@ -1,17 +1,14 @@
 import logging
 from typing import Any
 
-from app.core.error_codes import BizCode
-from app.core.exceptions import BusinessException
-from app.core.models import RedBearLLM, RedBearModelConfig
+from app.core.models import RedBearChatModel
 from app.core.workflow.engine.state_manager import WorkflowState
 from app.core.workflow.engine.variable_pool import VariablePool
 from app.core.workflow.nodes.base_node import BaseNode
 from app.core.workflow.nodes.question_classifier.config import QuestionClassifierNodeConfig
 from app.core.workflow.variable.base_variable import VariableType
 from app.core.workflow.variable.variable_objects import ArrayVariable, FileVariable
-from app.db import get_async_db_context, get_db_read
-from app.models import ModelType
+from app.db import get_async_db_context
 from app.schemas.model_schema import ModelInfo
 from app.services.model_service import ModelConfigService
 
@@ -61,36 +58,20 @@ class QuestionClassifierNode(BaseNode):
             "output": VariableType.STRING
         }
 
-    def _get_llm_instance(self, variable_pool: VariablePool) -> RedBearLLM:
-        """获取LLM实例"""
-        with get_db_read() as db:
-            config = ModelConfigService.get_model_by_id(db=db, model_id=self.typed_config.model_id)
-
-            if not config:
-                raise BusinessException("配置的模型不存在", BizCode.NOT_FOUND)
-
-            api_config = self.get_runtime_api_config(db, config, variable_pool)
-            model_type = config.type
-            model_config = RedBearModelConfig.from_api_key(api_config)
-
-        return RedBearLLM(model_config, type=ModelType(model_type))
-
     async def _load_model_info_async(self, variable_pool: VariablePool) -> ModelInfo:
         tenant_id = await self.resolve_tenant_id_async(variable_pool)
 
         async with get_async_db_context() as db:
-            return await ModelConfigService.get_runtime_model_info_async(
+            # 非解密视图：本节点不需要凭据（调用走模型服务，G2）
+            return await ModelConfigService.get_runtime_model_view_async(
                 db,
                 self.typed_config.model_id,
                 tenant_id=tenant_id,
             )
 
     @staticmethod
-    def _build_llm_from_model_info(model_info: ModelInfo) -> RedBearLLM:
-        return RedBearLLM(
-            RedBearModelConfig.from_api_key(model_info),
-            type=model_info.model_type,
-        )
+    def _build_llm_from_model_info(model_info: ModelInfo) -> RedBearChatModel:
+        return RedBearChatModel.for_invoke(model_info)
 
     def _build_category_case_map(self) -> dict[str, str]:
         """
@@ -104,29 +85,6 @@ class QuestionClassifierNode(BaseNode):
             case_tag = f"{DEFAULT_CASE_PREFIX}{idx}"
             category_map[category_name] = case_tag
         return category_map
-
-    def _get_model_info(self, variable_pool: VariablePool) -> ModelInfo:
-        """获取模型信息（用于视觉处理）"""
-        with get_db_read() as db:
-            config = ModelConfigService.get_model_by_id(db=db, model_id=self.typed_config.model_id)
-            if not config:
-                raise BusinessException("配置的模型不存在", BizCode.NOT_FOUND)
-            
-            api_config = self.get_runtime_api_config(db, config, variable_pool)
-            return ModelInfo(
-                model_name=api_config.model_name,
-                model_type=ModelType(config.type),
-                api_key=api_config.api_key,
-                api_base=api_config.api_base,
-                provider=api_config.provider,
-                input_modalities=[str(item) for item in (api_config.input_modalities or [])],
-                output_modalities=[str(item) for item in (api_config.output_modalities or [])],
-                features=[str(item) for item in (api_config.features or [])],
-                tenant_id=api_config.tenant_id,
-                model_config_id=api_config.model_config_id,
-                channel_id=api_config.channel_id,
-                failover_plan=api_config.failover_plan,
-            )
 
     async def _build_vision_message(
         self, 

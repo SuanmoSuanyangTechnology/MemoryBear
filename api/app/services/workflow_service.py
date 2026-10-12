@@ -957,31 +957,21 @@ class WorkflowService:
             if not annotations:
                 return None
 
-            from app.models.models_model import ModelConfig
             from app.services.model_service import ModelApiKeyService
-            model_cfg = self.db.query(ModelConfig).filter(
-                ModelConfig.id == setting.model_config_id
-            ).first()
-            if not model_cfg:
-                return None
-
             tenant_id = self._resolve_app_tenant_id(app_id)
-            api_key_obj = ModelApiKeyService.get_available_api_key(
+            embedding_ref = ModelApiKeyService.resolve_invoke_ref(
                 self.db,
                 setting.model_config_id,
                 tenant_id=tenant_id,
             )
-            if not api_key_obj:
+            if not embedding_ref:
                 return None
-
-            from app.core.models.base import RedBearModelConfig
-            config = RedBearModelConfig.from_api_key(api_key_obj, timeout=60, max_retries=3)
 
             return service.find_best_match(
                 query=message,
                 annotations=annotations,
                 threshold=setting.similarity_threshold,
-                model_config=config,
+                embedding_ref=embedding_ref,
                 app_id=app_id,
                 source=source,
             )
@@ -996,7 +986,6 @@ class WorkflowService:
             source: str = "",
     ) -> Optional[dict]:
         try:
-            from app.core.models.base import RedBearModelConfig
             from app.models.annotation_model import AppAnnotation, AppAnnotationHitLog, AppAnnotationSetting
             from app.models.models_model import (
                 ModelConfig,
@@ -1063,34 +1052,19 @@ class WorkflowService:
                     if not tenant_id:
                         return None
 
-                api_key_obj = await ModelApiKeyService.get_available_api_key_async(
+                embedding_ref = await ModelApiKeyService.resolve_invoke_ref_async(
                     db,
                     model_cfg.id,
                     tenant_id=tenant_id,
                 )
-                if not api_key_obj:
+                if not embedding_ref:
                     return None
-
-                # Snapshot ORM-backed fields before the async session closes. The
-                # session context may expire attributes on rollback/close, and using
-                # api_key_obj afterwards would raise DetachedInstanceError.
-                api_key_data = {
-                    "model_name": api_key_obj.model_name,
-                    "provider": api_key_obj.provider,
-                    "api_key": api_key_obj.api_key,
-                    "api_base": api_key_obj.api_base,
-                    "tenant_id": api_key_obj.tenant_id,
-                    "model_config_id": api_key_obj.model_config_id,
-                    "channel_id": api_key_obj.channel_id,
-                }
-
-            config = RedBearModelConfig.from_api_key(api_key_data, timeout=60, max_retries=3)
 
             # Embedding clients are synchronous; keep them off the async event loop.
             query_embedding = await asyncio.to_thread(
                 AnnotationService.generate_embedding,
                 message,
-                config,
+                embedding_ref,
             )
             best_match = None
             best_similarity = 0.0

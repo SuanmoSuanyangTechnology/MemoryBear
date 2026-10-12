@@ -16,8 +16,9 @@ from app.schemas.app_schema import ModelParameters
 
 class OrchestrationMode(StrEnum):
     """协作模式枚举"""
-    COLLABORATION = "collaboration"  # 协作模式：Agent 之间可以相互 handoff
-    SUPERVISOR = "supervisor"        # 监督模式：由主 Agent 统一调度子 Agent
+    COLLABORATION = "collaboration"      # 协作模式：Agent 之间可以相互 handoff
+    SUPERVISOR = "supervisor"            # 主管模式：路由→集合执行→整合（三段式）
+    SUPERVISOR_LOOP = "supervisor_loop"  # 主管循环模式：主管=ReAct 引擎、子 Agent=工具（S9）
 
 class AggregationStrategy(StrEnum):
     """图标类型枚举"""
@@ -67,8 +68,9 @@ class MultiAgentConfig(Base):
     orchestration_mode = Column(
         String(20),
         nullable=False,
-        default="collaboration",
-        comment="协作模式: collaboration（协作）| supervisor（监督）"
+        # S9 增补：新建配置默认主管循环模式（仅 Python 侧默认，无 server_default，零迁移）
+        default="supervisor_loop",
+        comment="协作模式: collaboration（协作）| supervisor（主管三段式）| supervisor_loop（主管 ReAct 循环，默认）"
     )
 
     # 子 Agent 列表
@@ -91,6 +93,24 @@ class MultiAgentConfig(Base):
         nullable=False,
         default=dict,
         comment="执行配置: {'max_iterations': 5, 'timeout': 60, 'parallel_limit': 3}"
+    )
+
+    # 主管配置（主管即 Agent）：supervisor_loop 模式下主管的本体能力面，
+    # 结构对齐单 Agent 应用的 features 形状。nullable —— NULL/缺键 = 全默认 =
+    # 现状行为（裸主管：硬编码 prompt + 仅 SubAgentTool），零迁移零行为突变。
+    # 注意与 execution_config 的边界：该字段管"执行护栏"（超时/重试/上限），
+    # 本字段管"主管是什么"（提示词/工具面/联网/记忆）。
+    # 集群变量定义（原顶层 variables 列）也归入本字段的 variables 键 —— 集群配置
+    # 不再单列变量字段；NULL/缺键/空 = 退化为子 Agent 变量并集（collect_variable_definitions）。
+    supervisor_config = Column(
+        JSON,
+        nullable=True,
+        comment=(
+            "主管配置（全模式；supervisor_loop 下还含主管本体能力面）: "
+            "{'system_prompt': str, 'web_search': bool, 'memory': {'enabled': bool}, "
+            "'knowledge_retrieval': {...}, 'tools': [...], 'skills': {...}, "
+            "'variables': [{'name', 'display_name', 'type', 'required', 'default_value', ...}]}"
+        ),
     )
 
     # 结果整合策略

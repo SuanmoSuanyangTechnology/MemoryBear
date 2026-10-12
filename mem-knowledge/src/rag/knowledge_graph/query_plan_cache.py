@@ -35,7 +35,6 @@ class GraphQueryPlanCache:
             "workspace_id": runtime.workspace_id,
             "provider": str(runtime.llm.provider),
             "model_name": runtime.llm.model_name,
-            "base_url": runtime.llm.base_url or "",
             "prompt_version": QUERY_PLAN_PROMPT_VERSION,
             "schema_version": _CACHE_SCHEMA_VERSION,
             "query_hash": query_hash,

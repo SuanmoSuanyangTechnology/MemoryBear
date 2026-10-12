@@ -17,9 +17,9 @@ import { type FC, type ReactNode } from 'react'
 import { Flex } from 'antd';
 
 /** Props interface for RbAlert component */
-interface RbAlertProps {
+export interface RbAlertProps {
   /** Color theme for the alert */
-  color?: 'blue' | 'green' | 'orange' | 'purple',
+  color?: 'blue' | 'green' | 'orange' | 'purple' | 'red',
   /** Alert content */
   children: ReactNode | string;
   /** Optional icon to display before content */
