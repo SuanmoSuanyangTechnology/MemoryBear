@@ -31,6 +31,7 @@ const CustomModelModal = forwardRef<CustomModelModalRef, CustomModelModalProps>(
   const [form] = Form.useForm<CustomModelForm>();
   const [loading, setLoading] = useState(false)
   const [abortController, setAbortController] = useState<AbortController | null>(null)
+  const modelType = Form.useWatch('type', form);
   /** Close modal and reset state */
   const handleClose = () => {
     abortController?.abort()
@@ -120,6 +121,9 @@ const CustomModelModal = forwardRef<CustomModelModalRef, CustomModelModalProps>(
         console.log('err', err)
       });
   }
+  const handleChangeType = (value?: string) => {
+    form.setFieldValue('input_modalities', value === 'asr' ? 'audio' : 'text')
+  }
 
   /** Expose methods to parent component */
   useImperativeHandle(ref, () => ({
@@ -174,6 +178,7 @@ const CustomModelModal = forwardRef<CustomModelModalRef, CustomModelModalProps>(
             hasAll={false}
             disabled={isEdit}
             format={(items) => items.map((item) => ({ label: formatModelType(item), value: String(item) }))}
+            onChange={handleChangeType}
           />
         </Form.Item>
 
@@ -216,7 +221,14 @@ const CustomModelModal = forwardRef<CustomModelModalRef, CustomModelModalProps>(
             name={['credential', "priority"]}
             label={t('modelNew.priority')}
           >
-            <InputNumber placeholder={t('common.pleaseEnter')} className="rb:w-full!" />
+            <InputNumber
+              placeholder={t('common.pleaseEnter')}
+              min={0}
+              max={2147483647}
+              step={1}
+              precision={0}
+              className="rb:w-full!"
+            />
           </Form.Item>
 
           <Form.Item
@@ -244,7 +256,7 @@ const CustomModelModal = forwardRef<CustomModelModalRef, CustomModelModalProps>(
               options={['text', 'image', 'audio', 'video'].map(value => ({
                 value,
                 label: t(`modelNew.${value}`),
-                disabled: field === 'input_modalities' && value === 'text'
+                disabled: field === 'input_modalities' && value === 'text' && modelType !== 'asr'
               }))}
             />
           </Form.Item>

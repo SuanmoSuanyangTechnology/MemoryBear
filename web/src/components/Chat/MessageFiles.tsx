@@ -2,6 +2,7 @@ import { Image, Flex } from 'antd'
 import clsx from 'clsx'
 import AudioPlayer from './AudioPlayer'
 import VideoPlayer from './VideoPlayer'
+import { formatFileSize } from './utils'
 
 const getFileUrl = (file: any) =>
   file.thumbUrl || file.url || (file.originFileObj ? URL.createObjectURL(file.originFileObj) : undefined)
@@ -62,7 +63,7 @@ const MessageFiles = ({ files, contentClassNames, onDownload }: MessageFilesProp
             key={key}
             align="center"
             gap={10}
-            className="rb:text-left rb:w-45 rb:text-[12px] rb:group rb:relative rb:rounded-lg rb-border rb:py-2! rb:px-2.5! rb:border rb:border-[#F6F6F6]"
+            className="rb:text-left rb:w-45 rb:text-[12px] rb:group rb:relative rb:rounded-lg rb-border rb:py-2! rb:px-2.5! rb:border rb:border-gray-100"
             onClick={() => onDownload(file)}
           >
             <div
@@ -73,9 +74,12 @@ const MessageFiles = ({ files, contentClassNames, onDownload }: MessageFilesProp
             />
             <div className="rb:flex-1 rb:w-32.5">
               <div className="rb:leading-4 rb:text-ellipsis rb:overflow-hidden rb:whitespace-nowrap">{file.name}</div>
-              <div className="rb:leading-3.5 rb:mt-0.5 rb:text-gray-600 rb:text-ellipsis rb:overflow-hidden rb:whitespace-nowrap">
-                {documentType?.[documentType.length - 1]} · {file.size}
-              </div>
+              <Flex align="center" gap={2} className="rb:leading-3.5 rb:mt-0.5! rb:text-gray-600 rb:overflow-hidden">
+                <span className="rb:min-w-0 rb:flex-initial rb:text-ellipsis rb:overflow-hidden rb:whitespace-nowrap">
+                  {documentType.pop()}
+                </span>
+                {file.size && <span className="rb:shrink-0">· {formatFileSize(file.size)}</span>}
+              </Flex>
             </div>
           </Flex>
         )

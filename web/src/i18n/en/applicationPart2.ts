@@ -51,7 +51,7 @@ export const applicationPart2 = {
       keyword_label: 'Keyword',
       ontology_id: 'Associated Ontology',
       ontologySubTitle: 'Optional. The default ontology is always active.',
-      ontologyExtra: 'An ontology includes one scenario type and a set of configured emotions. Once associated, it provides both profiling and emotion capabilities. You can update the association from the Application List after creation.',
+      ontologyExtra: 'An ontology includes one scenario type and a set of configured emotions. Once associated, it provides both profiling and emotion capabilities.',
       ontologyUnassociated: 'No association (default ontology fallback only)',
       ontologyEmotionCount: '{{count}} emotion types',
 }

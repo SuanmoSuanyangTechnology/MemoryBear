@@ -5,7 +5,7 @@ import { CloseOutlined } from '@ant-design/icons'
 import clsx from 'clsx'
 import type { UploadFile, FlexProps } from 'antd'
 
-import { getFileIconClassName } from './utils/index';
+import { getFileIconClassName, formatFileSize } from './utils/index';
 
 interface FileListProps {
   fileList: UploadFile[];
@@ -34,17 +34,18 @@ const FileList: FC<FileListProps> = ({ fileList, onDelete, wrap,
       <Flex gap={14} wrap={wrap} className={className}>
         {fileList.map((file, index) => {
           const key = `${index}_${file.url || file.uid}_${file.status}`
+          const documentType = file.type?.split('/') ?? []
           if (file.status === 'uploading') {
             return (
               <Spin key={key} spinning={file.status === 'uploading'}>
-                <div key={key} className="rb:size-12 rb:inline-block rb:group rb:relative rb:rounded-lg rb:bg-[#F6F6F6] rb:border rb:border-[#F6F6F6]" />
+                <div key={key} className="rb:size-12 rb:inline-block rb:group rb:relative rb:rounded-lg rb:bg-gray-100 rb:border rb:border-gray-100" />
               </Spin>
             )
           }
           if (file.type?.includes('image')) {
             return (
-              <div key={key} className={clsx("rb:inline-block rb:group rb:relative rb:rounded-lg rb:bg-[#F6F6F6] rb:border rb:border-[#F6F6F6]", {
-                'rb:border-[#FF5D34]': file.status === 'error'
+              <div key={key} className={clsx("rb:inline-block rb:group rb:relative rb:rounded-lg rb:bg-gray-100 rb:border rb:border-gray-100", {
+                'rb:border-red-500': file.status === 'error'
               })}>
                 <img src={file.url} alt={file.name} className="rb:size-12! rb:rounded-lg rb:object-cover" />
                 {onDelete && <div
@@ -59,8 +60,8 @@ const FileList: FC<FileListProps> = ({ fileList, onDelete, wrap,
               key={key}
               align="center"
               gap={10}
-              className={clsx("rb:w-45 rb:text-[12px] rb:group rb:relative rb:rounded-lg rb:bg-[#F6F6F6] rb:py-2! rb:px-2.5! rb:border rb:border-[#F6F6F6]", {
-                'rb:border-[#FF5D34]': file.status === 'error',
+              className={clsx("rb:w-45 rb:text-[12px] rb:group rb:relative rb:rounded-lg rb:bg-gray-100 rb:py-2! rb:px-2.5! rb:border rb:border-gray-100", {
+                'rb:border-red-500': file.status === 'error',
                 'rb:w-52': file.status === 'done' && (file.type?.includes('video') || file.type?.includes('audio'))
               })}>
               <div
@@ -71,7 +72,14 @@ const FileList: FC<FileListProps> = ({ fileList, onDelete, wrap,
               ></div>
               <div className="rb:flex-1 rb:w-32.5">
                 <div className="rb:leading-4 rb:text-ellipsis rb:overflow-hidden rb:whitespace-nowrap">{file.name}</div>
-                <div className="rb:leading-3.5 rb:mt-0.5 rb:text-[#5B6167] rb:text-ellipsis rb:overflow-hidden rb:whitespace-nowrap">{[file.type?.split('/').pop(), file.size].filter(item => item).join(' · ')}</div>
+                <Flex align="center" gap={2} className="rb:leading-3.5 rb:mt-0.5! rb:text-gray-600 rb:overflow-hidden">
+                  {documentType && documentType[documentType.length - 1] &&
+                    <span className="rb:min-w-0 rb:flex-initial rb:text-ellipsis rb:overflow-hidden rb:whitespace-nowrap">
+                      {documentType[documentType.length - 1]}
+                    </span>
+                  }
+                  {file.size && <span className="rb:shrink-0">· {formatFileSize(file.size)}</span>}
+                </Flex>
               </div>
               {file.status === 'done' && (file.type?.includes('video') || file.type?.includes('audio')) &&
                 <div
@@ -82,10 +90,12 @@ const FileList: FC<FileListProps> = ({ fileList, onDelete, wrap,
                   onClick={() => playingUid === file.uid ? handleClose() : setPlayingUid(file.uid)}
                 ></div>
               }
-              {onDelete && <div
-                className="rb:hidden rb:group-hover:block rb:absolute rb:-right-1 rb:-top-1 rb:size-3.5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/conversation/delete.svg')]"
-                onClick={() => onDelete(file)}
-              ></div>}
+              {onDelete &&
+                <div
+                  className="rb:hidden rb:group-hover:block rb:absolute rb:-right-1 rb:-top-1 rb:size-3.5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/conversation/delete.svg')]"
+                  onClick={() => onDelete(file)}
+                />
+              }
             </Flex>
           )
         })}
