@@ -27,7 +27,7 @@ import type { Modality, Model } from '@/views/ModelManagement/types'
 import { isPrivateAvailable } from '@/utils/private'
 import ModelSelect from '@/components/ModelSelect'
 import { request } from '@/utils/request'
-import EmbeddingAlert from './components/EmbeddingAlert';
+import EmbeddingAlert, { type Status } from './components/EmbeddingAlert';
 
 import styles from './index.module.css'
 
@@ -52,6 +52,7 @@ const SpaceConfig: FC = () => {
   const [form] = Form.useForm<SpaceConfigData>();
   const [loading, setLoading] = useState(false)
   const [reembedJobId, setReembedJobId] = useState<string | null | undefined>(null)
+  const [reembedJobStatus, setReembedJobStatus] = useState<Status | undefined>(undefined)
 
   const values = Form.useWatch([], form);
 
@@ -182,6 +183,10 @@ const SpaceConfig: FC = () => {
   const handleChangeTab: TabsProps['onChange'] = (value) => {
     setActiveTab(value as ('models' | 'memoryConfig'))
   }
+  const embeddingAlertChange = (id?: string | null, status?: Status) => {
+    setReembedJobId(id)
+    setReembedJobStatus(status)
+  }
 
   return (
     <div className="rb:bg-white rb:rounded-lg rb:p-6! rb:h-full rb:overflow-auto">
@@ -213,7 +218,7 @@ const SpaceConfig: FC = () => {
                   className="rb:flex-1! rb:overflow-hidden!"
                 > 
                   <Flex vertical gap={4} className="rb:h-full! rb:overflow-hidden!">
-                    <EmbeddingAlert reembedJobId={reembedJobId} onChange={setReembedJobId} className="rb:mb-4!" />
+                    <EmbeddingAlert reembedJobId={reembedJobId} onChange={embeddingAlertChange} className="rb:mb-4!" />
                     <div className="rb:flex-1! rb:overflow-x-hidden rb:overflow-y-auto">
                       {isPrivateAvailable && Object.keys(defaultModels).length > 0 &&
                         <Form.Item name="is_default_config" className="rb:mb-6!">
@@ -244,28 +249,31 @@ const SpaceConfig: FC = () => {
                             <span className="rb:text-[12px] rb:text-gray-600">{t('space.baseModelDesc')}</span>
                           </Flex>
                           <Row gutter={20}>
-                            {baseModelFields.map(field => (
-                              <Col key={field.name} span={12}>
-                                <Form.Item
-                                  label={t(`space.${field.label}`)}
-                                  className="rb:font-medium rb:mb-5!"
-                                  name={field.name}
-                                  rules={[{ required: true, message: t('common.pleaseSelect') }]}
-                                  extra={!!reembedJobId && field.name === 'embedding'
-                                    ? <span className="rb:text-orange-500">{t('space.reembedding.switchLockedNotice')}</span>
-                                    : undefined
-                                  }
-                                >
-                                  <ModelSelect
-                                    fieldNames={{ label: 'name', value: 'id' }}
-                                    placeholder={t('common.pleaseSelect')}
-                                    isAutoFetch={false}
-                                    initialData={customModels[field.name]}
-                                    disabled={!!reembedJobId && field.name === 'embedding'}
-                                  />
-                                </Form.Item>
-                              </Col>
-                            ))}
+                            {baseModelFields.map(field => {
+                              const isLocked = !!reembedJobId && field.name === 'embedding' && reembedJobStatus !== 'failed'
+                              return (
+                                <Col key={field.name} span={12}>
+                                  <Form.Item
+                                    label={t(`space.${field.label}`)}
+                                    className="rb:font-medium rb:mb-5!"
+                                    name={field.name}
+                                    rules={[{ required: true, message: t('common.pleaseSelect') }]}
+                                    extra={isLocked
+                                      ? <span className="rb:text-orange-500">{t('space.reembedding.switchLockedNotice')}</span>
+                                      : undefined
+                                    }
+                                  >
+                                    <ModelSelect
+                                      fieldNames={{ label: 'name', value: 'id' }}
+                                      placeholder={t('common.pleaseSelect')}
+                                      isAutoFetch={false}
+                                      initialData={customModels[field.name]}
+                                      disabled={isLocked}
+                                    />
+                                  </Form.Item>
+                                </Col>
+                              )
+                            })}
                           </Row>
 
                           <Flex align="baseline" justify="space-between" gap={8} className="rb:pb-3! rb:mb-5! rb-border-b">
