@@ -98,7 +98,7 @@ const CustomModelModal = forwardRef<CustomModelModalRef, CustomModelModalProps>(
           ...rest,
           type,
         }
-        formData.input_modalities = [...new Set(['text' as const, ...(values.input_modalities || [])])];
+        formData.input_modalities = [...new Set(values.input_modalities || [])];
         formData.output_modalities = [...new Set(values.output_modalities || [])];
         formData.features = values.features || [];
 
@@ -122,7 +122,7 @@ const CustomModelModal = forwardRef<CustomModelModalRef, CustomModelModalProps>(
       });
   }
   const handleChangeType = (value?: string) => {
-    form.setFieldValue('input_modalities', value === 'asr' ? 'audio' : 'text')
+    form.setFieldValue('input_modalities', value === 'asr' ? ['audio'] : ['text'])
   }
 
   /** Expose methods to parent component */
@@ -244,7 +244,7 @@ const CustomModelModal = forwardRef<CustomModelModalRef, CustomModelModalProps>(
             key={field}
             name={field}
             label={t(`modelNew.${field}`)}
-            initialValue={field === 'input_modalities' ? ['text'] : undefined}
+            initialValue={field === 'input_modalities' ? ['text'] : []}
             rules={[
               { required: true, type: 'array', min: 1, message: t('common.selectPlaceholder', { title: t(`modelNew.${field}`) }) },
             ]}
