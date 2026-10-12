@@ -213,7 +213,7 @@ const MultiKeyConfigModal = forwardRef<MultiKeyConfigModalRef, MultiKeyConfigMod
           name="remark"
           label={t('modelNew.remark')}
         >
-          <Input.TextArea placeholder={t('common.pleaseEnter')} />
+          <Input.TextArea placeholder={t('common.pleaseEnter')} maxLength={255} />
         </Form.Item>
 
         <Form.Item>
