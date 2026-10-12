@@ -40,6 +40,7 @@ export const space = {
       embeddingRebuildTitle: 'Embedding 模型已变更',
       embeddingRebuildContent: '由于空间已更换 Embedding 模型，记忆库需要使用新模型重新建立向量索引。索引重建期间，向量检索可能暂不可用，系统将降级为关键词/全文检索。',
       reembedding: {
+        allTask: '任务总数',
         status: {
           pending: '等待处理',
           queued: '等待处理',
