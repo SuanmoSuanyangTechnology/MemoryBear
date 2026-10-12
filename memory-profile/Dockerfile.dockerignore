@@ -1,0 +1,13 @@
+**
+!memory-profile/
+!memory-profile/pyproject.toml
+!memory-profile/uv.lock
+!memory-profile/README.md
+!memory-profile/src/**
+!memory-profile/alembic.ini
+!memory-profile/migrations/
+!memory-profile/migrations/**
+!packages/
+!packages/auth-sdk/
+!packages/auth-sdk/pyproject.toml
+!packages/auth-sdk/src/**

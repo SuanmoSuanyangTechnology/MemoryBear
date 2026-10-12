@@ -21,7 +21,7 @@
 import json
 from typing import Optional
 
-from fastapi import APIRouter, Header, Query, Request, Body
+from fastapi import APIRouter, Body, Header, Query, Request
 
 from app.core.api_key_auth import require_api_key_self_db
 from app.core.api_key_utils import get_current_user_snapshot_from_api_key_async, validate_end_user_in_workspace_async
@@ -30,6 +30,7 @@ from app.core.exceptions import BusinessException
 from app.core.logging_config import get_business_logger
 from app.core.response_utils import fail, success
 from app.db import get_async_db_context
+from app.integrations.profile.proxy import call_analytics_from_api_key
 from app.schemas.api_key_schema import ApiKeyAuth
 from app.schemas.memory_storage_schema import GenerateCacheRequest
 from app.services.workspace_memory_statistics_service import (
@@ -67,7 +68,8 @@ async def get_graph_data(
         end_user_id = str(end_user.id)
 
 
-    return await memory_analytics_controller.get_graph_data_api(
+    return await call_analytics_from_api_key(
+        memory_analytics_controller.get_graph_data_api,
         end_user_id=end_user_id,
         node_types=node_types,
         limit=limit,
@@ -93,7 +95,8 @@ async def get_community_graph(
         end_user_id = str(end_user.id)
 
 
-    return await memory_analytics_controller.get_community_graph_data_api(
+    return await call_analytics_from_api_key(
+        memory_analytics_controller.get_community_graph_data_api,
         end_user_id=end_user_id,
         current_user=current_user,
     )
@@ -118,7 +121,8 @@ async def get_node_statistics(
         end_user_id = str(end_user.id)
 
 
-    return await memory_analytics_controller.get_node_statistics_api(
+    return await call_analytics_from_api_key(
+        memory_analytics_controller.get_node_statistics_api,
         end_user_id=end_user_id,
         current_user=current_user,
     )
@@ -168,7 +172,8 @@ async def get_user_summary(
         end_user_id = str(end_user.id)
 
 
-    return await memory_analytics_controller.get_user_summary_api(
+    return await call_analytics_from_api_key(
+        memory_analytics_controller.get_user_summary_api,
         end_user_id=end_user_id,
         language_type=language_type,
         current_user=current_user,
@@ -191,7 +196,8 @@ async def get_memory_insight(
         end_user_id = str(end_user.id)
 
 
-    return await memory_analytics_controller.get_memory_insight_report_api(
+    return await call_analytics_from_api_key(
+        memory_analytics_controller.get_memory_insight_report_api,
         end_user_id=end_user_id,
         current_user=current_user,
     )

@@ -1,0 +1,1 @@
+"""Memory analytics domain module."""

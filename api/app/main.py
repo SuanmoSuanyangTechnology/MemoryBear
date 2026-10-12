@@ -7,7 +7,7 @@ import app.utils.dashscope_patch  # noqa: F401
 from app.repositories.neo4j.create_indexes import create_all_indexes
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, APIRouter
+from fastapi import FastAPI
 from fastapi import HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -96,6 +96,9 @@ async def lifespan(app: FastAPI):
     from app.integrations.knowledge.runtime import initialize_knowledge_integration
     await initialize_knowledge_integration()
 
+    from app.integrations.profile.runtime import initialize_memory_profile_integration
+    await initialize_memory_profile_integration()
+
     from app.integrations.model.runtime import initialize_model_integration
     await initialize_model_integration()
 
@@ -131,6 +134,8 @@ async def lifespan(app: FastAPI):
     await close_http_client()
     from app.integrations.knowledge.runtime import close_knowledge_integration
     await close_knowledge_integration()
+    from app.integrations.profile.runtime import close_memory_profile_integration
+    await close_memory_profile_integration()
     from app.integrations.model.runtime import close_model_integration
     await close_model_integration()
     from app.services.batch_persist_queue import BatchPersistQueue
@@ -203,15 +208,32 @@ def read_root():
 
 @app.get("/ready", include_in_schema=False)
 async def readiness():
-    """Return process readiness, including remote Knowledge when enabled."""
+    """Return process readiness, including enabled remote integrations."""
 
-    if not settings.ENABLE_MEM_KNOWLEDGE:
-        return {"status": "ready", "knowledge_mode": "legacy"}
-    from app.integrations.knowledge.runtime import is_remote_knowledge_ready
+    knowledge_mode = "legacy"
+    if settings.ENABLE_MEM_KNOWLEDGE:
+        from app.integrations.knowledge.runtime import is_remote_knowledge_ready
 
-    if await is_remote_knowledge_ready():
-        return {"status": "ready", "knowledge_mode": "remote"}
-    raise HTTPException(status_code=503, detail="Knowledge service unavailable")
+        if not await is_remote_knowledge_ready():
+            raise HTTPException(status_code=503, detail="Knowledge service unavailable")
+        knowledge_mode = "remote"
+
+    profile_mode = "legacy"
+    if settings.ENABLE_MEMORY_PROFILE:
+        from app.integrations.profile.runtime import is_remote_memory_profile_ready
+
+        if not await is_remote_memory_profile_ready():
+            raise HTTPException(
+                status_code=503,
+                detail="Memory profile service unavailable",
+            )
+        profile_mode = "remote"
+
+    return {
+        "status": "ready",
+        "knowledge_mode": knowledge_mode,
+        "profile_mode": profile_mode,
+    }
 
 
 # 生命周期事件由 lifespan 管理，无需 on_event

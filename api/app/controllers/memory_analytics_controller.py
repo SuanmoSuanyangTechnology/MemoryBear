@@ -23,6 +23,7 @@ from app.core.memory.constants.graph_data_constants import (
 from app.core.response_utils import fail, success
 from app.db import get_db_context
 from app.dependencies import CurrentUserSnapshot, get_current_user_async
+from app.integrations.profile.proxy import memory_profile_proxy
 from app.schemas.memory_storage_schema import GenerateCacheRequest
 from app.schemas.response_schema import ApiResponse
 from app.services._graph_data_helpers import parse_per_type_limits
@@ -47,8 +48,8 @@ router = APIRouter(
     tags=["Memory Analytics"],
 )
 
-
 @router.get("/memory_insight", response_model=ApiResponse)
+@memory_profile_proxy("memory_insight", query_fields=("end_user_id",))
 async def get_memory_insight_report_api(
         end_user_id: str,
         current_user: CurrentUserSnapshot = Depends(get_current_user_async),
@@ -75,6 +76,11 @@ async def get_memory_insight_report_api(
 
 
 @router.get("/user_summary", response_model=ApiResponse)
+@memory_profile_proxy(
+    "user_summary",
+    query_fields=("end_user_id",),
+    language_field="language_type",
+)
 async def get_user_summary_api(
         end_user_id: str,
         language_type: str = Header(default=None, alias="X-Language-Type"),
@@ -206,6 +212,7 @@ async def generate_cache_api(
 
 
 @router.get("/node_statistics", response_model=ApiResponse)
+@memory_profile_proxy("node_statistics", query_fields=("end_user_id",))
 async def get_node_statistics_api(
         end_user_id: str,
         current_user: CurrentUserSnapshot = Depends(get_current_user_async),
@@ -259,6 +266,18 @@ async def get_workspace_statistics_api(
 
 
 @router.get("/graph_data", response_model=ApiResponse)
+@memory_profile_proxy(
+    "graph_data",
+    query_fields=(
+        "end_user_id",
+        "node_types",
+        "limit",
+        "depth",
+        "center_node_id",
+        "per_type_limits",
+    ),
+    upper_bounds={"limit": CENTER_MODE_LIMIT_HARD_MAX, "depth": DEPTH_HARD_MAX},
+)
 async def get_graph_data_api(
         end_user_id: str,
         node_types: Optional[str] = None,
@@ -330,6 +349,7 @@ async def get_graph_data_api(
 
 
 @router.get("/community_graph", response_model=ApiResponse)
+@memory_profile_proxy("community_graph", query_fields=("end_user_id",))
 async def get_community_graph_data_api(
         end_user_id: str,
         current_user: CurrentUserSnapshot = Depends(get_current_user_async),
@@ -382,6 +402,7 @@ async def get_interest_distribution_by_user_api(
     """
     language = get_language_from_header(language_type)
     api_logger.info(f"Interest distribution by user requested: end_user_id={end_user_id}, language={language}")
+
     try:
         cached = await InterestMemoryCache.get_interest_distribution(
             end_user_id=end_user_id,
