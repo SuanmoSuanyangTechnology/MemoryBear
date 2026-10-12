@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import timedelta
 
-from sqlalchemy import and_, case, exists, func, or_, select
+from sqlalchemy import and_, case, exists, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
@@ -1523,15 +1523,37 @@ def _reopen_failed_job(db: Session, job: MemoryReembedJob) -> bool:
 
     行级与任务级两条重试通路共用本函数：各写一份会分叉，而它们必须在"清
     finished_at / error"上完全一致。
+
+    **必须是条件写（CAS），不能是属性赋值。** ``job`` 是调用方 SELECT 时物化的
+    对象，它的 ``status`` 可能已经过期：并发重试已经把任务推进到 ``running``，
+    或 worker 已经收尾成 ``succeeded``。属性赋值会发出无谓词的
+    ``UPDATE … WHERE id = ?``，把 ``succeeded`` 覆盖回 ``running``，让已完成的
+    任务被重开重跑。谓词让"只命中一次"由数据库保证——与
+    :func:`finalize_job_if_complete` / :func:`mark_job_failed` 同一套约定。
     """
-    if job.status != ReembedJobStatus.failed.value:
+    updated = (
+        db.query(MemoryReembedJob)
+        .filter(
+            MemoryReembedJob.id == job.id,
+            MemoryReembedJob.status == ReembedJobStatus.failed.value,
+        )
+        .update(
+            {
+                "status": ReembedJobStatus.running.value,
+                "finished_at": None,
+                # 旧失败原因必须清掉：finalize_job_if_complete 里是
+                # ``existing_error or (...)``，留着它会让重算成功后仍带着上一轮的
+                # 失败文案。
+                "error": None,
+            },
+            synchronize_session=False,
+        )
+    )
+    if not updated:
+        # 任务已被别人移出 failed（并发重试重开了它，或 worker 已收尾）。终态归它。
+        # 刷一次，让调用方回报的是库里的真值而不是这个过期的内存值。
+        db.refresh(job)
         return False
-    job.status = ReembedJobStatus.running.value
-    job.finished_at = None
-    # 旧失败原因必须清掉：finalize_job_if_complete 里是
-    # ``existing_error or (...)``，留着它会让重算成功后仍带着上一轮的失败文案。
-    job.error = None
-    db.add(job)
     return True
 
 
@@ -1560,6 +1582,16 @@ def retry_job_users(
             message="重算任务不存在",
             code=BizCode.NOT_FOUND,
         )
+    from app.models.workspace_model import Workspace
+
+    db.execute(
+        select(Workspace.id)
+        .where(Workspace.id == job.workspace_id)
+        .with_for_update()
+    )
+    # 锁后再读一次任务行：拿到锁内权威状态。并发重试会被这把锁串行化，后到者
+    # 在这里读到的就是先到者的结果，而不是自己 SELECT 时的旧值。
+    db.refresh(job)
     # 任务的目标模型必须仍是工作空间当前的 embedding 配置。否则重试会往图里写回
     # **过期模型**的向量，而读路径用的是当前模型——那正是整套机制要防的事。
     #
@@ -1611,6 +1643,7 @@ def retry_job_users(
         db.commit()
         # 与行级重试同理：提交后才派发。状态已落库，派发失败由对账任务兜底
         # （running 且无心跳会被重新派发）。
+        job_state.clear_job_claim(str(job_id))
         dispatch_reembed_job(job_id)
         logger.info(
             "[MemoryReembed] job-level retry: job=%s end_user_rows=0 (pre-flight failure)",
@@ -1625,14 +1658,30 @@ def retry_job_users(
 
     reopened = _reopen_failed_job(db, job)
 
-    retried_ids: list[str] = []
-    for row in rows:
-        row.status = ReembedUserStatus.pending.value
-        # 人工介入 = 重新开始：给全新预算，并清掉排队中不该再显示的旧错误。
-        row.attempts = 0
-        row.last_error = None
-        db.add(row)
-        retried_ids.append(str(row.end_user_id))
+    flipped_ids = set(
+        db.execute(
+            update(users)
+            .where(
+                users.id.in_([row.id for row in rows]),
+                _display_status_condition(
+                    REEMBED_DISPLAY_FAILED,
+                    users,
+                    stale_before,
+                ),
+            )
+            .values(
+                status=ReembedUserStatus.pending.value,
+                # 人工介入 = 重新开始：给全新预算，并清掉排队中不该再显示的旧错误。
+                attempts=0,
+                last_error=None,
+            )
+            .returning(users.id)
+            .execution_options(synchronize_session=False)
+        ).scalars()
+    )
+    retried_ids = [
+        str(row.end_user_id) for row in rows if row.id in flipped_ids
+    ]
     db.commit()
 
     # 提交后才动 Redis 与派发：状态已经落库，这两步即便失败也会由对账任务兜底
