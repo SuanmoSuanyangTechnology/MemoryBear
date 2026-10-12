@@ -42,6 +42,8 @@ class LLMEntityRelationExtractor:
                         },
                     ],
                     ExtractionResult,
+                    method="json_schema",
+                    strict=True,
                     include_raw=True,
                 )
                 return self._validate_result(
