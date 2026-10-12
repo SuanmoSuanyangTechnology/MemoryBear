@@ -53,18 +53,6 @@ RELATION_TYPES: tuple[str, ...] = (
     "pet",
 )
 
-# 旧 8 字段白名单，供 sidecar_step_schema / MetadataExtractionStep 使用
-ALLOWED_METADATA_FIELDS: tuple[str, ...] = (
-    "core_facts",
-    "traits",
-    "relations",
-    "goals",
-    "interests",
-    "beliefs_or_stances",
-    "anchors",
-    "events",
-)
-
 # 显式过滤/禁止作为独立 operation 输出的字段
 FILTERED_METADATA_FIELDS: tuple[str, ...] = (
     "aliases",

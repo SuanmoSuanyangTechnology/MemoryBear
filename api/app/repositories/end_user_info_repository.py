@@ -162,61 +162,6 @@ class EndUserInfoRepository:
             )
         return end_user_info
 
-    def replace_metadata_fields(
-        self,
-        end_user_id: uuid.UUID,
-        metadata: Dict[str, List[str]],
-    ) -> Optional["EndUserInfo"]:
-        """以 Neo4j 为权威源，覆盖 ``meta_data`` 中指定字段。
-
-        语义：
-            - 只覆盖 ``metadata`` 中显式提供的 key；其他 key 原样保留
-              （避免误伤未管理字段或别的链路写入的内容）
-            - ``aliases`` 与 ``other_name`` 不在本方法管辖范围内，原值保留
-            - 入参 dict 的 value 必须是 list；非 list 类型会被忽略
-
-        Args:
-            end_user_id: 终端用户 ID
-            metadata: 要覆盖的字段字典，例如
-                {"core_facts": [...], "traits": [...], ...}
-
-        Returns:
-            更新后的 EndUserInfo；记录不存在时返回 None
-        """
-        if not metadata:
-            return self.get_by_end_user_id(end_user_id)
-
-        end_user_info = self.get_by_end_user_id(end_user_id)
-        if not end_user_info:
-            logger.warning(
-                f"[EndUserInfo] 记录不存在，跳过 metadata 覆盖: end_user_id={end_user_id}"
-            )
-            return None
-
-        existing_meta = dict(end_user_info.meta_data or {})
-        changed = False
-        for field, values in metadata.items():
-            if not isinstance(values, list):
-                logger.warning(
-                    f"[EndUserInfo] meta_data.{field} 期望 list，实际为 "
-                    f"{type(values).__name__}，已跳过该字段: end_user_id={end_user_id}"
-                )
-                continue
-            existing_meta[field] = list(values)
-            changed = True
-
-        if not changed:
-            return end_user_info
-
-        end_user_info.meta_data = existing_meta
-        self.db.commit()
-        self.db.refresh(end_user_info)
-        logger.info(
-            f"[EndUserInfo] meta_data 字段覆盖完成: end_user_id={end_user_id}, "
-            f"fields={list(metadata.keys())}"
-        )
-        return end_user_info
-
     def remove_aliases( # NOTE：刘淼 别名移除
         self,
         end_user_id: uuid.UUID,

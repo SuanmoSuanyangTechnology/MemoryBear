@@ -550,7 +550,7 @@ class ExtractedEntityNode(Node):
         description="Whether this entity represents explicit/semantic memory (knowledge, concepts, definitions, theories, principles)"
     )
 
-    # User Metadata Fields (populated by async metadata extraction after dedup)
+    # 旧用户 metadata 字段（待废弃）：已不再写入，权威数据在 PG end_user_info.meta_data
     core_facts: List[str] = Field(default_factory=list, description="Stable basic facts about the user")
     traits: List[str] = Field(default_factory=list, description="Stable personality traits or behavioral tendencies")
     relations: List[str] = Field(default_factory=list, description="Durable relationships with people/groups/entities")

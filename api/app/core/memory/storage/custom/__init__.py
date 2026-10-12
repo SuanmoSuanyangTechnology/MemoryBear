@@ -71,7 +71,6 @@ from app.core.memory.storage.custom.reflection_mutations import (
     drop_alias_belongs_edges,
     merge_alias_properties,
     merge_entities,
-    patch_entity_metadata,
     redirect_alias_edges,
     resolve_statement,
 )
@@ -116,7 +115,6 @@ __all__ = [
     "merge_end_user_memory_nodes",
     "merge_entities",
     "merge_entity_description",
-    "patch_entity_metadata",
     "redirect_alias_edges",
     "rename_entity",
     "resolve_statement",

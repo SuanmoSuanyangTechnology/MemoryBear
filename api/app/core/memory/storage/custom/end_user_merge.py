@@ -242,17 +242,7 @@ def _merge_user_properties(
     source: dict[str, Any],
     target: dict[str, Any],
 ) -> dict[str, Any]:
-    list_fields = (
-        "aliases",
-        "anchors",
-        "beliefs_or_stances",
-        "core_facts",
-        "events",
-        "goals",
-        "interests",
-        "relations",
-        "traits",
-    )
+    list_fields = ("aliases",)
     merged = {
         field: _dedup_list(
             list(target.get(field) or []) + list(source.get(field) or [])
