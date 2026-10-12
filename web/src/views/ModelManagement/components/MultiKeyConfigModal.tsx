@@ -199,7 +199,14 @@ const MultiKeyConfigModal = forwardRef<MultiKeyConfigModalRef, MultiKeyConfigMod
           name="priority"
           label={t('modelNew.priority')}
         >
-          <InputNumber placeholder={t('common.pleaseEnter')} className="rb:w-full!" />
+          <InputNumber
+            placeholder={t('common.pleaseEnter')}
+            min={0}
+            max={2147483647}
+            step={1}
+            precision={0}
+            className="rb:w-full!"
+          />
         </Form.Item>
 
         <Form.Item

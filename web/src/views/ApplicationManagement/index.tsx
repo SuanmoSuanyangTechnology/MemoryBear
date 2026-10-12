@@ -171,6 +171,24 @@ const ApplicationManagement: React.FC = () => {
                   popupMatchSelectWidth={false}
                 />
               </Form.Item>
+              <PrivateWrap>
+                {() => (
+                  <Form.Item name="ontology_status" noStyle>
+                    <Select
+                      placeholder={t('application.ontologyStatusPlaceholder')}
+                      options={['bound', 'default'].map(status => ({
+                        value: status,
+                        label: t(`application.ontology_${status}`)
+                      }))}
+                      allowClear
+                      variant="filled"
+                      className="rb:w-30!"
+                      popupMatchSelectWidth={false}
+                    />
+                  </Form.Item>
+                )}
+              </PrivateWrap>
+              
               <Flex
                 className={clsx("rb-border rb:rounded-lg rb:bg-[#FFFFFF]", {
                   'rb:border-[#171719]!': focus
@@ -201,24 +219,26 @@ const ApplicationManagement: React.FC = () => {
                   />
                 </Form.Item>
               </Flex>
-              {activeTab === 'apps' && <Space size={10}>
-                <Dropdown
-                  menu={{
-                    items: [
-                      { key: 'thirdParty', label: t('application.importWorkflow') },
-                      { key: 'import', label: t('application.import') },
-                    ], onClick: handleClick
-                  }}
-                  placement="bottomRight"
-                >
-                  <Button>
-                    {t('application.import')}
-                  </Button>
-                </Dropdown>
-                <RbButton type="primary" icon={<div className="rb:size-3 rb:bg-cover rb:bg-[url('@/assets/images/common/plus.svg')]"></div>} onClick={handleCreate}>
-                  {t('application.createApplication')}
-                </RbButton>
-              </Space>}
+              {activeTab === 'apps' &&
+                <Space size={10}>
+                  <Dropdown
+                    menu={{
+                      items: [
+                        { key: 'thirdParty', label: t('application.importWorkflow') },
+                        { key: 'import', label: t('application.import') },
+                      ], onClick: handleClick
+                    }}
+                    placement="bottomRight"
+                  >
+                    <Button>
+                      {t('application.import')}
+                    </Button>
+                  </Dropdown>
+                  <RbButton type="primary" icon={<div className="rb:size-3 rb:bg-cover rb:bg-[url('@/assets/images/common/plus.svg')]"></div>} onClick={handleCreate}>
+                    {t('application.createApplication')}
+                  </RbButton>
+                </Space>
+              }
             </Space>
           }
         </Form>
