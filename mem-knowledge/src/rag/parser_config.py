@@ -10,6 +10,7 @@ from .knowledge_graph.config import (
     require_graph_mapping,
     resolve_graph_pipeline,
 )
+from .wiki.config import merge_wiki_config
 
 
 def _default_graph_config() -> dict[str, Any]:
@@ -67,6 +68,7 @@ def build_default_knowledge_parser_config() -> dict[str, Any]:
         "parent_chunk_token_num": 1024,
         "parent_chunk_delimiter": "\n\n",
         "graphrag": _default_graph_config(),
+        "wiki": merge_wiki_config(None, None),
     }
 
 
@@ -101,6 +103,8 @@ def normalize_document_parser_config(
     preserve_missing: bool = True,
 ) -> dict[str, Any]:
     normalized = _copy_parser_config(parser_config)
+    # Wiki admission is exclusively a knowledge-base setting.
+    normalized.pop("wiki", None)
     if "layout_recognize" in normalized or not preserve_missing:
         normalized["layout_recognize"] = resolve_layout_recognize(normalized)
     return normalized
@@ -126,6 +130,7 @@ def normalize_new_knowledge_parser_config(
     graph_config = normalized["graphrag"]
     graph_config.update(deepcopy(dict(requested_graph)))
     graph_config["pipeline"] = GraphPipeline.EVIDENCE.value
+    normalized["wiki"] = merge_wiki_config(None, requested.get("wiki"))
     if not chunk_mode_requested:
         normalized.pop("auto_questions", None)
         normalized.pop("parent_child_mode", None)
@@ -155,6 +160,10 @@ def normalize_knowledge_parser_config_update(
     merged_graph.update(deepcopy(dict(incoming_graph)))
     merged_graph["pipeline"] = current_pipeline.value
     normalized["graphrag"] = merged_graph
+    if "wiki" in current_copy or "wiki" in incoming_copy:
+        if "wiki" in incoming_copy and incoming_copy["wiki"] is None:
+            raise ValueError("wiki update must be an object")
+        normalized["wiki"] = merge_wiki_config(current_copy, incoming_copy.get("wiki"))
     return normalized
 
 

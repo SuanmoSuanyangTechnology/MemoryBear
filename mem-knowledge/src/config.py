@@ -22,6 +22,30 @@ class KnowledgeSettings(BaseSettings):
 
     service_name: Literal["mem-knowledge"] = "mem-knowledge"
 
+    # Wiki execution budgets are ceilings, not content truncation policies.
+    kb_wiki_input_tokens: int = Field(default=6000, ge=512, validation_alias="KB_WIKI_INPUT_TOKENS")
+    kb_wiki_output_tokens: int = Field(default=4000, ge=256,
+                                      validation_alias="KB_WIKI_OUTPUT_TOKENS")
+    kb_wiki_max_segments: int = Field(default=256, ge=1,
+                                     validation_alias="KB_WIKI_MAX_SEGMENTS")
+    kb_wiki_max_topics: int = Field(default=64, ge=1, validation_alias="KB_WIKI_MAX_TOPICS")
+    kb_wiki_repair_attempts: int = Field(default=2, ge=0,
+                                        validation_alias="KB_WIKI_REPAIR_ATTEMPTS")
+    kb_wiki_failure_attempts: int = Field(default=3, ge=1,
+                                         validation_alias="KB_WIKI_FAILURE_ATTEMPTS")
+    kb_wiki_defer_attempts: int = Field(default=240, ge=1,
+                                       validation_alias="KB_WIKI_DEFER_ATTEMPTS")
+    kb_wiki_retry_delay_seconds: int = Field(default=15, ge=1,
+                                            validation_alias="KB_WIKI_RETRY_DELAY_SECONDS")
+    kb_wiki_compact_depth: int = Field(default=3, ge=1,
+                                      validation_alias="KB_WIKI_COMPACT_DEPTH")
+    kb_wiki_backfill_batch_size: int = Field(default=100, ge=1, le=1000,
+                                            validation_alias="KB_WIKI_BACKFILL_BATCH_SIZE")
+    kb_wiki_graph_node_limit: int = Field(default=500, ge=1,
+                                         validation_alias="KB_WIKI_GRAPH_NODE_LIMIT")
+    kb_wiki_graph_edge_limit: int = Field(default=2000, ge=1,
+                                         validation_alias="KB_WIKI_GRAPH_EDGE_LIMIT")
+
     # Shared environment variables
     deployment_mode: str = Field(default="community", validation_alias="DEPLOYMENT_MODE")
     db_host: str = Field(default="127.0.0.1", validation_alias="DB_HOST")
