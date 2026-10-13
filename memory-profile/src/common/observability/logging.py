@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import socket
 import sys
 import threading
 from datetime import UTC, datetime
@@ -56,9 +57,10 @@ class TextFormatter(logging.Formatter):
 
 
 class JsonFormatter(logging.Formatter):
-    def __init__(self, service_name: str) -> None:
+    def __init__(self, service_name: str, instance_name: str) -> None:
         super().__init__()
         self.service_name = service_name
+        self.instance_name = instance_name
 
     def format(self, record: logging.LogRecord) -> str:
         payload: dict[str, Any] = {
@@ -67,6 +69,7 @@ class JsonFormatter(logging.Formatter):
             .replace("+00:00", "Z"),
             "level": record.levelname,
             "service": self.service_name,
+            "instance": self.instance_name,
             "logger": record.name,
             "event": getattr(record, "event", "log"),
             "message": record.getMessage(),
@@ -89,6 +92,7 @@ def setup_logging(settings: ProfileSettings) -> None:
     """Install one idempotent stdout handler owned by memory-profile."""
 
     level = getattr(logging, settings.log_level)
+    instance_name = socket.gethostname() or "unknown"
     with _configure_lock:
         root = logging.getLogger()
         root.setLevel(level)
@@ -102,12 +106,13 @@ def setup_logging(settings: ProfileSettings) -> None:
         handler.setLevel(level)
         handler.addFilter(TraceContextFilter())
         if settings.log_format == "json":
-            handler.setFormatter(JsonFormatter(settings.service_name))
+            handler.setFormatter(JsonFormatter(settings.service_name, instance_name))
         else:
             handler.setFormatter(
                 TextFormatter(
                     "%(asctime)sZ level=%(levelname)s service="
-                    f"{settings.service_name} logger=%(name)s event=%(event)s "
+                    f"{settings.service_name} instance={instance_name} "
+                    "logger=%(name)s event=%(event)s "
                     "trace_id=%(trace_id)s message=%(message)s",
                     datefmt="%Y-%m-%dT%H:%M:%S",
                 )
