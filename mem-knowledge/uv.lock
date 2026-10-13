@@ -1095,6 +1095,7 @@ dependencies = [
     { name = "kombu" },
     { name = "lxml" },
     { name = "markdown" },
+    { name = "mem-knowledge-models" },
     { name = "mem-storage-core" },
     { name = "openpyxl" },
     { name = "pillow" },
@@ -1143,6 +1144,7 @@ requires-dist = [
     { name = "kombu", specifier = "==5.5.4" },
     { name = "lxml", specifier = ">=6,<7" },
     { name = "markdown", specifier = "==3.8" },
+    { name = "mem-knowledge-models", directory = "../packages/knowledge-models" },
     { name = "mem-storage-core", directory = "../packages/storage-core" },
     { name = "openpyxl", specifier = "==3.1.5" },
     { name = "pillow", specifier = "==12.0.0" },
@@ -1171,6 +1173,17 @@ dev = [
     { name = "pytest-asyncio", specifier = ">=1.3,<2" },
     { name = "ruff", specifier = ">=0.16,<1" },
 ]
+
+[[package]]
+name = "mem-knowledge-models"
+version = "0.1.0"
+source = { directory = "../packages/knowledge-models" }
+dependencies = [
+    { name = "sqlalchemy" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "sqlalchemy", specifier = ">=2.0.44,<3" }]
 
 [[package]]
 name = "mem-storage-core"
