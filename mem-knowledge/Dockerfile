@@ -31,6 +31,7 @@ RUN if [ "$NEED_MIRROR" == "1" ]; then \
         pip install --no-cache-dir --index-url "${PYPI_INDEX_URL}" uv==0.10.11; \
     fi
 COPY packages/redbear-model /code/packages/redbear-model
+COPY packages/knowledge-models /code/packages/knowledge-models
 COPY packages/storage-core /code/packages/storage-core
 COPY packages/auth-sdk /code/packages/auth-sdk
 COPY mem-knowledge/pyproject.toml mem-knowledge/uv.lock /code/mem-knowledge/

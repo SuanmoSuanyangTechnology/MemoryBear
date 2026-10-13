@@ -5,6 +5,7 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
 dependencies = [
+    "mem-knowledge-models",
     "alembic==1.17.0",
     "amqp==5.3.1",
     "annotated-types==0.7.0",
@@ -155,6 +156,7 @@ dependencies = [
 ]
 
 [tool.uv.sources]
+mem-knowledge-models = { path = "../packages/knowledge-models" }
 redbear-model = { path = "../packages/redbear-model" }
 
 [tool.pytest.ini_options]
