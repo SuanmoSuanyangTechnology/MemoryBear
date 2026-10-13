@@ -175,16 +175,16 @@ def admit(session, kb_id, document_id, *, explicit=False, admission_id=None, exp
         return None
     if state and state.stage not in {"waiting_source", "waiting_wiki"}:
         if state.status in ACTIVE_STATUSES:
-            return {
-                **state_delivery(state),
-                "publish": not state.publish_confirmed
-                and (
-                    explicit
-                    or state.admission_id == admission_id
-                    or state.error_code == "WIKI_DISPATCH_FAILED"
-                ),
-                "accepted": False,
-            }
+            publish = not state.publish_confirmed and (
+                explicit
+                or state.admission_id == admission_id
+                or state.error_code == "WIKI_DISPATCH_FAILED"
+            )
+            if publish and document.progress < 0:
+                document.run, document.progress = 0, 0.0
+                state.last_progress = 0.0
+                append_log(document, "Wiki dispatch retry queued.")
+            return {**state_delivery(state), "publish": publish, "accepted": False}
         if not explicit:
             return None
         if not state.source_ready:
@@ -207,6 +207,13 @@ def admit(session, kb_id, document_id, *, explicit=False, admission_id=None, exp
         return None
     if knowledge.llm_id is None:
         raise WikiError("WIKI_MODEL_REQUIRED", retryable=False)
+    if state.processing_mode == "wiki_only" and document.progress == 1:
+        document.progress = 0.0
+        state.last_progress = 0.0
+        document.process_begin_at = utcnow_naive()
+        document.process_duration = 0.0
+        document.progress_msg = ""
+        append_log(document, "Wiki-only processing round started.")
     state.task_id = str(uuid.uuid4())
     state.admission_id = admission_id
     state.publish_confirmed = False
@@ -229,7 +236,7 @@ def confirm_publish(session, delivery):
         state.publish_confirmed = True
 
 
-def record_publish_failure(session, delivery):
+def record_publish_failure(session, delivery, *, terminal=False):
     lock_knowledge(session, delivery["kb_id"])
     document, state = lock_document(session, delivery["kb_id"], delivery["document_id"])
     if (
@@ -243,6 +250,8 @@ def record_publish_failure(session, delivery):
         # Retain the task identity: an ambiguous broker error may still deliver it.
         # Explicit retry republishes the same round instead of duplicating its work.
         state.error_code = "WIKI_DISPATCH_FAILED"
+        if terminal:
+            document.run, document.progress = 0, -1.0
         append_log(document, "Wiki dispatch failed; retry is available.")
 
 
@@ -274,7 +283,8 @@ def source_completed(session, kb_id, document_id, source_task_id):
     if state is None:
         if not enabled:
             return None
-        state = start_round(session, document, None, scope, source=True)
+        already_complete = document.run == 0 and document.progress == 1
+        state = start_round(session, document, None, scope, source=not already_complete)
         state.source_task_id = source_task_id
     if state.source_task_id != source_task_id:
         return None
@@ -284,11 +294,13 @@ def source_completed(session, kb_id, document_id, source_task_id):
     state.source_ready = True
     state.stage = "waiting_wiki"
     if not enabled:
+        state.processing_mode = "wiki_only"
+        state.last_progress = 0.0
         document.run, document.progress = 0, 1.0
         append_log(document, "Source ready; Wiki generation is disabled.")
         return None
-    document.progress = 0.7
-    state.last_progress = 0.7
+    document.progress = 0.7 if state.processing_mode == "source" else 0.0
+    state.last_progress = document.progress
     session.flush()
     return admit(session, kb_id, document_id)
 
