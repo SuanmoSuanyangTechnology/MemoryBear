@@ -53,7 +53,7 @@ export const space = {
         switchLockedNotice: 'Re-embedding 进行中，模型切换已锁定',
         alert: {
           pendingTitle: '记忆库索引重建任务排队中，请稍后',
-          pendingDescription: '由于空间已更换 Embedding 模型，记忆库需要使用新模型重新建立向量索引。 目标模型：text-embedding-3-large。当前正在排队中，期间已自动降级为关键词/全文检索，模型切换操作已锁定。',
+          pendingDescription: '由于空间已更换 Embedding 模型，记忆库需要使用新模型重新建立向量索引。 目标模型：{{model}}。当前正在排队中，期间已自动降级为关键词/全文检索，模型切换操作已锁定。',
           runningTitle: '记忆库索引正在重建',
           runningDescription: '由于空间已更换 Embedding 模型，记忆库需要使用新模型重新建立向量索引。目标模型：{{model}}。当前正在处理，期间已自动降级为关键词/全文检索，模型切换操作已锁定。',
           succeededTitle: '记忆库索引重建全部完成',
