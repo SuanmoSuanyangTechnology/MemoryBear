@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next'
 import RbAlert from '@/components/RbAlert'
 import ScoreBreakdown from './ScoreBreakdown'
 import type { LogItem } from '../types'
+import { OLD_META_DATA_KEY_FIELDS, NEW_META_DATA_KEY_FIELDS } from '@/views/UserMemoryDetail/constant'
 
 type RecordValue = Record<string, unknown>
 
@@ -31,22 +32,18 @@ const UserMetadataContent: FC<{ log: LogItem }> = ({ log }) => {
   const aliases = Array.isArray(source.aliases_name) ? source.aliases_name : []
   const name = String(aliases[0] ?? source.name ?? t('memoryConversation.userMetadata.unknownUser'))
   const nodeId = firstText(data, ['node_id', 'id']) ?? `meta_user_${name}`
-  const keyFileds = [
-    'aliases_name',
-    'core_facts',
-    'interests',
-    'events',
-    'anchors',
-    'beliefs_or_stances',
-    'goals',
-    'relations',
-    'traits',
-  ]
-  const matchedKeyFileds = keyFileds.filter(key => (
+  const hasOldMetaData = OLD_META_DATA_KEY_FIELDS.some((key) => {
+    const value = source[key]
+    return Array.isArray(value) && value.length > 0
+  })
+  const metaDataKeyFields = hasOldMetaData
+    ? OLD_META_DATA_KEY_FIELDS
+    : NEW_META_DATA_KEY_FIELDS
+  const matchedKeyFields = metaDataKeyFields.filter(key => (
     Object.prototype.hasOwnProperty.call(source, key)
   ))
-  const fields = matchedKeyFileds.slice(0, 4)
-  const metadataText = matchedKeyFileds
+  const fields = matchedKeyFields.slice(0, 4)
+  const metadataText = matchedKeyFields
     .flatMap(key => {
       const value = source[key]
       if (Array.isArray(value)) return value
@@ -78,7 +75,7 @@ const UserMetadataContent: FC<{ log: LogItem }> = ({ log }) => {
               {t('memoryConversation.userMetadata.notRanked')}
             </span>
           </Flex>
-          <p className="rb:text-[11px] rb:leading-5 rb:text-[#5B6167]">
+          <p className="rb:text-[11px] rb:leading-5 rb:text-gray-600">
             {description}
           </p>
           <ScoreBreakdown
