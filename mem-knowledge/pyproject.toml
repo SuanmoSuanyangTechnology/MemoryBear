@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "Independent MemoryBear knowledge service"
 requires-python = ">=3.12,<3.13"
 dependencies = [
-    "mem-knowledge-models",
+    "alembic==1.17.0",
     "asyncpg>=0.31,<1",
     "auth-sdk>=0.1",
     "amqp==5.3.1",
@@ -56,7 +56,6 @@ dev = [
 ]
 
 [tool.uv.sources]
-mem-knowledge-models = { path = "../packages/knowledge-models" }
 redbear-model = { path = "../packages/redbear-model" }
 mem-storage-core = { path = "../packages/storage-core" }
 auth-sdk = { path = "../packages/auth-sdk" }

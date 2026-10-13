@@ -72,7 +72,6 @@ ENV PATH=/root/.local/bin:$PATH
 # 本地路径依赖（pyproject [tool.uv.sources]）：uv sync 前必须就位，否则 --locked 解析失败；
 # uv.lock 位于 /code，../packages/redbear-model 即 /packages/redbear-model
 COPY packages/redbear-model /packages/redbear-model
-COPY packages/knowledge-models /packages/knowledge-models
 COPY api/pyproject.toml /code/pyproject.toml
 COPY api/uv.lock /code/uv.lock
 COPY api/app /code/app
