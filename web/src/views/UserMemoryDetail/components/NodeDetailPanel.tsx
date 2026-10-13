@@ -117,13 +117,13 @@ const NodeDetailPanel: FC<NodeDetailPanelProps> = ({
                     {(selectedNode as Node).name || (selectedNode as GraphNode).label}
                   </div>
                 }
-                {((selectedNode as Node).properties?.name || (selectedNode as GraphNode).label === 'PreferenceGroup') &&
+                {(selectedNode as Node).properties?.name &&
                   <div className="rb:font-medium rb:text-[16px] rb:text-gray-800 rb:leading-5.5 rb:mb-3">
                     {(selectedNode as Node).properties?.name || (selectedNode as GraphNode).label}
                   </div>
                 }
                 <Flex vertical gap={24}>
-                  {(selectedNode as GraphNode).label !== 'ExtractedEntity' &&  (selectedNode as GraphNode).label !== 'PreferenceGroup' &&
+                  {(selectedNode as GraphNode).label !== 'ExtractedEntity' &&  (selectedNode as GraphNode).label !== 'Preference' &&
                     <div>
                       <div className="rb:font-medium rb:leading-5">{t('userMemory.memoryContent')}</div>
                       <div className="rb:text-gray-600 rb:font-regular rb:leading-5 rb:mt-2">
@@ -306,25 +306,6 @@ const NodeDetailPanel: FC<NodeDetailPanelProps> = ({
                   </>}
 
                   {(selectedNode as GraphNode).label === 'Preference' && <>
-                    {(['domain', 'subject', 'situation_key', 'preference_text_all'] as const).map(key => {
-                      const p = (selectedNode as Node).properties as PreferenceNodeProperties
-                      if (p[key]) {
-                        return (
-                          <div key={key}>
-                            <div className="rb:font-medium rb:leading-5">{t(`userMemory.Preference_${key}`)}</div>
-                            <div className="rb:text-gray-600 rb:font-regular rb:leading-5 rb:mt-2">
-                              {Array.isArray(p[key]) && p[key].length > 0
-                                ? (p[key] as unknown as string[]).map((v, i) => <div key={i}>- {v}</div>)
-                                : p[key]}
-                            </div>
-                          </div>
-                        )
-                      }
-                      return null
-                    })}
-                  </>}
-
-                  {(selectedNode as GraphNode).label === 'PreferenceGroup' && <>
                     {(['domain', 'subject', 'situation_key', 'preference_text_all'] as const).map(key => {
                       const p = (selectedNode as Node).properties as PreferenceNodeProperties
                       if (p[key]) {
