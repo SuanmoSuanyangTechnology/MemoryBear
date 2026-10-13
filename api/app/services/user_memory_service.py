@@ -2272,7 +2272,7 @@ def _resolve_edge_caption(
 
     Args:
         rel_type: Cypher ``type(r)`` 返回的关系类型字符串。
-        edge_props: ``properties(r)`` 经过 ``_clean_neo4j_value`` 清洗后的关系属性。
+        edge_props: Cypher 边属性投影经 ``_clean_neo4j_value`` 清洗后的关系属性。
 
     Returns:
         最终用于响应的 ``caption`` 字符串；若 ``rel_type`` 与 ``edge_props.caption``
