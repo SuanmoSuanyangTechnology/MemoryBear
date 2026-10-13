@@ -639,6 +639,27 @@ class WritePipeline:
                         )
                         self._record_preference_result(preference_outcome[0])
                         preference_task = None
+                        # 偏好展示写入：wait_for 超时保护之外，不占偏好超时预算；
+                        # best effort，失败不改变 WritePipeline 返回状态。
+                        preference_result = preference_outcome[0]
+                        if (
+                            not isinstance(preference_result, BaseException)
+                            and getattr(preference_result, "status", None) == "success"
+                        ):
+                            try:
+                                from app.services.memory_engine_display_service import (
+                                    MemoryEngineDisplayService,
+                                )
+
+                                await MemoryEngineDisplayService.save_preference_event(
+                                    end_user_id=self.end_user_id,
+                                    memory_message_id=preference_target["memory_message_id"],
+                                    result=preference_result,
+                                )
+                            except Exception:
+                                logger.exception(
+                                    "[EngineDisplay] Preference event write failed"
+                                )
                     return result
 
                 finally:

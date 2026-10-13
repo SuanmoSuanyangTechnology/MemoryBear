@@ -4,6 +4,9 @@
 - 从 ExtractionResult 组装 0~3 个有效基础引擎事件（EXTRACTION / CROSS_MODAL / EMOTION）；
   另有每条最终永久 Statement 各追加一条 PERMANENT_ADDED 事件（数量随语句数，无上限）
 - 从遗忘、反思引擎的汇总结果组装 FORGETTING / REFLECTION 事件
+- 从 SceneSummary、GDS 价值评估结果组装 SCENE_SUMMARY / MEMORY_VALUE 事件
+- 从偏好引擎结果组装 PREFERENCE 事件（原子项计数，源消息派生稳定 operation_id）
+- 从情景重构批次结果组装 SCENE_RECONSTRUCTION 事件（批次指纹派生稳定 operation_id）
 - 查询时按用户时区日期聚合事件并生成卡片文案
 - 异常隔离（PG 写入失败不影响主流程）
 """
@@ -275,6 +278,73 @@ class MemoryEngineDisplayService:
         except Exception as e:
             logger.error(
                 f"[EngineDisplay] 价值评估事件组装失败: end_user_id={end_user_id}, error={e}",
+                exc_info=True,
+            )
+            return
+        if event is None:
+            return
+        await _persist_events(end_user_id, [event])
+
+    @staticmethod
+    async def save_preference_event(
+        end_user_id: str,
+        memory_message_id: str,
+        result: Any,
+    ) -> None:
+        """偏好引擎主结果成功后调用，best effort 写 PREFERENCE 展示事件。
+
+        只有 ``status = success`` 且三项原子项计数合计 > 0 才写入一条事件；
+        keyword_gate_miss、no_preferences、全部 noop、超时或写入失败都不产生。
+        计数来自 ``PreferenceProcessorResult`` 的原子项级统计（仅统计保存成功
+        的分组），details 不保存 preference_text、subject、situation_key 或
+        源消息正文。
+
+        operation_id 由源消息 ID 派生，同一消息重放不重复累计；一条消息同时
+        修改多个 Preference 节点时合并为一次用户可理解的偏好活动。
+
+        Args:
+            end_user_id: 终端用户 ID（字符串形式 UUID）
+            memory_message_id: 偏好分支处理的源消息稳定 ID
+            result: PreferenceProcessor.run() 返回的 PreferenceProcessorResult
+        """
+        try:
+            event = _build_preference_event(memory_message_id, result)
+        except Exception as e:
+            logger.error(
+                f"[EngineDisplay] 偏好事件组装失败: end_user_id={end_user_id}, error={e}",
+                exc_info=True,
+            )
+            return
+        if event is None:
+            return
+        await _persist_events(end_user_id, [event])
+
+    @staticmethod
+    async def save_scene_reconstruction_event(
+        end_user_id: str,
+        result: dict,
+    ) -> None:
+        """情景重构批次成功后调用，best effort 写 SCENE_RECONSTRUCTION 展示事件。
+
+        只有 ``status = success``、``processed_scene_count > 0`` 且
+        ``new_community_count + existing_community_update_count > 0`` 才写入；
+        incomplete_batch、O1/P2/P3 失败、原子提交或 Outbox 失败都不产生。
+        details 只保存计数，不保存 SceneSummary ID、社区名称、分类、边界、
+        摘要、理由或置信度。
+
+        operation_id 由批次指纹派生（排序后的 SceneSummary ID 集合做 SHA-256），
+        同一批次重放不重复累计；不同批次即使复用同一个 Celery task 上下文，
+        也拥有不同 operation_id。
+
+        Args:
+            end_user_id: 终端用户 ID（字符串形式 UUID）
+            result: SceneCommunityIncrementalService.run() 的成功返回值
+        """
+        try:
+            event = _build_scene_reconstruction_event(result)
+        except Exception as e:
+            logger.error(
+                f"[EngineDisplay] 情景重构事件组装失败: end_user_id={end_user_id}, error={e}",
                 exc_info=True,
             )
             return
@@ -737,6 +807,83 @@ def _stable_task_operation_id(task_id: Any) -> uuid.UUID:
         return uuid.uuid5(_ENGINE_EVENT_NAMESPACE, f"memory-value:{task_id}")
 
 
+def _build_preference_event(
+    memory_message_id: Any,
+    result: Any,
+) -> Optional[Dict[str, Any]]:
+    """组装偏好引擎（PREFERENCE）事件。
+
+    只有偏好主结果 success 且三项原子项计数合计 > 0 才生成；缺 memory_message_id
+    时无法派生稳定 operation_id，直接返回 None，避免用随机值造成重复累计。
+    """
+    if not memory_message_id or result is None:
+        return None
+    if getattr(result, "status", None) != "success":
+        return None
+
+    added = _as_count(_field(result, "added_item_count"))
+    updated = _as_count(_field(result, "updated_item_count"))
+    deleted = _as_count(_field(result, "deleted_item_count"))
+    if added <= 0 and updated <= 0 and deleted <= 0:
+        return None
+
+    return {
+        "engine_type": "PREFERENCE",
+        "details": {
+            "added_item_count": added,
+            "updated_item_count": updated,
+            "deleted_item_count": deleted,
+        },
+        "operation_id": uuid.uuid5(
+            _ENGINE_EVENT_NAMESPACE,
+            f"preference:{memory_message_id}",
+        ),
+    }
+
+
+def _build_scene_reconstruction_event(
+    result: Any,
+) -> Optional[Dict[str, Any]]:
+    """组装情景重构（SCENE_RECONSTRUCTION）事件。
+
+    只有完整批次 success、处理场景数 > 0 且脉络新建/更新数 > 0 才生成；
+    缺 batch_fingerprint 时无法派生稳定 operation_id，直接返回 None，
+    避免用随机值造成重复累计。boundary / summary 两个计数本期不进入
+    文案，仅随事件保存，保留给后续文案扩展。
+    """
+    if not isinstance(result, dict) or result.get("status") != "success":
+        return None
+
+    processed = _as_count(result.get("processed_scene_count"))
+    new_communities = _as_count(result.get("new_community_count"))
+    existing_updates = _as_count(result.get("existing_community_update_count"))
+    if processed <= 0 or (new_communities <= 0 and existing_updates <= 0):
+        return None
+
+    batch_fingerprint = result.get("batch_fingerprint")
+    if not batch_fingerprint:
+        return None
+
+    return {
+        "engine_type": "SCENE_RECONSTRUCTION",
+        "details": {
+            "processed_scene_count": processed,
+            "new_community_count": new_communities,
+            "existing_community_update_count": existing_updates,
+            "boundary_established_count": _as_count(
+                result.get("boundary_established_count")
+            ),
+            "summary_refreshed_count": _as_count(
+                result.get("summary_refreshed_count")
+            ),
+        },
+        "operation_id": uuid.uuid5(
+            _ENGINE_EVENT_NAMESPACE,
+            f"scene-reconstruction:{batch_fingerprint}",
+        ),
+    }
+
+
 def _field(obj: Any, key: str, default: Any = None) -> Any:
     """兼容 pydantic 模型与 dict 的字段读取。"""
     if isinstance(obj, dict):
@@ -951,6 +1098,44 @@ def _merge_event_details(
             "statement_count": statement_count,
         }
 
+    elif engine_type == "PREFERENCE":
+        # 原子项级计数对当天所有事件求和；合计为 0 的事件在组装侧已被过滤。
+        added = 0
+        updated = 0
+        deleted = 0
+        for e in events:
+            d = e.details or {}
+            added += _as_count(d.get("added_item_count"))
+            updated += _as_count(d.get("updated_item_count"))
+            deleted += _as_count(d.get("deleted_item_count"))
+        return {
+            "added_item_count": added,
+            "updated_item_count": updated,
+            "deleted_item_count": deleted,
+        }
+
+    elif engine_type == "SCENE_RECONSTRUCTION":
+        # 计数对当天所有成功批次求和；同一已有社区当天多批更新按次数累计。
+        processed = 0
+        new_communities = 0
+        existing_updates = 0
+        boundary_established = 0
+        summary_refreshed = 0
+        for e in events:
+            d = e.details or {}
+            processed += _as_count(d.get("processed_scene_count"))
+            new_communities += _as_count(d.get("new_community_count"))
+            existing_updates += _as_count(d.get("existing_community_update_count"))
+            boundary_established += _as_count(d.get("boundary_established_count"))
+            summary_refreshed += _as_count(d.get("summary_refreshed_count"))
+        return {
+            "processed_scene_count": processed,
+            "new_community_count": new_communities,
+            "existing_community_update_count": existing_updates,
+            "boundary_established_count": boundary_established,
+            "summary_refreshed_count": summary_refreshed,
+        }
+
     return {}
 
 
@@ -1103,6 +1288,62 @@ def _generate_card_text_zh(
                     f"这一天新增了 {added} 条永久记忆，"
                     f"完成了 {evaluations} 次价值评估；最近一次覆盖 {covered} 项记忆内容。"
                 )
+        return name, content
+
+    elif engine_type == "PREFERENCE":
+        added = _as_count(merged.get("added_item_count"))
+        updated = _as_count(merged.get("updated_item_count"))
+        deleted = _as_count(merged.get("deleted_item_count"))
+        if added <= 0 and updated <= 0 and deleted <= 0:
+            return ("", "")
+
+        if added > 0 and updated <= 0 and deleted <= 0:
+            # 只有新增
+            name = "我记住了新的使用偏好"
+            content = f"这一天新记住了 {added} 条长期偏好，之后会在适用场景中作为参考。"
+        elif added <= 0 and deleted <= 0:
+            # 只有调整
+            name = "我更新了对你偏好的理解"
+            content = f"这一天调整了 {updated} 条长期偏好，让偏好记录更符合你当前表达的要求。"
+        elif added <= 0:
+            # 只有移除
+            name = "我更新了对你偏好的理解"
+            content = f"这一天移除了 {deleted} 条不再适用的长期偏好记录。"
+        else:
+            # 多种变化同时存在
+            name = "我更新了对你偏好的理解"
+            content = (
+                f"这一天新记住了 {added} 条长期偏好，"
+                f"调整了 {updated} 条，并移除了 {deleted} 条不再适用的记录。"
+            )
+        return name, content
+
+    elif engine_type == "SCENE_RECONSTRUCTION":
+        processed = _as_count(merged.get("processed_scene_count"))
+        new_communities = _as_count(merged.get("new_community_count"))
+        existing_updates = _as_count(merged.get("existing_community_update_count"))
+        if processed <= 0 or (new_communities <= 0 and existing_updates <= 0):
+            return ("", "")
+
+        name = "我把分散的情景记忆重新串联了起来"
+        if new_communities > 0 and existing_updates <= 0:
+            # 只有新建事项脉络
+            content = (
+                f"这一天将 {processed} 段完整情景整理为 {new_communities} 个新的事项脉络，"
+                "方便以后按同一件事连贯回忆。"
+            )
+        elif new_communities <= 0:
+            # 只有已有脉络更新，按次数表述（同一天同一脉络可多次更新）
+            content = (
+                f"这一天整理了 {processed} 段完整情景，"
+                f"并完成了 {existing_updates} 次已有事项脉络更新，让相关记忆更连贯。"
+            )
+        else:
+            content = (
+                f"这一天整理了 {processed} 段完整情景，"
+                f"形成 {new_communities} 个新事项脉络，"
+                f"并完成 {existing_updates} 次已有脉络更新。"
+            )
         return name, content
 
     return ("", "")
@@ -1288,6 +1529,72 @@ def _generate_card_text_en(
                     f"{_pluralize('evaluation', evaluations)}; the most recent one "
                     f"covered {covered} memory {_pluralize('item', covered)}."
                 )
+        return name, content
+
+    if engine_type == "PREFERENCE":
+        added = _as_count(merged.get("added_item_count"))
+        updated = _as_count(merged.get("updated_item_count"))
+        deleted = _as_count(merged.get("deleted_item_count"))
+        if added <= 0 and updated <= 0 and deleted <= 0:
+            return ("", "")
+
+        if added > 0 and updated <= 0 and deleted <= 0:
+            name = "I learned new preferences about you"
+            content = (
+                f"I noted {added} new long-term "
+                f"{_pluralize('preference', added, 'preferences')} that day, and I "
+                "will use them as a reference in relevant situations."
+            )
+        elif added <= 0 and deleted <= 0:
+            name = "I updated my understanding of your preferences"
+            content = (
+                f"I adjusted {updated} long-term "
+                f"{_pluralize('preference', updated, 'preferences')} that day to "
+                "better match what you have expressed."
+            )
+        elif added <= 0:
+            name = "I updated my understanding of your preferences"
+            content = (
+                f"I removed {deleted} long-term preference "
+                f"{_pluralize('record', deleted)} that no longer apply."
+            )
+        else:
+            name = "I updated my understanding of your preferences"
+            content = (
+                f"I noted {added} new long-term preferences, adjusted {updated}, "
+                f"and removed {deleted} that no longer apply."
+            )
+        return name, content
+
+    if engine_type == "SCENE_RECONSTRUCTION":
+        processed = _as_count(merged.get("processed_scene_count"))
+        new_communities = _as_count(merged.get("new_community_count"))
+        existing_updates = _as_count(merged.get("existing_community_update_count"))
+        if processed <= 0 or (new_communities <= 0 and existing_updates <= 0):
+            return ("", "")
+
+        name = "I reconnected scattered episodic memories"
+        if new_communities > 0 and existing_updates <= 0:
+            content = (
+                f"I organized {processed} complete "
+                f"{_pluralize('scene', processed)} into {new_communities} new "
+                f"{_pluralize('topic thread', new_communities, 'topic threads')} "
+                "that day, so related memories stay connected."
+            )
+        elif new_communities <= 0:
+            content = (
+                f"I organized {processed} complete "
+                f"{_pluralize('scene', processed)} that day and made "
+                f"{existing_updates} "
+                f"{_pluralize('update', existing_updates)} to existing topic "
+                "threads to keep related memories connected."
+            )
+        else:
+            content = (
+                f"I organized {processed} complete scenes that day, forming "
+                f"{new_communities} new topic threads and making "
+                f"{existing_updates} updates to existing ones."
+            )
         return name, content
 
     return ("", "")

@@ -6922,6 +6922,26 @@ def run_scene_community_incremental(self, end_user_id: str):
             expire=1800,
         )
         result = loop.run_until_complete(_run())
+        if result.get("status") == "success":
+            # 展示写入：best effort，在取得成功结果后、派发下一批之前执行；
+            # save 方法内部吞掉 PG 异常，此处 try/except 为第二层隔离，
+            # 失败不触发 Celery 自动重试、不改变任务成功结果。
+            async def _save_scene_reconstruction_display():
+                from app.services.memory_engine_display_service import (
+                    MemoryEngineDisplayService,
+                )
+
+                await MemoryEngineDisplayService.save_scene_reconstruction_event(
+                    end_user_id=end_user_id,
+                    result=result,
+                )
+
+            try:
+                loop.run_until_complete(_save_scene_reconstruction_display())
+            except Exception:
+                logger.exception(
+                    "[EngineDisplay] Scene reconstruction event write failed"
+                )
         if result.get("dispatch_next"):
             stage = "dispatch_next"
             next_task = run_scene_community_incremental.apply_async(

@@ -70,4 +70,9 @@ class PreferenceProcessorResult(BaseModel):
     created_count: int = 0
     updated_count: int = 0
     noop_item_count: int = 0
+    # 原子项级统计：新建节点按写入条数、更新节点按 P2 operations 长度累计，
+    # 仅统计保存成功的分组（update_preference 返回 None 的分组整组不计）。
+    added_item_count: int = 0
+    updated_item_count: int = 0
+    deleted_item_count: int = 0
     reason: str | None = None
