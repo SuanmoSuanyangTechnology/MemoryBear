@@ -34,7 +34,6 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import json
 import logging
 import os
@@ -43,6 +42,7 @@ import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass
 
+from auth_sdk.pubsub import run_pubsub_listener
 from redbear_model import (
     AsyncSQLChannelRegistry,
     ChannelSnapshot,
@@ -430,37 +430,35 @@ async def run_channel_invalidation_listener() -> None:
     本地失效经 ``asyncio.to_thread``：``invalidate_channel_cache`` 内含同步 Redis 删除，
     事件循环内直调会阻塞（GC#11）。取消（进程收尾）即退出，重连退避不吞取消。
     """
-    delay = _RECONNECT_BASE_DELAY_S
-    while True:
-        pubsub = None
+
+    async def _on_subscribed() -> None:
+        logger.info(
+            "渠道失效订阅就绪: channel=%s instance=%s",
+            CHANNEL_INVALIDATION_CHANNEL,
+            _INSTANCE_ID,
+        )
+
+    async def _on_interrupted(exc: Exception, delay: float) -> None:
+        logger.warning("渠道失效订阅中断，%.1fs 后重连: %s", delay, exc)
+
+    async def _on_message(message) -> None:
+        data = message.get("data") if isinstance(message, dict) else None
+        if data is None:
+            return
         try:
-            client = await get_async_client()
-            pubsub = client.pubsub(ignore_subscribe_messages=True)
-            await pubsub.subscribe(CHANNEL_INVALIDATION_CHANNEL)
-            delay = _RECONNECT_BASE_DELAY_S
-            logger.info(
-                "渠道失效订阅就绪: channel=%s instance=%s",
-                CHANNEL_INVALIDATION_CHANNEL,
-                _INSTANCE_ID,
-            )
-            async for message in pubsub.listen():
-                data = message.get("data") if isinstance(message, dict) else None
-                if data is None:
-                    continue
-                try:
-                    await asyncio.to_thread(apply_channel_invalidation, data)
-                except Exception:
-                    logger.warning("应用渠道失效广播失败: %r", data, exc_info=True)
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:
-            logger.warning("渠道失效订阅中断，%.1fs 后重连: %s", delay, exc)
-            await asyncio.sleep(delay)
-            delay = min(delay * 2, _RECONNECT_MAX_DELAY_S)
-        finally:
-            if pubsub is not None:
-                with contextlib.suppress(Exception):
-                    await pubsub.aclose()
+            await asyncio.to_thread(apply_channel_invalidation, data)
+        except Exception:
+            logger.warning("应用渠道失效广播失败: %r", data, exc_info=True)
+
+    await run_pubsub_listener(
+        get_async_client,
+        CHANNEL_INVALIDATION_CHANNEL,
+        _on_message,
+        on_subscribed=_on_subscribed,
+        on_interrupted=_on_interrupted,
+        base_delay=_RECONNECT_BASE_DELAY_S,
+        max_delay=_RECONNECT_MAX_DELAY_S,
+    )
 
 
 def parse_members(config: dict | None) -> list[tuple[str, str]]:

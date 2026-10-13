@@ -38,6 +38,26 @@ def create_app(settings: KnowledgeSettings | None = None) -> FastAPI:
     service_settings = settings or get_settings()
     setup_logging(service_settings)
     runtime = ProcessRuntime(service_settings)
+    from .auth import KbAuthConfig, KbAuthMiddleware, _load_gateway_auth
+
+    kb_auth_config = KbAuthConfig(
+        auth_mode=service_settings.kb_auth_mode,
+        service_name=service_settings.kb_service_name,
+        kill_switch_file=service_settings.kb_kill_switch_file,
+        jwks_url=service_settings.kb_jwks_url,
+        redis=runtime.redis.client,
+    )
+    gateway_auth = None
+    if kb_auth_config.auth_mode == "gateway":
+        try:
+            # Built once here so the middleware and the lifespan share the same
+            # handler (the lifespan owns its rule-refresh task).
+            gateway_auth = _load_gateway_auth(kb_auth_config)
+        except RuntimeError:
+            # Misconfiguration (private package missing): keep the documented
+            # fail-closed timing — the middleware's lazy fallback raises per
+            # request instead of blocking app construction.
+            logger.exception("gateway auth handler unavailable; requests will fail closed")
 
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
@@ -45,9 +65,19 @@ def create_app(settings: KnowledgeSettings | None = None) -> FastAPI:
             "Knowledge service started: %s",
             service_settings.safe_summary(),
         )
+        # A failed refresh start degrades hot reload only; channel-1 auth keeps
+        # the rules loaded so far, so startup must not be blocked by it.
+        if gateway_auth is not None and hasattr(gateway_auth, "start"):
+            try:
+                await gateway_auth.start()
+            except Exception:
+                logger.exception("gateway auth refresh start failed")
         try:
             yield
         finally:
+            # Stop the subscription task before the redis pool closes.
+            if gateway_auth is not None and hasattr(gateway_auth, "aclose"):
+                await gateway_auth.aclose()
             await application.state.runtime.aclose()
             logger.info("Knowledge service stopped")
 
@@ -63,17 +93,10 @@ def create_app(settings: KnowledgeSettings | None = None) -> FastAPI:
     application.state.runtime = runtime
     application.add_middleware(TraceIdMiddleware)
     # 鉴权最外层（后注册者最外层）：无凭据请求在路由前即 401
-    from .auth import KbAuthConfig, KbAuthMiddleware
-
     application.add_middleware(
         KbAuthMiddleware,
-        kb_auth=KbAuthConfig(
-            auth_mode=service_settings.kb_auth_mode,
-            service_name=service_settings.kb_service_name,
-            kill_switch_file=service_settings.kb_kill_switch_file,
-            jwks_url=service_settings.kb_jwks_url,
-            redis=runtime.redis.client,
-        ),
+        kb_auth=kb_auth_config,
+        gateway=gateway_auth,
     )
     application.include_router(internal_v1_router)
 
