@@ -70,6 +70,20 @@ wheels = [
 ]
 
 [[package]]
+name = "alembic"
+version = "1.17.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "mako" },
+    { name = "sqlalchemy" },
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/6b/45/6f4555f2039f364c3ce31399529dcf48dd60726ff3715ad67f547d87dfd2/alembic-1.17.0.tar.gz", hash = "sha256:4652a0b3e19616b57d652b82bfa5e38bf5dbea0813eed971612671cb9e90c0fe", size = 1975526, upload-time = "2025-10-11T18:40:13.585Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/44/1f/38e29b06bfed7818ebba1f84904afdc8153ef7b6c7e0d8f3bc6643f5989c/alembic-1.17.0-py3-none-any.whl", hash = "sha256:80523bc437d41b35c5db7e525ad9d908f79de65c27d6a5a5eab6df348a352d99", size = 247449, upload-time = "2025-10-11T18:40:16.288Z" },
+]
+
+[[package]]
 name = "aliyun-python-sdk-core"
 version = "2.16.1"
 source = { registry = "https://pypi.org/simple" }
@@ -1008,6 +1022,18 @@ wheels = [
 ]
 
 [[package]]
+name = "mako"
+version = "1.4.3"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "markupsafe" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/5a/09/e07c4b5579a79f4b16f8d4f29f6c54514ac787c4ad506b8c4f28a0e6b0bf/mako-1.4.3.tar.gz", hash = "sha256:cd6537fe88d5fec315c55c2f8529bc4ce7a9a352ad7db3eeaa6a66e2dd4ec37a", size = 412799, upload-time = "2026-09-22T20:54:31.509Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/6d/a0/053d6af3e8f871e0073b4a36732d9e65be77a72e5434c31b94f6af78a6bb/mako-1.4.3-py3-none-any.whl", hash = "sha256:723296007c870bfd6b3f0c3230dba7198096e5269297ebf5e4eff9e7ffa39d4f", size = 80164, upload-time = "2026-09-22T20:54:33.128Z" },
+]
+
+[[package]]
 name = "markdown"
 version = "3.8"
 source = { registry = "https://pypi.org/simple" }
@@ -1078,6 +1104,7 @@ name = "mem-knowledge"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "alembic" },
     { name = "amqp" },
     { name = "asyncpg" },
     { name = "auth-sdk" },
@@ -1095,7 +1122,6 @@ dependencies = [
     { name = "kombu" },
     { name = "lxml" },
     { name = "markdown" },
-    { name = "mem-knowledge-models" },
     { name = "mem-storage-core" },
     { name = "openpyxl" },
     { name = "pillow" },
@@ -1127,6 +1153,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "alembic", specifier = "==1.17.0" },
     { name = "amqp", specifier = "==5.3.1" },
     { name = "asyncpg", specifier = ">=0.31,<1" },
     { name = "auth-sdk", directory = "../packages/auth-sdk" },
@@ -1144,7 +1171,6 @@ requires-dist = [
     { name = "kombu", specifier = "==5.5.4" },
     { name = "lxml", specifier = ">=6,<7" },
     { name = "markdown", specifier = "==3.8" },
-    { name = "mem-knowledge-models", directory = "../packages/knowledge-models" },
     { name = "mem-storage-core", directory = "../packages/storage-core" },
     { name = "openpyxl", specifier = "==3.1.5" },
     { name = "pillow", specifier = "==12.0.0" },
@@ -1173,17 +1199,6 @@ dev = [
     { name = "pytest-asyncio", specifier = ">=1.3,<2" },
     { name = "ruff", specifier = ">=0.16,<1" },
 ]
-
-[[package]]
-name = "mem-knowledge-models"
-version = "0.1.0"
-source = { directory = "../packages/knowledge-models" }
-dependencies = [
-    { name = "sqlalchemy" },
-]
-
-[package.metadata]
-requires-dist = [{ name = "sqlalchemy", specifier = ">=2.0.44,<3" }]
 
 [[package]]
 name = "mem-storage-core"
