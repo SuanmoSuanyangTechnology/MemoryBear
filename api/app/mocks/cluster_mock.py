@@ -192,6 +192,14 @@ def _get_features(app_id: str) -> Dict[str, Any]:
     return feats if isinstance(feats, dict) else {}
 
 
+def _get_features(app_id: str) -> Dict[str, Any]:
+    """取已保存配置里的 supervisor_config.features（缺省空 dict=全关）。"""
+    cfg = _CONFIG_STORE.get(app_id) or {}
+    sup = cfg.get("supervisor_config") or {}
+    feats = sup.get("features")
+    return feats if isinstance(feats, dict) else {}
+
+
 def _feat_on(features: Dict[str, Any], key: str) -> bool:
     sub = features.get(key)
     return isinstance(sub, dict) and bool(sub.get("enabled"))
@@ -205,6 +213,11 @@ def _deep_thinking_on(app_id: str, req: Dict[str, Any]) -> bool:
     return mp_on and bool(req.get("thinking"))
 
 
+def _web_search_on(app_id: str, req: Dict[str, Any]) -> bool:
+    """联网搜索 = features.web_search.enabled 且请求 web_search=true 同开。"""
+    return _feat_on(_get_features(app_id), "web_search") and bool(req.get("web_search"))
+
+
 def _json_output_on(app_id: str) -> bool:
     """JSON 输出 = model_parameters.json_output（纯配置开关，无需请求侧参数）。"""
     cfg = _CONFIG_STORE.get(app_id) or {}
@@ -216,19 +229,6 @@ def _json_output_on(app_id: str) -> bool:
 _JSON_SUPERVISOR_1 = '{"answer": "这是主管直接给出的结构化回答",'
 _JSON_SUPERVISOR_2 = '"confidence": 0.95, "sources": ["mock"]}'
 _JSON_SUB_OUTPUT = '{"result": "这是子 Agent 的结构化处理结果", "status": "ok"}'
-
-
-def _get_features(app_id: str) -> Dict[str, Any]:
-    """取已保存配置里的 supervisor_config.features（缺省空 dict=全关）。"""
-    cfg = _CONFIG_STORE.get(app_id) or {}
-    sup = cfg.get("supervisor_config") or {}
-    feats = sup.get("features")
-    return feats if isinstance(feats, dict) else {}
-
-
-def _feat_on(features: Dict[str, Any], key: str) -> bool:
-    sub = features.get(key)
-    return isinstance(sub, dict) and bool(sub.get("enabled"))
 
 
 def _opening_frames(app_id: str, req: Dict[str, Any]) -> List[tuple[str, Dict[str, Any]]]:
@@ -248,9 +248,10 @@ def _opening_frames(app_id: str, req: Dict[str, Any]) -> List[tuple[str, Dict[st
     return [("message", {"content": statement})]
 
 
-def _end_extras(app_id: str) -> Dict[str, Any]:
+def _end_extras(app_id: str, req: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """end 事件附加字段（仅对应特性开启才有键，缺省空 dict）。"""
     features = _get_features(app_id)
+    req = req or {}
     extras: Dict[str, Any] = {}
     if _feat_on(features, "suggested_questions_after_answer"):
         extras["suggested_questions"] = ["再问我一个问题", "换个角度解释", "给些示例"]
@@ -263,6 +264,8 @@ def _end_extras(app_id: str) -> Dict[str, Any]:
     if _feat_on(features, "text_to_speech"):
         extras["audio_url"] = "https://example.com/mock/tts.mp3"
         extras["audio_status"] = "completed"
+    if _feat_on(features, "emotion_reply"):
+        extras["emotion"] = {"label": "neutral", "score": 0.8}
     return extras
 
 
@@ -296,11 +299,32 @@ async def cluster_sse_stream(app_id: str, req: Dict[str, Any]) -> AsyncGenerator
     opening = _opening_frames(app_id, req) if is_new else []
 
     # 深度思考帧（非开场白的本轮）：start 之后、正文之前
+    # 事件名 reasoning（与真实后端 multi_agent_orchestrator 的 SSE 契约一致）
     thinking_frames: List[tuple[str, Dict[str, Any]]] = []
     if deep_thinking and scene not in ("fatal",):
         thinking_frames = [
-            ("thinking", {"content": "（Mock）主管正在深度思考：分析意图…"}),
-            ("thinking", {"content": "规划子任务与工具调用…"}),
+            ("reasoning", {"content": "（Mock）主管正在深度思考：分析意图…"}),
+            ("reasoning", {"content": "规划子任务与工具调用…"}),
+        ]
+
+    # 联网搜索帧（features.web_search.enabled 且请求 web_search=true）：tool_start/tool_end
+    web_search_frames: List[tuple[str, Dict[str, Any]]] = []
+    if _web_search_on(app_id, req) and scene not in ("fatal", "fail"):
+        _ws_step = _uuid()
+        web_search_frames = [
+            ("tool_start", {
+                "step_id": _ws_step,
+                "name": "联网搜索",
+                "input": {"query": message},
+                "meta": {"tool_type": "web_search"},
+            }),
+            ("tool_end", {
+                "step_id": _ws_step,
+                "output": {"results": [
+                    {"title": "示例搜索结果 1", "url": "https://example.com/1", "snippet": "（Mock）联网检索摘要"},
+                ]},
+                "meta": {"tool_type": "web_search"},
+            }),
         ]
 
     if scene == "fatal":
@@ -326,7 +350,7 @@ async def cluster_sse_stream(app_id: str, req: Dict[str, Any]) -> AsyncGenerator
             ("message", {"content": "这是主管直接给出的回答，"}),
             ("message", {"content": "无需派单，已为你处理完成。"}),
         ]
-        for ev, data in opening + thinking_frames + body:
+        for ev, data in opening + thinking_frames + web_search_frames + body:
             await asyncio.sleep(0.18)
             yield _frame(ev, data)
         yield end
@@ -349,7 +373,7 @@ async def cluster_sse_stream(app_id: str, req: Dict[str, Any]) -> AsyncGenerator
         step_id = _uuid()
         tool_input = {"query": message}
         yield start
-        for ev, data in opening + thinking_frames:
+        for ev, data in opening + thinking_frames + web_search_frames:
             await asyncio.sleep(0.18)
             yield _frame(ev, data)
         async for fr in _frames([
@@ -374,7 +398,7 @@ async def cluster_sse_stream(app_id: str, req: Dict[str, Any]) -> AsyncGenerator
         return
 
     yield start
-    for ev, data in opening + thinking_frames:
+    for ev, data in opening + thinking_frames + web_search_frames:
         await asyncio.sleep(0.18)
         yield _frame(ev, data)
     async for fr in _frames([
