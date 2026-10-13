@@ -118,6 +118,11 @@ export const userMemory = {
 
       AssistantPruned_memory_type: '记忆类型',
 
+      Preference_domain: '领域',
+      Preference_subject: '主题',
+      Preference_situation_key: '适用场景',
+      Preference_preference_text_all: '偏好内容',
+
       associative_memory: '关联记忆',
       unix: '个',
       completeMemory: '完整记忆',
@@ -141,6 +146,8 @@ export const userMemory = {
       MemorySummary: '记忆摘要',
       Perceptual: '感知记录',
       Statement: '来源陈述',
+      PreferenceGroup: '偏好汇总',
+      Preference: '偏好',
       positive: '正向情绪',
       negative: '负向情绪',
       neutral: '中性情绪',

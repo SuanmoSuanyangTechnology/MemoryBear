@@ -110,12 +110,12 @@ const RbCard: FC<RbCardProps> = ({
                     )
                   }>
                     <div className={`rb:w-full rb:text-ellipsis rb:overflow-hidden rb:whitespace-nowrap ${titleClassName}`}>{title}</div>
-                    {subTitle && <div className="rb:w-full rb:text-[#5B6167] rb:text-[12px]">{subTitle}</div>}
+                    {subTitle && <div className="rb:w-full rb:text-gray-600 rb:text-[12px]">{subTitle}</div>}
                   </div>
                 </Flex> : null
               }
             </div>
-            {subTitle && <div className="rb:text-[12px] rb:text-[#5B6167] rb:font-regular rb:leading-4">{subTitle}</div>}
+            {subTitle && <div className="rb:text-[12px] rb:text-gray-600 rb:font-regular rb:leading-4">{subTitle}</div>}
           </Flex>
           {extra}
         </Flex>
@@ -149,7 +149,7 @@ const RbCard: FC<RbCardProps> = ({
               <div className={`rb:w-full rb:text-ellipsis rb:overflow-hidden rb:whitespace-nowrap ${titleClassName}`}>{title}</div>
             </Tooltip>
             {/* Optional subtitle */}
-            {subTitle && <div className="rb:text-[#5B6167] rb:text-[12px]">{subTitle}</div>}
+            {subTitle && <div className="rb:text-gray-600 rb:text-[12px]">{subTitle}</div>}
           </div>
         </Flex> : null
       }

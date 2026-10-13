@@ -117,6 +117,11 @@ export const userMemory = {
 
       AssistantPruned_memory_type: 'Memory Type',
 
+      Preference_domain: 'Domain',
+      Preference_subject: 'Subject',
+      Preference_situation_key: 'Applicable Scenario',
+      Preference_preference_text_all: 'Preference Content',
+
       associative_memory: 'Associative Memory',
       unix: 'items',
       completeMemory: 'Complete Memory',
@@ -140,6 +145,8 @@ export const userMemory = {
       MemorySummary: 'MemorySummary',
       Perceptual: 'Perceptual',
       Statement: 'Statement',
+      PreferenceGroup: 'Preference Summary',
+      Preference: 'Preference',
       positive: 'Positive Emotion',
       negative: 'Negative Emotion',
       neutral: 'Neutral Emotion',

@@ -10,7 +10,7 @@ import dayjs from 'dayjs'
 import clsx from 'clsx'
 
 import RbCard from '@/components/RbCard/Card'
-import type { Node as GraphNode, PerceptualNodeProperties, StatementNodeProperties, ExtractedEntityNodeProperties, AssistantPrunedNodeProperties } from '../types'
+import type { Node as GraphNode, PerceptualNodeProperties, StatementNodeProperties, ExtractedEntityNodeProperties, AssistantPrunedNodeProperties, PreferenceNodeProperties } from '../types'
 import type { RawCommunityNode } from '@/components/D3Graph/types'
 import Tag from '@/components/Tag'
 import type { Node, EdgeClickData } from '@/components/Charts/GraphNetworkChart/types'
@@ -89,39 +89,44 @@ const NodeDetailPanel: FC<NodeDetailPanelProps> = ({
           <div className="rb:overflow-auto rb:h-full">
             {(selectedNode as RawCommunityNode).properties.community_id
               ? <div>
-                  <div className="rb:font-medium rb:text-[#212332] rb:text-[16px] rb:leading-5.5 rb:pl-1">
+                  <div className="rb:font-medium rb:text-gray-800 rb:text-[16px] rb:leading-5.5 rb:pl-1">
                     {(selectedNode as RawCommunityNode).properties.name || selectedNode.id}
                   </div>
                   {(selectedNode as RawCommunityNode).properties.summary && <>
                     <div className="rb:mt-3 rb:font-medium rb:leading-5 rb:pl-1">{t('userMemory.summary')}</div>
-                    <div className="rb:bg-[#F6F6F6] rb:rounded-xl rb:px-3 rb:py-2.5 rb:mt-2">
+                    <div className="rb:bg-gray-100 rb:rounded-xl rb:px-3 rb:py-2.5 rb:mt-2">
                       {(selectedNode as RawCommunityNode).properties.summary}
                     </div>
                   </>}
                   <Flex align="center" justify="space-between" className="rb:mt-5!">
-                    <span className="rb:text-[#5B6167] rb:font-regular rb:pl-1">{t('userMemory.member_count')}</span>
+                    <span className="rb:text-gray-600 rb:font-regular rb:pl-1">{t('userMemory.member_count')}</span>
                     <span className="rb:font-medium">{(selectedNode as RawCommunityNode).properties.member_count}{t('userMemory.member_count_desc')}</span>
                   </Flex>
 
                   {(selectedNode as RawCommunityNode).properties.core_entities && <>
                     <Divider className='rb:my-2.5!' />
                     <div className="rb:font-medium rb:leading-5 rb:pl-1">{t('userMemory.core_entities')}</div>
-                    <ul className="rb:list-disc rb:pl-4 rb:text-[#5B6167] rb:mt-2">
+                    <ul className="rb:list-disc rb:pl-4 rb:text-gray-600 rb:mt-2">
                       {(selectedNode as RawCommunityNode).properties.core_entities?.map((entity, index) => <li key={index}>{entity}</li>)}
                     </ul>
                   </>}
                 </div>
               : <>
                 {((selectedNode as Node).name || (selectedNode as GraphNode).label === 'Conversation') &&
-                  <div className="rb:font-medium rb:text-[16px] rb:text-[#212332] rb:leading-5.5 rb:mb-3">
+                  <div className="rb:font-medium rb:text-[16px] rb:text-gray-800 rb:leading-5.5 rb:mb-3">
                     {(selectedNode as Node).name || (selectedNode as GraphNode).label}
                   </div>
                 }
+                {((selectedNode as Node).properties?.name || (selectedNode as GraphNode).label === 'PreferenceGroup') &&
+                  <div className="rb:font-medium rb:text-[16px] rb:text-gray-800 rb:leading-5.5 rb:mb-3">
+                    {(selectedNode as Node).properties?.name || (selectedNode as GraphNode).label}
+                  </div>
+                }
                 <Flex vertical gap={24}>
-                  {(selectedNode as GraphNode).label !== 'ExtractedEntity' &&
+                  {(selectedNode as GraphNode).label !== 'ExtractedEntity' &&  (selectedNode as GraphNode).label !== 'PreferenceGroup' &&
                     <div>
                       <div className="rb:font-medium rb:leading-5">{t('userMemory.memoryContent')}</div>
-                      <div className="rb:text-[#5B6167] rb:font-regular rb:leading-5 rb:mt-2">
+                      <div className="rb:text-gray-600 rb:font-regular rb:leading-5 rb:mt-2">
                         {['Chunk', 'Dialogue', 'MemorySummary', 'AssistantOriginal'].includes((selectedNode as GraphNode).label) && 'content' in ((selectedNode as GraphNode).properties as { content: string })
                           ? ((selectedNode as GraphNode).properties as { content: string }).content
                             : (selectedNode as GraphNode).label === 'Statement' && 'statement' in ((selectedNode as GraphNode).properties as { statement: string })
@@ -139,10 +144,10 @@ const NodeDetailPanel: FC<NodeDetailPanelProps> = ({
                     <div>
                       <div className="rb:font-medium rb:leading-5">{t('userMemory.ExtractedEntity_description_summary')}</div>
                       {((selectedNode as GraphNode).properties as ExtractedEntityNodeProperties).description_summary
-                      ? <div className="rb:bg-[#F6F6F6] rb:rounded-xl rb:px-3 rb:py-2.5 rb:mt-2">
+                      ? <div className="rb:bg-gray-100 rb:rounded-xl rb:px-3 rb:py-2.5 rb:mt-2">
                         {((selectedNode as GraphNode).properties as ExtractedEntityNodeProperties).description_summary}
                         </div>
-                        : <div className="rb:bg-[#F6F6F6] rb:rounded-xl rb:px-3 rb:py-4 rb:mt-2 rb:text-center rb:text-[#5B6167]">{t('userMemory.noDescriptionSummary')}</div>
+                        : <div className="rb:bg-gray-100 rb:rounded-xl rb:px-3 rb:py-4 rb:mt-2 rb:text-center rb:text-gray-600">{t('userMemory.noDescriptionSummary')}</div>
                       }
                     </div>
                     <div>
@@ -150,10 +155,10 @@ const NodeDetailPanel: FC<NodeDetailPanelProps> = ({
                       {(() => {
                         const description = ((selectedNode as GraphNode).properties as ExtractedEntityNodeProperties).description || [];
                         if (description.length === 0) {
-                          return <div className="rb:bg-[#F6F6F6] rb:rounded-xl rb:px-3 rb:py-4 rb:mt-2 rb:text-center rb:text-[#5B6167]">{t('userMemory.noDescription')}</div>;
+                          return <div className="rb:bg-gray-100 rb:rounded-xl rb:px-3 rb:py-4 rb:mt-2 rb:text-center rb:text-gray-600">{t('userMemory.noDescription')}</div>;
                         }
                         return (
-                          <Flex vertical gap={8} className="rb:text-[#5B6167] rb:font-regular rb:leading-5 rb:mt-2">
+                          <Flex vertical gap={8} className="rb:text-gray-600 rb:font-regular rb:leading-5 rb:mt-2">
                             {description.map((item, index) => {
                               const match = item.match(/^\[([^\]]+)\]\s*(.*)$/);
                               if (match) {
@@ -174,30 +179,32 @@ const NodeDetailPanel: FC<NodeDetailPanelProps> = ({
                   </>}
                   <div>
                     <div className="rb:font-medium rb:leading-5">{t('userMemory.created_at')}</div>
-                    <div className="rb:text-[#5B6167] rb:font-regular rb:leading-5 rb:mt-2">
+                    <div className="rb:text-gray-600 rb:font-regular rb:leading-5 rb:mt-2">
                       {dayjs((selectedNode as Node).properties.created_at).format('YYYY-MM-DD HH:mm:ss')}
                     </div>
                   </div>
 
-                  {(selectedNode as Node).properties.associative_memory > 0 && <div>
-                    <div className="rb:font-medium rb:leading-5">{t('userMemory.associative_memory')}</div>
-                    <div className="rb:text-[#5B6167] rb:font-regular rb:leading-5 rb:mt-1 rb:pb-4">
-                      <span className="rb:text-[#155EEF] rb:font-medium">{(selectedNode as Node).properties.associative_memory}</span> {t('userMemory.unix')}{t('userMemory.associative_memory')}
+                  {(selectedNode as Node).properties.associative_memory > 0 &&
+                    <div>
+                      <div className="rb:font-medium rb:leading-5">{t('userMemory.associative_memory')}</div>
+                      <div className="rb:text-gray-600 rb:font-regular rb:leading-5 rb:mt-1 rb:pb-4">
+                        <span className="rb:text-blue-500 rb:font-medium">{(selectedNode as Node).properties.associative_memory}</span> {t('userMemory.unix')}{t('userMemory.associative_memory')}
+                      </div>
                     </div>
-                  </div>}
-
+                  }
 
                   {(selectedNode as GraphNode).label === 'ExtractedEntity' && <>
                     {(['description_summary', 'entity_type', 'aliases'] as const).map(key => {
                       const p = (selectedNode as Node).properties as ExtractedEntityNodeProperties
-                      if (p[key]) {
+                      const value = p[key]
+                      if (value) {
                         return (
                           <div key={key}>
                             <div className="rb:font-medium rb:leading-5">{t(`userMemory.ExtractedEntity_${key}`)}</div>
-                            <div className="rb:text-[#5B6167] rb:font-regular rb:leading-5 rb:mt-2">
-                              {Array.isArray(p[key]) && p[key].length > 0
-                                ? p[key].map((v, i) => <div key={i}>- {v}</div>)
-                                : p[key]
+                            <div className="rb:text-gray-600 rb:font-regular rb:leading-5 rb:mt-2">
+                              {Array.isArray(value) && value.length > 0
+                                ? value.map((v, i) => <div key={i}>- {v}</div>)
+                                : value
                               }
                             </div>
                           </div>
@@ -220,14 +227,14 @@ const NodeDetailPanel: FC<NodeDetailPanelProps> = ({
                               fileName={((selectedNode as GraphNode).properties as { file_name: string }).file_name}
                               fileSize={fileSize}
                             />
-                            : <Flex gap={11} align="center" justify="space-between" className="rb:bg-[#F6F6F6] rb:min-h-15.5! rb:rounded-xl rb:p-3!">
+                            : <Flex gap={11} align="center" justify="space-between" className="rb:bg-gray-100 rb:min-h-15.5! rb:rounded-xl rb:p-3!">
                               <Flex gap={12} align="center">
                                 <div className="rb:w-7.5 rb:h-9 rb:bg-cover rb:bg-[url('@/assets/images/userMemory/file.svg')]"></div>
                                 <div>
                                   <div className="rb:leading-5 rb:font-medium rb:mb-1 rb:wrap-break-word rb:line-clamp-1">
                                     {((selectedNode as GraphNode).properties as { file_name: string }).file_name}
                                   </div>
-                                  <div className="rb:text-[#5B6167] rb:text-[12px] rb:leading-4.5">
+                                  <div className="rb:text-gray-600 rb:text-[12px] rb:leading-4.5">
                                     {fileSize || '-'}
                                   </div>
                                 </div>
@@ -248,10 +255,10 @@ const NodeDetailPanel: FC<NodeDetailPanelProps> = ({
                             <div className="rb:mb-1">{t(`perceptualDetail.${key}`)}</div>
 
                             {typeof value === 'string'
-                              ? <div className="rb:text-[#5B6167]">{value}</div>
+                              ? <div className="rb:text-gray-600">{value}</div>
                               : Array.isArray(value)
                               ? <Flex wrap gap={11}>
-                                  {value.map((vo, index) => <div key={index} className="rb:bg-[#F6F6F6] rb:rounded-[13px] rb:py-1 rb:px-2 rb:text-[12px] rb:font-medium rb:leading-4.5">{vo}</div>)}
+                                  {value.map((vo, index) => <div key={index} className="rb:bg-gray-100 rb:rounded-[13px] rb:py-1 rb:px-2 rb:text-[12px] rb:font-medium rb:leading-4.5">{vo}</div>)}
                                 </Flex>
                               : '-'
                             }
@@ -267,7 +274,7 @@ const NodeDetailPanel: FC<NodeDetailPanelProps> = ({
                         return (
                           <div key={key}>
                             <div className="rb:font-medium rb:leading-5">{t(`userMemory.Statement_${key}`)}</div>
-                            <div className="rb:text-[#5B6167] rb:font-regular rb:leading-5 rb:mt-2">
+                            <div className="rb:text-gray-600 rb:font-regular rb:leading-5 rb:mt-2">
                               {key === 'emotion_keywords'
                                 ? <Space>{p.emotion_keywords.map((v, i) => <Tag key={i}>{v}</Tag>)}</Space>
                                 : p[key]}
@@ -286,9 +293,47 @@ const NodeDetailPanel: FC<NodeDetailPanelProps> = ({
                         return (
                           <div key={key}>
                             <div className="rb:font-medium rb:leading-5">{t(`userMemory.AssistantPruned_${key}`)}</div>
-                            <div className="rb:text-[#5B6167] rb:font-regular rb:leading-5 rb:mt-2">
+                            <div className="rb:text-gray-600 rb:font-regular rb:leading-5 rb:mt-2">
                               {Array.isArray(p[key]) && p[key].length > 0
-                                ? p[key].map((v, i) => <div key={i}>- {v}</div>)
+                                ? (p[key] as unknown as string[]).map((v, i) => <div key={i}>- {v}</div>)
+                                : p[key]}
+                            </div>
+                          </div>
+                        )
+                      }
+                      return null
+                    })}
+                  </>}
+
+                  {(selectedNode as GraphNode).label === 'Preference' && <>
+                    {(['domain', 'subject', 'situation_key', 'preference_text_all'] as const).map(key => {
+                      const p = (selectedNode as Node).properties as PreferenceNodeProperties
+                      if (p[key]) {
+                        return (
+                          <div key={key}>
+                            <div className="rb:font-medium rb:leading-5">{t(`userMemory.Preference_${key}`)}</div>
+                            <div className="rb:text-gray-600 rb:font-regular rb:leading-5 rb:mt-2">
+                              {Array.isArray(p[key]) && p[key].length > 0
+                                ? (p[key] as unknown as string[]).map((v, i) => <div key={i}>- {v}</div>)
+                                : p[key]}
+                            </div>
+                          </div>
+                        )
+                      }
+                      return null
+                    })}
+                  </>}
+
+                  {(selectedNode as GraphNode).label === 'PreferenceGroup' && <>
+                    {(['domain', 'subject', 'situation_key', 'preference_text_all'] as const).map(key => {
+                      const p = (selectedNode as Node).properties as PreferenceNodeProperties
+                      if (p[key]) {
+                        return (
+                          <div key={key}>
+                            <div className="rb:font-medium rb:leading-5">{t(`userMemory.Preference_${key}`)}</div>
+                            <div className="rb:text-gray-600 rb:font-regular rb:leading-5 rb:mt-2">
+                              {Array.isArray(p[key]) && p[key].length > 0
+                                ? (p[key] as unknown as string[]).map((v, i) => <div key={i}>- {v}</div>)
                                 : p[key]}
                             </div>
                           </div>
@@ -304,7 +349,7 @@ const NodeDetailPanel: FC<NodeDetailPanelProps> = ({
           {activeTab !== 'communityNetwork' &&
             <div className="rb:absolute rb:bottom-3 rb:left-6 rb:right-6 rb:bg-white">
               <Flex align="center" gap={12}>
-                <Flex align="center" justify="center" gap={6} className="rb:flex-1 rb:border rb:border-[#E5E6EB] rb:rounded-xl rb:h-11 rb:font-medium rb:leading-5 rb:text-[#212332] rb:cursor-pointer rb:hover:border-[#171719]" onClick={onForget}>
+                <Flex align="center" justify="center" gap={6} className="rb:flex-1 rb:border rb:border-[#E5E6EB] rb:rounded-xl rb:h-11 rb:font-medium rb:leading-5 rb:text-gray-800 rb:cursor-pointer rb:hover:border-[#171719]" onClick={onForget}>
                   {t('userMemory.forgetThisMemory')}
                 </Flex>
                 <Flex align="center" justify="center" className="rb:flex-1 rb:border rb:border-[#171719] rb:rounded-xl rb:h-11 rb:font-medium rb:leading-5 rb:cursor-pointer" onClick={onViewAll}>
