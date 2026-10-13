@@ -1,3 +1,5 @@
+import { type ReactNode } from 'react';
+import { type BreadcrumbItem } from '@/hooks/useBreadcrumbManager';
 // 知识库表单数据类型
 export interface KnowledgeBaseFormData {
   workspace_id?: string; // 工作空间ID
@@ -48,6 +50,21 @@ export interface KnowledgeBase {
   status?: number; // 状态 1 启用 0 禁用
   descriptionItems?: Record<string, unknown>[];
 }
+export interface ModelDisplayItem {
+  key: string;
+  label: ReactNode;
+  disabled?: boolean;
+};
+
+export interface ModelMenuInfo {
+  menu: ModelDisplayItem[];
+};
+
+export interface KnowledgeBaseNavigationState {
+  navigateToFolder?: string;
+  folderPath?: BreadcrumbItem[];
+  resetToRoot?: boolean;
+};
 
 export interface RecallTestMetadata {
   doc_id: string;

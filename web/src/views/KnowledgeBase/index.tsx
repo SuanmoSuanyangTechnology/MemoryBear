@@ -1,47 +1,25 @@
-import { useEffect, useState, useRef, useMemo, useCallback, type FC, type ReactNode } from 'react';
+import { useEffect, useState, useRef, useMemo, useCallback, type FC } from 'react';
 import { Button, Dropdown, Tooltip, App, Flex } from 'antd'
 import type { MenuProps } from 'antd';
 import { RightOutlined, DownOutlined } from '@ant-design/icons';
 import { useNavigate, useLocation } from 'react-router-dom';
-
 import { useTranslation } from 'react-i18next';
 import clsx from 'clsx';
-import folderIcon from '@/assets/images/knowledgeBase/folder.png';
-import generalIcon from '@/assets/images/knowledgeBase/datasets.png';
-import webIcon from '@/assets/images/knowledgeBase/general.png';
-import tpIcon from '@/assets/images/knowledgeBase/text.png';
-import type { KnowledgeBaseListItem, CreateModalRef, KnowledgeBaseListResponse, ListQuery } from '@/views/KnowledgeBase/types'
+
+import type { KnowledgeBaseListItem, CreateModalRef, ListQuery } from '@/views/KnowledgeBase/types'
 import CreateModal from './components/CreateModal'
 import RbCard from '@/components/RbCard/Card'
 import SearchInput from '@/components/SearchInput'
-import Empty from '@/components/Empty'
-import { getKnowledgeBaseList, deleteKnowledgeBase, getKnowledgeBaseTypeList } from '@/api/knowledgeBase'
+import { getKnowledgeBaseListUrl, deleteKnowledgeBase, getKnowledgeBaseTypeList } from '@/api/knowledgeBase'
+import PageScrollList, { type PageScrollListRef } from '@/components/PageScrollList'
 import { getModelList } from '@/api/models'
 import type { Model } from '@/views/ModelManagement/types'
 import copy from 'copy-to-clipboard'
 import CopyModal, { type CopyModalRef } from './components/CopyModal';
-import { baseModelFields, multimodalModelFields } from './constants';
+import { baseModelFields, multimodalModelFields, getTypeIcon, menuItems } from './constants';
 import ModelStatusTag from '@/components/ModelSelect/ModelStatusTag'
-
-import InfiniteScroll from 'react-infinite-scroll-component';
-
+import type { ModelDisplayItem, ModelMenuInfo, KnowledgeBaseNavigationState } from './types'
 import { useBreadcrumbManager, type BreadcrumbItem } from '@/hooks/useBreadcrumbManager';
-
-type ModelDisplayItem = {
-  key: string;
-  label: ReactNode;
-  disabled?: boolean;
-};
-
-type ModelMenuInfo = {
-  menu: ModelDisplayItem[];
-};
-
-type KnowledgeBaseNavigationState = {
-  navigateToFolder?: string;
-  folderPath?: BreadcrumbItem[];
-  resetToRoot?: boolean;
-};
 
 const KnowledgeBaseManagement: FC = () => {
   const { t } = useTranslation();
@@ -55,16 +33,14 @@ const KnowledgeBaseManagement: FC = () => {
   const initialFolderPath = initialFolderId && initialNavigationState?.folderPath
     ? initialNavigationState.folderPath
     : [];
-  const [loading, setLoading] = useState(false);
-  const [data, setData] = useState<KnowledgeBaseListItem[]>([])
-  const [page, setPage] = useState(1)
-  const [hasMore, setHasMore] = useState(true)
+  const pageScrollListRef = useRef<PageScrollListRef>(null)
   const [query, setQuery] = useState<ListQuery>({
     orderby:'created_at',
     desc:true,
     parent_id: initialFolderId,
   })
-  const [modelMenus, setModelMenus] = useState<Record<string, ModelMenuInfo>>({});
+  const [modelListVersion, setModelListVersion] = useState(0);
+  const [expandedItems, setExpandedItems] = useState<Record<string, boolean>>({});
   const [knowledgeBaseTypes, setKnowledgeBaseTypes] = useState<string[]>([]);
   const modelListCache = useRef<Partial<Record<string, Model>>>({});
   const modalRef = useRef<CreateModalRef>(null)
@@ -95,77 +71,34 @@ const KnowledgeBaseManagement: FC = () => {
   
   // 生成下拉菜单项（根据当前 item）
   const getOptMenuItems = (item: KnowledgeBaseListItem): MenuProps['items'] => {
-    const items: NonNullable<MenuProps['items']> = [];
-
-    // 当权限为 share 时，不显示编辑按钮
     const permissionId = (item.permission_id || '').toLowerCase();
-    if (permissionId !== 'share') {
-      items.push({
-        key: '1',
-        icon: <div className="rb:size-4 rb:bg-cover rb:cursor-pointer rb:bg-[url('@/assets/images/common/edit_bold.svg')]" />,
-        label: t('knowledgeBase.edit'),
+    const isShared = permissionId === 'share';
+    const isFolder = item.type === 'Folder';
+    return menuItems.filter(menu =>
+      menu.key === 'delete' || (menu.key === 'edit' && isShared)
+      || (menu.key === 'copy' && (isShared || isFolder))
+    ).map(menu => {
+      return {
+        ...menu,
+        label: t(`knowledgeBase.${menu.key}`),
+        icon: <div className={clsx(`rb:size-4 rb:bg-cover`, menu.icon)} />,
         onClick: () => {
-          handleEdit(item);
-        },
-      });
-
-      if (item.type !== 'Folder') {
-        items.push({
-          key: '3',
-          icon: <div className="rb:size-4 rb:bg-cover rb:cursor-pointer rb:bg-[url('@/assets/images/common/copy_dark.svg')]" />,
-          label: t('knowledgeBase.copy'),
-          onClick: () => {
-            handleCopyKb(item);
-          },
-        });
+          switch (menu.key) {
+            case 'edit':
+              handleEdit(item);
+              break
+            case 'copy':
+              handleCopyKb(item);
+              break
+            case 'delete':
+              handleDelete(item);  
+              break
+            default:
+              break
+          }
+        }
       }
-    }
-
-    items.push({
-      key: '2',
-      icon: <div className="rb:size-4 rb:bg-cover rb:cursor-pointer rb:bg-[url('@/assets/images/common/delete_red_big.svg')]" />,
-      label: t('knowledgeBase.delete'),
-      onClick: () => {
-        handleDelete(item);
-      },
-    });
-
-    return items;
-  };
-  // 根据类型获取图标
-  const getTypeIcon = (type: string) => {
-    const normalized = (type || '').toLowerCase();
-    switch (normalized) {
-      case 'general':
-        return generalIcon;
-      case 'folder':
-        return folderIcon;
-      case 'web':
-        return webIcon;
-      case 'third-party':
-      case 'tp':
-        return tpIcon;
-      default:
-        return generalIcon;
-    }
-  };
-
-  // 根据类型获取翻译 key
-  const getTypeLabelKey = (type: string) => {
-    const normalized = (type || '').toLowerCase();
-    switch (normalized) {
-      case 'general':
-        return 'knowledgeBase.general';
-      case 'folder':
-        return 'knowledgeBase.folder';
-      case 'web':
-        return 'knowledgeBase.web';
-      case 'third-party':
-      case 'tp':
-        return 'knowledgeBase.tp';
-      default:
-        return `knowledgeBase.${normalized}`;
-    }
+    })
   };
 
   // 处理创建
@@ -180,28 +113,22 @@ const KnowledgeBaseManagement: FC = () => {
       parent_id: currentParentId as string,
     } as KnowledgeBaseListItem : null;
     
-    console.log('handleCreate called:', {
-      type,
-      folderPath,
-      folderPathLength: folderPath.length,
-      queryParentId: query.parent_id,
-      currentParentId,
-      record
-    });
-    
     modalRef?.current?.handleOpen(record, type)
   }, [folderPath, query.parent_id])
 
   // 动态生成 createItems
   const createItems: MenuProps['items'] = useMemo(() => {
-    return knowledgeBaseTypes.map((type, index) => ({
-      key: String(index + 1),
-      icon: <img src={getTypeIcon(type)} alt={type} className="rb:size-4" />,
-      label: t(getTypeLabelKey(type.toLocaleLowerCase())),
-      onClick: () => {
-        handleCreate(type);
-      },
-    }));
+    return knowledgeBaseTypes.map((type, index) => {
+      const typeLabel = type.toLocaleLowerCase();
+      return {
+        key: String(index + 1),
+        icon: <img src={getTypeIcon(type)} alt={type} className="rb:size-4" />,
+        label: t(`knowledgeBase.${typeLabel === 'third-party' ? 'tp': typeLabel}`),
+        onClick: () => {
+          handleCreate(type);
+        },
+      }
+    });
   }, [knowledgeBaseTypes, t, handleCreate]);
   const formatData = (data: KnowledgeBaseListItem) => {
     const keys: (keyof KnowledgeBaseListItem)[] = ['permission_id','type']
@@ -225,158 +152,57 @@ const KnowledgeBaseManagement: FC = () => {
             }
           });
           modelListCache.current = cache;
+          setModelListVersion(version => version + 1);
         }
       })
   };
-  const fetchKnowledgeBaseTypes = async () => {
-    try {
-      const types = await getKnowledgeBaseTypeList();
-      setKnowledgeBaseTypes(types);
-    } catch (error) {
-      console.error('Failed to fetch knowledge base types:', error);
-      setKnowledgeBaseTypes([]);
-    }
-  };
-  const getModelById = (id?: string | null): Model | undefined => {
-    if (!id) return undefined;
-    // 从模型列表缓存中获取模型
-    return modelListCache.current[id];
+  const fetchKnowledgeBaseTypes = () => {
+    getKnowledgeBaseTypeList()
+      .then((res) => {
+        setKnowledgeBaseTypes(res);
+      })
+      .catch(() => {
+        setKnowledgeBaseTypes([]);
+      })
   };
   const buildModelMenuForItem = (item: KnowledgeBaseListItem): ModelMenuInfo | null => {
-    const entries: { menuItem: ModelDisplayItem }[] = [];
     const record = item as unknown as Record<string, unknown>;
-    [...baseModelFields, ...multimodalModelFields].map(item => {
-      const fieldKey = `${item.name}_id`
-      const modelId = record[fieldKey] as string
-      const model = getModelById(modelId);
-      const modelName = model?.name
-      if (modelName) {
-        const typeLabel = t(`knowledgeBase.createForm.${fieldKey}`) || t(`knowledgeBase.${fieldKey}`) || item.type;
+    const menu: ModelDisplayItem[] = [];
 
-        entries.push({
-          menuItem: {
-            key: `${fieldKey}_${modelId}`,
-            label: (
-              <div className="rb:text-gray-500 rb:text-[12px]">
-                {typeLabel}: <span className="rb:text-gray-900">{modelName}</span> <ModelStatusTag model={model} />
-              </div>
-            ),
-          },
+    const addModelFields = (modelFields: readonly (typeof baseModelFields[number] | typeof multimodalModelFields[number])[]) => {
+      for (const modelField of modelFields) {
+        const fieldKey = `${modelField.name}_id`;
+        const modelId = record[fieldKey] as string | undefined;
+        const model = modelId ? modelListCache.current[modelId] : undefined;
+        const modelName = model?.name;
+        if (!modelName || !modelId || !model) continue;
+
+        const typeLabel = t(`knowledgeBase.createForm.${fieldKey}`) || t(`knowledgeBase.${fieldKey}`) || modelField.type;
+        menu.push({
+          key: `${fieldKey}_${modelId}`,
+          label: (
+            <div className="rb:text-gray-500 rb:text-[12px]">
+              {typeLabel}: <span className="rb:text-gray-900">{modelName}</span> <ModelStatusTag model={model} size="small" />
+            </div>
+          ),
         });
       }
-    })
-    if (!entries.length) {
-      return null;
-    }
-    const header: ModelDisplayItem = {
-      key: 'header',
-      label: (<span className='rb:font-medium'>{t('knowledgeBase.allModels')}</span>),
-      disabled: true,
     };
-    const menuArray = [header, ...entries.map(({ menuItem }) => menuItem)];
-    return { menu: menuArray };
-  };
-  const buildModelMenus = (items: KnowledgeBaseListItem[], isLoadMore: boolean = false) => {
-    const nextMenus: Record<string, ModelMenuInfo> = {};
-    items.forEach((item) => {
-      const result = buildModelMenuForItem(item);
-      if (result) {
-        nextMenus[item.id] = result;
-      }
+    addModelFields(baseModelFields);
+    addModelFields(multimodalModelFields);
+
+    if (!menu.length) return null;
+    menu.unshift({
+      key: 'header',
+      label: <span className="rb:font-medium">{t('knowledgeBase.allModels')}</span>,
+      disabled: true,
     });
-    if (isLoadMore) {
-      // 加载更多时，合并之前的菜单
-      setModelMenus(prev => ({ ...prev, ...nextMenus }));
-    } else {
-      // 首次加载或刷新时，替换所有菜单
-      setModelMenus(nextMenus);
-    }
+    return { menu };
   };
-
-  const fetchData = async (pageNum: number = 1, isLoadMore: boolean = false) => {
-    if (loading) return;
-    
-    console.log('fetchData called:', {
-      pageNum,
-      isLoadMore,
-      currentQuery: query,
-      currentFolderPath: folderPath,
-      folderPathLastId: folderPath.length > 0 ? folderPath[folderPath.length - 1].id : 'none'
-    });
-    
-    setLoading(true);
-    try {
-      const params = {
-        ...query,
-        page: pageNum,
-        pagesize: 9,
-        orderby:'created_at',
-        desc:true,
-      }
-      
-      console.log('API params:', params);
-      const res = await getKnowledgeBaseList(undefined, params);
-      const response = res as KnowledgeBaseListResponse & { items?: KnowledgeBaseListItem[] };
-      console.log('API response:', response);
-      const list = response.items || [];
-      const curDatas = list.map((item: KnowledgeBaseListItem) => ({
-        ...item,
-        descriptionItems: formatData(item),
-      }));
-      
-      if (isLoadMore) {
-        setData(prev => [...prev, ...curDatas]);
-      } else {
-        setData(curDatas);
-        // 重置分页状态，确保从第一页开始
-        setPage(1);
-      }
-
-      // 更新是否有更多数据
-      const hasNext = response.page?.has_next ?? false;
-      console.log('hasNext:', hasNext, 'response.page:', response.page);
-      setHasMore(hasNext);
-
-      buildModelMenus(list, isLoadMore);
-      
-      // 首次加载后，检查是否需要自动加载更多（解决无滚动条问题）
-      if (!isLoadMore && hasNext) {
-        setTimeout(() => {
-          const scrollDiv = document.getElementById('scrollableDiv');
-          if (scrollDiv && scrollDiv.scrollHeight <= scrollDiv.clientHeight) {
-            console.log('No scrollbar detected, auto-loading more data');
-            setPage(2);
-            fetchData(2, true);
-          }
-        }, 100);
-      }
-    } catch (error) {
-      console.error('Failed to fetch knowledge base list:', error);
-      if (!isLoadMore) {
-        setData([]);
-        setModelMenus({});
-        setPage(1);
-      }
-      setHasMore(false);
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  const loadMore = () => {
-    console.log('loadMore called, loading:', loading, 'hasMore:', hasMore, 'page:', page);
-    if (loading || !hasMore) return;
-    const nextPage = page + 1;
-    setPage(nextPage);
-    fetchData(nextPage, true);
-  }
-  
-  // 创建一个稳定的刷新函数供子组件调用
   const handleRefresh = () => {
-    fetchData(1, false);
+    pageScrollListRef.current?.refresh();
   }
 
-  
   const handleSearch = (value?: string) => {
     setQuery((prev) => ({
       ...prev,
@@ -399,12 +225,9 @@ const KnowledgeBaseManagement: FC = () => {
         deleteKnowledgeBase(item.id).then((res) => {
           if (res) {
             messageApi.success(t('common.deleteSuccess'));
-            fetchData(1, false);
+            handleRefresh();
           }
         });
-      },
-      onCancel: () => {
-        console.log('Cancel delete');
       },
     });
   };
@@ -412,14 +235,6 @@ const KnowledgeBaseManagement: FC = () => {
   const handleToDetail = useCallback((knowledgeBase: KnowledgeBaseListItem) => {
     // 统一处理类型判断，忽略大小写
     const itemType = (knowledgeBase.type || '').toLowerCase();
-    
-    console.log('handleToDetail called with:', {
-      id: knowledgeBase.id,
-      name: knowledgeBase.name,
-      type: itemType,
-      currentFolderPath: folderPath,
-      currentQuery: query
-    });
     
     // 如果是 Folder 类型，刷新当前页面，显示该文件夹下的知识库列表
     if (itemType === 'folder') {
@@ -431,13 +246,6 @@ const KnowledgeBaseManagement: FC = () => {
           name: knowledgeBase.name,
         },
       ];
-      
-      console.log('Folder clicked:', {
-        folderId: knowledgeBase.id,
-        folderName: knowledgeBase.name,
-        currentFolderPath: folderPath,
-        newFolderPath: newFolderPath
-      });
       
       // 同步更新状态，保持与面包屑逻辑一致
       setFolderPath(newFolderPath);
@@ -468,17 +276,12 @@ const KnowledgeBaseManagement: FC = () => {
     
     // 检查是否是相同路径跳转
     const currentPath = location.pathname;
-    
-    if (currentPath === targetPath) {
-      // 如果是相同路径，使用replace并强制刷新状态
-      navigate(targetPath, { 
-        state: navigationState, 
-        replace: true 
-      });
-    } else {
-      // 不同路径，正常跳转
-      navigate(targetPath, { state: navigationState });
-    }
+
+    // 如果是相同路径，使用replace并强制刷新状态
+    navigate(targetPath, { 
+      state: navigationState, 
+      replace: currentPath === targetPath 
+    });
   }, [folderPath, query, location.pathname, navigate])
   // 更新面包屑
   useEffect(() => {
@@ -521,9 +324,6 @@ const KnowledgeBaseManagement: FC = () => {
     fetchKnowledgeBaseTypes();
     fetchModelList();
   }, [])
-  useEffect(() => {
-    fetchData(1, false);
-  }, [query.parent_id, query.keywords, query.orderby, query.desc])
   const handleCopy = (value: string) => {
     copy(value)
     messageApi.success(t('common.copySuccess'))
@@ -542,130 +342,126 @@ const KnowledgeBaseManagement: FC = () => {
           <Button type="primary">+ {t('knowledgeBase.createKnowledgeBase')}</Button>
         </Dropdown>
       </Flex>
-      <div id="scrollableDiv" className="rb:flex-1 rb:overflow-y-auto rb:overflow-x-hidden">
-        <InfiniteScroll
-          dataLength={data.length}
-          next={loadMore}
-          hasMore={hasMore}
-          loader={loading && data.length > 0 ? <div className="rb:text-center rb:py-4">{t('common.loading')}</div> : null}
-          endMessage={
-            data.length > 0 && !hasMore ? (
-              <div className="rb:text-center rb:py-4 rb:text-gray-400">
-                {t('common.noMoreData')}
-              </div>
-            ) : null
-          }
-          scrollThreshold={0.9}
-          scrollableTarget="scrollableDiv"
-          style={{ overflow: 'visible', width: '100%' }}
-        >
-          {data.length === 0 && !loading ? (
-            <Empty size={200} />
-          ) : (
-            <Flex align="flex-start" gap={12} className="rb:mb-2!">
-              {[0, 1, 2].map(colIdx => (
+      <PageScrollList<KnowledgeBaseListItem, ListQuery>
+        ref={pageScrollListRef}
+        url={getKnowledgeBaseListUrl}
+        query={query}
+        column={1}
+        className="rb:flex-1! rb:min-h-0!"
+        renderItems={(items) => {
+          // 模型列表异步加载后通过 modelListVersion 触发重新派生。
+          void modelListVersion;
+          const columns: KnowledgeBaseListItem[][] = [[], [], []];
+          const modelMenus: Record<string, ModelMenuInfo> = {};
+          items.forEach((item, index) => {
+            columns[index % columns.length].push({
+              ...item,
+              descriptionItems: formatData(item),
+            });
+            const modelInfo = buildModelMenuForItem(item);
+            if (modelInfo) modelMenus[item.id] = modelInfo;
+          });
+
+          return (
+            <Flex key="knowledge-base-items" align="flex-start" gap={12} className="rb:mb-2!">
+              {columns.map((columnItems, colIdx) => (
                 <div key={colIdx} style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 12 }}>
-                  {data.filter((_, i) => i % 3 === colIdx).map((item) => {
+                  {columnItems.map((item) => {
                     const modelInfo = modelMenus[item.id];
                     const hasModelInfo = modelInfo && modelInfo.menu.length > 1;
                     return (
-                      <div key={item.id}>
-                        <RbCard
-                          title={item.name}
-                          headerType="borderless"
-                          bodyClassName="rb:px-4! rb:pt-0! rb:pb-4!"
-                          headerClassName="rb:py-3!"
-                          className="rb:cursor-pointer"
-                          onClick={() => handleToDetail(item)}
-                          extra={
-                            <div onClick={(e) => e.stopPropagation()}>
-                              <Dropdown
-                                menu={{ items: getOptMenuItems(item) }}
-                                placement="bottomRight"
-                              >
-                                <div onClick={(e) => e.stopPropagation()} className="rb:cursor-pointer rb:size-5.5 rb:bg-[url('@/assets/images/common/more.svg')] rb:hover:bg-[url('@/assets/images/common/more_hover.svg')]"></div>
-                              </Dropdown>
+                      <RbCard
+                        key={item.id}
+                        title={item.name}
+                        headerType="borderless"
+                        bodyClassName="rb:px-4! rb:pt-0! rb:pb-4!"
+                        headerClassName="rb:py-3!"
+                        className="rb:cursor-pointer"
+                        onClick={() => handleToDetail(item)}
+                        extra={
+                          <div onClick={(e) => e.stopPropagation()}>
+                            <Dropdown
+                              menu={{ items: getOptMenuItems(item) }}
+                              placement="bottomRight"
+                            >
+                              <div onClick={(e) => e.stopPropagation()} className="rb:cursor-pointer rb:size-5.5 rb:bg-[url('@/assets/images/common/more.svg')] rb:hover:bg-[url('@/assets/images/common/more_hover.svg')]"></div>
+                            </Dropdown>
+                          </div>
+                        }
+                      >
+                        <Tooltip title={item.description}>
+                          <div className='rb:flex-1 rb:text-left rb:text-sm rb:leading-5 rb:text-gray-600 rb:wrap-break-word rb:line-clamp-1 rb:mb-3'>
+                            {(item.description && item.description != '') ? item.description : t('knowledgeBase.noDescription')}
+                          </div>
+                        </Tooltip>
+                        <Flex vertical gap={4} className='rb:min-h-15 rb:py-2.5! rb:px-3! rb:bg-gray-100 rb:rounded-lg rb:mb-3!'>
+                          <div className="rb:cursor-pointer rb:mb-3 rb:w-full" onClick={() => handleCopy(item.id)}>
+                            <div className="rb:text-gray-800 rb:font-medium">ID:</div>
+                            <Flex align="center" className="rb:text-gray-600">
+                              {item.id}
+                              <span className="rb:ml-1 rb:inline-block rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/common/copy_dark.svg')]"></span>
+                            </Flex>
+                          </div>
+                          {item.descriptionItems?.map((description: Record<string, unknown>) => (
+                            <div 
+                              key={description.key as string}
+                              className="rb:grid rb:grid-cols-2 rb:text-gray-600 rb:text-[14px] rb:leading-5"
+                            >
+                              <div className={clsx('rb:whitespace-nowrap rb:w-20', {"rb:text-gray-800 rb:font-medium" : (description.key as string) === 'permission_id'})}>{(description.label as string)}</div>
+                              <div className={clsx('rb:flex-inline rb:text-left rb:py-px rb:rounded',{
+                                  "rb:text-blue-500 rb:font-medium": (description.key as string) === 'permission_id' && (description.children as string) === t('knowledgeBase.private'),
+                                  "rb:text-[#FF8A4C] rb:font-medium": (description.key as string) === 'permission_id' && (description.children as string) === t('knowledgeBase.share'),
+                              })}>{(description.children as string)}</div>
                             </div>
-                          }
-                        >
-                          <div>
-                            <Flex className="rb:text-gray-600 rb:h-5 rb:line-clamp-1 rb:text-sm rb:leading-5 rb:mb-3!">
-                                {/* <div className="rb:font-medium rb:w-20">{t('knowledgeBase.description')} </div> */}
-                                <Tooltip title={item.description}>
-                                    <div className='rb:flex-1 rb:text-left rb:leading-5 rb:text-gray-800 rb:wrap-break-word rb:line-clamp-2'>{(item.description && item.description != '') ? item.description : t('knowledgeBase.noDescription')}</div>
-                                </Tooltip>
+                          ))}
+                        </Flex>
+                        {hasModelInfo && (
+                          <div onClick={(e) => e.stopPropagation()}>
+                            <Flex
+                              align="center"
+                              justify="space-between"
+                              className="rb:pt-2! rb:pr-1! rb:text-[12px] rb:leading-5 rb:cursor-pointer rb:rounded rb:transition-colors"
+                              onClick={() => {
+                                setExpandedItems(prev => ({ ...prev, [item.id]: !prev[item.id] }));
+                              }}
+                            >
+                              <span className="rb:truncate rb:flex-1 rb:text-gray-500">
+                                {modelInfo.menu.slice(1, 2).map(item => item?.label ? <div>{item?.label}</div> : null)}
+                              </span>
+                              <span className="rb:text-gray-400 rb:text-[10px]">
+                                {expandedItems[item.id] ? <DownOutlined /> : <RightOutlined />}
+                              </span>
                             </Flex>
-                            <Flex vertical gap={4} className='rb:min-h-15 rb:py-2.5! rb:px-3! rb:bg-gray-100 rb:rounded-lg rb:mb-3!'>
-                              <div className="rb:cursor-pointer rb:mb-3 rb:w-full" onClick={() => handleCopy(item.id)}>
-                                <div className="rb:text-gray-800 rb:font-medium">ID:</div>
-                                <Flex align="center" className="rb:text-[#5B6167]">
-                                  {item.id}
-                                  <span className="rb:ml-1 rb:inline-block rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/common/copy_dark.svg')]"></span>
-                                </Flex>
-                              </div>
-                              {item.descriptionItems?.map((description: Record<string, unknown>) => (
-                                <div 
-                                  key={description.key as string}
-                                  className="rb:grid rb:grid-cols-2 rb:text-[#5B6167] rb:text-[14px] rb:leading-5"
-                                >
-                                  <div className={clsx('rb:whitespace-nowrap rb:w-20', {"rb:text-gray-800 rb:font-medium" : (description.key as string) === 'permission_id'})}>{(description.label as string)}</div>
-                                  <div className={clsx('rb:flex-inline rb:text-left rb:py-px rb:rounded',{
-                                      "rb:text-[#155eef] rb:font-medium": (description.key as string) === 'permission_id' && (description.children as string) === t('knowledgeBase.private'),
-                                      "rb:text-[#FF8A4C] rb:font-medium": (description.key as string) === 'permission_id' && (description.children as string) === t('knowledgeBase.share'),
-                                  })}>{(description.children as string)}</div>
-                                </div>
-                              ))}
-                            </Flex>
-                            {hasModelInfo && (
-                              <div onClick={(e) => e.stopPropagation()}>
-                                <Flex
-                                  align="center"
-                                  justify="space-between"
-                                  className="rb:pt-2! rb:pr-1! rb:text-[12px] rb:leading-5 rb:cursor-pointer rb:rounded rb:transition-colors"
-                                  onClick={() => {
-                                    setData(prev => prev.map(d => d.id === item.id ? { ...d, _expanded: !d._expanded } : d));
-                                  }}
-                                >
-                                  <span className="rb:truncate rb:flex-1 rb:text-gray-500">
-                                    {modelInfo.menu.slice(1, 2).map(item => item?.label ? <div>{item?.label}</div> : null)}
-                                  </span>
-                                  <span className="rb:text-gray-400 rb:text-[10px]">
-                                    {item._expanded ? <DownOutlined /> : <RightOutlined />}
-                                  </span>
-                                </Flex>
-                                {item._expanded && (
-                                  <Flex vertical gap={8} className="rb:text-[12px] rb:mt-2!">
-                                    {modelInfo.menu.slice(2).map((text, idx) => {
-                                      return (
-                                        <div key={idx} className="rb:text-gray-500">
-                                          {text?.label}
-                                        </div>
-                                      );
-                                    })}
-                                  </Flex>
-                                )}
-                              </div>
+                            {expandedItems[item.id] && (
+                              <Flex vertical gap={8} className="rb:text-[12px] rb:mt-2!">
+                                {modelInfo.menu.slice(2).map((text, idx) => {
+                                  return (
+                                    <div key={idx} className="rb:text-gray-500">
+                                      {text?.label}
+                                    </div>
+                                  );
+                                })}
+                              </Flex>
                             )}
                           </div>
-                        </RbCard>
-                      </div>
+                        )}
+                      </RbCard>
                     )
                   })}
                 </div>
               ))}
             </Flex>
-          )}
-        </InfiniteScroll>
+          );
+        }}
+      />
 
-        <CreateModal
-          ref={modalRef}
-          refreshTable={handleRefresh}
-        />
-        <CopyModal ref={copyModalRef} refresh={handleRefresh} />
-      </div>
+      <CreateModal
+        ref={modalRef}
+        refreshTable={handleRefresh}
+      />
+      <CopyModal ref={copyModalRef} refresh={handleRefresh} />
     </Flex>
   )
 }
 
 export default KnowledgeBaseManagement
-

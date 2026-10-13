@@ -168,7 +168,7 @@ service.interceptors.response.use(
         const text = await error.response.data.text();
         const errorData = JSON.parse(text);
         msg = errorData.error || errorData.msg || msg;
-      } catch (e) {
+      } catch {
         msg = msg || i18n.t('common.unknownError');
       }
     }
@@ -309,40 +309,45 @@ function paramFilter(params: Record<string, string | number | boolean | ObjectWi
   return params;
 }
 
+const toDataPromise = <T>(requestPromise: Promise<unknown>): Promise<T> => {
+  // The response interceptor above unwraps AxiosResponse to business data.
+  return requestPromise as Promise<T>;
+};
+
 /**
  * HTTP request methods wrapper
  */
 export const request = {
   get<T>(url: string, data?: unknown, config?: AxiosRequestConfig): Promise<T> {
-    return service.get(url, {
+    return toDataPromise<T>(service.get(url, {
       params: paramFilter(data as Record<string, string | number | boolean | ObjectWithPush | null | undefined>),
       ...config || {}
-    });
+    }));
   },
   
   post<T>(url: string, data?: unknown, config?: AxiosRequestConfig): Promise<T> {
-    return service.post(url, data, config);
+    return toDataPromise<T>(service.post(url, data, config));
   },
   
   put<T>(url: string, data?: unknown, config?: AxiosRequestConfig): Promise<T> {
-    return service.put(url, data, config);
+    return toDataPromise<T>(service.put(url, data, config));
   },
   
   delete<T>(url: string, config?: AxiosRequestConfig): Promise<T> {
-    return service.delete(url, config);
+    return toDataPromise<T>(service.delete(url, config));
   },
   
   patch<T>(url: string, data?: unknown, config?: AxiosRequestConfig): Promise<T> {
-    return service.patch(url, data, config);
+    return toDataPromise<T>(service.patch(url, data, config));
   },
   uploadFile<T>(url: string, formData?: unknown, config?: AxiosRequestConfig): Promise<T> {
-    return service.post(url, formData, {
+    return toDataPromise<T>(service.post(url, formData, {
       headers: {
         'Content-Type': 'multipart/form-data',
       },
       withCredentials: false,
       ...config
-    });
+    }));
   },
   downloadFile(url: string, fileName: string, data?: unknown, callback?: () => void) {
     service.post(url, data, {
