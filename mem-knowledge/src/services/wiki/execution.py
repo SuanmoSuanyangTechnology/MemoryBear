@@ -21,7 +21,7 @@ def dispatcher(runtime):
     return getattr(runtime, "task_dispatcher", None) or TaskDispatcher(runtime=runtime)
 
 
-def publish_map(runtime, delivery):
+def publish_map(runtime, delivery, *, terminal_on_failure=False):
     if not delivery or not delivery.get("publish", True):
         return
     try:
@@ -35,7 +35,7 @@ def publish_map(runtime, delivery):
             task_id=delivery["task_id"],
         )
     except Exception:
-        transaction(runtime, state.record_publish_failure, delivery)
+        transaction(runtime, state.record_publish_failure, delivery, terminal=terminal_on_failure)
         raise
     transaction(runtime, state.confirm_publish, delivery)
 

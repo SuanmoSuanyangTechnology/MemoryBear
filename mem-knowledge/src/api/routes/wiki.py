@@ -188,7 +188,7 @@ async def generate(
         )
         if delivery is None:
             raise KnowledgeError.from_code("KB_WIKI_NOT_FOUND")
-        await asyncio.to_thread(publish_map, runtime, delivery)
+        await asyncio.to_thread(publish_map, runtime, delivery, terminal_on_failure=True)
     except WikiError as exc:
         raise _business_error(exc) from None
     return _response(request, {"document_id": str(document_id), "task_id": delivery["task_id"]})
