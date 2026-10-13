@@ -31,7 +31,6 @@ RUN if [ "$NEED_MIRROR" == "1" ]; then \
         pip install --no-cache-dir --index-url "${PYPI_INDEX_URL}" uv==0.10.11; \
     fi
 COPY packages/redbear-model /code/packages/redbear-model
-COPY packages/knowledge-models /code/packages/knowledge-models
 COPY packages/storage-core /code/packages/storage-core
 COPY packages/auth-sdk /code/packages/auth-sdk
 COPY mem-knowledge/pyproject.toml mem-knowledge/uv.lock /code/mem-knowledge/
@@ -44,6 +43,8 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked --no-dev --no-install-project --no-editable
 
 COPY mem-knowledge/src /code/mem-knowledge/src
+COPY mem-knowledge/alembic.ini /code/mem-knowledge/alembic.ini
+COPY mem-knowledge/migrations /code/mem-knowledge/migrations
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked --no-dev --no-editable && \
     rm -f \
@@ -91,6 +92,10 @@ COPY --from=builder --chown=memknowledge:memknowledge \
     /code/mem-knowledge/.venv /code/mem-knowledge/.venv
 COPY --from=builder --chown=memknowledge:memknowledge \
     /code/mem-knowledge/src /code/mem-knowledge/src
+COPY --from=builder --chown=memknowledge:memknowledge \
+    /code/mem-knowledge/alembic.ini /code/mem-knowledge/alembic.ini
+COPY --from=builder --chown=memknowledge:memknowledge \
+    /code/mem-knowledge/migrations /code/mem-knowledge/migrations
 COPY --from=builder --chown=memknowledge:memknowledge /opt/tika /opt/tika
 COPY --from=builder --chown=memknowledge:memknowledge \
     /opt/tiktoken-cache /opt/tiktoken-cache

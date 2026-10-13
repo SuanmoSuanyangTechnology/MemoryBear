@@ -1951,17 +1951,6 @@ wheels = [
 ]
 
 [[package]]
-name = "mem-knowledge-models"
-version = "0.1.0"
-source = { directory = "../packages/knowledge-models" }
-dependencies = [
-    { name = "sqlalchemy" },
-]
-
-[package.metadata]
-requires-dist = [{ name = "sqlalchemy", specifier = ">=2.0.44,<3" }]
-
-[[package]]
 name = "modelscope"
 version = "1.36.1"
 source = { registry = "https://pypi.tuna.tsinghua.edu.cn/simple" }
@@ -3179,7 +3168,6 @@ name = "redbear-mem"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
-    { name = "mem-knowledge-models" },
     { name = "aiofiles" },
     { name = "alembic" },
     { name = "amqp" },
@@ -3327,7 +3315,6 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "mem-knowledge-models", directory = "../packages/knowledge-models" },
     { name = "aiofiles", specifier = ">=23.0.0" },
     { name = "alembic", specifier = "==1.17.0" },
     { name = "amqp", specifier = "==5.3.1" },
