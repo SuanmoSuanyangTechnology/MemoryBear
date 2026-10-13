@@ -55,6 +55,7 @@ class TaskContext:
     attempt: int
     knowledge_id: str | None = None
     document_id: str | None = None
+    page_id: str | None = None
     trace_id: str | None = None
     parent_task_id: str | None = None
     published_at_ms: int | None = None
@@ -109,6 +110,7 @@ TASK_LOG_FIELDS = (
     "parent_task_id",
     "knowledge_id",
     "document_id",
+    "page_id",
     "stage",
     "detail",
     "business_outcome",
@@ -282,6 +284,11 @@ class DocumentProgressSink:
         with database.sync_session() as session:
             document = session.get(Document, self._document_id)
             if document is None:
+                return
+            from ..services.wiki.source import handle_source_event
+
+            if handle_source_event(session, document, event, messages):
+                session.commit()
                 return
             if event.event == "kb_task_started":
                 document.run = 1
@@ -671,6 +678,7 @@ def task_context_from_current_task(
     role: str,
     knowledge_id: object | None = None,
     document_id: object | None = None,
+    page_id: object | None = None,
 ) -> TaskContext:
     """Build a safe task context from Celery's current task proxy."""
 
@@ -701,6 +709,7 @@ def task_context_from_current_task(
         attempt=int(getattr(request, "retries", 0) or 0),
         knowledge_id=_safe_uuid(knowledge_id),
         document_id=_safe_uuid(document_id),
+        page_id=_safe_uuid(page_id),
         trace_id=_safe_header_text(headers.get("kb_trace_id")),
         parent_task_id=_safe_uuid(headers.get("kb_parent_task_id")),
         published_at_ms=published_at_ms,

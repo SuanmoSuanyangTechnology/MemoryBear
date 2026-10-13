@@ -21,6 +21,7 @@ WORKER_ROLES = frozenset(
         "document_worker",
         "graphrag_worker",
         "qa_import_worker",
+        "wiki_worker",
     }
 )
 STATE_FIELDS = frozenset(
