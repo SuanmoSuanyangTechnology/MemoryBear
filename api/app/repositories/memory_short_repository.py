@@ -103,17 +103,37 @@ class ShortTermMemoryRepository:
         """统计一批终端用户的短期记忆总数。"""
         if not end_user_ids:
             return 0
+        result = await self.db.execute(
+            self._build_count_by_user_ids_query(end_user_ids)
+        )
+        return int(result.scalar_one() or 0)
+
+    def count_by_user_ids(
+        self,
+        end_user_ids: List[uuid.UUID],
+    ) -> int:
+        """统计一批终端用户的短期记忆总数。"""
+        if not end_user_ids:
+            return 0
+        result = self.db.execute(
+            self._build_count_by_user_ids_query(end_user_ids)
+        )
+        return int(result.scalar_one() or 0)
+
+    def _build_count_by_user_ids_query(
+        self,
+        end_user_ids: List[uuid.UUID],
+    ):
         end_user_ids_param = bindparam(
             "workspace_statistics_end_user_ids",
             value=[str(end_user_id) for end_user_id in end_user_ids],
             type_=ARRAY(ShortTermMemory.end_user_id.type),
         )
-        result = await self.db.execute(
+        return (
             select(func.count()).select_from(ShortTermMemory).where(
                 ShortTermMemory.end_user_id == any_(end_user_ids_param)
             )
         )
-        return int(result.scalar_one() or 0)
 
 
     def get_latest_by_user_id(self, end_user_id: str, limit: int = 5) -> List[ShortTermMemory]:

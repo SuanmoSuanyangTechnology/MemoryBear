@@ -5,7 +5,8 @@ ARG PYPI_INDEX_URL=https://pypi.org/simple
 ARG NEED_MIRROR=1
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    TIKTOKEN_CACHE_DIR=/opt/tiktoken-cache
 
 WORKDIR /code
 
@@ -39,11 +40,14 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked --no-dev --no-install-project --no-editable
 
 COPY model-service/src /code/model-service/src
+# Pre-seed cl100k_base; runtime has no egress and tiktoken's lazy download has no connect timeout.
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked --no-dev --no-install-project --no-editable && \
     rm -f \
       .venv/lib/python3.12/site-packages/_virtualenv.pth \
-      .venv/lib/python3.12/site-packages/distutils-precedence.pth
+      .venv/lib/python3.12/site-packages/distutils-precedence.pth && \
+    mkdir -p "${TIKTOKEN_CACHE_DIR}" && \
+    .venv/bin/python -c 'import tiktoken; tiktoken.get_encoding("cl100k_base")'
 
 FROM ${PYTHON_BASE_IMAGE} AS runtime
 
@@ -53,6 +57,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     MEMORYBEAR_ROOT_DIR=/code \
     MODEL_SERVICE_DIR=/code/model-service \
+    TIKTOKEN_CACHE_DIR=/opt/tiktoken-cache \
     PATH=/code/model-service/.venv/bin:$PATH
 
 WORKDIR /code/model-service
@@ -71,6 +76,8 @@ COPY --from=builder --chown=memmodel:memmodel \
     /code/model-service/.venv /code/model-service/.venv
 COPY --from=builder --chown=memmodel:memmodel \
     /code/model-service/src /code/model-service/src
+COPY --from=builder --chown=memmodel:memmodel \
+    /opt/tiktoken-cache /opt/tiktoken-cache
 
 USER memmodel
 

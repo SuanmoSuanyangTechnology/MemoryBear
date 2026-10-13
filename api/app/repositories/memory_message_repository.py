@@ -344,6 +344,27 @@ class MemoryMessageRepository:
         """统计一批用户 API/MCP 来源的 distinct 用户-source 对数量。"""
         if not end_user_ids:
             return 0
+        result = await self.db.execute(
+            self._build_get_working_memory_source_count_by_user_ids_query(end_user_ids)
+        )
+        return int(result.scalar_one() or 0)
+
+    def get_working_memory_source_count_by_user_ids(
+        self,
+        end_user_ids: list[uuid.UUID],
+    ) -> int:
+        """统计一批用户 API/MCP 来源的 distinct 用户-source 对数量。"""
+        if not end_user_ids:
+            return 0
+        result = self.db.execute(
+            self._build_get_working_memory_source_count_by_user_ids_query(end_user_ids)
+        )
+        return int(result.scalar_one() or 0)
+
+    def _build_get_working_memory_source_count_by_user_ids_query(
+        self,
+        end_user_ids: list[uuid.UUID],
+    ):
         end_user_ids_param = bindparam(
             "workspace_statistics_end_user_ids",
             value=[str(end_user_id) for end_user_id in end_user_ids],
@@ -359,10 +380,9 @@ class MemoryMessageRepository:
             .group_by(MemoryMessage.end_user_id, MemoryMessage.source)
             .subquery()
         )
-        result = await self.db.execute(
+        return (
             select(func.count()).select_from(grouped_sources)
         )
-        return int(result.scalar_one() or 0)
 
     def has_api_mcp_messages(self, end_user_id: str) -> bool:
         """判断该用户是否有任何 API/MCP 来源的记忆消息（用于 work_count +1 判断）。"""

@@ -2325,27 +2325,24 @@ async def update_workspace_models_configs(
         if current_embedding_config_id != resolved_models["embedding"]:
             old_embedding_config_id = current_embedding_config_id
             new_embedding_config_id = resolved_models["embedding"]
+            if await get_active_reembed_job_id_async(db, workspace_id):
+                _raise_model_config_error(
+                    [
+                        _model_issue(
+                            "embedding",
+                            reason="embedding_switch_in_progress",
+                            locale=locale,
+                        )
+                    ],
+                    locale,
+                    code=BizCode.STATE_CONFLICT,
+                )
             old_embedding_name, new_embedding_name = await _resolve_embedding_model_names(
                 old_embedding_config_id,
                 new_embedding_config_id,
                 db_workspace.tenant_id,
             )
             if old_embedding_name != new_embedding_name:
-                # 在途重算未完成前禁止再次切换：存量向量还没全部用当前模型重建，
-                # 再换一次会让已重建的部分重新落回旧模型空间，等于永远追不上。
-                # 检查与建任务同处 workspace 行排他锁内，不存在"检查—插入"的空窗。
-                if await get_active_reembed_job_id_async(db, workspace_id):
-                    _raise_model_config_error(
-                        [
-                            _model_issue(
-                                "embedding",
-                                reason="embedding_switch_in_progress",
-                                locale=locale,
-                            )
-                        ],
-                        locale,
-                        code=BizCode.STATE_CONFLICT,
-                    )
                 # 存量向量由旧模型生成，与新模型写入的向量不再可比（同维会混在一起，
                 # 异维会从向量召回里消失），因此登记一次重算任务。
                 # 与模型变更写在同一个事务里：要么都成立，要么都不成立。
@@ -2365,7 +2362,8 @@ async def update_workspace_models_configs(
                     f"{old_embedding_name} -> {new_embedding_name}"
                 )
             else:
-                # 换的是配置而不是底层模型（同一模型的不同配置行），向量空间未变。
+                # 换的是配置而不是底层模型（同一模型的不同配置行），向量空间未变，
+                # 不需要新任务——但上面那道在途守卫照样管着它：在途期间槽位不能动。
                 business_logger.info(
                     f"工作空间 embedding 配置变更但底层模型名未变，跳过存量重算: "
                     f"workspace_id={workspace_id}, model={new_embedding_name}"

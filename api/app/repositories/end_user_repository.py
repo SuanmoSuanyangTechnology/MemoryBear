@@ -296,14 +296,8 @@ class EndUserRepository:
     ) -> List[uuid.UUID]:
         """按 ID 游标分页查询 workspace 下的活跃终端用户 ID。"""
         try:
-            stmt = select(EndUser.id).where(
-                EndUser.workspace_id == workspace_id,
-                EndUser.is_active.is_(True),
-            )
-            if after_id is not None:
-                stmt = stmt.where(EndUser.id > after_id)
             result = await self.db.execute(
-                stmt.order_by(EndUser.id.asc()).limit(limit)
+                self._build_active_end_user_ids_page_query(workspace_id, after_id, limit)
             )
             return list(result.scalars().all())
         except Exception as e:
@@ -314,6 +308,33 @@ class EndUserRepository:
                 str(e),
             )
             raise
+
+    def get_active_end_user_ids_page(
+        self,
+        workspace_id: uuid.UUID,
+        after_id: uuid.UUID | None = None,
+        limit: int = 200,
+    ) -> List[uuid.UUID]:
+        """Read active user IDs using a synchronous worker session."""
+        try:
+            result = self.db.execute(
+                self._build_active_end_user_ids_page_query(workspace_id, after_id, limit)
+            )
+            return list(result.scalars().all())
+        except Exception:
+            self.db.rollback()
+            db_logger.exception("Failed to page active users: workspace_id=%s", workspace_id)
+            raise
+
+    @staticmethod
+    def _build_active_end_user_ids_page_query(workspace_id, after_id, limit):
+        stmt = select(EndUser.id).where(
+            EndUser.workspace_id == workspace_id,
+            EndUser.is_active.is_(True),
+        )
+        if after_id is not None:
+            stmt = stmt.where(EndUser.id > after_id)
+        return stmt.order_by(EndUser.id.asc()).limit(limit)
 
     @redis_cache(prefix="hot_tags", id_arg="workspace_id", skip_args=["self"])
     async def get_hot_memory_tags_by_workspace_async(

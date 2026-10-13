@@ -5,7 +5,6 @@ import {
   checkFeishuSync,
   checkYuqueSync,
   createKnowledgeBase,
-  deleteKnowledgeGraph,
   getKnowledgeGraphEntityTypes,
   rebuildKnowledgeGraph,
   updateKnowledgeBase,
@@ -160,7 +159,7 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({ refreshTa
     getTypeList();
   };
 
-  const performSave = () => {
+  const performSave = (isRebuild?: boolean) => {
     form.validateFields()
       .then(() => {
         setLoading(true);
@@ -195,6 +194,9 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({ refreshTa
             : createKnowledgeBase(payload);
 
           return submit.then(() => {
+            if (isRebuild) {
+              rebuildKnowledgeGraph(datasets?.id || '');
+            }
             if (refreshTable) {
               refreshTable();
             }
@@ -272,15 +274,7 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({ refreshTa
         title: t('knowledgeBase.rebuildConfirmTitle'),
         content: t('knowledgeBase.rebuildConfirmContent'),
         onOk: () => {
-          deleteKnowledgeGraph(datasets?.id || '')
-            .then(() => {
-              console.log(t('knowledgeBase.deleteGraphSuccess'));
-              return rebuildKnowledgeGraph(datasets?.id || '');
-            })
-            .catch(() => {
-              messageApi.error(t('knowledgeBase.deleteGraphFailed'));
-            });
-          performSave();
+          performSave(true);
         },
         onCancel: () => {},
       });
@@ -392,7 +386,7 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({ refreshTa
           size="small"
           current={currentStep}
           items={stepItems.map(({ title }) => ({ title }))}
-          className="rb:mb-6!"
+          className="rb:mb-6! rb:mt-3!"
         />
       )}
       <Form

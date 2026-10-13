@@ -131,6 +131,12 @@ async def run_job(job_id: str, owner: str) -> Dict[str, Any]:
     可重复执行：已终态的 end_user 由 PG 行状态跳过，并发扇出由派发占位拦住，
     因此崩溃或超时后重新派发即可从断点继续。
 
+    **前置换算只在任务名下还没有行时才有资格判死它**，这条由
+    ``mark_job_failed`` 的守卫兜住。前置换算每次派发都重跑（对账会重派失去心跳的
+    任务），而重派时上一轮早已建好行、甚至还有子任务在跑：此时判死会把父任务写成
+    ``failed``，却把那些行留在中途——对账只捞 ``pending``/``running`` 的任务、行级
+    重试只认终态失败的行，它们再也没有出口。所以判死会被拒，驱动只如实报告。
+
     Args:
         job_id: memory_reembed_jobs.id
     """
@@ -162,20 +168,26 @@ async def run_job(job_id: str, owner: str) -> Dict[str, Any]:
         # ``notify=False``：这里什么都没失败（一次写入都没发生），不应给用户发失败
         # 告警。终端状态只剩 failed 一个可用值，原委写进 error 供排查。
         if not _reembed_is_current_job(snapshot):
-            memory_reembed_service.mark_job_failed(
+            if memory_reembed_service.mark_job_failed(
                 job_id,
                 error=(
                     "本任务已不再对应当前工作空间的嵌入模型（或已有更新的在途任务），"
                     "因此未执行重建"
                 ),
                 notify=False,
-            )
-            logger.info(
-                "[MemoryReembed] job stopped itself at fan-out (no longer current): "
-                "job=%s",
+            ):
+                logger.info(
+                    "[MemoryReembed] job stopped itself at fan-out (no longer "
+                    "current): job=%s",
+                    job_id,
+                )
+                return {"status": "OBSOLETE", "job_id": job_id}
+            logger.warning(
+                "[MemoryReembed] job is no longer current but owns rows; not "
+                "judging it here: job=%s",
                 job_id,
             )
-            return {"status": "OBSOLETE", "job_id": job_id}
+            return {"status": "DEFERRED", "job_id": job_id}
 
         holder = job_state.claim_job(job_id, owner)
         if holder != owner:
@@ -186,11 +198,18 @@ async def run_job(job_id: str, owner: str) -> Dict[str, Any]:
             snapshot
         )
         if dimension_error is not None:
-            memory_reembed_service.mark_job_failed(
+            if not memory_reembed_service.mark_job_failed(
                 job_id,
                 error=dimension_error,
                 reason_code=failure_reason,
-            )
+            ):
+                logger.warning(
+                    "[MemoryReembed] probe failed on a job that already owns rows; "
+                    "leaving it to the reconciler: job=%s error=%s",
+                    job_id,
+                    dimension_error,
+                )
+                return {"status": "DEFERRED", "error": dimension_error}
             logger.error(
                 "[MemoryReembed] embedding dimension rejected: job=%s error=%s",
                 job_id,

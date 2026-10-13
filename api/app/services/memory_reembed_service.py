@@ -489,7 +489,7 @@ def mark_job_failed(
         reason_code: str | None = None,
         notify: bool = True,
 ) -> bool:
-    """Fail a job before any work is written (pre-flight rejections).
+    """Fail a job, but only while it still has nothing of its own to lose.
 
     ``reason_code`` 只用于通知中心的原因分类（见
     :mod:`app.core.memory.alerts`），不参与状态机。
@@ -498,6 +498,9 @@ def mark_job_failed(
     :func:`app.services.memory_reembed_orchestrator` 的扇出自检）：终端状态只剩
     ``failed`` 这一个可用值，为了不把这种情形伪装成用户的失败，选择不发通知，
     原委写进 ``error`` 供排查。
+
+    :return: 是否由本次调用写下终态。``False`` 表示任务已终态、被别的调用方抢先，
+        或它名下已经有行——三者都不该由本次调用写终态，也不该发通知。
     """
     job_uuid = _as_uuid(job_id)
     if job_uuid is None:
@@ -524,6 +527,11 @@ def mark_job_failed(
             .filter(
                 MemoryReembedJob.id == job_uuid,
                 MemoryReembedJob.status.in_(_ACTIVE_STATUSES),
+                ~exists(
+                    select(MemoryReembedJobUser.id).where(
+                        MemoryReembedJobUser.job_id == job_uuid,
+                    )
+                ),
             )
             .update(
                 {
@@ -536,7 +544,8 @@ def mark_job_failed(
         )
         db.commit()
         if not updated:
-            # 已被别的调用方写成终态：终态与通知都归它。
+            # 已被别的调用方写成终态（终态与通知都归它），或它名下已经有行了
+            # （本函数不许判死，留给别的出口——见上面 docstring）。
             return False
 
     if not notify:
@@ -554,7 +563,7 @@ def mark_job_failed(
     _report_permanent_failure(
         job_id=job_id,
         reason_code=reason_code,
-        # 前置换算没写过任何一行，所以失败用户/节点计数都还是零。
+        # 守卫保证这个任务一行都没有，所以失败用户/节点计数都还是零。
         failed_end_users=0,
         processed_nodes=0,
         failed_nodes=0,
