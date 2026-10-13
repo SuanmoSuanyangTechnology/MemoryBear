@@ -114,6 +114,7 @@ export const memoryConversation = {
       stopAudioRecorder: '停止录音',
       startAudioRecorder: '开始录音',
       citations: '引用',
+      waitingModelResponse: '正在等待响应',
       reasoning_content: '深度思考内容',
       history: '历史记录',
       likeMsg: '感谢您的正面反馈',

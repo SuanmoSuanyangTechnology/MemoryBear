@@ -1,4 +1,4 @@
-import { type FC, useState, useRef, useEffect, useCallback, type Dispatch, type SetStateAction } from 'react'
+import { type FC, useState, useRef, useEffect, useCallback } from 'react'
 import { Button, Flex, Space, Progress } from 'antd';
 import { useTranslation } from 'react-i18next';
 
@@ -31,7 +31,7 @@ export interface ReembedInfo {
 interface EmbeddingAlertProps {
   reembedJobId?: string | null;
   source?: 'space' | 'user';
-  onChange?: Dispatch<SetStateAction<string | null | undefined>>;
+  onChange?: (id?: string | null, status?: Status) => void;
   className?: string;
 }
 
@@ -50,6 +50,11 @@ const alertColors: Record<Status, RbAlertProps['color']> = {
 }
 
 const spaceAlertConfigs: Partial<Record<Status, SpaceAlertConfig>> = {
+  pending: {
+    titleKey: 'space.reembedding.alert.runningTitle',
+    descriptionKey: 'space.reembedding.alert.runningDescription',
+    showProgress: true,
+  },
   running: {
     titleKey: 'space.reembedding.alert.runningTitle',
     descriptionKey: 'space.reembedding.alert.runningDescription',
@@ -115,7 +120,7 @@ const EmbeddingAlert: FC<EmbeddingAlertProps> = ({
         const response = res as ReembedInfo;
         if (response) {
           setReembedInfo(response)
-          onChange?.(response.status !== 'succeeded' ? response.id : null)
+          onChange?.(response.status !== 'succeeded' ? response.id : null, response.status)
         }
       })
   }, [onChange])
