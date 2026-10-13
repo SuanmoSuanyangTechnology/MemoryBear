@@ -212,6 +212,7 @@ class AsyncChunkStore:
         asc: bool = True,
         chunk_types: list[str] | str | None = None,
         parent_ids: list[str] | str | None = None,
+        source_includes: Sequence[str] | None = None,
     ) -> AsyncIterator[dict[str, Any]]:
         if not await self.client.indices.exists(index=self.index):
             return
@@ -228,6 +229,7 @@ class AsyncChunkStore:
             ),
             sort=self.segment_sort(asc),
             batch_size=ES_FULL_SCAN_BATCH_SIZE,
+            source_includes=source_includes,
         ):
             yield hit
 

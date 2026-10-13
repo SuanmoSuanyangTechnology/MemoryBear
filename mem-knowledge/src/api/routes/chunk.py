@@ -488,7 +488,7 @@ async def import_qa_new_doc(
         raise
     task_id = await dispatch_qa_import(
         runtime,
-        TaskDispatcher(),
+        TaskDispatcher(runtime=runtime),
         kb_id,
         resources.document_id,
         filename,
@@ -529,7 +529,7 @@ async def import_qa_chunks(
         )
     task_id = await dispatch_qa_import(
         runtime,
-        TaskDispatcher(),
+        TaskDispatcher(runtime=runtime),
         snapshot.knowledge_id,
         snapshot.document_id,
         filename,

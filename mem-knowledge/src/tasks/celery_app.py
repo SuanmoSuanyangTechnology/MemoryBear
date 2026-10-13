@@ -7,14 +7,19 @@ from kombu import Exchange, Queue
 
 from ..bootstrap import get_settings
 from ..config import KnowledgeSettings
+from ..rag.wiki.config import BACKFILL_TASK, MAP_TASK, REDUCE_TASK, WIKI_QUEUE
 
 KNOWLEDGE_QUEUES = (
     "document_tasks",
     "graphrag_tasks",
     "qa_import",
+    WIKI_QUEUE,
 )
 
 PUBLISHABLE_KNOWLEDGE_TASK_ROUTES = {
+    BACKFILL_TASK: WIKI_QUEUE,
+    MAP_TASK: WIKI_QUEUE,
+    REDUCE_TASK: WIKI_QUEUE,
     "app.core.rag.tasks.parse_document": "document_tasks",
     "app.core.rag.tasks.sync_knowledge_for_kb": "document_tasks",
     "app.core.rag.tasks.import_qa_chunks": "qa_import",
@@ -58,6 +63,14 @@ def create_celery_app(settings: KnowledgeSettings) -> Celery:
         result_expires=settings.kb_result_expires_seconds,
         task_acks_late=True,
         task_reject_on_worker_lost=True,
+        broker_transport_options={"confirm_publish": True},
+        task_publish_retry=True,
+        task_publish_retry_policy={
+            "max_retries": 3,
+            "interval_start": 0.2,
+            "interval_step": 0.2,
+            "interval_max": 1,
+        },
         worker_disable_rate_limits=True,
         worker_send_task_events=True,
         task_send_sent_event=True,

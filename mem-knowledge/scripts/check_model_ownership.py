@@ -28,8 +28,6 @@ EXPECTED_REFERENCE_TABLES = {
     "users",
     "model_configs",
     "model_bases",
-    "model_api_keys",
-    "model_config_api_key_association",
 }
 
 OWNED_MODEL_NAMES = {

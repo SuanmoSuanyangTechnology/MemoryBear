@@ -1,0 +1,184 @@
+"""Source lifecycle handoff and progress adaptation without holding model-time sessions."""
+
+from __future__ import annotations
+
+from ...models.owned import Document, Knowledge, WikiDocumentState
+from ...rag.wiki.config import WikiSuperseded, read_wiki_config
+from ...repositories.wiki import state as repository
+from ...repositories.wiki.common import append_log, as_uuid, lock_document, lock_knowledge
+from ...tasks.observability import current_parent_task_id
+from .runtime import transaction
+
+
+class WikiHandoffPending(RuntimeError):
+    """Source has committed; retry only its Wiki message handoff."""
+
+
+def _source_start(session, document_id, source_task_id, *, replace=False):
+    document = session.get(Document, as_uuid(document_id))
+    if document is None or document.status != 1:
+        return None
+    knowledge = session.get(Knowledge, document.kb_id)
+    state = session.get(WikiDocumentState, document.id)
+    if state is None and not read_wiki_config(knowledge.parser_config).enabled:
+        return None
+    result = repository.source_started(
+        session, document.kb_id, document.id, source_task_id, replace=replace
+    )
+    return result
+
+
+def begin_source(runtime, document_id, source_task_id):
+    return transaction(runtime, _source_start, document_id, source_task_id)
+
+
+def prepare_source_dispatch(runtime, document_id, source_task_id):
+    return transaction(runtime, _source_start, document_id, source_task_id, replace=True)
+
+
+def _source_complete(session, document_id, source_task_id):
+    document = session.get(Document, as_uuid(document_id))
+    if document is None or document.status != 1:
+        return None
+    return repository.source_completed(session, document.kb_id, document.id, source_task_id)
+
+
+def finish_source(
+    runtime, document_id, source_task_id, *, expected_chunk_ids=None, replace_source=False
+):
+    info = transaction(runtime, _source_verification, document_id, source_task_id)
+    if info:
+        from ...rag.wiki.input import read_sources
+        from ..document import delete_document_search_data
+        from ..document_mutation_guard import sync_document_mutation_guard
+
+        if replace_source and expected_chunk_ids == []:
+            # A legitimate zero-chunk reparse must retire the previous ES source first.
+            with sync_document_mutation_guard(
+                runtime.redis.sync_client(), as_uuid(document_id)
+            ) as guard:
+                transaction(runtime, _source_verification, document_id, source_task_id)
+
+                async def remove_old_chunks():
+                    await delete_document_search_data(
+                        await runtime.elasticsearch.client(),
+                        as_uuid(info["kb_id"]),
+                        as_uuid(document_id),
+                    )
+
+                runtime.run_async(remove_old_chunks)
+                guard.ensure_owned()
+        runtime.run_async(
+            lambda: read_sources(
+                runtime,
+                info["kb_id"],
+                document_id,
+                expected_ids=expected_chunk_ids,
+                exact=replace_source,
+                expect_index=bool(info["chunk_count"]),
+            )
+        )
+    from .execution import publish_map
+
+    # Persist source readiness before attempting the broker handoff.
+    delivery = transaction(runtime, _source_complete, document_id, source_task_id)
+    try:
+        publish_map(runtime, delivery)
+    except Exception as exc:
+        raise WikiHandoffPending("Wiki handoff pending; source is already committed") from exc
+
+
+def _source_verification(session, document_id, source_task_id):
+    document = session.get(Document, as_uuid(document_id))
+    if document is None:
+        raise WikiSuperseded("WIKI_DOCUMENT_UNAVAILABLE", retryable=False)
+    if document.status != 1:
+        return None
+    state = session.get(WikiDocumentState, document.id)
+    if state and state.source_task_id != source_task_id:
+        raise WikiSuperseded("WIKI_SOURCE_TASK_SUPERSEDED", retryable=False)
+    if state and state.source_ready:
+        return None
+    knowledge = session.get(Knowledge, document.kb_id)
+    if state is None and not read_wiki_config(knowledge.parser_config).enabled:
+        return None
+    return {"kb_id": str(document.kb_id), "chunk_count": document.chunk_num}
+
+
+def _handoff_failed(session, document_id, task_id):
+    document = session.get(Document, as_uuid(document_id))
+    if document is None:
+        return
+    lock_knowledge(session, document.kb_id)
+    document, state = lock_document(session, document.kb_id, document.id)
+    if (
+        state
+        and state.source_task_id == task_id
+        and state.stage == "map_pending"
+        and not state.publish_confirmed
+        and document.run != 2
+    ):
+        document.run, document.progress = 0, -1.0
+        state.error_code = "WIKI_DISPATCH_FAILED"
+        append_log(
+            document, "Source ready; Wiki dispatch exhausted retries. Retry Wiki explicitly."
+        )
+
+
+def handoff_failed(runtime, document_id, task_id):
+    transaction(runtime, _handoff_failed, document_id, task_id)
+
+
+def apply_source_update(session, document, updater, task_id=None):
+    """Adapt existing processor callbacks in their own short transaction."""
+    task_id = task_id or current_parent_task_id()
+    state = session.get(WikiDocumentState, document.id)
+    if state is None:
+        updater(document)
+        return
+    lock_knowledge(session, document.kb_id)
+    document, state = lock_document(session, document.kb_id, document.id)
+    if state.source_ready and state.source_task_id is None:
+        # Backfill may have admitted a source between its commit and final source callbacks.
+        return
+    if (
+        state.source_task_id != task_id
+        or document.status != 1
+        or document.run == 2
+        or state.status in {"cancelled", "failed"}
+    ):
+        raise WikiSuperseded("WIKI_SOURCE_TASK_SUPERSEDED", retryable=False)
+    if state.source_ready:
+        return
+    previous = max(0.0, state.last_progress)
+    updater(document)
+    if document.progress >= 0:
+        document.progress = max(previous, min(0.7, document.progress * 0.7))
+        document.run = 1
+        state.last_progress = document.progress
+    else:
+        state.status, state.error_code = "failed", "WIKI_SOURCE_FAILED"
+
+
+def handle_source_event(session, document, event, messages):
+    """Return whether a Wiki source round owns the event's document progress."""
+    state = session.get(WikiDocumentState, document.id)
+    if state is None:
+        return False
+    lock_knowledge(session, document.kb_id)
+    document, state = lock_document(session, document.kb_id, document.id)
+    if state.source_task_id != event.context.task_id or document.run == 2:
+        return True
+    if state.source_ready or state.status in {"cancelled", "ready", "skipped", "failed"}:
+        return True
+    if event.event == "kb_task_failed":
+        state.status, state.error_code = "failed", event.error_code or "WIKI_SOURCE_FAILED"
+        document.run, document.progress = 0, -1.0
+    elif event.event != "kb_task_finished":
+        document.run = 1
+        if event.progress is not None:
+            document.progress = max(state.last_progress, min(0.7, float(event.progress) * 0.7))
+            state.last_progress = document.progress
+    for message in messages:
+        append_log(document, message.rstrip("\n"))
+    return True

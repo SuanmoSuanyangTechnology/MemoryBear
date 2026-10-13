@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import logging
 import uuid
 from typing import Annotated, Any
 
@@ -27,6 +29,7 @@ router = APIRouter(
     tags=["documents"],
     dependencies=[Depends(get_principal)],
 )
+logger = logging.getLogger(__name__)
 
 
 def _success(
@@ -147,11 +150,17 @@ async def update_document(
             plan.update_fields["status"],
         )
     async with runtime.database.async_session() as db:
-        document = await document_service.apply_document_update(db, plan, principal)
+        document, wiki_pages, wiki_delivery = await document_service.apply_document_update(
+            db, plan, principal
+        )
         data = document_service.document_to_data(document)
+    from ...services.wiki.execution import publish_map, publish_pages
+
+    await asyncio.to_thread(publish_pages, runtime, plan.knowledge_id, wiki_pages)
+    await asyncio.to_thread(publish_map, runtime, wiki_delivery)
     if plan.status_changed:
         await document_service.dispatch_document_graph_sync(
-            TaskDispatcher(),
+            TaskDispatcher(runtime=runtime),
             plan.knowledge_id,
             plan.document_id,
             plan.graph_parser_config,
@@ -193,12 +202,21 @@ async def delete_document(
 
     async def delete_records(final_snapshot: document_service.DocumentDeletionSnapshot) -> None:
         async with runtime.database.async_session() as db:
-            await document_service.delete_document_records(db, final_snapshot)
+            wiki_pages = await document_service.delete_document_records(db, final_snapshot)
+        from ...services.wiki.execution import publish_pages
+
+        try:
+            await asyncio.to_thread(publish_pages, runtime, final_snapshot.knowledge_id, wiki_pages)
+        except Exception as exc:
+            logger.error(
+                "Document deleted; Wiki cleanup dispatch failed kb_id=%s page_ids=%s error_type=%s",
+                final_snapshot.knowledge_id, wiki_pages, type(exc).__name__,
+            )
 
     await document_service.delete_document_resources(
         snapshot,
         redis=redis,
-        dispatcher=TaskDispatcher(),
+        dispatcher=TaskDispatcher(runtime=runtime),
         storage=KnowledgeFileStorage(runtime.storage),
         delete_search=delete_search,
         delete_records=delete_records,
@@ -233,7 +251,7 @@ async def parse_documents(
         )
     result = await document_service.claim_and_dispatch_parse(
         runtime,
-        TaskDispatcher(),
+        TaskDispatcher(runtime=runtime),
         snapshot,
     )
     return _success(

@@ -35,6 +35,8 @@ class KnowledgeSettings(BaseSettings):
                                          validation_alias="KB_WIKI_FAILURE_ATTEMPTS")
     kb_wiki_defer_attempts: int = Field(default=240, ge=1,
                                        validation_alias="KB_WIKI_DEFER_ATTEMPTS")
+    kb_wiki_wait_timeout_seconds: int = Field(default=3600, ge=1,
+                                             validation_alias="KB_WIKI_WAIT_TIMEOUT_SECONDS")
     kb_wiki_retry_delay_seconds: int = Field(default=15, ge=1,
                                             validation_alias="KB_WIKI_RETRY_DELAY_SECONDS")
     kb_wiki_compact_depth: int = Field(default=3, ge=1,
@@ -275,6 +277,7 @@ class KnowledgeSettings(BaseSettings):
         "document_worker",
         "graphrag_worker",
         "qa_import_worker",
+        "wiki_worker",
     ] = Field(default="api", validation_alias="KB_PROCESS_ROLE")
     kb_log_level: str = Field(default="INFO", validation_alias="KB_LOG_LEVEL")
     kb_db_pool_size: int = Field(
