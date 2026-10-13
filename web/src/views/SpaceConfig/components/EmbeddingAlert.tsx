@@ -51,9 +51,8 @@ const alertColors: Record<Status, RbAlertProps['color']> = {
 
 const spaceAlertConfigs: Partial<Record<Status, SpaceAlertConfig>> = {
   pending: {
-    titleKey: 'space.reembedding.alert.runningTitle',
-    descriptionKey: 'space.reembedding.alert.runningDescription',
-    showProgress: true,
+    titleKey: 'space.reembedding.alert.pendingTitle',
+    descriptionKey: 'space.reembedding.alert.pendingDescription',
   },
   running: {
     titleKey: 'space.reembedding.alert.runningTitle',
@@ -73,7 +72,10 @@ const spaceAlertConfigs: Partial<Record<Status, SpaceAlertConfig>> = {
 const getUserAlertKey = (reembedInfo: ReembedInfo) => {
   const { status, end_users: counts } = reembedInfo
 
-  if (status === 'queued' || status === 'pending') {
+  if (status === 'pending') {
+    return 'space.reembedding.alert.userPending'
+  }
+  if (status === 'queued') {
     return 'space.reembedding.alert.userQueued'
   }
   if (status === 'running') {
@@ -160,7 +162,7 @@ const EmbeddingAlert: FC<EmbeddingAlertProps> = ({
     }
 
     hasCheckedInitialModalRef.current = true
-    if (reembedInfo.status !== 'succeeded') {
+    if (reembedInfo.status !== 'succeeded' && reembedInfo.status !== 'pending') {
       embeddingRebuildModalRef.current?.handleOpen()
     }
   }, [source, reembedInfo.status])
@@ -202,9 +204,11 @@ const EmbeddingAlert: FC<EmbeddingAlertProps> = ({
                 {t('space.reembedding.retryFailedTasks')}
               </Button>
             )}
-            <Button onClick={() => embeddingRebuildModalRef.current?.handleOpen()}>
-              {t('space.reembedding.viewDetails')}
-            </Button>
+            {reembedInfo.status !== 'pending' &&
+              <Button onClick={() => embeddingRebuildModalRef.current?.handleOpen()}>
+                {t('space.reembedding.viewDetails')}
+              </Button>
+            }
           </Space>
         </Flex>
       </RbAlert>
