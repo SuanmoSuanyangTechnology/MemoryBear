@@ -42,16 +42,11 @@ export const getKnowledgeBaseTypeList = async (): Promise<string[]> => {
 export const getFileUrl = (fileId: string) => {
   return `/files/${fileId}`;
 };
-// 知识库文档解析类型
-export const getKnowledgeBaseDocumentParseTypeList = async () => {
-  const response = await request.get(`/knowledges/parsertype`);
-  return response as any[];
-};
 
 // 知识库列表
-export const getKnowledgeBaseList = async (parent_id?: string, query?: ListQuery) => {
-  const response = await request.get(`/knowledges/knowledges`, query);
-  return response as KnowledgeBaseListResponse;
+export const getKnowledgeBaseListUrl = '/knowledges/knowledges';
+export const getKnowledgeBaseList = (query?: ListQuery) => {
+  return request.get(getKnowledgeBaseListUrl, query);
 };
 // 知识库详情
 export const getKnowledgeBaseDetail = async (id: string) => {
