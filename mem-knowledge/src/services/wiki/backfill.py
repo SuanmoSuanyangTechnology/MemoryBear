@@ -4,9 +4,9 @@ from datetime import UTC, datetime
 
 from sqlalchemy import and_, or_, select
 
-from ...models.owned import Document, Knowledge
+from ...models.owned import Document, Knowledge, WikiDocumentState
 from ...rag.wiki.config import read_wiki_config
-from ...repositories.wiki.common import as_uuid
+from ...repositories.wiki.common import as_uuid, state_delivery
 from ...repositories.wiki.state import admit
 from .execution import publish_map
 from .runtime import transaction
@@ -37,6 +37,12 @@ def _batch(session, kb_id, upper_at_ms, cursor, limit):
 
 
 def execute_backfill(runtime, kb_id, upper_at_ms, admission_id):
+    # Resume already accepted children even when admission has since been disabled.
+    while pending := transaction(
+        runtime, _unconfirmed, kb_id, admission_id, runtime.settings.kb_wiki_backfill_batch_size
+    ):
+        for delivery in pending:
+            publish_map(runtime, delivery)
     cursor = None
     accepted = 0
     while batch := transaction(
@@ -49,3 +55,21 @@ def execute_backfill(runtime, kb_id, upper_at_ms, admission_id):
                 accepted += bool(delivery["accepted"])
             cursor = (created_at, document_id)
     return {"accepted_documents": accepted}
+
+
+def _unconfirmed(session, kb_id, admission_id, limit):
+    return [
+        {**state_delivery(state), "publish": True}
+        for state in session.scalars(
+            select(WikiDocumentState)
+            .where(
+                WikiDocumentState.kb_id == as_uuid(kb_id),
+                WikiDocumentState.admission_id == admission_id,
+                WikiDocumentState.publish_confirmed.is_(False),
+                WikiDocumentState.stage == "map_pending",
+                WikiDocumentState.status == "pending",
+            )
+            .order_by(WikiDocumentState.document_id)
+            .limit(limit)
+        )
+    ]
