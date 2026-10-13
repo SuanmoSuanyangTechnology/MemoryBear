@@ -4049,12 +4049,15 @@ class MultiAgentOrchestrator:
                         "orchestration_mode": self._normalized_mode,
                     })
 
-                # handoffs 自己的 end 属于"协作运行生命周期"，不是集群会话事件：
-                # 集群级 end 由 execute_stream 在模式分支之后统一发出，这里不透传，
-                # 否则上层会看到两个 end（且第二个 end 已经把外层消息收过尾了）。
+                # handoffs 自己的 start / end 属于"协作运行生命周期"，不是集群会话事件
+                # （与 supervisor 分支同口径，见 _SUB_RUN_LIFECYCLE_EVENTS），不透传：
+                # - end：集群级 end 由 execute_stream 统一发出，透传会出现两个 end；
+                # - start：剥离 conversation_id 后变成空 start，体验分享前端 start 分支
+                #   会用它把已捕获的会话 ID 覆盖成 undefined → 轮末不回填 →
+                #   下一轮带 null 会话 ID → 后端每轮新建会话（对话分裂成多个窗口）。
                 # 其余事件先剥离子运行 conversation_id（S3：防前端会话指针被
                 # handoffs 内部会话 ID 污染——集群会话 ID 只由 start/end 发布）。
-                if event_name != "end":
+                if event_name not in _SUB_RUN_LIFECYCLE_EVENTS:
                     yield self._strip_conversation_id(event)
 
                 if event_name in ("end", "error") and active_execution_id is not None:
