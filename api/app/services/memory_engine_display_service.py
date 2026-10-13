@@ -818,7 +818,7 @@ def _build_preference_event(
     """
     if not memory_message_id or result is None:
         return None
-    if getattr(result, "status", None) != "success":
+    if _field(result, "status") != "success":
         return None
 
     added = _as_count(_field(result, "added_item_count"))
@@ -1301,21 +1301,28 @@ def _generate_card_text_zh(
             # 只有新增
             name = "我记住了新的使用偏好"
             content = f"这一天新记住了 {added} 条长期偏好，之后会在适用场景中作为参考。"
-        elif added <= 0 and deleted <= 0:
+            return name, content
+
+        name = "我更新了对你偏好的理解"
+        if added <= 0 and deleted <= 0:
             # 只有调整
-            name = "我更新了对你偏好的理解"
             content = f"这一天调整了 {updated} 条长期偏好，让偏好记录更符合你当前表达的要求。"
-        elif added <= 0:
+        elif added <= 0 and updated <= 0:
             # 只有移除
-            name = "我更新了对你偏好的理解"
             content = f"这一天移除了 {deleted} 条不再适用的长期偏好记录。"
         else:
-            # 多种变化同时存在
-            name = "我更新了对你偏好的理解"
-            content = (
-                f"这一天新记住了 {added} 条长期偏好，"
-                f"调整了 {updated} 条，并移除了 {deleted} 条不再适用的记录。"
-            )
+            # 多种变化并存：按非零项动态拼接，不输出“0 条”，也不漏报任何变化
+            parts = []
+            if added > 0:
+                parts.append(f"新记住了 {added} 条长期偏好")
+            if updated > 0:
+                parts.append(f"调整了 {updated} 条")
+            if deleted > 0:
+                parts.append(f"移除了 {deleted} 条不再适用的记录")
+            if len(parts) == 2:
+                content = "这一天" + parts[0] + "，并" + parts[1] + "。"
+            else:
+                content = "这一天" + "，".join(parts[:-1]) + "，并" + parts[-1] + "。"
         return name, content
 
     elif engine_type == "SCENE_RECONSTRUCTION":
@@ -1545,25 +1552,35 @@ def _generate_card_text_en(
                 f"{_pluralize('preference', added, 'preferences')} that day, and I "
                 "will use them as a reference in relevant situations."
             )
-        elif added <= 0 and deleted <= 0:
-            name = "I updated my understanding of your preferences"
+            return name, content
+
+        name = "I updated my understanding of your preferences"
+        if added <= 0 and deleted <= 0:
             content = (
                 f"I adjusted {updated} long-term "
                 f"{_pluralize('preference', updated, 'preferences')} that day to "
                 "better match what you have expressed."
             )
-        elif added <= 0:
-            name = "I updated my understanding of your preferences"
+        elif added <= 0 and updated <= 0:
+            removed_verb = "applies" if deleted == 1 else "apply"
             content = (
                 f"I removed {deleted} long-term preference "
-                f"{_pluralize('record', deleted)} that no longer apply."
+                f"{_pluralize('record', deleted)} that no longer {removed_verb}."
             )
         else:
-            name = "I updated my understanding of your preferences"
-            content = (
-                f"I noted {added} new long-term preferences, adjusted {updated}, "
-                f"and removed {deleted} that no longer apply."
-            )
+            # Multiple changes: join only the non-zero parts to avoid "0" counts
+            parts = []
+            if added > 0:
+                parts.append(
+                    f"noted {added} new long-term "
+                    f"{_pluralize('preference', added, 'preferences')}"
+                )
+            if updated > 0:
+                parts.append(f"adjusted {updated} of them")
+            if deleted > 0:
+                removed_verb = "applies" if deleted == 1 else "apply"
+                parts.append(f"removed {deleted} that no longer {removed_verb}")
+            content = f"I {_join_english(parts)} that day."
         return name, content
 
     if engine_type == "SCENE_RECONSTRUCTION":
@@ -1591,9 +1608,12 @@ def _generate_card_text_en(
             )
         else:
             content = (
-                f"I organized {processed} complete scenes that day, forming "
-                f"{new_communities} new topic threads and making "
-                f"{existing_updates} updates to existing ones."
+                f"I organized {processed} complete "
+                f"{_pluralize('scene', processed)} that day, forming "
+                f"{new_communities} new "
+                f"{_pluralize('topic thread', new_communities, 'topic threads')} "
+                f"and making {existing_updates} "
+                f"{_pluralize('update', existing_updates)} to existing ones."
             )
         return name, content
 
