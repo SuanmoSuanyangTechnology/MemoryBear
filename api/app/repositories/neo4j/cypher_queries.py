@@ -1482,7 +1482,8 @@ RETURN count(n) AS total
 """
 
 
-# Q2：批量查询若干节点的关联边总数，取代旧实现里每节点一次的 N+1 子查询。
+# Q2：批量查询若干节点的有效关联边总数，排除软删除的边和邻居节点，
+# 取代旧实现里每节点一次的 N+1 子查询。
 # Q2 按 ``elementId(n)`` 直接定位节点，无需 label，不涉及上面的索引命中问题。
 #
 # 注意：Neo4j 5 已移除 ``size((n)--())`` 这种「pattern expression in size()」用法，
@@ -1498,7 +1499,12 @@ GRAPH_NODES_REL_COUNT_BATCH = """
 UNWIND $node_ids AS nid
 MATCH (n) WHERE elementId(n) = nid
   AND n.delete_at IS NULL
-RETURN nid AS id, COUNT { (n)--() } AS rel_count
+RETURN nid AS id,
+       COUNT {
+           MATCH (n)-[r]-(neighbor)
+           WHERE r.delete_at IS NULL
+             AND neighbor.delete_at IS NULL
+       } AS rel_count
 """
 
 
@@ -1568,6 +1574,8 @@ def build_center_node_neighbors_query(depth: int) -> str:
 MATCH path = (center)-[*1..{safe_depth}]-(connected)
 WHERE center.end_user_id = $end_user_id
   AND elementId(center) = $center_node_id
+  AND all(node IN nodes(path) WHERE node.delete_at IS NULL)
+  AND all(rel IN relationships(path) WHERE rel.delete_at IS NULL)
 WITH collect(DISTINCT center) + collect(DISTINCT connected) as all_nodes
 UNWIND all_nodes as n
 RETURN DISTINCT
@@ -1578,12 +1586,15 @@ LIMIT $limit
 """
 
 
-# Q3：查询若干节点之间的有向关系
+# Q3：查询若干未软删除节点之间的有效有向关系
 # 参数：$node_ids (LIST<STRING>)
 GRAPH_EDGES_AMONG_NODES = """
 MATCH (n)-[r]->(m)
 WHERE elementId(n) IN $node_ids
   AND elementId(m) IN $node_ids
+  AND n.delete_at IS NULL
+  AND m.delete_at IS NULL
+  AND r.delete_at IS NULL
 RETURN
     elementId(r) as id,
     elementId(n) as source,
