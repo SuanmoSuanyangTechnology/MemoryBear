@@ -53,7 +53,7 @@ export const space = {
         switchLockedNotice: 'Re-embedding is in progress. Model switching is locked.',
         alert: {
           pendingTitle: 'Memory Library Index Rebuild Queued. Please Wait.',
-          pendingDescription: 'Because the workspace Embedding model has changed, the memory libraries need to rebuild their vector indexes with the new model. Target model: text-embedding-3-large. The task is currently queued. Search has fallen back to keyword/full-text search, and model switching is locked.',
+          pendingDescription: 'Because the workspace Embedding model has changed, the memory libraries need to rebuild their vector indexes with the new model. Target model: {{model}}. The task is currently queued. Search has fallen back to keyword/full-text search, and model switching is locked.',
           runningTitle: 'Rebuilding Memory Library Indexes',
           runningDescription: 'Because the workspace Embedding model has changed, the memory libraries need to rebuild their vector indexes with the new model. Target model: {{model}}. Processing is in progress. Search has fallen back to keyword/full-text search, and model switching is locked.',
           succeededTitle: 'Memory Library Index Rebuild Complete',

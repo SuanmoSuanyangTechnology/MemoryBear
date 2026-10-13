@@ -72,7 +72,7 @@ const spaceAlertConfigs: Partial<Record<Status, SpaceAlertConfig>> = {
 const getUserAlertKey = (reembedInfo: ReembedInfo) => {
   const { status, end_users: counts } = reembedInfo
 
-  if (status === 'pending' || !reembedInfo.total_end_users) {
+  if (status === 'pending' || (!reembedInfo.total_end_users && status === 'queued')) {
     return 'space.reembedding.alert.userPending'
   }
   if (status === 'queued') {
@@ -162,7 +162,7 @@ const EmbeddingAlert: FC<EmbeddingAlertProps> = ({
     }
 
     hasCheckedInitialModalRef.current = true
-    if (reembedInfo.status !== 'succeeded' && reembedInfo.status !== 'pending' && reembedInfo.total_end_users > 0) {
+    if (reembedInfo.status !== 'succeeded' && !(reembedInfo.status === 'pending' && !reembedInfo.total_end_users)) {
       embeddingRebuildModalRef.current?.handleOpen()
     }
   }, [source, reembedInfo.status])
@@ -171,7 +171,7 @@ const EmbeddingAlert: FC<EmbeddingAlertProps> = ({
     return null
   }
 
-  const spaceAlertConfig = spaceAlertConfigs[reembedInfo.total_end_users > 0 ? reembedInfo.status : 'pending']
+  const spaceAlertConfig = spaceAlertConfigs[!(reembedInfo.status === 'pending' && !reembedInfo.total_end_users) ? reembedInfo.status : 'pending']
   const userAlertKey = getUserAlertKey(reembedInfo)
   const counts = reembedInfo.end_users
 
@@ -204,7 +204,7 @@ const EmbeddingAlert: FC<EmbeddingAlertProps> = ({
                 {t('space.reembedding.retryFailedTasks')}
               </Button>
             )}
-            {reembedInfo.status !== 'pending' && reembedInfo.total_end_users > 0 &&
+            {!(reembedInfo.status === 'pending' && !reembedInfo.total_end_users) &&
               <Button onClick={() => embeddingRebuildModalRef.current?.handleOpen()}>
                 {t('space.reembedding.viewDetails')}
               </Button>
