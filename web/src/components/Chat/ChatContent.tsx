@@ -17,6 +17,7 @@ import MessageFiles from './MessageFiles'
 import MoreDropdown from '@/components/MoreDropdown'
 import InterventionList from './InterventionList'
 import MemoryRecall from './MemoryRecall'
+import WaitingModelResponse from './WaitingModelResponse'
 
 const getFileUrl = (file: any) => {
   return file.thumbUrl || file.url || (file.originFileObj ? URL.createObjectURL(file.originFileObj) : undefined)
@@ -106,8 +107,8 @@ const ChatContent: FC<ChatContentProps> = ({
   }
   const [playingIndex, setPlayingIndex] = useState<string | null>(null)
 
-  const handlePlay = (audio_url: string, audio_status?: string) => {
-    if (audio_status !== 'completed' && typeof audio_status === 'string') return
+  const handlePlay = (audio_url?: string | null, audio_status?: string) => {
+    if (!audio_url || (audio_status !== 'completed' && typeof audio_status === 'string')) return
     if (playingIndex === audio_url) {
       audioRef.current?.pause()
       setPlayingIndex(null)
@@ -169,7 +170,7 @@ const ChatContent: FC<ChatContentProps> = ({
         prevDataLengthRef.current = data.length;
       }
     }, 0);
-  }, [data])
+  }, [data, playingIndex])
 
   const handleDownload = (file: any) => {
     if (file.thumbUrl || file.originFileObj) {
@@ -245,7 +246,7 @@ const ChatContent: FC<ChatContentProps> = ({
     messageApi.success(t('common.copySuccess'))
   }
   return (
-    <div ref={scrollContainerRef} className={clsx("rb:relative rb:h-full! rb:h-0! rb:min-h-0! rb:overflow-y-auto", classNames)}>
+    <div ref={scrollContainerRef} className={clsx("rb:relative rb:h-full! rb:min-h-0! rb:overflow-y-auto", classNames)}>
       {data.length === 0
         ? <div className="rb:h-full! rb:min-h-0! rb:overflow-y-auto">{empty}</div> // Display empty state, ensure it fills ChatContent height and stays scrollable on overflow
         : data.map((vo, index) => {
@@ -278,7 +279,7 @@ const ChatContent: FC<ChatContentProps> = ({
                     >
                       {/* Top label (such as timestamp, username, etc.) */}
                       {labelPosition === 'top' &&
-                        <div className="rb:text-[#5B6167] rb:text-[12px] rb:leading-4 rb:font-regular rb:px-1">
+                        <div className="rb:text-gray-600 rb:text-[12px] rb:leading-4 rb:font-regular rb:px-1">
                           {labelFormat(item)}
                         </div>
                       }
@@ -286,12 +287,12 @@ const ChatContent: FC<ChatContentProps> = ({
                       {/* Message bubble */}
                       <div className={clsx('rb:text-left rb:leading-5 rb:inline-block rb:wrap-break-word rb:relative', item.role === 'user' ? contentClassNames : '', {
                         // Error message style (content is null and not assistant message)
-                        'rb:text-[#FF5D34]': (item.status && !['completed', 'waiting_human', 'running'].includes(item.status as string)) || (errorDesc && item.role === 'assistant' && item.content === null && !renderRuntime) || (item.role === 'assistant' && typeof item.meta_data?.error === 'string'),
+                        'rb:text-red-500': (item.status && !['completed', 'waiting_human', 'running'].includes(item.status as string)) || (errorDesc && item.role === 'assistant' && item.content === null && !renderRuntime) || (item.role === 'assistant' && typeof item.meta_data?.error === 'string'),
                         // Assistant message style
                         'rb:bg-[#E3EBFD] rb:p-[10px_12px_2px_12px] rb:rounded-lg rb:max-w-130': item.role === 'user',
                         'rb:max-w-full rb:w-full': item.role === 'assistant',
                         // User message style
-                        'rb:text-[#212332]': item.role === 'assistant' && (item.content || item.content === '' || typeof renderRuntime === 'function'),
+                        'rb:text-gray-800': item.role === 'assistant' && (item.content || item.content === '' || typeof renderRuntime === 'function'),
                         'rb:mt-1': labelPosition === 'top',
                         'rb:mb-1': labelPosition === 'bottom',
                         'rb:pl-7': item.role === 'assistant' && typeof item.meta_data?.error === 'string' && typeof renderRuntime !== 'function',
@@ -306,7 +307,7 @@ const ChatContent: FC<ChatContentProps> = ({
                         )}
                         {item.meta_data?.reasoning_content &&
                           <div className={clsx("rb:mb-4 rb-border rb:rounded-xl rb:px-4 rb:pt-4 rb:bg-white", {
-                            'rb:hover:bg-[#F6F6F6] rb:w-64': !isReasoningExpanded(index)
+                            'rb:hover:bg-gray-100 rb:w-64': !isReasoningExpanded(index)
                           })}>
                             <Flex
                               align="center"
@@ -318,7 +319,7 @@ const ChatContent: FC<ChatContentProps> = ({
                                 align="center"
                                 justify="center"
                                 className={clsx("rb:size-6.5 rb:cursor-pointer rb-border rb:rounded-lg", {
-                                  'rb:hover:bg-[#F6F6F6]!': isReasoningExpanded(index)
+                                  'rb:hover:bg-gray-100!': isReasoningExpanded(index)
                                 })}
                                 onClick={() => toggleReasoning(index)}
                               >
@@ -331,7 +332,7 @@ const ChatContent: FC<ChatContentProps> = ({
                             </Flex>
                             </Flex>
                             {isReasoningExpanded(index) &&
-                              <Markdown content={item.meta_data.reasoning_content} className="rb:text-[#5B6167] rb:text-[12px]" />
+                              <Markdown content={item.meta_data.reasoning_content} className="rb:text-gray-600 rb:text-[12px]" />
                             }
                           </div>
                         }
@@ -356,8 +357,8 @@ const ChatContent: FC<ChatContentProps> = ({
                         {outputs && outputs?.length > 1
                           ? <Flex vertical gap={8} align="start">
                             {outputs?.map((output, idx: number) => (
-                              <div key={idx} className="rb:bg-[#F6F6F6] rb:rounded-xl rb:px-3 rb:pt-2.5 rb:pb-0.5">
-                                <div className="rb:text-[#5B6167] rb:text-[12px] rb:mb-3">{t('application.reply')} {idx + 1}</div>
+                              <div key={idx} className="rb:bg-gray-100 rb:rounded-xl rb:px-3 rb:pt-2.5 rb:pb-0.5">
+                                <div className="rb:text-gray-600 rb:text-[12px] rb:mb-3">{t('application.reply')} {idx + 1}</div>
                                 <Markdown
                                   content={formatContent(output)}
                                   onFormSubmit={onFormSubmit}
@@ -370,6 +371,9 @@ const ChatContent: FC<ChatContentProps> = ({
                             onFormSubmit={onFormSubmit}
                           />
                         }
+                        {item.role === 'assistant' && !isEnded && index === data.length - 1 && (
+                          <WaitingModelResponse />
+                        )}
 
                         {item.meta_data?.citations && item.meta_data?.citations.length > 0 &&
                           <Flex vertical gap={4} className="rb:mt-1! rb:pt-3! rb-border-t rb:mb-2!">
@@ -377,7 +381,7 @@ const ChatContent: FC<ChatContentProps> = ({
                             {item.meta_data?.citations?.map((citation: CitationItem, idx: number) => (
                               <Flex key={idx} align="center" gap={12}>
                                 <div
-                                  className="rb:text-[#155EEF] rb:leading-5 rb:underline rb:cursor-pointer"
+                                  className="rb:text-blue-500 rb:leading-5 rb:underline rb:cursor-pointer"
                                   onClick={() => {
                                     const params = new URLSearchParams({ documentId: citation.document_id, parentId: citation.knowledge_id });
                                     window.open(`/#/knowledge-base/${citation.knowledge_id}/DocumentDetails?${params}`, '_blank');
@@ -398,7 +402,7 @@ const ChatContent: FC<ChatContentProps> = ({
                       {(labelPosition === 'bottom' || item.meta_data?.audio_url || isSupportTools || isAlwaysShowAssistantTools) &&
                         <Flex gap={12} wrap align="center" justify={item.role === 'user' ? 'end' : 'start'} className={item.role === 'user' ? 'rb:mt-2!' : ''}>
                           {labelPosition === 'bottom' &&
-                            <div className="rb:text-[#5B6167] rb:text-[12px] rb:leading-4 rb:font-regular">
+                            <div className="rb:text-gray-600 rb:text-[12px] rb:leading-4 rb:font-regular">
                               {labelFormat(item)}
                             </div>
                           }
@@ -407,12 +411,12 @@ const ChatContent: FC<ChatContentProps> = ({
                               ? <Spin />
                               : playingIndex !== item.meta_data?.audio_url
                                 ? <SoundOutlined className={clsx("rb:cursor-pointer rb:size-5.5", {
-                                  'rb:text-[#FF5D34]': item.meta_data?.audio_status === 'error',
-                                  'rb:hover:text-[#155EEF]!': !item.meta_data?.audio_status || !['pending', 'error'].includes(item.meta_data?.audio_status)
-                                })} onClick={() => handlePlay(item.meta_data?.audio_url!, item.meta_data?.audio_status)} />
+                                  'rb:text-red-500': item.meta_data?.audio_status === 'error',
+                                  'rb:hover:text-blue-500!': !item.meta_data?.audio_status || !['pending', 'error'].includes(item.meta_data?.audio_status)
+                                })} onClick={() => handlePlay(item.meta_data?.audio_url, item.meta_data?.audio_status)} />
                                 : <div
                                   className="rb:size-5.5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/conversation/audio_ing.gif')]"
-                                  onClick={() => handlePlay(item.meta_data?.audio_url!, item.meta_data?.audio_status)}
+                                  onClick={() => handlePlay(item.meta_data?.audio_url, item.meta_data?.audio_status)}
                                 />
                             }
                           </>}
@@ -481,7 +485,7 @@ const ChatContent: FC<ChatContentProps> = ({
                               : null
                             }
                           </>}
-                          {isSupportTools &&item.role === 'user' &&
+                          {isSupportTools && item.role === 'user' &&
                             <Tooltip title={t('common.copy')}>
                               <div
                                 className="rb:size-4.5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/common/copy.svg')]"
@@ -502,7 +506,7 @@ const ChatContent: FC<ChatContentProps> = ({
                       {item.meta_data?.suggested_questions && item.meta_data?.suggested_questions?.length > 0 &&
                         <Flex wrap gap={8} className="rb:my-1!">
                           {item.meta_data?.suggested_questions?.map((question: string, idx: number) => (
-                            <Button key={idx} size="small" className="rb:text-[12px]! rb:text-[#155EEF]!"
+                            <Button key={idx} size="small" className="rb:text-[12px]! rb:text-blue-500!"
                               onClick={() => onSend?.(question)}
                             >{question}</Button>
                           ))}

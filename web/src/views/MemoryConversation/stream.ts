@@ -31,7 +31,7 @@ const normalizeKey = (value: unknown) => String(value || '')
 
 const normalizeStatus = (value: unknown, fallback = 'running') => {
   const status = normalizeKey(value)
-  if (['completed', 'complete', 'success', 'succeeded', 'done'].includes(status)) return 'completed'
+  if (['completed', 'complete', 'success', 'succeeded', 'done', 'degraded'].includes(status)) return 'completed'
   if (['failed', 'failure', 'error', 'cancelled', 'canceled', 'timeout'].includes(status)) return 'failed'
   return status || fallback
 }

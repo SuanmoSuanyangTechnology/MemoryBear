@@ -177,6 +177,30 @@ export interface NodeStatisticsItem {
   count: number;
   percentage: number;
 }
+export interface EndUserMetaData {
+    goals?: string[];
+    traits?: string[];
+    interests?: string[];
+    core_facts?: string[];
+    alias?: string[];
+    beliefs_or_stances?: string[];
+    anchors?: string[];
+    relations?: string[];
+
+    name?: string[];
+    age?: string[];
+    from?: string[];
+    residence?: string[];
+    education?: string[];
+    occupation?: string[];
+    family?: string[];
+    religion_or_politics?: string[];
+    health?: string[];
+    person?: string[];
+    group?: string[];
+    object?: string[];
+    pet?: string[];
+  }
 /**
  * End user profile
  */
@@ -186,15 +210,7 @@ export interface EndUser {
   end_user_id: string;
   other_name: string;
   aliases: string[];
-  meta_data: {
-    goals: string[];
-    traits: string[];
-    interests: string[];
-    core_facts: string[];
-    alias: string[];
-    beliefs_or_stances: string[];
-    anchors: string[];
-  };
+  meta_data: EndUserMetaData;
   created_at: number;
   updated_at: number;
 }

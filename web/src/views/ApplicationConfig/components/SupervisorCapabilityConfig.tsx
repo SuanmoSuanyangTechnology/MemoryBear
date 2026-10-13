@@ -10,6 +10,7 @@ import AiPromptModal from './AiPromptModal'
 import PromptConfigurationCard from './PromptConfigurationCard'
 import SkillList from './Skill'
 import VariableList from './VariableList/VariableList'
+import ToolList from './ToolList/ToolList'
 import type { Variable } from './VariableList/types'
 import {
   buildVariablesFromNames,
@@ -21,6 +22,7 @@ const PROMPT_PATH: string[] = ['supervisor_config', 'system_prompt']
 const KNOWLEDGE_PATH: string[] = ['supervisor_config', 'knowledge_retrieval']
 const VARIABLES_PATH: string[] = ['supervisor_config', 'variables']
 const SKILLS_PATH: string[] = ['supervisor_config', 'skills']
+const TOOLS_PATH: string[] = ['supervisor_config', 'tools']
 
 const withStableIndexes = (variables: Variable[]): Variable[] => {
   const createdAt = Date.now()
@@ -108,6 +110,10 @@ const SupervisorCapabilityConfig = () => {
 
       <Form.Item name={SKILLS_PATH} noStyle>
         <SkillList name={SKILLS_PATH} />
+      </Form.Item>
+
+      <Form.Item name={TOOLS_PATH} noStyle>
+        <ToolList />
       </Form.Item>
 
       <AiPromptModal

@@ -186,7 +186,7 @@ const ApplicationModal = forwardRef<ApplicationModalRef, ApplicationModalProps>(
           />
         </FormItem>
 
-        {ONTOLOGY_LIST &&
+        {!editVo?.id && ONTOLOGY_LIST &&
           <PrivateWrap>
             {() => (
               <FormItem
