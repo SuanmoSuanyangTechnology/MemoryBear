@@ -220,6 +220,10 @@ async def readiness():
 # 注册路由
 app.include_router(health_router)
 
+# TODO(联调Mock，真实功能上线后整体移除)：集群补充功能 Mock，须在 manager_router 之前注册以优先匹配同路径
+from app.mocks import cluster_mock
+app.include_router(cluster_mock.router, prefix="/api")
+
 # 管理端 API (JWT 认证)
 app.include_router(manager_router, prefix="/api")
 
