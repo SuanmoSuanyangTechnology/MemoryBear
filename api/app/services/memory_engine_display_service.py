@@ -817,6 +817,8 @@ def _build_preference_event(
     时无法派生稳定 operation_id，直接返回 None，避免用随机值造成重复累计。
     """
     if not memory_message_id or result is None:
+        if not memory_message_id:
+            logger.warning("[EngineDisplay] 偏好事件组装跳过: memory_message_id 为空")
         return None
     if _field(result, "status") != "success":
         return None
@@ -862,6 +864,7 @@ def _build_scene_reconstruction_event(
 
     batch_fingerprint = result.get("batch_fingerprint")
     if not batch_fingerprint:
+        logger.warning("[EngineDisplay] 情景重构事件组装跳过: batch_fingerprint 为空")
         return None
 
     return {

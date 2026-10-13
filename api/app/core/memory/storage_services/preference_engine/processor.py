@@ -122,6 +122,8 @@ class PreferenceProcessor:
         deleted_items)。原子项计数以实际落库为准：先在组内 pending 累计，
         ``update_preference`` 保存成功后才计入返回值；节点保存前消失（返回
         None）的分组整组不计，避免展示层把未落库的操作报为已生效活动。
+        ``noop_item_count`` 是识别阶段（P2 判 noop）的诊断计数，与保存成败
+        无关，不进入展示卡片统计。
         """
         incoming_items = [
             PreferenceItem(mode=item.mode, preference_text=item.preference_text)
