@@ -18,6 +18,10 @@ ACTIVE_STATUSES = frozenset({"pending", "running", "retry_wait"})
 TERMINAL_TASK_STATUSES = frozenset({"succeeded", "failed", "cancelled", "superseded"})
 MAX_LANGUAGE_LENGTH = 64
 MAX_EXTRACT_PROMPT_LENGTH = 12000
+TYPE_GROUP_NAMES = frozenset({"知识", "摘要", "knowledge", "summary", "summaries"})
+# Opportunistic cleanup bounds diagnostic history without a periodic scheduler.
+TASK_RETENTION_DAYS = 30
+TASK_CLEANUP_BATCH_SIZE = 1000
 
 
 class WikiError(RuntimeError):
@@ -46,6 +50,8 @@ class WikiConfig:
 
 def read_wiki_config(parser_config: Mapping[str, Any] | None) -> WikiConfig:
     value = (parser_config or {}).get("wiki", {})
+    if value is None:
+        value = {}
     if not isinstance(value, Mapping):
         raise ValueError("wiki must be an object")
     enabled = value.get("enabled", False)
