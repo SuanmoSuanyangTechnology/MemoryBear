@@ -164,10 +164,10 @@ class PreferenceProcessor:
             if operations.is_noop:
                 noop_item_count += 1
                 continue
+            working = apply_preference_operations(working, incoming_item, operations)
             pending_added += len(operations.add)
             pending_updated += len(operations.update)
             pending_deleted += len(operations.delete)
-            working = apply_preference_operations(working, incoming_item, operations)
             changed = True
 
         if not changed:
