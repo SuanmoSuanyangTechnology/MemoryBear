@@ -72,7 +72,7 @@ const spaceAlertConfigs: Partial<Record<Status, SpaceAlertConfig>> = {
 const getUserAlertKey = (reembedInfo: ReembedInfo) => {
   const { status, end_users: counts } = reembedInfo
 
-  if (status === 'pending') {
+  if (status === 'pending' || !reembedInfo.total_end_users) {
     return 'space.reembedding.alert.userPending'
   }
   if (status === 'queued') {
@@ -82,13 +82,13 @@ const getUserAlertKey = (reembedInfo: ReembedInfo) => {
     if (counts.failed > 0) {
       return 'space.reembedding.alert.userRunningFailed'
     }
-    if (counts.running > 0 && counts.queued > 0) {
+    if (counts.running > 0) {
       return 'space.reembedding.alert.userRunningQueued'
     }
     if (counts.succeeded > 0 && counts.queued > 0) {
       return 'space.reembedding.alert.userSucceededQueued'
     }
-    return null
+    return 'space.reembedding.alert.userQueued'
   }
   if (status === 'succeeded') {
     return 'space.reembedding.alert.userSucceeded'
@@ -162,7 +162,7 @@ const EmbeddingAlert: FC<EmbeddingAlertProps> = ({
     }
 
     hasCheckedInitialModalRef.current = true
-    if (reembedInfo.status !== 'succeeded' && reembedInfo.status !== 'pending') {
+    if (reembedInfo.status !== 'succeeded' && reembedInfo.status !== 'pending' && reembedInfo.total_end_users > 0) {
       embeddingRebuildModalRef.current?.handleOpen()
     }
   }, [source, reembedInfo.status])
@@ -171,7 +171,7 @@ const EmbeddingAlert: FC<EmbeddingAlertProps> = ({
     return null
   }
 
-  const spaceAlertConfig = spaceAlertConfigs[reembedInfo.status]
+  const spaceAlertConfig = spaceAlertConfigs[reembedInfo.total_end_users > 0 ? reembedInfo.status : 'pending']
   const userAlertKey = getUserAlertKey(reembedInfo)
   const counts = reembedInfo.end_users
 
@@ -204,7 +204,7 @@ const EmbeddingAlert: FC<EmbeddingAlertProps> = ({
                 {t('space.reembedding.retryFailedTasks')}
               </Button>
             )}
-            {reembedInfo.status !== 'pending' &&
+            {reembedInfo.status !== 'pending' && reembedInfo.total_end_users > 0 &&
               <Button onClick={() => embeddingRebuildModalRef.current?.handleOpen()}>
                 {t('space.reembedding.viewDetails')}
               </Button>
