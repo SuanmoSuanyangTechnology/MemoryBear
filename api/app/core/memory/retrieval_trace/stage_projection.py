@@ -314,12 +314,6 @@ def _search_status(trace: RetrievalExecutionTrace) -> str:
         active.append(trace.semantic_status)
     if active and all(status == "failed" for status in active):
         return "failed"
-    if any(status in {"failed", "degraded"} for status in active):
-        return "degraded"
-    if trace.rerank_status == "degraded":
-        return "degraded"
-    if trace.degraded_reasons:
-        return "degraded"
     return "completed"
 
 
