@@ -59,7 +59,7 @@ const RbCard: FC<RbCardProps> = ({
         {avatarUrl
           ? <img src={avatarUrl} alt={avatarUrl} className="rb:size-12 rb:rounded-lg" />
           : avatarText
-            ? <Flex align="center" justify="center" className={clsx(avatarClassName, "rb:size-11 rb:rounded-lg rb:text-[24px] rb:text-[#ffffff] rb:bg-[#155EEF]")}>{avatarText}</Flex> : null
+            ? <Flex align="center" justify="center" className={clsx(avatarClassName, "rb:size-11 rb:rounded-lg rb:text-[24px] rb:text-[#ffffff] rb:bg-blue-500")}>{avatarText}</Flex> : null
         }
         {isNeedTooltip
           ? <Tooltip title={title} placement="topLeft">

@@ -70,7 +70,7 @@ const ResultCard: FC<ResultCardProps> = ({
       headerType="borderless"
       headerClassName={headerClassName ?? "rb:min-h-[40px]! rb:text-[#212332]! rb:text-[14px]!"}
       bodyClassName={bodyClassName ?? "rb:py-0! rb:px-3!"}
-      className={className ?? "rb:bg-[#F6F6F6]!"}
+      className={className ?? "rb:bg-gray-100!"}
     >
       {((expanded && handleExpand) || (!handleExpand))&& children}
     </RbCard>

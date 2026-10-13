@@ -126,19 +126,33 @@ export interface MemorySummaryNode {
   caption: string;
   associative_memory: number;
 }
+export interface PreferenceNodeProperties {
+  domain: string;
+  subject: string;
+  situation_key: string;
+  preference_text_all: string
+  created_at: string;
+  updated_at: string;
+  associative_memory: number;
+}
+export interface PreferenceGroupNodeProperties {
+  name: string;
+  virtual: boolean;
+  preference_count: number;
+}
 /**
  * Graph node
  */
 export interface Node {
   id: string;
-  label:  'AssistantOriginal' | 'AssistantPruned' | 'Chunk' | 'Dialogue' | 'ExtractedEntity' | 'Perceptual' | 'Statement' | 'Conversation' | 'MemorySummary';
+  label:  'AssistantOriginal' | 'AssistantPruned' | 'Chunk' | 'Dialogue' | 'ExtractedEntity' | 'Perceptual' | 'Statement' | 'Conversation' | 'MemorySummary' | 'Preference' | 'PreferenceGroup';
   category: number;
   symbolSize: number;
   name: string;
   itemStyle: {
     color: string;
   }
-  properties: BaseProperties | AssistantOriginalNodeProperties | StatementNodeProperties | ExtractedEntityNodeProperties | PerceptualNodeProperties
+  properties: BaseProperties | AssistantOriginalNodeProperties | StatementNodeProperties | ExtractedEntityNodeProperties | PerceptualNodeProperties | PreferenceNodeProperties | PreferenceGroupNodeProperties 
   caption: string;
   type?: 'edge';
 }

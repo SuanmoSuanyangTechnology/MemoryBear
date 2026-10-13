@@ -70,7 +70,7 @@ const  Empty: FC<EmptyProps> = ({
             {/* Empty state icon */}
             <img src={url || emptyIcon} alt="404" style={{ width: `${width}px`, height: `${height}px` }} />
             {/* Optional title */}
-            {title && <div className="rb:mt-2 rb:leading-5 rb:font-medium">{title}</div>}
+            {title && <div className="rb:mt-2 rb:leading-5 rb:text-gray-800 rb:font-medium">{title}</div>}
             {/* Optional subtitle with conditional styling */}
             {curSubTitle && <div className={`rb:mt-[${url ? 8 : 5}px] rb:leading-4 rb:text-[12px] rb:text-gray-600 ${subClassName}`}>{curSubTitle}</div>}
           </Flex>
