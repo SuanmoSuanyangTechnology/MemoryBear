@@ -15,7 +15,7 @@ import { useTranslation } from 'react-i18next'
 import clsx from 'clsx';
 import { Flex } from 'antd';
 
-import type { DashboardData } from '../index'
+import type { DashboardData } from '../types'
 
 /** Card configuration with styling */
 const list = [
@@ -49,18 +49,18 @@ const TopCardList: FC<{data?: DashboardData}> = ({ data }) => {
           >
             <div className={clsx("rb:text-[12px] rb:leading-4", {
               'rb:text-[#FFFFFF]': item.key === 'total_memory',
-              'rb:text-[#5B6167]': item.key !== 'total_memory',
+              'rb:text-gray-600': item.key !== 'total_memory',
             })}>{t(`dashboard.${item.key}`)}</div>
 
             <div className={clsx("rb:text-[20px] rb:font-bold rb:leading-7 rb:mt-1 rb:font-[MiSans-Bold]", {
               'rb:text-[#FFFFFF]': item.key === 'total_memory',
             })}>
-              {data?.[item.key as keyof DashboardData] || 0}
+              {(data?.[item.key as keyof DashboardData] || 0).toLocaleString()}
             </div>
 
             <Flex align="center" className={clsx('rb:font-medium rb:mt-7.5!', {
-              'rb:text-[#FF5D34]': data?.[`${item.key}_change` as keyof DashboardData] && data?.[`${item.key}_change` as keyof DashboardData] < 0,
-              'rb:text-[#369F21]': !data?.[`${item.key}_change` as keyof DashboardData] || data?.[`${item.key}_change` as keyof DashboardData] >= 0,
+              'rb:text-red-500': data?.[`${item.key}_change` as keyof DashboardData] && data?.[`${item.key}_change` as keyof DashboardData] < 0,
+              'rb:text-green-600': !data?.[`${item.key}_change` as keyof DashboardData] || data?.[`${item.key}_change` as keyof DashboardData] >= 0,
               'rb:text-[#FFFFFF]': item.key === 'total_memory'
             })}>
               {data?.[`${item.key}_change` as keyof DashboardData] && typeof data?.[item.key as keyof DashboardData] === 'number'
@@ -74,7 +74,7 @@ const TopCardList: FC<{data?: DashboardData}> = ({ data }) => {
             </Flex>
             <div className={clsx("rb:text-[12px] rb:leading-4 rb:mt-0.5", {
               'rb:text-[#FFFFFF]': item.key === 'total_memory',
-              'rb:text-[#5B6167]': item.key !== 'total_memory',
+              'rb:text-gray-600': item.key !== 'total_memory',
             })}>
               {t('dashboard.comparedToYesterday')}
             </div>

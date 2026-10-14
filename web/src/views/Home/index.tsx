@@ -1,9 +1,3 @@
-/*
- * @Author: ZhaoYing 
- * @Date: 2026-02-03 17:12:43 
- * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-08-03 17:15:29
- */
 /**
  * Home Dashboard Page
  * Main dashboard displaying memory statistics, charts, activities, and quick operations
@@ -18,56 +12,22 @@ import clsx from 'clsx';
 import TopCardList from './components/TopCardList'
 import LineCard from './components/LineCard'
 import PieCard from './components/PieCard'
-import { getDashboardData, getMemoryIncrement, getKbTypes, getWorkspaceStatistics } from '@/api/memory';
+import { getDashboardData, getMemoryIncrement, getKbTypes } from '@/api/memory';
 import RecentActivity from './components/RecentActivity'
 import TagList from './components/TagList'
 import QuickOperation from './components/QuickOperation'
 import ApiLineCard from './components/ApiLineCard'
 import BarCard from './components/BarCard';
 import Card from './components/Card'
-
-/**
- * Dashboard statistics data
- */
-export interface DashboardData {
-  total_memory: number;
-  total_app: number;
-  total_knowledge: number;
-  total_api_call: number;
-  total_memory_change: number;
-  total_app_change: number;
-  total_knowledge_change: number;
-  total_api_call_change: number;
-}
-export interface WorkspaceStatistics {
-  statistics: Array<{
-    type:
-      | 'PERCEPTUAL_MEMORY'
-      | 'WORKING_MEMORY'
-      | 'SHORT_TERM_MEMORY'
-      | 'EXPLICIT_MEMORY'
-      | 'IMPLICIT_MEMORY'
-      | 'EMOTIONAL_MEMORY'
-      | 'EPISODIC_MEMORY'
-      | 'FORGET_MEMORY';
-    count: number;
-    percentage: number;
-    change: number;
-  }>;
-  total_count: number;
-  total_count_change: number;
-  total_users: number;
-  update: number;
-  generated_at: number;
-}
+import type { DashboardDataResponse, DashboardData, WorkspaceStatistics } from './types';
 
 const Home = () => {
   const { t } = useTranslation()
+  const [dashboardDataLoading, setDashboardDataLoading] = useState(true);
   const [dashboardData, setDashboardData] = useState<DashboardData>({} as DashboardData);
   const [loading, setLoading] = useState({
     knowledgeTypeDistribution: true,
   });
-  const [workspaceStatisticsLoading, setWorkspaceStatisticsLoading] = useState(true)
   const [workspaceStatistics, setWorkspaceStatistics] = useState<WorkspaceStatistics>({} as WorkspaceStatistics)
   const [knowledgeTypeDistribution, setKnowledgeTypeDistribution] = useState<Array<{ name: string; value: number }>>([]);
   const [memoryIncrement, setMemoryIncrement] = useState<Array<{ date: string; total_num: number; }>>([]);
@@ -80,30 +40,25 @@ const Home = () => {
   useEffect(() => {
     getData()
     getKnowledgeTypeDistribution()
-    getWorkspaceStatisticsData()
   }, []);
   /** Fetch memory total, app count, knowledge base count, API call count */
   const getData = () => {
-    getDashboardData().then(res => {
-      const response = res as {
-        storage_type: 'rag' | 'neo4j',
-        neo4j_data?:  {
-          total_memory?: number;
-          total_app?: number;
-          total_knowledge?: number;
-          total_api_call?: number;
-        };
-        rag_data?: {
-          total_memory?: number;
-          total_app?: number;
-          total_knowledge?: number;
-          total_api_call?: number;
-        }
-      }
-      const { storage_type = 'neo4j' } = response || {}
-      const responseData = storage_type === 'neo4j' ? response.neo4j_data : response.rag_data
-      setDashboardData(responseData as DashboardData)
-    })
+    setDashboardDataLoading(true)
+    getDashboardData()
+      .then(res => {
+        const response = res as DashboardDataResponse
+        const { storage_type = 'neo4j', memory_update = 0, memory_update_change = 0 } = response || {}
+        const responseData = storage_type === 'neo4j' ? response.neo4j_data : response.rag_data
+        setDashboardData(responseData as DashboardData)
+        setWorkspaceStatistics({
+          ...(response.workspace_statistics || {}),
+          memory_update,
+          memory_update_change
+        })
+      })
+      .finally(() => {
+        setDashboardDataLoading(false)
+      })
   }
   /** Fetch knowledge base type distribution */
   const getKnowledgeTypeDistribution = () => {
@@ -142,17 +97,6 @@ const Home = () => {
       const response = res as {items: { date: string; total_num: number; }[]}
       setMemoryIncrement(response.items || [])
     })
-  }
-
-  const getWorkspaceStatisticsData = () => {
-    setWorkspaceStatisticsLoading(true)
-    getWorkspaceStatistics()
-      .then(res => {
-        setWorkspaceStatistics(res as WorkspaceStatistics)
-      })
-      .finally(() => {
-        setWorkspaceStatisticsLoading(false)
-      })
   }
   useEffect(() => {
     getMemoryIncrementData()
@@ -205,8 +149,19 @@ const Home = () => {
 
                   <Flex align="flex-end" gap={4}>
                     <span className="rb:text-[16px] rb:leading-4 rb:font-[MiSans-Bold] rb:text-gray-900">
-                      {(workspaceStatistics.update ?? 0).toLocaleString()}
+                      {(workspaceStatistics.memory_update ?? 0).toLocaleString()}
                     </span>
+
+                    <Flex align="center" className={clsx('rb:font-medium rb:leading-3.5', {
+                      'rb:text-red-500': workspaceStatistics.memory_update_change < 0,
+                      'rb:text-green-600': workspaceStatistics.memory_update_change >= 0,
+                    })}>
+                      <div className={clsx("rb:size-3.5 rb:cursor-pointer rb:bg-cover", {
+                        "rb:bg-[url('@/assets/images/home/arrow_down.png')]": workspaceStatistics.memory_update_change < 0,
+                        "rb:bg-[url('@/assets/images/home/arrow_up_success.svg')]": workspaceStatistics.memory_update_change >= 0,
+                      })}></div>
+                      {workspaceStatistics.memory_update_change ?? 0}
+                    </Flex>
                   </Flex>
                 </Flex>
               </div>   
@@ -229,7 +184,7 @@ const Home = () => {
       <Col span={8}>
         <BarCard
           statistics={workspaceStatistics?.statistics || []}
-          loading={workspaceStatisticsLoading}
+          loading={dashboardDataLoading}
         />
       </Col>
       <Col span={8}>
