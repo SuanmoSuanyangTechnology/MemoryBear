@@ -62,7 +62,7 @@ const AuthSpaceLayout: FC = () => {
   return (
     <Layout className={`rb:min-h-screen!${isWiki ? ' wiki-layout' : ''}`}>
       {/* Sidebar navigation configured for space mode */}
-      {!isWiki && <Sider source="space" />}
+      <Sider source="space" />
       <Layout className="rb:max-h-screen! rb:w-screen! rb:overflow-y-auto!">
         {/* Header with breadcrumbs and user menu configured for space mode */}
         <AppHeader source="space" />

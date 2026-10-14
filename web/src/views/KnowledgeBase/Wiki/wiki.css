@@ -5,18 +5,21 @@
   flex: 1;
   align-self: stretch;
   min-height: 0;
+  min-width: 0;
+  container-type: inline-size;
   overflow: hidden;
   background: #fff;
   border-radius: 16px;
   color: #202124;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
 }
+.wiki-layout > .ant-layout { flex: 1; min-width: 0; width: 0 !important; }
 .wiki-layout .ant-layout-content { display: flex; flex-direction: column; min-height: 0; overflow: hidden !important; }
 .wiki-layout .ant-layout-content > .ant-flex { flex: 1; min-height: 0; height: 0 !important; }
 .wiki-layout .ant-layout-content > .ant-flex > div { display: flex; min-height: 0; }
 .wiki-workspace button { cursor: pointer; }
 .wiki-workspace button:focus-visible { outline: 2px solid #3478ff; outline-offset: 3px; }
-.wiki-sidebar { width: clamp(280px, 21vw, 376px); flex-shrink: 0; display: flex; flex-direction: column; min-height: 0; padding: 22px 16px 14px; background: #fafbfc; border-right: 1px solid #eceef1; }
+.wiki-sidebar { width: clamp(260px, 21cqw, 346px); flex-shrink: 0; display: flex; flex-direction: column; min-height: 0; padding: 22px 16px 14px; background: #fafbfc; border-right: 1px solid #eceef1; }
 .wiki-kb-heading { display: flex; align-items: center; gap: 8px; min-height: 40px; margin-bottom: 22px; }
 .wiki-kb-heading strong { flex: 1; min-width: 0; font-size: 17px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .wiki-kb-heading .ant-tag { margin: 0; font-size: 14px; padding: 4px 8px; }
@@ -52,7 +55,7 @@
 .wiki-breadcrumb button { color: #959ba5; background: none; border: 0; padding: 0; }
 .wiki-toolbar-actions { margin-left: auto; display: flex; gap: 8px; }
 .wiki-content { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
-.wiki-article { max-width: 1360px; margin: 0 auto; padding: 40px clamp(32px, 6.7vw, 122px) 72px; }
+.wiki-article { max-width: 1360px; margin: 0 auto; padding: 40px clamp(32px, 6.7cqw, 112px) 72px; }
 .wiki-article h1 { font-size: 34px; line-height: 1.35; font-weight: 650; margin: 0 0 34px; color: #171719; overflow-wrap: anywhere; }
 .wiki-subtitle { margin: 0 0 48px; font-size: 18px; color: var(--wiki-muted); line-height: 1.7; }
 .wiki-directory-group { margin-bottom: 44px; }
