@@ -45,6 +45,7 @@ dependencies = [
     "xlrd>=2.0,<3",
     "xxhash>=3.5,<5",
     "jieba==0.42.1",
+    "psutil>=7.0,<8 ; sys_platform == 'darwin'",
 ]
 
 [dependency-groups]
