@@ -511,7 +511,7 @@ def _with_yesterday_changes(response: dict[str, Any]) -> dict[str, Any]:
         "total_count_change": _calculate_yesterday_change(
             response["total_count"], yesterday["total_count"]
         ),
-        "update": response["total_count"] - yesterday["total_count"],
+        "update": response["total_count"] - yesterday["total_count"], # v0.5.6计划删除此字段，v0.5.2已有公告
     }
     result.pop("yesterday")
     return result
