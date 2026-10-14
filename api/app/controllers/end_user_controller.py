@@ -13,6 +13,10 @@ from fastapi import APIRouter, Depends
 
 from app.core.error_codes import BizCode
 from app.core.logging_config import get_api_logger
+from app.core.memory.models.metadata_models import (
+    LEGACY_METADATA_FIELDS,
+    project_display_profile,
+)
 from app.core.response_utils import fail, success
 from app.db import get_async_db_context
 from app.dependencies import get_current_user_async, CurrentUserSnapshot
@@ -24,6 +28,9 @@ from app.services.end_user_service import EndUserService
 from app.services.user_memory_service import UserMemoryService
 
 api_logger = get_api_logger()
+
+# GET /end_user/info 中新结构 13 键每键最多返回的条数
+END_USER_INFO_PROFILE_KEY_LIMIT = 10
 
 user_memory_service = UserMemoryService()
 
@@ -83,29 +90,23 @@ async def get_end_user_info(
         if not info_record:
             return fail(BizCode.USER_NOT_FOUND, "终端用户信息记录不存在", "终端用户信息记录不存在")
 
-        # 在 session 活跃期间提取所有需要的字段（含字段优先级过滤逻辑）
-        TOP_FIELDS = ("other_name", "aliases")
-        META_FIELDS = (
-            "relations", "goals", "core_facts", "interests",
-            "traits", "beliefs_or_stances", "anchors", "events",
-        )
-        ALWAYS_INCLUDE = {"other_name"}
-        MAX_VISIBLE = 6
+        # 在 session 活跃期间提取所有需要的字段
+        # 顶层：other_name 恒返回，aliases 有值才返回；
+        # meta_data：有值的旧字段原样返回 + 新结构 13 键展示投影（每键最多 10 条）
+        raw_meta = info_record.meta_data if isinstance(info_record.meta_data, dict) else {}
 
-        raw_meta = info_record.meta_data or {}
-        candidates = (
-            [(f, getattr(info_record, f, None), True) for f in TOP_FIELDS]
-            + [(f, raw_meta.get(f), False) for f in META_FIELDS]
-        )
+        selected_top = {"other_name": info_record.other_name}
+        if info_record.aliases:
+            selected_top["aliases"] = info_record.aliases
 
-        selected_top = {}
-        filtered_meta = {}
-        for field, value, is_top in candidates:
-            if len(selected_top) + len(filtered_meta) >= MAX_VISIBLE:
-                break
-            if not value and field not in ALWAYS_INCLUDE:
-                continue
-            (selected_top if is_top else filtered_meta)[field] = value
+        filtered_meta = {
+            field: raw_meta[field]
+            for field in LEGACY_METADATA_FIELDS
+            if raw_meta.get(field)
+        }
+        filtered_meta.update(
+            project_display_profile(raw_meta, limit_per_key=END_USER_INFO_PROFILE_KEY_LIMIT)
+        )
 
         response_data = {
             "end_user_info_id": str(info_record.id),
