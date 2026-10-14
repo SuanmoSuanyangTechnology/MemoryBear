@@ -29,6 +29,7 @@ from app.core.memory.storage_services.preference_engine.recall_service import (
     PreferenceRecallForbiddenError,
     PreferenceRecallValidationError,
     execute_preference_recall,
+    masked_identifier,
 )
 
 warnings.filterwarnings("ignore", category=DeprecationWarning, module="scipy")
@@ -183,6 +184,11 @@ async def recall_coding_preferences(
     except PreferenceRecallForbiddenError:
         return {"success": False, "error": "无权访问该偏好资源"}
     except Exception:
+        logger.exception(
+            "MCP preference recall failed workspace_id=%s end_user_id=%s",
+            masked_identifier(str(workspace_id)),
+            masked_identifier(end_user_id),
+        )
         return {"success": False, "error": "偏好召回服务暂时不可用"}
     return {
         "success": True,
