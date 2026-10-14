@@ -143,3 +143,11 @@ class PreferenceRecallSuccess(BaseModel):
     success: Literal[True] = True
     preferences: list[RecalledPreference]
     count: int
+
+
+class FullPreferenceRecallResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    preferences: list[RecalledPreference]
+    count: int
+    preference_prompt: str

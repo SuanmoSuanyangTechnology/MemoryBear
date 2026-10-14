@@ -34,6 +34,7 @@
     "@lexical/list": "^0.39.0",
     "@lexical/react": "^0.39.0",
     "@lexical/rich-text": "^0.39.0",
+    "@redbear/memory-brick": "^0.0.29",
     "antd": "^5.29.2",
     "axios": "^1.12.2",
     "clsx": "^2.1.1",

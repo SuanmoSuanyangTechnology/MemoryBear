@@ -117,6 +117,38 @@ async def test_empty_targets_are_successful_without_storage_access(caplog):
 
 
 @pytest.mark.asyncio
+async def test_only_step2_log_includes_routed_target_details(caplog):
+    targets = [
+        PreferenceRecallTarget(subject="tool_choice", situation_key="code_generation"),
+        PreferenceRecallTarget(subject="response_length", situation_key="global"),
+    ]
+    expected = (
+        'targets=2 target_details=[{"subject":"tool_choice",'
+        '"situation_key":"code_generation"},{"subject":"response_length",'
+        '"situation_key":"global"}]'
+    )
+
+    with caplog.at_level("INFO", logger=recall_service.__name__):
+        await _service(FakeRunner(targets), FakeStorage()).recall(
+            workspace_id="workspace-1",
+            end_user_id="user-1",
+            request=_request("写测试"),
+        )
+
+    step2_logs = [
+        record.message for record in caplog.records
+        if " step2 completed " in record.message
+    ]
+    assert len(step2_logs) == 1
+    assert expected in step2_logs[0]
+    assert all(
+        "target_details=" not in record.message
+        for record in caplog.records
+        if " step1 " in record.message or " step3 " in record.message
+    )
+
+
+@pytest.mark.asyncio
 async def test_context_keeps_recent_messages_within_character_budget():
     runner = FakeRunner([])
 
@@ -251,12 +283,11 @@ async def test_shared_adapter_rejects_invalid_role_before_database_access(monkey
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("fail_route", [False, True])
-async def test_shared_adapter_closes_injected_model_client(
-    monkeypatch, fail_route
+async def test_shared_adapter_does_not_close_model_wrapper(
+    monkeypatch, caplog, fail_route
 ):
     config_id = uuid.uuid4()
     workspace_id = uuid.uuid4()
-    closed = False
 
     @asynccontextmanager
     async def fake_db_context():
@@ -275,9 +306,7 @@ async def test_shared_adapter_closes_injected_model_client(
             )
 
     class FakeModelClient:
-        async def aclose(self):
-            nonlocal closed
-            closed = True
+        pass
 
     async def fake_get_llm_client(db, model_id, tenant_id):
         return FakeModelClient()
@@ -318,12 +347,13 @@ async def test_shared_adapter_closes_injected_model_client(
             request_payload={"current_user_message": "继续", "context_messages": []},
         )
 
-    if fail_route:
-        with pytest.raises(RuntimeError, match="preference recall dependency failed"):
-            await run_recall()
-    else:
-        assert await run_recall() == []
-    assert closed is True
+    with caplog.at_level("WARNING", logger=recall_service.__name__):
+        if fail_route:
+            with pytest.raises(RuntimeError, match="preference recall dependency failed"):
+                await run_recall()
+        else:
+            assert await run_recall() == []
+    assert "cleanup_failed" not in caplog.text
 
 
 @pytest.mark.asyncio

@@ -9,6 +9,7 @@ from typing import Any
 
 from app.core.memory.storage.enums import BackendType, MemoryNodeType
 from app.core.memory.storage.provider.elasticsearch.client import ElasticClient
+from app.core.memory.storage.provider.elasticsearch.client import PIT_KEEP_ALIVE, SEARCH_BATCH_SIZE
 from app.core.memory.storage.provider.elasticsearch.index import get_index_name
 from app.core.memory.storage.provider.factory import BackendFactory
 from app.core.memory.storage_services.preference_engine.models import (
@@ -22,6 +23,15 @@ class PreferenceRecallCandidate:
     updated_at: datetime
     target_index: int
     is_global: bool
+    item_index: int
+
+
+@dataclass(frozen=True)
+class FullPreferenceCandidate:
+    preference_text: str
+    updated_at: datetime
+    is_global: bool
+    document_id: str
     item_index: int
 
 
@@ -176,3 +186,95 @@ class PreferenceRecallStorage:
                 )
         return candidates
 
+    async def query_all(self, *, end_user_id: str) -> tuple[list[FullPreferenceCandidate], int]:
+        """Read the complete active Coding preference PIT snapshot from Elasticsearch."""
+        raw_client = self._client.client
+        if raw_client is None:
+            raise RuntimeError("Elasticsearch client is not connected")
+        opened = await raw_client.open_point_in_time(
+            index=get_index_name(MemoryNodeType.PREFERENCE), keep_alive=PIT_KEEP_ALIVE
+        )
+        pit = getattr(opened, "body", opened)
+        if not isinstance(pit, Mapping) or not isinstance(pit.get("id"), str) or not pit["id"]:
+            raise RuntimeError("Elasticsearch preference PIT has no id")
+        pit_id = pit["id"]
+        candidates: list[FullPreferenceCandidate] = []
+        pages = 0
+        expected_total: int | None = None
+        search_after: list[Any] | None = None
+        try:
+            while True:
+                options: dict[str, Any] = {
+                    "pit": {"id": pit_id, "keep_alive": PIT_KEEP_ALIVE},
+                    "query": {"bool": {"filter": [
+                        {"term": {"end_user_id": end_user_id}},
+                        {"term": {"domain": "coding"}},
+                        {"term": {"status": "active"}},
+                    ]}},
+                    "source_includes": ["id", "situation_key", "preference_text", "updated_at"],
+                    "size": SEARCH_BATCH_SIZE,
+                    "sort": [{"_shard_doc": "asc"}],
+                    "track_total_hits": True,
+                    "allow_partial_search_results": False,
+                }
+                if search_after is not None:
+                    options["search_after"] = search_after
+                result = await raw_client.search(**options)
+                response = getattr(result, "body", result)
+                if not isinstance(response, Mapping):
+                    raise RuntimeError("Elasticsearch preference page is invalid")
+                if isinstance(response.get("pit_id"), str) and response["pit_id"]:
+                    pit_id = response["pit_id"]
+                if response.get("timed_out") is not False:
+                    raise RuntimeError("Elasticsearch preference page timeout is unknown")
+                shards = response.get("_shards")
+                if (not isinstance(shards, Mapping)
+                        or not isinstance(shards.get("total"), int)
+                        or not isinstance(shards.get("successful"), int)
+                        or not isinstance(shards.get("failed"), int)
+                        or shards["failed"] != 0
+                        or shards["successful"] + shards.get("skipped", 0) != shards["total"]):
+                    raise RuntimeError("Elasticsearch preference page has incomplete shards")
+                hits = _validate_response(response)
+                total = response["hits"].get("total")
+                if (not isinstance(total, Mapping) or total.get("relation") != "eq"
+                        or not isinstance(total.get("value"), int) or total["value"] < 0):
+                    raise RuntimeError("Elasticsearch preference total is invalid")
+                if expected_total is None:
+                    expected_total = total["value"]
+                elif expected_total != total["value"]:
+                    raise RuntimeError("Elasticsearch preference PIT total changed")
+                if len(hits) > SEARCH_BATCH_SIZE or pages * SEARCH_BATCH_SIZE + len(hits) > expected_total:
+                    raise RuntimeError("Elasticsearch preference page count is invalid")
+                for hit in hits:
+                    source = hit.get("_source")
+                    if not isinstance(source, Mapping):
+                        raise RuntimeError("Elasticsearch preference source is invalid")
+                    document_id = source.get("id")
+                    situation_key = source.get("situation_key")
+                    texts = source.get("preference_text")
+                    if (not isinstance(document_id, str) or not document_id
+                            or not isinstance(situation_key, str) or not situation_key
+                            or not isinstance(texts, list)
+                            or not all(isinstance(item, str) for item in texts)):
+                        raise RuntimeError("Elasticsearch preference document is invalid")
+                    updated_at = _parse_datetime(source.get("updated_at"))
+                    candidates.extend(
+                        FullPreferenceCandidate(
+                            text, updated_at, situation_key == "global", document_id, index
+                        )
+                        for index, text in enumerate(texts)
+                    )
+                pages += 1
+                read_count = (pages - 1) * SEARCH_BATCH_SIZE + len(hits)
+                if read_count == expected_total:
+                    break
+                if not hits or len(hits) != SEARCH_BATCH_SIZE:
+                    raise RuntimeError("Elasticsearch preference PIT is incomplete")
+                sort = hits[-1].get("sort")
+                if not isinstance(sort, (list, tuple)) or not sort:
+                    raise RuntimeError("Elasticsearch preference search_after is missing")
+                search_after = list(sort)
+            return candidates, pages
+        finally:
+            await raw_client.close_point_in_time(id=pit_id)

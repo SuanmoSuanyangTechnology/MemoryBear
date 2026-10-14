@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 import logging
 import time
 import uuid
@@ -32,6 +34,10 @@ from .ontology_registry import load_preference_ontology
 from .prompt_runner import PreferencePromptRunner
 
 logger = logging.getLogger(__name__)
+
+
+def masked_identifier(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()[:12]
 
 
 class PreferenceRecallValidationError(Exception):
@@ -84,7 +90,7 @@ class PreferenceRecallService:
         self.storage = storage
         self.limits = limits or PreferenceRecallLimits.from_settings()
 
-    # 公共能力：统一阶段日志只记录标识、计数和耗时，不记录请求或模型正文。
+    # 公共能力：记录标识、计数和耗时；step2 附闭集目标，不记录请求或模型正文。
     @staticmethod
     def _log_stage(
         *,
@@ -99,17 +105,29 @@ class PreferenceRecallService:
         context_chars: int = 0,
         context_truncated: bool = False,
         target_count: int = 0,
+        targets: Sequence[PreferenceRecallTarget] | None = None,
         candidate_count: int = 0,
         result_count: int = 0,
         preference_truncated: bool = False,
     ) -> None:
+        target_details = ""
+        if targets is not None:
+            target_details = " target_details=" + json.dumps(
+                [
+                    {"subject": target.subject, "situation_key": target.situation_key}
+                    for target in targets
+                ],
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
         logger.info(
             "[PreferenceRecall][%d/3] step%d %s request_id=%s workspace_id=%s "
             "end_user_id=%s context_count=%d context_chars=%d context_truncated=%s "
-            "targets=%d candidates=%d results=%d preference_truncated=%s "
+            "targets=%d%s candidates=%d results=%d preference_truncated=%s "
             "reason=%s duration_ms=%.2f",
-            stage, stage, status, request_id, workspace_id, end_user_id,
-            context_count, context_chars, context_truncated, target_count,
+            stage, stage, status, request_id,
+            masked_identifier(workspace_id), masked_identifier(end_user_id),
+            context_count, context_chars, context_truncated, target_count, target_details,
             candidate_count, result_count, preference_truncated, reason, duration_ms,
         )
 
@@ -159,6 +177,7 @@ class PreferenceRecallService:
             workspace_id=workspace_id, end_user_id=end_user_id,
             duration_ms=(time.perf_counter() - telemetry.stage_started) * 1000,
             target_count=telemetry.target_count,
+            targets=targets,
         )
         return targets
 
@@ -179,10 +198,10 @@ class PreferenceRecallService:
         ordered = sorted(winners.items(), key=lambda item: self._sort_rank(item[1], item[0]))
         preferences = [
             RecalledPreference(
-                preference_text=candidate.preference_text.strip(),
+                preference_text=normalized_text,
                 updated_at=candidate.updated_at,
             )
-            for _, candidate in ordered[: self.limits.max_preferences]
+            for normalized_text, candidate in ordered[: self.limits.max_preferences]
         ]
         return preferences, len(ordered) > self.limits.max_preferences
 
@@ -345,7 +364,7 @@ async def execute_preference_recall(
     end_user_id: str,
     request_payload: Any,
 ) -> list[RecalledPreference]:
-    """Validate and run recall while owning the DB and model-client lifecycle."""
+    """Validate and run recall with the application-managed model transport."""
     started = time.perf_counter()
     request_id = get_trace_id() or uuid.uuid4().hex
     try:
@@ -365,7 +384,6 @@ async def execute_preference_recall(
         )
         raise
 
-    llm_client = None
     service_started = False
     try:
         async with get_async_db_context() as db:
@@ -397,14 +415,3 @@ async def execute_preference_recall(
                 reason=type(exc).__name__,
             )
         raise
-    finally:
-        if llm_client is not None:
-            try:
-                await llm_client.aclose()
-            except Exception as exc:
-                # Cleanup must not replace an already classified public response.
-                logger.warning(
-                    "[PreferenceRecall] cleanup_failed request_id=%s workspace_id=%s "
-                    "end_user_id=%s reason=%s",
-                    request_id, workspace_id, end_user_id, type(exc).__name__,
-                )
