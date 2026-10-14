@@ -69,3 +69,41 @@ class Compacted(Output):
     items: list[CompactItem]
     covered_item_refs: list[str]
     omitted_item_refs: list[str]
+
+
+class TopicCitations(Output):
+    topic_ref: str
+    source_refs: list[str]
+
+
+class Citations(Output):
+    topics: list[TopicCitations]
+    new_candidates: list[Candidate]
+
+
+class SummaryPoints(Output):
+    summary_points: list[SummaryPoint]
+
+
+class IdentityMatch(Output):
+    candidate_ref: str
+    page_ref: str | None
+
+
+class IdentityMatches(Output):
+    matches: list[IdentityMatch]
+
+
+class FolderAssignment(Output):
+    topic_ref: str
+    category_path: list[str] = Field(max_length=2)
+
+
+class FolderAssignments(Output):
+    assignments: list[FolderAssignment]
+
+
+class EvidencePage(Output):
+    summary: str = Field(min_length=1)
+    content_markdown: str = Field(min_length=1)
+    source_refs: list[str] = Field(min_length=1)

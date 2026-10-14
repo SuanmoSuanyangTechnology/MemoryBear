@@ -6,9 +6,11 @@ import logging
 import re
 from collections import defaultdict
 
+from ..chunk.token_utils import split_by_token_limit
+from .batching import optional_items, parallel
 from .config import WikiError, fingerprint, normalize_name
-from .contracts import Candidates, Compacted, DocumentSummary, Materials, PageContent
-from .model import tokens
+from .contracts import Candidates, Compacted, EvidencePage
+from .model import request_tokens, tokens
 
 logger = logging.getLogger(__name__)
 
@@ -66,8 +68,7 @@ def model_topics(topics):
 
 
 def extract_candidates(model, snapshot, segments):
-    candidates = {}
-    for segment_index, segment in enumerate(segments, start=1):
+    def extract(segment):
         source_ids = {s["ref"] for s in segment}
 
         def validate(value, source_ids=source_ids):
@@ -87,6 +88,12 @@ def extract_candidates(model, snapshot, segments):
             Candidates,
             validate,
         )
+        return result
+
+    results = parallel([lambda segment=segment: extract(segment) for segment in segments],
+                       model.settings)
+    candidates = {}
+    for segment_index, result in enumerate(results, start=1):
         for item in result["candidates"]:
             key = (item["kind"], normalize_name(item["name"]), normalize_name(item["scope"]))
             if key in candidates:
@@ -106,26 +113,61 @@ def extract_candidates(model, snapshot, segments):
             len({key[:2] for key in candidates}),
             model.settings.kb_wiki_max_topics,
         )
-        if len(candidates) > model.settings.kb_wiki_max_topics:
+        if (model.settings.kb_wiki_max_topics
+                and len(candidates) > model.settings.kb_wiki_max_topics):
             raise WikiError("WIKI_TOPIC_BUDGET_EXCEEDED", retryable=False)
     return list(candidates.values())
 
 
-def compress(model, items, *, target, language):
+def compress(model, items, *, target, language, limit=None):
     """Bounded recursive compaction with original identity and source conservation."""
-    limit = model.settings.kb_wiki_input_tokens // 3
+    limit = limit or model.settings.kb_wiki_input_tokens // 3
+    if tokens(items) <= limit:
+        return items
+    limit = min(limit, model.settings.kb_wiki_input_tokens - request_tokens(
+        "wiki_evidence_compact_v1",
+        {"language": language, "target": target, "budget": 128, "items": []}, Compacted
+    ) - 256)
+    if limit < 128:
+        raise WikiError("WIKI_CONTEXT_BUDGET_EXCEEDED", retryable=False)
+    expanded, identities = [], {}
+    for index, item in enumerate(items):
+        if tokens(item) <= limit:
+            expanded.append(item)
+            continue
+        available = limit - tokens({**item, "text": ""}) - 64
+        if available < 1:
+            raise WikiError("WIKI_EVIDENCE_ITEM_TOO_LARGE", retryable=False)
+        for part_index, text in enumerate(split_by_token_limit(item["text"], available)):
+            ref = f"PART_{index}_{part_index}"
+            identities[ref] = item["source_item_refs"]
+            expanded.append({**item, "text": text, "source_item_refs": [ref]})
+    items = expanded
+
+    def restore(values):
+        return [{**item, "source_item_refs": sorted({
+            original for ref in item["source_item_refs"] for original in identities.get(ref, [ref])
+        })} for item in values]
+
     original_sources = defaultdict(set)
     for item in items:
         for ref in item["source_item_refs"]:
             original_sources[ref].update(item["source_refs"])
+
+    def compaction_input(values):
+        return {"language": language, "target": target, "budget": max(128, limit // 2),
+                "items": [{**item, "item_ref": f"I{i + 1}"} for i, item in enumerate(values)]}
+
     for _ in range(model.settings.kb_wiki_compact_depth):
         if tokens(items) <= limit:
-            return items
+            return restore(items)
         groups, group = [], []
         for item in items:
             if tokens(item) > limit:
                 raise WikiError("WIKI_EVIDENCE_ITEM_TOO_LARGE", retryable=False)
-            if group and tokens([*group, item]) > limit:
+            if group and (tokens([*group, item]) > limit or request_tokens(
+                "wiki_evidence_compact_v1", compaction_input([*group, item]), Compacted
+            ) > model.settings.kb_wiki_input_tokens):
                 groups.append(group)
                 group = []
             group.append(item)
@@ -161,12 +203,7 @@ def compress(model, items, *, target, language):
 
             result = model.call(
                 "wiki_evidence_compact_v1",
-                {
-                    "language": language,
-                    "target": target,
-                    "budget": max(128, limit // 2),
-                    "items": [{**i, "item_ref": f"I{index + 1}"} for index, i in enumerate(group)],
-                },
+                compaction_input(group),
                 Compacted,
                 validate,
             )
@@ -174,126 +211,7 @@ def compress(model, items, *, target, language):
         items = compressed
     if tokens(items) > limit:
         raise WikiError("WIKI_COMPACTION_BUDGET_EXCEEDED", retryable=False)
-    return items
-
-
-def extract_materials(model, snapshot, plan, segments, source_catalog):
-    topics = model_topics(plan["topics"])
-    topic_ids = {item["topic_ref"] for item in topics}
-    facts = defaultdict(list)
-    points, summary = [], None
-    full_document = len(segments) == 1
-    for segment in segments:
-        source_ids = {s["ref"] for s in segment}
-
-        def validate(value, source_ids=source_ids):
-            handles = [item["topic_ref"] for item in value["topics"]]
-            if len(handles) != len(set(handles)):
-                raise ValueError("Duplicate topic handles")
-            require_refs(handles, topic_ids, complete=True)
-            for topic in value["topics"]:
-                for fact in topic["facts"]:
-                    require_refs(fact["source_refs"], source_ids)
-            require_refs(
-                [r for p in value["summary_points"] for r in p["source_refs"]],
-                source_ids,
-            )
-            result_summary = value["document_summary"]
-            if full_document:
-                if result_summary is None:
-                    raise ValueError("Whole-document summary missing")
-                require_refs(result_summary["source_refs"], source_ids, complete=True)
-                validate_markdown(
-                    result_summary["summary_markdown"], result_summary["source_refs"], topic_ids
-                )
-            elif result_summary is not None:
-                raise ValueError("A segment is not a whole document")
-
-        value = model.call(
-            "wiki_materials_v1",
-            {
-                "language": snapshot["language"],
-                "mode": "full_document" if full_document else "segment",
-                "document_title": snapshot["title"],
-                "extraction_focus": snapshot["extract_prompt"],
-                "confirmed_topics": topics,
-                "sources": model_sources(segment),
-            },
-            Materials,
-            validate,
-        )
-        for item in value["topics"]:
-            facts[item["topic_ref"]].extend(item["facts"])
-        segment_points = value["summary_points"]
-        covered = {ref for point in segment_points for ref in point["source_refs"]}
-        missing = [source for source in segment if source["ref"] not in covered]
-        # Retain omitted evidence verbatim; only subsequent bounded compaction may summarize it.
-        segment_points.extend(
-            {"text": source["text"], "source_refs": [source["ref"]]} for source in missing
-        )
-        require_refs(
-            [ref for point in segment_points for ref in point["source_refs"]],
-            source_ids,
-            complete=True,
-        )
-        if missing:
-            logger.info(
-                "Wiki summary evidence retained document_id=%s "
-                "missing_sources=%s segment_sources=%s",
-                snapshot.get("document_id"), len(missing), len(segment),
-            )
-        points.extend(segment_points)
-        summary = value["document_summary"] or summary
-    if not full_document:
-        items = [
-            {**point, "qualifiers": [], "source_item_refs": [f"P{i + 1}"]}
-            for i, point in enumerate(points)
-        ]
-        points = compress(model, items, target="document_summary", language=snapshot["language"])
-
-        def validate_summary(value):
-            require_refs(value["source_refs"], source_catalog, complete=True)
-            validate_markdown(value["summary_markdown"], value["source_refs"], topic_ids)
-
-        summary = model.call(
-            "wiki_document_summary_v1",
-            {
-                "language": snapshot["language"],
-                "document_title": snapshot["title"],
-                "summary_points": points,
-                "confirmed_topics": topics,
-            },
-            DocumentSummary,
-            validate_summary,
-        )
-    materials = []
-    for topic in plan["topics"]:
-        values = facts[topic["topic_ref"]]
-        if not values:
-            raise WikiError("WIKI_TOPIC_WITHOUT_EVIDENCE")
-        related = {ref for fact in values for ref in fact["source_refs"]}
-        materials.append(
-            {
-                "page_id": topic["page_id"],
-                "facts": values,
-                "chunk_refs": [source_catalog[ref] for ref in sorted(related)],
-                "source_context": {"title": snapshot["title"], "topics": plan["topics"]},
-            }
-        )
-    if summary is not None:
-        materials.append(
-            {
-                "page_id": plan["summary_id"],
-                "facts": [],
-                "chunk_refs": list(source_catalog.values()),
-                "source_context": {
-                    "title": snapshot["title"],
-                    "summary": summary,
-                    "topics": plan["topics"],
-                },
-            }
-        )
-    return materials
+    return restore(items)
 
 
 def reduce_input(snapshot):
@@ -337,6 +255,38 @@ def render_links(text, mapping):
     return rewrite_markdown_text(text, lambda part: PAGE_LINK.sub(substitute, part)), links
 
 
+def link_mentions(text, choices):
+    """Link unambiguous literal mentions, preserving code and existing links/citations."""
+    names = defaultdict(set)
+    for choice in choices:
+        for label in [choice["title"], *choice.get("aliases", [])]:
+            if len(label) >= 2 and not any(char in label for char in "[]|\n"):
+                names[label].add(choice["page_id"])
+    names = {name: next(iter(targets)) for name, targets in names.items() if len(targets) == 1}
+    if not names:
+        return text, []
+    pattern = re.compile(r"(?<![A-Za-z0-9_])(?:" + "|".join(
+        re.escape(name) for name in sorted(names, key=lambda name: -len(name))
+    ) + r")(?![A-Za-z0-9_])")
+    targets = []
+
+    def transform(part):
+        offset, result = 0, []
+
+        def replace(match):
+            target = names[match[0]]
+            targets.append(target)
+            return f"[[{target}|{match[0]}]]"
+
+        for match in re.finditer(r"\[\[.*?\]\]|\[\^[^\]]+\]", part):
+            result.extend([pattern.sub(replace, part[offset:match.start()]), match[0]])
+            offset = match.end()
+        result.append(pattern.sub(replace, part[offset:]))
+        return "".join(result)
+
+    return rewrite_markdown_text(text, transform), targets
+
+
 def generate_page(model, snapshot):
     if not snapshot["sources"]:
         return {"content": "", "summary": "", "links": []}
@@ -352,44 +302,71 @@ def generate_page(model, snapshot):
             lambda part: CITATION.sub(lambda m: f"[^{mapping[source['document_id']][m[1]]}]", part),
         )
         return {"content": text, "summary": summary["summary_line"], "links": links}
-    items = compress(model, evidence, target=snapshot["title"], language=snapshot["language"])
-    all_facts = {r for i in evidence for r in i["source_item_refs"]}
-    links = {f"L{i + 1}": p["page_id"] for i, p in enumerate(snapshot["allowed_links"])}
+    items = [{"source_item_refs": [c["ref"]], "text": c["quote"], "qualifiers": [],
+              "source_refs": [c["ref"]]} for c in catalog]
+    selected_links = optional_items(snapshot["allowed_links"],
+                                    model.settings.kb_wiki_input_tokens // 8)
+    links = {f"L{i + 1}": p["page_id"] for i, p in enumerate(selected_links)}
     allowed_refs = {item["ref"] for item in catalog}
 
     def validate(value):
-        require_refs(value["used_fact_refs"], all_facts, complete=True)
         require_refs(value["source_refs"], allowed_refs, complete=True)
         validate_markdown(value["content_markdown"], value["source_refs"], links)
 
-    result = model.call(
-        "wiki_page_reduce_v1",
-        {
+    contexts = []
+    for source in snapshot["sources"]:
+        context = source.get("source_context", {}).get("summary", {})
+        contexts.append({
+            "document_title": source["title"],
+            "context": rewrite_markdown_text(
+                context.get("summary_markdown", context.get("summary_line", "")),
+                lambda part: CITATION.sub("", PAGE_LINK.sub(lambda m: m[2], part)),
+            ),
+        })
+    prior_links = {target: ref for ref, target in links.items()}
+    previous = rewrite_markdown_text(snapshot["content"], lambda part: CITATION.sub(
+        "", PAGE_LINK.sub(lambda match: (
+            f"[[{prior_links[match[1]]}|{match[2]}]]" if match[1] in prior_links else match[2]
+        ), part)
+    ))
+    if tokens(previous) > model.settings.kb_wiki_input_tokens // 8:
+        previous = "\n".join(line for line in previous.splitlines() if line.startswith("#"))
+    data = {
             "language": snapshot["language"],
             "page": {"title": snapshot["title"], "type": snapshot["page_type"]},
-            "previous_outline": [
-                line for line in snapshot["content"].splitlines() if line.startswith("#")
-            ][:20],
-            "evidence": [
-                {
-                    "fact_refs": i["source_item_refs"],
-                    "text": i["text"],
-                    "qualifiers": i["qualifiers"],
-                    "source_refs": i["source_refs"],
-                }
-                for i in items
-            ],
-            # Raw quotes remain in persisted source records; facts carry the model evidence.
+            "previous_content": previous,
+            "document_context": optional_items(contexts, model.settings.kb_wiki_input_tokens // 8),
+            "evidence": [],
             "source_catalog": [
                 {"ref": c["ref"], "document_title": c["document_title"]} for c in catalog
             ],
             "allowed_links": [
                 {"link_ref": f"L{i + 1}", "title": p["title"], "type": p["type"]}
-                for i, p in enumerate(snapshot["allowed_links"])
+                for i, p in enumerate(selected_links)
             ],
-        },
-        PageContent,
-        validate,
-    )
+    }
+    available = model.settings.kb_wiki_input_tokens - request_tokens(
+        "wiki_page_original_v2", data, EvidencePage
+    ) - 256
+    if available < 128:
+        # Keep every required source; optional presentation metadata yields first.
+        data.update(previous_content="", document_context=[], allowed_links=[])
+        links = {}
+        available = model.settings.kb_wiki_input_tokens - request_tokens(
+            "wiki_page_original_v2", data, EvidencePage
+        ) - 256
+    if available < 128:
+        raise WikiError("WIKI_CONTEXT_BUDGET_EXCEEDED", retryable=False)
+    def page_evidence(values):
+        return [{"text": item["text"], "source_refs": item["source_refs"]} for item in values]
+
+    if request_tokens("wiki_page_original_v2", {**data, "evidence": page_evidence(items)},
+                      EvidencePage) > model.settings.kb_wiki_input_tokens:
+        items = compress(model, items, target=snapshot["title"],
+                         language=snapshot["language"], limit=available)
+    data["evidence"] = page_evidence(items)
+    result = model.call("wiki_page_original_v2", data, EvidencePage, validate)
     content, targets = render_links(result["content_markdown"], links)
+    content, added = link_mentions(content, snapshot["allowed_links"])
+    targets.extend(added)
     return {"content": content, "summary": result["summary"], "links": targets}

@@ -7,7 +7,8 @@ from ..models.chunk import chunk_retrieval_content
 from ..retrieval.async_elasticsearch import AsyncChunkStore
 from ..vdb.field import Field
 from .config import WikiError, fingerprint
-from .model import tokens
+from .contracts import Candidates
+from .model import request_tokens, tokens
 
 
 def normalize_chunks(chunks):
@@ -81,12 +82,21 @@ async def read_sources(
     return normalize_chunks(chunks)
 
 
-def segment_sources(sources, settings):
-    # Reserve space for prompts, schemas and confirmed topic handles.
-    budget = max(128, settings.kb_wiki_input_tokens // 3)
+def segment_sources(sources, settings, snapshot=None):
+    budget = getattr(settings, "kb_wiki_segment_tokens", settings.kb_wiki_input_tokens // 3)
+    if snapshot:
+        fixed = {"language": snapshot["language"], "document_title": snapshot["title"],
+                 "extraction_focus": snapshot["extract_prompt"], "sources": []}
+        budget = min(budget, settings.kb_wiki_input_tokens
+                     - request_tokens("wiki_candidates_v1", fixed, Candidates) - 128)
+    if budget < 128:
+        raise WikiError("WIKI_CONTEXT_BUDGET_EXCEEDED", retryable=False)
     pieces = []
     for source in sources:
-        for text in split_by_token_limit(source["text"], budget):
+        text_budget = budget - tokens({**source, "text": "", "ref": "S000000"}) - 16
+        if text_budget < 1:
+            raise WikiError("WIKI_CONTEXT_BUDGET_EXCEEDED", retryable=False)
+        for text in split_by_token_limit(source["text"], text_budget):
             pieces.append({**source, "ref": f"S{len(pieces) + 1}", "text": text})
     segments, current = [], []
     for item in pieces:

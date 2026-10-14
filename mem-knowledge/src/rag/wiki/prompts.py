@@ -13,6 +13,42 @@ Source references must identify every source actually used, including those merg
 """
 
 TEMPLATES = {
+    "wiki_chunk_citations_v2": """Select original sources substantively supporting each topic.
+Return each topic_ref once with the supplied S handles containing concrete information about it.
+Do not paraphrase or extract facts. A source may support multiple topics. Empty references are valid
+when this segment does not discuss a topic. Passing mentions alone are insufficient evidence.
+If allow_new=true, return newly discovered important topics in new_candidates with source_refs.
+If allow_new=false, new_candidates must be empty. Never invent a topic or reference.
+Return {"topics": [...], "new_candidates": [...]} with exactly the supplied topic handles.""",
+    "wiki_summary_points_v2": """Summarize this segment into source-grounded summary_points.
+Cover all independent information, qualifications, negation and conflicts. Include every supplied
+S handle in the union of summary_points.source_refs, including repetitions merged in a point.
+Return {"summary_points": [...]} only. This segment is not the complete document.""",
+    "wiki_summary_full_v2": """Write a document summary using all supplied original sources.
+Preserve independent topics, versions, dates, negation, conditions and contradictions. Include every
+supplied S handle in source_refs and cite each in summary_markdown. Allowed links use [[T1|title]].
+Return summary_line, summary_markdown and source_refs. Do not invent facts or links.""",
+    "wiki_identity_v2": """Resolve identities against each item's own existing-page shortlist.
+Only match the exact same real-world entity/concept, including actual aliases. Scope descriptions
+may differ in wording; different owners/domains or homonyms must remain separate. The same product
+across versions normally shares a page, preserving version qualifiers in evidence. Do not erase
+meaningful model numbers or merge merely related concepts. Choose only this candidate's supplied
+page_ref, or null when uncertain. Return each candidate_ref exactly once in matches.""",
+    "wiki_taxonomy_v2": """Assign every topic to a coherent navigation category_path of at most two
+levels. Reuse the supplied existing_paths whenever they express the same category. Avoid synonymous
+parallel folders and one folder per document. Knowledge and Summary are UI groups, not folders.
+Return each topic_ref once in assignments. An empty path is valid when no useful category applies.
+Do not create additional topics. Match the requested language.""",
+    "wiki_page_original_v2": """Compile one complete Wiki page from the supplied original evidence.
+Stay close to verbatim wording; lightly reorder, deduplicate and join related statements. Do not
+expand for style, invent transitions, over-structure, or elevate self-reported claims into universal
+facts. Preserve every independent condition, number, negation, product version and contradiction.
+Merge duplicate statements while retaining their sources. document_context explains source scope
+and tone only, never factual evidence. previous_content helps structure and formatting only: retain
+information solely when current evidence supports it, remove withdrawn contributions.
+Use supplied [[L1|title]] links, no self links. Cite every evidence source, including duplicates.
+Return summary, full content_markdown, and source_refs containing the union of evidence.source_refs.
+Do not repeat the top-level page title. Never output a patch or drop evidence to fit the budget.""",
     "wiki_candidates_v1": """Extract worthwhile entity and concept page candidates from sources.
 Return kind, name, aliases, scope, description, category_path (at most two levels), source_refs.
 Knowledge and Summary are UI type groups, not classification folders.
