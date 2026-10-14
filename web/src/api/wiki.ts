@@ -4,6 +4,9 @@ import type { KnowledgeBase, KnowledgeBaseDocumentData } from '@/views/Knowledge
 export type WikiPageType = 'summary' | 'entity' | 'concept';
 export type WikiPageStatus = 'ready' | 'pending' | 'updating' | 'cleanup_pending' | 'failed' | 'unavailable';
 export interface WikiConfig { enabled: boolean; language: string; extract_prompt: string }
+export const DEFAULT_WIKI_CONFIG: WikiConfig = { enabled: false, language: 'zh-CN', extract_prompt: '' };
+export const MAX_WIKI_LANGUAGE_LENGTH = 64;
+export const MAX_WIKI_PROMPT_LENGTH = 12000;
 export interface WikiFolder { id: string; name: string; parent_id: string | null; page_count: number }
 export interface WikiPage {
   id: string;

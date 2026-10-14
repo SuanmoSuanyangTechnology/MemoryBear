@@ -43,6 +43,7 @@ import './Private.css'
 import copy from 'copy-to-clipboard'
 import Empty from '@/components/Empty'
 import NoData from '@/assets/images/knowledgeBase/noData.png'
+import WikiSettings from '../Wiki/WikiSettings';
 // Tree node data type
 
 const Private: FC = () => {
@@ -75,6 +76,7 @@ const Private: FC = () => {
   const [folderTreeRefreshKey, setFolderTreeRefreshKey] = useState(0);
   const [autoExpandPath, setAutoExpandPath] = useState<Array<{ id: string; name: string }>>([]);
   const [isGraph, setIsGraph] = useState(false);
+  const [wikiSettingsOpen, setWikiSettingsOpen] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const syncIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const syncStartTimeRef = useRef<number | null>(null);
@@ -835,6 +837,7 @@ const Private: FC = () => {
         <Flex align="center" justify={isGraph ? 'flex-end' : "space-between"} className='rb:mb-4!'>
           {!isGraph && <SearchInput placeholder={t('knowledgeBase.search')} variant="outlined" onSearch={handleSearch} />}
           <Flex align="center" justify="flex-end" gap={12} className='rb:flex-1'>
+            <Button onClick={() => setWikiSettingsOpen(true)}>{t('knowledgeBase.wiki.settings')}</Button>
             <Button onClick={() => navigate(`/knowledge-base/${knowledgeBaseId}/wiki`)}>Wiki</Button>
             <Radio.Group value={isGraph} onChange={(e) => setIsGraph(e.target.value)}>
               <Radio.Button value={false} className="rb:px-2!">
@@ -941,6 +944,11 @@ const Private: FC = () => {
         ref={modalRef}
         refreshTable={handleRefreshTable}
       />
+      <WikiSettings knowledge={knowledgeBase} open={wikiSettingsOpen}
+        onClose={() => {
+          setWikiSettingsOpen(false);
+          void fetchKnowledgeBaseDetail(knowledgeBase.id).catch(() => undefined);
+        }} onSaved={() => tableRef.current?.loadData()} />
       <ShareModal
         ref={shareModalRef}
         handleShare={handleShareCallback}

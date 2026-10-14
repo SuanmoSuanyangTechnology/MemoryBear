@@ -1,5 +1,19 @@
 export const knowledgeBase = {
     knowledgeBase: {
+      wiki: {
+        settings: 'Wiki 设置',
+        graphAndWiki: '知识图谱与 Wiki',
+        configuration: 'Wiki 自动生成',
+        enable: '启用 Wiki',
+        enableHelp: '开启后将为已有文档补录 Wiki，并自动处理后续导入的文档。关闭后停止受理新的生成任务，已受理的任务继续完成，已有页面仍可阅读。',
+        modelHelp: 'Wiki 使用基本配置中的文本生成模型；修改该模型后，将用于后续生成任务。',
+        modelRequired: '请先在基本配置中选择文本生成模型',
+        language: 'Wiki 生成语言',
+        languageRequired: '请输入 Wiki 生成语言',
+        extractPrompt: 'Wiki 提取提示词',
+        promptHelp: '留空使用默认提示词；修改后用于后续生成任务。',
+        promptPlaceholder: '例如：优先整理产品能力、使用方法与架构设计，保留来源与适用版本。',
+      },
       home: '首页',
       selectSpace: '请选择空间',
       preview: '预览',

@@ -1,5 +1,19 @@
 export const knowledgeBase = {
     knowledgeBase: {
+      wiki: {
+        settings: 'Wiki settings',
+        graphAndWiki: 'Knowledge graph and Wiki',
+        configuration: 'Wiki generation',
+        enable: 'Enable Wiki',
+        enableHelp: 'Enabling Wiki backfills existing documents and processes new imports. Disabling it stops new admissions while accepted tasks continue and existing pages remain readable.',
+        modelHelp: 'Wiki uses the text generation model selected in basic configuration. Model changes apply to subsequent generation tasks.',
+        modelRequired: 'Select a text generation model in basic configuration first',
+        language: 'Wiki generation language',
+        languageRequired: 'Enter a Wiki generation language',
+        extractPrompt: 'Wiki extraction prompt',
+        promptHelp: 'Leave blank to use the default prompt. Changes apply to subsequent generation tasks.',
+        promptPlaceholder: 'For example: organize product capabilities, usage, and architecture while preserving sources and applicable versions.',
+      },
       home: 'Home',
       selectSpace: 'Please select space',
       preview: 'Preview',

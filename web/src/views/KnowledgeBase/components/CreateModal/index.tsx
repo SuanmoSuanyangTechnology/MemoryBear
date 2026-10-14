@@ -1,5 +1,5 @@
 import { forwardRef, useImperativeHandle, useState } from 'react';
-import { App, Button, Form, Steps } from 'antd';
+import { Alert, App, Button, Divider, Form, Steps } from 'antd';
 import { useTranslation } from 'react-i18next';
 import {
   checkFeishuSync,
@@ -21,6 +21,9 @@ import CreateModalBasicConfig from './CreateModalBasicConfig';
 import CreateModalKnowledgeGraphConfig from './CreateModalKnowledgeGraphConfig';
 import useCreateModalModels from './useCreateModalModels';
 import { baseModelFields, multimodalModelFields } from '../../constants'
+import WikiConfigFields from '../WikiConfigFields';
+import { DEFAULT_WIKI_CONFIG, getWikiKnowledge } from '@/api/wiki';
+import { wikiErrorMessage } from '../../Wiki/useWikiResource';
 
 const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({ refreshTable }, ref) => {
   const { t } = useTranslation();
@@ -34,6 +37,7 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({ refreshTa
   const [generatingEntityTypes, setGeneratingEntityTypes] = useState(false);
   const [isRebuildMode, setIsRebuildMode] = useState(false);
   const [originalType, setOriginalType] = useState<string>('');
+  const [saveError, setSaveError] = useState<string>();
   const { customModels, getTypeList, resetModelInfo } = useCreateModalModels({
     form,
     datasets,
@@ -41,6 +45,7 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({ refreshTa
   });
 
   const handleClose = () => {
+    setSaveError(undefined);
     setDatasets(null);
     form.resetFields();
     setLoading(false);
@@ -106,6 +111,7 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({ refreshTa
       const defaults: Partial<KnowledgeBaseFormData> = {
         permission_id: 'Private',
         type: type || currentType,
+        parser_config: { wiki: { ...DEFAULT_WIKI_CONFIG } },
       };
       form.setFieldsValue(defaults);
       return;
@@ -119,6 +125,7 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({ refreshTa
       status: record.status,
       parser_config: {
         ...record.parser_config,
+        wiki: { ...DEFAULT_WIKI_CONFIG, ...record.parser_config?.wiki },
         graphrag: {
           use_graphrag: false,
           scene_name: '',
@@ -145,6 +152,7 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({ refreshTa
   };
 
   const handleOpen = (record?: KnowledgeBaseListItem | null, type?: string) => {
+    setSaveError(undefined);
     setDatasets(record || null);
     const isRebuild = type === 'rebuild';
     const actualType = isRebuild
@@ -164,6 +172,7 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({ refreshTa
     form.validateFields()
       .then(() => {
         setLoading(true);
+        setSaveError(undefined);
         const formValues = form.getFieldsValue(true);
         const save = () => {
           const rawEntityTypes = formValues.parser_config?.graphrag?.entity_types as string[] | string | undefined;
@@ -181,6 +190,7 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({ refreshTa
             parent_id: datasets?.parent_id || undefined,
             parser_config: {
               ...formValues.parser_config,
+              wiki: saveType === 'Folder' ? undefined : formValues.parser_config?.wiki,
               graphrag: formValues.parser_config?.graphrag
                 ? {
                     ...formValues.parser_config.graphrag,
@@ -189,7 +199,6 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({ refreshTa
                 : undefined,
             },
           };
-          console.log('Saving payload:', payload);
           const submit = datasets?.id
             ? updateKnowledgeBase(datasets.id, payload)
             : createKnowledgeBase(payload);
@@ -257,8 +266,17 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({ refreshTa
 
         return save();
       })
-      .catch((error) => {
-        console.log('Validation or save failed:', error);
+      .catch(async (error) => {
+        if (!error?.errorFields) {
+          setSaveError(wikiErrorMessage(error));
+          if (datasets?.id) {
+            try {
+              // A backfill dispatch error can occur after the configuration commits.
+              const current = await getWikiKnowledge(datasets.id);
+              form.setFieldValue(['parser_config', 'wiki'], { ...DEFAULT_WIKI_CONFIG, ...current.parser_config?.wiki });
+            } catch { /* Leave the form available for an explicit retry. */ }
+          }
+        }
         setLoading(false);
       });
   };
@@ -338,12 +356,18 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({ refreshTa
       ),
     },
     ...(!isFolder ? [{
-      title: t('knowledgeBase.knowledgeGraph'),
+      title: isRebuildMode ? t('knowledgeBase.knowledgeGraph') : t('knowledgeBase.wiki.graphAndWiki'),
       content: (
-        <CreateModalKnowledgeGraphConfig
-          generatingEntityTypes={generatingEntityTypes}
-          onGenerateEntityTypes={generateEntityTypes}
-        />
+        <>
+          <CreateModalKnowledgeGraphConfig
+            generatingEntityTypes={generatingEntityTypes}
+            onGenerateEntityTypes={generateEntityTypes}
+          />
+          {!isRebuildMode ? <>
+            <Divider orientation="left">{t('knowledgeBase.wiki.configuration')}</Divider>
+            <WikiConfigFields />
+          </> : null}
+        </>
       ),
     }] : []),
   ];
@@ -387,6 +411,7 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({ refreshTa
       ]}
       confirmLoading={loading}
     >
+      {saveError ? <Alert type="warning" showIcon message={saveError} className="rb:mb-4" /> : null}
       {!isFolder && (
         <Steps
           size="small"
@@ -402,6 +427,7 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({ refreshTa
           permission_id: 'Private',
           type: currentType,
           parser_config: {
+            wiki: { ...DEFAULT_WIKI_CONFIG },
             graphrag: {
               use_graphrag: false,
               scene_name: '',

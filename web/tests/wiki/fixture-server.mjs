@@ -25,7 +25,11 @@ const pages = catalog.map(([title, summary, folder], i) => ({ id: uuid(i + 1), p
   folder_path: [{ id: folders[folder].id, name: folders[folder].name }], updated_at_ms: 1791925200000 }));
 const documentId = uuid(200);
 let scenario = 'normal';
-let knowledge = { id: kbId, name: 'xxxx', status: 1, type: 'General', llm_id: uuid(300), parser_config: { wiki: { enabled: true, language: 'zh-CN', extract_prompt: '' } } };
+const modelOptions = Object.fromEntries(['llm', 'embedding', 'rerank'].map((type, i) => [type, [{
+  id: uuid(300 + i), name: `本地测试${type}模型`, type, provider: 'openai', is_active: true, is_available: true, is_deprecated: false,
+}]]));
+let knowledge = { id: kbId, name: 'xxxx', status: 1, type: 'General', llm_id: uuid(300), embedding_id: uuid(301), reranker_id: uuid(302),
+  permission_id: 'Private', created_at: '2026-10-14T08:00:00Z', parser_config: { wiki: { enabled: true, language: 'zh-CN', extract_prompt: '' } } };
 let doc = { id: documentId, file_id: uuid(201), kb_id: kbId, file_name: 'MemoryBear 产品说明.md', file_ext: 'md',
   chunk_num: 3, run: 0, progress: 1, status: 1, progress_msg: 'Wiki 生成完成：11 / 11 个页面', created_at: '2026-10-14T08:00:00Z' };
 const requests = [];
@@ -60,6 +64,12 @@ const server = createServer(async (req, res) => {
     }
     return send(knowledge);
   }
+  if (path === '/api/knowledges/knowledges') return send({ items: [knowledge], page: { page: 1, pagesize: 20, total: 1, hasnext: false } });
+  if (path === '/api/knowledges/knowledgetype') return send(['General', 'Folder']);
+  if (path === '/api/knowledges/knowledge' && req.method === 'POST') return send({ ...knowledge, ...payload, id: uuid(700) });
+  if (path === '/api/models') return send(Object.values(modelOptions).flat());
+  if (path === '/api/workspaces/workspace_models') return send({ llm: uuid(300), embedding: uuid(301), rerank: uuid(302) });
+  if (path.startsWith('/api/files/') && path.endsWith('/files')) return send({ items: [], page: { page: 1, pagesize: 20, total: 0, has_next: false } });
   if (path.endsWith('/wiki/index')) return send({ total_pages: scenario === 'empty' ? 0 : pages.length, counts: { summary: 1, entity: 1, concept: 9 }, folders });
   if (path.endsWith('/wiki/tree')) {
     const folder = url.searchParams.get('folder_id');
@@ -103,11 +113,12 @@ const server = createServer(async (req, res) => {
   if (path === `/api/documents/${kbId}/documents`) return send({ items: [doc], page: { page: 1, pagesize: 20, total: 1, has_next: false } });
   if (path === `/api/documents/${documentId}`) return send(doc);
   if (path.startsWith('/api/chunks/') && path.endsWith('/chunks')) return send({ items: [{ page_content: 'MemoryBear source chunk is readable during Wiki processing.', metadata: { document_id: documentId, knowledge_id: kbId, sort_id: 1 }, children: [] }], page: { total: 1, has_next: false } });
-  if (path === '/api/workspaces/model_options') return send({ llm: [{ id: uuid(300), name: '本地测试模型', is_active: true }] });
+  if (path === '/api/workspaces/model_options') return send({ ...modelOptions, vision: [], audio: [], video: [] });
   if (path === '/api/workspaces/storage') return send({ storage_type: 'neo4j' });
   if (path === '/api/notifications/sync') return send({ notifications: [], banners: [], modals: [], unread_count: 0 });
   if (path.startsWith('/api/notifications')) return send({ items: [], total: 0 });
   if (path.includes('/metadata')) return send({ items: [] });
   return send({});
 });
-server.listen(4174, '127.0.0.1', () => console.log('Wiki fixture API listening on http://127.0.0.1:4174'));
+const port = Number(process.env.WIKI_FIXTURE_PORT || 4174);
+server.listen(port, '127.0.0.1', () => console.log(`Wiki fixture API listening on http://127.0.0.1:${port}`));

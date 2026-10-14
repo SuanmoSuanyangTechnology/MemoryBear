@@ -104,6 +104,7 @@ function WikiWorkspace({ kbId }: { kbId: string }) {
         aria-label={collapsed ? '展开侧栏' : '收起侧栏'} onClick={() => setCollapsed(value => !value)} />
         <nav className="wiki-breadcrumb" aria-label="Wiki 路径"><button onClick={showDirectory}>Wiki</button><span>/</span><span>{title}</span></nav>
         <div className="wiki-toolbar-actions"><Tooltip title="刷新 Wiki"><Button type="text" icon={<ReloadOutlined />} onClick={refresh} aria-label="刷新 Wiki" /></Tooltip>
+          <Button type="text" onClick={() => setSettingsOpen(true)}>Wiki 设置</Button>
           <Button type="text" icon={<ShareAltOutlined />} onClick={() => showGraph(selectedId)}>图谱</Button></div>
       </header>
       <div className="wiki-content" key={`${view}:${selectedId ?? ''}:${query}:${revision}`}>
