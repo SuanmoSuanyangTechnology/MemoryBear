@@ -74,7 +74,10 @@ def _parse_datetime(value: Any) -> datetime:
     if isinstance(value, datetime):
         parsed = value
     elif isinstance(value, str):
-        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise RuntimeError("Elasticsearch preference hit has invalid updated_at") from exc
     else:
         raise RuntimeError("Elasticsearch preference hit has invalid updated_at")
     if parsed.tzinfo is None:
@@ -197,6 +200,7 @@ class PreferenceRecallStorage:
         candidates: list[FullPreferenceCandidate] = []
         pages = 0
         expected_total: int | None = None
+        read_count = 0
         search_after: list[Any] | None = None
         try:
             while True:
@@ -210,7 +214,7 @@ class PreferenceRecallStorage:
                     "source_includes": ["id", "situation_key", "preference_text", "updated_at"],
                     "size": SEARCH_BATCH_SIZE,
                     "sort": [{"_shard_doc": "asc"}],
-                    "track_total_hits": True,
+                    "track_total_hits": expected_total is None,
                     "allow_partial_search_results": False,
                 }
                 if search_after is not None:
@@ -232,15 +236,13 @@ class PreferenceRecallStorage:
                         or shards["successful"] + shards.get("skipped", 0) != shards["total"]):
                     raise RuntimeError("Elasticsearch preference page has incomplete shards")
                 hits = _validate_response(response)
-                total = response["hits"].get("total")
-                if (not isinstance(total, Mapping) or total.get("relation") != "eq"
-                        or not isinstance(total.get("value"), int) or total["value"] < 0):
-                    raise RuntimeError("Elasticsearch preference total is invalid")
                 if expected_total is None:
+                    total = response["hits"].get("total")
+                    if (not isinstance(total, Mapping) or total.get("relation") != "eq"
+                            or not isinstance(total.get("value"), int) or total["value"] < 0):
+                        raise RuntimeError("Elasticsearch preference total is invalid")
                     expected_total = total["value"]
-                elif expected_total != total["value"]:
-                    raise RuntimeError("Elasticsearch preference PIT total changed")
-                if len(hits) > SEARCH_BATCH_SIZE or pages * SEARCH_BATCH_SIZE + len(hits) > expected_total:
+                if len(hits) > SEARCH_BATCH_SIZE or read_count + len(hits) > expected_total:
                     raise RuntimeError("Elasticsearch preference page count is invalid")
                 for hit in hits:
                     source = hit.get("_source")
@@ -262,14 +264,16 @@ class PreferenceRecallStorage:
                         for index, text in enumerate(texts)
                     )
                 pages += 1
-                read_count = (pages - 1) * SEARCH_BATCH_SIZE + len(hits)
+                read_count += len(hits)
                 if read_count == expected_total:
                     break
-                if not hits or len(hits) != SEARCH_BATCH_SIZE:
+                if not hits:
                     raise RuntimeError("Elasticsearch preference PIT is incomplete")
                 sort = hits[-1].get("sort")
-                if not isinstance(sort, (list, tuple)) or not sort:
-                    raise RuntimeError("Elasticsearch preference search_after is missing")
+                if (not isinstance(sort, (list, tuple)) or len(sort) != 1
+                        or type(sort[0]) is not int
+                        or (search_after is not None and sort[0] <= search_after[0])):
+                    raise RuntimeError("Elasticsearch preference search_after is invalid")
                 search_after = list(sort)
             return candidates, pages
         finally:

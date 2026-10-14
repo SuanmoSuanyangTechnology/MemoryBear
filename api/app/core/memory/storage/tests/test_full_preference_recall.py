@@ -88,7 +88,7 @@ async def test_full_read_filters_and_traverses_every_pit_page(monkeypatch):
             _hit("a", ["A"], sort=1),
             _hit("b", ["B"], situation="code_generation", sort=2),
         ], 3),
-        _page([_hit("c", ["C"], sort=3)], 3),
+        _page([_hit("c", ["C"], sort=3)], 3, hits={"hits": [_hit("c", ["C"], sort=3)]}),
     ])
     candidates, pages = await _storage(raw).query_all(end_user_id="user-1")
     assert [item.preference_text for item in candidates] == ["A", "B", "C"]
@@ -102,8 +102,31 @@ async def test_full_read_filters_and_traverses_every_pit_page(monkeypatch):
         {"term": {"status": "active"}},
     ]
     assert raw.search_calls[0]["track_total_hits"] is True
+    assert raw.search_calls[1]["track_total_hits"] is False
     assert raw.search_calls[0]["allow_partial_search_results"] is False
     assert "subject" not in str(raw.search_calls[0]["query"])
+
+
+@pytest.mark.asyncio
+async def test_full_read_continues_after_a_short_nonfinal_page(monkeypatch):
+    monkeypatch.setattr(recall_storage, "SEARCH_BATCH_SIZE", 2)
+    raw = FakeES([
+        _page([_hit("a", ["A"], sort=1)], 3),
+        _page([_hit("b", ["B"], sort=2)], 3, hits={"hits": [_hit("b", ["B"], sort=2)]}),
+        _page([_hit("c", ["C"], sort=3)], 3, hits={"hits": [_hit("c", ["C"], sort=3)]}),
+    ])
+
+    candidates, pages = await _storage(raw).query_all(end_user_id="user-1")
+
+    assert [item.preference_text for item in candidates] == ["A", "B", "C"]
+    assert pages == 3
+    assert [call["track_total_hits"] for call in raw.search_calls] == [True, False, False]
+    assert [call.get("search_after") for call in raw.search_calls] == [None, [1], [2]]
+
+
+def test_invalid_preference_timestamp_uses_storage_error_type():
+    with pytest.raises(RuntimeError, match="invalid updated_at"):
+        recall_storage._parse_datetime("not-a-timestamp")
 
 
 @pytest.mark.asyncio
@@ -121,7 +144,6 @@ async def test_full_read_missing_alias_is_a_failure():
     _page([], 3),
     _page([_hit("c", ["C"])], 3, timed_out=True),
     _page([_hit("c", ["C"])], 3, _shards={"total": 1, "successful": 0, "failed": 1}),
-    _page([_hit("c", ["C"])], 3, hits={"total": {"value": 3, "relation": "gte"}, "hits": [_hit("c", ["C"])]}),
     _page([_hit("c", ["C"])], 3, hits={"total": {"value": 3, "relation": "eq"}, "hits": [{"_source": {"id": "c"}}]}),
     RuntimeError("search unavailable"),
 ])
@@ -129,6 +151,45 @@ async def test_full_read_rejects_incomplete_or_invalid_page_and_closes_pit(monke
     monkeypatch.setattr(recall_storage, "SEARCH_BATCH_SIZE", 2)
     raw = FakeES([_page([_hit("a", ["A"], sort=1), _hit("b", ["B"], sort=2)], 3), second])
     with pytest.raises((RuntimeError, KeyError)):
+        await _storage(raw).query_all(end_user_id="user-1")
+    assert raw.closed == [{"id": "pit-2"}]
+
+
+@pytest.mark.asyncio
+async def test_full_read_rejects_inexact_first_page_total(monkeypatch):
+    monkeypatch.setattr(recall_storage, "SEARCH_BATCH_SIZE", 2)
+    raw = FakeES([_page([_hit("a", ["A"])], 3, hits={
+        "total": {"value": 3, "relation": "gte"},
+        "hits": [_hit("a", ["A"])],
+    })])
+    with pytest.raises(RuntimeError, match="total is invalid"):
+        await _storage(raw).query_all(end_user_id="user-1")
+    assert raw.closed == [{"id": "pit-2"}]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("sort", [None, [], [None], [1, 2]])
+async def test_full_read_rejects_invalid_search_after(monkeypatch, sort):
+    monkeypatch.setattr(recall_storage, "SEARCH_BATCH_SIZE", 1)
+    hit = _hit("a", ["A"], sort=1)
+    if sort is None:
+        del hit["sort"]
+    else:
+        hit["sort"] = sort
+    raw = FakeES([_page([hit], 2)])
+    with pytest.raises(RuntimeError, match="search_after is invalid"):
+        await _storage(raw).query_all(end_user_id="user-1")
+    assert raw.closed == [{"id": "pit-2"}]
+
+
+@pytest.mark.asyncio
+async def test_full_read_rejects_nonadvancing_search_after(monkeypatch):
+    monkeypatch.setattr(recall_storage, "SEARCH_BATCH_SIZE", 1)
+    raw = FakeES([
+        _page([_hit("a", ["A"], sort=1)], 3),
+        _page([_hit("b", ["B"], sort=1)], 3, hits={"hits": [_hit("b", ["B"], sort=1)]}),
+    ])
+    with pytest.raises(RuntimeError, match="search_after is invalid"):
         await _storage(raw).query_all(end_user_id="user-1")
     assert raw.closed == [{"id": "pit-2"}]
 
@@ -289,19 +350,18 @@ def isolated_controller(monkeypatch):
     return module
 
 
-def _request(body: bytes) -> Request:
+def _request(body: bytes, *, method: str = "POST", query_string: bytes = b"") -> Request:
     async def receive():
         return {"type": "http.request", "body": body, "more_body": False}
 
     return Request({
-        "type": "http", "method": "POST", "path": "/v1/memory/preference/recall/full",
-        "headers": [(b"x-end-user-other-id", b"external-user")], "query_string": b"",
+        "type": "http", "method": method, "path": "/v1/memory/preference/recall/full",
+        "headers": [(b"x-end-user-other-id", b"external-user")], "query_string": query_string,
     }, receive)
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("body", [b"", b"{}"])
-async def test_full_http_accepts_empty_body_and_empty_object(monkeypatch, isolated_controller, body):
+async def test_full_http_get_accepts_no_body(monkeypatch, isolated_controller):
     async def caller(request):
         return ("workspace", "user", "config"), None
 
@@ -311,19 +371,31 @@ async def test_full_http_accepts_empty_body_and_empty_object(monkeypatch, isolat
 
     monkeypatch.setattr(isolated_controller, "_resolve_caller", caller)
     monkeypatch.setattr(isolated_controller, "execute_full_preference_recall", execute)
-    response = await isolated_controller.recall_all_coding_preferences_http.__wrapped__(_request(body))
+    response = await isolated_controller.recall_all_coding_preferences_http.__wrapped__(
+        _request(b"", method="GET")
+    )
     assert response.status_code == 200
+    assert response.headers["cache-control"] == "no-store"
     assert loads(response.body)["data"] == {"preferences": [], "count": 0, "preference_prompt": ""}
+    route = next(route for route in isolated_controller.router.routes if route.path == "/memory/preference/recall/full")
+    assert route.methods == {"GET"}
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("body", [b'{"language":"en"}', b"[]", b"null", b"not json"])
-async def test_full_http_rejects_other_payloads_before_identity_lookup(monkeypatch, isolated_controller, body):
+@pytest.mark.parametrize(
+    ("body", "query_string"),
+    [(b"{}", b""), (b'{"language":"en"}', b""), (b"", b"language=en")],
+)
+async def test_full_http_get_rejects_body_and_query_before_identity_lookup(
+    monkeypatch, isolated_controller, body, query_string
+):
     async def forbidden_lookup(request):
         raise AssertionError("identity lookup must not run")
 
     monkeypatch.setattr(isolated_controller, "_resolve_caller", forbidden_lookup)
-    response = await isolated_controller.recall_all_coding_preferences_http.__wrapped__(_request(body))
+    response = await isolated_controller.recall_all_coding_preferences_http.__wrapped__(
+        _request(body, method="GET", query_string=query_string)
+    )
     assert response.status_code == 400
     assert loads(response.body)["code"] == BizCode.INVALID_PARAMETER
 
@@ -338,7 +410,9 @@ async def test_full_http_dependency_failure_is_503_without_partial_data(monkeypa
 
     monkeypatch.setattr(isolated_controller, "_resolve_caller", caller)
     monkeypatch.setattr(isolated_controller, "execute_full_preference_recall", execute)
-    response = await isolated_controller.recall_all_coding_preferences_http.__wrapped__(_request(b""))
+    response = await isolated_controller.recall_all_coding_preferences_http.__wrapped__(
+        _request(b"", method="GET")
+    )
     assert response.status_code == 503
     assert loads(response.body)["code"] == BizCode.SERVICE_UNAVAILABLE
     assert "sensitive preference body" not in response.body.decode()
@@ -385,7 +459,9 @@ async def test_full_http_resolves_end_user_only_with_authenticated_workspace(mon
     monkeypatch.setattr(isolated_controller, "get_current_api_key_auth", lambda: SimpleNamespace(workspace_id="authenticated-workspace"))
     monkeypatch.setattr(isolated_controller, "get_async_db_context", db_context)
     monkeypatch.setattr(isolated_controller, "EndUserRepository", Users)
-    response = await isolated_controller.recall_all_coding_preferences_http.__wrapped__(_request(b""))
+    response = await isolated_controller.recall_all_coding_preferences_http.__wrapped__(
+        _request(b"", method="GET")
+    )
     assert response.status_code == 403
     assert loads(response.body)["code"] == BizCode.PERMISSION_DENIED
 

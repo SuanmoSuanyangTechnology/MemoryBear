@@ -99,18 +99,12 @@ async def recall_coding_preferences_http(request: Request) -> JSONResponse:
     )
 
 
-@router.post("/recall/full")
+@router.get("/recall/full")
 @require_api_key_self_db(scopes=["memory"])
 async def recall_all_coding_preferences_http(request: Request) -> JSONResponse:
     """Return all visible active Coding Agent preferences and their prompt block."""
-    body_bytes = await request.body()
-    if body_bytes:
-        try:
-            body = await request.json()
-        except (ValueError, TypeError):
-            return _failure(BizCode.INVALID_PARAMETER, "偏好召回请求参数不合法")
-        if body != {} or not isinstance(body, dict):
-            return _failure(BizCode.INVALID_PARAMETER, "偏好召回请求参数不合法")
+    if await request.body() or request.query_params:
+        return _failure(BizCode.INVALID_PARAMETER, "偏好召回请求参数不合法")
 
     caller, error = await _resolve_caller(request)
     if error is not None:
@@ -124,4 +118,7 @@ async def recall_all_coding_preferences_http(request: Request) -> JSONResponse:
         return _failure(BizCode.PERMISSION_DENIED, "无权访问该偏好资源")
     except Exception:
         return _failure(BizCode.SERVICE_UNAVAILABLE, "偏好召回服务暂时不可用")
-    return JSONResponse(content=success(data=result.model_dump(mode="json"), msg="查询成功"))
+    return JSONResponse(
+        content=success(data=result.model_dump(mode="json"), msg="查询成功"),
+        headers={"Cache-Control": "no-store"},
+    )
