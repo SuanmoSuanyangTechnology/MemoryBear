@@ -15,6 +15,7 @@ from typing import Any
 
 SCHEMA_VERSION = 1
 DEFAULT_PROC_ROOT = Path("/proc")
+MICROSECONDS_PER_SECOND = 1_000_000
 VALID_PROBES = frozenset({"startup", "live", "ready"})
 WORKER_ROLES = frozenset(
     {
@@ -114,7 +115,17 @@ def read_process_stat(
     *,
     proc_root: Path = DEFAULT_PROC_ROOT,
 ) -> tuple[str, int]:
-    """Return Linux process state and start ticks from /proc."""
+    """Return process state and a stable token that detects PID reuse."""
+
+    if sys.platform == "darwin" and proc_root == DEFAULT_PROC_ROOT:
+        import psutil
+
+        try:
+            process = psutil.Process(pid)
+            state = "Z" if process.status() == psutil.STATUS_ZOMBIE else "R"
+            return state, round(process.create_time() * MICROSECONDS_PER_SECOND)
+        except psutil.Error as error:
+            raise OSError("Process identity is unavailable") from error
 
     stat = (proc_root / str(pid) / "stat").read_text(encoding="utf-8")
     closing_parenthesis = stat.rfind(")")
@@ -131,7 +142,15 @@ def read_process_command(
     *,
     proc_root: Path = DEFAULT_PROC_ROOT,
 ) -> tuple[str, ...]:
-    """Return the NUL-separated command line for one Linux process."""
+    """Return the argument vector without executing or inspecting its environment."""
+
+    if sys.platform == "darwin" and proc_root == DEFAULT_PROC_ROOT:
+        import psutil
+
+        try:
+            return tuple(psutil.Process(pid).cmdline())
+        except psutil.Error as error:
+            raise OSError("Process command is unavailable") from error
 
     raw = (proc_root / str(pid) / "cmdline").read_bytes()
     return tuple(
@@ -169,7 +188,7 @@ def command_is_celery_worker(command: Sequence[str]) -> bool:
 
     if not command:
         return False
-    executable = Path(command[0]).name
+    executable = Path(command[0]).name.lower()
     if executable == "celery":
         arguments = command[1:]
     elif executable.startswith("python") and len(command) >= 2:
