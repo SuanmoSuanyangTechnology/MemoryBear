@@ -21,7 +21,7 @@ _MAX_REPAIR_ERROR_CHARS = 1500
 
 def tokens(value) -> int:
     text = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False)
-    return len(get_encoder().encode(text))
+    return len(get_encoder().encode(text, disallowed_special=()))
 
 
 def system_prompt(stage, schema):

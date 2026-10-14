@@ -7,6 +7,9 @@ from .config import TYPE_GROUP_NAMES, normalize_name
 from .contracts import FolderAssignments, IdentityMatches
 from .pipeline import require_refs
 
+IDENTITY_CANDIDATE_LIMIT = 5
+IDENTITY_SIMILARITY_THRESHOLD = 0.5
+
 
 def _names(topic):
     return {normalize_name(topic.get("name") or topic.get("title")),
@@ -28,9 +31,11 @@ def reconcile(model, snapshot, topics, context):
         for page in available:
             score = max(SequenceMatcher(None, name, old).ratio()
                         for name in names for old in _names(page))
-            if score >= 0.5:
+            if score >= IDENTITY_SIMILARITY_THRESHOLD:
                 scored.append((score, page))
-        selected = [p for _, p in sorted(scored, key=lambda pair: -pair[0])[:5]]
+        selected = [p for _, p in sorted(scored, key=lambda pair: -pair[0])[
+            :IDENTITY_CANDIDATE_LIMIT
+        ]]
         if not selected:
             continue
         choices = {f"E{index + 1}": page for index, page in enumerate(selected)}

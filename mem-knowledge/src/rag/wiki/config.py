@@ -93,3 +93,8 @@ def generation_config_hash(llm_id: Any, parser_config: Mapping | None) -> str:
 
 def normalize_name(value: str) -> str:
     return " ".join(unicodedata.normalize("NFKC", value).casefold().split())
+
+
+def source_reference_key(ref: str):
+    """Numeric S handles preserve the original document order beyond nine pieces."""
+    return (0, int(ref[1:])) if ref.startswith("S") and ref[1:].isdigit() else (1, ref)

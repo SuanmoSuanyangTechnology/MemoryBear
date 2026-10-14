@@ -4,7 +4,7 @@ from collections import defaultdict
 
 from ..chunk.token_utils import split_by_token_limit
 from .batching import batches, optional_items, parallel
-from .config import WikiError, normalize_name
+from .config import WikiError, normalize_name, source_reference_key
 from .contracts import Citations, DocumentSummary, SummaryPoints
 from .model import request_tokens, tokens
 from .pipeline import (
@@ -77,7 +77,7 @@ def _classify(model, snapshot, topics, segment, allow_new):
         if size < 1:
             raise WikiError("WIKI_CONTEXT_BUDGET_EXCEEDED", retryable=False)
         pieces.extend({**source, "text": text}
-                      for text in split_by_token_limit(source["text"], size))
+                      for text in split_by_token_limit(source["text"], size, disallowed_special=()))
 
     source_groups = batches(pieces, stage="wiki_chunk_citations_v2",
                             build=lambda values: {**fixed, "sources": model_sources(values)},
@@ -180,7 +180,7 @@ def bind_materials(draft, plan, catalog, title):
     context = {"title": title, "summary": summary, "topics": links,
                "format": "original_evidence_v2"}
     materials = [{"page_id": page_id, "facts": [],
-                  "chunk_refs": [catalog[ref] for ref in sorted(refs)],
+                  "chunk_refs": [catalog[ref] for ref in sorted(refs, key=source_reference_key)],
                   "source_context": {"title": title, "format": "original_evidence_v2",
                                      "page_metadata": metadata[page_id]}}
                  for page_id, refs in grouped.items()]
