@@ -1,0 +1,280 @@
+"""
+工作流相关数据模型
+"""
+
+import uuid
+from sqlalchemy import Column, String, Boolean, DateTime, Integer, BigInteger, Float, ForeignKey, Text, text
+from sqlalchemy.dialects.postgresql import UUID, JSONB
+from sqlalchemy.orm import relationship
+from .base import ServiceBase as Base
+from ..utils.datetime_utils import utcnow_naive
+
+
+class WorkflowConfig(Base):
+    """工作流配置表"""
+    __tablename__ = "workflow_configs"
+
+    # 主键
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    
+    # 关联应用（一对一）
+    app_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("apps.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+        index=True
+    )
+    
+    # 工作流类型:pure_workflow(纯工作流) | workflow(对话式工作流)
+    workflow_type = Column(String(20), nullable=False, server_default="workflow", index=True)
+    
+    # 节点和边的定义（JSON 格式）
+    nodes = Column(JSONB, nullable=False, default=list)
+    edges = Column(JSONB, nullable=False, default=list)
+    
+    # 全局变量定义
+    variables = Column(JSONB, default=list)
+    environment_variables = Column(JSONB, default=list, server_default=text("'[]'::jsonb"))
+    
+    # 执行配置
+    execution_config = Column(JSONB, nullable=False, default=dict)
+    features = Column(JSONB, nullable=True, default=dict)
+    
+    # 触发器配置（可选）
+    triggers = Column(JSONB, default=list)
+    
+    # 状态
+    is_active = Column(Boolean, nullable=False, default=True)
+    created_at = Column(DateTime, nullable=False, default=utcnow_naive)
+    updated_at = Column(
+        DateTime,
+        nullable=False,
+        default=utcnow_naive,
+        onupdate=utcnow_naive
+    )
+    
+    # 关系
+    app = relationship("App", back_populates="workflow_config")
+    executions = relationship(
+        "WorkflowExecution",
+        back_populates="workflow_config",
+        cascade="all, delete-orphan"
+    )
+    
+    def __repr__(self):
+        return f"<WorkflowConfig(id={self.id}, app_id={self.app_id})>"
+
+
+class WorkflowExecution(Base):
+    """工作流执行记录表"""
+    __tablename__ = "workflow_executions"
+
+    # 主键
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    
+    # 关联信息
+    workflow_config_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("workflow_configs.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True
+    )
+
+    release_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("app_releases.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True
+    )
+
+    app_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("apps.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True
+    )
+    conversation_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("conversations.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True
+    )
+    
+    # 执行信息
+    execution_id = Column(String(100), nullable=False, unique=True, index=True)
+    trigger_type = Column(String(20), nullable=False)  # manual, schedule, webhook, event
+    triggered_by = Column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id"),
+        nullable=True
+    )
+    
+    # 输入输出
+    input_data = Column(JSONB)
+    output_data = Column(JSONB)
+    context = Column(JSONB, default=dict)
+    
+    # 状态
+    status = Column(String(20), nullable=False, default="pending", index=True)
+    # 可选值：pending, running, completed, failed, cancelled, timeout
+    
+    error_message = Column(Text)
+    error_node_id = Column(String(100))
+    
+    # 性能指标
+    started_at = Column(DateTime, nullable=False, default=utcnow_naive, index=True)
+    completed_at = Column(DateTime)
+    elapsed_time = Column(Float)  # 耗时（秒）
+    
+    # 资源使用
+    token_usage = Column(JSONB)
+    
+    # 元数据（使用 meta_data 避免与 SQLAlchemy 保留字 metadata 冲突）
+    meta_data = Column(JSONB, default=dict)
+    
+    created_at = Column(DateTime, nullable=False, default=utcnow_naive)
+    
+    # 关系
+    workflow_config = relationship("WorkflowConfig", back_populates="executions")
+    app = relationship("App")
+    conversation = relationship("Conversation")
+    # Cross-domain relationship omitted: target model is host-owned and not part of this service's model set (FK column retained).
+    node_executions = relationship(
+        "WorkflowNodeExecution",
+        back_populates="execution",
+        cascade="all, delete-orphan",
+        order_by="WorkflowNodeExecution.execution_order"
+    )
+    
+    def __repr__(self):
+        return f"<WorkflowExecution(id={self.id}, execution_id={self.execution_id}, status={self.status})>"
+
+
+class WorkflowNodeExecution(Base):
+    """工作流节点执行记录表
+
+    保留策略：本表只保留「最近一次」执行明细，不保存历史。
+      - 完整工作流：同 app_id + workflow_config_id 下按执行开始时间最近 1 次的全部节点行
+        （包括 waiting_human，且较旧人工介入执行恢复时不会覆盖更新执行）
+      - 单节点调试：同 app_id + workflow_config_id + node_id 下最近 1 条
+    历史节点明细的权威数据源是 workflow_executions.output_data["node_outputs"]。
+    由 settings.WORKFLOW_NODE_EXECUTION_RETENTION_ENABLED 控制。
+    """
+    __tablename__ = "workflow_node_executions"
+
+    # 主键
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    
+    # 关联执行（整图执行时关联，单节点调试可为空）
+    execution_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("workflow_executions.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True
+    )
+
+    app_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("apps.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    workflow_config_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("workflow_configs.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    
+    # 节点信息
+    node_id = Column(String(100), nullable=False, index=True)
+    node_type = Column(String(20), nullable=False)
+    node_name = Column(String(100))
+    
+    # 执行顺序
+    execution_order = Column(BigInteger, nullable=False)
+    retry_count = Column(Integer, nullable=False, default=0)
+    
+    # 输入输出
+    input_data = Column(JSONB)
+    output_data = Column(JSONB)
+    
+    # 状态
+    status = Column(String(20), nullable=False, default="pending", index=True)
+    # 可选值：pending, running, completed, failed, skipped, cached
+    
+    error_message = Column(Text)
+    
+    # 性能指标
+    started_at = Column(DateTime, nullable=False, default=utcnow_naive)
+    completed_at = Column(DateTime)
+    elapsed_time = Column(Float)  # 耗时（秒）
+    
+    # 资源使用（针对 LLM 节点）
+    token_usage = Column(JSONB)
+    
+    # 缓存信息
+    cache_hit = Column(Boolean, default=False)
+    cache_key = Column(String(255))
+    
+    # 元数据（使用 meta_data 避免与 SQLAlchemy 保留字 metadata 冲突）
+    meta_data = Column(JSONB, default=dict)
+    
+    created_at = Column(DateTime, nullable=False, default=utcnow_naive)
+    
+    # 关系
+    execution = relationship("WorkflowExecution", back_populates="node_executions")
+    
+    def __repr__(self):
+        return f"<WorkflowNodeExecution(id={self.id}, node_id={self.node_id}, status={self.status})>"
+
+
+class WorkflowNodeCache(Base):
+    """工作流节点缓存表"""
+
+    __tablename__ = "workflow_node_caches"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+
+    app_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("apps.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    workflow_config_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("workflow_configs.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+
+    node_id = Column(String(100), nullable=False, index=True)
+    node_type = Column(String(50), nullable=False)
+    node_name = Column(String(100))
+    cache_key = Column(String(64), nullable=False, index=True)
+    source = Column(String(32), nullable=False, default="workflow_execution")
+
+    status = Column(String(20), nullable=False, default="active", index=True)
+    input_data = Column(JSONB)
+    result_data = Column(JSONB)
+    hit_count = Column(Integer, nullable=False, default=0)
+    last_hit_at = Column(DateTime)
+    expires_at = Column(DateTime)
+    invalidated_at = Column(DateTime)
+    meta_data = Column(JSONB, default=dict)
+
+    created_at = Column(DateTime, nullable=False, default=utcnow_naive)
+    updated_at = Column(
+        DateTime,
+        nullable=False,
+        default=utcnow_naive,
+        onupdate=utcnow_naive
+    )
+
+    app = relationship("App")
+    workflow_config = relationship("WorkflowConfig")
+
+    def __repr__(self):
+        return f"<WorkflowNodeCache(id={self.id}, node_id={self.node_id}, status={self.status})>"

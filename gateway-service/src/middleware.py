@@ -69,7 +69,7 @@ def _has_credentials(request: Request) -> bool:
 _STRIPPED_HEADERS = frozenset({
     "authorization", "x-api-key", "x-api-key-id", "x-internal-token",
 })
-_STRIPPED_HEADER_PREFIXES = ("x-user-", "x-tenant-", "x-workspace-", "x-kb-", "x-model-")
+_STRIPPED_HEADER_PREFIXES = ("x-user-", "x-tenant-", "x-workspace-", "x-kb-", "x-model-", "x-app-")
 
 
 def _sanitize_headers(headers) -> dict[str, str]:

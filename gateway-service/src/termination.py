@@ -43,6 +43,7 @@ logger = logging.getLogger(__name__)
 _PROFILE_HEADERS: dict[str, tuple[str, str, str]] = {
     "kb": ("X-KB-Actor-ID", "X-KB-Tenant-ID", "X-KB-Workspace-ID"),
     "model-service": ("X-Model-Actor-ID", "X-Model-Tenant-ID", "X-Model-Workspace-ID"),
+    "application-service": ("X-App-Actor-ID", "X-App-Tenant-ID", "X-App-Workspace-ID"),
 }
 
 
