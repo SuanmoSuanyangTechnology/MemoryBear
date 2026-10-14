@@ -20,7 +20,11 @@ from typing import Any, Dict, List, Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.memory.emotion.emotion_buckets import EMOTION_NAMES_EN, EMOTION_NAMES_ZH
+from app.core.memory.emotion.emotion_buckets import (
+    EMOTION_NAMES_EN,
+    EMOTION_NAMES_ZH,
+    normalize_emotion_type_or_raw,
+)
 from app.core.utils.datetime_utils import parse_timestamp_to_utc_naive, to_timestamp_ms, utcnow_naive
 from app.repositories.end_user_repository import EndUserRepository
 from app.repositories.memory_engine_display_event_repository import (
@@ -984,7 +988,12 @@ def _merge_event_details(
         for e in events:
             d = e.details or {}
             stats = d.get("emotion_stats", {})
-            for etype, info in stats.items():
+            for raw_etype, info in stats.items():
+                # 存量旧值归一化（fear→anxiety、surprise→neutral）后同 code 合并；
+                # 归一化为 neutral 的跳过（卡片排除中性），未知原值保留
+                etype = normalize_emotion_type_or_raw(raw_etype)
+                if etype == "neutral":
+                    continue
                 if etype not in merged_emotions:
                     merged_emotions[etype] = {"count": 0, "intensity_sum": 0.0, "last_at": e.occurred_at}
                 merged_emotions[etype]["count"] += info.get("count", 0)
