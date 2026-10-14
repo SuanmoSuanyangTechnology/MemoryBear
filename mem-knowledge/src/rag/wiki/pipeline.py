@@ -41,7 +41,11 @@ def rewrite_markdown_text(text, transform):
 def require_refs(actual, allowed, *, complete=False):
     actual, allowed = set(actual), set(allowed)
     if not actual.issubset(allowed) or (complete and actual != allowed):
-        raise ValueError("Unknown or missing evidence handles")
+        raise ValueError(
+            "Unknown or missing evidence handles: "
+            f"unknown={sorted(actual - allowed)}, "
+            f"missing={sorted(allowed - actual) if complete else []}"
+        )
 
 
 def validate_markdown(text, source_refs, links):
