@@ -27,7 +27,6 @@ FULLTEXT_FIELDS: dict[MemoryNodeLabel, tuple[str, ...]] = {
     MemoryNodeType.SCENE_SUMMARY: ("content",),
     MemoryNodeType.COMMUNITY: ("name", "summary"),
     MemoryNodeType.PERCEPTUAL: ("summary", "topic", "domain", "keywords"),
-    MemoryNodeType.PREFERENCE: ("preference_text_all",),
     MemoryNodeType.ASSISTANT_PRUNED: ("text",),
     MemoryNodeType.DIALOGUE: ("content",),
 }
