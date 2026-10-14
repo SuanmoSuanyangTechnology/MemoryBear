@@ -96,7 +96,7 @@ class EndUser(Base):
     created_at = Column(DateTime, default=utcnow_naive)
     updated_at = Column(DateTime, default=utcnow_naive, onupdate=utcnow_naive)
 
-    # 用户档案字段 - User Profile Fields
+    # User profile fields
     position = Column(String, nullable=True, comment="职位")
     department = Column(String, nullable=True, comment="部门")
     contact = Column(String, nullable=True, comment="联系方式")
@@ -121,7 +121,7 @@ class EndUser(Base):
         comment="记忆节点总数",
     )
 
-    # 用户摘要四个维度 - User Summary Four Dimensions
+    # User summary four dimensions
     user_summary = Column(Text, nullable=True, comment="缓存的用户摘要（基本介绍）")
     personality_traits = Column(Text, nullable=True, comment="性格特点")
     core_values = Column(Text, nullable=True, comment="核心价值观")
@@ -139,29 +139,29 @@ class EndUser(Base):
         comment="用户名片Tag清洗后源数据SHA-256指纹",
     )
 
-    # 记忆洞察四个维度 - Memory Insight Four Dimensions
+    # Memory insight four dimensions
     memory_insight = Column(Text, nullable=True, comment="缓存的记忆洞察报告（总体概述）")
     behavior_pattern = Column(Text, nullable=True, comment="行为模式")
     key_findings = Column(Text, nullable=True, comment="关键发现")
     growth_trajectory = Column(Text, nullable=True, comment="成长轨迹")
     memory_insight_updated_at = Column(DateTime, nullable=True, comment="洞察报告最后更新时间")
 
-    # RAG存储模式专用字段 - RAG Storage Mode Fields
+    # RAG storage mode fields
     # storage_type = Column(String, nullable=True, default="neo4j", comment="存储模式类型: neo4j / rag")
     rag_tags = Column(Text, nullable=True, comment="RAG模式下提取的标签列表（JSON格式）")
     rag_personas = Column(Text, nullable=True, comment="RAG模式下提取的人物形象列表（JSON格式）")
     rag_summary_updated_at = Column(DateTime, nullable=True, comment="RAG摘要/标签/人物形象最后更新时间")
 
-    # 与 App 的反向关系
+    # Reverse relationship with App
     app = relationship(
         "App",
         back_populates="end_users"
     )
 
-    # 与 WorkSpace 的反向关系
+    # Reverse relationship with WorkSpace
     # Cross-domain relationship omitted: target model is host-owned and not part of this service's model set (FK column retained).
 
-    # 与 EndUserInfo 的反向关系
+    # Reverse relationship with EndUserInfo
     info = relationship("EndUserInfo", back_populates="end_user", cascade="all, delete-orphan")
 
 

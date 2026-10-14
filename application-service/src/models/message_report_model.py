@@ -1,5 +1,5 @@
 """
-消息举报模型（含选中反馈和审核）
+Message report model (with text-selection feedback and review)
 """
 import uuid
 import datetime
@@ -14,23 +14,23 @@ from ..utils.datetime_utils import utcnow_naive
 
 
 class MessageReportType(StrEnum):
-    """举报类型枚举"""
-    POLITICS = "politics"      # 涉政
-    PORN = "porn"              # 色情
-    VIOLENCE = "violence"      # 暴力
-    FAKE = "fake"              # 虚假信息
-    AD = "ad"                  # 广告
-    QUALITY = "quality"        # 内容不准确
-    OTHER = "other"            # 其他
+    """Report type enum"""
+    POLITICS = "politics"      # Politically sensitive
+    PORN = "porn"              # Pornographic
+    VIOLENCE = "violence"      # Violence
+    FAKE = "fake"              # Misinformation
+    AD = "ad"                  # Advertising
+    QUALITY = "quality"        # Inaccurate content
+    OTHER = "other"            # Other
 
     @classmethod
     def get_all_types(cls):
-        """获取所有举报类型"""
+        """Get all report types"""
         return [report_type.value for report_type in cls]
 
     @classmethod
     def get_all_types_with_labels(cls):
-        """获取所有举报类型及其文本描述"""
+        """Get all report types with their text labels"""
         return [
             {"value": cls.POLITICS.value, "label": "涉政"},
             {"value": cls.PORN.value, "label": "色情"},
@@ -43,12 +43,12 @@ class MessageReportType(StrEnum):
 
 
 class MessageReport(Base):
-    """消息举报表（含选中反馈和审核）
-    
-    支持功能：
-    - 选中反馈：用户选中某段文本提交反馈
-    - 举报：标记不当内容
-    - 审核流程：平台侧对举报数据进行分类、严重度分拣、趋势分析
+    """Message report table (with text-selection feedback and review)
+
+    Supported features:
+    - Text-selection feedback: a user selects a span of text and submits feedback
+    - Report: flag inappropriate content
+    - Review workflow: the platform classifies report data, triages severity, and analyzes trends
     """
     __tablename__ = "message_reports"
 
@@ -58,28 +58,28 @@ class MessageReport(Base):
     workspace_id = Column(UUID(as_uuid=True), ForeignKey("workspaces.id"), nullable=False, comment="工作空间ID")
     reported_by = Column(UUID(as_uuid=True), nullable=False, comment="举报人ID")
 
-    # 举报类型
+    # Report type
     report_type = Column(String(50), nullable=False, comment="举报类型: politics/porn/violence/fake/ad/quality/other")
     report_reason = Column(Text, comment="举报原因详细描述")
 
-    # 选中文本定位（支持选中反馈）
+    # Selected-text positions (supports text-selection feedback)
     text_start_offset = Column(Integer, comment="选中文本起始位置")
     text_end_offset = Column(Integer, comment="选中文本结束位置")
     selected_text = Column(Text, comment="选中的违规文本片段")
 
-    # 审核状态
+    # Review status
     status = Column(String(20), server_default="pending", comment="状态: pending/reviewing/resolved/rejected")
     severity = Column(String(20), comment="严重程度: low/medium/high/critical")
     reviewer_id = Column(UUID(as_uuid=True), comment="审核人ID")
     review_note = Column(Text, comment="审核备注")
     reviewed_at = Column(DateTime, comment="审核时间")
 
-    # 处理结果
+    # Action taken
     action_taken = Column(String(50), comment="处理措施: warning/content_removed/user_banned/no_action")
 
     created_at = Column(DateTime, default=utcnow_naive, comment="创建时间")
     updated_at = Column(DateTime, default=utcnow_naive, onupdate=utcnow_naive, comment="更新时间")
 
-    # 关联关系
+    # Relationships
     message = relationship("Message", back_populates="reports")
     conversation = relationship("Conversation")

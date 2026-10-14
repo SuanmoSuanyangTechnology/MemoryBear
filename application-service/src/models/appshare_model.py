@@ -8,9 +8,9 @@ from sqlalchemy.orm import relationship
 
 
 class AppShare(Base):
-    """应用分享模型
+    """App share model
     
-    记录应用从一个工作空间分享到另一个工作空间的关系
+    Records a relation that shares an app from one workspace to another workspace
     """
     __tablename__ = "app_shares"
 

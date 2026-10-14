@@ -8,6 +8,7 @@ version = "0.1.0"
 description = "Independent MemoryBear application service"
 requires-python = ">=3.12,<3.13"
 dependencies = [
+    "aiohttp>=3.13,<4",
     "asyncpg>=0.31,<1",
     "auth-sdk>=0.1",
     "fastapi>=0.119,<1",
@@ -16,9 +17,12 @@ dependencies = [
     "pydantic>=2.12,<3",
     "pydantic-settings>=2.11,<3",
     "python-dotenv>=1.1,<2",
+    "python-multipart>=0.0.20,<1",
+    "pyyaml>=6.0.3,<7",
     "redis>=6.4,<7",
     "sqlalchemy[asyncio]>=2.0.44,<3",
     "uvicorn[standard]>=0.37,<1",
+    "websockets==15.0.1",
 ]
 
 [dependency-groups]
@@ -49,10 +53,12 @@ target-version = "py312"
 select = ["E", "F", "I", "UP", "B", "ASYNC"]
 
 [tool.ruff.lint.per-file-ignores]
-# Mechanically copied from the monolith ORM (frozen copies): kept verbatim for
-# line-by-line comparison with the host side during the coexistence period; no
-# import-order or typing modernization is applied. Newly written service
-# modules are not exempt.
+# Mechanically copied from the monolith (frozen ORM models and definition-plane
+# schemas): kept verbatim for line-by-line comparison with the host side during
+# the coexistence period; no import-order or typing modernization is applied.
+# Newly written glue modules (routes, guards, quota, repositories, runtime,
+# services) are not exempt.
+"src/schemas/*.py" = ["E501", "F401", "I001", "UP006", "UP007", "UP035", "UP037", "UP042", "UP045"]
 "src/models/app_model.py" = ["E501", "F401", "I001", "UP006", "UP035", "UP045"]
 "src/models/app_release_model.py" = ["E501", "F401", "I001", "UP006", "UP035", "UP045"]
 "src/models/appshare_model.py" = ["E501", "F401", "I001", "UP006", "UP035", "UP045"]
@@ -75,3 +81,14 @@ select = ["E", "F", "I", "UP", "B", "ASYNC"]
 "src/models/prompt_optimizer_model.py" = ["E501", "F401", "I001", "UP006", "UP035", "UP045"]
 "src/models/generic_file_model.py" = ["E501", "F401", "I001", "UP006", "UP035", "UP045"]
 "src/models/file_metadata_model.py" = ["E501", "F401", "I001", "UP006", "UP035", "UP045"]
+# Frozen port of the host workflow definition-plane closure (adapters, node
+# configs, variable primitives): kept verbatim for line-by-line comparison;
+# only import paths and the logger helper were rewritten mechanically.
+"src/workflow/*.py" = ["E501", "E721", "E722", "F401", "F541", "I001", "UP006", "UP007", "UP035", "UP037", "UP045", "B904"]
+"src/workflow/**/*.py" = ["E501", "E721", "E722", "F401", "F541", "I001", "UP006", "UP007", "UP035", "UP037", "UP045", "B904"]
+# Frozen port of the host tool closure (base/serialization, MCP client and
+# manager, builtin/custom/workflow tool classes): kept verbatim for line-by-line
+# comparison; only import paths and the logger helper were rewritten
+# mechanically.
+"src/tools/*.py" = ["E501", "E721", "E722", "F401", "F541", "I001", "UP006", "UP007", "UP035", "UP037", "UP041", "UP045", "B007", "B904"]
+"src/tools/**/*.py" = ["E501", "E721", "E722", "F401", "F541", "I001", "UP006", "UP007", "UP035", "UP037", "UP041", "UP045", "B007", "B904"]

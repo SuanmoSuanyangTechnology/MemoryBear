@@ -4,9 +4,13 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from ..models.base import utcnow_naive
+__all__ = ["as_utc_aware", "to_iso_z", "to_timestamp_ms", "utcnow_naive"]
 
-__all__ = ["as_utc_aware", "to_timestamp_ms", "utcnow_naive"]
+
+def utcnow_naive() -> datetime:
+    """Naive UTC now for DB storage (mirrors the host helper)."""
+
+    return datetime.now(UTC).replace(tzinfo=None)
 
 
 def as_utc_aware(value: datetime | None) -> datetime | None:
@@ -26,3 +30,12 @@ def to_timestamp_ms(value: datetime | None) -> int | None:
     if aware is None:
         return None
     return int(aware.timestamp() * 1000)
+
+
+def to_iso_z(value: datetime | None) -> str | None:
+    """Serialize a datetime to an ISO-8601 UTC string with Z suffix."""
+
+    aware = as_utc_aware(value)
+    if aware is None:
+        return None
+    return aware.isoformat().replace("+00:00", "Z")

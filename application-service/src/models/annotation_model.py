@@ -14,7 +14,7 @@ class HitLogSource(StrEnum):
 
 
 class AppAnnotation(Base):
-    """应用标注表 - 存储应用的QA标注对"""
+    """App annotation table - stores QA annotation pairs for apps"""
     __tablename__ = "app_annotations"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
@@ -22,21 +22,21 @@ class AppAnnotation(Base):
     workspace_id = Column(UUID(as_uuid=True), nullable=False, index=True, comment="工作空间ID")
     created_by = Column(UUID(as_uuid=True), nullable=False, comment="创建者用户ID")
 
-    # QA标注对
+    # QA annotation pairs
     question = Column(Text, nullable=False, comment="提问")
     answer = Column(Text, nullable=False, comment="答案")
 
-    # Embedding向量（用于相似度匹配）
+    # Embedding vector (for similarity matching)
     embedding = Column(ARRAY(Float), nullable=True, comment="提问的Embedding向量")
 
-    # 命中统计
+    # Hit statistics
     hit_count = Column(Integer, default=0, nullable=False, comment="命中次数")
 
     is_active = Column(Integer, default=1, nullable=False, comment="是否激活: 1=是, 0=否")
     created_at = Column(DateTime, default=utcnow_naive, nullable=False, comment="创建时间")
     updated_at = Column(DateTime, default=utcnow_naive, onupdate=utcnow_naive, nullable=False, comment="更新时间")
 
-    # 复合索引：加速按应用ID查询
+    # Composite indexes: speed up queries by app ID
     __table_args__ = (
         Index("idx_annotation_app_active", "app_id", "is_active"),
         Index("idx_annotation_workspace", "workspace_id", "is_active"),
@@ -47,18 +47,18 @@ class AppAnnotation(Base):
 
 
 class AppAnnotationSetting(Base):
-    """应用标注设置表 - 每个应用的标注配置"""
+    """App annotation settings table - annotation configuration per app"""
     __tablename__ = "app_annotation_settings"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
     app_id = Column(UUID(as_uuid=True), ForeignKey("apps.id", ondelete="CASCADE"), nullable=False, unique=True, index=True, comment="应用ID")
     workspace_id = Column(UUID(as_uuid=True), nullable=False, index=True, comment="工作空间ID")
 
-    # 相似度阈值 (0-1, 默认0.85)
+    # Similarity threshold (0-1, default 0.85)
     similarity_threshold = Column(Float, default=0.85, nullable=False, comment="相似度阈值")
-    # Embedding模型配置ID
+    # Embedding model config ID
     model_config_id = Column(UUID(as_uuid=True), ForeignKey("model_configs.id"), nullable=True, comment="Embedding模型配置ID")
-    # 是否启用标注功能
+    # Whether the annotation feature is enabled
     enabled = Column(Integer, default=0, nullable=False, comment="是否启用: 1=是, 0=否")
 
     created_at = Column(DateTime, default=utcnow_naive, nullable=False, comment="创建时间")
@@ -69,7 +69,7 @@ class AppAnnotationSetting(Base):
 
 
 class AppAnnotationHitLog(Base):
-    """标注命中历史表 - 记录每次标注命中的详情"""
+    """Annotation hit log table - records details of each annotation hit"""
     __tablename__ = "app_annotation_hit_logs"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)

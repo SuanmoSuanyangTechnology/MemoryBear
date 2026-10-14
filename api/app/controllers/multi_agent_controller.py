@@ -7,11 +7,12 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.db import get_db
-from app.dependencies import get_current_user
+from app.dependencies import get_current_user, cur_workspace_access_guard
 from app.core.response_utils import success
 from app.core.logging_config import get_business_logger
 from app.schemas import MultiAgentConfigUpdate, MultiAgentConfigSchema
 from app.schemas.multi_agent_schema import MultiAgentRunRequest
+from app.services.app_service import AppService
 from app.services.multi_agent_service import MultiAgentService, get_multi_agent_service
 from app.services.multi_agent_handoffs_integration import MultiAgentHandoffsService
 from app.models import User
@@ -27,12 +28,18 @@ logger = get_business_logger()
     "/{app_id}/multi-agent",
     summary="获取当前应用的最新有效多 Agent 配置"
 )
+@cur_workspace_access_guard()
 def get_multi_agent_configs(
     app_id: uuid.UUID = Path(..., description="应用 ID"),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """获取指定应用的最新有效多 Agent 配置，如果不存在则返回默认模板"""
+    workspace_id = current_user.current_workspace_id
+    app_service = AppService(db)
+    app = app_service._get_app_or_404(app_id)
+    app_service._validate_app_accessible(app, workspace_id)
+
     service = MultiAgentService(db)
 
     # 通过 app_id 获取最新有效配置（已转换 agent_id 为 app_id）
@@ -71,6 +78,7 @@ def get_multi_agent_configs(
     "/{app_id}/multi-agent",
     summary="更新多 Agent 配置"
 )
+@cur_workspace_access_guard()
 def update_multi_agent_config(
     app_id: uuid.UUID = Path(..., description="应用 ID"),
     data: MultiAgentConfigUpdate = ...,
@@ -79,6 +87,11 @@ def update_multi_agent_config(
     multi_agent_service: Annotated[MultiAgentService, Depends(get_multi_agent_service)] = None,
 ):
     """更新多 Agent 配置"""
+    workspace_id = current_user.current_workspace_id
+    app_service = AppService(db)
+    app = app_service._get_app_or_404(app_id)
+    app_service._validate_app_writable(app, workspace_id)
+
     config = multi_agent_service.update_config(app_id, data)
     return success(
         data=MultiAgentConfigSchema.model_validate(config),
@@ -232,6 +245,7 @@ def clear_handoff_state(
     "/{app_id}/handoffs/test-routing",
     summary="测试 Handoff 路由决策"
 )
+@cur_workspace_access_guard()
 async def test_handoff_routing(
     app_id: uuid.UUID = Path(..., description="应用 ID"),
     message: str = ...,
@@ -248,6 +262,11 @@ async def test_handoff_routing(
     
     不会实际执行 Agent，只返回路由决策信息
     """
+    workspace_id = current_user.current_workspace_id
+    app_service = AppService(db)
+    app = app_service._get_app_or_404(app_id)
+    app_service._validate_app_accessible(app, workspace_id)
+
     # 创建 handoffs 服务
     handoffs_service = MultiAgentHandoffsService(db, multi_agent_service)
     

@@ -10,8 +10,6 @@
 - The `fk_anchors.py` tables share this metadata for FK resolution only; they
   are never read or written by this service.
 """
-from datetime import UTC, datetime
-
 from sqlalchemy.orm import DeclarativeBase
 
 
@@ -79,7 +77,3 @@ SERVICE_WRITE_TABLES = frozenset(
         "file_metadata",
     }
 )
-
-
-def utcnow_naive() -> datetime:
-    return datetime.now(UTC).replace(tzinfo=None)

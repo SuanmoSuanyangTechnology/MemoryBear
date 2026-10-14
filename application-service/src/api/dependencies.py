@@ -7,6 +7,7 @@ from uuid import UUID
 
 from fastapi import HTTPException, Request
 from pydantic import BaseModel, ValidationError
+from redis import Redis as SyncRedis
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
@@ -42,6 +43,18 @@ def get_sync_db(request: Request) -> Iterator[Session]:
     runtime: ProcessRuntime = request.app.state.runtime
     with runtime.database.sync_session() as session:
         yield session
+
+
+def get_sync_redis(request: Request) -> SyncRedis:
+    """Process-wide sync Redis client for the shared-key cache contract.
+
+    ``from_url`` does not connect eagerly, and the cache helpers swallow
+    connection errors, so an unreachable Redis degrades to a stale cache
+    instead of failing requests — the same posture as the monolith helper.
+    """
+
+    runtime: ProcessRuntime = request.app.state.runtime
+    return runtime.redis.sync_client()
 
 
 async def get_async_db(request: Request) -> AsyncIterator[AsyncSession]:
@@ -91,9 +104,11 @@ __all__ = [
     "TENANT_ID_HEADER",
     "WORKSPACE_ID_HEADER",
     "Principal",
+    "SyncRedis",
     "get_async_db",
     "get_principal",
     "get_runtime",
     "get_sync_db",
+    "get_sync_redis",
     "principal_from_headers",
 ]

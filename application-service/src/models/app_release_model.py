@@ -15,14 +15,14 @@ class AppRelease(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
     app_id = Column(UUID(as_uuid=True), ForeignKey("apps.id"), nullable=False, index=True)
 
-    # 版本号（按应用内递增）
+    # Version number (incremented per app)
     version = Column(Integer, nullable=False, default=1, index=True)
-    # 版本号，显示用
+    # Version number for display
     version_name = Column(String, nullable=False)
-    # 版本说明
+    # Release notes
     release_notes = Column(String, nullable=True, comment="版本说明")
 
-    # 基础信息快照（发布时冻结）
+    # Base-info snapshot (frozen at publish time)
     name = Column(String, nullable=False)
     description = Column(String, nullable=True)
     icon = Column(String, nullable=True)
@@ -30,13 +30,13 @@ class AppRelease(Base):
     type = Column(String, nullable=False)
     visibility = Column(String, default="private")
 
-    # 类型特定配置快照（针对 agent/workflow 等统一存放）
+    # Type-specific config snapshot (stored uniformly for agent/workflow, etc.)
     config = Column(JSON, default=dict)
 
-    # 便于查询的索引字段（例如 agent 的默认模型）
+    # Indexed field for easier queries (e.g. the agent's default model)
     default_model_config_id = Column(UUID(as_uuid=True), ForeignKey("model_configs.id"), nullable=True, index=True)
 
-    # 发布信息
+    # Publish info
     published_by = Column(UUID(as_uuid=True), nullable=False, comment="users.id")
     published_at = Column(DateTime, default=utcnow_naive)
 
@@ -44,10 +44,10 @@ class AppRelease(Base):
     created_at = Column(DateTime, default=utcnow_naive)
     updated_at = Column(DateTime, default=utcnow_naive, onupdate=utcnow_naive)
 
-    # 关系: 指定外键，避免与 App.current_release_id 引起歧义
+    # Relationship: explicit foreign key to avoid ambiguity with App.current_release_id
     app = relationship("App", back_populates="releases", foreign_keys=[app_id])
     
-    # 发布人关系 - 使用 primaryjoin 明确指定关联条件
+    # Publisher relationship - explicit join condition via primaryjoin
     # Cross-domain relationship omitted: target model is host-owned and not part of this service's model set (FK column retained).
     
     # Cross-domain property omitted: reads the removed publisher relationship,

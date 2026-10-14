@@ -46,6 +46,8 @@ class BizCode(IntEnum):
     WORKSPACE_NOT_FOUND = 4002
     MODEL_NOT_FOUND = 4003
     FILE_NOT_FOUND = 4006
+    APP_NOT_FOUND = 4007
+    RELEASE_NOT_FOUND = 4008
     USER_NO_ACCESS = 4009
     MODEL_DEPRECATED = 4010
     CHANNEL_DISABLED = 4011
@@ -67,6 +69,8 @@ class BizCode(IntEnum):
     APP_TYPE_NOT_SUPPORTED = 6004
     AGENT_CONFIG_MISSING = 6005
     PERMISSION_DENIED = 6010
+    CONFIG_MISSING = 6012
+    APP_NOT_PUBLISHED = 6013
     # model (7xxx, kept for host-enum parity; consumed by the model domain)
     MODEL_CONFIG_INVALID = 7001
     API_KEY_MISSING = 7002
@@ -107,6 +111,8 @@ HTTP_MAPPING: dict[BizCode, int] = {
     BizCode.SPEEDBEAR_CHANNEL_MISSING: 400,
     BizCode.CREDENTIAL_DECRYPT_ERROR: 500,
     BizCode.FILE_NOT_FOUND: 400,
+    BizCode.APP_NOT_FOUND: 400,
+    BizCode.RELEASE_NOT_FOUND: 400,
     BizCode.DUPLICATE_NAME: 409,
     BizCode.RESOURCE_ALREADY_EXISTS: 409,
     BizCode.VERSION_ALREADY_EXISTS: 409,
@@ -228,6 +234,20 @@ class I18nException(HTTPException):
         return "_".join(error_key.split(".")).upper()
 
 
+class ResourceNotFoundException(BusinessException):
+    """Port of the host ``ResourceNotFoundException`` (message shape and 4006
+    code must stay identical on the wire)."""
+
+    def __init__(self, resource_type: str, resource_id: str | None = None, **kwargs: Any):
+        message = f"{resource_type} 不存在"
+        context: dict[str, Any] = {"resource_type": resource_type}
+        if resource_id:
+            context["resource_id"] = resource_id
+        if "context" in kwargs:
+            context.update(kwargs.pop("context"))
+        super().__init__(message, BizCode.FILE_NOT_FOUND, context, **kwargs)
+
+
 class QuotaExceededError(I18nException):
     """Quota exceeded error (402)."""
 
@@ -285,6 +305,7 @@ __all__ = [
     "I18nException",
     "InternalServerError",
     "QuotaExceededError",
+    "ResourceNotFoundException",
     "as_biz_code",
     "http_status_for",
 ]

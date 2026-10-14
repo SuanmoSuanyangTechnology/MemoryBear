@@ -10,7 +10,7 @@ from ..utils.datetime_utils import utcnow_naive
 
 
 class EndUserInfo(Base):
-    """终端用户信息表 - 存储用户的别名和扩展信息"""
+    """End user info table - stores user aliases and extended info"""
     __tablename__ = "end_user_info"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, nullable=False, index=True)
@@ -21,5 +21,5 @@ class EndUserInfo(Base):
     created_at = Column(DateTime, default=utcnow_naive, comment="创建时间")
     updated_at = Column(DateTime, default=utcnow_naive, onupdate=utcnow_naive, comment="更新时间")
 
-    # 与 EndUser 的关系
+    # Relationship with EndUser
     end_user = relationship("EndUser", back_populates="info")

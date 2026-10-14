@@ -29,6 +29,23 @@ class AppServiceSettings(BaseSettings):
         validation_alias="ENABLE_SENSITIVE_DATA_FILTER",
     )
     i18n_default_language: str = Field(default="zh", validation_alias="I18N_DEFAULT_LANGUAGE")
+    # Caps FileUploadConfig.max_file_count in the app feature schemas; the host
+    # validator reads the monolith `settings.MAX_FILE_COUNT` (same env name).
+    max_file_count: int = Field(default=20, ge=1, validation_alias="MAX_FILE_COUNT")
+    # DSL export metadata version (host `settings.SYSTEM_VERSION`); same env
+    # name and default as the monolith.
+    system_version: str = Field(default="v0.2.1", validation_alias="SYSTEM_VERSION")
+    # TTL of the staged workflow-import payload in the shared Redis (host
+    # `settings.WORKFLOW_IMPORT_CACHE_TIMEOUT`); same env name and default.
+    workflow_import_cache_timeout: int = Field(
+        default=1800, ge=1, validation_alias="WORKFLOW_IMPORT_CACHE_TIMEOUT"
+    )
+    # Base URL used to rebuild local file URLs for resolved workflow variable
+    # defaults; same env name and default as the monolith settings.
+    file_local_server_url: str = Field(
+        default="http://localhost:8000/api",
+        validation_alias="FILE_LOCAL_SERVER_URL",
+    )
     db_host: str = Field(default="127.0.0.1", validation_alias="DB_HOST")
     db_port: int = Field(default=5432, ge=1, le=65535, validation_alias="DB_PORT")
     db_user: str = Field(default="postgres", validation_alias="DB_USER")

@@ -179,10 +179,12 @@ class ToolRepository:
     @staticmethod
     def count_enabled_by_tenant(db: Session, tenant_id: uuid.UUID) -> int:
         """统计租户启用的工具数量"""
+        # "Enabled" maps to the available status; ToolConfig has no is_enabled
+        # column (that switch only exists on builtin tools).
         return db.query(ToolConfig).filter(
             ToolConfig.tenant_id == tenant_id,
             ToolConfig.is_active.is_(True),
-            ToolConfig.is_enabled == True
+            ToolConfig.status == ToolStatus.AVAILABLE.value
         ).count()
 
     @staticmethod

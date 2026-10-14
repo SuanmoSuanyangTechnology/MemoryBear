@@ -32,6 +32,8 @@ class RedisManager:
                     self._settings.redis_url,
                     decode_responses=True,
                     max_connections=self._settings.application_service_redis_pool_size,
+                    socket_connect_timeout=5,
+                    socket_timeout=5,
                     health_check_interval=30,
                 )
                 self._loop = current_loop
@@ -44,6 +46,8 @@ class RedisManager:
                     self._settings.redis_url,
                     decode_responses=True,
                     max_connections=self._settings.application_service_redis_pool_size,
+                    socket_connect_timeout=5,
+                    socket_timeout=5,
                     health_check_interval=30,
                 )
             return self._sync_client

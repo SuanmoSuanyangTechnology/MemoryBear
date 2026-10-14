@@ -9,29 +9,29 @@ from .base import ServiceBase as Base
 from ..utils.datetime_utils import utcnow_naive
 
 class IconType(StrEnum):
-    """图标类型枚举"""
+    """Icon type enum"""
     LOCALE = "locale"
     REMOTE = "remote"
 
-# 可见性：private | workspace | public
+# Visibility: private | workspace | public
 class AppVisibility(StrEnum):
-    """可见性枚举""" 
+    """Visibility enum""" 
     PRIVATE = "private"
     WORKSPACE = "workspace"
     PUBLIC = "public"
 
-# 应用类型：agent | workflow | pure_workflow | multi_agent
+# App type: agent | workflow | pure_workflow | multi_agent
 class AppType(StrEnum):
-    """应用类型枚举"""
+    """App type enum"""
     AGENT = "agent"
     WORKFLOW = "workflow"
     PURE_WORKFLOW = "pure_workflow"
     MULTI_AGENT = "multi_agent"
 
 
-# 应用状态：draft | active | archived
+# App status: draft | active | archived
 class AppStatus(StrEnum):
-    """应用状态枚举"""
+    """App status enum"""
     DRAFT = "draft"
     ACTIVE = "active"
     ARCHIVED = "archived"
@@ -49,19 +49,19 @@ class App(Base):
     icon = Column(String, nullable=True)
     icon_type = Column(String, nullable=True)
 
-    # 应用类型：agent | workflow 等
+    # App type: agent | workflow, etc.
     type = Column(String, index=True, nullable=False)
 
-    # 可见性：private | workspace | public
+    # Visibility: private | workspace | public
     visibility = Column(String, default="workspace")
 
-    # 状态：draft | active | archived
+    # Status: draft | active | archived
     status = Column(String, default="draft")
 
-    # 标签或扩展元数据
+    # Tags or extended metadata
     tags = Column(JSON, default=list)
 
-    # 当前已发布版本指针（发布后指向快照，不受编辑影响）
+    # Current published release pointer (points to the snapshot after publish, unaffected by edits)
     current_release_id = Column(
         UUID(as_uuid=True),
         ForeignKey("app_releases.id", use_alter=True, name="fk_apps_current_release_id"),
@@ -73,7 +73,7 @@ class App(Base):
     created_at = Column(DateTime, default=utcnow_naive)
     updated_at = Column(DateTime, default=utcnow_naive, onupdate=utcnow_naive)
 
-    # 一对一：Agent 配置（仅当 type=agent 时有效）
+    # One-to-one: agent config (effective only when type=agent)
     agent_config = relationship(
         "AgentConfig",
         back_populates="app",
@@ -81,7 +81,7 @@ class App(Base):
         cascade="all, delete-orphan",
     )
     
-    # 一对一：多 Agent 配置（仅当 type=multi_agent 时有效）
+    # One-to-one: multi-agent config (effective only when type=multi_agent)
     multi_agent_config = relationship(
         "MultiAgentConfig",
         back_populates="app",
@@ -89,7 +89,7 @@ class App(Base):
         cascade="all, delete-orphan",
     )
     
-    # 一对一：工作流配置（仅当 type=workflow 时有效）
+    # One-to-one: workflow config (effective only when type=workflow)
     workflow_config = relationship(
         "WorkflowConfig",
         back_populates="app",
@@ -97,9 +97,9 @@ class App(Base):
         cascade="all, delete-orphan",
     )
 
-    # 发布版本关联
+    # Release associations
     current_release = relationship("AppRelease", foreign_keys=[current_release_id])
-    # 指定外键以避免与 current_release_id 造成歧义
+    # Explicit foreign keys to avoid ambiguity with current_release_id
     releases = relationship(
         "AppRelease",
         back_populates="app",
@@ -107,14 +107,14 @@ class App(Base):
         foreign_keys="AppRelease.app_id",
     )
     
-    # 会话关联
+    # Conversation associations
     conversations = relationship(
         "Conversation",
         back_populates="app",
         cascade="all, delete-orphan"
     )
 
-    # 与 EndUser 的反向关系
+    # Reverse relationship with EndUser
     end_users = relationship(
         "EndUser",
         back_populates="app",

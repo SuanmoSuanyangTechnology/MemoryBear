@@ -1,5 +1,5 @@
 """
-会话分享模型
+Conversation share model
 """
 import uuid
 import datetime
@@ -13,9 +13,10 @@ from ..utils.datetime_utils import utcnow_naive
 
 
 class ConversationShare(Base):
-    """会话分享表
-    
-    支持生成只读公开链接，他人点击即可查看完整对话内容。
+    """Conversation share table
+
+    Supports generating read-only public links so others can view the full
+    conversation by clicking the link.
     """
     __tablename__ = "conversation_shares"
 
@@ -25,16 +26,16 @@ class ConversationShare(Base):
     workspace_id = Column(UUID(as_uuid=True), ForeignKey("workspaces.id"), nullable=False, comment="工作空间ID")
     created_by = Column(UUID(as_uuid=True), nullable=False, comment="创建人ID")
 
-    # 访问控制
+    # Access control
     password = Column(String(100), comment="访问密码（可选）")
     expire_at = Column(DateTime, comment="过期时间")
     allow_copy = Column(Boolean, default=True, comment="是否允许复制内容")
 
-    # 统计
+    # Statistics
     view_count = Column(Integer, default=0, comment="访问次数")
 
     is_active = Column(Boolean, default=True, nullable=False, comment="是否有效")
     created_at = Column(DateTime, default=utcnow_naive, comment="创建时间")
 
-    # 关联关系
+    # Relationships
     conversation = relationship("Conversation", back_populates="shares")

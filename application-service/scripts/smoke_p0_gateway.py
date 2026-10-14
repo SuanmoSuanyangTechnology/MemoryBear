@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""P0 gateway-wiring smoke for the application service (zero-traffic mechanism check).
+"""Gateway-wiring smoke for the application service (zero-traffic mechanism check).
 
 Runs six checks against a dev stack (gateway, identity, Redis and this service
 up; ``kubectl port-forward`` is enough for the localhost URLs). No production
@@ -16,7 +16,7 @@ Checks:
   5. Redis acl:rules carries a gateway -> application-service allow rule for
      "GET /internal/v1/apps" - the gateway-mode precondition
   6. full chain with a real user token: the gateway-terminated request reaches
-     this service and gets its legacy 404 envelope (no endpoint exists in P0);
+     this service and gets its own 404 envelope (no endpoint exists yet);
      a gateway-level 'detail' 404 instead identifies an unregistered prefix
 
 Exit codes: 0 = all checks passed; 1 = a check failed; 2 = checks 1-5 passed

@@ -1,5 +1,5 @@
 """
-会话和消息模型
+Conversation and message models
 """
 import uuid
 
@@ -15,16 +15,16 @@ from .base import ServiceBase as Base
 
 
 class Conversation(Base):
-    """会话表
+    """Conversation table
 
-    会话类型说明：
-    - 草稿会话 (is_draft=True): 使用应用的当前草稿配置，用于开发和测试
-    - 发布会话 (is_draft=False): 使用应用的当前发布版本配置，用于生产环境
+    Conversation types:
+    - Draft conversation (is_draft=True): uses the app's current draft config, for development and testing
+    - Release conversation (is_draft=False): uses the app's current release config, for production
 
-    工作空间隔离：
-    - 每个会话属于一个工作空间（workspace_id）
-    - 同一个应用在不同工作空间有独立的会话记录
-    - 支持应用分享后的会话隔离
+    Workspace isolation:
+    - Each conversation belongs to one workspace (workspace_id)
+    - The same app has independent conversation records in different workspaces
+    - Supports conversation isolation after an app is shared
     """
     __tablename__ = "conversations"
     __table_args__ = (
@@ -38,36 +38,37 @@ class Conversation(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
 
-    # 关联信息
+    # Association info
     app_id = Column(UUID(as_uuid=True), ForeignKey("apps.id"), nullable=False, comment="应用ID")
     workspace_id = Column(UUID(as_uuid=True), ForeignKey("workspaces.id"), nullable=False, comment="工作空间ID")
     user_id = Column(String, nullable=True, comment="用户ID（外部系统）")
 
-    # 会话信息
+    # Conversation info
     title = Column(String(255), comment="会话标题")
     summary = Column(Text, comment="会话摘要")
 
-    # 会话类型：True=草稿会话（使用草稿配置），False=发布会话（使用发布配置）
+    # Conversation type: True=draft conversation (uses draft config), False=release conversation (uses release config)
     is_draft = Column(Boolean, default=True, nullable=False, comment="是否为草稿会话")
 
-    # 配置快照：保存创建会话时的完整配置，用于审计和问题追溯
+    # Config snapshot: stores the full config at conversation creation, for auditing and troubleshooting
     config_snapshot = Column(JSON, comment="配置快照（Agent配置、模型配置等）")
 
-    # 统计信息
+    # Statistics
     message_count = Column(Integer, default=0, comment="消息数量")
 
-    # 滑动窗口写入游标：最后一条已处理的 memory_messages 表中消息的 message_seq；should_memorize=FALSE 时也推进
+    # Sliding-window write cursor: message_seq of the last processed message in the
+    # memory_messages table; also advances when should_memorize=FALSE
     write_cursor = Column(Integer, nullable=False, default=0, server_default="0",
                           comment="最后一条已处理的 memory_messages 表中消息的 message_seq；should_memorize=FALSE 时也推进")
 
-    # 状态
+    # Status
     is_active = Column(Boolean, default=True, nullable=False, comment="是否活跃")
 
-    # 时间戳
+    # Timestamps
     created_at = Column(DateTime, default=utcnow_naive, comment="创建时间")
     updated_at = Column(DateTime, default=utcnow_naive, onupdate=utcnow_naive, comment="更新时间")
 
-    # 关联关系
+    # Relationships
     app = relationship("App", back_populates="conversations")
     # Cross-domain relationship omitted: target model is host-owned and not part of this service's model set (FK column retained).
     messages = relationship("Message", back_populates="conversation", cascade="all, delete-orphan")
@@ -88,7 +89,7 @@ class ConversationDetail(Base):
 
 
 class Message(Base):
-    """消息表"""
+    """Message table"""
     __tablename__ = "messages"
     __table_args__ = (
         Index(
@@ -106,45 +107,45 @@ class Message(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
 
-    # 关联信息
+    # Association info
     conversation_id = Column(UUID(as_uuid=True), ForeignKey("conversations.id"), nullable=False, index=True, comment="会话ID")
 
-    # 消息内容
+    # Message content
     role = Column(String(20), nullable=False, comment="角色: user/assistant/system")
     content = Column(Text, nullable=False, comment="消息内容")
 
-    # === 版本化支持（重新生成功能） ===
+    # === Versioning support (regenerate feature) ===
     version = Column(Integer, server_default="1", default=1, comment="版本号（重新生成时递增）")
     is_current = Column(Boolean, server_default="true", default=True, comment="是否为当前展示版本")
     parent_message_id = Column(UUID(as_uuid=True), comment="父消息ID（用于重新生成时关联原用户消息）")
 
-    # === 逻辑删除 ===
+    # === Soft delete ===
     is_deleted = Column(Boolean, server_default="false", default=False, comment="逻辑删除标记")
 
-    # === 统计字段（冗余，便于查询） ===
+    # === Statistics fields (denormalized for easy querying) ===
     like_count = Column(Integer, server_default="0", default=0, comment="点赞数")
     dislike_count = Column(Integer, server_default="0", default=0, comment="点踩数")
     report_count = Column(Integer, server_default="0", default=0, comment="举报数")
 
-    # 元数据（避免使用 metadata 保留字）
+    # Metadata (avoid the reserved word metadata)
     meta_data = Column(JSON, comment="消息元数据（如模型、token使用等）")
 
-    # 状态
+    # Status
     status = Column(String(20), nullable=False, server_default="completed", comment="消息状态: completed/failed")
 
-    # 时间戳
+    # Timestamps
     created_at = Column(DateTime, default=utcnow_naive, comment="创建时间")
 
-    # 关联关系
+    # Relationships
     conversation = relationship("Conversation", back_populates="messages")
     feedbacks = relationship("MessageFeedback", back_populates="message", cascade="all, delete-orphan")
     reports = relationship("MessageReport", back_populates="message", cascade="all, delete-orphan")
 
 
 class ConversationContextState(Base):
-    """会话上下文状态表。
+    """Conversation context state table.
 
-    用于持久化商业版上下文引擎的摘要文本与业务边界。
+    Persists the summary text and business boundaries of the commercial-edition context engine.
     """
 
     __tablename__ = "conversation_context_state"

@@ -15,14 +15,14 @@ class AgentConfig(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
 
-    # 一对一关联到 App
+    # One-to-one association to App
     app_id = Column(UUID(as_uuid=True), ForeignKey("apps.id"), nullable=False, unique=True, index=True)
 
-    # Agent 行为配置
+    # Agent behavior configuration
     system_prompt = Column(Text, nullable=True, comment="系统提示词")
     default_model_config_id = Column(UUID(as_uuid=True), ForeignKey("model_configs.id"), nullable=True, index=True, comment="默认模型配置ID")
 
-    # 结构化配置（直接存储 JSON）
+    # Structured configuration (stored directly as JSON)
     # model_parameters = Column(JSON, nullable=True, comment="模型参数配置（temperature、max_tokens等）")
     model_parameters = Column(PydanticType(ModelParameters), nullable=True,
                               comment="模型参数配置（temperature、max_tokens等）")
@@ -34,18 +34,18 @@ class AgentConfig(Base):
     skills = Column(JSON, default=dict, nullable=True, comment="技能配置")
     features = Column(JSON, default=dict, nullable=True, comment="功能特性配置")
 
-    # 多 Agent 相关字段
+    # Multi-agent related fields
     agent_role = Column(String(20), comment="Agent 角色: master|sub|standalone")
     agent_domain = Column(String(50), comment="专业领域: customer_service|technical_support|sales 等")
     parent_agent_id = Column(UUID(as_uuid=True), ForeignKey("agent_configs.id"), comment="父 Agent ID")
     capabilities = Column(JSON, default=list, comment="Agent 能力列表")
 
-    # 状态与时间戳
+    # Status and timestamps
     is_active = Column(Boolean, default=True, nullable=False)
     created_at = Column(DateTime, default=utcnow_naive)
     updated_at = Column(DateTime, default=utcnow_naive, onupdate=utcnow_naive)
 
-    # 关系
+    # Relationships
     app = relationship("App", back_populates="agent_config")
     parent_agent = relationship("AgentConfig", remote_side=[id], backref="sub_agents")
 

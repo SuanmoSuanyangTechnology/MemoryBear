@@ -1,4 +1,4 @@
-"""工具管理相关数据模型"""
+"""Data models related to tool management"""
 import uuid
 from datetime import datetime
 from enum import StrEnum
@@ -12,7 +12,7 @@ from ..utils.datetime_utils import utcnow_naive
 
 
 class ToolType(StrEnum):
-    """工具类型枚举"""
+    """Tool type enum"""
     BUILTIN = "builtin"
     CUSTOM = "custom"
     MCP = "mcp"
@@ -20,20 +20,20 @@ class ToolType(StrEnum):
 
 
 class ToolStatus(StrEnum):
-    """工具状态枚举"""
-    AVAILABLE = "available"  # 可用（已配置且已启用）
-    UNCONFIGURED = "unconfigured"  # 未配置
-    CONFIGURED_DISABLED = "configured_disabled"  # 已配置未启用
-    ERROR = "error"  # 错误状态
+    """Tool status enum"""
+    AVAILABLE = "available"  # Available (configured and enabled)
+    UNCONFIGURED = "unconfigured"  # Unconfigured
+    CONFIGURED_DISABLED = "configured_disabled"  # Configured but disabled
+    ERROR = "error"  # Error state
 
     @classmethod
     def get_all_statuses(cls):
-        """获取所有工具状态"""
+        """Get all tool statuses"""
         return [status.value for status in cls]
 
     @classmethod
     def get_all_statuses_with_labels(cls):
-        """获取所有工具状态及其文本描述"""
+        """Get all tool statuses with their text labels"""
         return [
             {"value": cls.AVAILABLE.value, "label": "可用"},
             {"value": cls.UNCONFIGURED.value, "label": "未配置"},
@@ -43,22 +43,22 @@ class ToolStatus(StrEnum):
 
     @classmethod
     def is_valid_status(cls, status):
-        """检查状态是否有效"""
+        """Check whether a status is valid"""
         return status in cls._value2member_map_
 
     @classmethod
     def get_active_statuses(cls):
-        """获取所有活跃状态"""
+        """Get all active statuses"""
         return [cls.AVAILABLE.value]
 
     @classmethod
     def get_inactive_statuses(cls):
-        """获取所有非活跃状态"""
+        """Get all inactive statuses"""
         return [cls.UNCONFIGURED.value, cls.CONFIGURED_DISABLED.value, cls.ERROR.value]
 
 
 class AuthType(StrEnum):
-    """认证类型枚举"""
+    """Auth type enum"""
     NONE = "none"
     API_KEY = "api_key"
     BEARER_TOKEN = "bearer_token"
@@ -66,12 +66,12 @@ class AuthType(StrEnum):
 
     @classmethod
     def get_all_types(cls):
-        """获取所有认证类型"""
+        """Get all auth types"""
         return [auth_type.value for auth_type in cls]
 
     @classmethod
     def get_all_types_with_labels(cls):
-        """获取所有认证类型及其文本描述"""
+        """Get all auth types with their text labels"""
         return [
             {"value": cls.NONE.value, "label": "无需认证"},
             {"value": cls.API_KEY.value, "label": "API Key"},
@@ -81,12 +81,12 @@ class AuthType(StrEnum):
 
     @classmethod
     def is_valid_types(cls, auth_type):
-        """检查认证类型是否有效"""
+        """Check whether an auth type is valid"""
         return auth_type in cls._value2member_map_
 
 
 class ExecutionStatus(StrEnum):
-    """执行状态枚举"""
+    """Execution status enum"""
     PENDING = "pending"
     RUNNING = "running"
     COMPLETED = "completed"
@@ -95,32 +95,32 @@ class ExecutionStatus(StrEnum):
 
 
 class ToolConfig(Base):
-    """工具配置基础模型"""
+    """Base tool config model"""
     __tablename__ = "tool_configs"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name = Column(String(255), nullable=False, index=True)
     description = Column(Text)
-    icon = Column(String(255))  # 工具图标
+    icon = Column(String(255))  # Tool icon
     tool_type = Column(String(50), nullable=False, index=True)
-    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False, index=True)  # 必须属于租户
-    status = Column(String(50), default=ToolStatus.UNCONFIGURED.value, nullable=False, index=True)  # 工具状态
-    
-    # 工具特定配置（JSON格式存储）
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False, index=True)  # Must belong to a tenant
+    status = Column(String(50), default=ToolStatus.UNCONFIGURED.value, nullable=False, index=True)  # Tool status
+
+    # Tool-specific config (stored as JSON)
     config_data = Column(JSON, default=dict)
 
-    # 元数据
+    # Metadata
     version = Column(String(50), default="1.0.0")
-    tags = Column(JSON, default=list)  # 标签列表
+    tags = Column(JSON, default=list)  # Tag list
 
-    # 逻辑删除标志
+    # Soft delete flag
     is_active = Column(Boolean, default=True, server_default='true', nullable=False, index=True, comment="是否可用，False表示已删除")
 
-    # 时间戳
+    # Timestamps
     created_at = Column(DateTime, default=utcnow_naive, nullable=False)
     updated_at = Column(DateTime, default=utcnow_naive, onupdate=utcnow_naive, nullable=False)
-    
-    # 关联关系
+
+    # Relationships
     # Cross-domain relationship omitted: target model is host-owned and not part of this service's model set (FK column retained).
     executions = relationship("ToolExecution", back_populates="tool_config", cascade="all, delete-orphan")
     
@@ -129,16 +129,16 @@ class ToolConfig(Base):
 
 
 class BuiltinToolConfig(Base):
-    """内置工具配置模型"""
+    """Builtin tool config model"""
     __tablename__ = "builtin_tool_configs"
 
     id = Column(UUID(as_uuid=True), ForeignKey("tool_configs.id"), primary_key=True)
-    tool_class = Column(String(255), nullable=False)  # 工具类名
-    parameters = Column(JSON, default=dict)  # 工具参数配置
-    is_enabled = Column(Boolean, default=False, server_default='false', nullable=False)  # 启用开关
-    requires_config = Column(Boolean, default=False, server_default='false', nullable=False)  # 是否需要配置
+    tool_class = Column(String(255), nullable=False)  # Tool class name
+    parameters = Column(JSON, default=dict)  # Tool parameter config
+    is_enabled = Column(Boolean, default=False, server_default='false', nullable=False)  # Enable switch
+    requires_config = Column(Boolean, default=False, server_default='false', nullable=False)  # Whether config is required
 
-    # 关联关系
+    # Relationships
     base_config = relationship("ToolConfig", foreign_keys=[id])
     
     def __repr__(self):
@@ -146,22 +146,22 @@ class BuiltinToolConfig(Base):
 
 
 class CustomToolConfig(Base):
-    """自定义工具配置模型"""
+    """Custom tool config model"""
     __tablename__ = "custom_tool_configs"
 
     id = Column(UUID(as_uuid=True), ForeignKey("tool_configs.id"), primary_key=True)
     schema_url = Column(String(1000))  # OpenAPI schema URL
-    schema_content = Column(JSON)  # OpenAPI schema 内容
-    
-    # 认证配置
+    schema_content = Column(JSON)  # OpenAPI schema content
+
+    # Auth config
     auth_type = Column(String(50), default=AuthType.NONE.value, nullable=False)
-    auth_config = Column(JSON, default=dict)  # 认证配置（加密存储）
-    
-    # API配置
-    base_url = Column(String(1000))  # API基础URL
-    timeout = Column(Integer, default=30)  # 超时时间（秒）
-    
-    # 关联关系
+    auth_config = Column(JSON, default=dict)  # Auth config (stored encrypted)
+
+    # API config
+    base_url = Column(String(1000))  # API base URL
+    timeout = Column(Integer, default=30)  # Timeout (seconds)
+
+    # Relationships
     base_config = relationship("ToolConfig", foreign_keys=[id])
     
     def __repr__(self):
@@ -169,40 +169,40 @@ class CustomToolConfig(Base):
 
 
 class MCPSourceChannel(StrEnum):
-    """MCP来源渠道枚举"""
-    ALIYUN_BAILIAN = "aliyun_bailian"  # 阿里云百炼
+    """MCP source channel enum"""
+    ALIYUN_BAILIAN = "aliyun_bailian"  # Alibaba Cloud Bailian
     MODELSCOPE = "modelscope"          # ModelScope
     TOKENFLUX = "tokenflux"            # TokenFlux
-    LANGENG = "langeng"                # 蓝耕科技
+    LANGENG = "langeng"                # Langeng Technology
     AI_302 = "302ai"                   # 302.AI
     MCP_ROUTER = "mcp_router"          # MCP Router
-    SELF_HOSTED = "self_hosted"        # 自建
+    SELF_HOSTED = "self_hosted"        # Self-hosted
 
 
 class MCPToolConfig(Base):
-    """MCP工具配置模型"""
+    """MCP tool config model"""
     __tablename__ = "mcp_tool_configs"
 
     id = Column(UUID(as_uuid=True), ForeignKey("tool_configs.id"), primary_key=True)
-    server_url = Column(String(1000), nullable=False)  # MCP服务器URL
-    connection_config = Column(JSON, default=dict)  # 连接配置（包含认证信息）
+    server_url = Column(String(1000), nullable=False)  # MCP server URL
+    connection_config = Column(JSON, default=dict)  # Connection config (includes auth info)
 
-    # 来源渠道
+    # Source channel
     source_channel = Column(String(50), default=MCPSourceChannel.SELF_HOSTED,
                             server_default=text(f"'{MCPSourceChannel.SELF_HOSTED}'"), nullable=False, comment="来源渠道")
     market_id = Column(UUID(as_uuid=True), nullable=True, comment="渠道市场id")
     market_config_id = Column(UUID(as_uuid=True), nullable=True, comment="渠道市场配置id")
     mcp_service_id = Column(String(255), nullable=True, comment="mcp服务id")
     
-    # 服务状态
+    # Service status
     last_health_check = Column(DateTime)
     health_status = Column(String(50), default="unknown")
     error_message = Column(Text)
     
-    # 可用工具列表
+    # Available tool list
     available_tools = Column(JSON, default=list)
     
-    # 关联关系
+    # Relationships
     base_config = relationship("ToolConfig", foreign_keys=[id])
     
     def __repr__(self):
@@ -210,34 +210,34 @@ class MCPToolConfig(Base):
 
 
 class ToolExecution(Base):
-    """工具执行记录模型"""
+    """Tool execution record model"""
     __tablename__ = "tool_executions"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     tool_config_id = Column(UUID(as_uuid=True), ForeignKey("tool_configs.id"), nullable=False, index=True)
     
-    # 执行信息
-    execution_id = Column(String(255), nullable=False, index=True)  # 执行ID（可用于关联工作流等）
+    # Execution info
+    execution_id = Column(String(255), nullable=False, index=True)  # Execution ID (can be used to link workflows, etc.)
     status = Column(String(50), default=ExecutionStatus.PENDING.value, nullable=False, index=True)
-    
-    # 输入输出
-    input_data = Column(JSON)  # 输入参数
-    output_data = Column(JSON)  # 输出结果
-    error_message = Column(Text)  # 错误信息
-    
-    # 性能指标
+
+    # Input/output
+    input_data = Column(JSON)  # Input parameters
+    output_data = Column(JSON)  # Output result
+    error_message = Column(Text)  # Error message
+
+    # Performance metrics
     started_at = Column(DateTime, nullable=False, index=True)
     completed_at = Column(DateTime)
-    execution_time = Column(Float)  # 执行时间（秒）
-    
-    # Token使用情况（如果适用）
+    execution_time = Column(Float)  # Execution time (seconds)
+
+    # Token usage (if applicable)
     token_usage = Column(JSON)
-    
-    # 用户信息
+
+    # User info
     user_id = Column(UUID(as_uuid=True), index=True, nullable=True)
     workspace_id = Column(UUID(as_uuid=True), ForeignKey("workspaces.id"), nullable=False, index=True)
     
-    # 关联关系
+    # Relationships
     tool_config = relationship("ToolConfig", back_populates="executions")
     # Cross-domain relationship omitted: target model is host-owned and not part of this service's model set (FK column retained).
     
@@ -246,21 +246,21 @@ class ToolExecution(Base):
 
 
 # class ToolDependency(Base):
-#     """工具依赖关系模型"""
+#     """Tool dependency model"""
 #     __tablename__ = "tool_dependencies"
 #
 #     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
 #     tool_id = Column(UUID(as_uuid=True), ForeignKey("tool_configs.id"), nullable=False)
 #     depends_on_tool_id = Column(UUID(as_uuid=True), ForeignKey("tool_configs.id"), nullable=False)
 #
-#     # 依赖类型和版本要求
+#     # Dependency type and version requirements
 #     dependency_type = Column(String(50), default="required")  # required, optional
-#     version_constraint = Column(String(100))  # 版本约束，如 ">=1.0.0"
+#     version_constraint = Column(String(100))  # Version constraint, e.g. ">=1.0.0"
 #
-#     # 时间戳
+#     # Timestamps
 #     created_at = Column(DateTime, default=utcnow_naive, nullable=False)
 #
-#     # 关联关系
+#     # Relationships
 #     tool = relationship("ToolConfig", foreign_keys=[tool_id])
 #     depends_on_tool = relationship("ToolConfig", foreign_keys=[depends_on_tool_id])
 #
@@ -269,37 +269,37 @@ class ToolExecution(Base):
 
 
 # class PluginConfig(Base):
-#     """插件配置模型"""
+#     """Plugin config model"""
 #     __tablename__ = "plugin_configs"
 #
 #     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
 #     name = Column(String(255), nullable=False, unique=True, index=True)
 #     description = Column(Text)
 #
-#     # 插件信息
-#     plugin_path = Column(String(1000), nullable=False)  # 插件文件路径
-#     entry_point = Column(String(255), nullable=False)  # 入口点
+#     # Plugin info
+#     plugin_path = Column(String(1000), nullable=False)  # Plugin file path
+#     entry_point = Column(String(255), nullable=False)  # Entry point
 #     version = Column(String(50), default="1.0.0")
 #
-#     # 状态
+#     # Status
 #     is_enabled = Column(Boolean, default=True, nullable=False)
 #     is_loaded = Column(Boolean, default=False, nullable=False)
-#     load_error = Column(Text)  # 加载错误信息
+#     load_error = Column(Text)  # Load error message
 #
-#     # 配置
-#     config_schema = Column(JSON)  # 配置schema
-#     config_data = Column(JSON, default=dict)  # 配置数据
+#     # Configuration
+#     config_schema = Column(JSON)  # Config schema
+#     config_data = Column(JSON, default=dict)  # Config data
 #
-#     # 依赖
-#     dependencies = Column(JSON, default=list)  # 依赖的其他插件
+#     # Dependencies
+#     dependencies = Column(JSON, default=list)  # Other dependent plugins
 #
-#     # 时间戳
+#     # Timestamps
 #     created_at = Column(DateTime, default=datetime.datetime.utcnow, nullable=False)
 #     updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow, nullable=False)
 #     last_loaded_at = Column(DateTime)
 #
 class WorkflowToolConfig(Base):
-    """工作流工具配置模型"""
+    """Workflow tool config model"""
     __tablename__ = "workflow_tool_configs"
 
     id = Column(UUID(as_uuid=True), ForeignKey("tool_configs.id"), primary_key=True)
@@ -310,7 +310,7 @@ class WorkflowToolConfig(Base):
     output_schema = Column(JSON, default=dict)
     timeout = Column(Integer, default=300)
 
-    # 关联关系
+    # Relationships
     base_config = relationship("ToolConfig", foreign_keys=[id])
     
     def __repr__(self):

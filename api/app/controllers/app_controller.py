@@ -1725,6 +1725,11 @@ async def export_workflow_config(
         current_user: Annotated[User, Depends(get_current_user)]
 ):
     """导出工作流配置为YAML文件"""
+    workspace_id = current_user.current_workspace_id
+    service = AppService(db)
+    app = service._get_app_or_404(app_id)
+    service._validate_app_accessible(app, workspace_id)
+
     workflow_service = WorkflowService(db)
 
     return success(data={
@@ -1801,6 +1806,10 @@ def get_app_statistics(
         - total_tokens: 总token消耗
     """
     workspace_id = current_user.current_workspace_id
+    app_service = AppService(db)
+    app = app_service._get_app_or_404(app_id)
+    app_service._validate_app_accessible(app, workspace_id)
+
     stats_service = AppStatisticsService(db)
 
     result = stats_service.get_app_statistics(
@@ -1860,6 +1869,11 @@ async def export_app(
     """导出 agent / multi_agent / workflow 应用配置为 YAML 文件流。
     release_id: 指定发布版本id，不传则导出当前草稿配置。
     """
+    workspace_id = current_user.current_workspace_id
+    service = AppService(db)
+    app = service._get_app_or_404(app_id)
+    service._validate_app_accessible(app, workspace_id)
+
     yaml_str, filename = AppDslService(db).export_dsl(app_id, release_id)
     encoded = quote(filename, safe=".")
     yaml_bytes = yaml_str.encode("utf-8")

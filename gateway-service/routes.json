@@ -10,6 +10,8 @@
     {"path_prefix": "/v1/files", "service": "kb", "base_url": "http://mem-knowledge:8080", "aud": "kb"},
     {"path_prefix": "/api/knowledgeshares", "service": "kb", "base_url": "http://mem-knowledge:8080", "aud": "kb"},
     {"path_prefix": "/api/models", "service": "model-service", "base_url": "http://model-service:8080", "aud": "model-service"},
-    {"path_prefix": "/api/apps", "service": "application-service", "base_url": "http://application-service:8080", "aud": "application-service"}
+    {"path_prefix": "/api/apps", "service": "application-service", "base_url": "http://application-service:8080", "aud": "application-service"},
+    {"path_prefix": "/api/tools", "service": "application-service", "base_url": "http://application-service:8080", "aud": "application-service"},
+    {"path_prefix": "/api/skills", "service": "application-service", "base_url": "http://application-service:8080", "aud": "application-service"}
   ]
 }
