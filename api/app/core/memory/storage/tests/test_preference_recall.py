@@ -59,7 +59,7 @@ class FakeRawElasticsearch:
                         "hits": [
                             {
                                 "_source": {
-                                    "preference_text": ["use pytest"],
+                                    "preference_text": ["use pytest", "use snake_case"],
                                     "updated_at": "2026-09-01T01:00:00Z",
                                 }
                             }
@@ -76,7 +76,6 @@ def _service(runner, storage, **limit_overrides):
         "max_context_messages": 2,
         "max_context_chars": 20,
         "max_preferences": 10,
-        "per_bucket_limit": 3,
         "timeout_ms": 1000,
     }
     limits.update(limit_overrides)
@@ -224,11 +223,11 @@ async def test_specific_bucket_wins_dedup_when_global_is_newer():
 
     assert [item.preference_text for item in result] == ["使用 pytest"]
     assert result[0].updated_at == now - timedelta(days=1)
-    assert storage.calls[0]["per_bucket_limit"] == 3
+    assert storage.calls[0]["targets"] == [target]
 
 
 @pytest.mark.asyncio
-async def test_final_result_limit_is_independent_of_per_bucket_query_limit():
+async def test_final_result_limit_applies_after_candidate_expansion():
     now = datetime.now(timezone.utc)
     storage = FakeStorage(
         [
@@ -255,7 +254,6 @@ async def test_final_result_limit_is_independent_of_per_bucket_query_limit():
         request=_request("写测试"),
     )
 
-    assert storage.calls[0]["per_bucket_limit"] == 3
     assert len(result) == 10
 
 
@@ -392,12 +390,11 @@ async def test_query_uses_exact_active_user_and_bucket_filters_only():
                 situation_key="code_generation",
             )
         ],
-        per_bucket_limit=3,
     )
 
-    assert [item.preference_text for item in result] == ["use pytest"]
-    assert raw.searches[1]["size"] == 3
-    assert raw.searches[3]["size"] == 3
+    assert [item.preference_text for item in result] == ["use pytest", "use snake_case"]
+    assert raw.searches[1]["size"] == 1
+    assert raw.searches[3]["size"] == 1
     filters = raw.searches[1]["query"]["bool"]["filter"]
     assert filters == [
         {"term": {"end_user_id": "user-1"}},

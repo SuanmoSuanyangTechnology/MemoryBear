@@ -250,9 +250,6 @@ class Settings:
     PREFERENCE_RECALL_MAX_PREFERENCES: int = max(
         1, int(os.getenv("PREFERENCE_RECALL_MAX_PREFERENCES", "10"))
     )
-    PREFERENCE_RECALL_PER_BUCKET_LIMIT: int = max(
-        1, int(os.getenv("PREFERENCE_RECALL_PER_BUCKET_LIMIT", "3"))
-    )
     PREFERENCE_RECALL_TIMEOUT_MS: int = max(
         100, int(os.getenv("PREFERENCE_RECALL_TIMEOUT_MS", "3000"))
     )

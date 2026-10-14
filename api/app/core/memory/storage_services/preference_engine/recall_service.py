@@ -53,7 +53,6 @@ class PreferenceRecallLimits:
     max_context_messages: int
     max_context_chars: int
     max_preferences: int
-    per_bucket_limit: int
     timeout_ms: int
 
     @classmethod
@@ -62,7 +61,6 @@ class PreferenceRecallLimits:
             max_context_messages=settings.PREFERENCE_RECALL_MAX_CONTEXT_MESSAGES,
             max_context_chars=settings.PREFERENCE_RECALL_MAX_CONTEXT_CHARS,
             max_preferences=settings.PREFERENCE_RECALL_MAX_PREFERENCES,
-            per_bucket_limit=settings.PREFERENCE_RECALL_PER_BUCKET_LIMIT,
             timeout_ms=settings.PREFERENCE_RECALL_TIMEOUT_MS,
         )
 
@@ -252,7 +250,6 @@ class PreferenceRecallService:
         candidates = await self.storage.query_buckets(
             end_user_id=end_user_id,
             targets=targets,
-            per_bucket_limit=self.limits.per_bucket_limit,
         )
         selected, truncated = self._select_preferences(candidates)
         self._log_stage(

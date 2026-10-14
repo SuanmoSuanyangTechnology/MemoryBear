@@ -47,11 +47,10 @@ def _search_body(
     end_user_id: str,
     subject: str,
     situation_key: str,
-    size: int,
 ) -> dict[str, Any]:
     """Build an exact keyword-only query; never use full text or vectors."""
     return {
-        "size": size,
+        "size": 1,
         "_source": ["preference_text", "updated_at"],
         "query": {
             "bool": {
@@ -112,7 +111,6 @@ class PreferenceRecallStorage:
         *,
         end_user_id: str,
         targets: Sequence[PreferenceRecallTarget],
-        per_bucket_limit: int,
     ) -> list[PreferenceRecallCandidate]:
         if not targets:
             return []
@@ -130,7 +128,6 @@ class PreferenceRecallStorage:
                         end_user_id=end_user_id,
                         subject=target.subject,
                         situation_key=target.situation_key,
-                        size=per_bucket_limit,
                     ),
                 ]
             )
@@ -143,7 +140,6 @@ class PreferenceRecallStorage:
                             end_user_id=end_user_id,
                             subject=target.subject,
                             situation_key="global",
-                            size=per_bucket_limit,
                         ),
                     ]
                 )
