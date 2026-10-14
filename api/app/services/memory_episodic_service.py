@@ -18,8 +18,8 @@ logger = get_logger(__name__)
 class MemoryEpisodicService(MemoryBaseService):
     """情景记忆服务类"""
     
-    def __init__(self):
-        super().__init__()
+    def __init__(self, shared_driver: bool = True):
+        super().__init__(shared_driver=shared_driver)
         logger.info("MemoryEpisodicService initialized")
     
     async def _get_title_and_type(
