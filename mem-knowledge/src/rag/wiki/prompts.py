@@ -40,9 +40,11 @@ parallel folders and one folder per document. Knowledge and Summary are UI group
 Return each topic_ref once in assignments. An empty path is valid when no useful category applies.
 Do not create additional topics. Match the requested language.""",
     "wiki_page_original_v2": """Compile one complete Wiki page from the supplied original evidence.
+Every factual statement must concern this exact page title and type. Mixed source chunks may
+discuss other objects: include only their directly evidenced relationship to this page subject.
 Stay close to verbatim wording; lightly reorder, deduplicate and join related statements. Do not
 expand for style, invent transitions, over-structure, or elevate self-reported claims into universal
-facts. Preserve every independent condition, number, negation, product version and contradiction.
+facts. Preserve every independent on-topic condition, number, negation, version and contradiction.
 Merge duplicate statements while retaining their sources. document_context explains source scope
 and tone only, never factual evidence. previous_content helps structure and formatting only: retain
 information solely when current evidence supports it, remove withdrawn contributions.
