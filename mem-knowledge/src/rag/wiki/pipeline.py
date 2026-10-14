@@ -197,7 +197,6 @@ def extract_materials(model, snapshot, plan, segments, source_catalog):
             require_refs(
                 [r for p in value["summary_points"] for r in p["source_refs"]],
                 source_ids,
-                complete=True,
             )
             result_summary = value["document_summary"]
             if full_document:
@@ -225,7 +224,25 @@ def extract_materials(model, snapshot, plan, segments, source_catalog):
         )
         for item in value["topics"]:
             facts[item["topic_ref"]].extend(item["facts"])
-        points.extend(value["summary_points"])
+        segment_points = value["summary_points"]
+        covered = {ref for point in segment_points for ref in point["source_refs"]}
+        missing = [source for source in segment if source["ref"] not in covered]
+        # Retain omitted evidence verbatim; only subsequent bounded compaction may summarize it.
+        segment_points.extend(
+            {"text": source["text"], "source_refs": [source["ref"]]} for source in missing
+        )
+        require_refs(
+            [ref for point in segment_points for ref in point["source_refs"]],
+            source_ids,
+            complete=True,
+        )
+        if missing:
+            logger.info(
+                "Wiki summary evidence retained document_id=%s "
+                "missing_sources=%s segment_sources=%s",
+                snapshot.get("document_id"), len(missing), len(segment),
+            )
+        points.extend(segment_points)
         summary = value["document_summary"] or summary
     if not full_document:
         items = [
