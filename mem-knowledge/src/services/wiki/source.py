@@ -32,6 +32,36 @@ def begin_source(runtime, document_id, source_task_id):
     return transaction(runtime, _source_start, document_id, source_task_id)
 
 
+def _incomplete_source(session, document_id, source_task_id):
+    document = session.get(Document, as_uuid(document_id))
+    if document is None:
+        return
+    knowledge, _ = lock_knowledge(session, document.kb_id)
+    document, state = lock_document(session, document.kb_id, document.id)
+    if state is None:
+        return
+    if state.source_task_id != source_task_id or document.run == 2:
+        raise WikiSuperseded("WIKI_SOURCE_TASK_SUPERSEDED", retryable=False)
+    state.source_ready = False
+    state.status, state.error_code = "failed", "WIKI_SOURCE_INCOMPLETE"
+    state.error_stage = "source"
+    from ...repositories.wiki.common import current_tasks
+
+    for task in current_tasks(session, state):
+        task.status, task.error_code, task.error_stage = "failed", state.error_code, "source"
+    document.run = 0
+    document.progress = -1.0 if read_wiki_config(knowledge.parser_config).enabled else 1.0
+    state.last_progress = document.progress
+    append_log(
+        document, "QA source partially imported; Wiki generation requires a complete source."
+    )
+
+
+def incomplete_source(runtime, document_id, source_task_id):
+    """Keep the source import result while recording the independent Wiki failure."""
+    transaction(runtime, _incomplete_source, document_id, source_task_id)
+
+
 def prepare_source_dispatch(runtime, document_id, source_task_id):
     return transaction(runtime, _source_start, document_id, source_task_id, replace=True)
 

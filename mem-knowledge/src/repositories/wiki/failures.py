@@ -79,7 +79,7 @@ def page_failure(session, kb_id, page_id, error, settings, *, deferred=False, sn
     )
     if page is None:
         return False
-    if snapshot and page.row_version != snapshot["row_version"] and not deferred:
+    if snapshot and page.row_version != snapshot["row_version"]:
         return True
     retry = None
     if deferred and page.error_code == error.code:
@@ -118,11 +118,30 @@ def page_failure(session, kb_id, page_id, error, settings, *, deferred=False, sn
         return False
     if retry is None:
         retry = _attempt(page, error, settings, deferred=deferred)
+    participants = (
+        {(as_uuid(p["document_id"]), p["requested_version"], as_uuid(p["subtask_id"]))
+         for p in snapshot["participants"]}
+        if snapshot and "participants" in snapshot else None
+    )
+    eligible = []
+    for task in tasks:
+        state = states[task.document_id]
+        if not state or task.requested_version != state.requested_version:
+            task.status = "superseded"
+            continue
+        # A provisional plan did not supply evidence or take part in this execution.
+        if not state.plan_ready or state.mapped_version != state.requested_version:
+            continue
+        if participants is not None and (
+            task.document_id, task.requested_version, task.subtask_id
+        ) not in participants:
+            continue
+        eligible.append(task)
     page.error_code = error.code
     if not retry:
-        page.status = "failed"
+        page.status = "updating" if len(eligible) < len(tasks) else "failed"
         page.row_version += 1
-    for task in tasks:
+    for task in eligible:
         document, state = documents[task.document_id], states[task.document_id]
         if not state or task.requested_version != state.requested_version:
             task.status = "superseded"
@@ -138,7 +157,8 @@ def page_failure(session, kb_id, page_id, error, settings, *, deferred=False, sn
         if changed:
             append_log(document, f"Wiki page {page.id}: {error.code}; retry={str(retry).lower()}.")
     session.flush()
-    for doc_id, document in documents.items():
+    for doc_id in {task.document_id for task in eligible}:
+        document = documents[doc_id]
         if states[doc_id]:
             settle_progress(session, document, states[doc_id])
     return retry

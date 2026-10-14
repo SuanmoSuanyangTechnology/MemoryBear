@@ -467,7 +467,9 @@ def process_qa_import(
                 replace_source=clear_parse_task,
             )
         elif wiki_source:
-            raise _SafeQAImportError("Wiki requires a completely successful QA import")
+            from .wiki.source import incomplete_source
+
+            incomplete_source(runtime, normalized_document_id, run.context.task_id)
         logger.info(
             "QA import completed: document=%s imported=%s failed=%s",
             normalized_document_id,
