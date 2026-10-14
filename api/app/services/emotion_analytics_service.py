@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.core.logging_config import get_business_logger
+from app.core.memory.emotion.emotion_buckets import emotion_display_name
 from app.repositories.neo4j.emotion_repository import EmotionRepository
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 from app.services.memory_config_service import MemoryConfigService
@@ -64,29 +65,17 @@ class EmotionAnalyticsService:
         self.emotion_repo = EmotionRepository(connector)
         logger.info("情绪分析服务初始化完成")
 
-    # 情绪类型的中英文映射
-    EMOTION_TYPE_TRANSLATIONS = {
-        'joy': {'zh': '喜悦', 'en': 'Joy'},
-        'sadness': {'zh': '悲伤', 'en': 'Sadness'},
-        'anger': {'zh': '愤怒', 'en': 'Anger'},
-        'fear': {'zh': '恐惧', 'en': 'Fear'},
-        'surprise': {'zh': '惊讶', 'en': 'Surprise'},
-        'neutral': {'zh': '中性', 'en': 'Neutral'}
-    }
-
     def _translate_emotion_type(self, emotion_type: str, language: str = "zh") -> str:
         """将情绪类型翻译成指定语言
         
         Args:
-            emotion_type: 情绪类型（英文key）
+            emotion_type: 情绪类型（英文key，10 类或旧值 fear/surprise）
             language: 目标语言 ("zh" 或 "en")
         
         Returns:
-            翻译后的情绪类型名称
+            翻译后的情绪类型名称；未知值原样返回
         """
-        if emotion_type in self.EMOTION_TYPE_TRANSLATIONS:
-            return self.EMOTION_TYPE_TRANSLATIONS[emotion_type].get(language, emotion_type)
-        return emotion_type
+        return emotion_display_name(emotion_type, language) or emotion_type
 
     async def get_emotion_tags(
             self,

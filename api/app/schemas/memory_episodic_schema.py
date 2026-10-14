@@ -5,6 +5,8 @@ from abc import ABC
 from pydantic import BaseModel, Field
 from typing import Optional
 
+from app.core.memory.emotion.emotion_buckets import EMOTION_NAMES_ZH, LEGACY_EMOTION_MAP
+
 type_mapping = {
             "Person": "人物实体节点",
             "Organization": "组织实体节点",
@@ -51,19 +53,10 @@ def translate_episodic_type(episodic_type: str, language: str = "zh") -> str:
 
 
 class EmotionType(ABC):
-    JOY_TYPE = "joy"
-    SURPRISE_TYPE = "surprise"
-    SANDROWNESS_TYPE = "sadness"
-    FEAR_TYPE = "fear"
-    ANGET_TYPE="anger"
-    NEUTRAL_TYPE="neutral"
-    EMOTION_MAPPING={
-        "joy":"愉快",
-        "surprise":"惊喜",
-        "sadness":"悲伤",
-        "fear":"恐惧",
-        "anger":"生气",
-        "neutral":"中性"
+    # 10 类中文名 + 旧值（fear→焦虑、surprise→中性），由 emotion_buckets 生成，保留给外部兼容引用
+    EMOTION_MAPPING = {
+        **dict(EMOTION_NAMES_ZH),
+        **{old: EMOTION_NAMES_ZH[new] for old, new in LEGACY_EMOTION_MAP.items()},
     }
 class EmotionSubject(ABC):
     SUBJECT_MAPPING={

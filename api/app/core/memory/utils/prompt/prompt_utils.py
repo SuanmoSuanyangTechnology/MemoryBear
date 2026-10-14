@@ -1,6 +1,7 @@
 import json
 import os
 from jinja2 import Environment, FileSystemLoader
+from app.core.memory.emotion.emotion_buckets import emotion_display_name
 from app.core.memory.models.ontology_extraction_models import OntologyTypeList
 from app.core.memory.utils.log.logging_utils import log_prompt_rendering, log_template_rendering
 
@@ -349,12 +350,8 @@ async def render_emotion_suggestions_prompt(
     # 如果是中文，将 emotion_distribution 的 key 翻译为中文
     emotion_distribution = health_data.get('emotion_distribution', {})
     if language == "zh":
-        emotion_type_zh = {
-            'joy': '喜悦', 'sadness': '悲伤', 'anger': '愤怒',
-            'fear': '恐惧', 'surprise': '惊讶', 'neutral': '中性'
-        }
         emotion_distribution = {
-            emotion_type_zh.get(k, k): v for k, v in emotion_distribution.items()
+            (emotion_display_name(k, "zh") or k): v for k, v in emotion_distribution.items()
         }
     emotion_distribution_json = json.dumps(
         emotion_distribution, 
@@ -366,10 +363,7 @@ async def render_emotion_suggestions_prompt(
     dominant_negative_translated = None
     dominant_neg = patterns.get('dominant_negative_emotion')
     if dominant_neg and language == "zh":
-        emotion_type_zh_map = {
-            'sadness': '悲伤', 'anger': '愤怒', 'fear': '恐惧'
-        }
-        dominant_negative_translated = emotion_type_zh_map.get(dominant_neg, dominant_neg)
+        dominant_negative_translated = emotion_display_name(dominant_neg, "zh") or dominant_neg
     
     template = prompt_env.get_template("generate_emotion_suggestions.jinja2")
     rendered_prompt = template.render(
