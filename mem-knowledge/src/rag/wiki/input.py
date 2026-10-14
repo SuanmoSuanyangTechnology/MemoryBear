@@ -96,7 +96,7 @@ def segment_sources(sources, settings, snapshot=None):
         text_budget = budget - tokens({**source, "text": "", "ref": "S000000"}) - 16
         if text_budget < 1:
             raise WikiError("WIKI_CONTEXT_BUDGET_EXCEEDED", retryable=False)
-        for text in split_by_token_limit(source["text"], text_budget):
+        for text in split_by_token_limit(source["text"], text_budget, disallowed_special=()):
             pieces.append({**source, "ref": f"S{len(pieces) + 1}", "text": text})
     segments, current = [], []
     for item in pieces:

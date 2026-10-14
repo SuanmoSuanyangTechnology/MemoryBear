@@ -8,7 +8,7 @@ from collections import defaultdict
 
 from ..chunk.token_utils import split_by_token_limit
 from .batching import optional_items, parallel
-from .config import WikiError, fingerprint, normalize_name
+from .config import WikiError, fingerprint, normalize_name, source_reference_key
 from .contracts import Candidates, Compacted, EvidencePage
 from .model import request_tokens, tokens
 
@@ -138,7 +138,9 @@ def compress(model, items, *, target, language, limit=None):
         available = limit - tokens({**item, "text": ""}) - 64
         if available < 1:
             raise WikiError("WIKI_EVIDENCE_ITEM_TOO_LARGE", retryable=False)
-        for part_index, text in enumerate(split_by_token_limit(item["text"], available)):
+        for part_index, text in enumerate(split_by_token_limit(
+            item["text"], available, disallowed_special=()
+        )):
             ref = f"PART_{index}_{part_index}"
             identities[ref] = item["source_item_refs"]
             expanded.append({**item, "text": text, "source_item_refs": [ref]})
@@ -218,7 +220,10 @@ def reduce_input(snapshot):
     catalog, evidence, source_mapping = [], [], {}
     for source in snapshot["sources"]:
         mapping = {}
-        for chunk in sorted(source["chunk_refs"], key=lambda c: c["ref"]):
+        original_order = source.get("source_context", {}).get("format") == "original_evidence_v2"
+        for chunk in sorted(source["chunk_refs"], key=lambda c: (
+            source_reference_key(c["ref"]) if original_order else c["ref"]
+        )):
             ref = f"R{len(catalog) + 1}"
             mapping[chunk["ref"]] = ref
             catalog.append(
