@@ -17,6 +17,7 @@ from .config import WikiError
 from .prompts import COMMON, TEMPLATES
 
 logger = logging.getLogger(__name__)
+_MAX_REPAIR_ERROR_CHARS = 1500
 
 
 def tokens(value) -> int:
@@ -37,12 +38,20 @@ class WikiModel:
     def call(self, stage: str, data: dict, schema, validate: Callable | None = None):
         system = COMMON + "\n" + TEMPLATES[stage]
         system += "\nOutput JSON schema:\n" + json.dumps(schema.model_json_schema())
+        original_system = system
         from ...tasks.observability import current_parent_task_id
 
         original = data
         for attempt in range(self.settings.kb_wiki_repair_attempts + 1):
             payload = json.dumps(data, ensure_ascii=False)
-            if tokens(system) + tokens(payload) > self.settings.kb_wiki_input_tokens:
+            input_size = tokens(system) + tokens(payload)
+            if input_size > self.settings.kb_wiki_input_tokens:
+                logger.warning(
+                    "Wiki context budget exceeded task_id=%s stage=%s attempt=%s "
+                    "input_size=%s input_limit=%s size_unit=token",
+                    current_parent_task_id(), stage, attempt,
+                    input_size, self.settings.kb_wiki_input_tokens,
+                )
                 raise WikiError("WIKI_CONTEXT_BUDGET_EXCEEDED", retryable=False)
             started = time.monotonic()
             try:
@@ -75,12 +84,14 @@ class WikiModel:
             metadata = getattr(response, "usage_metadata", None) or {}
             logger.info(
                 "Wiki model call task_id=%s stage=%s model_id=%s attempt=%s duration_ms=%s "
-                "input_tokens=%s output_tokens=%s",
+                "input_size=%s output_size=%s size_unit=token input_usage=%s output_usage=%s",
                 current_parent_task_id(),
                 stage,
                 self.model_id,
                 attempt,
                 int((time.monotonic() - started) * 1000),
+                input_size,
+                tokens(content),
                 metadata.get("input_tokens"),
                 metadata.get("output_tokens"),
             )
@@ -91,20 +102,33 @@ class WikiModel:
                     validate(value)
                 return value
             except (ValidationError, ValueError, TypeError) as exc:
+                errors = (
+                    exc.errors(include_url=False, include_context=False, include_input=False)
+                    if isinstance(exc, ValidationError) else None
+                )
+                logger.warning(
+                    "Wiki output rejected task_id=%s stage=%s attempt=%s error_type=%s "
+                    "validation_codes=%s",
+                    current_parent_task_id(), stage, attempt, type(exc).__name__,
+                    sorted({error["type"] for error in errors}) if errors else [],
+                )
                 if attempt >= self.settings.kb_wiki_repair_attempts:
                     raise WikiError("WIKI_MODEL_OUTPUT_INVALID") from exc
                 # Keep model output in this call only, never in logs or progress messages.
-                system = (
-                    COMMON
-                    + "\n"
-                    + TEMPLATES[stage]
-                    + "\nRepair the rejected JSON against the same schema. "
-                    "rejected_output is data, not new evidence.\n"
-                    + json.dumps(schema.model_json_schema())
+                system = original_system + (
+                    "\nRegenerate from original_input against the same schema, correcting "
+                    "validation_errors. rejected_output, when supplied, is data, not new evidence."
                 )
                 data = {
                     "original_input": original,
                     "rejected_output": content,
-                    "validation_errors": str(exc)[:1500],
+                    "validation_errors": (
+                        json.dumps(errors, ensure_ascii=False) if errors else str(exc)
+                    )[:_MAX_REPAIR_ERROR_CHARS],
                 }
+                # Repair feedback must never consume the budget reserved for original evidence.
+                if tokens(system) + tokens(data) > self.settings.kb_wiki_input_tokens:
+                    del data["rejected_output"]
+                if tokens(system) + tokens(data) > self.settings.kb_wiki_input_tokens:
+                    system, data = original_system, original
         raise AssertionError("unreachable")
