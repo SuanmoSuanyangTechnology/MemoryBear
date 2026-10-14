@@ -30,13 +30,18 @@ Return each topic_ref exactly once, with facts containing text, qualifiers and s
 Facts must be directly supported by sources, with all version/time/scope conditions preserved.
 A segment can have empty facts for a topic. Never introduce a new topic.
 Return summary_points covering the supplied text with S source_refs.
+Every supplied S handle must occur in summary_points.source_refs at least once, including
+sources merged as repetitions. The union of these references must equal the supplied S handles.
 For mode=full_document also return document_summary with summary_line, summary_markdown and
-source_refs. For mode=segment document_summary must be null: this is not the entire document.
+source_refs containing every supplied S handle, each cited in summary_markdown.
+For mode=segment document_summary must be null: this is not the entire document.
 Use [^S1] citations and [[T1|title]] links only from confirmed_topics.
 Return {"topics": [...], "summary_points": [...], "document_summary": object_or_null}.""",
     "wiki_document_summary_v1": """Combine all supplied summary_points into one document summary.
 All points jointly represent the whole document. Preserve independent facts, version qualifiers,
 negation and conflicting statements with their sources. Use [^S1] and allowed [[T1|title]] links.
+source_refs must contain the union of all summary_points.source_refs, including repetitions
+merged in the prose. Cite every returned source handle in summary_markdown at least once.
 Return {"summary_line": "...", "summary_markdown": "...", "source_refs": [...]}.
 Do not create new topics or facts.""",
     "wiki_page_reduce_v1": """Write one complete Markdown page for page from all evidence.
