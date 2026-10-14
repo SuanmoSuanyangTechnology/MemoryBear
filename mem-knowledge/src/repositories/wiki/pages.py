@@ -103,6 +103,8 @@ def load_plan(session, state):
                     "page_id": str(page.id),
                     "kind": page.page_type,
                     "title": page.title,
+                    "name": page.title,
+                    "aliases": page.aliases,
                     "scope": page.topic_scope,
                 }
             )
@@ -134,6 +136,14 @@ def _page_for_candidate(session, scope, candidate, document_id):
     name = normalize_name(candidate["name"])
     topic_scope = normalize_name(candidate["scope"])
     names = {name, *(normalize_name(v) for v in candidate["aliases"])}
+    if candidate.get("existing_page_id"):
+        page = session.scalar(select(WikiPage).where(
+            WikiPage.id == as_uuid(candidate["existing_page_id"]),
+            WikiPage.kb_id == scope["kb_id"], WikiPage.page_type == candidate["kind"],
+        ))
+        if page is None:
+            raise WikiDeferred("WIKI_IDENTITY_CHANGED")
+        return page
     existing = list(
         session.scalars(
             select(WikiPage).where(
@@ -177,14 +187,31 @@ def fix_plan(session, delivery, candidates, input_hash, *, has_text, document_ti
     if state.plan_ready:
         if state.input_hash != input_hash:
             raise WikiError("WIKI_SOURCE_CHANGED", retryable=False)
-        return load_plan(session, state)
+        plan = load_plan(session, state)
+        mapping = {}
+        for candidate in candidates:
+            names = {normalize_name(candidate["name"]),
+                     *(normalize_name(alias) for alias in candidate["aliases"])}
+            matches = [topic for topic in plan["topics"] if (
+                topic["page_id"] == candidate.get("existing_page_id") or (
+                    topic["kind"] == candidate["kind"]
+                    and normalize_name(topic["scope"]) == normalize_name(candidate["scope"])
+                    and names & {normalize_name(topic["title"]),
+                                 *(normalize_name(alias) for alias in topic["aliases"])}
+                )
+            )]
+            if len(matches) != 1:
+                raise WikiDeferred("WIKI_PLAN_CHANGED")
+            if candidate.get("topic_ref"):
+                mapping[candidate["topic_ref"]] = matches[0]["page_id"]
+        return {**plan, "topic_pages": mapping}
     if document.file_name != document_title:
         raise WikiDeferred("WIKI_SOURCE_CHANGED")
     if state.config_hash != generation_config_hash(knowledge.llm_id, knowledge.parser_config):
         raise WikiDeferred("WIKI_CONFIG_CHANGED")
     if state.mapped_version == state.requested_version:
         raise WikiSuperseded("WIKI_MAP_ALREADY_COMMITTED", retryable=False)
-    topics = []
+    topics, topic_pages = [], {}
     new_ids = set()
     if has_text:
         summary_key = f"summary:{document.id}"
@@ -209,6 +236,8 @@ def fix_plan(session, delivery, candidates, input_hash, *, has_text, document_ti
         new_ids.add(summary.id)
         for candidate in candidates:
             page = _page_for_candidate(session, scope, candidate, document.id)
+            if candidate.get("topic_ref"):
+                topic_pages[candidate["topic_ref"]] = str(page.id)
             if page.id in new_ids:
                 continue
             new_ids.add(page.id)
@@ -244,7 +273,28 @@ def fix_plan(session, delivery, candidates, input_hash, *, has_text, document_ti
     state.stage = "materials"
     append_log(document, f"Wiki page plan ready: pages={len(targets)}.")
     session.flush()
-    return load_plan(session, state)
+    return {**load_plan(session, state), "topic_pages": topic_pages}
+
+
+def load_planning_context(session, delivery):
+    knowledge, _ = lock_knowledge(session, delivery["kb_id"])
+    document, state = lock_document(session, delivery["kb_id"], delivery["document_id"])
+    require_round(document, state, delivery["requested_version"])
+    pages = [{"page_id": str(row.id), "name": row.title, "kind": row.page_type,
+              "scope": row.topic_scope, "aliases": row.aliases,
+              "folder_id": str(row.folder_id) if row.folder_id else None}
+             for row in session.execute(select(
+                 WikiPage.id, WikiPage.title, WikiPage.page_type, WikiPage.topic_scope,
+                 WikiPage.aliases, WikiPage.folder_id,
+             ).where(WikiPage.kb_id == knowledge.id, WikiPage.page_type != "summary"))]
+    folders = {folder.id: folder for folder in session.scalars(
+        select(WikiFolder).where(WikiFolder.kb_id == knowledge.id)
+    )}
+    paths = []
+    for folder in folders.values():
+        parent = folders.get(folder.parent_id)
+        paths.append([parent.name, folder.name] if parent else [folder.name])
+    return {"pages": pages, "folders": sorted(paths)}
 
 
 def commit_map(session, delivery, *, config_hash, input_hash, materials, document_title):
@@ -268,6 +318,15 @@ def commit_map(session, delivery, *, config_hash, input_hash, materials, documen
     if {item["page_id"] for item in materials} != expected:
         raise WikiSuperseded("WIKI_MATERIAL_PLAN_MISMATCH", retryable=False)
     session.execute(delete(WikiPageSource).where(WikiPageSource.document_id == document.id))
+    metadata_by_page = {item["page_id"]: item.get("source_context", {}).get("page_metadata", {})
+                        for item in materials}
+    for page in session.scalars(select(WikiPage).where(
+        WikiPage.kb_id == knowledge.id, WikiPage.id.in_([as_uuid(p) for p in expected]),
+    ).order_by(WikiPage.id).with_for_update()):
+        metadata = metadata_by_page[str(page.id)]
+        page.aliases = sorted(set([*page.aliases, *metadata.get("aliases", [])]))
+        if page.folder_id is None and metadata.get("category_path"):
+            page.folder_id = _folder(session, scope, metadata["category_path"])
     for item in materials:
         session.add(
             WikiPageSource(
@@ -369,6 +428,12 @@ def load_reduce(session, kb_id, page_id, *, redelivered=False, failure_limit=Non
         return error
 
     valid_sources = []
+    summary_contexts = {row.document_id: row.source_context for row in session.execute(
+        select(WikiPageSource.document_id, WikiPageSource.source_context)
+        .join(WikiPage, WikiPage.id == WikiPageSource.page_id)
+        .where(WikiPageSource.kb_id == knowledge.id, WikiPage.page_type == "summary",
+               WikiPageSource.document_id.in_({source.document_id for source in sources}))
+    )}
     for source in sources:
         document, state = documents[source.document_id], states[source.document_id]
         if (
@@ -389,7 +454,9 @@ def load_reduce(session, kb_id, page_id, *, redelivered=False, failure_limit=Non
                 "content_hash": source.content_hash,
                 "facts": source.facts,
                 "chunk_refs": source.chunk_refs,
-                "source_context": source.source_context,
+                "source_context": {**source.source_context,
+                                   "summary": summary_contexts.get(source.document_id, {}).get(
+                                       "summary", source.source_context.get("summary", {}))},
             }
         )
     participants = []

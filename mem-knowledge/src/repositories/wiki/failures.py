@@ -139,7 +139,15 @@ def page_failure(session, kb_id, page_id, error, settings, *, deferred=False, sn
         eligible.append(task)
     page.error_code = error.code
     if not retry:
-        page.status = "updating" if len(eligible) < len(tasks) else "failed"
+        uncovered = any(
+            task not in eligible and task.status not in TERMINAL_TASK_STATUSES
+            and states[task.document_id] is not None
+            and task.requested_version == states[task.document_id].requested_version
+            and states[task.document_id].status not in {"failed", "cancelled"}
+            and documents[task.document_id].run != 2
+            for task in tasks
+        )
+        page.status = "updating" if uncovered else "failed"
         page.row_version += 1
     for task in eligible:
         document, state = documents[task.document_id], states[task.document_id]

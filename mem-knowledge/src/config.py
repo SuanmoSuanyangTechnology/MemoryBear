@@ -23,12 +23,20 @@ class KnowledgeSettings(BaseSettings):
     service_name: Literal["mem-knowledge"] = "mem-knowledge"
 
     # Wiki execution budgets are ceilings, not content truncation policies.
-    kb_wiki_input_tokens: int = Field(default=6000, ge=512, validation_alias="KB_WIKI_INPUT_TOKENS")
-    kb_wiki_output_tokens: int = Field(default=4000, ge=256,
+    kb_wiki_segment_tokens: int = Field(default=32768, ge=128,
+                                       validation_alias="KB_WIKI_SEGMENT_TOKENS")
+    kb_wiki_input_tokens: int = Field(default=65536, ge=512,
+                                     validation_alias="KB_WIKI_INPUT_TOKENS")
+    kb_wiki_output_tokens: int = Field(default=32768, ge=256,
                                       validation_alias="KB_WIKI_OUTPUT_TOKENS")
     kb_wiki_max_segments: int = Field(default=256, ge=1,
                                      validation_alias="KB_WIKI_MAX_SEGMENTS")
-    kb_wiki_max_topics: int = Field(default=64, ge=1, validation_alias="KB_WIKI_MAX_TOPICS")
+    # Zero permits the complete candidate set; positive limits fail instead of truncating.
+    kb_wiki_max_topics: int = Field(default=0, ge=0, validation_alias="KB_WIKI_MAX_TOPICS")
+    kb_wiki_parallelism: int = Field(default=4, ge=1, le=16,
+                                     validation_alias="KB_WIKI_PARALLELISM")
+    kb_wiki_continuations: int = Field(default=3, ge=0, le=8,
+                                      validation_alias="KB_WIKI_CONTINUATIONS")
     kb_wiki_repair_attempts: int = Field(default=2, ge=0,
                                         validation_alias="KB_WIKI_REPAIR_ATTEMPTS")
     kb_wiki_failure_attempts: int = Field(default=3, ge=1,

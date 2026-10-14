@@ -8,8 +8,10 @@ from ...rag.wiki.config import (
     WikiError,
     fingerprint,
 )
+from ...rag.wiki.document import bind_materials, prepare_document
 from ...rag.wiki.input import read_sources, segment_sources
-from ...rag.wiki.pipeline import extract_candidates, extract_materials, generate_page
+from ...rag.wiki.pipeline import extract_candidates, generate_page
+from ...rag.wiki.planning import reconcile, taxonomy
 from ...repositories.wiki import pages, state
 from ...repositories.wiki.common import lock_document, lock_knowledge
 from ...tasks.dispatch import TaskDispatcher
@@ -75,7 +77,7 @@ def execute_map(runtime, delivery):
                 expect_index=bool(snapshot["chunk_count"]),
             )
         )
-        segments, catalog, _ = segment_sources(raw, runtime.settings)
+        segments, catalog, _ = segment_sources(raw, runtime.settings, snapshot)
         input_hash = fingerprint({"title": snapshot["title"], "sources": raw})
         if snapshot.get("reuse_candidate") and snapshot["input_hash"] == input_hash:
             pending = transaction(
@@ -90,8 +92,18 @@ def execute_map(runtime, delivery):
             model = make_model(runtime, snapshot) if segments else None
             if snapshot["plan_ready"] and snapshot["input_hash"] == input_hash:
                 plan = snapshot["plan"]
+                draft = prepare_document(model, snapshot, plan["topics"], segments, catalog,
+                                         fixed_plan=True) if segments else None
             else:
                 candidates = extract_candidates(model, snapshot, segments) if segments else []
+                draft = prepare_document(model, snapshot, candidates, segments, catalog) if (
+                    segments
+                ) else None
+                if draft:
+                    context = transaction(runtime, pages.load_planning_context, delivery)
+                    candidates = taxonomy(model, snapshot,
+                                          reconcile(model, snapshot, draft["topics"], context),
+                                          context)
                 plan = transaction(
                     runtime,
                     pages.fix_plan,
@@ -102,7 +114,7 @@ def execute_map(runtime, delivery):
                     document_title=snapshot["title"],
                 )
             materials = (
-                extract_materials(model, snapshot, plan, segments, catalog) if segments else []
+                bind_materials(draft, plan, catalog, snapshot["title"]) if draft else []
             )
             # Re-check source content after model calls without keeping a DB connection open.
             current = runtime.run_async(

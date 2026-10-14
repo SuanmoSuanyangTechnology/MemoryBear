@@ -7,7 +7,6 @@ import logging
 import time
 from collections.abc import Callable
 
-from json_repair import repair_json
 from pydantic import ValidationError
 
 from ...integrations.model.chat import RedBearChatModel
@@ -25,20 +24,100 @@ def tokens(value) -> int:
     return len(get_encoder().encode(text))
 
 
+def system_prompt(stage, schema):
+    return (COMMON + "\n" + TEMPLATES[stage] + "\nOutput JSON schema:\n"
+            + json.dumps(schema.model_json_schema()))
+
+
+def request_tokens(stage, data, schema):
+    return tokens(system_prompt(stage, schema)) + tokens(data)
+
+
 class WikiModel:
     def __init__(self, runtime, ref: RemoteInvokeRef, *, model=None):
         self.settings = runtime.settings
+        if model is None:
+            # Initialize the existing process-owned client before parallel first calls.
+            try:
+                _ = runtime.model_runtime.invoke_sync_client
+            except Exception as exc:
+                from ...error_mapping import map_model_error
+
+                mapped = map_model_error(exc)
+                raise WikiError(mapped.code, retryable=mapped.retryable) from None
         self.model = model or RedBearChatModel.for_invoke_sync_ref(
             ref,
             pool=runtime.model_runtime,
-            params={"max_tokens": self.settings.kb_wiki_output_tokens},
+            params={"max_tokens": self.settings.kb_wiki_output_tokens,
+                    "temperature": 0.3, "deep_thinking": False},
         )
         self.model_id = str(ref.config_id)
 
+    def _invoke(self, stage, messages, attempt, continuation=0):
+        from ...tasks.observability import current_parent_task_id
+
+        input_size = sum(tokens(m["content"]) for m in messages)
+        if input_size > self.settings.kb_wiki_input_tokens:
+            raise WikiError("WIKI_CONTEXT_BUDGET_EXCEEDED", retryable=False)
+        started = time.monotonic()
+        try:
+            response = self.model.invoke(messages)
+        except Exception as exc:
+            from ...error_mapping import map_model_error
+
+            mapped = map_model_error(exc)
+            logger.warning(
+                "Wiki model failed task_id=%s stage=%s model_id=%s error_code=%s error_type=%s",
+                current_parent_task_id(), stage, self.model_id, mapped.code, type(exc).__name__,
+            )
+            raise WikiError(mapped.code, retryable=mapped.retryable) from None
+        content = response.content
+        if isinstance(content, list):
+            content = "".join(block.get("text", "") for block in content
+                              if isinstance(block, dict) and block.get("type") == "text")
+        metadata = getattr(response, "usage_metadata", None) or {}
+        response_metadata = getattr(response, "response_metadata", None) or {}
+        finish = response_metadata.get("finish_reason") or response_metadata.get("stop_reason")
+        logger.info(
+            "Wiki model call task_id=%s stage=%s model_id=%s attempt=%s continuation=%s "
+            "duration_ms=%s input_size=%s output_size=%s size_unit=token "
+            "input_usage=%s output_usage=%s finish_reason=%s",
+            current_parent_task_id(), stage, self.model_id, attempt, continuation,
+            int((time.monotonic() - started) * 1000), input_size, tokens(content),
+            metadata.get("input_tokens"), metadata.get("output_tokens"),
+            str(finish)[:64] if finish else None,
+        )
+        return content, str(finish or "").strip().lower()
+
+    def _complete(self, stage, system, payload, attempt):
+        messages = [{"role": "system", "content": system}, {"role": "user", "content": payload}]
+        content, finish = self._invoke(stage, messages, attempt)
+        result = content
+        limit = (getattr(self.settings, "kb_wiki_continuations", 3)
+                 if stage in {"wiki_page_original_v2", "wiki_page_reduce_v1"} else 0)
+        round_index = 0
+        while finish in {"length", "max_tokens", "max_output_tokens"}:
+            if round_index >= limit:
+                raise WikiError("WIKI_MODEL_OUTPUT_TRUNCATED")
+            round_index += 1
+            messages.extend([
+                {"role": "assistant", "content": content},
+                {"role": "user", "content": (
+                    "Continue exactly from the interrupted JSON byte sequence. Return only its "
+                    "remaining tail, no repetition, Markdown fences or restart. If the preceding "
+                    "JSON was already complete, return __WIKI_COMPLETE__ only."
+                )},
+            ])
+            content, finish = self._invoke(stage, messages, attempt, round_index)
+            if content.strip() == "__WIKI_COMPLETE__" and finish not in {
+                "length", "max_tokens", "max_output_tokens"
+            }:
+                break
+            result += content
+        return result
+
     def call(self, stage: str, data: dict, schema, validate: Callable | None = None):
-        system = COMMON + "\n" + TEMPLATES[stage]
-        system += "\nOutput JSON schema:\n" + json.dumps(schema.model_json_schema())
-        original_system = system
+        system = original_system = system_prompt(stage, schema)
         from ...tasks.observability import current_parent_task_id
 
         original = data
@@ -53,50 +132,9 @@ class WikiModel:
                     input_size, self.settings.kb_wiki_input_tokens,
                 )
                 raise WikiError("WIKI_CONTEXT_BUDGET_EXCEEDED", retryable=False)
-            started = time.monotonic()
+            content = self._complete(stage, system, payload, attempt)
             try:
-                response = self.model.invoke(
-                    [
-                        {"role": "system", "content": system},
-                        {"role": "user", "content": payload},
-                    ]
-                )
-            except Exception as exc:
-                from ...error_mapping import map_model_error
-
-                mapped = map_model_error(exc)
-                logger.warning(
-                    "Wiki model failed task_id=%s stage=%s model_id=%s error_code=%s error_type=%s",
-                    current_parent_task_id(),
-                    stage,
-                    self.model_id,
-                    mapped.code,
-                    type(exc).__name__,
-                )
-                raise WikiError(mapped.code, retryable=mapped.retryable) from None
-            content = response.content
-            if isinstance(content, list):
-                content = "".join(
-                    block.get("text", "")
-                    for block in content
-                    if isinstance(block, dict) and block.get("type") == "text"
-                )
-            metadata = getattr(response, "usage_metadata", None) or {}
-            logger.info(
-                "Wiki model call task_id=%s stage=%s model_id=%s attempt=%s duration_ms=%s "
-                "input_size=%s output_size=%s size_unit=token input_usage=%s output_usage=%s",
-                current_parent_task_id(),
-                stage,
-                self.model_id,
-                attempt,
-                int((time.monotonic() - started) * 1000),
-                input_size,
-                tokens(content),
-                metadata.get("input_tokens"),
-                metadata.get("output_tokens"),
-            )
-            try:
-                result = schema.model_validate(repair_json(content, return_objects=True))
+                result = schema.model_validate(json.loads(content))
                 value = result.model_dump()
                 if validate:
                     validate(value)
