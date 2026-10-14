@@ -20,11 +20,14 @@ class GraphNode(BaseModel):
 
     model_config = ConfigDict(extra="ignore")
 
-    id: str = Field(..., description="Neo4j elementId")
-    label: str = Field(..., description="节点 label，对应 Supported_Node_Types 之一")
+    id: str = Field(..., description="真实节点为 Neo4j elementId；虚拟节点为稳定的响应期 ID")
+    label: str = Field(..., description="真实节点 label 或响应期虚拟类型 PreferenceGroup")
     properties: Dict[str, Any] = Field(
         default_factory=dict,
-        description="按 NODE_PROPERTY_WHITELIST 过滤后的属性 + associative_memory 计数",
+        description=(
+            "真实节点为白名单属性及 Neo4j 关系计数 associative_memory；"
+            "虚拟 PreferenceGroup 含 virtual 和 preference_count"
+        ),
     )
     caption: str = Field(..., description="前端展示文案；优先取 properties.caption，否则取 label")
 
@@ -72,7 +75,7 @@ class EdgeGroupItem(BaseModel):
 
     model_config = ConfigDict(extra="ignore")
 
-    id: str = Field(..., description="边 elementId")
+    id: str = Field(..., description="真实边为 Neo4j elementId；虚拟边为稳定的响应期 ID")
     type: str = Field(..., description="关系类型")
     created_at: Optional[str] = Field(
         default=None, description="关系创建时间 (ISO 8601)"
