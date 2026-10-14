@@ -32,6 +32,7 @@
       { "path": "/memory-conversation", "element": "MemoryConversation" },
       { "path": "/knowledge-base", "element": "KnowledgeBase" },
       { "path": "/knowledge-base/:knowledgeBaseId/private", "element": "Private" },
+      { "path": "/knowledge-base/:knowledgeBaseId/wiki", "element": "Wiki" },
       { "path": "/knowledge-base/:knowledgeBaseId/share", "element": "Share" },
       { "path": "/knowledge-base/:knowledgeBaseId/create-dataset", "element": "CreateDataset" },
       { "path": "/knowledge-base/:knowledgeBaseId/DocumentDetails", "element": "DocumentDetails" },

@@ -835,6 +835,7 @@ const Private: FC = () => {
         <Flex align="center" justify={isGraph ? 'flex-end' : "space-between"} className='rb:mb-4!'>
           {!isGraph && <SearchInput placeholder={t('knowledgeBase.search')} variant="outlined" onSearch={handleSearch} />}
           <Flex align="center" justify="flex-end" gap={12} className='rb:flex-1'>
+            <Button onClick={() => navigate(`/knowledge-base/${knowledgeBaseId}/wiki`)}>Wiki</Button>
             <Radio.Group value={isGraph} onChange={(e) => setIsGraph(e.target.value)}>
               <Radio.Button value={false} className="rb:px-2!">
                 <Flex align="center" className="rb:h-full! rb:w-full!">

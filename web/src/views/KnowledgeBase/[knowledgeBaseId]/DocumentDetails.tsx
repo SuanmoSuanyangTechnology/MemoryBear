@@ -48,6 +48,7 @@ const DocumentDetails: FC = () => {
   const [loading, setLoading] = useState(false);
   const [document, setDocument] = useState<KnowledgeBaseDocumentData | null>(null);
   const [chunkList, setChunkList] = useState<RecallTestData[]>([]);
+  const [hasReadableChunks, setHasReadableChunks] = useState(false);
   const [infoItems, setInfoItems] = useState<InfoItem[]>([]);
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
@@ -61,6 +62,7 @@ const DocumentDetails: FC = () => {
   const [isParentChildMode, setIsParentChildMode] = useState<undefined | boolean>(false);
   
   useEffect(() => {
+    setHasReadableChunks(false);
     if (documentId) {
       fetchDocumentDetail();
     }
@@ -73,10 +75,10 @@ const DocumentDetails: FC = () => {
     }
   }, [breadcrumbPath, updateBreadcrumbs]);
 
-  // Load chunk list when document is loaded and progress === 1
+  // Wiki processing can continue after source chunks become readable.
   useEffect(() => {
     if (!documentId) return
-    if (document && document.progress === 1 && !isManualRefreshRef.current) {
+    if (document && !isManualRefreshRef.current) {
       ChunkList();
     }
     // Reset flag
@@ -85,7 +87,7 @@ const DocumentDetails: FC = () => {
 
   // Listen to keywords changes and re-search
   useEffect(() => {
-    if (documentId && document?.progress === 1) {
+    if (documentId && document) {
       setPage(1); // Reset page number
       setChunkList([]); // Clear list
       ChunkList(1, false); // Reload first page
@@ -136,7 +138,9 @@ const DocumentDetails: FC = () => {
       {
         key: 'status',
         label: t('knowledgeBase.status'),
-        value: doc.progress === 1 ? t('knowledgeBase.progressComplete') : t('knowledgeBase.progressing') ?? '-',
+        value: doc.run === 2 ? t('common.cancel')
+          : doc.run === 0 && (doc.progress ?? 0) < 0 ? t('knowledgeBase.failed')
+          : doc.progress === 1 ? t('knowledgeBase.progressComplete') : t('knowledgeBase.progressing'),
       },
       {
         key: 'chunk_num',
@@ -173,7 +177,7 @@ const DocumentDetails: FC = () => {
       const auto_questions = response?.parser_config?.auto_questions || 0
       setParserMode(auto_questions)
       setIsParentChildMode(response.parent_child_mode || false)
-      // ChunkList will be called automatically in useEffect based on document.progress
+      // ChunkList is loaded independently of the Wiki processing state.
     } catch (error) {
       console.error('Failed to fetch document details:', error);
       message.error(t('common.loadFailed'));
@@ -189,10 +193,6 @@ const DocumentDetails: FC = () => {
       return;
     }
     
-    // Only fetch chunk list when document processing is complete
-    if (document && document.progress !== 1) {
-      return;
-    }
     setChunkLoading(true);
     try {
       const response = await getDocumentChunkList({ 
@@ -221,6 +221,7 @@ const DocumentDetails: FC = () => {
         },
         children: item.children || [],
       }));
+      if (formattedChunks.length > 0) setHasReadableChunks(true);
       
       if (append) {
         setChunkList(prev => [...prev, ...formattedChunks]);
@@ -250,6 +251,11 @@ const DocumentDetails: FC = () => {
   };
 
   const handleBack = () => {
+    const wikiReturn = location.state?.wikiReturn;
+    if (typeof wikiReturn === 'string' && wikiReturn.startsWith(`/knowledge-base/${knowledgeBaseId}/wiki`)) {
+      navigate(wikiReturn);
+      return;
+    }
     if (knowledgeBaseId && breadcrumbPath) {
       // Return to knowledge base detail page and pass breadcrumb info to restore state
       const navigationState = {
@@ -406,7 +412,7 @@ const DocumentDetails: FC = () => {
     );
   }
 
-  if (document?.progress !== 1) {
+  if (!document || (document.progress !== 1 && !hasReadableChunks)) {
     return (
       <Flex vertical className="rb:h-full rb:p-4!">
         <Flex align="center" gap={8} className='rb:mb-4! rb:cursor-pointer' onClick={handleBack}>

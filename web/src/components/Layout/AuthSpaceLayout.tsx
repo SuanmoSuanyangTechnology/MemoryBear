@@ -17,7 +17,7 @@
  * @component
  */
 
-import { Outlet } from 'react-router-dom';
+import { Outlet, useLocation } from 'react-router-dom';
 import { useEffect, type FC } from 'react';
 import { Layout, Flex } from 'antd';
 
@@ -39,6 +39,8 @@ const { Content } = Layout;
  */
 const AuthSpaceLayout: FC = () => {
   const { getUserInfo, getStorageType } = useUser();
+  const { pathname } = useLocation();
+  const isWiki = /^\/knowledge-base\/[^/]+\/wiki$/.test(pathname);
   
   // Use route guard hook to handle authentication and permission checks for space context
   useRouteGuard('space');
@@ -58,9 +60,9 @@ const AuthSpaceLayout: FC = () => {
   }, []);
 
   return (
-    <Layout className="rb:min-h-screen!">
+    <Layout className={`rb:min-h-screen!${isWiki ? ' wiki-layout' : ''}`}>
       {/* Sidebar navigation configured for space mode */}
-      <Sider source="space" />
+      {!isWiki && <Sider source="space" />}
       <Layout className="rb:max-h-screen! rb:w-screen! rb:overflow-y-auto!">
         {/* Header with breadcrumbs and user menu configured for space mode */}
         <AppHeader source="space" />

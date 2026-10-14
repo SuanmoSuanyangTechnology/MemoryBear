@@ -1,4 +1,4 @@
-import { defineConfig } from 'vite'
+import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
 import { resolve } from 'path'
 import AutoImport from 'unplugin-auto-import/vite'
@@ -7,14 +7,16 @@ import svgr from 'vite-plugin-svgr';
 import { virtualMemoryBrickPlugin } from './plugins/virtualMemoryBrick'
 
 // https://vite.dev/config/
-export default defineConfig({
+export default defineConfig(({ mode }) => {
+  const env = loadEnv(mode, process.cwd());
+  return {
   server: {
     host: '0.0.0.0', // 支持通过IP地址访问
     port: 5175,
     proxy: {
       // 主要API代理，支持 /api 和 /api/* 格式
       '/api': {
-        target: 'http://localhost:5175',
+        target: env.VITE_API_PROXY_TARGET || 'http://127.0.0.1:8000',
         changeOrigin: true,
 
         // 匹配所有以/api开头的请求，包括/api/token
@@ -96,4 +98,5 @@ export default defineConfig({
       },
     },
   },
+  };
 })

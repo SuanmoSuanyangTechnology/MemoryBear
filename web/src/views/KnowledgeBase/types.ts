@@ -107,6 +107,11 @@ export interface FileMeta {
   tag: string; // 标签
 }
 export interface ParserConfig {
+  wiki?: {
+    enabled?: boolean;
+    language?: string;
+    extract_prompt?: string;
+  };
   layout_recognize?: string; // 布局识别
   chunk_token_num?: number; // 分块token数量
   delimiter?: string; // 分隔符

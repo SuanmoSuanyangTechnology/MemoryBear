@@ -69,6 +69,7 @@ const componentMap: Record<string, LazyExoticComponent<ComponentType<object>>> =
   Conversation: lazy(() => import('@/views/Conversation')),
   KnowledgeBase: lazy(() => import('@/views/KnowledgeBase')),
   Private: lazy(() => import('@/views/KnowledgeBase/[knowledgeBaseId]/Private')),
+  Wiki: lazy(() => import('@/views/KnowledgeBase/Wiki')),
   Share: lazy(() => import('@/views/KnowledgeBase/[knowledgeBaseId]/Share')),
   CreateDataset: lazy(() => import('@/views/KnowledgeBase/[knowledgeBaseId]/CreateDataset')),
   DocumentDetails: lazy(() => import('@/views/KnowledgeBase/[knowledgeBaseId]/DocumentDetails')),

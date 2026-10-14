@@ -187,8 +187,8 @@ export const deleteFile = async (id: string) => {
 };
 
 // 获取文档列表
-export const getDocumentList = async (kb_id:string, query: PathQuery) => {
-  const response = await request.get(`/documents/${kb_id}/documents`, query);
+export const getDocumentList = async (kb_id:string, query: PathQuery, signal?: AbortSignal) => {
+  const response = await request.get(`/documents/${kb_id}/documents`, query, { signal });
   return response as KnowledgeBaseDocumentData[];
 };
 // 文档详情
