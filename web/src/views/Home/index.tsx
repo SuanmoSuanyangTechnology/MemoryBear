@@ -195,7 +195,7 @@ const Home = () => {
                         "rb:bg-[url('@/assets/images/home/arrow_down.png')]": workspaceStatistics.total_count_change < 0,
                         "rb:bg-[url('@/assets/images/home/arrow_up_success.svg')]": workspaceStatistics.total_count_change >= 0,
                       })}></div>
-                      {(workspaceStatistics.total_count_change ?? 0) * 100}%
+                      {((workspaceStatistics.total_count_change ?? 0) * 100).toFixed(2)}%
                     </Flex>
                   </Flex>
                 </Flex>
