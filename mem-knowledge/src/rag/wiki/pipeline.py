@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from collections import defaultdict
 
 from .config import WikiError, fingerprint, normalize_name
 from .contracts import Candidates, Compacted, DocumentSummary, Materials, PageContent
 from .model import tokens
+
+logger = logging.getLogger(__name__)
 
 CITATION = re.compile(r"\[\^([A-Za-z0-9_-]+)\]")
 PAGE_LINK = re.compile(r"\[\[([^\]|]+)\|([^\]\n]+)\]\]")
@@ -60,7 +63,7 @@ def model_topics(topics):
 
 def extract_candidates(model, snapshot, segments):
     candidates = {}
-    for segment in segments:
+    for segment_index, segment in enumerate(segments, start=1):
         source_ids = {s["ref"] for s in segment}
 
         def validate(value, source_ids=source_ids):
@@ -88,6 +91,17 @@ def extract_candidates(model, snapshot, segments):
                 previous["aliases"] = sorted(set(previous["aliases"] + item["aliases"]))
             else:
                 candidates[key] = item
+        logger.info(
+            "Wiki candidate accumulation document_id=%s segment=%s/%s "
+            "segment_candidates=%s unique_candidates=%s named_candidates=%s topic_limit=%s",
+            snapshot.get("document_id"),
+            segment_index,
+            len(segments),
+            len(result["candidates"]),
+            len(candidates),
+            len({key[:2] for key in candidates}),
+            model.settings.kb_wiki_max_topics,
+        )
         if len(candidates) > model.settings.kb_wiki_max_topics:
             raise WikiError("WIKI_TOPIC_BUDGET_EXCEEDED", retryable=False)
     return list(candidates.values())
