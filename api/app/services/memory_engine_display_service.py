@@ -23,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.memory.emotion.emotion_buckets import (
     EMOTION_NAMES_EN,
     EMOTION_NAMES_ZH,
+    normalize_emotion_type,
     normalize_emotion_type_or_raw,
 )
 from app.core.utils.datetime_utils import parse_timestamp_to_utc_naive, to_timestamp_ms, utcnow_naive
@@ -592,11 +593,10 @@ def _build_emotion_event(result: Any) -> Optional[Dict[str, Any]]:
     # 按 emotion_type 汇总，排除空和 neutral
     emotion_stats: Dict[str, Dict[str, Any]] = {}
     for stmt in user_statements:
-        etype = getattr(stmt, "emotion_type", None)
-        if not etype or etype.lower().strip() == "neutral":
+        etype_key = normalize_emotion_type(getattr(stmt, "emotion_type", None))
+        if etype_key is None or etype_key == "neutral":
             continue
 
-        etype_key = etype.lower().strip()
         if etype_key not in emotion_stats:
             emotion_stats[etype_key] = {"count": 0, "intensity_sum": 0.0}
         emotion_stats[etype_key]["count"] += 1

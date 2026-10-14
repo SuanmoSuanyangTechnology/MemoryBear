@@ -261,6 +261,10 @@ class Settings:
     FAST_WRITE_EMOTION_HTTP_TIMEOUT_SECONDS: float = max(
         0.1, float(os.getenv("FAST_WRITE_EMOTION_HTTP_TIMEOUT_SECONDS", "2.0"))
     )
+    # 正写继承快写情绪：快写 Dialogue 尚未落库时的最长等待（秒），0 表示不等待；范围 [0, 10]
+    FAST_WRITE_EMOTION_INHERIT_WAIT_SECONDS: float = min(
+        10.0, max(0.0, float(os.getenv("FAST_WRITE_EMOTION_INHERIT_WAIT_SECONDS", "3.0")))
+    )
 
     # Scene continuity BERT (/v1/rerank)
     SCENE_CONTINUITY_URL: str = os.getenv("SCENE_CONTINUITY_URL", "")

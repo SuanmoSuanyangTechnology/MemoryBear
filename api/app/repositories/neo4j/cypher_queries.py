@@ -54,11 +54,6 @@ SET s.delete_at = null,
     stmt_type: statement.stmt_type,
     statement: statement.statement,
     speaker: statement.speaker,
-    emotion_intensity: statement.emotion_intensity,
-    emotion_target: statement.emotion_target,
-    emotion_subject: statement.emotion_subject,
-    emotion_type: statement.emotion_type,
-    emotion_keywords: statement.emotion_keywords,
     temporal_info: statement.temporal_info,
     created_at: statement.created_at,
     valid_at: coalesce(statement.valid_at, ""),
@@ -77,6 +72,14 @@ SET s.delete_at = null,
         ELSE coalesce(statement.is_permanent, false)
     END
 }
+FOREACH (_ IN CASE WHEN statement.emotion_type IS NULL THEN [] ELSE [1] END |
+    SET s.emotion_type = statement.emotion_type,
+        s.emotion_intensity = statement.emotion_intensity,
+        s.emotion_keywords = coalesce(statement.emotion_keywords, []),
+        s.emotion_subject = statement.emotion_subject,
+        s.emotion_target = statement.emotion_target)
+FOREACH (_ IN CASE WHEN statement.emotion_type IS NULL THEN [1] ELSE [] END |
+    SET s.emotion_keywords = coalesce(s.emotion_keywords, []))
 RETURN s.id AS uuid
 """
 

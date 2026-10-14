@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 import uuid
 from dataclasses import dataclass
 from datetime import datetime
@@ -49,6 +50,9 @@ from app.core.memory.storage_services.extraction_engine.knowledge_extraction.mem
 from app.core.memory.utils.name_similarity_utils import cosine_similarity
 logger = logging.getLogger(__name__)
 bear = BearLogger("memory.pipeline")
+
+# 继承快写情绪：外层 asyncio.wait_for 在等待上限之外给单次查询的宽限（秒），整步硬上限 = wait + 宽限
+_INHERIT_QUERY_GRACE_SECONDS = 2.0
 
 
 # ──────────────────────────────────────────────
@@ -549,6 +553,9 @@ class WritePipeline:
                             elapsed_seconds=0.0,
                         )
 
+                    # Step 3.4: 继承快写情绪（不调用 LLM；任何失败只降级为该批 Statement 情绪为空）
+                    await self._inherit_fast_write_emotion(extraction_result)
+
                     # Step 3.5: 构建 UserSource 子图
                     if self._user_pruning_info:
                         await self._build_user_source_subgraph(extraction_result)
@@ -976,6 +983,136 @@ class WritePipeline:
                 else:
                     raise
         return False
+
+    # ──────────────────────────────────────────────
+    # Step 3.4: 继承快写情绪
+    # ──────────────────────────────────────────────
+
+    async def _inherit_fast_write_emotion(self, result: ExtractionResult) -> None:
+        """把快写 Dialogue 的 BERT 情绪继承到本次 user Statement（原地改写 ``result.statement_nodes``）。
+
+        只由 ``memory_config.emotion_enabled`` 控制是否执行。查询快写 Dialogue 时最多等待
+        ``settings.FAST_WRITE_EMOTION_INHERIT_WAIT_SECONDS``，整步硬上限为等待 + ``_INHERIT_QUERY_GRACE_SECONDS``。
+        除任务取消外，任何失败都只降级为该批 Statement 情绪为空，不阻断写入。
+
+        Args:
+            result: ``_extract`` 产出的萃取结果（StatementNode / ChunkNode 已定型）。
+        """
+        if not getattr(self.memory_config, "emotion_enabled", False):
+            logger.debug("[EmotionInherit] skipped: end_user_id=%s reason=emotion_disabled", self.end_user_id)
+            return
+
+        try:
+            from app.core.config import settings
+            from app.core.memory.emotion.emotion_inheritance import (
+                InheritanceReport,
+                apply_inherited_emotions,
+                build_inherited_emotion,
+                fetch_dialogue_emotions,
+                is_inheritable_dialogue_id,
+            )
+            from app.repositories.neo4j.dialog_repository import DialogRepository
+
+            user_statements = [
+                node for node in result.statement_nodes
+                if getattr(node, "speaker", None) == "user"
+            ]
+            if not user_statements:
+                return
+
+            chunk_to_dialog = {chunk.id: chunk.dialog_id for chunk in result.chunk_nodes}
+            dialogue_ids = sorted({
+                chunk_to_dialog[node.chunk_id]
+                for node in user_statements
+                if node.chunk_id in chunk_to_dialog
+                and is_inheritable_dialogue_id(chunk_to_dialog[node.chunk_id])
+            })
+            if not dialogue_ids:
+                logger.info(
+                    "[EmotionInherit] skipped: end_user_id=%s reason=no_fast_counterpart statements=%d",
+                    self.end_user_id,
+                    len(user_statements),
+                )
+                return
+
+            wait_seconds = settings.FAST_WRITE_EMOTION_INHERIT_WAIT_SECONDS
+            repo = DialogRepository(self._neo4j_connector)
+            rows: Dict[str, Any] = {}
+            fetch_reason: Optional[str] = None
+            timed_out = False
+            started = time.monotonic()
+            try:
+                rows, fetch_reason, waited = await asyncio.wait_for(
+                    fetch_dialogue_emotions(
+                        repo,
+                        self.end_user_id,
+                        dialogue_ids,
+                        wait_seconds=wait_seconds,
+                    ),
+                    timeout=wait_seconds + _INHERIT_QUERY_GRACE_SECONDS,
+                )
+            except asyncio.TimeoutError:
+                timed_out = True
+                waited = time.monotonic() - started
+
+            inherited = 0
+            if not timed_out:
+                inherited = apply_inherited_emotions(result.statement_nodes, result.chunk_nodes, rows)
+
+            # missing_reason 优先级：timeout → fetch_reason → 逐行 emotion_null/invalid_value → unmapped → None
+            missing_reason: Optional[str] = None
+            if timed_out:
+                missing_reason = "timeout"
+            elif fetch_reason is not None:
+                missing_reason = fetch_reason
+            else:
+                for dialogue_id in dialogue_ids:
+                    row = rows.get(dialogue_id)
+                    if row is None:
+                        continue
+                    if row.emotion is None:
+                        missing_reason = "emotion_null"
+                        break
+                    if build_inherited_emotion(row.emotion, row.emotion_score) is None:
+                        missing_reason = "invalid_value"
+                        break
+                if missing_reason is None and inherited < len(user_statements):
+                    missing_reason = "unmapped"
+
+            report = InheritanceReport(
+                statement_count=len(user_statements),
+                inherited_count=inherited,
+                dialogue_ids=tuple(dialogue_ids),
+                missing_reason=missing_reason,
+                waited_seconds=waited,
+            )
+            if report.missing_reason is None and report.inherited_count >= report.statement_count:
+                logger.info(
+                    "[EmotionInherit] end_user_id=%s statements=%d inherited=%d dialogues=%d waited=%.2fs",
+                    self.end_user_id,
+                    report.statement_count,
+                    report.inherited_count,
+                    len(report.dialogue_ids),
+                    report.waited_seconds,
+                )
+            else:
+                logger.warning(
+                    "[EmotionInherit] degraded: end_user_id=%s reason=%s statements=%d inherited=%d "
+                    "dialogues=%d waited=%.2fs",
+                    self.end_user_id,
+                    report.missing_reason,
+                    report.statement_count,
+                    report.inherited_count,
+                    len(report.dialogue_ids),
+                    report.waited_seconds,
+                )
+        except Exception as exc:
+            logger.warning(
+                "[EmotionInherit] degraded: end_user_id=%s reason=error error=%s",
+                self.end_user_id,
+                type(exc).__name__,
+                exc_info=True,
+            )
 
     # ──────────────────────────────────────────────
     # Step 3.5: 构建 UserSource 子图
