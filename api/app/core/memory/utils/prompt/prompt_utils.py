@@ -296,6 +296,8 @@ async def render_emotion_extraction_prompt(
     language: str = "zh"
 ) -> str:
     """
+    [DEPRECATED v0.5.2] Statement LLM 情绪提取已废弃，改为继承快写 BERT 情绪（见 emotion_inheritance），暂时保留代码不删除
+
     Renders the emotion extraction prompt using the extract_emotion.jinja2 template.
 
     Args:
