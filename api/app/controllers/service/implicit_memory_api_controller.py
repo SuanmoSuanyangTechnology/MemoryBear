@@ -9,7 +9,7 @@ from app.core.logging_config import get_api_logger
 from app.core.response_utils import fail, success
 from app.db import get_async_db_context, get_db_context
 from app.schemas.response_schema import ApiResponse
-from app.services.implicit_memory_service import ImplicitMemoryService
+from app.repositories.implicit_emotions_storage_repository import ImplicitEmotionsStorageRepository
 
 router = APIRouter(
     prefix="/memory/implicit-memory",
@@ -102,20 +102,16 @@ async def get_implicit_memory(
         resolved_end_user_id = str(end_user.id)
 
     try:
-        # 对合并用户使用归一化后的 ID，并沿用 API 接口的快照读取路径。
+        # 对合并用户使用归一化后的 ID，直接读取快照，避免初始化分析和配置组件。
         with get_db_context() as db:
-            service = ImplicitMemoryService(
-                db=db,
-                end_user_id=resolved_end_user_id,
+            storage = ImplicitEmotionsStorageRepository(db).get_by_end_user_id(
+                resolved_end_user_id
             )
-            cached_profile = await service.get_cached_profile(
-                end_user_id=resolved_end_user_id,
-                db=db,
-            )
+            cached_profile = storage.implicit_profile if storage else None
 
         if cached_profile is None:
             logger.info("用户 %s 的画像数据不存在", resolved_end_user_id)
-            return fail(BizCode.NOT_FOUND, "", "")
+            return fail(BizCode.NOT_FOUND, "隐性记忆快照尚未生成")
 
         # 四类数据保持落库原始结构，仅对偏好应用 API 接口的默认置信度阈值。
         habits = cached_profile.get("habits", [])

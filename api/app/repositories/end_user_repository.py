@@ -5,6 +5,7 @@ from typing import List, NamedTuple, Optional, Set, TypedDict
 
 import sqlalchemy as sa
 from sqlalchemy import func, or_, select, update
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
@@ -1267,6 +1268,9 @@ class EndUserRepository:
             db_logger.error(f"获取或创建终端用户出错: {str(e)}")
             raise
 
+    # NOTE: 当前代码库中无调用方（已全部切换到 get_or_create_end_user_with_config_async），
+    # 暂不修改。其「现有用户 / 合并目标」分支未处理 other_name 与 EndUserInfo 同步，
+    # 与异步版行为不一致；若重新启用，需参照 _sync_end_user_info_async 补齐逻辑。
     def get_or_create_end_user_with_config(
             self,
             app_id: Optional[uuid.UUID],
@@ -1358,6 +1362,45 @@ class EndUserRepository:
             db_logger.error(f"获取或创建终端用户(含配置)时出错: {str(e)}")
             raise
 
+    async def _sync_end_user_info_async(self, end_user: EndUser, other_name: Optional[str]) -> None:
+        """同步 end_user.other_name 与 EndUserInfo 记录（不提交事务）。
+
+        - other_name 非空：更新 end_user.other_name，并更新/创建 EndUserInfo
+        - other_name 为空：不覆盖已有名称；EndUserInfo 缺失时兜底创建，
+          与新建用户分支「始终创建 EndUserInfo」的行为保持一致
+
+        Args:
+            end_user: 已存在的终端用户（或合并目标）
+            other_name: 调用方传入的用户名称，可为空
+        """
+        normalized_name = other_name.strip() if other_name else ""
+        if normalized_name:
+            end_user.other_name = normalized_name
+
+        # 单条 INSERT ... ON CONFLICT 替代「先 SELECT 再 INSERT/UPDATE」：
+        # 省掉一次往返，并依赖 end_user_info.end_user_id 唯一索引保证并发下不产生重复记录。
+        # 记录缺失时兜底创建；名称为空时沿用 end_user 上的已有名称。
+        now = utcnow_naive()
+        stmt = pg_insert(EndUserInfo).values(
+            end_user_id=end_user.id,
+            other_name=normalized_name or end_user.other_name or "",
+            aliases=[],
+            meta_data={},
+            created_at=now,
+            updated_at=now,
+        )
+        if normalized_name:
+            # on_conflict_do_update 不会触发 Column.onupdate，需显式刷新 updated_at；
+            # 名称未变化时跳过更新，避免无意义写入和 updated_at 抖动（该字段参与乐观并发校验）
+            stmt = stmt.on_conflict_do_update(
+                index_elements=[EndUserInfo.end_user_id],
+                set_={"other_name": normalized_name, "updated_at": now},
+                where=EndUserInfo.other_name.is_distinct_from(normalized_name),
+            )
+        else:
+            stmt = stmt.on_conflict_do_nothing(index_elements=[EndUserInfo.end_user_id])
+        await self.db.execute(stmt)
+
     async def get_or_create_end_user_with_config_async(
             self,
             app_id: Optional[uuid.UUID],
@@ -1389,6 +1432,7 @@ class EndUserRepository:
                     end_user.app_id = app_id
                 if memory_config_id and not end_user.memory_config_id:
                     end_user.memory_config_id = memory_config_id
+                await self._sync_end_user_info_async(end_user, other_name)
                 await self.db.commit()
                 await self.db.refresh(end_user)
                 return end_user
@@ -1405,15 +1449,18 @@ class EndUserRepository:
                     merged_target.app_id = app_id
                 if memory_config_id and not merged_target.memory_config_id:
                     merged_target.memory_config_id = memory_config_id
+                await self._sync_end_user_info_async(merged_target, other_name)
                 await self.db.commit()
                 await self.db.refresh(merged_target)
                 return merged_target
 
-            # 创建新用户
+            # 创建新用户，end_user和end_user_info同时创建
+            normalized_name = other_name.strip() if other_name and other_name.strip() else ""
             end_user = EndUser(
                 app_id=app_id,
                 workspace_id=workspace_id,
                 other_id=other_id,
+                other_name=normalized_name,
                 memory_config_id=memory_config_id,
             )
             self.db.add(end_user)
@@ -1421,7 +1468,7 @@ class EndUserRepository:
 
             end_user_info = EndUserInfo(
                 end_user_id=end_user.id,
-                other_name=other_name or "",
+                other_name=normalized_name,
                 aliases=[],
                 meta_data={}
             )
