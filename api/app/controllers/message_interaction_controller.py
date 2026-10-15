@@ -52,9 +52,10 @@ async def regenerate_message(
 
     按应用类型路由：
     - WORKFLOW：重新执行工作流（仅对话流支持），复用原输入重跑
-    - AGENT / MULTI_AGENT：保持同一上下文、同一前置对话，再次调用 LLM 生成新回答
+    - AGENT：保持同一上下文、同一前置对话，再次调用 LLM 生成新回答
+    - MULTI_AGENT：走多 Agent 编排器重跑（保留主管路由/子 Agent 编排），
+      版本管理与 Agent 对齐（同轮多版本、可切换回看）
     - PURE_WORKFLOW：一次性执行，不支持重新生成
-    - 多版本历史保留、可切换回看
     """
     workspace_id = current_user.current_workspace_id
     app_service = AppService(db)
@@ -117,7 +118,45 @@ async def regenerate_message(
         )
         return success(data=app_schema.WorkflowRegenerateResponse(**result))
 
-    # ---- agent 分支（AGENT / MULTI_AGENT）----
+    # ---- 多 Agent 集群分支（MULTI_AGENT）----
+    # 走编排器重跑（保留主管路由/子 Agent 编排），版本管理与 Agent 对齐。
+    # 此前集群消息落单 Agent 引擎分支，重跑会丢掉编排语义。
+    if app.type == AppType.MULTI_AGENT:
+        from app.services.multi_agent_service import MultiAgentService
+
+        if payload.stream:
+            async def cluster_event_generator():
+                with get_db_context() as stream_db:
+                    svc = MultiAgentService(stream_db)
+                    async for event in svc.regenerate_stream(
+                            message_id=message_id,
+                            app_id=app_id,
+                            user_id=str(current_user.id),
+                            variables=payload.variables,
+                            web_search=payload.web_search,
+                            memory=payload.memory,
+                            thinking=True,  # 与 Agent 一致：是否思考只看配置 deep_thinking
+                    ):
+                        yield event
+
+            return StreamingResponse(
+                cluster_event_generator(),
+                media_type="text/event-stream",
+                headers=_SSE_HEADERS,
+            )
+
+        result = await MultiAgentService(db).regenerate(
+            message_id=message_id,
+            app_id=app_id,
+            user_id=str(current_user.id),
+            variables=payload.variables,
+            web_search=payload.web_search,
+            memory=payload.memory,
+            thinking=True,  # 与 Agent 一致：是否思考只看配置 deep_thinking
+        )
+        return success(data=app_schema.RegenerateResponse(**result))
+
+    # ---- agent 分支（AGENT）----
     service = AppService(db)
     agent_cfg = service.get_agent_config(app_id=app_id, workspace_id=workspace_id)
     model_config = None

@@ -1,7 +1,7 @@
 """多 Agent 配置管理服务"""
 import uuid
 import json
-from typing import AsyncGenerator, Optional, List, Tuple, Any, Annotated
+from typing import AsyncGenerator, Optional, List, Tuple, Any, Annotated, Dict
 
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -56,11 +56,85 @@ def convert_uuids_to_str(obj: Any) -> Any:
 class MultiAgentService:
     """多 Agent 配置管理服务"""
 
+    # 同一轮回复的最大版本数（含原始回复），与 WorkflowService.MAX_REGENERATE_VERSIONS 对齐
+    MAX_REGENERATE_VERSIONS = 5
+
     def __init__(self, db: Session | AsyncSession):
         self.db = db
 
     def _uses_async_session(self) -> bool:
         return isinstance(self.db, AsyncSession)
+
+    async def _get_last_current_assistant_id(self, conversation_id) -> Optional[uuid.UUID]:
+        """本轮提问之前，会话里最后一条 is_current 的 assistant 消息 ID。
+
+        用作本轮 user 消息的 parent_message_id（user 接在用户当前所处的版本之后），
+        使 _load_branch_chain 能按 parent 精确隔离各版本的后续对话。
+        必须在本轮消息入队之前调用；查询失败降级为 None（等同旧行为），不影响落库。
+        """
+        if not conversation_id:
+            return None
+        try:
+            from app.models import Message
+            conv_uuid = conversation_id if isinstance(conversation_id, uuid.UUID) else uuid.UUID(str(conversation_id))
+            async with get_async_db_context() as db:
+                result = await db.execute(
+                    select(Message.id).where(
+                        Message.conversation_id == conv_uuid,
+                        Message.role == "assistant",
+                        Message.is_current.is_(True),
+                        Message.is_deleted.is_not(True),
+                    ).order_by(Message.created_at.desc()).limit(1)
+                )
+                return result.scalar_one_or_none()
+        except Exception as e:
+            logger.warning("查询上一条当前 assistant 消息失败，user 消息不记录 parent", extra={"error": str(e)})
+            return None
+
+    async def _conversation_has_messages(self, conversation_id: uuid.UUID) -> bool:
+        """新会话判定（对齐 AppChatService._conversation_has_messages）。"""
+        if self._uses_async_session():
+            from app.models import Message
+            result = await self.db.execute(
+                select(Message.id)
+                .where(
+                    Message.conversation_id == conversation_id,
+                    Message.is_deleted.is_not(True),
+                )
+                .order_by(Message.created_at)
+                .limit(1)
+            )
+            return result.first() is not None
+        from app.services.conversation_service import ConversationService
+        existing_messages = ConversationService(self.db).message_repo.get_message_by_conversation_id(
+            conversation_id=conversation_id,
+            limit=1,
+        )
+        return len(existing_messages) > 0
+
+    async def _resolve_cluster_opening(
+        self,
+        orchestrator: MultiAgentOrchestrator,
+        conversation_id: uuid.UUID,
+        variables: Optional[Dict[str, Any]],
+    ) -> Tuple[Optional[str], List[str]]:
+        """集群新会话开场白（试运行入口）。仅 features.opening_statement 开启时才查库。
+
+        向后兼容：存量集群没有 features → 直接返回 (None, [])，不产生任何额外查询；
+        失败降级为无开场白，不阻断对话。
+        """
+        features = getattr(orchestrator, "_features", None) or {}
+        opening_cfg = features.get("opening_statement")
+        if not (isinstance(opening_cfg, dict) and opening_cfg.get("enabled") and opening_cfg.get("statement")):
+            return None, []
+        try:
+            is_new_conversation = not await self._conversation_has_messages(conversation_id)
+            from app.services.cluster_chat_features import resolve_opening
+
+            return resolve_opening(features, variables, is_new_conversation)
+        except Exception as e:  # noqa: BLE001 - 开场白是增量能力
+            logger.warning(f"集群开场白解析失败（已跳过）: {e}")
+            return None, []
 
     async def _release_db_connection(self) -> None:
         """Release the underlying DB connection back to the pool before LLM streaming."""
@@ -488,8 +562,9 @@ class MultiAgentService:
         Returns:
             执行结果
         """
-        # 1. 获取配置
-        config = self.get_config(app_id)
+        # 1. 获取配置（draft/run 入口用 AsyncSession，get_config 是同步 scalars 会拿到协程；
+        #    用 get_config_async 兼容两种 session——AsyncSession 走 execute，sync 走 get_config）
+        config = await self.get_config_async(app_id)
         if not config:
             raise ResourceNotFoundException("多 Agent 配置", str(app_id))
 
@@ -504,6 +579,11 @@ class MultiAgentService:
         message_id = uuid.uuid4()
         user_message_id = uuid.uuid4()
 
+        # 新会话开场白（features.opening_statement 开启才查库；老集群 features 为空，零开销）
+        opening_statement, _opening_suggested_questions = await self._resolve_cluster_opening(
+            orchestrator, request.conversation_id, request.variables
+        )
+
         # 3. 执行任务
         result = await orchestrator.execute(
             message=request.message,
@@ -517,6 +597,7 @@ class MultiAgentService:
             thinking=getattr(request, 'thinking', False),  # 深度思考（缺省 False = 旧行为）
             files=getattr(request, 'files', None) or None,  # 附件（缺省空 = 旧行为）
             user_message_id=user_message_id,  # 情绪感知缓存键（features.emotion_reply 开启才用）
+            opening_statement=opening_statement,  # 开场白注入主管历史（缺省 None = 旧行为）
         )
 
         # S3 落库收口：非流式同样经 BatchPersistQueue 统一落库（与流式同一口径），
@@ -548,15 +629,26 @@ class MultiAgentService:
             _result.audio_url = result.get("audio_url")
             _result.audio_status = result.get("audio_status")
         if request.conversation_id is not None:
+            _persist_args = {
+                "conversation_id": str(request.conversation_id),
+                "result": _result,
+                "user_message_id_override": user_message_id,
+                "user_message_content": request.message,
+                # 本轮变量值随 user 消息落库，重新生成时回读（无变量不加键）
+                "variables_meta": request.variables or None,
+                # user 消息接在用户当前所处的 assistant 版本之后，使切换版本时按 parent 隔离后续对话
+                "user_parent_message_id": await self._get_last_current_assistant_id(request.conversation_id),
+                "should_memorize": orchestrator.cluster_memory_enabled(),
+            }
+            # 新会话开场白落库（与 Agent 一致）：首轮 user 挂在开场白下，切版本分支链才带得出开场白
+            if opening_statement:
+                _persist_args["is_new_conversation"] = True
+                _persist_args["opening_statement"] = opening_statement
+                _persist_args["opening_message_id"] = uuid.uuid4()
+                _persist_args["opening_suggested_questions"] = _opening_suggested_questions
             await BatchPersistQueue.enqueue(PersistTask(
                 task_type="save_messages",
-                args={
-                    "conversation_id": str(request.conversation_id),
-                    "result": _result,
-                    "user_message_id_override": user_message_id,
-                    "user_message_content": request.message,
-                    "should_memorize": orchestrator.cluster_memory_enabled(),
-                },
+                args=_persist_args,
             ))
 
         # 上下文引擎 after_turn（仅本轮实际走了 features.context_engine 才入队；老集群恒为 None）
@@ -621,6 +713,11 @@ class MultiAgentService:
         message_id = uuid.uuid4()
         user_message_id = uuid.uuid4()
 
+        # 新会话开场白（features.opening_statement 开启才查库；老集群 features 为空，零开销）
+        opening_statement, _opening_suggested_questions = await self._resolve_cluster_opening(
+            orchestrator, request.conversation_id, request.variables
+        )
+
         # 3. 流式执行任务
         # S4：不再拦截 sub_usage 字符串累加 token —— orchestrator 内建
         # per-turn 账本（routing/sub/merge 分层），在 end 事件统一发布
@@ -642,6 +739,7 @@ class MultiAgentService:
             thinking=getattr(request, 'thinking', False),  # 深度思考（缺省 False = 旧行为）
             files=getattr(request, 'files', None) or None,  # 附件（缺省空 = 旧行为）
             user_message_id=user_message_id,  # 情绪感知缓存键（features.emotion_reply 开启才用）
+            opening_statement=opening_statement,  # 开场白注入主管历史（缺省 None = 旧行为）
         ):
             _event_name = ""
             if event.startswith("event:"):
@@ -711,7 +809,22 @@ class MultiAgentService:
                 "result": _result,
                 "user_message_id_override": user_message_id,
                 "user_message_content": request.message,
+                # 本轮变量值随 user 消息落库，重新生成时回读（无变量不加键）
+                "variables_meta": request.variables or None,
+
+                # user 消息接在用户当前所处的 assistant 版本之后，使切换版本时按 parent 隔离后续对话
+                "user_parent_message_id": await self._get_last_current_assistant_id(request.conversation_id),
                 "should_memorize": orchestrator.cluster_memory_enabled(),
+                # 新会话开场白随本轮落库（与 Agent 一致），切版本分支链才能带出开场白；无开场白不加键
+                **(
+                    {
+                        "is_new_conversation": True,
+                        "opening_statement": opening_statement,
+                        "opening_message_id": uuid.uuid4(),
+                        "opening_suggested_questions": _opening_suggested_questions,
+                    }
+                    if opening_statement else {}
+                ),
             },
         ))
 
@@ -736,6 +849,536 @@ class MultiAgentService:
                 ))
             except Exception as e:
                 logger.warning("回填主执行记录 message_id 失败（不影响对话）", extra={"error": str(e)})
+
+    # ==================== 重新生成功能（对齐 Agent 应用多版本语义） ====================
+
+    def _assert_regenerate_quota(self, message_id: uuid.UUID) -> None:
+        """校验本轮版本数是否已达上限，超限抛 BusinessException（对齐 WorkflowService 口径）。
+
+        计数同 parent_message_id 下未删除的 assistant 版本（含原始回复）。
+        历史数据中 original_msg 可能未挂 parent_message_id（未计入查询），需补计 1。
+        """
+        from app.models import Message
+        original_msg = self.db.get(Message, message_id)
+        if not original_msg or original_msg.role != "assistant":
+            raise BusinessException("只能重新生成 AI 回复", BizCode.BAD_REQUEST)
+        parent_msg = self._locate_parent_user_message(original_msg)
+        existing = self.db.query(Message).filter(
+            Message.parent_message_id == parent_msg.id,
+            Message.role == "assistant",
+            Message.is_deleted.is_not(True),
+        ).count()
+        if not original_msg.parent_message_id:
+            existing += 1
+        if existing >= self.MAX_REGENERATE_VERSIONS:
+            raise BusinessException(
+                f"该回复已达最大版本数（{self.MAX_REGENERATE_VERSIONS} 个），无法继续重新生成",
+                BizCode.VERSION_LIMIT_EXCEEDED,
+            )
+
+    def _locate_parent_user_message(self, original_msg):
+        """定位原 assistant 消息对应的父 user 消息（对齐 WorkflowService._locate_parent_user_message）。
+
+        查找顺序：
+        1. 优先用 parent_message_id；为空/指向非 user 时回退到时间回溯；
+        2. 回溯同会话 created_at 早于或等于原消息的最近一条 user 消息（不按 is_deleted
+           过滤——即使被删仍是本轮实际提问；用 <= 兼容 user/assistant 同毫秒入库）；
+        3. 仍找不到再放宽到本会话内最近一条 user 消息（兜底，覆盖 created_at 异常脏数据）。
+
+        若定位到的父消息已被逻辑删除（重新生成前误删了原提问），自动恢复后继续，
+        而非直接报错——避免误删提问导致该轮回复彻底无法重新生成。
+        """
+        from app.models import Message
+
+        parent_msg = None
+        if original_msg.parent_message_id:
+            candidate = self.db.get(Message, original_msg.parent_message_id)
+            if candidate and candidate.role == "user":
+                parent_msg = candidate
+        if not parent_msg:
+            parent_msg = (
+                self.db.query(Message)
+                .filter(
+                    Message.conversation_id == original_msg.conversation_id,
+                    Message.role == "user",
+                    Message.created_at <= original_msg.created_at,
+                )
+                .order_by(Message.created_at.desc())
+                .first()
+            )
+        if not parent_msg:
+            # 兜底：同会话内最近一条 user 消息（不论时间顺序），覆盖 created_at 异常的脏数据
+            parent_msg = (
+                self.db.query(Message)
+                .filter(
+                    Message.conversation_id == original_msg.conversation_id,
+                    Message.role == "user",
+                )
+                .order_by(Message.created_at.desc())
+                .first()
+            )
+        if not parent_msg:
+            raise BusinessException("无法找到原始用户消息", BizCode.NOT_FOUND)
+        # 回填 parent_message_id 便于后续版本化关联；父消息被删则自动恢复
+        if original_msg.parent_message_id != parent_msg.id:
+            original_msg.parent_message_id = parent_msg.id
+        if parent_msg.is_deleted:
+            parent_msg.is_deleted = False
+        self.db.commit()
+        return parent_msg
+
+    def _next_regenerate_version(self, original_msg, parent_msg_id: uuid.UUID) -> int:
+        """计算新版本号：同 parent_message_id 下未删除 assistant 版本的最大 version + 1。
+
+        多分支场景下用户可能切回旧版本再重新生成，若用 original.version+1 会与已存在
+        的更新版本冲突，导致版本切换混乱，故取同组最大 version + 1。
+        """
+        from app.models import Message
+        base = original_msg.version or 1
+        siblings = self.db.query(Message).filter(
+            Message.parent_message_id == parent_msg_id,
+            Message.conversation_id == original_msg.conversation_id,
+            Message.role == "assistant",
+            Message.is_deleted.is_not(True),
+        ).all()
+        for s in siblings:
+            if s.version and s.version > base:
+                base = s.version
+        return base + 1
+
+    def _mark_siblings_not_current(self, conversation_id, parent_msg_id, exclude_id=None) -> None:
+        """把同一轮（同 parent_message_id）下所有 assistant 版本置为非当前。
+
+        注意：不能依赖 ``update().where(is_current.is_(True))`` 之类的条件去判断"是否要置"，
+        直接按行集合统一置 False；幂等——重复置 False 无副作用。
+        """
+        from app.models import Message
+        q = self.db.query(Message).filter(
+            Message.conversation_id == conversation_id,
+            Message.parent_message_id == parent_msg_id,
+            Message.role == "assistant",
+        )
+        if exclude_id is not None:
+            q = q.filter(Message.id != exclude_id)
+        q.update({"is_current": False}, synchronize_session=False)
+        self.db.commit()
+
+    def _mark_message_current(self, message_id: uuid.UUID, is_current: bool) -> None:
+        """按主键把单条消息置为当前/非当前（回滚用，不依赖 ORM 实例状态）。"""
+        from app.models import Message
+        self.db.query(Message).filter(Message.id == message_id).update(
+            {"is_current": is_current}, synchronize_session=False
+        )
+        self.db.commit()
+
+    def _restore_files_from_parent(self, parent_msg):
+        """从父 user 消息 meta_data.files 还原 FileInput 列表（与 Agent regenerate 同口径）。"""
+        files = None
+        if parent_msg and parent_msg.meta_data:
+            meta_files = parent_msg.meta_data.get("files", [])
+            if meta_files:
+                from app.services.multimodal_service import deserialize_file_reference
+                files = []
+                for f in meta_files:
+                    try:
+                        files.append(deserialize_file_reference(f))
+                    except Exception as e:
+                        logger.warning(f"转换文件信息失败: {e}")
+                        continue
+        return files
+
+    @staticmethod
+    def _restore_variables_from_parent(parent_msg, override: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
+        """还原首轮对话传入的变量值：父 user 消息 meta_data.variables 为底，请求显式传入的覆盖其上。
+
+        重新生成沿用原提问的变量，用户不必重传；请求里传了的变量以请求为准（与工作流重新生成的合并语义一致）。
+        存量会话没有落库变量时返回 override 原样（可能为 None）。
+        """
+        saved = None
+        if parent_msg is not None and parent_msg.meta_data:
+            saved = parent_msg.meta_data.get("variables")
+        if not isinstance(saved, dict) or not saved:
+            return override
+        merged = dict(saved)
+        if override:
+            merged.update(override)
+        return merged
+
+    async def _resolve_regenerate_config(self, app_id: uuid.UUID, config: Optional[MultiAgentConfig]):
+        """解析重跑用的集群配置：config 传入（分享端发布快照）则直接用；否则取草稿。
+
+        控制台试运行走草稿（与集群 run 同源）；分享端走发布快照。任一缺失都抛错。
+        """
+        if config is not None:
+            return config
+        resolved = await self.get_config_async(app_id)
+        if not resolved:
+            raise ResourceNotFoundException("多 Agent 配置", str(app_id))
+        if not resolved.is_active:
+            raise BusinessException("多 Agent 配置已禁用", BizCode.RESOURCE_DISABLED)
+        return resolved
+
+    def _build_regenerate_meta(self, original_message_id, usage=None, extra: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """新版本 assistant 消息的 meta_data：usage + 能力附加字段 + regenerated_from 溯源。"""
+        meta: Dict[str, Any] = {
+            "usage": usage or {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+            "regenerated_from": str(original_message_id),
+        }
+        for k in ("suggested_questions", "citations", "audio_url", "audio_status", "reasoning_content"):
+            if extra and extra.get(k):
+                meta[k] = extra[k]
+        return meta
+
+    def _save_regenerated_message(
+        self,
+        *,
+        conversation_id: uuid.UUID,
+        content: str,
+        version: int,
+        parent_message_id: uuid.UUID,
+        meta_data: Dict[str, Any],
+        message_id: Optional[uuid.UUID] = None,
+    ):
+        """落库新版本 assistant 消息（同步直插，对齐 WorkflowService.regenerate 行 5747 模式）。
+
+        响应需立即引用新 message_id、版本切换要即时可用，故不走 BatchPersistQueue
+        异步队列。同时把会话 message_count +1（直插场景队列不会代计）。
+        """
+        from app.models import Conversation, Message
+        new_msg = Message(
+            id=message_id or uuid.uuid4(),
+            conversation_id=conversation_id,
+            role="assistant",
+            content=content,
+            version=version,
+            is_current=True,
+            parent_message_id=parent_message_id,
+            meta_data=meta_data,
+            status="completed",
+        )
+        self.db.add(new_msg)
+        conv = self.db.get(Conversation, conversation_id)
+        if conv:
+            conv.message_count = int(conv.message_count or 0) + 1
+        self.db.commit()
+        self.db.refresh(new_msg)
+        return new_msg
+
+    async def regenerate(
+        self,
+        *,
+        message_id: uuid.UUID,
+        app_id: uuid.UUID,
+        user_id: Optional[str] = None,
+        variables: Optional[Dict[str, Any]] = None,
+        web_search: bool = False,
+        memory: bool = True,
+        storage_type: str = '',
+        user_rag_memory_id: str = '',
+        thinking: bool = False,
+        config: Optional[MultiAgentConfig] = None,
+    ) -> Dict[str, Any]:
+        """重新生成集群回复（非流式，多版本支持）。
+
+        对齐 Agent 应用的重新生成语义，但执行引擎是多 Agent 编排器（保留主管路由/
+        子 Agent 编排），而非单 Agent。版本管理骨架与 WorkflowService.regenerate 一致：
+        定位父 user 消息 → 旧版本置非当前 → 取同组 max(version)+1 → 基于"父消息之前"
+        的历史重跑（编排器 regenerate_before 截断）→ 落库新版本。
+
+        Args:
+            message_id: 原 assistant 消息 ID
+            app_id: 集群应用 ID（取配置/观测用）
+            config: 可选。传入（分享端发布快照）直接用；缺省取当前草稿（控制台试运行）。
+        """
+        from app.models import Message
+
+        # 1. 校验原消息
+        original_msg = self.db.get(Message, message_id)
+        if not original_msg or original_msg.role != "assistant":
+            raise BusinessException("只能重新生成 AI 回复", BizCode.BAD_REQUEST)
+        if original_msg.is_deleted:
+            raise BusinessException("消息已被删除", BizCode.BAD_REQUEST)
+
+        # 2. 版本配额（开跑前拒绝，避免编排后才发现超限）
+        self._assert_regenerate_quota(message_id)
+
+        # 3. 定位父 user 消息（误删则自动恢复）
+        parent_msg = self._locate_parent_user_message(original_msg)
+        parent_msg_id = parent_msg.id
+        conversation_id = original_msg.conversation_id
+        user_message_content = parent_msg.content or ""
+
+        # 4. 版本号：同组 max+1；旧版本（含原消息及其兄弟）统一置非当前
+        new_version = self._next_regenerate_version(original_msg, parent_msg_id)
+        self._mark_siblings_not_current(conversation_id, parent_msg_id)
+
+        # 5. 提取父消息附件（与 Agent regenerate 同口径）
+        files = self._restore_files_from_parent(parent_msg)
+        # 沿用首轮对话的变量值（请求显式传入的覆盖其上），用户不必重传必填变量
+        variables = self._restore_variables_from_parent(parent_msg, variables)
+
+        # 6. 解析配置并重建编排器；注入历史截断时间（= 父消息创建时间）
+        resolved_config = await self._resolve_regenerate_config(app_id, config)
+        orchestrator = await MultiAgentOrchestrator.create(self.db, resolved_config)
+
+        new_message_id = uuid.uuid4()
+        try:
+            result = await orchestrator.execute(
+                message=user_message_content,
+                conversation_id=conversation_id,
+                user_id=user_id,
+                variables=variables,
+                use_llm_routing=True,
+                web_search=web_search,
+                memory=memory,
+                storage_type=storage_type,
+                user_rag_memory_id=user_rag_memory_id,
+                message_id=new_message_id,
+                thinking=thinking,
+                files=files or None,
+                user_message_id=parent_msg_id,  # 情绪感知缓存键；不新建 user 行
+                opening_statement=None,  # 重新生成不重复开场白
+                regenerate_before=parent_msg.created_at,  # 历史截断到本轮提问之前
+            )
+        except Exception:
+            # 编排失败：把原版本恢复为当前，避免出现"无任何当前回复"的空窗
+            self._mark_message_current(original_msg.id, True)
+            raise
+
+        # 7. 落库新版本 assistant 消息
+        usage = result.get("usage") or {}
+        new_msg = self._save_regenerated_message(
+            conversation_id=conversation_id,
+            content=result.get("message", ""),
+            version=new_version,
+            parent_message_id=parent_msg_id,
+            meta_data=self._build_regenerate_meta(message_id, usage=usage, extra=result),
+            message_id=new_message_id,
+        )
+
+        # 8. 主执行记录关联到新消息（观测挂载；失败不阻断）
+        master_execution_id = getattr(orchestrator, "current_execution_id", None)
+        if master_execution_id is not None:
+            try:
+                from app.services.batch_persist_queue import BatchPersistQueue, PersistTask
+                await BatchPersistQueue.enqueue(PersistTask(
+                    task_type="link_agent_execution_message",
+                    args={
+                        "execution_id": str(master_execution_id),
+                        "message_id": str(new_message_id),
+                    },
+                ))
+            except Exception as e:
+                logger.warning("回填主执行记录 message_id 失败（不影响对话）", extra={"error": str(e)})
+
+        logger.info(
+            "集群重新生成回复成功",
+            extra={
+                "original_message_id": str(message_id),
+                "new_message_id": str(new_msg.id),
+                "version": new_version,
+                "conversation_id": str(conversation_id),
+            },
+        )
+
+        return {
+            "message_id": str(new_msg.id),
+            "message": result.get("message", ""),
+            "reasoning_content": result.get("reasoning_content"),
+            "version": new_version,
+            "conversation_id": str(conversation_id),
+            "suggested_questions": result.get("suggested_questions", []),
+            "citations": result.get("citations", []),
+            "audio_url": result.get("audio_url"),
+            "audio_status": result.get("audio_status"),
+        }
+
+    async def regenerate_stream(
+        self,
+        *,
+        message_id: uuid.UUID,
+        app_id: uuid.UUID,
+        user_id: Optional[str] = None,
+        variables: Optional[Dict[str, Any]] = None,
+        web_search: bool = False,
+        memory: bool = True,
+        storage_type: str = '',
+        user_rag_memory_id: str = '',
+        thinking: bool = False,
+        config: Optional[MultiAgentConfig] = None,
+    ) -> AsyncGenerator[str, None]:
+        """重新生成集群回复（流式输出，多版本支持）。
+
+        SSE 契约对齐 WorkflowService.regenerate_stream：
+        start{message_id,user_message_id,version,conversation_id} → 编排器内容事件
+        （message/reasoning/sub_agent_* 等）→ end → regenerate_end。
+        落库与版本管理骨架同 regenerate（非流式）。
+        """
+        import json as _json
+        import time as _time
+        from app.models import Message
+
+        def _sse(event: str, data: dict) -> str:
+            return f"event: {event}\ndata: {_json.dumps(data, ensure_ascii=False)}\n\n"
+
+        # 1-4. 校验 + 配额 + 父消息 + 版本号 + 置旧版本非当前（与非流式同一骨架；
+        #       必须在首个 SSE 事件前完成——开流后无法回传干净的 HTTP 错误）
+        original_msg = self.db.get(Message, message_id)
+        if not original_msg or original_msg.role != "assistant":
+            raise BusinessException("只能重新生成 AI 回复", BizCode.BAD_REQUEST)
+        if original_msg.is_deleted:
+            raise BusinessException("消息已被删除", BizCode.BAD_REQUEST)
+        self._assert_regenerate_quota(message_id)
+        parent_msg = self._locate_parent_user_message(original_msg)
+        parent_msg_id = parent_msg.id
+        conversation_id = original_msg.conversation_id
+        user_message_content = parent_msg.content or ""
+        new_version = self._next_regenerate_version(original_msg, parent_msg_id)
+        self._mark_siblings_not_current(conversation_id, parent_msg_id)
+        files = self._restore_files_from_parent(parent_msg)
+        # 沿用首轮对话的变量值（请求显式传入的覆盖其上），用户不必重传必填变量
+        variables = self._restore_variables_from_parent(parent_msg, variables)
+        resolved_config = await self._resolve_regenerate_config(app_id, config)
+        orchestrator = await MultiAgentOrchestrator.create(self.db, resolved_config)
+
+        new_message_id = uuid.uuid4()
+        start_time = _time.time()
+
+        # start 事件：带新消息 id / 版本号（前端据此挂载本轮气泡与版本指示）
+        yield _sse("start", {
+            "conversation_id": str(conversation_id),
+            "message_id": str(new_message_id),
+            "user_message_id": str(parent_msg_id),
+            "version": new_version,
+            "timestamp": start_time,
+        })
+
+        full_content = ""
+        usage: Dict[str, Any] = {}
+        end_extras: Dict[str, Any] = {}
+        stream_failed = False
+        error_emitted = False
+        failure_error: Optional[str] = None
+        try:
+            async for event in orchestrator.execute_stream(
+                message=user_message_content,
+                conversation_id=conversation_id,
+                user_id=user_id,
+                variables=variables,
+                use_llm_routing=True,
+                web_search=web_search,
+                memory=memory,
+                storage_type=storage_type,
+                user_rag_memory_id=user_rag_memory_id,
+                message_id=new_message_id,
+                thinking=thinking,
+                files=files or None,
+                user_message_id=parent_msg_id,
+                opening_statement=None,
+                regenerate_before=parent_msg.created_at,
+            ):
+                # 解析事件名以累积正文 / 提取 end 的 usage 与能力附加字段
+                _ev = ""
+                if event.startswith("event:"):
+                    _ev = event[6:].split("\n", 1)[0].strip()
+                if "data:" in event:
+                    try:
+                        _data = _json.loads(event.split("data: ", 1)[1].strip())
+                    except Exception:
+                        _data = {}
+                else:
+                    _data = {}
+
+                # 编排器自身的 start/end 透传会造成前端重复 start；这里接管收尾，
+                # 只转发内容/过程事件，start/end 由本方法统一发。
+                if _ev == "start":
+                    continue
+                if _ev == "end":
+                    usage = _data.get("usage") or {}
+                    for _k in ("suggested_questions", "citations", "audio_url", "audio_status"):
+                        if _k in _data:
+                            end_extras[_k] = _data[_k]
+                    continue  # 末尾统一补标准 end + regenerate_end
+                if _ev == "error":
+                    # 编排器 execute_stream 的失败语义是发 error 事件（吞异常正常返回），
+                    # 不抛异常——必须在这里识别并走回滚，否则空/部分正文会被落成新版本。
+                    stream_failed = True
+                    failure_error = _data.get("error") or "集群重新生成失败"
+                    error_emitted = True  # 编排器的 error 帧已原样透传，收尾不再重复发
+                    yield event
+                    break
+
+                if _ev == "message" and "content" in _data:
+                    full_content += _data["content"]
+                yield event
+        except Exception as e:
+            stream_failed = True
+            failure_error = str(e)
+
+        # 失败回滚：恢复原版本为当前，不落新版本。
+        # 失败帧用 error 事件（与 Agent / 编排器失败语义一致），不再发 status=failed 的 end；
+        # 编排器已透传过 error 帧时不重复发。
+        if stream_failed:
+            self._mark_message_current(original_msg.id, True)
+            if not error_emitted:
+                yield _sse("error", {
+                    "conversation_id": str(conversation_id),
+                    "error": failure_error or "集群重新生成失败",
+                    "elapsed_time": _time.time() - start_time,
+                    "timestamp": _time.time(),
+                })
+            return
+
+        # 7. 落库新版本 assistant 消息
+        new_msg = self._save_regenerated_message(
+            conversation_id=conversation_id,
+            content=full_content,
+            version=new_version,
+            parent_message_id=parent_msg_id,
+            meta_data=self._build_regenerate_meta(message_id, usage=usage, extra=end_extras),
+            message_id=new_message_id,
+        )
+
+        # 8. 主执行记录关联（观测挂载；失败不阻断）
+        master_execution_id = getattr(orchestrator, "current_execution_id", None)
+        if master_execution_id is not None:
+            try:
+                from app.services.batch_persist_queue import BatchPersistQueue, PersistTask
+                await BatchPersistQueue.enqueue(PersistTask(
+                    task_type="link_agent_execution_message",
+                    args={
+                        "execution_id": str(master_execution_id),
+                        "message_id": str(new_message_id),
+                    },
+                ))
+            except Exception as e:
+                logger.warning("回填主执行记录 message_id 失败（不影响对话）", extra={"error": str(e)})
+
+        logger.info(
+            "集群重新生成回复成功（流式）",
+            extra={
+                "original_message_id": str(message_id),
+                "new_message_id": str(new_msg.id),
+                "version": new_version,
+                "conversation_id": str(conversation_id),
+            },
+        )
+
+        # 9. 标准 end + regenerate_end（与 workflow 重新生成契约一致）
+        yield _sse("end", {
+            "status": "completed",
+            "elapsed_time": _time.time() - start_time,
+            "conversation_id": str(conversation_id),
+            "message_id": str(new_message_id),
+            "message_length": len(full_content),
+            "usage": usage or {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+            **end_extras,
+        })
+        yield _sse("regenerate_end", {
+            "message_id": str(new_message_id),
+            "version": new_version,
+            "conversation_id": str(conversation_id),
+        })
 
     async def _save_conversation_message(
         self,

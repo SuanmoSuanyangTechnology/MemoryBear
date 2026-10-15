@@ -23,7 +23,7 @@ from app.models.app_model import AppStatus, AppType
 from app.schemas.app_schema import FileInput
 from app.services.draft_run_service import AgentRunService
 from app.services.model_service import ModelConfigService
-from app.utils.app_config_utils import agent_config_4_app_release
+from app.utils.app_config_utils import agent_config_4_app_release, multi_agent_config_4_app_release
 
 ReleasePolicy = Literal["current", "pinned"]
 _MAX_INVOCATION_DEPTH = 5
@@ -37,7 +37,12 @@ _INVOCATION_STACK: ContextVar[tuple[tuple[str, str, str], ...]] = ContextVar(
 class PublishedAgentRuntime:
     app: App
     release: AppRelease
+    # 单 Agent 引用的模型配置；集群引用时为主模型（校验用途），执行走编排器
     model_config: ModelConfig
+
+    @property
+    def is_cluster(self) -> bool:
+        return self.app.type == AppType.MULTI_AGENT
 
     @property
     def reference_meta(self) -> dict[str, Any]:
@@ -50,8 +55,8 @@ class PublishedAgentRuntime:
 
 
 @asynccontextmanager
-async def _invocation_scope(app_id: uuid.UUID, release_id: uuid.UUID):
-    key = ("agent", str(app_id), str(release_id))
+async def _invocation_scope(app_id: uuid.UUID, release_id: uuid.UUID, kind: str = "agent"):
+    key = (kind, str(app_id), str(release_id))
     stack = _INVOCATION_STACK.get()
     if key in stack:
         path = " -> ".join(f"{kind}:{app}:{release}" for kind, app, release in (*stack, key))
@@ -86,7 +91,11 @@ class PublishedAgentRunner:
             raise BusinessException("引用的 Agent 应用不存在或已停用", BizCode.APP_NOT_FOUND)
         if app.workspace_id != workspace_id:
             raise BusinessException("第一阶段仅支持引用当前工作空间的 Agent 应用", BizCode.WORKSPACE_NO_ACCESS)
-        if app.type != AppType.AGENT:
+        # 集群引用：仅放行 multi_agent 且发布快照为 supervisor_loop 编排的应用
+        #（三段式 supervisor/collaboration 依赖会话态，无会话引用场景不适用）
+        if app.type == AppType.MULTI_AGENT:
+            pass
+        elif app.type != AppType.AGENT:
             raise BusinessException("引用的应用不是 Agent 类型", BizCode.APP_TYPE_NOT_SUPPORTED)
         if app.status != AppStatus.ACTIVE:
             raise BusinessException("引用的 Agent 应用尚未发布或已归档", BizCode.APP_NOT_PUBLISHED)
@@ -102,9 +111,16 @@ class PublishedAgentRunner:
             not release
             or not release.is_active
             or release.app_id != app.id
-            or release.type != AppType.AGENT
+            or release.type != app.type
         ):
             raise BusinessException("Agent 发布版本不存在、已下线或归属错误", BizCode.RELEASE_NOT_FOUND)
+        if app.type == AppType.MULTI_AGENT:
+            _cfg = release.config if isinstance(release.config, dict) else {}
+            if (_cfg.get("orchestration_mode") or "") != "supervisor_loop":
+                raise BusinessException(
+                    "仅支持引用 supervisor_loop（主管循环）模式的集群应用",
+                    BizCode.APP_TYPE_NOT_SUPPORTED,
+                )
         if not release.default_model_config_id:
             raise BusinessException("Agent 发布版本缺少模型配置", BizCode.AGENT_CONFIG_MISSING)
 
@@ -142,28 +158,41 @@ class PublishedAgentRunner:
                 release_id=release_id,
                 workspace_id=workspace_id,
             )
-            async with _invocation_scope(runtime.app.id, runtime.release.id):
-                agent_config = agent_config_4_app_release(runtime.release)
-                result = await AgentRunService(db).run(
-                    agent_config=agent_config,
-                    model_config=runtime.model_config,
-                    message=message,
-                    workspace_id=workspace_id,
-                    conversation_id=None,
-                    user_id=user_id,
-                    variables=variables,
-                    storage_type=storage_type,
-                    user_rag_memory_id=user_rag_memory_id,
-                    web_search=True,
-                    memory=True,
-                    sub_agent=True,
-                    files=files,
-                    source="workflow_agent_reference",
-                    history=history,
-                    skip_save=True,
-                    stateless=True,
-                    execution_mode="in_process",
-                )
+            async with _invocation_scope(
+                runtime.app.id, runtime.release.id, "cluster" if runtime.is_cluster else "agent"
+            ):
+                if runtime.is_cluster:
+                    result = await self._run_cluster_reference(
+                        db, runtime,
+                        message=message,
+                        user_id=user_id,
+                        variables=variables,
+                        files=files,
+                        storage_type=storage_type,
+                        user_rag_memory_id=user_rag_memory_id,
+                    )
+                else:
+                    agent_config = agent_config_4_app_release(runtime.release)
+                    result = await AgentRunService(db).run(
+                        agent_config=agent_config,
+                        model_config=runtime.model_config,
+                        message=message,
+                        workspace_id=workspace_id,
+                        conversation_id=None,
+                        user_id=user_id,
+                        variables=variables,
+                        storage_type=storage_type,
+                        user_rag_memory_id=user_rag_memory_id,
+                        web_search=True,
+                        memory=True,
+                        sub_agent=True,
+                        files=files,
+                        source="workflow_agent_reference",
+                        history=history,
+                        skip_save=True,
+                        stateless=True,
+                        execution_mode="in_process",
+                    )
                 result["reference_meta"] = runtime.reference_meta
                 return result
 
@@ -190,31 +219,48 @@ class PublishedAgentRunner:
                 release_id=release_id,
                 workspace_id=workspace_id,
             )
-            async with _invocation_scope(runtime.app.id, runtime.release.id):
-                agent_config = agent_config_4_app_release(runtime.release)
-                stream = AgentRunService(db).run_stream(
-                    agent_config=agent_config,
-                    model_config=runtime.model_config,
-                    message=message,
-                    workspace_id=workspace_id,
-                    conversation_id=None,
-                    user_id=user_id,
-                    variables=variables,
-                    storage_type=storage_type,
-                    user_rag_memory_id=user_rag_memory_id,
-                    web_search=True,
-                    memory=True,
-                    sub_agent=True,
-                    files=files,
-                    source="workflow_agent_reference",
-                    history=history,
-                    skip_save=True,
-                    stateless=True,
-                    execution_mode="in_process",
-                )
+            async with _invocation_scope(
+                runtime.app.id, runtime.release.id, "cluster" if runtime.is_cluster else "agent"
+            ):
+                if runtime.is_cluster:
+                    stream = self._run_cluster_reference_stream(
+                        db, runtime,
+                        message=message,
+                        user_id=user_id,
+                        variables=variables,
+                        files=files,
+                        storage_type=storage_type,
+                        user_rag_memory_id=user_rag_memory_id,
+                    )
+                else:
+                    agent_config = agent_config_4_app_release(runtime.release)
+                    stream = AgentRunService(db).run_stream(
+                        agent_config=agent_config,
+                        model_config=runtime.model_config,
+                        message=message,
+                        workspace_id=workspace_id,
+                        conversation_id=None,
+                        user_id=user_id,
+                        variables=variables,
+                        storage_type=storage_type,
+                        user_rag_memory_id=user_rag_memory_id,
+                        web_search=True,
+                        memory=True,
+                        sub_agent=True,
+                        files=files,
+                        source="workflow_agent_reference",
+                        history=history,
+                        skip_save=True,
+                        stateless=True,
+                        execution_mode="in_process",
+                    )
                 async for raw_event in stream:
-                    event = self._parse_sse_event(raw_event)
+                    event = raw_event if isinstance(raw_event, dict) else self._parse_sse_event(raw_event)
                     if event is None:
+                        continue
+                    # 集群流式有子 Agent 派发/过程事件（agent_dispatch/sub_agent_message 等），
+                    # 引用场景只回传主气泡正文与终态，过程事件丢弃（工作流节点只认 message/end）
+                    if runtime.is_cluster and event["type"] not in ("message", "end", "error"):
                         continue
                     if event["type"] == "error":
                         error = event["data"].get("error")
@@ -224,6 +270,84 @@ class PublishedAgentRunner:
                     if event["type"] == "end":
                         event["data"]["reference_meta"] = runtime.reference_meta
                     yield event
+
+    @staticmethod
+    def _normalize_cluster_sse_event(raw_event: str) -> dict[str, Any] | None:
+        """集群 SSE 事件 → 统一 dict；message 事件取 data.content。"""
+        event = PublishedAgentRunner._parse_sse_event(raw_event)
+        if event is None:
+            return None
+        if event["type"] == "message" and not isinstance(event["data"], dict):
+            event["data"] = {"content": str(event["data"])}
+        return event
+
+    async def _run_cluster_reference(
+        self,
+        db: AsyncSession,
+        runtime: PublishedAgentRuntime,
+        *,
+        message: str,
+        user_id: str | None,
+        variables: dict[str, Any],
+        files: list[FileInput],
+        storage_type: str | None,
+        user_rag_memory_id: str | None,
+    ) -> dict[str, Any]:
+        """以无会话方式执行已发布集群（supervisor_loop）。
+
+        conversation_id=None → 主管历史/开场白/主执行记录全部降级为空，
+        子 Agent 走既有 sub_agent=True 链路本就无会话落库；返回结构对齐
+        orchestrator.execute 的 supervisor_loop 分支（message/usage/citations 等）。
+        """
+        from app.services.multi_agent_orchestrator import MultiAgentOrchestrator
+
+        config = multi_agent_config_4_app_release(runtime.release)
+        orchestrator = await MultiAgentOrchestrator.create(db, config)
+        result = await orchestrator.execute(
+            message=message,
+            conversation_id=None,
+            user_id=user_id,
+            variables=variables,
+            web_search=True,
+            storage_type=storage_type or "",
+            user_rag_memory_id=user_rag_memory_id or "",
+            files=files or None,
+        )
+        # 对齐 Agent 引用返回面：编排器 supervisor_loop 分支的 "message" 即最终答案，
+        # usage/引用建议问题等键原样保留（工作流节点按 message/usage/citations 消费）。
+        result.setdefault("message", result.get("message") or result.get("content", ""))
+        return result
+
+    async def _run_cluster_reference_stream(
+        self,
+        db: AsyncSession,
+        runtime: PublishedAgentRuntime,
+        *,
+        message: str,
+        user_id: str | None,
+        variables: dict[str, Any],
+        files: list[FileInput],
+        storage_type: str | None,
+        user_rag_memory_id: str | None,
+    ) -> AsyncGenerator[dict[str, Any], None]:
+        """无会话流式执行已发布集群（supervisor_loop），事件转为统一 dict 供上游过滤。"""
+        from app.services.multi_agent_orchestrator import MultiAgentOrchestrator
+
+        config = multi_agent_config_4_app_release(runtime.release)
+        orchestrator = await MultiAgentOrchestrator.create(db, config)
+        async for raw_event in orchestrator.execute_stream(
+            message=message,
+            conversation_id=None,
+            user_id=user_id,
+            variables=variables,
+            web_search=True,
+            storage_type=storage_type or "",
+            user_rag_memory_id=user_rag_memory_id or "",
+            files=files or None,
+        ):
+            event = self._normalize_cluster_sse_event(raw_event)
+            if event is not None:
+                yield event
 
     @staticmethod
     def _parse_sse_event(raw_event: str) -> dict[str, Any] | None:

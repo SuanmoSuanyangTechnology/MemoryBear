@@ -486,6 +486,9 @@ class MultiAgentOrchestrator:
         self._turn_used_context_engine: bool = False
         self._turn_ctx_provider: Optional[str] = None
         self._turn_ctx_model_config_id: Any = None
+        # 重新生成场景：主管历史截断到该时间之前（= 原提问 user 消息的 created_at），
+        # 保证重跑上下文与被重新生成的那一轮一致。None = 不截断（正常新轮对话）。
+        self._regenerate_before: Any = None
 
     def _prepare_turn_chat_features(
         self,
@@ -782,7 +785,12 @@ class MultiAgentOrchestrator:
 
         每轮都重算（同一 orchestrator 实例会跑多轮，且子 Agent 配置可能已更新）。
         """
-        bag = build_cluster_variable_bag(self.config, self.sub_agents, variables)
+        # 重新生成（_regenerate_before 非空）：变量沿用首轮落库值，存量会话没有落库变量时
+        # 不应因必填缺失拦截重跑（首轮已通过入口校验），因此放宽为不抛错、仅记观测。
+        strict_required = False if self._regenerate_before is not None else None
+        bag = build_cluster_variable_bag(
+            self.config, self.sub_agents, variables, strict_required=strict_required
+        )
         self._cluster_variables = bag
         return bag
 
@@ -1225,6 +1233,7 @@ class MultiAgentOrchestrator:
         execution_mode: Optional[str] = None,
         files: Optional[List[Any]] = None,
         user_message_id: Optional[uuid.UUID] = None,
+        regenerate_before: Any = None,
     ):
         """执行多 Agent 任务（流式返回）
 
@@ -1239,12 +1248,16 @@ class MultiAgentOrchestrator:
             storage_type: 存储类型
             user_rag_memory_id: 用户 RAG 记忆 ID
             message_id: 本轮 assistant 消息 ID（写入主执行记录，供日志详情按消息挂载节点）
+            regenerate_before: 重新生成场景的历史截断时间（= 原提问 user 消息 created_at），
+                非空时主管历史只取该时间之前的消息；None = 正常新轮对话（旧行为）
 
         Yields:
             SSE 格式的事件流
         """
 
         start_time = time.time()
+        # 重新生成：历史截断钩子（仅主管链路 _load_cluster_history 消费；缺省 None = 旧行为）
+        self._regenerate_before = regenerate_before
 
         # S3：每轮开始重置整合模式观测值（同一 orchestrator 实例可能跑多轮）
         self._merge_mode_actual = None
@@ -1442,6 +1455,7 @@ class MultiAgentOrchestrator:
         execution_mode: Optional[str] = None,
         files: Optional[List[Any]] = None,
         user_message_id: Optional[uuid.UUID] = None,
+        regenerate_before: Any = None,
     ) -> Dict[str, Any]:
         """执行多 Agent 任务（基于 Master Agent 决策）
 
@@ -1454,11 +1468,15 @@ class MultiAgentOrchestrator:
             message_id: 本轮 assistant 消息 ID（写入主执行记录）
             storage_type: 存储类型（S5：透传给 collaboration 调用上下文）
             user_rag_memory_id: 用户 RAG 记忆 ID（S5：同上）
+            regenerate_before: 重新生成场景的历史截断时间（= 原提问 user 消息 created_at），
+                非空时主管历史只取该时间之前的消息；None = 正常新轮对话（旧行为）
 
         Returns:
             执行结果
         """
         start_time = time.time()
+        # 重新生成：历史截断钩子（仅主管链路 _load_cluster_history 消费；缺省 None = 旧行为）
+        self._regenerate_before = regenerate_before
 
         # S5：与流式同口径 —— 变量契约在入口一次性处理，两模式共用渲染后的消息。
         cluster_variables = self._build_cluster_variables(variables)
@@ -2729,6 +2747,35 @@ class MultiAgentOrchestrator:
         if not conversation_id or self.db is None:
             return []
         try:
+            # 重新生成场景（_regenerate_before 非空）：按原提问消息的创建时间截断，
+            # 主管只感知"被重新生成轮次之前"的上下文，与单 Agent regenerate 同口径
+            #（AppChatService._load_history_before_message 的 before_time 语义）。
+            # get_conversation_history 不带 created_at，这里直查 Message 表。
+            if self._regenerate_before is not None:
+                from app.models import Message
+                from sqlalchemy import select
+                from sqlalchemy.ext.asyncio import AsyncSession as _AsyncSession
+
+                stmt = (
+                    select(Message)
+                    .where(
+                        Message.conversation_id == conversation_id,
+                        Message.is_current.is_not(False),
+                        Message.is_deleted.is_not(True),
+                        Message.created_at < self._regenerate_before,
+                    )
+                    .order_by(Message.created_at.asc())
+                )
+                if isinstance(self.db, _AsyncSession):
+                    rows = (await self.db.execute(stmt)).scalars().all()
+                else:
+                    rows = self.db.scalars(stmt).all()
+                return [
+                    {"role": m.role, "content": m.content}
+                    for m in (rows or [])
+                    if isinstance(m.content, str)
+                ]
+
             from app.services.conversation_service import ConversationService
 
             conv_service = ConversationService(self.db)

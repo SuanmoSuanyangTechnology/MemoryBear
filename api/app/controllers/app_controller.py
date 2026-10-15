@@ -447,7 +447,7 @@ def create_app(
 @router.get("", summary="应用列表（分页）")
 @cur_workspace_access_guard()
 def list_apps(
-        type: str | None = None,
+        type: str | None = Query(None, description="应用类型过滤，支持逗号分隔多值，如 'agent,multi_agent'"),
         visibility: str | None = None,
         status: str | None = None,
         search: str | None = None,
@@ -457,6 +457,7 @@ def list_apps(
         page: int = 1,
         pagesize: int = 10,
         ids: Optional[str] = None,
+        orchestration_mode: str | None = Query(None, description="编排模式过滤（仅 multi_agent 生效），如 supervisor_loop"),
         ontology_status: Literal["all", "bound", "default"] = Query(
             "all", description="本体状态筛选：all 全部 / bound 已关联本体 / default 仅默认本体"
         ),
@@ -526,6 +527,7 @@ def list_apps(
         pagesize=pagesize,
         ontology_status=ontology_status,
         field_search=field_search,
+        orchestration_mode=orchestration_mode,
     )
 
     items = service.to_schemas_with_ontology(items_orm, workspace_id)
@@ -1235,8 +1237,9 @@ async def draft_run(
             user_id=payload.user_id or current_user_id,
             variables=payload.variables or {},
             use_llm_routing=True,
-            # 深度思考：缺省 False = 旧行为；需集群 model_parameters.deep_thinking 同时开启才生效
-            thinking=bool(getattr(payload, "thinking", False)),
+            # 深度思考：与 Agent 试运行一致，只由集群 model_parameters.deep_thinking 决定，
+            # 请求无需再传 thinking（is_deep_thinking_on 要求两者同真，这里恒为 True）
+            thinking=True,
             # 联网：缺省 False = 旧行为；需集群 features.web_search.enabled 同时开启，仅主管生效
             web_search=bool(getattr(payload, "web_search", False)),
             # 附件：缺省空 = 旧行为；需集群 features.file_upload 开启才放行
