@@ -64,10 +64,17 @@ def _summary(model, snapshot, topics, segments, catalog):
                       DocumentSummary, validate)
 
 
+def _classification_context(snapshot, allow_new):
+    return {
+        "language": snapshot["language"], "document_title": snapshot.get("title", ""),
+        "extraction_focus": snapshot.get("extract_prompt", ""), "allow_new": allow_new,
+    }
+
+
 def _classify(model, snapshot, topics, segment, allow_new):
     largest = ([max(topics, key=lambda topic: tokens(model_topics([topic])))] if topics else [])
-    fixed = {"language": snapshot["language"], "topics": model_topics(largest),
-             "sources": [], "allow_new": allow_new}
+    fixed = {**_classification_context(snapshot, allow_new),
+             "topics": model_topics(largest), "sources": []}
     available = model.settings.kb_wiki_input_tokens - request_tokens(
         "wiki_chunk_citations_v2", fixed, Citations
     ) - 128
@@ -92,8 +99,8 @@ def _classify_slice(model, snapshot, topics, segment, allow_new):
     refs = {source["ref"] for source in segment}
 
     def build(values):
-        return {"language": snapshot["language"], "topics": model_topics(values),
-                "sources": model_sources(segment), "allow_new": allow_new}
+        return {**_classification_context(snapshot, allow_new), "topics": model_topics(values),
+                "sources": model_sources(segment)}
 
     groups = batches(topics, stage="wiki_chunk_citations_v2", build=build,
                      schema=Citations, settings=model.settings)
