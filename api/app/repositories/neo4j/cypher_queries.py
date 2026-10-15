@@ -11,6 +11,9 @@ from app.core.memory.constants.value_weight_constants import (
     T_WEIGHT,
 )
 from app.core.memory.enums import Neo4jNodeType
+from app.core.memory.storage.custom.legacy_metadata_merge import (
+    LEGACY_METADATA_MERGE_CLAUSES,
+)
 
 DIALOGUE_NODE_SAVE = """
     UNWIND $dialogues AS dialogue
@@ -360,119 +363,6 @@ SET e.name = CASE WHEN entity.name IS NOT NULL AND entity.name <> '' THEN entity
     e.extraction_count = CASE WHEN entity.extraction_count IS NOT NULL THEN entity.extraction_count + coalesce(e.extraction_count, 0) ELSE coalesce(e.extraction_count, 1) END,
     e.delete_at = null
 RETURN e.id AS uuid
-"""
-
-# ── 查询用户实体已有的元数据（供增量提取时去重） ──
-ENTITY_METADATA_QUERY = """
-MATCH (e:ExtractedEntity {id: $entity_id})
-WHERE e.delete_at IS NULL
-RETURN e.core_facts AS core_facts,
-       e.traits AS traits,
-       e.relations AS relations,
-       e.goals AS goals,
-       e.interests AS interests,
-       e.beliefs_or_stances AS beliefs_or_stances,
-       e.anchors AS anchors,
-       e.events AS events
-"""
-
-# ── 元数据 patch 回写：对 8 字段统一应用 delete / update / add 三段操作 ──
-# 设计要点：
-#   1. 8 个字段一次原子 SET，纯 Cypher（不依赖 APOC），无 race 风险
-#   2. delete: [x IN list WHERE NOT x IN $field_delete] —— 仅精确剔除被指名项
-#   3. update: [x IN list | CASE WHEN x = pair.old THEN pair.new ELSE x END]
-#              对每个 (old, new) pair 顺序应用一次，匹配不到则保持原值
-#   4. add:    reduce 去重追加，原值不会丢失
-#   5. 输入参数（每字段三类）：
-#        $<field>_delete : List[str]
-#        $<field>_update : List[{old: str, new: str}]
-#        $<field>_add    : List[str]
-#      上层调用方对未变更字段传空数组即可，避免 Cypher 内部出现 NULL 分支。
-ENTITY_METADATA_PATCH = """
-MATCH (e:ExtractedEntity {id: $entity_id})
-WHERE e.delete_at IS NULL
-
-// ── core_facts ──
-WITH e,
-     [x IN coalesce(e.core_facts, []) WHERE NOT x IN $core_facts_delete] AS cf0
-WITH e, reduce(acc = cf0, pair IN $core_facts_update |
-        [x IN acc | CASE WHEN x = pair.old THEN pair.new ELSE x END]) AS cf1
-WITH e, reduce(acc = cf1, item IN $core_facts_add |
-        CASE WHEN item IN acc THEN acc ELSE acc + item END) AS cf2
-SET e.core_facts = cf2
-
-// ── traits ──
-WITH e,
-     [x IN coalesce(e.traits, []) WHERE NOT x IN $traits_delete] AS tr0
-WITH e, reduce(acc = tr0, pair IN $traits_update |
-        [x IN acc | CASE WHEN x = pair.old THEN pair.new ELSE x END]) AS tr1
-WITH e, reduce(acc = tr1, item IN $traits_add |
-        CASE WHEN item IN acc THEN acc ELSE acc + item END) AS tr2
-SET e.traits = tr2
-
-// ── relations ──
-WITH e,
-     [x IN coalesce(e.relations, []) WHERE NOT x IN $relations_delete] AS re0
-WITH e, reduce(acc = re0, pair IN $relations_update |
-        [x IN acc | CASE WHEN x = pair.old THEN pair.new ELSE x END]) AS re1
-WITH e, reduce(acc = re1, item IN $relations_add |
-        CASE WHEN item IN acc THEN acc ELSE acc + item END) AS re2
-SET e.relations = re2
-
-// ── goals ──
-WITH e,
-     [x IN coalesce(e.goals, []) WHERE NOT x IN $goals_delete] AS go0
-WITH e, reduce(acc = go0, pair IN $goals_update |
-        [x IN acc | CASE WHEN x = pair.old THEN pair.new ELSE x END]) AS go1
-WITH e, reduce(acc = go1, item IN $goals_add |
-        CASE WHEN item IN acc THEN acc ELSE acc + item END) AS go2
-SET e.goals = go2
-
-// ── interests ──
-WITH e,
-     [x IN coalesce(e.interests, []) WHERE NOT x IN $interests_delete] AS in0
-WITH e, reduce(acc = in0, pair IN $interests_update |
-        [x IN acc | CASE WHEN x = pair.old THEN pair.new ELSE x END]) AS in1
-WITH e, reduce(acc = in1, item IN $interests_add |
-        CASE WHEN item IN acc THEN acc ELSE acc + item END) AS in2
-SET e.interests = in2
-
-// ── beliefs_or_stances ──
-WITH e,
-     [x IN coalesce(e.beliefs_or_stances, []) WHERE NOT x IN $beliefs_or_stances_delete] AS be0
-WITH e, reduce(acc = be0, pair IN $beliefs_or_stances_update |
-        [x IN acc | CASE WHEN x = pair.old THEN pair.new ELSE x END]) AS be1
-WITH e, reduce(acc = be1, item IN $beliefs_or_stances_add |
-        CASE WHEN item IN acc THEN acc ELSE acc + item END) AS be2
-SET e.beliefs_or_stances = be2
-
-// ── anchors ──
-WITH e,
-     [x IN coalesce(e.anchors, []) WHERE NOT x IN $anchors_delete] AS an0
-WITH e, reduce(acc = an0, pair IN $anchors_update |
-        [x IN acc | CASE WHEN x = pair.old THEN pair.new ELSE x END]) AS an1
-WITH e, reduce(acc = an1, item IN $anchors_add |
-        CASE WHEN item IN acc THEN acc ELSE acc + item END) AS an2
-SET e.anchors = an2
-
-// ── events ──
-WITH e,
-     [x IN coalesce(e.events, []) WHERE NOT x IN $events_delete] AS ev0
-WITH e, reduce(acc = ev0, pair IN $events_update |
-        [x IN acc | CASE WHEN x = pair.old THEN pair.new ELSE x END]) AS ev1
-WITH e, reduce(acc = ev1, item IN $events_add |
-        CASE WHEN item IN acc THEN acc ELSE acc + item END) AS ev2
-SET e.events = ev2
-
-RETURN e.id AS uuid,
-       e.core_facts AS core_facts,
-       e.traits AS traits,
-       e.relations AS relations,
-       e.goals AS goals,
-       e.interests AS interests,
-       e.beliefs_or_stances AS beliefs_or_stances,
-       e.anchors AS anchors,
-       e.events AS events
 """
 
 # Add back ENTITY_RELATIONSHIP_SAVE to be used by graph_saver.save_entities_and_relationships
@@ -2374,23 +2264,6 @@ RETURN n.id AS source_id,
        m.name AS target_name
 """
 
-SEARCH_USER_METADATA = """
-MATCH (n:ExtractedEntity)
-WHERE (n.end_user_id = $end_user_id AND n.entity_type ='用户')
-  AND n.delete_at IS NULL
-RETURN n.description AS description,
-       n.aliases AS aliases,
-       n.anchors AS anchors,
-       n.beliefs_or_stances AS beliefs_or_stances,
-       n.core_facts AS core_facts,
-       n.event_timeline AS event_timeline,
-       n.goals AS goals,
-       n.interests AS interests,
-       n.relations AS relations,
-       n.traits AS traits,
-       n.id AS id
-"""
-
 # ── 查询用户实体基本信息（供元数据提取使用） ──
 USER_ENTITY_FOR_METADATA = """
 MATCH (n:ExtractedEntity)
@@ -2715,15 +2588,8 @@ SET keeper.name = $merged_name,
       WHEN keeper.created_at IS NULL THEN loser.created_at
       WHEN loser.created_at IS NULL THEN keeper.created_at
       WHEN loser.created_at > keeper.created_at THEN loser.created_at
-      ELSE keeper.created_at END,
-    keeper.core_facts = apoc.coll.toSet(coalesce(keeper.core_facts,[]) + coalesce(loser.core_facts,[])),
-    keeper.traits = apoc.coll.toSet(coalesce(keeper.traits,[]) + coalesce(loser.traits,[])),
-    keeper.relations = apoc.coll.toSet(coalesce(keeper.relations,[]) + coalesce(loser.relations,[])),
-    keeper.goals = apoc.coll.toSet(coalesce(keeper.goals,[]) + coalesce(loser.goals,[])),
-    keeper.interests = apoc.coll.toSet(coalesce(keeper.interests,[]) + coalesce(loser.interests,[])),
-    keeper.beliefs_or_stances = apoc.coll.toSet(coalesce(keeper.beliefs_or_stances,[]) + coalesce(loser.beliefs_or_stances,[])),
-    keeper.anchors = apoc.coll.toSet(coalesce(keeper.anchors,[]) + coalesce(loser.anchors,[])),
-    keeper.events = apoc.coll.toSet(coalesce(keeper.events,[]) + coalesce(loser.events,[]))
+      ELSE keeper.created_at END
+""" + LEGACY_METADATA_MERGE_CLAUSES + """
 WITH keeper, loser
 OPTIONAL MATCH (s:Statement)-[r:REFERENCES_ENTITY]->(loser)
 WHERE s.delete_at IS NULL AND NOT (s)-[:REFERENCES_ENTITY]->(keeper)
