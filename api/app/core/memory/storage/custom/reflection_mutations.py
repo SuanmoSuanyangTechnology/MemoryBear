@@ -14,14 +14,14 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from app.core.memory.storage.custom.legacy_metadata_merge import (
+    LEGACY_METADATA_MERGE_CLAUSES,
+)
 from app.core.memory.storage.enums import MemoryNodeType
 from app.core.memory.storage.outbox.producer import enqueue_events
 from app.core.memory.storage.outbox.repository import OutboxRepository
 from app.core.memory.storage.outbox.types import OutboxEventInput, OutboxOperation
 from app.core.memory.storage.provider.neo4j.client import Neo4jClient
-from app.core.memory.storage.provider.neo4j.legacy_metadata import (
-    LEGACY_METADATA_MERGE_CLAUSES,
-)
 
 logger = logging.getLogger(__name__)
 

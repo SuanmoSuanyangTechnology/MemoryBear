@@ -11,7 +11,7 @@ from app.core.memory.constants.value_weight_constants import (
     T_WEIGHT,
 )
 from app.core.memory.enums import Neo4jNodeType
-from app.core.memory.storage.provider.neo4j.legacy_metadata import (
+from app.core.memory.storage.custom.legacy_metadata_merge import (
     LEGACY_METADATA_MERGE_CLAUSES,
 )
 

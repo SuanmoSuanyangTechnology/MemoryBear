@@ -1,4 +1,4 @@
-"""Neo4j 历史用户 metadata 的合并兼容；迁移完成后随旧字段统一删除。"""
+"""用户归并与反思实体合并的旧画像字段兼容；迁移完成后随旧字段统一删除。"""
 
 import json
 from typing import Any

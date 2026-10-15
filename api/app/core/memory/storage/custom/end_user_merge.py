@@ -6,15 +6,15 @@ from dataclasses import dataclass
 from typing import Any
 
 from app.core.memory.models.graph_models import PreferenceNode
+from app.core.memory.storage.custom.legacy_metadata_merge import (
+    merge_legacy_user_properties,
+)
 from app.core.memory.storage.enums import MemoryNodeType
 from app.core.memory.storage.outbox.exceptions import OutboxEnqueueError
 from app.core.memory.storage.outbox.producer import enqueue_events
 from app.core.memory.storage.outbox.repository import OutboxRepository
 from app.core.memory.storage.outbox.types import OutboxEventInput, OutboxOperation
 from app.core.memory.storage.provider.neo4j.client import Neo4jClient, _to_native
-from app.core.memory.storage.provider.neo4j.legacy_metadata import (
-    merge_legacy_user_properties,
-)
 from app.core.utils.datetime_utils import utcnow_naive
 
 logger = logging.getLogger(__name__)
