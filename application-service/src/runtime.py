@@ -32,6 +32,7 @@ class ProcessRuntime:
         for close in (
             self.redis.aclose,
             self.database.aclose_async,
+            self.upstream.aclose,
         ):
             try:
                 await close()

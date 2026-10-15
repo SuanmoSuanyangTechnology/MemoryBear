@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from ..aio_redis import get_redis_connection
+from ..infrastructure.upstream import UpstreamUnavailableError, get_monolith_upstream
 from ..utils.datetime_utils import parse_iso_to_utc_naive, to_iso_z
 from ..plugins import get_plugin
 from ..repositories.context_state_repository import ContextStateRepository
@@ -138,6 +139,38 @@ class ContextEngineManager:
             return None, None
         provider_name = self.DEFAULT_PROVIDER
         return plugin.get_provider(provider_name), provider_name
+
+    async def _forward_to_monolith(self, op: str, payload: dict[str, Any]) -> tuple[bool, Any]:
+        """Forward a context-engine operation to the monolith (single writer of
+        summary state during the coexistence period).
+
+        Returns ``(handled, value)`` where ``value`` is the endpoint ``data``
+        payload. ``handled=False`` means no upstream is wired or the call did
+        not succeed; the caller then falls back to its local (degraded) path.
+        """
+
+        upstream = get_monolith_upstream()
+        if upstream is None or not upstream.configured:
+            return False, None
+        try:
+            response = await upstream.forward_async(
+                "POST",
+                f"/api/internal/app-service/context-engine/{op}",
+                json_body=payload,
+            )
+        except UpstreamUnavailableError as exc:
+            logger.warning("Context engine delegation to monolith failed (%s): %s", op, exc)
+            return False, None
+        body = response.body if isinstance(response.body, dict) else {}
+        if response.status_code != 200 or body.get("code") != 0:
+            logger.warning(
+                "Context engine delegation to monolith rejected (%s): status=%s code=%s",
+                op,
+                response.status_code,
+                body.get("code"),
+            )
+            return False, None
+        return True, body.get("data")
 
     @staticmethod
     def _build_options(
@@ -371,6 +404,22 @@ class ContextEngineManager:
         if context_config is None:
             return None
 
+        handled, data = await self._forward_to_monolith("prepare-app-input", {
+            "features": self._normalize_features(features),
+            "conversation_id": str(conversation_id),
+            "system_prompt": system_prompt,
+            "current_input": current_input,
+            "current_provider": current_provider,
+            "legacy_max_history": legacy_max_history,
+            "scope_key": scope_key,
+            "model_config_id": str(model_config_id) if model_config_id else None,
+            "include_cross_session": include_cross_session,
+        })
+        if handled:
+            if not data:
+                return None
+            return str(data.get("system_prompt") or ""), list(data.get("history") or [])
+
         provider, provider_name = self._resolve_provider(context_config)
         if provider is None:
             logger.info("Context engine plugin unavailable, fallback to legacy history")
@@ -450,6 +499,17 @@ class ContextEngineManager:
         context_config = self._get_context_config(features)
         if context_config is None:
             return False
+
+        handled, data = await self._forward_to_monolith("after-app-turn", {
+            "features": self._normalize_features(features),
+            "conversation_id": str(conversation_id),
+            "current_provider": current_provider,
+            "legacy_max_history": legacy_max_history,
+            "scope_key": scope_key,
+            "model_config_id": str(model_config_id) if model_config_id else None,
+        })
+        if handled:
+            return bool((data or {}).get("updated"))
 
         provider, provider_name = self._resolve_provider(context_config)
         if provider is None:
@@ -546,6 +606,20 @@ class ContextEngineManager:
         if context_config is None:
             return None
 
+        handled, data = await self._forward_to_monolith("prepare-workflow-history-prefix", {
+            "features": self._normalize_features(features),
+            "conversation_id": str(conversation_id),
+            "scope_key": scope_key,
+            "current_input": current_input,
+            "workflow_messages": workflow_messages,
+            "window_size": window_size,
+            "model_config_id": str(model_config_id) if model_config_id else None,
+        })
+        if handled:
+            if not data:
+                return None
+            return list(data.get("history") or [])
+
         provider, provider_name = self._resolve_provider(context_config)
         if provider is None:
             return None
@@ -619,6 +693,17 @@ class ContextEngineManager:
         context_config = self._get_context_config(features)
         if context_config is None:
             return False
+
+        handled, data = await self._forward_to_monolith("after-workflow-turn", {
+            "features": self._normalize_features(features),
+            "conversation_id": str(conversation_id),
+            "scope_key": scope_key,
+            "workflow_messages": workflow_messages,
+            "window_size": window_size,
+            "model_config_id": str(model_config_id) if model_config_id else None,
+        })
+        if handled:
+            return bool((data or {}).get("updated"))
 
         provider, provider_name = self._resolve_provider(context_config)
         if provider is None:

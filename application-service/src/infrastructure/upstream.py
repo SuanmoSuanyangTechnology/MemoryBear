@@ -33,7 +33,7 @@ class UpstreamResponse:
 
 
 class MonolithUpstream:
-    """Lazy sync client for the monolith ``/v1`` face.
+    """Lazy HTTP client for the monolith service face (sync and async).
 
     Callers must end their own database transaction before forwarding: the
     forwarded request re-runs the full logic on the monolith side (including
@@ -45,13 +45,14 @@ class MonolithUpstream:
         base_url: str,
         api_key: str,
         timeout_seconds: float,
-        transport: httpx.BaseTransport | None = None,
+        transport: httpx.BaseTransport | httpx.AsyncBaseTransport | None = None,
     ) -> None:
         self._base_url = base_url.rstrip("/")
         self._api_key = api_key
         self._timeout_seconds = timeout_seconds
         self._transport = transport
         self._client: httpx.Client | None = None
+        self._async_client: httpx.AsyncClient | None = None
 
     @classmethod
     def from_settings(cls, settings: AppServiceSettings) -> MonolithUpstream:
@@ -75,6 +76,16 @@ class MonolithUpstream:
             )
         return self._client
 
+    def _get_async_client(self) -> httpx.AsyncClient:
+        if self._async_client is None:
+            self._async_client = httpx.AsyncClient(
+                base_url=self._base_url,
+                timeout=httpx.Timeout(self._timeout_seconds),
+                transport=self._transport,
+                headers={"X-API-Key": self._api_key},
+            )
+        return self._async_client
+
     def forward(
         self,
         method: str,
@@ -88,16 +99,59 @@ class MonolithUpstream:
             response = self._get_client().request(method, path, json=json_body)
         except httpx.HTTPError as error:
             raise UpstreamUnavailableError(f"forward to monolith failed: {error}") from error
+        return _to_upstream_response(response)
+
+    async def forward_async(
+        self,
+        method: str,
+        path: str,
+        *,
+        json_body: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
+    ) -> UpstreamResponse:
+        if not self.configured:
+            raise UpstreamUnavailableError("application service upstream is not configured")
         try:
-            body = response.json()
-        except ValueError:
-            body = {}
-        return UpstreamResponse(status_code=response.status_code, body=body)
+            response = await self._get_async_client().request(
+                method, path, json=json_body, headers=headers
+            )
+        except httpx.HTTPError as error:
+            raise UpstreamUnavailableError(f"forward to monolith failed: {error}") from error
+        return _to_upstream_response(response)
 
     def close(self) -> None:
         if self._client is not None:
             self._client.close()
             self._client = None
 
+    async def aclose(self) -> None:
+        if self._async_client is not None:
+            await self._async_client.aclose()
+            self._async_client = None
 
-__all__ = ["MonolithUpstream", "UpstreamResponse", "UpstreamUnavailableError"]
+
+def _to_upstream_response(response: httpx.Response) -> UpstreamResponse:
+    try:
+        body = response.json()
+    except ValueError:
+        body = {}
+    return UpstreamResponse(status_code=response.status_code, body=body)
+
+
+def get_monolith_upstream() -> MonolithUpstream | None:
+    """Runtime-owned upstream client; ``None`` when the runtime is not assembled."""
+
+    from ..runtime import get_process_runtime
+
+    try:
+        return get_process_runtime().upstream
+    except Exception:
+        return None
+
+
+__all__ = [
+    "MonolithUpstream",
+    "UpstreamResponse",
+    "UpstreamUnavailableError",
+    "get_monolith_upstream",
+]

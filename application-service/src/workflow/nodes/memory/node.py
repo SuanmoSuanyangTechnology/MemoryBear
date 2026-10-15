@@ -53,6 +53,7 @@ class MemoryReadNode(BaseNode):
             storage_type=state["memory_storage_type"],
             config_id=config_id,
             end_user_id=end_user_id,
+            workspace_id=state.get("workspace_id"),
             user_rag_memory_id=state["user_rag_memory_id"],
             conversation_id=variable_pool.get_value("sys.conversation_id"),
         )
