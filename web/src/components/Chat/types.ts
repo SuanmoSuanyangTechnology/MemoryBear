@@ -6,23 +6,11 @@
  */
 import { type ReactNode } from 'react'
 import { type ButtonProps } from 'antd'
+import type { EndUserMetaData } from '@/views/UserMemoryDetail/types';
 
 /**
  * Chat message item interface
  */
-export interface MemoryProfile {
-  aliases_name?: string[];
-  description?: string;
-  core_facts?: string[];
-  goals?: string[];
-  interests?: string[];
-  relations?: string[];
-  beliefs_or_stances?: string[];
-  anchors?: string[];
-  events?: string[];
-  traits?: string[];
-}
-
 export interface MemoryRecallItem {
   rank?: number;
   memory_type?: string;
@@ -43,7 +31,7 @@ export interface MemoryRecallItem {
 export interface MemoryStageData {
   [key: string]: unknown;
   has_profile?: boolean;
-  profile?: MemoryProfile;
+  profile?: EndUserMetaData;
   count?: number;
   questions?: string[];
   hit_count?: number;

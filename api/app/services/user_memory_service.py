@@ -25,6 +25,9 @@ from app.core.memory.analytics.memory_insight import (
 from app.core.memory.analytics.user_card_tags import normalize_stored_user_card_tags
 from app.core.memory.constants.graph_data_constants import (
     NODE_PROPERTY_WHITELIST,
+    PREFERENCE_GROUP_EDGE_TYPE,
+    PREFERENCE_GROUP_LABEL,
+    PREFERENCE_GROUP_NODE_ID_PREFIX,
     _DEFAULT_FIELDS,
 )
 from app.core.memory.storage_services.extraction_engine.deduplication.deduped_and_disamb import _USER_PLACEHOLDER_NAMES
@@ -38,6 +41,7 @@ from app.schemas.memory_episodic_schema import EmotionSubject, EmotionType, type
 from app.services._graph_data_helpers import (
     assemble_per_type_stat,
     assemble_center_per_type_stat,
+    attach_preference_group,
     build_unified_edges,
     compute_stat_types,
     resolve_mode_and_type_limits,
@@ -49,6 +53,32 @@ from app.services.memory_base_service import MemoryBaseService, MIN_MEMORY_SUMMA
 from app.services.memory_config_service import MemoryConfigService
 
 logger = get_logger(__name__)
+
+
+def _is_user_placeholder_name(name: str) -> bool:
+    """判断名称是否为用户占位名（如「用户」「我」「User」「I」），忽略首尾空白与大小写。
+
+    _USER_PLACEHOLDER_NAMES 中均为小写，与抽取侧（triplet_step）的比较方式保持一致。
+    """
+    return name.strip().lower() in _USER_PLACEHOLDER_NAMES
+
+
+def _normalize_other_name(value: Any) -> Optional[str]:
+    """规范化待更新的 other_name。
+
+    Returns:
+        去除首尾空白后的有效名称；None / 非字符串 / 空串 / 纯空白 / 占位名称返回 None，
+        调用方据此跳过该字段，避免清空或污染已有名称。
+    """
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip()
+    if not normalized:
+        return None
+    if _is_user_placeholder_name(normalized):
+        logger.warning(f"拒绝将占位名称 '{normalized}' 设置为 other_name")
+        return None
+    return normalized
 
 # Neo4j connector instance for analytics functions
 _neo4j_connector = Neo4jConnector(shared_driver=True)
@@ -480,6 +510,9 @@ class UserMemoryService:
         }
 
     # ======================== 用户别名及信息 ========================    
+    # NOTE: 当前代码库中无调用方（controller 已统一使用 update_end_user_info_async），暂不修改。
+    # 其 other_name 校验未处理 None / 空串 / 纯空白 / 大小写占位名，与异步版不一致；
+    # 若重新启用，需参照 _normalize_other_name / _is_user_placeholder_name 补齐。
     def update_end_user_info(
         self,
         db: Session,
@@ -632,16 +665,21 @@ class UserMemoryService:
                 }
             
             allowed_fields = {'other_name', 'aliases', 'meta_data'}
-            _user_placeholder_names = _USER_PLACEHOLDER_NAMES
-            
-            if 'other_name' in update_data and update_data['other_name'] and update_data['other_name'].strip() in _user_placeholder_names:
-                logger.warning(f"拒绝将占位名称 '{update_data['other_name']}' 设置为 other_name")
-                del update_data['other_name']
+            # other_name 规范化：None / 空串 / 纯空白 / 占位名称一律从待更新字典移除，避免清空或污染已有名称
+            if 'other_name' in update_data:
+                normalized_name = _normalize_other_name(update_data['other_name'])
+                if normalized_name is None:
+                    update_data.pop('other_name')
+                else:
+                    update_data['other_name'] = normalized_name
             
             if 'aliases' in update_data and update_data['aliases']:
+                # 每个别名只 strip 一次，过滤与输出使用同一个规范化值
                 update_data['aliases'] = [
-                    a for a in update_data['aliases']
-                    if isinstance(a, str) and a.strip() and a.strip() not in _user_placeholder_names
+                    stripped for a in update_data['aliases']
+                    if isinstance(a, str)
+                    and (stripped := a.strip())
+                    and not _is_user_placeholder_name(stripped)
                 ]
             
             aliases_updated = 'aliases' in update_data and update_data['aliases'] != end_user_info_record.aliases
@@ -1682,6 +1720,9 @@ async def analytics_graph_data(
             logger.warning(f"未找到 end_user_id 为 {end_user_id} 的用户")
             return _empty_graph_response("用户不存在")
 
+        if center_node_id and center_node_id.startswith(PREFERENCE_GROUP_NODE_ID_PREFIX):
+            return _empty_graph_response("虚拟偏好节点不能作为中心节点")
+
         # 2. 模式分派 + Q1 节点查询
         mode, type_limits, node_rows = await _collect_node_query(
             end_user_id=end_user_id,
@@ -1702,6 +1743,21 @@ async def analytics_graph_data(
         # 其他边类型各成独立 SINGLE 边条目。纯逻辑无 IO。
         unified_edges = build_unified_edges(edges)
 
+        # 虚拟对象只在真实 Neo4j 边查询结束后加入响应。
+        preference_count = node_type_counts.get("Preference", 0)
+        nodes, unified_edges = attach_preference_group(
+            nodes, unified_edges, end_user_id=end_user_id
+        )
+        if preference_count:
+            node_type_counts = {**node_type_counts, PREFERENCE_GROUP_LABEL: 1}
+            edge_type_counts = {
+                **edge_type_counts,
+                PREFERENCE_GROUP_EDGE_TYPE: (
+                    edge_type_counts.get(PREFERENCE_GROUP_EDGE_TYPE, 0)
+                    + preference_count
+                ),
+            }
+
         # 7. Q4 全量计数 + statistics.per_type 装配
         per_type_stat = await _build_per_type_stat(
             mode=mode,
@@ -1709,7 +1765,7 @@ async def analytics_graph_data(
             type_limits=type_limits,
             node_type_counts=node_type_counts,
             center_limit=limit,
-            total_returned=len(nodes),
+            total_returned=len(node_ids),
         )
 
         statistics = {
@@ -2250,7 +2306,7 @@ def _resolve_edge_caption(
 
     Args:
         rel_type: Cypher ``type(r)`` 返回的关系类型字符串。
-        edge_props: ``properties(r)`` 经过 ``_clean_neo4j_value`` 清洗后的关系属性。
+        edge_props: Cypher 边属性投影经 ``_clean_neo4j_value`` 清洗后的关系属性。
 
     Returns:
         最终用于响应的 ``caption`` 字符串；若 ``rel_type`` 与 ``edge_props.caption``

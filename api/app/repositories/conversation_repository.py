@@ -172,6 +172,27 @@ class ConversationRepository:
         """统计一批终端用户的活跃会话总数。"""
         if not user_ids:
             return 0
+        result = await self.db.execute(
+            self._build_get_active_conversation_count_by_user_ids_query(user_ids)
+        )
+        return int(result.scalar_one() or 0)
+
+    def get_active_conversation_count_by_user_ids(
+        self,
+        user_ids: list[uuid.UUID],
+    ) -> int:
+        """统计一批终端用户的活跃会话总数。"""
+        if not user_ids:
+            return 0
+        result = self.db.execute(
+            self._build_get_active_conversation_count_by_user_ids_query(user_ids)
+        )
+        return int(result.scalar_one() or 0)
+
+    def _build_get_active_conversation_count_by_user_ids_query(
+        self,
+        user_ids: list[uuid.UUID],
+    ):
         user_ids_param = bindparam(
             "workspace_statistics_user_ids",
             value=[str(user_id) for user_id in user_ids],
@@ -182,8 +203,7 @@ class ConversationRepository:
             Conversation.is_active.is_(True),
             Conversation.app_id != _EXCLUDED_APP_ID,
         )
-        result = await self.db.execute(stmt)
-        return int(result.scalar_one() or 0)
+        return stmt
 
     async def get_pending_write_conversation_count_async(self, user_id: str) -> int:
         """统计有待写入长期记忆的会话数（message_seq > write_cursor）"""
@@ -208,6 +228,27 @@ class ConversationRepository:
         """统计一批终端用户中存在待写入消息的会话总数。"""
         if not user_ids:
             return 0
+        result = await self.db.execute(
+            self._build_get_pending_write_conversation_count_by_user_ids_query(user_ids)
+        )
+        return int(result.scalar_one() or 0)
+
+    def get_pending_write_conversation_count_by_user_ids(
+        self,
+        user_ids: list[uuid.UUID],
+    ) -> int:
+        """统计一批终端用户中存在待写入消息的会话总数。"""
+        if not user_ids:
+            return 0
+        result = self.db.execute(
+            self._build_get_pending_write_conversation_count_by_user_ids_query(user_ids)
+        )
+        return int(result.scalar_one() or 0)
+
+    def _build_get_pending_write_conversation_count_by_user_ids_query(
+        self,
+        user_ids: list[uuid.UUID],
+    ):
         from app.models.memory_message_model import MemoryMessage
 
         user_ids_param = bindparam(
@@ -224,8 +265,7 @@ class ConversationRepository:
                 MemoryMessage.message_seq > func.coalesce(Conversation.write_cursor, 0),
             )
         )
-        result = await self.db.execute(stmt)
-        return int(result.scalar_one() or 0)
+        return stmt
 
     def list_conversations(
             self,

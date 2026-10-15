@@ -338,17 +338,38 @@ class ForgetLogRepository:
         """统计一批终端用户的遗忘日志总数。"""
         if not end_user_ids:
             return 0
+        result = await db.execute(
+            ForgetLogRepository._build_get_total_by_user_ids_query(end_user_ids)
+        )
+        return int(result.scalar_one() or 0)
+
+    @staticmethod
+    def get_total_by_user_ids_sync(
+        db: Session,
+        end_user_ids: list[uuid.UUID],
+    ) -> int:
+        """统计一批终端用户的遗忘日志总数。"""
+        if not end_user_ids:
+            return 0
+        result = db.execute(
+            ForgetLogRepository._build_get_total_by_user_ids_query(end_user_ids)
+        )
+        return int(result.scalar_one() or 0)
+
+    @staticmethod
+    def _build_get_total_by_user_ids_query(
+        end_user_ids: list[uuid.UUID],
+    ):
         end_user_ids_param = bindparam(
             "workspace_statistics_end_user_ids",
             value=end_user_ids,
             type_=ARRAY(ForgetAuditModel.end_user_id.type),
         )
-        result = await db.scalar(
+        return (
             select(func.count()).select_from(ForgetAuditModel).where(
                 ForgetAuditModel.end_user_id == any_(end_user_ids_param)
             )
         )
-        return int(result or 0)
 
     @staticmethod
     def get_forgotten_logs(

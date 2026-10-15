@@ -1415,12 +1415,17 @@ RETURN DISTINCT
 #   字面量内联不存在注入风险。
 
 
+def _graph_node_property_map(fields: list[str]) -> str:
+    """只读取图谱响应需要的节点属性，避免传输 embedding 等大字段。"""
+    return "{" + ", ".join(f"{field}: n.{field}" for field in fields) + "}"
+
+
 def build_graph_nodes_by_type_query(node_type: str) -> str:
     """构建「按单个 Node_Type 检索节点」的 Cypher（Q1），label 字面量内联以命中索引。
 
     优化：不再使用 ``properties(n)`` 拉取全部属性（包含 embedding 等大字段），
     而是仅 SELECT 白名单字段，大幅减少网络传输和序列化开销。
-    使用 CASE 过滤 null 值，保持与 properties(n) 行为一致（仅返回存在的属性）。
+    返回的 map 中可能有 null 值，由 service 过滤以保持原有响应结构。
 
     Args:
         node_type: 节点 label，必须属于 :data:`SUPPORTED_NODE_TYPES`。
@@ -1437,9 +1442,9 @@ def build_graph_nodes_by_type_query(node_type: str) -> str:
     # 从白名单获取该类型需要返回的字段
     fields = NODE_PROPERTY_WHITELIST.get(node_type, _DEFAULT_FIELDS)
 
-    # 使用 Cypher map projection + 后续在 Python 中过滤 null
+    # 使用 Cypher 属性白名单 + 后续在 Python 中过滤 null
     # Neo4j map literal {k: n.k} 会保留 null 值，需要在应用层过滤
-    props_entries = ", ".join(f"{f}: n.{f}" for f in fields)
+    properties_projection = _graph_node_property_map(fields)
 
     return f"""
 // GRAPH_NODES_BY_TYPE_LIMITS({node_type})
@@ -1449,7 +1454,7 @@ WHERE n.end_user_id = $end_user_id
 RETURN
     elementId(n)        AS id,
     labels(n)           AS labels,
-    {{{props_entries}}} AS properties
+    {properties_projection} AS properties
 LIMIT $limit
 """
 
@@ -1482,7 +1487,8 @@ RETURN count(n) AS total
 """
 
 
-# Q2：批量查询若干节点的关联边总数，取代旧实现里每节点一次的 N+1 子查询。
+# Q2：批量查询若干节点的有效关联边总数，排除软删除的边和邻居节点，
+# 取代旧实现里每节点一次的 N+1 子查询。
 # Q2 按 ``elementId(n)`` 直接定位节点，无需 label，不涉及上面的索引命中问题。
 #
 # 注意：Neo4j 5 已移除 ``size((n)--())`` 这种「pattern expression in size()」用法，
@@ -1498,7 +1504,12 @@ GRAPH_NODES_REL_COUNT_BATCH = """
 UNWIND $node_ids AS nid
 MATCH (n) WHERE elementId(n) = nid
   AND n.delete_at IS NULL
-RETURN nid AS id, COUNT { (n)--() } AS rel_count
+RETURN nid AS id,
+       COUNT {
+           MATCH (n)-[r]-(neighbor)
+           WHERE r.delete_at IS NULL
+             AND neighbor.delete_at IS NULL
+       } AS rel_count
 """
 
 
@@ -1559,37 +1570,58 @@ RETURN count(n) as count
 def build_center_node_neighbors_query(depth: int) -> str:
     """构建中心节点邻居查询 Cypher（Center_Mode）。
 
+    邻居可能有不同 label，按 ``labels(n)[0]`` 选择同一套属性白名单；
+    未知类型只读取默认字段。这样不会先把 embedding 传给应用再丢弃。
+
     Args:
         depth: 邻居跳数（已被调用方钳制为 1-3）
     """
     from app.core.memory.constants.graph_data_constants import DEPTH_HARD_MAX
     safe_depth = max(1, min(int(depth), DEPTH_HARD_MAX))
+    property_cases = "\n".join(
+        f"    WHEN '{label}' THEN {_graph_node_property_map(fields)}"
+        for label, fields in sorted(NODE_PROPERTY_WHITELIST.items())
+    )
+    default_properties = _graph_node_property_map(_DEFAULT_FIELDS)
     return f"""
 MATCH path = (center)-[*1..{safe_depth}]-(connected)
 WHERE center.end_user_id = $end_user_id
   AND elementId(center) = $center_node_id
+  AND all(node IN nodes(path) WHERE node.delete_at IS NULL)
+  AND all(rel IN relationships(path) WHERE rel.delete_at IS NULL)
 WITH collect(DISTINCT center) + collect(DISTINCT connected) as all_nodes
 UNWIND all_nodes as n
 RETURN DISTINCT
     elementId(n) as id,
     labels(n) as labels,
-    properties(n) as properties
+    CASE labels(n)[0]
+{property_cases}
+    ELSE {default_properties}
+    END as properties
 LIMIT $limit
 """
 
 
-# Q3：查询若干节点之间的有向关系
+# Q3：查询若干未软删除节点之间的有效有向关系
 # 参数：$node_ids (LIST<STRING>)
 GRAPH_EDGES_AMONG_NODES = """
 MATCH (n)-[r]->(m)
 WHERE elementId(n) IN $node_ids
   AND elementId(m) IN $node_ids
+  AND n.delete_at IS NULL
+  AND m.delete_at IS NULL
+  AND r.delete_at IS NULL
 RETURN
     elementId(r) as id,
     elementId(n) as source,
     elementId(m) as target,
     type(r) as rel_type,
-    properties(r) as properties
+    {caption: r.caption,
+      created_at: r.created_at,
+      valid_at: r.valid_at,
+      predicate: r.predicate,
+      predicate_surface: r.predicate_surface,
+      predicate_description: r.predicate_description} as properties
 """
 
 # DEPRECATED: Graph_Node_query 已被 build_graph_nodes_by_type_query() 取代，

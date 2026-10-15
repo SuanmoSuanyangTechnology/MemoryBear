@@ -1,16 +1,9 @@
-/*
- * @Author: ZhaoYing 
- * @Date: 2026-03-13 17:20:21 
- * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-27 19:07:35
- */
 import { type FC, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Button, Popover } from 'antd';
+import { Button } from 'antd';
 
 import FeaturesConfigModal from './FeaturesConfigModal'
 import type { FeaturesConfigModalRef, FeaturesConfigForm } from '../../types'
-import type { Application } from '@/views/ApplicationManagement/types';
 import type { Modality } from '@/views/ModelManagement/types'
 import type { Variable } from '../VariableList/types'
 
@@ -20,7 +13,6 @@ interface FeaturesConfigProps {
   value: FeaturesConfigForm;
   /** Callback to propagate updated config back to the parent */
   refresh: (value: FeaturesConfigForm) => void;
-  source?: Application['type'];
   input_modalities?: Modality[];
   chatVariables: Variable[];
 }
@@ -28,7 +20,6 @@ interface FeaturesConfigProps {
 const FeaturesConfig: FC<FeaturesConfigProps> = ({
   value,
   refresh,
-  source,
   input_modalities,
   chatVariables
 }) => {
@@ -38,29 +29,17 @@ const FeaturesConfig: FC<FeaturesConfigProps> = ({
 
   /** Open the feature config modal pre-populated with the current values */
   const handleFeaturesConfig = () => {
-    console.log('handleFeaturesConfig', value)
     funConfigModalRef.current?.handleOpen(value)
   }
 
   return (
     <>
-      {/* Button that triggers the feature configuration modal */}
-      {source === 'workflow'
-        ?
-        <Popover content={t('application.features')} classNames={{ body: 'rb:py-0.5! rb:px-1! rb:rounded-[6px]! rb:text-[12px]!' }}>
-          <div
-            className="rb:cursor-pointer rb:size-7.5 rb:border rb:border-[#EBEBEB] rb:hover:bg-[#F6F6F6] rb:rounded-[10px] rb:bg-[url('@/assets/images/workflow/features.svg')] rb:bg-size-[16px_16px] rb:bg-center rb:bg-no-repeat"
-            onClick={handleFeaturesConfig}
-          ></div>
-        </Popover>
-        : <Button onClick={handleFeaturesConfig}>{t('application.features')}</Button>
-      }
+      <Button onClick={handleFeaturesConfig}>{t('application.features')}</Button>
 
       {/* Modal for editing feature settings; calls refresh on save */}
       <FeaturesConfigModal
         ref={funConfigModalRef}
         refresh={refresh}
-        source={source}
         input_modalities={input_modalities}
         chatVariables={chatVariables}
       />

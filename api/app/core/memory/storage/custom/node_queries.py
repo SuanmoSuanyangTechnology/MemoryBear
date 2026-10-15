@@ -7,6 +7,13 @@ instead of being scattered across callers.
 
 from __future__ import annotations
 
+import asyncio
+import uuid
+
+from app.core.memory.models.metadata_models import (
+    LEGACY_METADATA_FIELDS,
+    NEW_METADATA_FIELDS,
+)
 from app.core.memory.storage.enums import MemoryNodeLabel, MemoryNodeType
 from app.core.memory.storage.models import (
     FilterCondition,
@@ -15,6 +22,8 @@ from app.core.memory.storage.models import (
     NodeProjection,
 )
 from app.core.memory.storage.service import get_storage_service
+from app.db import get_db_read
+from app.repositories.end_user_info_repository import EndUserInfoRepository
 from app.utils.redis_cache import redis_cache
 
 
@@ -67,35 +76,57 @@ async def get_user_entity_id(end_user_id: str) -> str | None:
 
 @redis_cache(ttl=60, prefix="memory", id_arg="end_user_id")
 async def get_user_metadata(end_user_id: str) -> dict:
-    """Return the active user entity fields used to build memory metadata."""
+    """Return the fields used to build the L0 user profile.
+
+    ``id``、``aliases``、``description``、``event_timeline`` come from the active
+    Neo4j user entity; metadata (legacy 8 fields + identity_background /
+    relationships / domain_specific_info) comes from PG ``end_user_info.meta_data``.
+    Exceptions from either source propagate to the caller.
+    """
     service = get_storage_service()
-    result = await service.get_node(
-        MemoryNodeType.EXTRACTED_ENTITY,
-        NodeFilter.all_of(
-            FilterCondition(field="end_user_id", value=end_user_id),
-            FilterCondition(field="entity_type", value="用户"),
-            FilterCondition(
-                field="delete_at",
-                operator=FilterOperator.EXISTS,
-                value=False,
+    node_result, meta_data = await asyncio.gather(
+        service.get_node(
+            MemoryNodeType.EXTRACTED_ENTITY,
+            NodeFilter.all_of(
+                FilterCondition(field="end_user_id", value=end_user_id),
+                FilterCondition(field="entity_type", value="用户"),
+                FilterCondition(
+                    field="delete_at",
+                    operator=FilterOperator.EXISTS,
+                    value=False,
+                ),
             ),
+            NodeProjection.of(
+                "description",
+                "aliases",
+                "event_timeline",
+                "id",
+            ),
+            None,
         ),
-        NodeProjection.of(
-            "description",
-            "aliases",
-            "anchors",
-            "beliefs_or_stances",
-            "core_facts",
-            "event_timeline",
-            "goals",
-            "interests",
-            "relations",
-            "traits",
-            "id",
-        ),
-        None,
+        _get_user_meta_data_from_pg(end_user_id),
     )
-    return result.items[0].data if result.items else {}
+    node_data = node_result.items[0].data if node_result.items else {}
+    metadata = {
+        field: meta_data[field]
+        for field in (*LEGACY_METADATA_FIELDS, *NEW_METADATA_FIELDS)
+        if field in meta_data
+    }
+    return {**metadata, **node_data}
+
+
+def _read_user_meta_data_sync(user_uuid: uuid.UUID) -> dict:
+    with get_db_read() as db:
+        return EndUserInfoRepository(db).get_meta_data_sync(user_uuid)
+
+
+async def _get_user_meta_data_from_pg(end_user_id: str) -> dict:
+    """Read PG ``end_user_info.meta_data`` via thread-local sync session; a non-UUID end_user_id has no record."""
+    try:
+        user_uuid = uuid.UUID(str(end_user_id))
+    except ValueError:
+        return {}
+    return await asyncio.to_thread(_read_user_meta_data_sync, user_uuid)
 
 
 async def get_active_entities_by_ids(

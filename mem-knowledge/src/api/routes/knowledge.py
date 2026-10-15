@@ -36,6 +36,7 @@ from ...services.knowledge_commands import (
     load_reparse_snapshots,
 )
 from ...services.knowledge_file_storage import KnowledgeFileStorage
+from ...services.knowledge_model_validation import validate_requested_knowledge_model_availability
 from ...services.qa_export import (
     cleanup_export_file,
     iter_export_file,
@@ -258,6 +259,9 @@ async def create_knowledge(
     runtime: Annotated[ProcessRuntime, Depends(get_runtime)],
     source: Annotated[KnowledgeRetrievalSource, Depends(get_source)],
 ) -> SuccessEnvelope[dict[str, Any]]:
+    await validate_requested_knowledge_model_availability(
+        create_data.model_dump(exclude_unset=True), principal, runtime.model_runtime
+    )
     async with runtime.database.async_session() as db:
         knowledge = await knowledge_service.create_knowledge(db, create_data, principal)
         data = await knowledge_service.knowledge_to_data(db, knowledge)
@@ -354,6 +358,9 @@ async def update_knowledge(
             update_data,
             principal,
         )
+    await validate_requested_knowledge_model_availability(
+        update_data.model_dump(exclude_unset=True), principal, runtime.model_runtime
+    )
     if plan.delete_vector_index:
         await (await runtime.elasticsearch.client()).indices.delete(
             index=collection_name_for_knowledge(knowledge_id),

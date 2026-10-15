@@ -99,17 +99,37 @@ class MemoryPerceptualRepository:
         """统计一批终端用户的感知记忆总数。"""
         if not end_user_ids:
             return 0
+        result = await self.db.execute(
+            self._build_get_count_by_user_ids_query(end_user_ids)
+        )
+        return int(result.scalar_one() or 0)
+
+    def get_count_by_user_ids(
+        self,
+        end_user_ids: List[uuid.UUID],
+    ) -> int:
+        """统计一批终端用户的感知记忆总数。"""
+        if not end_user_ids:
+            return 0
+        result = self.db.execute(
+            self._build_get_count_by_user_ids_query(end_user_ids)
+        )
+        return int(result.scalar_one() or 0)
+
+    def _build_get_count_by_user_ids_query(
+        self,
+        end_user_ids: List[uuid.UUID],
+    ):
         end_user_ids_param = bindparam(
             "workspace_statistics_end_user_ids",
             value=end_user_ids,
             type_=ARRAY(MemoryPerceptualModel.end_user_id.type),
         )
-        result = await self.db.execute(
+        return (
             select(func.count()).select_from(MemoryPerceptualModel).where(
                 MemoryPerceptualModel.end_user_id == any_(end_user_ids_param)
             )
         )
-        return int(result.scalar_one() or 0)
 
     def get_count_by_type(
             self,

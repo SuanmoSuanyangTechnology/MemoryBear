@@ -36,7 +36,7 @@ const useCreateModalModels = ({ form, datasets, visible }: UseCreateModalModelsO
     }
 
     const defaultValues: Record<string, string> = {};
-    [...baseModelFields, ...multimodalModelFields].forEach((item) => {
+    [...baseModelFields].forEach((item) => {
       const { type } = item;
       const fieldKey = `${item.name}_id`;
       const workspaceModelId = workspaceModels[type];

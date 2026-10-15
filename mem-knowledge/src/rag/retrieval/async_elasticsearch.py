@@ -112,9 +112,9 @@ class AsyncChunkStore:
         return {"bool": {"must": must}}
 
     @staticmethod
-    def segment_sort(asc: bool) -> list[dict[str, Any]]:
+    def segment_sort(asc: bool, *, query: str | None = None) -> list[dict[str, Any]]:
         order = "asc" if asc else "desc"
-        return [
+        sort = [
             {
                 Field.SORT_ID.value: {
                     "order": order,
@@ -130,6 +130,9 @@ class AsyncChunkStore:
                 }
             },
         ]
+        if query:
+            sort.insert(0, {"_score": {"order": "desc"}})
+        return sort
 
     @staticmethod
     def hit_to_chunk(hit: Mapping[str, Any]) -> DocumentChunk:
@@ -195,7 +198,7 @@ class AsyncChunkStore:
             from_=offset,
             size=pagesize,
             query=segment_query,
-            sort=self.segment_sort(asc),
+            sort=self.segment_sort(asc, query=query),
             track_total_hits=True,
             allow_partial_search_results=False,
         )
@@ -226,7 +229,7 @@ class AsyncChunkStore:
                     parent_ids,
                 )
             ),
-            sort=self.segment_sort(asc),
+            sort=self.segment_sort(asc, query=query),
             batch_size=ES_FULL_SCAN_BATCH_SIZE,
         ):
             yield hit

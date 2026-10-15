@@ -7,6 +7,7 @@
 from fastapi import APIRouter, Depends, Header, Query
 
 from app.core.error_codes import BizCode
+from app.core.memory.constants.graph_data_constants import PREFERENCE_GROUP_NODE_ID_PREFIX
 from app.core.language_utils import get_language_from_header
 from app.core.logging_config import get_api_logger
 from app.core.response_utils import success, fail
@@ -188,6 +189,9 @@ async def delete_node_api(
     element_id = request.element_id
     end_user_id = request.end_user_id
 
+    if element_id.startswith(PREFERENCE_GROUP_NODE_ID_PREFIX):
+        return fail(BizCode.INVALID_PARAMETER, "偏好汇总节点不可删除", "请先删除具体的偏好记忆节点")
+
     api_logger.info(
         f"节点删除请求: element_id={element_id}, end_user_id={end_user_id}, "
         f"user={current_user.username}, workspace={workspace_id}"
@@ -222,4 +226,3 @@ async def delete_node_api(
     except Exception as e:
         api_logger.error(f"节点删除失败: element_id={element_id}, error={str(e)}")
         return fail(BizCode.INTERNAL_ERROR, "节点删除失败", str(e))
-

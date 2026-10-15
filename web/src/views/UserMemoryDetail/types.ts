@@ -126,19 +126,33 @@ export interface MemorySummaryNode {
   caption: string;
   associative_memory: number;
 }
+export interface PreferenceNodeProperties {
+  domain: string;
+  subject: string;
+  situation_key: string;
+  preference_text_all: string
+  created_at: string;
+  updated_at: string;
+  associative_memory: number;
+}
+export interface PreferenceGroupNodeProperties {
+  name: string;
+  virtual: boolean;
+  preference_count: number;
+}
 /**
  * Graph node
  */
 export interface Node {
   id: string;
-  label:  'AssistantOriginal' | 'AssistantPruned' | 'Chunk' | 'Dialogue' | 'ExtractedEntity' | 'Perceptual' | 'Statement' | 'Conversation' | 'MemorySummary';
+  label:  'AssistantOriginal' | 'AssistantPruned' | 'Chunk' | 'Dialogue' | 'ExtractedEntity' | 'Perceptual' | 'Statement' | 'Conversation' | 'MemorySummary' | 'Preference' | 'PreferenceGroup';
   category: number;
   symbolSize: number;
   name: string;
   itemStyle: {
     color: string;
   }
-  properties: BaseProperties | AssistantOriginalNodeProperties | StatementNodeProperties | ExtractedEntityNodeProperties | PerceptualNodeProperties
+  properties: BaseProperties | AssistantOriginalNodeProperties | StatementNodeProperties | ExtractedEntityNodeProperties | PerceptualNodeProperties | PreferenceNodeProperties | PreferenceGroupNodeProperties 
   caption: string;
   type?: 'edge';
 }
@@ -177,6 +191,30 @@ export interface NodeStatisticsItem {
   count: number;
   percentage: number;
 }
+export interface EndUserMetaData {
+    goals?: string[];
+    traits?: string[];
+    interests?: string[];
+    core_facts?: string[];
+    alias?: string[];
+    beliefs_or_stances?: string[];
+    anchors?: string[];
+    relations?: string[];
+
+    name?: string[];
+    age?: string[];
+    from?: string[];
+    residence?: string[];
+    education?: string[];
+    occupation?: string[];
+    family?: string[];
+    religion_or_politics?: string[];
+    health?: string[];
+    person?: string[];
+    group?: string[];
+    object?: string[];
+    pet?: string[];
+  }
 /**
  * End user profile
  */
@@ -186,15 +224,7 @@ export interface EndUser {
   end_user_id: string;
   other_name: string;
   aliases: string[];
-  meta_data: {
-    goals: string[];
-    traits: string[];
-    interests: string[];
-    core_facts: string[];
-    alias: string[];
-    beliefs_or_stances: string[];
-    anchors: string[];
-  };
+  meta_data: EndUserMetaData;
   created_at: number;
   updated_at: number;
 }

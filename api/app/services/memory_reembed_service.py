@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import timedelta
 
-from sqlalchemy import and_, case, exists, func, or_, select
+from sqlalchemy import and_, case, exists, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
@@ -489,7 +489,7 @@ def mark_job_failed(
         reason_code: str | None = None,
         notify: bool = True,
 ) -> bool:
-    """Fail a job before any work is written (pre-flight rejections).
+    """Fail a job, but only while it still has nothing of its own to lose.
 
     ``reason_code`` 只用于通知中心的原因分类（见
     :mod:`app.core.memory.alerts`），不参与状态机。
@@ -498,6 +498,9 @@ def mark_job_failed(
     :func:`app.services.memory_reembed_orchestrator` 的扇出自检）：终端状态只剩
     ``failed`` 这一个可用值，为了不把这种情形伪装成用户的失败，选择不发通知，
     原委写进 ``error`` 供排查。
+
+    :return: 是否由本次调用写下终态。``False`` 表示任务已终态、被别的调用方抢先，
+        或它名下已经有行——三者都不该由本次调用写终态，也不该发通知。
     """
     job_uuid = _as_uuid(job_id)
     if job_uuid is None:
@@ -524,6 +527,11 @@ def mark_job_failed(
             .filter(
                 MemoryReembedJob.id == job_uuid,
                 MemoryReembedJob.status.in_(_ACTIVE_STATUSES),
+                ~exists(
+                    select(MemoryReembedJobUser.id).where(
+                        MemoryReembedJobUser.job_id == job_uuid,
+                    )
+                ),
             )
             .update(
                 {
@@ -536,7 +544,8 @@ def mark_job_failed(
         )
         db.commit()
         if not updated:
-            # 已被别的调用方写成终态：终态与通知都归它。
+            # 已被别的调用方写成终态（终态与通知都归它），或它名下已经有行了
+            # （本函数不许判死，留给别的出口——见上面 docstring）。
             return False
 
     if not notify:
@@ -554,7 +563,7 @@ def mark_job_failed(
     _report_permanent_failure(
         job_id=job_id,
         reason_code=reason_code,
-        # 前置换算没写过任何一行，所以失败用户/节点计数都还是零。
+        # 守卫保证这个任务一行都没有，所以失败用户/节点计数都还是零。
         failed_end_users=0,
         processed_nodes=0,
         failed_nodes=0,
@@ -1515,6 +1524,48 @@ def empty_job_retry_result() -> dict:
     }
 
 
+def _reopen_failed_job(db: Session, job: MemoryReembedJob) -> bool:
+    """把终态失败的任务重新打开，返回是否真的重开了。
+
+    重开是必需的，不是可选的：子任务入口会拒绝终态任务
+    （``_REEMBED_TERMINAL_STATUSES`` → ``ABORTED``），不重开就点了没反应。
+
+    行级与任务级两条重试通路共用本函数：各写一份会分叉，而它们必须在"清
+    finished_at / error"上完全一致。
+
+    **必须是条件写（CAS），不能是属性赋值。** ``job`` 是调用方 SELECT 时物化的
+    对象，它的 ``status`` 可能已经过期：并发重试已经把任务推进到 ``running``，
+    或 worker 已经收尾成 ``succeeded``。属性赋值会发出无谓词的
+    ``UPDATE … WHERE id = ?``，把 ``succeeded`` 覆盖回 ``running``，让已完成的
+    任务被重开重跑。谓词让"只命中一次"由数据库保证——与
+    :func:`finalize_job_if_complete` / :func:`mark_job_failed` 同一套约定。
+    """
+    updated = (
+        db.query(MemoryReembedJob)
+        .filter(
+            MemoryReembedJob.id == job.id,
+            MemoryReembedJob.status == ReembedJobStatus.failed.value,
+        )
+        .update(
+            {
+                "status": ReembedJobStatus.running.value,
+                "finished_at": None,
+                # 旧失败原因必须清掉：finalize_job_if_complete 里是
+                # ``existing_error or (...)``，留着它会让重算成功后仍带着上一轮的
+                # 失败文案。
+                "error": None,
+            },
+            synchronize_session=False,
+        )
+    )
+    if not updated:
+        # 任务已被别人移出 failed（并发重试重开了它，或 worker 已收尾）。终态归它。
+        # 刷一次，让调用方回报的是库里的真值而不是这个过期的内存值。
+        db.refresh(job)
+        return False
+    return True
+
+
 def retry_job_users(
         db: Session,
         *,
@@ -1528,6 +1579,11 @@ def retry_job_users(
     重开任务是必需的，不是可选的：子任务入口会拒绝终态任务
     （``_REEMBED_TERMINAL_STATUSES`` → ``ABORTED``），不重开就点了没反应。重开后
     全部行完成时 :func:`finalize_job_if_complete` 会把它重新收尾为 ``succeeded``。
+
+    两条通路：有终态失败的行就逐行重置并重派**子任务**；一行都没有但任务停在
+    ``failed``（前置换算在建行之前失败）时改走**任务级**重试——重开任务并重派
+    **驱动**，由 ``run_job`` 重跑探测。后者在 ``end_user_ids`` 指名时仍报 409：
+    任务里根本没有该用户的行，那不是"可以重试"的状态。
     """
     job = get_reembed_job(db, job_id)
     if job is None:
@@ -1535,6 +1591,16 @@ def retry_job_users(
             message="重算任务不存在",
             code=BizCode.NOT_FOUND,
         )
+    from app.models.workspace_model import Workspace
+
+    db.execute(
+        select(Workspace.id)
+        .where(Workspace.id == job.workspace_id)
+        .with_for_update()
+    )
+    # 锁后再读一次任务行：拿到锁内权威状态。并发重试会被这把锁串行化，后到者
+    # 在这里读到的就是先到者的结果，而不是自己 SELECT 时的旧值。
+    db.refresh(job)
     # 任务的目标模型必须仍是工作空间当前的 embedding 配置。否则重试会往图里写回
     # **过期模型**的向量，而读路径用的是当前模型——那正是整套机制要防的事。
     #
@@ -1564,26 +1630,67 @@ def retry_job_users(
             code=BizCode.STATE_CONFLICT,
         )
     if not rows:
-        return {"retried": 0, "reopened": False, "job_status": job.status, "end_user_ids": []}
+        # 查不到终态失败的行，但任务本身停在 failed：这只可能是**前置换算**在建行
+        # 之前就拒绝了任务（orchestrator 的维度探测 / 扇出自检），于是
+        # ``memory_reembed_job_users`` 一行都没有。
+        #
+        # 为什么二者等价：``finalize_job_if_complete`` 只在"每行都终态、且至少一行
+        # 重试耗尽"时才写 failed，而 ``mark_job_failed`` 的生产调用点只有那两处前置
+        # 换算。所以「failed 且查不到终态失败行」⇔ 零行。
+        #
+        # 这种任务没有行可以承载重试，要重试的是**任务本身**：重开后重新派发驱动，
+        # 由 run_job 重跑探测。否则它既点不动重试（行级重试查不到行），也不会被对账
+        # 补派（对账只捞 pending/running），而读路径会因为"该 end_user 没有 done 行"
+        # 把整个工作空间持续降级为纯全文检索（should_degrade_semantic），没有出口。
+        if not _reopen_failed_job(db, job):
+            return {
+                "retried": 0,
+                "reopened": False,
+                "job_status": job.status,
+                "end_user_ids": [],
+            }
+        db.commit()
+        # 与行级重试同理：提交后才派发。状态已落库，派发失败由对账任务兜底
+        # （running 且无心跳会被重新派发）。
+        job_state.clear_job_claim(str(job_id))
+        dispatch_reembed_job(job_id)
+        logger.info(
+            "[MemoryReembed] job-level retry: job=%s end_user_rows=0 (pre-flight failure)",
+            job_id,
+        )
+        return {
+            "retried": 0,
+            "reopened": True,
+            "job_status": job.status,
+            "end_user_ids": [],
+        }
 
-    reopened = False
-    if job.status == ReembedJobStatus.failed.value:
-        job.status = ReembedJobStatus.running.value
-        job.finished_at = None
-        # 旧失败原因必须清掉：finalize_job_if_complete 里是
-        # ``existing_error or (...)``，留着它会让重算成功后仍带着上一轮的失败文案。
-        job.error = None
-        reopened = True
-    db.add(job)
+    reopened = _reopen_failed_job(db, job)
 
-    retried_ids: list[str] = []
-    for row in rows:
-        row.status = ReembedUserStatus.pending.value
-        # 人工介入 = 重新开始：给全新预算，并清掉排队中不该再显示的旧错误。
-        row.attempts = 0
-        row.last_error = None
-        db.add(row)
-        retried_ids.append(str(row.end_user_id))
+    flipped_ids = set(
+        db.execute(
+            update(users)
+            .where(
+                users.id.in_([row.id for row in rows]),
+                _display_status_condition(
+                    REEMBED_DISPLAY_FAILED,
+                    users,
+                    stale_before,
+                ),
+            )
+            .values(
+                status=ReembedUserStatus.pending.value,
+                # 人工介入 = 重新开始：给全新预算，并清掉排队中不该再显示的旧错误。
+                attempts=0,
+                last_error=None,
+            )
+            .returning(users.id)
+            .execution_options(synchronize_session=False)
+        ).scalars()
+    )
+    retried_ids = [
+        str(row.end_user_id) for row in rows if row.id in flipped_ids
+    ]
     db.commit()
 
     # 提交后才动 Redis 与派发：状态已经落库，这两步即便失败也会由对账任务兜底

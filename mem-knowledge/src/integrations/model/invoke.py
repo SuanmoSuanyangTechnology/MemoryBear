@@ -31,12 +31,13 @@ from redbear_model.runtime.remote import (
 from ...config import KnowledgeSettings
 from ...trace import get_trace_id
 from ...usage_context import get_usage_resource
-from .errors import to_invoke_error
+from .errors import ModelInvokeProtocolError, ModelInvokeUnavailableError, to_invoke_error
 
 logger = logging.getLogger(__name__)
 
 #: 归因来源常量：服务侧 usage 事件 ``source_service`` 原样落库（服务侧只校验非空）
 MODEL_SOURCE_MEM_KNOWLEDGE = "mem-knowledge"
+_MODEL_AVAILABILITY_TIMEOUT_SECONDS = 5.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -218,6 +219,30 @@ class ModelInvokeClient:
         """非流式调用：返回 ``data`` 承载的族结果体（失败照旧翻 km 语汇）。"""
 
         return await self._invoke.call(request, invoke_target(context))
+
+    async def is_model_available(self, model_id: UUID, context: ModelCallContext) -> bool:
+        """Read the same derived availability flag used by the model selector."""
+        try:
+            response = await self._http.get(
+                f"internal/v1/models/{model_id}",
+                headers=invoke_target(context).headers(),
+                timeout=_MODEL_AVAILABILITY_TIMEOUT_SECONDS,
+            )
+            if response.status_code in (400, 404):
+                return False
+            response.raise_for_status()
+            payload = response.json()
+        except httpx.HTTPError as exc:
+            raise ModelInvokeUnavailableError("Model availability lookup failed") from exc
+        except ValueError as exc:
+            raise ModelInvokeProtocolError("Invalid model availability response") from exc
+        if (
+            not isinstance(payload, dict)
+            or payload.get("code") != 0
+            or not isinstance(payload.get("data"), dict)
+        ):
+            raise ModelInvokeProtocolError("Invalid model availability response")
+        return payload["data"].get("is_available") is True
 
     async def aclose(self) -> None:
         await self._http.aclose()

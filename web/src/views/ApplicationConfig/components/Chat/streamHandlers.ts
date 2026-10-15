@@ -231,11 +231,19 @@ interface ClusterStreamDeps {
   compareLoadingRef: MutableRefObject<boolean>;
   conversationId: string | null;
   setConversationId: (id: string) => void;
+  audioPollingRef: MutableRefObject<Map<string, ReturnType<typeof setInterval>>>;
 }
 
 /** Adapts the shared cluster event processor to the single-column chat state. */
 export const createClusterStreamHandler = (deps: ClusterStreamDeps) => {
-  const { updateChatList, setLoading, compareLoadingRef, conversationId, setConversationId } = deps
+  const {
+    updateChatList,
+    setLoading,
+    compareLoadingRef,
+    conversationId,
+    setConversationId,
+    audioPollingRef,
+  } = deps
   const updateAssistant = (updater: (message: ChatItem) => ChatItem) => {
     updateChatList(prev => {
       if (!prev[0]) return prev
@@ -252,6 +260,16 @@ export const createClusterStreamHandler = (deps: ClusterStreamDeps) => {
 
   return createClusterStreamProcessor({
     updateAssistant,
+    appendAssistantReasoning: content => {
+      if (!content) return
+      updateAssistant(message => ({
+        ...message,
+        meta_data: {
+          ...(message.meta_data || {}),
+          reasoning_content: (message.meta_data?.reasoning_content || '') + content,
+        },
+      }))
+    },
     appendAssistantContent: content => {
       updateChatList(prev => updateClusterAssistantMessage(prev, content))
     },
@@ -266,6 +284,29 @@ export const createClusterStreamHandler = (deps: ClusterStreamDeps) => {
     },
     stopInitialLoading: () => {
       compareLoadingRef.current = false
+    },
+    startAudioPolling: (audioUrl, pollingKey) => {
+      const fileId = pollingKey === audioUrl ? audioUrl.split('/').pop() : pollingKey
+      if (!fileId || audioPollingRef.current.has(pollingKey)) return
+
+      const clearPolling = () => {
+        clearInterval(audioPollingRef.current.get(pollingKey))
+        audioPollingRef.current.delete(pollingKey)
+      }
+      const timer = setInterval(() => {
+        getFileStatusById(fileId)
+          .then(res => {
+            const { status } = res as { status: string }
+            if (!status || status === 'pending') return
+            clearPolling()
+            updateAssistant(message => ({
+              ...message,
+              meta_data: { ...(message.meta_data || {}), audio_status: status },
+            }))
+          })
+          .catch(clearPolling)
+      }, 2000)
+      audioPollingRef.current.set(pollingKey, timer)
     },
     finishStreaming: () => {
       updateChatList(prev => prev.map(chat => ({ ...chat, streamLoading: false })))

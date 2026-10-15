@@ -186,9 +186,9 @@ const AppHeader: FC<{ source?: 'space' | 'manage'; }> = ({ source = 'manage' }) 
   return (
     <Header className={styles.header}>
       {/* Breadcrumb navigation */}
-      <Breadcrumb separator="<" items={formatBreadcrumbNames() as BreadcrumbProps['items']} className="rb:font-medium!" />
+      <Breadcrumb separator="<" items={formatBreadcrumbNames() as BreadcrumbProps['items']} className="rb:font-medium! rb:flex-1!" />
 
-      <Flex gap={12} align="center">
+      <Flex gap={12} align="center" className="rb:shrink-0!">
         <PrivateWrap>
           {() => <NotificationBell />}
         </PrivateWrap>

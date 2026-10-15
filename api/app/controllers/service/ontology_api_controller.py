@@ -17,7 +17,7 @@ from starlette.responses import Response
 from app.core.api_key_auth import require_api_key_self_db
 from app.core.api_key_utils import get_current_user_snapshot_from_api_key_async
 from app.core.logging_config import get_business_logger
-from app.db import get_async_db_context, get_db_context
+from app.db import get_async_db_context
 from app.schemas.api_key_schema import ApiKeyAuth
 
 # 包装内部 controller
@@ -85,13 +85,11 @@ async def create_scene(
     async with get_async_db_context() as auth_db:
         current_user = await get_current_user_snapshot_from_api_key_async(auth_db, api_key_auth)
 
-    with get_db_context() as sync_db:
-        result = await ontology_controller.create_scene(
-            request=payload,
-            current_user=current_user,
-            x_language_type=x_language_type,
-            db=sync_db,
-        )
+    result = await ontology_controller.create_scene(
+        request=payload,
+        current_user=current_user,
+        x_language_type=x_language_type,
+    )
     return _encode_result(result)
 
 

@@ -12,6 +12,9 @@ export const applicationPart1 = {
       applicationType: '应用类型',
       applicationTypePlaceholder: '应用类型',
       allType: '全部类型',
+      ontologyStatusPlaceholder: '本体状态',
+      ontology_bound: '已关联本体',
+      ontology_default: '仅默认本体',
 
       agent: 'Agent',
       agentDesc: '创建单个智能代理',

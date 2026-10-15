@@ -73,6 +73,28 @@ FILTERED_METADATA_FIELDS: tuple[str, ...] = (
 
 OperationLiteral = Literal["add", "delete", "update"]
 
+# 读链路使用的历史旧 8 字段（PG meta_data 中原样保留，不再生成）
+LEGACY_METADATA_FIELDS: tuple[str, ...] = (
+    "core_facts",
+    "traits",
+    "relations",
+    "goals",
+    "interests",
+    "beliefs_or_stances",
+    "anchors",
+    "events",
+)
+
+# 新结构 3 个顶层键
+NEW_METADATA_FIELDS: tuple[str, ...] = (
+    "identity_background",
+    "relationships",
+    "domain_specific_info",
+)
+
+# 展示投影 / L0 投影使用的 13 个通用二级键，顺序固定
+PROFILE_DISPLAY_KEYS: tuple[str, ...] = IDENTITY_BACKGROUND_SUBCATEGORIES + RELATION_TYPES
+
 
 def parse_entry_triplet(item: str) -> Optional[Tuple[str, str, str]]:
     """按 '|' 切分最多两次 (split('|', 2))，去除首尾空白，得到 (二级键, 三级键, 正文)。
@@ -139,6 +161,84 @@ def _normalize_entry(item: str) -> str:
     """规范化为三段式写法（不打日志），用于快照记录与库内存储写法保持一致。"""
     parts = _entry_key(item).split("|", 2)
     return format_entry_triplet(*parts) if len(parts) == 3 else (item or "").strip()
+
+
+def _split_entry_quiet(item: Any) -> Optional[Tuple[str, str, str]]:
+    """读链路条目解析：规则同 parse_entry_triplet，但不打日志，非字符串条目返回 None。"""
+    if not isinstance(item, str):
+        return None
+    parts = [p.strip() for p in item.strip().split("|", 2)]
+    if len(parts) == 2:
+        parts = [parts[0], "", parts[1]]
+    if len(parts) != 3 or not parts[2]:
+        return None
+    return parts[0], parts[1], parts[2]
+
+
+def normalize_new_metadata(meta: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """返回新三键的副本；缺失或类型不符时补默认值（list / list / dict[str, list]）。"""
+    meta = meta if isinstance(meta, dict) else {}
+    ib = meta.get("identity_background")
+    rel = meta.get("relationships")
+    ds = meta.get("domain_specific_info")
+    return {
+        "identity_background": list(ib) if isinstance(ib, list) else [],
+        "relationships": list(rel) if isinstance(rel, list) else [],
+        "domain_specific_info": (
+            {k: list(v) for k, v in ds.items() if isinstance(v, list)}
+            if isinstance(ds, dict) else {}
+        ),
+    }
+
+
+def _iter_profile_entries(meta: Optional[Dict[str, Any]]):
+    """依次产出 identity_background、relationships 中可解析且二级键属于 13 个通用键的条目。"""
+    normalized = normalize_new_metadata(meta)
+    for field in ("identity_background", "relationships"):
+        for item in normalized[field]:
+            triplet = _split_entry_quiet(item)
+            if triplet and triplet[0] in PROFILE_DISPLAY_KEYS:
+                yield triplet
+
+
+def project_display_profile(
+    meta: Optional[Dict[str, Any]],
+    limit_per_key: Optional[int] = None,
+) -> Dict[str, List[str]]:
+    """展示投影（GET 画像、Trace 画像）。
+
+    取第 1 段为 key、第 3 段为 value，丢弃第 2 段三级键；同一 key 下正文相同的去重（保留首现）；
+    按 PROFILE_DISPLAY_KEYS 顺序输出，无值的 key 不输出；limit_per_key 为 None 时不限条数。
+    """
+    grouped: Dict[str, List[str]] = {}
+    for l2, _l3, content in _iter_profile_entries(meta):
+        values = grouped.setdefault(l2, [])
+        if content not in values:
+            values.append(content)
+    result: Dict[str, List[str]] = {}
+    for key in PROFILE_DISPLAY_KEYS:
+        values = grouped.get(key)
+        if values:
+            result[key] = values if limit_per_key is None else values[:limit_per_key]
+    return result
+
+
+def project_l0_profile(meta: Optional[Dict[str, Any]]) -> Dict[str, List[str]]:
+    """L0 投影（给大模型的 <user-info>）。
+
+    以二级键分组，值为规范化后的完整三段条目（保留三级键），按 _entry_key 去重、保留存储顺序；
+    按 PROFILE_DISPLAY_KEYS 顺序输出，无值的 key 不输出，不限条数。
+    """
+    grouped: Dict[str, List[str]] = {}
+    seen: Dict[str, set[str]] = {}
+    for l2, l3, content in _iter_profile_entries(meta):
+        entry = format_entry_triplet(l2, l3, content)
+        key = _entry_key(entry)
+        if key in seen.setdefault(l2, set()):
+            continue
+        seen[l2].add(key)
+        grouped.setdefault(l2, []).append(entry)
+    return {key: grouped[key] for key in PROFILE_DISPLAY_KEYS if key in grouped}
 
 
 def _trace(

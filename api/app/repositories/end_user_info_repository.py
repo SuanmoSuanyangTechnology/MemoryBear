@@ -49,6 +49,15 @@ class EndUserInfoRepository:
             select(EndUserInfo).where(EndUserInfo.end_user_id == end_user_id).limit(1)
         )
         return result.scalars().first()
+
+    def get_meta_data_sync(self, end_user_id: uuid.UUID) -> dict:
+        """读取用户的 meta_data（同步版本）；记录不存在或字段为空时返回 {}。"""
+        from sqlalchemy import select
+        result = self.db.execute(
+            select(EndUserInfo.meta_data).where(EndUserInfo.end_user_id == end_user_id).limit(1)
+        )
+        meta_data = result.scalars().first()
+        return meta_data if isinstance(meta_data, dict) else {}
     
     def update(self, info_id: uuid.UUID, aliases: List[str] = None, meta_data: dict = None) -> Optional[EndUserInfo]:
         """更新用户信息"""
