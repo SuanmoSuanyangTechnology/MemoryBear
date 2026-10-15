@@ -12,6 +12,9 @@ from app.core.memory.storage.outbox.producer import enqueue_events
 from app.core.memory.storage.outbox.repository import OutboxRepository
 from app.core.memory.storage.outbox.types import OutboxEventInput, OutboxOperation
 from app.core.memory.storage.provider.neo4j.client import Neo4jClient, _to_native
+from app.core.memory.storage.provider.neo4j.legacy_metadata import (
+    merge_legacy_user_properties,
+)
 from app.core.utils.datetime_utils import utcnow_naive
 
 logger = logging.getLogger(__name__)
@@ -249,6 +252,7 @@ def _merge_user_properties(
         )
         for field in list_fields
     }
+    merged.update(merge_legacy_user_properties(target, source))
     merged["description_timeline"] = _merge_separated_string(
         str(target.get("description_timeline") or ""),
         str(source.get("description_timeline") or ""),

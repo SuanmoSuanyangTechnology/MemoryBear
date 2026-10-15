@@ -10,6 +10,7 @@ Storage schema: identity_background / relationships 为 list[str]，
 domain_specific_info 为 dict[str, list[str]]。
 """
 
+import json
 import logging
 from typing import Any, Dict, List, Literal, Optional, Tuple
 
@@ -61,7 +62,7 @@ FILTERED_METADATA_FIELDS: tuple[str, ...] = (
 
 OperationLiteral = Literal["add", "delete", "update"]
 
-# 读链路使用的历史旧 8 字段（PG meta_data 中原样保留，不再生成）
+# 历史旧 8 字段：停止生成，读取和合并继续保留，待迁移后统一删除
 LEGACY_METADATA_FIELDS: tuple[str, ...] = (
     "core_facts",
     "traits",
@@ -258,17 +259,39 @@ def _union_entries(base: List[Any], extra: List[Any]) -> List[Any]:
     return result
 
 
+def normalize_legacy_metadata_values(value: Any) -> list[Any]:
+    """历史字段按列表读取；单值整体保留，空值不生成条目。"""
+    values = value if isinstance(value, list) else [value]
+    return [item for item in values if item is not None and item != ""]
+
+
+def _legacy_metadata_entry_key(value: Any) -> tuple[str, str]:
+    # 字符串沿用忽略大小写去重；其他 JSON 值保留类型，避免 0 / False / "0" 混淆。
+    if isinstance(value, str):
+        return "str", value.lower()
+    return type(value).__name__, json.dumps(value, sort_keys=True, ensure_ascii=False)
+
+
 def merge_user_meta_data(target: Optional[Dict[str, Any]], source: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     """用户归并时把 source 的 meta_data 合并进 target，返回新字典。
 
     - identity_background / relationships：按 _entry_key 去重并集；
     - domain_specific_info：按场景键合并，场景内按 _entry_key 去重并集；
-    - 其他 list 字段（含旧 8 字段）：按 str(v).lower() 去重并集（历史行为）；
+    - 旧 8 字段：列表或历史单值均保留，字符串忽略大小写去重，无内容时不新增键；
+    - 其他 list 字段：按 str(v).lower() 去重并集（历史行为）；
     - 类型不符的一侧忽略并记 warning；source 中非 list / dict 的其他字段不合并。
     """
     merged: Dict[str, Any] = dict(target or {})
     for key, values in (source or {}).items():
-        if key in ("identity_background", "relationships"):
+        if key in LEGACY_METADATA_FIELDS:
+            items = normalize_legacy_metadata_values(merged.get(key))
+            items += normalize_legacy_metadata_values(values)
+            if items:
+                unique: dict[tuple[str, str], Any] = {}
+                for item in items:
+                    unique.setdefault(_legacy_metadata_entry_key(item), item)
+                merged[key] = list(unique.values())
+        elif key in ("identity_background", "relationships"):
             if not isinstance(values, list):
                 logger.warning(f"[Metadata] 归并忽略 source 中类型不符的字段: {key}={type(values).__name__}")
                 continue

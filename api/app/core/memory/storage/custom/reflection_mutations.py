@@ -19,6 +19,9 @@ from app.core.memory.storage.outbox.producer import enqueue_events
 from app.core.memory.storage.outbox.repository import OutboxRepository
 from app.core.memory.storage.outbox.types import OutboxEventInput, OutboxOperation
 from app.core.memory.storage.provider.neo4j.client import Neo4jClient
+from app.core.memory.storage.provider.neo4j.legacy_metadata import (
+    LEGACY_METADATA_MERGE_CLAUSES,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -289,6 +292,7 @@ SET keeper.name = $merged_name,
       WHEN loser.created_at IS NULL THEN keeper.created_at
       WHEN loser.created_at > keeper.created_at THEN loser.created_at
       ELSE keeper.created_at END
+""" + LEGACY_METADATA_MERGE_CLAUSES + """
 WITH keeper, loser
 OPTIONAL MATCH (s:Statement)-[r:REFERENCES_ENTITY]->(loser)
 WHERE s.delete_at IS NULL AND NOT (s)-[:REFERENCES_ENTITY]->(keeper)
