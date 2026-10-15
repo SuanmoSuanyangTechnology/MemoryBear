@@ -9,23 +9,24 @@ interface Props {
 }
 
 export default function WikiDirectory({ kbId, query, page, enabled, types, onPageChange, onSelect, onSettings, onFiles }: Props) {
+  const summaries = types === 'summary';
   const load = useCallback((signal: AbortSignal) => getWikiPages(kbId, query, page, signal, types), [kbId, query, page, types]);
   const { data, loading, error, reload } = useWikiResource(load);
   const groups = new Map<string, { title: string; pages: WikiPage[] }>();
   for (const item of data?.items ?? []) {
-    const key = item.folder_id ?? '';
-    if (!groups.has(key)) groups.set(key, { title: item.folder_path.map(folder => folder.name).join(' / ') || '未分类', pages: [] });
+    const key = summaries ? '' : item.folder_id ?? '';
+    if (!groups.has(key)) groups.set(key, { title: summaries ? '' : item.folder_path.map(folder => folder.name).join(' / ') || '未分类', pages: [] });
     groups.get(key)!.pages.push(item);
   }
 
   return <article className="wiki-article wiki-directory">
-    <h1>{query ? '搜索结果' : 'Wiki 目录'}</h1>
-    <p className="wiki-subtitle">{query ? `“${query}” · ${data?.total ?? 0} 个页面` : '查看知识库中的全部 Wiki。'}</p>
+    <h1>{query ? '搜索结果' : summaries ? '摘要文档' : 'Wiki 目录'}</h1>
+    <p className="wiki-subtitle">{query ? `“${query}” · ${data?.total ?? 0} 个页面` : summaries ? '查看知识库中已生成的文档摘要。' : '查看知识库中的实体与概念页面。'}</p>
     {loading ? <Skeleton active paragraph={{ rows: 9 }} /> : error
       ? <Alert type="error" showIcon message="Wiki 页面加载失败" description={error} action={<Button onClick={reload}>重试</Button>} />
       : data?.items.length ? <>
           {[...groups.entries()].map(([key, group]) => <section className="wiki-directory-group" key={key}>
-            <h2>{group.title}</h2>
+            {group.title ? <h2>{group.title}</h2> : null}
             <ul>{group.pages.map(item => <li key={item.page_id}>
               <button className="wiki-text-link" onClick={() => onSelect(item.page_id)}>{item.title}</button>
               {item.summary ? <span> — {item.summary}</span> : null}

@@ -70,7 +70,9 @@
 .wiki-text-link:hover { text-decoration: underline; }
 .wiki-loading { padding: 48px; background: #fff; height: 100%; border-radius: 16px; }
 .wiki-folder-path { font-size: 14px; color: var(--wiki-muted); margin-bottom: 18px; }
-.wiki-reader h1 { margin-bottom: 24px; }
+.wiki-reader h1 { margin-bottom: 12px; }
+.wiki-page-badges { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 24px; }
+.wiki-page-badges .ant-tag { margin: 0; padding: 2px 8px; border-radius: 6px; background: #f2f3f5; color: var(--wiki-muted); font-size: 12px; line-height: 20px; }
 .wiki-page-summary { border-left: 3px solid #dfe4ed; color: var(--wiki-muted); font-size: 14px; line-height: 1.85; margin: 0 0 28px; padding-left: 16px; white-space: pre-wrap; }
 .wiki-outline { margin: 0 0 24px; color: var(--wiki-muted); font-size: 12px; }
 .wiki-outline summary { cursor: pointer; }

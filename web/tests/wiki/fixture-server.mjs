@@ -87,7 +87,10 @@ const server = createServer(async (req, res) => {
     if (scenario === 'error') return send(null, 503);
     let items = filterPages(url.searchParams.get('page_types')).filter(page => `${page.title} ${page.summary}`.includes(url.searchParams.get('q') || ''));
     if (scenario === 'empty') items = [];
-    if (scenario === 'pagination') items = Array.from({ length: 62 }, (_, i) => ({ ...pages[i % pages.length], id: uuid(1000 + i), page_id: uuid(1000 + i) }));
+    if (scenario === 'pagination') {
+      const matching = items;
+      items = Array.from({ length: matching.length ? 62 : 0 }, (_, i) => ({ ...matching[i % matching.length], id: uuid(1000 + i), page_id: uuid(1000 + i) }));
+    }
     const page = Number(url.searchParams.get('page') || 1);
     const limit = Number(url.searchParams.get('limit') || 50);
     return send({ items: items.slice((page - 1) * limit, page * limit), page, limit, total: items.length, has_next: page * limit < items.length });

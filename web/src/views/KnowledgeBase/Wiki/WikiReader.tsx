@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { Alert, Button, Skeleton } from 'antd';
+import { Alert, Button, Skeleton, Tag } from 'antd';
+import { BulbOutlined, FileTextOutlined, TagOutlined } from '@ant-design/icons';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { getWikiDetail, WIKI_POLL_INTERVAL, type WikiDetail, type WikiPageStatus, type WikiPageType } from '@/api/wiki';
@@ -7,7 +8,8 @@ import { useWikiResource } from './useWikiResource';
 import { remarkWikiLinks } from './wikiMarkdown';
 import { groupWikiSources } from './wikiSources';
 
-const TYPE_LABELS: Record<WikiPageType, string> = { summary: '文档摘要', entity: '实体页面', concept: '概念页面' };
+const TYPE_LABELS: Record<WikiPageType, string> = { summary: '摘要', entity: '实体', concept: '概念' };
+const TYPE_ICONS = { summary: <FileTextOutlined />, entity: <TagOutlined />, concept: <BulbOutlined /> };
 const STATUS_LABELS: Record<WikiPageStatus, string> = {
   ready: '可阅读', pending: '正在生成页面', updating: '页面更新中', cleanup_pending: '正在更新页面来源', failed: '页面生成失败', unavailable: '页面暂不可用',
 };
@@ -47,6 +49,10 @@ export default function WikiReader({ kbId, pageId, onSelect, onDocument, onGraph
   };
   return <article ref={articleRef} className={`wiki-article wiki-reader${embedded ? ' wiki-reader-embedded' : ''}`}>
     <h1>{data.title}</h1>
+    <div className="wiki-page-badges" aria-label="页面类型与版本">
+      <Tag bordered={false} icon={TYPE_ICONS[data.type]}>{TYPE_LABELS[data.type]}</Tag>
+      <Tag bordered={false}>v{data.version}</Tag>
+    </div>
     {readable ? <>
       {data.summary ? <blockquote className="wiki-page-summary">{data.summary}</blockquote> : null}
       {outline.length > 3 ? <details className="wiki-outline"><summary>本页目录</summary>
@@ -83,7 +89,6 @@ export default function WikiReader({ kbId, pageId, onSelect, onDocument, onGraph
       description={<>{data.reason ? <p>{REASON_LABELS[data.reason] || '处理暂未完成，请在文件列表中查看详细进度。'}</p> : null}<p>可到文件列表查看处理进度，失败后重新生成。</p></>}
       action={<Button onClick={reload}>刷新</Button>} />}
     <details className="wiki-page-information"><summary>页面信息</summary><div>
-      <span>{TYPE_LABELS[data.type]} · 版本 {data.version}</span>
       {data.updated_at_ms ? <time dateTime={new Date(data.updated_at_ms).toISOString()}>
         更新于 {new Date(data.updated_at_ms).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false })}
       </time> : null}

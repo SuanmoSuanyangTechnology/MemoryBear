@@ -6,6 +6,7 @@ import { getWikiIndex, getWikiKnowledge, WIKI_TYPE_FILTERS, type WikiDetail } fr
 import { useBreadcrumbManager } from '@/hooks/useBreadcrumbManager';
 import { useWikiResource } from './useWikiResource';
 import WikiTree from './WikiTree';
+import WikiSummaryList from './WikiSummaryList';
 import WikiDirectory from './WikiDirectory';
 import WikiReader from './WikiReader';
 import WikiFiles from './WikiFiles';
@@ -29,7 +30,8 @@ function WikiWorkspace({ kbId }: { kbId: string }) {
   const selectedId = params.get('page') ?? undefined;
   const centerId = params.get('center') ?? undefined;
   const view = params.get('view') === 'files' ? 'files' : params.get('view') === 'graph' ? 'graph' : 'wiki';
-  const typeFilter = WIKI_TYPE_FILTERS.find(item => item.key === params.get('type')) ?? WIKI_TYPE_FILTERS[0];
+  const typeFilter = WIKI_TYPE_FILTERS.find(item => item.key === params.get('type')) ?? WIKI_TYPE_FILTERS.find(item => item.key === 'knowledge')!;
+  const summaries = typeFilter.key === 'summary';
   const types = typeFilter.types.join(',') || undefined;
   const requestedPage = Number(params.get('p'));
   const page = Number.isSafeInteger(requestedPage) && requestedPage > 0 ? requestedPage : 1;
@@ -55,6 +57,8 @@ function WikiWorkspace({ kbId }: { kbId: string }) {
     go({ page: id });
   };
   const showFiles = () => go({ view: 'files' });
+  const showWikiTab = () => go({ type: 'knowledge' });
+  const showSummaryTab = () => go({ type: 'summary' });
   const showGraph = (center?: string) => go({ view: 'graph', ...(center ? { center } : {}) });
   const showDirectory = () => {
     setRevision(value => value + 1);
@@ -75,7 +79,10 @@ function WikiWorkspace({ kbId }: { kbId: string }) {
     setPageDetail(detail);
     readablePageId.current = detail.status === 'ready' ? detail.page_id : undefined;
     if (contentRef.current && readablePageId.current) contentRef.current.scrollTop = readingPositions.current.get(detail.page_id) ?? 0;
-  }, []);
+    if ((detail.type === 'summary') !== summaries) {
+      setParams(current => { const next = new URLSearchParams(current); next.set('type', detail.type === 'summary' ? 'summary' : 'knowledge'); return next; }, { replace: true });
+    }
+  }, [setParams, summaries]);
 
   if (knowledge.loading) return <div className="wiki-loading"><Skeleton active paragraph={{ rows: 12 }} /></div>;
   if (knowledge.error || !knowledge.data) return <div className="wiki-loading"><Alert type="error" showIcon message="知识库加载失败"
@@ -83,7 +90,8 @@ function WikiWorkspace({ kbId }: { kbId: string }) {
   const kb = knowledge.data;
   const enabled = kb.parser_config?.wiki?.enabled === true;
   const selectedPage = pageDetail?.page_id === selectedId ? pageDetail : undefined;
-  const title = view === 'files' ? '文件' : view === 'graph' ? 'Wiki 图谱' : selectedId ? selectedPage?.title ?? '加载页面…' : query ? '搜索结果' : 'Wiki 目录';
+  const directoryTitle = summaries ? '摘要文档' : 'Wiki 目录';
+  const title = view === 'files' ? '文件' : view === 'graph' ? 'Wiki 图谱' : selectedId ? selectedPage?.title ?? '加载页面…' : query ? '搜索结果' : directoryTitle;
   const visibleCount = index.data ? typeFilter.types.length
     ? typeFilter.types.reduce((total, type) => total + (index.data!.counts[type] ?? 0), 0)
     : index.data.total_pages : undefined;
@@ -99,7 +107,7 @@ function WikiWorkspace({ kbId }: { kbId: string }) {
         ] }}><Button type="text" icon={<MoreOutlined />} aria-label="知识库菜单" /></Dropdown>
       </div>
       <div className="wiki-search-row"><Input value={search} maxLength={400} allowClear prefix={<SearchOutlined />}
-        placeholder={view === 'files' ? '搜索文件...' : '搜索 Wiki 页面...'} aria-label={view === 'files' ? '搜索文件' : '搜索 Wiki 页面'}
+        placeholder={view === 'files' ? '搜索文件...' : summaries ? '搜索摘要文档...' : '搜索 Wiki 页面...'} aria-label={view === 'files' ? '搜索文件' : summaries ? '搜索摘要文档' : '搜索 Wiki 页面'}
         onChange={event => { setSearch(event.target.value); if (!event.target.value) submitSearch(''); }}
         onPressEnter={() => submitSearch(search)} suffix={view !== 'files' ? <Dropdown trigger={['click']} menu={{
           items: WIKI_TYPE_FILTERS.map(item => ({ key: item.key, label: item.label })), selectable: true, selectedKeys: [typeFilter.key],
@@ -109,16 +117,18 @@ function WikiWorkspace({ kbId }: { kbId: string }) {
       </div>
       <button className={`wiki-graph-entry ${view === 'graph' ? 'is-active' : ''}`} onClick={() => showGraph()}><ShareAltOutlined />Wiki 图谱</button>
       <div className="wiki-tabs" role="tablist" aria-label="知识库内容">
-        <button role="tab" aria-selected={view !== 'files'} className={view !== 'files' ? 'is-active' : ''} onClick={showDirectory}>Wiki</button>
+        <button role="tab" aria-selected={view !== 'files' && !summaries} className={view !== 'files' && !summaries ? 'is-active' : ''} onClick={showWikiTab}>Wiki</button>
+        <button role="tab" aria-selected={view !== 'files' && summaries} className={view !== 'files' && summaries ? 'is-active' : ''} onClick={showSummaryTab}>摘要</button>
         <button role="tab" aria-selected={view === 'files'} className={view === 'files' ? 'is-active' : ''} onClick={showFiles}>文件</button>
       </div>
       <div className="wiki-sidebar-scroll">
         {view === 'files' ? <button className="wiki-directory-entry is-selected" onClick={showFiles}>全部文件</button> : <>
-          <button className={`wiki-directory-entry ${view === 'wiki' && !selectedId && !query ? 'is-selected' : ''}`} onClick={showDirectory}>Wiki 目录</button>
-          <WikiTree key={`${kbId}:${revision}:${types ?? ''}`} kbId={kbId} selectedId={selectedId} onSelect={selectPage} types={types} />
+          <button className={`wiki-directory-entry ${view === 'wiki' && !selectedId && !query ? 'is-selected' : ''}`} onClick={showDirectory}>{directoryTitle}</button>
+          {summaries ? <WikiSummaryList key={`${kbId}:${revision}:${query}`} kbId={kbId} query={query} selectedId={selectedId} onSelect={selectPage} />
+            : <WikiTree key={`${kbId}:${revision}:${types ?? ''}`} kbId={kbId} selectedId={selectedId} onSelect={selectPage} types={types} />}
         </>}
       </div>
-      <div className="wiki-sidebar-footer"><span>{visibleCount !== undefined ? `${visibleCount} 个 Wiki 页面` : index.error ? '目录统计暂不可用' : '加载目录…'}</span>
+      <div className="wiki-sidebar-footer"><span>{visibleCount !== undefined ? `${visibleCount} 个${summaries ? '摘要文档' : ' Wiki 页面'}` : index.error ? '目录统计暂不可用' : '加载目录…'}</span>
         <button onClick={() => setSettingsOpen(true)}>Wiki 设置</button></div>
     </aside>
     <main className="wiki-main">
