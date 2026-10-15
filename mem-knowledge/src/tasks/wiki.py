@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import json
+import logging
+import re
 import time
+import traceback
 
 from sqlalchemy.exc import InterfaceError, OperationalError
 from sqlalchemy.exc import TimeoutError as DatabaseTimeoutError
@@ -18,9 +22,43 @@ from .observability import (
     task_context_from_current_task,
 )
 
+_LOGGER = logging.getLogger(__name__)
+_DIAGNOSTIC_FRAME_LIMIT = 24
+_SQLSTATE = re.compile(r"^[A-Z0-9]{5}$")
+
 
 def _safe_error(exc):
     return exc if isinstance(exc, WikiError) else WikiError("WIKI_EXECUTION_FAILED")
+
+
+def _report_error(run, exc, *, code=None):
+    """Retain failure locations without logging exception messages or request data."""
+    error = WikiError(code) if code else _safe_error(exc)
+    context = run.context
+    diagnostic = {
+        "event": "wiki_task_error",
+        "task_id": context.task_id,
+        "task_name": context.task_name,
+        "knowledge_id": context.knowledge_id,
+        "document_id": context.document_id,
+        "page_id": context.page_id,
+        "attempt": context.attempt,
+        "error_code": error.code,
+        "error_type": type(exc).__name__,
+        "frames": [
+            {"file": frame.filename, "line": frame.lineno, "function": frame.name}
+            for frame in traceback.extract_tb(exc.__traceback__)[-_DIAGNOSTIC_FRAME_LIMIT:]
+        ],
+    }
+    driver = getattr(exc, "orig", None)
+    if driver is not None:
+        diagnostic["driver_error_type"] = type(driver).__name__
+        sqlstate = getattr(driver, "sqlstate", None) or getattr(driver, "pgcode", None)
+        if isinstance(sqlstate, str) and _SQLSTATE.fullmatch(sqlstate):
+            diagnostic["sqlstate"] = sqlstate
+    level = logging.INFO if isinstance(exc, WikiDeferred) else logging.ERROR
+    _LOGGER.log(level, "%s", json.dumps(diagnostic, ensure_ascii=False))
+    return error
 
 
 def _record_failure(task, run, runtime, operation, *args, **kwargs):
@@ -31,9 +69,10 @@ def _record_failure(task, run, runtime, operation, *args, **kwargs):
         return transaction(runtime, operation, *args, **kwargs)
     except WikiSuperseded:
         return False
-    except (OperationalError, InterfaceError, DatabaseTimeoutError):
+    except (OperationalError, InterfaceError, DatabaseTimeoutError) as exc:
         # Never ACK an accepted delivery when even its terminal state cannot be saved.
         # This only retries state availability; model/lock budgets remain persisted and finite.
+        _report_error(run, exc, code="WIKI_STATE_UNAVAILABLE")
         run.finish(BusinessOutcome.RETRY, error_code="WIKI_STATE_UNAVAILABLE")
         raise task.retry(
             exc=RuntimeError("WIKI_STATE_UNAVAILABLE"),
@@ -74,7 +113,7 @@ def sync_wiki_document(self, kb_id, document_id, requested_version, operation="u
             run.finish(BusinessOutcome.SKIPPED)
             return {"status": "superseded"}
         except Exception as exc:
-            error = _safe_error(exc)
+            error = _report_error(run, exc)
             retry = _record_failure(
                 self,
                 run,
@@ -86,7 +125,7 @@ def sync_wiki_document(self, kb_id, document_id, requested_version, operation="u
                 deferred=isinstance(exc, WikiDeferred),
             )
             if retry:
-                run.finish(BusinessOutcome.RETRY)
+                run.finish(BusinessOutcome.RETRY, error_code=error.code)
                 raise self.retry(
                     exc=RuntimeError(error.code),
                     countdown=runtime.settings.kb_wiki_retry_delay_seconds,
@@ -120,7 +159,7 @@ def reduce_wiki_page(self, kb_id, page_id, participants=None):
             run.finish(BusinessOutcome.SUCCESS)
             return result
         except Exception as exc:
-            error = _safe_error(exc)
+            error = _report_error(run, exc)
             retry = _record_failure(
                 self,
                 run,
@@ -134,7 +173,7 @@ def reduce_wiki_page(self, kb_id, page_id, participants=None):
                 snapshot=getattr(exc, "wiki_snapshot", None),
             )
             if retry:
-                run.finish(BusinessOutcome.RETRY)
+                run.finish(BusinessOutcome.RETRY, error_code=error.code)
                 raise self.retry(
                     exc=RuntimeError(error.code),
                     countdown=runtime.settings.kb_wiki_retry_delay_seconds,
@@ -162,9 +201,9 @@ def enqueue_unprocessed_wiki_documents(self, kb_id, upper_at_ms):
             run.finish(BusinessOutcome.SUCCESS)
             return result
         except Exception as exc:
-            error = _safe_error(exc)
+            error = _report_error(run, exc)
             if self.request.retries < self.max_retries:
-                run.finish(BusinessOutcome.RETRY)
+                run.finish(BusinessOutcome.RETRY, error_code=error.code)
                 raise self.retry(
                     exc=RuntimeError(error.code),
                     countdown=runtime.settings.kb_wiki_retry_delay_seconds,
