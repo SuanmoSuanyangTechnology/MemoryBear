@@ -1,9 +1,3 @@
-/*
- * @Author: ZhaoYing 
- * @Date: 2026-02-03 18:33:01 
- * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-16 14:58:25
- */
 import { type FC, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useParams } from 'react-router-dom'
@@ -80,10 +74,11 @@ const Health: FC = () => {
       title={t('statementDetail.health')}
       headerType="borderless"
       headerClassName="rb:min-h-[46px]! rb:font-[MiSans-Bold] rb:font-bold"
-      bodyClassName="rb:px-[25px]! rb:pb-[30px]! rb:pt-0!"
+      bodyClassName="rb:px-[25px]! rb:pb-[30px]! rb:pt-0! rb:h-[calc(100%-46px)]! rb:overflow-hidden!"
+      className="rb:h-full!"
     >
       {health?.health_score && health?.health_score > 0
-        ? <Flex vertical align="center" justify="center">
+        ? <Flex vertical align="center" justify="center" className="rb:h-full!">
           <ReactEcharts
             option={{
               series: [{
@@ -134,17 +129,19 @@ const Health: FC = () => {
                 }
               }]
             }}
-            style={{ height: '180px', width: '180px' }}
+            style={{ minHeight: '180px', width: '180px', flex: 1 }}
           />
 
-          {health.dimensions && <Flex justify="space-between" className="rb:w-full rb:mt-7!">
+          {health.dimensions &&
+          <Flex justify="space-between" className="rb:w-full rb:mt-7! rb:shrink-0!">
             {['positivity_rate', 'stability', 'resilience'].map(key => (
-              <div key={key} className="rb:text-[12px] rb:leading-4.5 rb:text-[#5B6167]">
-                <div className="rb:font-[MiSans-Bold] rb:font-bold rb:text-[#212332] rb:text-[14px] rb:leading-4.75 rb:mb-1">{health.dimensions[key as keyof typeof health.dimensions].score}%</div>
+              <div key={key} className="rb:text-[12px] rb:leading-4.5 rb:text-gray-600">
+                <div className="rb:font-[MiSans-Bold] rb:font-bold rb:text-gray-800 rb:text-[14px] rb:leading-4.75 rb:mb-1">{health.dimensions[key as keyof typeof health.dimensions].score}%</div>
                 {t(`statementDetail.${key}`)}
               </div>
             ))}
-          </Flex>}
+          </Flex>
+          }
 
         </Flex>
         : <Empty size={88} className="rb:h-full" />
