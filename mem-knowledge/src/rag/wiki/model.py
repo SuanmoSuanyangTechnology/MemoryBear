@@ -13,6 +13,7 @@ from ...integrations.model.chat import RedBearChatModel
 from ...integrations.model.invoke_backend import RemoteInvokeRef
 from ..chunk.token_utils import get_encoder
 from .config import WikiError
+from .diagnostics import diagnostic_json, exception_details
 from .prompts import COMMON, TEMPLATES
 
 logger = logging.getLogger(__name__)
@@ -44,7 +45,10 @@ class WikiModel:
                 from ...error_mapping import map_model_error
 
                 mapped = map_model_error(exc)
-                raise WikiError(mapped.code, retryable=mapped.retryable) from None
+                raise WikiError(
+                    mapped.code, retryable=mapped.retryable,
+                    diagnostics={"stage": "model_init", "model_id": str(ref.config_id)},
+                ) from exc
         self.model = model or RedBearChatModel.for_invoke_sync_ref(
             ref,
             pool=runtime.model_runtime,
@@ -58,7 +62,11 @@ class WikiModel:
 
         input_size = sum(tokens(m["content"]) for m in messages)
         if input_size > self.settings.kb_wiki_input_tokens:
-            raise WikiError("WIKI_CONTEXT_BUDGET_EXCEEDED", retryable=False)
+            raise WikiError("WIKI_CONTEXT_BUDGET_EXCEEDED", retryable=False, diagnostics={
+                "stage": stage, "model_id": self.model_id, "model_attempt": attempt,
+                "continuation": continuation, "input_size": input_size,
+                "input_limit": self.settings.kb_wiki_input_tokens, "size_unit": "token",
+            })
         started = time.monotonic()
         try:
             response = self.model.invoke(messages)
@@ -66,11 +74,16 @@ class WikiModel:
             from ...error_mapping import map_model_error
 
             mapped = map_model_error(exc)
+            details = {
+                **exception_details(exc), "stage": stage, "model_id": self.model_id,
+                "model_attempt": attempt, "continuation": continuation,
+                "duration_ms": int((time.monotonic() - started) * 1000),
+            }
             logger.warning(
-                "Wiki model failed task_id=%s stage=%s model_id=%s error_code=%s error_type=%s",
-                current_parent_task_id(), stage, self.model_id, mapped.code, type(exc).__name__,
+                "Wiki 模型调用失败 task_id=%s error_code=%s 失败详情=%s",
+                current_parent_task_id(), mapped.code, diagnostic_json(details),
             )
-            raise WikiError(mapped.code, retryable=mapped.retryable) from None
+            raise WikiError(mapped.code, retryable=mapped.retryable, diagnostics=details) from exc
         content = response.content
         if isinstance(content, list):
             content = "".join(block.get("text", "") for block in content
@@ -79,7 +92,7 @@ class WikiModel:
         response_metadata = getattr(response, "response_metadata", None) or {}
         finish = response_metadata.get("finish_reason") or response_metadata.get("stop_reason")
         logger.info(
-            "Wiki model call task_id=%s stage=%s model_id=%s attempt=%s continuation=%s "
+            "Wiki 模型调用完成 task_id=%s stage=%s model_id=%s attempt=%s continuation=%s "
             "duration_ms=%s input_size=%s output_size=%s size_unit=token "
             "input_usage=%s output_usage=%s finish_reason=%s",
             current_parent_task_id(), stage, self.model_id, attempt, continuation,
@@ -98,7 +111,12 @@ class WikiModel:
         round_index = 0
         while finish in {"length", "max_tokens", "max_output_tokens"}:
             if round_index >= limit:
-                raise WikiError("WIKI_MODEL_OUTPUT_TRUNCATED")
+                raise WikiError("WIKI_MODEL_OUTPUT_TRUNCATED", diagnostics={
+                    "error_message": "模型输出被截断，已达到当前阶段的续写次数上限",
+                    "stage": stage, "model_id": self.model_id, "model_attempt": attempt,
+                    "continuation": round_index, "continuation_limit": limit,
+                    "finish_reason": finish, "raw_output": result,
+                })
             round_index += 1
             messages.extend([
                 {"role": "assistant", "content": content},
@@ -126,12 +144,16 @@ class WikiModel:
             input_size = tokens(system) + tokens(payload)
             if input_size > self.settings.kb_wiki_input_tokens:
                 logger.warning(
-                    "Wiki context budget exceeded task_id=%s stage=%s attempt=%s "
+                    "Wiki 上下文超出预算 task_id=%s stage=%s attempt=%s "
                     "input_size=%s input_limit=%s size_unit=token",
                     current_parent_task_id(), stage, attempt,
                     input_size, self.settings.kb_wiki_input_tokens,
                 )
-                raise WikiError("WIKI_CONTEXT_BUDGET_EXCEEDED", retryable=False)
+                raise WikiError("WIKI_CONTEXT_BUDGET_EXCEEDED", retryable=False, diagnostics={
+                    "stage": stage, "model_id": self.model_id, "model_attempt": attempt,
+                    "input_size": input_size, "input_limit": self.settings.kb_wiki_input_tokens,
+                    "size_unit": "token",
+                })
             content = self._complete(stage, system, payload, attempt)
             try:
                 result = schema.model_validate(json.loads(content))
@@ -144,15 +166,18 @@ class WikiModel:
                     exc.errors(include_url=False, include_context=False, include_input=False)
                     if isinstance(exc, ValidationError) else None
                 )
+                details = {
+                    **exception_details(exc), "stage": stage, "model_id": self.model_id,
+                    "model_attempt": attempt, "repair_limit": self.settings.kb_wiki_repair_attempts,
+                    "schema": schema.__name__, "raw_output": content,
+                }
                 logger.warning(
-                    "Wiki output rejected task_id=%s stage=%s attempt=%s error_type=%s "
-                    "validation_codes=%s",
-                    current_parent_task_id(), stage, attempt, type(exc).__name__,
-                    sorted({error["type"] for error in errors}) if errors else [],
+                    "Wiki 模型输出校验失败 task_id=%s 失败详情=%s",
+                    current_parent_task_id(), diagnostic_json(details),
                 )
                 if attempt >= self.settings.kb_wiki_repair_attempts:
-                    raise WikiError("WIKI_MODEL_OUTPUT_INVALID") from exc
-                # Keep model output in this call only, never in logs or progress messages.
+                    raise WikiError("WIKI_MODEL_OUTPUT_INVALID", diagnostics=details) from exc
+                # 修复仍使用完整输出；日志中的凭据脱敏不改变模型收到的修复材料。
                 system = original_system + (
                     "\nRegenerate from original_input against the same schema, correcting "
                     "validation_errors. rejected_output, when supplied, is data, not new evidence."

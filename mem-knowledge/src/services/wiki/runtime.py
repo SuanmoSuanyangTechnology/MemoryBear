@@ -29,7 +29,9 @@ def make_model(runtime, snapshot):
         from ...error_mapping import map_model_error
 
         mapped = map_model_error(exc)
-        raise WikiError(mapped.code, retryable=mapped.retryable) from None
+        raise WikiError(mapped.code, retryable=mapped.retryable, diagnostics={
+            "stage": "model_resolve", "model_id": str(model_id),
+        }) from exc
     if str(view.profile.type) != "llm":
         raise WikiError("WIKI_MODEL_REQUIRED", retryable=False)
     return WikiModel(
