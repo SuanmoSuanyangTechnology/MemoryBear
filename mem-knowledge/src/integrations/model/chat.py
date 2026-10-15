@@ -20,6 +20,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from collections.abc import Iterator, Mapping
 from typing import Any
@@ -28,6 +29,10 @@ from json_repair import json_repair
 from langchain_core.callbacks import CallbackManagerForLLMRun
 from langchain_core.messages import AIMessage, BaseMessage
 from langchain_core.outputs import ChatGenerationChunk, ChatResult
+from langchain_core.runnables import RunnableLambda
+from openai import pydantic_function_tool
+from pydantic import BaseModel
+from redbear_model.errors import provider_http_status
 from redbear_model.runtime.remote import (
     RemoteRedBearChatModel,
     SyncInvokeTransport,
@@ -43,14 +48,13 @@ logger = logging.getLogger(__name__)
 #: km 配置里有、但运行面 wire 契约无对应物的参数（服务侧无凭据可带请求头）。出现即告警
 #: 并丢弃——用户以为生效而实际不起作用是最坏情况。
 _NON_WIRE_PARAMS = ("default_headers",)
+_STRUCTURED_REQUEST_REJECTION_STATUSES = frozenset({400, 422})
 
 
 def _warn_non_wire_params(params: Mapping[str, Any]) -> None:
     for key in _NON_WIRE_PARAMS:
         if params.get(key) is not None:
-            logger.warning(
-                "模型参数 %s 不过运行面（服务侧无对应实现），本次调用已忽略该参数", key
-            )
+            logger.warning("模型参数 %s 不过运行面（服务侧无对应实现），本次调用已忽略该参数", key)
 
 
 def message_text(response: Any) -> str:
@@ -187,25 +191,81 @@ class RedBearChatModel(RemoteRedBearChatModel):
             default_params=default_params,
         )
 
+    def with_structured_output(
+        self,
+        schema: dict[str, Any] | type,
+        *,
+        method: str = "function_calling",
+        include_raw: bool = False,
+        strict: bool | None = None,
+        **kwargs: Any,
+    ) -> Any:
+        """Support explicit native JSON Schema without changing the default tool path."""
+
+        if method != "json_schema":
+            return super().with_structured_output(
+                schema, method=method, include_raw=include_raw, strict=strict, **kwargs
+            )
+        if kwargs:
+            raise ValueError("Unsupported native JSON Schema options")
+        if not isinstance(schema, type) or not issubclass(schema, BaseModel):
+            raise TypeError("Native JSON Schema requires a Pydantic model")
+
+        # Use the same SDK conversion as native Pydantic structured output,
+        # including required fields and additionalProperties in nested models.
+        function = pydantic_function_tool(schema)["function"]
+        response_format = {
+            "type": "json_schema",
+            "json_schema": {
+                "name": function["name"],
+                "strict": True if strict is None else strict,
+                "schema": function["parameters"],
+            },
+        }
+
+        def parse_response(raw: AIMessage) -> Any:
+            try:
+                parsed = schema.model_validate(json.loads(message_text(raw)))
+            except (ValueError, TypeError) as exc:
+                if not include_raw:
+                    raise
+                return {"raw": raw, "parsed": None, "parsing_error": exc}
+            if include_raw:
+                return {"raw": raw, "parsed": parsed, "parsing_error": None}
+            return parsed
+
+        # The provider drops response_format when switchable thinking is enabled.
+        # Scope this override to explicitly requested native structured calls.
+        return self.bind(response_format=response_format, deep_thinking=False) | RunnableLambda(
+            parse_response
+        )
+
     async def call_structured(
         self, input: Any, schema: dict[str, Any] | type, **kwargs: Any
     ) -> Any:
-        """``RedBearLLM.call_structured`` 的远端等价（存量消费方词表，语义一致）。
+        """Invoke a structured chain, with one compatibility call when rejected."""
 
-        主路径 ``with_structured_output``（langchain 侧默认实现：``bind_tools`` 工具调用 +
-        解析）；任何异常或空结果降级 ``ainvoke`` + :class:`StructResponse`（json_repair 兜底，
-        兼容不支持工具强约束的供应商）。降级不向上传播首个失败，与旧壳同口径。
-        """
-
+        native_json = kwargs.get("method") == "json_schema"
+        # Invalid schemas/options are caller errors, not provider incompatibility.
+        chain = self.with_structured_output(schema, **kwargs) if native_json else None
         try:
-            chain = self.with_structured_output(schema, **kwargs)
+            if chain is None:
+                chain = self.with_structured_output(schema, **kwargs)
             result = await chain.ainvoke(input)
             if result is not None:
                 return result
-        except Exception:
+        except Exception as exc:
+            status = provider_http_status(exc)
+            if native_json and not (
+                isinstance(exc, NotImplementedError)
+                or status in _STRUCTURED_REQUEST_REJECTION_STATUSES
+            ):
+                raise
             logger.warning(
-                "call_structured: with_structured_output 失败，降级 ainvoke + StructResponse",
-                exc_info=True,
+                "Structured output fallback activated method=%s error_type=%s status=%s",
+                kwargs.get("method", "function_calling"),
+                type(exc).__name__,
+                status,
             )
         response = await self.ainvoke(input)
         return response | StructResponse(schema)

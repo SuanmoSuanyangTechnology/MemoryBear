@@ -12,7 +12,11 @@ from redbear_model import (
 )
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..api.dependencies import Principal
 from ..errors import KnowledgeError
+from ..integrations.model.errors import ModelInvokeClientError
+from ..integrations.model.invoke import ModelCallContext
+from ..integrations.model.runtime import ModelInvokeRuntime
 from ..repositories.model_registry import AsyncSQLModelRegistry
 
 _MODEL_FIELD_TYPES = {
@@ -28,6 +32,34 @@ _MEDIA_INPUT_MODALITIES = {
     "video2text_id": "video",
 }
 _DASHSCOPE_MEDIA_FIELDS = frozenset({"audio2text_id", "video2text_id"})
+
+
+async def validate_requested_knowledge_model_availability(
+    values: Mapping[str, uuid.UUID | None],
+    principal: Principal,
+    model_runtime: ModelInvokeRuntime,
+) -> None:
+    """Require explicit model bindings to be available before mutation side effects."""
+    checked: set[uuid.UUID] = set()
+    context = ModelCallContext(
+        tenant_id=principal.tenant_id,
+        actor_id=principal.actor_id,
+        actor_name=principal.actor_name,
+        workspace_id=principal.workspace_id,
+    )
+    for field_name in _MODEL_FIELD_TYPES:
+        model_id = values.get(field_name)
+        if model_id is None or model_id in checked:
+            continue
+        try:
+            available = await model_runtime.invoke_client.is_model_available(model_id, context)
+        except ModelInvokeClientError as exc:
+            raise KnowledgeError.from_code("KB_HTTP_UNAVAILABLE") from exc
+        if not available:
+            raise KnowledgeError.from_code(
+                "KB_KNOWLEDGE_MODEL_UNAVAILABLE", params={"model_field": field_name}
+            )
+        checked.add(model_id)
 
 
 def _matches_knowledge_model_field(field_name: str, model: ModelConfigSnapshot) -> bool:

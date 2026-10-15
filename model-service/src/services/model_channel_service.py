@@ -50,6 +50,7 @@ from .channel_service import ChannelService, describe_channel
 from .model_profile_view import profile_columns
 from .model_service import (
     ModelConfigService,
+    _probe_asr_submission,
     _require_api_base_for_local_provider,
     _require_asr_api_base,
     _require_asr_model_configuration,
@@ -399,7 +400,7 @@ class ChannelApiKeyService:
         """给模型登记点名凭据（真实调用名 = config.name，组合 name 是别名不走本域）。
 
         同凭据同端点已存在时幂等合并：provider 级渠道吸收为 no-op、点名渠道并入覆盖集。
-        ASR 模型登记时只校验配置结构，凭据在实际调用时验证；其他模型
+        ASR 模型登记时提交探针校验（submit 受理即通过）；其他模型
         仍在登记前试调一次，失败返回 400。
         """
         snapshot = ChannelApiKeyService._asr_key_snapshot(db, model_id, tenant_id)
@@ -409,6 +410,15 @@ class ChannelApiKeyService:
             _require_wellformed_api_base(snapshot["provider"], data.api_base, snapshot["type"])
             _require_asr_api_base(data.api_base)
             _require_supported_api_base(snapshot["provider"], data.api_base, snapshot["type"])
+            await _probe_asr_submission(
+                model_name=snapshot["name"],
+                provider=snapshot["provider"],
+                api_key=data.api_key,
+                api_base=data.api_base,
+                input_modalities=snapshot["input_modalities"],
+                output_modalities=snapshot["output_modalities"],
+                features=snapshot["features"],
+            )
             return ChannelApiKeyService._register_asr_key(
                 db, model_id, tenant_id, created_by, data.model_dump(), snapshot
             )

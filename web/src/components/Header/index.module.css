@@ -2,10 +2,13 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 12px;
   padding: 16px 24px 16px 20px;
   color: #212332;
   z-index: 0;
   font-size: 14px;
+  width: 100%;
+  overflow: hidden;
 }
 .title {
   font-family: PingFangSC, PingFang SC;
@@ -22,6 +25,13 @@
 }
 .header :global(.ant-breadcrumb) {
   line-height: 31px;
+  max-width: 100%;
+  overflow: hidden;
+}
+.header :global(.ant-breadcrumb ol) {
+  flex-wrap: nowrap;
+  max-width: 100%;
+  overflow-x: auto;
 }
 .header :global(.ant-breadcrumb .ant-breadcrumb-item a) {
   height: inherit;

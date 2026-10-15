@@ -362,24 +362,27 @@ async def _resolve_embedding_model_names(
     new_model_config_id: str | None,
     tenant_id: uuid.UUID,
 ) -> tuple[str | None, str | None]:
-    """解析新旧 embedding 模型配置的实际调用名（``ModelApiKey.model_name``）。
+    """Resolve embedding model configs to their runtime call names via the non-decrypting view.
 
-    通过异步会话解析，避免在 async 端点的事件循环内执行阻塞的同步渠道解析。
-    解析不到时对应位置返回 ``None``，调用方按“模型名称不同”处理。
+    This path only needs the model name for the re-embed comparison — going through
+    the credential resolver would drag channel resolution (and, in rollback mode, the
+    legacy association fallback) into a normal admin request path. Async session keeps
+    the event loop free; a resolution failure yields ``None`` (caller treats the names
+    as different).
     """
     from app.db import get_async_db_context
-    from app.services.model_service import ModelApiKeyService
+    from app.services.model_service import ModelConfigService
 
     async def resolve_one(model_config_id: str | None) -> str | None:
         if not model_config_id:
             return None
         try:
-            api_key = await ModelApiKeyService.get_available_api_key_async(
+            view = await ModelConfigService.get_runtime_model_view_async(
                 async_db, uuid.UUID(str(model_config_id)), tenant_id
             )
         except BusinessException:
             return None
-        return api_key.model_name if api_key else None
+        return view.model_name if view else None
 
     async with get_async_db_context() as async_db:
         return (
@@ -2322,27 +2325,24 @@ async def update_workspace_models_configs(
         if current_embedding_config_id != resolved_models["embedding"]:
             old_embedding_config_id = current_embedding_config_id
             new_embedding_config_id = resolved_models["embedding"]
+            if await get_active_reembed_job_id_async(db, workspace_id):
+                _raise_model_config_error(
+                    [
+                        _model_issue(
+                            "embedding",
+                            reason="embedding_switch_in_progress",
+                            locale=locale,
+                        )
+                    ],
+                    locale,
+                    code=BizCode.STATE_CONFLICT,
+                )
             old_embedding_name, new_embedding_name = await _resolve_embedding_model_names(
                 old_embedding_config_id,
                 new_embedding_config_id,
                 db_workspace.tenant_id,
             )
             if old_embedding_name != new_embedding_name:
-                # 在途重算未完成前禁止再次切换：存量向量还没全部用当前模型重建，
-                # 再换一次会让已重建的部分重新落回旧模型空间，等于永远追不上。
-                # 检查与建任务同处 workspace 行排他锁内，不存在"检查—插入"的空窗。
-                if await get_active_reembed_job_id_async(db, workspace_id):
-                    _raise_model_config_error(
-                        [
-                            _model_issue(
-                                "embedding",
-                                reason="embedding_switch_in_progress",
-                                locale=locale,
-                            )
-                        ],
-                        locale,
-                        code=BizCode.STATE_CONFLICT,
-                    )
                 # 存量向量由旧模型生成，与新模型写入的向量不再可比（同维会混在一起，
                 # 异维会从向量召回里消失），因此登记一次重算任务。
                 # 与模型变更写在同一个事务里：要么都成立，要么都不成立。
@@ -2362,7 +2362,8 @@ async def update_workspace_models_configs(
                     f"{old_embedding_name} -> {new_embedding_name}"
                 )
             else:
-                # 换的是配置而不是底层模型（同一模型的不同配置行），向量空间未变。
+                # 换的是配置而不是底层模型（同一模型的不同配置行），向量空间未变，
+                # 不需要新任务——但上面那道在途守卫照样管着它：在途期间槽位不能动。
                 business_logger.info(
                     f"工作空间 embedding 配置变更但底层模型名未变，跳过存量重算: "
                     f"workspace_id={workspace_id}, model={new_embedding_name}"
