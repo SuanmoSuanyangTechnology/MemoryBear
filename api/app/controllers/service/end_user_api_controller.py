@@ -3,6 +3,7 @@
 import uuid
 
 from fastapi import APIRouter, Body, Depends, Query, Request
+from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
 from app.controllers import end_user_controller
@@ -47,8 +48,13 @@ async def create_end_user(
     memory configuration. If not provided, falls back to the workspace default config.
     Optionally accepts an app_id to bind the end user to a specific app.
     """
-    body = await request.json()
-    payload = CreateEndUserRequest(**body)
+    try:
+        body = await request.json()
+        if not isinstance(body, dict):
+            raise ValueError("Request body must be a JSON object")
+        payload = CreateEndUserRequest(**body)
+    except (ValueError, ValidationError) as exc:
+        raise BusinessException("请求体格式无效", BizCode.INVALID_PARAMETER, cause=exc)
     workspace_id = api_key_auth.workspace_id
 
     logger.info("Create end user request - other_id: %s, workspace_id: %s", payload.other_id, workspace_id)
@@ -100,8 +106,6 @@ async def create_end_user(
             memory_config_id=memory_config_id,
             other_name=payload.other_name,
         )
-        end_user.other_name = payload.other_name
-        await async_db.commit()
         logger.info(f"End user ready: {end_user.id}")
 
         # 终端用户已落库，用量真正发生变化后才评估告警。
@@ -235,8 +239,13 @@ async def update_end_user_info(
     Updates the info record (other_name, aliases, meta_data) for the specified end user.
     Delegates to the manager-side controller for shared logic.
     """
-    body = await request.json()
-    payload = EndUserInfoUpdate(**body)
+    try:
+        body = await request.json()
+        if not isinstance(body, dict):
+            raise ValueError("Request body must be a JSON object")
+        payload = EndUserInfoUpdate(**body)
+    except (ValueError, ValidationError) as exc:
+        raise BusinessException("请求体格式无效", BizCode.INVALID_PARAMETER, cause=exc)
 
     async with get_async_db_context() as auth_db:
         current_user = await get_current_user_snapshot_from_api_key_async(auth_db, api_key_auth)

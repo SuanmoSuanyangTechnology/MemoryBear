@@ -12,6 +12,7 @@ from app.core.logging_config import get_db_logger
 from app.core.utils.datetime_utils import utcnow_naive
 from app.models import User
 from app.models.end_user_info_model import EndUserInfo
+from app.repositories.end_user_info_repository import EndUserInfoRepository
 from app.models.end_user_model import EndUser, EndUserMerge
 from app.models.workspace_model import Workspace
 from app.utils.redis_cache import redis_cache
@@ -1358,6 +1359,7 @@ class EndUserRepository:
             db_logger.error(f"获取或创建终端用户(含配置)时出错: {str(e)}")
             raise
 
+        
     async def get_or_create_end_user_with_config_async(
             self,
             app_id: Optional[uuid.UUID],
@@ -1389,6 +1391,16 @@ class EndUserRepository:
                     end_user.app_id = app_id
                 if memory_config_id and not end_user.memory_config_id:
                     end_user.memory_config_id = memory_config_id
+                if other_name and other_name.strip():
+                    normalized_name = other_name.strip()
+                    end_user.other_name = normalized_name
+                    info_repo = EndUserInfoRepository(self.db)
+                    info_record = await info_repo.get_end_user_info_async(end_user.id)
+                    if info_record:
+                        info_record.other_name = normalized_name
+                    else:
+                        # 表end_user_info中没有数据，同时也创建
+                        self.db.add(EndUserInfo(end_user_id=end_user.id, other_name=normalized_name, aliases=[], meta_data={}))
                 await self.db.commit()
                 await self.db.refresh(end_user)
                 return end_user
@@ -1405,15 +1417,26 @@ class EndUserRepository:
                     merged_target.app_id = app_id
                 if memory_config_id and not merged_target.memory_config_id:
                     merged_target.memory_config_id = memory_config_id
+                if other_name and other_name.strip():
+                    normalized_name = other_name.strip()
+                    merged_target.other_name = normalized_name
+                    info_repo = EndUserInfoRepository(self.db)
+                    info_record = await info_repo.get_end_user_info_async(merged_target.id)
+                    if info_record:
+                        info_record.other_name = normalized_name
+                    else:
+                        self.db.add(EndUserInfo(end_user_id=merged_target.id, other_name=normalized_name, aliases=[], meta_data={}))
                 await self.db.commit()
                 await self.db.refresh(merged_target)
                 return merged_target
 
-            # 创建新用户
+            # 创建新用户，end_user和end_user_info同时创建
+            normalized_name = other_name.strip() if other_name and other_name.strip() else ""
             end_user = EndUser(
                 app_id=app_id,
                 workspace_id=workspace_id,
                 other_id=other_id,
+                other_name=normalized_name,
                 memory_config_id=memory_config_id,
             )
             self.db.add(end_user)
@@ -1421,7 +1444,7 @@ class EndUserRepository:
 
             end_user_info = EndUserInfo(
                 end_user_id=end_user.id,
-                other_name=other_name or "",
+                other_name=normalized_name,
                 aliases=[],
                 meta_data={}
             )

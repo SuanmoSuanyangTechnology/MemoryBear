@@ -636,6 +636,9 @@ class UserMemoryService:
                 }
             
             allowed_fields = {'other_name', 'aliases', 'meta_data'}
+            # 更新数据中`other_name` 为`None` 或空字符串时，将该字段从待更新字典移除，避免把已有名称清空；
+            if update_data.get('other_name') is None or update_data.get('other_name') == "":
+                update_data.pop('other_name', None)
             _user_placeholder_names = _USER_PLACEHOLDER_NAMES
             
             if 'other_name' in update_data and update_data['other_name'] and update_data['other_name'].strip() in _user_placeholder_names:

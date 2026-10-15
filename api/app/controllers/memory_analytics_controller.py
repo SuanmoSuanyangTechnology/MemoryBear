@@ -370,7 +370,7 @@ async def get_community_graph_data_api(
 @router.get("/interest_distribution", response_model=ApiResponse)
 async def get_interest_distribution_by_user_api(
         end_user_id: str = Query(..., description="用户ID（必填）"),
-        limit: int = Query(5, le=5, description="返回兴趣标签数量限制，最多5个"),
+        limit: int = Query(5, ge=1, le=5, description="返回兴趣标签数量限制，1到5个"),
         language_type: str = Header(default=None, alias="X-Language-Type"),
         current_user: CurrentUserSnapshot = Depends(get_current_user_async),
 ):
