@@ -97,7 +97,9 @@ const Chat: FC<ChatProps> = ({
   const [message, setMessage] = useState<string | undefined>(undefined)
   const [audioStatusMap, setAudioStatusMap] = useState<Record<string, string>>({})
   const abortRef = useRef<(() => void) | null>(null)
-  const features = useMemo(() => data?.features ?? {}, [data?.features])
+  const features = useMemo(() => {
+    return data?.features ?? data?.supervisor_config?.features ?? {}
+  }, [data?.features, data?.supervisor_config?.features])
 
   const cleanup = () => {
     abortRef.current?.()
@@ -233,6 +235,7 @@ const Chat: FC<ChatProps> = ({
           compareLoadingRef,
           conversationId,
           setConversationId,
+          audioPollingRef,
         })
 
         setTimeout(() => {
@@ -299,15 +302,24 @@ const Chat: FC<ChatProps> = ({
       streamLoading: chat.model_config_id === column.model_config_id,
     })))
 
-    const handleStreamMessage = createRegenerateStreamHandler({
-      modelConfigId: column.model_config_id,
-      updateChatList,
-      setLoading,
-      compareLoadingRef,
-      audioStatusMap,
-      setAudioStatusMap,
-      audioPollingRef,
-    })
+    const handleStreamMessage = isCluster
+      ? createClusterStreamHandler({
+        updateChatList,
+        setLoading,
+        compareLoadingRef,
+        conversationId,
+        setConversationId,
+        audioPollingRef,
+      })
+      : createRegenerateStreamHandler({
+        modelConfigId: column.model_config_id,
+        updateChatList,
+        setLoading,
+        compareLoadingRef,
+        audioStatusMap,
+        setAudioStatusMap,
+        audioPollingRef,
+      })
 
     setTimeout(() => {
       draftRunRegenerate(id, vo.id as string, handleStreamMessage, (abort) => { abortRef.current = abort })
@@ -378,7 +390,6 @@ const Chat: FC<ChatProps> = ({
   const reportMsg = (vo: ChatItem) => {
     reportModalRef.current?.handleOpen(vo)
   }
-  console.log('chatList', chatList)
   const isHasLabel = useMemo(() => chatList.some(item => item.label), [chatList])
   const isNeedVariableConfig = useMemo(() => chatVariables?.some(vo => vo.required && !vo.value), [chatVariables])
   return (
@@ -435,16 +446,16 @@ const Chat: FC<ChatProps> = ({
                   labelPosition="top"
                   labelFormat={(item) => item.role === 'user' ? t('application.you') : chat.label || t(`application.ai`)}
                   renderRuntime={(item, index) => <Runtime source={source} item={item} index={index} />}
-                  isSupportTools={!isCluster}
-                  isAlwaysShowAssistantTools={!isCluster}
+                  isSupportTools={true}
+                  isAlwaysShowAssistantTools={true}
                   isEnded={!loading || !chat.streamLoading}
-                  handleFeedback={isCluster ? undefined : handleFeedback}
-                  handleFavorite={isCluster ? undefined : handleFavorite}
-                  deleteMsg={isCluster ? undefined : deleteMsg}
-                  reportMsg={isCluster ? undefined : reportMsg}
+                  handleFeedback={handleFeedback}
+                  handleFavorite={handleFavorite}
+                  deleteMsg={deleteMsg}
+                  reportMsg={reportMsg}
                   regenerateMaxCount={5}
-                  regenerateMessages={isCluster ? undefined : regenerateMessages}
-                  handleVersionChange={isCluster ? undefined : handleVersionChange}
+                  regenerateMessages={regenerateMessages}
+                  handleVersionChange={handleVersionChange}
                 />
               </Flex>
             ))}
@@ -469,9 +480,9 @@ const Chat: FC<ChatProps> = ({
                   chatVariables && chatVariables.length > 0 ?(
                     <Tooltip title={t('memoryConversation.variableConfig')}>
                       <Flex justify="center" align="center"
-                        className={clsx("rb:size-7 rb:border rb:cursor-pointer rb:hover:bg-[#F6F6F6] rb:rounded-full rb:shadow-[0px_2px_12px_0px_rgba(23,23,25,0.12)]", {
-                          'rb:border-[#FF5D34]': isNeedVariableConfig,
-                          'rb:border-[#EBEBEB]': !isNeedVariableConfig,
+                        className={clsx("rb:size-7 rb:border rb:cursor-pointer rb:hover:bg-gray-100 rb:rounded-full rb:shadow-[0px_2px_12px_0px_rgba(23,23,25,0.12)]", {
+                          'rb:border-red-500': isNeedVariableConfig,
+                          'rb:border-gray-200': !isNeedVariableConfig,
                         })}
                         onClick={handleEditVariables}
                       >

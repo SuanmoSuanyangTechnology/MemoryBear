@@ -1,9 +1,3 @@
-/*
- * @Author: ZhaoYing 
- * @Date: 2026-02-03 16:28:07 
- * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-07-02 16:37:51
- */
 /**
  * Model Configuration Modal
  * Allows configuring model parameters like temperature, max_tokens, top_p, etc.
@@ -15,12 +9,13 @@ import { Form, type SelectProps, Checkbox, Button } from 'antd';
 import { useTranslation } from 'react-i18next';
 import { useParams } from 'react-router-dom';
 
-import type { ModelConfig, ModelConfigModalRef, Config, Source } from '../types'
+import type { ModelConfig, ModelConfigModalRef, Config, Source } from '../../types'
 import type { Model } from '@/views/ModelManagement/types'
 import RbModal from '@/components/RbModal'
 import RbSlider from '@/components/RbSlider'
 import ModelSelect from '@/components/ModelSelect'
 import { resetAppModelConfig } from '@/api/application';
+import { configFields, minThinkingBudgetTokens, defaultThinkingBudgetTokens } from './constants'
 
 const FormItem = Form.Item;
 
@@ -33,24 +28,6 @@ interface ModelConfigModalProps {
   /** Application configuration data */
   data: Config;
 }
-
-/**
- * Modal for configuring model parameters
- */
-/**
- * Model parameter configuration fields
- */
-const configFields = [
-  { key: 'temperature', max: 2, min: 0, step: 0.1, defaultValue: 0.7 },
-  { key: 'max_tokens', max: 32000, min: 256, step: 1, defaultValue: 8000 },
-  { key: 'top_p', max: 1, min: 0, step: 0.1, defaultValue: 1.0 },
-  { key: 'frequency_penalty', max: 2.0, min: -2.0, step: 0.1, defaultValue: 0.0 },
-  { key: 'presence_penalty', max: 2.0, min: -2.0, step: 0.1, defaultValue: 0.0 },
-  { key: 'n', max: 10, min: 1, step: 1, defaultValue: 1 },
-]
-
-const minThinkingBudgetTokens = 128;
-const defaultThinkingBudgetTokens = 1000;
 
 const omitOutputSettings = (modelParameters?: ModelConfig | null): ModelConfig => {
   const filteredParameters = { ...(modelParameters ?? {}) };
@@ -84,11 +61,29 @@ const ModelConfigModal = forwardRef<ModelConfigModalRef, ModelConfigModalProps>(
       form.setFieldsValue({
         ...(data?.model_parameters || {}),
         default_model_config_id: data.default_model_config_id,
-        input_modalities: model?.input_modalities ?? data.input_modalities ?? data.model_parameters?.input_modalities ?? ['text'],
-        output_modalities: model?.output_modalities ?? data.output_modalities ?? data.model_parameters?.output_modalities ?? ['text'],
+        input_modalities: model?.input_modalities ?? data.input_modalities ?? data.model_parameters?.input_modalities,
+        output_modalities: model?.output_modalities ?? data.output_modalities ?? data.model_parameters?.output_modalities,
         features: model?.features ?? data.model_parameters?.features ?? []
       })
-    } else if (source === 'chat' || source === 'multi_agent') {
+    } else if (source === 'multi_agent') {
+      if (model) {
+        form.setFieldsValue({
+          ...(model || {}),
+          default_model_config_id: model.default_model_config_id,
+          input_modalities: model?.input_modalities ?? data.input_modalities ?? data.model_parameters?.input_modalities,
+          output_modalities: model?.output_modalities ?? data.output_modalities ?? data.model_parameters?.output_modalities,
+          features: model?.features ?? data.model_parameters?.features ?? []
+        })
+      } else {
+        form.setFieldsValue({
+          ...(data?.model_parameters || {}),
+          default_model_config_id: undefined,
+          input_modalities: [],
+          output_modalities: [],
+          features: []
+        })
+      }
+    } else if (source === 'chat') {
       if (model) {
         form.setFieldsValue({
           ...(model?.model_parameters || {}),
@@ -118,8 +113,8 @@ const ModelConfigModal = forwardRef<ModelConfigModalRef, ModelConfigModalProps>(
   /** Handle model selection change */
   const handleChange: SelectProps['onChange'] = (_value, option) => {
     const newValues: ModelConfig = {
-      input_modalities: (option as Model | undefined)?.input_modalities ?? ['text'],
-      output_modalities: (option as Model | undefined)?.output_modalities ?? ['text'],
+      input_modalities: (option as Model | undefined)?.input_modalities,
+      output_modalities: (option as Model | undefined)?.output_modalities,
       features: (option as Model | undefined)?.features ?? [],
       deep_thinking: (option as Model | undefined)?.features?.includes('thinking_only'),
       thinking_budget_tokens: defaultThinkingBudgetTokens,
@@ -139,13 +134,13 @@ const ModelConfigModal = forwardRef<ModelConfigModalRef, ModelConfigModalProps>(
 
   useEffect(() => {
     form.setFieldsValue(omitOutputSettings(data?.model_parameters))
-  }, [data?.model_parameters])
+  }, [data?.model_parameters, form])
 
   useEffect(() => {
     if (values?.deep_thinking && !values?.thinking_budget_tokens) {
       form.setFieldValue('thinking_budget_tokens', defaultThinkingBudgetTokens)
     }
-  }, [values?.deep_thinking, values?.thinking_budget_tokens, defaultThinkingBudgetTokens])
+  }, [form, values?.deep_thinking, values?.thinking_budget_tokens])
 
   const handleReset = () => {
     if (!id) return
@@ -172,32 +167,27 @@ const ModelConfigModal = forwardRef<ModelConfigModalRef, ModelConfigModalProps>(
         <FormItem
           name="default_model_config_id"
           label={t('application.currentModel')}
-          rules={[{ required: source !== 'multi_agent', message: t('common.pleaseSelect') }]}
-          hidden={source === 'multi_agent'}
+          rules={[{ required: true, message: t('common.pleaseSelect') }]}
         >
-          {source !== 'multi_agent' &&
-            <ModelSelect
-              params={{type: 'llm'}}
-              placeholder={t('common.pleaseSelect')}
-              onChange={handleChange}
-            />
-          }
+          <ModelSelect
+            params={{type: 'llm'}}
+            placeholder={t('common.pleaseSelect')}
+            onChange={handleChange}
+          />
         </FormItem>
-        {['model', 'chat'].includes(source) && <>
-          <FormItem name="features" hidden />
-          <FormItem name="input_modalities" hidden />
-          <FormItem name="output_modalities" hidden />
-        </>}
+        <FormItem name="features" hidden />
+        <FormItem name="input_modalities" hidden />
+        <FormItem name="output_modalities" hidden />
         <FormItem name="json_output" valuePropName="checked" hidden={!(values?.features?.includes('json_output'))}>
           <Checkbox>{t('application.json_output')}</Checkbox>
         </FormItem>
-        <FormItem name="deep_thinking" valuePropName="checked" hidden={!['model', 'chat'].includes(source) || !(values?.deep_thinking || values?.features?.includes('thinking') || values?.features?.includes('thinking_only'))}>
+        <FormItem name="deep_thinking" valuePropName="checked" hidden={!(values?.deep_thinking || values?.features?.includes('thinking') || values?.features?.includes('thinking_only'))}>
           <Checkbox disabled={values?.features?.includes('thinking_only')}>{t('application.deep_thinking')}</Checkbox>
         </FormItem>
         <FormItem
           name="thinking_budget_tokens"
           label={t('application.thinking_budget_tokens')}
-          hidden={!['model', 'chat'].includes(source) || !(values?.deep_thinking || values?.features?.includes('thinking') || values?.features?.includes('thinking_only'))}
+          hidden={!(values?.deep_thinking || values?.features?.includes('thinking') || values?.features?.includes('thinking_only'))}
           extra={<>{t('application.range')}: [{minThinkingBudgetTokens}, {t(`application.max_tokens`)}: {values?.max_tokens}]</>}
           dependencies={['max_tokens']}
           rules={[
@@ -230,7 +220,7 @@ const ModelConfigModal = forwardRef<ModelConfigModalRef, ModelConfigModalProps>(
         {source === 'chat' && <FormItem name="label" hidden />}
 
 
-        <div className="rb:text-[14px] rb:font-medium rb:text-[#5B6167] rb:mb-4">{t('application.parameterConfig')}</div>
+        <div className="rb:text-[14px] rb:font-medium rb:text-gray-600 rb:mb-4">{t('application.parameterConfig')}</div>
 
         {configFields.map(item => (
           <FormItem
@@ -238,6 +228,7 @@ const ModelConfigModal = forwardRef<ModelConfigModalRef, ModelConfigModalProps>(
             name={item.key}
             label={t(`application.${item.key}`)}
             extra={<>{t(`application.${item.key}_desc`)} | {t('application.range')}: [{item.min}, {item.max}]</>}
+            initialValue={item.defaultValue}
           >
             <RbSlider 
               max={item.max}
