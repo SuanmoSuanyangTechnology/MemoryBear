@@ -1214,6 +1214,7 @@ class MultiAgentService:
         （message/reasoning/sub_agent_* 等）→ end → regenerate_end。
         落库与版本管理骨架同 regenerate（非流式）。
         """
+        import asyncio as _asyncio
         import json as _json
         import time as _time
         from app.models import Message
@@ -1311,6 +1312,15 @@ class MultiAgentService:
                 if _ev == "message" and "content" in _data:
                     full_content += _data["content"]
                 yield event
+        except (GeneratorExit, _asyncio.CancelledError):
+            # 消费方中途断开（GeneratorExit / 任务取消均属 BaseException，不会被下方
+            # except Exception 捕获）：此刻旧版本已被置为非当前、新版本尚未落库，
+            # 不回滚会让该轮所有版本都 is_current=false。这里不能再 yield，只做 DB 收尾后重抛。
+            try:
+                self._mark_message_current(original_msg.id, True)
+            except Exception as rollback_err:
+                logger.warning("断开后回滚原版本失败", extra={"error": str(rollback_err)})
+            raise
         except Exception as e:
             stream_failed = True
             failure_error = str(e)

@@ -785,7 +785,8 @@ async def chat(
                 runtime_config = agent_config_4_app_release(release)
             elif app_type == AppType.MULTI_AGENT:
                 config = release.config or {}
-                if not config.get("sub_agents"):
+                # supervisor_loop 允许零子 Agent（主管退化为裸 Agent）；其余模式必须有子 Agent
+                if not config.get("sub_agents") and config.get("orchestration_mode") != "supervisor_loop":
                     raise BusinessException("多 Agent 应用未配置子 Agent", BizCode.AGENT_CONFIG_MISSING)
                 runtime_config = multi_agent_config_4_app_release(release)
             elif app_type in (AppType.WORKFLOW, AppType.PURE_WORKFLOW):
@@ -1569,7 +1570,8 @@ async def regenerate_message(
         from app.services.multi_agent_service import MultiAgentService
 
         cluster_cfg = multi_agent_config_4_app_release(release)
-        if not (cluster_cfg.sub_agents or []):
+        # supervisor_loop 允许零子 Agent（主管退化为裸 Agent）；其余模式必须有子 Agent
+        if not (cluster_cfg.sub_agents or []) and cluster_cfg.orchestration_mode != "supervisor_loop":
             raise BusinessException("多 Agent 应用未配置子 Agent", BizCode.AGENT_CONFIG_MISSING)
 
         # 存储/记忆上下文：与下方 AGENT 分支同源（AGENT 分支的计算在本分支之后，

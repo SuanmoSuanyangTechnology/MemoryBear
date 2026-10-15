@@ -2397,6 +2397,15 @@ class MultiAgentOrchestrator:
             "避免主对话被工具输出淹没；结论性小问题用你自己的工具或知识直接回答。\n"
             "最终答案必须是完整、自洽的中文回复，不要提及调度过程。"
         )
+        if not self.sub_agents:
+            # 无子 Agent：主管就是裸 Agent，不能再提"调用子 Agent 工具/可用子 Agent: (空)"，
+            # 否则模型会被空名册误导去幻想工具。自用工具引导保留。
+            auto_prompt = (
+                "你是多智能体集群的主管（supervisor），当前没有配置子 Agent，"
+                "请直接回答用户问题。"
+                f"{own_tools_section}\n\n"
+                "最终答案必须是完整、自洽的中文回复。"
+            )
         if not custom_prompt:
             return auto_prompt
         return f"{custom_prompt}\n\n---\n\n{auto_prompt}"
@@ -2835,10 +2844,8 @@ class MultiAgentOrchestrator:
         # 本轮入口消息（主管技能过滤 load_skill_config 用，同 Agent 应用口径）
         self._loop_entry_message = message
 
-        # S9：前置校验失败直接抛错（模式语义可预期，不静默换档）
-        if not self.sub_agents:
-            self._loop_stop_reason = "error"
-            raise BusinessException("没有可用的子 Agent", BizCode.AGENT_CONFIG_MISSING)
+        # 子 Agent 可为空：此时主管就是一个裸 Agent（只用自用工具/知识直接作答），
+        # 不拦截。主模型缺失仍在下面的 _resolve_supervisor_model_view 前置校验里抛错。
         model_view = await self._resolve_supervisor_model_view()
 
         self._set_merge_mode_actual("loop", "supervisor_loop 模式（主管 ReAct 循环）")
@@ -3077,10 +3084,7 @@ class MultiAgentOrchestrator:
         self._loop_stop_reason = None
         self._loop_entry_message = message
 
-        # S9：前置校验失败直接抛错
-        if not self.sub_agents:
-            self._loop_stop_reason = "error"
-            raise BusinessException("没有可用的子 Agent", BizCode.AGENT_CONFIG_MISSING)
+        # 子 Agent 可为空（同流式版）：主管退化为裸 Agent 直接作答，不拦截
         model_view = await self._resolve_supervisor_model_view()
 
         self._set_merge_mode_actual("loop", "supervisor_loop 模式（主管 ReAct 循环）")

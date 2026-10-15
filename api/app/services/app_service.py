@@ -363,7 +363,11 @@ class AppService:
                 )
 
         # 3. 检查子 Agent 配置
-        if not multi_agent_config.sub_agents or len(multi_agent_config.sub_agents) == 0:
+        # supervisor_loop 允许零子 Agent（主管退化为裸 Agent 直接作答）；其余模式依赖子 Agent 才能运行
+        if (
+            multi_agent_config.orchestration_mode != "supervisor_loop"
+            and (not multi_agent_config.sub_agents or len(multi_agent_config.sub_agents) == 0)
+        ):
             raise BusinessException(
                 "未配置子 Agent，无法运行",
                 BizCode.AGENT_CONFIG_MISSING
