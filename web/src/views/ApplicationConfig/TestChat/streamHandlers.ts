@@ -241,13 +241,14 @@ export interface ClusterStreamDeps {
   setLoading: (loading: boolean) => void;
   setStreamLoading: (loading: boolean) => void;
   streamLoadingRef: MutableRefObject<boolean>;
+  audioPollingRef: MutableRefObject<Map<string, ReturnType<typeof setInterval>>>;
 }
 
 /** Adapts the shared cluster event processor to TestChat's versioned message list. */
 export const createTestClusterStreamHandler = (deps: ClusterStreamDeps) => {
   const {
     conversationId, setConversationId, setChatList,
-    setLoading, setStreamLoading, streamLoadingRef,
+    setLoading, setStreamLoading, streamLoadingRef, audioPollingRef,
   } = deps
 
   return createClusterStreamProcessor({
@@ -255,6 +256,9 @@ export const createTestClusterStreamHandler = (deps: ClusterStreamDeps) => {
       setChatList(prev => mapLastVersion(prev, message =>
         message.role === 'assistant' ? updater(message) : message,
       ))
+    },
+    appendAssistantReasoning: content => {
+      if (content) setChatList(prev => appendReasoningMessage(prev, content))
     },
     appendAssistantContent: content => {
       if (content) setChatList(prev => appendAssistantMessage(prev, content))
@@ -267,6 +271,39 @@ export const createTestClusterStreamHandler = (deps: ClusterStreamDeps) => {
     },
     syncConversationId: id => {
       if (id && conversationId !== id) setConversationId(id)
+    },
+    stopInitialLoading: () => {
+      if (streamLoadingRef.current) {
+        streamLoadingRef.current = false
+        setStreamLoading(false)
+      }
+    },
+    startAudioPolling: (audioUrl, pollingKey) => {
+      const fileId = pollingKey === audioUrl ? audioUrl.split('/').pop() : pollingKey
+      if (!fileId || audioPollingRef.current.has(pollingKey)) return
+
+      const clearPolling = () => {
+        clearInterval(audioPollingRef.current.get(pollingKey))
+        audioPollingRef.current.delete(pollingKey)
+      }
+      const timer = setInterval(() => {
+        getFileStatusById(fileId)
+          .then(res => {
+            const { status } = res as { status: string }
+            if (!status || status === 'pending') return
+            clearPolling()
+            setChatList(prev => mapLastVersion(prev, message => (
+              message.role === 'assistant'
+                ? {
+                    ...message,
+                    meta_data: { ...(message.meta_data || {}), audio_status: status },
+                  }
+                : message
+            )))
+          })
+          .catch(clearPolling)
+      }, 2000)
+      audioPollingRef.current.set(pollingKey, timer)
     },
     finishStreaming: () => {
       streamLoadingRef.current = false
