@@ -51,6 +51,8 @@ from app.core.memory.utils.name_similarity_utils import cosine_similarity
 logger = logging.getLogger(__name__)
 bear = BearLogger("memory.pipeline")
 
+# 继承快写情绪：快写 Dialogue 尚未落库时的最长等待（秒），0 表示只查询一次不等待
+_INHERIT_WAIT_SECONDS = 3.0
 # 继承快写情绪：外层 asyncio.wait_for 在等待上限之外给单次查询的宽限（秒），整步硬上限 = wait + 宽限
 _INHERIT_QUERY_GRACE_SECONDS = 2.0
 
@@ -992,7 +994,7 @@ class WritePipeline:
         """把快写 Dialogue 的 BERT 情绪继承到本次 user Statement（原地改写 ``result.statement_nodes``）。
 
         只由 ``memory_config.emotion_enabled`` 控制是否执行。查询快写 Dialogue 时最多等待
-        ``settings.FAST_WRITE_EMOTION_INHERIT_WAIT_SECONDS``，整步硬上限为等待 + ``_INHERIT_QUERY_GRACE_SECONDS``。
+        ``_INHERIT_WAIT_SECONDS``，整步硬上限为等待 + ``_INHERIT_QUERY_GRACE_SECONDS``。
         除任务取消外，任何失败都只降级为该批 Statement 情绪为空，不阻断写入。
 
         Args:
@@ -1003,7 +1005,6 @@ class WritePipeline:
             return
 
         try:
-            from app.core.config import settings
             from app.core.memory.emotion.emotion_inheritance import (
                 InheritanceReport,
                 apply_inherited_emotions,
@@ -1035,7 +1036,7 @@ class WritePipeline:
                 )
                 return
 
-            wait_seconds = settings.FAST_WRITE_EMOTION_INHERIT_WAIT_SECONDS
+            wait_seconds = _INHERIT_WAIT_SECONDS
             repo = DialogRepository(self._neo4j_connector)
             rows: Dict[str, Any] = {}
             fetch_reason: Optional[str] = None
