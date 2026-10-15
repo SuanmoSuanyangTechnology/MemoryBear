@@ -8,7 +8,7 @@ from src.bootstrap import get_settings
 from src.db import KnowledgeBase
 from src.migration_policy import VERSION_TABLE, include_name, include_object
 
-settings = get_settings()
+settings = context.config.attributes.get("settings") or get_settings()
 options = {
     "target_metadata": KnowledgeBase.metadata,
     "version_table": VERSION_TABLE,
@@ -17,18 +17,26 @@ options = {
     "compare_type": True,
     "compare_server_default": True,
     "transaction_per_migration": True,
+    "dont_mutate": bool(context.config.attributes.get("read_only", False)),
 }
+
+
+def run_migrations(connection):
+    context.configure(connection=connection, **options)
+    with context.begin_transaction():
+        context.run_migrations()
+
 
 if context.is_offline_mode():
     context.configure(url=settings.database_url_sync, literal_binds=True, **options)
     with context.begin_transaction():
         context.run_migrations()
+elif (connection := context.config.attributes.get("connection")) is not None:
+    run_migrations(connection)
 else:
     engine = create_engine(settings.database_url_sync, poolclass=pool.NullPool)
     try:
         with engine.connect() as connection:
-            context.configure(connection=connection, **options)
-            with context.begin_transaction():
-                context.run_migrations()
+            run_migrations(connection)
     finally:
         engine.dispose()
