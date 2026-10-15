@@ -100,6 +100,12 @@ COPY --from=builder --chown=memknowledge:memknowledge /opt/tika /opt/tika
 COPY --from=builder --chown=memknowledge:memknowledge \
     /opt/tiktoken-cache /opt/tiktoken-cache
 
+# Validate packaged migrations during the image build without connecting to a database.
+RUN test -f /code/mem-knowledge/alembic.ini && \
+    python -c "from alembic.script import ScriptDirectory; \
+graph = ScriptDirectory('/code/mem-knowledge/migrations'); \
+assert len(graph.get_heads()) == 1, 'Expected exactly one knowledge migration head'"
+
 RUN chown memknowledge:memknowledge /files
 
 USER memknowledge
