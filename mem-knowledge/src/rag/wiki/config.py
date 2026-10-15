@@ -9,7 +9,7 @@ from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from typing import Any
 
-TEMPLATE_VERSION = "wiki_raw_evidence_v2"
+TEMPLATE_VERSION = "wiki_readable_evidence_v3"
 MAP_TASK = "mem_knowledge.tasks.sync_wiki_document"
 REDUCE_TASK = "mem_knowledge.tasks.reduce_wiki_page"
 BACKFILL_TASK = "mem_knowledge.tasks.enqueue_unprocessed_wiki_documents"
@@ -35,6 +35,10 @@ class WikiError(RuntimeError):
 
 class WikiDeferred(WikiError):
     """Contention or an incomplete source; separate from model failure budget."""
+
+
+class WikiSourcePending(WikiError):
+    """An active source may have an existing task identity in the parse registry."""
 
 
 class WikiSuperseded(WikiError):

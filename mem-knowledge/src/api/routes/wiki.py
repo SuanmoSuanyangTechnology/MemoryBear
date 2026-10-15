@@ -10,9 +10,10 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from ...errors import KnowledgeError
 from ...rag.wiki.config import WikiError
-from ...repositories.wiki import read, state
+from ...repositories.wiki import read
 from ...runtime import ProcessRuntime
 from ...services.wiki.execution import publish_map
+from ...services.wiki.generation import admit_generation
 from ...services.wiki.runtime import transaction
 from ..dependencies import Principal, get_principal, get_runtime
 from ..schemas.common import SuccessEnvelope, success
@@ -177,15 +178,7 @@ async def generate(
     runtime: RuntimeDep,
 ):
     try:
-        delivery = await asyncio.to_thread(
-            transaction,
-            runtime,
-            state.admit,
-            kb_id,
-            document_id,
-            explicit=True,
-            expected_scope=_scope(kb_id, principal),
-        )
+        delivery = await admit_generation(runtime, kb_id, document_id, _scope(kb_id, principal))
         if delivery is None:
             raise KnowledgeError.from_code("KB_WIKI_NOT_FOUND")
         await asyncio.to_thread(publish_map, runtime, delivery, terminal_on_failure=True)

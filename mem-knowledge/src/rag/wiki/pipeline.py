@@ -15,6 +15,9 @@ from .model import request_tokens, tokens
 logger = logging.getLogger(__name__)
 
 CITATION = re.compile(r"\[\^([A-Za-z0-9_-]+)\]")
+CITATION_DEFINITION = re.compile(
+    r"^ {0,3}\[\^([A-Za-z0-9_-]+)\]:[^\n]*(?:\n(?: {4}|\t)[^\n]*)*(?:\n|$)", re.M
+)
 PAGE_LINK = re.compile(r"\[\[([^\]|]+)\|([^\]\n]+)\]\]")
 HTML = re.compile(r"<\s*/?\s*[A-Za-z][^>]*>")
 UNSAFE_LINK = re.compile(r"\]\(\s*(?:[a-z][a-z0-9+.-]*:|//)", re.I)
@@ -55,8 +58,33 @@ def validate_markdown(text, source_refs, links):
     if HTML.search(text) or UNSAFE_LINK.search(text):
         raise ValueError("Raw HTML and external or executable links are not allowed")
     cited = set(CITATION.findall(text))
-    require_refs(cited, source_refs, complete=True)
+    # Structured source_refs owns coverage; visible footnotes are optional legacy input.
+    require_refs(cited, source_refs)
     require_refs([match[0] for match in PAGE_LINK.findall(text)], links)
+
+
+def readable_markdown(text, source_refs):
+    """Hide known evidence markers without changing prose, Wiki links or code examples."""
+    allowed = set(source_refs)
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    code_spans = [match.span() for match in CODE_ISLANDS.finditer(text)]
+
+    def remove_definition(match):
+        in_code = any(start <= match.start() < end for start, end in code_spans)
+        return "" if match[1] in allowed and not in_code else match[0]
+
+    # Remove whole definitions, including any inline code within their source descriptions.
+    text = CITATION_DEFINITION.sub(remove_definition, text)
+
+    def clean(part):
+        return "".join(
+            line if line.startswith(("    ", "\t")) else CITATION.sub(
+                lambda match: "" if match[1] in allowed else match[0], line
+            )
+            for line in part.splitlines(keepends=True)
+        )
+
+    return rewrite_markdown_text(text, clean)
 
 
 def model_sources(sources):
@@ -295,17 +323,17 @@ def link_mentions(text, choices):
 def generate_page(model, snapshot):
     if not snapshot["sources"]:
         return {"content": "", "summary": "", "links": []}
-    catalog, evidence, mapping = reduce_input(snapshot)
+    catalog, _, _ = reduce_input(snapshot)
     if snapshot["page_type"] == "summary":
         source = snapshot["sources"][0]
         summary = source["source_context"]["summary"]
         topics = {t["topic_ref"]: t["page_id"] for t in source["source_context"]["topics"]}
+        require_refs(
+            summary["source_refs"], [c["ref"] for c in source["chunk_refs"]], complete=True
+        )
         validate_markdown(summary["summary_markdown"], summary["source_refs"], topics)
         text, links = render_links(summary["summary_markdown"], topics)
-        text = rewrite_markdown_text(
-            text,
-            lambda part: CITATION.sub(lambda m: f"[^{mapping[source['document_id']][m[1]]}]", part),
-        )
+        text = readable_markdown(text, summary["source_refs"])
         return {"content": text, "summary": summary["summary_line"], "links": links}
     items = [{"source_item_refs": [c["ref"]], "text": c["quote"], "qualifiers": [],
               "source_refs": [c["ref"]]} for c in catalog]
@@ -372,6 +400,7 @@ def generate_page(model, snapshot):
     data["evidence"] = page_evidence(items)
     result = model.call("wiki_page_original_v2", data, EvidencePage, validate)
     content, targets = render_links(result["content_markdown"], links)
+    content = readable_markdown(content, allowed_refs)
     content, added = link_mentions(content, snapshot["allowed_links"])
     targets.extend(added)
     return {"content": content, "summary": result["summary"], "links": targets}

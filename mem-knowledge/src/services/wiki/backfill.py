@@ -49,7 +49,10 @@ def execute_backfill(runtime, kb_id, upper_at_ms, admission_id):
         runtime, _batch, kb_id, upper_at_ms, cursor, runtime.settings.kb_wiki_backfill_batch_size
     ):
         for document_id, created_at in batch:
-            delivery = transaction(runtime, admit, kb_id, document_id, admission_id=admission_id)
+            delivery = transaction(
+                runtime, admit, kb_id, document_id,
+                admission_id=admission_id, admission_at_ms=upper_at_ms,
+            )
             if delivery:
                 publish_map(runtime, delivery)
                 accepted += bool(delivery["accepted"])
