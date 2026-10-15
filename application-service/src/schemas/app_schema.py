@@ -643,6 +643,66 @@ class AppShare(BaseModel):
         return to_timestamp_ms(dt)
 
 
+# ---------- Message Interaction Schemas ----------
+
+class MessageFeedbackRequest(BaseModel):
+    """Message feedback request (like / dislike)."""
+
+    feedback_type: str = Field(..., pattern="^(like|dislike)$", description="反馈类型: like/dislike")
+    feedback_content: Optional[str] = Field(default=None, description="反馈内容（点踩时填写原因；默认 null）")
+
+
+class MessageFeedbackResponse(BaseModel):
+    """Message feedback response"""
+    action: str = Field(..., description="操作: created/updated/cancelled")
+    feedback_type: Optional[str] = Field(None, description="当前反馈类型")
+
+
+class MessageFavoriteResponse(BaseModel):
+    """Message favorite response"""
+    action: str = Field(..., description="操作: created/cancelled")
+    is_favorited: bool = Field(..., description="是否已收藏")
+
+
+class MessageReportRequest(BaseModel):
+    """Message report request (with selected-feedback text)"""
+    report_type: str = Field(
+        ...,
+        description="举报类型: politics/porn/violence/fake/ad/quality/other"
+    )
+    report_reason: Optional[str] = Field(None, description="举报原因详细描述")
+    text_start_offset: Optional[int] = Field(None, description="选中文本起始位置")
+    text_end_offset: Optional[int] = Field(None, description="选中文本结束位置")
+    selected_text: Optional[str] = Field(None, description="选中的违规文本片段")
+
+
+class MessageReportResponse(BaseModel):
+    """Message report response"""
+    report_id: str = Field(..., description="举报ID")
+    status: str = Field(..., description="状态: pending")
+
+
+class MessageVersion(BaseModel):
+    """Message version"""
+    message_id: uuid.UUID
+    version: int
+    is_current: bool
+    content: str
+    created_at: int
+
+
+# ---------- Message Moderation Schemas ----------
+
+class ReportReviewRequest(BaseModel):
+    """Report review request"""
+    severity: str = Field(..., description="严重程度: low/medium/high/critical")
+    action_taken: str = Field(
+        ...,
+        description="处理措施: no_action/warning/content_removed/user_banned"
+    )
+    review_note: Optional[str] = Field(None, description="审核备注")
+
+
 __all__ = [
     "AgentConfigCreate",
     "App",
@@ -662,9 +722,16 @@ __all__ = [
     "KnowledgeBaseConfig",
     "KnowledgeRetrievalConfig",
     "MemoryConfig",
+    "MessageFavoriteResponse",
+    "MessageFeedbackRequest",
+    "MessageFeedbackResponse",
+    "MessageReportRequest",
+    "MessageReportResponse",
+    "MessageVersion",
     "ModelParameters",
     "OpeningStatementConfig",
     "PublishRequest",
+    "ReportReviewRequest",
     "SkillConfig",
     "SuggestedQuestionsConfig",
     "TextToSpeechConfig",

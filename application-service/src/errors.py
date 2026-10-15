@@ -38,6 +38,7 @@ class BizCode(IntEnum):
     API_KEY_NOT_FOUND = 3007
     API_KEY_INVALID = 3009
     API_KEY_EXPIRED = 3010
+    API_KEY_INVALID_SCOPE = 3012
     QUOTA_EXCEEDED = 3018
     RATE_LIMIT_EXCEEDED = 3019
     # resources (4xxx)
@@ -77,6 +78,9 @@ class BizCode(IntEnum):
     PROVIDER_NOT_SUPPORTED = 7003
     LLM_ERROR = 7004
     EMBEDDING_ERROR = 7005
+    # memory (95xx, host codes consumed by the end-user create path)
+    MEMORY_CONFIG_NOT_FOUND = 9503
+    INVALID_USER_ID = 9601
     # system (100xx)
     INTERNAL_ERROR = 10001
     DB_ERROR = 10002
@@ -128,12 +132,15 @@ HTTP_MAPPING: dict[BizCode, int] = {
     BizCode.API_KEY_NOT_FOUND: 400,
     BizCode.API_KEY_INVALID: 401,
     BizCode.API_KEY_EXPIRED: 401,
+    BizCode.API_KEY_INVALID_SCOPE: 403,
     BizCode.QUOTA_EXCEEDED: 402,
     BizCode.MODEL_CONFIG_INVALID: 400,
     BizCode.API_KEY_MISSING: 400,
     BizCode.PROVIDER_NOT_SUPPORTED: 400,
     BizCode.LLM_ERROR: 500,
     BizCode.EMBEDDING_ERROR: 500,
+    BizCode.MEMORY_CONFIG_NOT_FOUND: 400,
+    BizCode.INVALID_USER_ID: 400,
     BizCode.INTERNAL_ERROR: 500,
     BizCode.DB_ERROR: 500,
     BizCode.SERVICE_UNAVAILABLE: 503,

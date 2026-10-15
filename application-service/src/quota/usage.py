@@ -22,7 +22,9 @@ from ..api.dependencies import Principal, get_principal, get_sync_db
 from ..errors import InternalServerError, QuotaExceededError
 from ..guards.workspace_access import require_workspace_access
 from ..models.app_model import App
+from ..models.end_user_model import EndUser
 from ..models.skill_model import Skill
+from ..repositories import cross_domain_read
 from .config import get_quota_config
 
 logger = logging.getLogger(__name__)
@@ -44,6 +46,30 @@ def count_active_skills(db: Session, tenant_id: UUID) -> int:
     )
 
 
+def count_active_end_users(
+    db: Session, tenant_id: UUID, workspace_id: UUID | None = None
+) -> int:
+    """Host ``QuotaUsageRepository.count_end_users``: active end users under the
+    workspace (or the tenant), trial users (``other_id`` matching a tenant
+    user) excluded."""
+
+    query = db.query(EndUser).filter(EndUser.is_active.is_(True))
+    if workspace_id:
+        query = query.filter(EndUser.workspace_id == workspace_id)
+    else:
+        workspace_ids = cross_domain_read.get_workspace_ids_by_tenant(db, tenant_id)
+        if not workspace_ids:
+            return 0
+        query = query.filter(EndUser.workspace_id.in_(workspace_ids))
+
+    trial_user_ids = [
+        str(user_id) for user_id in cross_domain_read.get_tenant_user_ids(db, tenant_id)
+    ]
+    if trial_user_ids:
+        query = query.filter(~EndUser.other_id.in_(trial_user_ids))
+    return query.count()
+
+
 def _dispatch_usage(
     db: Session, tenant_id: UUID, quota_type: str, workspace_id: UUID | None
 ) -> int | float:
@@ -51,6 +77,8 @@ def _dispatch_usage(
         return count_active_apps(db, workspace_id) if workspace_id else 0
     if quota_type == "skill_quota":
         return count_active_skills(db, tenant_id)
+    if quota_type == "end_user_quota":
+        return count_active_end_users(db, tenant_id, workspace_id)
     # Unknown quota types resolve to zero usage, matching the host dispatch
     # fallback for quota types this service does not meter.
     return 0
@@ -138,6 +166,22 @@ def ensure_skill_quota(db: Session, principal: Principal) -> None:
     check_quota(db, principal.tenant_id, "skill_quota", "skill")
 
 
+def ensure_end_user_quota(db: Session, principal: Principal) -> None:
+    """Workspace-scoped end-user-count check (end-user create path)."""
+
+    workspace_id = principal.workspace_id
+    if workspace_id is None:
+        logger.error("check_end_user_quota: workspace_id missing; refusing request")
+        raise InternalServerError()
+    check_quota(
+        db,
+        principal.tenant_id,
+        "end_user_quota",
+        "end_user",
+        workspace_id=workspace_id,
+    )
+
+
 def require_app_quota(
     _: Annotated[UUID, Depends(require_workspace_access)],
     db: Annotated[Session, Depends(get_sync_db)],
@@ -166,12 +210,29 @@ def require_skill_quota(
     ensure_skill_quota(db, principal)
 
 
+def require_end_user_quota(
+    db: Annotated[Session, Depends(get_sync_db)],
+    principal: Annotated[Principal, Depends(get_principal)],
+) -> None:
+    """FastAPI dependency form of the host ``check_end_user_quota`` decorator.
+
+    The host end-user create route carries no workspace guard either (the API
+    key pins the workspace); a missing workspace fails as a server error, the
+    same posture as the host wrapper.
+    """
+
+    ensure_end_user_quota(db, principal)
+
+
 __all__ = [
     "check_quota",
     "count_active_apps",
+    "count_active_end_users",
     "count_active_skills",
     "ensure_app_quota",
+    "ensure_end_user_quota",
     "ensure_skill_quota",
     "require_app_quota",
+    "require_end_user_quota",
     "require_skill_quota",
 ]

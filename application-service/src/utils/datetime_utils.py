@@ -4,7 +4,13 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-__all__ = ["as_utc_aware", "to_iso_z", "to_timestamp_ms", "utcnow_naive"]
+__all__ = [
+    "as_utc_aware",
+    "parse_iso_to_utc_naive",
+    "to_iso_z",
+    "to_timestamp_ms",
+    "utcnow_naive",
+]
 
 
 def utcnow_naive() -> datetime:
@@ -39,3 +45,14 @@ def to_iso_z(value: datetime | None) -> str | None:
     if aware is None:
         return None
     return aware.isoformat().replace("+00:00", "Z")
+
+
+def parse_iso_to_utc_naive(value: str | None) -> datetime | None:
+    """Parse an ISO datetime string and normalize it to naive UTC (host parity)."""
+
+    if not value:
+        return None
+    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if parsed.tzinfo is None:
+        return parsed
+    return parsed.astimezone(UTC).replace(tzinfo=None)

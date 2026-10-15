@@ -11,11 +11,16 @@ from redis import Redis as SyncRedis
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
+from ..infrastructure.upstream import MonolithUpstream
+from ..integrations.model_invoke import ModelInvokeClient
 from ..runtime import ProcessRuntime
 
 ACTOR_ID_HEADER = "X-App-Actor-ID"
 TENANT_ID_HEADER = "X-App-Tenant-ID"
 WORKSPACE_ID_HEADER = "X-App-Workspace-ID"
+# API-key identity header injected by the gateway on ``/v1`` (API-key) paths:
+# the key row id, from which the service resolves the key's resource binding.
+API_KEY_ID_HEADER = "X-Api-Key-ID"
 
 
 class Principal(BaseModel):
@@ -43,6 +48,20 @@ def get_sync_db(request: Request) -> Iterator[Session]:
     runtime: ProcessRuntime = request.app.state.runtime
     with runtime.database.sync_session() as session:
         yield session
+
+
+def get_upstream(request: Request) -> MonolithUpstream:
+    """Process-wide monolith upstream client (cross-domain write forwarding)."""
+
+    runtime: ProcessRuntime = request.app.state.runtime
+    return runtime.upstream
+
+
+def get_model_invoke(request: Request) -> ModelInvokeClient:
+    """Process-wide model-service invoke client (embedding generation)."""
+
+    runtime: ProcessRuntime = request.app.state.runtime
+    return runtime.model_invoke
 
 
 def get_sync_redis(request: Request) -> SyncRedis:
@@ -101,14 +120,19 @@ async def get_principal(request: Request) -> Principal:
 
 __all__ = [
     "ACTOR_ID_HEADER",
+    "API_KEY_ID_HEADER",
     "TENANT_ID_HEADER",
     "WORKSPACE_ID_HEADER",
+    "ModelInvokeClient",
+    "MonolithUpstream",
     "Principal",
     "SyncRedis",
     "get_async_db",
+    "get_model_invoke",
     "get_principal",
     "get_runtime",
     "get_sync_db",
     "get_sync_redis",
+    "get_upstream",
     "principal_from_headers",
 ]

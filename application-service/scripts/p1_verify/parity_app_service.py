@@ -6,9 +6,10 @@ Harness notes:
   * Same savepoint discipline as the L4 suite: every request session joins
     one outer transaction, which rolls back at the end (only the shared
     identity seed stays in the scratch database).
-  * Auth is the internal-API header triple; the quota lookup is stubbed the
-    same way the L4 suite does it (the default free plan would cap the
-    scenario at two apps).
+  * Auth is the internal-API header triple (the gateway contract); v1 steps
+    add the API-key binding id header, public steps carry none. The quota
+    lookup is stubbed the same way the L4 suite does it (the default free
+    plan would cap the scenario at two apps).
 
 Environment (the same L4_* variables as the integration tests):
   L4_DB_HOST / L4_DB_PORT / L4_DB_USER / L4_DB_PASSWORD / L4_DB_NAME
@@ -32,6 +33,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+# Pin the share-URL base so both recordings agree regardless of a local .env.
+os.environ["FILE_LOCAL_SERVER_URL"] = "http://parity.local"
+
 import parity_common  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 from sqlalchemy import create_engine, text  # noqa: E402
@@ -39,6 +43,7 @@ from sqlalchemy.orm import Session  # noqa: E402
 
 from src.api.dependencies import (  # noqa: E402
     ACTOR_ID_HEADER,
+    API_KEY_ID_HEADER,
     TENANT_ID_HEADER,
     WORKSPACE_ID_HEADER,
     get_sync_db,
@@ -67,6 +72,10 @@ def build_settings() -> AppServiceSettings:
         redis_port=int(os.getenv("L4_REDIS_PORT", "6379")),
         redis_password=os.getenv("L4_REDIS_PASSWORD", ""),
         redis_db=int(os.getenv("L4_REDIS_DB", "0")),
+        # The env-file bootstrap is bypassed by this direct construction, so
+        # the share-URL base must be threaded through explicitly (the module
+        # top pins the same value both runners agree on).
+        file_local_server_url=os.environ["FILE_LOCAL_SERVER_URL"],
     )
 
 
@@ -83,15 +92,39 @@ def _convert(value):
 
 
 class AppServiceRunner:
+    """Runner facade for the internal API.
+
+    Every face maps onto the ``/internal/v1`` prefix (the gateway strips the
+    host ``/api`` or ``/v1`` before forwarding): ``manager`` and ``v1`` send
+    the internal identity headers, ``v1`` additionally sends the API-key
+    binding id (the split resolves the app through the binding row), and
+    ``public`` sends no credentials at all (anonymous share view).
+    """
+
     def __init__(self, client: TestClient, connection, headers: dict):
         self.client = client
         self.connection = connection
         self.headers = headers
 
-    def request(self, method, path, json_body=None, params=None):
-        response = self.client.request(
-            method, PREFIX + path, json=json_body, params=params, headers=self.headers
-        )
+    def request(self, method, path, json_body=None, params=None, face="manager",
+                files=None, headers=None):
+        if face == "public":
+            request_headers = dict(headers or {})
+        else:
+            request_headers = dict(self.headers)
+            request_headers.update(headers or {})
+            if face == "v1":
+                request_headers.setdefault(API_KEY_ID_HEADER, parity_common.API_KEY["id"])
+        if files is not None:
+            response = self.client.request(
+                method, PREFIX + path, files=files, params=params,
+                headers=request_headers,
+            )
+        else:
+            response = self.client.request(
+                method, PREFIX + path, json=json_body, params=params,
+                headers=request_headers,
+            )
         try:
             body = response.json()
         except ValueError:
@@ -103,6 +136,9 @@ class AppServiceRunner:
         if row is None:
             return None
         return tuple(_convert(value) for value in row)
+
+    def exec_sql(self, sql, **params):
+        return self.fetch_row(sql, **params)
 
 
 def main() -> int:

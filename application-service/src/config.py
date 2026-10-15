@@ -150,6 +150,31 @@ class AppServiceSettings(BaseSettings):
         validation_alias="APPLICATION_SERVICE_JWKS_URL",
     )
 
+    # Monolith upstream channel (coexistence period): cross-domain writes are
+    # forwarded to the monolith's /v1 API-key face over the internal network.
+    # Unset or unreachable upstreams fail the forward closed.
+    application_service_upstream_base_url: str | None = Field(
+        default=None,
+        validation_alias="APPLICATION_SERVICE_UPSTREAM_BASE_URL",
+    )
+    application_service_upstream_api_key: SecretStr = Field(
+        default=SecretStr(""),
+        validation_alias="APPLICATION_SERVICE_UPSTREAM_API_KEY",
+    )
+    application_service_upstream_timeout_seconds: float = Field(
+        default=30.0,
+        gt=0,
+        validation_alias="APPLICATION_SERVICE_UPSTREAM_TIMEOUT_SECONDS",
+    )
+    # East-west direct dependency on model-service (annotation embeddings),
+    # never routed through the gateway; same env name as the monolith's
+    # outbound knob. Unset or unreachable degrades annotation writes to a
+    # missing vector (the monolith's behavior when the model call fails).
+    model_service_base_url: str | None = Field(
+        default=None,
+        validation_alias="MODEL_SERVICE_BASE_URL",
+    )
+
     @classmethod
     def settings_customise_sources(
         cls,

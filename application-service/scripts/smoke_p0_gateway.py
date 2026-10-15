@@ -16,8 +16,8 @@ Checks:
   5. Redis acl:rules carries a gateway -> application-service allow rule for
      "GET /internal/v1/apps" - the gateway-mode precondition
   6. full chain with a real user token: the gateway-terminated request reaches
-     this service and gets its own 404 envelope (no endpoint exists yet);
-     a gateway-level 'detail' 404 instead identifies an unregistered prefix
+     this service and answers with its own envelope (legacy {"code": ...} body);
+     a gateway-level 'detail' response instead identifies an unregistered prefix
 
 Exit codes: 0 = all checks passed; 1 = a check failed; 2 = checks 1-5 passed
 but check 6 was skipped because no --token/SMOKE_USER_TOKEN was supplied.
@@ -35,6 +35,7 @@ import json
 import os
 import sys
 from pathlib import Path
+from urllib.parse import urlparse
 
 import httpx
 from redis import Redis
@@ -67,8 +68,11 @@ def check_routes_file() -> str:
             f"{SMOKE_PREFIX} routes to service={entry.get('service')!r} "
             f"aud={entry.get('aud')!r}, expected {SERVICE_NAME!r} for both"
         )
-    if not str(entry.get("base_url", "")).rstrip("/").endswith(SERVICE_NAME):
-        raise CheckFailed(f"{SMOKE_PREFIX} base_url looks wrong: {entry.get('base_url')!r}")
+    if urlparse(str(entry.get("base_url", ""))).hostname != SERVICE_NAME:
+        raise CheckFailed(
+            f"{SMOKE_PREFIX} base_url host looks wrong: {entry.get('base_url')!r} "
+            f"(expected hostname {SERVICE_NAME!r})"
+        )
     return (
         f"{SMOKE_PREFIX} -> {entry['service']} "
         f"(aud={entry['aud']}, base_url={entry['base_url']})"
@@ -163,10 +167,20 @@ def check_full_forward(client: httpx.Client, gateway_url: str, token: str) -> st
             "the service rejected the gateway-terminated request (401) - with a fresh "
             f"user token this points at the service-side auth chain: {response.text[:200]}"
         )
-    # Reaching this service without any endpoint yet = the legacy 404 envelope
-    # {"code": 404, ...}; the gateway's own unmatched-route 404 is {"detail": ...}.
-    if response.status_code == 404 and body.get("code") == 404:
-        return "request reached the application service (legacy 404 envelope; no endpoint in P0)"
+    if response.status_code == 403:
+        raise CheckFailed(
+            "the service denied the gateway-terminated request (403) - acl:rules likely "
+            "lacks the gateway -> application-service allow rule for this endpoint "
+            f"(see check 5): {response.text[:200]}"
+        )
+    # Service answers always carry the legacy envelope ({"code": ...}, 0 on
+    # success / the biz code on failure); the gateway's own responses never do
+    # ({"detail": ...}).
+    if "code" in body:
+        return (
+            f"request reached the application service "
+            f"(service envelope, HTTP {response.status_code}, code={body['code']})"
+        )
     if response.status_code == 404:
         raise CheckFailed(
             f"gateway answered its own 404 (body={body!r}) - {SMOKE_PREFIX} is not in the "

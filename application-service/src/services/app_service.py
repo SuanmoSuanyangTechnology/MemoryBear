@@ -2413,6 +2413,40 @@ class AppService:
 
         return self.db.get(AppRelease, app.current_release_id)
 
+    def get_release_by_id(
+            self,
+            *,
+            app_id: uuid.UUID,
+            release_id: uuid.UUID
+    ) -> AppRelease:
+        """Get one active release snapshot by its id.
+
+        Args:
+            app_id: App ID
+            release_id: Release ID
+
+        Returns:
+            AppRelease: The active release snapshot
+
+        Raises:
+            BusinessException: When the release does not exist or is inactive
+        """
+        release = self.db.execute(
+            select(AppRelease)
+            .where(
+                AppRelease.app_id == app_id,
+                AppRelease.id == release_id,
+                AppRelease.is_active.is_(True),
+            )
+            .limit(1)
+        ).scalars().first()
+
+        if not release:
+            raise BusinessException(
+                f"版本 {release_id} 不存在或已下线", BizCode.RELEASE_NOT_FOUND
+            )
+        return release
+
     def list_releases(
             self,
             *,

@@ -2,7 +2,8 @@
 gateway enterprise plugin) and apply its termination result.
 
 dispatch does four things: probe whitelist → resolve the target route (aud +
-forwarding target) → KB public-download exemption → run authenticate.
+forwarding target) → anonymous exemptions (KB public download, app public
+share view) → run authenticate.
 Credential-type routing (path prefix) and the termination judgment itself live
 in src/termination.py, shared by both strategies.
 
@@ -11,7 +12,8 @@ Result application (both strategies terminate credentials):
   headers passed through) — returned directly;
 - success: request.state.internal_token (None in direct mode — no token is
   issued), sanitize client credentials + the whole identity namespace, inject
-  the gateway-authenticated identity headers, write the audit event.
+  the gateway-authenticated identity headers, re-assert the client-facing
+  origin as X-Forwarded-Proto / X-Forwarded-Host, write the audit event.
 
 KB public single-file download exemption: anonymous GET /api/files/{uuid36}
 (browser <img> rendering) skips authenticate in both strategies — sanitize the
@@ -20,6 +22,19 @@ same namespace, inject the gateway-asserted X-KB-Source, then forward
 semantics; mirrors the kb whitelist in mem-knowledge src/auth.py). Requests
 carrying credentials never short-circuit — they run the full pipeline
 (declared identity must fail closed, never fall back to anonymous download).
+
+App public conversation-share exemption: anonymous GET /api/apps/share/{token}
+(shared-link viewer landing page) skips authenticate the same way — sanitize
+the namespace and forward with no identity injected (the split serves the view
+from its own public path, application-service src/auth.py). Same containment:
+exact single-segment token, GET only, credentials always run the pipeline.
+
+X-Forwarded hardening: client-supplied X-Forwarded-* are stripped from every
+path (forgery surface) and the terminated path re-injects the pair downstream
+services rebuild public share URLs from — scheme + Host of the gateway's own
+request view (the exact inputs the monolith used). Behind a TLS-terminating
+edge, run the gateway with uvicorn proxy headers trusted (FORWARDED_ALLOW_IPS)
+so request.url.scheme reflects the public scheme, same as the monolith.
 """
 import logging
 import re
@@ -56,6 +71,19 @@ def is_kb_public_file_download(path: str, method: str) -> bool:
     return method == "GET" and _KB_PUBLIC_FILE_DOWNLOAD_RE.fullmatch(path) is not None
 
 
+# App public conversation-share exemption (mirrors the split public path
+# /internal/v1/apps/share/{token} in application-service src/auth.py): the
+# shared-link viewer holds no credentials, so anonymous GET of the share view
+# is forwarded without termination. The token is the capability — exact
+# single-segment match, GET only; every other /api/apps/* path stays
+# authenticated.
+_APP_PUBLIC_SHARE_RE = re.compile(r"/api/apps/share/[^/]+")
+
+
+def is_app_public_share(path: str, method: str) -> bool:
+    return method == "GET" and _APP_PUBLIC_SHARE_RE.fullmatch(path) is not None
+
+
 def _has_credentials(request: Request) -> bool:
     """请求是否携带可验证凭据（Bearer 用户 JWT 或 API key）。"""
     auth = request.headers.get("authorization", "")
@@ -65,11 +93,13 @@ def _has_credentials(request: Request) -> bool:
 # Headers always removed from client requests before termination results are
 # applied: credentials plus the gateway-managed identity namespace. Clients
 # must never be able to forge values the gateway injects (downstream services
-# trust these headers after termination).
+# trust these headers after termination). The X-Forwarded-* family is included
+# — the gateway re-derives the origin pair from its own request view.
 _STRIPPED_HEADERS = frozenset({
     "authorization", "x-api-key", "x-api-key-id", "x-internal-token",
 })
-_STRIPPED_HEADER_PREFIXES = ("x-user-", "x-tenant-", "x-workspace-", "x-kb-", "x-model-", "x-app-")
+_STRIPPED_HEADER_PREFIXES = ("x-user-", "x-tenant-", "x-workspace-", "x-kb-", "x-model-",
+                             "x-app-", "x-forwarded-")
 
 
 def _sanitize_headers(headers) -> dict[str, str]:
@@ -123,6 +153,14 @@ class GatewayMiddleware(BaseHTTPMiddleware):
                 and not _has_credentials(request)):
             self._public_download_headers(request)
             return await call_next(request)
+        # App public conversation-share exemption: anonymous shared-link views
+        # (no credentials) are forwarded with no identity injected; requests
+        # carrying credentials always run the pipeline so a failing declared
+        # identity rejects 401 (never an anonymous fallback).
+        if (is_app_public_share(request.url.path, request.method)
+                and not _has_credentials(request)):
+            self._public_share_headers(request)
+            return await call_next(request)
         result = await strategy.authenticate(request, deps)
         if result.status_code is not None:
             # Rejection: 401 semantics / 429 rate limit; rate-limit headers ride
@@ -143,9 +181,17 @@ class GatewayMiddleware(BaseHTTPMiddleware):
     def _rewrite_headers(request: Request, added: dict[str, str]) -> None:
         """Sanitize client credentials + the identity namespace, then merge the
         injected values and rewrite scope headers (downstream sees only the
-        gateway-authenticated identity)."""
+        gateway-authenticated identity).
+
+        The client-facing origin is re-asserted as X-Forwarded-Proto /
+        X-Forwarded-Host from the gateway's own request view (scheme + Host) —
+        the exact inputs the monolith computed public share URLs from; splits
+        only ever see their own internal address and rebuild the origin from
+        this pair. Client-supplied X-Forwarded-* were stripped above."""
         headers = _sanitize_headers(request.headers)
         headers.update(added)
+        headers["x-forwarded-proto"] = request.url.scheme
+        headers["x-forwarded-host"] = request.headers.get("host", "")
         request.scope["headers"] = [(k.lower().encode(), v.encode()) for k, v in headers.items()]
 
     @staticmethod
@@ -158,4 +204,14 @@ class GatewayMiddleware(BaseHTTPMiddleware):
         only sees a trusted one-hop source marker and no forgeable identity."""
         headers = _sanitize_headers(request.headers)
         headers["x-kb-source"] = _KB_PUBLIC_DOWNLOAD_SOURCE
+        request.scope["headers"] = [(k.lower().encode(), v.encode()) for k, v in headers.items()]
+
+    @staticmethod
+    def _public_share_headers(request: Request) -> None:
+        """Header cleanup for the anonymous conversation-share exemption: the
+        same sanitization set as terminated requests and no identity injected —
+        the viewer has no identity to assert and the split serves the view from
+        its public path. Forged X-App-* / X-User-* headers must not survive
+        even so: the namespace is gateway-managed on every other path."""
+        headers = _sanitize_headers(request.headers)
         request.scope["headers"] = [(k.lower().encode(), v.encode()) for k, v in headers.items()]

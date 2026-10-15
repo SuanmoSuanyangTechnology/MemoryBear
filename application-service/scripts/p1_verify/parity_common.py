@@ -13,20 +13,37 @@ Normally invoked by the two venv-specific scripts in this directory:
 
 Runner contract (implemented by each side):
 
-  request(method, path, json_body=None, params=None) -> (status, body)
+  request(method, path, json_body=None, params=None, face="manager",
+          files=None, headers=None) -> (status, body)
       ``path`` is the canonical suffix (for example ``/apps/{app_id}`` with
       the placeholders already substituted); each runner prepends its own
-      prefix (``/api`` vs ``/internal/v1``) and attaches its own auth.
+      prefix (``/api`` + ``/v1`` vs ``/internal/v1``) and attaches its own
+      auth depending on ``face``:
+
+        manager  user-JWT plane (``/api``; the application-service uses the
+                 internal identity headers)
+        v1       API-key plane (``/v1``; the monolith sends the seeded API
+                 key value, the application-service sends the binding id)
+        public   anonymous share view (no credentials on either side)
+
+      ``files`` (multipart uploads) replaces ``json_body`` when given.
       ``body`` is the decoded JSON when possible, otherwise the raw text.
 
   fetch_row(sql, **params) -> tuple | None
-      Runs the query on the runner's own connection so uncommitted
+      Runs the query on the runner's scenario connection so uncommitted
       scenario state is visible; uuid/datetime values are converted to
       JSON-able primitives before returning.
+
+  exec_sql(sql, **params) -> tuple | None
+      Runs a DML statement on the runner's scenario connection (state that
+      lives inside the battery's rollback boundary, e.g. the API-key row or
+      seeded conversations/messages). Handler sessions join that same
+      connection, so the rows are visible to both stacks without committing.
 """
 
 from __future__ import annotations
 
+import json
 import re
 
 # Fixed identity chain shared by both sides. Both runner scripts seed these
@@ -38,6 +55,39 @@ SEED = {
     "workspace_id": "aaaaaaa1-0000-4000-8000-000000000003",
     "member_id": "aaaaaaa1-0000-4000-8000-000000000004",
     "model_config_id": "aaaaaaa1-0000-4000-8000-000000000005",
+}
+
+# The v1 face resolves its app from one API-key binding row; the scenario
+# seeds it inside the rollback boundary once the flow app is published. The
+# monolith sends API_KEY_VALUE on v1 requests (its real validator queries the
+# row), the application-service sends the row id via the binding header.
+API_KEY = {
+    "id": "aaaaaaa1-0000-4000-8000-000000000006",
+    "value": "parity-key-0001",
+}
+
+# Deterministic P2 fixtures seeded via ``exec_sql`` inside the rollback
+# boundary. Fixed ids make uuid5-derived app-log virtual message ids identical
+# across recordings; they are pre-registered as role tokens so both sides
+# normalize them the same way.
+FIXTURES = {
+    "conversation_id": "aaaaaaa1-0000-4000-8000-000000000007",
+    "user_message_id": "aaaaaaa1-0000-4000-8000-000000000008",
+    "assistant_message_id": "aaaaaaa1-0000-4000-8000-000000000009",
+    "assistant_message_v2_id": "aaaaaaa1-0000-4000-8000-00000000000a",
+    "workflow_execution_id": "aaaaaaa1-0000-4000-8000-00000000000b",
+}
+
+# Fixed timestamps for the seeded fixture rows (both recordings read the same
+# absolute values; only the relative ordering matters).
+FIXTURE_TS = {
+    "api_key": "2026-01-05 03:04:00",
+    "conversation": "2026-01-05 03:04:05",
+    "user_message": "2026-01-05 03:04:06",
+    "assistant_message": "2026-01-05 03:04:07",
+    "assistant_message_v2": "2026-01-05 03:04:08",
+    "execution_started": "2026-01-05 03:04:05",
+    "execution_completed": "2026-01-05 03:04:09",
 }
 
 SEED_STATEMENTS = [
@@ -122,18 +172,39 @@ def _reverse_ids(ids: dict) -> dict:
     return {str(value).lower(): role for role, value in ids.items() if value}
 
 
+def _raw_ids(ids: dict) -> dict:
+    return {str(value): role for role, value in ids.items() if value}
+
+
 def normalize(value, ids: dict):
     """Recursively replace run-scoped ids and timestamps with placeholders."""
-    return _normalize(value, _reverse_ids(ids))
+    return _normalize(value, _reverse_ids(ids), _raw_ids(ids))
 
 
-def _normalize(value, reverse: dict):
+def _scrub_embedded(text: str, raw: dict) -> str:
+    """Replace run-scoped ids embedded inside longer strings.
+
+    Share urls carry the token inside a longer url, so exact-match
+    normalization cannot catch them; the raw id values are substituted
+    wherever they appear.
+    """
+    for value, role in raw.items():
+        if value in text:
+            text = text.replace(value, f"<{role}>")
+    return text
+
+
+def _normalize(value, reverse: dict, raw: dict):
     if isinstance(value, bool):
         return value
     if isinstance(value, str):
         role = reverse.get(value.lower())
         if role:
             return f"<{role}>"
+        if raw:
+            scrubbed = _scrub_embedded(value, raw)
+            if scrubbed != value:
+                return scrubbed
         if ISO_TS.match(value):
             return "<ts>"
         if value.isdigit() and len(value) >= 12:
@@ -142,9 +213,9 @@ def _normalize(value, reverse: dict):
     if isinstance(value, (int, float)) and value >= EPOCH_MS_THRESHOLD:
         return "<ts>"
     if isinstance(value, dict):
-        return {k: _normalize(v, reverse) for k, v in value.items()}
+        return {k: _normalize(v, reverse, raw) for k, v in value.items()}
     if isinstance(value, (list, tuple)):
-        return [_normalize(v, reverse) for v in value]
+        return [_normalize(v, reverse, raw) for v in value]
     if value is None:
         return None
     return str(value)
@@ -174,7 +245,9 @@ def _dig(body, *keys):
 def run_scenario(runner) -> list[dict]:
     """Execute the canonical scenario; return the recorded [step] list."""
     results: list[dict] = []
-    ids: dict[str, str | None] = {}
+    # Pre-registered constant ids (the seeded API key and the P2 fixtures) plus
+    # everything captured from responses as the scenario advances.
+    ids: dict[str, str | None] = {"api_key_id": API_KEY["id"], **FIXTURES}
 
     def record(name: str, status, data):
         results.append({"step": name, "status": status, "data": data})
@@ -187,11 +260,18 @@ def run_scenario(runner) -> list[dict]:
         params=None,
         capture=None,
         text_fields=(),
+        face="manager",
+        files=None,
+        headers=None,
     ):
         """Capture ids first, then record the normalized response, so ids
         established by this very step are already role tokens in the log."""
         concrete = path.format(**{k: (v or "none") for k, v in ids.items()})
-        status, body = runner.request(method, concrete, json_body, params)
+        status, body = runner.request(
+            method, concrete, json_body, params, face=face, files=files, headers=headers
+        )
+        if isinstance(body, str):
+            body = normalize_text(body, ids)
         if capture and isinstance(body, dict):
             if callable(capture):
                 ids.update(capture(body))
@@ -212,6 +292,19 @@ def run_scenario(runner) -> list[dict]:
 
     def db(name: str, sql: str, **params):
         row = runner.fetch_row(sql, **params)
+        record(name, None, normalize(list(row) if row is not None else None, ids))
+
+    def exec_sql(name: str, sql: str, capture: str | None = None, **params):
+        """DML inside the rollback boundary (seeded fixtures like the API-key
+        row or conversations/messages); records the RETURNING row if any.
+
+        ``capture`` registers the first returned column as a role token: ids
+        minted by handler-side inserts (for example the auto-created end-user
+        info row) must not leak verbatim into the recordings.
+        """
+        row = runner.exec_sql(sql, **params)
+        if capture and row is not None:
+            ids[capture] = row[0]
         record(name, None, normalize(list(row) if row is not None else None, ids))
 
     def capture_builtin_tools(body):
@@ -407,6 +500,451 @@ def run_scenario(runner) -> list[dict]:
         "45_db_skill_row",
         "SELECT name, is_active FROM skills WHERE id = :id",
         id=ids["skill_id"],
+    )
+
+    # -- P2: end-user face (v1 create + manager/v1 reads and updates) -------
+    # The key is seeded after the flow app is published (the binding's
+    # publish-state check reads the current release) and carries both scopes
+    # the P2 v1 faces require (app for messages/annotations, memory for
+    # end-user).
+    exec_sql(
+        "46_seed_api_key",
+        "INSERT INTO api_keys (id, name, api_key, type, scopes, workspace_id,"
+        " resource_id, rate_limit_disabled, is_active, created_by, created_at,"
+        " updated_at) VALUES (:id, 'parity-key', :api_key, 'pure_workflow',"
+        " CAST(:scopes AS jsonb), :workspace_id, :resource_id, true, true,"
+        " :created_by, :created_at, :created_at) RETURNING id",
+        id=API_KEY["id"],
+        api_key=API_KEY["value"],
+        scopes=json.dumps(["app", "memory"]),
+        workspace_id=SEED["workspace_id"],
+        resource_id=ids["flow_app_id"],
+        created_by=SEED["actor_id"],
+        created_at=FIXTURE_TS["api_key"],
+    )
+    req(
+        "47_v1_create_end_user", "POST", "/end_user/create",
+        {"other_id": "parity-ext-user-1", "other_name": "Parity External User"},
+        capture=[(("data", "id"), "end_user_id")],
+        face="v1",
+    )
+    # The create above also inserts an empty end-user info row; fill it in
+    # place and capture its minted id so the info endpoints stay diffable.
+    exec_sql(
+        "48_seed_end_user_info",
+        "UPDATE end_user_info SET other_name = :other_name, aliases = :aliases,"
+        " meta_data = CAST(:meta_data AS jsonb) WHERE end_user_id = :end_user_id"
+        " RETURNING id",
+        capture="end_user_info_id",
+        other_name="Parity External User",
+        aliases=["parity-alias-A", "parity-alias-B"],
+        meta_data=json.dumps({
+            "goals": ["parity goal"],
+            "core_facts": ["parity fact"],
+            "interests": ["parity interest"],
+            "traits": ["parity trait"],
+        }),
+        end_user_id=ids["end_user_id"],
+    )
+    req(
+        "49_manager_get_end_user_info", "GET", "/end_user/info",
+        params={"end_user_id": ids["end_user_id"]},
+    )
+    req(
+        "50_manager_update_end_user_info", "POST", "/end_user/info/update",
+        {"end_user_id": ids["end_user_id"], "other_name": "Parity Renamed"},
+    )
+    req(
+        "51_manager_confirm_identity", "POST", "/end_user/identity/update",
+        {
+            "end_user_id": ids["end_user_id"],
+            "identity_features": "parity-identity-1",
+        },
+    )
+    db(
+        "52_db_end_users",
+        "SELECT other_id, other_name, identity_features, identity_status"
+        " FROM end_users WHERE id = :id",
+        id=ids["end_user_id"],
+    )
+    req(
+        "53_v1_update_end_user_info", "POST", "/end_user/info/update",
+        {"end_user_id": ids["end_user_id"], "other_name": "Parity V1 Renamed"},
+        face="v1",
+    )
+    req(
+        "54_v1_confirm_identity", "POST", "/end_user/identity/update",
+        {
+            "end_user_id": ids["end_user_id"],
+            "identity_features": "parity-identity-1",
+        },
+        face="v1",
+    )
+    req(
+        "55_v1_get_end_user_info", "GET", "/end_user/info",
+        params={"end_user_id": ids["end_user_id"]}, face="v1",
+    )
+    req(
+        "56_v1_get_end_user_mapping", "GET", "/end_user/mapping",
+        params={"other_id": "parity-ext-user-1"}, face="v1",
+    )
+
+    # -- P2: annotation face (manager 11 + v1 6) -----------------------------
+    # enabled=1 with no embedding model configured keeps every write off the
+    # model-service transport (the port degrades to a missing vector).
+    req(
+        "57_manager_annotation_settings_put", "PUT",
+        "/apps/{flow_app_id}/annotations/settings",
+        {"enabled": 1, "similarity_threshold": 0.9, "model_config_id": None},
+    )
+    req(
+        "58_manager_annotation_settings_get", "GET",
+        "/apps/{flow_app_id}/annotations/settings",
+    )
+    req(
+        "59_manager_annotation_create", "POST",
+        "/apps/{flow_app_id}/annotations",
+        {"question": "parity question 1", "answer": "parity answer 1"},
+        capture=[(("data", "id"), "annotation_id")],
+    )
+    req("60_manager_annotation_list", "GET", "/apps/{flow_app_id}/annotations")
+    req(
+        "61_manager_annotation_get", "GET",
+        "/apps/{flow_app_id}/annotations/{annotation_id}",
+    )
+    req(
+        "62_manager_annotation_update", "PUT",
+        "/apps/{flow_app_id}/annotations/{annotation_id}",
+        {"answer": "parity answer 1 v2"},
+    )
+    req(
+        "63_manager_annotation_hit_logs", "GET",
+        "/apps/{flow_app_id}/annotations/{annotation_id}/hit-logs",
+    )
+    req(
+        "64_manager_annotation_export", "GET",
+        "/apps/{flow_app_id}/annotations/export", params={"format": "json"},
+    )
+    req(
+        "65_manager_annotation_import", "POST",
+        "/apps/{flow_app_id}/annotations/import",
+        files={
+            "file": (
+                "parity.csv",
+                "问题,答案\nparity q2,parity a2\nparity q3,parity a3\n",
+                "text/csv",
+            )
+        },
+    )
+    req(
+        "66_manager_annotation_delete", "DELETE",
+        "/apps/{flow_app_id}/annotations/{annotation_id}",
+    )
+    req(
+        "67_manager_annotation_delete_all", "DELETE",
+        "/apps/{flow_app_id}/annotations",
+    )
+    db(
+        "68_db_annotations_count",
+        "SELECT count(*) FROM app_annotations WHERE app_id = :app_id",
+        app_id=ids["flow_app_id"],
+    )
+    req(
+        "69_v1_annotation_create", "POST", "/app/annotations",
+        {"question": "parity v1 question", "answer": "parity v1 answer"},
+        capture=[(("data", "id"), "v1_annotation_id")], face="v1",
+    )
+    req("70_v1_annotation_list", "GET", "/app/annotations", face="v1")
+    req(
+        "71_v1_annotation_settings_get", "GET", "/app/annotations/settings",
+        face="v1",
+    )
+    req(
+        "72_v1_annotation_settings_put", "PUT", "/app/annotations/settings",
+        {"similarity_threshold": 0.95}, face="v1",
+    )
+    req(
+        "73_v1_annotation_update", "PUT",
+        "/app/annotations/{v1_annotation_id}",
+        {"answer": "parity v1 answer v2"}, face="v1",
+    )
+    req(
+        "74_v1_annotation_delete", "DELETE",
+        "/app/annotations/{v1_annotation_id}", face="v1",
+    )
+    db(
+        "75_db_annotations_count_after_v1",
+        "SELECT count(*) FROM app_annotations WHERE app_id = :app_id",
+        app_id=ids["flow_app_id"],
+    )
+
+    # -- P2: seeded conversation + messages + workflow execution -------------
+    # conversation.user_id carries the internal end-user uuid (the /v1 face
+    # resolves other_id to it before the ownership guards), is_draft=false and
+    # is_active=true are required by the same guards, and the assistant
+    # message's meta_data.execution_id ties the row to the seeded execution
+    # for the app-log detail view.
+    exec_sql(
+        "76_seed_conversation",
+        "INSERT INTO conversations (id, app_id, workspace_id, user_id, title,"
+        " is_draft, message_count, is_active, created_at, updated_at)"
+        " VALUES (:id, :app_id, :workspace_id, :user_id, 'parity conversation',"
+        " false, 3, true, :created_at, :created_at) RETURNING id",
+        id=FIXTURES["conversation_id"],
+        app_id=ids["flow_app_id"],
+        workspace_id=SEED["workspace_id"],
+        user_id=ids["end_user_id"],
+        created_at=FIXTURE_TS["conversation"],
+    )
+    exec_sql(
+        "77_seed_user_message",
+        "INSERT INTO messages (id, conversation_id, role, content, version,"
+        " is_current, parent_message_id, is_deleted, status, like_count,"
+        " dislike_count, report_count, created_at)"
+        " VALUES (:id, :conversation_id, 'user', 'parity question', 1, true,"
+        " NULL, false, 'completed', 0, 0, 0, :created_at) RETURNING id",
+        id=FIXTURES["user_message_id"],
+        conversation_id=FIXTURES["conversation_id"],
+        created_at=FIXTURE_TS["user_message"],
+    )
+    exec_sql(
+        "78_seed_assistant_message",
+        "INSERT INTO messages (id, conversation_id, role, content, version,"
+        " is_current, parent_message_id, is_deleted, meta_data, status,"
+        " like_count, dislike_count, report_count, created_at)"
+        " VALUES (:id, :conversation_id, 'assistant',"
+        " 'parity answer', 1, true, :parent_message_id, false,"
+        " CAST(:meta_data AS json), 'completed', 0, 0, 0, :created_at)"
+        " RETURNING id",
+        id=FIXTURES["assistant_message_id"],
+        conversation_id=FIXTURES["conversation_id"],
+        parent_message_id=FIXTURES["user_message_id"],
+        meta_data=json.dumps({
+            "execution_id": "parity-exec-0001",
+            "suggested_questions": ["parity follow-up 1", "parity follow-up 2"],
+            "usage": {"total_tokens": 10},
+        }),
+        created_at=FIXTURE_TS["assistant_message"],
+    )
+    exec_sql(
+        "79_seed_assistant_message_v2",
+        "INSERT INTO messages (id, conversation_id, role, content, version,"
+        " is_current, parent_message_id, is_deleted, meta_data, status,"
+        " like_count, dislike_count, report_count, created_at)"
+        " VALUES (:id, :conversation_id, 'assistant',"
+        " 'parity answer v2', 2, false, :parent_message_id, false,"
+        " CAST(:meta_data AS json), 'completed', 0, 0, 0, :created_at)"
+        " RETURNING id",
+        id=FIXTURES["assistant_message_v2_id"],
+        conversation_id=FIXTURES["conversation_id"],
+        parent_message_id=FIXTURES["user_message_id"],
+        meta_data=json.dumps({"usage": {"total_tokens": 12}}),
+        created_at=FIXTURE_TS["assistant_message_v2"],
+    )
+    exec_sql(
+        "80_seed_workflow_execution",
+        "INSERT INTO workflow_executions (id, workflow_config_id, release_id,"
+        " app_id, conversation_id, execution_id, trigger_type, triggered_by,"
+        " input_data, output_data, context, status, elapsed_time, token_usage,"
+        " started_at, completed_at, created_at)"
+        " VALUES (:id, :workflow_config_id, NULL, :app_id, :conversation_id,"
+        " 'parity-exec-0001', 'manual', :triggered_by,"
+        " CAST(:input_data AS jsonb), CAST(:output_data AS jsonb),"
+        " CAST('{}' AS jsonb), 'completed', 4.0, CAST(:token_usage AS jsonb),"
+        " :started_at, :completed_at, :started_at) RETURNING id",
+        id=FIXTURES["workflow_execution_id"],
+        workflow_config_id=ids["workflow_config_id"],
+        app_id=ids["flow_app_id"],
+        conversation_id=FIXTURES["conversation_id"],
+        triggered_by=SEED["actor_id"],
+        input_data=json.dumps({"message": "parity run input"}),
+        output_data=json.dumps({
+            "output": "parity run output",
+            "node_outputs": {
+                "end": {
+                    "node_type": "end",
+                    "node_name": "end",
+                    "status": "completed",
+                    "output": "parity run output",
+                    "execution_order": 1,
+                }
+            },
+        }),
+        token_usage=json.dumps({"total_tokens": 12}),
+        started_at=FIXTURE_TS["execution_started"],
+        completed_at=FIXTURE_TS["execution_completed"],
+    )
+
+    # -- P2: /v1 app + message faces ----------------------------------------
+    req("81_v1_app_placeholder", "GET", "/app", face="v1")
+    req("82_v1_app_variable", "GET", "/app/variable", face="v1")
+    req(
+        "83_v1_list_conversations", "GET", "/app/conversations",
+        params={"user_id": "parity-ext-user-1"}, face="v1",
+    )
+    req(
+        "84_v1_conversation_messages", "GET",
+        "/app/conversations/{conversation_id}/messages",
+        params={"user_id": "parity-ext-user-1"}, face="v1",
+    )
+    req(
+        "85_v1_message_feedback", "POST",
+        "/app/messages/{assistant_message_id}/feedback",
+        {"feedback_type": "dislike", "feedback_content": "parity dislike reason"},
+        params={"user_id": "parity-ext-user-1"}, face="v1",
+    )
+    req(
+        "86_v1_conversation_feedbacks", "GET",
+        "/app/conversations/{conversation_id}/messages/feedbacks",
+        params={"user_id": "parity-ext-user-1"}, face="v1",
+    )
+    req(
+        "87_v1_message_suggested", "GET",
+        "/app/messages/{assistant_message_id}/suggested", face="v1",
+    )
+    req("88_v1_app_info", "GET", "/app/info", face="v1")
+
+    # -- P2: manager message face -------------------------------------------
+    req(
+        "89_manager_message_versions", "GET",
+        "/apps/{flow_app_id}/messages/{assistant_message_id}/versions",
+    )
+    req(
+        "90_manager_switch_version_branch", "POST",
+        "/apps/{flow_app_id}/messages/{assistant_message_v2_id}"
+        "/switch-version/1/branch",
+    )
+    req(
+        "91_manager_message_feedback", "POST",
+        "/apps/{flow_app_id}/messages/{assistant_message_id}/feedback",
+        {"feedback_type": "like"},
+    )
+    req(
+        "92_manager_get_message_feedback", "GET",
+        "/apps/{flow_app_id}/messages/{assistant_message_id}/feedback",
+    )
+    req(
+        "93_manager_message_favorite", "POST",
+        "/apps/{flow_app_id}/messages/{assistant_message_id}/favorite",
+    )
+    req(
+        "94_manager_message_report", "POST",
+        "/apps/{flow_app_id}/messages/{assistant_message_id}/report",
+        {
+            "report_type": "quality",
+            "report_reason": "parity report",
+            "text_start_offset": 0,
+            "text_end_offset": 5,
+            "selected_text": "parity",
+        },
+        capture=[(("data", "report_id"), "report_id")],
+    )
+    req("95_manager_report_types_enum", "GET", "/apps/enums/message_report_types")
+    req("96_manager_reports_list", "GET", "/apps/messages/reports")
+    req(
+        "97_manager_review_report", "POST", "/apps/reports/{report_id}/review",
+        {
+            "severity": "low",
+            "action_taken": "no_action",
+            "review_note": "parity review",
+        },
+    )
+    req(
+        "98_manager_reports_statistics", "GET",
+        "/apps/messages/reports/statistics",
+    )
+
+    # -- P2: app-log face ----------------------------------------------------
+    req("99_app_log_conversations", "GET", "/apps/{flow_app_id}/logs")
+    req(
+        "100_app_log_executions", "GET",
+        "/apps/{flow_app_id}/workflow-executions",
+    )
+    req(
+        "101_app_log_execution_detail", "GET",
+        "/apps/{flow_app_id}/workflow-executions/parity-exec-0001",
+    )
+    req(
+        "102_app_log_conversation_detail", "GET",
+        "/apps/{flow_app_id}/logs/{conversation_id}",
+    )
+
+    # -- P2: conversation share face ----------------------------------------
+    req(
+        "103_conversation_share_create", "POST",
+        "/apps/{flow_app_id}/conversations/{conversation_id}/share",
+        {"allow_copy": True},
+        capture=[
+            (("data", "share_id"), "conversation_share_id"),
+            (("data", "share_uuid"), "share_uuid"),
+        ],
+    )
+    req(
+        "104_conversation_share_view", "GET", "/apps/share/{share_uuid}",
+        face="public",
+    )
+    req(
+        "105_conversation_share_list", "GET",
+        "/apps/{flow_app_id}/conversations/{conversation_id}/shares",
+    )
+    req(
+        "106_conversation_share_revoke", "DELETE",
+        "/apps/{flow_app_id}/conversations/{conversation_id}/share/{share_uuid}",
+    )
+    db(
+        "107_db_conversation_shares",
+        "SELECT view_count, is_active FROM conversation_shares WHERE id = :id",
+        id=ids["conversation_share_id"],
+    )
+
+    # -- P2: release share face ---------------------------------------------
+    req(
+        "108_release_share_create", "POST",
+        "/apps/{flow_app_id}/releases/{release_v1_id}/share",
+        {"is_enabled": True, "require_password": False, "allow_embed": False},
+        capture=[
+            (("data", "id"), "release_share_id"),
+            (("data", "share_token"), "share_token"),
+        ],
+    )
+    req(
+        "109_release_share_get", "GET",
+        "/apps/{flow_app_id}/releases/{release_v1_id}/share",
+    )
+    req(
+        "110_release_share_update", "PUT",
+        "/apps/{flow_app_id}/releases/{release_v1_id}/share",
+        {"allow_embed": True, "embed_domains": ["https://embed.parity"]},
+    )
+    req(
+        "111_release_share_regenerate", "POST",
+        "/apps/{flow_app_id}/releases/{release_v1_id}/share/regenerate-token",
+        capture=[(("data", "share_token"), "share_token")],
+    )
+    req(
+        "112_release_share_delete", "DELETE",
+        "/apps/{flow_app_id}/releases/{release_v1_id}/share",
+    )
+    db(
+        "113_db_release_shares",
+        "SELECT is_enabled FROM release_shares WHERE release_id = :id",
+        id=ids["release_v1_id"],
+    )
+
+    # -- P2: message deletion (last; shares and app-log ran on live rows) ----
+    req(
+        "114_manager_delete_message", "DELETE",
+        "/apps/{flow_app_id}/messages/{assistant_message_id}",
+    )
+    db(
+        "115_db_message_deleted",
+        "SELECT is_deleted FROM messages WHERE id = :id",
+        id=ids["assistant_message_id"],
+    )
+    db(
+        "116_db_report_status",
+        "SELECT status FROM message_reports WHERE id = :id",
+        id=ids["report_id"],
     )
 
     return results

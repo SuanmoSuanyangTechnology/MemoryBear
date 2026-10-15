@@ -127,6 +127,7 @@ api_keys = Table(
     Column("api_key", String),
     Column("workspace_id", PgUUID(as_uuid=True)),
     Column("resource_id", PgUUID(as_uuid=True)),
+    Column("scopes", JSONB),
     # Statistics reads narrow workspace calls by key type.
     Column("type", String),
 )
@@ -177,6 +178,9 @@ memory_config = Table(
     Column("config_id", PgUUID(as_uuid=True), primary_key=True),
     Column("config_id_old", Integer),
     Column("workspace_id", PgUUID(as_uuid=True)),
+    Column("is_default", Boolean),
+    Column("state", Boolean),
+    Column("created_at", DateTime),
 )
 
 model_configs = Table(
@@ -225,6 +229,17 @@ def get_workspace(db: Session, workspace_id: UUID) -> Row | None:
     return db.execute(
         select(workspaces).where(workspaces.c.id == workspace_id)
     ).first()
+
+
+def get_workspace_ids_by_tenant(db: Session, tenant_id: UUID) -> list[UUID]:
+    """Workspace ids of a tenant (stand-in for the host workspace join in
+    tenant-scoped usage counts)."""
+
+    return list(
+        db.execute(select(workspaces.c.id).where(workspaces.c.tenant_id == tenant_id))
+        .scalars()
+        .all()
+    )
 
 
 def get_user(db: Session, user_id: UUID) -> Row | None:
@@ -326,6 +341,24 @@ def get_api_key_resource_id(
             api_keys.c.resource_id.isnot(None),
         )
     ).scalar_one_or_none()
+
+
+def get_api_key_binding(
+    db: Session, api_key_id: UUID, workspace_id: UUID
+) -> Row | None:
+    """Key-row binding used by the ``/v1`` faces: resolve the key's resource,
+    type and scopes from the credential id the gateway injected. Scoped by the
+    principal's workspace (claims authority) as defense in depth; a missing row
+    (deleted key) or foreign workspace returns None."""
+
+    return db.execute(
+        select(
+            api_keys.c.resource_id, api_keys.c.type, api_keys.c.scopes
+        ).where(
+            api_keys.c.id == api_key_id,
+            api_keys.c.workspace_id == workspace_id,
+        )
+    ).first()
 
 
 def get_workspaces_by_ids(
@@ -501,6 +534,68 @@ def memory_config_exists_by_legacy_id(
                 )
             )
         ).scalar()
+    )
+
+
+def get_memory_config_by_id(db: Session, config_id: UUID) -> Row | None:
+    """Memory config by uuid, no workspace filter (host
+    ``MemoryConfigRepository.get_by_id_async``)."""
+
+    return db.execute(
+        select(memory_config).where(memory_config.c.config_id == config_id)
+    ).first()
+
+
+def get_workspace_default_memory_config(db: Session, workspace_id: UUID) -> Row | None:
+    """Workspace default memory config (host
+    ``MemoryConfigRepository.get_workspace_default_async``: flagged default
+    first, else the earliest active config by created_at)."""
+
+    row = db.execute(
+        select(memory_config)
+        .where(
+            memory_config.c.workspace_id == workspace_id,
+            memory_config.c.is_default.is_(True),
+            memory_config.c.state.is_(True),
+        )
+        .limit(1)
+    ).first()
+    if row is not None:
+        return row
+    return db.execute(
+        select(memory_config)
+        .where(
+            memory_config.c.workspace_id == workspace_id,
+            memory_config.c.state.is_(True),
+        )
+        .order_by(memory_config.c.created_at.asc())
+        .limit(1)
+    ).first()
+
+
+def get_memory_config_with_fallback(
+    db: Session, config_id: UUID | None, workspace_id: UUID
+) -> Row | None:
+    """Memory config with workspace-default fallback (host
+    ``MemoryConfigRepository.get_with_fallback_async``: a missing id falls back
+    to the default instead of erroring)."""
+
+    if not config_id:
+        return get_workspace_default_memory_config(db, workspace_id)
+    row = get_memory_config_by_id(db, config_id)
+    if row is not None:
+        return row
+    return get_workspace_default_memory_config(db, workspace_id)
+
+
+def get_tenant_user_ids(db: Session, tenant_id: UUID) -> list[UUID]:
+    """User ids of a tenant (host quota trial-user exclusion: end users whose
+    ``other_id`` matches a tenant user are not counted)."""
+
+    return list(
+        db.execute(select(users.c.id).where(users.c.tenant_id == tenant_id))
+        .scalars()
+        .all()
     )
 
 
@@ -761,6 +856,7 @@ __all__ = [
     "find_skill_id_by_name",
     "find_tool_config_id_by_name",
     "get_active_subscription",
+    "get_api_key_binding",
     "get_api_key_resource_id",
     "get_available_kb_ids",
     "get_available_model_ids",
@@ -772,17 +868,22 @@ __all__ = [
     "get_importable_tool_id",
     "get_knowledge_row",
     "get_knowledge_share_row",
+    "get_memory_config_by_id",
+    "get_memory_config_with_fallback",
     "get_model_config_row",
     "get_plan_quotas",
     "get_plan_version_snapshot",
     "get_publishable_ref_rows",
     "get_resource_pack_rows",
     "get_skill_row",
+    "get_tenant_user_ids",
     "get_tool_config_row",
     "get_user",
     "get_user_display_names_by_ids",
     "get_usernames_by_ids",
     "get_workspace",
+    "get_workspace_default_memory_config",
+    "get_workspace_ids_by_tenant",
     "get_workspace_tenant_id",
     "get_workspace_published_knowledge_row",
     "get_workspaces_by_ids",

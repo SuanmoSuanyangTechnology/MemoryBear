@@ -618,6 +618,21 @@ class ConversationService:
             return None
         return str(end_user.id)
 
+    async def _resolve_v1_internal_user_id_async(
+            self,
+            *,
+            workspace_id: uuid.UUID,
+            external_user_id: str,
+    ) -> str | None:
+        """将外部 user_id 解析为内部终端用户 ID（异步版本），不存在时返回 None。"""
+        end_user = await self.end_user_repo.get_end_user_by_other_id_async(
+            workspace_id=workspace_id,
+            other_id=external_user_id,
+        )
+        if not end_user:
+            return None
+        return str(end_user.id)
+
     @classmethod
     def _sanitize_v1_message_meta_data(cls, meta_data: Optional[dict]) -> dict:
         """对外返回消息元数据时仅保留白名单字段。"""
@@ -799,7 +814,7 @@ class ConversationService:
         if limit > 200:
             raise BusinessException("limit 超过最大限制", BizCode.INVALID_PARAMETER)
 
-        internal_user_id = self._resolve_v1_internal_user_id(
+        internal_user_id = await self._resolve_v1_internal_user_id_async(
             workspace_id=workspace_id,
             external_user_id=external_user_id,
         )

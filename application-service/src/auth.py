@@ -23,6 +23,7 @@ single-channel rule holds in both modes.
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass
 
 from fastapi import HTTPException, Request
@@ -45,6 +46,14 @@ _PUBLIC_PATHS = frozenset(
     }
 )
 
+# Anonymous-by-contract paths carrying a variable segment. The conversation
+# share view is public: the shared-link viewer holds no credentials, so the
+# gateway forwards the request without terminating a user credential and no
+# principal can be assembled. Read-only GET only.
+_PUBLIC_PATH_PATTERNS = (
+    (re.compile(r"^/internal/v1/apps/share/[^/]+$"), ("GET",)),
+)
+
 
 @dataclass
 class AppAuthConfig:
@@ -59,8 +68,12 @@ class AppAuthConfig:
 
 
 def is_public_path(path: str, method: str) -> bool:
-    del method
-    return path in _PUBLIC_PATHS
+    if path in _PUBLIC_PATHS:
+        return True
+    return any(
+        method in methods and pattern.match(path)
+        for pattern, methods in _PUBLIC_PATH_PATTERNS
+    )
 
 
 def _load_gateway_auth(config: AppAuthConfig):
