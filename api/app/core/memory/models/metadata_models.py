@@ -246,11 +246,21 @@ def flatten_domain_specific_info(domain_specific_info: Any) -> List[Tuple[str, s
 
 
 def _union_entries(base: List[Any], extra: List[Any]) -> List[Any]:
-    """按 _entry_key 做去重并集，保留 base 在前、首现顺序；非字符串条目原样保留。"""
+    """字符串按 _entry_key 去重；非字符串 JSON 条目按类型和值去重，原样保留。
+
+    保留 base 在前、首现顺序；重复归并不会追加相同的非字符串历史条目。
+    """
     result = list(base)
     seen = {_entry_key(x) for x in result if isinstance(x, str)}
+    seen_non_strings = {
+        _legacy_metadata_entry_key(x) for x in result if not isinstance(x, str)
+    }
     for item in extra:
         if not isinstance(item, str):
+            non_string_key = _legacy_metadata_entry_key(item)
+            if non_string_key not in seen_non_strings:
+                seen_non_strings.add(non_string_key)
+                result.append(item)
             continue
         key = _entry_key(item)
         if key not in seen:
