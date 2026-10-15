@@ -77,10 +77,15 @@ may differ in wording; different owners/domains or homonyms must remain separate
 across versions normally shares a page, preserving version qualifiers in evidence. Do not erase
 meaningful model numbers or merge merely related concepts. Choose only this candidate's supplied
 page_ref, or null when uncertain. Return each candidate_ref exactly once in matches.""",
-    "wiki_taxonomy_v2": """Assign every topic to a coherent navigation category_path of at most two
-levels. Reuse the supplied existing_paths whenever they express the same category. Avoid synonymous
-parallel folders and one folder per document. Knowledge and Summary are UI groups, not folders.
-Return each topic_ref once in assignments. An empty path is valid when no useful category applies.
+    "wiki_taxonomy_v2": """Assign every entity/concept topic to a useful navigation category_path
+with one or two levels. A nonempty first-level category is required for every topic; never return
+an empty path or leave a topic at the navigation root. Reuse existing_paths only when they fit the
+topic. If existing paths are empty or unrelated, create a meaningful category from the supplied
+topic names, types and descriptions. Prefer a broad useful category over a forced narrow one.
+Group related subjects together; avoid synonymous parallel folders and one folder per document
+or topic. For example, products and capabilities may share a category, while technical methods
+or organizations and people may belong in other categories when supported by the topic set.
+Knowledge and Summary are UI groups, not folders. Return each topic_ref once in assignments.
 Do not create additional topics. Match the requested language.""",
     "wiki_page_original_v2": MARKDOWN_RULES + """Compile a full Wiki page from original evidence.
 Every factual statement must concern this exact page title and type. Mixed source chunks may
