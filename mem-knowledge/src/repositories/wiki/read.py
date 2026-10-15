@@ -17,7 +17,7 @@ from ...models.owned import (
 )
 from ...models.references import Workspace
 from ...rag.wiki.config import WikiError
-from ...rag.wiki.pipeline import reduce_input
+from ...rag.wiki.pipeline import readable_markdown, reduce_input
 from ...utils.datetime_utils import to_timestamp_ms
 from .common import as_uuid
 
@@ -217,7 +217,7 @@ def detail(session, scope, page_id):
     ).all()
     result.update(
         {
-            "content": page.content,
+            "content": readable_markdown(page.content, [item["ref"] for item in catalog]),
             "summary": page.summary,
             "sources": catalog,
             "outlinks": [{"page_id": str(row.id), "title": row.title} for row in outlinks],

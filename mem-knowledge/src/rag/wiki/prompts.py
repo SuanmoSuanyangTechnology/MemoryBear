@@ -7,8 +7,10 @@ Preserve names, product versions, dates, amounts, negation and applicability con
 Keep conflicting claims with their respective sources. Never choose a winner without evidence.
 Use the requested language. Return exactly one JSON object matching the supplied output schema.
 Use only provided handles for sources, topics, facts and page links. Never invent database IDs.
-Use Markdown without raw HTML, executable URLs or external links. Citations use [^handle].
-Code examples may contain literal HTML inside fenced code. Citation/link handles apply outside code.
+Use readable Markdown without raw HTML, executable URLs or external links.
+Keep source handles in structured source_refs, not in the visible prose. Do not add footnotes,
+source quotation blocks, reference lists or chunk IDs. Link relevant concepts in the prose using
+the supplied Wiki page handles. Code examples may contain literal HTML inside fenced code.
 Source references must identify every source actually used, including those merged as duplicates.
 """
 
@@ -26,7 +28,8 @@ S handle in the union of summary_points.source_refs, including repetitions merge
 Return {"summary_points": [...]} only. This segment is not the complete document.""",
     "wiki_summary_full_v2": """Write a document summary using all supplied original sources.
 Preserve independent topics, versions, dates, negation, conditions and contradictions. Include every
-supplied S handle in source_refs and cite each in summary_markdown. Allowed links use [[T1|title]].
+supplied S handle in source_refs. Write natural prose without source markers or reference blocks.
+Allowed inline Wiki links use [[T1|title]].
 Return summary_line, summary_markdown and source_refs. Do not invent facts or links.""",
     "wiki_identity_v2": """Resolve identities against each item's own existing-page shortlist.
 Only match the exact same real-world entity/concept, including actual aliases. Scope descriptions
@@ -48,7 +51,8 @@ facts. Preserve every independent on-topic condition, number, negation, version 
 Merge duplicate statements while retaining their sources. document_context explains source scope
 and tone only, never factual evidence. previous_content helps structure and formatting only: retain
 information solely when current evidence supports it, remove withdrawn contributions.
-Use supplied [[L1|title]] links, no self links. Cite every evidence source, including duplicates.
+Use supplied [[L1|title]] links directly on relevant words in the prose, no self links.
+Track every evidence source, including duplicates, in source_refs without visible citations.
 Return summary, full content_markdown, and source_refs containing the union of evidence.source_refs.
 Do not repeat the top-level page title. Never output a patch or drop evidence to fit the budget.""",
     "wiki_candidates_v1": """Extract worthwhile entity and concept page candidates from sources.
@@ -71,21 +75,23 @@ Return summary_points covering the supplied text with S source_refs.
 Every supplied S handle must occur in summary_points.source_refs at least once, including
 sources merged as repetitions. The union of these references must equal the supplied S handles.
 For mode=full_document also return document_summary with summary_line, summary_markdown and
-source_refs containing every supplied S handle, each cited in summary_markdown.
+source_refs containing every supplied S handle; keep handles out of summary_markdown.
 For mode=segment document_summary must be null: this is not the entire document.
-Use [^S1] citations and [[T1|title]] links only from confirmed_topics.
+Use inline [[T1|title]] links only from confirmed_topics and keep citations in source_refs.
 Return {"topics": [...], "summary_points": [...], "document_summary": object_or_null}.""",
     "wiki_document_summary_v1": """Combine all supplied summary_points into one document summary.
 All points jointly represent the whole document. Preserve independent facts, version qualifiers,
-negation and conflicting statements with their sources. Use [^S1] and allowed [[T1|title]] links.
+negation and conflicting statements with their source attribution in natural language.
+Use allowed inline [[T1|title]] links and keep source handles in source_refs.
 source_refs must contain the union of all summary_points.source_refs, including repetitions
-merged in the prose. Cite every returned source handle in summary_markdown at least once.
+merged in the prose. Do not append source markers or reference blocks to summary_markdown.
 Return {"summary_line": "...", "summary_markdown": "...", "source_refs": [...]}.
 Do not create new topics or facts.""",
     "wiki_page_reduce_v1": """Write one complete Markdown page for page from all evidence.
 previous_outline is only a structural hint, never evidence. Preserve independent facts and
 qualifiers; merge duplicates while retaining their references; present conflicts with sources.
-Use [^R1] citations and [[L1|title]] only from allowed_links. No self-links or extra pages.
+Use inline [[L1|title]] only from allowed_links. Keep citations in source_refs, not visible prose.
+No self-links or extra pages.
 Do not repeat the top-level page title inside the body. No IDs, versions, state or edge arrays.
 Return summary, content_markdown, used_fact_refs and source_refs. used_fact_refs includes every
 original fact represented, including all facts combined as duplicates; do not silently drop facts.

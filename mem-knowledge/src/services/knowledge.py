@@ -752,8 +752,12 @@ async def apply_knowledge_update(
     await db.flush()
     await db.refresh(knowledge)
     outcome = await build_knowledge_mutation_outcome(db, knowledge)
+    wiki_update = (plan.parser_config_update or {}).get("wiki") or {}
     outcome = replace(
-        outcome, wiki_backfill_required=not wiki_enabled_before and wiki_enabled_after
+        outcome,
+        wiki_backfill_required=wiki_enabled_after and (
+            not wiki_enabled_before or wiki_update.get("enabled") is True
+        ),
     )
     await db.commit()
     return outcome

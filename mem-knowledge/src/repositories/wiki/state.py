@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import delete, select
 
@@ -19,6 +19,7 @@ from ...rag.wiki.config import (
     TASK_RETENTION_DAYS,
     TERMINAL_TASK_STATUSES,
     WikiError,
+    WikiSourcePending,
     WikiSuperseded,
     generation_config_hash,
     read_wiki_config,
@@ -34,6 +35,47 @@ from .common import (
     settle_progress,
     state_delivery,
 )
+
+DISPATCH_RECOVERY_SECONDS = 120
+
+
+def _active_delivery(document, state, *, explicit, admission_id):
+    if state is None or state.status not in ACTIVE_STATUSES or document.run == 2:
+        return None
+    if state.stage == "waiting_source":
+        if (
+            explicit and not state.source_ready and state.source_task_id
+            and document.progress >= 0
+        ):
+            return {
+                **state_delivery(state), "task_id": state.source_task_id,
+                "publish": False, "accepted": False,
+            }
+        return None
+    if state.stage == "waiting_wiki" or not state.task_id:
+        return None
+    # Give the original publisher time to finish before recovering an abandoned handoff.
+    updated_at = getattr(state, "updated_at", None)
+    abandoned = updated_at is not None and updated_at <= (
+        utcnow_naive() - timedelta(seconds=DISPATCH_RECOVERY_SECONDS)
+    )
+    publish = (
+        state.stage == "map_pending" and state.status == "pending"
+        and not state.publish_confirmed
+        and (
+            state.error_code == "WIKI_DISPATCH_FAILED"
+            or (admission_id is not None and state.admission_id == admission_id)
+            or (explicit and abandoned)
+        )
+    )
+    if publish and document.progress < 0:
+        document.run, document.progress = 0, 0.0
+        state.last_progress = 0.0
+        append_log(document, "Wiki dispatch retry queued.")
+    if publish:
+        state.error_code = None
+        state.updated_at = utcnow_naive()
+    return {**state_delivery(state), "publish": publish, "accepted": False}
 
 
 def affected_page_ids(session, document_id):
@@ -84,6 +126,9 @@ def start_round(session, document, state, scope, *, source=False, reuse=False):
             task.status = "superseded"
     state.processing_mode = "source" if source else "wiki_only"
     state.source_ready = not source
+    if source:
+        # Only source_started/source_completed may bind the current parse task identity.
+        state.source_task_id = None
     state.plan_ready = False
     state.mapped_version = 0
     state.task_id = None
@@ -145,9 +190,16 @@ def start_round(session, document, state, scope, *, source=False, reuse=False):
     return state
 
 
-def admit(session, kb_id, document_id, *, explicit=False, admission_id=None, expected_scope=None):
+def admit(
+    session, kb_id, document_id, *, explicit=False, admission_id=None, expected_scope=None,
+    source_task_id=None, admission_at_ms=None,
+):
     knowledge, scope = lock_knowledge(session, kb_id, expected_scope)
     document, state = lock_document(session, kb_id, document_id)
+    if document.status == 1 or (explicit and state and state.operation == "retract"):
+        active = _active_delivery(document, state, explicit=explicit, admission_id=admission_id)
+        if active:
+            return active
     if document.status != 1:
         if (
             explicit
@@ -169,23 +221,33 @@ def admit(session, kb_id, document_id, *, explicit=False, admission_id=None, exp
             session.flush()
             return {**state_delivery(state), "publish": True, "accepted": True}
         return None
+    if state is None and explicit and document.run in {0, 1} and 0 <= document.progress < 1:
+        if source_task_id:
+            return {
+                "kb_id": str(kb_id), "document_id": str(document_id),
+                "task_id": source_task_id, "publish": False, "accepted": False,
+            }
+        # The service may resolve a parse task registered while Wiki was disabled.
+        raise WikiSourcePending("WIKI_SOURCE_NOT_READY", retryable=False)
     if not read_wiki_config(knowledge.parser_config).enabled:
         if explicit:
             raise WikiError("WIKI_DISABLED", retryable=False)
         return None
-    if state and state.stage not in {"waiting_source", "waiting_wiki"}:
-        if state.status in ACTIVE_STATUSES:
-            publish = not state.publish_confirmed and (
-                explicit
-                or state.admission_id == admission_id
-                or state.error_code == "WIKI_DISPATCH_FAILED"
-            )
-            if publish and document.progress < 0:
-                document.run, document.progress = 0, 0.0
-                state.last_progress = 0.0
-                append_log(document, "Wiki dispatch retry queued.")
-            return {**state_delivery(state), "publish": publish, "accepted": False}
-        if not explicit:
+    if state and state.status not in ACTIVE_STATUSES:
+        started_at = getattr(document, "process_begin_at", None)
+        predates_event = (
+            admission_at_ms is None or started_at is None
+            or started_at <= datetime.fromtimestamp(
+                admission_at_ms / 1000, UTC
+            ).replace(tzinfo=None)
+        )
+        recover_failed = (
+            admission_id is not None and state.admission_id != admission_id
+            and state.status == "failed" and state.source_ready
+            and state.operation == "upsert" and document.run != 2
+            and predates_event
+        )
+        if not explicit and not recover_failed:
             return None
         if not state.source_ready:
             raise WikiError("WIKI_SOURCE_NOT_READY", retryable=False)
