@@ -5977,7 +5977,12 @@ class WorkflowService:
             orphan_q = orphan_q.filter(MessageModel.created_at >= parent_user.created_at)
         if next_user is not None:
             orphan_q = orphan_q.filter(MessageModel.created_at < next_user.created_at)
+        # 排除本轮 user 的上一条 assistant（开场白 / 上一轮回复）：它们 parent 为空且
+        # created_at 可能与 user 相同（同批落库、时钟精度），否则会被时间窗误圈成本轮"版本"
+        preceding_id = parent_user.parent_message_id
         for o in orphan_q.order_by(MessageModel.version.asc()).all():
+            if preceding_id is not None and o.id == preceding_id:
+                continue
             if str(o.id) not in existing_ids:
                 siblings.append(o)
                 existing_ids.add(str(o.id))

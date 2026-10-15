@@ -397,8 +397,13 @@ async def _bulk_persist_messages(
             opening_row_id = args.get("opening_message_id")
             if opening_row_id:
                 _opening_sq = args.get("opening_suggested_questions")
-                _add_row(_row(opening_row_id, conv_id, "assistant", args["opening_statement"],
-                              {"suggested_questions": _opening_sq} if _opening_sq else None), conv_id)
+                _opening_row = _row(opening_row_id, conv_id, "assistant", args["opening_statement"],
+                                    {"suggested_questions": _opening_sq} if _opening_sq else None)
+                # 同批落库的行 created_at 可能因时钟精度完全相同，按时间排序会让开场白与 user 次序不定；
+                # 开场白前移 1ms，保证它严格排在本轮 user 之前
+                from datetime import timedelta as _timedelta
+                _opening_row["created_at"] = _opening_row["created_at"] - _timedelta(milliseconds=1)
+                _add_row(_opening_row, conv_id)
 
         # user message
         if args.get("user_meta_override"):
