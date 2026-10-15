@@ -194,6 +194,7 @@ export const memoryConversation = {
         profile: 'L0 用户画像',
         notRanked: '不参与排序',
         metadataBadge: 'L0 元数据',
+        noMetadataBadge: '无用户画像',
         unknownUser: '未知用户',
         profileDescription: 'L0 用户元数据：{{name}}；包含 {{fields}} 等聚合字段。',
         loaded: '已加载',
