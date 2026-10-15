@@ -9,7 +9,7 @@ from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from typing import Any
 
-TEMPLATE_VERSION = "wiki_readable_evidence_v3"
+TEMPLATE_VERSION = "wiki_substantive_candidates_v4"
 MAP_TASK = "mem_knowledge.tasks.sync_wiki_document"
 REDUCE_TASK = "mem_knowledge.tasks.reduce_wiki_page"
 BACKFILL_TASK = "mem_knowledge.tasks.enqueue_unprocessed_wiki_documents"

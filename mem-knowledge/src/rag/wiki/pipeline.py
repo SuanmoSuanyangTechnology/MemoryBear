@@ -92,7 +92,11 @@ def model_sources(sources):
 
 
 def model_topics(topics):
-    return [{key: item[key] for key in ("topic_ref", "kind", "title", "scope")} for item in topics]
+    return [
+        {**{key: item[key] for key in ("topic_ref", "kind", "title", "scope")},
+         "aliases": item.get("aliases", [])}
+        for item in topics
+    ]
 
 
 def extract_candidates(model, snapshot, segments):
@@ -102,8 +106,6 @@ def extract_candidates(model, snapshot, segments):
         def validate(value, source_ids=source_ids):
             for candidate in value["candidates"]:
                 require_refs(candidate["source_refs"], source_ids)
-                if any(not name.strip() or len(name) > 200 for name in candidate["category_path"]):
-                    raise ValueError("Invalid category name")
 
         result = model.call(
             "wiki_candidates_v1",

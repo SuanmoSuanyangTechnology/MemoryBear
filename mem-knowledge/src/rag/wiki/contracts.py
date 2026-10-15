@@ -14,8 +14,7 @@ class Candidate(Output):
     name: str = Field(min_length=1, max_length=400)
     aliases: list[str]
     scope: str = Field(min_length=1, max_length=2000)
-    description: str
-    category_path: list[str] = Field(max_length=2)
+    description: str = Field(min_length=1)
     source_refs: list[str] = Field(min_length=1)
 
 
