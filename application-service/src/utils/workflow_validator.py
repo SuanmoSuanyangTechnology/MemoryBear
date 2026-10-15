@@ -471,4 +471,15 @@ class WorkflowValidator:
         return len(errors) == 0, errors
 
 
-__all__ = ["WorkflowValidator", "validate_variable_names"]
+def validate_workflow_config(
+    workflow_config: dict[str, Any] | Any,
+    for_publish: bool = False,
+) -> tuple[bool, list[str]]:
+    """Convenience wrapper (host parity): ``for_publish`` selects the stricter pass."""
+
+    if for_publish:
+        return WorkflowValidator.validate_for_publish(workflow_config)
+    return WorkflowValidator.validate(workflow_config)
+
+
+__all__ = ["WorkflowValidator", "validate_variable_names", "validate_workflow_config"]

@@ -175,6 +175,9 @@ class ScenarioAsyncSession:
     async def delete(self, *args, **kwargs):
         return self._session.delete(*args, **kwargs)
 
+    async def run_sync(self, fn, *args, **kwargs):
+        return fn(self._session, *args, **kwargs)
+
     async def close(self):
         release_clean_session(self._session)
 

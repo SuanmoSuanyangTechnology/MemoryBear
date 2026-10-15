@@ -4,7 +4,7 @@ import time
 from typing import List, Dict, Any
 
 from ...models.tool_model import ToolType
-from ..base import BaseTool, ToolParameter, ParameterType
+from ..base import BaseTool, ToolParameter, ParameterType, ToolResult
 
 logger = logging.getLogger(__name__)
 
@@ -114,6 +114,38 @@ class MCPTool(BaseTool):
     def set_current_tool(self, tool_name: str):
         """Set the current tool name used to fetch tool-specific parameters."""
         self._current_tool_name = tool_name
+
+    async def execute(self, **kwargs) -> ToolResult:
+        """Execute the MCP tool."""
+        start_time = time.time()
+
+        try:
+            # Determine the tool to call: prefer the tool_name argument, else the
+            # current tool name (extracted from available_tools)
+            tool_name = kwargs.pop("tool_name", None) or self.name
+            arguments = kwargs.pop("arguments", kwargs)  # remaining arguments become tool arguments
+
+            from .client import SimpleMCPClient
+
+            client = SimpleMCPClient(self.server_url, self.connection_config)
+
+            async with client:
+                result = await client.call_tool(tool_name, arguments)
+
+                execution_time = time.time() - start_time
+                return ToolResult.success_result(
+                    data=result,
+                    execution_time=execution_time
+                )
+
+        except Exception as e:
+            execution_time = time.time() - start_time
+            logger.error(f"MCP工具执行失败: {kwargs.get('tool_name', 'unknown')}, 错误: {e}")
+            return ToolResult.error_result(
+                error=str(e),
+                error_code="MCP_EXECUTION_ERROR",
+                execution_time=execution_time
+            )
 
 
 class MCPError(Exception):

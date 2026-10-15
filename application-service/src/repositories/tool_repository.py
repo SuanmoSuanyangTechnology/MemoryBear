@@ -6,7 +6,8 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import func
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from ..models.tool_model import (
@@ -18,6 +19,27 @@ from ..models.tool_model import (
     ToolType,
     WorkflowToolConfig,
 )
+from ..utils.redis_cache import redis_cache
+from .cross_domain_read import get_workspace_tenant_id, workspaces
+
+
+@redis_cache(ttl=300, prefix="tenant_by_workspace", skip_args=["db"], return_type=uuid.UUID)
+async def _get_tenant_id_by_workspace_id_cached(
+    db: AsyncSession, workspace_id: str
+) -> uuid.UUID | None:
+    """Cached workspace->tenant lookup (same shared key as the monolith)."""
+
+    tenant_id = (
+        await db.execute(
+            select(workspaces.c.tenant_id).where(workspaces.c.id == workspace_id)
+        )
+    ).scalar_one_or_none()
+    if tenant_id is not None and not isinstance(tenant_id, uuid.UUID):
+        try:
+            tenant_id = uuid.UUID(tenant_id)
+        except (ValueError, TypeError):
+            return None
+    return tenant_id
 
 
 class ToolRepository:
@@ -25,6 +47,44 @@ class ToolRepository:
 
     def __init__(self, db: Session):
         self.db = db
+
+    @staticmethod
+    def get_tenant_id_by_workspace_id(db: Session, workspace_id: str) -> uuid.UUID | None:
+        """Workspace -> tenant_id (tolerates string-stored ids)."""
+
+        tenant_id = get_workspace_tenant_id(db, workspace_id)
+        if tenant_id is not None and not isinstance(tenant_id, uuid.UUID):
+            try:
+                tenant_id = uuid.UUID(tenant_id)
+            except (ValueError, TypeError):
+                return None
+        return tenant_id
+
+    @staticmethod
+    async def get_tenant_id_by_workspace_id_async(
+        db: AsyncSession, workspace_id: str
+    ) -> uuid.UUID | None:
+        """Async variant with the shared Redis cache."""
+
+        return await _get_tenant_id_by_workspace_id_cached(db, workspace_id)
+
+    @staticmethod
+    async def get_tenant_id_by_workspace_id_async_nocache(
+        db: AsyncSession, workspace_id: str
+    ) -> uuid.UUID | None:
+        """Uncached async variant for strong-consistency callers."""
+
+        tenant_id = (
+            await db.execute(
+                select(workspaces.c.tenant_id).where(workspaces.c.id == workspace_id)
+            )
+        ).scalar_one_or_none()
+        if tenant_id is not None and not isinstance(tenant_id, uuid.UUID):
+            try:
+                tenant_id = uuid.UUID(tenant_id)
+            except (ValueError, TypeError):
+                return None
+        return tenant_id
 
     def find_by_tenant(
         self,

@@ -12,6 +12,7 @@ from __future__ import annotations
 from uuid import UUID
 
 from sqlalchemy import select, text
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from ..models.end_user_info_model import EndUserInfo
@@ -19,7 +20,7 @@ from ..models.end_user_model import EndUser, EndUserMerge
 
 
 class EndUserRepository:
-    def __init__(self, db: Session):
+    def __init__(self, db: Session | AsyncSession):
         self.db = db
 
     def get_end_user_by_id(self, end_user_id: UUID | str) -> EndUser | None:
@@ -100,6 +101,55 @@ class EndUserRepository:
             )
             .first()
         )
+
+    async def get_end_user_by_other_id_async(
+        self, workspace_id: UUID, other_id: str
+    ) -> EndUser | None:
+        """Async variant used on the runtime plane; ``self.db`` must be an
+        AsyncSession."""
+
+        result = await self.db.execute(
+            select(EndUser)
+            .filter(
+                EndUser.workspace_id == workspace_id,
+                EndUser.other_id == other_id,
+                EndUser.is_active.is_(True),
+            )
+            .order_by(EndUser.created_at.asc())
+        )
+        end_user = result.scalars().first()
+        if end_user:
+            return end_user
+        return await self.resolve_merge_by_other_id_async(workspace_id, other_id)
+
+    async def resolve_merge_by_other_id_async(
+        self, workspace_id: UUID, other_id: str
+    ) -> EndUser | None:
+        """Async variant of ``resolve_merge_by_other_id`` (same selection:
+        latest mapping row, target active + in-workspace)."""
+
+        merge_result = await self.db.execute(
+            select(EndUserMerge.target_id)
+            .filter(
+                EndUserMerge.workspace_id == workspace_id,
+                EndUserMerge.origin_other_id == other_id,
+            )
+            .order_by(EndUserMerge.id.desc())
+            .limit(1)
+        )
+        target_id = merge_result.scalars().first()
+        if not target_id:
+            return None
+        target_result = await self.db.execute(
+            select(EndUser)
+            .filter(
+                EndUser.id == target_id,
+                EndUser.workspace_id == workspace_id,
+                EndUser.is_active.is_(True),
+            )
+            .limit(1)
+        )
+        return target_result.scalars().first()
 
     def get_filtered_by_workspace(
         self,

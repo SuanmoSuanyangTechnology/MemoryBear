@@ -43,3 +43,28 @@ class ProcessRuntime:
             errors.append(exc)
         if errors:
             raise errors[0]
+
+
+_process_runtime: ProcessRuntime | None = None
+
+
+def set_process_runtime(runtime: ProcessRuntime) -> None:
+    """Record the process runtime at assembly time.
+
+    Deep workflow-runtime code (engine/node modules carried over from the
+    monolith) resolves database/Redis handles without a FastAPI request, the
+    same way the monolith reads its module-level singletons. ``create_app``
+    publishes the runtime here so those call sites keep working.
+    """
+
+    global _process_runtime
+    _process_runtime = runtime
+
+
+def get_process_runtime() -> ProcessRuntime:
+    """Return the process runtime recorded by ``create_app``; fail closed when
+    the application has not been assembled."""
+
+    if _process_runtime is None:
+        raise RuntimeError("process runtime is not initialized; create_app must run first")
+    return _process_runtime

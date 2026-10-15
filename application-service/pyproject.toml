@@ -8,21 +8,50 @@ version = "0.1.0"
 description = "Independent MemoryBear application service"
 requires-python = ">=3.12,<3.13"
 dependencies = [
+    "aiofiles>=23.0.0,<25",
     "aiohttp>=3.13,<4",
     "asyncpg>=0.31,<1",
     "auth-sdk>=0.1",
+    "boto3>=1.42,<2",
+    "chardet>=5.2.0,<6",
+    "deprecated>=1.3.1,<2",
     "fastapi>=0.119,<1",
     "httpx>=0.28,<1",
+    "jinja2>=3.1.6,<4",
+    "json-repair>=0.53,<1",
+    "langchain>=1.2,<2",
+    "langchain-aws>=1.3,<2",
+    "langchain-core>=1.2,<2",
+    "langchain-ollama>=1.0,<2",
+    "langchain-openai>=1.1,<2",
+    "langgraph>=1.0,<2",
+    "langid>=1.1.6,<2",
+    "olefile>=0.47,<1",
+    "openpyxl>=3.1.5,<4",
+    "orjson>=3.11,<4",
+    "oss2>=2.19,<3",
+    "pillow>=12.0,<13",
     "psycopg[binary]>=3.2,<4",
+    "psycopg2-binary>=2.9.11,<3",
     "pydantic>=2.12,<3",
     "pydantic-settings>=2.11,<3",
+    "pypdf2>=3.0.1,<4",
+    "python-calamine>=0.4.0,<1",
+    "python-docx>=1.2.0,<2",
     "python-dotenv>=1.1,<2",
+    "python-magic>=0.4.14; sys_platform == 'linux' or sys_platform == 'darwin'",
     "python-multipart>=0.0.20,<1",
+    "pytz>=2025.2,<2027",
     "pyyaml>=6.0.3,<7",
+    "redbear-model[all]",
     "redis>=6.4,<7",
+    "requests>=2.32,<3",
+    "simpleeval>=1.0.3,<2",
     "sqlalchemy[asyncio]>=2.0.44,<3",
     "uvicorn[standard]>=0.37,<1",
+    "volcengine-python-sdk[ark]>=5.0.19,<6",
     "websockets==15.0.1",
+    "xlrd>=2.0.2,<3",
 ]
 
 [dependency-groups]
@@ -38,6 +67,7 @@ dev = [
 
 [tool.uv.sources]
 auth-sdk = { path = "../packages/auth-sdk" }
+redbear-model = { path = "../packages/redbear-model" }
 
 [tool.hatch.build.targets.wheel]
 packages = ["src"]
@@ -92,3 +122,115 @@ select = ["E", "F", "I", "UP", "B", "ASYNC"]
 # mechanically.
 "src/tools/*.py" = ["E501", "E721", "E722", "F401", "F541", "I001", "UP006", "UP007", "UP035", "UP037", "UP041", "UP045", "B007", "B904"]
 "src/tools/**/*.py" = ["E501", "E721", "E722", "F401", "F541", "I001", "UP006", "UP007", "UP035", "UP037", "UP041", "UP045", "B007", "B904"]
+# Frozen port of the host runtime closure (agent runtime, model clients,
+# moderation, RAG helpers, storage backends and the model/knowledge integration
+# clients): kept verbatim for line-by-line comparison; only import paths, the
+# logger helper and settings access were rewritten mechanically.
+"src/agent/*.py" = ["E501", "E721", "E722", "F401", "F541", "I001", "UP006", "UP007", "UP035", "UP037", "UP041", "UP045", "B007", "B904"]
+"src/model_clients/*.py" = ["E501", "E721", "E722", "F401", "F541", "I001", "UP006", "UP007", "UP035", "UP037", "UP041", "UP045", "B007", "B904"]
+"src/moderation/*.py" = ["E501", "E721", "E722", "F401", "F541", "I001", "UP006", "UP007", "UP035", "UP037", "UP041", "UP045", "B007", "B904"]
+"src/moderation/**/*.py" = ["E501", "E721", "E722", "F401", "F541", "I001", "UP006", "UP007", "UP035", "UP037", "UP041", "UP045", "B007", "B904"]
+"src/rag/*.py" = ["E501", "E721", "E722", "F401", "F541", "I001", "UP006", "UP007", "UP035", "UP037", "UP041", "UP045", "B007", "B904"]
+"src/rag/**/*.py" = ["E501", "E721", "E722", "F401", "F541", "I001", "UP006", "UP007", "UP035", "UP037", "UP041", "UP045", "B007", "B904"]
+"src/storage/*.py" = ["E501", "E721", "E722", "F401", "F541", "I001", "UP006", "UP007", "UP035", "UP037", "UP041", "UP045", "B007", "B904"]
+# Frozen port of the host file pipeline (storage/content/multimodal parsing
+# used by the workflow nodes): kept verbatim for line-by-line comparison; only
+# import paths and the logger helper were rewritten mechanically.
+"src/services/file_storage_service.py" = ["E501", "E721", "E722", "F401", "F541", "I001", "UP006", "UP007", "UP035", "UP037", "UP041", "UP045", "B007", "B904"]
+"src/services/file_content_service.py" = ["E501", "E721", "E722", "F401", "F541", "I001", "UP006", "UP007", "UP035", "UP037", "UP041", "UP045", "B007", "B904"]
+"src/services/multimodal_service.py" = ["E501", "E721", "E722", "F401", "F541", "I001", "UP006", "UP007", "UP035", "UP037", "UP041", "UP045", "B007", "B904"]
+"src/services/context_engine_manager.py" = ["E501", "E721", "E722", "F401", "F541", "I001", "UP006", "UP007", "UP035", "UP037", "UP041", "UP045", "B007", "B904"]
+"src/repositories/context_state_repository.py" = ["E501", "E721", "E722", "F401", "F541", "I001", "UP006", "UP007", "UP035", "UP037", "UP041", "UP045", "B007", "B904"]
+# Frozen port of the host trial-run/debug surface (draft-run service, published
+# agent runner, prompt rendering, tool server, context assembly, metadata
+# auto-filter, knowledge metadata helpers, image retrieval guard, emotion reply
+# client): kept verbatim for line-by-line comparison; only import paths and the
+# logger helper were rewritten mechanically.
+"src/services/draft_run_service.py" = ["E501", "E721", "E722", "F401", "F541", "I001", "UP006", "UP007", "UP035", "UP037", "UP041", "UP045", "B007", "B904", "F402", "E741", "ASYNC109"]
+"src/services/tool_orchestrator.py" = ["E501", "E721", "E722", "F401", "F541", "I001", "UP006", "UP007", "UP035", "UP037", "UP041", "UP045", "B007", "B904"]
+"src/services/published_agent_runner.py" = ["E501", "E721", "E722", "F401", "F541", "I001", "UP006", "UP007", "UP035", "UP037", "UP041", "UP045", "B007", "B904"]
+"src/services/langchain_tool_server.py" = ["E501", "E721", "E722", "F401", "F541", "I001", "UP006", "UP007", "UP035", "UP037", "UP041", "UP045", "B007", "B904"]
+"src/services/model_parameter_merger.py" = ["E501", "E721", "E722", "F401", "F541", "I001", "UP006", "UP007", "UP035", "UP037", "UP041", "UP045", "B007", "B904"]
+"src/services/metadata_auto_filter_service.py" = ["E501", "E721", "E722", "F401", "F541", "I001", "UP006", "UP007", "UP035", "UP037", "UP041", "UP045", "B007", "B904"]
+"src/services/context_assembler.py" = ["E501", "E721", "E722", "F401", "F541", "I001", "UP006", "UP007", "UP035", "UP037", "UP041", "UP045", "B007", "B904"]
+"src/services/knowledge_metadata_service.py" = ["E501", "E721", "E722", "F401", "F541", "I001", "UP006", "UP007", "UP035", "UP037", "UP041", "UP045", "B007", "B904"]
+"src/services/image_retrieval_guard.py" = ["E501", "E721", "E722", "F401", "F541", "I001", "UP006", "UP007", "UP035", "UP037", "UP041", "UP045", "B007", "B904"]
+"src/services/multi_agent_variable_contract.py" = ["E501", "E721", "E722", "F401", "F541", "I001", "UP006", "UP007", "UP035", "UP037", "UP041", "UP045", "B007", "B904"]
+"src/services/batch_persist_queue.py" = ["E501", "E721", "E722", "F401", "F541", "I001", "UP006", "UP007", "UP035", "UP037", "UP041", "UP045", "B007", "B904"]
+"src/services/chat_context.py" = ["E501", "E721", "E722", "F401", "F541", "I001", "UP006", "UP007", "UP035", "UP037", "UP041", "UP045", "B007", "B904"]
+"src/services/fast_write_emotion_client.py" = ["E501", "E721", "E722", "F401", "F541", "I001", "UP006", "UP007", "UP035", "UP037", "UP041", "UP045", "B007", "B904"]
+"src/repositories/knowledge_metadata_repository.py" = ["E501", "E721", "E722", "F401", "F541", "I001", "UP006", "UP007", "UP035", "UP037", "UP041", "UP045", "B007", "B904"]
+# Frozen port of the host reply-side emotion domain (cache + resolver) and the
+# anthropomorphic policy anchor: kept verbatim for line-by-line comparison.
+"src/memory/emotion/*.py" = ["E501", "E721", "E722", "F401", "F541", "I001", "UP006", "UP007", "UP035", "UP037", "UP041", "UP045", "B007", "B904"]
+# Frozen port of the host model-config resolution seam (repositories, channel
+# registry/cipher, usage load, profile view, model config service, redis cache
+# helper): kept verbatim for line-by-line comparison; only import paths, the
+# logger helper and settings access were rewritten mechanically.
+"src/repositories/model_repository.py" = ["E501", "E721", "E722", "F401", "F541", "I001", "UP006", "UP007", "UP035", "UP037", "UP041", "UP045", "B007", "B904"]
+"src/repositories/model_channel_repository.py" = ["E501", "E721", "E722", "F401", "F541", "I001", "UP006", "UP007", "UP035", "UP037", "UP041", "UP045", "B007", "B904"]
+"src/services/channel_service.py" = ["E501", "E721", "E722", "F401", "F541", "I001", "UP006", "UP007", "UP035", "UP037", "UP041", "UP045", "B007", "B904"]
+"src/services/channel_registry.py" = ["E501", "E721", "E722", "F401", "F541", "I001", "UP006", "UP007", "UP035", "UP037", "UP041", "UP045", "B007", "B904"]
+"src/services/usage_load.py" = ["E501", "E721", "E722", "F401", "F541", "I001", "UP006", "UP007", "UP035", "UP037", "UP041", "UP045", "B007", "B904"]
+"src/services/model_profile_view.py" = ["E501", "E721", "E722", "F401", "F541", "I001", "UP006", "UP007", "UP035", "UP037", "UP041", "UP045", "B007", "B904"]
+"src/services/model_service.py" = ["E501", "E721", "E722", "F401", "F541", "I001", "UP006", "UP007", "UP035", "UP037", "UP041", "UP045", "B007", "B904"]
+"src/utils/redis_cache.py" = ["E501", "E721", "E722", "F401", "F541", "I001", "UP006", "UP007", "UP035", "UP037", "UP041", "UP045", "B007", "B904"]
+"src/models/model_usage_record.py" = ["E501", "F401", "I001", "UP006", "UP035", "UP045"]
+"src/integrations/model/*.py" = ["E501", "E721", "E722", "F401", "F541", "I001", "UP006", "UP007", "UP035", "UP037", "UP041", "UP045", "B007", "B904"]
+"src/integrations/knowledge/*.py" = ["E501", "E721", "E722", "F401", "F541", "I001", "UP006", "UP007", "UP035", "UP037", "UP041", "UP045", "B007", "B904"]
+"src/memory/enums.py" = ["E501", "E721", "E722", "F401", "F541", "I001", "UP006", "UP007", "UP035", "UP037", "UP041", "UP045", "B007", "B904"]
+"src/memory/retrieval_trace/*.py" = ["E501", "E721", "E722", "F401", "F541", "I001", "UP006", "UP007", "UP035", "UP037", "UP041", "UP045", "B007", "B904"]
+"src/utils/workflow_triggers.py" = ["E501", "E721", "E722", "F401", "F541", "I001", "UP006", "UP007", "UP035", "UP037", "UP041", "UP045", "B007", "B904", "UP017"]
+"src/llm_error_handler.py" = ["E501", "E721", "E722", "F401", "F541", "I001", "UP006", "UP007", "UP035", "UP037", "UP041", "UP045", "B007", "B904"]
+"src/usage_context.py" = ["E501", "E721", "E722", "F401", "F541", "I001", "UP006", "UP007", "UP035", "UP037", "UP041", "UP045", "B007", "B904"]
+"src/usage_bridge.py" = ["E501", "E721", "E722", "F401", "F541", "I001", "UP006", "UP007", "UP035", "UP037", "UP041", "UP045", "B007", "B904"]
+"src/usage_publisher.py" = ["E501", "E721", "E722", "F401", "F541", "I001", "UP006", "UP007", "UP035", "UP037", "UP041", "UP045", "B007", "B904"]
+"src/alert_metric_bridge.py" = ["E501", "E721", "E722", "F401", "F541", "I001", "UP006", "UP007", "UP035", "UP037", "UP041", "UP045", "B007", "B904"]
+# Cross-domain ORM copies (tables owned by other services, read-only here):
+# same frozen-copy rule as the app-domain models above.
+"src/models/user_model.py" = ["E501", "F401", "I001", "UP006", "UP035", "UP045"]
+"src/models/models_model.py" = ["E501", "F401", "I001", "UP006", "UP035", "UP045"]
+"src/models/workspace_model.py" = ["E501", "F401", "I001", "UP006", "UP035", "UP045"]
+# Frozen port of the host workflow service layer (draft/debug config assembly,
+# branch views, execution snapshot reads, draft-run orchestration): kept
+# verbatim for line-by-line comparison; only import paths, the logger helper,
+# settings access and the Redis/lock helpers were rewritten mechanically.
+"src/services/workflow_service.py" = ["E501", "E721", "E722", "F401", "F541", "I001", "UP006", "UP007", "UP034", "UP035", "UP037", "UP041", "UP045", "B007", "B904", "B905", "F841"]
+# Frozen port of the host in-process intervention registry backing the
+# draft-run resume/timeout signalling: kept verbatim.
+"src/services/intervention_registry.py" = ["E501"]
+# Frozen port of the host knowledge repository's by-name read slice (used by the
+# runtime memory-store resolver): kept verbatim.
+"src/repositories/knowledge_repository.py" = ["E501", "E721", "E722", "F401", "F541", "I001", "UP006", "UP007", "UP035", "UP037", "UP041", "UP045", "B007", "B904"]
+"src/models/document_model.py" = ["E501", "F401", "I001", "UP006", "UP035", "UP045"]
+"src/models/knowledge_metadata_model.py" = ["E501", "F401", "I001", "UP006", "UP035", "UP045"]
+"src/models/knowledge_model.py" = ["E501", "F401", "I001", "UP006", "UP035", "UP045"]
+"src/models/knowledgeshare_model.py" = ["E501", "F401", "I001", "UP006", "UP035", "UP045"]
+# Frozen-copy lint codes surfaced by the full-tree sweep (host-parity code
+# shapes the shared ignore lists do not cover): kept verbatim like the rest.
+"src/workflow/engine/graph_builder.py" = ["E501", "E721", "E722", "F401", "F541", "I001", "UP006", "UP007", "UP035", "UP037", "UP041", "UP045", "B007", "B904", "E402", "B023", "B905"]
+"src/workflow/nodes/operators.py" = ["E501", "E721", "E722", "F401", "F541", "I001", "UP006", "UP007", "UP035", "UP037", "UP041", "UP045", "B007", "B904", "E701", "B024"]
+"src/workflow/engine/variable_pool.py" = ["E501", "E721", "E722", "F401", "F541", "I001", "UP006", "UP007", "UP035", "UP037", "UP041", "UP045", "B007", "B904", "UP046"]
+"src/workflow/variable/variable_objects.py" = ["E501", "E721", "E722", "F401", "F541", "I001", "UP006", "UP007", "UP035", "UP037", "UP041", "UP045", "B007", "B904", "UP046", "UP047"]
+"src/workflow/utils/file_processor.py" = ["E501", "E721", "E722", "F401", "F541", "I001", "UP006", "UP007", "UP035", "UP037", "UP041", "UP045", "B007", "B904", "F841"]
+"src/utils/datetime_utils.py" = ["E501", "E721", "E722", "F401", "F541", "I001", "UP006", "UP007", "UP035", "UP037", "UP041", "UP045", "B007", "B904", "UP017"]
+"src/response_utils.py" = ["E501", "E721", "E722", "F401", "F541", "I001", "UP006", "UP007", "UP035", "UP037", "UP041", "UP045", "B007", "B904"]
+"src/rag/retrieval/models.py" = ["E501", "E721", "E722", "F401", "F541", "I001", "UP006", "UP007", "UP035", "UP037", "UP041", "UP045", "B007", "B904", "UP040"]
+"src/model_clients/failover.py" = ["E501", "E721", "E722", "F401", "F541", "I001", "UP006", "UP007", "UP035", "UP037", "UP041", "UP045", "B007", "B904", "UP047"]
+"src/model_clients/llm.py" = ["E501", "E721", "E722", "F401", "F541", "I001", "UP006", "UP007", "UP035", "UP037", "UP041", "UP045", "B007", "B904", "UP028"]
+"src/agent/langchain_agent.py" = ["E501", "E721", "E722", "F401", "F541", "I001", "UP006", "UP007", "UP035", "UP037", "UP041", "UP045", "B007", "B904", "B023"]
+"src/agent/redis_checkpoint.py" = ["E501", "E721", "E722", "F401", "F541", "I001", "UP006", "UP007", "UP035", "UP037", "UP041", "UP045", "B007", "B904", "ASYNC109", "B905"]
+"src/tools/langchain_adapter.py" = ["E501", "E721", "E722", "F401", "F541", "I001", "UP006", "UP007", "UP035", "UP037", "UP041", "UP045", "B007", "B904", "B009"]
+"src/repositories/workflow_repository.py" = ["E501", "E721", "E722", "F401", "F541", "I001", "UP006", "UP007", "UP035", "UP037", "UP041", "UP045", "B007", "B904"]
+"src/integrations/knowledge/retrieval_policy.py" = ["E501", "E721", "E722", "F401", "F541", "I001", "UP006", "UP007", "UP035", "UP037", "UP041", "UP045", "B007", "B904", "ASYNC109"]
+"src/memory/emotion/emotion_resolver.py" = ["E501", "E721", "E722", "F401", "F541", "I001", "UP006", "UP007", "UP035", "UP037", "UP041", "UP045", "B007", "B904", "ASYNC109", "UP015"]
+# Frozen port of the host multi-agent runtime closure (agent registry, master
+# router, conversation state manager, cluster chat features, handoff service,
+# orchestrator): kept verbatim for line-by-line comparison; only import paths
+# and the logger helper were rewritten mechanically.
+"src/services/agent_registry.py" = ["E501", "E721", "E722", "F401", "F541", "I001", "UP006", "UP007", "UP035", "UP037", "UP041", "UP045", "B007", "B904"]
+"src/services/master_agent_router.py" = ["E501", "E721", "E722", "F401", "F541", "I001", "UP006", "UP007", "UP035", "UP037", "UP041", "UP045", "B007", "B904"]
+"src/services/conversation_state_manager.py" = ["E501", "E721", "E722", "F401", "F541", "I001", "UP006", "UP007", "UP035", "UP037", "UP041", "UP045", "B007", "B904"]
+"src/services/cluster_chat_features.py" = ["E501", "E721", "E722", "F401", "F541", "I001", "UP006", "UP007", "UP035", "UP037", "UP041", "UP045", "B007", "B904"]
+"src/services/handoffs_service.py" = ["E501", "E721", "E722", "F401", "F541", "I001", "UP006", "UP007", "UP035", "UP037", "UP041", "UP045", "B007", "B904"]
+"src/services/multi_agent_orchestrator.py" = ["E501", "E721", "E722", "F401", "F541", "I001", "UP006", "UP007", "UP035", "UP037", "UP041", "UP045", "B007", "B904", "F841"]

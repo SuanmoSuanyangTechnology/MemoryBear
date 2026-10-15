@@ -291,7 +291,7 @@ async def _load_workflow_runtime_config(
             execution_config=cfg.get("execution_config", {}),
             triggers=cfg.get("triggers", []),
             features=cfg.get("features", {}),
-            workflow_type=workflow_service._normalize_workflow_type(cfg.get("workflow_type")),
+            workflow_type=AppService(None)._normalize_workflow_type(cfg.get("workflow_type")),
             is_active=True,
             created_at=now,
             updated_at=now,

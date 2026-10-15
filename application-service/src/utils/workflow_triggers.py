@@ -1,19 +1,92 @@
 """
-Workflow trigger utilities (host ``core/workflow/triggers`` subset).
+Workflow trigger utilities.
 
-Covers only the parts needed by the definition-side write path:
-normalization and validation of ``trigger`` nodes.
+Responsibilities:
+1. Normalize and validate `trigger` node configuration
+2. Convert Webhook / Schedule events into TriggerNode outputs
+3. Lightweight Schedule cron matching
 """
 
 from __future__ import annotations
 
+import datetime
 import re
 import uuid
 from typing import Any
+from zoneinfo import ZoneInfo
+
 
 SUPPORTED_TRIGGER_TYPES = {"webhook", "schedule"}
 _IDENTIFIER_PATTERN = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
 TRIGGER_NODES_PREPARED_FLAG = "_trigger_nodes_prepared"
+SCHEDULE_DISPATCH_LEASE_SECONDS = 600
+
+
+def resolve_schedule_timezone(timezone_name: str | None) -> tuple[datetime.tzinfo, str]:
+    normalized_name = str(timezone_name or "UTC").strip() or "UTC"
+    try:
+        return ZoneInfo(normalized_name), normalized_name
+    except Exception:
+        return datetime.timezone.utc, "UTC"
+
+
+def build_schedule_now_payload(
+    current: datetime.datetime | None = None,
+    timezone_name: str | None = None,
+) -> dict[str, Any]:
+    current_time = current or datetime.datetime.now(datetime.timezone.utc)
+    if current_time.tzinfo is None:
+        current_time = current_time.replace(tzinfo=datetime.timezone.utc)
+
+    timezone, normalized_name = resolve_schedule_timezone(timezone_name)
+    localized = current_time.astimezone(timezone)
+    return {
+        "iso": localized.isoformat(),
+        "timestamp": int(current_time.timestamp()),
+        "date": localized.date().isoformat(),
+        "time": localized.time().replace(microsecond=0).isoformat(),
+        "timezone": normalized_name,
+    }
+
+
+def normalize_schedule_now_payload(
+    now: dict[str, Any] | None,
+    timezone_name: str | None = None,
+) -> dict[str, Any]:
+    timezone_value = None
+    if isinstance(now, dict):
+        timezone_value = now.get("timezone")
+    timezone_value = timezone_value or timezone_name or "UTC"
+
+    base_time = None
+    if isinstance(now, dict):
+        iso_value = now.get("iso")
+        if iso_value:
+            base_time = parse_datetime(str(iso_value))
+
+        if base_time is None and now.get("timestamp") is not None:
+            try:
+                base_time = datetime.datetime.fromtimestamp(
+                    int(now["timestamp"]),
+                    tz=datetime.timezone.utc,
+                )
+            except (TypeError, ValueError, OSError):
+                base_time = None
+
+    normalized = build_schedule_now_payload(base_time, timezone_value)
+    if isinstance(now, dict):
+        return {
+            **now,
+            **normalized,
+        }
+    return normalized
+
+
+def find_start_node_id(nodes: list[dict[str, Any]]) -> str | None:
+    for node in nodes or []:
+        if node.get("type") in {"start", "trigger"}:
+            return node.get("id")
+    return None
 
 
 def get_trigger_config(node: dict[str, Any] | None) -> dict[str, Any]:
@@ -23,6 +96,10 @@ def get_trigger_config(node: dict[str, Any] | None) -> dict[str, Any]:
 
 def get_trigger_type(node: dict[str, Any] | None) -> str:
     return str(get_trigger_config(node).get("trigger_type") or "").strip()
+
+
+def is_trigger_enabled(node: dict[str, Any] | None) -> bool:
+    return bool(get_trigger_config(node).get("enabled", True))
 
 
 def iter_trigger_nodes(
@@ -131,12 +208,168 @@ def _validate_webhook_param_defs(param_defs: list[dict[str, Any]], section_name:
         names.add(name)
 
 
-__all__ = [
-    "SUPPORTED_TRIGGER_TYPES",
-    "TRIGGER_NODES_PREPARED_FLAG",
-    "get_trigger_config",
-    "get_trigger_type",
-    "iter_trigger_nodes",
-    "normalize_trigger_nodes",
-    "validate_trigger_nodes",
-]
+def get_value_by_path(payload: dict[str, Any], path: Any) -> Any:
+    if not isinstance(path, str):
+        return path
+
+    normalized = path.strip()
+    if normalized.startswith("$."):
+        normalized = normalized[2:]
+
+    if not normalized:
+        return None
+
+    current: Any = payload
+    for part in normalized.split("."):
+        if isinstance(current, dict):
+            current = current.get(part)
+        elif isinstance(current, list):
+            if not part.isdigit():
+                return None
+            index = int(part)
+            current = current[index] if 0 <= index < len(current) else None
+        else:
+            return None
+    return current
+
+
+def _extract_named_params(
+    values: Any,
+    param_defs: list[dict[str, Any]],
+    section_name: str,
+) -> dict[str, Any]:
+    if not param_defs:
+        return values if isinstance(values, dict) else {}
+
+    extracted: dict[str, Any] = {}
+    for param_def in param_defs:
+        name = param_def["name"]
+        value = get_value_by_path(values or {}, name)
+        if value is None and param_def.get("required"):
+            raise ValueError(f"Webhook 缺少必填 {section_name} 参数: {name}")
+        extracted[name] = value
+    return extracted
+
+
+def build_webhook_trigger_output(
+    trigger_node: dict[str, Any],
+    event: dict[str, Any],
+) -> dict[str, Any]:
+    config = trigger_node.get("config") or {}
+    body = event.get("body")
+    query = event.get("query") or {}
+    headers = event.get("headers") or {}
+    return {
+        "query_params": _extract_named_params(query, config.get("query_params") or [], "query"),
+        "header_params": _extract_named_params(headers, config.get("header_params") or [], "header"),
+        "req_body_params": _extract_named_params(body, config.get("req_body_params") or [], "body"),
+        "webhook_raw": {
+            "body": body,
+            "query": query,
+            "headers": headers,
+            "meta": event.get("meta") or {},
+        },
+    }
+
+
+def build_schedule_trigger_output(
+    trigger_node: dict[str, Any],
+    event: dict[str, Any],
+) -> dict[str, Any]:
+    config = trigger_node.get("config") or {}
+    now = normalize_schedule_now_payload(
+        event.get("now"),
+        config.get("timezone", "UTC"),
+    )
+    return {
+        "schedule": now,
+    }
+
+
+def parse_datetime(value: str | None) -> datetime.datetime | None:
+    if not value:
+        return None
+    try:
+        return datetime.datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def _match_cron_part(part: str, value: int) -> bool:
+    if part == "*":
+        return True
+    if part.startswith("*/"):
+        step = int(part[2:])
+        return value % step == 0
+    if "," in part:
+        return any(_match_cron_part(item.strip(), value) for item in part.split(","))
+    if "-" in part:
+        start, end = part.split("-", 1)
+        return int(start) <= value <= int(end)
+    return int(part) == value
+
+
+def cron_matches(cron_expr: str, current: datetime.datetime) -> bool:
+    parts = cron_expr.split()
+    if len(parts) != 5:
+        raise ValueError("cron 表达式必须为 5 段")
+
+    minute, hour, day, month, weekday = parts
+    weekday_value = (current.weekday() + 1) % 7
+    return (
+        _match_cron_part(minute, current.minute)
+        and _match_cron_part(hour, current.hour)
+        and _match_cron_part(day, current.day)
+        and _match_cron_part(month, current.month)
+        and _match_cron_part(weekday, weekday_value)
+    )
+
+
+def is_schedule_trigger_due(
+    trigger: dict[str, Any],
+    now: datetime.datetime | None = None,
+) -> bool:
+    now = now or datetime.datetime.now(datetime.timezone.utc)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=datetime.timezone.utc)
+    config = trigger.get("config") or {}
+    runtime = trigger.get("runtime") or {}
+    last_triggered_at = parse_datetime(runtime.get("last_triggered_at"))
+    last_dispatched_at = parse_datetime(runtime.get("last_dispatched_at"))
+    dispatch_status = str(runtime.get("dispatch_status") or "").strip()
+    dispatch_lease_seconds = SCHEDULE_DISPATCH_LEASE_SECONDS
+    raw_dispatch_lease_seconds = config.get("dispatch_lease_seconds")
+    if raw_dispatch_lease_seconds not in (None, ""):
+        try:
+            parsed_dispatch_lease_seconds = int(raw_dispatch_lease_seconds)
+            if parsed_dispatch_lease_seconds > 0:
+                dispatch_lease_seconds = parsed_dispatch_lease_seconds
+        except (TypeError, ValueError):
+            dispatch_lease_seconds = SCHEDULE_DISPATCH_LEASE_SECONDS
+
+    if dispatch_status in {"queued", "running"} and last_dispatched_at is not None:
+        if (now - last_dispatched_at).total_seconds() < dispatch_lease_seconds:
+            return False
+
+    if config.get("interval_seconds") is not None:
+        interval_seconds = int(config["interval_seconds"])
+        if last_triggered_at is None:
+            return True
+        return (now - last_triggered_at).total_seconds() >= interval_seconds
+
+    cron_expr = config.get("cron")
+    if not cron_expr:
+        return False
+
+    timezone, _ = resolve_schedule_timezone(config.get("timezone", "UTC"))
+    local_now = now.astimezone(timezone)
+
+    if not cron_matches(cron_expr, local_now):
+        return False
+
+    if last_triggered_at is None:
+        return True
+
+    # Avoid re-triggering within the same minute of the same timezone
+    last_local = last_triggered_at.astimezone(timezone)
+    return last_local.replace(second=0, microsecond=0) != local_now.replace(second=0, microsecond=0)

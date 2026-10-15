@@ -11,14 +11,30 @@ from .app_release_model import AppRelease
 from .appshare_model import AppShare
 from .conversation_model import Conversation, ConversationContextState, ConversationDetail, Message
 from .conversation_share_model import ConversationShare
+from .document_model import Document
 from .end_user_info_model import EndUserInfo
 from .end_user_model import EndUser, EndUserMerge
 from .file_metadata_model import FileMetadata
 from .generic_file_model import GenericFile
+from .knowledge_model import Knowledge
+from .knowledgeshare_model import KnowledgeShare
 from .mcp_market_config_model import McpMarketConfig
 from .mcp_market_model import McpMarket
 from .message_feedback_model import MessageFeedback
 from .message_report_model import MessageReport, MessageReportType
+from .model_usage_record import ModelUsageRecord
+from .models_model import (
+    LoadBalanceStrategy,
+    Modality,
+    ModelApiKey,
+    ModelBase,
+    ModelCapability,
+    ModelChannel,
+    ModelConfig,
+    ModelFeature,
+    ModelProvider,
+    ModelType,
+)
 from .multi_agent_model import (
     AgentInvocation,
     AggregationStrategy,
@@ -46,11 +62,18 @@ from .tool_model import (
     ToolType,
     WorkflowToolConfig,
 )
+from .user_model import User
 from .workflow_model import (
     WorkflowConfig,
     WorkflowExecution,
     WorkflowNodeCache,
     WorkflowNodeExecution,
+)
+from .workspace_model import (
+    Workspace,
+    WorkspaceDefaultModelPreset,
+    WorkspaceMember,
+    WorkspaceRole,
 )
 
 __all__ = [
@@ -74,6 +97,7 @@ __all__ = [
     "ConversationDetail",
     "ConversationShare",
     "CustomToolConfig",
+    "Document",
     "EndUser",
     "EndUserInfo",
     "EndUserMerge",
@@ -82,6 +106,9 @@ __all__ = [
     "GenericFile",
     "HitLogSource",
     "IconType",
+    "Knowledge",
+    "KnowledgeShare",
+    "LoadBalanceStrategy",
     "MCPSourceChannel",
     "MCPToolConfig",
     "McpMarket",
@@ -90,6 +117,16 @@ __all__ = [
     "MessageFeedback",
     "MessageReport",
     "MessageReportType",
+    "Modality",
+    "ModelApiKey",
+    "ModelBase",
+    "ModelCapability",
+    "ModelChannel",
+    "ModelConfig",
+    "ModelFeature",
+    "ModelProvider",
+    "ModelType",
+    "ModelUsageRecord",
     "MultiAgentConfig",
     "OrchestrationMode",
     "PromptHistory",
@@ -102,9 +139,14 @@ __all__ = [
     "ToolExecution",
     "ToolStatus",
     "ToolType",
+    "User",
     "WorkflowConfig",
     "WorkflowExecution",
     "WorkflowNodeCache",
     "WorkflowNodeExecution",
     "WorkflowToolConfig",
+    "Workspace",
+    "WorkspaceDefaultModelPreset",
+    "WorkspaceMember",
+    "WorkspaceRole",
 ]

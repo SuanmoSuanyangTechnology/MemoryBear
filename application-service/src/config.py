@@ -46,6 +46,25 @@ class AppServiceSettings(BaseSettings):
         default="http://localhost:8000/api",
         validation_alias="FILE_LOCAL_SERVER_URL",
     )
+    # Per-node execution timeout of the workflow runtime (host
+    # `settings.WORKFLOW_NODE_TIMEOUT`); same env name and default.
+    workflow_node_timeout: int = Field(
+        default=600, ge=1, validation_alias="WORKFLOW_NODE_TIMEOUT"
+    )
+    # Largest file the workflow runtime accepts for download/processing (host
+    # `settings.MAX_FILE_SIZE`); same env name and default.
+    max_file_size: int = Field(
+        default=52428800, ge=1, validation_alias="MAX_FILE_SIZE"
+    )
+    max_file_count: int = Field(
+        default=20, ge=1, validation_alias="MAX_FILE_COUNT"
+    )
+    # Sandbox HTTP API used by the code node (host `settings.SANDBOX_URL` /
+    # `SANDBOX_API_KEY`); an empty URL fails the code node closed.
+    sandbox_url: str = Field(default="", validation_alias="SANDBOX_URL")
+    sandbox_api_key: SecretStr = Field(
+        default=SecretStr("redbear-sandbox"), validation_alias="SANDBOX_API_KEY"
+    )
     db_host: str = Field(default="127.0.0.1", validation_alias="DB_HOST")
     db_port: int = Field(default=5432, ge=1, le=65535, validation_alias="DB_PORT")
     db_user: str = Field(default="postgres", validation_alias="DB_USER")
@@ -133,6 +152,21 @@ class AppServiceSettings(BaseSettings):
         validation_alias="APPLICATION_SERVICE_SSE_HEARTBEAT_INTERVAL_SECONDS",
     )
 
+    # LangGraph checkpoint store (host `settings.LANGGRAPH_CHECKPOINT_*`); the
+    # checkpoint Redis DB falls back to the shared REDIS_DB when unset.
+    langgraph_checkpoint_backend: str = Field(
+        default="redis", validation_alias="LANGGRAPH_CHECKPOINT_BACKEND"
+    )
+    langgraph_checkpoint_redis_db: int | None = Field(
+        default=None, ge=0, validation_alias="LANGGRAPH_CHECKPOINT_REDIS_DB"
+    )
+    langgraph_checkpoint_pool_size: int = Field(
+        default=20, ge=1, validation_alias="LANGGRAPH_CHECKPOINT_POOL_SIZE"
+    )
+    langgraph_checkpoint_ttl: int = Field(
+        default=7 * 24 * 3600, ge=1, validation_alias="LANGGRAPH_CHECKPOINT_TTL"
+    )
+
     # Internal-face auth: direct (community default, trusts the X-App-* identity
     # headers injected by the gateway after credential termination + NetworkPolicy);
     # gateway (enterprise, internal-token verification through the private
@@ -173,6 +207,179 @@ class AppServiceSettings(BaseSettings):
     model_service_base_url: str | None = Field(
         default=None,
         validation_alias="MODEL_SERVICE_BASE_URL",
+    )
+
+    # East-west clients to mem-knowledge (KB retrieval face) and model-service
+    # (runtime invocation face); same env names and defaults as the monolith
+    # settings. Unset or unreachable clients fail the ported call sites closed.
+    enable_mem_knowledge: bool = Field(
+        default=False, validation_alias="ENABLE_MEM_KNOWLEDGE"
+    )
+    mem_knowledge_base_url: str = Field(default="", validation_alias="MEM_KNOWLEDGE_BASE_URL")
+    mem_knowledge_connect_timeout_seconds: float = Field(
+        default=5.0, gt=0, validation_alias="MEM_KNOWLEDGE_CONNECT_TIMEOUT_SECONDS"
+    )
+    mem_knowledge_pool_timeout_seconds: float = Field(
+        default=5.0, gt=0, validation_alias="MEM_KNOWLEDGE_POOL_TIMEOUT_SECONDS"
+    )
+    mem_knowledge_read_timeout_seconds: float = Field(
+        default=120.0, gt=0, validation_alias="MEM_KNOWLEDGE_READ_TIMEOUT_SECONDS"
+    )
+    mem_knowledge_write_timeout_seconds: float = Field(
+        default=600.0, gt=0, validation_alias="MEM_KNOWLEDGE_WRITE_TIMEOUT_SECONDS"
+    )
+    mem_knowledge_stream_read_timeout_seconds: float = Field(
+        default=600.0, gt=0, validation_alias="MEM_KNOWLEDGE_STREAM_READ_TIMEOUT_SECONDS"
+    )
+    mem_knowledge_max_connections: int = Field(
+        default=100, ge=1, validation_alias="MEM_KNOWLEDGE_MAX_CONNECTIONS"
+    )
+    mem_knowledge_max_keepalive_connections: int = Field(
+        default=20, ge=0, validation_alias="MEM_KNOWLEDGE_MAX_KEEPALIVE_CONNECTIONS"
+    )
+    mem_knowledge_health_timeout_seconds: float = Field(
+        default=3.0, gt=0, validation_alias="MEM_KNOWLEDGE_HEALTH_TIMEOUT_SECONDS"
+    )
+    model_service_connect_timeout_seconds: float = Field(
+        default=5.0, gt=0, validation_alias="MODEL_SERVICE_CONNECT_TIMEOUT_SECONDS"
+    )
+    model_service_pool_timeout_seconds: float = Field(
+        default=5.0, gt=0, validation_alias="MODEL_SERVICE_POOL_TIMEOUT_SECONDS"
+    )
+    model_service_read_timeout_seconds: float = Field(
+        default=120.0, gt=0, validation_alias="MODEL_SERVICE_READ_TIMEOUT_SECONDS"
+    )
+    model_service_write_timeout_seconds: float = Field(
+        default=60.0, gt=0, validation_alias="MODEL_SERVICE_WRITE_TIMEOUT_SECONDS"
+    )
+    model_service_max_connections: int = Field(
+        default=100, ge=1, validation_alias="MODEL_SERVICE_MAX_CONNECTIONS"
+    )
+    model_service_max_keepalive_connections: int = Field(
+        default=20, ge=0, validation_alias="MODEL_SERVICE_MAX_KEEPALIVE_CONNECTIONS"
+    )
+    model_service_invoke_connect_timeout_seconds: float = Field(
+        default=5.0, gt=0, validation_alias="MODEL_SERVICE_INVOKE_CONNECT_TIMEOUT_SECONDS"
+    )
+    model_service_invoke_idle_timeout_seconds: float = Field(
+        default=180.0, gt=0, validation_alias="MODEL_SERVICE_INVOKE_IDLE_TIMEOUT_SECONDS"
+    )
+    model_service_invoke_write_timeout_seconds: float = Field(
+        default=60.0, gt=0, validation_alias="MODEL_SERVICE_INVOKE_WRITE_TIMEOUT_SECONDS"
+    )
+    model_service_invoke_media_idle_timeout_seconds: float = Field(
+        default=720.0, gt=0, validation_alias="MODEL_SERVICE_INVOKE_MEDIA_IDLE_TIMEOUT_SECONDS"
+    )
+    # Model-channel credential master key (host `settings.MODEL_CREDENTIALS_KEY`);
+    # base64 32-byte key backing the envelope cipher for channel secrets. An
+    # empty value fails the cipher closed the moment a credential is built
+    # (same behavior as the monolith).
+    model_credentials_key: SecretStr = Field(
+        default=SecretStr(""), validation_alias="MODEL_CREDENTIALS_KEY"
+    )
+    # Least-used channel routing knobs (host `settings.MODEL_USAGE_*`); same env
+    # names and defaults.
+    model_usage_least_used_enabled: bool = Field(
+        default=True, validation_alias="MODEL_USAGE_LEAST_USED_ENABLED"
+    )
+    model_usage_load_window_minutes: int = Field(
+        default=15, ge=1, validation_alias="MODEL_USAGE_LOAD_WINDOW_MINUTES"
+    )
+    # Channel-resolution mode (host `settings.MODEL_CHANNEL_RESOLUTION`): a
+    # migration-window switch consumed by the model config service.
+    model_channel_resolution: str = Field(
+        default="prefer", validation_alias="MODEL_CHANNEL_RESOLUTION"
+    )
+    # Agent history window (host `settings.AGENT_MAX_HISTORY`); same env name
+    # and default.
+    agent_max_history: int = Field(
+        default=20, ge=1, validation_alias="AGENT_MAX_HISTORY"
+    )
+    # In-process batch persistence queue tuning (host `settings.BATCH_PERSIST_*`);
+    # same env names and defaults.
+    batch_persist_queue_size: int = Field(
+        default=10000, ge=1, validation_alias="BATCH_PERSIST_QUEUE_SIZE"
+    )
+    batch_persist_max_batch: int = Field(
+        default=50, ge=1, validation_alias="BATCH_PERSIST_MAX_BATCH"
+    )
+    batch_persist_max_wait_ms: int = Field(
+        default=500, ge=0, validation_alias="BATCH_PERSIST_MAX_WAIT_MS"
+    )
+    batch_persist_put_timeout_ms: int = Field(
+        default=100, ge=0, validation_alias="BATCH_PERSIST_PUT_TIMEOUT_MS"
+    )
+    workflow_node_execution_retention_enabled: bool = Field(
+        default=True, validation_alias="WORKFLOW_NODE_EXECUTION_RETENTION_ENABLED"
+    )
+    # Reply-side emotion detection (host `settings.FAST_WRITE_EMOTION_*`); an
+    # empty URL/API key/model disables the feature and degrades to no-op, same
+    # as the monolith.
+    fast_write_emotion_url: str = Field(
+        default="", validation_alias="FAST_WRITE_EMOTION_URL"
+    )
+    fast_write_emotion_model: str = Field(
+        default="", validation_alias="FAST_WRITE_EMOTION_MODEL"
+    )
+    fast_write_emotion_api_key: SecretStr = Field(
+        default=SecretStr(""), validation_alias="FAST_WRITE_EMOTION_API_KEY"
+    )
+    fast_write_emotion_http_timeout_seconds: float = Field(
+        default=2.0, gt=0, validation_alias="FAST_WRITE_EMOTION_HTTP_TIMEOUT_SECONDS"
+    )
+    # E2B sandbox callback settings (host `settings.E2B_CALLBACK_*`); kept for
+    # config-shape parity, the sandbox execution path itself is fail-closed.
+    e2b_callback_url: str = Field(
+        default="http://host.docker.internal:8000", validation_alias="E2B_CALLBACK_URL"
+    )
+    e2b_callback_secret: SecretStr = Field(
+        default=SecretStr("sandbox-callback-secret"), validation_alias="E2B_CALLBACK_SECRET"
+    )
+    llm_network_retry_attempts: int = Field(
+        default=3, ge=1, validation_alias="LLM_NETWORK_RETRY_ATTEMPTS"
+    )
+    knowledge_retrieval_graph_max_concurrency: int = Field(
+        default=2, ge=1, validation_alias="KNOWLEDGE_RETRIEVAL_GRAPH_MAX_CONCURRENCY"
+    )
+    knowledge_graph_extract_max_concurrency: int = Field(
+        default=4, ge=1, le=16, validation_alias="KNOWLEDGE_GRAPH_EXTRACT_MAX_CONCURRENCY"
+    )
+    knowledge_graph_retrieval_timeout_ms: int = Field(
+        default=15000, ge=1000, le=30000, validation_alias="KNOWLEDGE_GRAPH_RETRIEVAL_TIMEOUT_MS"
+    )
+
+    # Object storage backend (host parity): local filesystem, MinIO, Aliyun OSS
+    # or S3. Files land in the deployment's existing storage so the monolith
+    # and this service read the same objects during the coexistence period.
+    secret_key: SecretStr = Field(
+        default=SecretStr("a_default_secret_key_that_is_long_and_random"),
+        validation_alias="SECRET_KEY",
+    )
+    file_path: str = Field(default="/files", validation_alias="FILE_PATH")
+    storage_type: str = Field(default="local", validation_alias="STORAGE_TYPE")
+    minio_endpoint_url: str = Field(default="", validation_alias="MINIO_ENDPOINT_URL")
+    minio_access_key_id: str = Field(default="", validation_alias="MINIO_ACCESS_KEY_ID")
+    minio_secret_access_key: SecretStr = Field(
+        default=SecretStr(""), validation_alias="MINIO_SECRET_ACCESS_KEY"
+    )
+    minio_bucket_name: str = Field(default="", validation_alias="MINIO_BUCKET_NAME")
+    minio_region: str = Field(default="", validation_alias="MINIO_REGION")
+    oss_endpoint: str = Field(default="", validation_alias="OSS_ENDPOINT")
+    oss_access_key_id: str = Field(default="", validation_alias="OSS_ACCESS_KEY_ID")
+    oss_access_key_secret: SecretStr = Field(
+        default=SecretStr(""), validation_alias="OSS_ACCESS_KEY_SECRET"
+    )
+    oss_bucket_name: str = Field(default="", validation_alias="OSS_BUCKET_NAME")
+    s3_region: str = Field(default="", validation_alias="S3_REGION")
+    s3_access_key_id: str = Field(default="", validation_alias="S3_ACCESS_KEY_ID")
+    s3_secret_access_key: SecretStr = Field(
+        default=SecretStr(""), validation_alias="S3_SECRET_ACCESS_KEY"
+    )
+    s3_bucket_name: str = Field(default="", validation_alias="S3_BUCKET_NAME")
+    s3_endpoint_url: str = Field(default="", validation_alias="S3_ENDPOINT_URL")
+    speedbear_base_url: str = Field(
+        default="https://testspeedbear.redbearai.com",
+        validation_alias="SPEEDBEAR_BASE_URL",
     )
 
     @classmethod

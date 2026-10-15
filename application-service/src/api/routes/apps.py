@@ -375,7 +375,7 @@ def update_workflow_config(
 ):
     service = AppService(db)
     if payload.variables:
-        resolved = WorkflowService(db)._resolve_variables_file_defaults(
+        resolved = WorkflowService(db)._resolve_variables_file_defaults_sync(
             [v.model_dump() for v in payload.variables]
         )
         # Patch default values back into VariableDefinition objects

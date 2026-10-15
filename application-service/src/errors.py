@@ -78,6 +78,8 @@ class BizCode(IntEnum):
     PROVIDER_NOT_SUPPORTED = 7003
     LLM_ERROR = 7004
     EMBEDDING_ERROR = 7005
+    # parsers (8xxx, host code raised by the prompt-optimizer variable parser)
+    PARSER_NOT_SUPPORTED = 8002
     # memory (95xx, host codes consumed by the end-user create path)
     MEMORY_CONFIG_NOT_FOUND = 9503
     INVALID_USER_ID = 9601
@@ -139,6 +141,7 @@ HTTP_MAPPING: dict[BizCode, int] = {
     BizCode.PROVIDER_NOT_SUPPORTED: 400,
     BizCode.LLM_ERROR: 500,
     BizCode.EMBEDDING_ERROR: 500,
+    BizCode.PARSER_NOT_SUPPORTED: 400,
     BizCode.MEMORY_CONFIG_NOT_FOUND: 400,
     BizCode.INVALID_USER_ID: 400,
     BizCode.INTERNAL_ERROR: 500,
@@ -255,6 +258,23 @@ class ResourceNotFoundException(BusinessException):
         super().__init__(message, BizCode.FILE_NOT_FOUND, context, **kwargs)
 
 
+class ValidationException(BusinessException):
+    """Port of the host validation error (1001) carrying an optional field name."""
+
+    def __init__(self, message: str, field: str | None = None, **kwargs: Any):
+        context: dict[str, Any] = {"field": field} if field else {}
+        if "context" in kwargs:
+            context.update(kwargs.pop("context"))
+        super().__init__(message, BizCode.VALIDATION_FAILED, context, **kwargs)
+
+
+class DuplicateResourceException(BusinessException):
+    """Port of the host duplicate-resource error (5001)."""
+
+    def __init__(self, message: str = "资源已存在", **kwargs: Any):
+        super().__init__(message, BizCode.DUPLICATE_NAME, **kwargs)
+
+
 class QuotaExceededError(I18nException):
     """Quota exceeded error (402)."""
 
@@ -307,12 +327,14 @@ class InternalServerError(I18nException):
 __all__ = [
     "BizCode",
     "BusinessException",
+    "DuplicateResourceException",
     "ERROR_CODE_TO_BIZ_CODE",
     "HTTP_MAPPING",
     "I18nException",
     "InternalServerError",
     "QuotaExceededError",
     "ResourceNotFoundException",
+    "ValidationException",
     "as_biz_code",
     "http_status_for",
 ]

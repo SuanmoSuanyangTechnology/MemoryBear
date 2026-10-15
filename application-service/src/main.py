@@ -18,7 +18,7 @@ from .i18n import LanguageContextMiddleware, load_catalogs
 from .i18n import configure as configure_i18n
 from .logging import setup_logging
 from .request_logging import RequestLoggingFastAPI
-from .runtime import ProcessRuntime
+from .runtime import ProcessRuntime, set_process_runtime
 from .sensitive import SensitiveDataFilter
 from .trace import TraceIdMiddleware
 
@@ -43,6 +43,9 @@ def create_app(settings: AppServiceSettings | None = None) -> FastAPI:
     configure_i18n(service_settings.i18n_default_language)
     configure_settings(service_settings)
     runtime = ProcessRuntime(service_settings)
+    # Deep workflow-runtime code (carried over from the monolith) resolves
+    # process resources through this module-level registration.
+    set_process_runtime(runtime)
 
     app_auth_config = AppAuthConfig(
         auth_mode=service_settings.application_service_auth_mode,

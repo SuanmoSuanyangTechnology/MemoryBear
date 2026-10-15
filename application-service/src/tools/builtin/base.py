@@ -4,7 +4,7 @@ from typing import Dict, Any, List
 
 from ...models.tool_model import ToolType
 from ..base import BaseTool
-from ...schemas.tool_schema import ToolParameter
+from ...schemas.tool_schema import ToolParameter, ToolResult
 
 
 class BuiltinTool(BaseTool, ABC):
@@ -41,6 +41,18 @@ class BuiltinTool(BaseTool, ABC):
     @abstractmethod
     def parameters(self) -> List[ToolParameter]:
         """Tool parameter definitions - must be implemented by subclasses."""
+        pass
+
+    @abstractmethod
+    async def execute(self, **kwargs) -> ToolResult:
+        """Execute the tool - must be implemented by subclasses.
+
+        Args:
+            **kwargs: Tool parameters
+
+        Returns:
+            Execution result
+        """
         pass
 
     @property
@@ -84,3 +96,24 @@ class BuiltinTool(BaseTool, ABC):
             return False, f"缺少必需的配置参数: {', '.join(missing_params)}"
 
         return True, ""
+
+    async def safe_execute(self, **kwargs) -> ToolResult:
+        """Execute the tool with configuration validation.
+
+        Args:
+            **kwargs: Tool parameters
+
+        Returns:
+            Execution result
+        """
+        # Validate the configuration first
+        is_valid, error_msg = self.validate_configuration()
+        if not is_valid:
+            return ToolResult.error_result(
+                error=f"工具配置无效: {error_msg}",
+                error_code="CONFIGURATION_ERROR",
+                execution_time=0.0
+            )
+
+        # Delegate to the base safe execution
+        return await super().safe_execute(**kwargs)

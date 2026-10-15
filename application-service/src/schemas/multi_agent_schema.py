@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import datetime
 import uuid
-from typing import Any, List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_serializer, model_validator
 
@@ -19,6 +19,7 @@ from ..models.model_parameters import ModelParameters
 from ..utils.datetime_utils import to_timestamp_ms
 from .app_schema import (
     AppFeatures,
+    FileInput,
     KnowledgeRetrievalConfig,
     MemoryConfig,
     SkillConfig,
@@ -322,6 +323,25 @@ class MultiAgentConfigSchema(BaseModel):
     @field_serializer("updated_at", when_used="json")
     def _serialize_updated_at(self, dt: datetime.datetime):
         return to_timestamp_ms(dt)
+
+
+# ==================== Multi-agent run ====================
+
+class MultiAgentRunRequest(BaseModel):
+    """Multi-agent run request"""
+    message: str = Field(..., description="用户消息")
+    conversation_id: Optional[uuid.UUID] = Field(None, description="会话 ID")
+    user_id: Optional[str] = Field(None, description="用户 ID")
+    variables: Optional[Dict[str, Any]] = Field(None, description="变量参数")
+    use_llm_routing: bool = Field(default=True, description="是否启用 LLM 路由（默认启用）")
+    stream: bool = Field(default=False, description="是否流式返回")
+    web_search: bool = Field(default=False, description="是否启用网络搜索")
+    memory: bool = Field(default=True, description="是否启用记忆功能")
+    thinking: bool = Field(default=False, description="是否启用深度思考（需集群 model_parameters.deep_thinking 同时开启）")
+    files: List[FileInput] = Field(
+        default_factory=list,
+        description="附件列表（需 supervisor_config.features.file_upload 开启；仅 supervisor_loop 模式给主管）",
+    )
 
 
 class HandoffToolInfo(BaseModel):

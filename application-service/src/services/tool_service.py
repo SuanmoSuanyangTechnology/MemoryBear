@@ -1,31 +1,40 @@
-"""Tool definition-plane service.
+"""Tool service (definition plane + tool execution plane).
 
 Port of the monolith ``ToolService`` management reads and writes: list, detail,
 CRUD, builtin bootstrap, method discovery, statistics and OpenAPI schema
-parsing. Execution-plane paths (execute, connection test, MCP tool sync) stay in
-the monolith until the runtime-plane batch. Repository access becomes
-instance-based (the host uses repository static methods); the OpenAPI parser is
-synchronous here, so call sites that awaited it in the host call it directly.
+parsing, plus the execution-plane paths (execute, connection test, MCP tool
+sync) run against the caller's sync session. The host's async-session branches
+are not ported: the service is always constructed with a sync ``Session``, and
+its async methods are bridged with ``asyncio.run`` at the route layer.
+Repository access is instance-based (the host uses repository static methods);
+the OpenAPI parser is synchronous here, so call sites that awaited it in the
+host call it directly.
 """
 
 from __future__ import annotations
 
+import base64
 import importlib
 import json
 import logging
+import time
 import uuid
 from typing import Any
 
+import aiohttp
 from sqlalchemy.orm import Session
 
 from ..errors import BizCode, BusinessException
 from ..models.app_model import App
 from ..models.tool_model import (
+    AuthType,
     BuiltinToolConfig,
     CustomToolConfig,
+    ExecutionStatus,
     MCPSourceChannel,
     MCPToolConfig,
     ToolConfig,
+    ToolExecution,
     ToolStatus,
     ToolType,
 )
@@ -42,6 +51,7 @@ from ..schemas.tool_schema import (
     MCPToolConfigSchema,
     ToolDetailSchema,
     ToolInfo,
+    ToolResult,
     WorkflowToolConfigSchema,
 )
 from ..tools.base import BaseTool
@@ -50,7 +60,7 @@ from ..tools.mcp import MCPToolManager
 from ..tools.mcp.base import MCPTool
 from ..tools.serialization import serialize_tool_parameter
 from ..tools.workflow.base import WorkflowAsTool
-from ..utils.datetime_utils import to_timestamp_ms
+from ..utils.datetime_utils import to_timestamp_ms, utcnow_naive
 
 logger = logging.getLogger(__name__)
 
@@ -326,6 +336,72 @@ class ToolService:
             self.db.rollback()
             logger.error(f"设置工具状态失败: {tool_id}, {e}")
             return False
+
+    async def execute_tool(
+            self,
+            tool_id: str,
+            parameters: dict[str, Any],
+            tenant_id: uuid.UUID,
+            user_id: uuid.UUID | None = None,
+            workspace_id: uuid.UUID | None = None,
+            timeout: float = 60.0  # noqa: ASYNC109 - API parity; not enforced (host semantics)
+    ) -> ToolResult:
+        """Execute a tool."""
+        execution_id = f"exec_{uuid.uuid4().hex[:16]}"
+        start_time = time.time()
+
+        try:
+            # Tool instance (the host's async-session branch is not ported)
+            tool = self.get_tool_instance(tool_id, tenant_id)
+            if not tool:
+                return ToolResult.error_result(
+                    error=f"工具不存在: {tool_id}",
+                    execution_time=time.time() - start_time
+                )
+
+            # Record the execution start
+            self._record_execution_start(
+                execution_id, tool_id, parameters, user_id, workspace_id
+            )
+
+            # Execute the tool
+            tool.set_runtime_context(user_id=user_id, workspace_id=workspace_id)
+            result = await tool.safe_execute(**parameters)
+
+            # Record the execution completion
+            self._record_execution_complete(execution_id, result)
+
+            return result
+
+        except Exception as e:
+            execution_time = time.time() - start_time
+            error_result = ToolResult.error_result(
+                error=str(e),
+                execution_time=execution_time
+            )
+            self._record_execution_complete(execution_id, error_result)
+            return error_result
+
+    async def test_connection(self, tool_id: str, tenant_id: uuid.UUID) -> dict[str, Any]:
+        """Test the tool connection."""
+        try:
+            config = self._get_tool_config(tool_id, tenant_id)
+            if not config:
+                return {"success": False, "message": "工具不存在"}
+
+            if config.tool_type == ToolType.MCP.value:
+                return await self._test_mcp_connection(config)
+            elif config.tool_type == ToolType.CUSTOM.value:
+                return await self._test_custom_connection(config)
+            elif config.tool_type == ToolType.BUILTIN.value:
+                return await self._test_builtin_connection(config)
+            elif config.tool_type == ToolType.WORKFLOW.value:
+                return {"success": True, "message": "工作流工具无需额外连接测试"}
+            else:
+                return {"success": True, "message": "未知工具类型"}
+
+        except Exception as e:
+            return {"success": False, "message": f"测试失败: {str(e)}"}
 
     def ensure_builtin_tools_initialized(self, tenant_id: uuid.UUID) -> None:
         """Ensure builtin tools are initialized (supports incremental additions)."""
@@ -1439,6 +1515,324 @@ class ToolService:
         except Exception as e:
             logger.error(f"加载内置工具配置失败: {e}")
             return {}
+
+    def _record_execution_start(
+            self,
+            execution_id: str,
+            tool_id: str,
+            parameters: dict[str, Any],
+            user_id: uuid.UUID | None,
+            workspace_id: uuid.UUID | None
+    ) -> None:
+        """Record the execution start."""
+        try:
+            execution = ToolExecution(
+                execution_id=execution_id,
+                tool_config_id=uuid.UUID(tool_id),
+                status=ExecutionStatus.RUNNING.value,
+                input_data=parameters,
+                started_at=utcnow_naive(),
+                user_id=user_id,
+                workspace_id=workspace_id
+            )
+            self.db.add(execution)
+            self.db.commit()
+        except Exception as e:
+            logger.error(f"记录执行开始失败: {execution_id}, {e}")
+
+    def _record_execution_complete(self, execution_id: str, result: ToolResult) -> None:
+        """Record the execution completion."""
+        try:
+            execution = self.db.query(ToolExecution).filter(
+                ToolExecution.execution_id == execution_id
+            ).first()
+
+            if execution:
+                execution.status = (
+                    ExecutionStatus.COMPLETED.value
+                    if result.success
+                    else ExecutionStatus.FAILED.value
+                )
+                execution.output_data = result.data if result.success else None
+                execution.error_message = result.error if not result.success else None
+                execution.completed_at = utcnow_naive()
+                execution.execution_time = result.execution_time
+                execution.token_usage = result.token_usage
+                self.db.commit()
+        except Exception as e:
+            logger.error(f"记录执行完成失败: {execution_id}, {e}")
+
+    async def _test_mcp_connection(self, config: ToolConfig) -> dict[str, Any]:
+        """Test the MCP connection and auto-sync the tool list."""
+        try:
+            mcp_config = self.mcp_repo.find_by_tool_id(config.id)
+            if not mcp_config:
+                return {"success": False, "message": "MCP配置不存在"}
+
+            # Test the connection through the integrated MCP manager
+            test_result = await self.mcp_tool_manager.test_tool_connection(
+                mcp_config.server_url, mcp_config.connection_config or {}
+            )
+
+            if test_result["success"]:
+                # Connection is healthy: sync the tool list
+                success, tools, error = await self.mcp_tool_manager.discover_tools(
+                    mcp_config.server_url, mcp_config.connection_config or {}
+                )
+
+                if success:
+                    # Convert to the new format
+                    tool_list = []
+                    tool_names = []
+                    for tool in tools:
+                        if tool.get("name"):
+                            tool_names.append(tool["name"])
+                            tool_list.append({
+                                tool["name"]: {
+                                    "description": tool.get("description", ""),
+                                    "inputSchema": tool.get("inputSchema", {})
+                                }
+                            })
+
+                    # Update the database
+                    mcp_config.available_tools = tool_list
+                    mcp_config.last_health_check = utcnow_naive()
+                    mcp_config.health_status = "healthy"
+                    mcp_config.error_message = None
+                    config.status = ToolStatus.AVAILABLE.value
+
+                    self.db.commit()
+
+                    return {
+                        "success": True,
+                        "message": "MCP连接成功并同步工具列表",
+                        "details": {
+                            "server_url": mcp_config.server_url,
+                            "tools_count": len(tool_names),
+                            "tools": tool_names
+                        }
+                    }
+                else:
+                    return {"success": False, "message": f"同步工具失败: {error}"}
+            else:
+                # Update the error status
+                mcp_config.last_health_check = utcnow_naive()
+                mcp_config.health_status = "error"
+                mcp_config.error_message = test_result.get("error", "连接失败")
+                config.status = ToolStatus.ERROR.value
+                self.db.commit()
+
+                return test_result
+
+        except Exception as e:
+            logger.error(f"测试MCP连接失败: {config.id}, 错误: {e}")
+            return {"success": False, "message": f"测试失败: {str(e)}"}
+
+    async def sync_mcp_tools(self, tool_id: str, tenant_id: uuid.UUID) -> dict[str, Any]:
+        """Sync the MCP tool list into the database."""
+        config: ToolConfig | None = None
+        mcp_config: MCPToolConfig | None = None
+        try:
+            config = self._get_tool_config(tool_id, tenant_id)
+            if not config or config.tool_type != ToolType.MCP.value:
+                return {"success": False, "message": "工具不存在或不是MCP工具"}
+
+            mcp_config = self.mcp_repo.find_by_tool_id(config.id)
+            if not mcp_config:
+                return {"success": False, "message": "MCP配置不存在"}
+
+            # Create the MCP client
+            from ..tools.mcp.client import SimpleMCPClient
+
+            connection_config = mcp_config.connection_config or {}
+            client = SimpleMCPClient(mcp_config.server_url, connection_config)
+
+            async with client:
+                # Fetch the tool list
+                tools = await client.list_tools()
+
+                # Convert to the new format
+                tool_list = []
+                tool_names = []
+                for tool in tools:
+                    if tool.get("name"):
+                        tool_names.append(tool["name"])
+                        tool_list.append({
+                            tool["name"]: {
+                                "description": tool.get("description", ""),
+                                "inputSchema": tool.get("inputSchema", {})
+                            }
+                        })
+
+                # Update the database
+                mcp_config.available_tools = tool_list
+                mcp_config.last_health_check = utcnow_naive()
+                mcp_config.health_status = "healthy"
+                mcp_config.error_message = None
+
+                # Update the tool status
+                config.status = ToolStatus.AVAILABLE.value
+
+                self.db.commit()
+
+                return {
+                    "success": True,
+                    "message": "工具列表同步成功",
+                    "tools_count": len(tool_names),
+                    "tools": tool_names
+                }
+
+        except Exception as e:
+            # Update the error status (best-effort; the health write must not
+            # mask the original failure)
+            try:
+                if config is not None:
+                    mcp_config = self.mcp_repo.find_by_tool_id(config.id)
+                    if mcp_config:
+                        mcp_config.last_health_check = utcnow_naive()
+                        mcp_config.health_status = "error"
+                        mcp_config.error_message = str(e)
+                        config.status = ToolStatus.ERROR.value
+                        self.db.commit()
+            except Exception as recovery_error:
+                logger.error(f"更新MCP错误状态失败: {tool_id}, 错误: {recovery_error}")
+
+            logger.error(f"同步MCP工具列表失败: {tool_id}, 错误: {e}")
+            return {"success": False, "message": f"同步失败: {str(e)}"}
+
+    async def _test_custom_connection(self, config: ToolConfig) -> dict[str, Any]:
+        """Test a custom tool connection (base connectivity check)."""
+        try:
+            custom_config = self.db.query(CustomToolConfig).filter(
+                CustomToolConfig.id == config.id
+            ).first()
+
+            if not custom_config or not custom_config.base_url:
+                return {"success": False, "message": "自定义工具配置不完整"}
+
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                        custom_config.base_url,
+                        timeout=aiohttp.ClientTimeout(total=10)
+                ) as response:
+                    if response.status == 200:
+                        return {"success": True, "message": "自定义工具连接成功"}
+                    else:
+                        return {"success": False, "message": f"连接失败，状态码: {response.status}"}
+
+        except Exception as e:
+            return {"success": False, "message": f"自定义工具测试失败: {str(e)}"}
+
+    async def test_custom_tool(
+            self,
+            tool_id: str,
+            tenant_id: uuid.UUID,
+            method: str,
+            path: str,
+            parameters: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Test a custom tool API call."""
+        try:
+            config = self._get_tool_config(tool_id, tenant_id)
+            if not config or config.tool_type != ToolType.CUSTOM.value:
+                return {"success": False, "message": "工具不存在或不是自定义工具"}
+
+            custom_config = self.db.query(CustomToolConfig).filter(
+                CustomToolConfig.id == config.id
+            ).first()
+
+            if not custom_config or not custom_config.base_url:
+                return {"success": False, "message": "自定义工具配置不完整"}
+
+            # Build the full URL
+            url = custom_config.base_url.rstrip('/') + '/' + path.lstrip('/')
+
+            # Build the request headers
+            headers = {"Content-Type": "application/json"}
+
+            # Add the auth headers
+            if custom_config.auth_type != AuthType.NONE.value:
+                auth_config = custom_config.auth_config or {}
+                if custom_config.auth_type == AuthType.API_KEY.value:
+                    key_name = auth_config.get("key_name", "X-API-Key")
+                    api_key = auth_config.get("api_key")
+                    if api_key:
+                        headers[key_name] = api_key
+                elif custom_config.auth_type == AuthType.BEARER_TOKEN.value:
+                    token = auth_config.get("token")
+                    if token:
+                        headers["Authorization"] = f"Bearer {token}"
+                elif custom_config.auth_type == AuthType.BASIC_AUTH.value:
+                    username = auth_config.get("username", "")
+                    password = auth_config.get("password", "")
+                    credentials = base64.b64encode(
+                        f"{username}:{password}".encode()
+                    ).decode()
+                    headers["Authorization"] = f"Basic {credentials}"
+
+            async with aiohttp.ClientSession() as session:
+                # Send the request according to the method
+                if method.upper() == "GET":
+                    async with session.get(
+                        url,
+                        params=parameters,
+                        headers=headers,
+                        timeout=aiohttp.ClientTimeout(total=custom_config.timeout or 30)
+                    ) as response:
+                        result_data = await response.text()
+                        return {
+                            "success": True,
+                            "message": "测试成功",
+                            "status_code": response.status,
+                            "response_data": result_data[:1000]
+                        }
+                else:
+                    async with session.request(
+                        method.upper(),
+                        url,
+                        json=parameters,
+                        headers=headers,
+                        timeout=aiohttp.ClientTimeout(total=custom_config.timeout or 30)
+                    ) as response:
+                        result_data = await response.text()
+                        return {
+                            "success": True,
+                            "message": "测试成功",
+                            "status_code": response.status,
+                            "response_data": result_data[:1000]
+                        }
+
+        except Exception as e:
+            logger.error(f"测试自定义工具API失败: {tool_id}, 错误: {e}")
+            return {"success": False, "message": f"测试失败: {str(e)}"}
+
+    async def _test_builtin_connection(self, config: ToolConfig) -> dict[str, Any]:
+        """Test a builtin tool connection."""
+        try:
+            # Get the tool instance
+            tool_instance = self.get_tool_instance(str(config.id), config.tenant_id)
+            if not tool_instance:
+                return {"success": False, "message": "无法创建工具实例"}
+
+            # Prefer the tool's own connection check when it exposes one
+            if hasattr(tool_instance, 'test_connection'):
+                result = await tool_instance.test_connection()
+                return result
+            else:
+                # Check whether configuration is required
+                builtin_config = self.builtin_repo.find_by_tool_id(config.id)
+                if builtin_config and builtin_config.requires_config:
+                    # Check whether all required parameters are configured
+                    if self._is_tool_configured(builtin_config):
+                        return {"success": True, "message": "内置工具已正确配置"}
+                    else:
+                        return {"success": False, "message": "工具缺少必需配置参数"}
+                else:
+                    return {"success": True, "message": "内置工具无需连接测试"}
+
+        except Exception as e:
+            logger.error(f"测试内置工具失败: {config.id}, 错误: {e}")
+            return {"success": False, "message": f"测试失败: {str(e)}"}
 
     async def _test_mcp_connection_by_config(self, config: dict[str, Any]) -> dict[str, Any]:
         """Test an MCP connection directly from config (called before creating the tool record)."""

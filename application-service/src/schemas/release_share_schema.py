@@ -17,7 +17,7 @@ from ..utils.datetime_utils import to_timestamp_ms
 
 
 class ReleaseShareCreate(BaseModel):
-    """创建/启用分享配置"""
+    """Create/enable share config"""
 
     is_enabled: bool = Field(default=True, description="是否启用公开分享")
     require_password: bool = Field(default=False, description="是否需要密码访问")
@@ -27,7 +27,7 @@ class ReleaseShareCreate(BaseModel):
 
 
 class ReleaseShareUpdate(BaseModel):
-    """更新分享配置"""
+    """Update share config"""
 
     is_enabled: Optional[bool] = Field(None, description="是否启用公开分享")
     require_password: Optional[bool] = Field(None, description="是否需要密码访问")
@@ -37,7 +37,7 @@ class ReleaseShareUpdate(BaseModel):
 
 
 class ReleaseShare(BaseModel):
-    """分享配置输出"""
+    """Share config output"""
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -46,7 +46,7 @@ class ReleaseShare(BaseModel):
     app_id: uuid.UUID
     is_enabled: bool
     share_token: str
-    share_url: str  # 完整的公开访问 URL
+    share_url: str  # Full public access URL
     require_password: bool
     allow_embed: bool
     embed_domains: List[str] = []

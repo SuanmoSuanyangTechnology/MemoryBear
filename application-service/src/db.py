@@ -113,6 +113,10 @@ class DatabaseManager:
                 if session.in_transaction():
                     await session.rollback()
 
+    def async_pool(self):
+        """The async engine's connection pool (created on first use)."""
+        return self._get_async_engine().pool
+
     async def ping(self) -> bool:
         async with self._get_async_engine().connect() as connection:
             result = await connection.execute(text("SELECT 1"))
@@ -133,3 +137,86 @@ class DatabaseManager:
             self._sync_session_factory = None
         if sync_engine is not None:
             sync_engine.dispose()
+
+
+# ---------------------------------------------------------------------------
+# Host-compatible session contexts for the frozen workflow runtime.
+#
+# The monolith's engine/node modules call module-level helpers (``get_db_context``
+# / ``get_db_read`` / ``get_async_db_context``) that open sessions from process
+# singletons. Ported call sites keep working through the process runtime
+# registered by ``create_app``; transaction contracts are identical to the host
+# helpers (rollback uncommitted work, never leave an idle-in-transaction
+# connection behind).
+# ---------------------------------------------------------------------------
+
+
+@contextmanager
+def get_db_context() -> Iterator[Session]:
+    """Pool-friendly sync session for read/write paths.
+
+    Never commits or rolls back on its own; the caller owns the transaction
+    boundary (host ``get_db_context`` contract).
+    """
+
+    from .runtime import get_process_runtime
+
+    with get_process_runtime().database.sync_session() as session:
+        yield session
+
+
+@contextmanager
+def get_db_read() -> Iterator[Session]:
+    """Read-only sync session.
+
+    Opens a PostgreSQL READ ONLY transaction (accidental writes fail inside
+    the database) and always rolls back on exit, so no
+    idle-in-transaction connection survives.
+    """
+
+    from .runtime import get_process_runtime
+
+    with get_process_runtime().database.sync_session() as session:
+        session.execute(text("SET TRANSACTION READ ONLY"))
+        yield session
+
+
+@asynccontextmanager
+async def get_async_db_context() -> AsyncIterator[AsyncSession]:
+    """Async session context for runtime-plane code (streaming, ``run_sync``).
+
+    Uncommitted transactions roll back on exit; cancellation-safe like the
+    host helper (the rollback is shielded so a cancelled caller cannot leak a
+    dirty connection).
+    """
+
+    from .runtime import get_process_runtime
+
+    async with get_process_runtime().database.async_session() as session:
+        yield session
+
+
+def get_db() -> Iterator[Session]:
+    """FastAPI-style sync session dependency (host ``get_db`` shape)."""
+
+    from .runtime import get_process_runtime
+
+    with get_process_runtime().database.sync_session() as session:
+        yield session
+
+
+def get_async_pool_status() -> dict[str, int | float]:
+    """Snapshot of the async connection pool for hot-path logging (host shape)."""
+
+    from .runtime import get_process_runtime
+
+    pool = get_process_runtime().database.async_pool()
+    total = pool.size() + pool.overflow()
+    return {
+        "pool_size": pool.size(),
+        "checked_in": pool.checkedin(),
+        "checked_out": pool.checkedout(),
+        "overflow": pool.overflow(),
+        "total": total,
+        "usage_percent": round(pool.checkedout() / total * 100, 2) if total > 0 else 0,
+    }

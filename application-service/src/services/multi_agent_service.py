@@ -1,24 +1,30 @@
 """Multi-agent config management service.
 
 Covers the definition-plane read and update paths of the monolith's
-``MultiAgentService`` consumed by the multi-agent config endpoints; the run /
-stream / delete paths remain in the monolith.
+``MultiAgentService`` consumed by the multi-agent config endpoints, plus the
+runtime entry points (run / run_stream) backing the draft-run surface. The
+delete path remains in the monolith.
 """
 from __future__ import annotations
 
+import json
 import logging
 import uuid
+from collections.abc import AsyncGenerator
 from typing import Any
 
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
-from ..errors import ResourceNotFoundException
+from ..errors import BizCode, BusinessException, ResourceNotFoundException
 from ..models import App, AppRelease
 from ..models.multi_agent_model import MultiAgentConfig
 from ..repositories import cross_domain_read
 from ..repositories.multi_agent_repository import MultiAgentConfigRepository
-from ..schemas.multi_agent_schema import MultiAgentConfigUpdate
+from ..schemas.multi_agent_schema import MultiAgentConfigUpdate, MultiAgentRunRequest
 from .model_ref_gate import raise_model_unavailable, resolve_invoke_ref
+from .multi_agent_orchestrator import MultiAgentOrchestrator
 from .multi_agent_release_resolver import describe_release_state, resolve_release_for_save
 
 logger = logging.getLogger(__name__)
@@ -65,6 +71,22 @@ class MultiAgentService:
             The multi-agent config, or None if it does not exist
         """
         return MultiAgentConfigRepository(self.db).get_by_app_id(app_id)
+
+    async def get_config_async(self, app_id: uuid.UUID) -> MultiAgentConfig | None:
+        """Async variant of ``get_config`` (runtime plane); falls back to the
+        sync read when ``self.db`` is a plain Session."""
+
+        if isinstance(self.db, AsyncSession):
+            result = await self.db.execute(
+                select(MultiAgentConfig)
+                .where(
+                    MultiAgentConfig.app_id == app_id,
+                    MultiAgentConfig.is_active.is_(True),
+                )
+                .order_by(MultiAgentConfig.updated_at.desc())
+            )
+            return result.scalars().first()
+        return self.get_config(app_id)
 
     def get_multi_agent_configs(self, app_id: uuid.UUID) -> dict[str, Any] | None:
         """Get the latest effective multi-agent config by app_id, converting
@@ -284,3 +306,294 @@ class MultiAgentService:
         )
 
         return config
+
+    async def run(
+        self,
+        app_id: uuid.UUID,
+        request: MultiAgentRunRequest
+    ) -> dict:
+        """Run a multi-agent task (non-streaming).
+
+        Args:
+            app_id: App ID
+            request: Run request
+
+        Returns:
+            Execution result
+        """
+        # 1. Load the config. This entry point sits on the runtime plane where
+        # self.db is an AsyncSession, so the async read is required (the host
+        # used the sync get_config here, which cannot run against AsyncSession).
+        config = await self.get_config_async(app_id)
+        if not config:
+            raise ResourceNotFoundException("多 Agent 配置", str(app_id))
+
+        if not config.is_active:
+            # Host parity: the streaming path rejects a disabled config with
+            # NOT_FOUND; the host non-streaming path referenced a BizCode member
+            # that does not exist and would raise AttributeError, so both port
+            # paths use NOT_FOUND.
+            raise BusinessException("多 Agent 配置已禁用", BizCode.NOT_FOUND)
+
+        # 2. Build the orchestrator
+        orchestrator = await MultiAgentOrchestrator.create(self.db, config)
+
+        # Pre-generate the assistant message ID and hand it to the orchestrator
+        # so the master execution record and the persisted message share one ID;
+        # log details attach nodes by message instead of relying on timing order.
+        message_id = uuid.uuid4()
+        user_message_id = uuid.uuid4()
+
+        # 3. Execute the task
+        result = await orchestrator.execute(
+            message=request.message,
+            conversation_id=request.conversation_id,
+            user_id=request.user_id,
+            variables=request.variables,
+            use_llm_routing=getattr(request, 'use_llm_routing', True),  # LLM routing, on by default
+            web_search=getattr(request, 'web_search', False),  # web search
+            memory=getattr(request, 'memory', True),  # memory
+            message_id=message_id,
+            thinking=getattr(request, 'thinking', False),  # deep thinking (off = legacy behavior)
+            files=getattr(request, 'files', None) or None,  # attachments (empty = legacy behavior)
+            user_message_id=user_message_id,  # emotion cache key (features.emotion_reply only)
+        )
+
+        # Non-streaming runs persist through the same in-process
+        # BatchPersistQueue as the streaming path; direct
+        # _save_conversation_message writes are deprecated, and outer callers
+        # must not add their own assistant message (duplicate-record root cause).
+        from .batch_persist_queue import BatchPersistQueue, PersistTask
+        from .chat_context import StreamResult as _StreamResult
+        _result = _StreamResult()
+        _result.message_id = message_id
+        _result.user_message_id = user_message_id
+        _result.full_content = result.get("message", "")
+        _result.total_tokens = (result.get("usage") or {}).get("total_tokens", 0)
+        _result.assistant_meta = {
+            "mode": result.get("mode"),
+            "elapsed_time": result.get("elapsed_time"),
+            "merge_mode_actual": getattr(orchestrator, "_merge_mode_actual", None),
+            "usage": result.get("usage", {
+                "prompt_tokens": 0,
+                "completion_tokens": 0,
+                "total_tokens": 0
+            })
+        }
+        # Suggested questions / citations / voice persist like an Agent app;
+        # the keys exist only when the matching features are enabled, otherwise
+        # no field is written.
+        if "suggested_questions" in result:
+            _result.suggested_questions = result.get("suggested_questions") or []
+        if "citations" in result:
+            _result.citations = result.get("citations") or []
+        if result.get("audio_url"):
+            _result.audio_url = result.get("audio_url")
+            _result.audio_status = result.get("audio_status")
+        if request.conversation_id is not None:
+            await BatchPersistQueue.enqueue(PersistTask(
+                task_type="save_messages",
+                args={
+                    "conversation_id": str(request.conversation_id),
+                    "result": _result,
+                    "user_message_id_override": user_message_id,
+                    "user_message_content": request.message,
+                    "should_memorize": orchestrator.cluster_memory_enabled(),
+                },
+            ))
+
+        # Context-engine after_turn fires only when this turn actually used the
+        # context engine; legacy clusters always yield None here.
+        _ctx_after_turn = orchestrator.context_engine_after_turn_args(request.conversation_id)
+        if _ctx_after_turn:
+            try:
+                await BatchPersistQueue.enqueue(
+                    PersistTask(task_type="after_turn", args=_ctx_after_turn)
+                )
+            except Exception as e:
+                logger.warning(
+                    "入队 context_engine after_turn 失败（不影响对话）", extra={"error": str(e)}
+                )
+
+        # Backfill the master execution record's message_id after persistence
+        # (idempotent; best-effort, never fails the turn).
+        master_execution_id = getattr(orchestrator, "current_execution_id", None)
+        if master_execution_id is not None:
+            try:
+                await BatchPersistQueue.enqueue(PersistTask(
+                    task_type="link_agent_execution_message",
+                    args={
+                        "execution_id": str(master_execution_id),
+                        "message_id": str(message_id),
+                    },
+                ))
+            except Exception as e:
+                logger.warning(
+                    "回填主执行记录 message_id 失败（不影响对话）", extra={"error": str(e)}
+                )
+
+        return result
+
+    async def run_stream(
+        self,
+        app_id: uuid.UUID,
+        request: MultiAgentRunRequest,
+        storage_type: str,
+        user_rag_memory_id: str
+    ) -> AsyncGenerator[str, None]:
+        """Run a multi-agent task (streaming SSE events).
+
+        Args:
+            app_id: App ID
+            request: Run request
+            storage_type: Memory storage type (neo4j / ...)
+            user_rag_memory_id: User RAG memory knowledge-base ID
+
+        Yields:
+            SSE events
+        """
+        # 1. Load the config
+        config = await self.get_config_async(app_id)
+        if not config:
+            raise ResourceNotFoundException("多 Agent 配置", str(app_id))
+
+        if not config.is_active:
+            raise BusinessException("多 Agent 配置已禁用", BizCode.NOT_FOUND)
+
+        # 2. Build the orchestrator
+        orchestrator = await MultiAgentOrchestrator.create(self.db, config)
+
+        full_content = ""
+        total_tokens = 0
+        # Pre-generate the assistant message ID and hand it to the orchestrator:
+        # the master execution record gets its message_id by backfill, and log
+        # details attach nodes by message instead of "closest in time" (which
+        # scatters one turn's nodes across messages under multi-round /
+        # concurrent sub-agents).
+        message_id = uuid.uuid4()
+        user_message_id = uuid.uuid4()
+
+        # 3. Stream the task. This layer only relays events and accumulates the
+        # message body; token accounting is owned by the orchestrator's per-turn
+        # ledger (routing/sub/merge) and published once in the end event.
+        total_tokens = 0
+        # Conversation-capability extras carried by the end event (suggested
+        # questions / citations / voice); empty when the features are off.
+        end_extras: dict = {}
+        async for event in orchestrator.execute_stream(
+            message=request.message,
+            conversation_id=request.conversation_id,
+            user_id=request.user_id,
+            variables=request.variables,
+            use_llm_routing=getattr(request, 'use_llm_routing', True),
+            web_search=getattr(request, 'web_search', False),  # web search
+            memory=getattr(request, 'memory', True),  # memory
+            storage_type=storage_type,
+            user_rag_memory_id=user_rag_memory_id,
+            message_id=message_id,
+            thinking=getattr(request, 'thinking', False),  # deep thinking (off = legacy behavior)
+            files=getattr(request, 'files', None) or None,  # attachments (empty = legacy behavior)
+            user_message_id=user_message_id,  # emotion cache key (features.emotion_reply only)
+        ):
+            _event_name = ""
+            if event.startswith("event:"):
+                _event_name = event[6:].split("\n", 1)[0].strip()
+
+            if _event_name == "end" and "data:" in event:
+                # The end event carries this turn's usage (ledger view) — the
+                # single token source for the persisted meta.
+                try:
+                    data_line = event.split("data: ", 1)[1].strip()
+                    data = json.loads(data_line)
+                    total_tokens = int((data.get("usage") or {}).get("total_tokens") or 0)
+                    # Conversation-capability extras (present only when the
+                    # matching features are enabled)
+                    for _k in ("suggested_questions", "citations", "audio_url", "audio_status"):
+                        if _k in data:
+                            end_extras[_k] = data[_k]
+                except Exception:
+                    pass
+
+            yield event
+            # Persist only the cluster-level `message` events (decided by event
+            # name). Sub-agent bodies arrive as `sub_agent_message`; counting
+            # them too would give the persisted assistant body one extra copy
+            # versus the UI (bubble grows after refresh).
+            if _event_name == "message" and "data:" in event:
+                try:
+                    data_line = event.split("data: ", 1)[1].strip()
+                    data = json.loads(data_line)
+                    if "content" in data:
+                        full_content += data["content"]
+                except Exception:
+                    pass
+
+        # Persistence closure: this service (draft/API scenario) is the single
+        # persistence layer for the multi-agent stream — writes go through
+        # BatchPersistQueue, and the deprecated direct
+        # _save_conversation_message path stays unused. The persisted body = the
+        # orchestrator's message event sequence (same view as the frontend main
+        # bubble), not an intermediate assembly made by an outer layer.
+        import time as _time
+        _master_started_at = getattr(orchestrator, "_master_started_at", None)
+        elapsed_time = (_time.time() - _master_started_at) if _master_started_at else 0.0
+        from .batch_persist_queue import BatchPersistQueue, PersistTask
+        from .chat_context import StreamResult as _StreamResult
+        _result = _StreamResult()
+        _result.message_id = message_id
+        _result.user_message_id = user_message_id
+        _result.full_content = full_content
+        _result.total_tokens = total_tokens
+        _result.assistant_meta = {
+            "elapsed_time": elapsed_time,
+            "mode": getattr(orchestrator, "_normalized_mode", None),
+            "merge_mode_actual": getattr(orchestrator, "_merge_mode_actual", None),
+            "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": total_tokens},
+        }
+        # Suggested questions / citations / voice persist like an Agent app;
+        # empty end_extras writes no field.
+        if end_extras:
+            if "suggested_questions" in end_extras:
+                _result.suggested_questions = end_extras.get("suggested_questions") or []
+            if "citations" in end_extras:
+                _result.citations = end_extras.get("citations") or []
+            if end_extras.get("audio_url"):
+                _result.audio_url = end_extras.get("audio_url")
+                _result.audio_status = end_extras.get("audio_status")
+        await BatchPersistQueue.enqueue(PersistTask(
+            task_type="save_messages",
+            args={
+                "conversation_id": str(request.conversation_id),
+                "result": _result,
+                "user_message_id_override": user_message_id,
+                "user_message_content": request.message,
+                "should_memorize": orchestrator.cluster_memory_enabled(),
+            },
+        ))
+
+        # Context-engine after-turn summary (enqueued only when this turn
+        # actually ran through the context engine; legacy clusters: None)
+        _ctx_after_args = orchestrator.context_engine_after_turn_args(request.conversation_id)
+        if _ctx_after_args:
+            await BatchPersistQueue.enqueue(
+                PersistTask(task_type="after_turn", args=_ctx_after_args)
+            )
+
+        # Backfill the master execution record's message_id after persistence
+        # (the record is created when the stream starts, before the message row
+        # exists — writing message_id there would be an FK violation; idempotent:
+        # only records still holding NULL are updated).
+        master_execution_id = getattr(orchestrator, "current_execution_id", None)
+        if master_execution_id is not None:
+            try:
+                await BatchPersistQueue.enqueue(PersistTask(
+                    task_type="link_agent_execution_message",
+                    args={
+                        "execution_id": str(master_execution_id),
+                        "message_id": str(message_id),
+                    },
+                ))
+            except Exception as e:
+                logger.warning(
+                    "回填主执行记录 message_id 失败（不影响对话）", extra={"error": str(e)}
+                )

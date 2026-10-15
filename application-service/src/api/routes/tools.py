@@ -1,10 +1,10 @@
 """Tool family management routes.
 
-Mirrors the monolith ``tool_controller`` definition-plane endpoints (list,
-detail, CRUD, active toggle, method discovery, statistics, schema parsing and
-enums). Execution-plane endpoints (execute, connection test, MCP tool sync)
-stay in the monolith for now. The async service methods that bridge to MCP
-discovery run through ``asyncio.run`` on the sync threadpool handler.
+Mirrors the monolith ``tool_controller`` endpoints: list, detail, CRUD, active
+toggle, method discovery, statistics, schema parsing, enums and the
+execution-plane trio (execute, connection test, MCP tool sync). The async
+service methods that bridge to MCP discovery or tool execution run through
+``asyncio.run`` on the sync threadpool handler.
 """
 
 from __future__ import annotations
@@ -15,12 +15,14 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
-from ...errors import BusinessException
+from ...errors import BizCode, BusinessException
 from ...models.tool_model import AuthType, ToolStatus, ToolType
 from ...schemas.tool_schema import (
+    CustomToolTestRequest,
     ParseSchemaRequest,
     ToolActiveUpdate,
     ToolCreateRequest,
+    ToolExecuteRequest,
     ToolUpdateRequest,
 )
 from ...services.tool_service import ToolService
@@ -196,6 +198,80 @@ def parse_openapi_schema(request: ParseSchemaRequest, db: DbSession, principal: 
             raise HTTPException(status_code=400, detail=result["message"])
         return success(data=result, msg="Schema解析完成")
     except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@router.post("/execution/execute", summary="执行工具", response_model=ApiResponse)
+def execute_tool(request: ToolExecuteRequest, db: DbSession, principal: Caller):
+    """Execute a tool"""
+    try:
+        result = asyncio.run(ToolService(db).execute_tool(
+            tool_id=request.tool_id,
+            parameters=request.parameters,
+            tenant_id=principal.tenant_id,
+            user_id=principal.actor_id,
+            workspace_id=principal.workspace_id,
+            timeout=request.timeout
+        ))
+        if not result.success:
+            status_code = 400 if result.error_code == "VALIDATION_ERROR" else 500
+            raise HTTPException(status_code=status_code, detail=result.error)
+        return success(
+            data={
+                "success": result.success,
+                "data": result.data,
+                "error": result.error,
+                "execution_time": result.execution_time,
+                "token_usage": result.token_usage
+            },
+            msg="工具执行完成"
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@router.post("/{tool_id}/sync_mcp_tools", summary="同步MCP工具列表", response_model=ApiResponse)
+def sync_mcp_tools(tool_id: str, db: DbSession, principal: Caller):
+    """Sync the MCP tool list"""
+    try:
+        result = asyncio.run(ToolService(db).sync_mcp_tools(tool_id, principal.tenant_id))
+        if not result.get("success", False):
+            raise BusinessException(
+                result.get("message", "工具列表同步失败"), BizCode.BAD_REQUEST
+            )
+        return success(data=result, msg="MCP工具列表同步完成")
+    except BusinessException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@router.post("/{tool_id}/test", summary="测试工具连接", response_model=ApiResponse)
+def test_tool_connection(
+        tool_id: str,
+        db: DbSession,
+        principal: Caller,
+        test_request: CustomToolTestRequest | None = None,
+):
+    """Test the tool connection"""
+    try:
+        if test_request:
+            # Custom tool API test
+            result = asyncio.run(ToolService(db).test_custom_tool(
+                tool_id, principal.tenant_id,
+                test_request.method, test_request.path, test_request.parameters
+            ))
+        else:
+            # Plain connection test
+            result = asyncio.run(ToolService(db).test_connection(tool_id, principal.tenant_id))
+        if result["success"] is False:
+            raise BusinessException(result["message"], BizCode.SERVICE_UNAVAILABLE)
+        return success(data=result, msg="连接测试完成")
+    except BusinessException:
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e)) from e

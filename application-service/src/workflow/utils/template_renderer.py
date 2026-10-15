@@ -1,0 +1,226 @@
+"""
+Template Renderer
+
+Provides safe template rendering using Jinja2, supporting variable references
+and expressions.
+"""
+
+import logging
+import re
+from typing import Any
+
+from jinja2 import TemplateSyntaxError, UndefinedError, Environment, StrictUndefined, Undefined
+
+from ..engine.variable_pool import LazyVariableDict
+
+logger = logging.getLogger(__name__)
+
+_NORMALIZE_PATTERN = re.compile(r"\{\{\s*(\d+)\.(\w+)\s*}}")
+_FORM_FIELD_PATTERN = re.compile(r"\{\{form_field:([^}]+)\}}")
+
+
+class SafeUndefined(Undefined):
+    """Return empty string instead of raising error when accessing undefined variables"""
+    __slots__ = ()
+
+    def _fail_with_undefined_error(self, *args, **kwargs):
+        return ""
+
+    __add__ = __radd__ = __mul__ = __rmul__ = __div__ = __rdiv__ = __truediv__ = __rtruediv__ = _fail_with_undefined_error
+    __getitem__ = __getattr__ = _fail_with_undefined_error
+    __str__ = __repr__ = lambda self: ""
+
+
+class TemplateRenderer:
+    def __init__(self, strict: bool = True):
+        """Initialize renderer
+
+        Args:
+            strict: Whether to enable strict mode (raise error on undefined variables)
+        """
+        self.strict = strict
+        self.env = Environment(
+            undefined=StrictUndefined if strict else SafeUndefined,
+            autoescape=False  # Disable auto-escaping since we handle plain text instead of HTML
+        )
+
+    @staticmethod
+    def normalize_template(template: str) -> str:
+        """Normalize template syntax (convert numeric node reference to dict access)"""
+        template = _NORMALIZE_PATTERN.sub(
+            r'{{ node["\1"].\2 }}',
+            template
+        )
+        # Handle node IDs with hyphens: convert {{node-id.var}} to {{node["node-id"].var}}
+        # This prevents Jinja2 from interpreting hyphen as subtraction
+        template = re.sub(
+            r'\{\{\s*([a-zA-Z_][\w-]*-[\w-]+)\.',
+            r'{{ node["\1"].',
+            template
+        )
+        return template
+
+    def render(
+            self,
+            template: str,
+            conv_vars: dict[str, Any] | LazyVariableDict,
+            node_outputs: dict[str, Any] | dict[str, LazyVariableDict],
+            system_vars: dict[str, Any] | LazyVariableDict | None = None,
+            env_vars: dict[str, Any] | LazyVariableDict | None = None,
+    ) -> str:
+        """Render template
+
+        Args:
+            template: Template string
+            conv_vars: Conversation variables
+            node_outputs: Node outputs
+            system_vars: System variables
+
+        Returns:
+            Rendered string
+
+        Raises:
+            ValueError: If template syntax is invalid or variables are undefined
+
+        Examples:
+            >>> renderer = TemplateRenderer()
+            >>> renderer.render(
+            ...     "Hello {{var.name}}!",
+            ...     {"name": "World"},
+            ...     {},
+            ...     {}
+            ... )
+            'Hello World!'
+
+            >>> renderer.render(
+            ...     "Analysis result: {{node.analyze.output}}",
+            ...     {},
+            ...     {"analyze": {"output": "positive sentiment"}},
+            ...     {}
+            ... )
+            'Analysis result: positive sentiment'
+        """
+        # Build namespace context
+        context = {
+            "conv": conv_vars,  # Conversation variables: {{conv.user_name}}
+            "node": node_outputs,  # Node outputs: {{node.node_1.output}}
+            "sys": system_vars,  # System variables: {{sys.execution_id}}
+            "env": env_vars,  # Environment variables: {{env.OPENAI_API_KEY}}
+        }
+
+        # Allow direct access to node outputs by node ID: {{llm_qa.output}}
+        if node_outputs:
+            context.update(node_outputs)
+
+        # Protect {{form_field:...}} placeholders from Jinja2 parsing.
+        # These use {{ }} delimiters but contain colons which are not valid Jinja2 syntax.
+        # Replace them with temporary markers, render, then restore.
+        form_field_slots: list[str] = []
+        def _save_form_field(m: re.Match) -> str:
+            form_field_slots.append(m.group(0))
+            return f"__FORM_FIELD_SLOT_{len(form_field_slots) - 1}__"
+        template = _FORM_FIELD_PATTERN.sub(_save_form_field, template)
+
+        template = self.normalize_template(template)
+        try:
+            tmpl = self.env.from_string(template)
+            result = tmpl.render(**context)
+
+        except TemplateSyntaxError as e:
+            logger.error(f"Template syntax error: {template}, error: {e}")
+            raise ValueError(f"Template syntax error: {e}")
+        except UndefinedError as e:
+            logger.error(f"Undefined variable in template: {template}, error: {e}")
+            raise ValueError(f"Undefined variable: {e}")
+        except Exception as e:
+            logger.error(f"Template rendering error: {template}, error: {e}")
+            raise ValueError(f"Template rendering failed: {e}")
+
+        # Restore {{form_field:...}} placeholders
+        for i, original in enumerate(form_field_slots):
+            result = result.replace(f"__FORM_FIELD_SLOT_{i}__", original)
+
+        return result
+
+    def validate(self, template: str) -> list[str]:
+        """Validate template syntax
+
+        Args:
+            template: Template string
+
+        Returns:
+            List of errors (empty if valid)
+
+        Examples:
+            >>> renderer = TemplateRenderer()
+            >>> renderer.validate("Hello {{var.name}}!")
+            []
+
+            >>> renderer.validate("Hello {{var.name")  # Missing closing tag
+            ['Template syntax error: ...']
+        """
+        errors = []
+
+        # Protect {{form_field:...}} placeholders before validation
+        protected = _FORM_FIELD_PATTERN.sub(
+            lambda m: f"__FORM_FIELD_SLOT__", template
+        )
+
+        try:
+            self.env.from_string(self.normalize_template(protected))
+        except TemplateSyntaxError as e:
+            errors.append(f"Template syntax error: {e}")
+        except Exception as e:
+            errors.append(f"Template validation failed: {e}")
+
+        return errors
+
+
+# Global renderer instances (strict / lenient)
+_strict_renderer = TemplateRenderer(strict=True)
+_lenient_renderer = TemplateRenderer(strict=False)
+
+
+def render_template(
+        template: str,
+        conv_vars: dict[str, Any] | LazyVariableDict,
+        node_outputs: dict[str, Any] | dict[str, LazyVariableDict],
+        system_vars: dict[str, Any] | LazyVariableDict,
+        env_vars: dict[str, Any] | LazyVariableDict | None = None,
+        strict: bool = True
+) -> str:
+    """Render template (convenience function)
+
+    Args:
+        strict: Whether to use strict mode
+        template: Template string
+        conv_vars: Conversation variables
+        node_outputs: Node outputs
+        system_vars: System variables
+
+    Returns:
+        Rendered string
+
+    Examples:
+        >>> render_template(
+        ...     "Analyze: {{var.text}}",
+        ...     {"text": "This is a text"},
+        ...     {},
+        ...     {}
+        ... )
+        'Analyze: This is a text'
+    """
+    renderer = _strict_renderer if strict else _lenient_renderer
+    return renderer.render(template, conv_vars, node_outputs, system_vars, env_vars)
+
+
+def validate_template(template: str) -> list[str]:
+    """Validate template syntax (convenience function)
+
+    Args:
+        template: Template string
+
+    Returns:
+        List of errors
+    """
+    return _strict_renderer.validate(template)

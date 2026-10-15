@@ -16,7 +16,7 @@ from ..utils.datetime_utils import to_timestamp_ms
 
 
 class V1ConversationListItem(BaseModel):
-    """v1 应用对外服务的会话列表项"""
+    """Conversation list item for the v1 public app API"""
     conversation_id: uuid.UUID
     title: str | None = None
     summary: str | None = None
@@ -34,7 +34,7 @@ class V1ConversationListItem(BaseModel):
 
 
 class V1ConversationMessageItem(BaseModel):
-    """v1 应用对外服务的历史消息项"""
+    """History message item for the v1 public app API"""
     message_id: uuid.UUID
     role: str
     content: str
@@ -55,14 +55,14 @@ class V1ConversationMessageItem(BaseModel):
 
 
 class V1ConversationMessageListResponse(BaseModel):
-    """v1 应用对外服务的历史消息列表响应"""
+    """History message list response for the v1 public app API"""
     conversation_id: uuid.UUID
     items: list[V1ConversationMessageItem]
     limit: int
 
 
 class V1ConversationFeedbackItem(BaseModel):
-    """v1 应用对外服务的会话消息反馈项（仅当前用户反馈类型，不含收藏）"""
+    """Conversation message feedback item for the v1 public app API (current user's feedback type only, favorites excluded)"""
     message_id: uuid.UUID
     role: str
     feedback_type: str | None = None  # Current user's like / dislike / None (excludes is_favorite)
@@ -75,7 +75,7 @@ class V1ConversationFeedbackItem(BaseModel):
 
 
 class V1ConversationFeedbackListResponse(BaseModel):
-    """v1 应用对外服务的会话消息反馈列表响应"""
+    """Conversation message feedback list response for the v1 public app API"""
     conversation_id: uuid.UUID
     items: list[V1ConversationFeedbackItem]
     limit: int

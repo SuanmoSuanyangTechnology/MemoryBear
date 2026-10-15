@@ -499,13 +499,13 @@ class MultiAgentService:
         Returns:
             执行结果
         """
-        # 1. 获取配置
-        config = self.get_config(app_id)
+        # 1. 获取配置（运行面 self.db 为 AsyncSession，须走异步读取）
+        config = await self.get_config_async(app_id)
         if not config:
             raise ResourceNotFoundException("多 Agent 配置", str(app_id))
 
         if not config.is_active:
-            raise BusinessException("多 Agent 配置已禁用", BizCode.RESOURCE_DISABLED)
+            raise BusinessException("多 Agent 配置已禁用", BizCode.NOT_FOUND)
 
         # 2. 创建编排器
         orchestrator = await MultiAgentOrchestrator.create(self.db, config)

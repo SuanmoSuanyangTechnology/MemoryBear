@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 
 
 class ShareConversationRequest(BaseModel):
-    """分享会话请求"""
+    """Share-conversation request"""
 
     password: Optional[str] = Field(None, description="访问密码（可选）")
     expire_hours: Optional[int] = Field(None, ge=1, le=720, description="过期时长（小时）")
@@ -16,7 +16,7 @@ class ShareConversationRequest(BaseModel):
 
 
 class ShareConversationResponse(BaseModel):
-    """分享会话响应"""
+    """Share-conversation response"""
 
     share_id: str = Field(..., description="分享ID")
     share_uuid: str = Field(..., description="分享唯一标识")

@@ -1,18 +1,16 @@
-"""Knowledge-retrieval node config contracts (frozen subset of the host
-``app/schemas/chunk_schema.py``).
-
-Only the classes the workflow definition-plane closure consumes are ported
-(``RetrieveType`` and ``KnowledgeBaseConfig``); field names, defaults and
-constraints must stay byte-compatible with the host so imported workflow
-nodes validate identically on both sides.
-"""
-
 import uuid
 from enum import StrEnum
+from typing import Annotated, Literal, Union
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from ..rag.models.chunk import QAChunk
+from ..integrations.knowledge.contracts import (
+    KnowledgeRetrievalSource as KnowledgeRetrievalSource,
+)
+from .knowledge_metadata_schema import FilterGroup, MetadataFilterMode
 from .rerank_schema import RerankMode, RerankWeights
+from .response_schema import ApiResponse
 
 
 class RetrieveType(StrEnum):
@@ -43,4 +41,215 @@ class KnowledgeBaseConfig(BaseModel):
     )
 
 
-__all__ = ["KnowledgeBaseConfig", "RetrieveType"]
+class RetrievalPolicyRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    kb_ids: list[uuid.UUID] = Field(min_length=1, max_length=100)
+    rerank_id: uuid.UUID | None = None
+
+    @field_validator("kb_ids")
+    @classmethod
+    def deduplicate_kb_ids(cls, value: list[uuid.UUID]) -> list[uuid.UUID]:
+        return list(dict.fromkeys(value))
+
+
+class RetrievalPolicy(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    participle: tuple[Literal["text", "image"], ...] = ("text",)
+    semantic: tuple[Literal["text", "image"], ...] = ("text",)
+    hybrid: tuple[Literal["text", "image"], ...] = ("text",)
+    graph: tuple[Literal["text", "image"], ...] = ("text",)
+
+
+class RetrievalPolicyResponse(ApiResponse):
+    data: RetrievalPolicy
+
+
+class TextRetrievalQuery(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    modality: Literal["text"]
+    content: str
+
+    @field_validator("content")
+    @classmethod
+    def validate_content(cls, value: str) -> str:
+        content = value.strip()
+        if not content:
+            raise ValueError("text query content must not be empty")
+        return content
+
+
+class ImageRetrievalQuery(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    modality: Literal["image"]
+    content: str = Field(min_length=1, repr=False)
+
+
+type StructuredRetrievalQuery = Annotated[
+    TextRetrievalQuery | ImageRetrievalQuery,
+    Field(discriminator="modality"),
+]
+type RetrievalQuery = str | StructuredRetrievalQuery
+
+
+def normalize_retrieval_query(
+    query: RetrievalQuery,
+) -> TextRetrievalQuery | ImageRetrievalQuery:
+    if isinstance(query, str):
+        return TextRetrievalQuery(modality="text", content=query)
+    return query
+
+
+class ChunkType(StrEnum):
+    """Chunk type enumeration"""
+    CHUNK = "chunk"
+    PARENT = "parent"
+    CHILD = "child"
+    QA = "qa"
+
+
+class ChunkCreate(BaseModel):
+    content: Union[str, QAChunk] = Field(
+        description="Content can be either a string or a QAChunk object"
+    )
+    chunk_type: ChunkType = Field(default=ChunkType.CHUNK, description="chunk 类型")
+    parent_id: str | None = Field(default=None, description="父块 doc_id（仅 child 类型必填）")
+
+    @property
+    def chunk_content(self) -> str:
+        """Get the actual content string regardless of input type"""
+        if isinstance(self.content, QAChunk):
+            return self.content.question  # In QA mode page_content stores the question
+        return self.content
+
+    @property
+    def is_qa(self) -> bool:
+        return isinstance(self.content, QAChunk) or self.chunk_type == ChunkType.QA
+
+    @property
+    def qa_metadata(self) -> dict:
+        """Return the QA-related metadata fields"""
+        if isinstance(self.content, QAChunk):
+            return {
+                "chunk_type": "qa",
+                "question": self.content.question,
+                "answer": self.content.answer,
+            }
+        return {}
+
+    @property
+    def type_metadata(self) -> dict:
+        """Return the metadata fields for the current chunk_type"""
+        meta = {"chunk_type": self.chunk_type.value}
+        if self.chunk_type == ChunkType.CHILD and self.parent_id:
+            meta["parent_id"] = self.parent_id
+        return meta
+
+
+class ChunkUpdate(BaseModel):
+    content: Union[str, QAChunk] = Field(
+        description="Content can be either a string or a QAChunk object"
+    )
+
+    @property
+    def chunk_content(self) -> str:
+        """Get the actual content string regardless of input type"""
+        if isinstance(self.content, QAChunk):
+            return self.content.question  # In QA mode page_content stores the question
+        return self.content
+
+    @property
+    def is_qa(self) -> bool:
+        return isinstance(self.content, QAChunk)
+
+    @property
+    def qa_metadata(self) -> dict:
+        """Return the QA-related metadata fields"""
+        if isinstance(self.content, QAChunk):
+            return {
+                "chunk_type": "qa",
+                "question": self.content.question,
+                "answer": self.content.answer,
+            }
+        return {}
+
+
+class _ChunkRetrieveBase(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    query: RetrievalQuery
+    kb_ids: list[uuid.UUID] = Field(default_factory=list)
+    ex_ids: list[str] | None = Field(None)
+    file_names_filter: list[str] | None = Field(None)
+    similarity_threshold: float | None = Field(None)
+    vector_similarity_weight: float | None = Field(None)
+    top_k: int | None = Field(20, ge=1, le=100)
+    retrieve_type: RetrieveType | None = Field(None)
+    rerank_mode: RerankMode | None = None
+    rerank_weights: RerankWeights | None = None
+    enable_graph_retrieval: int = Field(
+        0,
+        ge=0,
+        le=1,
+        description="Whether to add the graph retrieval route to hybrid retrieval. 1 enables it.",
+    )
+    rerank_score_threshold: float | None = Field(None, ge=0, le=1)
+    metadata_filters: list[FilterGroup] | None = Field(None, description="filter condition groups")
+    metadata_filter_mode: MetadataFilterMode = Field(MetadataFilterMode.MANUAL, description="filter mode")
+
+    @field_validator("query")
+    @classmethod
+    def validate_query(cls, value: RetrievalQuery) -> RetrievalQuery:
+        if isinstance(value, str):
+            stripped = value.strip()
+            if not stripped:
+                raise ValueError("query must not be empty")
+            return stripped
+        return value
+
+    @property
+    def normalized_query(self) -> TextRetrievalQuery | ImageRetrievalQuery:
+        return normalize_retrieval_query(self.query)
+
+
+class _HttpChunkRetrieve(_ChunkRetrieveBase):
+    """Supported request parameters for HTTP retrieval routes."""
+
+    @model_validator(mode="after")
+    def validate_knowledge_ids(self) -> "_HttpChunkRetrieve":
+        if not self.kb_ids and not self.ex_ids:
+            raise ValueError("kb_ids and ex_ids cannot both be empty")
+        return self
+
+
+class ApiChunkRetrieve(_HttpChunkRetrieve):
+    """Supported request parameters for JWT retrieval."""
+
+
+class V1ChunkRetrieve(_HttpChunkRetrieve):
+    """Supported request parameters for API Key retrieval."""
+
+
+class ChunkRetrieve(_ChunkRetrieveBase):
+    knowledge_bases: list[KnowledgeBaseConfig] = Field(default_factory=list)
+    top_n: int | None = Field(20, ge=1, le=100)
+    rerank_id: uuid.UUID | None = None
+
+    @model_validator(mode="after")
+    def resolve_top_n(self):
+        if not self.kb_ids and not self.ex_ids and not self.knowledge_bases:
+            raise ValueError("kb_ids, ex_ids and knowledge_bases cannot all be empty")
+        top_k = self.top_k or 20
+        if self.top_n is None or "top_n" not in self.model_fields_set:
+            self.top_n = max(top_k, 20)
+        elif self.top_n < top_k:
+            raise ValueError("top_n must be greater than or equal to top_k")
+        return self
+
+
+class ChunkBatchCreate(BaseModel):
+    """Batch chunk creation"""
+    items: list[ChunkCreate] = Field(..., min_length=1, description="chunk 列表")

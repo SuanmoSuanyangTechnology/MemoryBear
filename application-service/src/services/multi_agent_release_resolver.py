@@ -1,6 +1,6 @@
-"""Cluster sub-agent release resolution (synchronous subset of the host
-``multi_agent_release_resolver``: save-time validation, runtime resolution,
-read-back display).
+"""Cluster sub-agent release resolution (subset of the host
+``multi_agent_release_resolver``: save-time validation, runtime resolution —
+sync and async, read-back display).
 
 Sub-agent entry conventions (multi_agent_configs.sub_agents[*], current form):
 - agent_id: the sub-agent's **app ID** (App.id); the identity is stable and
@@ -22,6 +22,7 @@ UUID spaces cannot collide, so this discrimination is safe.
 
 from __future__ import annotations
 
+import inspect
 import logging
 import uuid
 from typing import Any, NamedTuple
@@ -104,6 +105,17 @@ def _locate(db: Any, agent_id: uuid.UUID) -> tuple[App | None, AppRelease | None
     release = db.get(AppRelease, agent_id)
     if release is not None:
         return db.get(App, release.app_id), release
+    return None, None
+
+
+async def _alocate(get, agent_id: uuid.UUID) -> tuple[App | None, AppRelease | None]:
+    """Async lookup through an awaited getter (``get`` returns an awaitable)."""
+    app = await get(App, agent_id)
+    if app is not None:
+        return app, None
+    release = await get(AppRelease, agent_id)
+    if release is not None:
+        return await get(App, release.app_id), release
     return None, None
 
 
@@ -202,6 +214,28 @@ def resolve_effective_release_id(
     return _latest_or_fail(plan, latest, entry, strict)
 
 
+async def aresolve_effective_release_id(
+    db: Any, entry: dict[str, Any], *, strict: bool = False
+) -> uuid.UUID:
+    """Async variant; db may be a Session or AsyncSession (awaited when ``db.get``
+    returns an awaitable).
+    """
+
+    async def _get(model, ident):
+        result = db.get(model, ident)
+        return await result if inspect.isawaitable(result) else result
+
+    agent_id = _require_agent_id(entry)
+    app, legacy = await _alocate(_get, agent_id)
+    plan = _plan(entry, agent_id, app, legacy)
+    if plan.fixed is not None:
+        return plan.fixed
+    latest = None
+    if plan.app is not None and plan.app.is_active and plan.app.current_release_id:
+        latest = await _get(AppRelease, plan.app.current_release_id)
+    return _latest_or_fail(plan, latest, entry, strict)
+
+
 # ───────────────────────── Read-back display ─────────────────────────
 
 
@@ -246,6 +280,7 @@ def describe_release_state(db: Any, entry: dict[str, Any]) -> dict[str, Any]:
 __all__ = [
     "POLICY_CURRENT",
     "POLICY_PINNED",
+    "aresolve_effective_release_id",
     "describe_release_state",
     "get_policy",
     "resolve_effective_release_id",

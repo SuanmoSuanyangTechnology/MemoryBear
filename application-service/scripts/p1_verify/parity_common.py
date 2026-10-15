@@ -141,12 +141,18 @@ WORKFLOW_PAYLOAD = {
         {
             "id": "trigger",
             "type": "trigger",
-            "name": "parity schedule",
+            "name": "parity trigger",
+            # webhook keeps the debug trigger payload static (empty
+            # body/query/headers plus config-derived meta). The schedule
+            # branch embeds a wall-clock ``now`` block (iso/timestamp/date/
+            # time) that no normalization rule can scrub, and the host
+            # rejects any other trigger type. route_key must be given
+            # explicitly: the host default is a random ``wh_<uuid>``.
             "config": {
-                "trigger_type": "schedule",
+                "trigger_type": "webhook",
                 "enabled": True,
-                "interval_seconds": 3600,
-                "timezone": "UTC",
+                "method": "POST",
+                "route_key": "parity-hook",
             },
         },
         {"id": "end", "type": "end", "name": "end"},
@@ -164,8 +170,23 @@ WORKFLOW_PAYLOAD = {
     "workflow_type": "pure_workflow",
 }
 
+# Fixed well-formed ids that resolve on neither side: the negative-path P3
+# requests stay byte-identical across both recordings.
+P3_UNKNOWN_SESSION_ID = "00000000-0000-4000-8000-000000000000"
+P3_UNKNOWN_MODEL_ID = "00000000-0000-4000-8000-000000000001"
+P3_UNKNOWN_TOOL_ID = "00000000-0000-4000-8000-000000000002"
+
 ISO_TS = re.compile(r"^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:?\d{2})?$")
 EPOCH_MS_THRESHOLD = 10**12
+
+# Wall-clock durations (seconds) that can never match across two runs; masked
+# by key wherever they appear as numbers inside dict payloads.
+VOLATILE_KEYS = frozenset({
+    "elapsed_time",
+    "execution_time",
+    "cache_origin_elapsed_time",
+    "first_token_time",
+})
 
 
 def _reverse_ids(ids: dict) -> dict:
@@ -213,7 +234,17 @@ def _normalize(value, reverse: dict, raw: dict):
     if isinstance(value, (int, float)) and value >= EPOCH_MS_THRESHOLD:
         return "<ts>"
     if isinstance(value, dict):
-        return {k: _normalize(v, reverse, raw) for k, v in value.items()}
+        normalized = {}
+        for key, item in value.items():
+            if (
+                key in VOLATILE_KEYS
+                and isinstance(item, (int, float))
+                and not isinstance(item, bool)
+            ):
+                normalized[key] = "<elapsed>"
+            else:
+                normalized[key] = _normalize(item, reverse, raw)
+        return normalized
     if isinstance(value, (list, tuple)):
         return [_normalize(v, reverse, raw) for v in value]
     if value is None:
@@ -946,5 +977,182 @@ def run_scenario(runner) -> list[dict]:
         "SELECT status FROM message_reports WHERE id = :id",
         id=ids["report_id"],
     )
+
+    # -- P3: draft run + workflow debug face (A9) ----------------------------
+    # The draft run mints a fresh execution and message ids per run; the
+    # trigger node is webhook, so its debug payload is static and the run
+    # stays free of wall-clock blocks (elapsed_time is masked by
+    # VOLATILE_KEYS downstream).
+    req(
+        "117_p3_draft_run_workflow", "POST", "/apps/{flow_app_id}/draft/run",
+        {"message": "parity draft message", "stream": False},
+        capture=lambda body: {
+            "draft_execution_id": _dig(body, "data", "execution_id"),
+            "draft_message_id": _dig(body, "data", "message_id"),
+            "draft_user_message_id": _dig(body, "data", "user_message_id"),
+        },
+    )
+    # The route resolves (and here creates) the caller's end-user row for the
+    # app; its id is run-scoped and can surface in later debug snapshots.
+    exec_sql(
+        "118_p3_db_draft_end_user",
+        "SELECT id FROM end_users WHERE workspace_id = :workspace_id"
+        " AND other_id = :other_id",
+        capture="draft_end_user_id",
+        workspace_id=SEED["workspace_id"],
+        other_id=SEED["actor_id"],
+    )
+    db(
+        "119_p3_db_draft_execution",
+        "SELECT status, trigger_type FROM workflow_executions"
+        " WHERE execution_id = :execution_id",
+        execution_id=ids["draft_execution_id"],
+    )
+    req(
+        "120_p3_debug_state_after_draft", "GET",
+        "/apps/{flow_app_id}/workflow/debug/state",
+    )
+    req(
+        "121_p3_last_run_end_workflow_execution", "GET",
+        "/apps/{flow_app_id}/workflow/nodes/end/last_run",
+        params={"source": "workflow_execution"},
+    )
+
+    req(
+        "122_p3_node_run_end", "POST",
+        "/apps/{flow_app_id}/workflow/nodes/end/run",
+        {"inputs": {}, "stream": False},
+        capture=lambda body: {"node_run_id": _dig(body, "data", "execution_id")},
+    )
+    req(
+        "123_p3_debug_state_after_node_run", "GET",
+        "/apps/{flow_app_id}/workflow/debug/state",
+    )
+    req(
+        "124_p3_last_run_end_single_node_debug", "GET",
+        "/apps/{flow_app_id}/workflow/nodes/end/last_run",
+        params={"source": "single_node_debug"},
+    )
+    req(
+        "125_p3_last_run_end_default", "GET",
+        "/apps/{flow_app_id}/workflow/nodes/end/last_run",
+    )
+    req(
+        "126_p3_last_run_invalid_source", "GET",
+        "/apps/{flow_app_id}/workflow/nodes/end/last_run",
+        params={"source": "bogus"},
+    )
+
+    req(
+        "127_p3_cache_put_end", "PUT",
+        "/apps/{flow_app_id}/workflow/nodes/end/cache",
+        {"result_data": {"output": "parity cached output"}},
+        capture=lambda body: {"node_cache_id": _dig(body, "data", "id")},
+    )
+    req(
+        "128_p3_debug_state_after_cache_put", "GET",
+        "/apps/{flow_app_id}/workflow/debug/state",
+    )
+    req(
+        "129_p3_cache_delete_end", "DELETE",
+        "/apps/{flow_app_id}/workflow/nodes/end/cache",
+    )
+    db(
+        "130_p3_db_cache_invalidated",
+        "SELECT status FROM workflow_node_caches WHERE id = :id",
+        id=ids["node_cache_id"],
+    )
+    req(
+        "131_p3_debug_state_after_cache_invalidate", "GET",
+        "/apps/{flow_app_id}/workflow/debug/state",
+    )
+
+    req(
+        "132_p3_cache_reset", "POST",
+        "/apps/{flow_app_id}/workflow/cache/reset",
+    )
+    req(
+        "133_p3_debug_state_after_reset", "GET",
+        "/apps/{flow_app_id}/workflow/debug/state",
+    )
+    # After the reset the rerun input resolves from the latest base execution
+    # (the draft run above), so both sides rebuild the same deterministic
+    # payload; the trigger node never ran single-node debug and must 404.
+    req(
+        "134_p3_rerun_end", "POST",
+        "/apps/{flow_app_id}/workflow/nodes/end/rerun",
+        {},
+        capture=lambda body: {"rerun_run_id": _dig(body, "data", "execution_id")},
+    )
+    req(
+        "135_p3_rerun_trigger_missing", "POST",
+        "/apps/{flow_app_id}/workflow/nodes/trigger/rerun",
+        {},
+    )
+
+    # -- P3: draft-run compare (A9 negative paths) ---------------------------
+    req(
+        "136_p3_compare_on_workflow_app", "POST",
+        "/apps/{flow_app_id}/draft/run/compare",
+        {
+            "message": "parity compare",
+            "models": [{"model_config_id": SEED["model_config_id"]}],
+        },
+    )
+    req(
+        "137_p3_compare_missing_model", "POST",
+        "/apps/{agent_app_id}/draft/run/compare",
+        {
+            "message": "parity compare",
+            "models": [{"model_config_id": P3_UNKNOWN_MODEL_ID}],
+        },
+    )
+
+    # -- P3: tool runtime face (B3) ------------------------------------------
+    req(
+        "138_p3_tool_execute_missing", "POST", "/tools/execution/execute",
+        {"tool_id": P3_UNKNOWN_TOOL_ID, "parameters": {}},
+    )
+    req(
+        "139_p3_tool_test_workflow_tool", "POST",
+        "/tools/{tool_id}/test",
+    )
+    req(
+        "140_p3_tool_sync_mcp_non_mcp", "POST",
+        "/tools/{tool_id}/sync_mcp_tools",
+    )
+
+    # -- P3: prompt optimizer family (D6) ------------------------------------
+    req(
+        "141_p3_prompt_create_session", "POST", "/prompt/sessions",
+        capture=[(("data", "id"), "prompt_session_id")],
+    )
+    req(
+        "142_p3_prompt_get_session", "GET",
+        "/prompt/sessions/{prompt_session_id}",
+    )
+    # The unknown-session stream short-circuits to the monolith's error frame
+    # before any model call; the frame embeds the fixed request id and the
+    # seeded actor id only.
+    req(
+        "143_p3_prompt_stream_unknown_session", "POST",
+        "/prompt/sessions/" + P3_UNKNOWN_SESSION_ID + "/messages",
+        {"model_id": P3_UNKNOWN_MODEL_ID, "message": "parity prompt"},
+    )
+    req(
+        "144_p3_prompt_save_release", "POST", "/prompt/releases",
+        {
+            "session_id": ids["prompt_session_id"],
+            "title": "parity release",
+            "prompt": "parity prompt body",
+        },
+        capture=[(("data", "id"), "prompt_release_id")],
+    )
+    req("145_p3_prompt_release_list", "GET", "/prompt/releases/list")
+    req(
+        "146_p3_prompt_delete_release", "DELETE",
+        "/prompt/releases/{prompt_release_id}",
+    )
+    req("147_p3_prompt_release_list_after_delete", "GET", "/prompt/releases/list")
 
     return results

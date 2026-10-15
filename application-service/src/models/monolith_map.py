@@ -6,6 +6,10 @@ removal only). During the coexistence period a functional change lands in the
 monolith first and is then synchronized here semantically; this map locates the
 host counterpart of every module for that pass. The manifest test cross-checks
 the map against the live `ServiceBase.metadata` registry.
+
+CROSS_DOMAIN_MODULES are the same kind of frozen copies, but their tables are
+owned by other services: they are mapped on `CrossDomainBase` (a separate
+registry, read-only here) and are importable on demand by request-time code.
 """
 
 # Service model module -> class names defined in it (including enums the module
@@ -69,7 +73,40 @@ MODEL_MODULES: dict[str, tuple[str, ...]] = {
     "file_metadata_model": ("FileMetadata",),
 }
 
+# Cross-domain (read-only here) model module -> class names defined in it.
+CROSS_DOMAIN_MODULES: dict[str, tuple[str, ...]] = {
+    "user_model": ("User",),
+    "workspace_model": (
+        "InviteStatus",
+        "Workspace",
+        "WorkspaceDefaultModelPreset",
+        "WorkspaceInvite",
+        "WorkspaceMember",
+        "WorkspaceRole",
+    ),
+    "models_model": (
+        "BaseModel",
+        "LEGACY_CHAT_TYPE",
+        "LoadBalanceStrategy",
+        "ModelApiKey",
+        "ModelBase",
+        "ModelCapability",
+        "ModelChannel",
+        "ModelConfig",
+        "ModelFeature",
+        "ModelProvider",
+        "ModelType",
+        "Modality",
+    ),
+    "document_model": ("Document",),
+    "knowledge_model": ("Knowledge",),
+    "knowledgeshare_model": ("KnowledgeShare",),
+    "knowledge_metadata_model": ("KnowledgeMetadata", "KnowledgeMetadataBinding"),
+    "model_usage_record": ("ModelUsageRecord",),
+}
+
 # Service model module -> monolith source file (repository-relative).
 MONOLITH_PATHS: dict[str, str] = {
-    module: f"core/api/app/models/{module}.py" for module in MODEL_MODULES
+    module: f"core/api/app/models/{module}.py"
+    for module in (*MODEL_MODULES, *CROSS_DOMAIN_MODULES)
 }

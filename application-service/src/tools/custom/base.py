@@ -1,11 +1,15 @@
 """Custom tool base class."""
 import json
 import logging
-from typing import Dict, Any, List
+import time
+from typing import Dict, Any, List, Optional
+from urllib.parse import urljoin
+
+import aiohttp
 
 from ...models.tool_model import ToolType, AuthType
 from ..base import BaseTool
-from ...schemas.tool_schema import ToolParameter, ParameterType
+from ...schemas.tool_schema import ToolParameter, ToolResult, ParameterType
 
 logger = logging.getLogger(__name__)
 
@@ -103,6 +107,48 @@ class CustomTool(BaseTool):
 
         return params
 
+    async def execute(self, **kwargs) -> ToolResult:
+        """Execute the custom tool."""
+        start_time = time.time()
+
+        try:
+            # Determine the operation to execute
+            operation_name = kwargs.get("operation")
+            if not operation_name and len(self._parsed_operations) == 1:
+                operation_name = next(iter(self._parsed_operations.keys()))
+
+            if not operation_name or operation_name not in self._parsed_operations:
+                raise ValueError(f"无效的操作: {operation_name}")
+
+            operation = self._parsed_operations[operation_name]
+
+            # Build the request
+            url = self._build_request_url(operation, kwargs)
+            headers = self._build_request_headers(operation)
+            data = self._build_request_data(operation, kwargs)
+
+            # Send the HTTP request
+            result = await self._send_http_request(
+                method=operation["method"],
+                url=url,
+                headers=headers,
+                data=data
+            )
+
+            execution_time = time.time() - start_time
+            return ToolResult.success_result(
+                data=result,
+                execution_time=execution_time
+            )
+
+        except Exception as e:
+            execution_time = time.time() - start_time
+            return ToolResult.error_result(
+                error=str(e),
+                error_code="CUSTOM_TOOL_ERROR",
+                execution_time=execution_time
+            )
+
     def _parse_openapi_schema(self) -> Dict[str, Any]:
         """Parse the OpenAPI schema."""
         operations = {}
@@ -168,6 +214,108 @@ class CustomTool(BaseTool):
             "object": ParameterType.OBJECT
         }
         return type_mapping.get(openapi_type, ParameterType.STRING)
+
+    def _build_request_url(self, operation: Dict[str, Any], params: Dict[str, Any]) -> str:
+        """Build the request URL."""
+        path = operation["path"]
+
+        # Substitute path parameters
+        for param_name, param_info in operation.get("parameters", {}).items():
+            if param_info.get("in") == "path" and param_name in params:
+                path = path.replace(f"{{{param_name}}}", str(params[param_name]))
+
+        # Build the full URL
+        if self.base_url:
+            url = urljoin(self.base_url, path.lstrip("/"))
+        else:
+            # Take the server URL from the schema
+            servers = self.schema_content.get("servers", [])
+            if servers:
+                base_url = servers[0].get("url", "")
+                url = urljoin(base_url, path.lstrip("/"))
+            else:
+                url = path
+
+        # Add query parameters
+        query_params = {}
+        for param_name, param_info in operation.get("parameters", {}).items():
+            if param_info.get("in") == "query" and param_name in params:
+                query_params[param_name] = params[param_name]
+
+        if query_params:
+            from urllib.parse import urlencode
+            url += "?" + urlencode(query_params)
+
+        return url
+
+    def _build_request_headers(self, operation: Dict[str, Any]) -> Dict[str, str]:
+        """Build the request headers."""
+        headers = {
+            "Content-Type": "application/json",
+            "User-Agent": "CustomTool/1.0"
+        }
+
+        # Add auth headers
+        if self.auth_type == AuthType.API_KEY:
+            api_key = self.auth_config.get("api_key")
+            key_name = self.auth_config.get("key_name", "X-API-Key")
+            if api_key:
+                headers[key_name] = api_key
+
+        elif self.auth_type == AuthType.BEARER_TOKEN:
+            token = self.auth_config.get("token")
+            if token:
+                headers["Authorization"] = f"Bearer {token}"
+
+        return headers
+
+    @staticmethod
+    def _build_request_data(operation: Dict[str, Any], params: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Build the request body data."""
+        if operation["method"] in ["POST", "PUT", "PATCH"]:
+            request_body = operation.get("request_body")
+            if request_body:
+                # Build the request body data
+                data = {}
+                properties = request_body.get("properties", {})
+
+                for prop_name, prop_schema in properties.items():
+                    if prop_name in params:
+                        data[prop_name] = params[prop_name]
+
+                return data if data else None
+
+        return None
+
+    async def _send_http_request(
+        self,
+        method: str,
+        url: str,
+        headers: Dict[str, str],
+        data: Optional[Dict[str, Any]] = None
+    ) -> Any:
+        """Send an HTTP request."""
+        timeout = aiohttp.ClientTimeout(total=self.timeout)
+
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            kwargs = {
+                "headers": headers
+            }
+
+            if data and method in ["POST", "PUT", "PATCH"]:
+                kwargs["json"] = data
+
+            async with session.request(method, url, **kwargs) as response:
+                if response.status >= 400:
+                    error_text = await response.text()
+                    raise Exception(f"HTTP {response.status}: {error_text}")
+
+                # Try to parse the response as JSON
+                try:
+                    return await response.json()
+                except Exception as e:
+                    logger.error(f"解析HTTP响应JSON失败: {str(e)}")
+                    return await response.text()
 
     @classmethod
     def from_url(cls, schema_url: str, auth_config: Dict[str, Any], tool_id: str = None) -> 'CustomTool':
