@@ -2,16 +2,14 @@
 
 from __future__ import annotations
 
-import json
 import logging
-import re
 import time
-import traceback
 
 from sqlalchemy.exc import InterfaceError, OperationalError
 from sqlalchemy.exc import TimeoutError as DatabaseTimeoutError
 
 from ..rag.wiki.config import WikiDeferred, WikiError
+from ..rag.wiki.diagnostics import diagnostic_json, exception_details
 from ..runtime import get_worker_runtime
 from ..usage_context import bind_usage
 from .celery_app import celery_app
@@ -23,8 +21,6 @@ from .observability import (
 )
 
 _LOGGER = logging.getLogger(__name__)
-_DIAGNOSTIC_FRAME_LIMIT = 24
-_SQLSTATE = re.compile(r"^[A-Z0-9]{5}$")
 
 
 def _safe_error(exc):
@@ -32,32 +28,25 @@ def _safe_error(exc):
 
 
 def _report_error(run, exc, *, code=None):
-    """Retain failure locations without logging exception messages or request data."""
+    """保留完整失败原因，并把可展示的诊断信息传递给文档进度日志。"""
     error = WikiError(code) if code else _safe_error(exc)
     context = run.context
     diagnostic = {
+        **exception_details(exc),
         "event": "wiki_task_error",
+        "message": "Wiki 任务延后执行" if isinstance(exc, WikiDeferred) else "Wiki 任务执行失败",
         "task_id": context.task_id,
         "task_name": context.task_name,
         "knowledge_id": context.knowledge_id,
         "document_id": context.document_id,
         "page_id": context.page_id,
         "attempt": context.attempt,
+        "trace_id": context.trace_id,
         "error_code": error.code,
-        "error_type": type(exc).__name__,
-        "frames": [
-            {"file": frame.filename, "line": frame.lineno, "function": frame.name}
-            for frame in traceback.extract_tb(exc.__traceback__)[-_DIAGNOSTIC_FRAME_LIMIT:]
-        ],
     }
-    driver = getattr(exc, "orig", None)
-    if driver is not None:
-        diagnostic["driver_error_type"] = type(driver).__name__
-        sqlstate = getattr(driver, "sqlstate", None) or getattr(driver, "pgcode", None)
-        if isinstance(sqlstate, str) and _SQLSTATE.fullmatch(sqlstate):
-            diagnostic["sqlstate"] = sqlstate
+    error.diagnostics = diagnostic
     level = logging.INFO if isinstance(exc, WikiDeferred) else logging.ERROR
-    _LOGGER.log(level, "%s", json.dumps(diagnostic, ensure_ascii=False))
+    _LOGGER.log(level, "%s", diagnostic_json(diagnostic))
     return error
 
 

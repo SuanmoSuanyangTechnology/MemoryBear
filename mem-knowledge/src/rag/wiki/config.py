@@ -27,10 +27,12 @@ TASK_CLEANUP_BATCH_SIZE = 1000
 class WikiError(RuntimeError):
     """Bounded worker failure with a safe, stable public code."""
 
-    def __init__(self, code: str, *, retryable: bool = True):
+    def __init__(self, code: str, *, retryable: bool = True, diagnostics: dict | None = None):
         super().__init__(code)
         self.code = code
         self.retryable = retryable
+        # 稳定错误码继续供状态机和接口使用，诊断详情独立传递到日志。
+        self.diagnostics = diagnostics or {}
 
 
 class WikiDeferred(WikiError):
