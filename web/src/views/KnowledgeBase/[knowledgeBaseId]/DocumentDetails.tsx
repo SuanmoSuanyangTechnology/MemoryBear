@@ -22,6 +22,7 @@ import InsertModal, { type InsertModalRef } from '../components/InsertModal';
 import DocumentMetadata from '../components/DocumentMetadata';
 import exitIcon from '@/assets/images/knowledgeBase/exit.png';
 import copy from 'copy-to-clipboard'
+import { getDocumentPhase, isDocumentSuccessful } from '../Wiki/documentState';
 const DocumentDetails: FC = () => {
   const { t } = useTranslation();
   const navigate = useNavigate();
@@ -138,9 +139,8 @@ const DocumentDetails: FC = () => {
       {
         key: 'status',
         label: t('knowledgeBase.status'),
-        value: doc.run === 2 ? t('common.cancel')
-          : doc.run === 0 && (doc.progress ?? 0) < 0 ? t('knowledgeBase.failed')
-          : doc.progress === 1 ? t('knowledgeBase.progressComplete') : t('knowledgeBase.progressing'),
+        value: t({ cancelled: 'common.cancel', failed: 'knowledgeBase.failed', complete: 'knowledgeBase.progressComplete',
+          queued: 'knowledgeBase.pending', processing: 'knowledgeBase.progressing' }[getDocumentPhase(doc)]),
       },
       {
         key: 'chunk_num',
@@ -412,7 +412,7 @@ const DocumentDetails: FC = () => {
     );
   }
 
-  if (!document || (document.progress !== 1 && !hasReadableChunks)) {
+  if (!document || (!isDocumentSuccessful(document) && !hasReadableChunks)) {
     return (
       <Flex vertical className="rb:h-full rb:p-4!">
         <Flex align="center" gap={8} className='rb:mb-4! rb:cursor-pointer' onClick={handleBack}>

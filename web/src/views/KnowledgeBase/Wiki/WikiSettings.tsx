@@ -38,7 +38,7 @@ export default function WikiSettings({ knowledge, open, onClose, onSaved }: Prop
     setError(undefined);
     try {
       const { llm_id, ...wiki } = values;
-      await saveWikiConfig(knowledge.id, wiki, llm_id);
+      await saveWikiConfig(knowledge.id, wiki, llm_id !== knowledge.llm_id ? llm_id : undefined);
       message.success('Wiki 设置已保存');
       onSaved();
       onClose();

@@ -1,13 +1,31 @@
 interface DocumentProgress { run?: number; progress?: number }
+export const DOCUMENT_RUN = { idle: 0, active: 1, cancelled: 2 } as const;
+export const DOCUMENT_PROGRESS = { queued: 0, complete: 1 } as const;
+export type DocumentPhase = 'queued' | 'processing' | 'complete' | 'failed' | 'cancelled';
+
+export function getDocumentPhase(document: DocumentProgress): DocumentPhase {
+  if (document.run === DOCUMENT_RUN.cancelled) return 'cancelled';
+  if (document.run === DOCUMENT_RUN.active) return 'processing';
+  if ((document.progress ?? DOCUMENT_PROGRESS.queued) < 0) return 'failed';
+  if (document.progress === DOCUMENT_PROGRESS.complete) return 'complete';
+  if (!document.progress) return 'queued';
+  return 'processing';
+}
+
+export const isDocumentSuccessful = (document: DocumentProgress) => getDocumentPhase(document) === 'complete';
+export const isDocumentRetryable = (document: DocumentProgress) => ['failed', 'cancelled'].includes(getDocumentPhase(document));
 
 export function isDocumentTerminal(document: DocumentProgress) {
-  return document.run === 2 || (document.run !== 1 && (document.progress === 1 || (document.progress ?? 0) < 0));
+  return ['complete', 'failed', 'cancelled'].includes(getDocumentPhase(document));
 }
 
 export function documentState(document: DocumentProgress) {
-  if (document.run === 2) return { label: '已取消', color: 'default' };
-  if (document.run === 0 && (document.progress ?? 0) < 0) return { label: '处理失败', color: 'error' };
-  if (document.progress === 1 && document.run !== 1) return { label: '已完成', color: 'success' };
-  if (!document.progress && document.run !== 1) return { label: '等待处理', color: 'warning' };
-  return { label: '处理中', color: 'processing' };
+  const states = {
+    cancelled: { label: '已取消', color: 'default' },
+    failed: { label: '处理失败', color: 'error' },
+    complete: { label: '已完成', color: 'success' },
+    queued: { label: '等待处理', color: 'warning' },
+    processing: { label: '处理中', color: 'processing' },
+  };
+  return states[getDocumentPhase(document)];
 }

@@ -4,12 +4,12 @@ import { getWikiPages, WIKI_PAGE_SIZE, type WikiPage } from '@/api/wiki';
 import { useWikiResource } from './useWikiResource';
 
 interface Props {
-  kbId: string; query: string; page: number; enabled: boolean;
+  kbId: string; query: string; page: number; enabled: boolean; types?: string;
   onPageChange: (page: number) => void; onSelect: (id: string) => void; onSettings: () => void; onFiles: () => void;
 }
 
-export default function WikiDirectory({ kbId, query, page, enabled, onPageChange, onSelect, onSettings, onFiles }: Props) {
-  const load = useCallback((signal: AbortSignal) => getWikiPages(kbId, query, page, signal), [kbId, query, page]);
+export default function WikiDirectory({ kbId, query, page, enabled, types, onPageChange, onSelect, onSettings, onFiles }: Props) {
+  const load = useCallback((signal: AbortSignal) => getWikiPages(kbId, query, page, signal, types), [kbId, query, page, types]);
   const { data, loading, error, reload } = useWikiResource(load);
   const groups = new Map<string, { title: string; pages: WikiPage[] }>();
   for (const item of data?.items ?? []) {

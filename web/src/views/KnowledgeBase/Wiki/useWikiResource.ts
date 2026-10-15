@@ -6,12 +6,13 @@ export function wikiErrorMessage(error: unknown): string {
 }
 
 /** Cancel obsolete reads so a previous page cannot replace the current selection. */
-export function useWikiResource<T>(load: (signal: AbortSignal) => Promise<T>, pollInterval = 0) {
+export function useWikiResource<T>(load: (signal: AbortSignal) => Promise<T>, pollInterval = 0, shouldPoll?: (data: T) => boolean) {
   const [state, setState] = useState<{ data?: T; loading: boolean; error?: string }>({ loading: true });
   const [revision, setRevision] = useState(0);
   const loader = useRef(load);
   loader.current = load;
   const reload = useCallback(() => setRevision(value => value + 1), []);
+  const pollEnabled = state.data === undefined || !shouldPoll || shouldPoll(state.data);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -25,7 +26,7 @@ export function useWikiResource<T>(load: (signal: AbortSignal) => Promise<T>, po
   }, [load, revision]);
 
   useEffect(() => {
-    if (!pollInterval || state.loading || state.error) return;
+    if (!pollInterval || !pollEnabled || state.loading || state.error) return;
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout>;
     const poll = async () => {
@@ -45,7 +46,7 @@ export function useWikiResource<T>(load: (signal: AbortSignal) => Promise<T>, po
     };
     timer = setTimeout(poll, pollInterval);
     return () => { controller.abort(); clearTimeout(timer); };
-  }, [load, pollInterval, revision, state.loading, state.error]);
+  }, [load, pollEnabled, pollInterval, revision, state.loading, state.error]);
 
   return { ...state, reload };
 }

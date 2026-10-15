@@ -1,10 +1,10 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useState, type CSSProperties } from 'react';
 import { Button, Spin } from 'antd';
 import { DownOutlined, RightOutlined } from '@ant-design/icons';
 import { getWikiTree, type WikiTreeNode } from '@/api/wiki';
 import { useWikiResource } from './useWikiResource';
 
-interface Props { kbId: string; selectedId?: string; onSelect: (id: string) => void; folderId?: string; depth?: number }
+interface Props { kbId: string; selectedId?: string; onSelect: (id: string) => void; folderId?: string; depth?: number; types?: string }
 
 function Folder({ node, depth, ...props }: Props & { node: WikiTreeNode; depth: number }) {
   const [open, setOpen] = useState(depth === 0);
@@ -18,17 +18,17 @@ function Folder({ node, depth, ...props }: Props & { node: WikiTreeNode; depth: 
   );
 }
 
-export default function WikiTree({ kbId, folderId, selectedId, onSelect, depth = 0 }: Props) {
+export default function WikiTree({ kbId, folderId, selectedId, onSelect, depth = 0, types }: Props) {
   const [cursor, setCursor] = useState<string>();
   const [previous, setPrevious] = useState<WikiTreeNode[]>([]);
-  const load = useCallback((signal: AbortSignal) => getWikiTree(kbId, folderId, cursor, signal), [kbId, folderId, cursor]);
+  const load = useCallback((signal: AbortSignal) => getWikiTree(kbId, folderId, cursor, signal, types), [kbId, folderId, cursor, types]);
   const { data, loading, error, reload } = useWikiResource(load);
   const nodes = [...previous, ...(data?.items ?? [])];
   const seen = new Set<string>();
   return (
-    <ul className="wiki-tree" aria-label={depth === 0 ? 'Wiki 页面目录' : '子目录'}>
+    <ul className="wiki-tree" style={{ '--wiki-tree-depth': depth } as CSSProperties} aria-label={depth === 0 ? 'Wiki 页面目录' : '子目录'}>
       {nodes.filter(node => !seen.has(node.id) && seen.add(node.id)).map(node => node.node_kind === 'folder'
-        ? <Folder key={node.id} node={node} kbId={kbId} selectedId={selectedId} onSelect={onSelect} depth={depth} />
+        ? <Folder key={node.id} node={node} kbId={kbId} selectedId={selectedId} onSelect={onSelect} depth={depth} types={types} />
         : <li key={node.id}><button className={`wiki-tree-page ${selectedId === node.id ? 'is-selected' : ''}`}
             aria-current={selectedId === node.id ? 'page' : undefined} onClick={() => onSelect(node.id)} title={node.title}>
             {node.title}

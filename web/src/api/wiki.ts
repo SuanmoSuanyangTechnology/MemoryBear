@@ -7,6 +7,13 @@ export interface WikiConfig { enabled: boolean; language: string; extract_prompt
 export const DEFAULT_WIKI_CONFIG: WikiConfig = { enabled: false, language: 'zh-CN', extract_prompt: '' };
 export const MAX_WIKI_LANGUAGE_LENGTH = 64;
 export const MAX_WIKI_PROMPT_LENGTH = 12000;
+export const WIKI_TYPE_FILTERS: { key: string; label: string; types: WikiPageType[] }[] = [
+  { key: 'all', label: '全部页面', types: [] },
+  { key: 'knowledge', label: '知识（实体与概念）', types: ['entity', 'concept'] },
+  { key: 'summary', label: '文档摘要', types: ['summary'] },
+  { key: 'entity', label: '实体页面', types: ['entity'] },
+  { key: 'concept', label: '概念页面', types: ['concept'] },
+];
 export interface WikiFolder { id: string; name: string; parent_id: string | null; page_count: number }
 export interface WikiPage {
   id: string;
@@ -66,15 +73,15 @@ export const WIKI_PAGE_SIZE = 50;
 export const WIKI_POLL_INTERVAL = 5000;
 export const getWikiIndex = (kbId: string, signal?: AbortSignal) =>
   request.get<WikiIndex>(`${wikiPath(kbId)}/index`, undefined, { signal });
-export const getWikiTree = (kbId: string, folderId?: string, cursor?: string, signal?: AbortSignal) =>
-  request.get<WikiTree>(`${wikiPath(kbId)}/tree`, { folder_id: folderId, cursor, limit: WIKI_PAGE_SIZE }, { signal });
-export const getWikiPages = (kbId: string, q: string, page: number, signal?: AbortSignal) =>
-  request.get<WikiPages>(`${wikiPath(kbId)}/pages`, { q, page, limit: WIKI_PAGE_SIZE }, { signal });
+export const getWikiTree = (kbId: string, folderId?: string, cursor?: string, signal?: AbortSignal, types?: string) =>
+  request.get<WikiTree>(`${wikiPath(kbId)}/tree`, { folder_id: folderId, cursor, limit: WIKI_PAGE_SIZE, page_types: types }, { signal });
+export const getWikiPages = (kbId: string, q: string, page: number, signal?: AbortSignal, types?: string) =>
+  request.get<WikiPages>(`${wikiPath(kbId)}/pages`, { q, page, limit: WIKI_PAGE_SIZE, page_types: types }, { signal });
 export const getWikiDetail = (kbId: string, pageId: string, signal?: AbortSignal) =>
   request.get<WikiDetail>(`${wikiPath(kbId)}/pages/${encodeURIComponent(pageId)}`, undefined, { signal });
-export const getWikiGraph = (kbId: string, centerId?: string, signal?: AbortSignal) =>
+export const getWikiGraph = (kbId: string, centerId?: string, signal?: AbortSignal, depth: 1 | 2 = 1, types?: string) =>
   request.get<WikiGraph>(`${wikiPath(kbId)}/graph`, {
-    mode: centerId ? 'ego' : 'overview', center_page_id: centerId, depth: 1, limit: 500,
+    mode: centerId ? 'ego' : 'overview', center_page_id: centerId, depth, limit: 500, types,
   }, { signal });
 export const generateDocumentWiki = (kbId: string, documentId: string) =>
   request.post<{ document_id: string; task_id: string }>(`${wikiPath(kbId)}/documents/${encodeURIComponent(documentId)}/generate`);

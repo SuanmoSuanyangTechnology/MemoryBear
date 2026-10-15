@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { getDocumentList } from '@/api/knowledgeBase';
 import type { TableRef } from '@/components/Table';
 import type { KnowledgeBaseDocumentData } from '@/views/KnowledgeBase/types';
-import { isDocumentTerminal } from '../../../Wiki/documentState';
+import { isDocumentSuccessful, isDocumentTerminal } from '../../../Wiki/documentState';
 
 interface UseDocumentPollingOptions {
   knowledgeBaseId?: string;
@@ -52,7 +52,7 @@ const useDocumentPolling = ({ knowledgeBaseId, fileIds, tableRef, onCompleted }:
       tableRef.current?.loadData();
       if (documents.length === ids.length && documents.every(isDocumentTerminal)) {
         stop();
-        if (autoReturn && documents.every(document => document.run !== 2 && document.progress === 1)) {
+        if (autoReturn && documents.every(isDocumentSuccessful)) {
           completionRef.current = setTimeout(onCompleted, 2000);
         }
       }

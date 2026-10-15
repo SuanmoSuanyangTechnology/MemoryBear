@@ -25,6 +25,8 @@ import WikiConfigFields from '../WikiConfigFields';
 import { DEFAULT_WIKI_CONFIG, getWikiKnowledge } from '@/api/wiki';
 import { wikiErrorMessage } from '../../Wiki/useWikiResource';
 
+type ModelIdField = `${(typeof baseModelFields)[number]['name'] | (typeof multimodalModelFields)[number]['name']}_id`;
+
 const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({ refreshTable }, ref) => {
   const { t } = useTranslation();
   const { modal, message: messageApi } = App.useApp();
@@ -199,6 +201,13 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({ refreshTa
                 : undefined,
             },
           };
+          if (datasets?.id) {
+            // Stored models may be unavailable; a Wiki disable must not revalidate unchanged bindings.
+            for (const model of [...baseModelFields, ...multimodalModelFields]) {
+              const field = `${model.name}_id` as ModelIdField;
+              if (formValues[field] === datasets[field]) delete payload[field];
+            }
+          }
           const submit = datasets?.id
             ? updateKnowledgeBase(datasets.id, payload)
             : createKnowledgeBase(payload);

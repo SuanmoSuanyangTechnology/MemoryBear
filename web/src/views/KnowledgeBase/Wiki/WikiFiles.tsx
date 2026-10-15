@@ -4,7 +4,7 @@ import { PlusOutlined, ReloadOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import { generateDocumentWiki, getWikiDocuments, WIKI_POLL_INTERVAL } from '@/api/wiki';
 import type { KnowledgeBaseDocumentData } from '../types';
-import { documentState } from './documentState';
+import { documentState, getDocumentPhase, isDocumentRetryable, isDocumentTerminal } from './documentState';
 import { useWikiResource, wikiErrorMessage } from './useWikiResource';
 
 interface Props {
@@ -18,7 +18,8 @@ export default function WikiFiles({ kbId, query, enabled, onDocument, onImport, 
   const [submitError, setSubmitError] = useState<string>();
   const { message } = App.useApp();
   const load = useCallback((signal: AbortSignal) => getWikiDocuments(kbId, page, query, signal), [kbId, page, query]);
-  const { data, loading, error, reload } = useWikiResource(load, WIKI_POLL_INTERVAL);
+  const { data, loading, error, reload } = useWikiResource(load, WIKI_POLL_INTERVAL,
+    documents => documents.items.some(document => !isDocumentTerminal(document)));
 
   const generate = async (document: KnowledgeBaseDocumentData) => {
     if (!document.id) return;
@@ -49,11 +50,12 @@ export default function WikiFiles({ kbId, query, enabled, onDocument, onImport, 
       return <Tooltip title={<pre className="wiki-progress-tooltip">{text}</pre>}><div className="wiki-progress-message">{text}</div></Tooltip>;
     } },
     { title: '操作', width: 150, key: 'action', render: (_, document) => {
-      const failed = (document.progress ?? 0) < 0 || document.run === 2;
+      const failed = isDocumentRetryable(document);
+      const processing = getDocumentPhase(document) === 'processing';
       const retryRetraction = document.status === 0 && failed;
-      return <Button size="small" disabled={(!enabled || document.status === 0) && !retryRetraction || !document.id || !!submitting}
+      return <Button size="small" disabled={(!enabled || document.status === 0) && !retryRetraction || !document.id || !!submitting || processing}
         loading={submitting === document.id} onClick={() => void generate(document)}>
-        {retryRetraction ? '重试来源更新' : failed ? '重试 Wiki' : '生成 Wiki'}
+        {processing ? '处理中' : retryRetraction ? '重试来源更新' : failed ? '重试 Wiki' : '生成 Wiki'}
       </Button>;
     } },
   ];

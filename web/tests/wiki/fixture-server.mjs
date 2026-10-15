@@ -59,6 +59,7 @@ const server = createServer(async (req, res) => {
   }
   if (path === `/api/knowledges/${kbId}`) {
     if (req.method === 'PUT') {
+      if (scenario === 'model-disabled' && payload.llm_id) return send(null, 409);
       knowledge = { ...knowledge, ...payload, parser_config: { ...knowledge.parser_config, ...payload.parser_config } };
       if (scenario === 'save-error') return send(null, 503);
     }
@@ -71,17 +72,20 @@ const server = createServer(async (req, res) => {
   if (path === '/api/workspaces/workspace_models') return send({ llm: uuid(300), embedding: uuid(301), rerank: uuid(302) });
   if (path.startsWith('/api/files/') && path.endsWith('/files')) return send({ items: [], page: { page: 1, pagesize: 20, total: 0, has_next: false } });
   if (path.endsWith('/wiki/index')) return send({ total_pages: scenario === 'empty' ? 0 : pages.length, counts: { summary: 1, entity: 1, concept: 9 }, folders });
+  const filterPages = types => pages.filter(page => !types || types.split(',').includes(page.type));
   if (path.endsWith('/wiki/tree')) {
     const folder = url.searchParams.get('folder_id');
-    let items = folder ? pages.filter(page => page.folder_id === folder).map(page => ({ ...page, node_kind: 'page', page_type: page.type, parent_id: folder }))
-      : folders.map(folder => ({ ...folder, title: folder.name, node_kind: 'folder', has_children: true }));
+    const visible = filterPages(url.searchParams.get('page_types'));
+    let items = folder ? visible.filter(page => page.folder_id === folder).map(page => ({ ...page, node_kind: 'page', page_type: page.type, parent_id: folder }))
+      : folders.filter(folder => visible.some(page => page.folder_id === folder.id))
+        .map(folder => ({ ...folder, title: folder.name, node_kind: 'folder', has_children: true }));
     if (scenario === 'tree-pages' && !url.searchParams.has('cursor')) return send({ items: items.slice(0, 1), parent_id: folder, next_cursor: `1:${uuid(999)}` });
     if (scenario === 'tree-pages') items = items.slice(1);
     return send({ items: scenario === 'empty' ? [] : items, parent_id: folder, next_cursor: null });
   }
   if (path.endsWith('/wiki/pages')) {
     if (scenario === 'error') return send(null, 503);
-    let items = pages.filter(page => `${page.title} ${page.summary}`.includes(url.searchParams.get('q') || ''));
+    let items = filterPages(url.searchParams.get('page_types')).filter(page => `${page.title} ${page.summary}`.includes(url.searchParams.get('q') || ''));
     if (scenario === 'empty') items = [];
     if (scenario === 'pagination') items = Array.from({ length: 62 }, (_, i) => ({ ...pages[i % pages.length], id: uuid(1000 + i), page_id: uuid(1000 + i) }));
     const page = Number(url.searchParams.get('page') || 1);
@@ -94,15 +98,30 @@ const server = createServer(async (req, res) => {
     if (!page) return send(null, 404);
     if (scenario === 'slow' && page.id === pages[0].id) await new Promise(resolve => setTimeout(resolve, 1600));
     const ready = !['updating', 'unavailable'].includes(scenario);
+    const topicContent = `## 关键概念\n\n知识库 · 长期记忆\n\n## 实体说明\n\nMemoryBear 是产品白皮书中描述的知识与记忆平台。原始资料经过解析后生成摘要、概念和实体 Wiki。\n\n## 核心能力\n\n通过 [[${pages[1].id}|记忆引擎]] 保留长期上下文，通过 [[${pages[2].id}|知识检索与问答]] 提供可追溯的知识回答。\n\n## 知识组织\n\n原文件与派生 Wiki 保持关联。同名概念和实体可以汇总多个原文件中的信息。`;
     return send({ ...page, status: ready ? 'ready' : scenario, reason: ready ? null : 'WIKI_UPDATING',
-      content: ready ? `## 产品与知识\n\n${page.summary} [^R1]\n\n阅读 [[${pages[1].id}|记忆引擎]]，了解上下文如何持续积累。\n\n### 来源与版本\n\n本页根据上传文档生成，页面保留版本及引用。\n\n\`[[${pages[1].id}|代码示例]] [^R1]\`\n\n\`\`\`md\n[[${pages[1].id}|代码块示例]]\n\`\`\`\n\n<script>alert('unsafe')</script>\n\n[危险链接](javascript:alert(1))` : null,
-      sources: ready ? [{ ref: 'R1', document_id: documentId, document_title: doc.file_name, chunk_id: uuid(500), quote: 'MemoryBear 将文档、知识和长期记忆连接起来。<script>不可执行的来源文本</script>' }] : [],
+      content: ready ? page.title === 'MemoryBear' ? topicContent : `## 产品与知识\n\n${page.summary} [^R1]\n\n阅读 [[${pages[1].id}|记忆引擎]]，了解上下文如何持续积累。\n\n### 来源与版本\n\n本页根据上传文档生成，页面保留版本及引用。\n\n\`[[${pages[1].id}|代码示例]] [^R1]\`\n\n\`\`\`md\n[[${pages[1].id}|代码块示例]]\n\`\`\`\n\n<script>alert('unsafe')</script>\n\n[危险链接](javascript:alert(1))` : null,
+      sources: ready ? [{ ref: 'R1', document_id: documentId, document_title: doc.file_name, chunk_id: uuid(500), quote: 'MemoryBear 将文档、知识和长期记忆连接起来。<script>不可执行的来源文本</script>' },
+        { ref: 'R2', document_id: documentId, document_title: doc.file_name, chunk_id: uuid(501), quote: '第二段来源片段。' }] : [],
       outlinks: ready ? [{ page_id: pages[1].id, title: pages[1].title }] : [] });
   }
   if (path.endsWith('/wiki/graph')) {
-    const nodes = pages.map(({ id, title, type, version }) => ({ id, title, type, version }));
-    const edges = pages.slice(1).map(page => ({ source: pages[0].id, target: page.id }));
-    return send({ nodes, edges, total_nodes: nodes.length, total_edges: edges.length, returned_nodes: nodes.length, returned_edges: edges.length, truncated: scenario === 'truncated', totals_scope: 'knowledge_base' });
+    let nodes = filterPages(url.searchParams.get('types')).map(({ id, title, type, version }) => ({ id, title, type, version }));
+    let edges = pages.slice(1).map(page => ({ source: pages[0].id, target: page.id }));
+    if (url.searchParams.get('mode') === 'ego') {
+      const included = new Set([url.searchParams.get('center_page_id')]);
+      for (let level = 0; level < Number(url.searchParams.get('depth') || 1); level++) {
+        const existing = new Set(included);
+        for (const edge of edges) {
+          if (existing.has(edge.source)) included.add(edge.target);
+          if (existing.has(edge.target)) included.add(edge.source);
+        }
+      }
+      nodes = nodes.filter(node => included.has(node.id));
+    }
+    const visible = new Set(nodes.map(node => node.id));
+    edges = edges.filter(edge => visible.has(edge.source) && visible.has(edge.target));
+    return send({ nodes, edges, total_nodes: pages.length, total_edges: pages.length - 1, returned_nodes: nodes.length, returned_edges: edges.length, truncated: scenario === 'truncated', totals_scope: 'knowledge_base' });
   }
   if (path.endsWith('/generate') && req.method === 'POST') {
     if (!knowledge.parser_config.wiki.enabled) return send(null, 409);
@@ -113,7 +132,8 @@ const server = createServer(async (req, res) => {
   if (path === `/api/documents/${kbId}/documents`) return send({ items: [doc], page: { page: 1, pagesize: 20, total: 1, has_next: false } });
   if (path === `/api/documents/${documentId}`) return send(doc);
   if (path.startsWith('/api/chunks/') && path.endsWith('/chunks')) return send({ items: [{ page_content: 'MemoryBear source chunk is readable during Wiki processing.', metadata: { document_id: documentId, knowledge_id: kbId, sort_id: 1 }, children: [] }], page: { total: 1, has_next: false } });
-  if (path === '/api/workspaces/model_options') return send({ ...modelOptions, vision: [], audio: [], video: [] });
+  if (path === '/api/workspaces/model_options') return send({ ...modelOptions, ...(scenario === 'model-disabled' ? { llm: [] } : {}), vision: [], audio: [], video: [] });
+  if (path.startsWith('/api/models/')) return send({ ...modelOptions.llm[0], is_active: scenario !== 'model-disabled' });
   if (path === '/api/workspaces/storage') return send({ storage_type: 'neo4j' });
   if (path === '/api/notifications/sync') return send({ notifications: [], banners: [], modals: [], unread_count: 0 });
   if (path.startsWith('/api/notifications')) return send({ items: [], total: 0 });

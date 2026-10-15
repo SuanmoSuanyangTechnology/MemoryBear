@@ -4,7 +4,8 @@ import { unified } from 'unified';
 import remarkParse from 'remark-parse';
 import remarkGfm from 'remark-gfm';
 import { remarkWikiLinks } from '../../src/views/KnowledgeBase/Wiki/wikiMarkdown.ts';
-import { documentState, isDocumentTerminal } from '../../src/views/KnowledgeBase/Wiki/documentState.ts';
+import { documentState, isDocumentRetryable, isDocumentTerminal } from '../../src/views/KnowledgeBase/Wiki/documentState.ts';
+import { groupWikiSources } from '../../src/views/KnowledgeBase/Wiki/wikiSources.ts';
 
 const id = '11111111-1111-4111-8111-111111111111';
 const processor = unified().use(remarkParse).use(remarkGfm).use(remarkWikiLinks);
@@ -33,10 +34,29 @@ test('Multiple Wiki links are preserved in lists, emphasis and tables', () => {
   assert.equal(nodes.filter(node => node.type === 'link').length, 3);
 });
 
+test('Formatted Wiki labels remain one navigable link', () => {
+  for (const label of ['_MemoryBear_', 'Memory **Bear**', '`MemoryBear`']) {
+    const nodes = flatten(parse(`阅读 [[${id}|${label}]] 后继续。`));
+    assert.deepEqual(nodes.filter(node => node.type === 'link').map(node => node.url), [`/wiki-page/${id}`]);
+  }
+  assert.equal(flatten(parse(`[[${id}|**一个**]] 与 [[${id}|_另一个_]]`)).filter(node => node.type === 'link').length, 2);
+});
+
+test('Source files are grouped once while retaining every quoted excerpt', () => {
+  const sources = [{ ref: 'R1', document_id: 'A', document_title: '原文 A', chunk_id: 'C1', quote: '片段一' },
+    { ref: 'R2', document_id: 'A', document_title: '原文 A', chunk_id: 'C2', quote: '片段二' },
+    { ref: 'R3', document_id: 'B', document_title: '原文 B', chunk_id: 'C3', quote: '片段三' }];
+  const files = groupWikiSources(sources);
+  assert.equal(files.length, 2);
+  assert.deepEqual(files[0].excerpts.map(source => source.ref), ['R1', 'R2']);
+});
+
 test('Queued Wiki-only and active retries are not terminal', () => {
   assert.equal(isDocumentTerminal({ run: 0, progress: 0 }), false);
   assert.equal(isDocumentTerminal({ run: 1, progress: .8 }), false);
   assert.equal(isDocumentTerminal({ run: 1, progress: -1 }), false);
+  assert.equal(isDocumentRetryable({ run: 1, progress: -1 }), false);
+  assert.equal(documentState({ run: 1, progress: -1 }).label, '处理中');
 });
 
 test('Failed, cancelled and completed rounds stop the upload poll', () => {
