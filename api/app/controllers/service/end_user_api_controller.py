@@ -270,8 +270,13 @@ async def update_end_user_identity(
     identity confirmation & cross-channel merge. Delegates to the manager-side
     controller for shared logic (no double implementation).
     """
-    body = await request.json()
-    payload = EndUserIdentityUpdate(**body)
+    try:
+        body = await request.json()
+        if not isinstance(body, dict):
+            raise ValueError("Request body must be a JSON object")
+        payload = EndUserIdentityUpdate(**body)
+    except (ValueError, ValidationError) as exc:
+        raise BusinessException("请求体格式无效", BizCode.INVALID_PARAMETER, cause=exc)
 
     async with get_async_db_context() as auth_db:
         current_user = await get_current_user_snapshot_from_api_key_async(auth_db, api_key_auth)

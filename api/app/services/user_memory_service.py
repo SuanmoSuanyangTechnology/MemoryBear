@@ -54,6 +54,32 @@ from app.services.memory_config_service import MemoryConfigService
 
 logger = get_logger(__name__)
 
+
+def _is_user_placeholder_name(name: str) -> bool:
+    """判断名称是否为用户占位名（如「用户」「我」「User」「I」），忽略首尾空白与大小写。
+
+    _USER_PLACEHOLDER_NAMES 中均为小写，与抽取侧（triplet_step）的比较方式保持一致。
+    """
+    return name.strip().lower() in _USER_PLACEHOLDER_NAMES
+
+
+def _normalize_other_name(value: Any) -> Optional[str]:
+    """规范化待更新的 other_name。
+
+    Returns:
+        去除首尾空白后的有效名称；None / 非字符串 / 空串 / 纯空白 / 占位名称返回 None，
+        调用方据此跳过该字段，避免清空或污染已有名称。
+    """
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip()
+    if not normalized:
+        return None
+    if _is_user_placeholder_name(normalized):
+        logger.warning(f"拒绝将占位名称 '{normalized}' 设置为 other_name")
+        return None
+    return normalized
+
 # Neo4j connector instance for analytics functions
 _neo4j_connector = Neo4jConnector(shared_driver=True)
 
@@ -484,6 +510,9 @@ class UserMemoryService:
         }
 
     # ======================== 用户别名及信息 ========================    
+    # NOTE: 当前代码库中无调用方（controller 已统一使用 update_end_user_info_async），暂不修改。
+    # 其 other_name 校验未处理 None / 空串 / 纯空白 / 大小写占位名，与异步版不一致；
+    # 若重新启用，需参照 _normalize_other_name / _is_user_placeholder_name 补齐。
     def update_end_user_info(
         self,
         db: Session,
@@ -636,19 +665,18 @@ class UserMemoryService:
                 }
             
             allowed_fields = {'other_name', 'aliases', 'meta_data'}
-            # 更新数据中`other_name` 为`None` 或空字符串时，将该字段从待更新字典移除，避免把已有名称清空；
-            if update_data.get('other_name') is None or update_data.get('other_name') == "":
-                update_data.pop('other_name', None)
-            _user_placeholder_names = _USER_PLACEHOLDER_NAMES
-            
-            if 'other_name' in update_data and update_data['other_name'] and update_data['other_name'].strip() in _user_placeholder_names:
-                logger.warning(f"拒绝将占位名称 '{update_data['other_name']}' 设置为 other_name")
-                del update_data['other_name']
+            # other_name 规范化：None / 空串 / 纯空白 / 占位名称一律从待更新字典移除，避免清空或污染已有名称
+            if 'other_name' in update_data:
+                normalized_name = _normalize_other_name(update_data['other_name'])
+                if normalized_name is None:
+                    update_data.pop('other_name')
+                else:
+                    update_data['other_name'] = normalized_name
             
             if 'aliases' in update_data and update_data['aliases']:
                 update_data['aliases'] = [
-                    a for a in update_data['aliases']
-                    if isinstance(a, str) and a.strip() and a.strip() not in _user_placeholder_names
+                    a.strip() for a in update_data['aliases']
+                    if isinstance(a, str) and a.strip() and not _is_user_placeholder_name(a)
                 ]
             
             aliases_updated = 'aliases' in update_data and update_data['aliases'] != end_user_info_record.aliases
