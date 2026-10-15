@@ -5517,6 +5517,7 @@
             "schema": {
               "type": "integer",
               "maximum": 5,
+              "minimum": 1,
               "description": "Max interest tags to return",
               "default": 5,
               "title": "Limit"
