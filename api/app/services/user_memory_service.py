@@ -674,9 +674,12 @@ class UserMemoryService:
                     update_data['other_name'] = normalized_name
             
             if 'aliases' in update_data and update_data['aliases']:
+                # 每个别名只 strip 一次，过滤与输出使用同一个规范化值
                 update_data['aliases'] = [
-                    a.strip() for a in update_data['aliases']
-                    if isinstance(a, str) and a.strip() and not _is_user_placeholder_name(a)
+                    stripped for a in update_data['aliases']
+                    if isinstance(a, str)
+                    and (stripped := a.strip())
+                    and not _is_user_placeholder_name(stripped)
                 ]
             
             aliases_updated = 'aliases' in update_data and update_data['aliases'] != end_user_info_record.aliases

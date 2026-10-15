@@ -34,7 +34,15 @@ class ImplicitEmotionsStorageRepository:
 
     # 只有查询确实无记录时才返回
     def get_by_end_user_id(self, end_user_id: str) -> Optional[ImplicitEmotionsStorage]:
-        """根据终端用户ID获取存储记录"""
+        """
+        根据终端用户ID获取存储记录
+        Returns:
+            存储记录；仅当确实无记录时返回 None。
+
+        Raises:
+            SQLAlchemyError: 数据库访问失败时直接抛出，由调用方/全局异常处理器负责。
+            不在此吞异常，避免调用方把"查询失败"误判为"无记录"而重复创建或重复初始化。
+        """
         stmt = select(ImplicitEmotionsStorage).where(
             ImplicitEmotionsStorage.end_user_id == end_user_id
         )
