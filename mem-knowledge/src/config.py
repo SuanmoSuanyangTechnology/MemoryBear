@@ -63,6 +63,7 @@ class KnowledgeSettings(BaseSettings):
     db_user: str = Field(default="postgres", validation_alias="DB_USER")
     db_password: SecretStr = Field(default=SecretStr("password"), validation_alias="DB_PASSWORD")
     db_name: str = Field(default="redbear-mem", validation_alias="DB_NAME")
+    db_auto_upgrade: bool = Field(default=False, validation_alias="DB_AUTO_UPGRADE")
     redis_host: str = Field(default="127.0.0.1", validation_alias="REDIS_HOST")
     redis_port: int = Field(default=6379, ge=1, le=65535, validation_alias="REDIS_PORT")
     redis_password: SecretStr = Field(default=SecretStr(""), validation_alias="REDIS_PASSWORD")
@@ -580,6 +581,7 @@ class KnowledgeSettings(BaseSettings):
             "elasticsearch_hosts": self.elasticsearch_hosts,
             "storage_type": self.storage_type,
             "db_pool_size": self.kb_db_pool_size,
+            "db_auto_upgrade": self.db_auto_upgrade,
             "max_document_pages": self.max_document_pages,
             "task_heartbeat_seconds": self.kb_task_heartbeat_seconds,
             "progress_flush_interval_seconds": self.kb_progress_flush_interval_seconds,
