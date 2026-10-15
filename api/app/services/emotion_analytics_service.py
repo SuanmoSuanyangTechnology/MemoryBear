@@ -97,14 +97,15 @@ class EmotionAnalyticsService:
 
         查询指定用户的情绪类型分布，包括计数、百分比和平均强度。
         旧值按 fear→anxiety、surprise→neutral 合并，未知值丢弃；
-        固定按 EMOTION_CODES 顺序返回全部 10 类，没有数据的类别 count=0。
+        按 EMOTION_CODES 固定顺序返回，没有数据的类别 count=0；
+        limit 小于 10 时只返回 count 最高的 limit 类（同 count 按 EMOTION_CODES 顺序取）。
 
         Args:
             end_user_id: 用户ID
             emotion_type: 情绪类型过滤（10 类 code；旧值 fear/surprise 兼容）
             start_date: 开始日期
             end_date: 结束日期
-            limit: 保留以兼容既有接口契约，不再截断结果（始终返回 10 类）
+            limit: 返回标签数量上限（最多 10 类，超过 10 等同于 10）
             language: 输出语言 ("zh" 中文, "en" 英文)
 
         """
@@ -135,9 +136,15 @@ class EmotionAnalyticsService:
 
             total_count = sum(bucket["count"] for bucket in buckets.values())
 
+            # limit < 10 时按 count 降序取前 limit 类（同 count 按 EMOTION_CODES 顺序，sorted 稳定），
+            # 输出仍保持 EMOTION_CODES 固定顺序；total_count/percentage 基于全部类别计算
+            selected_codes = set(
+                sorted(EMOTION_CODES, key=lambda c: buckets[c]["count"], reverse=True)[:max(limit, 0)]
+            )
+
             # 直接使用英文枚举key（前端自行翻译）
             complete_tags = []
-            for code in EMOTION_CODES:
+            for code in (c for c in EMOTION_CODES if c in selected_codes):
                 bucket = buckets[code]
                 count = bucket["count"]
                 intensity_count = bucket["intensity_count"]

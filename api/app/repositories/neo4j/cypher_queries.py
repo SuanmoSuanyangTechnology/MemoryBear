@@ -19,10 +19,16 @@ DIALOGUE_NODE_SAVE = """
     UNWIND $dialogues AS dialogue
     MERGE (n:Dialogue {id: dialogue.id})
     SET n.uuid = coalesce(n.uuid, dialogue.id)
+    // 握手补写依赖写入前状态 prev_*（新建节点时均为 null）：
+    // SET n.uuid 已对节点加写锁；Neo4j read-committed 下读不加锁，prev_* 必须在拿锁之后、
+    // 改写 write_mode / emotion 之前读取，才能看到并发对方已提交的状态。
     // 覆盖竞态守卫：只许 normal 覆盖 fast，不许 fast 反向降级 normal。
     // 当已存在节点为 normal 且本次写入为 fast 时跳过内容写入（canWrite=[]），
     // 保留正写的权威版本；其余情况（新建 / normal 覆盖 fast / 同模式重试）照常写入。
     WITH n, dialogue,
+         n.write_mode AS prev_write_mode,
+         n.emotion AS prev_emotion,
+         n.emotion_score AS prev_emotion_score,
          CASE WHEN n.write_mode = 'normal' AND dialogue.write_mode = 'fast'
               THEN [] ELSE [1] END AS canWrite
     FOREACH (_ IN canWrite |
@@ -34,12 +40,49 @@ DIALOGUE_NODE_SAVE = """
             n.name = dialogue.name,
             n.dialog_embedding = dialogue.dialog_embedding,
             n.config_id = dialogue.config_id,
-            n.write_mode = coalesce(dialogue.write_mode, 'normal'),
-            // emotion 粘性保留：本次写入未带值（None）则保留原值，避免正写（不算情绪）
-            n.emotion = coalesce(dialogue.emotion, n.emotion),
-            n.emotion_score = coalesce(dialogue.emotion_score, n.emotion_score)
+            n.write_mode = coalesce(dialogue.write_mode, 'normal')
     )
-    RETURN n.id AS uuid
+    // 情绪独立于 canWrite 守卫，emotion / emotion_score 成对写入（入参两者都非空才写）：
+    // - canWrite 生效（新建 / normal 覆盖 fast / 同模式重试）：本次带情绪则覆盖；
+    // - 迟到 fast（canWrite=[]）：仅在 normal 节点尚无情绪时补写，已有情绪不覆盖；
+    // - 本次未带情绪（如正写不算情绪）：不触碰情绪字段，保留原值。
+    FOREACH (_ IN CASE WHEN dialogue.emotion IS NOT NULL
+                            AND dialogue.emotion_score IS NOT NULL
+                            AND (size(canWrite) > 0 OR n.emotion IS NULL)
+                       THEN [1] ELSE [] END |
+        SET n.emotion = dialogue.emotion,
+            n.emotion_score = dialogue.emotion_score
+    )
+    // 已知遗留：id 无内容哈希，同一 conv_id + seq 内容变更后重处理时，prev_emotion 可能属于旧内容。
+    RETURN n.id AS uuid, prev_write_mode, prev_emotion, prev_emotion_score
+"""
+
+# 握手补写候选：某 Dialogue 下尚无情绪的 user Statement。
+# Dialogue 与 Chunk 之间无关系边，Chunk 通过属性 dialog_id 指向 Dialogue；Chunk → Statement 为 CONTAINS 边。
+STATEMENT_EMOTION_BACKFILL_CANDIDATES = """
+    MATCH (c:Chunk {dialog_id: $dialogue_id})-[:CONTAINS]->(s:Statement)
+    WHERE c.end_user_id = $end_user_id AND c.delete_at IS NULL
+      AND s.end_user_id = $end_user_id AND s.delete_at IS NULL
+      AND s.speaker = 'user' AND s.emotion_type IS NULL
+    RETURN DISTINCT s.id AS id, s.statement AS statement
+"""
+
+# 握手补写写入：先写一个临时属性拿到节点写锁，再判断 emotion_type IS NULL（只补空、不覆盖），
+# 防止并发补写 / 正写 Statement 重写时互相覆盖。RETURN 实际更新的 id，供 outbox 精确入队。
+STATEMENT_EMOTION_BACKFILL_SAVE = """
+    UNWIND $rows AS row
+    MATCH (s:Statement {id: row.id})
+    WHERE s.end_user_id = $end_user_id AND s.speaker = 'user'
+    SET s._emotion_backfill_lock = true
+    REMOVE s._emotion_backfill_lock
+    WITH s, row
+    WHERE s.emotion_type IS NULL
+    SET s.emotion_type = row.emotion_type,
+        s.emotion_intensity = row.emotion_intensity,
+        s.emotion_keywords = row.emotion_keywords,
+        s.emotion_subject = row.emotion_subject,
+        s.emotion_target = row.emotion_target
+    RETURN s.id AS id
 """
 
 STATEMENT_NODE_SAVE = """

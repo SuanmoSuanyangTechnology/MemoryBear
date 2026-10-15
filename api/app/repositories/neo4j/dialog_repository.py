@@ -131,12 +131,16 @@ class DialogRepository(BaseNeo4jRepository[DialogueNode]):
 
         Returns:
             dict[str, DialogueEmotionRow]: 以 Dialogue.id 为键；不存在的 id 不出现在结果中。
+            ``write_mode`` 原样返回（含 None），是否可继承由 ``fetch_dialogue_emotions`` 判定；
+            不过滤 ``delete_at`` 的原因见 ``emotion_inheritance.fetch_dialogue_emotions``。
             ``dialogue_ids`` 为空时直接返回 ``{}``，不发查询。查询异常向上抛出。
         """
         ids = list(dialogue_ids)
         if not ids:
             return {}
 
+        # 不按 write_mode 过滤：调用方需要据此把 normal 节点判为终态、立即停止轮询；
+        # 不过滤 delete_at：DIALOGUE_NODE_SAVE 不重置 delete_at，软删后再快写的节点仍带该属性
         records = await self.connector.execute_query(
             """
             MATCH (d:Dialogue)
