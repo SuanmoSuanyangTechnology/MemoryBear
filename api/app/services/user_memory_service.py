@@ -23,6 +23,7 @@ from app.core.memory.analytics.memory_insight import (
     validate_neo4j_memory_insight_workspace,
 )
 from app.core.memory.analytics.user_card_tags import normalize_stored_user_card_tags
+from app.core.memory.emotion.emotion_buckets import emotion_display_name
 from app.core.memory.constants.graph_data_constants import (
     NODE_PROPERTY_WHITELIST,
     PREFERENCE_GROUP_EDGE_TYPE,
@@ -37,7 +38,7 @@ from app.db import get_db_context
 from app.repositories.end_user_repository import EndUserRepository
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 from app.schemas.graph_data_schema import GraphDataResponse
-from app.schemas.memory_episodic_schema import EmotionSubject, EmotionType, type_mapping
+from app.schemas.memory_episodic_schema import EmotionSubject, type_mapping
 from app.services._graph_data_helpers import (
     assemble_per_type_stat,
     assemble_center_per_type_stat,
@@ -2282,7 +2283,7 @@ def _extract_node_properties(
 # 修改本表即可扩展新的字段映射规则，无需触碰 ``_extract_node_properties`` 主体。
 _NODE_FIELD_VALUE_MAPPERS: Dict[str, Callable[[Any], Any]] = {
     "entity_type": lambda v: type_mapping.get(v, ""),
-    "emotion_type": lambda v: EmotionType.EMOTION_MAPPING.get(v),
+    "emotion_type": lambda v: emotion_display_name(v, "zh"),
     "emotion_subject": lambda v: EmotionSubject.SUBJECT_MAPPING.get(v),
     # description 存储为分号分隔的字符串，API 返回时拆分为数组
     "description": lambda v: (

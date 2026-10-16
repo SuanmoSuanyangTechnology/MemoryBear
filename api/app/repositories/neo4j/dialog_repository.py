@@ -8,7 +8,7 @@ Classes:
 """
 
 from dataclasses import dataclass
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Sequence
 from datetime import datetime
 
 from app.repositories.neo4j.base_neo4j_repository import BaseNeo4jRepository
@@ -27,6 +27,16 @@ class DialogueActivitySnapshot:
     id: str
     content: str
     created_at: datetime
+    write_mode: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class DialogueEmotionRow:
+    """正写继承快写情绪用的 Dialogue 情绪快照。"""
+
+    id: str
+    emotion: str | None
+    emotion_score: float | None
     write_mode: str | None
 
 
@@ -107,6 +117,54 @@ class DialogRepository(BaseNeo4jRepository[DialogueNode]):
                 else None
             ),
         )
+
+    async def get_dialogue_emotions(
+        self,
+        end_user_id: str,
+        dialogue_ids: Sequence[str],
+    ) -> dict[str, DialogueEmotionRow]:
+        """按 end_user_id 批量读取 Dialogue 的快写情绪原值。
+
+        Args:
+            end_user_id: 终端用户 ID（租户隔离边界）
+            dialogue_ids: 待查询的 Dialogue 业务 ID
+
+        Returns:
+            dict[str, DialogueEmotionRow]: 以 Dialogue.id 为键；不存在的 id 不出现在结果中。
+            ``write_mode`` 原样返回（含 None），是否可继承由 ``fetch_dialogue_emotions`` 判定；
+            不过滤 ``delete_at`` 的原因见 ``emotion_inheritance.fetch_dialogue_emotions``。
+            ``dialogue_ids`` 为空时直接返回 ``{}``，不发查询。查询异常向上抛出。
+        """
+        ids = list(dialogue_ids)
+        if not ids:
+            return {}
+
+        # 不按 write_mode 过滤：调用方需要据此把 normal 节点判为终态、立即停止轮询；
+        # 不过滤 delete_at：DIALOGUE_NODE_SAVE 不重置 delete_at，软删后再快写的节点仍带该属性
+        records = await self.connector.execute_query(
+            """
+            MATCH (d:Dialogue)
+            WHERE d.id IN $dialogue_ids AND d.end_user_id = $end_user_id
+            RETURN d.id AS id, d.emotion AS emotion, d.emotion_score AS emotion_score, d.write_mode AS write_mode
+            """,
+            dialogue_ids=ids,
+            end_user_id=end_user_id,
+        )
+
+        rows: dict[str, DialogueEmotionRow] = {}
+        for record in records or []:
+            dialogue_id = record.get("id")
+            if dialogue_id is None:
+                continue
+            emotion = record.get("emotion")
+            write_mode = record.get("write_mode")
+            rows[str(dialogue_id)] = DialogueEmotionRow(
+                id=str(dialogue_id),
+                emotion=str(emotion) if emotion is not None else None,
+                emotion_score=record.get("emotion_score"),
+                write_mode=str(write_mode) if write_mode is not None else None,
+            )
+        return rows
 
     async def find_by_end_user_id(self, end_user_id: str, limit: int = 100) -> List[DialogueNode]:
         """根据end_user_id查询对话

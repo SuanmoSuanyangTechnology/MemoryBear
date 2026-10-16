@@ -9,8 +9,8 @@ Specific rules:
 1. Carefully check the count for each emotion type in "Emotion Distribution" — count ≥ 1 means the emotion exists
 2. Even if an emotion appeared only once, you must mention it in health_summary or suggestions and provide targeted advice
 3. Never state that an emotion is "zero" or "non-existent" unless its count in the distribution data is truly 0
-4. If positive emotions (e.g., Joy) exist, health_summary must affirm this positive signal
-5. If negative emotions (e.g., Sadness, Anger, Fear) exist even once, you must provide targeted improvement suggestions
+4. If positive emotions (e.g., Joy, Hope, Relief) exist, health_summary must affirm this positive signal
+5. If negative emotions (e.g., Anxiety, Sadness, Anger, Frustration, Loneliness) exist even once, you must provide targeted improvement suggestions
 6. A high proportion of neutral emotions does NOT mean other emotions are absent — address all non-zero emotions
 
 ## User Emotional Health Data
@@ -89,8 +89,8 @@ Notes:
 1. 仔细查看"情绪分布"中每种情绪的出现次数，次数 ≥ 1 即表示该情绪存在
 2. 即使某种情绪只出现了1次，也必须在 health_summary 或建议中提及并给出针对性建议
 3. 严禁在输出中声称某种情绪"为零"或"不存在"，除非该情绪在分布数据中确实为0次
-4. 如果正面情绪（如喜悦）存在，health_summary 中必须肯定这一积极信号
-5. 如果负面情绪（如悲伤、愤怒、恐惧）存在，即使只有1次，也必须给出针对性的改善建议
+4. 如果正面情绪（如开心、期待、缓解）存在，health_summary 中必须肯定这一积极信号
+5. 如果负面情绪（如焦虑、难过、生气、挫败、孤独）存在，即使只有1次，也必须给出针对性的改善建议
 6. 中性情绪占比高不代表没有其他情绪，必须同时关注所有非零情绪
 
 ## 用户情绪健康数据
@@ -151,7 +151,7 @@ Notes:
 }
 
 注意事项：
-- 所有输出内容必须完全使用中文，严禁出现任何英文单词或短语（包括情绪类型名称如fear、sadness、anger等，必须使用对应的中文：恐惧、悲伤、愤怒等）
+- 所有输出内容必须完全使用中文，严禁出现任何英文单词或短语（包括情绪类型名称如anxiety、sadness、anger等，必须使用对应的中文：焦虑、难过、生气等）
 - 再次强调：情绪分布中出现次数≥1的情绪必须在建议中被提及和回应，绝不能忽略或声称为零
 - 建议要具体、可执行，避免空泛
 - 结合用户的兴趣爱好提供个性化建议
