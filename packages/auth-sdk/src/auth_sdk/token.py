@@ -56,7 +56,9 @@ class LocalTokenIssuer:
 
     UserContext → sub=user_id. ApiKeyContext → sub=user_id (the key creator, the
     monolith's "key acts for its creator" semantics) + auth_type="api_key" +
-    scopes, so downstreams can tell credential types apart. The "ak:{api_key_id}"
+    scopes + api_key_id (which key, carried separately from the creator it acts
+    for — neither is derivable from the other), so downstreams can tell
+    credential types apart. The "ak:{api_key_id}"
     fallback for a missing user_id is defense in depth only: the gateway pipeline
     fails closed (401) before issuance.
     """
@@ -81,6 +83,10 @@ class LocalTokenIssuer:
             payload["sub"] = identity.user_id or f"ak:{identity.api_key_id}"
             payload["auth_type"] = "api_key"
             payload["scopes"] = list(identity.scopes)
+            # The key itself, not the creator ``sub`` names: per-key attribution and
+            # incident forensics need the credential, per-user authorization needs
+            # the person, so both travel.
+            payload["api_key_id"] = identity.api_key_id
         else:
             payload["sub"] = identity.user_id
             payload["roles"] = list(identity.roles)
