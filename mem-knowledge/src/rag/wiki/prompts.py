@@ -46,7 +46,9 @@ Do not propose folders or summary pages. Navigation categories are planned in a 
 MARKDOWN_RULES = """Use readable Markdown without raw HTML, executable URLs or external links.
 Keep source handles in structured source_refs, not in the visible prose. Do not add footnotes,
 source quotation blocks, reference lists or chunk IDs. Link relevant concepts in the prose using
-the supplied Wiki page handles. Code examples may contain literal HTML inside fenced code.
+the supplied Wiki page handles. Never print source markers such as [[S1]], [[R1]], [^S1] or [^R1]
+in prose; only Wiki page references such as [[L1|title]] or [[T1|title]] belong there, using the
+handles supplied for this stage. Code examples may contain literal HTML inside fenced code.
 """
 
 TEMPLATES = {

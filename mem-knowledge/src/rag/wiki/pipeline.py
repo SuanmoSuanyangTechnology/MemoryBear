@@ -15,6 +15,7 @@ from .model import request_tokens, tokens
 logger = logging.getLogger(__name__)
 
 CITATION = re.compile(r"\[\^([A-Za-z0-9_-]+)\]")
+VISIBLE_SOURCE_MARKER = re.compile(rf"{CITATION.pattern}|\[\[[SR][0-9]+\]\]")
 CITATION_DEFINITION = re.compile(
     r"^ {0,3}\[\^([A-Za-z0-9_-]+)\]:[^\n]*(?:\n(?: {4}|\t)[^\n]*)*(?:\n|$)", re.M
 )
@@ -27,6 +28,7 @@ CODE_ISLANDS = re.compile(
     r"|(?<!`)(?P<inline>`+)(?!`)[^\n]*?(?<!`)(?P=inline)(?!`)",
     re.M | re.S,
 )
+INDENTED_CODE = re.compile(r"^(?: {4}|\t)[^\n]*", re.M)
 
 
 def markdown_parts(text):
@@ -64,7 +66,7 @@ def validate_markdown(text, source_refs, links):
 
 
 def readable_markdown(text, source_refs):
-    """Hide known evidence markers without changing prose, Wiki links or code examples."""
+    """Hide evidence markers without changing prose, Wiki links or code examples."""
     allowed = set(source_refs)
     text = text.replace("\r\n", "\n").replace("\r", "\n")
     code_spans = [match.span() for match in CODE_ISLANDS.finditer(text)]
@@ -76,15 +78,17 @@ def readable_markdown(text, source_refs):
     # Remove whole definitions, including any inline code within their source descriptions.
     text = CITATION_DEFINITION.sub(remove_definition, text)
 
-    def clean(part):
-        return "".join(
-            line if line.startswith(("    ", "\t")) else CITATION.sub(
-                lambda match: "" if match[1] in allowed else match[0], line
-            )
-            for line in part.splitlines(keepends=True)
-        )
+    code_spans = [match.span() for pattern in (CODE_ISLANDS, INDENTED_CODE)
+                  for match in pattern.finditer(text)]
 
-    return rewrite_markdown_text(text, clean)
+    def remove_marker(match):
+        if any(start <= match.start() < end for start, end in code_spans):
+            return match[0]
+        # S/R 数字编号为来源标记；S 在读取时可能已重映射为 R，不能仅按当前目录匹配。
+        # 真正的 Wiki 页面引用含有 |，不属于此匹配；未知自定义脚注仍原样保留。
+        return "" if match[1] is None or match[1] in allowed else match[0]
+
+    return VISIBLE_SOURCE_MARKER.sub(remove_marker, text)
 
 
 def model_sources(sources):
