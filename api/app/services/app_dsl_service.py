@@ -717,8 +717,10 @@ class AppDslService:
             if ref:
                 a = self._find_app_by_name(ref.get("name"), workspace_id)
                 if not a:
-                    warnings.append(f"子 Agent '{ref.get('name')}' 未匹配，已置空，请导入后手动配置")
-                entry["agent_id"] = str(a.id) if a else None
+                    # 目标工作空间不存在同名子 Agent 时，直接清空该子 Agent 配置（整条剔除）
+                    warnings.append(f"子 Agent '{ref.get('name')}' 在目标工作空间不存在，已清空，请导入后手动添加")
+                    continue
+                entry["agent_id"] = str(a.id)
                 # agent_id 现为子 Agent 应用 ID。release_id 跨环境无效，导入后一律跟随最新发布版本
                 entry["release_policy"] = "current"
                 entry["release_id"] = None
