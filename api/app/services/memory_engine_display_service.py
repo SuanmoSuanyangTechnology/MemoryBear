@@ -20,6 +20,12 @@ from typing import Any, Dict, List, Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.memory.emotion.emotion_buckets import (
+    EMOTION_NAMES_EN,
+    EMOTION_NAMES_ZH,
+    normalize_emotion_type,
+    normalize_emotion_type_or_raw,
+)
 from app.core.utils.datetime_utils import parse_timestamp_to_utc_naive, to_timestamp_ms, utcnow_naive
 from app.repositories.end_user_repository import EndUserRepository
 from app.repositories.memory_engine_display_event_repository import (
@@ -42,24 +48,12 @@ _ROLE_ENTITY_NAMES = frozenset({
     "assistant", "ai回复", "ai assistant",
 })
 
-_EMOTION_TYPE_LABELS: Dict[str, Dict[str, str]] = {
-    "zh": {
-        "joy": "喜悦",
-        "sadness": "悲伤",
-        "anger": "愤怒",
-        "fear": "恐惧",
-        "surprise": "惊讶",
-        "neutral": "中性",
-    },
-    "en": {
-        "joy": "joy",
-        "sadness": "sadness",
-        "anger": "anger",
-        "fear": "fear",
-        "surprise": "surprise",
-        "neutral": "neutral emotion",
-    },
-}
+def _emotion_label(code: str, lang: str) -> str:
+    """引擎卡片情绪文案：zh 用中文名，en 用小写英文名；未知 code 原样返回。"""
+    if lang == "en":
+        name = EMOTION_NAMES_EN.get(code)
+        return name.lower() if name is not None else code
+    return EMOTION_NAMES_ZH.get(code, code)
 
 
 class MemoryEngineDisplayService:
@@ -599,11 +593,10 @@ def _build_emotion_event(result: Any) -> Optional[Dict[str, Any]]:
     # 按 emotion_type 汇总，排除空和 neutral
     emotion_stats: Dict[str, Dict[str, Any]] = {}
     for stmt in user_statements:
-        etype = getattr(stmt, "emotion_type", None)
-        if not etype or etype.lower().strip() == "neutral":
+        etype_key = normalize_emotion_type(getattr(stmt, "emotion_type", None))
+        if etype_key is None or etype_key == "neutral":
             continue
 
-        etype_key = etype.lower().strip()
         if etype_key not in emotion_stats:
             emotion_stats[etype_key] = {"count": 0, "intensity_sum": 0.0}
         emotion_stats[etype_key]["count"] += 1
@@ -995,7 +988,12 @@ def _merge_event_details(
         for e in events:
             d = e.details or {}
             stats = d.get("emotion_stats", {})
-            for etype, info in stats.items():
+            for raw_etype, info in stats.items():
+                # 存量旧值归一化（fear→anxiety、surprise→neutral）后同 code 合并；
+                # 归一化为 neutral 的跳过（卡片排除中性），未知原值保留
+                etype = normalize_emotion_type_or_raw(raw_etype)
+                if etype == "neutral":
+                    continue
                 if etype not in merged_emotions:
                     merged_emotions[etype] = {"count": 0, "intensity_sum": 0.0, "last_at": e.occurred_at}
                 merged_emotions[etype]["count"] += info.get("count", 0)
@@ -1210,7 +1208,7 @@ def _generate_card_text_zh(
             emotion_names = []
             for em in emotions:
                 etype = em["type"]
-                zh_name = _EMOTION_TYPE_LABELS["zh"].get(etype, etype)
+                zh_name = _emotion_label(etype, "zh")
                 emotion_names.append(zh_name)
             emotion_str = "和".join(emotion_names)
             content = f"这一天的交流中，我留意到了{emotion_str}的情绪表达。"
@@ -1424,7 +1422,7 @@ def _generate_card_text_en(
             content = "In the conversations that day, I noticed emotional expressions."
         else:
             emotion_names = [
-                _EMOTION_TYPE_LABELS["en"].get(emotion["type"], emotion["type"])
+                _emotion_label(emotion["type"], "en")
                 for emotion in emotions
             ]
             content = (

@@ -11296,7 +11296,7 @@
               }
             ],
             "title": "Emotion Type",
-            "description": "情绪类型过滤（joy/sadness/anger/fear/surprise/neutral）"
+            "description": "情绪类型过滤（neutral/joy/relief/anxiety/sadness/anger/frustration/loneliness/confusion/hope；旧值 fear/surprise 兼容）"
           },
           "start_date": {
             "anyOf": [
@@ -11355,7 +11355,7 @@
               }
             ],
             "title": "Emotion Type",
-            "description": "情绪类型过滤（joy/sadness/anger/fear/surprise/neutral）"
+            "description": "情绪类型过滤（neutral/joy/relief/anxiety/sadness/anger/frustration/loneliness/confusion/hope；旧值 fear/surprise 兼容）"
           },
           "limit": {
             "type": "integer",

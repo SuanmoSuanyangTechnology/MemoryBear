@@ -7,7 +7,9 @@ extraction pipeline.  Failures degrade gracefully to default outputs.
 
 from typing import List
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+from app.core.memory.emotion.emotion_buckets import normalize_emotion_type
 
 
 # ── Emotion extraction (sidecar) ──
@@ -25,3 +27,9 @@ class EmotionStepOutput(BaseModel):
     emotion_type: str = "neutral"
     emotion_intensity: float = 0.0
     emotion_keywords: List[str] = Field(default_factory=list)
+
+    @field_validator("emotion_type", mode="before")
+    @classmethod
+    def validate_emotion_type(cls, v):
+        """归一化到 10 类；未知值回落为 neutral。"""
+        return normalize_emotion_type(v) or "neutral"
