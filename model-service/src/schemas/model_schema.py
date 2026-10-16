@@ -11,7 +11,13 @@ from pydantic import (
     model_validator,
 )
 
-from ..models.models_model import LoadBalanceStrategy, ModelProvider, ModelType
+from ..models.models_model import (
+    LoadBalanceStrategy,
+    Modality,
+    ModelFeature,
+    ModelProvider,
+    ModelType,
+)
 from ..utils.datetime_utils import to_timestamp_ms
 
 
@@ -36,6 +42,48 @@ class RejectLegacyModelFields:
             if isinstance(raw_type, str) and raw_type.lower() == "chat":
                 raise ValueError("type='chat' 已下线，请改用 type='llm'")
         return data
+
+
+def _unknown_enum_values(enum_cls, values: Optional[List[str]]) -> List[str]:
+    unknown: List[str] = []
+    for value in values or ():
+        try:
+            enum_cls(value)
+        except ValueError:
+            unknown.append(value)
+    return unknown
+
+
+class RejectUnknownModelColumns:
+    """Contract v2 value-domain guard for write entry points.
+
+    ``List[str]`` accepts any string; unknown values would reach the DB and only be
+    dropped (or defaulted) later at the profile layer, silently diverging across
+    readers. Request schemas reject them up front (422) with the allowed set;
+    response schemas stay tolerant so legacy rows with unknown values still render.
+    """
+
+    @field_validator("input_modalities", "output_modalities")
+    @classmethod
+    def _reject_unknown_modalities(cls, values: Optional[List[str]]) -> Optional[List[str]]:
+        unknown = _unknown_enum_values(Modality, values)
+        if unknown:
+            raise ValueError(
+                f"未知模态 {', '.join(map(str, unknown))}，"
+                f"可选值：{', '.join(item.value for item in Modality)}"
+            )
+        return values
+
+    @field_validator("features")
+    @classmethod
+    def _reject_unknown_features(cls, values: Optional[List[str]]) -> Optional[List[str]]:
+        unknown = _unknown_enum_values(ModelFeature, values)
+        if unknown:
+            raise ValueError(
+                f"未知能力特征 {', '.join(map(str, unknown))}，"
+                f"可选值：{', '.join(item.value for item in ModelFeature)}"
+            )
+        return values
 
 
 # ModelConfig Schemas
@@ -64,7 +112,7 @@ class ApiKeyRegister(BaseModel):
     priority: int = Field(0, description="优先级（大者优先）")
 
 
-class ModelConfigCreate(ModelConfigBase, RejectLegacyModelFields):
+class ModelConfigCreate(ModelConfigBase, RejectLegacyModelFields, RejectUnknownModelColumns):
     """创建自定义模型Schema（内嵌 credential：创建即登记点名渠道，单接口原子完成）
 
     自定义模型不经模型广场添加，provider 级渠道不保证可用，因此凭据必填并
@@ -92,7 +140,7 @@ class CompositeModelCreate(BaseModel, RejectLegacyModelFields):
     load_balance_strategy: Optional[str] = Field(default=LoadBalanceStrategy.NONE.value, description="负载均衡策略")
 
 
-class ModelConfigUpdate(BaseModel, RejectLegacyModelFields):
+class ModelConfigUpdate(BaseModel, RejectLegacyModelFields, RejectUnknownModelColumns):
     """更新模型配置Schema"""
     name: Optional[str] = Field(None, description="模型显示名称", max_length=255)
     type: Optional[ModelType] = Field(None, description="模型类型")
@@ -307,7 +355,7 @@ ModelConfig.model_rebuild()
 
 
 # ModelBase Schemas
-class ModelBaseCreate(BaseModel, RejectLegacyModelFields):
+class ModelBaseCreate(BaseModel, RejectLegacyModelFields, RejectUnknownModelColumns):
     """创建基础模型Schema"""
     name: str = Field(..., description="模型唯一标识", max_length=255)
     type: ModelType = Field(..., description="模型类型")
@@ -321,7 +369,7 @@ class ModelBaseCreate(BaseModel, RejectLegacyModelFields):
     features: Optional[List[str]] = Field(None, description="能力特征（缺省为空）")
 
 
-class ModelBaseUpdate(BaseModel, RejectLegacyModelFields):
+class ModelBaseUpdate(BaseModel, RejectLegacyModelFields, RejectUnknownModelColumns):
     """更新基础模型Schema"""
     name: Optional[str] = Field(None, description="模型唯一标识", max_length=255)
     type: Optional[ModelType] = Field(None, description="模型类型")

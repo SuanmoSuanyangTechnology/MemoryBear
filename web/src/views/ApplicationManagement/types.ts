@@ -282,4 +282,5 @@ export interface MySharedOutItem {
   source_app_is_active: boolean;
   target_workspace_name: string;
   target_workspace_icon: string;
+  ontology: Application['ontology']
 }

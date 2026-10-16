@@ -15,6 +15,7 @@ import asyncio
 import logging
 import re
 import uuid
+from collections.abc import Mapping
 from typing import TYPE_CHECKING, List, Optional, Tuple
 
 if TYPE_CHECKING:
@@ -68,6 +69,8 @@ class FastWritePipeline:
         self._embedder = None
         self._storage_service = None
         self._neo4j_connector = None
+        # 最近一次 _persist 时 Dialogue 的写入前状态（DialogueWriteState），供握手补写判定
+        self._last_dialogue_write_state = None
 
     async def run(
         self,
@@ -161,11 +164,13 @@ class FastWritePipeline:
                         emotion_result=emotion_result,
                     )
                     dialog_id = await self._persist(node)
+                    emotion_backfilled = await self._backfill_statement_emotions_if_superseded(node)
                     activity_saved = await self._project_fast_dialogue_activity(
                         dialog_id
                     )
                     s.metadata(
                         dialog_id=dialog_id,
+                        emotion_backfilled=emotion_backfilled,
                         activity_saved=activity_saved,
                     )
 
@@ -426,7 +431,12 @@ class FastWritePipeline:
         - Neo4j 提交成功后自动 enqueue outbox Dialogue upsert 事件，
           由 Beat + memory_projection worker 自动投影到 ES。
         - 竞态守卫在 DIALOGUE_NODE_SAVE Cypher 层：normal 覆盖 fast，
-          迟到 fast 不降级 normal（write_mode="fast" 触发 canWrite=[] 跳过）。
+          迟到 fast 不降级 normal（write_mode="fast" 触发 canWrite=[] 跳过内容写入）；
+          但若 normal 节点尚无情绪，迟到 fast 仍会成对补写 emotion / emotion_score
+          （只补空、不覆盖），ES 由本次 outbox 事件回读 Neo4j 同步。
+        - 握手补写：Cypher 在节点写锁内返回写入前状态 prev_*，记录到
+          ``self._last_dialogue_write_state``；迟到 fast 遇到 normal 节点时，由
+          ``_backfill_statement_emotions_if_superseded`` 再补该 Dialogue 下的 user Statement 情绪。
         - 死锁重试：与 WritePipeline._is_deadlock 一致的宽松判定——异常消息中
           包含 "deadlock"（大小写不敏感）即视为死锁，最多重试
           NEO4J_MERGE_MAX_RETRY 次，退避 0.1*(attempt+1) 秒。
@@ -441,6 +451,7 @@ class FastWritePipeline:
 
         command = MemoryGraphWriteCommand(dialogue_nodes=[dialog_node])
 
+        self._last_dialogue_write_state = None
         for attempt in range(self.NEO4J_MERGE_MAX_RETRY):
             try:
                 result = await self._storage_service.save_memory_graph(command)
@@ -449,6 +460,9 @@ class FastWritePipeline:
                     raise RuntimeError(
                         "expected one dialogue UUID, got none"
                     )
+                states = getattr(result, "dialogue_states", None)
+                if isinstance(states, Mapping):
+                    self._last_dialogue_write_state = states.get(dialog_node.id)
                 logger.info(
                     "[FastWrite] persisted: dialog_id=%s, end_user_id=%s, "
                     "has_embedding=%s, attempt=%s",
@@ -472,6 +486,49 @@ class FastWritePipeline:
                     dialog_node.id,
                 )
                 await asyncio.sleep(0.1 * (attempt + 1))
+
+    async def _backfill_statement_emotions_if_superseded(self, node: DialogueNode) -> int:
+        """Step 3 — 握手补写（快写侧）：正写已先落库时，把本次 BERT 情绪补到该 Dialogue 下的 user Statement。
+
+        只在 ``memory_config.emotion_enabled`` 开启（与正写 Step 3.4 同一开关），且
+        ``should_backfill_on_fast_side`` 成立（写入前节点为 normal、当时无情绪、本次情绪成对非空）时执行。
+        补写失败只打 warning，不影响快写结果。
+
+        Args:
+            node: 本次写入的 DialogueNode。
+
+        Returns:
+            实际补写的 Statement 数。
+        """
+        if not getattr(self.memory_config, "emotion_enabled", False):
+            return 0
+        try:
+            from app.core.memory.emotion import emotion_inheritance
+
+            if not emotion_inheritance.should_backfill_on_fast_side(
+                self._last_dialogue_write_state, node.emotion, node.emotion_score
+            ):
+                return 0
+            from app.repositories.neo4j.neo4j_connector import Neo4jConnector
+
+            if self._neo4j_connector is None:
+                self._neo4j_connector = Neo4jConnector()
+            return await emotion_inheritance.backfill_statement_emotions(
+                self._neo4j_connector,
+                end_user_id=self.end_user_id,
+                dialogue_id=node.id,
+                emotion=node.emotion,
+                emotion_score=node.emotion_score,
+                source=emotion_inheritance.BACKFILL_SOURCE_FAST_SIDE,
+            )
+        except Exception as exc:
+            logger.warning(
+                "[FastWrite] statement emotion backfill failed: dialogue_id=%s, end_user_id=%s, error=%s",
+                node.id,
+                self.end_user_id,
+                type(exc).__name__,
+            )
+            return 0
 
     async def _project_fast_dialogue_activity(self, dialogue_id: str) -> bool:
         """回查一次 Neo4j 权威快照，并尽力投影 Fast 活动到 PG。"""

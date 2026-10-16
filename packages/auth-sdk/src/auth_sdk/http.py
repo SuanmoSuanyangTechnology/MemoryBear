@@ -39,4 +39,8 @@ class InboundInterceptor:
             user_id=sub, tenant_id=payload.get("tenant_id", ""),
             workspace_id=payload.get("workspace_id", ""),
             roles=tuple(payload.get("roles", [])),
+            auth_type=payload.get("auth_type"),
+            scopes=tuple(payload.get("scopes", [])),
+            # 缺席即旧签发端（无此 claim）：None，下游按「不知是哪把钥匙」处理。
+            api_key_id=payload.get("api_key_id"),
         )

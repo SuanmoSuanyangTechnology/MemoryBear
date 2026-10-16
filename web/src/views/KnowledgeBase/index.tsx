@@ -26,6 +26,7 @@ import ModelStatusTag from '@/components/ModelSelect/ModelStatusTag'
 import InfiniteScroll from 'react-infinite-scroll-component';
 
 import { useBreadcrumbManager, type BreadcrumbItem } from '@/hooks/useBreadcrumbManager';
+import { getFolderPathAfterEntering } from './folderPath';
 
 type ModelDisplayItem = {
   key: string;
@@ -70,6 +71,9 @@ const KnowledgeBaseManagement: FC = () => {
   const modalRef = useRef<CreateModalRef>(null)
   const processedStateRef = useRef<any>(null);
   const copyModalRef = useRef<CopyModalRef>(null)
+  const loadingRef = useRef(false);
+  const latestRequestIdRef = useRef(0);
+  const autoLoadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   
   // 使用面包屑管理 Hook
   const { updateBreadcrumbs } = useBreadcrumbManager({
@@ -294,16 +298,16 @@ const KnowledgeBaseManagement: FC = () => {
   };
 
   const fetchData = async (pageNum: number = 1, isLoadMore: boolean = false) => {
-    if (loading) return;
-    
-    console.log('fetchData called:', {
-      pageNum,
-      isLoadMore,
-      currentQuery: query,
-      currentFolderPath: folderPath,
-      folderPathLastId: folderPath.length > 0 ? folderPath[folderPath.length - 1].id : 'none'
-    });
-    
+    // 翻页请求必须串行；首屏请求允许覆盖旧目录请求。
+    if (isLoadMore && loadingRef.current) return;
+
+    if (autoLoadTimerRef.current) {
+      clearTimeout(autoLoadTimerRef.current);
+      autoLoadTimerRef.current = null;
+    }
+
+    const requestId = ++latestRequestIdRef.current;
+    loadingRef.current = true;
     setLoading(true);
     try {
       const params = {
@@ -313,17 +317,17 @@ const KnowledgeBaseManagement: FC = () => {
         orderby:'created_at',
         desc:true,
       }
-      
-      console.log('API params:', params);
+
       const res = await getKnowledgeBaseList(undefined, params);
+      if (requestId !== latestRequestIdRef.current) return;
+
       const response = res as KnowledgeBaseListResponse & { items?: KnowledgeBaseListItem[] };
-      console.log('API response:', response);
       const list = response.items || [];
       const curDatas = list.map((item: KnowledgeBaseListItem) => ({
         ...item,
         descriptionItems: formatData(item),
       }));
-      
+
       if (isLoadMore) {
         setData(prev => [...prev, ...curDatas]);
       } else {
@@ -334,23 +338,26 @@ const KnowledgeBaseManagement: FC = () => {
 
       // 更新是否有更多数据
       const hasNext = response.page?.has_next ?? false;
-      console.log('hasNext:', hasNext, 'response.page:', response.page);
       setHasMore(hasNext);
 
       buildModelMenus(list, isLoadMore);
-      
+
       // 首次加载后，检查是否需要自动加载更多（解决无滚动条问题）
       if (!isLoadMore && hasNext) {
-        setTimeout(() => {
+        autoLoadTimerRef.current = setTimeout(() => {
+          autoLoadTimerRef.current = null;
+          if (requestId !== latestRequestIdRef.current) return;
+
           const scrollDiv = document.getElementById('scrollableDiv');
           if (scrollDiv && scrollDiv.scrollHeight <= scrollDiv.clientHeight) {
-            console.log('No scrollbar detected, auto-loading more data');
             setPage(2);
-            fetchData(2, true);
+            void fetchData(2, true);
           }
         }, 100);
       }
     } catch (error) {
+      if (requestId !== latestRequestIdRef.current) return;
+
       console.error('Failed to fetch knowledge base list:', error);
       if (!isLoadMore) {
         setData([]);
@@ -359,16 +366,18 @@ const KnowledgeBaseManagement: FC = () => {
       }
       setHasMore(false);
     } finally {
-      setLoading(false);
+      if (requestId === latestRequestIdRef.current) {
+        loadingRef.current = false;
+        setLoading(false);
+      }
     }
   }
 
   const loadMore = () => {
-    console.log('loadMore called, loading:', loading, 'hasMore:', hasMore, 'page:', page);
-    if (loading || !hasMore) return;
+    if (loadingRef.current || !hasMore) return;
     const nextPage = page + 1;
     setPage(nextPage);
-    fetchData(nextPage, true);
+    void fetchData(nextPage, true);
   }
   
   // 创建一个稳定的刷新函数供子组件调用
@@ -412,40 +421,19 @@ const KnowledgeBaseManagement: FC = () => {
   const handleToDetail = useCallback((knowledgeBase: KnowledgeBaseListItem) => {
     // 统一处理类型判断，忽略大小写
     const itemType = (knowledgeBase.type || '').toLowerCase();
-    
-    console.log('handleToDetail called with:', {
-      id: knowledgeBase.id,
-      name: knowledgeBase.name,
-      type: itemType,
-      currentFolderPath: folderPath,
-      currentQuery: query
-    });
-    
+
     // 如果是 Folder 类型，刷新当前页面，显示该文件夹下的知识库列表
     if (itemType === 'folder') {
-      // 计算新的文件夹路径
-      const newFolderPath = [
-        ...folderPath,
-        {
-          id: knowledgeBase.id,
-          name: knowledgeBase.name,
-        },
-      ];
-      
-      console.log('Folder clicked:', {
-        folderId: knowledgeBase.id,
-        folderName: knowledgeBase.name,
-        currentFolderPath: folderPath,
-        newFolderPath: newFolderPath
-      });
-      
-      // 同步更新状态，保持与面包屑逻辑一致
-      setFolderPath(newFolderPath);
+      // 按目录 id 幂等更新，避免陈旧列表项将已有目录重复追加到路径。
+      setFolderPath((prevPath) => getFolderPathAfterEntering(prevPath, {
+        id: knowledgeBase.id,
+        name: knowledgeBase.name,
+      }));
       setQuery((prev) => ({
         ...prev,
         parent_id: knowledgeBase.id,
       }));
-      
+
       return;
     }
     
@@ -523,6 +511,15 @@ const KnowledgeBaseManagement: FC = () => {
   }, [])
   useEffect(() => {
     fetchData(1, false);
+
+    return () => {
+      latestRequestIdRef.current += 1;
+      loadingRef.current = false;
+      if (autoLoadTimerRef.current) {
+        clearTimeout(autoLoadTimerRef.current);
+        autoLoadTimerRef.current = null;
+      }
+    };
   }, [query.parent_id, query.keywords, query.orderby, query.desc])
   const handleCopy = (value: string) => {
     copy(value)

@@ -24,14 +24,12 @@ from app.repositories.neo4j.cypher_queries import (
     SEARCH_PERCEPTUALS_BY_FULLTEXT,
     FULLTEXT_QUERY_CYPHER_MAPPING,
     NODE_ID_QUERY_CYPHER_MAPPING,
-    SEARCH_USER_METADATA,
     SEARCH_ENITITES_BY_RELATIONSHIP,
     SEARCH_RELATION_BETWEEN_ENTITIES,
     SEARCH_RELATIONS_BETWEEN_ENTITY_PAIRS, SEARCH_PERCEPTUAL_BY_USER_ID, SEARCH_PERCEPTUAL_BY_IDS,
     USER_ID_QUERY_CYPHER_MAPPING,
 )
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
-from app.utils.redis_cache import redis_cache
 
 logger = logging.getLogger(__name__)
 
@@ -716,19 +714,6 @@ async def search_graph_by_relationship(
         predicates=predicates,
     )
     return related_node
-
-
-@redis_cache(ttl=60, prefix="memory", skip_args=["connector"], id_arg="end_user_id")
-async def search_user_metadata(
-        connector: Neo4jConnector,
-        end_user_id: str
-) -> dict:
-    user_info = await connector.execute_query(
-        SEARCH_USER_METADATA,
-        end_user_id=end_user_id,
-        json_format=True
-    )
-    return user_info[0] if user_info else {}
 
 
 async def search_graph_by_keyword_temporal(

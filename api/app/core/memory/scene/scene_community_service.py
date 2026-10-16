@@ -1,6 +1,7 @@
 """Incremental SceneCommunity planning and persistence."""
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import math
@@ -287,6 +288,9 @@ class SceneCommunityIncrementalService:
         added_by_community: dict[str, list[SceneSummaryNode]] = defaultdict(list)
         assignments: list[dict[str, Any]] = []
         target_order: list[str] = []
+        # 展示统计：P3 成功建立稳定边界 / 成功刷新摘要的社区数
+        boundary_established = 0
+        summary_refreshed = 0
 
         for scene in scenes:
             # Step [1/3] O1: route the scene to one ontology category.
@@ -428,6 +432,10 @@ class SceneCommunityIncrementalService:
                         },
                     })
                 community = community.model_copy(update=updates)
+                # P3 成功生成新摘要：按 operation_mode 分别累计展示统计
+                summary_refreshed += 1
+                if operation_mode == "ESTABLISH_BOUNDARY":
+                    boundary_established += 1
                 logger.info(
                     "[SceneCommunity][3/3] P3 completed user=%s community=%s mode=%s "
                     "fetched_members=%s added_members=%s members=%s reason=%s "
@@ -476,10 +484,25 @@ class SceneCommunityIncrementalService:
             assignments=assignments,
         )
         remaining = await self.writer.count_inactive(end_user_id)
+        # 展示统计：批次指纹对排序后的 SceneSummary ID 做 SHA-256，
+        # 同一成员集合换序视为同一批次，用于展示事件 operation_id 派生。
+        batch_fingerprint = hashlib.sha256(
+            "\n".join(sorted(scene.id for scene in scenes)).encode("utf-8")
+        ).hexdigest()
+        existing_updates = len(
+            [c for c in target_order if c not in newly_created]
+        )
         return {
             "status": "success",
             "processed": len(scenes),
             "community_count": len(final_communities),
             "remaining_inactive_count": remaining,
             "dispatch_next": remaining >= batch_size,
+            # 展示扩展字段：事件组装按新字段统计，旧字段保留兼容现有日志
+            "processed_scene_count": len(scenes),
+            "new_community_count": len(newly_created),
+            "existing_community_update_count": existing_updates,
+            "boundary_established_count": boundary_established,
+            "summary_refreshed_count": summary_refreshed,
+            "batch_fingerprint": batch_fingerprint,
         }

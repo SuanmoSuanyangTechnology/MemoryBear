@@ -785,7 +785,8 @@ async def chat(
                 runtime_config = agent_config_4_app_release(release)
             elif app_type == AppType.MULTI_AGENT:
                 config = release.config or {}
-                if not config.get("sub_agents"):
+                # supervisor_loop 允许零子 Agent（主管退化为裸 Agent）；其余模式必须有子 Agent
+                if not config.get("sub_agents") and config.get("orchestration_mode") != "supervisor_loop":
                     raise BusinessException("多 Agent 应用未配置子 Agent", BizCode.AGENT_CONFIG_MISSING)
                 runtime_config = multi_agent_config_4_app_release(release)
             elif app_type in (AppType.WORKFLOW, AppType.PURE_WORKFLOW):
@@ -1560,6 +1561,84 @@ async def regenerate_message(
         )
         return success(data=app_schema.WorkflowRegenerateResponse(**result))
 
+    # ---- 多 Agent 集群分支（MULTI_AGENT）----
+    # 走编排器重跑（保留主管路由/子 Agent 编排），配置用发布快照
+    #（multi_agent_config_4_app_release，与分享端聊天入口同源）。此前集群被
+    # "非 AGENT 直接拒绝"挡在门外。SSE 事件经 SHARE_FORWARD_EVENTS 白名单过滤
+    #（丢弃 sub_agent_*/agent_dispatch 等内部过程事件，只透传正文与端点事件）。
+    if app_type == AppType.MULTI_AGENT:
+        from app.services.multi_agent_service import MultiAgentService
+
+        cluster_cfg = multi_agent_config_4_app_release(release)
+        # supervisor_loop 允许零子 Agent（主管退化为裸 Agent）；其余模式必须有子 Agent
+        if not (cluster_cfg.sub_agents or []) and cluster_cfg.orchestration_mode != "supervisor_loop":
+            raise BusinessException("多 Agent 应用未配置子 Agent", BizCode.AGENT_CONFIG_MISSING)
+
+        # 存储/记忆上下文：与下方 AGENT 分支同源（AGENT 分支的计算在本分支之后，
+        # 不能引用其局部变量，这里独立算一份）
+        storage_type = workspace_service.get_workspace_storage_type_without_auth(db=db, workspace_id=workspace_id)
+        if storage_type is None:
+            storage_type = 'neo4j'
+        user_rag_memory_id = ''
+        if storage_type == 'rag' and workspace_id:
+            knowledge = knowledge_repository.get_knowledge_by_name(
+                db=db, name="USER_RAG_MERORY", workspace_id=workspace_id
+            )
+            if knowledge:
+                user_rag_memory_id = str(knowledge.id)
+
+        # 深度思考：需快照 model_parameters 开启 + 请求开启才生效，否则强制关闭
+        #（对齐 AGENT 分支对 deep_thinking 的处理；集群 thinking 经编排器 _prepare_turn_chat_features 消费）
+        thinking = bool(getattr(payload, "thinking", False)) and bool(
+            (cluster_cfg.model_parameters or {}).get("deep_thinking", False)
+        )
+
+        if payload.stream:
+            async def cluster_event_generator():
+                with get_db_context() as stream_db:
+                    svc = MultiAgentService(stream_db)
+                    async for event in svc.regenerate_stream(
+                            message_id=message_id,
+                            app_id=release.app_id,
+                            user_id=str(end_user.id),
+                            variables=payload.variables,
+                            web_search=payload.web_search,
+                            memory=payload.memory,
+                            storage_type=storage_type,
+                            user_rag_memory_id=user_rag_memory_id,
+                            thinking=thinking,
+                            config=cluster_cfg,
+                    ):
+                        # 集群路径吐出的是已序列化 SSE 字符串；按 event 行白名单过滤
+                        m = SSE_EVENT_LINE.search(event)
+                        if m and m.group(1) not in SHARE_FORWARD_EVENTS:
+                            continue
+                        yield event
+
+            return StreamingResponse(
+                cluster_event_generator(),
+                media_type="text/event-stream",
+                headers={
+                    "Cache-Control": "no-cache",
+                    "Connection": "keep-alive",
+                    "X-Accel-Buffering": "no"
+                }
+            )
+
+        result = await MultiAgentService(db).regenerate(
+            message_id=message_id,
+            app_id=release.app_id,
+            user_id=str(end_user.id),
+            variables=payload.variables,
+            web_search=payload.web_search,
+            memory=payload.memory,
+            storage_type=storage_type,
+            user_rag_memory_id=user_rag_memory_id,
+            thinking=thinking,
+            config=cluster_cfg,
+        )
+        return success(data=app_schema.RegenerateResponse(**result))
+
     if app_type != AppType.AGENT:
         raise BusinessException(
             code=BizCode.APP_TYPE_NOT_SUPPORTED,
@@ -1662,5 +1741,22 @@ async def switch_message_version(
     result["pending_intervention"] = AppLogService(db).build_pending_intervention_map(
         message.conversation_id
     )
+
+    # 节点明细：与控制台 /apps/{id}/messages/{mid}/switch-version/{v}/branch 同口径，
+    # 复用 _build_branch_view 的 node_executions_map（工作流取节点执行表，Agent/集群取 agent_executions）。
+    # 失败只降级为空 map，不影响版本切换本身。
+    try:
+        branch = WorkflowService(db)._build_branch_view(
+            result["message_id"], user_id=str(share_data.user_id)
+        )
+        result["node_executions_map"] = branch.get("node_executions_map", {})
+        # 目标版本所在分支的完整对话链：前端据此重建列表，隐藏其它版本之后的追问轮次
+        result["messages"] = branch.get("messages", [])
+        # 以分支视图的人工介入信息为准（与上面同源，仅在其非空时覆盖）
+        if branch.get("pending_intervention"):
+            result["pending_intervention"] = branch["pending_intervention"]
+    except Exception as e:
+        logger.warning(f"分享端切换版本构建节点明细失败（已降级为空）: {e}")
+        result["node_executions_map"] = {}
 
     return success(data=result)

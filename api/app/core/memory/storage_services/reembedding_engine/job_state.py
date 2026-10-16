@@ -298,6 +298,14 @@ def clear_end_user_claim(job_id: str, end_user_id: str) -> None:
     _safe(drop, None, "end_user claim force clear")
 
 
+def clear_job_claim(job_id: str) -> None:
+
+    def drop(client):
+        client.delete(claim_key(job_id))
+
+    _safe(drop, None, "job claim force clear")
+
+
 __all__ = [
     "END_USER_CLAIM_TTL_SECONDS",
     "JOB_CLAIM_TTL_SECONDS",
@@ -306,6 +314,7 @@ __all__ = [
     "claim_end_user",
     "claim_job",
     "clear_end_user_claim",
+    "clear_job_claim",
     "clear_job_heartbeat",
     "clear_label_cursors",
     "get_label_cursor",

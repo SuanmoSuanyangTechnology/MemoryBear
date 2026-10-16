@@ -1,5 +1,7 @@
 import uuid
-from sqlalchemy import delete, func, select, update
+from datetime import datetime
+
+from sqlalchemy import case, delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 from app.core.utils.datetime_utils import to_iso_z, utcnow, utcnow_naive
@@ -10,6 +12,35 @@ from app.core.logging_config import get_db_logger
 
 # Obtain a dedicated logger for the database
 db_logger = get_db_logger()
+
+
+async def get_rag_memory_baselines_async(
+    db: AsyncSession,
+    end_user_ids: list[str],
+    today_start: datetime,
+    yesterday_start: datetime,
+) -> tuple[int, int]:
+    """Aggregate the two creation-time baselines for an existing current total."""
+    if not end_user_ids:
+        return 0, 0
+
+    statement = select(
+        func.coalesce(
+            func.sum(case(
+                (Document.created_at < today_start, Document.chunk_num), else_=0
+            )),
+            0,
+        ),
+        func.coalesce(
+            func.sum(case(
+                (Document.created_at < yesterday_start, Document.chunk_num), else_=0
+            )),
+            0,
+        ),
+    ).where(Document.file_name.in_([f"{user_id}.txt" for user_id in end_user_ids]))
+    result = await db.execute(statement)
+    yesterday, day_before = result.one()
+    return int(yesterday), int(day_before)
 
 
 def _pending_progress_msg() -> str:

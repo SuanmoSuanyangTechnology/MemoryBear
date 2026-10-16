@@ -10,6 +10,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field, model_validator
 
 from app.core.logging_config import get_logger
+from app.core.memory.models.metadata_models import flatten_domain_specific_info, split_metadata_entry
 from app.core.memory.pipelines.base_pipeline import ModelClientMixin
 from app.core.memory.utils.prompt.template_render import prompt_env
 from app.core.utils.datetime_utils import utcnow_naive
@@ -20,22 +21,39 @@ from app.services.memory_config_service import MemoryConfigService
 logger = get_logger(__name__)
 
 USER_CARD_TAG_META_FIELDS = (
-    "interests",
+    "identity_background",
+    "relationships",
+    "domain_specific_info",
+    "core_facts",
     "traits",
     "goals",
+    "interests",
 )
-USER_CARD_TAG_CANDIDATE_LIMIT = 6
+# identity_background / relationships 中参与名片 Tag 的二级键；
+# name、age、family、health、religion_or_politics、person 不参与
+USER_CARD_TAG_IDENTITY_KEYS = frozenset({"from", "residence", "education", "occupation"})
+USER_CARD_TAG_RELATION_KEYS = frozenset({"group", "object", "pet"})
+USER_CARD_TAG_CANDIDATE_LIMIT = 20
 USER_CARD_TAG_DISPLAY_LIMIT = 5
-USER_CARD_TAG_CATEGORY_LIMIT = 2
 USER_CARD_TAG_MAX_LENGTH = 12
-USER_CARD_TAG_LLM_TIMEOUT_SECONDS = 12
+USER_CARD_TAG_LLM_TIMEOUT_SECONDS = 30
+
+UserCardTagCategory = Literal[
+    "identity_background",
+    "relationships",
+    "domain_specific_info",
+    "core_facts",
+    "traits",
+    "goals",
+    "interests",
+]
 
 
 class UserCardTagCandidate(BaseModel):
-    """LLM 返回的单个候选 Tag，category 用于限制各类 Tag 的展示数量。"""
+    """LLM 返回的单个候选 Tag，category 为来源的顶层 metadata 字段。"""
 
     name: str = Field(min_length=1)
-    category: Literal["interests", "traits", "goals"]
+    category: UserCardTagCategory
 
 
 class UserCardTagOutput(BaseModel):
@@ -55,13 +73,42 @@ class UserCardTagOutput(BaseModel):
         return value
 
 
+def _clean_text(value: str) -> str:
+    return " ".join(value.split())
+
+
 def build_user_card_tag_input(meta_data: object) -> dict[str, list[str]]:
-    """只提取允许生成名片 Tag 的 metadata 字段，并清理字符串空白。"""
+    """提取生成名片 Tag 的 metadata 字段，并清理字符串空白。
+
+    identity_background / relationships 只取白名单二级键的完整条目；
+    domain_specific_info 展平为 ``<scene> | <field_key> | <内容>``；
+    旧字段只取 core_facts、traits、goals、interests，原样取值。
+    """
     if not isinstance(meta_data, dict):
         return {field: [] for field in USER_CARD_TAG_META_FIELDS}
 
+    level2_whitelist = {
+        "identity_background": USER_CARD_TAG_IDENTITY_KEYS,
+        "relationships": USER_CARD_TAG_RELATION_KEYS,
+    }
     result: dict[str, list[str]] = {}
     for field in USER_CARD_TAG_META_FIELDS:
+        if field == "domain_specific_info":
+            result[field] = [
+                normalized
+                for scene_key, field_key, content in flatten_domain_specific_info(meta_data.get(field))
+                if (normalized := _clean_text(f"{scene_key} | {field_key} | {content}"))
+            ]
+            continue
+        if field in level2_whitelist:
+            values = meta_data.get(field)
+            result[field] = [
+                normalized
+                for value in (values if isinstance(values, list) else [])
+                if (parsed := split_metadata_entry(value)) and parsed[0] in level2_whitelist[field]
+                if (normalized := _clean_text(value))
+            ]
+            continue
         values = meta_data.get(field)
         if not isinstance(values, list):
             result[field] = []
@@ -70,7 +117,7 @@ def build_user_card_tag_input(meta_data: object) -> dict[str, list[str]]:
             normalized
             for value in values
             if isinstance(value, str)
-            if (normalized := " ".join(value.split()))
+            if (normalized := _clean_text(value))
         ]
     return result
 
@@ -87,10 +134,9 @@ def build_user_card_tag_source_fingerprint(tag_input: dict[str, list[str]]) -> s
 
 
 def validate_user_card_tags(candidates: list[UserCardTagCandidate]) -> list[str]:
-    """清理候选 Tag，并执行长度、去重、分类数量和总展示数量限制。"""
+    """清理候选 Tag，并执行长度、去重和总展示数量限制；按模型输出顺序取前 N 个。"""
     tags: list[str] = []
     seen: set[str] = set()
-    category_counts = {field: 0 for field in USER_CARD_TAG_META_FIELDS}
 
     for candidate in candidates:
         name = " ".join(candidate.name.split())
@@ -99,11 +145,8 @@ def validate_user_card_tags(candidates: list[UserCardTagCandidate]) -> list[str]
             continue
         if key in seen:
             continue
-        if category_counts[candidate.category] >= USER_CARD_TAG_CATEGORY_LIMIT:
-            continue
 
         seen.add(key)
-        category_counts[candidate.category] += 1
         tags.append(name)
         if len(tags) >= USER_CARD_TAG_DISPLAY_LIMIT:
             break

@@ -1,5 +1,7 @@
 """EmotionExtractionStep — sidecar step for extracting emotion from statements.
 
+[DEPRECATED v0.5.2] Statement LLM 情绪提取已废弃，改为继承快写 BERT 情绪（见 emotion_inheritance），暂时保留代码不删除
+
 Replaces the legacy ``EmotionExtractionService`` with the unified ExtractionStep
 paradigm.  Registered via ``@SidecarStepFactory.register`` so the orchestrator
 picks it up automatically when ``emotion_enabled`` is ``True``.
@@ -12,15 +14,18 @@ from app.core.memory.models.emotion_models import EmotionExtraction
 from app.core.memory.utils.prompt.prompt_utils import render_emotion_extraction_prompt
 
 from .base import ExtractionStep, StepContext
-from ..sidecar_factory import SidecarStepFactory, SidecarTiming
+from ..sidecar_factory import SidecarStepFactory, SidecarTiming  # noqa: F401
 from .schema import EmotionStepInput, EmotionStepOutput
 
 logger = logging.getLogger(__name__)
 
 
-@SidecarStepFactory.register("emotion_enabled", SidecarTiming.AFTER_STATEMENT)
+# [DEPRECATED v0.5.2] Statement LLM 情绪提取已废弃，改为继承快写 BERT 情绪（见 emotion_inheritance），暂时保留代码不删除
+# @SidecarStepFactory.register("emotion_enabled", SidecarTiming.AFTER_STATEMENT)
 class EmotionExtractionStep(ExtractionStep[EmotionStepInput, EmotionStepOutput]):
     """Extract emotion type, intensity, and keywords from a statement.
+
+    [DEPRECATED v0.5.2] Statement LLM 情绪提取已废弃，改为继承快写 BERT 情绪（见 emotion_inheritance），暂时保留代码不删除
 
     This is a **sidecar** (non-critical) step — failure returns a neutral
     default without aborting the pipeline.

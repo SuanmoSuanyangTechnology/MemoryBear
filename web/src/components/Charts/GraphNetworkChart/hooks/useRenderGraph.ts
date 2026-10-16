@@ -193,9 +193,12 @@ export const useRenderGraph = ({
       .on('click', handleEdgeClick)
     linkLabelSelRef.current = linkLabelSel
 
+    const originalNodeMap = new Map(nodes.map(node => [node.id, node]))
+    const isNodeClickable = (node: D3Node) => originalNodeMap.get(node.id)?.label !== 'PreferenceGroup'
+
     const nodeSel = g.append('g').selectAll<SVGGElement, D3Node>('g')
       .data(graphState.nodes).enter().append('g')
-      .style('cursor', 'pointer')
+      .style('cursor', node => isNodeClickable(node) ? 'pointer' : 'default')
       .call(d3.drag<SVGGElement, D3Node>()
         .on('start', (e, d) => { if (!e.active) simulation.alphaTarget(1).restart(); d.fx = d.x; d.fy = d.y })
         .on('drag', (e, d) => { d.fx = e.x; d.fy = e.y })
@@ -215,9 +218,11 @@ export const useRenderGraph = ({
       .attr('r', d => d.symbolSize).attr('fill', d => d.color)
       .attr('fill-opacity', 1).attr('stroke', '#fff').attr('stroke-width', 1.5)
       .on('click', (_event: MouseEvent, d: D3Node) => {
+        const originalNode = originalNodeMap.get(d.id)
+        if (!originalNode || !isNodeClickable(d)) return
+
         const newSelectedId = selectedNodeId === d.id ? null : d.id
-        const originalNode = nodes.find(n => n.id === d.id)
-        if (originalNode) onNodeClick(newSelectedId ? originalNode : null as any)
+        onNodeClick(newSelectedId ? originalNode : null as any)
       })
 
     nodeSel.append('text')

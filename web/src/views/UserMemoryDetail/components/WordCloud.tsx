@@ -1,9 +1,3 @@
-/*
- * @Author: ZhaoYing 
- * @Date: 2026-02-03 18:31:24 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-03-16 15:02:21 
- */
 import { type FC, useEffect, useState, useMemo, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useParams } from 'react-router-dom'
@@ -34,7 +28,7 @@ interface WordCloud {
  * Displays emotion distribution as radar chart with statistics
  * Shows emotion types, counts, percentages, and average intensity
  */
-const WordCloud: FC = () => {
+const WordCloudCard: FC = () => {
   const { t } = useTranslation()
   const { id } = useParams()
   const chartRef = useRef<ReactEcharts>(null);
@@ -130,30 +124,30 @@ const WordCloud: FC = () => {
       title={t('statementDetail.wordCloud')}
       headerType="borderless"
       headerClassName="rb:min-h-[50px]! rb:font-[MiSans-Bold] rb:font-bold"
-      bodyClassName='rb:px-[22px]! rb:pb-[28px]! rb:pt-0! rb:h-[calc(100%-54px)]'
+      bodyClassName='rb:px-[22px]! rb:pb-[28px]! rb:pt-0! rb:h-[calc(100%-54px)]! rb:overflow-hidden!'
       className="rb:h-full!"
     >
       {wordCloud?.total_count && wordCloud?.total_count > 0
-        ? <Row gutter={58}>
-          <Col span={12}>
+        ? <Row gutter={58} className="rb:h-full! rb:overflow-hidden!">
+          <Col span={12} className="rb:h-full! rb:overflow-hidden!">
             <ReactEcharts
               ref={chartRef}
               option={radarOption}
-              style={{ width: '100%', height: 'calc(100% - 88px)' }}
+              style={{ width: '100%', height: 'calc(100% - 88px)', minHeight: '320px' }}
             />
-            <div className="rb:text-center rb:bg-[#F6F6F6] rb:rounded-lg rb:p-2.5 rb:mt-4">
+            <div className="rb:text-center rb:bg-gray-100 rb:rounded-lg rb:p-2.5 rb:mt-4">
               <span className="rb:font-[MiSans-Heavy] rb:font-bold rb:text-[24px] rb:leading-8">{wordCloud.total_count}</span><br />
-              <span className="rb:text-[#5B6167] rb:leading-5">{t('statementDetail.totalCount')}</span>
+              <span className="rb:text-gray-600 rb:leading-5">{t('statementDetail.totalCount')}</span>
             </div>
           </Col>
-          <Col span={12}>
-            <Flex vertical gap={20} className="rb:pt-1!">
+          <Col span={12} className="rb:h-full! rb:overflow-hidden!">
+            <Flex vertical gap={8} className="rb:pt-1! rb:h-full!">
               {wordCloud.tags.map(item => (
                 <div key={item.emotion_type}>
                   <Flex align="center" justify="space-between">
                     <div>
-                      <span className="rb:font-medium rb:text-[#212332]">{t(`statementDetail.${item.emotion_type}`)}</span>
-                      <span className="rb:font-regular rb:text-[#5B6167]">({item.count} {t('statementDetail.pieces')})</span>
+                      <span className="rb:font-medium rb:text-gray-800">{t(`statementDetail.${item.emotion_type}`)}</span>
+                      <span className="rb:font-regular rb:text-gray-600">({item.count} {t('statementDetail.pieces')})</span>
                     </div>
                     <div className="rb:font-medium">{item.percentage.toFixed(1)}%</div>
                   </Flex>
@@ -169,4 +163,4 @@ const WordCloud: FC = () => {
   )
 }
 
-export default WordCloud
+export default WordCloudCard

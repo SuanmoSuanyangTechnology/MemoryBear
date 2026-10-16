@@ -7,7 +7,7 @@ import PageScrollList from '@/components/PageScrollList'
 import Empty from '@/components/Empty'
 import { useI18n } from '@/store/locale'
 import { formatDateTime } from '@/utils/format'
-import { TAG_COLORS } from '../../pages/EpisodicDetail'
+import { TAG_COLORS } from '../../constant'
 import Tag from '@/components/Tag'
 import PageTabs from '@/components/PageTabs'
 import {

@@ -66,9 +66,9 @@ class ModelConfigRepository:
         db_logger.debug(f"根据ID查询模型配置: model_id={model_id}, tenant_id={tenant_id}")
 
         try:
-            # api_keys 仅剩 off 模式回滚读（_select_legacy_key）；M6 随旧表退役
+            # model_base feeds is_deprecated; the legacy api_keys association is
+            # intentionally not loaded — this service has no reader for it.
             query = db.query(ModelConfig).options(
-                joinedload(ModelConfig.api_keys),
                 joinedload(ModelConfig.model_base),
             ).filter(ModelConfig.id == model_id)
 
@@ -97,9 +97,9 @@ class ModelConfigRepository:
         """Async version of get_by_id — uses select() for AsyncSession compatibility."""
 
         try:
-            # api_keys 仅剩 off 模式回滚读（_select_legacy_key）；M6 随旧表退役
+            # model_base feeds is_deprecated; the legacy api_keys association is
+            # intentionally not loaded — this service has no reader for it.
             query = select(ModelConfig).options(
-                joinedload(ModelConfig.api_keys),
                 joinedload(ModelConfig.model_base),
             ).filter(ModelConfig.id == model_id)
 

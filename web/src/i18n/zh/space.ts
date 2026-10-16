@@ -40,6 +40,7 @@ export const space = {
       embeddingRebuildTitle: 'Embedding 模型已变更',
       embeddingRebuildContent: '由于空间已更换 Embedding 模型，记忆库需要使用新模型重新建立向量索引。索引重建期间，向量检索可能暂不可用，系统将降级为关键词/全文检索。',
       reembedding: {
+        allTask: '任务总数',
         status: {
           pending: '等待处理',
           queued: '等待处理',
@@ -51,16 +52,20 @@ export const space = {
         viewDetails: '查看详情',
         switchLockedNotice: 'Re-embedding 进行中，模型切换已锁定',
         alert: {
+          pendingTitle: '记忆库索引重建任务排队中，请稍后',
+          pendingDescription: '由于空间已更换 Embedding 模型，记忆库需要使用新模型重新建立向量索引。 目标模型：{{model}}。当前正在排队中，期间已自动降级为关键词/全文检索，模型切换操作已锁定。',
           runningTitle: '记忆库索引正在重建',
           runningDescription: '由于空间已更换 Embedding 模型，记忆库需要使用新模型重新建立向量索引。目标模型：{{model}}。当前正在处理，期间已自动降级为关键词/全文检索，模型切换操作已锁定。',
           succeededTitle: '记忆库索引重建全部完成',
           succeededDescription: '由于空间已更换 Embedding 模型，记忆库需要使用新模型重新建立向量索引。全部记忆库已使用「{{model}}」完成索引重建，向量检索和语义检索均已恢复。',
           failedTitle: '部分记忆库索引重建失败',
           failedDescription: '由于空间已更换 Embedding 模型，记忆库需要使用新模型重新建立向量索引。目标模型：{{model}}。失败记忆库继续使用关键词/全文检索，可重试失败任务。',
+          userPending: '由于空间已更换 Embedding 模型，记忆库需要使用新模型重新建立向量索引。 当前任务排队中，检索能力暂不受影响。',
           userQueued: '由于空间已更换 Embedding 模型，记忆库需要使用新模型重新建立向量索引。当前 {{queued}} 个记忆库等待处理，检索能力暂不受影响。',
           userRunningFailed: '由于空间已更换 Embedding 模型，记忆库需要使用新模型重新建立向量索引。当前 {{failed}} 个记忆库处理失败，本轮仍有任务未结束。',
           userRunningQueued: '由于空间已更换 Embedding 模型，记忆库需要使用新模型重新建立向量索引。当前 {{running}} 个记忆库正在处理，期间已自动降级为关键词/全文检索；另有 {{queued}} 个待处理。',
           userSucceededQueued: '由于空间已更换 Embedding 模型，记忆库需要使用新模型重新建立向量索引。已有 {{succeeded}} 个记忆库完成，{{queued}} 个等待处理。',
+          noUserSucceeded: '由于空间已更换 Embedding 模型，记忆库需要使用新模型重新建立向量索引。全部记忆库已处理成功，向量检索已恢复。',
           userSucceeded: '由于空间已更换 Embedding 模型，记忆库需要使用新模型重新建立向量索引。全部 {{succeeded}} 个记忆库已处理成功，向量检索已恢复。',
           userFailed: '由于空间已更换 Embedding 模型，记忆库需要使用新模型重新建立向量索引。本轮处理已结束：{{succeeded}} 个成功，{{failed}} 个失败。',
         },

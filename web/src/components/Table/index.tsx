@@ -72,7 +72,7 @@ export interface TableRef {
 
 /** Filter out empty or invalid parameters from API request */
 const dealSo = (params: any) => {
-  let so: any = {}
+  const so: any = {}
   Object.keys(params).forEach(key => {
     if (params[key] === '' || (Array.isArray(params[key]) && params[key].length === 0)) {
       return

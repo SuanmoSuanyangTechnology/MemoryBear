@@ -22,7 +22,7 @@ import { getMemoryConfigList } from '@/api/memory'
 import type { Memory } from '@/views/MemoryManagement/types'
 import { getListLogoUrl } from '@/views/ModelManagement/utils';
 import Tag from '@/components/Tag'
-import { buildAgentSaveParams, extractPromptVariables, buildVariablesFromNames, findInvalidVariables } from './agentHelpers'
+import { appendMissingOpeningStatementVariables, buildAgentSaveParams, extractPromptVariables, buildVariablesFromNames, findInvalidVariables } from './agentHelpers'
 import { useOpeningStatementSync } from './useOpeningStatementSync'
 import { normalizeSavedAgent } from './modelContract'
 
@@ -299,24 +299,15 @@ export function useAgent(
 
   const handleSaveFeaturesConfig = (value: FeaturesConfigForm) => {
     form.setFieldValue('features', value)
-    const { statement = '' } = value?.opening_statement || {}
     onFeaturesLoad?.(value)
 
-    if (value?.opening_statement?.enabled) {
-      const variables = values?.variables
-      const invalid = findInvalidVariables(statement, variables.map(v => v.name))
-      if (invalid.length > 0) {
-        const newVars = invalid.map((name, i) => ({
-          index: variables.length + i,
-          name,
-          display_name: name,
-          type: 'text',
-          required: true,
-          max_length: 48,
-        }))
-
-        form.setFieldValue('variables', [...variables, ...newVars])
-      }
+    const variables = values?.variables || []
+    const nextVariables = appendMissingOpeningStatementVariables(
+      value.opening_statement,
+      variables,
+    )
+    if (nextVariables !== variables) {
+      updateVariableList(nextVariables)
     }
   }
   const modelLogo = useMemo(() => {
@@ -324,7 +315,7 @@ export function useAgent(
   }, [defaultModel])
 
   useOpeningStatementSync({
-    form,
+    openingStatement: values?.features?.opening_statement,
     defaultModel,
     chatVariables,
     chatListLength: chatList.length,
@@ -346,7 +337,7 @@ export function useAgent(
         },
       })
     }
-  }, [chatVariables])
+  }, [chatVariables, modal, updateVariableList, t])
 
   return {
     form,

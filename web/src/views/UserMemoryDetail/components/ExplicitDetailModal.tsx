@@ -1,9 +1,3 @@
-/*
- * @Author: ZhaoYing 
- * @Date: 2026-02-03 18:33:16 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-03 18:33:16 
- */
 import { forwardRef, useImperativeHandle, useState } from 'react';
 import { useParams } from 'react-router-dom'
 import { Descriptions, Skeleton, Flex } from 'antd';
@@ -13,7 +7,7 @@ import RbModal from '@/components/RbModal'
 import { getExplicitMemoryDetails } from '@/api/memory'
 import { formatDateTime } from '@/utils/format'
 import type { ExplicitDetailModalRef, EpisodicMemory, SemanticMemory } from '../pages/ExplicitDetail'
-
+import { getEmotionColor } from '../constant'
 
 /**
  * Explicit memory detail data structure
@@ -76,23 +70,6 @@ const ExplicitDetailModal = forwardRef<ExplicitDetailModalRef>((_props, ref) => 
         setLoading(false)
       })
   };
-
-  /**
-   * Get color for emotion type
-   * @param {string} emotionType - Emotion type
-   * @returns {string} Color hex code
-   */
-  const getEmotionColor = (emotionType: string) => {
-    const colors: Record<string, string> = {
-      joy: '#52c41a',
-      anger: '#ff4d4f',
-      sadness: '#1890ff',
-      fear: '#fa8c16',
-      neutral: '#8c8c8c',
-      surprise: '#722ed1'
-    }
-    return colors[emotionType] || '#8c8c8c'
-  }
 
   /**
    * Expose methods to parent component

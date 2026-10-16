@@ -21,6 +21,7 @@ semantics; mirrors the kb whitelist in mem-knowledge src/auth.py). Requests
 carrying credentials never short-circuit — they run the full pipeline
 (declared identity must fail closed, never fall back to anonymous download).
 """
+
 import logging
 import re
 from dataclasses import dataclass
@@ -66,19 +67,34 @@ def _has_credentials(request: Request) -> bool:
 # applied: credentials plus the gateway-managed identity namespace. Clients
 # must never be able to forge values the gateway injects (downstream services
 # trust these headers after termination).
-_STRIPPED_HEADERS = frozenset({
-    "authorization", "x-api-key", "x-api-key-id", "x-internal-token",
-})
-_STRIPPED_HEADER_PREFIXES = ("x-user-", "x-tenant-", "x-workspace-", "x-kb-", "x-model-")
+_STRIPPED_HEADERS = frozenset(
+    {
+        "authorization",
+        "x-api-key",
+        "x-api-key-id",
+        "x-internal-token",
+        "x-source",
+    }
+)
+_STRIPPED_HEADER_PREFIXES = (
+    "x-user-",
+    "x-tenant-",
+    "x-workspace-",
+    "x-kb-",
+    "x-model-",
+)
 
 
 def _sanitize_headers(headers) -> dict[str, str]:
     """Strip credentials + the identity namespace; callers then inject the
     authoritative values. Lowercased per-key check: raw scope headers are
     lowercase in practice (h11/uvicorn), but never rely on that here."""
-    return {k: v for k, v in headers.items()
-            if k.lower() not in _STRIPPED_HEADERS
-            and not k.lower().startswith(_STRIPPED_HEADER_PREFIXES)}
+    return {
+        k: v
+        for k, v in headers.items()
+        if k.lower() not in _STRIPPED_HEADERS
+        and not k.lower().startswith(_STRIPPED_HEADER_PREFIXES)
+    }
 
 
 @dataclass
@@ -88,7 +104,7 @@ class GatewayDeps:
     issuer: LocalTokenIssuer
     limiter: ApiKeyRateLimiter
     audit: AuditLogger | None
-    resolver: TargetResolver   # 路径 → 目标路由（aud 动态化 + 转发目标）
+    resolver: TargetResolver  # 路径 → 目标路由（aud 动态化 + 转发目标）
 
 
 class GatewayMiddleware(BaseHTTPMiddleware):
@@ -107,7 +123,7 @@ class GatewayMiddleware(BaseHTTPMiddleware):
         # K8s probe 白名单：不依赖 Redis/DB，探活期间外部依赖故障不影响 liveness 判定
         if request.url.path == "/healthz":
             return await call_next(request)
-        deps = self._deps_getter()               # 局部变量，避免并发 await 期间实例属性互覆
+        deps = self._deps_getter()  # 局部变量，避免并发 await 期间实例属性互覆
         # 先解析目标路由（aud 动态化 + 转发层取 route）；未命中即 None，走 stub 语义
         request.state.target_route = deps.resolver.resolve(request.url.path)
         strategy = self._strategy or load_strategy(settings.auth_strategy_name, deps)
@@ -119,21 +135,24 @@ class GatewayMiddleware(BaseHTTPMiddleware):
         # run the pipeline — a verified identity takes the kb principal path,
         # a failing one rejects 401 (declared identity never falls back to
         # anonymous download).
-        if (is_kb_public_file_download(request.url.path, request.method)
-                and not _has_credentials(request)):
+        if is_kb_public_file_download(
+            request.url.path, request.method
+        ) and not _has_credentials(request):
             self._public_download_headers(request)
             return await call_next(request)
         result = await strategy.authenticate(request, deps)
         if result.status_code is not None:
             # Rejection: 401 semantics / 429 rate limit; rate-limit headers ride
             # the rejection response (api-key semantics preserved).
-            return JSONResponse(status_code=result.status_code,
-                                content={"detail": result.detail},
-                                headers=result.headers or None)
+            return JSONResponse(
+                status_code=result.status_code,
+                content={"detail": result.detail},
+                headers=result.headers or None,
+            )
         # Termination path: the identity context (UserContext/ApiKeyContext) was
         # written to request.state.identity by the pipeline (/stub echo +
         # downstream consumers); here we only apply headers/state/audit.
-        request.state.internal_token = result.internal_token   # None in direct mode
+        request.state.internal_token = result.internal_token  # None in direct mode
         self._rewrite_headers(request, result.identity_headers)
         if deps.audit is not None and result.audit_event is not None:
             await deps.audit.audit(AuditEvent(**result.audit_event))
@@ -146,7 +165,9 @@ class GatewayMiddleware(BaseHTTPMiddleware):
         gateway-authenticated identity)."""
         headers = _sanitize_headers(request.headers)
         headers.update(added)
-        request.scope["headers"] = [(k.lower().encode(), v.encode()) for k, v in headers.items()]
+        request.scope["headers"] = [
+            (k.lower().encode(), v.encode()) for k, v in headers.items()
+        ]
 
     @staticmethod
     def _public_download_headers(request: Request) -> None:
@@ -158,4 +179,6 @@ class GatewayMiddleware(BaseHTTPMiddleware):
         only sees a trusted one-hop source marker and no forgeable identity."""
         headers = _sanitize_headers(request.headers)
         headers["x-kb-source"] = _KB_PUBLIC_DOWNLOAD_SOURCE
-        request.scope["headers"] = [(k.lower().encode(), v.encode()) for k, v in headers.items()]
+        request.scope["headers"] = [
+            (k.lower().encode(), v.encode()) for k, v in headers.items()
+        ]

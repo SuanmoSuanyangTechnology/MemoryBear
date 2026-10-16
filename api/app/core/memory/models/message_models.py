@@ -13,10 +13,11 @@ Classes:
 """
 
 from typing import List, Dict, Any, Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from uuid import uuid4
 from datetime import datetime
 
+from app.core.memory.emotion.emotion_buckets import normalize_emotion_type
 from app.core.utils.datetime_utils import utcnow_naive
 from app.core.memory.utils.data.ontology import StatementType, TemporalInfo, RelevenceInfo
 from app.core.memory.models.triplet_models import TripletExtractionResponse, Triplet
@@ -68,7 +69,8 @@ class Statement(BaseModel):
         connect_strength: Optional connection strength ('Strong' or 'Weak')
         temporal_validity: Optional temporal validity range
         triplet_extraction_info: Optional triplet extraction results
-        emotion_type: Optional emotion type (joy/sadness/anger/fear/surprise/neutral)
+        emotion_type: Optional emotion type (10 buckets: neutral/joy/relief/anxiety/sadness/anger/
+            frustration/loneliness/confusion/hope; legacy fear/surprise normalized)
         emotion_intensity: Optional emotion intensity (0.0-1.0)
         emotion_keywords: Optional list of emotion keywords
         emotion_subject: Optional emotion subject (self/other/object)
@@ -91,7 +93,12 @@ class Statement(BaseModel):
         None, description="The triplet extraction information of the statement."
     )
     # Emotion fields
-    emotion_type: Optional[str] = Field(None, description="Emotion type: joy/sadness/anger/fear/surprise/neutral")
+    emotion_type: Optional[str] = Field(
+        None,
+        description=(
+            "Emotion type: neutral/joy/relief/anxiety/sadness/anger/frustration/loneliness/confusion/hope"
+        ),
+    )
     emotion_intensity: Optional[float] = Field(None, ge=0.0, le=1.0, description="Emotion intensity: 0.0-1.0")
     emotion_keywords: Optional[List[str]] = Field(default_factory=list, description="Emotion keywords, max 3")
     emotion_subject: Optional[str] = Field(None, description="Emotion subject: self/other/object")
@@ -107,6 +114,12 @@ class Statement(BaseModel):
         description="Whether this statement is a permanent-memory candidate",
     )
     dialog_at: Optional[str] = Field(None, description="Absolute timestamp of the source message (ISO 8601).")
+
+    @field_validator("emotion_type", mode="before")
+    @classmethod
+    def validate_emotion_type(cls, v):
+        """Normalize emotion type to the 10 buckets (legacy fear/surprise mapped; unknown → None, never raises)"""
+        return normalize_emotion_type(v)
 
 
 class ConversationContext(BaseModel):

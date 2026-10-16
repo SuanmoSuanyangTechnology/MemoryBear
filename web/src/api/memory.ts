@@ -1,9 +1,3 @@
-/*
- * @Author: ZhaoYing 
- * @Date: 2026-02-03 14:00:06 
- * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-09-03 11:46:30
- */
 import { request } from '@/utils/request'
 import type { AxiosRequestConfig } from 'axios'
 import type {
@@ -63,10 +57,6 @@ export const getApiTrend = () => {
 // Memory Dashboard - Total data
 export const getDashboardData = () => {
   return request.get(`/dashboard/dashboard_data`)
-}
-// Workspace user memory categories
-export const getWorkspaceStatistics = () => {
-  return request.get(`/memory/analytics/workspace_statistics`)
 }
 /*************** end Memory Dashboard APIs ******************************/
 

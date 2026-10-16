@@ -1,6 +1,8 @@
 import type { KnowledgeConfig } from '@/components/Knowledge/types'
 import type { Skill } from '@/views/Skills/types'
-import type { SupervisorConfig } from '../types'
+import type { SupervisorConfig, Config } from '../types'
+import { getModelInfo } from '@/api/models'
+import type { Model } from '@/views/ModelManagement/types'
 
 const normalizeKnowledgeForSave = (
   knowledgeConfig: KnowledgeConfig | null | undefined,
@@ -34,6 +36,7 @@ const isDefaultSupervisorConfig = (supervisorConfig: SupervisorConfig): boolean 
     && (skills?.skill_ids?.length ?? 0) === 0
     && (supervisorConfig.variables?.length ?? 0) === 0
     && (supervisorConfig.tools?.length ?? 0) === 0
+    && Object.keys(supervisorConfig.features ?? {}).length === 0
 }
 
 /** Build stable form values when the API returns a null or partial supervisor config. */
@@ -61,6 +64,7 @@ export const normalizeSupervisorConfigForForm = (
       ...variable,
       index,
     })),
+    tools: supervisorConfig?.tools ?? []
   }
 }
 
@@ -75,8 +79,8 @@ export const normalizeSupervisorConfigForSave = (
   }
 
   return {
-    ...originalSupervisorConfig,
-    ...supervisorConfig,
+    ...(originalSupervisorConfig || {}),
+    ...(supervisorConfig || {}),
     knowledge_retrieval: normalizeKnowledgeForSave(
       supervisorConfig.knowledge_retrieval,
       originalSupervisorConfig?.knowledge_retrieval
@@ -87,5 +91,51 @@ export const normalizeSupervisorConfigForSave = (
       delete normalizedVariable.key
       return normalizedVariable
     }),
+    tools: (supervisorConfig.tools ?? []).map(vo => {
+      if (!vo.operation) {
+        return {
+          tool_id: vo.tool_id,
+          enabled: vo.enabled
+        }
+      }
+      return {
+        tool_id: vo.tool_id,
+        operation: vo.operation,
+        enabled: vo.enabled
+      }
+    }),
+  }
+}
+
+export const enrichMissingModelFields = async (response: Config): Promise<Config> => {
+  const missingInputModalities = response.input_modalities === undefined
+  const missingOutputModalities = response.output_modalities === undefined
+  const missingModelFeatures = response.model_parameters?.features === undefined
+
+  if (
+    !response.default_model_config_id
+    || (!missingInputModalities && !missingOutputModalities && !missingModelFeatures)
+  ) {
+    return response
+  }
+
+  try {
+    const model = await getModelInfo(response.default_model_config_id) as Model
+
+    return {
+      ...response,
+      ...(missingInputModalities ? { input_modalities: model.input_modalities } : {}),
+      ...(missingOutputModalities ? { output_modalities: model.output_modalities } : {}),
+      ...(missingModelFeatures
+        ? {
+            model_parameters: {
+              ...(response.model_parameters || {}),
+              features: model.features,
+            },
+          }
+        : {}),
+    }
+  } catch {
+    return response
   }
 }
