@@ -7,13 +7,14 @@ Keeping the judgment here, once, prevents the two shapes from drifting:
 
     verify signature → logout blacklist → identity snapshot (fail-closed)
     → disabled/tenant/password-reset checks → per-user rate limit
-    → request.state.identity → inject identity headers (generic trio + service
-      profile).
+    → request.state.identity → inject identity headers (generic trio + the
+      authenticated face + service profile).
 
 Requests under API_KEY_PATH_PREFIXES take the API-key variant (snapshot +
 QPS/daily quota). Failure texts match the enterprise flow this was migrated
 from, so both shapes reject identically.
 """
+
 from __future__ import annotations
 
 import logging
@@ -46,6 +47,13 @@ _PROFILE_HEADERS: dict[str, tuple[str, str, str]] = {
     "application-service": ("X-App-Actor-ID", "X-App-Tenant-ID", "X-App-Workspace-ID"),
 }
 
+# The face the credentials were terminated on, injected for every downstream as the
+# generic ``x-source``: the API-key face is external (``ex_api``), every other route
+# is an internal call (``in_api``). A fact about the request rather than about the
+# target, so both variants below set it without consulting the route table.
+SOURCE_EXTERNAL = "ex_api"
+SOURCE_INTERNAL = "in_api"
+
 
 def _extract_api_key(request: Request) -> str | None:
     """API key extraction: Authorization: Bearer <key> first, then X-API-Key
@@ -59,8 +67,9 @@ def _extract_api_key(request: Request) -> str | None:
     return request.headers.get("x-api-key") or None
 
 
-def _profile_headers(request: Request, actor_id: str, tenant_id: str,
-                     workspace_id: str) -> dict[str, str]:
+def _profile_headers(
+    request: Request, actor_id: str, tenant_id: str, workspace_id: str
+) -> dict[str, str]:
     """Service-specific identity headers for the resolved target route
     (no route / unknown service → none, e.g. stub semantics)."""
     route = getattr(request.state, "target_route", None)
@@ -93,7 +102,10 @@ async def terminate_user(request: Request, deps: GatewayDeps) -> AuthResult:
         # Snapshot/blacklist state unobtainable → reject (fail-closed); no DB
         # backfill on miss, recovery rides the invalidation-notify rebuild path.
         return AuthResult(status_code=401, detail="auth unavailable")
-    except (JWTError, ValueError) as exc:  # every verify_jwt failure: signature/aud/type/missing key
+    except (
+        JWTError,
+        ValueError,
+    ) as exc:  # every verify_jwt failure: signature/aud/type/missing key
         logger.warning("token verification failed: %s", exc)
         return AuthResult(status_code=401, detail="invalid token")
     if snap.disabled or not snap.tenant_active:
@@ -110,31 +122,45 @@ async def terminate_user(request: Request, deps: GatewayDeps) -> AuthResult:
     # fail-open: any Redis failure bypasses the limit (availability over
     # strictness) and is logged; over limit → 429 with rate-limit headers
     # (middleware passes them through).
-    limiter = FixedWindowRateLimiter(redis=gredis.redis)   # lazy module singleton, read at call time
+    limiter = FixedWindowRateLimiter(
+        redis=gredis.redis
+    )  # lazy module singleton, read at call time
     try:
         allowed, rl_headers = await limiter.check(
-            f"user:{payload['sub']}", limit=settings.user_rate_limit_per_minute,
-            window_seconds=60)
+            f"user:{payload['sub']}",
+            limit=settings.user_rate_limit_per_minute,
+            window_seconds=60,
+        )
         if not allowed:
-            return AuthResult(status_code=429, detail="rate limit exceeded", headers=rl_headers)
-    except Exception:
+            return AuthResult(
+                status_code=429, detail="rate limit exceeded", headers=rl_headers
+            )
+    except Exception:  # noqa: BLE001 - rate-limit backend intentionally fails open
         logger.warning("user rate limit bypassed (redis down): sub=%s", payload["sub"])
-    ctx = UserContext(user_id=payload["sub"], tenant_id=snap.tenant_id,
-                      workspace_id=snap.workspace_id, roles=snap.roles)
+    ctx = UserContext(
+        user_id=payload["sub"],
+        tenant_id=snap.tenant_id,
+        workspace_id=snap.workspace_id,
+        roles=snap.roles,
+    )
     request.state.identity = ctx  # stub echo + downstream consumers (ctx object)
     identity_headers = {
         "x-user-id": ctx.user_id,
         "x-tenant-id": ctx.tenant_id,
         "x-workspace-id": ctx.workspace_id,
+        "x-source": SOURCE_INTERNAL,
     }
-    identity_headers.update(_profile_headers(request, ctx.user_id, ctx.tenant_id,
-                                             ctx.workspace_id))
+    identity_headers.update(
+        _profile_headers(request, ctx.user_id, ctx.tenant_id, ctx.workspace_id)
+    )
     return AuthResult(
         identity_headers=identity_headers,
         audit_event={
-            "event_type": "auth.granted", "actor_id": ctx.user_id,
+            "event_type": "auth.granted",
+            "actor_id": ctx.user_id,
             "tenant_id": ctx.tenant_id,
-            "target": f"{request.method} {request.url.path}", "result": "ok",
+            "target": f"{request.method} {request.url.path}",
+            "result": "ok",
         },
     )
 
@@ -162,8 +188,10 @@ async def terminate_api_key(request: Request, deps: GatewayDeps) -> AuthResult:
         # an ak:* placeholder must never reach downstream services.
         return AuthResult(status_code=401, detail="invalid api key")
     if not ctx.rate_limit_disabled:
-        for check, limit in ((deps.limiter.check_qps, ctx.rate_limit),
-                             (deps.limiter.check_daily_requests, ctx.daily_request_limit)):
+        for check, limit in (
+            (deps.limiter.check_qps, ctx.rate_limit),
+            (deps.limiter.check_daily_requests, ctx.daily_request_limit),
+        ):
             if limit is None:
                 continue
             try:
@@ -174,21 +202,27 @@ async def terminate_api_key(request: Request, deps: GatewayDeps) -> AuthResult:
                 # unhandled 500.
                 return AuthResult(status_code=401, detail="auth unavailable")
             if not allowed:
-                return AuthResult(status_code=429, detail="rate limit exceeded", headers=headers)
-    request.state.identity = ctx               # /v1/stub echo (ctx object, not header strings)
+                return AuthResult(
+                    status_code=429, detail="rate limit exceeded", headers=headers
+                )
+    request.state.identity = ctx  # /v1/stub echo (ctx object, not header strings)
     identity_headers = {
         "x-api-key-id": ctx.api_key_id,
         "x-tenant-id": ctx.tenant_id,
         "x-workspace-id": ctx.workspace_id,
+        "x-source": SOURCE_EXTERNAL,
     }
-    identity_headers.update(_profile_headers(request, ctx.user_id, ctx.tenant_id,
-                                             ctx.workspace_id))
+    identity_headers.update(
+        _profile_headers(request, ctx.user_id, ctx.tenant_id, ctx.workspace_id)
+    )
     return AuthResult(
         identity_headers=identity_headers,
         audit_event={
-            "event_type": "api_key.granted", "actor_id": ctx.user_id,
+            "event_type": "api_key.granted",
+            "actor_id": ctx.user_id,
             "tenant_id": ctx.tenant_id,
-            "target": f"{request.method} {request.url.path}", "result": "ok",
+            "target": f"{request.method} {request.url.path}",
+            "result": "ok",
         },
     )
 

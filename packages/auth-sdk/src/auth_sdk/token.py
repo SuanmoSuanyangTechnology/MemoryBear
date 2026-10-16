@@ -54,9 +54,14 @@ class TokenIssuer(Protocol):
 class LocalTokenIssuer:
     """Local RS256 issuer: signs internal tokens with the in-process private key.
 
-    UserContext → sub=user_id. ApiKeyContext → sub=user_id (the key creator, the
+    UserContext → sub=user_id plus any credential facts the context carries
+    (auth_type/scopes/api_key_id — what InboundInterceptor builds from an API-key
+    token, so re-signing one round-trips instead of demoting the next hop to a
+    plain user token). ApiKeyContext → sub=user_id (the key creator, the
     monolith's "key acts for its creator" semantics) + auth_type="api_key" +
-    scopes, so downstreams can tell credential types apart. The "ak:{api_key_id}"
+    scopes + api_key_id (which key, carried separately from the creator it acts
+    for — neither is derivable from the other), so downstreams can tell
+    credential types apart. The "ak:{api_key_id}"
     fallback for a missing user_id is defense in depth only: the gateway pipeline
     fails closed (401) before issuance.
     """
@@ -81,7 +86,17 @@ class LocalTokenIssuer:
             payload["sub"] = identity.user_id or f"ak:{identity.api_key_id}"
             payload["auth_type"] = "api_key"
             payload["scopes"] = list(identity.scopes)
+            # The key itself, not the creator ``sub`` names: per-key attribution and
+            # incident forensics need the credential, per-user authorization needs
+            # the person, so both travel.
+            payload["api_key_id"] = identity.api_key_id
         else:
             payload["sub"] = identity.user_id
             payload["roles"] = list(identity.roles)
+            if identity.auth_type is not None:
+                payload["auth_type"] = identity.auth_type
+            if identity.scopes:
+                payload["scopes"] = list(identity.scopes)
+            if identity.api_key_id:
+                payload["api_key_id"] = identity.api_key_id
         return jwt.encode(payload, self.private_key, algorithm="RS256", headers={"kid": self.kid})
