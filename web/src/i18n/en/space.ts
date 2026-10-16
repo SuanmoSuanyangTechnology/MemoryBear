@@ -65,6 +65,7 @@ export const space = {
           userRunningFailed: 'Because the workspace Embedding model has changed, the memory libraries need to rebuild their vector indexes with the new model. Failed memory libraries: {{failed}}. Other tasks are still in progress.',
           userRunningQueued: 'Because the workspace Embedding model has changed, the memory libraries need to rebuild their vector indexes with the new model. Memory libraries in progress: {{running}}. Search has fallen back to keyword/full-text search during processing. Waiting: {{queued}}.',
           userSucceededQueued: 'Because the workspace Embedding model has changed, the memory libraries need to rebuild their vector indexes with the new model. Completed memory libraries: {{succeeded}}. Waiting: {{queued}}.',
+          noUserSucceeded: 'Because the workspace Embedding model has changed, the memory libraries need to rebuild their vector indexes with the new model. All memory libraries were processed successfully, and vector search has been restored.',
           userSucceeded: 'Because the workspace Embedding model has changed, the memory libraries need to rebuild their vector indexes with the new model. All {{succeeded}} memory libraries were processed successfully, and vector search has been restored.',
           userFailed: 'Because the workspace Embedding model has changed, the memory libraries need to rebuild their vector indexes with the new model. This run has ended. Succeeded: {{succeeded}}; failed: {{failed}}.',
         },
