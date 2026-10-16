@@ -9,7 +9,7 @@
  * Displays and manages end user profile information
  */
 
-import { forwardRef, useImperativeHandle, useEffect, useState, useRef } from 'react'
+import { forwardRef, useImperativeHandle, useEffect, useState, useRef, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useParams } from 'react-router-dom'
 import { Skeleton, Flex } from 'antd';
@@ -22,6 +22,7 @@ import {
 } from '@/api/memory'
 import EndUserProfileModal from './EndUserProfileModal'
 import type { EndUser, EndUserProfileModalRef, EndUserProfileRef } from '../types'
+import { OLD_META_DATA_KEY_FIELDS, NEW_META_DATA_KEY_FIELDS } from '../constant';
 
 /**
  * Component props
@@ -45,13 +46,9 @@ const EndUserProfile = forwardRef<EndUserProfileRef, EndUserProfileProps>(({ cla
   const [loading, setLoading] = useState<boolean>(false)
   const [data, setData] = useState<EndUser | null>(null)
 
-  useEffect(() => {
-    if (!id) return
-    getData()
-  }, [id])
   
   /** Fetch profile data */
-  const getData = () => {
+  const getData = useCallback(() => {
     if (!id) return
     setLoading(true)
     getEndUserInfo(id).then((res) => {
@@ -63,7 +60,12 @@ const EndUserProfile = forwardRef<EndUserProfileRef, EndUserProfileProps>(({ cla
     .finally(() => {
       setLoading(false)
     })
-  }
+  }, [onDataLoaded, id])
+
+  useEffect(() => {
+    if (!id) return
+    getData()
+  }, [id, getData])
   /** Open edit modal */
   const handleEdit = () => {
     if (!data) return
@@ -73,6 +75,13 @@ const EndUserProfile = forwardRef<EndUserProfileRef, EndUserProfileProps>(({ cla
   useImperativeHandle(ref, () => ({
     data
   }));
+
+  const hasOldMetaData = OLD_META_DATA_KEY_FIELDS.some(
+    (key) => (data?.meta_data?.[key]?.length ?? 0) > 0,
+  )
+  const metaDataKeyFields = hasOldMetaData
+    ? OLD_META_DATA_KEY_FIELDS
+    : NEW_META_DATA_KEY_FIELDS
 
   return (
     <RbCard 
@@ -94,12 +103,14 @@ const EndUserProfile = forwardRef<EndUserProfileRef, EndUserProfileProps>(({ cla
             <div className="rb:text-[#7B8085]">{t('userMemory.other_name')}</div>
             <div className="rb:mt-0.5">{data?.other_name || '-'}</div>
           </div>
-          {(['alias', 'relations', 'goals', 'core_facts', 'interests', 'traits', 'beliefs_or_stances', 'anchors'] as (keyof EndUser['meta_data'])[]).map((key) => {
-            if (!data?.meta_data?.[key] || (Array.isArray(data?.meta_data?.[key]) && data?.meta_data?.[key].length < 1)) return null
+          {metaDataKeyFields.map((key) => {
+            const value = data?.meta_data?.[key]
+            if (!value || (Array.isArray(value) && value.length < 1)) return null
+
             return(
               <div key={key}>
-                <div className="rb:text-[#7B8085]">{t(`userMemory.${key}`)}</div>
-                <div className="rb:mt-0.5">{formatValue(data?.meta_data?.[key])}</div>
+                <div className="rb:text-[#7B8085]">{t(`userMemory.meta_data.${key}`)}</div>
+                <div className="rb:mt-0.5">{formatValue(value)}</div>
               </div>
             )
           })}

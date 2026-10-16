@@ -20,6 +20,8 @@ class EngineDisplayCardItem(BaseModel):
         "REFLECTION",
         "SCENE_SUMMARY",
         "MEMORY_VALUE",
+        "PREFERENCE",
+        "SCENE_RECONSTRUCTION",
     ] = Field(
         ...,
         description="稳定英文引擎枚举，由前端负责文案映射",

@@ -15,8 +15,8 @@ logger = get_logger(__name__)
 class MemoryExplicitService(MemoryBaseService):
     """显性记忆服务类"""
     
-    def __init__(self):
-        super().__init__()
+    def __init__(self, shared_driver: bool = True):
+        super().__init__(shared_driver=shared_driver)
         logger.info("MemoryExplicitService initialized")
     
     async def get_explicit_memory_overview(

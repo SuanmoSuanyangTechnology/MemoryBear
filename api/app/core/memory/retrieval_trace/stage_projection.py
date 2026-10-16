@@ -12,6 +12,10 @@ from collections.abc import Iterable
 from typing import Any
 
 from app.core.memory.enums import MemoryDisplayType, Neo4jNodeType
+from app.core.memory.models.metadata_models import (
+    PROFILE_DISPLAY_KEYS,
+    project_display_profile,
+)
 from app.core.memory.models.service_models import (
     Memory,
     MemorySearchResult,
@@ -34,6 +38,7 @@ _PROFILE_FIELDS = (
     "anchors",
     "events",
     "traits",
+    *PROFILE_DISPLAY_KEYS,
 )
 _ARRAY_PROFILE_FIELDS = tuple(field for field in _PROFILE_FIELDS if field != "description")
 _TIME_PREFIX = re.compile(r"^\[\d{4}-\d{2}-\d{2}T[^]]+\]\s*")
@@ -77,10 +82,17 @@ def project_profile_data(result: MemorySearchResult | None) -> dict[str, Any]:
         "aliases_name": _profile_list(source.get("aliases_name", source.get("aliases"))),
         "description": _string_value(source.get("description"), 200),
     }
+    display_profile = project_display_profile(source)
     for field in _ARRAY_PROFILE_FIELDS:
         if field == "aliases_name":
             continue
-        profile[field] = _profile_list(source.get(field))
+        if field in PROFILE_DISPLAY_KEYS:
+            profile[field] = _profile_list(display_profile.get(field))
+        elif field == "events":
+            # memory.data 中事件字段名为 event_timeline
+            profile[field] = _profile_list(source.get("event_timeline", source.get("events")))
+        else:
+            profile[field] = _profile_list(source.get(field))
     return profile
 
 

@@ -4,7 +4,7 @@ import { Progress, Skeleton, Flex } from 'antd'
 
 import Card from './Card'
 import Empty from '@/components/Empty'
-import type { WorkspaceStatistics } from '../index'
+import type { WorkspaceStatistics } from '../types'
 
 interface BarCardProps {
   statistics: WorkspaceStatistics['statistics'];

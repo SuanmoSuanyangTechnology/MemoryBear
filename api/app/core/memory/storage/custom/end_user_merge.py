@@ -6,6 +6,9 @@ from dataclasses import dataclass
 from typing import Any
 
 from app.core.memory.models.graph_models import PreferenceNode
+from app.core.memory.storage.custom.legacy_metadata_merge import (
+    merge_legacy_user_properties,
+)
 from app.core.memory.storage.enums import MemoryNodeType
 from app.core.memory.storage.outbox.exceptions import OutboxEnqueueError
 from app.core.memory.storage.outbox.producer import enqueue_events
@@ -242,23 +245,14 @@ def _merge_user_properties(
     source: dict[str, Any],
     target: dict[str, Any],
 ) -> dict[str, Any]:
-    list_fields = (
-        "aliases",
-        "anchors",
-        "beliefs_or_stances",
-        "core_facts",
-        "events",
-        "goals",
-        "interests",
-        "relations",
-        "traits",
-    )
+    list_fields = ("aliases",)
     merged = {
         field: _dedup_list(
             list(target.get(field) or []) + list(source.get(field) or [])
         )
         for field in list_fields
     }
+    merged.update(merge_legacy_user_properties(target, source))
     merged["description_timeline"] = _merge_separated_string(
         str(target.get("description_timeline") or ""),
         str(source.get("description_timeline") or ""),

@@ -55,6 +55,7 @@ from . import (
     upload_controller,
     user_controller,
     user_memory_controllers,
+    wiki_controller,
     workflow_trigger_controller,
     workspace_controller,
     ontology_controller,
@@ -78,6 +79,7 @@ manager_router.include_router(model_controller.router)
 manager_router.include_router(file_controller.router)
 manager_router.include_router(document_controller.router)
 manager_router.include_router(knowledge_controller.router)
+manager_router.include_router(wiki_controller.router)
 manager_router.include_router(knowledge_metadata_controller.router)
 manager_router.include_router(mcp_market_controller.router)
 manager_router.include_router(mcp_market_config_controller.router)

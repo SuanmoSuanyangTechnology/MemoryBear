@@ -145,7 +145,7 @@ const ReleasePage: FC<{data: Application; refresh: () => void}> = ({data, refres
 
             <Space size={10}>
               {selectedVersion && <>
-                {data?.type && data?.type !== 'multi_agent' && <RbButton onClick={handleExport}>{t('common.export')}</RbButton>}
+                {data?.type && <RbButton onClick={handleExport}>{t('common.export')}</RbButton>}
                 {data.current_release_id !== selectedVersion.id && <RbButton onClick={handleRollback}>{t('application.willRollToThisVersion')}</RbButton>}
                 {data?.type !== 'pure_workflow' && <>
                   <RbButton type="primary" ghost onClick={() => releaseShareModalRef.current?.handleOpen()}>{t('application.share')}</RbButton>

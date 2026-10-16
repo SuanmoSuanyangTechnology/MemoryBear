@@ -29,6 +29,11 @@ export interface ClusterEventData {
   user_message_id?: string;
   content?: string;
   message_length?: number;
+  file_id?: string;
+  audio_url?: string | null;
+  audio_status?: string;
+  citations?: NonNullable<ChatItem['meta_data']>['citations'];
+  suggested_questions?: NonNullable<ChatItem['meta_data']>['suggested_questions'];
   execution_id?: string | null;
   parent_execution_id?: string | null;
   orchestration_mode?: string | null;
@@ -74,11 +79,13 @@ interface ClusterToolBlock extends Record<string, unknown> {
 
 export interface ClusterStreamAdapter {
   updateAssistant: (updater: (message: ChatItem) => ChatItem) => void;
+  appendAssistantReasoning: (content?: string) => void;
   appendAssistantContent: (content?: string) => void;
   applyMessageId: (id?: string) => void;
   applyUserMessageId: (id?: string) => void;
   syncConversationId: (id?: string) => void;
   stopInitialLoading?: () => void;
+  startAudioPolling?: (audioUrl: string, pollingKey: string) => void;
   finishStreaming: () => void;
   applyLegacyEmpty?: (messageLength: number) => void;
 }
@@ -190,7 +197,10 @@ const mergeTrace = (currentTrace: AgentTrace, incomingTrace: AgentTrace): AgentT
 
 const getErrorText = (error: unknown): string | undefined => {
   if (typeof error === 'string') return error
-  if (isRecord(error) && typeof error.message === 'string') return error.message
+  if (!isRecord(error)) return undefined
+  if (typeof error.message === 'string') return error.message
+  if (typeof error.error === 'string') return error.error
+  if (isRecord(error.error)) return getErrorText(error.error)
   return undefined
 }
 
@@ -355,18 +365,39 @@ export const createClusterStreamProcessor = (adapter: ClusterStreamAdapter) => {
     })
   }
 
-  const finishCluster = (status: 'completed' | 'failed', error?: string) => {
+  const finishCluster = (
+    status: 'completed' | 'failed',
+    error?: string,
+    endPayload?: ClusterEventData,
+  ) => {
+    const audioUrl = endPayload?.audio_url
+    const audioStatus = endPayload?.audio_status ?? (audioUrl ? 'pending' : undefined)
+
     adapter.stopInitialLoading?.()
     adapter.updateAssistant(message => ({
       ...message,
       status,
-      ...(error ? { error } : {}),
       subContent: message.subContent?.map(block =>
         block.status === 'running' || block.status === 'pending'
           ? { ...block, status: status === 'failed' ? 'failed' : 'completed' }
           : block,
       ),
+      content: error ? null : message.content,
+      meta_data: {
+        ...(message.meta_data || {}),
+        ...(endPayload?.citations !== undefined ? { citations: endPayload.citations } : {}),
+        ...(endPayload?.suggested_questions !== undefined
+          ? { suggested_questions: endPayload.suggested_questions }
+          : {}),
+        ...(audioUrl !== undefined ? { audio_url: audioUrl } : {}),
+        ...(audioStatus !== undefined ? { audio_status: audioStatus } : {}),
+        ...(error ? { error } : {}),
+      },
     }))
+
+    if (typeof audioUrl === 'string' && audioStatus === 'pending') {
+      adapter.startAudioPolling?.(audioUrl, endPayload?.file_id || audioUrl)
+    }
     adapter.finishStreaming()
   }
 
@@ -382,6 +413,11 @@ export const createClusterStreamProcessor = (adapter: ClusterStreamAdapter) => {
           adapter.applyMessageId(payload.message_id)
           adapter.applyUserMessageId(payload.user_message_id)
           adapter.updateAssistant(message => ({ ...message, status: 'running' }))
+          break
+        case 'reasoning':
+          if (ownedByAgent) break
+          adapter.stopInitialLoading?.()
+          adapter.appendAssistantReasoning(payload.content)
           break
         case 'message':
           adapter.stopInitialLoading?.()
@@ -428,11 +464,11 @@ export const createClusterStreamProcessor = (adapter: ClusterStreamAdapter) => {
               status: block.status === 'running' ? 'completed' : block.status,
             }), false)
           } else {
-            finishCluster('completed')
+            finishCluster('completed', undefined, payload)
           }
           break
         case 'error': {
-          const error = getErrorText(payload.error)
+          const error = getErrorText(payload)
           if (ownedByAgent) {
             updateAgentBlock(payload, block => ({
               ...block,

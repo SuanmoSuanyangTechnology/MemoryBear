@@ -10,6 +10,7 @@ Storage schema: identity_background / relationships 为 list[str]，
 domain_specific_info 为 dict[str, list[str]]。
 """
 
+import json
 import logging
 from typing import Any, Dict, List, Literal, Optional, Tuple
 
@@ -53,8 +54,16 @@ RELATION_TYPES: tuple[str, ...] = (
     "pet",
 )
 
-# 旧 8 字段白名单，供 sidecar_step_schema / MetadataExtractionStep 使用
-ALLOWED_METADATA_FIELDS: tuple[str, ...] = (
+# 显式过滤/禁止作为独立 operation 输出的字段
+FILTERED_METADATA_FIELDS: tuple[str, ...] = (
+    "aliases",
+    "domain_specific_info",
+)
+
+OperationLiteral = Literal["add", "delete", "update"]
+
+# 历史旧 8 字段：停止生成，读取和合并继续保留，待迁移后统一删除
+LEGACY_METADATA_FIELDS: tuple[str, ...] = (
     "core_facts",
     "traits",
     "relations",
@@ -65,13 +74,15 @@ ALLOWED_METADATA_FIELDS: tuple[str, ...] = (
     "events",
 )
 
-# 显式过滤/禁止作为独立 operation 输出的字段
-FILTERED_METADATA_FIELDS: tuple[str, ...] = (
-    "aliases",
+# 新结构 3 个顶层键
+NEW_METADATA_FIELDS: tuple[str, ...] = (
+    "identity_background",
+    "relationships",
     "domain_specific_info",
 )
 
-OperationLiteral = Literal["add", "delete", "update"]
+# 展示投影 / L0 投影使用的 13 个通用二级键，顺序固定
+PROFILE_DISPLAY_KEYS: tuple[str, ...] = IDENTITY_BACKGROUND_SUBCATEGORIES + RELATION_TYPES
 
 
 def parse_entry_triplet(item: str) -> Optional[Tuple[str, str, str]]:
@@ -139,6 +150,194 @@ def _normalize_entry(item: str) -> str:
     """规范化为三段式写法（不打日志），用于快照记录与库内存储写法保持一致。"""
     parts = _entry_key(item).split("|", 2)
     return format_entry_triplet(*parts) if len(parts) == 3 else (item or "").strip()
+
+
+def split_metadata_entry(item: Any) -> Optional[Tuple[str, str, str]]:
+    """读链路条目解析：规则同 parse_entry_triplet，但不打日志，非字符串条目返回 None。"""
+    if not isinstance(item, str):
+        return None
+    parts = [p.strip() for p in item.strip().split("|", 2)]
+    if len(parts) == 2:
+        parts = [parts[0], "", parts[1]]
+    if len(parts) != 3 or not parts[2]:
+        return None
+    return parts[0], parts[1], parts[2]
+
+
+def normalize_new_metadata(meta: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """返回新三键的副本；缺失或类型不符时补默认值（list / list / dict[str, list]）。"""
+    meta = meta if isinstance(meta, dict) else {}
+    ib = meta.get("identity_background")
+    rel = meta.get("relationships")
+    ds = meta.get("domain_specific_info")
+    return {
+        "identity_background": list(ib) if isinstance(ib, list) else [],
+        "relationships": list(rel) if isinstance(rel, list) else [],
+        "domain_specific_info": (
+            {k: list(v) for k, v in ds.items() if isinstance(v, list)}
+            if isinstance(ds, dict) else {}
+        ),
+    }
+
+
+def _iter_profile_entries(meta: Optional[Dict[str, Any]]):
+    """依次产出 identity_background、relationships 中可解析且二级键属于 13 个通用键的条目。"""
+    normalized = normalize_new_metadata(meta)
+    for field in ("identity_background", "relationships"):
+        for item in normalized[field]:
+            triplet = split_metadata_entry(item)
+            if triplet and triplet[0] in PROFILE_DISPLAY_KEYS:
+                yield triplet
+
+
+def project_display_profile(
+    meta: Optional[Dict[str, Any]],
+    limit_per_key: Optional[int] = None,
+) -> Dict[str, List[str]]:
+    """展示投影（GET 画像、Trace 画像）。
+
+    取第 1 段为 key、第 3 段为 value，丢弃第 2 段三级键；同一 key 下正文相同的去重（保留首现）；
+    按 PROFILE_DISPLAY_KEYS 顺序输出，无值的 key 不输出；limit_per_key 为 None 时不限条数。
+    """
+    grouped: Dict[str, List[str]] = {}
+    for l2, _l3, content in _iter_profile_entries(meta):
+        values = grouped.setdefault(l2, [])
+        if content not in values:
+            values.append(content)
+    result: Dict[str, List[str]] = {}
+    for key in PROFILE_DISPLAY_KEYS:
+        values = grouped.get(key)
+        if values:
+            result[key] = values if limit_per_key is None else values[:limit_per_key]
+    return result
+
+
+def project_l0_profile(meta: Optional[Dict[str, Any]]) -> Dict[str, List[str]]:
+    """L0 投影（给大模型的 <user-info>）。
+
+    以二级键分组，值为规范化后的完整三段条目（保留三级键），按 _entry_key 去重、保留存储顺序；
+    按 PROFILE_DISPLAY_KEYS 顺序输出，无值的 key 不输出，不限条数。
+    """
+    grouped: Dict[str, List[str]] = {}
+    seen: Dict[str, set[str]] = {}
+    for l2, l3, content in _iter_profile_entries(meta):
+        entry = format_entry_triplet(l2, l3, content)
+        key = _entry_key(entry)
+        if key in seen.setdefault(l2, set()):
+            continue
+        seen[l2].add(key)
+        grouped.setdefault(l2, []).append(entry)
+    return {key: grouped[key] for key in PROFILE_DISPLAY_KEYS if key in grouped}
+
+
+def flatten_domain_specific_info(domain_specific_info: Any) -> List[Tuple[str, str, str]]:
+    """把 domain_specific_info 展平为 (scene_key, field_key, 正文) 列表，按存储顺序，跳过无法解析的条目。"""
+    if not isinstance(domain_specific_info, dict):
+        return []
+    result: List[Tuple[str, str, str]] = []
+    for scene_key, items in domain_specific_info.items():
+        if not isinstance(items, list):
+            continue
+        for item in items:
+            triplet = split_metadata_entry(item)
+            if triplet:
+                result.append((str(scene_key), triplet[0], triplet[2]))
+    return result
+
+
+def _union_entries(base: List[Any], extra: List[Any]) -> List[Any]:
+    """字符串按 _entry_key 去重；非字符串 JSON 条目按类型和值去重，原样保留。
+
+    保留 base 在前、首现顺序；重复归并不会追加相同的非字符串历史条目。
+    """
+    result = list(base)
+    seen = {_entry_key(x) for x in result if isinstance(x, str)}
+    seen_non_strings = {
+        _legacy_metadata_entry_key(x) for x in result if not isinstance(x, str)
+    }
+    for item in extra:
+        if not isinstance(item, str):
+            non_string_key = _legacy_metadata_entry_key(item)
+            if non_string_key not in seen_non_strings:
+                seen_non_strings.add(non_string_key)
+                result.append(item)
+            continue
+        key = _entry_key(item)
+        if key not in seen:
+            seen.add(key)
+            result.append(item)
+    return result
+
+
+def normalize_legacy_metadata_values(value: Any) -> list[Any]:
+    """历史字段按列表读取；单值整体保留，空值不生成条目。"""
+    values = value if isinstance(value, list) else [value]
+    return [item for item in values if item is not None and item != ""]
+
+
+def _legacy_metadata_entry_key(value: Any) -> tuple[str, str]:
+    # 字符串沿用忽略大小写去重；其他 JSON 值保留类型，避免 0 / False / "0" 混淆。
+    if isinstance(value, str):
+        return "str", value.lower()
+    return type(value).__name__, json.dumps(value, sort_keys=True, ensure_ascii=False)
+
+
+def merge_user_meta_data(target: Optional[Dict[str, Any]], source: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """用户归并时把 source 的 meta_data 合并进 target，返回新字典。
+
+    - identity_background / relationships：按 _entry_key 去重并集；
+    - domain_specific_info：按场景键合并，场景内按 _entry_key 去重并集；
+    - 旧 8 字段：列表或历史单值均保留，字符串忽略大小写去重，无内容时不新增键；
+    - 其他 list 字段：按 str(v).lower() 去重并集（历史行为）；
+    - 类型不符的一侧忽略并记 warning；source 中非 list / dict 的其他字段不合并。
+    """
+    merged: Dict[str, Any] = dict(target or {})
+    for key, values in (source or {}).items():
+        if key in LEGACY_METADATA_FIELDS:
+            items = normalize_legacy_metadata_values(merged.get(key))
+            items += normalize_legacy_metadata_values(values)
+            if items:
+                unique: dict[tuple[str, str], Any] = {}
+                for item in items:
+                    unique.setdefault(_legacy_metadata_entry_key(item), item)
+                merged[key] = list(unique.values())
+        elif key in ("identity_background", "relationships"):
+            if not isinstance(values, list):
+                logger.warning(f"[Metadata] 归并忽略 source 中类型不符的字段: {key}={type(values).__name__}")
+                continue
+            existing = merged.get(key)
+            if existing is not None and not isinstance(existing, list):
+                logger.warning(f"[Metadata] 归并忽略 target 中类型不符的字段: {key}={type(existing).__name__}")
+                existing = None
+            merged[key] = _union_entries(existing or [], values)
+        elif key == "domain_specific_info":
+            if not isinstance(values, dict):
+                logger.warning(f"[Metadata] 归并忽略 source 中类型不符的字段: {key}={type(values).__name__}")
+                continue
+            existing = merged.get(key)
+            if existing is not None and not isinstance(existing, dict):
+                logger.warning(f"[Metadata] 归并忽略 target 中类型不符的字段: {key}={type(existing).__name__}")
+                existing = None
+            scenes: Dict[str, Any] = dict(existing or {})
+            for scene_key, scene_items in values.items():
+                if not isinstance(scene_items, list):
+                    logger.warning(f"[Metadata] 归并忽略 source 场景中类型不符的数据: {scene_key}")
+                    continue
+                current = scenes.get(scene_key)
+                if current is not None and not isinstance(current, list):
+                    logger.warning(f"[Metadata] 归并忽略 target 场景中类型不符的数据: {scene_key}")
+                    current = None
+                scenes[scene_key] = _union_entries(current or [], scene_items)
+            merged[key] = scenes
+        elif isinstance(values, list):
+            existing_list = list(merged.get(key) or [])
+            existing_set = {str(v).lower() for v in existing_list}
+            for v in values:
+                if str(v).lower() not in existing_set:
+                    existing_list.append(v)
+                    existing_set.add(str(v).lower())
+            merged[key] = existing_list
+    return merged
 
 
 def _trace(

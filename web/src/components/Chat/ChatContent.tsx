@@ -197,7 +197,7 @@ const ChatContent: FC<ChatContentProps> = ({
       ? item.meta_data?.outputs.map(vo => vo.content).join('\n')
       : renderRuntime && item.content && item.content.length > 0
       ? item.content
-      : renderRuntime
+      : renderRuntime && item.subContent
       ? ''
       : item.meta_data?.error && item.meta_data?.error.length > 0
       ? item.meta_data?.error
@@ -421,7 +421,7 @@ const ChatContent: FC<ChatContentProps> = ({
                             }
                           </>}
                           {(isSupportTools || isAlwaysShowAssistantTools) && item.role === 'assistant' && !(!isEnded && index === data.length - 1) && !item.is_hidden_refresh && item.id && <>
-                            {(index === data.length - 1 || typeof regenerateMaxCount === 'number') && Array.isArray(vo) && vo.length > 1 && typeof item.version === 'number' && handleVersionChange &&
+                            {(index === data.length - 1 || isAlwaysShowAssistantTools) && !item.is_hidden_refresh && Array.isArray(vo) && vo.length > 1 && typeof item.version === 'number' && handleVersionChange &&
                               <Pagination
                                 key={item.id}
                                 size="small"

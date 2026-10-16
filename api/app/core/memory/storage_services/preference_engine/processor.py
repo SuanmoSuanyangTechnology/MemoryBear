@@ -89,11 +89,15 @@ class PreferenceProcessor:
             groups[(item.subject, item.situation_key)].append(item)
 
         created = updated = noop_items = 0
+        added_items = updated_items = deleted_items = 0
         for (subject, situation_key), incoming in groups.items():
             outcome = await self._write_group(subject, situation_key, incoming)
             created += outcome[0]
             updated += outcome[1]
             noop_items += outcome[2]
+            added_items += outcome[3]
+            updated_items += outcome[4]
+            deleted_items += outcome[5]
 
         return PreferenceProcessorResult(
             status="success",
@@ -101,6 +105,9 @@ class PreferenceProcessor:
             created_count=created,
             updated_count=updated,
             noop_item_count=noop_items,
+            added_item_count=added_items,
+            updated_item_count=updated_items,
+            deleted_item_count=deleted_items,
         )
 
     async def _write_group(
@@ -108,7 +115,16 @@ class PreferenceProcessor:
         subject: str,
         situation_key: str,
         incoming: list[IdentifiedPreference],
-    ) -> tuple[int, int, int]:
+    ) -> tuple[int, int, int, int, int, int]:
+        """处理一个 (subject, situation_key) 分组。
+
+        返回 (created, updated, noop_item_count, added_items, updated_items,
+        deleted_items)。原子项计数以实际落库为准：先在组内 pending 累计，
+        ``update_preference`` 保存成功后才计入返回值；节点保存前消失（返回
+        None）的分组整组不计，避免展示层把未落库的操作报为已生效活动。
+        ``noop_item_count`` 是识别阶段（P2 判 noop）的诊断计数，与保存成败
+        无关，不进入展示卡片统计。
+        """
         incoming_items = [
             PreferenceItem(mode=item.mode, preference_text=item.preference_text)
             for item in incoming
@@ -130,7 +146,8 @@ class PreferenceProcessor:
                 items=incoming_items,
             )
             if created:
-                return 1, 0, 0
+                # 新建节点：写入的 items 全部计入 added_item_count。
+                return 1, 0, 0, len(incoming_items), 0, 0
 
         working = [
             PreferenceItem(mode=mode, preference_text=text)
@@ -138,6 +155,9 @@ class PreferenceProcessor:
         ]
         changed = False
         noop_item_count = 0
+        pending_added = 0
+        pending_updated = 0
+        pending_deleted = 0
         for incoming_item in incoming_items:
             operations = await self.runner.plan_update(
                 working,
@@ -147,10 +167,13 @@ class PreferenceProcessor:
                 noop_item_count += 1
                 continue
             working = apply_preference_operations(working, incoming_item, operations)
+            pending_added += len(operations.add)
+            pending_updated += len(operations.update)
+            pending_deleted += len(operations.delete)
             changed = True
 
         if not changed:
-            return 0, 0, noop_item_count
+            return 0, 0, noop_item_count, 0, 0, 0
         saved = await update_preference(self.connector, node, working)
         if saved is None:
             logger.warning(
@@ -161,8 +184,8 @@ class PreferenceProcessor:
                 subject,
                 situation_key,
             )
-            return 0, 0, noop_item_count
-        return 0, 1, noop_item_count
+            return 0, 0, noop_item_count, 0, 0, 0
+        return 0, 1, noop_item_count, pending_added, pending_updated, pending_deleted
 
     @staticmethod
     def _deduplicate_identified(

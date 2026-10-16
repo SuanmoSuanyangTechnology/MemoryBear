@@ -49,7 +49,7 @@ const NODE_TYPE_STYLES = {
   Statement: { category: 6, color: '#C86AFF' },
   Conversation: { category: 7, color: '#F7BA1E' },
   MemorySummary: { category: 8, color: '#5B6167' },
-} satisfies Record<GraphNode['label'], NodeTypeStyle>
+} as Record<GraphNode['label'], NodeTypeStyle>
 
 const UNKNOWN_NODE_TYPE_STYLE: NodeTypeStyle = { category: 0, color: '#A8ABB2' }
 
@@ -283,7 +283,7 @@ const RelationshipNetwork = forwardRef<RelationshipNetworkRef, RelationshipNetwo
                     key={item.name}
                     gap={4}
                     align="center"
-                    className={clsx("rb:cursor-pointer rb:px-2! rb:py-1! rb:rounded-full rb:text-[12px] rb:leading-4 rb:text-[#000000]", {
+                    className={clsx("rb:cursor-pointer rb:px-2! rb:py-1! rb:rounded-full rb:text-[12px] rb:leading-4 rb:text-gray-950", {
                       'rb:border rb:border-[#171719]': selectedCategory === item.name,
                       'rb-border': selectedCategory !== item.name
                     })}
@@ -293,7 +293,7 @@ const RelationshipNetwork = forwardRef<RelationshipNetworkRef, RelationshipNetwo
                       style={{ backgroundColor: getNodeTypeStyle(item.name).color }}
                     ></div>
                     {t(`userMemory.${item.name}`)}
-                    <div className="rb:px-1 rb:rounded-full rb:bg-[#F6F6F6] rb:text-[10px] rb:h-3.5">{item.value}</div>
+                    <div className="rb:px-1 rb:rounded-full rb:bg-gray-100 rb:text-[10px] rb:h-3.5">{item.value}</div>
                   </Flex>
                 ))}
               </Flex>

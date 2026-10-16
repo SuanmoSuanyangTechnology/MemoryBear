@@ -255,8 +255,12 @@ MIN_MEMORY_SUMMARY_COUNT = 5
 class MemoryBaseService:
     """记忆服务基类，提供共享的辅助方法"""
     
-    def __init__(self):
-        self.neo4j_connector = Neo4jConnector(shared_driver=True)
+    def __init__(self, shared_driver: bool = True):
+        self.neo4j_connector = Neo4jConnector(shared_driver=shared_driver)
+
+    async def close(self):
+        """关闭独立 driver；共享 driver 由应用生命周期统一管理。"""
+        await self.neo4j_connector.close()
     
     async def get_valid_memory_summary_count(
         self,
