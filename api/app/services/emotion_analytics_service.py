@@ -14,6 +14,14 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.core.logging_config import get_business_logger
+from app.core.memory.emotion.emotion_buckets import (
+    EMOTION_CODES,
+    NEGATIVE_EMOTIONS,
+    POSITIVE_EMOTIONS,
+    emotion_display_name,
+    emotion_valence,
+    normalize_emotion_type,
+)
 from app.repositories.neo4j.emotion_repository import EmotionRepository
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 from app.services.memory_config_service import MemoryConfigService
@@ -64,29 +72,17 @@ class EmotionAnalyticsService:
         self.emotion_repo = EmotionRepository(connector)
         logger.info("情绪分析服务初始化完成")
 
-    # 情绪类型的中英文映射
-    EMOTION_TYPE_TRANSLATIONS = {
-        'joy': {'zh': '喜悦', 'en': 'Joy'},
-        'sadness': {'zh': '悲伤', 'en': 'Sadness'},
-        'anger': {'zh': '愤怒', 'en': 'Anger'},
-        'fear': {'zh': '恐惧', 'en': 'Fear'},
-        'surprise': {'zh': '惊讶', 'en': 'Surprise'},
-        'neutral': {'zh': '中性', 'en': 'Neutral'}
-    }
-
     def _translate_emotion_type(self, emotion_type: str, language: str = "zh") -> str:
         """将情绪类型翻译成指定语言
         
         Args:
-            emotion_type: 情绪类型（英文key）
+            emotion_type: 情绪类型（英文key，10 类或旧值 fear/surprise）
             language: 目标语言 ("zh" 或 "en")
         
         Returns:
-            翻译后的情绪类型名称
+            翻译后的情绪类型名称；未知值原样返回
         """
-        if emotion_type in self.EMOTION_TYPE_TRANSLATIONS:
-            return self.EMOTION_TYPE_TRANSLATIONS[emotion_type].get(language, emotion_type)
-        return emotion_type
+        return emotion_display_name(emotion_type, language) or emotion_type
 
     async def get_emotion_tags(
             self,
@@ -100,15 +96,16 @@ class EmotionAnalyticsService:
         """获取情绪标签统计
 
         查询指定用户的情绪类型分布，包括计数、百分比和平均强度。
-        确保返回所有6个情绪维度（joy、sadness、anger、fear、surprise、neutral），
-        即使某些维度没有数据也会返回count=0的记录。
-        
+        旧值按 fear→anxiety、surprise→neutral 合并，未知值丢弃；
+        按 EMOTION_CODES 固定顺序返回，没有数据的类别 count=0；
+        limit 小于 10 时只返回 count 最高的 limit 类（同 count 按 EMOTION_CODES 顺序取）。
+
         Args:
             end_user_id: 用户ID
-            emotion_type: 情绪类型过滤
+            emotion_type: 情绪类型过滤（10 类 code；旧值 fear/surprise 兼容）
             start_date: 开始日期
             end_date: 结束日期
-            limit: 返回数量限制
+            limit: 返回标签数量上限（最多 10 类，超过 10 等同于 10）
             language: 输出语言 ("zh" 中文, "en" 英文)
 
         """
@@ -116,45 +113,49 @@ class EmotionAnalyticsService:
             logger.info(f"获取情绪标签统计: user={end_user_id}, type={emotion_type}, "
                         f"start={start_date}, end={end_date}, limit={limit}, language={language}")
 
-            # 调用仓储层查询
-            tags = await self.emotion_repo.get_emotion_tags(
+            # 调用仓储层查询（按原始值分组，不截断）
+            rows = await self.emotion_repo.get_emotion_tags(
                 end_user_id=end_user_id,
                 emotion_type=emotion_type,
                 start_date=start_date,
                 end_date=end_date,
-                limit=limit
             )
 
-            # 定义所有6个情绪维度
-            all_emotion_types = ['joy', 'sadness', 'anger', 'fear', 'surprise', 'neutral']
+            # 按归一化后的 code 合并到 10 个桶，未知值丢弃
+            buckets: Dict[str, Dict[str, float]] = {
+                code: {"count": 0, "intensity_sum": 0.0, "intensity_count": 0} for code in EMOTION_CODES
+            }
+            for row in rows:
+                code = normalize_emotion_type(row.get("emotion_type"))
+                if code is None:
+                    continue
+                bucket = buckets[code]
+                bucket["count"] += row.get("count") or 0
+                bucket["intensity_sum"] += row.get("intensity_sum") or 0.0
+                bucket["intensity_count"] += row.get("intensity_count") or 0
 
-            # 将查询结果转换为字典，方便查找
-            tags_dict = {tag["emotion_type"]: tag for tag in tags}
+            total_count = sum(bucket["count"] for bucket in buckets.values())
 
-            # 补全缺失的情绪维度，直接使用英文枚举key（前端自行翻译）
+            # limit < 10 时按 count 降序取前 limit 类（同 count 按 EMOTION_CODES 顺序，sorted 稳定），
+            # 输出仍保持 EMOTION_CODES 固定顺序；total_count/percentage 基于全部类别计算
+            selected_codes = set(
+                sorted(EMOTION_CODES, key=lambda c: buckets[c]["count"], reverse=True)[:max(limit, 0)]
+            )
+
+            # 直接使用英文枚举key（前端自行翻译）
             complete_tags = []
-            for emotion in all_emotion_types:
-                if emotion in tags_dict:
-                    tag = tags_dict[emotion].copy()
-                    tag["emotion_type"] = emotion
-                    complete_tags.append(tag)
-                else:
-                    # 如果该情绪类型不存在，添加默认值
-                    complete_tags.append({
-                        "emotion_type": emotion,
-                        "count": 0,
-                        "percentage": 0.0,
-                        "avg_intensity": 0.0
-                    })
-
-            # 计算总数
-            total_count = sum(tag["count"] for tag in complete_tags)
-
-            # 如果有数据，重新计算百分比（因为补全了0值项）
-            if total_count > 0:
-                for tag in complete_tags:
-                    if tag["count"] > 0:
-                        tag["percentage"] = round((tag["count"] / total_count) * 100, 2)
+            for code in (c for c in EMOTION_CODES if c in selected_codes):
+                bucket = buckets[code]
+                count = bucket["count"]
+                intensity_count = bucket["intensity_count"]
+                complete_tags.append({
+                    "emotion_type": code,
+                    "count": count,
+                    "percentage": round(count / total_count * 100, 2) if total_count > 0 else 0.0,
+                    "avg_intensity": (
+                        round(bucket["intensity_sum"] / intensity_count, 3) if intensity_count > 0 else 0.0
+                    ),
+                })
 
             # 构建时间范围信息
             time_range = {}
@@ -241,14 +242,10 @@ class EmotionAnalyticsService:
                 - negative_count: 负面情绪数量
                 - neutral_count: 中性情绪数量
         """
-        # 定义情绪分类
-        positive_emotions = {'joy', 'surprise'}
-        negative_emotions = {'sadness', 'anger', 'fear'}
-
-        # 统计各类情绪数量
-        positive_count = sum(1 for e in emotions if e.get('emotion_type') in positive_emotions)
-        negative_count = sum(1 for e in emotions if e.get('emotion_type') in negative_emotions)
-        neutral_count = sum(1 for e in emotions if e.get('emotion_type') == 'neutral')
+        # 统计各类情绪数量（效价分组见 emotion_buckets，D5）
+        positive_count = sum(1 for e in emotions if e.get('emotion_type') in POSITIVE_EMOTIONS)
+        negative_count = sum(1 for e in emotions if e.get('emotion_type') in NEGATIVE_EMOTIONS)
+        neutral_count = sum(1 for e in emotions if emotion_valence(e.get('emotion_type')) == 'neutral')
 
         # 计算积极率
         total_non_neutral = positive_count + negative_count
@@ -324,11 +321,7 @@ class EmotionAnalyticsService:
                 - score: 恢复力分数（0-100）
                 - recovery_rate: 恢复率（转换次数/负面情绪数）
         """
-        # 定义情绪分类
-        positive_emotions = {'joy', 'surprise'}
-        negative_emotions = {'sadness', 'anger', 'fear'}
-
-        # 统计负面到正面的转换次数
+        # 统计负面到正面的转换次数（效价分组见 emotion_buckets，D5）
         recovery_count = 0
         negative_count = 0
 
@@ -336,13 +329,13 @@ class EmotionAnalyticsService:
             current_emotion = emotions[i].get('emotion_type')
 
             # 统计负面情绪总数
-            if current_emotion in negative_emotions:
+            if current_emotion in NEGATIVE_EMOTIONS:
                 negative_count += 1
 
                 # 检查下一个情绪是否为正面
                 if i + 1 < len(emotions):
                     next_emotion = emotions[i + 1].get('emotion_type')
-                    if next_emotion in positive_emotions:
+                    if next_emotion in POSITIVE_EMOTIONS:
                         recovery_count += 1
 
         # 计算恢复力分数
@@ -447,7 +440,7 @@ class EmotionAnalyticsService:
 
             # 统计情绪分布
             emotion_distribution = {}
-            for emotion_type in ['joy', 'sadness', 'anger', 'fear', 'surprise', 'neutral']:
+            for emotion_type in EMOTION_CODES:
                 count = sum(1 for e in emotions if e.get('emotion_type') == emotion_type)
                 emotion_distribution[emotion_type] = count
 
@@ -485,13 +478,11 @@ class EmotionAnalyticsService:
                 - high_intensity_emotions: 高强度情绪列表
                 - emotion_volatility: 情绪波动性（高/中/低）
         """
-        negative_emotions = {'sadness', 'anger', 'fear'}
-
         # 统计负面情绪分布
         negative_emotion_counts = {}
         for emotion in emotions:
             emotion_type = emotion.get('emotion_type')
-            if emotion_type in negative_emotions:
+            if emotion_type in NEGATIVE_EMOTIONS:
                 negative_emotion_counts[emotion_type] = negative_emotion_counts.get(emotion_type, 0) + 1
 
         # 识别主要负面情绪
@@ -507,7 +498,7 @@ class EmotionAnalyticsService:
                 "created_at": e.get('created_at')
             }
             for e in emotions
-            if e.get('emotion_intensity', 0) >= 0.7
+            if (e.get('emotion_intensity') or 0.0) >= 0.7
         ]
 
         # 评估情绪波动性

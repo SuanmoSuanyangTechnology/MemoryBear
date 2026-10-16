@@ -65,6 +65,7 @@ export const space = {
           userRunningFailed: '由于空间已更换 Embedding 模型，记忆库需要使用新模型重新建立向量索引。当前 {{failed}} 个记忆库处理失败，本轮仍有任务未结束。',
           userRunningQueued: '由于空间已更换 Embedding 模型，记忆库需要使用新模型重新建立向量索引。当前 {{running}} 个记忆库正在处理，期间已自动降级为关键词/全文检索；另有 {{queued}} 个待处理。',
           userSucceededQueued: '由于空间已更换 Embedding 模型，记忆库需要使用新模型重新建立向量索引。已有 {{succeeded}} 个记忆库完成，{{queued}} 个等待处理。',
+          noUserSucceeded: '由于空间已更换 Embedding 模型，记忆库需要使用新模型重新建立向量索引。全部记忆库已处理成功，向量检索已恢复。',
           userSucceeded: '由于空间已更换 Embedding 模型，记忆库需要使用新模型重新建立向量索引。全部 {{succeeded}} 个记忆库已处理成功，向量检索已恢复。',
           userFailed: '由于空间已更换 Embedding 模型，记忆库需要使用新模型重新建立向量索引。本轮处理已结束：{{succeeded}} 个成功，{{failed}} 个失败。',
         },

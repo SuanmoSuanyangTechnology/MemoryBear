@@ -4,10 +4,16 @@ DIALOGUE_NODE_SAVE = """
     UNWIND $dialogues AS dialogue
     MERGE (n:Dialogue {id: dialogue.id})
     SET n.uuid = coalesce(n.uuid, dialogue.id)
+    // 握手补写依赖写入前状态 prev_*（新建节点时均为 null）：
+    // SET n.uuid 已对节点加写锁；Neo4j read-committed 下读不加锁，prev_* 必须在拿锁之后、
+    // 改写 write_mode / emotion 之前读取，才能看到并发对方已提交的状态。
     // 覆盖竞态守卫：只许 normal 覆盖 fast，不许 fast 反向降级 normal。
     // 当已存在节点为 normal 且本次写入为 fast 时跳过内容写入（canWrite=[]），
     // 保留正写的权威版本；其余情况（新建 / normal 覆盖 fast / 同模式重试）照常写入。
     WITH n, dialogue,
+         n.write_mode AS prev_write_mode,
+         n.emotion AS prev_emotion,
+         n.emotion_score AS prev_emotion_score,
          CASE WHEN n.write_mode = 'normal' AND dialogue.write_mode = 'fast'
               THEN [] ELSE [1] END AS canWrite
     FOREACH (_ IN canWrite |
@@ -19,12 +25,21 @@ DIALOGUE_NODE_SAVE = """
             n.name = dialogue.name,
             n.dialog_embedding = dialogue.dialog_embedding,
             n.config_id = dialogue.config_id,
-            n.write_mode = coalesce(dialogue.write_mode, 'normal'),
-            // emotion 粘性保留：本次写入未带值（None）则保留原值，避免正写（不算情绪）
-            n.emotion = coalesce(dialogue.emotion, n.emotion),
-            n.emotion_score = coalesce(dialogue.emotion_score, n.emotion_score)
+            n.write_mode = coalesce(dialogue.write_mode, 'normal')
     )
-    RETURN n.id AS uuid
+    // 情绪独立于 canWrite 守卫，emotion / emotion_score 成对写入（入参两者都非空才写）：
+    // - canWrite 生效（新建 / normal 覆盖 fast / 同模式重试）：本次带情绪则覆盖；
+    // - 迟到 fast（canWrite=[]）：仅在 normal 节点尚无情绪时补写，已有情绪不覆盖；
+    // - 本次未带情绪（如正写不算情绪）：不触碰情绪字段，保留原值。
+    FOREACH (_ IN CASE WHEN dialogue.emotion IS NOT NULL
+                            AND dialogue.emotion_score IS NOT NULL
+                            AND (size(canWrite) > 0 OR n.emotion IS NULL)
+                       THEN [1] ELSE [] END |
+        SET n.emotion = dialogue.emotion,
+            n.emotion_score = dialogue.emotion_score
+    )
+    // 已知遗留：id 无内容哈希，同一 conv_id + seq 内容变更后重处理时，prev_emotion 可能属于旧内容。
+    RETURN n.id AS uuid, prev_write_mode, prev_emotion, prev_emotion_score
 """
 
 STATEMENT_NODE_SAVE = """
@@ -39,11 +54,6 @@ SET s.delete_at = null,
     stmt_type: statement.stmt_type,
     statement: statement.statement,
     speaker: statement.speaker,
-    emotion_intensity: statement.emotion_intensity,
-    emotion_target: statement.emotion_target,
-    emotion_subject: statement.emotion_subject,
-    emotion_type: statement.emotion_type,
-    emotion_keywords: statement.emotion_keywords,
     temporal_info: statement.temporal_info,
     created_at: statement.created_at,
     valid_at: statement.valid_at,
@@ -62,6 +72,17 @@ SET s.delete_at = null,
         ELSE coalesce(statement.is_permanent, false)
     END
 }
+// 情绪字段粘性保留：本次写入带 emotion_type 时整组覆盖；
+// 未带（如正写不算情绪）则保留节点原值，仅保证 emotion_keywords 不为 null。
+WITH s, statement, statement.emotion_type IS NOT NULL AS has_emotion
+SET s.emotion_type = CASE WHEN has_emotion THEN statement.emotion_type ELSE s.emotion_type END,
+    s.emotion_intensity = CASE WHEN has_emotion THEN statement.emotion_intensity ELSE s.emotion_intensity END,
+    s.emotion_keywords = CASE
+        WHEN has_emotion THEN coalesce(statement.emotion_keywords, [])
+        ELSE coalesce(s.emotion_keywords, [])
+    END,
+    s.emotion_subject = CASE WHEN has_emotion THEN statement.emotion_subject ELSE s.emotion_subject END,
+    s.emotion_target = CASE WHEN has_emotion THEN statement.emotion_target ELSE s.emotion_target END
 RETURN s.id AS uuid
 """
 

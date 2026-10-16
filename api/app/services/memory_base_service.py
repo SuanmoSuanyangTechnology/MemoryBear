@@ -10,6 +10,7 @@ from typing import Optional
 from pydantic import BaseModel
 
 from app.core.logging_config import get_logger
+from app.core.memory.emotion.emotion_buckets import normalize_emotion_type_or_raw
 from app.core.memory.pipelines.base_pipeline import ModelClientMixin
 from app.core.utils.datetime_utils import to_timestamp_ms
 from app.db import get_db_context
@@ -378,7 +379,8 @@ class MemoryBaseService:
             )
             
             if result and len(result) > 0:
-                emotion_type = result[0].get("emotion_type")
+                # 旧值归一化（fear→anxiety、surprise→neutral），未知值原样返回
+                emotion_type = normalize_emotion_type_or_raw(result[0].get("emotion_type"))
                 logger.info(f"成功提取 summary_id={summary_id} 的情绪: {emotion_type}")
                 return emotion_type
             else:

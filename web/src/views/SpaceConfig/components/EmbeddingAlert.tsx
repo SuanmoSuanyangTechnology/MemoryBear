@@ -91,7 +91,7 @@ const getUserAlertKey = (reembedInfo: ReembedInfo) => {
     return 'space.reembedding.alert.userQueued'
   }
   if (status === 'succeeded') {
-    return 'space.reembedding.alert.userSucceeded'
+    return reembedInfo.total_end_users > 0 ?  'space.reembedding.alert.userSucceeded' : 'space.reembedding.alert.noUserSucceeded'
   }
   if (status === 'failed') {
     return 'space.reembedding.alert.userFailed'
@@ -199,12 +199,12 @@ const EmbeddingAlert: FC<EmbeddingAlertProps> = ({
             </div>
           )}
           <Space size={12} className="rb:shrink-0!">
-            {reembedInfo.status === 'failed' && (
+            {reembedInfo.status === 'failed' && reembedInfo.total_end_users > 0 && (
               <Button type="primary" onClick={handleRetryFailed}>
                 {t('space.reembedding.retryFailedTasks')}
               </Button>
             )}
-            {!(reembedInfo.status === 'pending' && !reembedInfo.total_end_users) &&
+            {!(reembedInfo.status === 'pending' && !reembedInfo.total_end_users) && reembedInfo.total_end_users > 0 &&
               <Button onClick={() => embeddingRebuildModalRef.current?.handleOpen()}>
                 {t('space.reembedding.viewDetails')}
               </Button>

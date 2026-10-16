@@ -1,4 +1,5 @@
 from app.core.memory.storage.models.dto import (
+    DialogueWriteState,
     GraphWriteResult,
     StorageReadResult,
     StorageResult,
@@ -33,6 +34,7 @@ __all__ = [
     "StorageResult",
     "StorageWriteResult",
     "StorageReadResult",
+    "DialogueWriteState",
     "GraphWriteResult",
     "MemoryGraphWriteCommand",
 

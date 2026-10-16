@@ -17,7 +17,7 @@ from neo4j.time import DateTime as Neo4jDateTime
 import json
 from datetime import datetime
 
-from app.schemas.memory_episodic_schema import EmotionType
+from app.core.memory.emotion.emotion_buckets import emotion_valence
 from app.core.utils.datetime_utils import parse_iso_to_utc_naive, to_timestamp_ms
 from app.core.memory.models.event_category_models import EVENT_CATEGORY_NAMES, EVENT_CATEGORY_NAME_TO_ID
 from enum import Enum
@@ -971,12 +971,10 @@ class MemoryEmotion:
                 length_data.append(emotion_intensity)
             if emotion_type is not None and emotion_intensity is not None and formatted_created_at is not None:
                 # 使用(emotion_type, created_at)作为分组键
-                if emotion_type in {EmotionType.JOY_TYPE, EmotionType.SURPRISE_TYPE}:
-                    emotion_type='positive'
-                elif emotion_type in {EmotionType.SANDROWNESS_TYPE, EmotionType.FEAR_TYPE, EmotionType.ANGET_TYPE}:
-                    emotion_type='negative'
-                elif emotion_type==EmotionType.NEUTRAL_TYPE:
-                    emotion_type='neutral'
+                # 折叠为效价（D5：10 类 + 旧值 fear/surprise）；未知值保留原值
+                valence = emotion_valence(emotion_type)
+                if valence is not None:
+                    emotion_type = valence
                 group_key = (emotion_type, formatted_created_at)
                 # 累加emotion_intensity
                 try:
