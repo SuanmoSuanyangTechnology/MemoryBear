@@ -231,6 +231,16 @@ class AppDslService:
                     model.pop("model_id", None)
                     config["model"] = model
 
+                # 引用模式：把被引用 Agent 应用的 app_id 转成名称引用，便于跨环境按名重绑。
+                # release_id 跨环境无效，导出时丢弃，导入后统一回退 current。
+                if config.get("mode") == "reference":
+                    reference = dict(config.get("reference") or {})
+                    ref_app_id = reference.pop("app_id", None)
+                    reference.pop("release_id", None)
+                    if ref_app_id:
+                        reference["_ref"] = self._agent_ref(ref_app_id)
+                    config["reference"] = reference
+
                 knowledge_retrieval = config.get("knowledge_retrieval")
                 if knowledge_retrieval:
                     config["knowledge_retrieval"] = self._enrich_knowledge_retrieval(knowledge_retrieval)
@@ -686,17 +696,25 @@ class AppDslService:
             warnings.append(f"主 Agent 发布版本 '{ref.get('name')}' 未匹配，已置空，请导入后手动配置")
         return r.id if r else None
 
-    def _find_app_by_name(self, name: Optional[str], workspace_id: uuid.UUID) -> Optional[App]:
+    def _find_app_by_name(
+        self,
+        name: Optional[str],
+        workspace_id: uuid.UUID,
+        app_type: Optional[str] = None,
+    ) -> Optional[App]:
         """按名称在目标工作空间内匹配应用：优先本空间自有应用，其次共享给本空间的应用。
 
         不跨空间匹配，避免同名应用取到别的空间的实例。
+        app_type 非空时额外按应用类型过滤，避免同名的工作流/集群被误绑为子 Agent。
         """
         if not name:
             return None
+        type_filter = [App.type == app_type] if app_type else []
         own = self.db.query(App).filter(
             App.name == name,
             App.workspace_id == workspace_id,
             App.is_active.is_(True),
+            *type_filter,
         ).first()
         if own:
             return own
@@ -707,6 +725,7 @@ class AppDslService:
             App.is_active.is_(True),
             AppShare.target_workspace_id == workspace_id,
             AppShare.is_active.is_(True),
+            *type_filter,
         ).first()
 
     def _resolve_sub_agents(self, sub_agents: list, warnings: list, workspace_id: uuid.UUID) -> list:
@@ -715,7 +734,7 @@ class AppDslService:
             ref = s.get("_ref")
             entry = {k: v for k, v in s.items() if k != "_ref"}
             if ref:
-                a = self._find_app_by_name(ref.get("name"), workspace_id)
+                a = self._find_app_by_name(ref.get("name"), workspace_id, AppType.AGENT)
                 if not a:
                     # 目标工作空间不存在同名子 Agent 时，直接清空该子 Agent 配置（整条剔除）
                     warnings.append(f"子 Agent '{ref.get('name')}' 在目标工作空间不存在，已清空，请导入后手动添加")
@@ -735,10 +754,12 @@ class AppDslService:
             ref = r.get("_ref")
             entry = {k: v for k, v in r.items() if k != "_ref"}
             if ref:
-                a = self._find_app_by_name(ref.get("name"), workspace_id)
+                a = self._find_app_by_name(ref.get("name"), workspace_id, AppType.AGENT)
                 if not a:
-                    warnings.append(f"路由目标 Agent '{ref.get('name')}' 未匹配，已置空，请导入后手动配置")
-                entry["target_agent_id"] = str(a.id) if a else None
+                    # 目标 Agent 在目标工作空间不存在（可能对应子 Agent 已被清空），整条剔除避免悬空路由
+                    warnings.append(f"路由目标 Agent '{ref.get('name')}' 在目标工作空间不存在，已清空该路由规则")
+                    continue
+                entry["target_agent_id"] = str(a.id)
             result.append(entry)
         return result
 
@@ -906,6 +927,31 @@ class AppDslService:
                             "已置空，请导入后手动配置"
                         )
                     config["model"] = model
+
+                # 引用模式：在目标工作空间按名重绑被引用 Agent 应用。
+                # 匹配不到（含旧 DSL 无名称引用、只剩源空间裸 ID）时回退 inline 并清空 reference，
+                # 节点与连线保留，导入后需手动重配，避免运行期悬空引用。
+                if config.get("mode") == "reference":
+                    reference = dict(config.get("reference") or {})
+                    ref = reference.pop("_ref", None)
+                    ref_name = ref.get("name") if isinstance(ref, dict) else None
+                    target_app = (
+                        self._find_app_by_name(ref_name, workspace_id, AppType.AGENT)
+                        if ref_name
+                        else None
+                    )
+                    if target_app:
+                        reference["app_id"] = str(target_app.id)
+                        reference["release_policy"] = "current"
+                        reference["release_id"] = None
+                        config["reference"] = reference
+                    else:
+                        warnings.append(
+                            f"[{node_label}] 引用的 Agent 应用 '{ref_name or reference.get('app_id')}' "
+                            "在目标工作空间不存在，已回退为内置模式，请导入后手动配置"
+                        )
+                        config["mode"] = "inline"
+                        config["reference"] = None
 
                 # Agent 节点内置知识库检索工具：清理知识库并校验 Rerank 模型
                 knowledge_retrieval = config.get("knowledge_retrieval")
