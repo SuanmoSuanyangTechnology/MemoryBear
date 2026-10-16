@@ -121,8 +121,8 @@ def _has_credentials(request: Request) -> bool:
 # Headers always removed from client requests before termination results are
 # applied: credentials plus the gateway-managed identity namespace. Clients
 # must never be able to forge values the gateway injects (downstream services
-# trust these headers after termination).The X-Forwarded-* family is included
-# # — the gateway re-derives the origin pair from its own request view.
+# trust these headers after termination). The X-Forwarded-* family is included
+# — the gateway re-derives the origin pair from its own request view.
 _STRIPPED_HEADERS = frozenset(
     {
         "authorization",
