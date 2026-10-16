@@ -15,7 +15,7 @@ from ...rag.wiki.planning import reconcile, taxonomy
 from ...repositories.wiki import pages, state
 from ...repositories.wiki.common import lock_document, lock_knowledge
 from ...tasks.dispatch import TaskDispatcher
-from .lease import page_lease
+from .lease import page_lease, taxonomy_lease
 from .runtime import make_model, transaction
 
 
@@ -62,6 +62,21 @@ def _pending(session, delivery):
     return pages.pending_page_ids(session, current)
 
 
+def _plan_topics(runtime, model, snapshot, draft, delivery, input_hash):
+    # 模型调用不持有数据库事务；租约保护目录快照到页面计划注册的完整阶段。
+    with taxonomy_lease(runtime.redis.sync_client(), delivery["kb_id"]) as ensure_owned:
+        context = transaction(runtime, pages.load_planning_context, delivery)
+        candidates = taxonomy(
+            model, snapshot, reconcile(model, snapshot, draft["topics"], context), context
+        )
+        ensure_owned()
+        return transaction(
+            runtime, pages.fix_plan, delivery, candidates, input_hash,
+            has_text=True, document_title=snapshot["title"],
+            planning_revision=context["revision"],
+        )
+
+
 def execute_map(runtime, delivery):
     snapshot = transaction(
         runtime, pages.load_map, delivery, failure_limit=runtime.settings.kb_wiki_failure_attempts
@@ -100,19 +115,12 @@ def execute_map(runtime, delivery):
                     segments
                 ) else None
                 if draft:
-                    context = transaction(runtime, pages.load_planning_context, delivery)
-                    candidates = taxonomy(model, snapshot,
-                                          reconcile(model, snapshot, draft["topics"], context),
-                                          context)
-                plan = transaction(
-                    runtime,
-                    pages.fix_plan,
-                    delivery,
-                    candidates,
-                    input_hash,
-                    has_text=bool(segments),
-                    document_title=snapshot["title"],
-                )
+                    plan = _plan_topics(runtime, model, snapshot, draft, delivery, input_hash)
+                else:
+                    plan = transaction(
+                        runtime, pages.fix_plan, delivery, candidates, input_hash,
+                        has_text=bool(segments), document_title=snapshot["title"],
+                    )
             materials = (
                 bind_materials(draft, plan, catalog, snapshot["title"]) if draft else []
             )

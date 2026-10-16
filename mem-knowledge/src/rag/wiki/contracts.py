@@ -95,7 +95,7 @@ class IdentityMatches(Output):
 
 class FolderAssignment(Output):
     topic_ref: str
-    category_path: list[str] = Field(min_length=1, max_length=2)
+    category_path: list[str] = Field(max_length=2)
 
 
 class FolderAssignments(Output):
