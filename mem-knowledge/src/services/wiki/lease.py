@@ -1,4 +1,4 @@
-"""Use the existing Redis client's token-owned lock for page Reduce."""
+"""复用 Redis 可续租锁，协调页面 Reduce 与知识库目录规划。"""
 
 import logging
 import threading
@@ -13,10 +13,18 @@ LEASE_RENEW_SECONDS = 30
 LEASE_WAIT_SECONDS = 1
 
 
-@contextmanager
 def page_lease(redis, kb_id, page_id):
+    return _lease(redis, f"wiki:reduce:{kb_id}:{page_id}", "WIKI_PAGE_BUSY", kb_id, page_id)
+
+
+def taxonomy_lease(redis, kb_id):
+    return _lease(redis, f"wiki:taxonomy:{kb_id}", "WIKI_TAXONOMY_BUSY", kb_id)
+
+
+@contextmanager
+def _lease(redis, key, busy_code, kb_id, page_id=None):
     lock = redis.lock(
-        f"wiki:reduce:{kb_id}:{page_id}",
+        key,
         timeout=LEASE_TTL_SECONDS,
         blocking_timeout=LEASE_WAIT_SECONDS,
         thread_local=False,
@@ -26,7 +34,11 @@ def page_lease(redis, kb_id, page_id):
     except Exception as exc:
         raise WikiDeferred("WIKI_REDIS_UNAVAILABLE") from exc
     if not acquired:
-        raise WikiDeferred("WIKI_PAGE_BUSY")
+        raise WikiDeferred(busy_code, diagnostics={
+            "knowledge_id": str(kb_id), "page_id": str(page_id) if page_id else None,
+            "stage": "taxonomy_lock" if page_id is None else "reduce_lock",
+            "error_message": "其他任务仍持有 Wiki 规划或页面写入租约，当前任务稍后重试",
+        })
     stop, lost = threading.Event(), threading.Event()
     renewal_failure = {}
 
@@ -34,7 +46,7 @@ def page_lease(redis, kb_id, page_id):
         while not stop.wait(LEASE_RENEW_SECONDS):
             try:
                 if not lock.extend(LEASE_TTL_SECONDS, replace_ttl=True):
-                    renewal_failure.update(error_message="Redis 未确认 Wiki 页面租约续期成功")
+                    renewal_failure.update(error_message="Redis 未确认 Wiki 租约续期成功")
                     lost.set()
                     return
             except Exception as exc:
@@ -55,7 +67,7 @@ def page_lease(redis, kb_id, page_id):
                 "knowledge_id": str(kb_id), "page_id": str(page_id),
             })
 
-    worker = threading.Thread(target=renew, name="wiki-page-lease", daemon=True)
+    worker = threading.Thread(target=renew, name="wiki-lease", daemon=True)
     worker.start()
     try:
         yield ensure_owned
@@ -67,6 +79,6 @@ def page_lease(redis, kb_id, page_id):
         except Exception as exc:
             # 已提交的结果保持不变，释放失败只记录完整原因。
             logger.warning(
-                "Wiki 页面租约释放失败 knowledge_id=%s page_id=%s 失败详情=%s",
+                "Wiki 租约释放失败 knowledge_id=%s page_id=%s 失败详情=%s",
                 kb_id, page_id, diagnostic_json(exception_details(exc)),
             )

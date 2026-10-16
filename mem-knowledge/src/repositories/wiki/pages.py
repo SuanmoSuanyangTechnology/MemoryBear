@@ -132,6 +132,18 @@ def _folder(session, scope, path):
     return parent_id
 
 
+def _assign_missing_folder(session, scope, page, candidate):
+    if page.folder_id is None:
+        if "category_path" not in candidate:
+            raise WikiDeferred("WIKI_TAXONOMY_CHANGED", diagnostics={
+                "stage": "taxonomy_register", "knowledge_id": str(scope["kb_id"]),
+                "page_id": str(page.id),
+                "error_message": "页面目录在规划后被移除，当前候选缺少分类结果，需要重新规划",
+            })
+        page.folder_id = _folder(session, scope, candidate["category_path"])
+    return page
+
+
 def _page_for_candidate(session, scope, candidate, document_id):
     name = normalize_name(candidate["name"])
     topic_scope = normalize_name(candidate["scope"])
@@ -143,7 +155,7 @@ def _page_for_candidate(session, scope, candidate, document_id):
         ))
         if page is None:
             raise WikiDeferred("WIKI_IDENTITY_CHANGED")
-        return page
+        return _assign_missing_folder(session, scope, page, candidate)
     existing = list(
         session.scalars(
             select(WikiPage).where(
@@ -159,7 +171,7 @@ def _page_for_candidate(session, scope, candidate, document_id):
         and names.intersection({page.normalized_name, *(normalize_name(v) for v in page.aliases)})
     ]
     if len(matches) == 1:
-        return matches[0]
+        return _assign_missing_folder(session, scope, matches[0], candidate)
     key = fingerprint([candidate["kind"], name, topic_scope or str(document_id)])
     page = session.scalar(
         select(WikiPage).where(WikiPage.kb_id == scope["kb_id"], WikiPage.canonical_key == key)
@@ -177,10 +189,13 @@ def _page_for_candidate(session, scope, candidate, document_id):
         )
         session.add(page)
         session.flush()
-    return page
+    return _assign_missing_folder(session, scope, page, candidate)
 
 
-def fix_plan(session, delivery, candidates, input_hash, *, has_text, document_title):
+def fix_plan(
+    session, delivery, candidates, input_hash, *, has_text, document_title,
+    planning_revision=None,
+):
     knowledge, scope = lock_knowledge(session, delivery["kb_id"])
     document, state = lock_document(session, delivery["kb_id"], delivery["document_id"])
     require_round(document, state, delivery["requested_version"])
@@ -211,6 +226,15 @@ def fix_plan(session, delivery, candidates, input_hash, *, has_text, document_ti
         raise WikiDeferred("WIKI_CONFIG_CHANGED")
     if state.mapped_version == state.requested_version:
         raise WikiSuperseded("WIKI_MAP_ALREADY_COMMITTED", retryable=False)
+    if planning_revision is not None:
+        current_revision = _planning_context(session, knowledge.id)["revision"]
+        if current_revision != planning_revision:
+            raise WikiDeferred("WIKI_TAXONOMY_CHANGED", diagnostics={
+                "stage": "taxonomy_register", "knowledge_id": str(knowledge.id),
+                "document_id": delivery["document_id"], "expected_revision": planning_revision,
+                "current_revision": current_revision,
+                "error_message": "模型规划期间目录结构或页面归属已变化，需要重新读取目录规划",
+            })
     topics, topic_pages = [], {}
     new_ids = set()
     if has_text:
@@ -280,21 +304,40 @@ def load_planning_context(session, delivery):
     knowledge, _ = lock_knowledge(session, delivery["kb_id"])
     document, state = lock_document(session, delivery["kb_id"], delivery["document_id"])
     require_round(document, state, delivery["requested_version"])
+    return _planning_context(session, knowledge.id)
+
+
+def _planning_context(session, kb_id):
     pages = [{"page_id": str(row.id), "name": row.title, "kind": row.page_type,
               "scope": row.topic_scope, "aliases": row.aliases,
+              "description": row.summary, "status": row.status,
               "folder_id": str(row.folder_id) if row.folder_id else None}
              for row in session.execute(select(
                  WikiPage.id, WikiPage.title, WikiPage.page_type, WikiPage.topic_scope,
-                 WikiPage.aliases, WikiPage.folder_id,
-             ).where(WikiPage.kb_id == knowledge.id, WikiPage.page_type != "summary"))]
+                 WikiPage.aliases, WikiPage.folder_id, WikiPage.summary, WikiPage.status,
+             ).where(WikiPage.kb_id == kb_id, WikiPage.page_type != "summary")
+             .order_by(WikiPage.id))]
     folders = {folder.id: folder for folder in session.scalars(
-        select(WikiFolder).where(WikiFolder.kb_id == knowledge.id)
+        select(WikiFolder).where(WikiFolder.kb_id == kb_id).order_by(WikiFolder.id)
     )}
-    paths = []
+    paths, by_id = [], {}
     for folder in folders.values():
         parent = folders.get(folder.parent_id)
-        paths.append([parent.name, folder.name] if parent else [folder.name])
-    return {"pages": pages, "folders": sorted(paths)}
+        path = [parent.name, folder.name] if parent else [folder.name]
+        paths.append(path)
+        by_id[str(folder.id)] = path
+    for page in pages:
+        page["folder_path"] = by_id.get(page["folder_id"], [])
+    # 正文发布和状态推进不应使分类失效；只校验身份、目录归属及目录结构。
+    revision = fingerprint({
+        "pages": [{key: page[key] for key in (
+            "page_id", "name", "kind", "scope", "aliases", "folder_id"
+        )} for page in pages],
+        "folders": [
+            [str(folder.id), str(folder.parent_id), folder.name] for folder in folders.values()
+        ],
+    })
+    return {"pages": pages, "folders": sorted(paths), "revision": revision}
 
 
 def commit_map(session, delivery, *, config_hash, input_hash, materials, document_title):
