@@ -76,6 +76,7 @@ from ...services.file_storage_service import (
 )
 from ...services.message_feedback_service import FavoriteService, FeedbackService
 from ...services.message_report_service import ReportService
+from ...services.multi_agent_service import MultiAgentService
 from ...services.workflow_service import WorkflowService
 from ...utils.app_config_utils import (
     agent_config_4_app_release,
@@ -179,6 +180,42 @@ async def regenerate_message(
             override_variables=payload.variables,
         )
         return success(data=WorkflowRegenerateResponse(**result))
+
+    # ---- multi-agent cluster branch (MULTI_AGENT) ----
+    # Reruns through the orchestrator (keeping supervisor routing / sub-agent
+    # orchestration); version management aligns with Agent apps. Cluster messages
+    # previously fell into the single-agent engine branch, which lost the
+    # orchestration semantics on rerun.
+    if app.type == AppType.MULTI_AGENT:
+        if payload.stream:
+            async def cluster_event_generator():
+                with get_db_context() as stream_db:
+                    svc = MultiAgentService(stream_db)
+                    async for event in svc.regenerate_stream(
+                            message_id=message_id,
+                            app_id=app_id,
+                            user_id=str(principal.actor_id),
+                            variables=payload.variables,
+                            web_search=payload.web_search,
+                            memory=payload.memory,
+                            # Same as Agent: thinking is decided solely by the
+                            # config's deep_thinking flag
+                            thinking=True,
+                    ):
+                        yield event
+
+            return sse_response(cluster_event_generator())
+
+        result = await MultiAgentService(db).regenerate(
+            message_id=message_id,
+            app_id=app_id,
+            user_id=str(principal.actor_id),
+            variables=payload.variables,
+            web_search=payload.web_search,
+            memory=payload.memory,
+            thinking=True,
+        )
+        return success(data=RegenerateResponse(**result))
 
     # ---- agent branch (the host routes every non-workflow type here; shared
     # config resolution rejects non-agent types with APP_TYPE_NOT_SUPPORTED) ----

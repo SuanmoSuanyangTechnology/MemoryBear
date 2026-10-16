@@ -13,11 +13,13 @@ from contextlib import contextmanager
 from uuid import UUID
 
 from sqlalchemy import select, text
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from ..models.end_user_info_model import EndUserInfo
 from ..models.end_user_model import EndUser, EndUserMerge
+from ..utils.datetime_utils import utcnow_naive
 
 
 class EndUserRepository:
@@ -222,6 +224,43 @@ class EndUserRepository:
             stmt = stmt.with_for_update()
         return self.db.execute(stmt).scalars().first()
 
+    def _sync_end_user_info(self, end_user: EndUser, other_name: str | None) -> None:
+        """Sync ``end_user.other_name`` and the EndUserInfo row (no commit).
+
+        - non-empty name: update ``end_user.other_name`` and upsert EndUserInfo
+        - empty name: keep the stored name; create the EndUserInfo row when
+          missing, matching the new-user branch that always creates one
+
+        A single INSERT ... ON CONFLICT replaces the select-then-write pair and
+        relies on the unique index on ``end_user_info.end_user_id`` to prevent
+        duplicate rows under concurrency.
+        """
+
+        normalized_name = other_name.strip() if other_name else ""
+        if normalized_name:
+            end_user.other_name = normalized_name
+
+        now = utcnow_naive()
+        stmt = pg_insert(EndUserInfo).values(
+            end_user_id=end_user.id,
+            other_name=normalized_name or end_user.other_name or "",
+            aliases=[],
+            meta_data={},
+            created_at=now,
+            updated_at=now,
+        )
+        if normalized_name:
+            # ON CONFLICT DO UPDATE does not fire Column.onupdate, so updated_at
+            # is set explicitly; an unchanged name skips the write entirely.
+            stmt = stmt.on_conflict_do_update(
+                index_elements=[EndUserInfo.end_user_id],
+                set_={"other_name": normalized_name, "updated_at": now},
+                where=EndUserInfo.other_name.is_distinct_from(normalized_name),
+            )
+        else:
+            stmt = stmt.on_conflict_do_nothing(index_elements=[EndUserInfo.end_user_id])
+        self.db.execute(stmt)
+
     def get_or_create_with_config(
         self,
         app_id: UUID | None,
@@ -232,7 +271,8 @@ class EndUserRepository:
     ) -> EndUser:
         """Get (or create) the workspace end user for ``other_id`` and feed the
         memory config in; a merged origin ``other_id`` routes to its target.
-        A new end user gets an empty ``EndUserInfo`` row in the same commit.
+        ``other_name`` is synced onto an existing/merged user in the same
+        commit; a new end user gets an ``EndUserInfo`` row carrying it.
         """
 
         end_user = (
@@ -250,6 +290,7 @@ class EndUserRepository:
                 end_user.app_id = app_id
             if memory_config_id and not end_user.memory_config_id:
                 end_user.memory_config_id = memory_config_id
+            self._sync_end_user_info(end_user, other_name)
             self.db.commit()
             self.db.refresh(end_user)
             return end_user
@@ -260,14 +301,17 @@ class EndUserRepository:
                 merged_target.app_id = app_id
             if memory_config_id and not merged_target.memory_config_id:
                 merged_target.memory_config_id = memory_config_id
+            self._sync_end_user_info(merged_target, other_name)
             self.db.commit()
             self.db.refresh(merged_target)
             return merged_target
 
+        normalized_name = other_name.strip() if other_name and other_name.strip() else ""
         end_user = EndUser(
             app_id=app_id,
             workspace_id=workspace_id,
             other_id=other_id,
+            other_name=normalized_name,
             memory_config_id=memory_config_id,
         )
         self.db.add(end_user)
@@ -276,7 +320,7 @@ class EndUserRepository:
         self.db.add(
             EndUserInfo(
                 end_user_id=end_user.id,
-                other_name=other_name or "",
+                other_name=normalized_name,
                 aliases=[],
                 meta_data={},
             )

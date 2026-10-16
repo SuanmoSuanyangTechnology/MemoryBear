@@ -22,6 +22,7 @@ from sqlalchemy.orm import Session
 
 from ...errors import BizCode, BusinessException, InternalServerError
 from ...infrastructure.upstream import MonolithUpstream, UpstreamUnavailableError
+from ...memory.metadata_models import LEGACY_METADATA_FIELDS, project_display_profile
 from ...quota.alerts import report_quota_change_sync
 from ...quota.usage import require_end_user_quota
 from ...repositories import cross_domain_read
@@ -35,6 +36,9 @@ from ..schemas.common import fail, success
 from ..schemas.response_schema import ApiResponse, PageMeta
 
 router = APIRouter(prefix="/end_user", tags=["End User"])
+
+# GET /end_user/info: per-key cap for the 13-key display projection.
+END_USER_INFO_PROFILE_KEY_LIMIT = 10
 
 logger = logging.getLogger(__name__)
 
@@ -94,33 +98,21 @@ def get_end_user_info(
             "终端用户信息记录不存在",
         )
 
-    top_fields = ("other_name", "aliases")
-    meta_fields = (
-        "relations",
-        "goals",
-        "core_facts",
-        "interests",
-        "traits",
-        "beliefs_or_stances",
-        "anchors",
-        "events",
+    # Top level: other_name is always returned, aliases only when it has
+    # values. meta_data: truthy legacy fields kept as-is plus the display
+    # projection of the 13 shared level-2 keys (at most 10 entries per key).
+    raw_meta = info_record.meta_data if isinstance(info_record.meta_data, dict) else {}
+
+    selected_top: dict[str, Any] = {"other_name": info_record.other_name}
+    if info_record.aliases:
+        selected_top["aliases"] = info_record.aliases
+
+    filtered_meta: dict[str, Any] = {
+        field: raw_meta[field] for field in LEGACY_METADATA_FIELDS if raw_meta.get(field)
+    }
+    filtered_meta.update(
+        project_display_profile(raw_meta, limit_per_key=END_USER_INFO_PROFILE_KEY_LIMIT)
     )
-    always_include = {"other_name"}
-    max_visible = 6
-
-    raw_meta = info_record.meta_data or {}
-    candidates = [(field, getattr(info_record, field, None), True) for field in top_fields] + [
-        (field, raw_meta.get(field), False) for field in meta_fields
-    ]
-
-    selected_top: dict[str, Any] = {}
-    filtered_meta: dict[str, Any] = {}
-    for field, value, is_top in candidates:
-        if len(selected_top) + len(filtered_meta) >= max_visible:
-            break
-        if not value and field not in always_include:
-            continue
-        (selected_top if is_top else filtered_meta)[field] = value
 
     response_data = {
         "end_user_info_id": str(info_record.id),
@@ -346,6 +338,8 @@ def create_end_user(
                 BizCode.INVALID_PARAMETER,
             ) from error
 
+    # The repository commits the row and syncs other_name onto an existing
+    # user (idempotent upsert), so no manual assignment happens here.
     end_user = EndUserRepository(db).get_or_create_with_config(
         app_id=app_id,
         workspace_id=workspace_id,
@@ -353,8 +347,6 @@ def create_end_user(
         memory_config_id=memory_config_id,
         other_name=payload.other_name,
     )
-    end_user.other_name = payload.other_name
-    db.commit()
     logger.info("End user ready: %s", end_user.id)
 
     # The end user is committed; evaluate the usage alert from the

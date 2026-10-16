@@ -61,6 +61,7 @@ from ...services.conversation_share_service import ConversationShareService
 from ...services.intervention_registry import submit_intervention
 from ...services.message_feedback_service import FavoriteService, FeedbackService
 from ...services.message_report_service import ReportService
+from ...services.multi_agent_service import MultiAgentService
 from ...services.release_share_service import ReleaseShareService
 from ...services.shared_chat_service import SharedChatService
 from ...services.workflow_service import WorkflowService
@@ -390,7 +391,12 @@ async def chat(
                 runtime_config = agent_config_4_app_release(release)
             elif app_type == AppType.MULTI_AGENT:
                 config = release.config or {}
-                if not config.get("sub_agents"):
+                # supervisor_loop accepts zero sub-agents (the supervisor degrades to a
+                # bare agent); every other mode requires at least one sub-agent.
+                if (
+                    not config.get("sub_agents")
+                    and config.get("orchestration_mode") != "supervisor_loop"
+                ):
                     raise BusinessException(
                         "多 Agent 应用未配置子 Agent", BizCode.AGENT_CONFIG_MISSING
                     )
@@ -709,6 +715,86 @@ async def regenerate_message(
             override_variables=payload.variables,
         )
         return success(data=app_schema.WorkflowRegenerateResponse(**result))
+
+    # ---- multi-agent cluster branch (MULTI_AGENT) ----
+    # Reruns through the orchestrator (keeping supervisor routing / sub-agent
+    # orchestration), with the config taken from the published snapshot
+    # (multi_agent_config_4_app_release, same source as the share-side chat
+    # entry). Cluster traffic used to be rejected by the "non-AGENT" guard
+    # below. SSE events are whitelisted through SHARE_FORWARD_EVENTS (internal
+    # process events such as sub_agent_*/agent_dispatch are dropped; only the
+    # text stream and endpoint events pass through).
+    if app_type == AppType.MULTI_AGENT:
+        cluster_cfg = multi_agent_config_4_app_release(release)
+        # supervisor_loop allows zero sub-agents (the supervisor degrades to a
+        # bare agent); other modes require at least one
+        if not (cluster_cfg.sub_agents or []) and cluster_cfg.orchestration_mode != (
+            "supervisor_loop"
+        ):
+            raise BusinessException("多 Agent 应用未配置子 Agent", BizCode.AGENT_CONFIG_MISSING)
+
+        # Storage / memory context: same source as the AGENT branch below (that
+        # branch computes its own after this one, so its locals can't be reused —
+        # compute an independent copy here)
+        storage_type = workspace_service.get_workspace_storage_type_without_auth(
+            db=db, workspace_id=workspace_id
+        )
+        if storage_type is None:
+            storage_type = "neo4j"
+        user_rag_memory_id = ""
+        if storage_type == "rag" and workspace_id:
+            knowledge = knowledge_repository.get_knowledge_by_name(
+                db=db, name="USER_RAG_MERORY", workspace_id=workspace_id
+            )
+            if knowledge:
+                user_rag_memory_id = str(knowledge.id)
+
+        # Deep thinking: requires both the snapshot's model_parameters flag and
+        # the request flag; otherwise it stays off (aligns with the AGENT
+        # branch's deep_thinking handling; cluster thinking is consumed by the
+        # orchestrator's _prepare_turn_chat_features)
+        thinking = bool(getattr(payload, "thinking", False)) and bool(
+            (cluster_cfg.model_parameters or {}).get("deep_thinking", False)
+        )
+
+        if payload.stream:
+            async def cluster_event_generator():
+                with get_db_context() as stream_db:
+                    svc = MultiAgentService(stream_db)
+                    async for event in svc.regenerate_stream(
+                            message_id=message_id,
+                            app_id=release.app_id,
+                            user_id=str(end_user.id),
+                            variables=payload.variables,
+                            web_search=payload.web_search,
+                            memory=payload.memory,
+                            storage_type=storage_type,
+                            user_rag_memory_id=user_rag_memory_id,
+                            thinking=thinking,
+                            config=cluster_cfg,
+                    ):
+                        # The cluster path yields serialized SSE strings; filter
+                        # on the `event:` line against the whitelist
+                        m = SSE_EVENT_LINE.search(event)
+                        if m and m.group(1) not in SHARE_FORWARD_EVENTS:
+                            continue
+                        yield event
+
+            return sse_response(cluster_event_generator())
+
+        result = await MultiAgentService(db).regenerate(
+            message_id=message_id,
+            app_id=release.app_id,
+            user_id=str(end_user.id),
+            variables=payload.variables,
+            web_search=payload.web_search,
+            memory=payload.memory,
+            storage_type=storage_type,
+            user_rag_memory_id=user_rag_memory_id,
+            thinking=thinking,
+            config=cluster_cfg,
+        )
+        return success(data=app_schema.RegenerateResponse(**result))
 
     if app_type != AppType.AGENT:
         raise BusinessException(
@@ -1643,5 +1729,26 @@ async def switch_message_version(
     result["pending_intervention"] = AppLogService(db).build_pending_intervention_map(
         message.conversation_id
     )
+
+    # Node details: same shape as the console
+    # /apps/{id}/messages/{mid}/switch-version/{v}/branch route; reuses
+    # _build_branch_view's node_executions_map (workflows take the node execution
+    # table, agent/cluster apps take agent_executions). Failures degrade to an
+    # empty map and never block the version switch itself.
+    try:
+        branch = WorkflowService(db)._build_branch_view(
+            result["message_id"], user_id=str(share_data.user_id)
+        )
+        result["node_executions_map"] = branch.get("node_executions_map", {})
+        # Full conversation chain of the target version's branch: the front end
+        # rebuilds the list from it and hides follow-up turns after other versions
+        result["messages"] = branch.get("messages", [])
+        # Trust the branch view's intervention info (same source as above; only
+        # override when non-empty)
+        if branch.get("pending_intervention"):
+            result["pending_intervention"] = branch["pending_intervention"]
+    except Exception as e:
+        logger.warning(f"分享端切换版本构建节点明细失败（已降级为空）: {e}")
+        result["node_executions_map"] = {}
 
     return success(data=result)

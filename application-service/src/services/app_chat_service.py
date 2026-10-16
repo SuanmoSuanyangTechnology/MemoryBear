@@ -194,6 +194,40 @@ class AppChatService:
             return await self.db.get(model, identity)
         return self.db.get(model, identity)
 
+    async def _get_last_current_assistant_id(self, conversation_id) -> Optional[uuid.UUID]:
+        """Last assistant message marked is_current before this turn's question.
+
+        Used as the parent_message_id of this turn's user message (the user message
+        attaches to the version the user is currently viewing), so _load_branch_chain
+        can isolate each version's follow-up turns precisely by parent instead of
+        falling back to time windows. Must be called before this turn's messages are
+        enqueued. Query failure degrades to None (= legacy behavior) and never blocks
+        persistence.
+        """
+        if not conversation_id:
+            return None
+        try:
+            if isinstance(conversation_id, uuid.UUID):
+                conv_uuid = conversation_id
+            else:
+                conv_uuid = uuid.UUID(str(conversation_id))
+            async with get_async_db_context() as db:
+                result = await db.execute(
+                    select(Message.id).where(
+                        Message.conversation_id == conv_uuid,
+                        Message.role == "assistant",
+                        Message.is_current.is_(True),
+                        Message.is_deleted.is_not(True),
+                    ).order_by(Message.created_at.desc()).limit(1)
+                )
+                return result.scalar_one_or_none()
+        except Exception as e:
+            logger.warning(
+                "查询上一条当前 assistant 消息失败，user 消息不记录 parent",
+                extra={"error": str(e)},
+            )
+            return None
+
     async def _fetch_completed_file_metadata(self, local_ids: list[uuid.UUID]) -> dict[str, SimpleNamespace]:
         if not local_ids:
             return {}
@@ -292,12 +326,16 @@ class AppChatService:
             if not match:
                 return None
             answer = match["answer"]
+            # The user message attaches to the version the user is currently
+            # viewing (must be queried before this turn's messages are written)
+            _user_parent_id = await self._get_last_current_assistant_id(conversation_id)
             await self.conversation_service.add_message_async(
                 message_id=user_message_id,
                 conversation_id=conversation_id,
                 role="user",
                 content=message,
                 meta_data={"files": []},
+                parent_message_id=_user_parent_id,
             )
             await self.conversation_service.add_message_async(
                 message_id=message_id,
@@ -1759,6 +1797,11 @@ class AppChatService:
                     "conversation_id": str(conversation_id),
                     "user_message_id_override": user_message_id,
                     "user_message_content": message,
+                    # The user message attaches to the version the user is currently
+                    # viewing, so a version switch isolates follow-up turns by parent
+                    "user_parent_message_id": await self._get_last_current_assistant_id(
+                        conversation_id
+                    ),
                     "files_meta": human_meta.get("files", []),
                     "api_key_model_name": _api_key_model_name,
                     "should_memorize": memory,
@@ -2072,17 +2115,28 @@ class AppChatService:
         # Attachments persist too (same as Agent apps); without files no
         # meta_data is passed, so legacy-cluster writes are unchanged
         _user_meta_kwargs: Dict[str, Any] = {}
+        _user_meta: Dict[str, Any] = {}
         if files:
             _files_meta, _history_files = await self._build_cluster_files_persist(files, orchestrator)
             _user_meta = {"files": _files_meta}
             if _history_files:
                 _user_meta["history_files"] = _history_files
+        # This turn's variable values persist with the user message so
+        # regeneration can read them back (no key when empty: legacy unchanged)
+        if variables:
+            _user_meta.setdefault("files", [])
+            _user_meta["variables"] = variables
+        if _user_meta:
             _user_meta_kwargs["meta_data"] = _user_meta
+        # The user message attaches to the version the user is currently
+        # viewing (must be queried before this turn's messages are written)
+        _user_parent_id = await self._get_last_current_assistant_id(conversation_id)
         await self.conversation_service.add_message_async(
             message_id=user_message_id,
             conversation_id=conversation_id,
             role="user",
             content=message,
+            parent_message_id=_user_parent_id,
             **_user_meta_kwargs,
         )
 
@@ -2319,8 +2373,17 @@ class AppChatService:
                 "result": _result,
                 "user_message_id_override": user_message_id,
                 "user_message_content": message,
+                # The user message attaches to the version the user is currently
+                # viewing, so a version switch isolates follow-up turns by parent
+                "user_parent_message_id": await self._get_last_current_assistant_id(
+                    conversation_id
+                ),
                 "should_memorize": orchestrator.cluster_memory_enabled(),
             }
+            # This turn's variable values persist with the user message so
+            # regeneration can read them back (no key when empty: legacy unchanged)
+            if variables:
+                _persist_args["variables_meta"] = variables
             # New-conversation opening statement persists too (same as Agent
             # apps); with no opening statement no new keys are added, so
             # legacy-cluster writes are unchanged

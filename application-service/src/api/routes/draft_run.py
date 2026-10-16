@@ -692,9 +692,11 @@ async def draft_run(
             user_id=payload.user_id or current_user_id,
             variables=payload.variables or {},
             use_llm_routing=True,
-            # Deep thinking: default False = legacy behavior; also requires the
-            # cluster's model_parameters.deep_thinking to be enabled.
-            thinking=bool(getattr(payload, "thinking", False)),
+            # Deep thinking: same as the Agent trial run — decided solely by the
+            # cluster's model_parameters.deep_thinking; the request no longer
+            # needs to pass thinking (is_deep_thinking_on requires both true,
+            # so this is always True here)
+            thinking=True,
             # Web search: default False = legacy behavior; also requires the
             # cluster's features.web_search.enabled (supervisor only).
             web_search=bool(getattr(payload, "web_search", False)),

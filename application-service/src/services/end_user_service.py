@@ -27,6 +27,34 @@ logger = logging.getLogger(__name__)
 # (`_USER_PLACEHOLDER_NAMES`); the update path drops them.
 _USER_PLACEHOLDER_NAMES = {"用户", "我", "user", "i"}
 
+
+def _is_user_placeholder_name(name: str) -> bool:
+    """True when the name is a placeholder ("用户" / "我" / "User" / "I"),
+    ignoring surrounding whitespace and case (the set is all lowercase,
+    matching the extraction-side comparison)."""
+
+    return name.strip().lower() in _USER_PLACEHOLDER_NAMES
+
+
+def _normalize_other_name(value: Any) -> str | None:
+    """Normalize an incoming other_name; None drops the field.
+
+    Returns the stripped name for a valid string, None for None / non-string /
+    empty / whitespace-only / placeholder values so the caller never clears or
+    pollutes the stored name.
+    """
+
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip()
+    if not normalized:
+        return None
+    if _is_user_placeholder_name(normalized):
+        logger.warning("Rejecting placeholder other_name: %s", normalized)
+        return None
+    return normalized
+
+
 _INFO_ALLOWED_FIELDS = {"other_name", "aliases", "meta_data"}
 
 
@@ -123,25 +151,24 @@ class EndUserService:
             return InfoUpdateOutcome(error="终端用户信息记录不存在")
 
         update_data = dict(raw_update_data)
-        # Placeholder names are dropped before the change comparison, exactly
-        # like the host: a placeholder-only payload never triggers the sync.
-        if (
-            "other_name" in update_data
-            and update_data["other_name"]
-            and update_data["other_name"].strip() in _USER_PLACEHOLDER_NAMES
-        ):
-            logger.warning(
-                "Rejecting placeholder other_name: %s", update_data["other_name"]
-            )
-            del update_data["other_name"]
+        # Normalize other_name before the change comparison, exactly like the
+        # host: None / empty / whitespace-only / placeholder values are dropped
+        # (never clear or pollute the stored name); valid names are stripped.
+        if "other_name" in update_data:
+            normalized_name = _normalize_other_name(update_data["other_name"])
+            if normalized_name is None:
+                update_data.pop("other_name")
+            else:
+                update_data["other_name"] = normalized_name
 
         if "aliases" in update_data and update_data["aliases"]:
+            # Each alias is stripped once; filtering and output share the value.
             update_data["aliases"] = [
-                alias
+                stripped
                 for alias in update_data["aliases"]
                 if isinstance(alias, str)
-                and alias.strip()
-                and alias.strip() not in _USER_PLACEHOLDER_NAMES
+                and (stripped := alias.strip())
+                and not _is_user_placeholder_name(stripped)
             ]
 
         aliases_updated = (

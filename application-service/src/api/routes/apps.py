@@ -74,7 +74,9 @@ def create_app(
 def list_apps(
         workspace_id: WorkspaceId,
         db: DbSession,
-        type: str | None = None,
+        type: str | None = Query(
+            None, description="应用类型过滤，支持逗号分隔多值，如 'agent,multi_agent'"
+        ),
         visibility: str | None = None,
         status: str | None = None,
         search: str | None = None,
@@ -84,6 +86,9 @@ def list_apps(
         page: int = 1,
         pagesize: int = 10,
         ids: str | None = None,
+        orchestration_mode: str | None = Query(
+            None, description="编排模式过滤（仅 multi_agent 生效），如 supervisor_loop"
+        ),
         ontology_status: Annotated[
             Literal["all", "bound", "default"],
             Query(description="本体状态筛选：all 全部 / bound 已关联本体 / default 仅默认本体"),
@@ -143,6 +148,7 @@ def list_apps(
         pagesize=pagesize,
         ontology_status=ontology_status,
         field_search=field_search,
+        orchestration_mode=orchestration_mode,
     )
 
     items = service.to_schemas_with_ontology(items_orm, workspace_id)

@@ -1186,6 +1186,7 @@ class AppService:
             pagesize: int = 10,
             ontology_status: str = "all",
             field_search: str | None = None,
+            orchestration_mode: str | None = None,
     ) -> tuple[list[App], int]:
         """List apps in a workspace (paginated).
 
@@ -1195,7 +1196,7 @@ class AppService:
 
         Args:
             workspace_id: Workspace ID
-            type: App type filter
+            type: App type filter (comma-separated multi-value, e.g. "agent,multi_agent")
             visibility: Visibility filter
             status: Status filter
             search: Search keyword (fuzzy match on app name)
@@ -1207,6 +1208,8 @@ class AppService:
                 default (default ontology only)
             field_search: Tag-mode search; fuzzy-matches display names of custom
                 fields of the bound ontology's scene
+            orchestration_mode: Orchestration mode filter (clusters only; filters by
+                the current release snapshot's config.orchestration_mode)
 
         Returns:
             Tuple[List[App], int]: (app list, total count)
@@ -1223,8 +1226,37 @@ class AppService:
 
         # Build query filters
         filters = [App.is_active.is_(True)]
-        if type:
-            filters.append(App.type == type)
+        # type accepts comma-separated multi-value (e.g. "agent,multi_agent"); single
+        # value stays backward compatible
+        type_list = [t.strip() for t in type.split(",") if t.strip()] if type else []
+        if orchestration_mode:
+            # Orchestration mode filter (clusters only): matched against the *current
+            # release snapshot* — workflow Agent nodes reference the published cluster's
+            # runtime artifact, so the predicate must agree with what the runtime reads
+            # (a draft whose mode changed but was never published must not be picked up).
+            # Cluster branch OR the remaining types:
+            #   type=agent,multi_agent&orchestration_mode=supervisor_loop
+            #   -> all agents + clusters published with that snapshot mode; with no type
+            #   given, only clusters of that mode.
+            mode_apps = (
+                select(AppRelease.app_id)
+                .where(
+                    AppRelease.is_active.is_(True),
+                    AppRelease.config["orchestration_mode"].astext == orchestration_mode,
+                )
+                .where(AppRelease.id == App.current_release_id)
+            )
+            other_types = [t for t in type_list if t != AppType.MULTI_AGENT]
+            cluster_branch = and_(App.type == AppType.MULTI_AGENT, App.id.in_(mode_apps))
+            if other_types:
+                filters.append(or_(App.type.in_(other_types), cluster_branch))
+            else:
+                filters.append(cluster_branch)
+        elif type_list:
+            if len(type_list) == 1:
+                filters.append(App.type == type_list[0])
+            else:
+                filters.append(App.type.in_(type_list))
         if visibility:
             filters.append(App.visibility == visibility)
         if status:
@@ -2192,7 +2224,12 @@ class AppService:
                 )
 
         # 3. Check sub-agent configs
-        if not multi_agent_config.sub_agents or len(multi_agent_config.sub_agents) == 0:
+        # supervisor_loop accepts zero sub-agents (the supervisor degrades to a bare
+        # agent answering directly); every other mode requires sub-agents to run.
+        if (
+            multi_agent_config.orchestration_mode != "supervisor_loop"
+            and (not multi_agent_config.sub_agents or len(multi_agent_config.sub_agents) == 0)
+        ):
             raise BusinessException(
                 "未配置子 Agent，无法运行",
                 BizCode.AGENT_CONFIG_MISSING

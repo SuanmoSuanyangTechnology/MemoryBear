@@ -592,11 +592,29 @@ def run_scenario(runner) -> list[dict]:
         capture="end_user_info_id",
         other_name="Parity External User",
         aliases=["parity-alias-A", "parity-alias-B"],
+        # The new-structure entries exercise the 13-key display projection:
+        # duplicate content dedups, unknown keys / empty content drop, and the
+        # 11 education entries hit the per-key cap of 10.
         meta_data=json.dumps({
             "goals": ["parity goal"],
             "core_facts": ["parity fact"],
             "interests": ["parity interest"],
             "traits": ["parity trait"],
+            "identity_background": [
+                "occupation | 职业 | 工程师",
+                "occupation | | 工程师",
+                "name | | Parity External User",
+                "age | | 30",
+                "unknown_key | | dropped",
+                "education | | ",
+                *[f"education | | education {i}" for i in range(1, 12)],
+            ],
+            "relationships": [
+                "person | | friend A",
+                "pet | | cat",
+                "occupation | | 工程师",
+            ],
+            "domain_specific_info": {"scene-1": ["field-1 | | value-1"]},
         }),
         end_user_id=ids["end_user_id"],
     )
@@ -1366,6 +1384,29 @@ def run_scenario(runner) -> list[dict]:
         "175_p4_db_conversation_shares",
         "SELECT is_active FROM conversation_shares WHERE id = :id",
         id=ids["p4_conversation_share_id"],
+    )
+
+    # -- end-user other_name sync on an existing user (idempotent upsert) -----
+    # Re-creating with the same other_id and a whitespace-padded name must
+    # normalize the name and sync both end_users and end_user_info in place.
+    req(
+        "176_v1_recreate_end_user_spaced_name", "POST", "/end_user/create",
+        {"other_id": "parity-ext-user-1", "other_name": "  Parity Recreated  "},
+        face="v1",
+    )
+    # An omitted name must keep the stored one (insert ... on conflict do
+    # nothing), leaving both tables untouched.
+    req(
+        "177_v1_recreate_end_user_no_name", "POST", "/end_user/create",
+        {"other_id": "parity-ext-user-1"},
+        face="v1",
+    )
+    db(
+        "178_db_end_user_name_sync",
+        "SELECT u.other_name AS user_name, i.other_name AS info_name"
+        " FROM end_users u JOIN end_user_info i ON i.end_user_id = u.id"
+        " WHERE u.id = :id",
+        id=ids["end_user_id"],
     )
 
     return results

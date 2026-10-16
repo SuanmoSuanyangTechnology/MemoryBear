@@ -561,6 +561,10 @@ class MultiAgentOrchestrator:
         self._turn_used_context_engine: bool = False
         self._turn_ctx_provider: Optional[str] = None
         self._turn_ctx_model_config_id: Any = None
+        # Regeneration scenario: truncate the supervisor history to before this time
+        # (= the created_at of the original user message) so the re-run context matches
+        # the round being regenerated. None = no truncation (normal new turn).
+        self._regenerate_before: Any = None
 
     def _prepare_turn_chat_features(
         self,
@@ -865,7 +869,14 @@ class MultiAgentOrchestrator:
         Recomputed every turn (the same orchestrator instance runs multiple
         turns and sub-agent configs may have been updated).
         """
-        bag = build_cluster_variable_bag(self.config, self.sub_agents, variables)
+        # Regeneration (when _regenerate_before is set): variables are restored from
+        # the values persisted on the first turn; stored conversations without saved
+        # variables must not be blocked by missing required ones (the first turn already
+        # passed entry validation), so relax to non-raising observation only.
+        strict_required = False if self._regenerate_before is not None else None
+        bag = build_cluster_variable_bag(
+            self.config, self.sub_agents, variables, strict_required=strict_required
+        )
         self._cluster_variables = bag
         return bag
 
@@ -1346,6 +1357,7 @@ class MultiAgentOrchestrator:
         execution_mode: Optional[str] = None,
         files: Optional[List[Any]] = None,
         user_message_id: Optional[uuid.UUID] = None,
+        regenerate_before: Any = None,
     ):
         """Execute a multi-agent task (streaming response).
 
@@ -1360,12 +1372,19 @@ class MultiAgentOrchestrator:
             storage_type: Storage type
             user_rag_memory_id: User RAG memory ID
             message_id: This turn's assistant message ID (written into the master execution record so log details can attach nodes by message)
+            regenerate_before: History truncation time for the regeneration scenario
+                (= the created_at of the original user message); when set, the
+                supervisor history only sees messages before it; None = normal new
+                turn (legacy behavior)
 
         Yields:
             A stream of SSE-formatted events
         """
 
         start_time = time.time()
+        # Regeneration: history truncation hook (consumed only by the supervisor
+        # chain's _load_cluster_history; default None = legacy behavior)
+        self._regenerate_before = regenerate_before
 
         # Reset the merge-mode observation value at the start of each turn (the same orchestrator instance may run multiple turns)
         self._merge_mode_actual = None
@@ -1585,6 +1604,7 @@ class MultiAgentOrchestrator:
         execution_mode: Optional[str] = None,
         files: Optional[List[Any]] = None,
         user_message_id: Optional[uuid.UUID] = None,
+        regenerate_before: Any = None,
     ) -> Dict[str, Any]:
         """Execute a multi-agent task (based on Master Agent decisions).
 
@@ -1597,11 +1617,18 @@ class MultiAgentOrchestrator:
             message_id: This turn's assistant message ID (written into the master execution record)
             storage_type: Storage type (passed through to the collaboration call context)
             user_rag_memory_id: User RAG memory ID (same as above)
+            regenerate_before: History truncation time for the regeneration scenario
+                (= the created_at of the original user message); when set, the
+                supervisor history only sees messages before it; None = normal new
+                turn (legacy behavior)
 
         Returns:
             Execution result
         """
         start_time = time.time()
+        # Regeneration: history truncation hook (consumed only by the supervisor
+        # chain's _load_cluster_history; default None = legacy behavior)
+        self._regenerate_before = regenerate_before
 
         # Same convention as streaming — the variable contract is handled once at the entry point and both modes share the rendered message.
         cluster_variables = self._build_cluster_variables(variables)
@@ -2552,6 +2579,16 @@ class MultiAgentOrchestrator:
             "避免主对话被工具输出淹没；结论性小问题用你自己的工具或知识直接回答。\n"
             "最终答案必须是完整、自洽的中文回复，不要提及调度过程。"
         )
+        if not self.sub_agents:
+            # No sub-agents: the supervisor is a bare agent. The standard prompt above
+            # advertises "available sub-agents" (an empty roster), which misleads the
+            # model into hallucinating tools; the own-tools guidance is preserved.
+            auto_prompt = (
+                "你是多智能体集群的主管（supervisor），当前没有配置子 Agent，"
+                "请直接回答用户问题。"
+                f"{own_tools_section}\n\n"
+                "最终答案必须是完整、自洽的中文回复。"
+            )
         if not custom_prompt:
             return auto_prompt
         return f"{custom_prompt}\n\n---\n\n{auto_prompt}"
@@ -2948,6 +2985,36 @@ class MultiAgentOrchestrator:
         if not conversation_id or self.db is None:
             return []
         try:
+            # Regeneration scenario (when _regenerate_before is set): truncate by the
+            # original question's created_at so the supervisor only sees context before
+            # the regenerated round, same convention as single-agent regenerate
+            # (AppChatService._load_history_before_message's before_time semantics).
+            # get_conversation_history does not expose created_at, so query Message directly.
+            if self._regenerate_before is not None:
+                from sqlalchemy import select
+
+                from ..models import Message
+
+                stmt = (
+                    select(Message)
+                    .where(
+                        Message.conversation_id == conversation_id,
+                        Message.is_current.is_not(False),
+                        Message.is_deleted.is_not(True),
+                        Message.created_at < self._regenerate_before,
+                    )
+                    .order_by(Message.created_at.asc())
+                )
+                if isinstance(self.db, AsyncSession):
+                    rows = (await self.db.execute(stmt)).scalars().all()
+                else:
+                    rows = self.db.scalars(stmt).all()
+                return [
+                    {"role": m.role, "content": m.content}
+                    for m in (rows or [])
+                    if isinstance(m.content, str)
+                ]
+
             from .conversation_service import ConversationService
 
             conv_service = ConversationService(self.db)
@@ -3016,10 +3083,9 @@ class MultiAgentOrchestrator:
         # filtering; same convention as Agent apps)
         self._loop_entry_message = message
 
-        # Pre-check failure raises immediately (mode semantics stay predictable; no silent fallback)
-        if not self.sub_agents:
-            self._loop_stop_reason = "error"
-            raise BusinessException("没有可用的子 Agent", BizCode.AGENT_CONFIG_MISSING)
+        # Sub-agents may be empty: the supervisor then acts as a bare agent (own tools /
+        # knowledge only) instead of being rejected here. A missing supervisor model is
+        # still enforced by _resolve_supervisor_model_view below.
         model_view = await self._resolve_supervisor_model_view()
 
         self._set_merge_mode_actual("loop", "supervisor_loop 模式（主管 ReAct 循环）")
@@ -3280,10 +3346,8 @@ class MultiAgentOrchestrator:
         self._loop_stop_reason = None
         self._loop_entry_message = message
 
-        # Pre-check failure raises immediately
-        if not self.sub_agents:
-            self._loop_stop_reason = "error"
-            raise BusinessException("没有可用的子 Agent", BizCode.AGENT_CONFIG_MISSING)
+        # Sub-agents may be empty (same as the streaming path): the supervisor degrades
+        # to a bare agent answering directly instead of being rejected here.
         model_view = await self._resolve_supervisor_model_view()
 
         self._set_merge_mode_actual("loop", "supervisor_loop 模式（主管 ReAct 循环）")
@@ -4355,16 +4419,22 @@ class MultiAgentOrchestrator:
                         "orchestration_mode": self._normalized_mode,
                     })
 
-                # handoffs' own end belongs to the "collaboration run lifecycle", not
-                # the cluster conversation: the cluster-level end is emitted uniformly
-                # by execute_stream after the mode branch, so it is not passed through
-                # here — otherwise the upstream layer would see two ends (and the second
-                # end has already finalized the outer message). All other events first
-                # have the sub-run conversation_id stripped (prevents the frontend's
-                # conversation pointer from being poisoned by handoffs' internal
-                # conversation ID — the cluster conversation ID is only ever published
-                # by start/end).
-                if event_name != "end":
+                # handoffs' own start / end belong to the "collaboration run lifecycle",
+                # not the cluster conversation (same convention as the supervisor branch,
+                # see _SUB_RUN_LIFECYCLE_EVENTS), so neither is passed through:
+                # - end: the cluster-level end is emitted uniformly by execute_stream
+                #   after the mode branch; passing it through would surface two ends
+                #   (and the second end has already finalized the outer message);
+                # - start: with the conversation_id stripped it becomes an empty start,
+                #   which the share frontend's start branch would use to overwrite the
+                #   captured conversation ID with undefined, so the turn never backfills
+                #   it; the next turn then carries a null conversation ID and the
+                #   backend creates a new conversation every turn (dialogue split).
+                # All other events first have the sub-run conversation_id stripped
+                # (prevents the frontend's conversation pointer from being poisoned by
+                # handoffs' internal conversation ID — the cluster conversation ID is
+                # only ever published by start/end).
+                if event_name not in _SUB_RUN_LIFECYCLE_EVENTS:
                     yield self._strip_conversation_id(event)
 
                 if event_name in ("end", "error") and active_execution_id is not None:

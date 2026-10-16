@@ -386,6 +386,26 @@ async def _bulk_persist_messages(
         msg_id = args.get("message_id_override") or (
             result.message_id if result else uuid_module.uuid4())
 
+        # opening statement row must exist before the user row (created_at ordering),
+        # and the first-turn user row must point at it as parent — same as Agent apps
+        # (agent path creates the conversation + opening first, then the user message
+        # takes the last is_current assistant as parent). This lets _load_branch_chain
+        # walk up and include the opening, so the version-switch endpoint returns it too.
+        opening_row_id = None
+        if args.get("is_new_conversation") and args.get("opening_statement"):
+            opening_row_id = args.get("opening_message_id")
+            if opening_row_id:
+                _opening_sq = args.get("opening_suggested_questions")
+                _opening_row = _row(opening_row_id, conv_id, "assistant", args["opening_statement"],
+                                    {"suggested_questions": _opening_sq} if _opening_sq else None)
+                # Rows persisted in the same batch may carry an identical created_at
+                # (clock resolution), leaving opening/user ordering undefined; shift the
+                # opening 1ms earlier so it always sorts strictly before this turn's user.
+                from datetime import timedelta as _timedelta
+
+                _opening_row["created_at"] = _opening_row["created_at"] - _timedelta(milliseconds=1)
+                _add_row(_opening_row, conv_id)
+
         # user message
         if args.get("user_meta_override"):
             user_meta = dict(args["user_meta_override"])
@@ -397,7 +417,15 @@ async def _bulk_persist_messages(
             if result and getattr(result, 'history_files', None):
                 user_meta["history_files"] = result.history_files
 
-        user_parent_id = args.get("user_parent_message_id")
+        # Variables supplied for this turn are persisted on the user row so a cluster
+        # regeneration can read them back instead of asking the user to re-enter
+        # required variables; omit the key entirely when absent.
+        if args.get("variables_meta"):
+            user_meta["variables"] = args["variables_meta"]
+
+        # First-turn user has no preceding assistant to attach to: fall back to the
+        # opening row written in this batch.
+        user_parent_id = args.get("user_parent_message_id") or opening_row_id
         user_content = args.get("user_message_content", "") or ""
 
         _add_row(_row(user_msg_id, conv_id, "user",
@@ -437,12 +465,6 @@ async def _bulk_persist_messages(
             user_content[:50] + ("..." if len(user_content) > 50 else "")
             if user_content else None
         )
-
-        # opening statement
-        if args.get("is_new_conversation") and args.get("opening_statement"):
-            opening_id = args.get("opening_message_id")
-            if opening_id:
-                _add_row(_row(opening_id, conv_id, "assistant", args["opening_statement"]), conv_id)
 
     # --- dedupe rows within the batch (same task enqueued twice, or success +
     # failed tasks sharing one message pair) ---

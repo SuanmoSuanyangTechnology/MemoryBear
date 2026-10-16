@@ -9,6 +9,8 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from typing import Any
 
+from ..metadata_models import PROFILE_DISPLAY_KEYS
+
 logger = logging.getLogger(__name__)
 MemoryStagePayload = dict[str, Any]
 MemoryStageSink = list[MemoryStagePayload]
@@ -41,6 +43,7 @@ _PROFILE_FIELDS = {
     "anchors",
     "events",
     "traits",
+    *PROFILE_DISPLAY_KEYS,
 }
 _MEMORY_ITEM_FIELDS = {"rank", "memory_type", "source", "score", "content"}
 _FILE_FIELDS = {"file_name", "file_path", "file_type", "perceptual_type"}

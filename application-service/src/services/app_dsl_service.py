@@ -143,6 +143,10 @@ class AppDslService:
                     {**r, "_ref": self._agent_ref(r.get("target_agent_id"))}
                     for r in (cfg["routing_rules"] or [])
                 ]
+            if cfg.get("supervisor_config"):
+                enriched["supervisor_config"] = self._enrich_supervisor_config(
+                    cfg["supervisor_config"]
+                )
             return enriched
         if app_type in (AppType.WORKFLOW, AppType.PURE_WORKFLOW):
             enriched = {**cfg}
@@ -215,7 +219,9 @@ class AppDslService:
 
                 "execution_config": config.execution_config if config else {},
                 "supervisor_config": (
-                    self._to_dict(config.supervisor_config) if config else None
+                    self._enrich_supervisor_config(self._to_dict(config.supervisor_config))
+                    if config
+                    else None
                 ),
                 "aggregation_strategy": config.aggregation_strategy if config else "merge",
             } if config else {}
@@ -381,6 +387,15 @@ class AppDslService:
     def _release_ref(self, release_id) -> dict | None:
         if not release_id:
             return None
+        # Published cluster snapshots may store the string "None" as
+        # master_agent_id (clusters without a master agent, str(None) persisted);
+        # treat non-UUID values as no reference to avoid a UUID-column DataError
+        try:
+            release_id = (
+                release_id if isinstance(release_id, uuid.UUID) else uuid.UUID(str(release_id))
+            )
+        except (ValueError, AttributeError, TypeError):
+            return None
         r = self.db.query(AppRelease).filter(AppRelease.id == release_id).first()
         if r:
             return {
@@ -393,6 +408,23 @@ class AppDslService:
 
     def _enrich_sub_agents(self, sub_agents: list) -> list:
         return [{**s, "_ref": self._agent_ref(s.get("agent_id"))} for s in (sub_agents or [])]
+
+    def _enrich_supervisor_config(self, sc: dict | None) -> dict | None:
+        """Export the supervisor capability surface: knowledge retrieval / tools /
+        skills get reference info attached (same as Agent apps) so a cross-environment
+        import can match them by name."""
+        if not sc:
+            return sc
+        enriched = dict(sc)
+        if enriched.get("knowledge_retrieval"):
+            enriched["knowledge_retrieval"] = self._enrich_knowledge_retrieval(
+                enriched["knowledge_retrieval"]
+            )
+        if enriched.get("tools"):
+            enriched["tools"] = self._enrich_tools(enriched["tools"])
+        if enriched.get("skills"):
+            enriched["skills"] = self._enrich_skills(enriched["skills"])
+        return enriched
 
     # ==================== Import ====================
 
@@ -543,10 +575,16 @@ class AppDslService:
                     cfg.get("default_model_config_ref"), tenant_id, warnings
                 ),
                 master_agent_id=self._resolve_release(cfg.get("master_agent_ref"), warnings),
-                sub_agents=self._resolve_sub_agents(cfg.get("sub_agents", []), warnings),
-                routing_rules=self._resolve_routing_rules(cfg.get("routing_rules"), warnings),
+                sub_agents=self._resolve_sub_agents(
+                    cfg.get("sub_agents", []), warnings, workspace_id
+                ),
+                routing_rules=self._resolve_routing_rules(
+                    cfg.get("routing_rules"), warnings, workspace_id
+                ),
                 execution_config=cfg.get("execution_config", {}),
-                supervisor_config=cfg.get("supervisor_config"),
+                supervisor_config=self._resolve_supervisor_config(
+                    cfg.get("supervisor_config"), workspace_id, tenant_id, warnings
+                ),
                 aggregation_strategy=cfg.get("aggregation_strategy", "merge"),
                 updated_at=now,
             )
@@ -749,15 +787,40 @@ class AppDslService:
             )
         return r.id if r else None
 
-    def _resolve_sub_agents(self, sub_agents: list, warnings: list) -> list:
+    def _find_app_by_name(self, name: str | None, workspace_id: uuid.UUID) -> App | None:
+        """Match an app by name inside the target workspace: an app owned by the
+        workspace first, then one shared into it.
+
+        Never matches across workspaces, so imports can't pick up an app with the
+        same name from another workspace.
+        """
+        if not name:
+            return None
+        own = self.db.query(App).filter(
+            App.name == name,
+            App.workspace_id == workspace_id,
+            App.is_active.is_(True),
+        ).first()
+        if own:
+            return own
+        return self.db.query(App).join(
+            AppShare, AppShare.source_app_id == App.id
+        ).filter(
+            App.name == name,
+            App.is_active.is_(True),
+            AppShare.target_workspace_id == workspace_id,
+            AppShare.is_active.is_(True),
+        ).first()
+
+    def _resolve_sub_agents(
+        self, sub_agents: list, warnings: list, workspace_id: uuid.UUID
+    ) -> list:
         result = []
         for s in (sub_agents or []):
             ref = s.get("_ref")
             entry = {k: v for k, v in s.items() if k != "_ref"}
             if ref:
-                a = self.db.query(App).filter(
-                    App.name == ref.get("name"), App.is_active.is_(True)
-                ).first()
+                a = self._find_app_by_name(ref.get("name"), workspace_id)
                 if not a:
                     warnings.append(
                         f"子 Agent '{ref.get('name')}' 未匹配，已置空，请导入后手动配置"
@@ -770,7 +833,9 @@ class AppDslService:
             result.append(entry)
         return result
 
-    def _resolve_routing_rules(self, rules: list | None, warnings: list) -> list | None:
+    def _resolve_routing_rules(
+        self, rules: list | None, warnings: list, workspace_id: uuid.UUID
+    ) -> list | None:
         if rules is None:
             return None
         result = []
@@ -778,9 +843,7 @@ class AppDslService:
             ref = r.get("_ref")
             entry = {k: v for k, v in r.items() if k != "_ref"}
             if ref:
-                a = self.db.query(App).filter(
-                    App.name == ref.get("name"), App.is_active.is_(True)
-                ).first()
+                a = self._find_app_by_name(ref.get("name"), workspace_id)
                 if not a:
                     warnings.append(
                         f"路由目标 Agent '{ref.get('name')}' 未匹配，已置空，请导入后手动配置"
@@ -788,6 +851,31 @@ class AppDslService:
                 entry["target_agent_id"] = str(a.id) if a else None
             result.append(entry)
         return result
+
+    def _resolve_supervisor_config(
+        self,
+        sc: dict | None,
+        workspace_id: uuid.UUID,
+        tenant_id: uuid.UUID,
+        warnings: list,
+    ) -> dict | None:
+        """Import the supervisor capability surface: knowledge retrieval / tools /
+        skills / memory are re-matched against the target environment; unmatched
+        entries are cleared with a warning."""
+        if not sc:
+            return sc
+        resolved = dict(sc)
+        if resolved.get("knowledge_retrieval"):
+            resolved["knowledge_retrieval"] = self._resolve_knowledge_retrieval(
+                resolved["knowledge_retrieval"], workspace_id, tenant_id, warnings
+            )
+        if resolved.get("tools"):
+            resolved["tools"] = self._resolve_tools(resolved["tools"], tenant_id, warnings)
+        if resolved.get("skills"):
+            resolved["skills"] = self._resolve_skills(resolved["skills"], tenant_id, warnings)
+        if resolved.get("memory"):
+            resolved["memory"] = self._resolve_memory(resolved["memory"], workspace_id, warnings)
+        return resolved
 
     def _resolve_imported_model(
         self,
