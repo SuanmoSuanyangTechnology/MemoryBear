@@ -90,6 +90,25 @@ FIXTURE_TS = {
     "execution_completed": "2026-01-05 03:04:09",
 }
 
+# P4 fixtures: one conversation owned by the share viewer. The P4 section
+# re-creates a release share inside the rollback boundary (the P2 one is
+# deleted at its last step), exchanges it for a viewer bearer token, and
+# seeds this conversation against the viewer's end user once that row exists.
+P4_VIEWER_ID = "parity-viewer-0001"
+P4_UNKNOWN_EXECUTION_ID = "parity-missing-exec"
+P4_FIXTURES = {
+    "p4_conversation_id": "aaaaaaa1-0000-4000-8000-00000000000c",
+    "p4_user_message_id": "aaaaaaa1-0000-4000-8000-00000000000d",
+    "p4_assistant_message_id": "aaaaaaa1-0000-4000-8000-00000000000e",
+    "p4_assistant_v2_id": "aaaaaaa1-0000-4000-8000-00000000000f",
+}
+P4_FIXTURE_TS = {
+    "conversation": "2026-01-05 04:04:05",
+    "user_message": "2026-01-05 04:04:06",
+    "assistant_message": "2026-01-05 04:04:07",
+    "assistant_message_v2": "2026-01-05 04:04:08",
+}
+
 SEED_STATEMENTS = [
     (
         "INSERT INTO tenants (id, name) VALUES (:tenant_id, 'parity tenant')"
@@ -276,9 +295,13 @@ def _dig(body, *keys):
 def run_scenario(runner) -> list[dict]:
     """Execute the canonical scenario; return the recorded [step] list."""
     results: list[dict] = []
-    # Pre-registered constant ids (the seeded API key and the P2 fixtures) plus
-    # everything captured from responses as the scenario advances.
-    ids: dict[str, str | None] = {"api_key_id": API_KEY["id"], **FIXTURES}
+    # Pre-registered constant ids (the seeded API key plus the P2/P4 fixtures)
+    # and everything captured from responses as the scenario advances.
+    ids: dict[str, str | None] = {
+        "api_key_id": API_KEY["id"],
+        **FIXTURES,
+        **P4_FIXTURES,
+    }
 
     def record(name: str, status, data):
         results.append({"step": name, "status": status, "data": data})
@@ -1154,5 +1177,195 @@ def run_scenario(runner) -> list[dict]:
         "/prompt/releases/{prompt_release_id}",
     )
     req("147_p3_prompt_release_list_after_delete", "GET", "/prompt/releases/list")
+
+    # -- P4: public share view face ------------------------------------------
+    # The P2 release share was deleted at the last P2 step; recreate one
+    # inside the rollback boundary (create-or-update re-enables the release),
+    # then exchange it for a viewer access token. Viewer steps authenticate
+    # with that bearer token only: ``face="public"`` sends no platform
+    # credentials on either side, mirroring the anonymous share plane.
+    req(
+        "148_p4_release_share_recreate", "POST",
+        "/apps/{flow_app_id}/releases/{release_v1_id}/share",
+        {"is_enabled": True, "require_password": False, "allow_embed": True},
+        capture=[
+            (("data", "id"), "p4_release_share_id"),
+            (("data", "share_token"), "p4_share_token"),
+        ],
+    )
+    req(
+        "149_p4_share_token_exchange", "POST",
+        "/public/share/{p4_share_token}/token",
+        {"user_id": P4_VIEWER_ID},
+        capture=[(("data", "access_token"), "viewer_access_token")],
+    )
+
+    def viewer(name, method, path, json_body=None, params=None, capture=None):
+        """Share-plane request with the exchanged viewer bearer token."""
+        return req(
+            name, method, path, json_body, params,
+            capture=capture, face="public",
+            headers={"Authorization": f"Bearer {ids['viewer_access_token']}"},
+        )
+
+    viewer("150_p4_share_info", "GET", "/public/share")
+    # A passwordless share accepts any submitted password (verify short-circuits).
+    viewer(
+        "151_p4_share_verify", "POST", "/public/share/verify",
+        {"password": "parity-wrong"},
+    )
+    viewer(
+        "152_p4_share_embed", "GET", "/public/share/embed",
+        params={"width": "320px", "height": "480px"},
+    )
+    viewer("153_p4_share_config", "GET", "/public/share/config")
+    # First list call admits the viewer (its end-user row is created here), so
+    # the list is still empty; the fixture conversation is seeded afterwards.
+    viewer("154_p4_conversations_empty", "GET", "/public/share/conversations")
+    exec_sql(
+        "155_p4_viewer_end_user",
+        "SELECT id FROM end_users WHERE workspace_id = :workspace_id"
+        " AND other_id = :other_id",
+        capture="p4_viewer_end_user_id",
+        workspace_id=SEED["workspace_id"],
+        other_id=P4_VIEWER_ID,
+    )
+    exec_sql(
+        "156_p4_seed_share_conversation",
+        "INSERT INTO conversations (id, app_id, workspace_id, user_id, title,"
+        " is_draft, message_count, is_active, created_at, updated_at)"
+        " VALUES (:id, :app_id, :workspace_id, :user_id,"
+        " 'parity share conversation', false, 3, true, :created_at, :created_at)"
+        " RETURNING id",
+        id=P4_FIXTURES["p4_conversation_id"],
+        app_id=ids["flow_app_id"],
+        workspace_id=SEED["workspace_id"],
+        user_id=ids["p4_viewer_end_user_id"],
+        created_at=P4_FIXTURE_TS["conversation"],
+    )
+    exec_sql(
+        "157_p4_seed_user_message",
+        "INSERT INTO messages (id, conversation_id, role, content, version,"
+        " is_current, parent_message_id, is_deleted, status, like_count,"
+        " dislike_count, report_count, created_at)"
+        " VALUES (:id, :conversation_id, 'user', 'parity share question', 1,"
+        " true, NULL, false, 'completed', 0, 0, 0, :created_at) RETURNING id",
+        id=P4_FIXTURES["p4_user_message_id"],
+        conversation_id=P4_FIXTURES["p4_conversation_id"],
+        created_at=P4_FIXTURE_TS["user_message"],
+    )
+    exec_sql(
+        "158_p4_seed_assistant_message",
+        "INSERT INTO messages (id, conversation_id, role, content, version,"
+        " is_current, parent_message_id, is_deleted, meta_data, status,"
+        " like_count, dislike_count, report_count, created_at)"
+        " VALUES (:id, :conversation_id, 'assistant', 'parity share answer', 1,"
+        " true, :parent_message_id, false, CAST(:meta_data AS json),"
+        " 'completed', 0, 0, 0, :created_at) RETURNING id",
+        id=P4_FIXTURES["p4_assistant_message_id"],
+        conversation_id=P4_FIXTURES["p4_conversation_id"],
+        parent_message_id=P4_FIXTURES["p4_user_message_id"],
+        meta_data=json.dumps({"usage": {"total_tokens": 10}}),
+        created_at=P4_FIXTURE_TS["assistant_message"],
+    )
+    exec_sql(
+        "159_p4_seed_assistant_message_v2",
+        "INSERT INTO messages (id, conversation_id, role, content, version,"
+        " is_current, parent_message_id, is_deleted, meta_data, status,"
+        " like_count, dislike_count, report_count, created_at)"
+        " VALUES (:id, :conversation_id, 'assistant', 'parity share answer v2',"
+        " 2, false, :parent_message_id, false, CAST(:meta_data AS json),"
+        " 'completed', 0, 0, 0, :created_at) RETURNING id",
+        id=P4_FIXTURES["p4_assistant_v2_id"],
+        conversation_id=P4_FIXTURES["p4_conversation_id"],
+        parent_message_id=P4_FIXTURES["p4_user_message_id"],
+        meta_data=json.dumps({"usage": {"total_tokens": 12}}),
+        created_at=P4_FIXTURE_TS["assistant_message_v2"],
+    )
+    viewer("160_p4_conversations_listed", "GET", "/public/share/conversations")
+    viewer(
+        "161_p4_conversation_detail", "GET",
+        "/public/share/conversations/{p4_conversation_id}",
+    )
+    viewer(
+        "162_p4_message_like", "POST",
+        "/public/share/messages/{p4_assistant_message_id}/feedback",
+        {"feedback_type": "like"},
+    )
+    viewer(
+        "163_p4_message_feedback_get", "GET",
+        "/public/share/messages/{p4_assistant_message_id}/feedback",
+    )
+    viewer(
+        "164_p4_message_favorite", "POST",
+        "/public/share/messages/{p4_assistant_message_id}/favorite",
+    )
+    viewer(
+        "165_p4_message_report", "POST",
+        "/public/share/messages/{p4_assistant_message_id}/report",
+        {
+            "report_type": "quality",
+            "report_reason": "parity share report",
+            "text_start_offset": 0,
+            "text_end_offset": 6,
+            "selected_text": "parity",
+        },
+        capture=[(("data", "report_id"), "p4_report_id")],
+    )
+    viewer(
+        "166_p4_conversation_share_create", "POST",
+        "/public/share/conversations/{p4_conversation_id}/share",
+        {"allow_copy": True},
+        capture=[
+            (("data", "share_id"), "p4_conversation_share_id"),
+            (("data", "share_uuid"), "p4_conversation_share_uuid"),
+        ],
+    )
+    viewer(
+        "167_p4_conversation_share_list", "GET",
+        "/public/share/conversations/{p4_conversation_id}/shares",
+    )
+    viewer(
+        "168_p4_conversation_share_revoke", "DELETE",
+        "/public/share/conversations/share/{p4_conversation_share_uuid}",
+    )
+    # v1 -> 2: the sibling picks up is_current while the response reports the
+    # requested version's id/content.
+    viewer(
+        "169_p4_switch_message_version", "POST",
+        "/public/share/messages/{p4_assistant_message_id}/switch-version/2",
+    )
+    viewer(
+        "170_p4_intervention_unknown", "POST",
+        "/public/share/workflow/interventions/" + P4_UNKNOWN_EXECUTION_ID + "/submit",
+        {"node_id": "end", "action_id": "approve"},
+    )
+    # Deleting one version drags the whole assistant group of the turn.
+    viewer(
+        "171_p4_delete_message", "DELETE",
+        "/public/share/messages/{p4_assistant_message_id}",
+    )
+    db(
+        "172_p4_db_message_feedbacks",
+        "SELECT feedback_type, is_favorite FROM message_feedbacks"
+        " WHERE message_id = :message_id AND user_id = :user_id",
+        message_id=P4_FIXTURES["p4_assistant_message_id"],
+        user_id=P4_VIEWER_ID,
+    )
+    db(
+        "173_p4_db_message_deleted",
+        "SELECT is_deleted FROM messages WHERE id = :id",
+        id=P4_FIXTURES["p4_assistant_message_id"],
+    )
+    db(
+        "174_p4_db_message_reports",
+        "SELECT report_type, status FROM message_reports WHERE id = :id",
+        id=ids["p4_report_id"],
+    )
+    db(
+        "175_p4_db_conversation_shares",
+        "SELECT is_active FROM conversation_shares WHERE id = :id",
+        id=ids["p4_conversation_share_id"],
+    )
 
     return results

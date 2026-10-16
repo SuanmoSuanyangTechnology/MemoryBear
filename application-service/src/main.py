@@ -20,6 +20,7 @@ from .logging import setup_logging
 from .request_logging import RequestLoggingFastAPI
 from .runtime import ProcessRuntime, set_process_runtime
 from .sensitive import SensitiveDataFilter
+from .services.batch_persist_queue import BatchPersistQueue
 from .trace import TraceIdMiddleware
 
 logger = logging.getLogger(__name__)
@@ -75,11 +76,17 @@ def create_app(settings: AppServiceSettings | None = None) -> FastAPI:
                 await gateway_auth.start()
             except Exception:
                 logger.exception("gateway auth refresh start failed")
+        # Post-stream persistence runs in the background; enqueue calls degrade
+        # to sync writes while the queue is down, so this is not fail-closed.
+        await BatchPersistQueue.start()
         try:
             yield
         finally:
             if gateway_auth is not None:
                 await gateway_auth.aclose()
+            # Drain queued persistence before the database engine is disposed.
+            await BatchPersistQueue.flush()
+            await BatchPersistQueue.stop()
             await application.state.runtime.aclose()
             logger.info("Application service stopped")
 

@@ -53,6 +53,7 @@ from ..models import App, AppRelease, Conversation, Message
 
 if TYPE_CHECKING:
     from ..models import Message as MessageModel
+from ..model_clients.embedding import RedBearEmbeddings
 from ..models.workflow_model import WorkflowConfig, WorkflowExecution, WorkflowNodeCache, WorkflowNodeExecution
 from ..repositories import knowledge_repository
 from ..repositories.workflow_repository import (
@@ -1073,12 +1074,7 @@ class WorkflowService:
                 if not embedding_ref:
                     return None
 
-            # Embedding clients are synchronous; keep them off the async event loop.
-            query_embedding = await asyncio.to_thread(
-                AnnotationService.generate_embedding,
-                message,
-                embedding_ref,
-            )
+            query_embedding = await RedBearEmbeddings.for_invoke(embedding_ref).aembed_query(message)
             best_match = None
             best_similarity = 0.0
             for annotation in annotations:

@@ -50,8 +50,16 @@ _PUBLIC_PATHS = frozenset(
 # share view is public: the shared-link viewer holds no credentials, so the
 # gateway forwards the request without terminating a user credential and no
 # principal can be assembled. Read-only GET only.
+#
+# The whole public share-view surface (bare info path included) shares that
+# contract: the viewer authenticates with a share access token that the route
+# dependencies verify, so the gateway cannot assemble a principal for any of
+# it. GET covers the read face, POST the token exchange / chat / regenerate /
+# interaction writes, DELETE the two self-owned removals (revoke a share
+# link, delete one's own message). PUT/PATCH stay authenticated.
 _PUBLIC_PATH_PATTERNS = (
     (re.compile(r"^/internal/v1/apps/share/[^/]+$"), ("GET",)),
+    (re.compile(r"^/internal/v1/public/share(?:$|/)"), ("GET", "POST", "DELETE")),
 )
 
 

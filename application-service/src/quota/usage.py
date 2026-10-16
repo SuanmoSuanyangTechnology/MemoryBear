@@ -16,6 +16,7 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import Depends
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from ..api.dependencies import Principal, get_principal, get_sync_db
@@ -182,6 +183,28 @@ def ensure_end_user_quota(db: Session, principal: Principal) -> None:
     )
 
 
+async def check_end_user_quota_async(
+    db: AsyncSession,
+    tenant_id: UUID,
+    workspace_id: UUID | None = None,
+) -> None:
+    """Async end-user quota admission for the runtime plane.
+
+    Bridges to the sync check through ``run_sync`` so config resolution and
+    counting (trial users excluded) share one implementation.
+    """
+
+    await db.run_sync(
+        lambda sync_db: check_quota(
+            sync_db,
+            tenant_id,
+            "end_user_quota",
+            "end_user",
+            workspace_id=workspace_id,
+        )
+    )
+
+
 def require_app_quota(
     _: Annotated[UUID, Depends(require_workspace_access)],
     db: Annotated[Session, Depends(get_sync_db)],
@@ -225,6 +248,7 @@ def require_end_user_quota(
 
 
 __all__ = [
+    "check_end_user_quota_async",
     "check_quota",
     "count_active_apps",
     "count_active_end_users",

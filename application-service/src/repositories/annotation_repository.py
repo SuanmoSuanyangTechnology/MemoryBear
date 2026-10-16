@@ -1,8 +1,8 @@
 """Annotation data access (frozen port of the host ``AnnotationRepository``).
 
-Only the paths consumed by the migrated annotation faces are ported: CRUD,
-settings and hit-log reads. Hit-log writes and similarity matching belong to
-the runtime plane and are not part of this face.
+Covers both the management face (CRUD, settings, export, hit-log reads) and
+the runtime face (hit counting and hit-log writes used by similarity
+matching in the chat path).
 """
 
 from __future__ import annotations
@@ -211,6 +211,42 @@ class AnnotationRepository:
         return setting
 
     # ==================== Hit Log ====================
+
+    def increment_hit_count(self, annotation_id: UUID) -> bool:
+        """Increase the hit count of one annotation."""
+
+        annotation = self.get_by_id(annotation_id)
+        if not annotation:
+            return False
+        annotation.hit_count += 1
+        self.db.commit()
+        return True
+
+    def create_hit_log(
+        self,
+        annotation_id: UUID,
+        query: str,
+        matched_question: str,
+        answer: str,
+        similarity: float,
+        app_id: UUID,
+        source: str,
+    ) -> AppAnnotationHitLog:
+        """Record one annotation hit."""
+
+        hit_log = AppAnnotationHitLog(
+            annotation_id=annotation_id,
+            app_id=app_id,
+            source=source,
+            query=query,
+            matched_question=matched_question,
+            answer=answer,
+            similarity=similarity,
+        )
+        self.db.add(hit_log)
+        self.db.commit()
+        self.db.refresh(hit_log)
+        return hit_log
 
     def list_hit_logs_by_annotation(
         self,

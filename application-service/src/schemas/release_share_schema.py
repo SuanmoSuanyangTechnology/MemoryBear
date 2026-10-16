@@ -1,17 +1,17 @@
 """Release-share schemas (wire-compatible port of the host ``release_share_schema``).
 
-Covers the management face only: create / update inputs and the share-config
-output. The public-facing contracts (shared release info, embed code, stats)
-arrive with the runtime plane.
+Covers the management face (create / update inputs, share-config output) and
+the public share-view contracts (access token request, password verification,
+shared release info, embed code).
 """
 
 from __future__ import annotations
 
 import datetime
 import uuid
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, field_serializer
+from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator
 
 from ..utils.datetime_utils import to_timestamp_ms
 
@@ -34,6 +34,19 @@ class ReleaseShareUpdate(BaseModel):
     password: Optional[str] = Field(None, min_length=4, max_length=50, description="访问密码")
     allow_embed: Optional[bool] = Field(None, description="是否允许嵌入")
     embed_domains: Optional[List[str]] = Field(None, description="允许嵌入的域名白名单")
+
+
+class PasswordVerifyRequest(BaseModel):
+    """Password verification request"""
+
+    password: str = Field(..., description="访问密码")
+
+
+class TokenRequest(BaseModel):
+    """Access token request"""
+
+    user_id: Optional[str] = Field(None, description="用户 ID（可选，不提供则自动生成）")
+    password: Optional[str] = Field(None, description="访问密码（如果需要）")
 
 
 class ReleaseShare(BaseModel):
@@ -68,4 +81,55 @@ class ReleaseShare(BaseModel):
         return to_timestamp_ms(dt)
 
 
-__all__ = ["ReleaseShare", "ReleaseShareCreate", "ReleaseShareUpdate"]
+class SharedReleaseInfo(BaseModel):
+    """App info returned to the public share view"""
+
+    app_name: str
+    app_description: Optional[str] = None
+    app_icon: Optional[str] = None
+    app_type: str
+    version: int
+    release_notes: Optional[str] = None
+    published_at: int
+
+    # App-type specific configuration payload
+    config: Dict[str, Any] = {}
+
+    # Access-control state
+    require_password: bool
+    is_password_verified: bool = False  # 当前是否已验证密码
+
+    # Embed configuration
+    allow_embed: bool
+
+    @field_validator("config", mode="before")
+    @classmethod
+    def parse_config(cls, v):
+        """Parse ``config``: a JSON string is decoded into a dict."""
+        if isinstance(v, str):
+            import json
+            try:
+                return json.loads(v)
+            except json.JSONDecodeError:
+                return {}
+        return v if v is not None else {}
+
+
+class EmbedCode(BaseModel):
+    """Embed code"""
+
+    iframe_code: str = Field(..., description="iframe 嵌入代码")
+    preview_url: str = Field(..., description="预览 URL")
+    width: str = Field(default="100%", description="宽度")
+    height: str = Field(default="600px", description="高度")
+
+
+__all__ = [
+    "EmbedCode",
+    "PasswordVerifyRequest",
+    "ReleaseShare",
+    "ReleaseShareCreate",
+    "ReleaseShareUpdate",
+    "SharedReleaseInfo",
+    "TokenRequest",
+]

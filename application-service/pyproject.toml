@@ -39,6 +39,7 @@ dependencies = [
     "python-calamine>=0.4.0,<1",
     "python-docx>=1.2.0,<2",
     "python-dotenv>=1.1,<2",
+    "python-jose>=3.5,<4",
     "python-magic>=0.4.14; sys_platform == 'linux' or sys_platform == 'darwin'",
     "python-multipart>=0.0.20,<1",
     "pytz>=2025.2,<2027",
@@ -234,3 +235,8 @@ select = ["E", "F", "I", "UP", "B", "ASYNC"]
 "src/services/cluster_chat_features.py" = ["E501", "E721", "E722", "F401", "F541", "I001", "UP006", "UP007", "UP035", "UP037", "UP041", "UP045", "B007", "B904"]
 "src/services/handoffs_service.py" = ["E501", "E721", "E722", "F401", "F541", "I001", "UP006", "UP007", "UP035", "UP037", "UP041", "UP045", "B007", "B904"]
 "src/services/multi_agent_orchestrator.py" = ["E501", "E721", "E722", "F401", "F541", "I001", "UP006", "UP007", "UP035", "UP037", "UP041", "UP045", "B007", "B904", "F841"]
+# Frozen port of the host app-chat kernel (agent / multi-agent cluster /
+# workflow chat entry points, streaming SSE, regeneration): kept verbatim for
+# line-by-line comparison; only import paths, the logger helper, settings
+# access and the sandbox seam were rewritten mechanically.
+"src/services/app_chat_service.py" = ["E501", "E721", "E722", "F401", "F541", "I001", "UP006", "UP007", "UP035", "UP037", "UP041", "UP045", "B007", "B904", "F841"]

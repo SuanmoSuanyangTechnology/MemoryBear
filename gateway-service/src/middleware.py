@@ -29,6 +29,16 @@ the namespace and forward with no identity injected (the split serves the view
 from its own public path, application-service src/auth.py). Same containment:
 exact single-segment token, GET only, credentials always run the pipeline.
 
+App public share-view API exemption: /api/public/share/* (token exchange, chat
+SSE, interaction writes) skips authenticate unconditionally — every request
+carries the viewer's share access token as Authorization: Bearer by contract,
+which is not a platform credential and must reach the split verbatim (its
+public share routes verify the share token themselves; no principal is ever
+assembled). The header is captured into request.state and re-injected by the
+forwarder; the scope itself stays sanitized. Identity namespace and X-Forwarded
+forgeries are stripped and the origin pair re-asserted, same as terminated
+paths.
+
 X-Forwarded hardening: client-supplied X-Forwarded-* are stripped from every
 path (forgery surface) and the terminated path re-injects the pair downstream
 services rebuild public share URLs from — scheme + Host of the gateway's own
@@ -82,6 +92,23 @@ _APP_PUBLIC_SHARE_RE = re.compile(r"/api/apps/share/[^/]+")
 
 def is_app_public_share(path: str, method: str) -> bool:
     return method == "GET" and _APP_PUBLIC_SHARE_RE.fullmatch(path) is not None
+
+
+# App public share-view API exemption (mirrors the split public path
+# /internal/v1/public/share in application-service src/auth.py): the viewer
+# authenticates with a share access token carried as Authorization: Bearer on
+# every request, so these paths never take the credential pipeline — the token
+# is verified by the split's public share routes, not by the gateway. The
+# method set mirrors the split contract (GET reads, POST token exchange / chat
+# / interaction writes, DELETE self-owned removals); everything else on the
+# prefix stays authenticated.
+_APP_PUBLIC_SHARE_API_RE = re.compile(r"^/api/public/share(?:$|/)")
+_APP_PUBLIC_SHARE_API_METHODS = ("GET", "POST", "DELETE")
+
+
+def is_app_public_share_api(path: str, method: str) -> bool:
+    return (method in _APP_PUBLIC_SHARE_API_METHODS
+            and _APP_PUBLIC_SHARE_API_RE.match(path) is not None)
 
 
 def _has_credentials(request: Request) -> bool:
@@ -161,6 +188,15 @@ class GatewayMiddleware(BaseHTTPMiddleware):
                 and not _has_credentials(request)):
             self._public_share_headers(request)
             return await call_next(request)
+        # App public share-view API exemption: the share access token rides
+        # Authorization: Bearer by contract, so this branch is deliberately
+        # unconditional — the pipeline would reject the share token as an
+        # invalid user JWT. The token is captured for the forwarder and the
+        # request continues without termination (the split's public share
+        # routes verify it; no platform identity exists on these paths).
+        if is_app_public_share_api(request.url.path, request.method):
+            self._public_share_api_headers(request)
+            return await call_next(request)
         result = await strategy.authenticate(request, deps)
         if result.status_code is not None:
             # Rejection: 401 semantics / 429 rate limit; rate-limit headers ride
@@ -214,4 +250,17 @@ class GatewayMiddleware(BaseHTTPMiddleware):
         its public path. Forged X-App-* / X-User-* headers must not survive
         even so: the namespace is gateway-managed on every other path."""
         headers = _sanitize_headers(request.headers)
+        request.scope["headers"] = [(k.lower().encode(), v.encode()) for k, v in headers.items()]
+
+    @staticmethod
+    def _public_share_api_headers(request: Request) -> None:
+        """Header cleanup for the public share-view API exemption: sanitize the
+        identity namespace (forged X-App-* / X-User-* must not survive), capture
+        the client's share access token for the forwarder (it never rides the
+        scope — same mechanics as the internal token), and re-assert the origin
+        pair the split rebuilds public share URLs from."""
+        request.state.forward_authorization = request.headers.get("authorization")
+        headers = _sanitize_headers(request.headers)
+        headers["x-forwarded-proto"] = request.url.scheme
+        headers["x-forwarded-host"] = request.headers.get("host", "")
         request.scope["headers"] = [(k.lower().encode(), v.encode()) for k, v in headers.items()]

@@ -5,7 +5,8 @@ agent / multi-agent / workflow draft runs, multi-model compare, single-node
 run, node cache maintenance, debug state and rerun-from-last-debug.
 
 Runtime plane: per-request async DB contexts, in-process execution only (no
-sandbox runner), SSE framing identical to the monolith.
+sandbox runner). SSE event framing matches the monolith; each stream runs
+through the shared keep-alive wrapper (heartbeat + idle cutoff).
 """
 
 from __future__ import annotations
@@ -19,7 +20,6 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
-from fastapi.responses import StreamingResponse
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
@@ -50,6 +50,7 @@ from ...services.multi_agent_service import MultiAgentService
 from ...services.workflow_service import WorkflowService
 from ...services.workspace_service import get_workspace_storage_type_without_auth_async
 from ...utils.datetime_utils import utcnow_naive
+from ...utils.sse_stream import sse_response
 from ...utils.workflow_validator import validate_workflow_config
 from ..dependencies import Principal, get_principal, get_sync_db
 from ..schemas.common import fail, success
@@ -533,15 +534,7 @@ async def draft_run(
                     sse_message = f"event: {event_type}\ndata: {json.dumps(event_data)}\n\n"
                     yield sse_message
 
-            return StreamingResponse(
-                event_generator(),
-                media_type="text/event-stream",
-                headers={
-                    "Cache-Control": "no-cache",
-                    "Connection": "keep-alive",
-                    "X-Accel-Buffering": "no"
-                }
-            )
+            return sse_response(event_generator())
 
         async with get_async_db_context() as db:
             workflow_service = WorkflowService(db)
@@ -624,15 +617,7 @@ async def draft_run(
                     ):
                         yield event
 
-            return StreamingResponse(
-                event_generator(),
-                media_type="text/event-stream",
-                headers={
-                    "Cache-Control": "no-cache",
-                    "Connection": "keep-alive",
-                    "X-Accel-Buffering": "no",
-                },
-            )
+            return sse_response(event_generator())
 
         logger.debug(
             "开始非流式试运行",
@@ -739,15 +724,7 @@ async def draft_run(
                     ):
                         yield event
 
-            return StreamingResponse(
-                event_generator(),
-                media_type="text/event-stream",
-                headers={
-                    "Cache-Control": "no-cache",
-                    "Connection": "keep-alive",
-                    "X-Accel-Buffering": "no",
-                },
-            )
+            return sse_response(event_generator())
 
         logger.debug(
             "开始多智能体非流式试运行",
@@ -900,15 +877,7 @@ async def draft_run_compare(
                 ):
                     yield event
 
-        return StreamingResponse(
-            event_generator(),
-            media_type="text/event-stream",
-            headers={
-                "Cache-Control": "no-cache",
-                "Connection": "keep-alive",
-                "X-Accel-Buffering": "no"
-            }
-        )
+        return sse_response(event_generator())
 
     # Non-streaming branch
     source = HitLogSource.CONSOLE
@@ -993,15 +962,7 @@ async def run_single_workflow_node(
                     f"{json.dumps(event['data'], ensure_ascii=False)}\n\n"
                 )
 
-        return StreamingResponse(
-            event_generator(),
-            media_type="text/event-stream",
-            headers={
-                "Cache-Control": "no-cache",
-                "Connection": "keep-alive",
-                "X-Accel-Buffering": "no",
-            }
-        )
+        return sse_response(event_generator())
 
     result = await workflow_service.run_single_node(
         app_id=app_id,

@@ -9,6 +9,7 @@ contract is frozen.
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from uuid import UUID
 
 from sqlalchemy import select, text
@@ -283,6 +284,146 @@ class EndUserRepository:
         self.db.commit()
         self.db.refresh(end_user)
         return end_user
+
+    @contextmanager
+    def _acquire_eu_lock(self, workspace_id: UUID, other_id: str):
+        """Transaction-scoped exclusive lock on (workspace, other_id).
+
+        Serializes the find -> decide -> write sequence so concurrent requests
+        cannot both conclude "no match" and leave duplicate rows behind.
+        The key matches the host repository so both services exclude each other
+        while they run side by side; released automatically at commit/rollback.
+        """
+
+        self.db.execute(
+            text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
+            {"key": f"{workspace_id}|{other_id}"},
+        )
+        yield
+
+    def get_or_create_end_user(
+        self,
+        app_id: UUID,
+        workspace_id: UUID,
+        other_id: str,
+        original_user_id: str | None = None,
+        other_name: str | None = None,
+    ) -> EndUser:
+        """Get or create the workspace end user for ``other_id`` (flag dropped)."""
+
+        end_user, _ = self.get_or_create_end_user_with_status(
+            app_id=app_id,
+            workspace_id=workspace_id,
+            other_id=other_id,
+            original_user_id=original_user_id,
+            other_name=other_name,
+        )
+        return end_user
+
+    def get_or_create_end_user_with_status(
+        self,
+        app_id: UUID,
+        workspace_id: UUID,
+        other_id: str,
+        original_user_id: str | None = None,
+        other_name: str | None = None,
+    ) -> tuple[EndUser, bool]:
+        """Get or create the workspace end user; the flag reports whether this
+        call created the row. The decision is made inside the advisory lock so
+        callers never act on a stale pre-lock probe. A merged origin ``other_id``
+        routes to its target; a new user gets an empty ``EndUserInfo`` row in
+        the same commit."""
+
+        try:
+            with self._acquire_eu_lock(workspace_id, other_id):
+                end_user = (
+                    self.db.query(EndUser)
+                    .filter(
+                        EndUser.workspace_id == workspace_id,
+                        EndUser.other_id == other_id,
+                        EndUser.is_active.is_(True),
+                    )
+                    .order_by(EndUser.created_at.asc())
+                    .first()
+                )
+                if end_user:
+                    end_user.app_id = app_id
+                    self.db.commit()
+                    self.db.refresh(end_user)
+                    return end_user, False
+
+                merged_target = self.resolve_merge_by_other_id(workspace_id, other_id)
+                if merged_target:
+                    merged_target.app_id = app_id
+                    self.db.commit()
+                    self.db.refresh(merged_target)
+                    return merged_target, False
+
+                end_user = EndUser(
+                    app_id=app_id,
+                    workspace_id=workspace_id,
+                    other_id=other_id,
+                )
+                self.db.add(end_user)
+                self.db.flush()
+
+                self.db.add(
+                    EndUserInfo(
+                        end_user_id=end_user.id,
+                        other_name=other_name or "",
+                        aliases=[],
+                        meta_data={},
+                    )
+                )
+                self.db.commit()
+            self.db.refresh(end_user)
+            return end_user, True
+        except Exception:
+            self.db.rollback()
+            raise
+
+    async def get_or_create_end_user_async(
+        self,
+        app_id: UUID,
+        workspace_id: UUID,
+        other_id: str,
+        original_user_id: str | None = None,
+        other_name: str | None = None,
+    ) -> EndUser:
+        """Async variant used on the runtime plane; ``self.db`` must be an
+        AsyncSession. No advisory lock (host parity); merge routing comes from
+        the async lookup, and a new user gets an empty ``EndUserInfo`` row."""
+
+        try:
+            end_user = await self.get_end_user_by_other_id_async(workspace_id, other_id)
+            if end_user:
+                end_user.app_id = app_id
+                await self.db.commit()
+                await self.db.refresh(end_user)
+                return end_user
+
+            end_user = EndUser(
+                app_id=app_id,
+                workspace_id=workspace_id,
+                other_id=other_id,
+            )
+            self.db.add(end_user)
+            await self.db.flush()
+
+            self.db.add(
+                EndUserInfo(
+                    end_user_id=end_user.id,
+                    other_name=other_name or "",
+                    aliases=[],
+                    meta_data={},
+                )
+            )
+            await self.db.commit()
+            await self.db.refresh(end_user)
+            return end_user
+        except Exception:
+            await self.db.rollback()
+            raise
 
 
 __all__ = ["EndUserRepository"]

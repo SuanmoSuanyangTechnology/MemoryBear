@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator, Iterator
+from typing import Annotated
 from uuid import UUID
 
-from fastapi import HTTPException, Request
+from fastapi import Depends, HTTPException, Request
+from fastapi.security import OAuth2PasswordBearer
 from pydantic import BaseModel, ValidationError
 from redis import Redis as SyncRedis
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -118,6 +120,60 @@ async def get_principal(request: Request) -> Principal:
     return principal_from_headers(request)
 
 
+# Bearer extraction for public share-access tokens (host parity:
+# ``OAuth2PasswordBearer`` answers a missing header with 401 + WWW-Authenticate).
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
+
+
+class ShareTokenData:
+    """Decoded share-access token: the viewer id bound to one share token."""
+
+    def __init__(self, user_id: str, share_token: str):
+        self.user_id = user_id
+        self.share_token = share_token
+
+
+def get_share_user_id(
+    token: Annotated[str, Depends(oauth2_scheme)],
+    db: Annotated[Session, Depends(get_sync_db)],
+) -> ShareTokenData:
+    """Validate the share-access token of a public share request.
+
+    Sync-style on purpose: the body makes sync DB calls, so FastAPI runs it in
+    the threadpool instead of blocking the event loop. Validity only requires
+    the share to exist and be enabled (a password share still resolves here);
+    any failure surfaces as 401.
+    """
+
+    from ..errors import BusinessException
+    from ..services.release_share_service import ReleaseShareService
+    from ..utils.share_token import decode_access_token
+
+    credentials_exception = HTTPException(
+        status_code=401,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+
+    try:
+        payload = decode_access_token(token)
+        user_id = payload["user_id"]
+        share_token = payload["share_token"]
+
+        share_info = ReleaseShareService(db).get_shared_release_info(
+            share_token=share_token
+        )
+    except BusinessException as e:
+        raise credentials_exception from e
+    except Exception as e:
+        raise credentials_exception from e
+
+    if not share_info:
+        raise credentials_exception
+
+    return ShareTokenData(user_id=user_id, share_token=share_token)
+
+
 __all__ = [
     "ACTOR_ID_HEADER",
     "API_KEY_ID_HEADER",
@@ -126,11 +182,13 @@ __all__ = [
     "ModelInvokeClient",
     "MonolithUpstream",
     "Principal",
+    "ShareTokenData",
     "SyncRedis",
     "get_async_db",
     "get_model_invoke",
     "get_principal",
     "get_runtime",
+    "get_share_user_id",
     "get_sync_db",
     "get_sync_redis",
     "get_upstream",

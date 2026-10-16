@@ -34,6 +34,7 @@ _UNAVAILABLE_MESSAGE = (
 
 _READ_PATH = "/api/internal/app-service/memory/read"
 _INGEST_WORKFLOW_PATH = "/api/internal/app-service/memory/ingest-workflow"
+_INGEST_AGENT_PATH = "/api/internal/app-service/memory/ingest-agent"
 
 
 class LongTermMemoryInput(BaseModel):
@@ -214,6 +215,53 @@ class MemoryService:
                 "conversation_id": conversation_id,
                 "end_user_id": end_user_id,
                 "config_id": str(config_id),
+                "language": language,
+                "storage_type": storage_type,
+                "user_rag_memory_id": user_rag_memory_id,
+            },
+        )
+
+    @staticmethod
+    async def ingest_agent_messages(
+        conversation_id: str,
+        messages: list,
+        app_id: str,
+        config_id: str = "",
+        workspace_id: str = "",
+        end_user_id: str = "",
+        language: str = "zh",
+        storage_type: str = "neo4j",
+        user_rag_memory_id: str = "",
+    ) -> None:
+        """Forward one same-turn message batch to the memory ingest endpoint.
+
+        The batch keeps the user + assistant pair together so the pipeline
+        assigns consecutive sequence numbers in order. Message objects carry
+        the host attribute set (``id`` / ``role`` / ``content`` /
+        ``created_at`` / ``meta_data`` / ``should_memorize``) and are
+        serialized to JSON; the endpoint rebuilds them with the same types.
+        """
+
+        payload_messages = []
+        for message in messages:
+            created_at = getattr(message, "created_at", None)
+            payload_messages.append({
+                "id": str(message.id) if getattr(message, "id", None) else None,
+                "role": str(getattr(message, "role", "")),
+                "content": str(getattr(message, "content", "") or ""),
+                "meta_data": getattr(message, "meta_data", None),
+                "created_at": created_at.isoformat() if created_at else None,
+                "should_memorize": bool(getattr(message, "should_memorize", True)),
+            })
+        await _forward_memory_call(
+            _INGEST_AGENT_PATH,
+            workspace_id=workspace_id,
+            json_body={
+                "messages": payload_messages,
+                "conversation_id": conversation_id,
+                "app_id": app_id,
+                "config_id": str(config_id) if config_id else "",
+                "end_user_id": end_user_id,
                 "language": language,
                 "storage_type": storage_type,
                 "user_rag_memory_id": user_rag_memory_id,

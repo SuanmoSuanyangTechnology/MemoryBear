@@ -16,6 +16,7 @@
     {"path_prefix": "/v1/end_user", "service": "application-service", "base_url": "http://application-service:8080", "aud": "application-service"},
     {"path_prefix": "/api/tools", "service": "application-service", "base_url": "http://application-service:8080", "aud": "application-service"},
     {"path_prefix": "/api/skills", "service": "application-service", "base_url": "http://application-service:8080", "aud": "application-service"},
-    {"path_prefix": "/api/prompt", "service": "application-service", "base_url": "http://application-service:8080", "aud": "application-service"}
+    {"path_prefix": "/api/prompt", "service": "application-service", "base_url": "http://application-service:8080", "aud": "application-service"},
+    {"path_prefix": "/api/public/share", "service": "application-service", "base_url": "http://application-service:8080", "aud": "application-service"}
   ]
 }

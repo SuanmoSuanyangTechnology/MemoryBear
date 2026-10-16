@@ -1,24 +1,121 @@
-"""Agent-execution read paths used by the application-log endpoints (frozen
-port of the monolith ``agent_execution_repository`` read subset)."""
+"""Agent-execution read paths used by the application-log endpoints plus the
+chat-kernel write path (frozen port of the monolith
+``agent_execution_repository`` subset)."""
 
 from __future__ import annotations
 
 import logging
 import uuid
+from typing import Any
 
 from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from ..models.agent_execution_model import AgentExecution
+from ..utils.datetime_utils import utcnow_naive
 
 logger = logging.getLogger(__name__)
 
 
 class AgentExecutionRepository:
-    """Agent execution record reads (app-log face)."""
+    """Agent execution record reads and completion writes."""
 
-    def __init__(self, db: Session):
+    def __init__(self, db: Session | AsyncSession):
         self.db = db
+
+    def create(self, execution: AgentExecution) -> AgentExecution:
+        """Stage a new execution record; the caller owns the commit."""
+
+        self.db.add(execution)
+        self.db.flush()
+        return execution
+
+    async def create_async(self, execution: AgentExecution) -> AgentExecution:
+        """Stage a new execution record on the async session."""
+
+        self.db.add(execution)
+        await self.db.flush()
+        return execution
+
+    def update_completed(
+        self,
+        execution_id: uuid.UUID,
+        *,
+        steps: list,
+        status: str = "completed",
+        elapsed_time: float | None = None,
+        token_usage: dict | None = None,
+        error_message: str | None = None,
+        completed_at: Any = None,
+        message_id: uuid.UUID | None = None,
+        agent_log: dict | None = None,
+    ) -> None:
+        """Mark an execution completed (or failed) and commit."""
+
+        updates = {
+            "steps": steps,
+            "status": status,
+            "completed_at": completed_at or utcnow_naive(),
+        }
+        if elapsed_time is not None:
+            updates["elapsed_time"] = elapsed_time
+        if token_usage is not None:
+            updates["token_usage"] = token_usage
+        if error_message is not None:
+            updates["error_message"] = error_message
+        if message_id is not None:
+            updates["message_id"] = message_id
+        if agent_log is not None:
+            updates["agent_log"] = agent_log
+
+        record = self.db.scalars(
+            select(AgentExecution).where(AgentExecution.id == execution_id)
+        ).first()
+        if record:
+            for key, value in updates.items():
+                setattr(record, key, value)
+            self.db.commit()
+
+    async def update_completed_async(
+        self,
+        execution_id: uuid.UUID,
+        *,
+        steps: list,
+        status: str = "completed",
+        elapsed_time: float | None = None,
+        token_usage: dict | None = None,
+        error_message: str | None = None,
+        completed_at: Any = None,
+        message_id: uuid.UUID | None = None,
+        agent_log: dict | None = None,
+    ) -> None:
+        """Async variant of ``update_completed``."""
+
+        updates = {
+            "steps": steps,
+            "status": status,
+            "completed_at": completed_at or utcnow_naive(),
+        }
+        if elapsed_time is not None:
+            updates["elapsed_time"] = elapsed_time
+        if token_usage is not None:
+            updates["token_usage"] = token_usage
+        if error_message is not None:
+            updates["error_message"] = error_message
+        if message_id is not None:
+            updates["message_id"] = message_id
+        if agent_log is not None:
+            updates["agent_log"] = agent_log
+
+        result = await self.db.execute(
+            select(AgentExecution).where(AgentExecution.id == execution_id)
+        )
+        record = result.scalar_one_or_none()
+        if record:
+            for key, value in updates.items():
+                setattr(record, key, value)
+            await self.db.commit()
 
     def get_by_conversation(
         self,

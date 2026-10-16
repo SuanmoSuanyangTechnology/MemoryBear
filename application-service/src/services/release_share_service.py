@@ -1,9 +1,8 @@
 """Release-share service (frozen port of the host ``ReleaseShareService``).
 
-Only the management face is ported: create-or-update, update, read, delete and
-token regeneration of a release's share configuration. The public share-view
-resolution (password check, embed code, view counting) belongs to the runtime
-plane.
+Covers the management face (create-or-update, update, read, delete, token
+regeneration) and the public share-view resolution (shared release info with
+password check, password verification, embed code, view counting).
 """
 
 from __future__ import annotations
@@ -19,7 +18,14 @@ from ..models.app_release_model import AppRelease
 from ..models.release_share_model import ReleaseShare
 from ..repositories.release_share_repository import ReleaseShareRepository
 from ..schemas import release_share_schema
-from ..utils.share_utils import build_share_url, generate_share_token, hash_password
+from ..utils.datetime_utils import to_timestamp_ms
+from ..utils.share_utils import (
+    build_share_url,
+    generate_embed_code,
+    generate_share_token,
+    hash_password,
+    verify_password,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -145,6 +151,112 @@ class ReleaseShareService:
             created_at=share.created_at,
             updated_at=share.updated_at,
         )
+
+    def get_shared_release_info(
+        self,
+        share_token: str,
+        password: str | None = None,
+    ) -> release_share_schema.SharedReleaseInfo:
+        """Public share-view resolution.
+
+        With a password-protected share and no password supplied, returns the
+        partial info (empty config, ``is_password_verified=False``) so the
+        viewer can render the password prompt; a wrong password raises.
+        """
+
+        share = self.repo.get_by_share_token(share_token)
+        if not share:
+            raise ResourceNotFoundException("分享链接", share_token)
+
+        if not share.is_enabled:
+            raise BusinessException("该分享链接已禁用", BizCode.SHARE_DISABLED)
+
+        is_password_verified = False
+        if share.require_password:
+            if not password:
+                release = self.db.get(AppRelease, share.release_id)
+                return release_share_schema.SharedReleaseInfo(
+                    app_name=release.name,
+                    app_description=release.description,
+                    app_icon=release.icon,
+                    app_type=release.type,
+                    version=release.version,
+                    release_notes=release.release_notes,
+                    published_at=to_timestamp_ms(release.published_at),
+                    config={},
+                    require_password=True,
+                    is_password_verified=False,
+                    allow_embed=share.allow_embed,
+                )
+
+            if not share.password_hash or not verify_password(password, share.password_hash):
+                raise BusinessException("密码错误", BizCode.INVALID_PASSWORD)
+
+            is_password_verified = True
+
+        release = self.db.get(AppRelease, share.release_id)
+        if not release:
+            raise ResourceNotFoundException("发布版本", str(share.release_id))
+
+        # View counting is best-effort and never blocks the response.
+        try:
+            self.repo.increment_view_count(share.id)
+        except Exception as e:
+            logger.warning(f"更新访问统计失败: {str(e)}")
+
+        return release_share_schema.SharedReleaseInfo(
+            app_name=release.name,
+            app_description=release.description,
+            app_icon=release.icon,
+            app_type=release.type,
+            version=release.version,
+            release_notes=release.release_notes,
+            published_at=to_timestamp_ms(release.published_at),
+            config=release.config or {},
+            require_password=share.require_password,
+            is_password_verified=is_password_verified,
+            allow_embed=share.allow_embed,
+        )
+
+    def verify_password(self, share_token: str, password: str) -> bool:
+        """Check one password against the share's stored hash."""
+
+        share = self.repo.get_by_share_token(share_token)
+        if not share:
+            raise ResourceNotFoundException("分享链接", share_token)
+
+        if not share.is_enabled:
+            raise BusinessException("该分享链接已禁用", BizCode.SHARE_DISABLED)
+
+        if not share.require_password:
+            return True
+
+        if not share.password_hash:
+            return False
+
+        return verify_password(password, share.password_hash)
+
+    def get_embed_code(
+        self,
+        share_token: str,
+        width: str = "100%",
+        height: str = "600px",
+        base_url: str | None = None,
+    ) -> release_share_schema.EmbedCode:
+        """Build the iframe embed payload for one share link."""
+
+        share = self.repo.get_by_share_token(share_token)
+        if not share:
+            raise ResourceNotFoundException("分享链接", share_token)
+
+        if not share.is_enabled:
+            raise BusinessException("该分享链接已禁用", BizCode.SHARE_DISABLED)
+
+        if not share.allow_embed:
+            raise BusinessException("该分享不允许嵌入", BizCode.EMBED_NOT_ALLOWED)
+
+        embed_data = generate_embed_code(share_token, width, height, base_url)
+        return release_share_schema.EmbedCode(**embed_data)
 
     def _create_share_internal(
         self,

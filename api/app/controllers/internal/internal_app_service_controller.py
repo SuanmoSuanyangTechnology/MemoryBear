@@ -17,11 +17,14 @@
     POST /context-engine/after-workflow-turn            工作流轮次后摘要状态推进
     POST /memory/read                                   长期记忆检索
     POST /memory/ingest-workflow                        工作流消息摄入（workflow 语义）
+    POST /memory/ingest-agent                           Agent 回合消息摄入（user+assistant 成对）
     GET  /memory/workspace-config                       工作空间启用中的记忆配置
 """
 from __future__ import annotations
 
 import uuid
+from datetime import datetime
+from types import SimpleNamespace
 from typing import Any, Optional
 
 from fastapi import APIRouter, Header
@@ -64,6 +67,18 @@ def _parse_uuid(raw: str, field_name: str) -> uuid.UUID:
     except (TypeError, ValueError) as exc:
         raise BusinessException(
             f"Invalid {field_name}: {raw}", BizCode.INVALID_PARAMETER
+        ) from exc
+
+
+def _parse_iso_created_at(raw: Optional[str]) -> Optional[datetime]:
+    """还原调用方序列化的 ISO 时间；写入列要求 datetime，字符串不容许透传。"""
+    if not raw:
+        return None
+    try:
+        return datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise BusinessException(
+            f"Invalid created_at: {raw}", BizCode.INVALID_PARAMETER
         ) from exc
 
 
@@ -128,6 +143,26 @@ class MemoryIngestWorkflowRequest(BaseModel):
     conversation_id: str
     end_user_id: str
     config_id: str
+    language: str = "zh"
+    storage_type: str = "neo4j"
+    user_rag_memory_id: str = ""
+
+
+class MemoryIngestAgentMessage(BaseModel):
+    id: Optional[str] = None
+    role: str
+    content: str
+    meta_data: Optional[dict[str, Any]] = None
+    created_at: Optional[str] = None
+    should_memorize: bool = True
+
+
+class MemoryIngestAgentRequest(BaseModel):
+    messages: list[MemoryIngestAgentMessage]
+    conversation_id: str
+    app_id: str
+    end_user_id: str = ""
+    config_id: str = ""
     language: str = "zh"
     storage_type: str = "neo4j"
     user_rag_memory_id: str = ""
@@ -315,6 +350,56 @@ async def internal_memory_ingest_workflow(
         end_user_id=end_user_id,
         config_id=payload.config_id,
         workspace_id=str(workspace_id),
+        language=payload.language,
+        storage_type=payload.storage_type,
+        user_rag_memory_id=payload.user_rag_memory_id,
+    )
+    return success()
+
+
+@router.post("/memory/ingest-agent")
+@require_api_key_self_db(scopes=["memory"])
+async def internal_memory_ingest_agent(
+        payload: MemoryIngestAgentRequest,
+        x_workspace_id: Optional[str] = Header(None, alias="X-Workspace-Id"),
+        api_key_auth: ApiKeyAuth = None,
+):
+    """Agent 回合消息摄入；同一回合 user+assistant 一次派发，seq 连续分配。
+
+    消息按宿主属性集（id/role/content/created_at/meta_data/should_memorize）
+    重建后再入流水线，与单体内部 dispatch_memory_pair 的入参形态一致。
+    """
+    workspace_id = _parse_workspace_id(x_workspace_id)
+    logger.info(
+        f"Internal memory ingest-agent - key_workspace: {api_key_auth.workspace_id}, "
+        f"workspace: {workspace_id}, end_user_id: {payload.end_user_id}"
+    )
+    end_user_id = payload.end_user_id
+    if end_user_id:
+        async with get_async_db_context() as db:
+            end_user = await validate_end_user_in_workspace_async(db, end_user_id, workspace_id)
+            # 合并路由：改写为合并目标用户，与记忆检索端点的口径一致
+            end_user_id = str(end_user.id)
+
+    messages = [
+        SimpleNamespace(
+            id=_parse_uuid(m.id, "message id") if m.id else None,
+            role=m.role,
+            content=m.content,
+            meta_data=m.meta_data,
+            created_at=_parse_iso_created_at(m.created_at),
+            should_memorize=m.should_memorize,
+        )
+        for m in payload.messages
+    ]
+
+    await MemoryService.ingest_agent_messages(
+        conversation_id=payload.conversation_id,
+        messages=messages,
+        app_id=payload.app_id,
+        config_id=payload.config_id,
+        workspace_id=str(workspace_id),
+        end_user_id=end_user_id,
         language=payload.language,
         storage_type=payload.storage_type,
         user_rag_memory_id=payload.user_rag_memory_id,

@@ -28,6 +28,7 @@ from ..config import current_settings
 from ..errors import BizCode
 from ..errors import BusinessException
 from ..llm_error_handler import classify_multimodal_exception
+from ..model_clients.embedding import RedBearEmbeddings
 from ..usage_context import bind_usage
 from ..integrations.knowledge.context_factory import build_app_knowledge_context
 from ..integrations.knowledge.contracts import KnowledgeRetrievalSource
@@ -1109,9 +1110,7 @@ class AgentRunService:
 
                 threshold = setting.similarity_threshold
 
-            query_embedding = await asyncio.to_thread(
-                AnnotationService.generate_embedding, message, embedding_ref
-            )
+            query_embedding = await RedBearEmbeddings.for_invoke(embedding_ref).aembed_query(message)
             best_match = None
             best_similarity = 0.0
             for annotation in annotations:
