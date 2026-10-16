@@ -184,16 +184,18 @@ class AppServiceSettings(BaseSettings):
         validation_alias="APPLICATION_SERVICE_JWKS_URL",
     )
 
-    # Monolith upstream channel (coexistence period): cross-domain writes are
-    # forwarded to the monolith's /v1 API-key face over the internal network.
-    # Unset or unreachable upstreams fail the forward closed.
+    # Monolith upstream channel (coexistence period): cross-domain writes and
+    # memory/context-engine operations are forwarded to the monolith's
+    # internal callback endpoints over the internal network, authenticated
+    # with a dedicated shared secret (no platform credential involved). Unset
+    # or unreachable upstreams fail the forward closed.
     application_service_upstream_base_url: str | None = Field(
         default=None,
         validation_alias="APPLICATION_SERVICE_UPSTREAM_BASE_URL",
     )
-    application_service_upstream_api_key: SecretStr = Field(
+    application_service_callback_secret: SecretStr = Field(
         default=SecretStr(""),
-        validation_alias="APPLICATION_SERVICE_UPSTREAM_API_KEY",
+        validation_alias="APPLICATION_SERVICE_CALLBACK_SECRET",
     )
     application_service_upstream_timeout_seconds: float = Field(
         default=30.0,

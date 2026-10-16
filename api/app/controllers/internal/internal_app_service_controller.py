@@ -3,9 +3,10 @@
 供拆分出的应用服务（application-service）在共存期回调老单体执行记忆读写与
 上下文引擎操作，避免应用服务本地复刻这些逻辑（状态在单体侧单写）。
 
-认证方式: API Key（memory scope）。记忆类端点同时要求显式 X-Workspace-Id 头：
-/v1 面工作空间取自 Key 绑定，预置服务 Key 需服务多工作空间，因此由调用方显式
-指定并按端点校验 end_user 归属。
+认证方式: 专用回调共享密钥（X-Callback-Secret 头，值来自环境变量
+APPLICATION_SERVICE_CALLBACK_SECRET，两端配置同一值）。记忆类与终端用户类端点
+同时要求显式 X-Workspace-Id 头：回调通道无凭据级工作空间绑定，工作空间由调用方
+显式指定并按端点校验 end_user 归属。
 
 路由前缀: /internal/app-service
 最终路径: /api/internal/app-service/...
@@ -19,6 +20,8 @@
     POST /memory/ingest-workflow                        工作流消息摄入（workflow 语义）
     POST /memory/ingest-agent                           Agent 回合消息摄入（user+assistant 成对）
     GET  /memory/workspace-config                       工作空间启用中的记忆配置
+    POST /end-user/info-update                          终端用户信息更新（alias 变更记忆侧效应）
+    POST /end-user/identity-update                      终端用户身份确认 / 归并
 """
 from __future__ import annotations
 
@@ -27,10 +30,11 @@ from datetime import datetime
 from types import SimpleNamespace
 from typing import Any, Optional
 
-from fastapi import APIRouter, Header
+from fastapi import APIRouter, Depends, Header
 from pydantic import BaseModel, Field
 
-from app.core.api_key_auth import require_api_key_self_db
+from app.controllers import end_user_controller
+from app.core.app_service_callback_auth import require_app_service_callback_secret
 from app.core.api_key_utils import validate_end_user_in_workspace_async
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
@@ -39,7 +43,10 @@ from app.core.memory.enums import Neo4jNodeType, SearchStrategy
 from app.core.memory.memory_service import MemoryService
 from app.core.response_utils import success
 from app.db import get_async_db_context
-from app.schemas.api_key_schema import ApiKeyAuth
+from app.dependencies import CurrentUserSnapshot
+from app.models.workspace_model import Workspace
+from app.schemas.end_user_info_schema import EndUserInfoUpdate
+from app.schemas.end_user_schema import EndUserIdentityUpdate
 from app.services.context_engine_manager import ContextEngineManager
 from app.services.memory_config_service import MemoryConfigService
 
@@ -48,7 +55,7 @@ logger = get_business_logger()
 
 
 def _parse_workspace_id(raw: Optional[str]) -> uuid.UUID:
-    """解析显式 X-Workspace-Id 头；记忆类端点的唯一工作空间来源。"""
+    """解析显式 X-Workspace-Id 头；回调端点的唯一工作空间来源。"""
     if not raw:
         raise BusinessException(
             "X-Workspace-Id header is required", BizCode.INVALID_PARAMETER
@@ -173,15 +180,13 @@ class MemoryIngestAgentRequest(BaseModel):
 # ──────────────────────────────────────────────────────────────
 
 @router.post("/context-engine/prepare-app-input")
-@require_api_key_self_db(scopes=["memory"])
 async def context_engine_prepare_app_input(
         payload: PrepareAppInputRequest,
-        api_key_auth: ApiKeyAuth = None,
+        _guard: None = Depends(require_app_service_callback_secret),
 ):
     """对话主流程上下文准备；整体在单体侧执行，返回 (system_prompt, history) 或空。"""
     logger.info(
-        f"Internal context engine prepare-app-input - key_workspace: {api_key_auth.workspace_id}, "
-        f"conversation: {payload.conversation_id}"
+        f"Internal context engine prepare-app-input - conversation: {payload.conversation_id}"
     )
     async with get_async_db_context() as db:
         prepared = await ContextEngineManager(db).prepare_app_agent_input(
@@ -202,15 +207,13 @@ async def context_engine_prepare_app_input(
 
 
 @router.post("/context-engine/after-app-turn")
-@require_api_key_self_db(scopes=["memory"])
 async def context_engine_after_app_turn(
         payload: AfterAppTurnRequest,
-        api_key_auth: ApiKeyAuth = None,
+        _guard: None = Depends(require_app_service_callback_secret),
 ):
     """对话轮次后推进摘要状态；返回是否触发摘要更新。"""
     logger.info(
-        f"Internal context engine after-app-turn - key_workspace: {api_key_auth.workspace_id}, "
-        f"conversation: {payload.conversation_id}"
+        f"Internal context engine after-app-turn - conversation: {payload.conversation_id}"
     )
     async with get_async_db_context() as db:
         updated = await ContextEngineManager(db).after_app_turn(
@@ -225,15 +228,14 @@ async def context_engine_after_app_turn(
 
 
 @router.post("/context-engine/prepare-workflow-history-prefix")
-@require_api_key_self_db(scopes=["memory"])
 async def context_engine_prepare_workflow_history_prefix(
         payload: PrepareWorkflowHistoryPrefixRequest,
-        api_key_auth: ApiKeyAuth = None,
+        _guard: None = Depends(require_app_service_callback_secret),
 ):
     """工作流节点历史前缀准备；返回消息列表或空。"""
     logger.info(
-        f"Internal context engine prepare-workflow-history-prefix - key_workspace: "
-        f"{api_key_auth.workspace_id}, conversation: {payload.conversation_id}, scope: {payload.scope_key}"
+        f"Internal context engine prepare-workflow-history-prefix - "
+        f"conversation: {payload.conversation_id}, scope: {payload.scope_key}"
     )
     async with get_async_db_context() as db:
         prepared = await ContextEngineManager(db).prepare_workflow_history_prefix(
@@ -251,14 +253,13 @@ async def context_engine_prepare_workflow_history_prefix(
 
 
 @router.post("/context-engine/after-workflow-turn")
-@require_api_key_self_db(scopes=["memory"])
 async def context_engine_after_workflow_turn(
         payload: WorkflowTurnRequest,
-        api_key_auth: ApiKeyAuth = None,
+        _guard: None = Depends(require_app_service_callback_secret),
 ):
     """工作流轮次后推进摘要状态；返回是否触发摘要更新。"""
     logger.info(
-        f"Internal context engine after-workflow-turn - key_workspace: {api_key_auth.workspace_id}, "
+        f"Internal context engine after-workflow-turn - "
         f"conversation: {payload.conversation_id}, scope: {payload.scope_key}"
     )
     async with get_async_db_context() as db:
@@ -278,17 +279,15 @@ async def context_engine_after_workflow_turn(
 # ──────────────────────────────────────────────────────────────
 
 @router.post("/memory/read")
-@require_api_key_self_db(scopes=["memory"])
 async def internal_memory_read(
         payload: MemoryReadRequest,
         x_workspace_id: Optional[str] = Header(None, alias="X-Workspace-Id"),
-        api_key_auth: ApiKeyAuth = None,
+        _guard: None = Depends(require_app_service_callback_secret),
 ):
     """长期记忆检索；工作空间为显式头，end_user 归属按该空间校验。"""
     workspace_id = _parse_workspace_id(x_workspace_id)
     logger.info(
-        f"Internal memory read - key_workspace: {api_key_auth.workspace_id}, "
-        f"workspace: {workspace_id}, end_user_id: {payload.end_user_id}"
+        f"Internal memory read - workspace: {workspace_id}, end_user_id: {payload.end_user_id}"
     )
     async with get_async_db_context() as db:
         end_user = await validate_end_user_in_workspace_async(db, payload.end_user_id, workspace_id)
@@ -328,17 +327,16 @@ async def internal_memory_read(
 
 
 @router.post("/memory/ingest-workflow")
-@require_api_key_self_db(scopes=["memory"])
 async def internal_memory_ingest_workflow(
         payload: MemoryIngestWorkflowRequest,
         x_workspace_id: Optional[str] = Header(None, alias="X-Workspace-Id"),
-        api_key_auth: ApiKeyAuth = None,
+        _guard: None = Depends(require_app_service_callback_secret),
 ):
     """工作流消息摄入；保持 workflow 来源语义（与 /v1/write 的 service_api 区分）。"""
     workspace_id = _parse_workspace_id(x_workspace_id)
     logger.info(
-        f"Internal memory ingest-workflow - key_workspace: {api_key_auth.workspace_id}, "
-        f"workspace: {workspace_id}, end_user_id: {payload.end_user_id}"
+        f"Internal memory ingest-workflow - workspace: {workspace_id}, "
+        f"end_user_id: {payload.end_user_id}"
     )
     async with get_async_db_context() as db:
         end_user = await validate_end_user_in_workspace_async(db, payload.end_user_id, workspace_id)
@@ -358,11 +356,10 @@ async def internal_memory_ingest_workflow(
 
 
 @router.post("/memory/ingest-agent")
-@require_api_key_self_db(scopes=["memory"])
 async def internal_memory_ingest_agent(
         payload: MemoryIngestAgentRequest,
         x_workspace_id: Optional[str] = Header(None, alias="X-Workspace-Id"),
-        api_key_auth: ApiKeyAuth = None,
+        _guard: None = Depends(require_app_service_callback_secret),
 ):
     """Agent 回合消息摄入；同一回合 user+assistant 一次派发，seq 连续分配。
 
@@ -371,8 +368,8 @@ async def internal_memory_ingest_agent(
     """
     workspace_id = _parse_workspace_id(x_workspace_id)
     logger.info(
-        f"Internal memory ingest-agent - key_workspace: {api_key_auth.workspace_id}, "
-        f"workspace: {workspace_id}, end_user_id: {payload.end_user_id}"
+        f"Internal memory ingest-agent - workspace: {workspace_id}, "
+        f"end_user_id: {payload.end_user_id}"
     )
     end_user_id = payload.end_user_id
     if end_user_id:
@@ -408,17 +405,81 @@ async def internal_memory_ingest_agent(
 
 
 @router.get("/memory/workspace-config")
-@require_api_key_self_db(scopes=["memory"])
 async def internal_memory_workspace_config(
         x_workspace_id: Optional[str] = Header(None, alias="X-Workspace-Id"),
-        api_key_auth: ApiKeyAuth = None,
+        _guard: None = Depends(require_app_service_callback_secret),
 ):
     """查询显式工作空间启用中的记忆配置 id。"""
     workspace_id = _parse_workspace_id(x_workspace_id)
     logger.info(
-        f"Internal memory workspace-config - key_workspace: {api_key_auth.workspace_id}, "
-        f"workspace: {workspace_id}"
+        f"Internal memory workspace-config - workspace: {workspace_id}"
     )
     async with get_async_db_context() as db:
         config_id = await MemoryConfigService(db).get_workspace_active_config_id_async(workspace_id)
     return success(data={"config_id": str(config_id)})
+
+
+# ──────────────────────────────────────────────────────────────
+# End user
+# ──────────────────────────────────────────────────────────────
+
+async def _callback_user_snapshot(workspace_id: uuid.UUID) -> CurrentUserSnapshot:
+    """回调通道的服务身份快照：工作空间来自显式头，其余字段为服务自身标识。
+
+    被委托的控制器只消费 current_workspace_id（归属校验）与 username（日志），
+    tenant_id 取工作空间所属租户，避免留下语义错误的占位值。
+    """
+    async with get_async_db_context() as db:
+        workspace = await db.get(Workspace, workspace_id)
+    if workspace is None:
+        raise BusinessException("工作空间不存在", BizCode.WORKSPACE_NOT_FOUND)
+    return CurrentUserSnapshot(
+        id=uuid.uuid5(uuid.NAMESPACE_URL, "application-service"),
+        username="application-service",
+        email="",
+        is_active=True,
+        is_superuser=False,
+        current_workspace_id=workspace_id,
+        tenant_id=workspace.tenant_id,
+    )
+
+
+@router.post("/end-user/info-update")
+async def internal_end_user_info_update(
+        payload: EndUserInfoUpdate,
+        x_workspace_id: Optional[str] = Header(None, alias="X-Workspace-Id"),
+        _guard: None = Depends(require_app_service_callback_secret),
+):
+    """终端用户信息更新；alias 变更的记忆侧效应在单体侧执行。
+
+    委托管理面控制器同一实现（归属校验 + 合并路由 + 更新），避免双实现漂移。
+    """
+    workspace_id = _parse_workspace_id(x_workspace_id)
+    logger.info(
+        f"Internal end user info update - workspace: {workspace_id}, "
+        f"end_user_id: {payload.end_user_id}"
+    )
+    current_user = await _callback_user_snapshot(workspace_id)
+    return await end_user_controller.update_end_user_info(
+        info_update=payload,
+        current_user=current_user,
+    )
+
+
+@router.post("/end-user/identity-update")
+async def internal_end_user_identity_update(
+        payload: EndUserIdentityUpdate,
+        x_workspace_id: Optional[str] = Header(None, alias="X-Workspace-Id"),
+        _guard: None = Depends(require_app_service_callback_secret),
+):
+    """终端用户身份确认 / 归并；跨渠道归并与记忆侧效应在单体侧执行。"""
+    workspace_id = _parse_workspace_id(x_workspace_id)
+    logger.info(
+        f"Internal end user identity update - workspace: {workspace_id}, "
+        f"end_user_id: {payload.end_user_id}"
+    )
+    current_user = await _callback_user_snapshot(workspace_id)
+    return await end_user_controller.update_end_user_identity(
+        identity_update=payload,
+        current_user=current_user,
+    )

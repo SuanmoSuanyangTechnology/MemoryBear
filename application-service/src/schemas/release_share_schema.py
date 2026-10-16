@@ -97,7 +97,7 @@ class SharedReleaseInfo(BaseModel):
 
     # Access-control state
     require_password: bool
-    is_password_verified: bool = False  # 当前是否已验证密码
+    is_password_verified: bool = False  # Whether the password has been verified
 
     # Embed configuration
     allow_embed: bool

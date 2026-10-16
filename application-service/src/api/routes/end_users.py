@@ -6,8 +6,8 @@ Wires the monolith ``end_user_controller`` (manager, JWT) and
 faces arrive as ``/internal/v1/end_user/*`` with the claims-injected identity,
 and the workspace always comes from the principal. Writes that carry
 memory-side effects (a merge hit on identity update, an alias change on info
-update) are forwarded to the monolith ``/v1`` face; the PG-only paths run
-locally.
+update) are forwarded to the monolith internal callback face; the PG-only
+paths run locally.
 """
 
 from __future__ import annotations
@@ -49,12 +49,19 @@ EndUserQuota = Annotated[None, Depends(require_end_user_quota)]
 
 
 def _forward_response(
-    upstream: MonolithUpstream, path: str, payload: dict[str, Any]
+    upstream: MonolithUpstream, path: str, payload: dict[str, Any], workspace_id: UUID
 ) -> JSONResponse:
-    """Replay a write on the monolith ``/v1`` face and pass its response back
-    unchanged (the caller has no open transaction at this point)."""
+    """Replay a write on the monolith internal callback face and pass its
+    response back unchanged (the caller has no open transaction at this
+    point). The workspace rides the explicit header: the callback channel has
+    no credential-bound workspace to fall back on."""
 
-    result = upstream.forward("POST", path, json_body=payload)
+    result = upstream.forward(
+        "POST",
+        path,
+        json_body=payload,
+        headers={"X-Workspace-Id": str(workspace_id)},
+    )
     return JSONResponse(status_code=result.status_code, content=result.body)
 
 
@@ -170,8 +177,9 @@ def update_end_user_info(
         try:
             return _forward_response(
                 upstream,
-                "/v1/end_user/info/update",
+                "/api/internal/app-service/end-user/info-update",
                 payload.model_dump(exclude_unset=True),
+                workspace_id=workspace_id,
             )
         except UpstreamUnavailableError as error:
             logger.error(
@@ -249,7 +257,10 @@ def update_end_user_identity(
             # reassignment, reflection dispatch) runs on the monolith; this
             # transaction was rolled back and holds no lock.
             return _forward_response(
-                upstream, "/v1/end_user/identity/update", payload.model_dump()
+                upstream,
+                "/api/internal/app-service/end-user/identity-update",
+                payload.model_dump(),
+                workspace_id=workspace_id,
             )
 
         raw_features = payload.identity_features

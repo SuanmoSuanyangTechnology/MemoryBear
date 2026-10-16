@@ -3,10 +3,11 @@
 Some application-domain writes carry memory-side effects (Neo4j merge /
 alias sync, ``memory_*`` reference migration, reflection dispatch) that this
 service must not execute directly while the memory service contract is still
-open. Those requests are forwarded verbatim to the monolith's API-key ``/v1``
-face over the internal network (never through the gateway) and the response is
-passed back unchanged. The transport is injectable so tests and the parity
-battery can bridge the monolith app in-process.
+open. Those requests are forwarded to the monolith's internal callback
+endpoints over the internal network (never through the gateway), authenticated
+with a dedicated pre-shared secret, and the response is passed back unchanged.
+The transport is injectable so tests and the parity battery can bridge the
+monolith app in-process.
 """
 
 from __future__ import annotations
@@ -21,6 +22,10 @@ from ..config import AppServiceSettings
 
 logger = logging.getLogger(__name__)
 
+# Header carrying the callback shared secret; both ends configure the value
+# through APPLICATION_SERVICE_CALLBACK_SECRET.
+CALLBACK_SECRET_HEADER = "X-Callback-Secret"
+
 
 class UpstreamUnavailableError(RuntimeError):
     """The upstream channel is unconfigured or the call failed (fail-closed)."""
@@ -33,7 +38,7 @@ class UpstreamResponse:
 
 
 class MonolithUpstream:
-    """Lazy HTTP client for the monolith service face (sync and async).
+    """Lazy HTTP client for the monolith internal callback endpoints (sync and async).
 
     Callers must end their own database transaction before forwarding: the
     forwarded request re-runs the full logic on the monolith side (including
@@ -43,12 +48,12 @@ class MonolithUpstream:
     def __init__(
         self,
         base_url: str,
-        api_key: str,
+        callback_secret: str,
         timeout_seconds: float,
         transport: httpx.BaseTransport | httpx.AsyncBaseTransport | None = None,
     ) -> None:
         self._base_url = base_url.rstrip("/")
-        self._api_key = api_key
+        self._callback_secret = callback_secret
         self._timeout_seconds = timeout_seconds
         self._transport = transport
         self._client: httpx.Client | None = None
@@ -58,13 +63,13 @@ class MonolithUpstream:
     def from_settings(cls, settings: AppServiceSettings) -> MonolithUpstream:
         return cls(
             base_url=settings.application_service_upstream_base_url or "",
-            api_key=settings.application_service_upstream_api_key.get_secret_value(),
+            callback_secret=settings.application_service_callback_secret.get_secret_value(),
             timeout_seconds=settings.application_service_upstream_timeout_seconds,
         )
 
     @property
     def configured(self) -> bool:
-        return bool(self._base_url and self._api_key)
+        return bool(self._base_url and self._callback_secret)
 
     def _get_client(self) -> httpx.Client:
         if self._client is None:
@@ -72,7 +77,7 @@ class MonolithUpstream:
                 base_url=self._base_url,
                 timeout=httpx.Timeout(self._timeout_seconds),
                 transport=self._transport,
-                headers={"X-API-Key": self._api_key},
+                headers={CALLBACK_SECRET_HEADER: self._callback_secret},
             )
         return self._client
 
@@ -82,7 +87,7 @@ class MonolithUpstream:
                 base_url=self._base_url,
                 timeout=httpx.Timeout(self._timeout_seconds),
                 transport=self._transport,
-                headers={"X-API-Key": self._api_key},
+                headers={CALLBACK_SECRET_HEADER: self._callback_secret},
             )
         return self._async_client
 
@@ -92,11 +97,12 @@ class MonolithUpstream:
         path: str,
         *,
         json_body: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
     ) -> UpstreamResponse:
         if not self.configured:
             raise UpstreamUnavailableError("application service upstream is not configured")
         try:
-            response = self._get_client().request(method, path, json=json_body)
+            response = self._get_client().request(method, path, json=json_body, headers=headers)
         except httpx.HTTPError as error:
             raise UpstreamUnavailableError(f"forward to monolith failed: {error}") from error
         return _to_upstream_response(response)
