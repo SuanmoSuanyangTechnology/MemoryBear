@@ -5,11 +5,11 @@ from __future__ import annotations
 import logging
 import uuid
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from redbear_model import ModelProfile
-from sqlalchemy import or_
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
 
@@ -579,6 +579,12 @@ async def create_knowledge(
         workspace_id=principal.workspace_id,
         check_name=True,
     )
+    from ..rag.wiki.config import read_wiki_config
+
+    if read_wiki_config(knowledge.parser_config).enabled:
+        await validate_requested_knowledge_models(
+            db, {"llm_id": knowledge.llm_id}, principal.tenant_id
+        )
     return await knowledge_repository.create_knowledge_async(db, knowledge)
 
 
@@ -624,6 +630,7 @@ class KnowledgeUpdatePlan:
     embedding_changed: bool
     delete_vector_index: bool
     graph_enabled_before: bool | None
+    parser_config_update: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -632,6 +639,7 @@ class KnowledgeMutationOutcome:
     knowledge_id: uuid.UUID
     parser_config: dict[str, Any]
     invalidate_workspace_id: uuid.UUID | None
+    wiki_backfill_required: bool = False
 
 
 async def prepare_knowledge_update(
@@ -686,6 +694,9 @@ async def prepare_knowledge_update(
             embedding_changed and knowledge.embedding_id and knowledge.reranker_id
         ),
         graph_enabled_before=graph_enabled_before,
+        parser_config_update=(
+            update_data.parser_config if "parser_config" in update_data.model_fields_set else None
+        ),
     )
 
 
@@ -702,12 +713,33 @@ async def apply_knowledge_update(
     )
     if knowledge is None:
         raise _not_found()
+    from ..rag.wiki.config import read_wiki_config
+
+    if (plan.parser_config_update is not None or "llm_id" in plan.update_fields
+            or read_wiki_config(knowledge.parser_config).enabled):
+        knowledge = (await db.execute(
+            select(Knowledge).where(Knowledge.id == knowledge.id)
+            .with_for_update().execution_options(populate_existing=True)
+        )).scalar_one()
+    update_fields = dict(plan.update_fields)
+    wiki_enabled_before = read_wiki_config(knowledge.parser_config).enabled
+    if plan.parser_config_update is not None:
+        update_fields["parser_config"] = normalize_knowledge_parser_config_update(
+            knowledge.parser_config, plan.parser_config_update
+        )
+    next_config = update_fields.get("parser_config", knowledge.parser_config)
+    wiki_enabled_after = read_wiki_config(next_config).enabled
+    if wiki_enabled_after and (not wiki_enabled_before or "llm_id" in update_fields):
+        llm_id = update_fields.get("llm_id", knowledge.llm_id)
+        if llm_id is None:
+            raise KnowledgeError.from_code("KB_WIKI_MODEL_REQUIRED")
+        await validate_requested_knowledge_models(db, {"llm_id": llm_id}, principal.tenant_id)
     if plan.embedding_changed:
         from ..repositories.document import stage_reset_documents_progress_by_kb_id_async
 
         await stage_reset_documents_progress_by_kb_id_async(db, knowledge.id)
         knowledge.chunk_num = 0
-    for field, value in plan.update_fields.items():
+    for field, value in update_fields.items():
         if hasattr(knowledge, field):
             setattr(knowledge, field, value)
     if plan.graph_enabled_before is False and is_graph_enabled(knowledge.parser_config):
@@ -720,6 +752,13 @@ async def apply_knowledge_update(
     await db.flush()
     await db.refresh(knowledge)
     outcome = await build_knowledge_mutation_outcome(db, knowledge)
+    wiki_update = (plan.parser_config_update or {}).get("wiki") or {}
+    outcome = replace(
+        outcome,
+        wiki_backfill_required=wiki_enabled_after and (
+            not wiki_enabled_before or wiki_update.get("enabled") is True
+        ),
+    )
     await db.commit()
     return outcome
 

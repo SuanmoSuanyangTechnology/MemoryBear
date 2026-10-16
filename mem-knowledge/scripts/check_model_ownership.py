@@ -8,6 +8,13 @@ import sys
 from pathlib import Path
 
 EXPECTED_OWNED_TABLES = {
+    "wiki_folders",
+    "wiki_pages",
+    "wiki_page_sources",
+    "wiki_page_links",
+    "wiki_document_states",
+    "wiki_document_page_tasks",
+
     "knowledges",
     "files",
     "documents",
@@ -21,11 +28,16 @@ EXPECTED_REFERENCE_TABLES = {
     "users",
     "model_configs",
     "model_bases",
-    "model_api_keys",
-    "model_config_api_key_association",
 }
 
 OWNED_MODEL_NAMES = {
+    "WikiFolder",
+    "WikiPage",
+    "WikiPageSource",
+    "WikiPageLink",
+    "WikiDocumentState",
+    "WikiDocumentPageTask",
+
     "Knowledge",
     "File",
     "Document",
