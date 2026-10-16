@@ -24,6 +24,7 @@ _STRUCTURED_FIELDS = (
     "completion",
     "outcome",
     "source",
+    "actor_kind",
     "actor_id",
     "tenant_id",
     "workspace_id",

@@ -9,6 +9,7 @@ from typing import Any
 
 import httpx
 
+from .contracts import MemoryProfileAuthSource
 from .errors import (
     MemoryProfileProtocolError,
     MemoryProfileTimeoutError,
@@ -17,20 +18,29 @@ from .errors import (
 
 logger = logging.getLogger(__name__)
 
-_ANALYTICS_PATHS = frozenset(
-    {
-        "memory_insight",
-        "user_summary",
-        "node_statistics",
-        "workspace_statistics",
-        "graph_data",
-        "community_graph",
-    }
-)
+
+def _internal_path(external_path: str) -> str:
+    """Map a caller's own route path onto the service's internal face.
+
+    The service answers on one internal prefix, so which of the API's two
+    external faces the caller used — ``/api`` (user JWT) or ``/v1`` (API key) —
+    survives only as ``x-source``, never in the path.
+    """
+
+    for prefix in ("/api", "/v1"):
+        if external_path == prefix or external_path.startswith(prefix + "/"):
+            return "/internal/v1" + external_path[len(prefix) :]
+    if external_path.startswith("/internal/v1/"):
+        return external_path
+    raise ValueError(
+        "Memory profile route path must start with /api, /v1, or /internal/v1"
+    )
 
 
 class MemoryProfileServiceClient:
-    """Own a process-level HTTP pool for memory analytics calls."""
+    """Own a process-level HTTP pool for memory-profile calls."""
+
+    internal_path = staticmethod(_internal_path)
 
     def __init__(
         self,
@@ -81,29 +91,43 @@ class MemoryProfileServiceClient:
         self,
         *,
         method: str,
-        operation: str,
+        path: str,
         workspace_id: str,
         tenant_id: str,
         actor_id: str,
-        source: str,
+        source: MemoryProfileAuthSource,
         trace_id: str,
         language_type: str | None = None,
         query: Mapping[str, Any] | None = None,
         payload: Any | None = None,
     ) -> dict[str, Any]:
-        """Call one fixed analytics operation and return its ApiResponse object."""
+        """Forward one caller route and return its ApiResponse object.
 
-        if operation not in _ANALYTICS_PATHS:
-            raise ValueError(f"Unsupported memory profile operation: {operation}")
+        ``path`` is the caller's own request path; it is mapped onto the service's
+        internal prefix and forwarded unchanged after that, so no local route table
+        has to grow with the service. The caller reports one fact about itself:
+        ``source`` (how it authenticated), carried as the generic ``x-source``.
+        It also decides both the name and the meaning of the acting id below.
+        """
 
-        path = f"/internal/v1/memory/analytics/{operation}"
+        path = _internal_path(path)
+
+        # The acting id travels under the header its own face's terminator uses:
+        # ``x-api-key-id`` naming the key that authenticated on the API-key face,
+        # ``x-user-id`` naming the user everywhere else. Choosing the name here keeps
+        # a caller from pairing one face's header with the other face's value — the
+        # service resolves ``x-user-id`` first, so a mismatched pair would silently
+        # read as a user.
+        actor_header = (
+            "x-api-key-id" if source == MemoryProfileAuthSource.APIKEY else "x-user-id"
+        )
         headers = {
             "Accept": "application/json",
-            "X-Memory-Workspace-ID": workspace_id,
-            "X-Memory-Tenant-ID": tenant_id,
-            "X-Memory-Actor-ID": actor_id,
-            "X-Memory-Source": source,
+            "x-tenant-id": tenant_id,
+            "x-workspace-id": workspace_id,
+            "x-source": source.value,
             "X-Trace-Id": trace_id,
+            actor_header: actor_id,
         }
         if language_type is not None:
             headers["X-Language-Type"] = language_type

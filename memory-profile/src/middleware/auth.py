@@ -20,8 +20,19 @@ from src.common.responses import failure
 from src.middleware.request_logging import record_request_failure
 
 logger = logging.getLogger(__name__)
-MemorySource = Literal["manager", "api_key"]
-_DEFAULT_HEADER_PREFIX = "X-Memory"
+
+MemoryAuthSource = Literal["ex_api", "in_api"]
+
+SOURCE_HEADER = "x-source"
+SOURCE_EXTERNAL = "ex_api"
+SOURCE_INTERNAL = "in_api"
+
+ACTOR_HEADER = "x-user-id"
+API_KEY_ID_HEADER = "x-api-key-id"
+TENANT_HEADER = "x-tenant-id"
+WORKSPACE_HEADER = "x-workspace-id"
+
+ActorKind = Literal["actor", "apikey"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -29,7 +40,10 @@ class MemoryPrincipal:
     actor_id: UUID
     tenant_id: UUID
     workspace_id: UUID
-    source: MemorySource
+    #: The face the caller arrived on — the value of the ``x-source`` header, which
+    #: is why the field carries that header's name.
+    source: MemoryAuthSource
+    actor_kind: ActorKind
     trace_id: str
 
 
@@ -39,7 +53,6 @@ class MemoryAuthConfig:
 
     auth_mode: Literal["direct", "gateway"] = "direct"
     service_name: str = "memory-profile"
-    header_prefix: str = _DEFAULT_HEADER_PREFIX
     public_paths: frozenset[str] = field(default_factory=frozenset)
     kill_switch_file: str | None = None
     jwks_url: str | None = None
@@ -84,10 +97,6 @@ def _auth_error(request: Request, status_code: int, detail: object) -> JSONRespo
     )
 
 
-def _identity_header(config: MemoryAuthConfig, suffix: str) -> str:
-    return f"{config.header_prefix}-{suffix}"
-
-
 def _uuid_header(request: Request, name: str) -> UUID:
     value = request.headers.get(name)
     if not value:
@@ -95,31 +104,59 @@ def _uuid_header(request: Request, name: str) -> UUID:
     return UUID(value)
 
 
-def _direct_principal(request: Request, config: MemoryAuthConfig) -> MemoryPrincipal:
-    source_header = _identity_header(config, "Source")
-    source = request.headers.get(source_header)
-    if source not in {"manager", "api_key"}:
-        raise ValueError(f"invalid {source_header}")
+def _direct_actor(request: Request) -> tuple[UUID, ActorKind]:
+    """The acting id and which header named it.
+
+    ``x-user-id`` when the terminator resolved a user; otherwise the API-key face's
+    ``x-api-key-id``, whose value is the key rather than the user behind it. Neither
+    present is a 401 — analytics cannot run without an id to authorize against.
+    """
+
+    user_id = request.headers.get(ACTOR_HEADER)
+    if user_id:
+        return UUID(user_id), "actor"
+    api_key_id = request.headers.get(API_KEY_ID_HEADER)
+    if api_key_id:
+        return UUID(api_key_id), "apikey"
+    raise ValueError(f"missing {ACTOR_HEADER}")
+
+
+def _direct_principal(request: Request) -> MemoryPrincipal:
+    source = request.headers.get(SOURCE_HEADER)
+    if source not in {SOURCE_EXTERNAL, SOURCE_INTERNAL}:
+        raise ValueError(f"invalid {SOURCE_HEADER}")
+    actor_id, actor_kind = _direct_actor(request)
     return MemoryPrincipal(
-        actor_id=_uuid_header(request, _identity_header(config, "Actor-ID")),
-        tenant_id=_uuid_header(request, _identity_header(config, "Tenant-ID")),
-        workspace_id=_uuid_header(request, _identity_header(config, "Workspace-ID")),
+        actor_id=actor_id,
+        tenant_id=_uuid_header(request, TENANT_HEADER),
+        workspace_id=_uuid_header(request, WORKSPACE_HEADER),
         source=source,
+        actor_kind=actor_kind,
         trace_id=getattr(request.state, "trace_id", ""),
     )
 
 
 def _claims_principal(request: Request, context: UserContext) -> MemoryPrincipal:
+    # ``context.auth_type`` is auth-sdk's own token claim (``api_key`` or absent),
+    # a different vocabulary from the ``x-source`` face value below; it is only
+    # read here, never renamed.
     if context.auth_type not in {None, "api_key"}:
         raise ValueError("invalid auth_type claim")
     if context.auth_type == "api_key" and "memory" not in context.scopes:
         raise HTTPException(status_code=403, detail="memory scope required")
-    source: MemorySource = "api_key" if context.auth_type == "api_key" else "manager"
+    source: MemoryAuthSource = (
+        SOURCE_EXTERNAL if context.auth_type == "api_key" else SOURCE_INTERNAL
+    )
+
+    api_key_id = getattr(context, "api_key_id", None)
+    actor_id: UUID = UUID(api_key_id) if api_key_id else UUID(context.user_id)
+    actor_kind: ActorKind = "apikey" if api_key_id else "actor"
     return MemoryPrincipal(
-        actor_id=UUID(context.user_id),
+        actor_id=actor_id,
         tenant_id=UUID(context.tenant_id),
         workspace_id=UUID(context.workspace_id),
         source=source,
+        actor_kind=actor_kind,
         trace_id=getattr(request.state, "trace_id", ""),
     )
 
@@ -145,11 +182,11 @@ class MemoryAuthMiddleware(BaseHTTPMiddleware):
         try:
             if self._kill_switch_active():
                 logger.warning("memory auth kill switch active; using trusted direct headers")
-                principal = _direct_principal(request, self._config)
+                principal = _direct_principal(request)
             elif self._config.auth_mode == "gateway":
                 principal = await self._gateway_principal(request)
             else:
-                principal = _direct_principal(request, self._config)
+                principal = _direct_principal(request)
         except HTTPException as exc:
             return _auth_error(request, exc.status_code, exc.detail)
         except (TypeError, ValueError, AttributeError) as exc:
@@ -167,7 +204,7 @@ class MemoryAuthMiddleware(BaseHTTPMiddleware):
             raise HTTPException(status_code=500, detail="auth misconfigured")
         context = await self._gateway.authenticate(request)
         if context is None:
-            return _direct_principal(request, self._config)
+            return _direct_principal(request)
         return _claims_principal(request, context)
 
     def _kill_switch_active(self) -> bool:
@@ -176,9 +213,17 @@ class MemoryAuthMiddleware(BaseHTTPMiddleware):
 
 
 __all__ = [
+    "ACTOR_HEADER",
+    "API_KEY_ID_HEADER",
+    "ActorKind",
     "MemoryAuthConfig",
     "MemoryAuthMiddleware",
     "MemoryPrincipal",
-    "MemorySource",
+    "MemoryAuthSource",
+    "SOURCE_HEADER",
+    "SOURCE_EXTERNAL",
+    "SOURCE_INTERNAL",
+    "TENANT_HEADER",
+    "WORKSPACE_HEADER",
     "load_gateway_auth",
 ]

@@ -18,9 +18,13 @@ from src.modules.analytics.repository.memory_graph import (
     DEFAULT_PER_TYPE_LIMITS,
     NODE_PROPERTY_WHITELIST,
     SUPPORTED_NODE_TYPES,
+    WHITELIST_DEFAULT_FIELDS,
     MemoryGraphRepository,
 )
-from src.modules.analytics.repository.memory_statistics import MemoryStatisticsRepository
+from src.modules.analytics.repository.memory_statistics import (
+    COUNT_KEYS,
+    MemoryStatisticsRepository,
+)
 from src.modules.analytics.repository.workspace_statistics import (
     WorkspaceStatisticsCorruptError,
     WorkspaceStatisticsRepository,
@@ -207,23 +211,25 @@ def _clean(value: Any) -> Any:
 
 def _properties(label: str, raw: dict[str, Any], rel_count: int) -> dict[str, Any]:
     result: dict[str, Any] = {}
-    for key in NODE_PROPERTY_WHITELIST.get(label, ("caption",)):
-        value = raw.get(key)
+    for key in NODE_PROPERTY_WHITELIST.get(label, WHITELIST_DEFAULT_FIELDS):
+        # 仓储层用 Cypher map projection 下推白名单，缺失属性会带上 null 值
+        # （``properties(n)`` 则是直接不返回该键）。Neo4j 的属性不可能为 null，
+        # 因此「值为 null」与「属性不存在」等价，统一按不存在处理。
+        if key not in raw or raw[key] is None:
+            continue
+        value = raw[key]
         if label == "ExtractedEntity" and key in {"description", "description_summary"}:
-            if value is None or (isinstance(value, str) and not value.strip()) or value == []:
+            if (isinstance(value, str) and not value.strip()) or value == []:
                 continue
-        if key in raw:
-            if key == "entity_type":
-                value = _ENTITY_TYPE_NAMES.get(value, "")
-            elif key == "emotion_type":
-                value = _EMOTION_TYPE_NAMES.get(value)
-            elif key == "emotion_subject":
-                value = _EMOTION_SUBJECT_NAMES.get(value)
-            elif key == "description" and isinstance(value, str):
-                value = [
-                    item.strip() for item in value.replace("；", ";").split(";") if item.strip()
-                ]
-            result[key] = _clean(value)
+        if key == "entity_type":
+            value = _ENTITY_TYPE_NAMES.get(value, "")
+        elif key == "emotion_type":
+            value = _EMOTION_TYPE_NAMES.get(value)
+        elif key == "emotion_subject":
+            value = _EMOTION_SUBJECT_NAMES.get(value)
+        elif key == "description" and isinstance(value, str):
+            value = [item.strip() for item in value.replace("；", ";").split(";") if item.strip()]
+        result[key] = _clean(value)
     result["associative_memory"] = rel_count
     return result
 
@@ -410,6 +416,65 @@ class ProfileAnalyticsService:
             if exc.code in {BizCode.INVALID_PARAMETER, BizCode.USER_NOT_FOUND}:
                 return _zero_memory_statistics()
             raise
+        # PG 侧 6 个计数器合并为一条查询（每项真实 DB 工作 <1ms，开销在会话/连接上），
+        # Neo4j 侧 4 个计数各自约一次往返（RTT 支配）保持并发。两组互不依赖，一起发。
+        source_counts, neo_counts = await asyncio.gather(
+            self._memory_type_source_counts(user_id),
+            asyncio.gather(
+                self._safe_count(
+                    "valid summaries",
+                    lambda: self.memory_graph.valid_summary_count(end_user_id),
+                ),
+                self._safe_count(
+                    "episodic", lambda: self.memory_graph.episodic_count(end_user_id)
+                ),
+                self._safe_count(
+                    "semantic explicit",
+                    lambda: self.memory_graph.semantic_explicit_count(end_user_id),
+                ),
+                self._safe_count(
+                    "emotional", lambda: self.memory_graph.emotional_count(end_user_id)
+                ),
+            ),
+        )
+        summaries, episodic, semantic, emotional = neo_counts
+        counts = {
+            "PERCEPTUAL_MEMORY": source_counts["perceptual"],
+            "WORKING_MEMORY": (
+                source_counts["active_conversations"] + source_counts["direct_sources"]
+            ),
+            "SHORT_TERM_MEMORY": (
+                source_counts["short_term"] + source_counts["pending_conversations"]
+            ),
+            "EXPLICIT_MEMORY": episodic + semantic,
+            "IMPLICIT_MEMORY": summaries if summaries >= 5 else 0,
+            "EMOTIONAL_MEMORY": emotional,
+            "EPISODIC_MEMORY": episodic,
+            "FORGET_MEMORY": source_counts["forgotten"],
+        }
+        total = sum(counts.values())
+        return [
+            {
+                "type": key,
+                "count": counts[key],
+                "percentage": round(counts[key] / total * 100, 2) if total else 0.0,
+            }
+            for key in _MEMORY_TYPES
+        ]
+
+    async def _memory_type_source_counts(self, user_id: UUID) -> dict[str, int]:
+        """PG 侧的 6 个计数器：优先一条查询取回（单连接、单快照）。
+
+        合并查询失败时回落到逐指标查询，从而保留原先「单个指标失败只把该项降级为 0」
+        的语义（见 :meth:`_safe_count`）；这也是仓储层保留那 6 个单指标方法的原因。
+        """
+        try:
+            return await self.memory_statistics.memory_type_counts(user_id)
+        except Exception:
+            logger.warning(
+                "memory type counts merged query degraded to per-metric queries",
+                exc_info=True,
+            )
         values = await asyncio.gather(
             self._safe_count(
                 "perceptual", lambda: self.memory_statistics.perceptual_count(user_id)
@@ -429,46 +494,10 @@ class ProfileAnalyticsService:
                 lambda: self.memory_statistics.pending_conversation_count(user_id),
             ),
             self._safe_count(
-                "valid summaries", lambda: self.memory_graph.valid_summary_count(end_user_id)
+                "forgotten", lambda: self.memory_statistics.forgotten_count(user_id)
             ),
-            self._safe_count("episodic", lambda: self.memory_graph.episodic_count(end_user_id)),
-            self._safe_count(
-                "semantic explicit", lambda: self.memory_graph.semantic_explicit_count(end_user_id)
-            ),
-            self._safe_count("emotional", lambda: self.memory_graph.emotional_count(end_user_id)),
-            self._safe_count("forgotten", lambda: self.memory_statistics.forgotten_count(user_id)),
         )
-        (
-            perceptual,
-            conversations,
-            sources,
-            short,
-            pending,
-            summaries,
-            episodic,
-            semantic,
-            emotional,
-            forgotten,
-        ) = values
-        counts = {
-            "PERCEPTUAL_MEMORY": perceptual,
-            "WORKING_MEMORY": conversations + sources,
-            "SHORT_TERM_MEMORY": short + pending,
-            "EXPLICIT_MEMORY": episodic + semantic,
-            "IMPLICIT_MEMORY": summaries if summaries >= 5 else 0,
-            "EMOTIONAL_MEMORY": emotional,
-            "EPISODIC_MEMORY": episodic,
-            "FORGET_MEMORY": forgotten,
-        }
-        total = sum(counts.values())
-        return [
-            {
-                "type": key,
-                "count": counts[key],
-                "percentage": round(counts[key] / total * 100, 2) if total else 0.0,
-            }
-            for key in _MEMORY_TYPES
-        ]
+        return dict(zip(COUNT_KEYS, values, strict=True))
 
     async def graph_data(
         self,
@@ -491,6 +520,19 @@ class ProfileAnalyticsService:
             if not node_types
             else [node_type for node_type in node_types if node_type in SUPPORTED_NODE_TYPES]
         )
+        stat_types = requested if not center_node_id else sorted(SUPPORTED_NODE_TYPES)
+        # per_type 的全量计数只依赖 (graph_end_user_id, stat_types)，与节点/边查询
+        # 互不依赖，因此在这里提前发起、与后续阶段重叠执行（原先排在流程末尾，
+        # 等价于串行等待）。_safe_count 内部吞掉异常并回落为 0，该 future 不会抛错。
+        totals_future = asyncio.gather(
+            *[
+                self._safe_count(
+                    f"graph total {node_type}",
+                    lambda t=node_type: self.memory_graph.count_type(graph_end_user_id, t),
+                )
+                for node_type in stat_types
+            ]
+        )
         rows: list[dict[str, Any]] = []
         type_limits: dict[str, int] = {}
         if center_node_id:
@@ -507,16 +549,7 @@ class ProfileAnalyticsService:
                 for node_type in requested
             }
             type_limits = _shrink_type_limits(type_limits)
-            for node_type, configured in type_limits.items():
-                if configured:
-                    rows.extend(
-                        await self.memory_graph.nodes_by_type(
-                            graph_end_user_id, node_type, configured
-                        )
-                    )
-                if len(rows) >= 2000:
-                    rows = rows[:2000]
-                    break
+            rows = await self._nodes_for_type_limits(graph_end_user_id, type_limits)
         nodes: list[dict[str, Any]] = []
         node_counts: dict[str, int] = defaultdict(int)
         for row in rows:
@@ -538,16 +571,7 @@ class ProfileAnalyticsService:
         for edge in raw_edges:
             edge_counts[str(edge["type"])] += 1
         edge_data = _unified_edges(raw_edges)
-        stat_types = requested if not center_node_id else sorted(SUPPORTED_NODE_TYPES)
-        totals = await asyncio.gather(
-            *[
-                self._safe_count(
-                    f"graph total {node_type}",
-                    lambda t=node_type: self.memory_graph.count_type(graph_end_user_id, t),
-                )
-                for node_type in stat_types
-            ]
-        )
+        totals = await totals_future
         per_type = {}
         for node_type, total in zip(stat_types, totals, strict=True):
             effective_limit = limit if center_node_id else type_limits.get(node_type, 0)
@@ -573,6 +597,43 @@ class ProfileAnalyticsService:
                 "per_type": per_type,
             },
         }
+
+    async def _nodes_for_type_limits(
+        self, graph_end_user_id: str, type_limits: dict[str, int]
+    ) -> list[dict[str, Any]]:
+        """并发拉取各 Node_Type 的节点，并逐项复现原串行实现的顺序与截断语义。
+
+        原实现逐类型 ``await``，共 N 次串行往返（N = 请求的类型数）；这里用
+        ``asyncio.gather`` 并发，再把结果按同一顺序回放「累加 → 触顶 2000 即截断
+        并停止」的语义，因此 ``rows`` 的内容与顺序与串行版本完全一致。
+
+        异常语义同样对齐：被截断点跳过的类型用 ``return_exceptions=True`` 收集后
+        丢弃（串行版本根本不会发起该查询），截断点之前出现的异常照旧向上抛出。
+        """
+
+        ordered = [
+            (node_type, limit) for node_type, limit in type_limits.items() if limit
+        ]
+        if not ordered:
+            return []
+
+        results = await asyncio.gather(
+            *(
+                self.memory_graph.nodes_by_type(graph_end_user_id, node_type, limit)
+                for node_type, limit in ordered
+            ),
+            return_exceptions=True,
+        )
+
+        rows: list[dict[str, Any]] = []
+        for (_node_type, _limit), part in zip(ordered, results, strict=True):
+            if isinstance(part, BaseException):
+                raise part
+            rows.extend(part)
+            if len(rows) >= 2000:
+                rows = rows[:2000]
+                break
+        return rows
 
     async def community_graph(self, end_user_id: str, workspace_id: UUID) -> dict[str, Any]:
         try:

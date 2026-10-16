@@ -46,6 +46,7 @@ RANGE_DEFS: List[Tuple[str, str]] = [
     ("user_chunk", "Chunk"),
     ("user_extracted_entity", "ExtractedEntity"),
     ("user_memorysummary", "MemorySummary"),
+    ("user_perceptual", "Perceptual"),
     ("user_scenesummary", "SceneSummary"),
     ("user_preference", "Preference"),
     ("user_scenecommunity", "SceneCommunity"),

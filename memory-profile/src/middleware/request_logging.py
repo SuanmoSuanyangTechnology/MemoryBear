@@ -110,6 +110,7 @@ class RequestLoggingMiddleware:
                 "completion": completion,
                 "outcome": outcome,
                 "source": getattr(principal, "source", None),
+                "actor_kind": getattr(principal, "actor_kind", None),
                 "actor_id": getattr(principal, "actor_id", None),
                 "tenant_id": getattr(principal, "tenant_id", None),
                 "workspace_id": getattr(principal, "workspace_id", None),

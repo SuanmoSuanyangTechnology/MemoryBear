@@ -7,11 +7,12 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, Header, Query, Request
 
 from src.common.responses import ApiResponse
-from src.modules.analytics.dependencies import MemoryRequestContext, require_memory_context
+from src.middleware.auth import MemoryPrincipal
+from src.middleware.identity import require_memory_context
 from src.modules.analytics.handler import AnalyticsHandler
 
 router = APIRouter(prefix="/memory/analytics", tags=["Profile Analytics"])
-Context = Annotated[MemoryRequestContext, Depends(require_memory_context)]
+Context = Annotated[MemoryPrincipal, Depends(require_memory_context)]
 ObjectApiResponse = ApiResponse[dict[str, Any]]
 ListApiResponse = ApiResponse[list[dict[str, Any]]]
 

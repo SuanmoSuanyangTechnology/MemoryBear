@@ -40,11 +40,6 @@ class ProfileSettings(BaseSettings):
         min_length=1,
         validation_alias="MEMORY_AUTH_SERVICE_NAME",
     )
-    memory_auth_header_prefix: str = Field(
-        "X-Memory",
-        min_length=1,
-        validation_alias="MEMORY_AUTH_HEADER_PREFIX",
-    )
     memory_auth_kill_switch_file: str | None = Field(
         None, validation_alias="MEMORY_AUTH_KILL_SWITCH_FILE"
     )

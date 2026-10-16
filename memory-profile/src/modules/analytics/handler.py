@@ -7,7 +7,7 @@ from typing import Any
 
 from src.common.errors import BizCode, ProfileError
 from src.common.responses import ApiResponse
-from src.modules.analytics.dependencies import MemoryRequestContext
+from src.middleware.auth import MemoryPrincipal
 from src.modules.analytics.repository.memory_graph import SUPPORTED_NODE_TYPES
 from src.modules.analytics.service import ProfileAnalyticsService
 from src.runtime import ProfileRuntime
@@ -52,7 +52,7 @@ class AnalyticsHandler:
         return result
 
     async def memory_insight(
-        self, context: MemoryRequestContext, end_user_id: str
+        self, context: MemoryPrincipal, end_user_id: str
     ) -> ApiResponse[dict[str, Any]]:
         data = await self.service.memory_insight(end_user_id, context.workspace_id)
         return ObjectApiResponse(
@@ -62,7 +62,7 @@ class AnalyticsHandler:
 
     async def user_summary(
         self,
-        context: MemoryRequestContext,
+        context: MemoryPrincipal,
         end_user_id: str,
         language_type: str | None,
     ) -> ApiResponse[dict[str, Any]]:
@@ -74,20 +74,20 @@ class AnalyticsHandler:
         )
 
     async def node_statistics(
-        self, context: MemoryRequestContext, end_user_id: str
+        self, context: MemoryPrincipal, end_user_id: str
     ) -> ApiResponse[list[dict[str, Any]]]:
         data = await self.service.node_statistics(end_user_id, context.workspace_id)
         return ListApiResponse(data=data, msg="查询成功")
 
     async def workspace_statistics(
-        self, context: MemoryRequestContext
+        self, context: MemoryPrincipal
     ) -> ApiResponse[dict[str, Any]]:
         data = await self.service.workspace_statistics(context.workspace_id)
         return ObjectApiResponse(data=data, msg="查询成功")
 
     async def graph_data(
         self,
-        context: MemoryRequestContext,
+        context: MemoryPrincipal,
         *,
         end_user_id: str,
         node_types: str | None,
@@ -111,7 +111,7 @@ class AnalyticsHandler:
         return ObjectApiResponse(data=data, msg=data.get("message", "查询成功"))
 
     async def community_graph(
-        self, context: MemoryRequestContext, end_user_id: str
+        self, context: MemoryPrincipal, end_user_id: str
     ) -> ApiResponse[dict[str, Any]]:
         data = await self.service.community_graph(end_user_id, context.workspace_id)
         return ObjectApiResponse(data=data, msg=data.get("message", "查询成功"))

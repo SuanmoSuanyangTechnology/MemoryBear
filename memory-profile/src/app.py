@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from fastapi import APIRouter, FastAPI
+from fastapi import FastAPI
 
 from src.bootstrap import get_settings
 from src.common.observability import setup_logging
@@ -19,8 +19,7 @@ from src.middleware.auth import (
 )
 from src.middleware.request_logging import RequestLoggingMiddleware
 from src.middleware.trace import TraceIdMiddleware
-from src.modules.analytics.routes import router as analytics_router
-from src.modules.health.routes import router as health_router
+from src.modules import router as modules_router
 from src.runtime import ProfileRuntime
 
 
@@ -56,7 +55,6 @@ def create_app(
     auth_config = MemoryAuthConfig(
         auth_mode=resolved_settings.memory_auth_mode,
         service_name=resolved_settings.memory_auth_service_name,
-        header_prefix=resolved_settings.memory_auth_header_prefix,
         public_paths=frozenset(
             {
                 "/internal/v1/health/live",
@@ -81,9 +79,6 @@ def create_app(
     if resolved_settings.access_log_enabled:
         application.add_middleware(RequestLoggingMiddleware)
 
-    internal_router = APIRouter(prefix="/internal/v1")
-    internal_router.include_router(health_router)
-    internal_router.include_router(analytics_router)
-    application.include_router(internal_router)
+    application.include_router(modules_router)
     register_error_handlers(application)
     return application

@@ -704,6 +704,35 @@ class EndUserRepository:
             db_logger.error(f"查询宿主 {end_user_id} 时出错: {str(e)}")
             raise
 
+    async def end_user_exists_async(self, end_user_id: uuid.UUID) -> bool:
+        """判断宿主是否存在（含「已合并 → 路由到目标」语义）。
+
+        与 :meth:`get_end_user_by_id_async` 的存在性判定完全一致（未命中时同样回落到
+        :meth:`resolve_merge_by_origin_id_async`），但首次命中只取主键列。调用方若仅需
+        真值判断，用本方法可避免把 ``EndUser`` 上的大文本列（``memory_insight`` /
+        ``user_summary`` / ``growth_trajectory`` 等洞察报告）整行载入后丢弃。
+        """
+        try:
+            result = await self.db.execute(
+                select(EndUser.id)
+                .filter(EndUser.id == end_user_id, EndUser.is_active == True)
+                .limit(1)
+            )
+            if result.scalars().first() is not None:
+                return True
+
+            resolved = await self.resolve_merge_by_origin_id_async(end_user_id)
+            if resolved is not None:
+                db_logger.info(f"宿主 {end_user_id} 已合并，路由到 {resolved.id}")
+                return True
+
+            db_logger.info(f"未找到宿主 {end_user_id}")
+            return False
+        except Exception as e:
+            await self.db.rollback()
+            db_logger.error(f"查询宿主 {end_user_id} 时出错: {str(e)}")
+            raise
+
     def get_end_user_by_other_id(self, workspace_id: uuid.UUID, other_id: str) -> Optional["EndUser"]:
         """按 workspace_id + other_id 查找终端用户，不存在返回 None。
         若用户已被合并（is_active=False），自动路由到合并目标。"""

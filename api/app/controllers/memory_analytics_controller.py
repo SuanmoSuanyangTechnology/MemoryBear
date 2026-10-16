@@ -9,7 +9,7 @@
 """
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Header, Query
+from fastapi import APIRouter, Depends, Header, Query, Request
 
 from app.cache.memory.interest_memory import InterestMemoryCache
 from app.core.error_codes import BizCode
@@ -49,10 +49,11 @@ router = APIRouter(
 )
 
 @router.get("/memory_insight", response_model=ApiResponse)
-@memory_profile_proxy("memory_insight", query_fields=("end_user_id",))
+@memory_profile_proxy(query_fields=("end_user_id",))
 async def get_memory_insight_report_api(
         end_user_id: str,
         current_user: CurrentUserSnapshot = Depends(get_current_user_async),
+        request: Request = None,
 ) -> dict:
     """获取缓存的记忆洞察报告"""
     api_logger.info(f"记忆洞察报告查询请求: end_user_id={end_user_id}, user={current_user.username}")
@@ -77,7 +78,6 @@ async def get_memory_insight_report_api(
 
 @router.get("/user_summary", response_model=ApiResponse)
 @memory_profile_proxy(
-    "user_summary",
     query_fields=("end_user_id",),
     language_field="language_type",
 )
@@ -85,6 +85,7 @@ async def get_user_summary_api(
         end_user_id: str,
         language_type: str = Header(default=None, alias="X-Language-Type"),
         current_user: CurrentUserSnapshot = Depends(get_current_user_async),
+        request: Request = None,
 ) -> dict:
     """获取缓存的用户摘要"""
     api_logger.info(f"用户摘要查询请求: end_user_id={end_user_id}, user={current_user.username}")
@@ -212,10 +213,11 @@ async def generate_cache_api(
 
 
 @router.get("/node_statistics", response_model=ApiResponse)
-@memory_profile_proxy("node_statistics", query_fields=("end_user_id",))
+@memory_profile_proxy(query_fields=("end_user_id",))
 async def get_node_statistics_api(
         end_user_id: str,
         current_user: CurrentUserSnapshot = Depends(get_current_user_async),
+        request: Request = None,
 ) -> dict:
     workspace_id = current_user.current_workspace_id
 
@@ -267,7 +269,6 @@ async def get_workspace_statistics_api(
 
 @router.get("/graph_data", response_model=ApiResponse)
 @memory_profile_proxy(
-    "graph_data",
     query_fields=(
         "end_user_id",
         "node_types",
@@ -286,6 +287,7 @@ async def get_graph_data_api(
         center_node_id: Optional[str] = None,
         per_type_limits: Optional[str] = None,
         current_user: CurrentUserSnapshot = Depends(get_current_user_async),
+        request: Request = None,
 ) -> dict:
     workspace_id = current_user.current_workspace_id
 
@@ -349,10 +351,11 @@ async def get_graph_data_api(
 
 
 @router.get("/community_graph", response_model=ApiResponse)
-@memory_profile_proxy("community_graph", query_fields=("end_user_id",))
+@memory_profile_proxy(query_fields=("end_user_id",))
 async def get_community_graph_data_api(
         end_user_id: str,
         current_user: CurrentUserSnapshot = Depends(get_current_user_async),
+        request: Request = None,
 ) -> dict:
     workspace_id = current_user.current_workspace_id
 
