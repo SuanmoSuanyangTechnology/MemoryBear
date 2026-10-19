@@ -355,29 +355,17 @@ class RateLimiterService:
     def __init__(self):
         self.redis = aio_redis
 
-    async def check_qps(self, api_key_id: uuid.UUID, limit: int) -> Tuple[bool, dict]:
-        """检查QPS限制
+    @staticmethod
+    def _queue_qps_increment(pipe, api_key_id: uuid.UUID) -> None:
+        """把一次 QPS 计数排入调用方的 pipeline（INCR + 1 秒窗口）。
 
-        Returns:
-            (is_allowed, rate_limit_info)
+        这里只负责计数，不做放行判断：调用方 ``execute()`` 后拿到当前值，
+        再与最终有效限额比较。排进已有 pipeline 是为了让套餐限额缓存的
+        GET 与 QPS 计数共用一次 Redis 往返。
         """
         key = f"rate_limit:qps:{api_key_id}"
-
-        async with self.redis.pipeline() as pipe:
-            pipe.incr(key)
-            pipe.expire(key, 1, nx=True)  # 1 秒过期
-            results = await pipe.execute()
-
-        current = results[0]
-        remaining = max(0, limit - current)
-        reset_time = int(time.time()) + 1
-
-        return current <= limit, {
-            "limit": limit,
-            "current": current,
-            "remaining": remaining,
-            "reset": reset_time,
-        }
+        pipe.incr(key)
+        pipe.expire(key, 1, nx=True)  # 1 秒过期
 
     async def check_daily_requests(
             self,
@@ -450,14 +438,12 @@ class RateLimiterService:
 
         # 1. 第一段 pipeline：套餐限额缓存 + QPS 计数。
         #    旧实现是 1 次 GET + 1 次 QPS pipeline；现在合并为 1 次往返。
-        qps_key = f"rate_limit:qps:{api_key_id}"
         tenant_cache_key = f"tenant_api_ops_limit:{workspace_id}"
 
         async with self.redis.pipeline() as pipe:
             if db is not None:
                 pipe.get(tenant_cache_key)
-            pipe.incr(qps_key)
-            pipe.expire(qps_key, 1, nx=True)
+            self._queue_qps_increment(pipe, api_key_id)
             results = await pipe.execute()
 
         index = 0
