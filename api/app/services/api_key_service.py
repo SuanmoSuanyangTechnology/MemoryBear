@@ -337,6 +337,20 @@ class ApiKeyService:
         )
 
 
+# 日调用量必须“读-判断-递增”原子完成：达到上限时不再 INCR，
+# 否则被拒请求也会消耗日配额，计数会逐渐偏离实际放行数。
+_DAILY_LIMIT_SCRIPT = """
+local current = tonumber(redis.call('GET', KEYS[1]) or '0')
+local limit = tonumber(ARGV[1])
+if current >= limit then
+    return {current, 0}
+end
+local updated = redis.call('INCR', KEYS[1])
+redis.call('EXPIRE', KEYS[1], ARGV[2], 'NX')
+return {updated, 1}
+"""
+
+
 class RateLimiterService:
     def __init__(self):
         self.redis = aio_redis
@@ -371,26 +385,31 @@ class RateLimiterService:
             limit: int
     ) -> Tuple[bool, dict]:
         """检查日调用量限制。
-        使用原子 INCR，先写后判断，极低概率下允许轻微超限（并发场景下可接受）。
+
+        通过 Lua 脚本原子地“读-判断-递增”：达到上限时不再 INCR，
+        被拒请求不会消耗日配额，并发下也不会出现多次超限。
         """
-        today = utcnow_naive().strftime("%Y%m%d")
+        now = utcnow_naive()
+        today = now.strftime("%Y%m%d")
         key = f"rate_limit:daily:{api_key_id}:{today}"
 
-        now = utcnow_naive()
         tomorrow_0 = (now + timedelta(days=1)).replace(
             hour=0, minute=0, second=0, microsecond=0
         )
         expire_seconds = int((tomorrow_0 - now).total_seconds())
         reset_time = int(as_utc_aware(tomorrow_0).timestamp())
 
-        async with self.redis.pipeline() as pipe:
-            pipe.incr(key)
-            pipe.expire(key, expire_seconds, nx=True)
-            results = await pipe.execute()
+        result = await self.redis.eval(
+            _DAILY_LIMIT_SCRIPT,
+            1,
+            key,
+            limit,
+            expire_seconds,
+        )
+        current = int(result[0])
+        incremented = int(result[1]) == 1
 
-        current = results[0]
-
-        if current > limit:
+        if not incremented:
             return False, {
                 "limit": limit,
                 "remaining": 0,
@@ -494,8 +513,9 @@ class RateLimiterService:
                 "X-RateLimit-Reset": str(qps_info["reset"])
             }
 
-        # 4. 第二段 pipeline：仅 QPS 放行后才累计日调用量。
-        #    这样 QPS 被拒的请求不会消耗日配额，保持原有配额语义。
+        # 4. 仅 QPS 放行后才检查并尝试累计日调用量。
+        #    Lua 脚本原子完成“读-判断-递增”：达到上限时不再 INCR，
+        #    被拒请求不会消耗日配额。
         now = utcnow_naive()
         today = now.strftime("%Y%m%d")
         tomorrow_0 = (now + timedelta(days=1)).replace(
@@ -505,13 +525,15 @@ class RateLimiterService:
         daily_reset_time = int(as_utc_aware(tomorrow_0).timestamp())
         daily_key = f"rate_limit:daily:{api_key_id}:{today}"
 
-        async with self.redis.pipeline() as pipe:
-            pipe.incr(daily_key)
-            pipe.expire(daily_key, daily_expire_seconds, nx=True)
-            daily_results = await pipe.execute()
-
-        daily_current = int(daily_results[0])
-        daily_ok = daily_current <= daily_request_limit
+        daily_result = await self.redis.eval(
+            _DAILY_LIMIT_SCRIPT,
+            1,
+            daily_key,
+            daily_request_limit,
+            daily_expire_seconds,
+        )
+        daily_current = int(daily_result[0])
+        daily_ok = int(daily_result[1]) == 1
         daily_info = {
             "limit": daily_request_limit,
             "remaining": max(0, daily_request_limit - daily_current),
