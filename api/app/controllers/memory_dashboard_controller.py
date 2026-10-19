@@ -14,6 +14,7 @@ from app.core.response_utils import fail, success
 from app.core.utils.datetime_utils import to_timestamp_ms, utcnow_naive
 from app.db import get_db, get_async_db, get_async_db_context
 from app.dependencies import get_current_user, get_current_user_async, CurrentUserSnapshot
+from app.integrations.profile.contracts import MemoryProfileAuthSource
 from app.models.user_model import User
 from app.schemas.memory_dashboard_schema import EndUserMemoryCountsRequest
 from app.schemas.response_schema import ApiResponse
@@ -740,7 +741,11 @@ async def dashboard_data(
             api_logger.info("成功获取rag_data")
         
         result["workspace_statistics"] = (
-            await memory_dashboard_service.get_dashboard_workspace_statistics_async(workspace_id)
+            await memory_dashboard_service.get_dashboard_workspace_statistics_async(
+                workspace_id,
+                current_user=current_user,
+                source=MemoryProfileAuthSource.INTERNAL,
+            )
         )
         api_logger.info("成功获取dashboard整合数据")
         return success(data=result, msg="Dashboard数据获取成功")

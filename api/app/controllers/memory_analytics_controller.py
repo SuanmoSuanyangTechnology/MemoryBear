@@ -241,8 +241,10 @@ async def get_node_statistics_api(
 
 
 @router.get("/workspace_statistics", response_model=ApiResponse)
+@memory_profile_proxy()
 async def get_workspace_statistics_api(
         current_user: CurrentUserSnapshot = Depends(get_current_user_async),
+        request: Request = None,
 ) -> dict:
     """获取当前工作空间的记忆类型统计。"""
     workspace_id = current_user.current_workspace_id

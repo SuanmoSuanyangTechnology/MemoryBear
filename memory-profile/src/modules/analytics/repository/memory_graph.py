@@ -64,6 +64,46 @@ _COMMUNITY_NODE_PROJECTION = variable_projection("c", COMMUNITY_GRAPH_NODE_FIELD
 _COMMUNITY_ENTITY_PROJECTION = variable_projection("e", COMMUNITY_GRAPH_ENTITY_FIELDS)
 _COMMUNITY_NEIGHBOR_PROJECTION = variable_projection("e2", COMMUNITY_GRAPH_ENTITY_FIELDS)
 
+# 工作空间统计的 ES 缺失用户回退计数（api
+# ``WorkspaceStatisticsStorage.get_statistics`` 同款 Cypher）。
+_WORKSPACE_FALLBACK_STATISTICS_QUERY = """
+UNWIND $end_user_ids AS end_user_id
+CALL (end_user_id) {
+    OPTIONAL MATCH (summary:MemorySummary {end_user_id: end_user_id})
+    WHERE summary.delete_at IS NULL
+    RETURN count(DISTINCT summary) AS episodic_count
+}
+CALL (end_user_id) {
+    OPTIONAL MATCH (entity:ExtractedEntity {end_user_id: end_user_id})
+    WHERE entity.delete_at IS NULL
+      AND entity.is_explicit_memory = true
+    RETURN count(DISTINCT entity) AS explicit_entity_count
+}
+CALL (end_user_id) {
+    OPTIONAL MATCH (statement:Statement {end_user_id: end_user_id})
+    WHERE statement.delete_at IS NULL
+      AND statement.emotion_type IS NOT NULL
+    RETURN count(DISTINCT statement) AS emotional_count
+}
+RETURN sum(episodic_count) AS episodic_count,
+       sum(explicit_entity_count) AS explicit_entity_count,
+       sum(emotional_count) AS emotional_count
+"""
+
+# 隐性记忆按用户统计「有来源关系的情景摘要」，单个用户不足 5 条时贡献 0
+# （api ``MIN_MEMORY_SUMMARY_COUNT`` 同值同口径）。
+_WORKSPACE_IMPLICIT_MEMORY_QUERY = """
+UNWIND $end_user_ids AS end_user_id
+OPTIONAL MATCH (summary:MemorySummary {end_user_id: end_user_id})
+      -[:DERIVED_FROM_STATEMENT]->(:Statement)
+WHERE summary.delete_at IS NULL
+WITH end_user_id, count(DISTINCT summary) AS summary_count
+RETURN sum(
+    CASE WHEN summary_count >= $minimum_summary_count
+         THEN summary_count ELSE 0 END
+) AS implicit_count
+"""
+
 
 class MemoryGraphRepository:
     def __init__(self, neo4j: Neo4jManager) -> None:
@@ -278,3 +318,47 @@ class MemoryGraphRepository:
             emotion_types=list(EMOTION_TYPE_STORAGE_VALUES),
         )
         return int(rows[0]["count"] if rows else 0)
+
+    async def workspace_implicit_count(
+        self,
+        end_user_ids: list[str],
+        minimum_summary_count: int,
+    ) -> int:
+        """工作空间口径的隐性记忆：按用户统计，不足阈值该用户贡献 0。"""
+
+        if not end_user_ids:
+            return 0
+        rows = await self._query(
+            _WORKSPACE_IMPLICIT_MEMORY_QUERY,
+            end_user_ids=list(end_user_ids),
+            minimum_summary_count=minimum_summary_count,
+        )
+        return int(rows[0].get("implicit_count") or 0) if rows else 0
+
+    async def workspace_fallback_statistics(
+        self,
+        end_user_ids: list[str],
+    ) -> dict[str, int]:
+        """ES 中完全无数据的用户回退到 Neo4j 统计的三类计数。
+
+        回退条件与 api 一致：用户在三个相关 ES 索引里**都不存在**有效数据时才回退，
+        因此这里的 ``emotion_type IS NOT NULL`` 与 ES 侧的 ``exists`` 语义对齐，
+        不做 10 桶归一化（归一化只在 ``emotional_count`` 的单用户展示口径里使用）。
+        """
+
+        if not end_user_ids:
+            return {
+                "episodic_count": 0,
+                "explicit_entity_count": 0,
+                "emotional_count": 0,
+            }
+        rows = await self._query(
+            _WORKSPACE_FALLBACK_STATISTICS_QUERY,
+            end_user_ids=list(end_user_ids),
+        )
+        row = rows[0] if rows else {}
+        return {
+            "episodic_count": int(row.get("episodic_count") or 0),
+            "explicit_entity_count": int(row.get("explicit_entity_count") or 0),
+            "emotional_count": int(row.get("emotional_count") or 0),
+        }

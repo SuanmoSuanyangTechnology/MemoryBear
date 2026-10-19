@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from functools import wraps
 from inspect import signature
 from typing import Any, ParamSpec, TypeVar
@@ -63,6 +64,45 @@ def _caller_actor_id(current_user: Any, source: MemoryProfileAuthSource) -> str:
     return str(current_user.id)
 
 
+async def forward_memory_profile_request(
+    *,
+    method: str,
+    path: str,
+    current_user: Any,
+    source: MemoryProfileAuthSource,
+    query: Mapping[str, Any] | None = None,
+    language_type: str | None = None,
+    raw: bool = False,
+) -> dict[str, Any] | MemoryProfileRawResponse:
+    """Forward one subrequest to memory-profile from an endpoint that stays local.
+
+    The dashboard aggregate keeps its own app/knowledge/API-call counters but
+    embeds workspace statistics; this helper lets that block come from
+    memory-profile without proxying the whole endpoint. ``path`` is the target
+    internal route, while ``source`` names the face the caller reached us on —
+    the two cannot be derived from each other, so the caller passes both. The
+    acting-id rule is the same one :func:`memory_profile_proxy` applies.
+    """
+
+    workspace_id = getattr(current_user, "current_workspace_id", None)
+    if workspace_id is None:
+        raise MemoryProfileConfigurationError(
+            "memory profile subrequest requires a workspace context"
+        )
+    return await get_memory_profile_client().request(
+        method=method,
+        path=path,
+        workspace_id=str(workspace_id),
+        tenant_id=str(current_user.tenant_id),
+        actor_id=_caller_actor_id(current_user, source),
+        source=source,
+        trace_id=get_trace_id() or uuid4().hex,
+        language_type=language_type,
+        query=query or {},
+        raw=raw,
+    )
+
+
 def memory_profile_proxy(
     *,
     query_fields: tuple[str, ...] = (),
@@ -71,7 +111,6 @@ def memory_profile_proxy(
     source: MemoryProfileAuthSource | None = None,
 ):
     """Forward one route to memory-profile when its integration is enabled.
-
     The wrapped function remains the complete legacy implementation. The API-key
     routes run their authentication, workspace validation, and merge routing
     before calling it, so the decorator only replaces the final use-case call.

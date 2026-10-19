@@ -429,46 +429,59 @@ class RateLimiterService:
         if rate_limit_disabled:
             return True, "", {}
 
-        # 1. 取套餐限额与 api_key 自身限额的最小值
-        effective_limit = api_key_rate_limit
+        # 1. 第一段 pipeline：套餐限额缓存 + QPS 计数。
+        #    旧实现是 1 次 GET + 1 次 QPS pipeline；现在合并为 1 次往返。
+        qps_key = f"rate_limit:qps:{api_key_id}"
+        tenant_cache_key = f"tenant_api_ops_limit:{workspace_id}"
+
+        async with self.redis.pipeline() as pipe:
+            if db is not None:
+                pipe.get(tenant_cache_key)
+            pipe.incr(qps_key)
+            pipe.expire(qps_key, 1, nx=True)
+            results = await pipe.execute()
+
+        index = 0
         tenant_limit = None
+        tenant_cache_miss = False
         if db is not None:
+            cached = results[index]
+            index += 1
+            if cached is None:
+                tenant_cache_miss = True
+            else:
+                try:
+                    tenant_limit = int(cached) if cached != "0" else None
+                except (ValueError, TypeError):
+                    tenant_limit = None
+                    tenant_cache_miss = True
+
+        qps_current = int(results[index])
+
+        if db is not None and tenant_cache_miss:
             try:
-                from app.models.workspace_model import Workspace
-                from app.core.quota_manager import get_api_ops_rate_limit, get_api_ops_rate_limit_async
-
-                cache_key = f"tenant_api_ops_limit:{workspace_id}"
-                cached = await self.redis.get(cache_key)
-                if cached is not None:
-                    try:
-                        tenant_limit = int(cached) if cached != "0" else None
-                    except (ValueError, TypeError):
-                        cached = None
-                        tenant_limit = None
-
-                if cached is None:
-                    stmt = select(Workspace).where(Workspace.id == workspace_id)
-                    if isinstance(db, AsyncSession):
-                        result = await db.execute(stmt)
-                    else:
-                        result = db.execute(stmt)
-                    workspace = result.scalars().first()
-                    if workspace:
-                        if isinstance(db, AsyncSession):
-                            tenant_limit = await get_api_ops_rate_limit_async(db, workspace.tenant_id)
-                        else:
-                            tenant_limit = get_api_ops_rate_limit(db, workspace.tenant_id)
-                        await self.redis.set(cache_key, str(tenant_limit) if tenant_limit else "0", ex=60)
-                    else:
-                        tenant_limit = None
-
-                if tenant_limit:
-                    effective_limit = min(api_key_rate_limit, tenant_limit)
+                tenant_limit = await self._resolve_tenant_rate_limit(db, workspace_id)
+                await self.redis.set(
+                    tenant_cache_key,
+                    str(tenant_limit) if tenant_limit else "0",
+                    ex=60,
+                )
             except Exception as e:
                 logger.warning(f"获取套餐限额失败，使用 api_key 自身限额: {e}")
 
-        # 用最终有效限额做 QPS 检查
-        qps_ok, qps_info = await self.check_qps(api_key_id, effective_limit)
+        # 2. 取套餐限额与 api_key 自身限额的最小值
+        effective_limit = api_key_rate_limit
+        if tenant_limit:
+            effective_limit = min(api_key_rate_limit, tenant_limit)
+
+        # 3. 用最终有效限额做 QPS 检查；被拒时直接返回，不累计日调用量。
+        qps_ok = qps_current <= effective_limit
+        qps_info = {
+            "limit": effective_limit,
+            "current": qps_current,
+            "remaining": max(0, effective_limit - qps_current),
+            "reset": int(time.time()) + 1,
+        }
         if not qps_ok:
             # 判断是套餐限额触发还是 api_key 自身限额触发
             if tenant_limit and effective_limit == tenant_limit and api_key_rate_limit > tenant_limit:
@@ -481,11 +494,29 @@ class RateLimiterService:
                 "X-RateLimit-Reset": str(qps_info["reset"])
             }
 
-        # 2. 检查日调用量
-        daily_ok, daily_info = await self.check_daily_requests(
-            api_key_id,
-            daily_request_limit
+        # 4. 第二段 pipeline：仅 QPS 放行后才累计日调用量。
+        #    这样 QPS 被拒的请求不会消耗日配额，保持原有配额语义。
+        now = utcnow_naive()
+        today = now.strftime("%Y%m%d")
+        tomorrow_0 = (now + timedelta(days=1)).replace(
+            hour=0, minute=0, second=0, microsecond=0
         )
+        daily_expire_seconds = int((tomorrow_0 - now).total_seconds())
+        daily_reset_time = int(as_utc_aware(tomorrow_0).timestamp())
+        daily_key = f"rate_limit:daily:{api_key_id}:{today}"
+
+        async with self.redis.pipeline() as pipe:
+            pipe.incr(daily_key)
+            pipe.expire(daily_key, daily_expire_seconds, nx=True)
+            daily_results = await pipe.execute()
+
+        daily_current = int(daily_results[0])
+        daily_ok = daily_current <= daily_request_limit
+        daily_info = {
+            "limit": daily_request_limit,
+            "remaining": max(0, daily_request_limit - daily_current),
+            "reset": daily_reset_time,
+        }
         if not daily_ok:
             return False, "Daily request limit exceeded", {
                 "X-RateLimit-Limit-Day": str(daily_info["limit"]),
@@ -500,6 +531,31 @@ class RateLimiterService:
             "X-RateLimit-Remaining-Day": str(daily_info["remaining"]),
             "X-RateLimit-Reset": str(daily_info["reset"]),
         }
+
+    @staticmethod
+    async def _resolve_tenant_rate_limit(
+        db: Session | AsyncSession,
+        workspace_id: uuid.UUID,
+    ) -> int | None:
+        """Load and return the tenant's API-ops QPS limit (cache miss path)."""
+
+        from app.core.quota_manager import (
+            get_api_ops_rate_limit,
+            get_api_ops_rate_limit_async,
+        )
+        from app.models.workspace_model import Workspace
+
+        stmt = select(Workspace).where(Workspace.id == workspace_id)
+        if isinstance(db, AsyncSession):
+            result = await db.execute(stmt)
+        else:
+            result = db.execute(stmt)
+        workspace = result.scalars().first()
+        if not workspace:
+            return None
+        if isinstance(db, AsyncSession):
+            return await get_api_ops_rate_limit_async(db, workspace.tenant_id)
+        return get_api_ops_rate_limit(db, workspace.tenant_id)
 
 
 class ApiKeyAuthService:

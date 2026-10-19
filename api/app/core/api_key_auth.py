@@ -3,12 +3,15 @@ import inspect
 import random
 import time
 import uuid
+from collections import OrderedDict
 from contextvars import ContextVar
 from functools import wraps
 from typing import Optional, List
 
 from fastapi import Request, Response
 from fastapi.responses import JSONResponse
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from app.core.api_key_utils import add_rate_limit_headers
@@ -48,6 +51,78 @@ def get_current_api_key_auth() -> "ApiKeyAuth":
     if auth is None:
         raise BusinessException("API Key 认证信息缺失", BizCode.API_KEY_NOT_FOUND)
     return auth
+
+
+# ── Workspace → tenant cache ─────────────────────────────────────────
+# A workspace never changes tenant, and the API key auth path resolves this
+# mapping on every request. A short-TTL process cache removes one DB query per
+# request; the TTL bounds staleness if the mapping is ever changed out of band.
+_WORKSPACE_TENANT_TTL_SECONDS = 300.0
+_WORKSPACE_TENANT_CACHE_MAX = 4096
+_CACHE_MISS = object()
+_workspace_tenant_cache: "OrderedDict[str, tuple[float, uuid.UUID | None]]" = OrderedDict()
+
+
+def clear_workspace_tenant_cache() -> None:
+    """Drop every cached workspace→tenant mapping (tests / admin changes)."""
+    _workspace_tenant_cache.clear()
+
+
+def invalidate_workspace_tenant_cache(workspace_id: uuid.UUID | str) -> None:
+    """Drop one workspace→tenant mapping after a workspace change."""
+    _workspace_tenant_cache.pop(str(workspace_id), None)
+
+
+def _cached_workspace_tenant(workspace_id: uuid.UUID | str):
+    key = str(workspace_id)
+    entry = _workspace_tenant_cache.get(key)
+    if entry is None:
+        return _CACHE_MISS
+    cached_at, tenant_id = entry
+    if time.monotonic() - cached_at >= _WORKSPACE_TENANT_TTL_SECONDS:
+        _workspace_tenant_cache.pop(key, None)
+        return _CACHE_MISS
+    _workspace_tenant_cache.move_to_end(key)
+    return tenant_id
+
+
+def _store_workspace_tenant(
+    workspace_id: uuid.UUID | str,
+    tenant_id: uuid.UUID | None,
+) -> None:
+    key = str(workspace_id)
+    _workspace_tenant_cache[key] = (time.monotonic(), tenant_id)
+    _workspace_tenant_cache.move_to_end(key)
+    while len(_workspace_tenant_cache) > _WORKSPACE_TENANT_CACHE_MAX:
+        _workspace_tenant_cache.popitem(last=False)
+
+
+async def _resolve_workspace_tenant_id_async(
+    db: AsyncSession,
+    workspace_id: uuid.UUID,
+) -> uuid.UUID | None:
+    cached = _cached_workspace_tenant(workspace_id)
+    if cached is not _CACHE_MISS:
+        return cached
+    result = await db.execute(
+        select(Workspace.tenant_id).where(Workspace.id == workspace_id)
+    )
+    tenant_id = result.scalar_one_or_none()
+    _store_workspace_tenant(workspace_id, tenant_id)
+    return tenant_id
+
+
+def _resolve_workspace_tenant_id_sync(
+    db: Session,
+    workspace_id: uuid.UUID,
+) -> uuid.UUID | None:
+    cached = _cached_workspace_tenant(workspace_id)
+    if cached is not _CACHE_MISS:
+        return cached
+    workspace = db.query(Workspace).filter(Workspace.id == workspace_id).first()
+    tenant_id = workspace.tenant_id if workspace else None
+    _store_workspace_tenant(workspace_id, tenant_id)
+    return tenant_id
 
 
 # ── Async log-writer: batched single-consumer queue ──────────────────
@@ -261,9 +336,8 @@ def require_api_key(
                         context={"required_scopes": scopes, "missing_scopes": missing_scopes}
                     )
 
-            # Resolve tenant_id from workspace
-            _ws = db.query(Workspace).filter(Workspace.id == api_key_obj.workspace_id).first()
-            _tenant_id = _ws.tenant_id if _ws else None
+            # Resolve tenant_id from workspace (workspace→tenant is stable; cache it)
+            _tenant_id = _resolve_workspace_tenant_id_sync(db, api_key_obj.workspace_id)
 
             kwargs["api_key_auth"] = ApiKeyAuth(
                 api_key_id=api_key_obj.id,
@@ -272,6 +346,7 @@ def require_api_key(
                 type=api_key_obj.type,
                 scopes=api_key_obj.scopes,
                 resource_id=api_key_obj.resource_id,
+                created_by=api_key_obj.created_by,
             )
 
             rate_limiter = RateLimiterService()
@@ -438,6 +513,7 @@ def require_api_key_self_db(
                 _api_key_type = api_key_obj.type
                 _api_key_scopes = list(api_key_obj.scopes or [])
                 _resource_id = api_key_obj.resource_id
+                _created_by = api_key_obj.created_by
 
                 rate_limiter = RateLimiterService()
                 is_allowed, error_msg, rate_headers = await rate_limiter.check_all_limits(api_key_obj, db=db)
@@ -464,12 +540,10 @@ def require_api_key_self_db(
 
                 await db.commit()
 
-                # Resolve tenant_id from workspace (needed by downstream loaders)
-                from sqlalchemy import select as sa_select
-                _ws_result = await db.execute(
-                    sa_select(Workspace.tenant_id).where(Workspace.id == _workspace_id)
-                )
-                _tenant_id = _ws_result.scalar_one_or_none()
+                # Resolve tenant_id from workspace (needed by downstream loaders).
+                # workspace→tenant is stable, so use the short-TTL process cache
+                # instead of querying it on every request.
+                _tenant_id = await _resolve_workspace_tenant_id_async(db, _workspace_id)
 
                 _api_key_auth = ApiKeyAuth(
                     api_key_id=_api_key_id,
@@ -478,6 +552,7 @@ def require_api_key_self_db(
                     type=_api_key_type,
                     scopes=_api_key_scopes,
                     resource_id=_resource_id,
+                    created_by=_created_by,
                 )
 
             # Set ContextVar for endpoints that use get_current_api_key_auth().
