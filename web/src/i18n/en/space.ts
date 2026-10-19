@@ -40,6 +40,7 @@ export const space = {
       embeddingRebuildTitle: 'Embedding model changed',
       embeddingRebuildContent: 'Because the workspace embedding model has changed, the memory library needs to rebuild its vector indexes with the new model. During rebuilding, vector search may be temporarily unavailable and fall back to keyword/full-text search.',
       reembedding: {
+        allTask: 'Total tasks',
         status: {
           pending: 'Pending',
           queued: 'Queued',
@@ -51,16 +52,20 @@ export const space = {
         viewDetails: 'View Details',
         switchLockedNotice: 'Re-embedding is in progress. Model switching is locked.',
         alert: {
+          pendingTitle: 'Memory Library Index Rebuild Queued. Please Wait.',
+          pendingDescription: 'Because the workspace Embedding model has changed, the memory libraries need to rebuild their vector indexes with the new model. Target model: {{model}}. The task is currently queued. Search has fallen back to keyword/full-text search, and model switching is locked.',
           runningTitle: 'Rebuilding Memory Library Indexes',
           runningDescription: 'Because the workspace Embedding model has changed, the memory libraries need to rebuild their vector indexes with the new model. Target model: {{model}}. Processing is in progress. Search has fallen back to keyword/full-text search, and model switching is locked.',
           succeededTitle: 'Memory Library Index Rebuild Complete',
           succeededDescription: 'Because the workspace Embedding model has changed, the memory libraries need to rebuild their vector indexes with the new model. All memory libraries have rebuilt their indexes with “{{model}}”. Vector and semantic search have been restored.',
           failedTitle: 'Some Memory Library Indexes Failed to Rebuild',
           failedDescription: 'Because the workspace Embedding model has changed, the memory libraries need to rebuild their vector indexes with the new model. Target model: {{model}}. Failed memory libraries continue to use keyword/full-text search. You can retry the failed tasks.',
+          userPending: 'Because the workspace Embedding model has changed, the memory library needs to rebuild its vector index with the new model. The task is currently queued, and search remains available.',
           userQueued: 'Because the workspace Embedding model has changed, the memory libraries need to rebuild their vector indexes with the new model. Memory libraries waiting for processing: {{queued}}. Search remains available.',
           userRunningFailed: 'Because the workspace Embedding model has changed, the memory libraries need to rebuild their vector indexes with the new model. Failed memory libraries: {{failed}}. Other tasks are still in progress.',
           userRunningQueued: 'Because the workspace Embedding model has changed, the memory libraries need to rebuild their vector indexes with the new model. Memory libraries in progress: {{running}}. Search has fallen back to keyword/full-text search during processing. Waiting: {{queued}}.',
           userSucceededQueued: 'Because the workspace Embedding model has changed, the memory libraries need to rebuild their vector indexes with the new model. Completed memory libraries: {{succeeded}}. Waiting: {{queued}}.',
+          noUserSucceeded: 'Because the workspace Embedding model has changed, the memory libraries need to rebuild their vector indexes with the new model. All memory libraries were processed successfully, and vector search has been restored.',
           userSucceeded: 'Because the workspace Embedding model has changed, the memory libraries need to rebuild their vector indexes with the new model. All {{succeeded}} memory libraries were processed successfully, and vector search has been restored.',
           userFailed: 'Because the workspace Embedding model has changed, the memory libraries need to rebuild their vector indexes with the new model. This run has ended. Succeeded: {{succeeded}}; failed: {{failed}}.',
         },

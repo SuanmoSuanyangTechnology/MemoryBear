@@ -185,6 +185,7 @@ const TestChat: FC<TestChatProps> = ({
           setLoading,
           setStreamLoading,
           streamLoadingRef,
+          audioPollingRef,
         })
         : handleStreamMessage
 
@@ -262,7 +263,19 @@ const TestChat: FC<TestChatProps> = ({
     setStreamLoading(true)
     setLoading(true)
 
-    const handler = isWorkflow ? handleWorkflowStreamMessage : handleStreamMessage
+    const handler = isWorkflow
+      ? handleWorkflowStreamMessage
+      : isCluster
+      ? createTestClusterStreamHandler({
+        conversationId,
+        setConversationId,
+        setChatList,
+        setLoading,
+        setStreamLoading,
+        streamLoadingRef,
+        audioPollingRef,
+      })
+      : handleStreamMessage
     draftRunRegenerate(application.id, vo.id, handler, (abort) => { abortRef.current = abort })
       .catch(() => {
         // Roll back to the state captured before appendRegenerateVersion.
@@ -344,8 +357,7 @@ const TestChat: FC<TestChatProps> = ({
       })
     }
   }, [features?.opening_statement, variables])
-  const isSupportTools = application?.type && ['workflow', 'agent'].includes(application.type)
-  const isSupportRuntime = Boolean(isSupportTools || isCluster)
+  const isSupportTools = !!application?.type
 
   return (
     <div className="rb:w-250 rb:mx-auto rb:h-full">
@@ -373,7 +385,7 @@ const TestChat: FC<TestChatProps> = ({
           }}
           labelFormat={(item) => item.role === 'user' ? t('application.you') : dayjs(item.created_at).locale('en').format('MMMM D, YYYY [at] h:mm A')}
           // errorDesc={t('application.ReplyException')}
-          renderRuntime={isSupportRuntime && application?.type ? (item, index) => <Runtime item={item} index={index} source={application.type} /> : undefined}
+          renderRuntime={application?.type ? (item, index) => <Runtime item={item} index={index} source={application.type} /> : undefined}
           handleInterventionActionClick={handleInterventionActionClick}
           isSupportTools={isSupportTools}
           isAlwaysShowAssistantTools={isSupportTools}

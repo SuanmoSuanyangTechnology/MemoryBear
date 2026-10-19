@@ -98,12 +98,10 @@ class AgentTraceRecorder:
             return [AgentTraceRecorder._strip_private(item) for item in value]
         return value
 
-    def start_llm(self, raw_input: Any | None = None) -> dict[str, Any]:
+    def start_llm(self) -> dict[str, Any]:
         self.finish_llm()
         index = len(self.log["iterations"]) + 1
         llm_input = dict(self._base_input)
-        if raw_input is not None:
-            llm_input["raw"] = self._jsonable(raw_input)
         iteration = {
             "id": str(_uuid.uuid4()),
             "index": index,
@@ -800,7 +798,7 @@ class LangChainAgent:
                     kind = event.get("event")
 
                     if kind in ("on_chat_model_start", "on_llm_start"):
-                        trace.start_llm(event.get("data", {}).get("input"))
+                        trace.start_llm()
 
                     elif kind in ("on_chat_model_end", "on_llm_end"):
                         output_message = self._extract_message_from_event_output(event.get("data", {}).get("output"))
@@ -1070,7 +1068,7 @@ class LangChainAgent:
 
                     # 处理所有可能的流式事件
                     if kind in ("on_chat_model_start", "on_llm_start"):
-                        trace.start_llm(event.get("data", {}).get("input"))
+                        trace.start_llm()
                         yield {"type": "agent_log", "data": trace.to_dict()}
 
                     elif kind in ("on_chat_model_end", "on_llm_end"):

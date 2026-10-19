@@ -49,14 +49,14 @@ const RequestSummaryCard: FC<RequestSummaryCardProps> = ({ log, query, searchSwi
   ]
 
   return (
-    <div className="rb:rounded-[8px] rb-border rb:bg-[#F6F6F6] rb:px-3.5 rb:py-3">
-      <p className="rb:text-xs rb:font-semibold rb:leading-5 rb:text-[#171719]">
+    <div className="rb:rounded-xl rb:bg-gray-100 rb:p-3">
+      <p className="rb:font-medium rb:leading-5 rb:text-gray-950">
         {query}
       </p>
       <Flex wrap gap={6} className="rb:mt-2!">
         {tags.map(tag => (
           <span
-            className="rb:rounded-md rb:border rb:border-[#E1E4E8] rb:bg-white rb:px-2 rb:py-0.5 rb:text-[10px] rb:leading-4 rb:text-[#8A9099]"
+            className="rb:rounded-md rb-border rb:bg-white rb:px-2 rb:py-1 rb:text-[12px] rb:leading-4 rb:text-gray-600"
             key={tag}
           >
             {tag}

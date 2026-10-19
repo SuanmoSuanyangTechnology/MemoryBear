@@ -23,7 +23,14 @@ class EmotionDailyTimelineRequest(BaseModel):
 class EmotionTagsRequest(BaseModel):
     """获取情绪标签统计请求"""
     end_user_id: str = Field(..., description="组ID")
-    emotion_type: Optional[str] = Field(None, description="情绪类型过滤（joy/sadness/anger/fear/surprise/neutral）")
+    # 不加枚举校验，以兼容旧值 fear/surprise
+    emotion_type: Optional[str] = Field(
+        None,
+        description=(
+            "情绪类型过滤（neutral/joy/relief/anxiety/sadness/anger/frustration/loneliness/confusion/hope；"
+            "旧值 fear/surprise 兼容）"
+        ),
+    )
     start_date: Optional[str] = Field(None, description="开始日期（ISO格式，如：2024-01-01）")
     end_date: Optional[str] = Field(None, description="结束日期（ISO格式，如：2024-12-31）")
     limit: int = Field(10, ge=1, le=100, description="返回数量限制")
@@ -32,7 +39,14 @@ class EmotionTagsRequest(BaseModel):
 class EmotionWordcloudRequest(BaseModel):
     """获取情绪词云数据请求"""
     end_user_id: str = Field(..., description="组ID")
-    emotion_type: Optional[str] = Field(None, description="情绪类型过滤（joy/sadness/anger/fear/surprise/neutral）")
+    # 不加枚举校验，以兼容旧值 fear/surprise
+    emotion_type: Optional[str] = Field(
+        None,
+        description=(
+            "情绪类型过滤（neutral/joy/relief/anxiety/sadness/anger/frustration/loneliness/confusion/hope；"
+            "旧值 fear/surprise 兼容）"
+        ),
+    )
     limit: int = Field(50, ge=1, le=200, description="返回词语数量")
 
 

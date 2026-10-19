@@ -16,6 +16,11 @@ PUBLIC_PACKAGE_ROOTS = (
 )
 FORBIDDEN_SERVICE_IMPORTS = {"api", "app", "premium"}
 AUTHORIZED_TASKS_BY_MODULE = {
+    "tasks/wiki.py": {
+        "mem_knowledge.tasks.sync_wiki_document",
+        "mem_knowledge.tasks.reduce_wiki_page",
+        "mem_knowledge.tasks.enqueue_unprocessed_wiki_documents",
+    },
     "tasks/document.py": {
         "app.core.rag.tasks.parse_document",
         "app.core.rag.tasks.sync_knowledge_for_kb",
@@ -36,6 +41,7 @@ REQUIRED_RUNTIME_ROOT_MODULES = frozenset(
     {
         "main.py",
         "api/router.py",
+        "migration_policy.py",  # Also loaded by the Alembic CLI outside src.
         "rag/chunk/router.py",
         "tasks/celery_worker.py",
         *AUTHORIZED_TASKS_BY_MODULE,
@@ -45,6 +51,8 @@ RUNTIME_ROOT_MODULES = frozenset(
     {
         "main.py",
         "api/router.py",
+        "migration_policy.py",  # Also loaded by the Alembic CLI outside src.
+        "services/wiki/taxonomy.py",  # scripts/replan_wiki_taxonomy.py 的显式运维入口。
         "rag/chunk/router.py",
         "tasks/celery_worker.py",
         *AUTHORIZED_TASKS_BY_MODULE,
@@ -461,6 +469,7 @@ def _scan_worker_observability(root: Path) -> list[str]:
         ("document_worker", "document_tasks"),
         ("graphrag_worker", "graphrag_tasks"),
         ("qa_import_worker", "qa_import"),
+        ("wiki_worker", "wiki_tasks"),
     ):
         if role not in worker_source or queue not in worker_source:
             errors.append(

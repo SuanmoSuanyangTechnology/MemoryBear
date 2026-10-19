@@ -183,8 +183,8 @@ class Neo4jSearchService:
             query: str,
             limit: int
     ) -> StorageReadResult:
-        query_embed = await self.get_embed(self.embedder._config.model_name, query)
-        # query_embed = await self.embedder.aembed_query(query)
+        # query_embed = await self.get_embed(self.embedder._config.model_name, query)
+        query_embed = await self.embedder.aembed_query(query)
         return await self.service.search_by_embedding(
             node_filters=build_content_search_filters(
                 self.includes,

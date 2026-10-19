@@ -241,6 +241,18 @@ class Settings:
     PREFERENCE_WRITE_TIMEOUT_SECONDS: float = float(
         os.getenv("PREFERENCE_WRITE_TIMEOUT_SECONDS", "300")
     )
+    PREFERENCE_RECALL_MAX_CONTEXT_MESSAGES: int = max(
+        0, int(os.getenv("PREFERENCE_RECALL_MAX_CONTEXT_MESSAGES", "3"))
+    )
+    PREFERENCE_RECALL_MAX_CONTEXT_CHARS: int = (
+        max(PREFERENCE_RECALL_MAX_CONTEXT_MESSAGES, 3) * 12000
+    )
+    PREFERENCE_RECALL_MAX_PREFERENCES: int = max(
+        1, int(os.getenv("PREFERENCE_RECALL_MAX_PREFERENCES", "10"))
+    )
+    PREFERENCE_RECALL_TIMEOUT_MS: int = max(
+        100, int(os.getenv("PREFERENCE_RECALL_TIMEOUT_MS", "3000"))
+    )
 
     # Fast Write BERT 
     FAST_WRITE_EMOTION_URL: str = os.getenv("FAST_WRITE_EMOTION_URL", "")

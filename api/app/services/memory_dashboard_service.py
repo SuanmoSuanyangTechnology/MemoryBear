@@ -1,4 +1,5 @@
 import uuid
+from datetime import timedelta
 from typing import List, Optional, Dict, Any
 
 from fastapi import HTTPException
@@ -8,10 +9,12 @@ from sqlalchemy.orm import Session
 
 from app.core.logging_config import get_business_logger
 from app.core.utils.datetime_utils import utcnow_naive
+from app.db import get_async_db_context
 from app.models.end_user_model import EndUser, EndUser as EndUserModel
 from app.models.memory_increment_model import MemoryIncrement
 from app.models.user_model import User
 from app.repositories import (
+    document_repository,
     memory_increment_repository,
     knowledge_repository
 )
@@ -21,6 +24,86 @@ from app.utils.redis_cache import redis_cache
 
 # 获取业务逻辑专用日志器
 business_logger = get_business_logger()
+
+
+async def get_dashboard_memory_updates_async(
+    workspace_id: uuid.UUID,
+    storage_type: str,
+    current_total: int | None,
+) -> dict[str, int | None]:
+    """Reuse the branch total and compare it with workspace-level baselines."""
+    from app.repositories.end_user_repository import EndUserRepository
+
+    result = {"memory_update": None, "memory_update_change": None}
+    if current_total is None:
+        return result
+    today_start = utcnow_naive().replace(hour=0, minute=0, second=0, microsecond=0)
+    yesterday_start = today_start - timedelta(days=1)
+    day_before_start = today_start - timedelta(days=2)
+
+    try:
+        # Keep failed metric queries isolated from the existing dashboard session.
+        async with get_async_db_context() as db:
+            if storage_type == "neo4j":
+                rows = await memory_increment_repository.MemoryIncrementRepository(
+                    db
+                ).get_daily_latest_by_workspace_async(
+                    workspace_id,
+                    day_before_start,
+                    today_start - timedelta(microseconds=1),
+                )
+                baselines = dict(rows)
+                yesterday = baselines.get(yesterday_start.date())
+                day_before = baselines.get(day_before_start.date())
+            elif storage_type == "rag":
+                users = EndUserRepository(db)
+                user_ids = await users.get_ids_by_app_workspace_async(workspace_id)
+                yesterday, day_before = await document_repository.get_rag_memory_baselines_async(
+                    db, user_ids, today_start, yesterday_start
+                )
+            else:
+                return result
+
+        if current_total is not None and yesterday is not None:
+            result["memory_update"] = int(current_total) - int(yesterday)
+            if day_before is not None:
+                result["memory_update_change"] = result["memory_update"] - (
+                    int(yesterday) - int(day_before)
+                )
+    except Exception:
+        business_logger.warning(
+            "Dashboard memory update query failed: workspace_id=%s storage_type=%s",
+            workspace_id,
+            storage_type,
+            exc_info=True,
+        )
+    return result
+
+
+async def get_dashboard_workspace_statistics_async(
+    workspace_id: uuid.UUID,
+) -> dict[str, Any] | None:
+    """Return the independent workspace statistics fields, or None on failure."""
+    try:
+        from app.services.workspace_memory_statistics_service import (
+            get_cached_workspace_statistics_async,
+        )
+
+        statistics = await get_cached_workspace_statistics_async(workspace_id)
+        return {
+            field: statistics[field]
+            for field in (
+                "statistics", "total_count", "total_count_change", "total_users",
+                "generated_at",
+            )
+        }
+    except Exception:
+        business_logger.warning(
+            "Dashboard workspace statistics query failed: workspace_id=%s",
+            workspace_id,
+            exc_info=True,
+        )
+    return None
 
 
 def get_current_workspace_type(

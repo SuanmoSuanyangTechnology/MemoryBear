@@ -20,6 +20,7 @@ from ..models.owned import (
     FILE_ROLE_DERIVED_IMAGE,
     Document,
     File,
+    Knowledge,
     KnowledgeMetadataBinding,
 )
 from ..rag.knowledge_graph import (
@@ -221,7 +222,7 @@ async def apply_document_update(
     db: AsyncSession,
     plan: DocumentUpdatePlan,
     principal: Principal,
-) -> Document:
+) -> tuple[Document, list[str], dict | None]:
     document = await get_document(db, plan.document_id, principal, plan.knowledge_id)
     if document is None:
         raise KnowledgeError.from_code("KB_DOCUMENT_NOT_FOUND")
@@ -229,6 +230,8 @@ async def apply_document_update(
     if knowledge is None:
         raise KnowledgeError.from_code("KB_KNOWLEDGE_NOT_FOUND")
 
+    await db.execute(select(Knowledge.id).where(Knowledge.id == knowledge.id).with_for_update())
+    await db.refresh(document, with_for_update=True)
     parser_config = plan.update_fields.get("parser_config")
     if parser_config is not None and knowledge.chunk_mode == 0:
         merged_config = dict(knowledge.parser_config or {})
@@ -238,11 +241,27 @@ async def apply_document_update(
     for field, value in plan.update_fields.items():
         if hasattr(document, field):
             setattr(document, field, value)
+    await db.flush()
+    from ..repositories.wiki.state import cancel, reenable, withdraw
+
+    wiki_pages = []
+    wiki_delivery = None
+    if plan.update_fields.get("run") == 2:
+        wiki_pages = await db.run_sync(lambda session: cancel(session, knowledge.id, document.id))
+    if plan.status_changed:
+        if document.status != 1:
+            wiki_pages = await db.run_sync(
+                lambda session: withdraw(session, knowledge.id, document.id)
+            )
+        else:
+            wiki_delivery = await db.run_sync(
+                lambda session: reenable(session, knowledge.id, document.id)
+            )
     document.updated_at = utcnow_naive()
     try:
         await db.commit()
         await db.refresh(document)
-        return document
+        return document, wiki_pages, wiki_delivery
     except Exception:
         await db.rollback()
         raise
@@ -469,8 +488,13 @@ async def prepare_document_deletion(
 async def delete_document_records(
     db: AsyncSession,
     snapshot: DocumentDeletionSnapshot,
-) -> None:
+) -> list[str]:
     try:
+        from ..repositories.wiki.state import withdraw
+
+        wiki_pages = await db.run_sync(lambda session: withdraw(
+            session, snapshot.knowledge_id, snapshot.document_id, hard_delete=True
+        ))
         if snapshot.file_ids:
             await db.execute(delete(File).where(File.id.in_(snapshot.file_ids)))
         await db.execute(
@@ -480,6 +504,7 @@ async def delete_document_records(
         )
         await db.execute(delete(Document).where(Document.id == snapshot.document_id))
         await db.commit()
+        return wiki_pages
     except Exception:
         await db.rollback()
         raise

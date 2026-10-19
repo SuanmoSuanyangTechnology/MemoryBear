@@ -359,7 +359,7 @@ def _upload_content(
 
 def _dispatcher(runtime: ProcessRuntime) -> TaskDispatcher:
     configured = getattr(runtime, "task_dispatcher", None)
-    return configured if configured is not None else TaskDispatcher()
+    return configured if configured is not None else TaskDispatcher(runtime=runtime)
 
 
 def _dispatch_parse(
@@ -424,11 +424,17 @@ def _delete_stale_records(
     runtime: ProcessRuntime,
     stale_files: tuple[_StaleFileSnapshot, ...],
 ) -> None:
+    from ..repositories.wiki.state import withdraw
+    from .wiki.execution import publish_pages
+
+    cleanup: dict[str, set[str]] = {}
     with runtime.database.sync_session() as session:
         for stale in stale_files:
             if stale.document_id is not None:
                 document = session.get(Document, stale.document_id)
                 if document is not None:
+                    pages = withdraw(session, document.kb_id, document.id, hard_delete=True)
+                    cleanup.setdefault(str(document.kb_id), set()).update(pages)
                     session.delete(document)
             for derived in stale.derived_files:
                 record = session.get(File, derived.id)
@@ -438,6 +444,12 @@ def _delete_stale_records(
             if record is not None:
                 session.delete(record)
         session.commit()
+    for kb_id, page_ids in cleanup.items():
+        try:
+            publish_pages(runtime, kb_id, sorted(page_ids))
+        except Exception as exc:
+            logger.error("Wiki cleanup dispatch failed kb_id=%s page_ids=%s error_type=%s",
+                         kb_id, sorted(page_ids), type(exc).__name__)
 
 
 def _delete_stale_files(

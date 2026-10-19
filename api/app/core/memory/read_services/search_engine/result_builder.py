@@ -2,6 +2,7 @@ from abc import ABC, abstractmethod
 from typing import TypeVar
 
 from app.core.memory.enums import Neo4jNodeType
+from app.core.memory.models.metadata_models import normalize_new_metadata, project_l0_profile
 from app.core.memory.models.service_models import RelationMemory
 
 
@@ -225,6 +226,7 @@ class DialogueBuilder(BaseBuilder):
 class MetadataBuilder(BaseBuilder):
     @property
     def data(self) -> dict:
+        new_meta = normalize_new_metadata(self.record)
         return {
             "id": self.record.get("id", ""),
             "aliases_name": self.record.get("aliases", []) or [],
@@ -237,6 +239,9 @@ class MetadataBuilder(BaseBuilder):
             "interests": self.record.get("interests", []) or [],
             "relations": self.record.get("relations", []) or [],
             "traits": self.record.get("traits", []) or [],
+            "identity_background": new_meta["identity_background"],
+            "relationships": new_meta["relationships"],
+            "domain_specific_info": new_meta["domain_specific_info"],
         }
 
     @property
@@ -254,6 +259,17 @@ class MetadataBuilder(BaseBuilder):
             ("relations", self.record.get("relations", [])),
             # ("traits", self.record.get("traits", [])),
         ]
+        # 13 个通用键：以二级键分组的完整三段条目，标签名下划线转连字符
+        fields.extend(
+            (key.replace("_", "-"), entries)
+            for key, entries in project_l0_profile(self.record).items()
+        )
+        domain_specific_info = {
+            scene: items
+            for scene, items in normalize_new_metadata(self.record)["domain_specific_info"].items()
+            if items
+        }
+        fields.append(("domain-specific-info", domain_specific_info))
         for tag, value in fields:
             if value:
                 parts.append(f"<{tag}>{value}</{tag}>\n")

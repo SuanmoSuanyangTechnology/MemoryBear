@@ -26,6 +26,7 @@ from datetime import datetime, timezone
 from typing import List, Literal, Optional
 from uuid import uuid4
 
+from app.core.memory.emotion.emotion_buckets import normalize_emotion_type
 from app.core.memory.utils.alias_utils import validate_aliases
 from app.core.memory.utils.data.ontology import TemporalInfo
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -302,7 +303,8 @@ class StatementNode(Node):
         emotion_intensity: Optional emotion intensity (0.0-1.0) - displayed on node
         emotion_target: Optional emotion target (person or object name)
         emotion_subject: Optional emotion subject (self/other/object)
-        emotion_type: Optional emotion type (joy/sadness/anger/fear/surprise/neutral)
+        emotion_type: Optional emotion type (10 buckets: neutral/joy/relief/anxiety/sadness/anger/
+            frustration/loneliness/confusion/hope; legacy fear/surprise normalized on read)
         emotion_keywords: Optional list of emotion keywords (max 3)
         temporal_info: Temporal information extracted from the statement
         valid_at: Optional start date of temporal validity
@@ -347,7 +349,9 @@ class StatementNode(Node):
     )
     emotion_type: Optional[str] = Field(
         None,
-        description="Emotion type: joy/sadness/anger/fear/surprise/neutral"
+        description=(
+            "Emotion type: neutral/joy/relief/anxiety/sadness/anger/frustration/loneliness/confusion/hope"
+        )
     )
     emotion_keywords: Optional[List[str]] = Field(
         default_factory=list,
@@ -413,13 +417,8 @@ class StatementNode(Node):
     @field_validator('emotion_type', mode='before')
     @classmethod
     def validate_emotion_type(cls, v):
-        """Validate emotion type is one of the valid values"""
-        if v is None:
-            return v
-        valid_types = ['joy', 'sadness', 'anger', 'fear', 'surprise', 'neutral']
-        if v not in valid_types:
-            raise ValueError(f"emotion_type must be one of {valid_types}, got {v}")
-        return v
+        """Normalize emotion type to the 10 buckets (legacy fear/surprise mapped; unknown → None, never raises)"""
+        return normalize_emotion_type(v)
 
     @field_validator('emotion_subject', mode='before')
     @classmethod
@@ -550,7 +549,7 @@ class ExtractedEntityNode(Node):
         description="Whether this entity represents explicit/semantic memory (knowledge, concepts, definitions, theories, principles)"
     )
 
-    # User Metadata Fields (populated by async metadata extraction after dedup)
+    # 旧用户 metadata 字段（待废弃）：停止新增提取，合并时保留历史值，迁移后统一删除
     core_facts: List[str] = Field(default_factory=list, description="Stable basic facts about the user")
     traits: List[str] = Field(default_factory=list, description="Stable personality traits or behavioral tendencies")
     relations: List[str] = Field(default_factory=list, description="Durable relationships with people/groups/entities")

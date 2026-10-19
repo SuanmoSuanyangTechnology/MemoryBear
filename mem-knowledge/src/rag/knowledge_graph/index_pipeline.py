@@ -31,6 +31,8 @@ from .normalizer import (
 logger = logging.getLogger(__name__)
 T = TypeVar("T")
 GraphStageCallback = Callable[[str, str, int, Mapping[str, int]], None]
+# Match the QA embedding safety ceiling for providers limited to 20 inputs.
+_MAX_PROJECTION_EMBEDDING_BATCH_SIZE = 20
 
 
 def calculate_evidence_pageranks(
@@ -640,7 +642,18 @@ class KnowledgeGraphIndexPipeline:
     ) -> None:
         if not projections:
             return
-        vectors = await self._embedding.aembed_documents(texts)
+        batch_size = min(
+            get_settings().embedding_batch_size,
+            _MAX_PROJECTION_EMBEDDING_BATCH_SIZE,
+        )
+        vectors: list[list[float]] = []
+        for start in range(0, len(texts), batch_size):
+            self._lock_guard.ensure_valid()
+            batch = texts[start : start + batch_size]
+            batch_vectors = await self._embedding.aembed_documents(batch)
+            if len(batch_vectors) != len(batch):
+                raise ValueError("embedding count does not match graph projection batch")
+            vectors.extend(batch_vectors)
         if len(vectors) != len(projections):
             raise ValueError("embedding count does not match graph projections")
         dimensions = {len(vector) for vector in vectors}

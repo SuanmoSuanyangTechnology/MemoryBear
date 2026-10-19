@@ -31,6 +31,7 @@ const CustomModelModal = forwardRef<CustomModelModalRef, CustomModelModalProps>(
   const [form] = Form.useForm<CustomModelForm>();
   const [loading, setLoading] = useState(false)
   const [abortController, setAbortController] = useState<AbortController | null>(null)
+  const modelType = Form.useWatch('type', form);
   /** Close modal and reset state */
   const handleClose = () => {
     abortController?.abort()
@@ -97,7 +98,7 @@ const CustomModelModal = forwardRef<CustomModelModalRef, CustomModelModalProps>(
           ...rest,
           type,
         }
-        formData.input_modalities = [...new Set(['text' as const, ...(values.input_modalities || [])])];
+        formData.input_modalities = [...new Set(values.input_modalities || [])];
         formData.output_modalities = [...new Set(values.output_modalities || [])];
         formData.features = values.features || [];
 
@@ -119,6 +120,9 @@ const CustomModelModal = forwardRef<CustomModelModalRef, CustomModelModalProps>(
       .catch((err) => {
         console.log('err', err)
       });
+  }
+  const handleChangeType = (value?: string) => {
+    form.setFieldValue('input_modalities', value === 'asr' ? ['audio'] : ['text'])
   }
 
   /** Expose methods to parent component */
@@ -174,6 +178,7 @@ const CustomModelModal = forwardRef<CustomModelModalRef, CustomModelModalProps>(
             hasAll={false}
             disabled={isEdit}
             format={(items) => items.map((item) => ({ label: formatModelType(item), value: String(item) }))}
+            onChange={handleChangeType}
           />
         </Form.Item>
 
@@ -216,14 +221,21 @@ const CustomModelModal = forwardRef<CustomModelModalRef, CustomModelModalProps>(
             name={['credential', "priority"]}
             label={t('modelNew.priority')}
           >
-            <InputNumber placeholder={t('common.pleaseEnter')} className="rb:w-full!" />
+            <InputNumber
+              placeholder={t('common.pleaseEnter')}
+              min={0}
+              max={2147483647}
+              step={1}
+              precision={0}
+              className="rb:w-full!"
+            />
           </Form.Item>
 
           <Form.Item
             name={['credential', "remark"]}
             label={t('modelNew.remark')}
           >
-            <Input.TextArea placeholder={t('common.pleaseEnter')} />
+            <Input.TextArea placeholder={t('common.pleaseEnter')} maxLength={255} />
           </Form.Item>
         </>}
 
@@ -232,7 +244,7 @@ const CustomModelModal = forwardRef<CustomModelModalRef, CustomModelModalProps>(
             key={field}
             name={field}
             label={t(`modelNew.${field}`)}
-            initialValue={field === 'input_modalities' ? ['text'] : undefined}
+            initialValue={field === 'input_modalities' ? ['text'] : []}
             rules={[
               { required: true, type: 'array', min: 1, message: t('common.selectPlaceholder', { title: t(`modelNew.${field}`) }) },
             ]}
@@ -244,7 +256,7 @@ const CustomModelModal = forwardRef<CustomModelModalRef, CustomModelModalProps>(
               options={['text', 'image', 'audio', 'video'].map(value => ({
                 value,
                 label: t(`modelNew.${value}`),
-                disabled: field === 'input_modalities' && value === 'text'
+                disabled: field === 'input_modalities' && value === 'text' && modelType !== 'asr'
               }))}
             />
           </Form.Item>

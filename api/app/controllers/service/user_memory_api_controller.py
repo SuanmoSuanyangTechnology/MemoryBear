@@ -22,6 +22,7 @@ import json
 from typing import Optional
 
 from fastapi import APIRouter, Header, Query, Request, Body
+from pydantic import ValidationError
 
 from app.core.api_key_auth import require_api_key_self_db
 from app.core.api_key_utils import get_current_user_snapshot_from_api_key_async, validate_end_user_in_workspace_async
@@ -205,7 +206,7 @@ async def get_memory_insight(
 async def get_interest_distribution(
     request: Request,
     end_user_id: str = Query(..., description="End user ID"),
-    limit: int = Query(5, le=5, description="Max interest tags to return"),
+    limit: int = Query(5, ge=1, le=5, description="Max interest tags to return"),
     language_type: str = Header(default=None, alias="X-Language-Type"),
     api_key_auth: ApiKeyAuth = None,
 ):
@@ -272,8 +273,14 @@ async def generate_cache(
         raise BusinessException(
             "请求体不是合法 JSON",
             BizCode.INVALID_PARAMETER,
+            cause=exc,
         )
-    cache_request = GenerateCacheRequest(**body)
+    if not isinstance(body, dict):
+        raise BusinessException("请求体必须是 JSON 对象", BizCode.INVALID_PARAMETER)
+    try:
+        cache_request = GenerateCacheRequest(**body)
+    except ValidationError as exc:
+        raise BusinessException("请求体格式无效", BizCode.INVALID_PARAMETER, cause=exc)
 
     async with get_async_db_context() as auth_db:
         current_user = await get_current_user_snapshot_from_api_key_async(auth_db, api_key_auth)

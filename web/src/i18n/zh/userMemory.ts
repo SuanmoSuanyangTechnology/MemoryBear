@@ -91,6 +91,31 @@ export const userMemory = {
       beliefs_or_stances: '价值观',
       anchors: '锚点',
 
+      meta_data: {
+        goals: '目标',
+        traits: '性格特点',
+        interests: '兴趣爱好',
+        core_facts: '核心事实',
+        alias: '别名',
+        beliefs_or_stances: '价值观',
+        anchors: '锚点',
+        relations: '关系',
+
+        name: '姓名/称呼',
+        age: '年龄',
+        from: '籍贯/来自',
+        residence: '居住地',
+        education: '教育',
+        occupation: '职业',
+        family: '家庭',
+        religion_or_politics: '宗教/政治',
+        health: '健康',
+        person: '人物关系',
+        group: '群体/组织',
+        object: '物品',
+        pet: '宠物',
+      },
+
       memoryWindow: "{{name}} 的记忆之窗",
       memory_insight: '总体概述',
       key_findings: '关键发现',
@@ -118,6 +143,11 @@ export const userMemory = {
 
       AssistantPruned_memory_type: '记忆类型',
 
+      Preference_domain: '领域',
+      Preference_subject: '主题',
+      Preference_situation_key: '适用场景',
+      Preference_preference_text_all: '偏好内容',
+
       associative_memory: '关联记忆',
       unix: '个',
       completeMemory: '完整记忆',
@@ -141,6 +171,8 @@ export const userMemory = {
       MemorySummary: '记忆摘要',
       Perceptual: '感知记录',
       Statement: '来源陈述',
+      PreferenceGroup: '偏好汇总',
+      Preference: '偏好',
       positive: '正向情绪',
       negative: '负向情绪',
       neutral: '中性情绪',
@@ -299,6 +331,7 @@ export const userMemory = {
       activityFilterEngine: '引擎',
       activityFilterRead: '读取',
       activityFilterWrite: '写入',
+
       EXTRACTION: "记忆萃取引擎",
       CROSS_MODAL: "跨模态记忆关联联想引擎",
       EMOTION: "情感引擎",
@@ -306,6 +339,9 @@ export const userMemory = {
       REFLECTION: "反思引擎",
       SCENE_SUMMARY: '长期固化演进引擎',
       MEMORY_VALUE: '记忆价值动态权重引擎',
+      PREFERENCE: '偏好引擎',
+      SCENE_RECONSTRUCTION: '多模态情景记忆重构引擎',
+
       memorySubject: '记忆主体',
       basicInfo: '基础信息',
       subjectId: '主体 ID',

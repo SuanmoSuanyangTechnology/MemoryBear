@@ -22,6 +22,12 @@ from zoneinfo import ZoneInfo
 
 from sqlalchemy.orm import Session
 
+from app.core.memory.emotion.emotion_buckets import (
+    EMOTION_NAMES_EN,
+    EMOTION_NAMES_ZH,
+    NEGATIVE_EMOTIONS,
+    POSITIVE_EMOTIONS,
+)
 from app.core.utils.datetime_utils import utcnow_naive
 from app.db import get_db_context
 from app.repositories.dialogue_emotion_raw_repository import DialogueEmotionRawRepository
@@ -43,37 +49,15 @@ class EmotionStatsService:
     # 样本极少阈值（接口文档 3.4：最近2活跃日 dialogue_count < 5 判为低样本）
     TOO_FEW_THRESHOLD = 5
 
-    # 十种 BERT 情绪枚举的中英文映射（display_name 由接口层按语言实时映射，不落库）
+    # 十种 BERT 情绪枚举的中英文映射（display_name 由接口层按语言实时映射，不落库；统一定义见 emotion_buckets）
     EMOTION_DISPLAY_NAMES = {
-        "zh": {
-            "joy": "愉悦",
-            "anger": "愤怒",
-            "anxiety": "焦虑",
-            "hope": "希望",
-            "neutral": "中性",
-            "relief": "释然",
-            "confusion": "困惑",
-            "loneliness": "孤独",
-            "sadness": "悲伤",
-            "frustration": "挫败",
-        },
-        "en": {
-            "joy": "Joy",
-            "anger": "Anger",
-            "anxiety": "Anxiety",
-            "hope": "Hope",
-            "neutral": "Neutral",
-            "relief": "Relief",
-            "confusion": "Confusion",
-            "loneliness": "Loneliness",
-            "sadness": "Sadness",
-            "frustration": "Frustration",
-        },
+        "zh": dict(EMOTION_NAMES_ZH),
+        "en": dict(EMOTION_NAMES_EN),
     }
 
     # 情绪效价（dominant_shift 结论文案用）
-    POSITIVE_EMOTIONS = {"joy", "hope", "relief"}
-    NEGATIVE_EMOTIONS = {"anger", "anxiety", "sadness", "frustration", "loneliness"}
+    POSITIVE_EMOTIONS = POSITIVE_EMOTIONS
+    NEGATIVE_EMOTIONS = NEGATIVE_EMOTIONS
 
     def __init__(self, db: Session):
         self.db = db

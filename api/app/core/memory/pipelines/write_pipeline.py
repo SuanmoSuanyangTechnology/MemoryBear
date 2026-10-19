@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Awaitable, Callable, Dict, List, Optional
@@ -49,6 +50,11 @@ from app.core.memory.storage_services.extraction_engine.knowledge_extraction.mem
 from app.core.memory.utils.name_similarity_utils import cosine_similarity
 logger = logging.getLogger(__name__)
 bear = BearLogger("memory.pipeline")
+
+# 继承快写情绪：查询快写 Dialogue 的超时（秒），防止 Neo4j 查询卡住拖慢正写。
+# 只查询一次、不等待：快写一般早于正写落库；晚到的情况由 DIALOGUE_NODE_SAVE 的 prev_* 握手补写处理
+# （Step 4.1 _backfill_emotion_after_store / FastWritePipeline._backfill_statement_emotions_if_superseded）。
+_INHERIT_QUERY_TIMEOUT_SECONDS = 2.0
 
 
 # ──────────────────────────────────────────────
@@ -241,6 +247,8 @@ class WritePipeline:
         self._store_lock = None
         self._redis_client = None
         self._embedding_degraded_error: MemoryExtractionBusinessError | None = None
+        # Step 4 提交时各 Dialogue 的写入前状态（DialogueWriteState），供 Step 4.1 握手补写
+        self._dialogue_write_states: Dict[str, Any] = {}
 
     # ──────────────────────────────────────────────
     # 执行写入
@@ -284,6 +292,7 @@ class WritePipeline:
         if context_after is None:
             context_after = []
         self._embedding_degraded_error = None
+        self._dialogue_write_states = {}
 
         if not ref_id:
             ref_id = uuid.uuid4().hex
@@ -549,6 +558,9 @@ class WritePipeline:
                             elapsed_seconds=0.0,
                         )
 
+                    # Step 3.4: 继承快写情绪（不调用 LLM；任何失败只降级为该批 Statement 情绪为空）
+                    await self._inherit_fast_write_emotion(extraction_result)
+
                     # Step 3.5: 构建 UserSource 子图
                     if self._user_pruning_info:
                         await self._build_user_source_subgraph(extraction_result)
@@ -575,6 +587,10 @@ class WritePipeline:
                             logger.warning(
                                 f"[Stats] Redis 统计缓存写入异常（不影响主流程）: {stats_result}"
                             )
+
+                    # Step 4.1: 握手补写（快写插在 Step 3.4 查询与 Step 4 提交之间落库时，由正写补本批 Statement）
+                    if stored:
+                        await self._backfill_emotion_after_store(extraction_result)
 
                     # Neo4j 事务成功后，触发引擎展示 PG 写入
                     if stored:
@@ -966,7 +982,10 @@ class WritePipeline:
         )
         for attempt in range(max_retries):
             try:
-                await self._storage_service.save_memory_graph(command)
+                graph_result = await self._storage_service.save_memory_graph(command)
+                # 记录 Dialogue 写入前状态（prev_*），供 Step 4.1 握手补写判定
+                states = getattr(graph_result, "dialogue_states", None)
+                self._dialogue_write_states = dict(states) if isinstance(states, Mapping) else {}
                 logger.debug("Successfully saved all data to Neo4j and outbox")
                 return True
             except Exception as e:
@@ -976,6 +995,209 @@ class WritePipeline:
                 else:
                     raise
         return False
+
+    # ──────────────────────────────────────────────
+    # Step 3.4: 继承快写情绪
+    # ──────────────────────────────────────────────
+
+    async def _inherit_fast_write_emotion(self, result: ExtractionResult) -> None:
+        """把快写 Dialogue 的 BERT 情绪继承到本次 user Statement（原地改写 ``result.statement_nodes``）。
+
+        只由 ``memory_config.emotion_enabled`` 控制是否执行。只查询一次快写 Dialogue，不等待；
+        查询超时上限为 ``_INHERIT_QUERY_TIMEOUT_SECONDS``。查不到（快写慢于正写）时该批
+        Statement 情绪暂时为空，由 Step 4.1 / 快写侧的握手补写兜底。
+        除任务取消外，任何失败都只降级为该批 Statement 情绪为空，不阻断写入。
+        只继承 ``write_mode='fast'`` 的快写 Dialogue；节点已被正写接管（normal）时不继承，记
+        ``superseded_by_normal``。
+
+        Args:
+            result: ``_extract`` 产出的萃取结果（StatementNode / ChunkNode 已定型）。
+        """
+        if not getattr(self.memory_config, "emotion_enabled", False):
+            logger.debug("[EmotionInherit] skipped: end_user_id=%s reason=emotion_disabled", self.end_user_id)
+            return
+
+        try:
+            from app.core.memory.emotion.emotion_inheritance import (
+                InheritanceReport,
+                apply_inherited_emotions,
+                build_inherited_emotion,
+                fetch_dialogue_emotions,
+                is_inheritable_dialogue_id,
+            )
+            from app.repositories.neo4j.dialog_repository import DialogRepository
+
+            user_statements = [
+                node for node in result.statement_nodes
+                if getattr(node, "speaker", None) == "user"
+            ]
+            if not user_statements:
+                return
+
+            chunk_to_dialog = {chunk.id: chunk.dialog_id for chunk in result.chunk_nodes}
+            dialogue_ids = sorted({
+                chunk_to_dialog[node.chunk_id]
+                for node in user_statements
+                if node.chunk_id in chunk_to_dialog
+                and is_inheritable_dialogue_id(chunk_to_dialog[node.chunk_id])
+            })
+            if not dialogue_ids:
+                logger.info(
+                    "[EmotionInherit] skipped: end_user_id=%s reason=no_fast_counterpart statements=%d",
+                    self.end_user_id,
+                    len(user_statements),
+                )
+                return
+
+            repo = DialogRepository(self._neo4j_connector)
+            rows: Dict[str, Any] = {}
+            fetch_reason: Optional[str] = None
+            fast_count = superseded_count = not_found_count = 0
+            timed_out = False
+            try:
+                fetch = await asyncio.wait_for(
+                    fetch_dialogue_emotions(repo, self.end_user_id, dialogue_ids),
+                    timeout=_INHERIT_QUERY_TIMEOUT_SECONDS,
+                )
+            except asyncio.TimeoutError:
+                timed_out = True
+            else:
+                # rows 只含 fast 节点；非 fast（已被正写接管）与未找到的分别计数
+                rows = fetch.rows
+                fetch_reason = fetch.reason
+                fast_count = len(fetch.rows)
+                superseded_count = len(fetch.superseded_ids)
+                not_found_count = len(fetch.unresolved_ids)
+
+            inherited = 0
+            if not timed_out:
+                inherited = apply_inherited_emotions(result.statement_nodes, result.chunk_nodes, rows)
+
+            # missing_reason 优先级：timeout → fetch.reason(query_error/not_found/superseded_by_normal)
+            # → 逐个 fast 行 emotion_null/invalid_value → unmapped → None
+            missing_reason: Optional[str] = None
+            if timed_out:
+                missing_reason = "timeout"
+            elif fetch_reason is not None:
+                missing_reason = fetch_reason
+            else:
+                for dialogue_id in dialogue_ids:
+                    row = rows.get(dialogue_id)
+                    if row is None:
+                        continue
+                    if row.emotion is None:
+                        missing_reason = "emotion_null"
+                        break
+                    if build_inherited_emotion(row.emotion, row.emotion_score) is None:
+                        missing_reason = "invalid_value"
+                        break
+                if missing_reason is None and inherited < len(user_statements):
+                    missing_reason = "unmapped"
+
+            report = InheritanceReport(
+                statement_count=len(user_statements),
+                inherited_count=inherited,
+                dialogue_ids=tuple(dialogue_ids),
+                missing_reason=missing_reason,
+                fast_count=fast_count,
+                superseded_count=superseded_count,
+                not_found_count=not_found_count,
+            )
+            if report.missing_reason is None and report.inherited_count >= report.statement_count:
+                logger.info(
+                    "[EmotionInherit] end_user_id=%s statements=%d inherited=%d dialogues=%d "
+                    "fast=%d superseded=%d not_found=%d",
+                    self.end_user_id,
+                    report.statement_count,
+                    report.inherited_count,
+                    len(report.dialogue_ids),
+                    report.fast_count,
+                    report.superseded_count,
+                    report.not_found_count,
+                )
+            elif report.missing_reason == "not_found":
+                # 快写尚未落库属于预期时序（正写不等待），由握手补写兜底：
+                # 快写在 Step 4 提交前落库 → Step 4.1 正写侧补写；之后落库 → 快写侧补写。
+                # 补写结果见 [EmotionBackfill] 日志，这里只记 info，避免告警误报。
+                logger.info(
+                    "[EmotionInherit] deferred: end_user_id=%s reason=%s statements=%d inherited=%d "
+                    "dialogues=%d fast=%d superseded=%d not_found=%d pending=handshake_backfill",
+                    self.end_user_id,
+                    report.missing_reason,
+                    report.statement_count,
+                    report.inherited_count,
+                    len(report.dialogue_ids),
+                    report.fast_count,
+                    report.superseded_count,
+                    report.not_found_count,
+                )
+            else:
+                logger.warning(
+                    "[EmotionInherit] degraded: end_user_id=%s reason=%s statements=%d inherited=%d "
+                    "dialogues=%d fast=%d superseded=%d not_found=%d",
+                    self.end_user_id,
+                    report.missing_reason,
+                    report.statement_count,
+                    report.inherited_count,
+                    len(report.dialogue_ids),
+                    report.fast_count,
+                    report.superseded_count,
+                    report.not_found_count,
+                )
+        except Exception as exc:
+            logger.warning(
+                "[EmotionInherit] degraded: end_user_id=%s reason=error error=%s",
+                self.end_user_id,
+                type(exc).__name__,
+                exc_info=True,
+            )
+
+    # ──────────────────────────────────────────────
+    # Step 4.1: 握手补写快写情绪
+    # ──────────────────────────────────────────────
+
+    async def _backfill_emotion_after_store(self, result: ExtractionResult) -> int:
+        """Step 4 提交后，用 Dialogue 写入前的快写情绪补写本批仍无情绪的 user Statement。
+
+        覆盖「快写插在 Step 3.4 查询与 Step 4 提交之间落库」的时序：Step 3.4 查不到，提交时
+        ``DIALOGUE_NODE_SAVE`` 在节点写锁内读到 ``prev_write_mode='fast'`` 与快写情绪。入选规则见
+        ``select_normal_side_backfills``；Step 3.4 已继承的 Dialogue 在内存中过滤，不发查询。
+        只由 ``memory_config.emotion_enabled`` 控制；任何失败只打 warning 并返回 0，不阻断写入。
+
+        Args:
+            result: 已提交的萃取结果。
+
+        Returns:
+            实际补写的 Statement 数。
+        """
+        if not getattr(self.memory_config, "emotion_enabled", False):
+            return 0
+        try:
+            from app.core.memory.emotion import emotion_inheritance
+
+            backfills = emotion_inheritance.select_normal_side_backfills(
+                self._dialogue_write_states,
+                result.statement_nodes,
+                result.chunk_nodes,
+            )
+            total = 0
+            for dialogue_id, emotion, emotion_score in backfills:
+                total += await emotion_inheritance.backfill_statement_emotions(
+                    self._neo4j_connector,
+                    end_user_id=self.end_user_id,
+                    dialogue_id=dialogue_id,
+                    emotion=emotion,
+                    emotion_score=emotion_score,
+                    source=emotion_inheritance.BACKFILL_SOURCE_NORMAL_SIDE,
+                )
+            return total
+        except Exception as exc:
+            logger.warning(
+                "[EmotionBackfill] normal side degraded: end_user_id=%s error=%s",
+                self.end_user_id,
+                type(exc).__name__,
+            )
+            return 0
 
     # ──────────────────────────────────────────────
     # Step 3.5: 构建 UserSource 子图

@@ -9,7 +9,7 @@ from contextlib import asynccontextmanager
 from typing import Any
 
 from ..errors import KnowledgeError
-from ..models.owned import Document
+from ..models.owned import Document, WikiDocumentState
 from ..rag.vdb.field import Field
 from ..rag.vdb.vector_store import collection_name_for_knowledge
 from ..runtime import ProcessRuntime
@@ -27,12 +27,24 @@ class DocumentTaskAborted(RuntimeError):
     """The document was deleted or its processing was cancelled."""
 
 
-def ensure_document_active(runtime: ProcessRuntime, document_id: uuid.UUID) -> None:
+def ensure_document_active(runtime: ProcessRuntime, document_id: uuid.UUID, *,
+                           source_task_id: str | None = None) -> None:
     """Use the database as a durable fence when a short Redis marker expires."""
 
     with runtime.database.sync_session() as session:
-        if session.get(Document, document_id) is None:
+        document = session.get(Document, document_id)
+        if document is None:
             raise DocumentTaskAborted(f"Document no longer exists: {document_id}")
+        from ..tasks.observability import current_parent_task_id
+
+        wiki_state = session.get(WikiDocumentState, document_id)
+        task_id = source_task_id or current_parent_task_id()
+        if wiki_state and (document.status != 1 or document.run == 2 or (
+            task_id and wiki_state.source_task_id and wiki_state.source_task_id != task_id
+        )):
+            raise DocumentTaskAborted(
+                f"Document source round superseded or cancelled: {document_id}"
+            )
     try:
         cancelled = runtime.redis.sync_client().get(PARSE_CANCEL_KEY.format(doc_id=document_id))
     except Exception as exc:

@@ -19,6 +19,7 @@ from . import (
     memory_explicit_api_controller,
     memory_value_ranking_api_controller,
     ontology_api_controller,
+    preference_recall_controller,
     rag_api_chunk_controller,
     rag_api_document_controller,
     rag_api_file_controller,
@@ -48,5 +49,6 @@ service_router.include_router(memory_explicit_api_controller.router)
 service_router.include_router(memory_value_ranking_api_controller.router)
 service_router.include_router(implicit_memory_api_controller.router)
 service_router.include_router(ontology_api_controller.router)
+service_router.include_router(preference_recall_controller.router)
 
 __all__ = ["service_router"]

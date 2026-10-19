@@ -597,23 +597,16 @@ async def dashboard_data(
     3. /memory/stats/types - 知识库类型统计（只要total数据）
     4. /dashboard/total_rag_count - RAG相关数据
     
-    根据 storage_type 判断调用不同的接口
+    根据 storage_type 判断调用不同的接口，今日更新、趋势和空间统计在 data 中独立返回
     
-    返回格式：
+    返回格式（data）：
     {
         "storage_type": str,
-        "neo4j_data": {
-            "total_memory": int,
-            "total_app": int,
-            "total_knowledge": int,
-            "total_api_call": int
-        } | null,
-        "rag_data": {
-            "total_memory": int,
-            "total_app": int,
-            "total_knowledge": int,
-            "total_api_call": int
-        } | null
+        "memory_update": int | null,
+        "memory_update_change": int | null,
+        "neo4j_data": dict | null,
+        "rag_data": dict | null,
+        "workspace_statistics": dict | null
     }
     """
     workspace_id = current_user.current_workspace_id
@@ -640,6 +633,8 @@ async def dashboard_data(
     # 如果是 'rag'，neo4j_data 为 null；否则 rag_data 为 null
     result = {
         "storage_type": storage_type,
+        "memory_update": None,
+        "memory_update_change": None,
         "neo4j_data": None,
         "rag_data": None
     }
@@ -689,6 +684,11 @@ async def dashboard_data(
                     "total_api_call_change": None,
                 })
             result["neo4j_data"] = neo4j_data
+            result.update(await memory_dashboard_service.get_dashboard_memory_updates_async(
+                workspace_id=workspace_id,
+                storage_type=storage_type,
+                current_total=neo4j_data["total_memory"],
+            ))
             api_logger.info("成功获取neo4j_data")
         
         # 如果 storage_type 为 'rag'，获取 rag_data
@@ -732,8 +732,16 @@ async def dashboard_data(
                 })
 
             result["rag_data"] = rag_data
+            result.update(await memory_dashboard_service.get_dashboard_memory_updates_async(
+                workspace_id=workspace_id,
+                storage_type=storage_type,
+                current_total=rag_data["total_memory"],
+            ))
             api_logger.info("成功获取rag_data")
         
+        result["workspace_statistics"] = (
+            await memory_dashboard_service.get_dashboard_workspace_statistics_async(workspace_id)
+        )
         api_logger.info("成功获取dashboard整合数据")
         return success(data=result, msg="Dashboard数据获取成功")
         

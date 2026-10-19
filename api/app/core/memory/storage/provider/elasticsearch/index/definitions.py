@@ -27,7 +27,6 @@ FULLTEXT_FIELDS: dict[MemoryNodeLabel, tuple[str, ...]] = {
     MemoryNodeType.SCENE_SUMMARY: ("content",),
     MemoryNodeType.COMMUNITY: ("name", "summary"),
     MemoryNodeType.PERCEPTUAL: ("summary", "topic", "domain", "keywords"),
-    MemoryNodeType.PREFERENCE: ("preference_text_all",),
     MemoryNodeType.ASSISTANT_PRUNED: ("text",),
     MemoryNodeType.DIALOGUE: ("content",),
 }
@@ -262,6 +261,7 @@ INDEX_DEFINITIONS: dict[MemoryNodeLabel, IndexDefinition] = {
             "access_count": {"type": "long"},
             "is_explicit_memory": {"type": "boolean"},
             "extraction_count": {"type": "long"},
+            # 旧 metadata 仅保留历史值及合并投影；移除需提升 schema_version 并重建索引，单独排期
             "core_facts": {"type": "keyword"},
             "traits": {"type": "keyword"},
             "relations": {"type": "keyword"},

@@ -72,6 +72,7 @@ from ..schemas.model_schema import (
     ModelConfigUpdate,
     ModelInfo,
 )
+from ..sensitive import SensitiveDataFilter
 from .channel_registry import (
     candidate_channels_batch_sync,
     candidate_channels_sync,
@@ -136,6 +137,17 @@ _MODEL_VALIDATION_IMAGE_DATA_URI = (
 _MODEL_VALIDATION_IMAGE_BYTES = len(
     base64.b64decode(_MODEL_VALIDATION_IMAGE_DATA_URI.partition(",")[2])
 )
+_ASR_PROBE_AUDIO_URL = "https://dashscope.oss-cn-beijing.aliyuncs.com/audios/welcome.mp3"
+_ASR_PROBE_TIMEOUT_MS = 10_000
+# ASR 提交探针失败分档：按状态码映射用户可读原因（文案对齐 LLM 活体验证口径）；
+# 未收录码回退"被拒绝"，5xx 单列上游异常，一律不回显供应商原始文本。
+_ASR_PROBE_REJECTION_COPY = {
+    400: "无效请求: 请确认模型名称与参数是否正确",
+    401: "认证失败: API Key 无效或已过期",
+    403: "认证失败: API Key 无效或已过期",
+    404: "模型不存在: 请确认模型名称",
+    429: "请求频率限制: 已超过 API 调用限制",
+}
 
 
 def _enum_value(value: Any) -> str:
@@ -260,6 +272,83 @@ def _require_asr_api_base(api_base: str | None) -> None:
         ) from None
 
 
+def _asr_probe_failure_reason(exc: Any) -> str:
+    """探针失败原因分档：无状态码按网络错误；其余按状态码映射，5xx 单列上游异常。"""
+    if exc.status_code is None:
+        return "ASR 提交探针网络错误"
+    copy = _ASR_PROBE_REJECTION_COPY.get(exc.status_code)
+    if copy is not None:
+        return copy
+    if exc.status_code >= 500:
+        return f"ASR 上游服务异常 (HTTP {exc.status_code})，请稍后重试"
+    return f"ASR 提交探针被拒绝 (HTTP {exc.status_code})"
+
+
+async def _probe_asr_submission(
+    *,
+    model_name: str,
+    provider: str,
+    api_key: str,
+    api_base: str | None,
+    input_modalities: list | None = None,
+    output_modalities: list | None = None,
+    features: list | None = None,
+) -> None:
+    """ASR 提交探针：真实 submit 一步，受理即通过（不轮询、不取结果）。
+
+    endpoint 与运行期同口径（自填 api_base 优先、空回落 provider 默认）；
+    失败映射 400 语义，按状态码分档文案且不回显原始异常文本（transport 异常
+    可能含签名 URL）；失败同时记服务端日志（仅异常类型与安全标识）。
+    """
+    from redbear_model.errors import (
+        MediaCallTimeoutError,
+        MediaProviderError,
+        ModelSubmissionUncertainError,
+    )
+    from redbear_model.media_contracts import AudioTranscriptionRequest, MediaCallOptions
+    from redbear_model.runtime import RedBearAudioTranscriber
+
+    shared_config = _shared_validation_config(
+        model_name=model_name,
+        provider=provider,
+        api_key=api_key,
+        api_base=api_base,
+        model_type="asr",
+        input_modalities=input_modalities,
+        output_modalities=output_modalities,
+        features=features,
+    )
+    runtime = RedBearAudioTranscriber(
+        shared_config, options=MediaCallOptions(call_timeout_ms=_ASR_PROBE_TIMEOUT_MS)
+    )
+    try:
+        await runtime.asubmit(AudioTranscriptionRequest(file_url=_ASR_PROBE_AUDIO_URL))
+    except (ModelSubmissionUncertainError, MediaCallTimeoutError) as exc:
+        # 子类先于 MediaProviderError 分档：两者均继承自它
+        logger.error("ASR 提交探针失败 - 类型: %s", type(exc).__name__)
+        raise BusinessException(
+            "模型配置验证失败: ASR 提交探针超时", BizCode.INVALID_PARAMETER
+        ) from None
+    except MediaProviderError as exc:
+        logger.error(
+            "ASR 提交探针失败 - 类型: %s, 状态码: %s, 供应商错误码: %s",
+            type(exc).__name__,
+            exc.status_code,
+            exc.provider_code,
+        )
+        raise BusinessException(
+            f"模型配置验证失败: {_asr_probe_failure_reason(exc)}",
+            BizCode.INVALID_PARAMETER,
+        ) from None
+    except Exception as exc:
+        logger.error("ASR 提交探针失败 - 类型: %s", type(exc).__name__)
+        raise BusinessException(
+            "模型配置验证失败: ASR 提交探针失败", BizCode.INVALID_PARAMETER
+        ) from None
+    finally:
+        await runtime.aclose()
+
+
 def _reject_asr_composite(model_type: ModelType | str | None) -> None:
     if model_type is not None and is_asr_model(model_type):
         raise BusinessException("ASR 模型暂不支持组合配置", BizCode.INVALID_PARAMETER)
@@ -371,7 +460,7 @@ def _require_api_base_for_local_provider(provider: ModelProvider | str, api_base
         isinstance(api_base, str) and api_base.strip()
     ):
         raise BusinessException(
-            f"本地部署提供商 {getattr(provider, 'value', provider)} 必须配置 API Base URL",
+            f"模型配置验证失败: 本地部署提供商 {getattr(provider, 'value', provider)} 必须配置 API Base URL",
             BizCode.INVALID_PARAMETER,
         )
 
@@ -396,7 +485,7 @@ def _require_wellformed_api_base(
     default = get_default_provider_api_base(provider, model_type)
     hint = f"；如需使用官方地址请留空（默认 {default}）" if default else ""
     raise BusinessException(
-        f"API Base URL 格式不正确：需要以 http:// 或 https:// 开头的完整地址{hint}",
+        f"模型配置验证失败: API Base URL 格式不正确：需要以 http:// 或 https:// 开头的完整地址{hint}",
         BizCode.INVALID_PARAMETER,
     )
 
@@ -415,7 +504,7 @@ def _require_wellformed_bedrock_credential(
     if sep and access_key_id.strip() and secret.strip():
         return
     raise BusinessException(
-        "Bedrock 的 API Key 格式不正确：需要按 access_key_id:secret_access_key 填写"
+        "模型配置验证失败: Bedrock 的 API Key 格式不正确：需要按 access_key_id:secret_access_key 填写"
         "（英文冒号分隔，两者都不可为空）",
         BizCode.INVALID_PARAMETER,
     )
@@ -429,7 +518,9 @@ def _require_supported_api_base(
     """运行时不读取自定义 api_base 的组合，只允许留空或官方基地址。"""
     error = validate_api_base_against_default(provider, api_base, model_type)
     if error:
-        raise BusinessException(error, BizCode.INVALID_PARAMETER)
+        raise BusinessException(
+            f"模型配置验证失败: {error}", BizCode.INVALID_PARAMETER
+        )
 
 
 def _model_option_cache_state(model: ModelConfig) -> tuple[uuid.UUID | None, bool]:
@@ -1017,13 +1108,13 @@ class ModelConfigService:
                 }
 
         except Exception as e:
-            # 分类匹配一律基于原始异常文本（raw）：VL 链路的展示文案被统一覆盖为
-            # 通用提示，若用覆盖后的 error_message 匹配会吞掉鉴权/连接等标记。
+            # 分类匹配一律基于原始异常文本（raw）：默认展示文案恒为通用提示（不回显
+            # 原文），若用覆盖后的 error_message 匹配会吞掉鉴权/连接等标记。
             raw_error_message = str(e)
             error_message = (
                 "Qwen3-VL 模型验证失败"
                 if is_qwen3_vl_request
-                else raw_error_message
+                else "未知错误: 调用模型服务失败，请检查模型配置后重试"
             )
             error_type = type(e).__name__
             # 特殊处理常见的错误类型
@@ -1035,7 +1126,7 @@ class ModelConfigService:
                 if "access denied" in raw_error_message.lower():
                     error_message = "访问被拒绝: 请检查 API 凭证和权限配置"
                 else:
-                    error_message = f"验证失败: {raw_error_message}"
+                    error_message = "验证失败: 请检查模型配置参数是否正确"
             elif any(
                 marker in f"{error_type} {raw_error_message}".lower()
                 for marker in _AUTH_ERROR_MARKERS
@@ -1075,14 +1166,24 @@ class ModelConfigService:
                     )
             elif "RateLimitError" in error_type or "rate limit" in raw_error_message.lower():
                 error_message = "请求频率限制: 已超过 API 调用限制"
+            elif (
+                "ModelNotFound" in error_type
+                or "model not exist" in raw_error_message.lower()
+                or "model not found" in raw_error_message.lower()
+            ):
+                # 首选类名（langchain_openai 对 404+模型缺失抛 OpenAIModelNotFoundError，
+                # 语义信号不随上游文案漂移）；文本标记兜底其他提供商/旧式空格文案。
+                # 均无法进一步区分名称错误/未开通/无权限
+                error_message = "模型不存在: 请确认模型名称，或该模型未开通/不支持此接入方式"
             elif "InvalidRequestError" in error_type or "invalid request" in raw_error_message.lower():
-                error_message = f"无效请求: {raw_error_message}"
+                error_message = "无效请求: 请确认模型名称与参数是否正确"
             elif "model_copy" in raw_error_message:
                 error_message = "模型消息格式错误: 请确保使用正确的模型类型（LLM/Chat）"
 
-            # 记录详细错误日志
+            # 记录详细错误日志（原始异常文本脱敏后仅落服务端日志，不回显客户端）
             logger.error("模型验证失败 - 类型: %s, 模型: %s, 提供商: %s", error_type, model_name, provider)
             logger.error("错误详情: %s", error_message)
+            logger.error("上游原始异常: %s", SensitiveDataFilter.filter_string(raw_error_message)[:500])
             logger.debug("完整堆栈: %s", traceback.format_exc())
 
             return {
@@ -1138,12 +1239,12 @@ class ModelConfigService:
         return result
 
     @staticmethod
-    def _create_asr_model(
+    def _prepare_asr_model(
         db: Session,
         model_data: ModelConfigCreate,
         tenant_id: uuid.UUID,
-        created_by: uuid.UUID | None,
-    ) -> model_schema.ModelConfig:
+    ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+        """ASR 创建前置（纯 sync 零 IO）：结构校验 + 快照组装 + 同租户重名检查。"""
         credential = model_data.credential
         _require_api_base_for_local_provider(model_data.provider, credential.api_base)
         _require_wellformed_bedrock_credential(model_data.provider, credential.api_key)
@@ -1163,9 +1264,7 @@ class ModelConfigService:
             )
         )
         ModelConfigService._check_asr_model_name(db, snapshot, tenant_id)
-        return ModelConfigService._save_asr_model(
-            db, snapshot, credential.model_dump(), tenant_id, created_by
-        )
+        return snapshot, credential.model_dump()
 
     @staticmethod
     async def create_model(
@@ -1176,15 +1275,29 @@ class ModelConfigService:
     ) -> ModelConfig | model_schema.ModelConfig:
         """创建自定义模型：config + 点名渠道单事务落库。
 
-        ASR 模型登记时只校验配置结构，凭据在实际调用时验证；其他模型
-        仍在网络活体验证通过后写入。
+        所有模型均在网络验证通过后写入：ASR 走提交探针（submit 受理即通过，
+        不轮询结果）；其他模型走完整活体验证。
         """
         # 广场已收录（同 name/provider/type 且未下线）→ 引导走广场添加，不再落重复自定义行
         _assert_plaza_entry_absent(
             db, name=model_data.name, provider=model_data.provider, model_type=model_data.type
         )
         if is_asr_model(model_data.type):
-            return ModelConfigService._create_asr_model(db, model_data, tenant_id, created_by)
+            snapshot, credential = ModelConfigService._prepare_asr_model(
+                db, model_data, tenant_id
+            )
+            await _probe_asr_submission(
+                model_name=snapshot["name"],
+                provider=snapshot["provider"],
+                api_key=credential["api_key"],
+                api_base=credential["api_base"],
+                input_modalities=snapshot["input_modalities"],
+                output_modalities=snapshot["output_modalities"],
+                features=snapshot["features"],
+            )
+            return ModelConfigService._save_asr_model(
+                db, snapshot, credential, tenant_id, created_by
+            )
         # 检查名称是否已存在（同租户内；先于任何网络调用）
         if ModelConfigRepository.get_by_name(db, model_data.name, provider=model_data.provider, tenant_id=tenant_id):
             raise BusinessException("模型名称已存在", BizCode.DUPLICATE_NAME)

@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.aioRedis import get_thread_safe_sync_redis
 from app.core.exceptions import BusinessException
 from app.core.logging_config import get_memory_logger
+from app.core.memory.models.metadata_models import merge_user_meta_data
 from app.core.memory.storage.custom import merge_end_user_memory_nodes
 from app.models import EndUserInfo
 from app.models.end_user_model import EndUser
@@ -223,16 +224,7 @@ class EndUserService:
                     final_aliases.append(alias)
                     seen_alias_lower.add(alias.lower())
 
-            for key, values in meta_data.items():
-                if not isinstance(values, list):
-                    continue
-                existing = list(merged_meta.get(key) or [])
-                existing_set = {str(v).lower() for v in existing}
-                for v in values:
-                    if str(v).lower() not in existing_set:
-                        existing.append(v)
-                        existing_set.add(str(v).lower())
-                merged_meta[key] = existing
+            merged_meta = merge_user_meta_data(merged_meta, meta_data)
 
         target_user_info.aliases = final_aliases
         target_user_info.meta_data = merged_meta

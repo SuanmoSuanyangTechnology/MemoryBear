@@ -9,12 +9,14 @@ import { useTranslation } from 'react-i18next';
 import { App, Flex, Row, Col, Space } from 'antd';
 import clsx from 'clsx';
 
-import type { MySharedOutItem } from './types';
+import type { Application, MySharedOutItem } from './types';
 import { mySharedOutList, cancelShare, cancelSpaceShare } from '@/api/application'
 import BodyWrapper from '@/components/Empty/BodyWrapper'
 import RbCard from '@/components/RbCard/Card'
 import RbDescriptions from '@/components/RbDescriptions'
 import Tag from '@/components/Tag'
+import PrivateWrap from '@/components/PrivateWrap';
+import { AppOntology } from '@redbear/memory-brick';
 
 const MySharing: React.FC = () => {
   const { t } = useTranslation();
@@ -82,8 +84,7 @@ const MySharing: React.FC = () => {
   };
     /** Navigate to application configuration page */
   const handleEdit = (item: MySharedOutItem) => {
-    let url = `/#/application/config/${item.source_app_id}`
-    window.open(url);
+    window.open(`/#/application/config/${item.source_app_id}`);
   }
 
   const [selectedWorkspace, setSelectedWorkspace] = useState<string | null>(null)
@@ -131,13 +132,13 @@ const MySharing: React.FC = () => {
                 <Flex align="center" gap={12}>
                   {workspace.target_workspace_icon
                     ? <img src={workspace.target_workspace_icon} alt={workspace.target_workspace_icon} className="rb:size-8.5 rb:rounded-lg rb:object-cover" />
-                    : <Flex align="center" justify="center" className="rb:size-8.5 rb:rounded-lg rb:bg-[#155eef] rb:text-[14px] rb:text-white">
+                    : <Flex align="center" justify="center" className="rb:size-8.5 rb:rounded-lg rb:bg-blue-500 rb:text-[14px] rb:text-white">
                       {workspace.target_workspace_name[0]}
                     </Flex>
                   }
                   <div>
                     <span className="rb:font-medium rb:text-[16px] rb:leading-5.5">{workspace.target_workspace_name}</span>
-                    <div className="rb:text-[#5B6167] rb:text-[12px] rb:leading-4.5 rb:mt-0.5">{t('application.appCount', { count: items.length })}</div>
+                    <div className="rb:text-gray-600 rb:text-[12px] rb:leading-4.5 rb:mt-0.5">{t('application.appCount', { count: items.length })}</div>
                   </div>
                 </Flex>
                 <div
@@ -154,8 +155,8 @@ const MySharing: React.FC = () => {
               <RbCard
                 key={item.source_app_id}
                 title={item.source_app_name}
-                avatar={<Flex align="center" justify="center" className={clsx("rb:size-12 rb:rounded-lg rb:text-[24px] rb:text-[#ffffff] rb:bg-[#155EEF]", {
-                  'rb:bg-[#155EEF]': item.source_app_type === 'agent',
+                avatar={<Flex align="center" justify="center" className={clsx("rb:size-12 rb:rounded-lg rb:text-[24px] rb:text-[#ffffff] rb:bg-blue-500", {
+                  'rb:bg-blue-500': item.source_app_type === 'agent',
                   'rb:bg-[#9C6FFF]!': item.source_app_type === 'multi_agent',
                   'rb:bg-[#171719]': item.source_app_type === 'workflow',
                 })}>{item.source_app_name.trim()[0]}</Flex>}
@@ -164,7 +165,7 @@ const MySharing: React.FC = () => {
                   <Tag color={item.source_app_is_active ? 'success' : 'error'}>{item.source_app_is_active ? t('application.sourceActive') : t('application.sourceInactive')}</Tag>
                 </Space>}
                 extra={<div
-                  className="rb:-mt-6 rb:cursor-pointer rb:size-5.5 rb:rounded-lg rb:hover:bg-[#F6F6F6] rb:bg-[url('@/assets/images/common/close_grey.svg')] rb:bg-size-[16px_16px] rb:bg-center rb:bg-no-repeat"
+                  className="rb:-mt-6 rb:cursor-pointer rb:size-5.5 rb:rounded-lg rb:hover:bg-gray-100 rb:bg-[url('@/assets/images/common/close_grey.svg')] rb:bg-size-[16px_16px] rb:bg-center rb:bg-no-repeat"
                   onClick={(e) => handleCancelOne(item, e)}
                 ></div>}
                 bodyClassName="rb:py-6! rb:px-4!"
@@ -182,11 +183,16 @@ const MySharing: React.FC = () => {
                       key: 'permission',
                       label: t(`application.permission`),
                       children: <span className={clsx('rb:font-medium', {
-                        'rb:text-[#369F21]': item.permission === 'editable',
+                        'rb:text-green-600': item.permission === 'editable',
                       })}>{t(`application.${item.permission}`)}</span>
                     },
                   ]}
                 />
+                {item.ontology &&
+                  <PrivateWrap>
+                    {() => <AppOntology app={item as unknown as Application} className="rb:mt-3!" />}
+                  </PrivateWrap>
+                }
               </RbCard>
             ))}
           </div>

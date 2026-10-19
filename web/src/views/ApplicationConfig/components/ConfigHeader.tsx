@@ -80,14 +80,14 @@ const ConfigHeader: FC<ConfigHeaderProps> = ({
    * Format tab items for display
    */
   const formatTabItems = useMemo(() => {
-    const isHideAnnotations = !application?.type || ['multi_agent', 'pure_workflow'].includes(application?.type as string) || source === 'sharing'
+    const isHideAnnotations = !application?.type || ['pure_workflow'].includes(application?.type as string) || source === 'sharing'
 
     const items = (source === 'sharing' ? sharingTabKeys : tabKeys).map(key => ({
       key,
       label: key === 'log' && !isHideAnnotations ? t('application.logAnnotations') : t(`application.${key}`),
     }))
     return items
-  }, [source, sharingTabKeys, tabKeys, application?.type])
+  }, [source, application?.type, t])
   /**
    * Handle menu item click
    */
@@ -150,14 +150,14 @@ const ConfigHeader: FC<ConfigHeaderProps> = ({
    * Format dropdown menu items
    */
   const formatMenuItems = useMemo(() => {
-    const items = (application?.type !== 'multi_agent' ? ['edit', 'copy', 'export', 'uploadCover', 'delete'] : ['edit', 'copy', 'delete']).map(key => ({
+    const items = ['edit', 'copy', 'export', 'uploadCover', 'delete'].map(key => ({
       key,
       icon: <div className={`rb:size-4 rb:mr-2 ${menuIcons[key]}`} />,
       danger: key === 'delete',
       label: key === 'uploadCover' ? t('application.uploadCover') : t(`common.${key}`),
     }))
     return items
-  }, [t, handleClick, application])
+  }, [t])
 
   return (
     <>
@@ -189,7 +189,7 @@ const ConfigHeader: FC<ConfigHeaderProps> = ({
         extra={!application?.type || (application?.type.includes('workflow') && source !== 'sharing' && activeTab === 'arrangement')
           ? null
           : <Flex justify="flex-end">
-            <Flex align="center" gap={8} className="rb:leading-5 rb:text-[14px] rb:text-[#5B6167] rb:font-regular rb:cursor-pointer" onClick={goToApplication}>
+            <Flex align="center" gap={8} className="rb:leading-5 rb:text-[14px] rb:text-gray-600 rb:font-regular rb:cursor-pointer" onClick={goToApplication}>
               <div
                 className="rb:size-4 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/logout_grey.svg')]"
               ></div>
@@ -197,8 +197,7 @@ const ConfigHeader: FC<ConfigHeaderProps> = ({
             </Flex>
           </Flex>
         }
-      >
-      </PageHeader>
+      />
       <ApplicationModal
         ref={applicationModalRef}
         refresh={refresh}

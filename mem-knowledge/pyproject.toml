@@ -8,6 +8,7 @@ version = "0.1.0"
 description = "Independent MemoryBear knowledge service"
 requires-python = ">=3.12,<3.13"
 dependencies = [
+    "alembic==1.17.0",
     "asyncpg>=0.31,<1",
     "auth-sdk>=0.1",
     "amqp==5.3.1",
@@ -44,6 +45,7 @@ dependencies = [
     "xlrd>=2.0,<3",
     "xxhash>=3.5,<5",
     "jieba==0.42.1",
+    "psutil>=7.0,<8 ; sys_platform == 'darwin'",
 ]
 
 [dependency-groups]

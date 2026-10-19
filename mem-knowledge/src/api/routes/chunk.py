@@ -147,15 +147,20 @@ async def get_chunks(
         tenant_id=principal.tenant_id,
         for_mutation=False,
     )
+    result = await chunk_service.list_chunks(
+        store,
+        snapshot,
+        page=page,
+        pagesize=pagesize,
+        keywords=keywords,
+    )
+    for chunk in result["items"]:
+        chunk.metadata["score"] = None
+        for child in chunk.children or []:
+            child.metadata["score"] = None
     return _success(
         request,
-        await chunk_service.list_chunks(
-            store,
-            snapshot,
-            page=page,
-            pagesize=pagesize,
-            keywords=keywords,
-        ),
+        result,
         "Query of document chunk list succeeded",
     )
 
@@ -488,7 +493,7 @@ async def import_qa_new_doc(
         raise
     task_id = await dispatch_qa_import(
         runtime,
-        TaskDispatcher(),
+        TaskDispatcher(runtime=runtime),
         kb_id,
         resources.document_id,
         filename,
@@ -529,7 +534,7 @@ async def import_qa_chunks(
         )
     task_id = await dispatch_qa_import(
         runtime,
-        TaskDispatcher(),
+        TaskDispatcher(runtime=runtime),
         snapshot.knowledge_id,
         snapshot.document_id,
         filename,

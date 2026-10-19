@@ -15,14 +15,12 @@ import httpx
 from pydantic import BaseModel
 
 from app.core.config import settings
+from app.core.memory.emotion.emotion_buckets import EMOTION_CODES
 
 logger = logging.getLogger(__name__)
 
-# BERT 原生 10 类情绪枚举（与已部署服务对齐）
-_VALID_EMOTIONS = frozenset({
-    "neutral", "joy", "relief", "anxiety", "sadness",
-    "anger", "frustration", "loneliness", "confusion", "hope",
-})
+# BERT 原生 10 类情绪枚举（与已部署服务对齐，统一定义见 emotion_buckets）
+_VALID_EMOTIONS = frozenset(EMOTION_CODES)
 
 # 每线程一个 client：连接池绑定在创建它的 loop 上，threads pool 下每线程独立 loop，
 # 故用 thread-local 隔离，避免跨 loop 复用。

@@ -90,6 +90,31 @@ export const userMemory = {
       beliefs_or_stances: 'Belief',
       anchors: 'Anchors',
 
+      meta_data: {
+        alias: 'Alias',
+        relations: 'Relations',
+        goals: 'Goals',
+        core_facts: 'Core Facts',
+        interests: 'Interests',
+        traits: 'Traits',
+        beliefs_or_stances: 'Belief',
+        anchors: 'Anchors',
+
+        name: 'Name / Preferred Name',
+        age: 'Age',
+        from: 'Hometown / Origin',
+        residence: 'Residence',
+        education: 'Education',
+        occupation: 'Occupation',
+        family: 'Family',
+        religion_or_politics: 'Religion / Politics',
+        health: 'Health',
+        person: 'Personal Relationships',
+        group: 'Groups / Organizations',
+        object: 'Objects',
+        pet: 'Pets',
+      },
+
       memoryWindow: "{{name}}'s Memory Overview",
       memory_insight: 'Overall Overview',
       key_findings: 'Key Findings',
@@ -117,6 +142,11 @@ export const userMemory = {
 
       AssistantPruned_memory_type: 'Memory Type',
 
+      Preference_domain: 'Domain',
+      Preference_subject: 'Subject',
+      Preference_situation_key: 'Applicable Scenario',
+      Preference_preference_text_all: 'Preference Content',
+
       associative_memory: 'Associative Memory',
       unix: 'items',
       completeMemory: 'Complete Memory',
@@ -140,6 +170,8 @@ export const userMemory = {
       MemorySummary: 'MemorySummary',
       Perceptual: 'Perceptual',
       Statement: 'Statement',
+      PreferenceGroup: 'Preference Summary',
+      Preference: 'Preference',
       positive: 'Positive Emotion',
       negative: 'Negative Emotion',
       neutral: 'Neutral Emotion',
@@ -298,6 +330,7 @@ export const userMemory = {
       activityFilterEngine: 'Engine',
       activityFilterRead: 'Read',
       activityFilterWrite: 'Write',
+
       EXTRACTION: 'Memory Extraction Engine',
       CROSS_MODAL: 'Cross-modal Memory Association Engine',
       EMOTION: 'Emotion Engine',
@@ -305,6 +338,9 @@ export const userMemory = {
       REFLECTION: 'Self-Reflexion Engine',
       SCENE_SUMMARY: 'Long-term Consolidation Evolution Engine',
       MEMORY_VALUE: 'Memory Value Dynamic Weight Engine',
+      PREFERENCE: 'Preference Engine',
+      SCENE_RECONSTRUCTION: 'Multimodal Episodic Memory Reconstruction Engine',
+
       memorySubject: 'Memory Subject',
       basicInfo: 'Basic Information',
       subjectId: 'Subject ID',

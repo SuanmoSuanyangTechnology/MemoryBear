@@ -10,6 +10,7 @@ from typing import Optional
 from pydantic import BaseModel
 
 from app.core.logging_config import get_logger
+from app.core.memory.emotion.emotion_buckets import normalize_emotion_type_or_raw
 from app.core.memory.pipelines.base_pipeline import ModelClientMixin
 from app.core.utils.datetime_utils import to_timestamp_ms
 from app.db import get_db_context
@@ -255,8 +256,12 @@ MIN_MEMORY_SUMMARY_COUNT = 5
 class MemoryBaseService:
     """记忆服务基类，提供共享的辅助方法"""
     
-    def __init__(self):
-        self.neo4j_connector = Neo4jConnector(shared_driver=True)
+    def __init__(self, shared_driver: bool = True):
+        self.neo4j_connector = Neo4jConnector(shared_driver=shared_driver)
+
+    async def close(self):
+        """关闭独立 driver；共享 driver 由应用生命周期统一管理。"""
+        await self.neo4j_connector.close()
     
     async def get_valid_memory_summary_count(
         self,
@@ -374,7 +379,8 @@ class MemoryBaseService:
             )
             
             if result and len(result) > 0:
-                emotion_type = result[0].get("emotion_type")
+                # 旧值归一化（fear→anxiety、surprise→neutral），未知值原样返回
+                emotion_type = normalize_emotion_type_or_raw(result[0].get("emotion_type"))
                 logger.info(f"成功提取 summary_id={summary_id} 的情绪: {emotion_type}")
                 return emotion_type
             else:
