@@ -501,18 +501,41 @@ class ConversationService:
             storage_type: 记忆空间存储类型；RAG 会直写知识库，不派发图写入任务。
             user_rag_memory_id: RAG 记忆知识库 ID。
         """
-        conversation = await self.conversation_repo.get_conversation_by_conversation_id_async(conversation_id)
-        if not conversation:
-            return
-
         from app.db import get_async_db_context
         from app.core.memory.memory_service import MemoryService
 
+        # 会话一律用独立 async session 读，不复用 self.db：
+        #   1) 本方法是 fire-and-forget 的记忆派发，与调用方事务无关；
+        #   2) 调用方的 db 可能是同步 Session（分享端/重新生成走 Depends(get_db)），
+        #      在同步 Session 上 `await db.execute(...)` 拿到的是 ChunkedIteratorResult，
+        #      直接抛 "object ChunkedIteratorResult can't be used in 'await' expression"，
+        #      连带打断标注命中分支（设置标注 → 分享会话 → 输入标注问题 → 重新生成）。
         try:
             async with get_async_db_context() as db:
+                conversation = await ConversationRepository(db).get_conversation_by_conversation_id_async(
+                    conversation_id
+                )
+                if not conversation:
+                    return
+                # 必须在 session 关闭前把后续要用的标量字段全部快照出来：退出 async with
+                # 后该 ORM 对象 expire_on_commit 已过期并与 session 解绑，再访问属性会抛
+                # DetachedInstanceError（曾连带吞掉集群标注命中分支）。
+                conv_id_str = str(conversation.id)
+                conv_app_id = str(conversation.app_id)
+                conv_workspace_id = str(conversation.workspace_id)
+                conv_user_id = str(conversation.user_id) if conversation.user_id else ""
                 config_id = await MemoryConfigService(db).get_workspace_active_config_id_async(
                     conversation.workspace_id
                 )
+        except Exception as exc:
+            logger.warning(
+                f"[ConversationService] dispatch_memory_pair 查询会话/记忆配置失败（已跳过）: "
+                f"conv={conversation_id}, err={exc}",
+                exc_info=True,
+            )
+            return
+
+        try:
             now = utcnow()
             messages = [
                 SimpleNamespace(
@@ -528,12 +551,12 @@ class ConversationService:
             ]
             asyncio.create_task(
                 MemoryService.ingest_agent_messages(
-                    conversation_id=str(conversation.id),
+                    conversation_id=conv_id_str,
                     messages=messages,
-                    app_id=str(conversation.app_id),
+                    app_id=conv_app_id,
                     config_id=str(config_id),
-                    workspace_id=str(conversation.workspace_id),
-                    end_user_id=str(conversation.user_id) if conversation.user_id else "",
+                    workspace_id=conv_workspace_id,
+                    end_user_id=conv_user_id,
                     storage_type=storage_type or "neo4j",
                     user_rag_memory_id=user_rag_memory_id,
                 )
@@ -541,7 +564,7 @@ class ConversationService:
         except Exception as exc:
             logger.warning(
                 f"[ConversationService] dispatch_memory_pair 执行失败: "
-                f"conv={conversation.id}, err={exc}",
+                f"conv={conversation_id}, err={exc}",
                 exc_info=True,
             )
 

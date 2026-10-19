@@ -31,6 +31,7 @@ from app.schemas import DraftRunRequest
 from app.schemas.app_schema import FileInput, FileType, TransferMethod
 from app.schemas.prompt_schema import render_prompt_message, PromptMessageRole
 from app.services.annotation_service import AnnotationService
+from app.models.annotation_model import HitLogSource
 from app.services.conversation_service import ConversationService
 from app.services.context_engine_manager import ContextEngineManager
 from app.core.config import settings
@@ -321,6 +322,9 @@ class AppChatService:
             orchestrator: Any,
     ) -> tuple:
         """集群本轮附件的落库内容（与 Agent 应用同口径）。
+
+        试运行入口（MultiAgentService.run/run_stream）委托本方法，与分享端共用一份实现，
+        避免"首轮能解析附件、重新生成取不到"这类落库口径漂移。
 
         Returns:
             (files_meta, history_files)：files_meta 写 user 消息 meta.files；
@@ -1942,6 +1946,7 @@ class AppChatService:
             thinking: bool = False,
             execution_mode: Optional[str] = None,
             files: Optional[List[FileInput]] = None,
+            source: str = HitLogSource.EXTERNAL,
     ) -> Dict[str, Any]:
         """多 Agent 聊天（非流式）
 
@@ -1962,7 +1967,7 @@ class AppChatService:
         # 标注命中（按 app_id 取 AppAnnotationSetting；未配置/未启用直接返回 None，老集群无影响）。
         # 命中则不进编排器，直接落库返回标注答案（与 Agent 应用一致）。
         _annotation_hit = await self._cluster_annotation_hit(
-            config, message, conversation_id, message_id, user_message_id
+            config, message, conversation_id, message_id, user_message_id, source=source
         )
         if _annotation_hit is not None:
             return {
@@ -2120,6 +2125,7 @@ class AppChatService:
             thinking: bool = False,
             execution_mode: Optional[str] = None,
             files: Optional[List[FileInput]] = None,
+            source: str = HitLogSource.EXTERNAL,
     ) -> AsyncGenerator[str, None]:
         """多 Agent 聊天（流式）
 
@@ -2148,7 +2154,7 @@ class AppChatService:
             # 直接落库并下发 message/end（与 Agent 应用一致）。
             _annotation_hit = await self._cluster_annotation_hit(
                 config, message, conversation_id, message_id, user_message_id,
-                storage_type=storage_type, user_rag_memory_id=user_rag_memory_id,
+                storage_type=storage_type, user_rag_memory_id=user_rag_memory_id, source=source,
             )
             if _annotation_hit is not None:
                 _answer = _annotation_hit["answer"]
