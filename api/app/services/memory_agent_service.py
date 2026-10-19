@@ -308,7 +308,6 @@ class MemoryAgentService:
             retrieve_info: str,
             history: List[Dict],
             query: str,
-            config_id: str,
     ) -> str:
         """
         基于检索信息、历史对话和查询生成最终答案
@@ -326,7 +325,6 @@ class MemoryAgentService:
         """
         # Always get workspace_id from end_user for fallback, even if config_id is provided
         def _load_model_view() -> Any:
-            resolved_id = config_id
             with get_db_read() as db:
                 try:
                     config_service = MemoryConfigService(db)

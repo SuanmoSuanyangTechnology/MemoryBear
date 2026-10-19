@@ -363,7 +363,11 @@ class AppService:
                 )
 
         # 3. 检查子 Agent 配置
-        if not multi_agent_config.sub_agents or len(multi_agent_config.sub_agents) == 0:
+        # supervisor_loop 允许零子 Agent（主管退化为裸 Agent 直接作答）；其余模式依赖子 Agent 才能运行
+        if (
+            multi_agent_config.orchestration_mode != "supervisor_loop"
+            and (not multi_agent_config.sub_agents or len(multi_agent_config.sub_agents) == 0)
+        ):
             raise BusinessException(
                 "未配置子 Agent，无法运行",
                 BizCode.AGENT_CONFIG_MISSING
@@ -1364,6 +1368,7 @@ class AppService:
             pagesize: int = 10,
             ontology_status: str = "all",
             field_search: Optional[str] = None,
+            orchestration_mode: Optional[str] = None,
     ) -> Tuple[List[App], int]:
         """列出工作空间中的应用（分页）
 
@@ -1373,7 +1378,7 @@ class AppService:
 
         Args:
             workspace_id: 工作空间ID
-            type: 应用类型过滤
+            type: 应用类型过滤（支持逗号分隔多值，如 "agent,multi_agent"）
             visibility: 可见性过滤
             status: 状态过滤
             search: 搜索关键词（模糊匹配应用名称）
@@ -1383,6 +1388,7 @@ class AppService:
             pagesize: 每页数量
             ontology_status: 本体状态筛选 all | bound（已关联本体）| default（仅默认本体）
             field_search: 标签模式搜索，模糊匹配绑定本体的场景自定义字段展示名
+            orchestration_mode: 编排模式过滤（仅约束集群；按当前发布版本快照 config.orchestration_mode 过滤）
 
         Returns:
             Tuple[List[App], int]: (应用列表, 总数)
@@ -1401,8 +1407,34 @@ class AppService:
 
         # 构建查询条件
         filters = [App.is_active.is_(True)]
-        if type:
-            filters.append(App.type == type)
+        # type 支持逗号分隔多值（如 "agent,multi_agent"），向后兼容单值
+        type_list = [t.strip() for t in type.split(",") if t.strip()] if type else []
+        if orchestration_mode:
+            # 编排模式过滤（仅约束集群）：按"当前发布版本快照"的 orchestration_mode 过滤——
+            # 工作流 Agent 节点引用的是已发布集群的运行时产物，口径必须与运行时读取的
+            # 发布快照一致（草稿态改了模式但未发布的集群不应被引用）。
+            # 集群分支 + 其余类型并集（OR 语义）：
+            #   type=agent,multi_agent&orchestration_mode=supervisor_loop
+            #   → agent 全部 + 已发布且快照为 supervisor_loop 的集群；不传 type 时仅出该模式集群。
+            mode_apps = (
+                select(AppRelease.app_id)
+                .where(
+                    AppRelease.is_active.is_(True),
+                    AppRelease.config["orchestration_mode"].astext == orchestration_mode,
+                )
+                .where(AppRelease.id == App.current_release_id)
+            )
+            other_types = [t for t in type_list if t != AppType.MULTI_AGENT]
+            cluster_branch = and_(App.type == AppType.MULTI_AGENT, App.id.in_(mode_apps))
+            if other_types:
+                filters.append(or_(App.type.in_(other_types), cluster_branch))
+            else:
+                filters.append(cluster_branch)
+        elif type_list:
+            if len(type_list) == 1:
+                filters.append(App.type == type_list[0])
+            else:
+                filters.append(App.type.in_(type_list))
         if visibility:
             filters.append(App.visibility == visibility)
         if status:
@@ -3027,6 +3059,7 @@ def list_apps(
         pagesize: int = 10,
         ontology_status: str = "all",
         field_search: Optional[str] = None,
+        orchestration_mode: Optional[str] = None,
 ) -> Tuple[List[App], int]:
     """列出应用（向后兼容接口）"""
     service = AppService(db)
@@ -3043,6 +3076,7 @@ def list_apps(
         pagesize=pagesize,
         ontology_status=ontology_status,
         field_search=field_search,
+        orchestration_mode=orchestration_mode,
     )
 
 

@@ -5977,7 +5977,12 @@ class WorkflowService:
             orphan_q = orphan_q.filter(MessageModel.created_at >= parent_user.created_at)
         if next_user is not None:
             orphan_q = orphan_q.filter(MessageModel.created_at < next_user.created_at)
+        # 排除本轮 user 的上一条 assistant（开场白 / 上一轮回复）：它们 parent 为空且
+        # created_at 可能与 user 相同（同批落库、时钟精度），否则会被时间窗误圈成本轮"版本"
+        preceding_id = parent_user.parent_message_id
         for o in orphan_q.order_by(MessageModel.version.asc()).all():
+            if preceding_id is not None and o.id == preceding_id:
+                continue
             if str(o.id) not in existing_ids:
                 siblings.append(o)
                 existing_ids.add(str(o.id))
@@ -6009,6 +6014,11 @@ class WorkflowService:
 
         def serialize(m: MessageModel) -> dict:
             fb_type, fb_content = feedback_map.get(m.id, (None, None))
+            meta_out = m.meta_data
+            # audio_status 落库时多为 end 帧当下的 "pending"（TTS 尚未合成完），不会回写；
+            # 这里按 FileMetadata 实时状态覆盖，口径同会话详情接口，避免切版本后一直 pending。
+            if isinstance(meta_out, dict) and m.id in audio_status_map:
+                meta_out = {**meta_out, "audio_status": audio_status_map[m.id]}
             return {
                 "id": str(m.id),
                 "role": m.role,
@@ -6016,7 +6026,7 @@ class WorkflowService:
                 "version": m.version,
                 "is_current": m.is_current,
                 "created_at": to_timestamp_ms(m.created_at),
-                "meta_data": m.meta_data,
+                "meta_data": meta_out,
                 "status": m.status,
                 "parent_message_id": str(m.parent_message_id) if m.parent_message_id else None,
                 "is_favorited": m.id in favorited_ids,
@@ -6138,6 +6148,35 @@ class WorkflowService:
                 .all()
             )
             feedback_map = {row[0]: (row[1], row[2]) for row in feedback_rows}
+
+        # TTS 语音状态：meta_data.audio_status 落库时是 end 帧当下的快照（多为 pending），
+        # 按 audio_url 末段 file_id 批量查 FileMetadata 实时状态覆盖（口径同分享端会话详情接口）。
+        audio_status_map: dict = {}
+        try:
+            from app.models.file_metadata_model import FileMetadata
+            _audio_fid_by_msg: dict = {}
+            for _role, _payload in turns:
+                for _m in ([_payload] if _role == "user" else _payload):
+                    _meta = _m.meta_data if isinstance(_m.meta_data, dict) else None
+                    _url = _meta.get("audio_url") if _meta else None
+                    if _m.role != "assistant" or not _url:
+                        continue
+                    try:
+                        _audio_fid_by_msg[_m.id] = uuid.UUID(str(_url).rstrip("/").split("/")[-1])
+                    except (ValueError, IndexError):
+                        audio_status_map[_m.id] = "unknown"
+            if _audio_fid_by_msg:
+                _status_by_fid = {
+                    fm.id: fm.status
+                    for fm in self.db.query(FileMetadata)
+                    .filter(FileMetadata.id.in_(set(_audio_fid_by_msg.values())))
+                    .all()
+                }
+                for _mid, _fid in _audio_fid_by_msg.items():
+                    audio_status_map[_mid] = _status_by_fid.get(_fid, "unknown")
+        except Exception as e:
+            # 状态回填失败不影响分支视图本身，退回落库值
+            logger.warning(f"分支视图回填 audio_status 失败（已降级）: {e}")
 
         items: list[Any] = []
         node_executions_map: dict[str, list[dict]] = {}

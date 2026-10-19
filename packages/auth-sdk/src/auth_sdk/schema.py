@@ -15,6 +15,9 @@ class UserContext:
     tenant_id: str
     workspace_id: str
     roles: tuple[str, ...] = ()
+    auth_type: str | None = None
+    scopes: tuple[str, ...] = ()
+    api_key_id: str | None = None
 
 
 @dataclass

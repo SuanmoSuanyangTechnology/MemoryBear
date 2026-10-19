@@ -469,8 +469,11 @@ class ImplicitMemoryService:
         try:
             # 前置检查：查询该用户有效的 MemorySummary 节点数量（排除孤立节点）
             from app.services.memory_base_service import MemoryBaseService
-            base_service = MemoryBaseService()
-            memory_summary_count = await base_service.get_valid_memory_summary_count(user_id)
+            base_service = MemoryBaseService(shared_driver=False)
+            try:
+                memory_summary_count = await base_service.get_valid_memory_summary_count(user_id)
+            finally:
+                await base_service.close()
             logger.info(f"用户 MemorySummary 节点数量: {memory_summary_count} (user={user_id})")
 
             if memory_summary_count < MIN_MEMORY_SUMMARY_COUNT:

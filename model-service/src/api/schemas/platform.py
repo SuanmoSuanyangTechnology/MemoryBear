@@ -5,7 +5,7 @@ from __future__ import annotations
 from pydantic import BaseModel, Field
 
 from ...models.models_model import ModelType
-from ...schemas.model_schema import RejectLegacyModelFields
+from ...schemas.model_schema import RejectLegacyModelFields, RejectUnknownModelColumns
 
 
 class PlatformModelCreateRequest(BaseModel):
@@ -14,7 +14,7 @@ class PlatformModelCreateRequest(BaseModel):
     )
 
 
-class PlatformModelUpdateRequest(BaseModel, RejectLegacyModelFields):
+class PlatformModelUpdateRequest(BaseModel, RejectLegacyModelFields, RejectUnknownModelColumns):
     type: ModelType | None = Field(None, description="模型类型（缺省保持现值；chat 已下线）")
     input_modalities: list[str] | None = Field(
         None, description="输入模态（缺省保持现值；不得为空列表）"

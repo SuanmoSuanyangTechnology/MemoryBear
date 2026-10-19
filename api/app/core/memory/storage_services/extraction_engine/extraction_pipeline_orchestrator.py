@@ -435,33 +435,34 @@ class NewExtractionOrchestrator:
 
         # ── Inline emotion extraction (previously deferred to pipeline layer) ──
         emotion_results: Dict[str, EmotionStepOutput] = {}
-        if self.config.emotion_enabled:
-            emotion_stmts = self._collect_emotion_statements(all_stmt_results)
-            if emotion_stmts:
-                from .steps.emotion_step import EmotionExtractionStep
-
-                emotion_step = EmotionExtractionStep(self.context)
-                if not emotion_step.should_skip():
-                    async def _extract_emotion(stmt_dict: Dict[str, str]) -> None:
-                        inp = EmotionStepInput(
-                            statement_id=stmt_dict["statement_id"],
-                            statement_text=stmt_dict["statement_text"],
-                            speaker=stmt_dict.get("speaker", "user"),
-                        )
-                        try:
-                            result = await emotion_step.run(inp)
-                            emotion_results[stmt_dict["statement_id"]] = result
-                        except Exception as e:
-                            logger.warning(
-                                "[Emotion] 提取失败 stmt=%s: %s",
-                                stmt_dict["statement_id"], e,
-                            )
-
-                    await asyncio.gather(*[_extract_emotion(s) for s in emotion_stmts])
-                    logger.info(
-                        "[Emotion] 批量情绪提取完成: 成功=%d, 总数=%d",
-                        len(emotion_results), len(emotion_stmts),
-                    )
+        # [DEPRECATED v0.5.2] Statement LLM 情绪提取已废弃，改为继承快写 BERT 情绪（见 emotion_inheritance），暂时保留代码不删除
+        # if self.config.emotion_enabled:
+        #     emotion_stmts = self._collect_emotion_statements(all_stmt_results)
+        #     if emotion_stmts:
+        #         from .steps.emotion_step import EmotionExtractionStep
+        #
+        #         emotion_step = EmotionExtractionStep(self.context)
+        #         if not emotion_step.should_skip():
+        #             async def _extract_emotion(stmt_dict: Dict[str, str]) -> None:
+        #                 inp = EmotionStepInput(
+        #                     statement_id=stmt_dict["statement_id"],
+        #                     statement_text=stmt_dict["statement_text"],
+        #                     speaker=stmt_dict.get("speaker", "user"),
+        #                 )
+        #                 try:
+        #                     result = await emotion_step.run(inp)
+        #                     emotion_results[stmt_dict["statement_id"]] = result
+        #                 except Exception as e:
+        #                     logger.warning(
+        #                         "[Emotion] 提取失败 stmt=%s: %s",
+        #                         stmt_dict["statement_id"], e,
+        #                     )
+        #
+        #             await asyncio.gather(*[_extract_emotion(s) for s in emotion_stmts])
+        #             logger.info(
+        #                 "[Emotion] 批量情绪提取完成: 成功=%d, 总数=%d",
+        #                 len(emotion_results), len(emotion_stmts),
+        #             )
 
         self._assign_results(
             dialog_data_list,
@@ -821,6 +822,7 @@ class NewExtractionOrchestrator:
 
         pairs: List[Tuple[ExtractionStep, Any]] = []
         for sidecar in self.after_statement_sidecars:
+            # [DEPRECATED v0.5.2] Statement LLM 情绪提取已废弃，改为继承快写 BERT 情绪（见 emotion_inheritance），暂时保留代码不删除
             if sidecar.name == "emotion_extraction":
                 # Skip — emotion is dispatched as async Celery task after Phase 4
                 continue
@@ -869,7 +871,9 @@ class NewExtractionOrchestrator:
         self,
         all_stmt_results: Dict[str, Dict[str, List[StatementStepOutput]]],
     ) -> List[Dict[str, str]]:
-        """Collect user statements for async emotion extraction.
+        """[DEPRECATED v0.5.2] Statement LLM 情绪提取已废弃，改为继承快写 BERT 情绪（见 emotion_inheritance），暂时保留代码不删除
+
+        Collect user statements for async emotion extraction.
 
         Only includes statements where has_emotional_state=True,
         indicating the statement reflects user's emotional state.
@@ -890,7 +894,10 @@ class NewExtractionOrchestrator:
 
     @property
     def emotion_statements(self) -> List[Dict[str, str]]:
-        """Statements collected for async emotion extraction after last run."""
+        """[DEPRECATED v0.5.2] Statement LLM 情绪提取已废弃，改为继承快写 BERT 情绪（见 emotion_inheritance），暂时保留代码不删除
+
+        Statements collected for async emotion extraction after last run.
+        """
         return getattr(self, "_emotion_statements", [])
 
     # ──────────────────────────────────────────────
@@ -1017,15 +1024,16 @@ class NewExtractionOrchestrator:
                         assigned_triplets += 1
 
                     # Emotion info
-                    emo = emotion_results.get(stmt_out.statement_id)
-                    emotion_kwargs = {}
-                    if emo:
-                        emotion_kwargs = {
-                            "emotion_type": emo.emotion_type,
-                            "emotion_intensity": emo.emotion_intensity,
-                            "emotion_keywords": emo.emotion_keywords,
-                        }
-                        assigned_emotions += 1
+                    # [DEPRECATED v0.5.2] Statement LLM 情绪提取已废弃，改为继承快写 BERT 情绪（见 emotion_inheritance），暂时保留代码不删除
+                    # emo = emotion_results.get(stmt_out.statement_id)
+                    # emotion_kwargs = {}
+                    # if emo:
+                    #     emotion_kwargs = {
+                    #         "emotion_type": emo.emotion_type,
+                    #         "emotion_intensity": emo.emotion_intensity,
+                    #         "emotion_keywords": emo.emotion_keywords,
+                    #     }
+                    #     assigned_emotions += 1
 
                     # Statement embedding
                     stmt_embedding = None
@@ -1053,7 +1061,8 @@ class NewExtractionOrchestrator:
                         triplet_extraction_info=triplet_info,
                         statement_embedding=stmt_embedding,
                         dialog_at=getattr(chunk, "dialog_at", None),
-                        **emotion_kwargs,
+                        # [DEPRECATED v0.5.2] Statement LLM 情绪提取已废弃，改为继承快写 BERT 情绪（见 emotion_inheritance），暂时保留代码不删除
+                        # **emotion_kwargs,
                     )
                     new_statements.append(stmt)
 

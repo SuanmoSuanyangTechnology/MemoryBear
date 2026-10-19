@@ -7372,6 +7372,7 @@ def do_workspace_statistics_snapshot(
     """串行刷新一个空间的统计快照；失败时最多补偿一次。"""
     from app.services.workspace_memory_statistics_service import (
         get_or_refresh_workspace_statistics_async,
+        get_workspace_statistics_for_worker_async,
         get_workspace_statistics_snapshot_version_async,
     )
 
@@ -7401,6 +7402,7 @@ def do_workspace_statistics_snapshot(
             allow_cached_response=False,
             baseline_version=attempt_baseline_version,
             baseline_captured=True,
+            calculate_statistics=get_workspace_statistics_for_worker_async,
         )
         return {
             "status": "SUCCESS" if generated else "SKIPPED_COALESCED",

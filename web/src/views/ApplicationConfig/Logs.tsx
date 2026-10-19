@@ -245,7 +245,7 @@ const Logs: FC<{ application: Application; }> = ({ application }) => {
     },
   ]
   const isHideAnnotations = useMemo(() => {
-    return ['multi_agent', 'pure_workflow'].includes(application?.type as string) || source === 'sharing'
+    return ['pure_workflow'].includes(application?.type as string) || source === 'sharing'
   }, [source, application.type])
 
   const logsQuery = useMemo(() => {

@@ -388,6 +388,23 @@ async def _bulk_persist_messages(
         msg_id = args.get("message_id_override") or (
             result.message_id if result else uuid_module.uuid4())
 
+        # opening statement：必须先于 user 行写入（created_at 在前），
+        # 且首轮 user 的 parent 指向它——与 Agent 一致（Agent 先建会话落开场白，
+        # user 再取"最后一条 is_current assistant"为 parent），这样 _load_branch_chain
+        # 向上回溯能带出开场白，切版本接口才会把开场白一并返回。
+        opening_row_id = None
+        if args.get("is_new_conversation") and args.get("opening_statement"):
+            opening_row_id = args.get("opening_message_id")
+            if opening_row_id:
+                _opening_sq = args.get("opening_suggested_questions")
+                _opening_row = _row(opening_row_id, conv_id, "assistant", args["opening_statement"],
+                                    {"suggested_questions": _opening_sq} if _opening_sq else None)
+                # 同批落库的行 created_at 可能因时钟精度完全相同，按时间排序会让开场白与 user 次序不定；
+                # 开场白前移 1ms，保证它严格排在本轮 user 之前
+                from datetime import timedelta as _timedelta
+                _opening_row["created_at"] = _opening_row["created_at"] - _timedelta(milliseconds=1)
+                _add_row(_opening_row, conv_id)
+
         # user message
         if args.get("user_meta_override"):
             user_meta = dict(args["user_meta_override"])
@@ -399,7 +416,12 @@ async def _bulk_persist_messages(
             if result and getattr(result, 'history_files', None):
                 user_meta["history_files"] = result.history_files
 
-        user_parent_id = args.get("user_parent_message_id")
+        # 本轮用户传入的变量值（集群重新生成时回读，免得让用户重传必填变量）；无变量不加键
+        if args.get("variables_meta"):
+            user_meta["variables"] = args["variables_meta"]
+
+        # 首轮 user 无上一条 assistant 可挂时，挂到本批写入的开场白上
+        user_parent_id = args.get("user_parent_message_id") or opening_row_id
         user_content = args.get("user_message_content", "") or ""
 
         _add_row(_row(user_msg_id, conv_id, "user",
@@ -439,12 +461,6 @@ async def _bulk_persist_messages(
             user_content[:50] + ("..." if len(user_content) > 50 else "")
             if user_content else None
         )
-
-        # opening statement
-        if args.get("is_new_conversation") and args.get("opening_statement"):
-            opening_id = args.get("opening_message_id")
-            if opening_id:
-                _add_row(_row(opening_id, conv_id, "assistant", args["opening_statement"]), conv_id)
 
     # --- dedupe rows within the batch (same task enqueued twice, or success +
     # failed tasks sharing one message pair) ---

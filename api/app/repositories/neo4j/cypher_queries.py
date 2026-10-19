@@ -11,15 +11,24 @@ from app.core.memory.constants.value_weight_constants import (
     T_WEIGHT,
 )
 from app.core.memory.enums import Neo4jNodeType
+from app.core.memory.storage.custom.legacy_metadata_merge import (
+    LEGACY_METADATA_MERGE_CLAUSES,
+)
 
 DIALOGUE_NODE_SAVE = """
     UNWIND $dialogues AS dialogue
     MERGE (n:Dialogue {id: dialogue.id})
     SET n.uuid = coalesce(n.uuid, dialogue.id)
+    // 握手补写依赖写入前状态 prev_*（新建节点时均为 null）：
+    // SET n.uuid 已对节点加写锁；Neo4j read-committed 下读不加锁，prev_* 必须在拿锁之后、
+    // 改写 write_mode / emotion 之前读取，才能看到并发对方已提交的状态。
     // 覆盖竞态守卫：只许 normal 覆盖 fast，不许 fast 反向降级 normal。
     // 当已存在节点为 normal 且本次写入为 fast 时跳过内容写入（canWrite=[]），
     // 保留正写的权威版本；其余情况（新建 / normal 覆盖 fast / 同模式重试）照常写入。
     WITH n, dialogue,
+         n.write_mode AS prev_write_mode,
+         n.emotion AS prev_emotion,
+         n.emotion_score AS prev_emotion_score,
          CASE WHEN n.write_mode = 'normal' AND dialogue.write_mode = 'fast'
               THEN [] ELSE [1] END AS canWrite
     FOREACH (_ IN canWrite |
@@ -31,12 +40,49 @@ DIALOGUE_NODE_SAVE = """
             n.name = dialogue.name,
             n.dialog_embedding = dialogue.dialog_embedding,
             n.config_id = dialogue.config_id,
-            n.write_mode = coalesce(dialogue.write_mode, 'normal'),
-            // emotion 粘性保留：本次写入未带值（None）则保留原值，避免正写（不算情绪）
-            n.emotion = coalesce(dialogue.emotion, n.emotion),
-            n.emotion_score = coalesce(dialogue.emotion_score, n.emotion_score)
+            n.write_mode = coalesce(dialogue.write_mode, 'normal')
     )
-    RETURN n.id AS uuid
+    // 情绪独立于 canWrite 守卫，emotion / emotion_score 成对写入（入参两者都非空才写）：
+    // - canWrite 生效（新建 / normal 覆盖 fast / 同模式重试）：本次带情绪则覆盖；
+    // - 迟到 fast（canWrite=[]）：仅在 normal 节点尚无情绪时补写，已有情绪不覆盖；
+    // - 本次未带情绪（如正写不算情绪）：不触碰情绪字段，保留原值。
+    FOREACH (_ IN CASE WHEN dialogue.emotion IS NOT NULL
+                            AND dialogue.emotion_score IS NOT NULL
+                            AND (size(canWrite) > 0 OR n.emotion IS NULL)
+                       THEN [1] ELSE [] END |
+        SET n.emotion = dialogue.emotion,
+            n.emotion_score = dialogue.emotion_score
+    )
+    // 已知遗留：id 无内容哈希，同一 conv_id + seq 内容变更后重处理时，prev_emotion 可能属于旧内容。
+    RETURN n.id AS uuid, prev_write_mode, prev_emotion, prev_emotion_score
+"""
+
+# 握手补写候选：某 Dialogue 下尚无情绪的 user Statement。
+# Dialogue 与 Chunk 之间无关系边，Chunk 通过属性 dialog_id 指向 Dialogue；Chunk → Statement 为 CONTAINS 边。
+STATEMENT_EMOTION_BACKFILL_CANDIDATES = """
+    MATCH (c:Chunk {dialog_id: $dialogue_id})-[:CONTAINS]->(s:Statement)
+    WHERE c.end_user_id = $end_user_id AND c.delete_at IS NULL
+      AND s.end_user_id = $end_user_id AND s.delete_at IS NULL
+      AND s.speaker = 'user' AND s.emotion_type IS NULL
+    RETURN DISTINCT s.id AS id, s.statement AS statement
+"""
+
+# 握手补写写入：先写一个临时属性拿到节点写锁，再判断 emotion_type IS NULL（只补空、不覆盖），
+# 防止并发补写 / 正写 Statement 重写时互相覆盖。RETURN 实际更新的 id，供 outbox 精确入队。
+STATEMENT_EMOTION_BACKFILL_SAVE = """
+    UNWIND $rows AS row
+    MATCH (s:Statement {id: row.id})
+    WHERE s.end_user_id = $end_user_id AND s.speaker = 'user'
+    SET s._emotion_backfill_lock = true
+    REMOVE s._emotion_backfill_lock
+    WITH s, row
+    WHERE s.emotion_type IS NULL
+    SET s.emotion_type = row.emotion_type,
+        s.emotion_intensity = row.emotion_intensity,
+        s.emotion_keywords = row.emotion_keywords,
+        s.emotion_subject = row.emotion_subject,
+        s.emotion_target = row.emotion_target
+    RETURN s.id AS id
 """
 
 STATEMENT_NODE_SAVE = """
@@ -51,11 +97,6 @@ SET s.delete_at = null,
     stmt_type: statement.stmt_type,
     statement: statement.statement,
     speaker: statement.speaker,
-    emotion_intensity: statement.emotion_intensity,
-    emotion_target: statement.emotion_target,
-    emotion_subject: statement.emotion_subject,
-    emotion_type: statement.emotion_type,
-    emotion_keywords: statement.emotion_keywords,
     temporal_info: statement.temporal_info,
     created_at: statement.created_at,
     valid_at: coalesce(statement.valid_at, ""),
@@ -74,6 +115,14 @@ SET s.delete_at = null,
         ELSE coalesce(statement.is_permanent, false)
     END
 }
+FOREACH (_ IN CASE WHEN statement.emotion_type IS NULL THEN [] ELSE [1] END |
+    SET s.emotion_type = statement.emotion_type,
+        s.emotion_intensity = statement.emotion_intensity,
+        s.emotion_keywords = coalesce(statement.emotion_keywords, []),
+        s.emotion_subject = statement.emotion_subject,
+        s.emotion_target = statement.emotion_target)
+FOREACH (_ IN CASE WHEN statement.emotion_type IS NULL THEN [1] ELSE [] END |
+    SET s.emotion_keywords = coalesce(s.emotion_keywords, []))
 RETURN s.id AS uuid
 """
 
@@ -360,119 +409,6 @@ SET e.name = CASE WHEN entity.name IS NOT NULL AND entity.name <> '' THEN entity
     e.extraction_count = CASE WHEN entity.extraction_count IS NOT NULL THEN entity.extraction_count + coalesce(e.extraction_count, 0) ELSE coalesce(e.extraction_count, 1) END,
     e.delete_at = null
 RETURN e.id AS uuid
-"""
-
-# ── 查询用户实体已有的元数据（供增量提取时去重） ──
-ENTITY_METADATA_QUERY = """
-MATCH (e:ExtractedEntity {id: $entity_id})
-WHERE e.delete_at IS NULL
-RETURN e.core_facts AS core_facts,
-       e.traits AS traits,
-       e.relations AS relations,
-       e.goals AS goals,
-       e.interests AS interests,
-       e.beliefs_or_stances AS beliefs_or_stances,
-       e.anchors AS anchors,
-       e.events AS events
-"""
-
-# ── 元数据 patch 回写：对 8 字段统一应用 delete / update / add 三段操作 ──
-# 设计要点：
-#   1. 8 个字段一次原子 SET，纯 Cypher（不依赖 APOC），无 race 风险
-#   2. delete: [x IN list WHERE NOT x IN $field_delete] —— 仅精确剔除被指名项
-#   3. update: [x IN list | CASE WHEN x = pair.old THEN pair.new ELSE x END]
-#              对每个 (old, new) pair 顺序应用一次，匹配不到则保持原值
-#   4. add:    reduce 去重追加，原值不会丢失
-#   5. 输入参数（每字段三类）：
-#        $<field>_delete : List[str]
-#        $<field>_update : List[{old: str, new: str}]
-#        $<field>_add    : List[str]
-#      上层调用方对未变更字段传空数组即可，避免 Cypher 内部出现 NULL 分支。
-ENTITY_METADATA_PATCH = """
-MATCH (e:ExtractedEntity {id: $entity_id})
-WHERE e.delete_at IS NULL
-
-// ── core_facts ──
-WITH e,
-     [x IN coalesce(e.core_facts, []) WHERE NOT x IN $core_facts_delete] AS cf0
-WITH e, reduce(acc = cf0, pair IN $core_facts_update |
-        [x IN acc | CASE WHEN x = pair.old THEN pair.new ELSE x END]) AS cf1
-WITH e, reduce(acc = cf1, item IN $core_facts_add |
-        CASE WHEN item IN acc THEN acc ELSE acc + item END) AS cf2
-SET e.core_facts = cf2
-
-// ── traits ──
-WITH e,
-     [x IN coalesce(e.traits, []) WHERE NOT x IN $traits_delete] AS tr0
-WITH e, reduce(acc = tr0, pair IN $traits_update |
-        [x IN acc | CASE WHEN x = pair.old THEN pair.new ELSE x END]) AS tr1
-WITH e, reduce(acc = tr1, item IN $traits_add |
-        CASE WHEN item IN acc THEN acc ELSE acc + item END) AS tr2
-SET e.traits = tr2
-
-// ── relations ──
-WITH e,
-     [x IN coalesce(e.relations, []) WHERE NOT x IN $relations_delete] AS re0
-WITH e, reduce(acc = re0, pair IN $relations_update |
-        [x IN acc | CASE WHEN x = pair.old THEN pair.new ELSE x END]) AS re1
-WITH e, reduce(acc = re1, item IN $relations_add |
-        CASE WHEN item IN acc THEN acc ELSE acc + item END) AS re2
-SET e.relations = re2
-
-// ── goals ──
-WITH e,
-     [x IN coalesce(e.goals, []) WHERE NOT x IN $goals_delete] AS go0
-WITH e, reduce(acc = go0, pair IN $goals_update |
-        [x IN acc | CASE WHEN x = pair.old THEN pair.new ELSE x END]) AS go1
-WITH e, reduce(acc = go1, item IN $goals_add |
-        CASE WHEN item IN acc THEN acc ELSE acc + item END) AS go2
-SET e.goals = go2
-
-// ── interests ──
-WITH e,
-     [x IN coalesce(e.interests, []) WHERE NOT x IN $interests_delete] AS in0
-WITH e, reduce(acc = in0, pair IN $interests_update |
-        [x IN acc | CASE WHEN x = pair.old THEN pair.new ELSE x END]) AS in1
-WITH e, reduce(acc = in1, item IN $interests_add |
-        CASE WHEN item IN acc THEN acc ELSE acc + item END) AS in2
-SET e.interests = in2
-
-// ── beliefs_or_stances ──
-WITH e,
-     [x IN coalesce(e.beliefs_or_stances, []) WHERE NOT x IN $beliefs_or_stances_delete] AS be0
-WITH e, reduce(acc = be0, pair IN $beliefs_or_stances_update |
-        [x IN acc | CASE WHEN x = pair.old THEN pair.new ELSE x END]) AS be1
-WITH e, reduce(acc = be1, item IN $beliefs_or_stances_add |
-        CASE WHEN item IN acc THEN acc ELSE acc + item END) AS be2
-SET e.beliefs_or_stances = be2
-
-// ── anchors ──
-WITH e,
-     [x IN coalesce(e.anchors, []) WHERE NOT x IN $anchors_delete] AS an0
-WITH e, reduce(acc = an0, pair IN $anchors_update |
-        [x IN acc | CASE WHEN x = pair.old THEN pair.new ELSE x END]) AS an1
-WITH e, reduce(acc = an1, item IN $anchors_add |
-        CASE WHEN item IN acc THEN acc ELSE acc + item END) AS an2
-SET e.anchors = an2
-
-// ── events ──
-WITH e,
-     [x IN coalesce(e.events, []) WHERE NOT x IN $events_delete] AS ev0
-WITH e, reduce(acc = ev0, pair IN $events_update |
-        [x IN acc | CASE WHEN x = pair.old THEN pair.new ELSE x END]) AS ev1
-WITH e, reduce(acc = ev1, item IN $events_add |
-        CASE WHEN item IN acc THEN acc ELSE acc + item END) AS ev2
-SET e.events = ev2
-
-RETURN e.id AS uuid,
-       e.core_facts AS core_facts,
-       e.traits AS traits,
-       e.relations AS relations,
-       e.goals AS goals,
-       e.interests AS interests,
-       e.beliefs_or_stances AS beliefs_or_stances,
-       e.anchors AS anchors,
-       e.events AS events
 """
 
 # Add back ENTITY_RELATIONSHIP_SAVE to be used by graph_saver.save_entities_and_relationships
@@ -2374,23 +2310,6 @@ RETURN n.id AS source_id,
        m.name AS target_name
 """
 
-SEARCH_USER_METADATA = """
-MATCH (n:ExtractedEntity)
-WHERE (n.end_user_id = $end_user_id AND n.entity_type ='用户')
-  AND n.delete_at IS NULL
-RETURN n.description AS description,
-       n.aliases AS aliases,
-       n.anchors AS anchors,
-       n.beliefs_or_stances AS beliefs_or_stances,
-       n.core_facts AS core_facts,
-       n.event_timeline AS event_timeline,
-       n.goals AS goals,
-       n.interests AS interests,
-       n.relations AS relations,
-       n.traits AS traits,
-       n.id AS id
-"""
-
 # ── 查询用户实体基本信息（供元数据提取使用） ──
 USER_ENTITY_FOR_METADATA = """
 MATCH (n:ExtractedEntity)
@@ -2715,15 +2634,8 @@ SET keeper.name = $merged_name,
       WHEN keeper.created_at IS NULL THEN loser.created_at
       WHEN loser.created_at IS NULL THEN keeper.created_at
       WHEN loser.created_at > keeper.created_at THEN loser.created_at
-      ELSE keeper.created_at END,
-    keeper.core_facts = apoc.coll.toSet(coalesce(keeper.core_facts,[]) + coalesce(loser.core_facts,[])),
-    keeper.traits = apoc.coll.toSet(coalesce(keeper.traits,[]) + coalesce(loser.traits,[])),
-    keeper.relations = apoc.coll.toSet(coalesce(keeper.relations,[]) + coalesce(loser.relations,[])),
-    keeper.goals = apoc.coll.toSet(coalesce(keeper.goals,[]) + coalesce(loser.goals,[])),
-    keeper.interests = apoc.coll.toSet(coalesce(keeper.interests,[]) + coalesce(loser.interests,[])),
-    keeper.beliefs_or_stances = apoc.coll.toSet(coalesce(keeper.beliefs_or_stances,[]) + coalesce(loser.beliefs_or_stances,[])),
-    keeper.anchors = apoc.coll.toSet(coalesce(keeper.anchors,[]) + coalesce(loser.anchors,[])),
-    keeper.events = apoc.coll.toSet(coalesce(keeper.events,[]) + coalesce(loser.events,[]))
+      ELSE keeper.created_at END
+""" + LEGACY_METADATA_MERGE_CLAUSES + """
 WITH keeper, loser
 OPTIONAL MATCH (s:Statement)-[r:REFERENCES_ENTITY]->(loser)
 WHERE s.delete_at IS NULL AND NOT (s)-[:REFERENCES_ENTITY]->(keeper)

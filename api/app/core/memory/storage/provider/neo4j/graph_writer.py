@@ -3,17 +3,42 @@
 from __future__ import annotations
 
 import logging
-from typing import List
+import math
+from typing import Any, List
 
 from neo4j import AsyncDriver
 
 from app.core.memory.models.graph_models import MemorySummaryNode
 from app.core.memory.storage.enums import MemoryNodeType
-from app.core.memory.storage.models import GraphWriteResult, MemoryGraphWriteCommand
+from app.core.memory.storage.models import DialogueWriteState, GraphWriteResult, MemoryGraphWriteCommand
 from app.core.memory.storage.provider.neo4j.graph_write_queries import SPECIAL_ENTITY_QUERY
 from app.core.utils.datetime_utils import as_utc_aware, to_iso_z
 
 logger = logging.getLogger(__name__)
+
+
+def _dialogue_write_state(record: Any) -> DialogueWriteState:
+    """从 DIALOGUE_NODE_SAVE 的一行结果解析写入前状态。
+
+    用 ``.get`` 读取（``neo4j.Record`` 与 dict 都支持），兼容不带 prev_* 列的旧结果；
+    非 str 的 write_mode / emotion、非数值或 NaN 的 score 一律记为 None。
+
+    Args:
+        record: DIALOGUE_NODE_SAVE 返回的一行。
+
+    Returns:
+        DialogueWriteState。
+    """
+    write_mode = record.get("prev_write_mode")
+    emotion = record.get("prev_emotion")
+    score = record.get("prev_emotion_score")
+    if isinstance(score, bool) or not isinstance(score, (int, float)) or math.isnan(score):
+        score = None
+    return DialogueWriteState(
+        prev_write_mode=write_mode if isinstance(write_mode, str) else None,
+        prev_emotion=emotion if isinstance(emotion, str) else None,
+        prev_emotion_score=float(score) if score is not None else None,
+    )
 
 
 # 迁移自 repositories/neo4j/graph_saver.py 中的
@@ -111,8 +136,15 @@ async def save_memory_graph(
             from app.core.memory.storage.provider.neo4j.graph_write_queries import DIALOGUE_NODE_SAVE
             dialogue_data = [node.model_dump() for node in dialogue_nodes]
             result = await tx.run(DIALOGUE_NODE_SAVE, dialogues=dialogue_data)
-            dialogue_uuids = [record["uuid"] async for record in result]
+            dialogue_uuids = []
+            dialogue_states: dict[str, DialogueWriteState] = {}
+            async for record in result:
+                dialogue_uuids.append(record["uuid"])
+                # 同批重复 id 时只取首行：后续行的 prev_* 是本事务自己写入的结果
+                dialogue_states.setdefault(str(record["uuid"]), _dialogue_write_state(record))
             results['dialogues'] = dialogue_uuids
+            # dict 而非 list，避免被下方 relationship_count 误计为关系
+            results['dialogue_states'] = dialogue_states
             logger.debug(f"Dialogues saved to Neo4j with UUIDs: {dialogue_uuids}")
 
         # 2. Save all chunk nodes in batch
@@ -367,6 +399,7 @@ async def save_memory_graph(
         # 使用显式写事务执行所有操作，避免死锁
         async with driver.session() as session:
             results = await session.execute_write(_save_all_in_transaction)
+        dialogue_states = results.pop("dialogue_states", {})
         summary = {
             key: len(value)
             for key, value in results.items()
@@ -399,6 +432,7 @@ async def save_memory_graph(
         return GraphWriteResult(
             node_ids=node_ids,
             relationship_count=relationship_count,
+            dialogue_states=dialogue_states,
         )
 
     except Exception as e:

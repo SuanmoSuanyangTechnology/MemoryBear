@@ -194,6 +194,7 @@ export const memoryConversation = {
         profile: 'L0 user profile',
         notRanked: 'Excluded from ranking',
         metadataBadge: 'L0 metadata',
+        noMetadataBadge: 'No user profile',
         unknownUser: 'Unknown user',
         profileDescription: 'L0 user metadata: {{name}}; aggregated fields include {{fields}}.',
         loaded: 'Loaded',

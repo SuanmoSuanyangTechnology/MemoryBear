@@ -1,10 +1,4 @@
-/*
- * @Author: ZhaoYing 
- * @Date: 2026-01-08 19:46:02 
- * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-27 11:20:40
- */
-import { type FC, useEffect, useState } from 'react'
+import { type FC, useEffect, useState, useCallback } from 'react'
 import clsx from 'clsx'
 import { useTranslation } from 'react-i18next'
 import { useParams } from 'react-router-dom'
@@ -15,7 +9,8 @@ import {
   getEpisodicDetail,
 } from '@/api/memory'
 import { formatDateTime } from '@/utils/format'
-import Tag, { type TagProps } from '@/components/Tag'
+import Tag from '@/components/Tag'
+import { TAG_COLORS } from '../constant'
 import Empty from '@/components/Empty'
 
 /** Single episodic memory item returned by the overview API. */
@@ -47,17 +42,6 @@ interface EpisodicMemoryDetail {
   content_records: string[];
   /** Emotion label associated with this episode (e.g. "joy", "neutral"). */
   emotion: string;
-}
-
-/** Maps episodic type keys to Ant Design Tag color presets. */
-export const TAG_COLORS: Record<string, TagProps['color']> = {
-  conversation: "processing",
-  dialogue: 'processing',
-  project_work: "success",
-  learning: "warning",
-  decision: "warning",
-  important_event: "error",
-  default: 'default'
 }
 
 /** Normalise a display-friendly type string (e.g. "Project/Work") to its internal key (e.g. "project_work"). */
@@ -93,14 +77,8 @@ const EpisodicDetail: FC = () => {
   const [detail, setDetail] = useState<EpisodicMemoryDetail | null>(null)
   const [selected, setSelected] = useState<EpisodicMemory | null>(null)
 
-  /* Fetch overview when the route user ID changes. */
-  useEffect(() => {
-    if (!id) return
-    getData()
-  }, [id])
-
   /** Fetch the episodic memory overview list with current filter values. */
-  const getData = () => {
+  const getData = useCallback(() => {
     if (!id) return
     setLoading(true)
     setSelected(null)
@@ -119,21 +97,12 @@ const EpisodicDetail: FC = () => {
     .finally(() => {
       setLoading(false)
     })
-  }
+  }, [id, values])
 
-  /* Re-fetch overview whenever filter form values change. */
-  useEffect(() => {
-    getData()
-  }, [values])
-
-  /* Load detail whenever a different memory card is selected. */
-  useEffect(() => {
-    getDetail()
-  }, [selected])
 
   /** Fetch full detail for the currently selected episodic memory. */
-  const getDetail = () => {
-    if (!selected || !selected.id) return
+  const getDetail = useCallback(() => {
+    if (!id || !selected || !selected.id) return
 
     setDetailLoading(true)
     getEpisodicDetail({
@@ -146,7 +115,16 @@ const EpisodicDetail: FC = () => {
       .finally(() => {
         setDetailLoading(false)
       })
-  }
+  }, [id, selected])
+  /* Re-fetch overview whenever filter form values change. */
+  useEffect(() => {
+    getData()
+  }, [id, values, getData])
+
+  /* Load detail whenever a different memory card is selected. */
+  useEffect(() => {
+    getDetail()
+  }, [selected, getDetail])
 
   return (
     <Row gutter={16} wrap={false} className="rb:h-full!">
@@ -154,7 +132,7 @@ const EpisodicDetail: FC = () => {
         <RbCard
           title={<div className="rb:leading-5.5!">
             <span className="rb:font-[MiSans-Bold] rb:font-bold">{t('episodicDetail.curResult')}</span>
-            <span className="rb:text-[#5B6167] rb:font-regular!"> ({data.total || 0}{t('episodicDetail.unix')})</span>
+            <span className="rb:text-gray-600 rb:font-regular!"> ({data.total || 0}{t('episodicDetail.unix')})</span>
           </div>}
           headerType="borderless"
           className="rb:h-full!"
@@ -218,8 +196,8 @@ const EpisodicDetail: FC = () => {
                     >
                       <div className="rb:rounded-md rb:text-[#FFFFFF] rb:size-5 rb:text-[10px] rb:leading-3.5 rb:text-center rb:py-0.75 rb:bg-[#171719]">{index + 1}</div>
                       <div className="rb:flex-1 rb:w-[calc(100%-36px)]">
-                        <div className="rb:text-ellipsis rb:overflow-hidden rb:whitespace-nowrap rb:flex-1 rb:text-[#212332] rb:font-medium rb:leading-5 rb:mb-1">{vo.title}</div>
-                        <Flex align="center" justify="space-between" className="rb:text-[#5B6167] rb:text-[12px]">
+                        <div className="rb:text-ellipsis rb:overflow-hidden rb:whitespace-nowrap rb:flex-1 rb:text-gray-800 rb:font-medium rb:leading-5 rb:mb-1">{vo.title}</div>
+                        <Flex align="center" justify="space-between" className="rb:text-gray-600 rb:text-[12px]">
                           {formatDateTime(vo.created_at)}
                           {vo.type && <Tag color={TAG_COLORS[getTypeKey(vo.type)]}>{t(`episodicDetail.${getTypeKey(vo.type)}`)}</Tag>}
                         </Flex>
@@ -248,19 +226,19 @@ const EpisodicDetail: FC = () => {
                   <div className="rb-border rb:rounded-xl rb:px-4 rb:py-3">
                     <Row gutter={12}>
                       <Col span={8}>
-                        <div className="rb:text-[#5B6167] rb:leading-5">
+                        <div className="rb:text-gray-600 rb:leading-5">
                           {t('episodicDetail.created')}
                           <div className="rb:font-medium rb:mt-1 rb:text-[#171719]">{formatDateTime(detail.created_at)}</div>
                         </div>
                       </Col>
                       <Col span={8}>
-                        <div className="rb:text-[#5B6167] rb:leading-5">
+                        <div className="rb:text-gray-600 rb:leading-5">
                           {t('episodicDetail.episodic_type')}
                           <div className="rb:font-medium rb:mt-1 rb:text-[#171719]">{detail.episodic_type}</div>
                         </div>
                       </Col>
                       {detail.involved_objects.length > 0 && <Col span={8}>
-                        <div className="rb:text-[#5B6167] rb:leading-5">
+                        <div className="rb:text-gray-600 rb:leading-5">
                           {t('episodicDetail.involved_objects')}
                           <Flex gap={8} className="rb:mt-1!">{detail.involved_objects.map((vo, index) => <Tag key={index}>{vo}</Tag>)}</Flex>
                         </div>

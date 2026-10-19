@@ -61,6 +61,15 @@
             "description": "每页数量，最大 100"
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApiKeyAuth"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -3601,7 +3610,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ChunkRetrieve"
+                "$ref": "#/components/schemas/V1ChunkRetrieve"
               }
             }
           },
@@ -4931,14 +4940,14 @@
         }
       }
     },
-    "/v1/memory_config/read_config_preference": {
+    "/v1/memory_config/read_config_scene_community": {
       "get": {
         "tags": [
           "V1 - Memory Config API"
         ],
-        "summary": "Read Config Preference",
-        "description": "Read a workspace-owned Coding Agent preference config.",
-        "operationId": "read_config_preference_v1_memory_config_read_config_preference_get",
+        "summary": "Read Config Scene Community",
+        "description": "Read SceneCommunity settings for the API Key workspace.",
+        "operationId": "read_config_scene_community_v1_memory_config_read_config_scene_community_get",
         "parameters": [
           {
             "name": "config_id",
@@ -4983,14 +4992,53 @@
         }
       }
     },
-    "/v1/memory_config/read_config_scene_community": {
+    "/v1/memory_config/update_config_scene_community": {
+      "put": {
+        "tags": [
+          "V1 - Memory Config API"
+        ],
+        "summary": "Update Config Scene Community",
+        "description": "Fully update SceneCommunity settings for the API Key workspace.",
+        "operationId": "update_config_scene_community_v1_memory_config_update_config_scene_community_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_update_config_scene_community_v1_memory_config_update_config_scene_community_put"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/memory_config/read_config_preference": {
       "get": {
         "tags": [
           "V1 - Memory Config API"
         ],
-        "summary": "Read Config Scene Community",
-        "description": "Read SceneCommunity settings for the API Key workspace.",
-        "operationId": "read_config_scene_community_v1_memory_config_read_config_scene_community_get",
+        "summary": "Read Config Preference",
+        "description": "Read a workspace-owned Coding Agent preference config.",
+        "operationId": "read_config_preference_v1_memory_config_read_config_preference_get",
         "parameters": [
           {
             "name": "config_id",
@@ -5048,45 +5096,6 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/Body_update_config_preference_v1_memory_config_update_config_preference_put"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/memory_config/update_config_scene_community": {
-      "put": {
-        "tags": [
-          "V1 - Memory Config API"
-        ],
-        "summary": "Update Config Scene Community",
-        "description": "Fully update SceneCommunity settings for the API Key workspace.",
-        "operationId": "update_config_scene_community_v1_memory_config_update_config_scene_community_put",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/Body_update_config_scene_community_v1_memory_config_update_config_scene_community_put"
               }
             }
           }
@@ -5329,6 +5338,45 @@
         }
       }
     },
+    "/v1/memory/analytics/workspace_statistics": {
+      "get": {
+        "tags": [
+          "V1 - User Memory API"
+        ],
+        "summary": "Get Workspace Statistics",
+        "description": "Get memory statistics for the API Key workspace.",
+        "operationId": "get_workspace_statistics_v1_memory_analytics_workspace_statistics_get",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApiKeyAuth"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/memory/analytics/user_summary": {
       "get": {
         "tags": [
@@ -5469,6 +5517,7 @@
             "schema": {
               "type": "integer",
               "maximum": 5,
+              "minimum": 1,
               "description": "Max interest tags to return",
               "default": 5,
               "title": "Limit"
@@ -5871,6 +5920,47 @@
         }
       }
     },
+    "/v1/dashboard/dashboard_data": {
+      "get": {
+        "tags": [
+          "V1 - Dashboard API"
+        ],
+        "summary": "Get Dashboard Data",
+        "description": "Aggregated dashboard data for the workspace bound to the API Key.\n\nThe workspace is determined by the API Key and is NOT accepted as input, to\nprevent cross-workspace access. The response shape matches the manager-side\n`GET /dashboard/dashboard_data`: `storage_type` plus exactly one of\n`neo4j_data` / `rag_data` (the other stays null), each holding total_memory /\ntotal_app / total_knowledge / total_api_call and their day-over-day changes.\n\nReturns:\n    ApiResponse.data: {\n        \"storage_type\": str,\n        \"memory_update\": int | null,\n        \"memory_update_change\": int | null,\n        \"neo4j_data\": dict | null,\n        \"rag_data\": dict | null,\n        \"workspace_statistics\": dict | null\n    }",
+        "operationId": "get_dashboard_data_v1_dashboard_dashboard_data_get",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApiKeyAuth"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/memory-display/written": {
       "get": {
         "tags": [
@@ -6125,7 +6215,7 @@
           "V1 - Memory Display API"
         ],
         "summary": "Get Engine Display Cards",
-        "description": "获取引擎动态展示卡片列表\n\n- 传 end_user_id：返回指定用户的引擎卡片；\n- 不传 end_user_id：返回 API Key 所属工作空间的全部引擎卡片（空间级，\n  仍按用户维度拆分），每张卡片额外携带 end_user_id。\n\n按\"指定时区下的自然日 + 引擎类型\"聚合事件并返回卡片。engine_type 始终返回\nEXTRACTION、CROSS_MODAL 或 EMOTION，由前端负责展示文案映射；X-Language-Type\n仅控制 name/content 文案。\n\n聚合边界必须在服务端确定，因此 X-Timezone 为必传请求头，\n前端统一传全局时区设置（useI18n().timeZone），\n保证卡片的聚合日期与前端展示 occurred_at 时使用的时区一致。",
+        "description": "获取引擎动态展示卡片列表\n\n- 传 end_user_id：返回指定用户的引擎卡片；\n- 不传 end_user_id：返回 API Key 所属工作空间的全部引擎卡片（空间级，\n  仍按用户维度拆分），每张卡片额外携带 end_user_id。\n\n按\"指定时区下的自然日 + 引擎类型\"聚合事件并返回卡片。engine_type 为\nEXTRACTION、CROSS_MODAL、EMOTION、FORGETTING、REFLECTION、SCENE_SUMMARY\n或 MEMORY_VALUE，由前端负责展示文案映射；X-Language-Type\n仅控制 name/content 文案。\n\n聚合边界必须在服务端确定，因此 X-Timezone 为必传请求头，\n前端统一传全局时区设置（useI18n().timeZone），\n保证卡片的聚合日期与前端展示 occurred_at 时使用的时区一致。",
         "operationId": "get_engine_display_cards_v1_memory_display_engines_get",
         "parameters": [
           {
@@ -6525,6 +6615,51 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/PermanentMemoryListApiResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/memory/implicit-memory": {
+      "get": {
+        "tags": [
+          "V1 - Implicit Memory API"
+        ],
+        "summary": "Get Implicit Memory",
+        "description": "返回单个终端用户已持久化的隐性记忆快照。",
+        "operationId": "get_implicit_memory_v1_memory_implicit_memory_get",
+        "parameters": [
+          {
+            "name": "end_user_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "终端用户ID",
+              "title": "End User Id"
+            },
+            "description": "终端用户ID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse"
                 }
               }
             }
@@ -7579,6 +7714,162 @@
         "title": "AnnotationUpdate",
         "description": "更新标注请求"
       },
+      "ApiChunkRetrieve": {
+        "properties": {
+          "query": {
+            "$ref": "#/components/schemas/RetrievalQuery"
+          },
+          "kb_ids": {
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "type": "array",
+            "title": "Kb Ids"
+          },
+          "ex_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ex Ids"
+          },
+          "file_names_filter": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "File Names Filter"
+          },
+          "similarity_threshold": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Similarity Threshold"
+          },
+          "vector_similarity_weight": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vector Similarity Weight"
+          },
+          "top_k": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 100.0,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Top K",
+            "default": 20
+          },
+          "retrieve_type": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RetrieveType"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "rerank_mode": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RerankMode"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "rerank_weights": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RerankWeights"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "enable_graph_retrieval": {
+            "type": "integer",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Enable Graph Retrieval",
+            "description": "Whether to add the graph retrieval route to hybrid retrieval. 1 enables it.",
+            "default": 0
+          },
+          "rerank_score_threshold": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rerank Score Threshold"
+          },
+          "metadata_filters": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/FilterGroup"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metadata Filters",
+            "description": "filter condition groups"
+          },
+          "metadata_filter_mode": {
+            "$ref": "#/components/schemas/MetadataFilterMode",
+            "description": "filter mode",
+            "default": "manual"
+          }
+        },
+        "type": "object",
+        "required": [
+          "query"
+        ],
+        "title": "ApiChunkRetrieve",
+        "description": "Supported request parameters for JWT retrieval."
+      },
       "ApiKeyAuth": {
         "properties": {
           "api_key_id": {
@@ -7757,54 +8048,6 @@
         ],
         "title": "ApiKeyCreate",
         "description": "创建 API Key"
-      },
-      "ApiKeyRegister": {
-        "properties": {
-          "api_key": {
-            "type": "string",
-            "maxLength": 500,
-            "title": "Api Key",
-            "description": "API密钥"
-          },
-          "api_base": {
-            "anyOf": [
-              {
-                "type": "string",
-                "maxLength": 500
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Api Base",
-            "description": "API基础URL"
-          },
-          "remark": {
-            "anyOf": [
-              {
-                "type": "string",
-                "maxLength": 255
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Remark",
-            "description": "备注"
-          },
-          "priority": {
-            "type": "integer",
-            "title": "Priority",
-            "description": "优先级（大者优先）",
-            "default": 0
-          }
-        },
-        "type": "object",
-        "required": [
-          "api_key"
-        ],
-        "title": "ApiKeyRegister",
-        "description": "模型域登记凭据（provider/model_name 由服务端按 config 读）"
       },
       "ApiKeyType": {
         "type": "string",
@@ -8168,6 +8411,19 @@
                 "type": "null"
               }
             ]
+          },
+          "ontology_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ontology Id",
+            "description": "绑定的本体ID（可选）"
           }
         },
         "type": "object",
@@ -8534,6 +8790,32 @@
             "type": "string",
             "title": "Name",
             "description": "KB name"
+          },
+          "audio2text_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Audio2Text Id",
+            "description": "Audio transcription model config ID (omitted or null inherits a compatible workspace audio model; remains null when none is available)"
+          },
+          "video2text_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Video2Text Id",
+            "description": "Video understanding model config ID (omitted or null inherits a compatible workspace video model; remains null when none is available)"
           }
         },
         "type": "object",
@@ -9102,6 +9384,32 @@
             "type": "string",
             "title": "Name",
             "description": "KB name (optional)"
+          },
+          "audio2text_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Audio2Text Id",
+            "description": "Audio transcription model config ID (null clears)"
+          },
+          "video2text_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Video2Text Id",
+            "description": "Video understanding model config ID (null clears)"
           }
         },
         "type": "object",
@@ -9521,194 +9829,6 @@
         ],
         "title": "ChunkCreate"
       },
-      "ChunkRetrieve": {
-        "properties": {
-          "query": {
-            "$ref": "#/components/schemas/RetrievalQuery"
-          },
-          "kb_ids": {
-            "items": {
-              "type": "string",
-              "format": "uuid"
-            },
-            "type": "array",
-            "title": "Kb Ids"
-          },
-          "ex_ids": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Ex Ids"
-          },
-          "knowledge_bases": {
-            "items": {
-              "$ref": "#/components/schemas/app__schemas__chunk_schema__KnowledgeBaseConfig"
-            },
-            "type": "array",
-            "title": "Knowledge Bases"
-          },
-          "file_names_filter": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "File Names Filter"
-          },
-          "similarity_threshold": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Similarity Threshold"
-          },
-          "vector_similarity_weight": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Vector Similarity Weight"
-          },
-          "top_k": {
-            "anyOf": [
-              {
-                "type": "integer",
-                "maximum": 100.0,
-                "minimum": 1.0
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Top K",
-            "default": 20
-          },
-          "top_n": {
-            "anyOf": [
-              {
-                "type": "integer",
-                "maximum": 100.0,
-                "minimum": 1.0
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Top N",
-            "default": 20
-          },
-          "retrieve_type": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/RetrieveType"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "rerank_id": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "uuid"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Rerank Id"
-          },
-          "rerank_mode": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/RerankMode"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "rerank_weights": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/RerankWeights"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "enable_graph_retrieval": {
-            "type": "integer",
-            "maximum": 1.0,
-            "minimum": 0.0,
-            "title": "Enable Graph Retrieval",
-            "description": "Whether to add the graph retrieval route to hybrid retrieval. 1 enables it.",
-            "default": 0
-          },
-          "rerank_score_threshold": {
-            "anyOf": [
-              {
-                "type": "number",
-                "maximum": 1.0,
-                "minimum": 0.0
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Rerank Score Threshold"
-          },
-          "metadata_filters": {
-            "anyOf": [
-              {
-                "items": {
-                  "$ref": "#/components/schemas/FilterGroup"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Metadata Filters",
-            "description": "filter condition groups"
-          },
-          "metadata_filter_mode": {
-            "$ref": "#/components/schemas/MetadataFilterMode",
-            "description": "filter mode",
-            "default": "manual"
-          }
-        },
-        "type": "object",
-        "required": [
-          "query"
-        ],
-        "title": "ChunkRetrieve"
-      },
       "ChunkType": {
         "type": "string",
         "enum": [
@@ -9847,136 +9967,25 @@
         "title": "ClassUpdateRequest",
         "description": "类型更新请求模型\n\n用于更新已有本体类型信息。\n\nAttributes:\n    class_name: 类型名称，可选，1-200字符\n    class_description: 类型描述，可选\n\nExamples:\n    >>> request = ClassUpdateRequest(\n    ...     class_name=\"更新后的类型名称\",\n    ...     class_description=\"更新后的描述\"\n    ... )"
       },
-      "CompositeMemberSpec": {
+      "CommunityPreviewRequest": {
         "properties": {
-          "provider": {
+          "config_id": {
             "type": "string",
-            "maxLength": 64,
-            "minLength": 1,
-            "title": "Provider",
-            "description": "成员模型供应商"
+            "format": "uuid",
+            "title": "Config Id"
           },
-          "model_name": {
+          "preview_case": {
             "type": "string",
-            "maxLength": 255,
             "minLength": 1,
-            "title": "Model Name",
-            "description": "成员模型名称"
+            "title": "Preview Case"
           }
         },
         "type": "object",
         "required": [
-          "provider",
-          "model_name"
+          "config_id",
+          "preview_case"
         ],
-        "title": "CompositeMemberSpec",
-        "description": "组合成员声明：以 (provider, model_name) 定位租户内成员 config。"
-      },
-      "CompositeModelCreate": {
-        "properties": {
-          "name": {
-            "type": "string",
-            "maxLength": 255,
-            "title": "Name",
-            "description": "组合模型名称（别名，真实调用名在成员声明）"
-          },
-          "type": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/ModelType"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "模型类型"
-          },
-          "logo": {
-            "anyOf": [
-              {
-                "type": "string",
-                "maxLength": 255
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Logo",
-            "description": "模型logo图片URL"
-          },
-          "description": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Description",
-            "description": "模型描述"
-          },
-          "config": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Config",
-            "description": "模型配置参数",
-            "default": {}
-          },
-          "is_active": {
-            "type": "boolean",
-            "title": "Is Active",
-            "description": "是否激活",
-            "default": true
-          },
-          "is_public": {
-            "type": "boolean",
-            "title": "Is Public",
-            "description": "是否公开",
-            "default": false
-          },
-          "members": {
-            "anyOf": [
-              {
-                "items": {
-                  "$ref": "#/components/schemas/CompositeMemberSpec"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Members",
-            "description": "组合成员列表（(provider, model_name) 声明）"
-          },
-          "load_balance_strategy": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Load Balance Strategy",
-            "description": "负载均衡策略",
-            "default": "none"
-          }
-        },
-        "type": "object",
-        "required": [
-          "name"
-        ],
-        "title": "CompositeModelCreate",
-        "description": "创建组合模型Schema"
+        "title": "CommunityPreviewRequest"
       },
       "ConfigParamsCreate": {
         "properties": {
@@ -10296,12 +10305,7 @@
                 "enum": [
                   "RecursiveChunker",
                   "TokenChunker",
-                  "SemanticChunker",
-                  "NeuralChunker",
-                  "HybridChunker",
-                  "LLMChunker",
-                  "SentenceChunker",
-                  "LateChunker"
+                  "SentenceChunker"
                 ]
               },
               {
@@ -11035,6 +11039,18 @@
             "title": "Files",
             "description": "附件列表（支持多文件）"
           },
+          "thinking": {
+            "type": "boolean",
+            "title": "Thinking",
+            "description": "是否启用深度思考（集群需 model_parameters.deep_thinking 同时开启）",
+            "default": false
+          },
+          "web_search": {
+            "type": "boolean",
+            "title": "Web Search",
+            "description": "是否启用联网搜索（集群需 features.web_search.enabled 同时开启，仅主管生效）",
+            "default": false
+          },
           "trigger_payload": {
             "anyOf": [
               {
@@ -11280,7 +11296,7 @@
               }
             ],
             "title": "Emotion Type",
-            "description": "情绪类型过滤（joy/sadness/anger/fear/surprise/neutral）"
+            "description": "情绪类型过滤（neutral/joy/relief/anxiety/sadness/anger/frustration/loneliness/confusion/hope；旧值 fear/surprise 兼容）"
           },
           "start_date": {
             "anyOf": [
@@ -11339,7 +11355,7 @@
               }
             ],
             "title": "Emotion Type",
-            "description": "情绪类型过滤（joy/sadness/anger/fear/surprise/neutral）"
+            "description": "情绪类型过滤（neutral/joy/relief/anxiety/sadness/anger/frustration/loneliness/confusion/hope；旧值 fear/surprise 兼容）"
           },
           "limit": {
             "type": "integer",
@@ -12554,6 +12570,92 @@
         "type": "object",
         "title": "KBBatchDownloadRequest"
       },
+      "KnowledgeBaseConfig": {
+        "properties": {
+          "kb_id": {
+            "type": "string",
+            "title": "Kb Id",
+            "description": "知识库ID"
+          },
+          "top_k": {
+            "type": "integer",
+            "maximum": 20.0,
+            "minimum": 1.0,
+            "title": "Top K",
+            "description": "检索返回的文档数量",
+            "default": 3
+          },
+          "similarity_threshold": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Similarity Threshold",
+            "description": "相似度阈值",
+            "default": 0.7
+          },
+          "vector_similarity_weight": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vector Similarity Weight",
+            "description": "向量相似度权重（语义/混合/图谱检索使用，分词检索不使用）",
+            "default": 0.5
+          },
+          "retrieve_type": {
+            "type": "string",
+            "title": "Retrieve Type",
+            "description": "检索方式participle｜ semantic｜hybrid",
+            "default": "hybrid"
+          },
+          "enable_graph_retrieval": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 1.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enable Graph Retrieval",
+            "description": "混合检索下是否启用证据图谱通道"
+          },
+          "rerank_mode": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RerankMode"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "rerank_weights": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RerankWeights"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "kb_id"
+        ],
+        "title": "KnowledgeBaseConfig",
+        "description": "单个知识库配置"
+      },
       "KnowledgeCreate": {
         "properties": {
           "workspace_id": {
@@ -12688,6 +12790,30 @@
             ],
             "title": "Image2Text Id"
           },
+          "audio2text_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Audio2Text Id"
+          },
+          "video2text_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Video2Text Id"
+          },
           "doc_num": {
             "anyOf": [
               {
@@ -12819,7 +12945,7 @@
         "properties": {
           "knowledge_bases": {
             "items": {
-              "$ref": "#/components/schemas/app__schemas__app_schema__KnowledgeBaseConfig"
+              "$ref": "#/components/schemas/KnowledgeBaseConfig"
             },
             "type": "array",
             "title": "Knowledge Bases",
@@ -13094,6 +13220,30 @@
               }
             ],
             "title": "Image2Text Id"
+          },
+          "audio2text_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Audio2Text Id"
+          },
+          "video2text_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Video2Text Id"
           },
           "doc_num": {
             "anyOf": [
@@ -13824,218 +13974,6 @@
         ],
         "title": "MetadataFilterMode"
       },
-      "ModelBaseCreate": {
-        "properties": {
-          "name": {
-            "type": "string",
-            "maxLength": 255,
-            "title": "Name",
-            "description": "模型唯一标识"
-          },
-          "type": {
-            "$ref": "#/components/schemas/ModelType",
-            "description": "模型类型"
-          },
-          "provider": {
-            "$ref": "#/components/schemas/ModelProvider",
-            "description": "提供商"
-          },
-          "logo": {
-            "anyOf": [
-              {
-                "type": "string",
-                "maxLength": 255
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Logo",
-            "description": "模型logo图片URL"
-          },
-          "description": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Description",
-            "description": "模型描述"
-          },
-          "is_official": {
-            "type": "boolean",
-            "title": "Is Official",
-            "description": "是否供应商官方模型",
-            "default": true
-          },
-          "tags": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array",
-            "title": "Tags",
-            "description": "模型标签"
-          },
-          "capability": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array",
-            "title": "Capability",
-            "description": "模型能力列表（如['vision', 'audio', 'video']）"
-          },
-          "is_omni": {
-            "type": "boolean",
-            "title": "Is Omni",
-            "description": "是否为Omni模型",
-            "default": false
-          }
-        },
-        "type": "object",
-        "required": [
-          "name",
-          "type",
-          "provider"
-        ],
-        "title": "ModelBaseCreate",
-        "description": "创建基础模型Schema"
-      },
-      "ModelBaseUpdate": {
-        "properties": {
-          "name": {
-            "anyOf": [
-              {
-                "type": "string",
-                "maxLength": 255
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Name",
-            "description": "模型唯一标识"
-          },
-          "type": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/ModelType"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "模型类型"
-          },
-          "provider": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/ModelProvider"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "提供商"
-          },
-          "logo": {
-            "anyOf": [
-              {
-                "type": "string",
-                "maxLength": 255
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Logo",
-            "description": "模型logo图片URL"
-          },
-          "description": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Description",
-            "description": "模型描述"
-          },
-          "is_deprecated": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Is Deprecated",
-            "description": "是否弃用"
-          },
-          "is_official": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Is Official",
-            "description": "是否供应商官方模型"
-          },
-          "tags": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Tags",
-            "description": "模型标签"
-          },
-          "capability": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Capability",
-            "description": "模型能力列表"
-          },
-          "is_omni": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Is Omni",
-            "description": "是否为Omni模型"
-          }
-        },
-        "type": "object",
-        "title": "ModelBaseUpdate",
-        "description": "更新基础模型Schema"
-      },
       "ModelCompareItem": {
         "properties": {
           "model_config_id": {
@@ -14088,261 +14026,6 @@
         ],
         "title": "ModelCompareItem",
         "description": "单个对比模型配置"
-      },
-      "ModelConfigCreate": {
-        "properties": {
-          "name": {
-            "type": "string",
-            "maxLength": 255,
-            "title": "Name",
-            "description": "模型显示名称"
-          },
-          "type": {
-            "$ref": "#/components/schemas/ModelType",
-            "description": "模型类型"
-          },
-          "logo": {
-            "anyOf": [
-              {
-                "type": "string",
-                "maxLength": 255
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Logo",
-            "description": "模型logo图片URL"
-          },
-          "description": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Description",
-            "description": "模型描述"
-          },
-          "provider": {
-            "type": "string",
-            "title": "Provider",
-            "description": "供应商"
-          },
-          "config": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Config",
-            "description": "模型配置参数",
-            "default": {}
-          },
-          "is_active": {
-            "type": "boolean",
-            "title": "Is Active",
-            "description": "是否激活",
-            "default": true
-          },
-          "is_public": {
-            "type": "boolean",
-            "title": "Is Public",
-            "description": "是否公开",
-            "default": false
-          },
-          "load_balance_strategy": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Load Balance Strategy",
-            "description": "负载均衡策略",
-            "default": "none"
-          },
-          "capability": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array",
-            "title": "Capability",
-            "description": "模型能力列表"
-          },
-          "is_omni": {
-            "type": "boolean",
-            "title": "Is Omni",
-            "description": "是否为Omni模型",
-            "default": false
-          },
-          "model_id": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "uuid"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Model Id",
-            "description": "基础模型ID"
-          },
-          "credential": {
-            "$ref": "#/components/schemas/ApiKeyRegister",
-            "description": "模型凭据（必填，创建时活体验证）"
-          }
-        },
-        "type": "object",
-        "required": [
-          "name",
-          "type",
-          "provider",
-          "credential"
-        ],
-        "title": "ModelConfigCreate",
-        "description": "创建自定义模型Schema（内嵌 credential：创建即登记点名渠道，单接口原子完成）\n\n自定义模型不经模型广场添加，provider 级渠道不保证可用，因此凭据必填并\n在创建时做活体验证；验证失败拒绝创建（零落库）。"
-      },
-      "ModelConfigUpdate": {
-        "properties": {
-          "name": {
-            "anyOf": [
-              {
-                "type": "string",
-                "maxLength": 255
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Name",
-            "description": "模型显示名称"
-          },
-          "type": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/ModelType"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "模型类型"
-          },
-          "provider": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Provider",
-            "description": "供应商"
-          },
-          "logo": {
-            "anyOf": [
-              {
-                "type": "string",
-                "maxLength": 255
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Logo",
-            "description": "模型logo图片URL"
-          },
-          "description": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Description",
-            "description": "模型描述"
-          },
-          "config": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Config",
-            "description": "模型配置参数"
-          },
-          "is_active": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Is Active",
-            "description": "是否激活"
-          },
-          "is_public": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Is Public",
-            "description": "是否公开"
-          },
-          "capability": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Capability",
-            "description": "模型能力列表"
-          },
-          "is_omni": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Is Omni",
-            "description": "是否为Omni模型"
-          }
-        },
-        "type": "object",
-        "title": "ModelConfigUpdate",
-        "description": "更新模型配置Schema"
       },
       "ModelParameters": {
         "properties": {
@@ -14440,99 +14123,6 @@
         "title": "ModelParameters",
         "description": "模型参数配置"
       },
-      "ModelProvider": {
-        "type": "string",
-        "enum": [
-          "openai",
-          "speedbear",
-          "minimax",
-          "dashscope",
-          "ollama",
-          "xinference",
-          "gpustack",
-          "bedrock",
-          "volcano",
-          "composite"
-        ],
-        "title": "ModelProvider",
-        "description": "模型提供商枚举"
-      },
-      "ModelType": {
-        "type": "string",
-        "enum": [
-          "llm",
-          "embedding",
-          "rerank",
-          "asr",
-          "image",
-          "video"
-        ],
-        "title": "ModelType",
-        "description": "模型类型枚举"
-      },
-      "ModelValidateRequest": {
-        "properties": {
-          "model_name": {
-            "type": "string",
-            "title": "Model Name",
-            "description": "模型实际名称"
-          },
-          "provider": {
-            "$ref": "#/components/schemas/ModelProvider",
-            "description": "API Key提供商"
-          },
-          "api_key": {
-            "type": "string",
-            "title": "Api Key",
-            "description": "API密钥"
-          },
-          "api_base": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Api Base",
-            "description": "API基础URL"
-          },
-          "model_type": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/ModelType"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "模型类型",
-            "default": "llm"
-          },
-          "test_message": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Test Message",
-            "description": "测试消息",
-            "default": "Hello"
-          }
-        },
-        "type": "object",
-        "required": [
-          "model_name",
-          "provider",
-          "api_key"
-        ],
-        "title": "ModelValidateRequest",
-        "description": "验证模型配置请求"
-      },
       "MultiAgentConfigUpdate": {
         "properties": {
           "master_agent_id": {
@@ -14588,15 +14178,15 @@
             "anyOf": [
               {
                 "type": "string",
-                "pattern": "^(collaboration|supervisor)$"
+                "pattern": "^(collaboration|supervisor|supervisor_loop)$"
               },
               {
                 "type": "null"
               }
             ],
             "title": "Orchestration Mode",
-            "description": "协作模式：collaboration（协作）| supervisor（监督）",
-            "default": "collaboration"
+            "description": "协作模式：supervisor_loop（主管 ReAct 循环，默认）| supervisor（主管三段式）| collaboration（协作）",
+            "default": "supervisor_loop"
           },
           "sub_agents": {
             "anyOf": [
@@ -14635,6 +14225,17 @@
                 "type": "null"
               }
             ]
+          },
+          "supervisor_config": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SupervisorConfig"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "主管配置（全模式；含集群变量 variables；None=不更新该字段）"
           },
           "aggregation_strategy": {
             "anyOf": [
@@ -14732,6 +14333,20 @@
             "title": "Memory",
             "description": "是否启用记忆功能",
             "default": true
+          },
+          "thinking": {
+            "type": "boolean",
+            "title": "Thinking",
+            "description": "是否启用深度思考（需集群 model_parameters.deep_thinking 同时开启）",
+            "default": false
+          },
+          "files": {
+            "items": {
+              "$ref": "#/components/schemas/FileInput"
+            },
+            "type": "array",
+            "title": "Files",
+            "description": "附件列表（需 supervisor_config.features.file_upload 开启；仅 supervisor_loop 模式给主管）"
           }
         },
         "type": "object",
@@ -15441,6 +15056,100 @@
         "title": "PilotRunInput",
         "description": "试运行请求 — QA 格式输入。\n\n与 /api/memory-storage/write 使用同一 messages 结构，避免两套输入解析逻辑。"
       },
+      "PredictionConfigUpdateRequest": {
+        "properties": {
+          "config_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Config Id"
+          },
+          "prediction_candidate_limit": {
+            "type": "integer",
+            "exclusiveMinimum": 0.0,
+            "title": "Prediction Candidate Limit"
+          },
+          "prediction_participant_limit": {
+            "type": "integer",
+            "exclusiveMinimum": 0.0,
+            "title": "Prediction Participant Limit"
+          },
+          "prediction_max_steps": {
+            "type": "integer",
+            "maximum": 6.0,
+            "minimum": 1.0,
+            "title": "Prediction Max Steps"
+          },
+          "prediction_recall_limit": {
+            "type": "integer",
+            "exclusiveMinimum": 0.0,
+            "title": "Prediction Recall Limit"
+          },
+          "prediction_min_valid_memory_count": {
+            "type": "integer",
+            "exclusiveMinimum": 0.0,
+            "title": "Prediction Min Valid Memory Count"
+          },
+          "prediction_embedding_min_similarity": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Prediction Embedding Min Similarity"
+          }
+        },
+        "type": "object",
+        "required": [
+          "config_id",
+          "prediction_candidate_limit",
+          "prediction_participant_limit",
+          "prediction_max_steps",
+          "prediction_recall_limit",
+          "prediction_min_valid_memory_count",
+          "prediction_embedding_min_similarity"
+        ],
+        "title": "PredictionConfigUpdateRequest",
+        "description": "Full update payload for prediction-engine configuration."
+      },
+      "PreferenceConfigUpdate": {
+        "properties": {
+          "config_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Config Id"
+          },
+          "preference_engine_enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Preference Engine Enabled"
+          },
+          "custom_keywords": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Custom Keywords"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "config_id"
+        ],
+        "title": "PreferenceConfigUpdate",
+        "description": "Update one workspace-owned preference configuration."
+      },
       "PromptOptMessage": {
         "properties": {
           "model_id": {
@@ -15501,129 +15210,6 @@
           "prompt"
         ],
         "title": "PromptSaveRequest"
-      },
-      "ProviderApiKeyCreate": {
-        "properties": {
-          "api_key": {
-            "type": "string",
-            "maxLength": 500,
-            "title": "Api Key",
-            "description": "API密钥"
-          },
-          "api_base": {
-            "anyOf": [
-              {
-                "type": "string",
-                "maxLength": 500
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Api Base",
-            "description": "不接受：公共渠道按能力使用供应商公共端点（传非空值将 400）"
-          },
-          "remark": {
-            "anyOf": [
-              {
-                "type": "string",
-                "maxLength": 255
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Remark",
-            "description": "备注"
-          },
-          "priority": {
-            "type": "integer",
-            "title": "Priority",
-            "description": "优先级（大者优先）",
-            "default": 0
-          },
-          "provider": {
-            "$ref": "#/components/schemas/ModelProvider",
-            "description": "API Key提供商"
-          }
-        },
-        "type": "object",
-        "required": [
-          "api_key",
-          "provider"
-        ],
-        "title": "ProviderApiKeyCreate",
-        "description": "Provider 域登记公共凭据（provider 级 [] 渠道，覆盖该供应商全部未点名模型）\n\n公共渠道固定使用供应商公共端点（运行时按 llm/embedding/rerank 能力区分），\n不接受 api_base；本地提供商无公共端点不可登记。自定义端点请改在模型域\n按模型登记（或编辑点名渠道）。"
-      },
-      "ProviderApiKeyUpdate": {
-        "properties": {
-          "priority": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Priority",
-            "description": "优先级（大者优先）"
-          },
-          "remark": {
-            "anyOf": [
-              {
-                "type": "string",
-                "maxLength": 255
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Remark",
-            "description": "备注"
-          },
-          "api_base": {
-            "anyOf": [
-              {
-                "type": "string",
-                "maxLength": 500
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Api Base",
-            "description": "API基础URL（仅点名渠道；公共渠道传非空值将 400；null 清空）"
-          },
-          "is_active": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Is Active",
-            "description": "渠道启停"
-          },
-          "api_key": {
-            "anyOf": [
-              {
-                "type": "string",
-                "maxLength": 500
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Api Key",
-            "description": "重填凭据"
-          }
-        },
-        "type": "object",
-        "title": "ProviderApiKeyUpdate",
-        "description": "渠道属性更新（Provider 域公共渠道与模型域点名渠道共用）\n\n省略 = 不改；api_base/remark 显式 null = 清空；priority/is_active 显式 null 视为省略；\napi_key 非空 = 重填凭据（重加密）。model_names 不可改。"
       },
       "PublishRequest": {
         "properties": {
@@ -16200,6 +15786,92 @@
         "title": "SceneCreateRequest",
         "description": "场景创建请求模型\n\n用于创建新的本体场景。\n\nAttributes:\n    scene_name: 场景名称，必填，1-200字符\n    scene_description: 场景描述，可选\n\nExamples:\n    >>> request = SceneCreateRequest(\n    ...     scene_name=\"医疗场景\",\n    ...     scene_description=\"用于医疗领域的本体建模\"\n    ... )"
       },
+      "SceneSplitDemoRequest": {
+        "properties": {
+          "config_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "integer"
+              }
+            ],
+            "title": "Config Id"
+          },
+          "history_messages": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "History Messages"
+          },
+          "current_query": {
+            "type": "string",
+            "title": "Current Query"
+          },
+          "scene_threshold": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 0.95,
+                "minimum": 0.5
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scene Threshold"
+          },
+          "scene_history_window_size": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 4.0,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scene History Window Size"
+          },
+          "scene_min_turns": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 10.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scene Min Turns"
+          },
+          "scene_max_turns": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 100.0,
+                "minimum": 5.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scene Max Turns"
+          }
+        },
+        "type": "object",
+        "required": [
+          "config_id",
+          "current_query"
+        ],
+        "title": "SceneSplitDemoRequest",
+        "description": "BERT 场景切分演示请求；未传的配置项由接口回落到 config_id 对应配置。\n\n当前场景轮次不由前端传入，由接口按「实际历史消息条数」推导（不含当前 Query，\n与 scene_history_window_size 无关），仅用于演示短路分支。"
+      },
       "SceneUpdateRequest": {
         "properties": {
           "scene_name": {
@@ -16545,6 +16217,29 @@
             "type": "array",
             "title": "Capabilities",
             "description": "能力列表"
+          },
+          "release_policy": {
+            "type": "string",
+            "enum": [
+              "current",
+              "pinned"
+            ],
+            "title": "Release Policy",
+            "description": "版本策略：current 跟随最新发布版本，pinned 固定版本",
+            "default": "current"
+          },
+          "release_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Release Id",
+            "description": "固定的 AppRelease ID，仅 release_policy=pinned 时必填"
           }
         },
         "type": "object",
@@ -16553,7 +16248,7 @@
           "name"
         ],
         "title": "SubAgentConfig",
-        "description": "子 Agent 配置"
+        "description": "子 Agent 配置\n\n版本策略（对齐工作流 Agent 节点的 AgentReferenceConfig）：\n- current：跟随子 Agent 应用的当前发布版本；集群发布时才钉死为具体版本。\n- pinned：固定到 release_id 指定的已发布版本。\n\n入参 agent_id 是子 Agent 的应用 ID；落库时后端把它换成有效的 release ID\n（current=保存时的当前发布版本，仅作锚点；pinned=release_id）。\n存量 JSON 没有 release_policy，由解析层按 pinned 处理，行为不变。"
       },
       "SubProblemEnum": {
         "type": "string",
@@ -16580,6 +16275,100 @@
         "type": "object",
         "title": "SuggestedQuestionsConfig",
         "description": "下一步问题建议配置"
+      },
+      "SupervisorConfig": {
+        "properties": {
+          "system_prompt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 8000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "System Prompt",
+            "description": "主管自定义系统提示词（渲染集群变量 {{var}} 后，自动段之前拼接）。留空 = 仅自动段（名册+分派纪律）"
+          },
+          "memory": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MemoryConfig"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "主管记忆配置（{'enabled': bool}；集群会话历史不受此开关控制，始终保留）"
+          },
+          "knowledge_retrieval": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/KnowledgeRetrievalConfig"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "主管知识库检索配置（与单 Agent 应用 KnowledgeRetrievalConfig 同构）"
+          },
+          "tools": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ToolConfig"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tools",
+            "description": "主管工具配置（与单 Agent 应用 ToolConfig 同构）"
+          },
+          "skills": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SkillConfig"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "主管技能配置（与单 Agent 应用 SkillConfig 同构）"
+          },
+          "variables": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/app__schemas__app_schema__VariableDefinition"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Variables",
+            "description": "集群变量定义（对外契约，优先于子 Agent 变量并集）：[{'name': str, 'display_name': str, 'type': str, 'required': bool, 'default_value': '...'}]；None/空 = 退化为子 Agent 变量并集"
+          },
+          "features": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AppFeatures"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "对话功能特性（与单 Agent 应用 AppFeatures 同构）：file_upload / opening_statement / suggested_questions_after_answer / text_to_speech / citation / web_search / context_engine / emotion_reply。None = 全部关闭（存量集群行为不变，零迁移）"
+          }
+        },
+        "type": "object",
+        "title": "SupervisorConfig",
+        "description": "主管配置（全模式；supervisor_loop 模式下还含主管本体能力面）。\n\n结构对齐单 Agent 应用的能力面；留空/缺省 = 现状\"裸主管\"行为\n（硬编码 prompt + 仅 SubAgentTool），存量配置零迁移。\n\n集群变量定义统一放在本模型的 variables 键（不再单列 MultiAgentConfig.variables）。\n主管 prompt 与子 Agent 共用同一变量包，不另设\"主管私有变量\"\n（避免两套变量定义打架）；缺省/空 = 运行时退化为子 Agent 变量并集。"
       },
       "TextRetrievalQuery": {
         "properties": {
@@ -17193,6 +16982,162 @@
           "end_user_id"
         ],
         "title": "UserInput"
+      },
+      "V1ChunkRetrieve": {
+        "properties": {
+          "query": {
+            "$ref": "#/components/schemas/RetrievalQuery"
+          },
+          "kb_ids": {
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "type": "array",
+            "title": "Kb Ids"
+          },
+          "ex_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ex Ids"
+          },
+          "file_names_filter": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "File Names Filter"
+          },
+          "similarity_threshold": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Similarity Threshold"
+          },
+          "vector_similarity_weight": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vector Similarity Weight"
+          },
+          "top_k": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 100.0,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Top K",
+            "default": 20
+          },
+          "retrieve_type": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RetrieveType"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "rerank_mode": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RerankMode"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "rerank_weights": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RerankWeights"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "enable_graph_retrieval": {
+            "type": "integer",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Enable Graph Retrieval",
+            "description": "Whether to add the graph retrieval route to hybrid retrieval. 1 enables it.",
+            "default": 0
+          },
+          "rerank_score_threshold": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rerank Score Threshold"
+          },
+          "metadata_filters": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/FilterGroup"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metadata Filters",
+            "description": "filter condition groups"
+          },
+          "metadata_filter_mode": {
+            "$ref": "#/components/schemas/MetadataFilterMode",
+            "description": "filter mode",
+            "default": "manual"
+          }
+        },
+        "type": "object",
+        "required": [
+          "query"
+        ],
+        "title": "V1ChunkRetrieve",
+        "description": "Supported request parameters for API Key retrieval."
       },
       "ValidationError": {
         "properties": {
@@ -18096,92 +18041,6 @@
         ],
         "title": "ToolExecuteRequest"
       },
-      "app__schemas__app_schema__KnowledgeBaseConfig": {
-        "properties": {
-          "kb_id": {
-            "type": "string",
-            "title": "Kb Id",
-            "description": "知识库ID"
-          },
-          "top_k": {
-            "type": "integer",
-            "maximum": 20.0,
-            "minimum": 1.0,
-            "title": "Top K",
-            "description": "检索返回的文档数量",
-            "default": 3
-          },
-          "similarity_threshold": {
-            "type": "number",
-            "maximum": 1.0,
-            "minimum": 0.0,
-            "title": "Similarity Threshold",
-            "description": "相似度阈值",
-            "default": 0.7
-          },
-          "vector_similarity_weight": {
-            "anyOf": [
-              {
-                "type": "number",
-                "maximum": 1.0,
-                "minimum": 0.0
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Vector Similarity Weight",
-            "description": "向量相似度权重（语义/混合/图谱检索使用，分词检索不使用）",
-            "default": 0.5
-          },
-          "retrieve_type": {
-            "type": "string",
-            "title": "Retrieve Type",
-            "description": "检索方式participle｜ semantic｜hybrid",
-            "default": "hybrid"
-          },
-          "enable_graph_retrieval": {
-            "anyOf": [
-              {
-                "type": "integer",
-                "maximum": 1.0,
-                "minimum": 0.0
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Enable Graph Retrieval",
-            "description": "混合检索下是否启用证据图谱通道"
-          },
-          "rerank_mode": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/RerankMode"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "rerank_weights": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/RerankWeights"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "type": "object",
-        "required": [
-          "kb_id"
-        ],
-        "title": "KnowledgeBaseConfig",
-        "description": "单个知识库配置"
-      },
       "app__schemas__app_schema__VariableDefinition": {
         "properties": {
           "name": {
@@ -18245,105 +18104,6 @@
         "title": "VariableDefinition",
         "description": "变量定义"
       },
-      "app__schemas__chunk_schema__KnowledgeBaseConfig": {
-        "properties": {
-          "kb_id": {
-            "type": "string",
-            "format": "uuid",
-            "title": "Kb Id",
-            "description": "Knowledge base ID"
-          },
-          "similarity_threshold": {
-            "type": "number",
-            "maximum": 1.0,
-            "minimum": 0.0,
-            "title": "Similarity Threshold",
-            "description": "Knowledge base similarity threshold",
-            "default": 0.2
-          },
-          "vector_similarity_weight": {
-            "anyOf": [
-              {
-                "type": "number",
-                "maximum": 1.0,
-                "minimum": 0.0
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Vector Similarity Weight",
-            "description": "Knowledge base vector similarity weight（语义/混合/图谱检索使用，分词检索不使用）",
-            "default": 0.3
-          },
-          "rerank_score_threshold": {
-            "anyOf": [
-              {
-                "type": "number",
-                "maximum": 1.0,
-                "minimum": 0.0
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Rerank Score Threshold",
-            "description": "Knowledge base rerank score threshold"
-          },
-          "top_k": {
-            "type": "integer",
-            "maximum": 100.0,
-            "minimum": 1.0,
-            "title": "Top K",
-            "description": "Knowledge base top k",
-            "default": 4
-          },
-          "retrieve_type": {
-            "$ref": "#/components/schemas/RetrieveType",
-            "description": "Retrieve type",
-            "default": "participle"
-          },
-          "rerank_mode": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/RerankMode"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "rerank_weights": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/RerankWeights"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "enable_graph_retrieval": {
-            "anyOf": [
-              {
-                "type": "integer",
-                "maximum": 1.0,
-                "minimum": 0.0
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Enable Graph Retrieval",
-            "description": "Whether this knowledge base adds the Evidence Graph channel during hybrid retrieval. Falls back to the request value when omitted."
-          }
-        },
-        "type": "object",
-        "required": [
-          "kb_id"
-        ],
-        "title": "KnowledgeBaseConfig"
-      },
       "app__schemas__multi_agent_schema__ExecutionConfig": {
         "properties": {
           "max_iterations": {
@@ -18351,16 +18111,24 @@
             "maximum": 20.0,
             "minimum": 1.0,
             "title": "Max Iterations",
-            "description": "最大迭代次数",
-            "default": 5
+            "description": "主管循环轮次上限（一轮=主管一次决策里发出的那批子 Agent 调用，同轮并发多个只算 1 轮），仅 orchestration_mode=supervisor_loop 生效；达到上限后新一轮的子 Agent 调用不再执行，把限制写进工具返回值让主管基于已有结果收尾；前端不提供配置入口，统一使用默认值 10",
+            "default": 10
           },
           "timeout": {
             "type": "integer",
             "maximum": 300.0,
             "minimum": 10.0,
             "title": "Timeout",
-            "description": "超时时间（秒）",
+            "description": "子 Agent 非流式执行的总超时（秒）。流式路径不用它——流式受 stream_idle_timeout 约束（长回答只要持续产出就不该被总时长杀掉）",
             "default": 60
+          },
+          "stream_idle_timeout": {
+            "type": "integer",
+            "maximum": 3600.0,
+            "minimum": 30.0,
+            "title": "Stream Idle Timeout",
+            "description": "子 Agent 流式执行的**事件间空闲**超时（秒）。取值需大于最慢工具的合法静默时长（沙箱代码执行 / 联网搜索在 tool_start→tool_end 之间完全无事件），设太小会误杀正常调用。作用是兜住真死锁（前端滚轮永久冻屏）",
+            "default": 300
           },
           "parallel_limit": {
             "type": "integer",
@@ -18373,36 +18141,45 @@
           "retry_on_failure": {
             "type": "boolean",
             "title": "Retry On Failure",
-            "description": "失败时是否重试",
-            "default": true
+            "description": "子 Agent 失败时是否重试。默认关：重试会重复消耗模型配额，且流式路径只在\"尚未产出任何事件\"时才安全重试",
+            "default": false
           },
           "max_retries": {
             "type": "integer",
             "maximum": 10.0,
             "minimum": 0.0,
             "title": "Max Retries",
-            "description": "最大重试次数",
-            "default": 3
-          },
-          "routing_mode": {
-            "type": "string",
-            "pattern": "^(master_agent|llm_router|rule_only)$",
-            "title": "Routing Mode",
-            "description": "路由模式：master_agent（Master Agent决策）| llm_router（旧LLM路由器）| rule_only（仅规则路由）",
-            "default": "master_agent"
+            "description": "最大重试次数（不含首次）。仅对瞬时失败生效——配置类错误（BusinessException）、超时、取消都不重试，重跑必然同样失败",
+            "default": 2
           },
           "enable_rule_fast_path": {
             "type": "boolean",
             "title": "Enable Rule Fast Path",
-            "description": "是否启用规则快速路径（性能优化，高置信度关键词直接返回）",
-            "default": true
+            "description": "已废弃：关键词规则快路径不再生效，保留字段仅为兼容存量配置。确定性编排请使用 orchestration_mode 的声明式模式（pipeline/fanout/router）。",
+            "default": false
           },
           "result_merge_mode": {
             "type": "string",
             "pattern": "^(smart|master)$",
             "title": "Result Merge Mode",
-            "description": "结果整合模式：smart（规则去重，快速）| master（Master Agent 智能整合，连贯）",
-            "default": "smart"
+            "description": "结果整合模式：master（Master Agent 流式智能整合，默认；连贯去重）| smart（规则拼接，不调用模型，快速）",
+            "default": "master"
+          },
+          "merge_max_tokens": {
+            "type": "integer",
+            "maximum": 32000.0,
+            "minimum": 256.0,
+            "title": "Merge Max Tokens",
+            "description": "Master Agent 整合输出的最大 token 数（仅 result_merge_mode=master 生效）",
+            "default": 8192
+          },
+          "supervisor_max_tool_calls": {
+            "type": "integer",
+            "maximum": 10.0,
+            "minimum": 1.0,
+            "title": "Supervisor Max Tool Calls",
+            "description": "主管循环单轮内最多分派子 Agent 次数（tool_call_limit），仅 orchestration_mode=supervisor_loop 生效",
+            "default": 3
           },
           "sub_agent_execution_mode": {
             "type": "string",

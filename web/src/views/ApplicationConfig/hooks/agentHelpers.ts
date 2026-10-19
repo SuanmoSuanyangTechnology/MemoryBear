@@ -3,7 +3,7 @@
  * React state / form access) makes the logic reusable and unit-testable, and
  * lets the hook focus on orchestration.
  */
-import type { Config, MemoryConfig } from '../types'
+import type { Config, FeaturesConfigForm, MemoryConfig } from '../types'
 import { normalizeSavedAgent } from './modelContract'
 import type { Variable } from '../components/VariableList/types'
 import type { KnowledgeConfig, KnowledgeConfigForm } from '@/components/Knowledge/types'
@@ -45,6 +45,32 @@ export function findInvalidVariables(text: string | null | undefined, existingNa
   const usedVars = [...new Set([...(text?.matchAll(/\{\{(\w+)\}\}/g) ?? [])].map(m => m[1]))]
   const validNames = new Set(existingNames)
   return usedVars.filter(v => !validNames.has(v))
+}
+
+/**
+ * Append variables referenced by an enabled opening statement but not yet defined.
+ * Returns the original array when no variables need to be added.
+ */
+export function appendMissingOpeningStatementVariables(
+  openingStatement: FeaturesConfigForm['opening_statement'] | undefined,
+  variables: Variable[] = [],
+): Variable[] {
+  if (!openingStatement?.enabled) return variables
+
+  const missingNames = findInvalidVariables(
+    openingStatement.statement,
+    variables.map(variable => variable.name),
+  )
+  if (missingNames.length === 0) return variables
+
+  const missingVariables = buildVariablesFromNames(missingNames).map((variable, index) => ({
+    ...variable,
+    index: variables.length + index,
+    required: true,
+    max_length: 48,
+  }))
+
+  return [...variables, ...missingVariables]
 }
 
 /**

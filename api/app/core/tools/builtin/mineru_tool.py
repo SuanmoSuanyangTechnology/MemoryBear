@@ -282,8 +282,10 @@ class MinerUTool(BuiltinTool):
             if not file_content and file_url:
                 file_content = file_url
 
-            file_name, file_content = self._resolve_file_url(
-                file_name, file_content
+            # requests 是同步阻塞调用(最多读 100MB),直接在协程里调用会卡死
+            # 整个事件循环,必须丢到线程里执行
+            file_name, file_content = await asyncio.to_thread(
+                self._resolve_file_url, file_name, file_content
             )
             
             if not isinstance(file_content, bytes) or not file_content:

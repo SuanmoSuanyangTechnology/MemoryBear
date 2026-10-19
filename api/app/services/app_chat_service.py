@@ -164,6 +164,32 @@ class AppChatService:
             return await self.db.get(model, identity)
         return self.db.get(model, identity)
 
+    async def _get_last_current_assistant_id(self, conversation_id) -> Optional[uuid.UUID]:
+        """本轮提问之前，会话里最后一条 is_current 的 assistant 消息 ID。
+
+        用作本轮 user 消息的 parent_message_id（user 接在用户当前所处的版本之后），
+        使 _load_branch_chain 能按 parent 精确隔离各版本的后续对话，
+        而不是靠时间兜底把同一批后续对话挂到每个版本上。必须在本轮消息入队之前调用。
+        查询失败只降级为 None（等同旧行为），不影响对话落库。
+        """
+        if not conversation_id:
+            return None
+        try:
+            conv_uuid = conversation_id if isinstance(conversation_id, uuid.UUID) else uuid.UUID(str(conversation_id))
+            async with get_async_db_context() as db:
+                result = await db.execute(
+                    select(Message.id).where(
+                        Message.conversation_id == conv_uuid,
+                        Message.role == "assistant",
+                        Message.is_current.is_(True),
+                        Message.is_deleted.is_not(True),
+                    ).order_by(Message.created_at.desc()).limit(1)
+                )
+                return result.scalar_one_or_none()
+        except Exception as e:
+            logger.warning("查询上一条当前 assistant 消息失败，user 消息不记录 parent", extra={"error": str(e)})
+            return None
+
     async def _fetch_completed_file_metadata(self, local_ids: list[uuid.UUID]) -> dict[str, SimpleNamespace]:
         if not local_ids:
             return {}
@@ -255,12 +281,15 @@ class AppChatService:
             if not match:
                 return None
             answer = match["answer"]
+            # user 消息接在用户当前所处的 assistant 版本之后（须在本轮消息写入前查询）
+            _user_parent_id = await self._get_last_current_assistant_id(conversation_id)
             await self.conversation_service.add_message_async(
                 message_id=user_message_id,
                 conversation_id=conversation_id,
                 role="user",
                 content=message,
                 meta_data={"files": []},
+                parent_message_id=_user_parent_id,
             )
             await self.conversation_service.add_message_async(
                 message_id=message_id,
@@ -1690,6 +1719,8 @@ class AppChatService:
                     "conversation_id": str(conversation_id),
                     "user_message_id_override": user_message_id,
                     "user_message_content": message,
+                    # user 消息接在用户当前所处的 assistant 版本之后，使切换版本时按 parent 隔离后续对话
+                    "user_parent_message_id": await self._get_last_current_assistant_id(conversation_id),
                     "files_meta": human_meta.get("files", []),
                     "api_key_model_name": _api_key_model_name,
                     "should_memorize": memory,
@@ -1985,17 +2016,26 @@ class AppChatService:
         # 保存消息
         # 附件落库（与 Agent 应用一致）；无 files 时不传 meta_data，老集群落库不变
         _user_meta_kwargs: Dict[str, Any] = {}
+        _user_meta: Dict[str, Any] = {}
         if files:
             _files_meta, _history_files = await self._build_cluster_files_persist(files, orchestrator)
             _user_meta = {"files": _files_meta}
             if _history_files:
                 _user_meta["history_files"] = _history_files
+        # 本轮变量值随 user 消息落库，重新生成时回读（无变量不加键，老集群落库不变）
+        if variables:
+            _user_meta.setdefault("files", [])
+            _user_meta["variables"] = variables
+        if _user_meta:
             _user_meta_kwargs["meta_data"] = _user_meta
+        # user 消息接在用户当前所处的 assistant 版本之后（须在本轮消息写入前查询）
+        _user_parent_id = await self._get_last_current_assistant_id(conversation_id)
         await self.conversation_service.add_message_async(
             message_id=user_message_id,
             conversation_id=conversation_id,
             role="user",
             content=message,
+            parent_message_id=_user_parent_id,
             **_user_meta_kwargs,
         )
 
@@ -2208,8 +2248,13 @@ class AppChatService:
                 "result": _result,
                 "user_message_id_override": user_message_id,
                 "user_message_content": message,
+                # user 消息接在用户当前所处的 assistant 版本之后，使切换版本时按 parent 隔离后续对话
+                "user_parent_message_id": await self._get_last_current_assistant_id(conversation_id),
                 "should_memorize": orchestrator.cluster_memory_enabled(),
             }
+            # 本轮变量值随 user 消息落库，重新生成时回读（无变量不加键，老集群落库不变）
+            if variables:
+                _persist_args["variables_meta"] = variables
             # 新会话开场白落库（与 Agent 应用一致）；无开场白时不加任何新键，老集群落库不变
             if opening_statement:
                 _persist_args["is_new_conversation"] = True
