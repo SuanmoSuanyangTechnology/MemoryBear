@@ -7,7 +7,7 @@ import threading
 from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager, contextmanager
 
-from sqlalchemy import Engine, create_engine, text
+from sqlalchemy import Connection, Engine, create_engine, text
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -102,6 +102,12 @@ class DatabaseManager:
                     expire_on_commit=False,
                 )
             return self._async_session_factory
+
+    @contextmanager
+    def sync_connection(self) -> Iterator[Connection]:
+        """Borrow a connection within the calling thread, without creating a Session."""
+        with self._get_sync_engine().connect() as connection:
+            yield connection
 
     @contextmanager
     def sync_session(self) -> Iterator[Session]:

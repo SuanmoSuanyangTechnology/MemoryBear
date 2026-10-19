@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+import uuid
 from collections.abc import Sequence
 from typing import Any
 
@@ -20,8 +21,9 @@ logger = logging.getLogger(__name__)
 class TaskDispatcher:
     """Validate and publish messages for the existing knowledge workers."""
 
-    def __init__(self, application: Any = celery_app):
+    def __init__(self, application: Any = celery_app, *, runtime: Any = None):
         self._application = application
+        self._runtime = runtime
 
     async def send(
         self,
@@ -63,6 +65,18 @@ class TaskDispatcher:
                 "KB_VALIDATION_ERROR",
                 f"Invalid queue for knowledge task: {name}",
             )
+        if self._runtime is not None and name in {
+            "app.core.rag.tasks.parse_document",
+            "app.core.rag.tasks.import_qa_chunks",
+        }:
+            from ..services.wiki.source import prepare_source_dispatch
+
+            document_id = (kwargs or {}).get("document_id")
+            if document_id is None and args and len(args) > 1:
+                document_id = args[1]
+            if document_id is not None:
+                task_id = task_id or str(uuid.uuid4())
+                prepare_source_dispatch(self._runtime, document_id, task_id)
         try:
             send_task_kwargs: dict[str, Any] = {
                 "args": list(args or ()),
