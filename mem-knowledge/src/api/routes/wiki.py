@@ -85,6 +85,7 @@ async def list_pages(
             page_types=_types(page_types),
             page=page,
             pagesize=pagesize,
+            legacy=limit is not None and "pagesize" not in request.query_params,
         ),
     )
 
@@ -135,6 +136,11 @@ async def tree(
             page=page,
             pagesize=pagesize,
             cursor=cursor,
+            legacy=(
+                limit is not None
+                and "page" not in request.query_params
+                and "pagesize" not in request.query_params
+            ),
         ),
     )
 

@@ -119,7 +119,7 @@ def page_data(row, folders):
     }
 
 
-def list_pages(session, scope, *, q="", page_types=(), page=1, pagesize=50):
+def list_pages(session, scope, *, q="", page_types=(), page=1, pagesize=50, legacy=False):
     begin_read(session, scope)
     condition = scoped_pages(scope, page_types)
     if q:
@@ -140,14 +140,16 @@ def list_pages(session, scope, *, q="", page_types=(), page=1, pagesize=50):
         .limit(pagesize)
     ).all()
     folders = _folders(session, scope)
-    return {
-        "items": [page_data(row, folders) for row in rows],
+    pagination = {
         "page": page,
         "pagesize": pagesize,
-        "limit": pagesize,  # 兼容已接入的旧客户端；主要契约统一为 pagesize。
         "total": total,
         "has_next": page * pagesize < total,
     }
+    items = [page_data(row, folders) for row in rows]
+    if legacy:
+        return {"items": items, **pagination, "limit": pagesize}
+    return {"items": items, "page": pagination}
 
 
 def detail(session, scope, page_id):
@@ -263,7 +265,9 @@ def _tree_cursor_page(session, items, page_query, folder_id, cursor, pagesize):
     }
 
 
-def tree(session, scope, *, folder_id=None, page_types=(), page=1, pagesize=50, cursor=None):
+def tree(
+    session, scope, *, folder_id=None, page_types=(), page=1, pagesize=50, cursor=None, legacy=False
+):
     begin_read(session, scope)
     parent_id = as_uuid(folder_id) if folder_id else None
     folders = _folders(session, scope)
@@ -297,8 +301,8 @@ def tree(session, scope, *, folder_id=None, page_types=(), page=1, pagesize=50, 
     page_query = select(*PAGE_COLUMNS).where(
         scoped_pages(scope, page_types), WikiPage.folder_id == parent_id
     )
-    if cursor:
-        return _tree_cursor_page(session, items, page_query, folder_id, cursor, pagesize)
+    if cursor or legacy:
+        return _tree_cursor_page(session, items, page_query, folder_id, cursor or "", pagesize)
     folder_count = len(items)
     page_count = session.scalar(
         select(func.count()).select_from(WikiPage).where(
@@ -321,11 +325,12 @@ def tree(session, scope, *, folder_id=None, page_types=(), page=1, pagesize=50, 
     return {
         "parent_id": folder_id,
         "items": items,
-        "page": page,
-        "pagesize": pagesize,
-        "total": total,
-        "has_next": has_next,
-        "next_cursor": _next_tree_cursor(items, has_next),
+        "page": {
+            "page": page,
+            "pagesize": pagesize,
+            "total": total,
+            "has_next": has_next,
+        },
     }
 
 
