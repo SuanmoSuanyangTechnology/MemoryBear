@@ -1,7 +1,7 @@
 """Read-only mappings for API-owned memory statistics tables."""
 
-from sqlalchemy import Boolean, Column, Integer, String
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import Boolean, Column, DateTime, Integer, String
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 
 from src.models.base import ReadOnlyBase
 
@@ -31,6 +31,14 @@ class MemoryPerceptual(ReadOnlyBase):
 
     id = Column(UUID(as_uuid=True), primary_key=True)
     end_user_id = Column(UUID(as_uuid=True), nullable=False)
+    perceptual_type = Column(Integer, nullable=False)
+    storage_service = Column(Integer, nullable=True)
+    file_path = Column(String, nullable=False)
+    file_name = Column(String, nullable=False)
+    file_ext = Column(String, nullable=False)
+    summary = Column(String, nullable=True)
+    meta_data = Column(JSONB, nullable=True)
+    created_time = Column(DateTime, nullable=True)
 
 
 class ShortTermMemory(ReadOnlyBase):
