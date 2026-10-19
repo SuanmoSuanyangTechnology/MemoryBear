@@ -157,5 +157,12 @@
   "KB_MULTIMODAL_RERANK_CONNECTION_FAILED": "图片重排模型连接失败，请稍后重试",
   "KB_MULTIMODAL_RERANK_RATE_LIMITED": "图片重排模型请求过于频繁，请稍后重试",
   "KB_MULTIMODAL_RERANK_RESPONSE_INVALID": "图片重排模型返回了无效响应",
-  "KB_MULTIMODAL_RERANK_TIMEOUT": "图片重排模型请求超时，请稍后重试"
+  "KB_MULTIMODAL_RERANK_TIMEOUT": "图片重排模型请求超时，请稍后重试",
+  "KB_FAQ_CONFLICT": "FAQ 已更新，请刷新后重试。",
+  "KB_FAQ_CONTENT_INVALID": "标准问与已有相似问或反例存在冲突，或答案不符合要求。",
+  "KB_FAQ_REVIEW_REQUIRED": "请先审核通过，再启用该 FAQ。",
+  "KB_FAQ_SOURCE_UNAVAILABLE": "FAQ 的 Wiki 来源当前不可用，无法完成审核或生成。",
+  "KB_FAQ_SOURCE_CHANGED": "Wiki 来源已更新，请重新查看对照后审核。",
+  "KB_FAQ_JOB_BUSY": "FAQ 生成任务仍在运行，请稍后重试。",
+  "KB_FAQ_JOB_TERMINAL": "已完成或已取消的首次生成任务不能重新生成。"
 }

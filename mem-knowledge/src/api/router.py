@@ -10,6 +10,7 @@ from .routes.knowledge import router as knowledge_router
 from .routes.knowledge_metadata import router as knowledge_metadata_router
 from .routes.knowledge_share import router as knowledge_share_router
 from .routes.wiki import router as wiki_router
+from .routes.wiki_faq import router as wiki_faq_router
 
 internal_v1_router = APIRouter(prefix="/internal/v1")
 internal_v1_router.include_router(health_router)
@@ -22,3 +23,5 @@ internal_v1_router.include_router(knowledge_share_router)
 internal_v1_router.include_router(wiki_router)
 
 __all__ = ["internal_v1_router"]
+
+internal_v1_router.include_router(wiki_faq_router)

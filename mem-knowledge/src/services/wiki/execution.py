@@ -160,6 +160,14 @@ def execute_map(runtime, delivery, *, ensure_owned):
 
 
 def execute_reduce(runtime, kb_id, page_id, *, redelivered=False):
+    from ..wiki_faq import publish_pending
+
+    result = _execute_reduce(runtime, kb_id, page_id, redelivered=redelivered)
+    publish_pending(runtime, kb_id, page_id)
+    return result
+
+
+def _execute_reduce(runtime, kb_id, page_id, *, redelivered=False):
     snapshot = None
     try:
         with page_lease(runtime.redis.sync_client(), kb_id, page_id) as ensure_owned:

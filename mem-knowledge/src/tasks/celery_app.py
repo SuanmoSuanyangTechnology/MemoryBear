@@ -7,6 +7,7 @@ from kombu import Exchange, Queue
 
 from ..bootstrap import get_settings
 from ..config import KnowledgeSettings
+from ..rag.faq.contracts import FAQ_GENERATE_TASK
 from ..rag.wiki.config import BACKFILL_TASK, MAP_TASK, REDUCE_TASK, WIKI_QUEUE
 
 KNOWLEDGE_QUEUES = (
@@ -17,6 +18,7 @@ KNOWLEDGE_QUEUES = (
 )
 
 PUBLISHABLE_KNOWLEDGE_TASK_ROUTES = {
+    FAQ_GENERATE_TASK: WIKI_QUEUE,
     BACKFILL_TASK: WIKI_QUEUE,
     MAP_TASK: WIKI_QUEUE,
     REDUCE_TASK: WIKI_QUEUE,

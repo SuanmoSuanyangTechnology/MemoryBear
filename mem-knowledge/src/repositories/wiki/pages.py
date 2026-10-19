@@ -662,6 +662,7 @@ def commit_reduce(session, snapshot, result):
             "aliases": sorted({normalize_name(alias) for alias in page.aliases}),
         }
     )
+    previous_version = page.version
     changed = page.published_content_hash != content_hash
     page.content, page.summary = result["content"], result["summary"]
     page.status = "ready" if actual else "unavailable"
@@ -680,6 +681,10 @@ def commit_reduce(session, snapshot, result):
         }
         for s in snapshot["sources"]
     ]
+    if actual and page.version != previous_version:
+        from ..wiki_faq.jobs import record_publication
+
+        record_publication(session, scope, page, previous_version, snapshot)
     session.execute(delete(WikiPageLink).where(WikiPageLink.source_page_id == page.id))
     for target in sorted(set(result["links"])):
         session.add(WikiPageLink(**scope, source_page_id=page.id, target_page_id=as_uuid(target)))

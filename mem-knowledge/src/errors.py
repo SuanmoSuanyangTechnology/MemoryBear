@@ -41,6 +41,14 @@ class ErrorDefinition:
 # Business resource absence uses HTTP 400 so legacy clients do not mistake it
 # for a missing API route. Keep numeric code 404 for existing consumers.
 _DEFINITIONS = {
+    "KB_FAQ_CONFLICT": ErrorDefinition(409, False, 409, "http"),
+    "KB_FAQ_CONTENT_INVALID": ErrorDefinition(409, False, 409, "http"),
+    "KB_FAQ_REVIEW_REQUIRED": ErrorDefinition(409, False, 409, "http"),
+    "KB_FAQ_SOURCE_UNAVAILABLE": ErrorDefinition(409, False, 409, "http"),
+    "KB_FAQ_SOURCE_CHANGED": ErrorDefinition(409, False, 409, "http"),
+    "KB_FAQ_JOB_BUSY": ErrorDefinition(409, False, 409, "http"),
+    "KB_FAQ_JOB_TERMINAL": ErrorDefinition(409, False, 409, "http"),
+
     "KB_PRINCIPAL_INVALID": ErrorDefinition(400, False, 400, "http"),
     "KB_VALIDATION_ERROR": ErrorDefinition(400, False, 400, "http"),
     "KB_RESOURCE_NOT_FOUND": ErrorDefinition(400, False, 404, "business"),

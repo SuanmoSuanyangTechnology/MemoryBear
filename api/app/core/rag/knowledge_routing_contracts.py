@@ -42,6 +42,7 @@ class KnowledgeRoutingInventory:
 
 
 MANAGER_SPECS = (
+    ControllerSpec("wiki_faq_controller.py", "/knowledges/{kb_id}/faqs"),
     ControllerSpec("wiki_controller.py", "/knowledges/{kb_id}/wiki"),
     ControllerSpec("knowledge_controller.py", "/knowledges"),
     ControllerSpec("knowledge_metadata_controller.py", "/knowledges"),
