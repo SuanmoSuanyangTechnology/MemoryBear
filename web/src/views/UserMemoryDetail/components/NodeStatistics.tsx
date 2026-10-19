@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 18:32:35 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-05 19:07:07
+ * @Last Modified time: 2026-10-19 17:36:46
  */
 /**
  * Node Statistics Component
@@ -45,7 +45,7 @@ const NodeStatistics = forwardRef<NodeStatisticsRef, { highlightKeys?: string[] 
   const navigate = useNavigate();
   const { t } = useTranslation()
   const { id } = useParams()
-  const [loading, setLoading] = useState<boolean>(false)
+  const [loading, setLoading] = useState<boolean>(true)
   const [data, setData] = useState<NodeStatisticsItem[]>([])
 
   useEffect(() => {
