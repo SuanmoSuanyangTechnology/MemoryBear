@@ -58,7 +58,6 @@ async def pages(
     request: Request,
     kb_id: uuid.UUID,
     current_user: Annotated[User, Depends(get_current_user_async)],
-    q: Annotated[str, Query(max_length=400)] = "",
     page_types: str | None = None,
     page: Annotated[int, Query(ge=1)] = 1,
     pagesize: Annotated[int, Query(ge=1, le=200)] = 50,

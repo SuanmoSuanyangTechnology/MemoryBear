@@ -119,18 +119,9 @@ def page_data(row, folders):
     }
 
 
-def list_pages(session, scope, *, q="", page_types=(), page=1, pagesize=50, legacy=False):
+def list_pages(session, scope, *, page_types=(), page=1, pagesize=50, legacy=False):
     begin_read(session, scope)
     condition = scoped_pages(scope, page_types)
-    if q:
-        pattern = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-        condition = and_(
-            condition,
-            or_(
-                WikiPage.title.ilike(f"%{pattern}%", escape="\\"),
-                WikiPage.summary.ilike(f"%{pattern}%", escape="\\"),
-            ),
-        )
     total = session.scalar(select(func.count()).select_from(WikiPage).where(condition))
     rows = session.execute(
         select(*PAGE_COLUMNS)
