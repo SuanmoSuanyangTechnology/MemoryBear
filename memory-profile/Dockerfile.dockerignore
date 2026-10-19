@@ -11,3 +11,6 @@
 !packages/auth-sdk/
 !packages/auth-sdk/pyproject.toml
 !packages/auth-sdk/src/**
+# Never ship local bytecode
+memory-profile/src/**/__pycache__/
+memory-profile/src/**/__pycache__/**

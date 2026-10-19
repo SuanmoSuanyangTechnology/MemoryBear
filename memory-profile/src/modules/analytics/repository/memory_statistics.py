@@ -14,18 +14,9 @@ from src.models.references import (
     MemoryPerceptual,
     ShortTermMemory,
 )
+from src.modules.analytics.constants import COUNT_KEYS
 
 _EXCLUDED_APP_ID = UUID("00000000-0000-0000-0000-000000000001")
-
-#: ``memory_type_counts`` 返回的计数器名字，顺序与 ``_statements`` 一致。
-COUNT_KEYS = (
-    "perceptual",
-    "active_conversations",
-    "direct_sources",
-    "short_term",
-    "pending_conversations",
-    "forgotten",
-)
 
 
 class MemoryStatisticsRepository:

@@ -152,6 +152,31 @@ class PostgresManager:
                 if session.in_transaction():
                     await session.rollback()
 
+    def pool_snapshot(self) -> dict[str, object] | None:
+        """Return in-memory pooled-connection counters; never touches the network."""
+
+        engine = self._engine
+        if engine is None:
+            return None
+        try:
+            pool = engine.pool
+            return {
+                "size": int(pool.size()),
+                "checked_in": int(pool.checkedin()),
+                "checked_out": int(pool.checkedout()),
+                "capacity": (
+                    self._settings.database_pool_size
+                    + self._settings.database_max_overflow
+                ),
+            }
+        except Exception as exc:
+            logger.warning(
+                "Failed to read PostgreSQL pool state: %s",
+                type(exc).__name__,
+                extra={"event": "postgres_pool_snapshot_failed"},
+            )
+            return None
+
     async def ping(self) -> bool:
         async with self.session() as session:
             await session.scalar(select(1))

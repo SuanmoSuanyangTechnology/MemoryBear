@@ -32,6 +32,26 @@ class ProfileSettings(BaseSettings):
         2.0, validation_alias="PROFILE_HEALTH_PROBE_TIMEOUT_SECONDS"
     )
 
+    # Runtime monitoring: tracemalloc is intentionally opt-in because allocation
+    # tracing has measurable CPU/memory overhead and snapshots are expensive.
+    memory_tracemalloc_enabled: bool = Field(
+        False, validation_alias="PROFILE_MEMORY_TRACEMALLOC_ENABLED"
+    )
+    memory_tracemalloc_frames: int = Field(
+        10, ge=1, le=50, validation_alias="PROFILE_MEMORY_TRACEMALLOC_FRAMES"
+    )
+    # 0 disables the RSS warning; set it to a container-aware alert threshold.
+    memory_rss_warn_bytes: int = Field(
+        0, ge=0, validation_alias="PROFILE_MEMORY_RSS_WARN_BYTES"
+    )
+
+    i18n_default_language: str = Field("zh", validation_alias="I18N_DEFAULT_LANGUAGE")
+    i18n_fallback_language: str = Field("zh", validation_alias="I18N_FALLBACK_LANGUAGE")
+    i18n_supported_languages: str = Field(
+        "zh,en", validation_alias="I18N_SUPPORTED_LANGUAGES"
+    )
+    i18n_locales_dir: str | None = Field(None, validation_alias="I18N_LOCALES_DIR")
+
     memory_auth_mode: Literal["direct", "gateway"] = Field(
         "direct", validation_alias="MEMORY_AUTH_MODE"
     )
@@ -138,6 +158,14 @@ class ProfileSettings(BaseSettings):
         if not 1 <= value <= 65535:
             raise ValueError("PROFILE_PORT must be between 1 and 65535")
         return value
+
+    @property
+    def i18n_language_list(self) -> list[str]:
+        return [
+            language.strip()
+            for language in self.i18n_supported_languages.split(",")
+            if language.strip()
+        ]
 
     @property
     def async_database_url(self) -> str:

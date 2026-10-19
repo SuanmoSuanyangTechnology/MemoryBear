@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from enum import StrEnum
 
 
@@ -23,3 +24,11 @@ class MemoryProfileAuthSource(StrEnum):
 
     APIKEY = "ex_api"
     INTERNAL = "in_api"
+
+
+@dataclass(frozen=True, slots=True)
+class MemoryProfileRawResponse:
+    """An already-serialized profile response, forwarded without re-encoding."""
+
+    body: bytes
+    media_type: str

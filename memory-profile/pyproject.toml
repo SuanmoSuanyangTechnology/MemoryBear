@@ -15,6 +15,7 @@ dependencies = [
     "elasticsearch[async]==8.16.0",
     "fastapi==0.143.0",
     "neo4j==6.4.0",
+    "psutil==7.2.2",
     "pydantic==2.14.1",
     "pydantic-settings==2.15.0",
     "python-dotenv==1.2.4",

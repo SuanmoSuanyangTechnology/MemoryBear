@@ -3,10 +3,24 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 
 from redis.asyncio import Redis
 
 from src.config import ProfileSettings
+
+logger = logging.getLogger(__name__)
+
+
+def _count(value: object) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, int):
+        return value
+    try:
+        return len(value)  # type: ignore[arg-type]
+    except TypeError:
+        return None
 
 
 class RedisManager:
@@ -36,6 +50,27 @@ class RedisManager:
                 )
                 self._loop = current_loop
             return self._client
+
+    def pool_snapshot(self) -> dict[str, object] | None:
+        """Return in-memory connection-pool counts without issuing a command."""
+
+        client = self._client
+        if client is None:
+            return None
+        try:
+            pool = client.connection_pool
+            return {
+                "max_connections": getattr(pool, "max_connections", None),
+                "in_use": _count(getattr(pool, "_in_use_connections", None)),
+                "available": _count(getattr(pool, "_available_connections", None)),
+            }
+        except Exception as exc:
+            logger.warning(
+                "Failed to read Redis pool state: %s",
+                type(exc).__name__,
+                extra={"event": "redis_pool_snapshot_failed"},
+            )
+            return None
 
     async def ping(self) -> bool:
         return bool(await (await self.client()).ping())

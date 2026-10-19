@@ -38,6 +38,24 @@ Exact invalidation uses `DEL`; prefix/pattern invalidation uses cursor-based `SC
 - Workspace statistics are snapshot-only. The API worker remains responsible for producing `cache:memory:workspace_statistics:v1:{workspace_id}`; this service does not synchronously recompute a whole workspace.
 - Direct mode trusts internal identity headers and therefore requires network-level isolation. Every non-public Memory request requires a complete generic identity principal (`x-user-id` or `x-api-key-id`, plus `x-tenant-id` / `x-workspace-id`), and user-scoped operations verify the active workspace owner.
 
+## Localization
+
+Response text — analytics messages, enum display names, and error envelopes —
+is translated by `src/i18n` from the JSON catalogs under
+`src/locales/<locale>/`. `LanguageMiddleware` resolves the request language
+once, in this order: `X-Language-Type`, `Accept-Language`, then
+`I18N_DEFAULT_LANGUAGE` (default `zh`; the chosen locale is echoed as
+`Content-Language`).
+
+`zh` output stays byte-identical to the legacy API contract. Error text is
+raised as translation keys (`LocalizedProfileError`) and rendered once by the
+global exception handler; empty-state payloads carry a `message_key` that the
+handler renders, so those messages stay language-neutral in the cache.
+`graph_data` includes the language in its Redis cache key because enum display
+names are part of the cached payload. To add a language, add a directory under
+`src/locales` with the same namespaces and list it in
+`I18N_SUPPORTED_LANGUAGES`.
+
 ## Authentication
 
 `MEMORY_AUTH_MODE=direct` is the community default. It accepts only a complete, UUID-valid generic identity injected by the API or Gateway; deploy this mode behind a NetworkPolicy/security group that blocks all other callers. Health endpoints are public.
@@ -62,6 +80,7 @@ target):
 
 - `GET /internal/v1/health/live`
 - `GET /internal/v1/health/ready`
+- `GET /internal/v1/health/metrics` (diagnostic; see Runtime monitoring)
 
 Analytics, reachable at `/internal/v1/memory/analytics/*` (requires
 `x-workspace-id: <uuid>`):
@@ -83,7 +102,7 @@ The legacy analytics envelope is exactly:
 
 The field names intentionally remain `msg`, `error`, and millisecond `time`, matching `api/app/core/response_utils.py`. Health responses use their dedicated probe shape.
 
-`graph_data` accepts comma-separated `node_types`, `limit` up to 1000, `depth` up to 3, `center_node_id`, and `per_type_limits` such as `Statement:50,Chunk:20`. Only the fixed supported node labels are accepted, and every Neo4j query includes `end_user_id` isolation.
+`graph_data` accepts comma-separated `node_types`, `limit` up to 1000, `depth` up to 3, `center_node_id`, and `per_type_limits` such as `Statement:50,Chunk:20`. Only the fixed supported node labels are accepted, and every Neo4j query includes `end_user_id` isolation. The response also carries the response-time virtual objects the API returns for `Preference` nodes — a `PreferenceGroup` node joined by `HAS_PREFERENCE` edges, counted as `PreferenceGroup` in `statistics.node_types` and `HAS_PREFERENCE` in `statistics.edge_types` — and a virtual node id is rejected as `center_node_id`.
 
 ## Source layout
 
@@ -172,9 +191,50 @@ PROFILE_ACCESS_LOG_ENABLED=true
 
 Every record receives the current `trace_id` and the emitting process hostname as `instance` (text: `instance=<hostname>`, JSON: `"instance": "<hostname>"`), so log lines from multiple replicas stay distinguishable. JSON logs use stable fields including `timestamp`, `level`, `service`, `instance`, `logger`, `event`, `message`, and `trace_id`; request completion records additionally include method, route template, status, duration, response bytes, completion/outcome, authenticated actor/tenant/workspace/source, and business error codes. The request logger never reads request or response bodies and never logs query strings or headers. Values passed to the logging system, including cache identifiers and exception text, are emitted without redaction.
 
-Middleware execution order is `RequestLogging -> TraceId -> MemoryAuth -> routing`. Uvicorn access logging is disabled to avoid duplicate request lines; the service middleware owns access completion logs.
+Middleware execution order is `RequestLogging -> TraceId -> Language -> Metrics -> MemoryAuth -> routing`. Uvicorn access logging is disabled to avoid duplicate request lines; the service middleware owns access completion logs.
 
 Uvicorn runs with `--http zttp --http2`. Port `8082` accepts HTTP/1.1 and cleartext HTTP/2 prior knowledge (h2c); HTTP/1.1 Upgrade-based h2c and HTTP/2 WebSockets are not supported. Production TLS and ALPN negotiation should be terminated by the Gateway or reverse proxy.
+
+## Runtime monitoring
+
+`GET /internal/v1/health/metrics` is an unauthenticated, read-only diagnostic
+probe with the same network-isolation assumption as `/health/live` and
+`/health/ready`. It returns a dedicated JSON shape (not the analytics envelope)
+and sets `Cache-Control: no-store`. It never pings a dependency; `/health/ready`
+remains the connectivity contract.
+
+- `process`: RSS/VMS, peak and baseline RSS, growth since process start, CPU
+  time/percent, thread count, and open file descriptors (POSIX) or handles
+  (Windows).
+- `python`: GC counts and per-generation statistics, `gc.garbage`, Python
+  thread count, pending asyncio tasks, and tracemalloc state.
+- `http`: per-process request totals, in-flight count, status-class buckets, and
+  per-route-template request/error counts with average and maximum latency.
+- `dependencies`: in-memory PostgreSQL, Neo4j, Redis, and Elasticsearch pool
+  counters (checked-out connections, in-use connections, node liveness).
+- `warnings`: stable codes such as `postgres_pool_saturated`,
+  `neo4j_pool_saturated`, `redis_pool_saturated`,
+  `elasticsearch_no_alive_nodes`, `rss_threshold_exceeded`, and
+  `process_metrics_unavailable`. `status` becomes `degraded` when any are
+  present; the endpoint still answers `200`.
+
+A `top=0` scrape costs tens of microseconds on the event loop and never touches
+the network. `top` (0-50, default 0) adds the largest Python allocation sites.
+Taking a snapshot walks every traced block and blocks the event loop (hundreds
+of milliseconds on a normal heap), so keep it at 0 during load unless you are
+actively investigating; results are memoized for 10 seconds. The always-on
+request middleware costs about two microseconds per HTTP request. Allocation
+tracing must be enabled at startup:
+
+```dotenv
+PROFILE_MEMORY_TRACEMALLOC_ENABLED=true    # restart required; adds overhead
+PROFILE_MEMORY_TRACEMALLOC_FRAMES=10
+PROFILE_MEMORY_RSS_WARN_BYTES=0            # 0 disables the RSS warning
+```
+
+Because the endpoint is public like the other health probes, expose
+`/internal/*` only to the cluster network. It returns process, pool, and route
+counters, but never configuration, connection strings, SQL, or business data.
 
 ## Run and validate
 

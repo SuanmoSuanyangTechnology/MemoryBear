@@ -9,7 +9,7 @@ from typing import Any
 
 import httpx
 
-from .contracts import MemoryProfileAuthSource
+from .contracts import MemoryProfileAuthSource, MemoryProfileRawResponse
 from .errors import (
     MemoryProfileProtocolError,
     MemoryProfileTimeoutError,
@@ -17,6 +17,8 @@ from .errors import (
 )
 
 logger = logging.getLogger(__name__)
+
+_REQUIRED_ENVELOPE_FIELDS = frozenset({"code", "msg", "data", "error", "time"})
 
 
 def _internal_path(external_path: str) -> str:
@@ -100,7 +102,8 @@ class MemoryProfileServiceClient:
         language_type: str | None = None,
         query: Mapping[str, Any] | None = None,
         payload: Any | None = None,
-    ) -> dict[str, Any]:
+        raw: bool = False,
+    ) -> dict[str, Any] | MemoryProfileRawResponse:
         """Forward one caller route and return its ApiResponse object.
 
         ``path`` is the caller's own request path; it is mapped onto the service's
@@ -108,9 +111,14 @@ class MemoryProfileServiceClient:
         has to grow with the service. The caller reports one fact about itself:
         ``source`` (how it authenticated), carried as the generic ``x-source``.
         It also decides both the name and the meaning of the acting id below.
+
+        With ``raw=True`` the response body is returned as already-serialized
+        bytes, after the same envelope validation. Callers that forward the
+        payload (the API proxy) then skip a second encode.
         """
 
         path = _internal_path(path)
+        http_method = method.upper()
 
         # The acting id travels under the header its own face's terminator uses:
         # ``x-api-key-id`` naming the key that authenticated on the API-key face,
@@ -139,7 +147,7 @@ class MemoryProfileServiceClient:
         started_at = time.perf_counter()
         try:
             response = await self._client.request(
-                method.upper(),
+                http_method,
                 self._url(path),
                 headers=headers,
                 params=params,
@@ -149,7 +157,7 @@ class MemoryProfileServiceClient:
             logger.warning(
                 "memory_profile_http_failed method=%s path=%s error=%s "
                 "elapsed_ms=%.2f trace_id=%s",
-                method.upper(),
+                http_method,
                 path,
                 type(exc).__name__,
                 (time.perf_counter() - started_at) * 1000,
@@ -162,7 +170,7 @@ class MemoryProfileServiceClient:
             logger.warning(
                 "memory_profile_http_failed method=%s path=%s error=%s "
                 "elapsed_ms=%.2f trace_id=%s",
-                method.upper(),
+                http_method,
                 path,
                 type(exc).__name__,
                 (time.perf_counter() - started_at) * 1000,
@@ -183,8 +191,7 @@ class MemoryProfileServiceClient:
                 raise MemoryProfileProtocolError(
                     "Memory profile service response must be a JSON object"
                 )
-            required_fields = {"code", "msg", "data", "error", "time"}
-            if not required_fields.issubset(envelope) or not isinstance(
+            if not _REQUIRED_ENVELOPE_FIELDS.issubset(envelope) or not isinstance(
                 envelope.get("code"), int
             ):
                 raise MemoryProfileProtocolError(
@@ -193,7 +200,7 @@ class MemoryProfileServiceClient:
             logger.info(
                 "memory_profile_call_completed method=%s path=%s status=%s "
                 "business_code=%s elapsed_ms=%.2f trace_id=%s",
-                method.upper(),
+                http_method,
                 path,
                 response.status_code,
                 envelope["code"],
@@ -203,6 +210,14 @@ class MemoryProfileServiceClient:
             # Business failures deliberately retain the legacy envelope even when
             # the internal service uses a matching HTTP 4xx/5xx status. Transport
             # and malformed responses are the only cases mapped to SERVICE_UNAVAILABLE.
+            if raw:
+                # The envelope was already serialized by the service; forwarding the
+                # bytes skips FastAPI's response_model dump and json.dumps (~1.1ms
+                # for a 74KB graph payload).
+                return MemoryProfileRawResponse(
+                    body=response.content,
+                    media_type=response.headers.get("content-type", "application/json"),
+                )
             return envelope
         finally:
             await response.aclose()

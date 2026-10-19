@@ -208,7 +208,7 @@ class Settings:
         os.getenv("MEMORY_PROFILE_MAX_CONNECTIONS", "100")
     )
     MEMORY_PROFILE_MAX_KEEPALIVE_CONNECTIONS: int = int(
-        os.getenv("MEMORY_PROFILE_MAX_KEEPALIVE_CONNECTIONS", "20")
+        os.getenv("MEMORY_PROFILE_MAX_KEEPALIVE_CONNECTIONS", "100")
     )
 
     # Independent model service routing（/api/models* 前缀代理；无开关：服务不可用即 fail-fast）

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from typing import Any
 
 from neo4j import AsyncDriver, AsyncGraphDatabase
@@ -10,6 +11,8 @@ from neo4j import AsyncDriver, AsyncGraphDatabase
 from src.config import ProfileSettings
 
 _DISABLED_NOTIFICATION_CLASSIFICATIONS = ["UNRECOGNIZED"]
+
+logger = logging.getLogger(__name__)
 
 
 class Neo4jManager:
@@ -78,6 +81,37 @@ class Neo4jManager:
         ) as session:
             result = await session.run(query, **params)
             return await result.data()
+
+    def pool_snapshot(self) -> dict[str, object] | None:
+        """Return in-memory connection-pool counts without issuing a query."""
+
+        driver = self._driver
+        if driver is None:
+            return None
+        try:
+            pool = getattr(driver, "_pool", None)
+            connections = getattr(pool, "connections", None)
+            if not isinstance(connections, dict):
+                return None
+            total = 0
+            in_use = 0
+            for address_connections in connections.values():
+                for connection in address_connections:
+                    total += 1
+                    if getattr(connection, "in_use", False):
+                        in_use += 1
+            return {
+                "total": total,
+                "in_use": in_use,
+                "max_size": self._settings.neo4j_max_pool_size,
+            }
+        except Exception as exc:
+            logger.warning(
+                "Failed to read Neo4j pool state: %s",
+                type(exc).__name__,
+                extra={"event": "neo4j_pool_snapshot_failed"},
+            )
+            return None
 
     async def ping(self) -> bool:
         await (await self.driver()).verify_connectivity()

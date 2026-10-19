@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from fastapi import HTTPException, Request
 
+from src.i18n import get_request_language, t
 from src.middleware.auth import MemoryPrincipal
 
 __all__ = ["require_memory_context"]
@@ -21,5 +22,8 @@ async def require_memory_context(request: Request) -> MemoryPrincipal:
 
     context = getattr(request.state, IDENTITY_STATE_KEY, None)
     if not isinstance(context, MemoryPrincipal):
-        raise HTTPException(status_code=401, detail="missing authenticated principal")
+        raise HTTPException(
+            status_code=401,
+            detail=t("common.auth.missing_principal", get_request_language(request)),
+        )
     return context

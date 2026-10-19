@@ -8,13 +8,13 @@ from inspect import signature
 from typing import Any, ParamSpec, TypeVar
 from uuid import uuid4
 
-from fastapi import Request
+from fastapi import Request, Response
 
 from app.core.error_codes import BizCode
 from app.core.response_utils import fail
 from app.core.trace import get_trace_id
 
-from .contracts import MemoryProfileAuthSource
+from .contracts import MemoryProfileAuthSource, MemoryProfileRawResponse
 from .errors import MemoryProfileClientError, MemoryProfileConfigurationError
 from .runtime import get_memory_profile_client, is_memory_profile_enabled
 
@@ -24,7 +24,7 @@ R = TypeVar("R")
 _API_KEY_FACE_PREFIX = "/v1/"
 
 
-def _caller_source(request: Request) -> MemoryProfileAuthSource:
+def _caller_source(path: str) -> MemoryProfileAuthSource:
     """Name the source the caller arrived from, off the path it reached us through.
 
     ``/v1`` is the API-key face and everything else is an internal call (a user
@@ -33,7 +33,7 @@ def _caller_source(request: Request) -> MemoryProfileAuthSource:
     label and the forwarded path from ever drifting apart.
     """
 
-    if request.url.path.startswith(_API_KEY_FACE_PREFIX):
+    if path.startswith(_API_KEY_FACE_PREFIX):
         return MemoryProfileAuthSource.APIKEY
     return MemoryProfileAuthSource.INTERNAL
 
@@ -88,11 +88,18 @@ def memory_profile_proxy(
         handler_signature = signature(handler)
 
         @wraps(handler)
-        async def wrapped(*args: P.args, **kwargs: P.kwargs) -> R | dict[str, Any]:
+        async def wrapped(
+            *args: P.args, **kwargs: P.kwargs
+        ) -> R | dict[str, Any] | Response:
             if not is_memory_profile_enabled():
                 return await handler(*args, **kwargs)
 
-            arguments = handler_signature.bind_partial(*args, **kwargs).arguments
+            # FastAPI and the API-key callers invoke handlers with keyword
+            # arguments; binding the full signature costs ~2µs per request.
+            if "request" in kwargs and "current_user" in kwargs:
+                arguments = kwargs
+            else:
+                arguments = handler_signature.bind_partial(*args, **kwargs).arguments
             request = arguments.get("request")
             if not isinstance(request, Request):
                 raise MemoryProfileConfigurationError(
@@ -117,26 +124,45 @@ def memory_profile_proxy(
                 if value is not None and value > maximum:
                     query[field] = maximum
 
+            path = request.scope["path"]
+            # Language is presentation-only, so every proxied route forwards it
+            # even when the handler does not declare the header. An explicit
+            # ``language_field`` still wins for callers that carry it elsewhere.
+            language_type = (
+                arguments.get(language_field) if language_field else None
+            )
+            if language_type is None:
+                language_type = request.headers.get("X-Language-Type")
+            if language_type is None:
+                language_type = request.headers.get("Accept-Language")
             trace_id = get_trace_id() or uuid4().hex
-            caller_source = _caller_source(request) if source is None else source
+            caller_source = _caller_source(path) if source is None else source
             try:
-                return await get_memory_profile_client().request(
+                result = await get_memory_profile_client().request(
                     method=request.method,
-                    path=request.url.path,
+                    path=path,
                     workspace_id=str(workspace_id),
                     tenant_id=str(current_user.tenant_id),
                     actor_id=_caller_actor_id(current_user, caller_source),
                     source=caller_source,
                     trace_id=trace_id,
-                    language_type=(
-                        arguments.get(language_field) if language_field else None
-                    ),
+                    language_type=language_type,
                     query=query,
+                    raw=True,
                 )
+                if isinstance(result, MemoryProfileRawResponse):
+                    # The upstream body is already a serialized ApiResponse;
+                    # returning it directly bypasses response_model re-encoding.
+                    return Response(
+                        content=result.body,
+                        media_type=result.media_type,
+                        status_code=200,
+                    )
+                return result
             except MemoryProfileClientError as exc:
                 logger.error(
                     "memory profile proxy failed: path=%s error=%s trace_id=%s",
-                    request.url.path,
+                    path,
                     type(exc).__name__,
                     trace_id,
                 )

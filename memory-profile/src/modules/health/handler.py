@@ -15,6 +15,13 @@ class HealthHandler:
     async def live() -> dict[str, str]:
         return {"status": "ok"}
 
+    async def metrics(self, top: int) -> JSONResponse:
+        payload = await self.runtime.metrics_snapshot(top)
+        return JSONResponse(
+            content=payload,
+            headers={"Cache-Control": "no-store"},
+        )
+
     async def ready(self) -> JSONResponse:
         components = await self.runtime.readiness()
         healthy = all(state == "up" for state in components.values())

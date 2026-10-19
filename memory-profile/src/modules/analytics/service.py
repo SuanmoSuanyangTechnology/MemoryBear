@@ -8,23 +8,38 @@ import logging
 import math
 from collections import defaultdict
 from collections.abc import Awaitable, Callable
-from datetime import UTC, datetime
 from typing import Any, TypeVar
 from uuid import UUID
 
-from src.common.errors import BizCode, ProfileError
-from src.modules.analytics.repository.end_user_profile import EndUserProfileRepository
-from src.modules.analytics.repository.memory_graph import (
-    DEFAULT_PER_TYPE_LIMITS,
-    NODE_PROPERTY_WHITELIST,
-    SUPPORTED_NODE_TYPES,
-    WHITELIST_DEFAULT_FIELDS,
-    MemoryGraphRepository,
+from src.common import redis_cache
+from src.common.errors import BizCode, LocalizedProfileError
+from src.common.normalization import (
+    collapse_whitespace,
+    datetime_to_epoch_ms,
+    is_blank,
+    parse_uuid,
+    to_jsonable,
 )
-from src.modules.analytics.repository.memory_statistics import (
+from src.i18n import EnumLabels, enum_labels
+from src.modules.analytics.constants import (
+    COMMUNITY_GRAPH_ENTITY_FIELDS,
+    COMMUNITY_GRAPH_NODE_FIELDS,
     COUNT_KEYS,
-    MemoryStatisticsRepository,
+    DEFAULT_PER_TYPE_LIMITS,
+    ENTITY_CONTENT_GATED_FIELDS,
+    MEMORY_TYPES,
+    NODE_PROPERTY_WHITELIST,
+    PREFERENCE_GROUP_EDGE_TYPE,
+    PREFERENCE_GROUP_LABEL,
+    PREFERENCE_GROUP_NODE_ID_PREFIX,
+    SINGLE_TYPE_LIMIT_HARD_MAX,
+    SUPPORTED_NODE_TYPES,
+    TOTAL_NODES_CAP,
+    WHITELIST_DEFAULT_FIELDS,
 )
+from src.modules.analytics.repository.end_user_profile import EndUserProfileRepository
+from src.modules.analytics.repository.memory_graph import MemoryGraphRepository
+from src.modules.analytics.repository.memory_statistics import MemoryStatisticsRepository
 from src.modules.analytics.repository.workspace_statistics import (
     WorkspaceStatisticsCorruptError,
     WorkspaceStatisticsRepository,
@@ -34,52 +49,43 @@ from src.runtime import ProfileRuntime
 
 logger = logging.getLogger(__name__)
 T = TypeVar("T")
-_MEMORY_TYPES = (
-    "PERCEPTUAL_MEMORY",
-    "WORKING_MEMORY",
-    "SHORT_TERM_MEMORY",
-    "EXPLICIT_MEMORY",
-    "IMPLICIT_MEMORY",
-    "EMOTIONAL_MEMORY",
-    "EPISODIC_MEMORY",
-    "FORGET_MEMORY",
-)
-_ENTITY_TYPE_NAMES = {
-    "Person": "人物实体节点",
-    "Organization": "组织实体节点",
-    "ORG": "组织实体节点",
-    "Location": "地点实体节点",
-    "LOC": "地点实体节点",
-    "Event": "事件实体节点",
-    "Concept": "概念实体节点",
-    "Time": "时间实体节点",
-    "Position": "职位实体节点",
-    "WorkRole": "职业实体节点",
-    "System": "系统实体节点",
-    "Policy": "政策实体节点",
-    "HistoricalPeriod": "历史时期实体节点",
-    "HistoricalState": "历史国家实体节点",
-    "HistoricalEvent": "历史事件实体节点",
-    "EconomicFactor": "经济因素实体节点",
-    "Condition": "条件实体节点",
-    "Numeric": "数值实体节点",
-}
-_EMOTION_TYPE_NAMES = {
-    "joy": "愉快",
-    "surprise": "惊喜",
-    "sadness": "悲伤",
-    "fear": "恐惧",
-    "anger": "生气",
-    "neutral": "中性",
-}
-_EMOTION_SUBJECT_NAMES = {"self": "自己", "other": "别人", "object": "事物对象"}
+
+
+def _empty_memory_insight(message_key: str) -> dict[str, Any]:
+    """记忆洞察空态：字段与成功响应同构。"""
+
+    return {
+        "memory_insight": None,
+        "behavior_pattern": None,
+        "key_findings": None,
+        "actionable_findings": [],
+        "growth_trajectory": None,
+        "updated_at": None,
+        "is_cached": False,
+        "message_key": message_key,
+    }
+
+
+def _empty_user_summary(message_key: str) -> dict[str, Any]:
+    """用户摘要空态：字段与成功响应同构。"""
+
+    return {
+        "user_summary": None,
+        "personality": None,
+        "core_values": None,
+        "one_sentence": None,
+        "tags": [],
+        "updated_at": None,
+        "is_cached": False,
+        "message_key": message_key,
+    }
 
 
 def _zero_memory_statistics() -> list[dict[str, Any]]:
-    return [{"type": memory_type, "count": 0, "percentage": 0.0} for memory_type in _MEMORY_TYPES]
+    return [{"type": memory_type, "count": 0, "percentage": 0.0} for memory_type in MEMORY_TYPES]
 
 
-def _empty_graph(message: str) -> dict[str, Any]:
+def _empty_graph(message_key: str) -> dict[str, Any]:
     return {
         "nodes": [],
         "edges": [],
@@ -90,11 +96,11 @@ def _empty_graph(message: str) -> dict[str, Any]:
             "edge_types": {},
             "per_type": {},
         },
-        "message": message,
+        "message_key": message_key,
     }
 
 
-def _empty_community_graph(message: str) -> dict[str, Any]:
+def _empty_community_graph(message_key: str) -> dict[str, Any]:
     return {
         "nodes": [],
         "edges": [],
@@ -104,16 +110,16 @@ def _empty_community_graph(message: str) -> dict[str, Any]:
             "node_types": {},
             "edge_types": {},
         },
-        "message": message,
+        "message_key": message_key,
     }
 
 
-def _shrink_type_limits(limits: dict[str, int], cap: int = 2000) -> dict[str, int]:
+def _shrink_type_limits(limits: dict[str, int], cap: int = TOTAL_NODES_CAP) -> dict[str, int]:
     if sum(limits.values()) <= cap:
         return limits
     weight_total = sum(DEFAULT_PER_TYPE_LIMITS.get(node_type, 0) for node_type in limits)
     if weight_total <= 0:
-        weight_total = sum(limit > 0 for limit in limits)
+        weight_total = sum(limit > 0 for limit in limits.values())
         weights = {node_type: int(limit > 0) for node_type, limit in limits.items()}
     else:
         weights = {node_type: DEFAULT_PER_TYPE_LIMITS.get(node_type, 0) for node_type in limits}
@@ -135,13 +141,6 @@ def _shrink_type_limits(limits: dict[str, int], cap: int = 2000) -> dict[str, in
     return shrunk
 
 
-def _timestamp_ms(value: datetime | None) -> int | None:
-    if value is None:
-        return None
-    aware = value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
-    return int(aware.timestamp() * 1000)
-
-
 def _normalize_tags(value: object) -> list[str]:
     if not isinstance(value, list):
         return []
@@ -150,7 +149,7 @@ def _normalize_tags(value: object) -> list[str]:
     for item in value:
         if not isinstance(item, str):
             continue
-        normalized = " ".join(item.split())
+        normalized = collapse_whitespace(item)
         key = normalized.casefold()
         if not normalized or len(normalized) > 12 or key in seen:
             continue
@@ -159,10 +158,6 @@ def _normalize_tags(value: object) -> list[str]:
         if len(tags) == 5:
             break
     return tags
-
-
-def _normalize_text(value: str) -> str:
-    return " ".join(value.split())
 
 
 def _parse_findings(value: object) -> tuple[list[str], list[dict[str, str]]]:
@@ -177,7 +172,7 @@ def _parse_findings(value: object) -> tuple[list[str], list[dict[str, str]]]:
     if not isinstance(parsed, list):
         return [], []
     if all(isinstance(item, str) for item in parsed):
-        return [normalized for item in parsed if (normalized := _normalize_text(item))], []
+        return [normalized for item in parsed if (normalized := collapse_whitespace(item))], []
     if not all(isinstance(item, dict) for item in parsed):
         return [], []
     findings: list[str] = []
@@ -187,29 +182,26 @@ def _parse_findings(value: object) -> tuple[list[str], list[dict[str, str]]]:
         action_value = item.get("recommended_action")
         if not isinstance(finding_value, str) or not isinstance(action_value, str):
             continue
-        finding, action = _normalize_text(finding_value), _normalize_text(action_value)
+        finding, action = collapse_whitespace(finding_value), collapse_whitespace(action_value)
         if finding and action:
             findings.append(finding)
             actionable.append({"finding": finding, "recommended_action": action})
     return findings, actionable
 
 
-def _clean(value: Any) -> Any:
-    if hasattr(value, "to_native"):
-        value = value.to_native()
-    if isinstance(value, datetime):
-        aware = value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
-        return aware.isoformat().replace("+00:00", "Z")
-    if isinstance(value, dict):
-        return {str(key): _clean(item) for key, item in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [_clean(item) for item in value]
-    if isinstance(value, (str, int, float, bool)) or value is None:
+def _map_description(value: Any) -> Any:
+    """``description`` 存的是分号分隔的字符串，读取时拆成数组（api 同款三分支）。"""
+
+    if isinstance(value, str):
+        return [item.strip() for item in value.replace("；", ";").split(";") if item.strip()]
+    if isinstance(value, list):
         return value
-    return str(value)
+    return []
 
 
-def _properties(label: str, raw: dict[str, Any], rel_count: int) -> dict[str, Any]:
+def _properties(
+    label: str, raw: dict[str, Any], rel_count: int, labels: EnumLabels
+) -> dict[str, Any]:
     result: dict[str, Any] = {}
     for key in NODE_PROPERTY_WHITELIST.get(label, WHITELIST_DEFAULT_FIELDS):
         # 仓储层用 Cypher map projection 下推白名单，缺失属性会带上 null 值
@@ -218,37 +210,44 @@ def _properties(label: str, raw: dict[str, Any], rel_count: int) -> dict[str, An
         if key not in raw or raw[key] is None:
             continue
         value = raw[key]
-        if label == "ExtractedEntity" and key in {"description", "description_summary"}:
-            if (isinstance(value, str) and not value.strip()) or value == []:
+        # 内容存在性判定基于清洗前的原始值，避免 to_jsonable 把空值包装成其它形态
+        if label == "ExtractedEntity" and key in ENTITY_CONTENT_GATED_FIELDS:
+            if is_blank(value):
                 continue
         if key == "entity_type":
-            value = _ENTITY_TYPE_NAMES.get(value, "")
+            value = labels.entity_type.get(value, "")
         elif key == "emotion_type":
-            value = _EMOTION_TYPE_NAMES.get(value)
+            value = labels.emotion_type.get(value)
         elif key == "emotion_subject":
-            value = _EMOTION_SUBJECT_NAMES.get(value)
-        elif key == "description" and isinstance(value, str):
-            value = [item.strip() for item in value.replace("；", ";").split(";") if item.strip()]
-        result[key] = _clean(value)
+            value = labels.emotion_subject.get(value)
+        elif key == "description":
+            value = _map_description(value)
+        result[key] = to_jsonable(value)
     result["associative_memory"] = rel_count
     return result
 
 
 def _edge_item(row: dict[str, Any]) -> dict[str, Any]:
+    """装配统一边条目（api ``_make_edge_item`` 的同字段口径）。
+
+    ``predicate`` / ``predicate_surface`` / ``predicate_description`` 只有实体—实体
+    语义关系（``EXTRACTED_RELATIONSHIP``）才有意义，其它边类型不输出这三个键；
+    空值一律不写进条目。
+    """
+
     props = row.get("properties") or {}
-    return {
-        key: value
-        for key, value in {
-            "id": str(row["id"]),
-            "type": str(row["type"]),
-            "created_at": _clean(props.get("created_at")),
-            "valid_at": _clean(props.get("valid_at")),
-            "predicate": _clean(props.get("predicate")),
-            "predicate_surface": _clean(props.get("predicate_surface")),
-            "predicate_description": _clean(props.get("predicate_description")),
-        }.items()
-        if value is not None
+    rel_type = str(row["type"])
+    item: dict[str, Any] = {
+        "id": str(row["id"]),
+        "type": rel_type,
+        "created_at": to_jsonable(props.get("created_at")),
+        "valid_at": to_jsonable(props.get("valid_at")),
     }
+    if rel_type == "EXTRACTED_RELATIONSHIP":
+        item["predicate"] = to_jsonable(props.get("predicate"))
+        item["predicate_surface"] = to_jsonable(props.get("predicate_surface"))
+        item["predicate_description"] = to_jsonable(props.get("predicate_description"))
+    return {key: value for key, value in item.items() if value is not None}
 
 
 def _unified_edges(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -298,6 +297,56 @@ def _unified_edges(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return result + standalone
 
 
+def _attach_preference_group(
+    nodes: list[dict[str, Any]],
+    edges: list[dict[str, Any]],
+    *,
+    end_user_id: str,
+    labels: EnumLabels,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """把真实 ``Preference`` 节点连到一个响应期虚拟分组节点（api 同名 helper）。
+
+    返回新列表；真实节点的 ``associative_memory`` 只统计 Neo4j 关系，因此这里既不
+    修改真实节点属性，也不把虚拟 ID 传给任何数据库查询。
+    """
+
+    preference_ids = [node["id"] for node in nodes if node.get("label") == "Preference"]
+    if not preference_ids:
+        return list(nodes), list(edges)
+
+    group_id = f"{PREFERENCE_GROUP_NODE_ID_PREFIX}{end_user_id}"
+    group_node = {
+        "id": group_id,
+        "label": PREFERENCE_GROUP_LABEL,
+        "caption": PREFERENCE_GROUP_LABEL,
+        "properties": {
+            "name": labels.preference_group_name,
+            "virtual": True,
+            "preference_count": len(preference_ids),
+        },
+    }
+    virtual_edges: list[dict[str, Any]] = []
+    for preference_id in preference_ids:
+        node_a, node_b = sorted((group_id, preference_id))
+        item = {
+            "id": f"virtual:has-preference:{preference_id}",
+            "type": PREFERENCE_GROUP_EDGE_TYPE,
+            "predicate": PREFERENCE_GROUP_EDGE_TYPE,
+        }
+        virtual_edges.append(
+            {
+                "node_a": node_a,
+                "node_b": node_b,
+                "total": 1,
+                "edge_type": "SINGLE",
+                "a_to_b": [item] if node_a == group_id else [],
+                "b_to_a": [item] if node_b == group_id else [],
+            }
+        )
+
+    return [*nodes, group_node], [*edges, *virtual_edges]
+
+
 class ProfileAnalyticsService:
     def __init__(self, runtime: ProfileRuntime) -> None:
         self.end_user_profile = EndUserProfileRepository(runtime.postgres)
@@ -305,58 +354,15 @@ class ProfileAnalyticsService:
         self.memory_graph = MemoryGraphRepository(runtime.neo4j)
         self.workspace_statistics_repository = WorkspaceStatisticsRepository(runtime.redis)
 
-    async def require_user(
-        self, end_user_id: str, workspace_id: UUID
-    ) -> tuple[UUID, dict[str, Any]]:
-        try:
-            user_id = UUID(end_user_id)
-        except (TypeError, ValueError) as exc:
-            raise ProfileError(
-                BizCode.INVALID_PARAMETER, "无效的用户ID格式", detail="invalid end_user_id"
-            ) from exc
-        row = await self.end_user_profile.get_end_user(user_id, workspace_id)
-        if row is None:
-            raise ProfileError(
-                BizCode.USER_NOT_FOUND,
-                "用户不存在",
-                detail="end_user does not exist in workspace",
-                status_code=404,
-            )
-        return user_id, row
-
-    async def require_graph_user(self, end_user_id: str, workspace_id: UUID) -> str:
-        try:
-            user_id = UUID(end_user_id)
-        except (TypeError, ValueError) as exc:
-            raise ProfileError(
-                BizCode.INVALID_PARAMETER, "无效的用户ID格式", detail="invalid end_user_id"
-            ) from exc
-        resolved = await self.end_user_profile.resolve_graph_end_user(user_id, workspace_id)
-        if resolved is None:
-            raise ProfileError(
-                BizCode.USER_NOT_FOUND,
-                "用户不存在",
-                detail="end_user does not exist in workspace",
-                status_code=404,
-            )
-        return str(resolved)
-
     async def memory_insight(self, end_user_id: str, workspace_id: UUID) -> dict[str, Any]:
-        try:
-            _, row = await self.require_user(end_user_id, workspace_id)
-        except ProfileError as exc:
-            if exc.code not in {BizCode.INVALID_PARAMETER, BizCode.USER_NOT_FOUND}:
-                raise
-            return {
-                "memory_insight": None,
-                "behavior_pattern": None,
-                "key_findings": None,
-                "actionable_findings": [],
-                "growth_trajectory": None,
-                "updated_at": None,
-                "is_cached": False,
-                "message": exc.message,
-            }
+        """读缓存的记忆洞察；用户维度的问题一律走空态（文档 3.4 的 B 类响应）。"""
+
+        user_id = parse_uuid(end_user_id)
+        if user_id is None:
+            return _empty_memory_insight("analytics.empty.invalid_insight_id")
+        row = await self.end_user_profile.get_memory_insight(user_id, workspace_id)
+        if row is None:
+            return _empty_memory_insight("analytics.empty.user_not_found")
         findings, actionable = _parse_findings(row["key_findings"])
         cached = any(
             row[key]
@@ -368,26 +374,19 @@ class ProfileAnalyticsService:
             "key_findings": findings,
             "actionable_findings": actionable,
             "growth_trajectory": row["growth_trajectory"],
-            "updated_at": _timestamp_ms(row["memory_insight_updated_at"]),
+            "updated_at": datetime_to_epoch_ms(row["memory_insight_updated_at"]),
             "is_cached": cached,
         }
 
     async def user_summary(self, end_user_id: str, workspace_id: UUID) -> dict[str, Any]:
-        try:
-            _, row = await self.require_user(end_user_id, workspace_id)
-        except ProfileError as exc:
-            if exc.code not in {BizCode.INVALID_PARAMETER, BizCode.USER_NOT_FOUND}:
-                raise
-            return {
-                "user_summary": None,
-                "personality": None,
-                "core_values": None,
-                "one_sentence": None,
-                "tags": [],
-                "updated_at": None,
-                "is_cached": False,
-                "message": exc.message,
-            }
+        """读缓存的用户摘要；只取摘要列，不捎带洞察那几列长文本。"""
+
+        user_id = parse_uuid(end_user_id)
+        if user_id is None:
+            return _empty_user_summary("analytics.empty.invalid_user_id")
+        row = await self.end_user_profile.get_user_summary(user_id, workspace_id)
+        if row is None:
+            return _empty_user_summary("analytics.empty.user_not_found")
         cached = any(
             row[key]
             for key in ("user_summary", "personality_traits", "core_values", "one_sentence_summary")
@@ -398,11 +397,12 @@ class ProfileAnalyticsService:
             "core_values": row["core_values"],
             "one_sentence": row["one_sentence_summary"],
             "tags": _normalize_tags(row["memory_tags"]),
-            "updated_at": _timestamp_ms(row["user_summary_updated_at"]),
+            "updated_at": datetime_to_epoch_ms(row["user_summary_updated_at"]),
             "is_cached": cached,
         }
 
-    async def _safe_count(self, name: str, call: Callable[[], Awaitable[int]]) -> int:
+    @staticmethod
+    async def _safe_count(name: str, call: Callable[[], Awaitable[int]]) -> int:
         try:
             return await call()
         except Exception:
@@ -410,12 +410,13 @@ class ProfileAnalyticsService:
             return 0
 
     async def node_statistics(self, end_user_id: str, workspace_id: UUID) -> list[dict[str, Any]]:
-        try:
-            user_id, _ = await self.require_user(end_user_id, workspace_id)
-        except ProfileError as exc:
-            if exc.code in {BizCode.INVALID_PARAMETER, BizCode.USER_NOT_FOUND}:
-                return _zero_memory_statistics()
-            raise
+        # 只做存在性判定，不把画像长文本列载入后丢掉（api ``end_user_exists_async``
+        # 同款取舍）；非法 ID 与用户不存在一律空态全零（文档 3.4 的 B 类响应）。
+        user_id = parse_uuid(end_user_id)
+        if user_id is None or not await self.end_user_profile.end_user_exists(
+            user_id, workspace_id
+        ):
+            return _zero_memory_statistics()
         # PG 侧 6 个计数器合并为一条查询（每项真实 DB 工作 <1ms，开销在会话/连接上），
         # Neo4j 侧 4 个计数各自约一次往返（RTT 支配）保持并发。两组互不依赖，一起发。
         source_counts, neo_counts = await asyncio.gather(
@@ -459,7 +460,7 @@ class ProfileAnalyticsService:
                 "count": counts[key],
                 "percentage": round(counts[key] / total * 100, 2) if total else 0.0,
             }
-            for key in _MEMORY_TYPES
+            for key in MEMORY_TYPES
         ]
 
     async def _memory_type_source_counts(self, user_id: UUID) -> dict[str, int]:
@@ -499,6 +500,11 @@ class ProfileAnalyticsService:
         )
         return dict(zip(COUNT_KEYS, values, strict=True))
 
+    @redis_cache(
+        prefix="memory_analytics_graph_data",
+        skip_args=["self"],
+        id_arg="end_user_id",
+    )
     async def graph_data(
         self,
         end_user_id: str,
@@ -508,17 +514,25 @@ class ProfileAnalyticsService:
         depth: int,
         center_node_id: str | None,
         per_type_limits: dict[str, int] | None,
+        language: str,
     ) -> dict[str, Any]:
-        try:
-            graph_end_user_id = await self.require_graph_user(end_user_id, workspace_id)
-        except ProfileError as exc:
-            if exc.code in {BizCode.INVALID_PARAMETER, BizCode.USER_NOT_FOUND}:
-                return _empty_graph(exc.message)
-            raise
+        user_id = parse_uuid(end_user_id)
+        if user_id is None:
+            return _empty_graph("analytics.empty.invalid_user_id")
+        resolved = await self.end_user_profile.resolve_graph_end_user(user_id, workspace_id)
+        if resolved is None:
+            return _empty_graph("analytics.empty.user_not_found")
+        graph_end_user_id = str(resolved)
+        if center_node_id and center_node_id.startswith(PREFERENCE_GROUP_NODE_ID_PREFIX):
+            return _empty_graph("analytics.empty.invalid_center_node")
+        # Filter_Mode 收敛到与 SUPPORTED_NODE_TYPES 的交集并去重排序（api
+        # ``compute_stat_types`` 用 ``sorted(type_limits.keys())``）。
         requested = (
             sorted(SUPPORTED_NODE_TYPES)
             if not node_types
-            else [node_type for node_type in node_types if node_type in SUPPORTED_NODE_TYPES]
+            else sorted(
+                {node_type for node_type in node_types if node_type in SUPPORTED_NODE_TYPES}
+            )
         )
         stat_types = requested if not center_node_id else sorted(SUPPORTED_NODE_TYPES)
         # per_type 的全量计数只依赖 (graph_end_user_id, stat_types)，与节点/边查询
@@ -533,33 +547,43 @@ class ProfileAnalyticsService:
                 for node_type in stat_types
             ]
         )
-        rows: list[dict[str, Any]] = []
+        rows: list[dict[str, Any]]
         type_limits: dict[str, int] = {}
         if center_node_id:
+            # 不过滤 label：Center_Mode 的邻居可能是 Community 等未列入
+            # SUPPORTED_NODE_TYPES 的类型，api 同样原样返回（白名单外的属性只留 caption）。
             rows = await self.memory_graph.centered_nodes(
                 graph_end_user_id, center_node_id, depth, limit
             )
-            rows = [row for row in rows if row.get("label") in SUPPORTED_NODE_TYPES]
         else:
             type_limits = {
                 node_type: (per_type_limits or {}).get(
                     node_type,
-                    DEFAULT_PER_TYPE_LIMITS.get(node_type, min(limit, 500)),
+                    DEFAULT_PER_TYPE_LIMITS.get(
+                        node_type, min(limit, SINGLE_TYPE_LIMIT_HARD_MAX)
+                    ),
                 )
                 for node_type in requested
             }
             type_limits = _shrink_type_limits(type_limits)
             rows = await self._nodes_for_type_limits(graph_end_user_id, type_limits)
+        # Resolve the language once per request; the node loop below only does dict.get.
+        labels = enum_labels(language)
         nodes: list[dict[str, Any]] = []
         node_counts: dict[str, int] = defaultdict(int)
         for row in rows:
             label = str(row["label"])
-            props = _properties(label, row.get("properties") or {}, int(row.get("rel_count") or 0))
-            caption = str(props.get("caption") or props.get("name") or label)
+            props = _properties(
+                label, row.get("properties") or {}, int(row.get("rel_count") or 0), labels
+            )
+            # 与 api ``_format_nodes`` 一致：caption 只回落到 label，不借用 name
+            caption = str(props["caption"]) if "caption" in props else label
             nodes.append(
                 {"id": str(row["id"]), "label": label, "properties": props, "caption": caption}
             )
             node_counts[label] += 1
+        # Center_Mode 的「是否触顶」以真实节点数为准，虚拟分组节点不参与
+        returned_total = len(nodes)
         raw_edges: list[dict[str, Any]] = []
         try:
             raw_edges = await self.memory_graph.edges(
@@ -571,6 +595,17 @@ class ProfileAnalyticsService:
         for edge in raw_edges:
             edge_counts[str(edge["type"])] += 1
         edge_data = _unified_edges(raw_edges)
+        # 虚拟偏好分组节点在真实边查询结束后才加入；它只存在于响应里，
+        # 因此不计入 returned_total，也不参与任何 Cypher 参数。
+        preference_count = node_counts.get("Preference", 0)
+        nodes, edge_data = _attach_preference_group(
+            nodes, edge_data, end_user_id=graph_end_user_id, labels=labels
+        )
+        if preference_count:
+            node_counts[PREFERENCE_GROUP_LABEL] = 1
+            edge_counts[PREFERENCE_GROUP_EDGE_TYPE] = (
+                edge_counts.get(PREFERENCE_GROUP_EDGE_TYPE, 0) + preference_count
+            )
         totals = await totals_future
         per_type = {}
         for node_type, total in zip(stat_types, totals, strict=True):
@@ -583,7 +618,7 @@ class ProfileAnalyticsService:
                 "truncated": (
                     effective_limit > 0
                     and total > returned
-                    and (not center_node_id or len(nodes) >= effective_limit)
+                    and (not center_node_id or returned_total >= effective_limit)
                 ),
             }
         return {
@@ -604,7 +639,7 @@ class ProfileAnalyticsService:
         """并发拉取各 Node_Type 的节点，并逐项复现原串行实现的顺序与截断语义。
 
         原实现逐类型 ``await``，共 N 次串行往返（N = 请求的类型数）；这里用
-        ``asyncio.gather`` 并发，再把结果按同一顺序回放「累加 → 触顶 2000 即截断
+        ``asyncio.gather`` 并发，再把结果按同一顺序回放「累加 → 触顶 TOTAL_NODES_CAP 即截断
         并停止」的语义，因此 ``rows`` 的内容与顺序与串行版本完全一致。
 
         异常语义同样对齐：被截断点跳过的类型用 ``return_exceptions=True`` 收集后
@@ -630,24 +665,30 @@ class ProfileAnalyticsService:
             if isinstance(part, BaseException):
                 raise part
             rows.extend(part)
-            if len(rows) >= 2000:
-                rows = rows[:2000]
+            if len(rows) >= TOTAL_NODES_CAP:
+                rows = rows[:TOTAL_NODES_CAP]
                 break
         return rows
 
+    @redis_cache(
+        prefix="memory_analytics_community_graph",
+        skip_args=["self"],
+        id_arg="end_user_id",
+    )
     async def community_graph(self, end_user_id: str, workspace_id: UUID) -> dict[str, Any]:
-        try:
-            graph_end_user_id = await self.require_graph_user(end_user_id, workspace_id)
-        except ProfileError as exc:
-            if exc.code in {BizCode.INVALID_PARAMETER, BizCode.USER_NOT_FOUND}:
-                return _empty_community_graph(exc.message)
-            raise
+        user_id = parse_uuid(end_user_id)
+        if user_id is None:
+            return _empty_community_graph("analytics.empty.invalid_user_id")
+        resolved = await self.end_user_profile.resolve_graph_end_user(user_id, workspace_id)
+        if resolved is None:
+            return _empty_community_graph("analytics.empty.user_not_found")
+        graph_end_user_id = str(resolved)
 
         rows = await self.memory_graph.community_graph_rows(graph_end_user_id)
         nodes: dict[str, dict[str, Any]] = {}
         edges: dict[str, dict[str, Any]] = {}
         memberships: dict[str, list[str]] = defaultdict(list)
-        entity_fields = ("name", "end_user_id", "description", "created_at", "entity_type")
+        entity_fields = COMMUNITY_GRAPH_ENTITY_FIELDS
 
         for row in rows:
             community_id = row.get("c_id")
@@ -656,10 +697,12 @@ class ProfileAnalyticsService:
             community_props = row.get("c_props") or {}
 
             if community_id and community_id not in nodes:
+                # 仓储层下推了属性投影，缺失属性会带 null 值回来（`properties()`
+                # 则是不返回该键），因此按「值非空」而非「键存在」过滤。
                 props = {
-                    key: _clean(community_props.get(key))
-                    for key in NODE_PROPERTY_WHITELIST["Community"]
-                    if key in community_props
+                    key: to_jsonable(community_props.get(key))
+                    for key in COMMUNITY_GRAPH_NODE_FIELDS
+                    if community_props.get(key) is not None
                 }
                 nodes[community_id] = {
                     "id": community_id,
@@ -669,8 +712,12 @@ class ProfileAnalyticsService:
 
             if entity_id and entity_id not in nodes:
                 raw = row.get("e_props") or {}
-                props = {key: _clean(raw.get(key)) for key in entity_fields if key in raw}
-                props["community_name"] = _clean(community_props.get("name")) or ""
+                props = {
+                    key: to_jsonable(raw.get(key))
+                    for key in entity_fields
+                    if raw.get(key) is not None
+                }
+                props["community_name"] = to_jsonable(community_props.get("name")) or ""
                 nodes[entity_id] = {
                     "id": entity_id,
                     "label": "ExtractedEntity",
@@ -679,7 +726,11 @@ class ProfileAnalyticsService:
 
             if neighbor_id and neighbor_id not in nodes:
                 raw = row.get("e2_props") or {}
-                props = {key: _clean(raw.get(key)) for key in entity_fields if key in raw}
+                props = {
+                    key: to_jsonable(raw.get(key))
+                    for key in entity_fields
+                    if raw.get(key) is not None
+                }
                 props["community_name"] = ""
                 nodes[neighbor_id] = {
                     "id": neighbor_id,
@@ -702,7 +753,7 @@ class ProfileAnalyticsService:
             relation_id = row.get("r_id")
             if relation_id and relation_id not in edges and neighbor_id:
                 relation_props = {
-                    key: _clean(value) for key, value in (row.get("r_props") or {}).items()
+                    key: to_jsonable(value) for key, value in (row.get("r_props") or {}).items()
                 }
                 from_entity = bool(row.get("r_from_e"))
                 edges[relation_id] = {
@@ -741,23 +792,23 @@ class ProfileAnalyticsService:
         try:
             snapshots = await self.workspace_statistics_repository.workspace_snapshots(workspace_id)
         except WorkspaceStatisticsUnavailableError as exc:
-            raise ProfileError(
+            raise LocalizedProfileError(
                 BizCode.SERVICE_UNAVAILABLE,
-                "工作空间记忆统计服务暂不可用",
+                "analytics.workspace_statistics.unavailable",
                 detail="workspace statistics cache unavailable",
                 status_code=503,
             ) from exc
         except WorkspaceStatisticsCorruptError as exc:
-            raise ProfileError(
+            raise LocalizedProfileError(
                 BizCode.SERVICE_UNAVAILABLE,
-                "工作空间记忆统计数据异常",
+                "analytics.workspace_statistics.corrupt",
                 detail="workspace statistics cache corrupt",
                 status_code=503,
             ) from exc
         if not snapshots:
-            raise ProfileError(
+            raise LocalizedProfileError(
                 BizCode.SERVICE_UNAVAILABLE,
-                "工作空间记忆统计尚未生成，请稍后重试",
+                "analytics.workspace_statistics.not_ready",
                 detail="workspace statistics snapshot unavailable",
                 status_code=503,
             )
@@ -767,7 +818,7 @@ class ProfileAnalyticsService:
             if len(snapshots) > 1
             else {
                 "statistics": [
-                    {"type": key, "count": 0, "percentage": 0.0} for key in _MEMORY_TYPES
+                    {"type": key, "count": 0, "percentage": 0.0} for key in MEMORY_TYPES
                 ],
                 "total_count": 0,
                 "total_users": 0,

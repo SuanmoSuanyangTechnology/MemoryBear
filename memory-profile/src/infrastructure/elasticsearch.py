@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 
 from elasticsearch import AsyncElasticsearch
 
 from src.config import ProfileSettings
+
+logger = logging.getLogger(__name__)
 
 
 class ElasticsearchManager:
@@ -46,6 +49,26 @@ class ElasticsearchManager:
                 self._client = AsyncElasticsearch(**options)
                 self._loop = current_loop
             return self._client
+
+    def pool_snapshot(self) -> dict[str, object] | None:
+        """Return transport node counts without issuing a request."""
+
+        client = self._client
+        if client is None:
+            return None
+        try:
+            transport = getattr(client, "transport", None) or getattr(client, "_transport", None)
+            node_pool = getattr(transport, "node_pool", None)
+            if node_pool is None:
+                return None
+            return {"nodes": len(node_pool), "alive": len(node_pool.all())}
+        except Exception as exc:
+            logger.warning(
+                "Failed to read Elasticsearch pool state: %s",
+                type(exc).__name__,
+                extra={"event": "elasticsearch_pool_snapshot_failed"},
+            )
+            return None
 
     async def ping(self) -> bool:
         return bool(await (await self.client()).ping())

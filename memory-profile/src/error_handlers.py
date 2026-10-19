@@ -10,8 +10,9 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from src.common.errors import BizCode, ProfileError
+from src.common.errors import BizCode, LocalizedProfileError, ProfileError
 from src.common.responses import ApiResponse, failure
+from src.i18n import get_request_language, t
 from src.middleware.request_logging import record_request_failure
 
 logger = logging.getLogger(__name__)
@@ -33,10 +34,17 @@ def _response(request: Request, status: int, body: ApiResponse[Any]) -> JSONResp
 def register_error_handlers(app: FastAPI) -> None:
     @app.exception_handler(ProfileError)
     async def profile_error(request: Request, exc: ProfileError) -> JSONResponse:
+        message = exc.message
+        detail = exc.detail
+        if isinstance(exc, LocalizedProfileError):
+            language = get_request_language(request)
+            message = t(exc.message_key, language, **exc.message_params)
+            if exc.detail_key:
+                detail = t(exc.detail_key, language, **exc.detail_params)
         return _response(
             request,
             exc.status_code,
-            failure(exc.code, exc.message, exc.detail, exc.data),
+            failure(exc.code, message, detail, exc.data),
         )
 
     @app.exception_handler(RequestValidationError)
@@ -46,7 +54,7 @@ def register_error_handlers(app: FastAPI) -> None:
             422,
             failure(
                 BizCode.VALIDATION_FAILED,
-                "请求参数校验失败",
+                t("common.validation.request_failed", get_request_language(request)),
                 str(exc.errors()),
             ),
         )
@@ -65,5 +73,8 @@ def register_error_handlers(app: FastAPI) -> None:
         return _response(
             request,
             500,
-            failure(BizCode.INTERNAL_ERROR, "内部服务错误"),
+            failure(
+                BizCode.INTERNAL_ERROR,
+                t("common.internal_error", get_request_language(request)),
+            ),
         )

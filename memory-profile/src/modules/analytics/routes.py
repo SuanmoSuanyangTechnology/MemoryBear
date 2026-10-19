@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Header, Query, Request
+from fastapi import APIRouter, Depends, Query, Request
 
 from src.common.responses import ApiResponse
+from src.i18n import get_request_language
 from src.middleware.auth import MemoryPrincipal
 from src.middleware.identity import require_memory_context
 from src.modules.analytics.handler import AnalyticsHandler
@@ -27,7 +28,9 @@ async def memory_insight(
     context: Context,
     end_user_id: str = Query(...),
 ) -> ObjectApiResponse:
-    return await _handler(request).memory_insight(context, end_user_id)
+    return await _handler(request).memory_insight(
+        context, end_user_id, get_request_language(request)
+    )
 
 
 @router.get("/user_summary", response_model=ObjectApiResponse)
@@ -35,9 +38,10 @@ async def user_summary(
     request: Request,
     context: Context,
     end_user_id: str = Query(...),
-    language_type: Annotated[str | None, Header(alias="X-Language-Type")] = None,
 ) -> ObjectApiResponse:
-    return await _handler(request).user_summary(context, end_user_id, language_type)
+    return await _handler(request).user_summary(
+        context, end_user_id, get_request_language(request)
+    )
 
 
 @router.get("/node_statistics", response_model=ListApiResponse)
@@ -46,12 +50,16 @@ async def node_statistics(
     context: Context,
     end_user_id: str = Query(...),
 ) -> ListApiResponse:
-    return await _handler(request).node_statistics(context, end_user_id)
+    return await _handler(request).node_statistics(
+        context, end_user_id, get_request_language(request)
+    )
 
 
 @router.get("/workspace_statistics", response_model=ObjectApiResponse)
 async def workspace_statistics(request: Request, context: Context) -> ObjectApiResponse:
-    return await _handler(request).workspace_statistics(context)
+    return await _handler(request).workspace_statistics(
+        context, get_request_language(request)
+    )
 
 
 @router.get("/graph_data", response_model=ObjectApiResponse)
@@ -73,6 +81,7 @@ async def graph_data(
         depth=depth,
         center_node_id=center_node_id,
         per_type_limits=per_type_limits,
+        language=get_request_language(request),
     )
 
 
@@ -82,4 +91,6 @@ async def community_graph(
     context: Context,
     end_user_id: str = Query(...),
 ) -> ObjectApiResponse:
-    return await _handler(request).community_graph(context, end_user_id)
+    return await _handler(request).community_graph(
+        context, end_user_id, get_request_language(request)
+    )
