@@ -182,6 +182,11 @@ service.interceptors.response.use(
         msg = i18n.t('common.permissionDenied');
         break;
       case 404:
+        // 通知中心为可选能力（premium 商用模块），社区版后端未提供该路由。
+        // 前端会轮询 /notifications/* 与 SSE，此处静默处理，避免反复弹「接口不存在」。
+        if (error.config?.url?.includes('/notifications')) {
+          return Promise.reject(error);
+        }
         msg = i18n.t('common.apiNotFound');
         break;
       case 429:

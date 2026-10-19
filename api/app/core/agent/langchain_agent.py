@@ -243,7 +243,7 @@ class LangChainAgent:
             deep_thinking: bool = False,  # 是否启用深度思考模式
             thinking_budget_tokens: Optional[int] = None,  # 深度思考 token 预算
             json_output: bool = False,  # 是否强制 JSON 输出
-            tool_call_limit: int = 1,  # 每个工具的最大调用次数（防止模型陷入工具循环）
+            tool_call_limit: int = 50,  # 每个工具的最大调用次数（防止模型陷入工具循环）
             context_evidence: Optional[List[Any]] = None,
             context_query: str = "",
             context_base_text: str = "",
