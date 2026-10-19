@@ -381,7 +381,7 @@ async def update_knowledge(
         )
     dispatcher = TaskDispatcher(runtime=runtime)
     if outcome.wiki_backfill_required:
-        from ...rag.wiki.config import BACKFILL_TASK, WIKI_QUEUE
+        from ...rag.wiki.config import BACKFILL_REGISTERED_HEADER, BACKFILL_TASK, WIKI_QUEUE
         from ...rag.wiki.diagnostics import diagnostic_json, exception_details
         from ...services.wiki.backfill import record_backfill_publish_failure
         from ...services.wiki.runtime import transaction
@@ -389,7 +389,8 @@ async def update_knowledge(
         try:
             await dispatcher.send(BACKFILL_TASK, kwargs={
                 "kb_id": str(knowledge_id), "upper_at_ms": outcome.wiki_backfill_upper_at_ms,
-            }, queue=WIKI_QUEUE, task_id=outcome.wiki_backfill_task_id)
+            }, queue=WIKI_QUEUE, task_id=outcome.wiki_backfill_task_id,
+                headers={BACKFILL_REGISTERED_HEADER: True})
         except Exception as exc:
             logger.error(
                 "Wiki 配置与待处理状态已保存，但补录派发失败 "

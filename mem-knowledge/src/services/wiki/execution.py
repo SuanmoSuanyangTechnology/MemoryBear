@@ -62,14 +62,16 @@ def _pending(session, delivery):
     return pages.pending_page_ids(session, current)
 
 
-def _plan_topics(runtime, model, snapshot, draft, delivery, input_hash):
+def _plan_topics(runtime, model, snapshot, draft, delivery, input_hash, ensure_map_owned):
     # 模型调用不持有数据库事务；租约保护目录快照到页面计划注册的完整阶段。
+    ensure_map_owned()
     with taxonomy_lease(runtime.redis.sync_client(), delivery["kb_id"]) as ensure_owned:
         context = transaction(runtime, pages.load_planning_context, delivery)
-        candidates = taxonomy(
-            model, snapshot, reconcile(model, snapshot, draft["topics"], context), context
-        )
+        candidates = reconcile(model, snapshot, draft["topics"], context)
+        ensure_map_owned()
+        candidates = taxonomy(model, snapshot, candidates, context)
         ensure_owned()
+        ensure_map_owned()
         return transaction(
             runtime, pages.fix_plan, delivery, candidates, input_hash,
             has_text=True, document_title=snapshot["title"],
@@ -77,7 +79,8 @@ def _plan_topics(runtime, model, snapshot, draft, delivery, input_hash):
         )
 
 
-def execute_map(runtime, delivery):
+def execute_map(runtime, delivery, *, ensure_owned):
+    ensure_owned()
     snapshot = transaction(
         runtime, pages.load_map, delivery, failure_limit=runtime.settings.kb_wiki_failure_attempts
     )
@@ -94,6 +97,7 @@ def execute_map(runtime, delivery):
         )
         segments, catalog, _ = segment_sources(raw, runtime.settings, snapshot)
         input_hash = fingerprint({"title": snapshot["title"], "sources": raw})
+        ensure_owned()
         if snapshot.get("reuse_candidate") and snapshot["input_hash"] == input_hash:
             pending = transaction(
                 runtime,
@@ -111,12 +115,16 @@ def execute_map(runtime, delivery):
                                          fixed_plan=True) if segments else None
             else:
                 candidates = extract_candidates(model, snapshot, segments) if segments else []
+                ensure_owned()
                 draft = prepare_document(model, snapshot, candidates, segments, catalog) if (
                     segments
                 ) else None
                 if draft:
-                    plan = _plan_topics(runtime, model, snapshot, draft, delivery, input_hash)
+                    plan = _plan_topics(
+                        runtime, model, snapshot, draft, delivery, input_hash, ensure_owned,
+                    )
                 else:
+                    ensure_owned()
                     plan = transaction(
                         runtime, pages.fix_plan, delivery, candidates, input_hash,
                         has_text=bool(segments), document_title=snapshot["title"],
@@ -135,6 +143,7 @@ def execute_map(runtime, delivery):
             )
             if fingerprint({"title": snapshot["title"], "sources": current}) != input_hash:
                 raise WikiDeferred("WIKI_SOURCE_CHANGED")
+            ensure_owned()
             pending = transaction(
                 runtime,
                 pages.commit_map,
@@ -144,7 +153,9 @@ def execute_map(runtime, delivery):
                 materials=materials,
                 document_title=snapshot["title"],
             )
-    publish_pages(runtime, delivery["kb_id"], pending)
+    for page_id in pending:
+        ensure_owned()
+        publish_pages(runtime, delivery["kb_id"], [page_id])
     return {"document_id": delivery["document_id"], "pages_dispatched": len(pending)}
 
 

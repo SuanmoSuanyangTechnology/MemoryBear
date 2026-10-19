@@ -756,13 +756,10 @@ async def apply_knowledge_update(
     await db.flush()
     await db.refresh(knowledge)
     outcome = await build_knowledge_mutation_outcome(db, knowledge)
-    outcome = replace(
-        outcome,
-        wiki_backfill_required=not wiki_enabled_before and wiki_enabled_after,
-    )
+    wiki_enable_transition = not wiki_enabled_before and wiki_enabled_after
     registered = 0
     try:
-        if outcome.wiki_backfill_required:
+        if wiki_enable_transition:
             from ..bootstrap import get_settings
             from .wiki.backfill import register_backfill
 
@@ -776,13 +773,15 @@ async def apply_knowledge_update(
                 session, knowledge.id, upper_at_ms, task_id, batch_size,
             ))
             outcome = replace(
-                outcome, wiki_backfill_task_id=task_id, wiki_backfill_upper_at_ms=upper_at_ms,
+                outcome, wiki_backfill_required=registered > 0,
+                wiki_backfill_task_id=task_id if registered else None,
+                wiki_backfill_upper_at_ms=upper_at_ms if registered else None,
             )
         await db.commit()
     except Exception:
         await db.rollback()
         raise
-    if outcome.wiki_backfill_required:
+    if wiki_enable_transition:
         logger.info("Wiki 补录待处理登记已提交 knowledge_id=%s admission_id=%s documents=%s",
                     knowledge.id, outcome.wiki_backfill_task_id, registered)
     return outcome

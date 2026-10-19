@@ -50,7 +50,9 @@ def load_map(session, delivery, *, failure_limit=None):
         raise WikiSuperseded("WIKI_OPERATION_SUPERSEDED", retryable=False)
     if state.status in {"ready", "skipped", "failed"}:
         raise WikiSuperseded("WIKI_ROUND_ALREADY_TERMINAL", retryable=False)
-    if delivery.get("redelivered") and state.status == "running":
+    # Map 已提交后仍可能等待 Reduce，重投不应消耗 Map 的 Worker 丢失预算。
+    if (delivery.get("redelivered") and state.status == "running"
+            and state.mapped_version != state.requested_version):
         state.failure_attempt += 1
         if failure_limit is not None and state.failure_attempt >= failure_limit:
             raise WikiError("WIKI_WORKER_LOSS_EXHAUSTED", retryable=False)
