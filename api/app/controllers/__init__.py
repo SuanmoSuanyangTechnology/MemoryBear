@@ -45,6 +45,7 @@ from . import (
     message_interaction_controller,
     model_controller,
     multi_agent_controller,
+    prediction_controller,
     prompt_optimizer_controller,
     public_share_controller,
     release_share_controller,
@@ -110,6 +111,7 @@ manager_router.include_router(multi_agent_controller.router)
 manager_router.include_router(emotion_controller.router)
 manager_router.include_router(emotion_config_controller.router)
 manager_router.include_router(prompt_optimizer_controller.router)
+manager_router.include_router(prediction_controller.router)
 manager_router.include_router(memory_reflection_controller.router)
 manager_router.include_router(memory_short_term_controller.router)
 manager_router.include_router(tool_controller.router)
