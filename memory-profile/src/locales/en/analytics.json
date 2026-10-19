@@ -19,7 +19,7 @@
   "workspace_statistics": {
     "unavailable": "Workspace memory statistics service is temporarily unavailable",
     "corrupt": "Workspace memory statistics data is invalid",
-    "not_ready": "Workspace memory statistics have not been generated yet, please try again later"
+    "not_ready": "Workspace memory statistics are being generated, please try again later"
   },
   "enum": {
     "entity_type": {

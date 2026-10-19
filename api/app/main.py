@@ -1,3 +1,4 @@
+import asyncio
 import os
 import subprocess
 
@@ -208,21 +209,50 @@ def read_root():
 
 @app.get("/ready", include_in_schema=False)
 async def readiness():
-    """Return process readiness, including enabled remote integrations."""
+    """Return process readiness, including enabled remote integrations.
 
-    knowledge_mode = "legacy"
+    Both enabled integrations are probed independently and concurrently, so a
+    failing knowledge probe no longer prevents the memory-profile probe from
+    running. The HTTP response shape stays unchanged: the original
+    ``{status, knowledge_mode, profile_mode}`` on success, and the original
+    HTTPException 503 detail on failure.
+    """
+
+    async def _probe(name: str, check) -> tuple[str, bool]:
+        try:
+            return name, bool(await check())
+        except Exception as exc:  # noqa: BLE001 - a readiness probe must fail closed
+            logger.warning(
+                "readiness probe failed: integration=%s error=%s",
+                name,
+                type(exc).__name__,
+            )
+            return name, False
+
+    probes = []
     if settings.ENABLE_MEM_KNOWLEDGE:
         from app.integrations.knowledge.runtime import is_remote_knowledge_ready
 
-        if not await is_remote_knowledge_ready():
+        probes.append(("knowledge", is_remote_knowledge_ready))
+    if settings.ENABLE_MEMORY_PROFILE:
+        from app.integrations.profile.runtime import is_remote_memory_profile_ready
+
+        probes.append(("memory_profile", is_remote_memory_profile_ready))
+
+    results = dict(
+        await asyncio.gather(*(_probe(name, check) for name, check in probes))
+    )
+    logger.debug("readiness probe results: %s", results)
+
+    knowledge_mode = "legacy"
+    if settings.ENABLE_MEM_KNOWLEDGE:
+        if not results.get("knowledge"):
             raise HTTPException(status_code=503, detail="Knowledge service unavailable")
         knowledge_mode = "remote"
 
     profile_mode = "legacy"
     if settings.ENABLE_MEMORY_PROFILE:
-        from app.integrations.profile.runtime import is_remote_memory_profile_ready
-
-        if not await is_remote_memory_profile_ready():
+        if not results.get("memory_profile"):
             raise HTTPException(
                 status_code=503,
                 detail="Memory profile service unavailable",

@@ -19,7 +19,7 @@
   "workspace_statistics": {
     "unavailable": "工作空间记忆统计服务暂不可用",
     "corrupt": "工作空间记忆统计数据异常",
-    "not_ready": "工作空间记忆统计尚未生成，请稍后重试"
+    "not_ready": "工作空间记忆统计正在生成，请稍后重试"
   },
   "enum": {
     "entity_type": {
