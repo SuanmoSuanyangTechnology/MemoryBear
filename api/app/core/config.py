@@ -76,6 +76,13 @@ class Settings:
     DB_POOL_TIMEOUT: int = int(os.getenv("DB_POOL_TIMEOUT", "30"))
     DB_POOL_PRE_PING: bool = os.getenv("DB_POOL_PRE_PING", "true").lower() == "true"
 
+    # 多 Agent 流式请求并发闸门（单进程）：超出上限的请求排队等待，避免同时占满 DB 连接池。
+    # 一个请求在准备阶段会同时持有共享 session 连接并另开独立连接，峰值远大于 1，
+    # 上限建议 <= (DB_POOL_SIZE + DB_MAX_OVERFLOW) / 4。0 表示不限制。
+    MULTI_AGENT_STREAM_MAX_CONCURRENCY: int = int(os.getenv("MULTI_AGENT_STREAM_MAX_CONCURRENCY", "16"))
+    # 排队等待上限（秒），超时下发 error 事件；0 表示一直等
+    MULTI_AGENT_STREAM_QUEUE_TIMEOUT: float = float(os.getenv("MULTI_AGENT_STREAM_QUEUE_TIMEOUT", "120"))
+
     # Batch persist queue for async message persistence
     BATCH_PERSIST_QUEUE_SIZE: int = int(os.getenv("BATCH_PERSIST_QUEUE_SIZE", "10000"))
     BATCH_PERSIST_MAX_BATCH: int = int(os.getenv("BATCH_PERSIST_MAX_BATCH", "50"))
