@@ -3,9 +3,9 @@
 Two outlets:
 - Inline emission (direct reporting from call sites in this process): the `report_*`
   family, covering host-local model-call/auth paths;
-- Usage-event stream consumption: `consume_model_gateway_alerts` reads the `model:usage`
-  stream and feeds service-side (model-service) call terminal states into the same
-  gateway health rules.
+- Usage-event stream consumption: `consume_model_gateway_alerts` reads the deployment-scoped
+  usage stream (`model:usage:<DB_NAME>`) and feeds service-side (model-service) call terminal
+  states into the same gateway health rules.
 
 Double-report protection: events with `source_service == SOURCE_SERVICE` (host-local
 emission) are alerted by the inline path and always skipped by stream consumption; if a
@@ -34,7 +34,7 @@ from redis.exceptions import ResponseError
 from .aio_redis import get_thread_safe_sync_redis
 from .usage_bridge import SOURCE_SERVICE
 from .plugins import get_plugin
-from .usage_publisher import MODEL_USAGE_STREAM
+from .usage_publisher import model_usage_stream
 
 logger = logging.getLogger(__name__)
 
@@ -339,7 +339,7 @@ def is_model_gateway_failure_type(error_type: str | None) -> bool:
 def _ensure_alert_group(client: Any) -> None:
     try:
         client.xgroup_create(
-            MODEL_USAGE_STREAM, MODEL_USAGE_ALERT_CONSUMER_GROUP, id="$", mkstream=True
+            model_usage_stream(), MODEL_USAGE_ALERT_CONSUMER_GROUP, id="$", mkstream=True
         )
     except ResponseError as exc:
         if "BUSYGROUP" not in str(exc):
@@ -438,7 +438,7 @@ def _reclaim_stale_entries(client: Any, reporter: Any, stats: dict[str, int]) ->
     while True:
         try:
             claimed = client.xautoclaim(
-                MODEL_USAGE_STREAM,
+                model_usage_stream(),
                 MODEL_USAGE_ALERT_CONSUMER_GROUP,
                 _consumer_name(),
                 min_idle_time=_ALERT_RECLAIM_MIN_IDLE_MS,
@@ -453,13 +453,13 @@ def _reclaim_stale_entries(client: Any, reporter: Any, stats: dict[str, int]) ->
             stats["reclaimed"] += len(messages)
             ack_ids = _handle_alert_entries(messages, reporter, stats)
             if ack_ids:
-                client.xack(MODEL_USAGE_STREAM, MODEL_USAGE_ALERT_CONSUMER_GROUP, *ack_ids)
+                client.xack(model_usage_stream(), MODEL_USAGE_ALERT_CONSUMER_GROUP, *ack_ids)
         if not messages or cursor in ("0-0", "0", None):
             return
 
 
 def consume_model_gateway_alerts() -> dict[str, Any]:
-    """Consume the `model:usage` event stream and evaluate by the gateway health rules (best-effort + freshness first).
+    """Consume the deployment-scoped usage stream and evaluate by the gateway health rules (best-effort + freshness first).
 
     Called only by the beat periodic task (sync Redis + sync alert engine); the
     community edition with no premium plugin skips entirely — no group created, no
@@ -492,7 +492,7 @@ def consume_model_gateway_alerts() -> dict[str, Any]:
         response = client.xreadgroup(
             MODEL_USAGE_ALERT_CONSUMER_GROUP,
             _consumer_name(),
-            {MODEL_USAGE_STREAM: ">"},
+            {model_usage_stream(): ">"},
             count=_ALERT_BATCH_SIZE,
         )
         entries = [entry for _stream, messages in (response or []) for entry in messages]
@@ -500,5 +500,5 @@ def consume_model_gateway_alerts() -> dict[str, Any]:
             break
         ack_ids = _handle_alert_entries(entries, reporter, stats)
         if ack_ids:
-            client.xack(MODEL_USAGE_STREAM, MODEL_USAGE_ALERT_CONSUMER_GROUP, *ack_ids)
+            client.xack(model_usage_stream(), MODEL_USAGE_ALERT_CONSUMER_GROUP, *ack_ids)
     return {"status": "SUCCESS", **stats}

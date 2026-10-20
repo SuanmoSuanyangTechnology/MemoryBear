@@ -76,6 +76,11 @@ class AppServiceSettings(BaseSettings):
     # Must match the host api's Redis DB: acl:rules (identity-written) is read
     # from the shared database.
     redis_db: int = Field(default=0, ge=0, validation_alias="REDIS_DB")
+    # Usage-event stream key. Leave empty to derive ``model:usage:<DB_NAME>`` so
+    # deployments that share one Redis but own separate databases consume only
+    # their own events; set explicitly only when those deployments share a
+    # database name as well.
+    model_usage_stream: str = Field(default="", validation_alias="MODEL_USAGE_STREAM")
 
     # Application service environment variables
     application_service_host: str = Field(
@@ -407,6 +412,15 @@ class AppServiceSettings(BaseSettings):
         return normalized
 
     @model_validator(mode="after")
+    def check_usage_stream(self) -> AppServiceSettings:
+        """Fail fast on an unusable usage stream key instead of writing to a wrong one."""
+
+        stream = self.model_usage_stream_name
+        if not stream:
+            raise ValueError("MODEL_USAGE_STREAM resolved to an empty key")
+        return self
+
+    @model_validator(mode="after")
     def check_sse_timeout_ordering(self) -> AppServiceSettings:
         """Heartbeat must fire strictly before the idle close (and both stay
         below the gateway's 300s idle cutoff)."""
@@ -448,6 +462,22 @@ class AppServiceSettings(BaseSettings):
     @property
     def redis_url(self) -> str:
         return self.redis_url_for_db(self.redis_db)
+
+    @property
+    def model_usage_stream_name(self) -> str:
+        """Resolve the deployment-scoped usage stream key."""
+
+        explicit = self.model_usage_stream.strip()
+        if explicit:
+            if any(ch.isspace() for ch in explicit):
+                raise ValueError("MODEL_USAGE_STREAM must not contain whitespace")
+            return explicit
+        db_name = self.db_name.strip()
+        if not db_name or any(ch.isspace() for ch in db_name):
+            raise ValueError(
+                "DB_NAME must be non-empty without whitespace to derive MODEL_USAGE_STREAM"
+            )
+        return f"model:usage:{db_name}"
 
     def safe_summary(self) -> dict[str, Any]:
         """Return only non-sensitive startup metadata."""

@@ -8,6 +8,24 @@ from pydantic import Field, TypeAdapter
 load_dotenv()
 
 
+def _resolve_usage_stream() -> str:
+    """Resolve the deployment-scoped usage stream name.
+
+    An explicit MODEL_USAGE_STREAM wins; otherwise the key is derived from
+    DB_NAME so deployments sharing one Redis but owning separate databases
+    consume only their own usage events.
+    """
+    explicit = os.getenv("MODEL_USAGE_STREAM", "").strip()
+    if explicit:
+        if any(ch.isspace() for ch in explicit):
+            raise RuntimeError("MODEL_USAGE_STREAM must not contain whitespace")
+        return explicit
+    db_name = os.getenv("DB_NAME", "redbear-mem").strip()
+    if not db_name or any(ch.isspace() for ch in db_name):
+        raise RuntimeError("DB_NAME must be non-empty without whitespace to derive MODEL_USAGE_STREAM")
+    return f"model:usage:{db_name}"
+
+
 class Settings:
     # ========================================================================
     # Deployment Mode Configuration
@@ -70,6 +88,9 @@ class Settings:
     DB_USER: str = os.getenv("DB_USER", "postgres")
     DB_PASSWORD: str = os.getenv("DB_PASSWORD", "password")
     DB_NAME: str = os.getenv("DB_NAME", "redbear-mem")
+    # Deployment-scoped usage stream shared by the local metering publisher and
+    # the alert consumer; derived from DB_NAME unless explicitly overridden.
+    MODEL_USAGE_STREAM: str = _resolve_usage_stream()
     DB_POOL_SIZE: int = int(os.getenv("DB_POOL_SIZE", "50"))
     DB_MAX_OVERFLOW: int = int(os.getenv("DB_MAX_OVERFLOW", "20"))
     DB_POOL_RECYCLE: int = int(os.getenv("DB_POOL_RECYCLE", "1800"))

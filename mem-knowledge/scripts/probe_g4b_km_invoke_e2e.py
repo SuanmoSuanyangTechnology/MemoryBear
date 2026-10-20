@@ -119,7 +119,6 @@ _ENV = "ENV"
 
 _counts = {_OK: 0, _WARN: 0, _FAIL: 0, _ENV: 0}
 
-MODEL_USAGE_STREAM = "model:usage"
 MODEL_USAGE_CONSUMER_GROUP = "model-usage-consumers"
 _CONSUMER_ONLINE_IDLE_MS = 30_000
 MODEL_USAGE_COLUMNS = (
@@ -247,6 +246,20 @@ def _env_file_values(path: Path) -> dict[str, str]:
     if not path.is_file():
         return {}
     return {key: value for key, value in dotenv_values(path).items() if value is not None}
+
+
+def _resolve_usage_stream() -> str:
+    """部署域用量 Stream：显式 MODEL_USAGE_STREAM 优先，否则 model:usage:<DB_NAME>。"""
+
+    env = {**_env_file_values(_ROOT_ENV), **_env_file_values(_MS_ENV)}
+    explicit = (env.get("MODEL_USAGE_STREAM") or "").strip()
+    if explicit:
+        return explicit
+    db_name = (env.get("DB_NAME") or "redbear-mem").strip()
+    return f"model:usage:{db_name}"
+
+
+MODEL_USAGE_STREAM = _resolve_usage_stream()
 
 
 def _load_settings():
