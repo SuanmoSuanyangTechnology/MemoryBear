@@ -14,7 +14,7 @@ from ...integrations.model.embedding import RedBearEmbeddings
 from ...integrations.model.invoke_backend import ref_from_view
 from ...integrations.model.views import is_qwen3_vl_embedding_view
 from ..models.chunk import DocumentChunk, chunk_retrieval_content
-from ..retrieval.async_elasticsearch import AsyncChunkStore, ElasticsearchResponseError
+from ..retrieval.async_elasticsearch import AsyncChunkStore
 from ..retrieval.models import ModelRuntimeSnapshot
 from ..wiki.diagnostics import diagnostic_json, exception_details
 
@@ -98,34 +98,6 @@ async def is_indexed(client, target, row):
             realtime=False,
         )
     )
-
-
-async def missing_projections(client, target, identities):
-    """批量核对可搜索投影；部分读取失败不能解释为不存在。"""
-    if not await client.indices.exists(index=target.index_name):
-        return set(identities)
-    missing = set()
-    for offset in range(0, len(identities), FAQ_ID_BATCH_SIZE):
-        batch = identities[offset : offset + FAQ_ID_BATCH_SIZE]
-        response = await client.mget(
-            index=target.index_name, ids=batch, source=False, realtime=False
-        )
-        documents = response.get("docs", [])
-        failures = [
-            {"_id": doc.get("_id"), "error": doc["error"]} for doc in documents if doc.get("error")
-        ]
-        if failures:
-            error = ElasticsearchResponseError(response, "FAQ projection lookup")
-            error.body["failures"] = failures
-            raise error
-        if (
-            len(documents) != len(batch)
-            or {doc.get("_id") for doc in documents} != set(batch)
-            or any(not isinstance(doc.get("found"), bool) for doc in documents)
-        ):
-            raise ValueError("FAQ projection lookup 返回身份、数量或 found 字段不符合请求")
-        missing.update(doc["_id"] for doc in documents if not doc["found"])
-    return missing
 
 
 async def write_projection(runtime, client, target, row):
