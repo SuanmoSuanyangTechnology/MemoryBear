@@ -19,6 +19,8 @@ import uuid
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, List, Optional, Tuple
 
+from app.core.config import settings
+
 if TYPE_CHECKING:
     from datetime import datetime
 
@@ -56,8 +58,8 @@ class FastWritePipeline:
     # Embedding 单步硬上限（秒）。底层 LangChain client 自带 max_retries * timeout，
     # 导致 worker 被 SIGKILL 而非降级。此处用 asyncio.wait_for 兜底，超时即降级为 None。
     EMBED_TIMEOUT_SEC = 15
-    # BERT 情绪单步硬上限（秒），超时即降级为 None，不重试。
-    EMOTION_TIMEOUT_SEC = 2
+    # 快写情绪分支的总耗时上限（秒），与 HTTPX 网络阶段超时分别配置。
+    EMOTION_TIMEOUT_SEC = settings.FAST_WRITE_EMOTION_TOTAL_TIMEOUT_SECONDS
     # Scene 边界判断分支硬上限（秒），超时按 BERT 失败继续当前 Scene。
     SCENE_BOUNDARY_TIMEOUT_SEC = 5
 
@@ -326,7 +328,7 @@ class FastWritePipeline:
           user_message_id）读情绪缓存，**读后即删**（GETDEL）：快写是唯一消费者，
           命中即复用 emotion + score 并跳过 BERT。
         - text 为空、或未配置（URL/API_KEY/MODEL 任一缺失）→ 直接返回 None，不发请求、不空等超时。
-        - 已配置时才调用；总耗时受 EMOTION_TOTAL_TIMEOUT_SECONDS 硬限制，超时/异常一律降级为 None，不重试。
+        - 已配置时才调用；总耗时受 FAST_WRITE_EMOTION_TOTAL_TIMEOUT_SECONDS 限制，超时/异常一律降级为 None，不重试。
         - 未命中时自己算出的结果**不回写缓存**（唯一消费者，回写无意义）。
         - 关键约束：服务故障绝不伪造 neutral；真实中性(emotion='neutral')
           与服务失败(emotion=None)必须可区分。
@@ -356,7 +358,6 @@ class FastWritePipeline:
                 )
                 return cached
         # 未配置（URL / API_KEY / MODEL 任一缺失）直接跳过，不发请求、不空等超时
-        from app.core.config import settings
         if (
             not settings.FAST_WRITE_EMOTION_URL
             or not settings.FAST_WRITE_EMOTION_API_KEY
