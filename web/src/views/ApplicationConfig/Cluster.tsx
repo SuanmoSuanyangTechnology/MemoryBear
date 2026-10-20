@@ -128,6 +128,7 @@ const Cluster = forwardRef<ClusterRef, { onFeaturesLoad?: (features: FeaturesCon
     if (!id) {
       return
     }
+    setChatList([{ list: [] }])
     setLoading(true)
     getMultiAgentConfig(id as string).then(async res => {
       const response = await enrichMissingModelFields(res as Config)
