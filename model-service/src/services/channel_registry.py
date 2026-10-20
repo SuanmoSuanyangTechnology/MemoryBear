@@ -68,6 +68,7 @@ from redbear_model import (
     resolve_and_chain_from_pool,
     resolve_composite_head,
 )
+from redis.exceptions import TimeoutError as RedisTimeoutError
 from sqlalchemy import select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session, joinedload
@@ -441,14 +442,26 @@ async def run_channel_invalidation_listener() -> None:
     """
     channel = channel_invalidation_channel()
 
+    # Idle socket timeouts on the shared client are routine (redis-py drops the
+    # socket on timeout): keep that whole reconnect at debug. Real faults stay
+    # warnings so actual subscription problems remain visible.
+    idle_reconnect = False
+
     async def _on_subscribed() -> None:
-        logger.info(
+        log = logger.debug if idle_reconnect else logger.info
+        log(
             "渠道失效订阅就绪: channel=%s instance=%s",
             channel,
             _INSTANCE_ID,
         )
 
     async def _on_interrupted(exc: Exception, delay: float) -> None:
+        nonlocal idle_reconnect
+        if isinstance(exc, RedisTimeoutError):
+            idle_reconnect = True
+            logger.debug("渠道失效订阅空闲超时，%.1fs 后重连", delay)
+            return
+        idle_reconnect = False
         logger.warning("渠道失效订阅中断，%.1fs 后重连: %s", delay, exc)
 
     async def _on_message(message) -> None:

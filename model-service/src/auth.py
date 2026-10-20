@@ -73,6 +73,10 @@ class ModelAuthConfig:
     # no Redis connection is made at app build time). None -> no rules loaded
     # (fail-safe: every request denied). Consumed by the gateway handler only.
     redis: object | None = None
+    # Deployment-scoped ACL names; main.py passes DB_NAME-derived values. The
+    # defaults match the legacy global names for direct construction in tests.
+    acl_rules_key: str = "acl:rules"
+    acl_rules_changed_channel: str = "acl:rules:changed"
 
 
 def is_public_path(path: str, method: str) -> bool:

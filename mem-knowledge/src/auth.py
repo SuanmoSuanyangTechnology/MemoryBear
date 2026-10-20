@@ -62,6 +62,10 @@ class KbAuthConfig:
     # connection at app-build time). None → no rules loaded. Consumed by the
     # gateway handler only; direct mode does not use Redis.
     redis: object | None = None
+    # Deployment-scoped ACL names; main.py passes DB_NAME-derived values. The
+    # defaults match the legacy global names for direct construction in tests.
+    acl_rules_key: str = "acl:rules"
+    acl_rules_changed_channel: str = "acl:rules:changed"
 
 
 def _is_single_file_download(path: str, method: str) -> bool:

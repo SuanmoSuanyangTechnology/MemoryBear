@@ -188,6 +188,15 @@ class AppServiceSettings(BaseSettings):
         default=None,
         validation_alias="APPLICATION_SERVICE_JWKS_URL",
     )
+    # ACL rule key and hot-reload channel. Empty derives
+    # acl:rules:<DB_NAME> / acl:rules:changed:<DB_NAME> to match identity's
+    # write side; deployments sharing one Redis but owning separate databases
+    # stay isolated (pub/sub channels are global across logical DBs).
+    acl_rules_key: str = Field(default="", validation_alias="ACL_RULES_KEY")
+    acl_rules_changed_channel: str = Field(
+        default="",
+        validation_alias="ACL_RULES_CHANGED_CHANNEL",
+    )
 
     # Monolith upstream channel (coexistence period): cross-domain writes and
     # memory/context-engine operations are forwarded to the monolith's
@@ -463,6 +472,21 @@ class AppServiceSettings(BaseSettings):
     def redis_url(self) -> str:
         return self.redis_url_for_db(self.redis_db)
 
+    def _deployment_scoped_name(self, explicit: str, base: str, env_name: str) -> str:
+        """Resolve a deployment-scoped Redis name from an override or DB_NAME."""
+
+        explicit = explicit.strip()
+        if explicit:
+            if any(ch.isspace() for ch in explicit):
+                raise ValueError(f"{env_name} must not contain whitespace")
+            return explicit
+        db_name = self.db_name.strip()
+        if not db_name or any(ch.isspace() for ch in db_name):
+            raise ValueError(
+                f"DB_NAME must be non-empty without whitespace to derive {env_name}"
+            )
+        return f"{base}:{db_name}"
+
     @property
     def model_usage_stream_name(self) -> str:
         """Resolve the deployment-scoped usage stream key."""
@@ -478,6 +502,22 @@ class AppServiceSettings(BaseSettings):
                 "DB_NAME must be non-empty without whitespace to derive MODEL_USAGE_STREAM"
             )
         return f"model:usage:{db_name}"
+
+    @property
+    def acl_rules_key_name(self) -> str:
+        """Resolve the deployment-scoped ACL rule blob key."""
+
+        return self._deployment_scoped_name(self.acl_rules_key, "acl:rules", "ACL_RULES_KEY")
+
+    @property
+    def acl_rules_changed_channel_name(self) -> str:
+        """Resolve the deployment-scoped ACL change pub/sub channel."""
+
+        return self._deployment_scoped_name(
+            self.acl_rules_changed_channel,
+            "acl:rules:changed",
+            "ACL_RULES_CHANGED_CHANNEL",
+        )
 
     def safe_summary(self) -> dict[str, Any]:
         """Return only non-sensitive startup metadata."""

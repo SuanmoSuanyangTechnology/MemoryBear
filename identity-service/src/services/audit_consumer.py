@@ -1,7 +1,7 @@
 """审计消费者：Redis Stream → consumer group → 批量插 audit_logs（XACK 后出队）。
 
 多副本安全（XREADGROUP 按消费者分配）+ 崩溃不丢不重（XACK 前消息留在 PEL 重投，
-insert 用 event_id ON CONFLICT 幂等去重）。老 list 队列（audit:queue）保留 drain 段，
+insert 用 event_id ON CONFLICT 幂等去重）。老 list 队列（audit:queue:<DB_NAME>）保留 drain 段，
 兼容改造前写入的存量消息；新写入已全部走 stream。
 """
 import asyncio

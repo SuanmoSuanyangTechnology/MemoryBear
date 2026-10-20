@@ -278,6 +278,15 @@ class ModelServiceSettings(BaseSettings):
         default=None,
         validation_alias="MODEL_SERVICE_JWKS_URL",
     )
+    # ACL rule key and hot-reload channel. Empty derives
+    # acl:rules:<DB_NAME> / acl:rules:changed:<DB_NAME> to match identity's
+    # write side; deployments sharing one Redis but owning separate databases
+    # stay isolated (pub/sub channels are global across logical DBs).
+    acl_rules_key: str = Field(default="", validation_alias="ACL_RULES_KEY")
+    acl_rules_changed_channel: str = Field(
+        default="",
+        validation_alias="ACL_RULES_CHANGED_CHANNEL",
+    )
 
     @classmethod
     def settings_customise_sources(
@@ -365,6 +374,22 @@ class ModelServiceSettings(BaseSettings):
             self.model_channel_invalidation_channel,
             "model:channel-invalidations",
             "MODEL_CHANNEL_INVALIDATION_CHANNEL",
+        )
+
+    @property
+    def acl_rules_key_name(self) -> str:
+        """Resolve the deployment-scoped ACL rule blob key."""
+
+        return self._deployment_scoped_name(self.acl_rules_key, "acl:rules", "ACL_RULES_KEY")
+
+    @property
+    def acl_rules_changed_channel_name(self) -> str:
+        """Resolve the deployment-scoped ACL change pub/sub channel."""
+
+        return self._deployment_scoped_name(
+            self.acl_rules_changed_channel,
+            "acl:rules:changed",
+            "ACL_RULES_CHANGED_CHANNEL",
         )
 
     def safe_summary(self) -> dict[str, Any]:

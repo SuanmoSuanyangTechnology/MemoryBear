@@ -51,8 +51,16 @@ class Settings:
 
     # ---- 服务自身配置 ----
     SERVICE_NAME: str = "identity"
-    AUDIT_QUEUE_KEY: str = os.getenv("AUDIT_QUEUE_KEY", "audit:queue")
-    AUDIT_STREAM_KEY: str = os.getenv("AUDIT_STREAM_KEY", "audit:stream")
+    # Audit keys are deployment-scoped: empty derives audit:queue:<DB_NAME> /
+    # audit:stream:<DB_NAME> so deployments sharing one Redis do not consume
+    # each other's events (a shared stream would load-balance events across
+    # deployments through the same consumer group).
+    AUDIT_QUEUE_KEY: str = (
+        os.getenv("AUDIT_QUEUE_KEY", "").strip() or f"audit:queue:{DB_NAME}"
+    )
+    AUDIT_STREAM_KEY: str = (
+        os.getenv("AUDIT_STREAM_KEY", "").strip() or f"audit:stream:{DB_NAME}"
+    )
     # 审计保留（天）：0 禁用清理；设计 §7 要求 append-only 审计流 ≥180 天
     AUDIT_RETENTION_DAYS: int = int(os.getenv("AUDIT_RETENTION_DAYS", "180"))
     AUDIT_RETENTION_INTERVAL_SEC: int = int(os.getenv("AUDIT_RETENTION_INTERVAL_SEC", "3600"))
@@ -65,6 +73,18 @@ class Settings:
     AUTH_INVALIDATION_CHANNEL: str = (
         os.getenv("AUTH_INVALIDATION_CHANNEL", "").strip()
         or f"auth:invalidations:{DB_NAME}"
+    )
+    # ACL rule blob key and hot-reload channel. Empty derives
+    # acl:rules:<DB_NAME> / acl:rules:changed:<DB_NAME>; deployments sharing one
+    # Redis but owning separate databases must not overwrite each other's rule
+    # set. The channel is namespaced too: Redis pub/sub is global, not scoped
+    # by logical DB.
+    ACL_RULES_KEY: str = (
+        os.getenv("ACL_RULES_KEY", "").strip() or f"acl:rules:{DB_NAME}"
+    )
+    ACL_RULES_CHANGED_CHANNEL: str = (
+        os.getenv("ACL_RULES_CHANGED_CHANNEL", "").strip()
+        or f"acl:rules:changed:{DB_NAME}"
     )
 
 

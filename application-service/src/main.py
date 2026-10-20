@@ -53,6 +53,8 @@ def create_app(settings: AppServiceSettings | None = None) -> FastAPI:
         service_name=service_settings.application_service_internal_name,
         jwks_url=service_settings.application_service_jwks_url,
         redis=runtime.redis.client,
+        acl_rules_key=service_settings.acl_rules_key_name,
+        acl_rules_changed_channel=service_settings.acl_rules_changed_channel_name,
     )
     gateway_auth = None
     if app_auth_config.auth_mode == "gateway":

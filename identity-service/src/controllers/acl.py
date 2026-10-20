@@ -20,6 +20,7 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src import redis as iredis
+from src.config import settings
 from src.db import get_async_db
 from src.models import AclRule
 from src.schemas.acl import rules_to_redis
@@ -28,8 +29,10 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-REDIS_ACL_KEY = "acl:rules"
-REDIS_ACL_CHANGED_CHANNEL = "acl:rules:changed"
+# Deployment-scoped key/channel (derived from DB_NAME unless explicitly set):
+# deployments sharing one Redis must not overwrite each other's full rule set.
+REDIS_ACL_KEY = settings.ACL_RULES_KEY
+REDIS_ACL_CHANGED_CHANNEL = settings.ACL_RULES_CHANGED_CHANNEL
 
 # Change-notification tuning: one bounded retry on top of the initial attempt.
 _NOTIFY_TIMEOUT_S = 1.0

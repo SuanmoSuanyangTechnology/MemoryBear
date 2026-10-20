@@ -1,8 +1,12 @@
 """Hot-reloadable ACL rules holder for gateway-mode consumers.
 
 Keeps an in-memory AclMatcher in sync with the identity-published Redis blob
-(`acl:rules`) by subscribing to the change notification channel. The identity
-service publishes `acl:rules:changed` after every successful full push; this
+(default `acl:rules`) by subscribing to the change notification channel
+(default `acl:rules:changed`). Hosts should pass deployment-scoped `key` /
+`channel` names (for example `acl:rules:<DB_NAME>`) when several deployments
+share one Redis: the blob key would otherwise be overwritten by another
+deployment, and pub/sub channels are global across logical DBs. The identity
+service publishes a notification after every successful full push; this
 refresher treats every notification — and every successful (re)subscribe, to
 cover notifications missed while disconnected — as a trigger for a full reload.
 
@@ -20,6 +24,8 @@ import contextlib
 import logging
 from collections.abc import Awaitable, Callable
 from typing import Any
+
+from redis.exceptions import TimeoutError as RedisTimeoutError
 
 from auth_sdk.acl import AclMatcher, parse_rules
 from auth_sdk.pubsub import run_pubsub_listener
@@ -76,11 +82,12 @@ class AclRefresher:
             await self.refresh()
             self._loaded = True
 
-    async def refresh(self) -> bool:
+    async def refresh(self, *, quiet: bool = False) -> bool:
         """Fetch, parse and atomically swap the matcher. True = replaced.
 
         Never raises except cancellation; every failure keeps the current
         matcher (deny-all before the first successful load, then last-known-good).
+        `quiet` downgrades the success log for routine reconnect catch-ups.
         """
         try:
             client = await asyncio.wait_for(self._redis_provider(), _REFRESH_TIMEOUT_S)
@@ -101,7 +108,8 @@ class AclRefresher:
             logger.warning("acl rules payload corrupt; keeping current rules")
             return False
         self._matcher = matcher
-        logger.info("acl rules reloaded: %d rule(s)", matcher.rule_count)
+        log = logger.debug if quiet else logger.info
+        log("acl rules reloaded: %d rule(s)", matcher.rule_count)
         return True
 
     async def start(self) -> None:
@@ -131,15 +139,36 @@ class AclRefresher:
     async def _run(self) -> None:
         """Resilient subscription loop over the change channel."""
 
+        # A shared client carries socket_timeout, so an idle pub/sub connection
+        # raises TimeoutError every timeout window and must re-subscribe
+        # (redis-py disconnects the socket). That cycle is routine: keep the
+        # whole reconnect quiet at debug. Real faults and real rule changes
+        # stay at their normal levels.
+        idle_reconnect = False
+
         async def _on_subscribed() -> None:
-            logger.info(
-                "acl rules change subscription established: channel=%s", self._channel
-            )
+            if idle_reconnect:
+                logger.debug(
+                    "acl rules change subscription re-established after idle timeout: channel=%s",
+                    self._channel,
+                )
+            else:
+                logger.info(
+                    "acl rules change subscription established: channel=%s", self._channel
+                )
             # Catch up on changes missed while disconnected: a fresh subscribe
             # cannot assume the in-memory rules are current.
-            await self.refresh()
+            await self.refresh(quiet=idle_reconnect)
 
         async def _on_interrupted(exc: Exception, delay: float) -> None:
+            nonlocal idle_reconnect
+            if isinstance(exc, RedisTimeoutError):
+                idle_reconnect = True
+                logger.debug(
+                    "acl rules subscription idle timeout, reconnecting in %.1fs", delay
+                )
+                return
+            idle_reconnect = False
             logger.warning(
                 "acl rules subscription interrupted, reconnecting in %.1fs: %s", delay, exc
             )

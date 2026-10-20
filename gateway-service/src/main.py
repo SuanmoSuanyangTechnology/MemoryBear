@@ -35,7 +35,7 @@ def build_gateway_deps() -> GatewayDeps:
                                 ttl=config.settings.INTERNAL_TOKEN_TTL,
                                 leeway=config.settings.INTERNAL_TOKEN_LEEWAY),
         limiter=ApiKeyRateLimiter(gredis.redis),
-        audit=AuditLogger(gredis.redis, stream_key=config.settings.AUDIT_STREAM_KEY,
+        audit=AuditLogger(gredis.redis, stream_key=config.settings.audit_stream_key_name,
                           timeout_ms=config.settings.REDIS_CMD_TIMEOUT_MS),
         resolver=resolver)
 

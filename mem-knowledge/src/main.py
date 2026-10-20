@@ -46,6 +46,8 @@ def create_app(settings: KnowledgeSettings | None = None) -> FastAPI:
         kill_switch_file=service_settings.kb_kill_switch_file,
         jwks_url=service_settings.kb_jwks_url,
         redis=runtime.redis.client,
+        acl_rules_key=service_settings.acl_rules_key_name,
+        acl_rules_changed_channel=service_settings.acl_rules_changed_channel_name,
     )
     gateway_auth = None
     if kb_auth_config.auth_mode == "gateway":
