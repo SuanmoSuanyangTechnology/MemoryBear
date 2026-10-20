@@ -1562,8 +1562,8 @@ class AgentRunService:
 
         # file_upload 校验
         self._validate_file_upload(features_config, files)
-        # 情绪感知回复：与提示词/上下文引擎/多模态准备并发，结果在 ToolOrchestrator 之前注入。
-        emotion_detection = start_emotion_detection(features_config, message)
+        # 情绪策略仅用于主 Agent 的最终回复；子 Agent（含无会话调用）跳过识别。
+        emotion_detection = start_emotion_detection(features_config, message, sub_agent=sub_agent)
         tenant_id = await self._get_tenant_id_by_workspace_id_async(workspace_id)
 
         try:
@@ -1791,7 +1791,8 @@ class AgentRunService:
             system_prompt = append_external_context_rule(system_prompt)
             # 情绪感知回复：必须在 ToolOrchestrator / LangChainAgent 之前完成。
             system_prompt = await apply_emotion_detection(
-                system_prompt, emotion_detection, user_message_id, write_cache=False
+                system_prompt, emotion_detection, user_message_id,
+                app_id=agent_config.app_id, tenant_id=tenant_id, write_cache=False,
             )
             use_agent_mode = ModelFeature.FUNCTION_CALL in features
             orchestrator_node_executions = []
@@ -2101,8 +2102,8 @@ class AgentRunService:
 
         # file_upload 校验
         self._validate_file_upload(features_config, files)
-        # 情绪感知回复：提前启动，与提示词/上下文引擎/多模态准备并发，结果在 ToolOrchestrator 之前注入。
-        emotion_detection = start_emotion_detection(features_config, message)
+        # 情绪策略仅用于主 Agent 的最终回复；子 Agent（含无会话调用）跳过识别。
+        emotion_detection = start_emotion_detection(features_config, message, sub_agent=sub_agent)
         tenant_id = await self._get_tenant_id_by_workspace_id_async(workspace_id)
 
         start_time = time.time()
@@ -2340,7 +2341,8 @@ class AgentRunService:
             system_prompt = append_external_context_rule(system_prompt)
             # 情绪感知回复：必须在 ToolOrchestrator / LangChainAgent 之前完成。
             system_prompt = await apply_emotion_detection(
-                system_prompt, emotion_detection, user_message_id, write_cache=False
+                system_prompt, emotion_detection, user_message_id,
+                app_id=agent_config.app_id, tenant_id=tenant_id, write_cache=False,
             )
             use_agent_mode = ModelFeature.FUNCTION_CALL in features
             orchestrator_node_executions = []
