@@ -995,6 +995,8 @@ class AppService:
 
         app = self._get_app_or_404(app_id)
         self._validate_workspace_access(app, workspace_id)
+        app_workspace = self.db.get(Workspace, app.workspace_id)
+        app_tenant_id = app_workspace.tenant_id if app_workspace else None
 
         # 逻辑删除应用
         app.is_active = False
@@ -1010,6 +1012,20 @@ class AppService:
         self.db.execute(stmt)
         
         self.db.commit()
+        # 应用删除：停用提交后失效其情绪策略缓存。
+        logger.info(
+            "[EmotionReply] completed event=app_delete_persist tenant_id=%s app_id=%s result=committed",
+            app_tenant_id, app_id,
+        )
+        policy_provider = get_plugin("memory.emotion_reply_policy")
+        if policy_provider is not None and app_tenant_id is not None:
+            policy_provider.invalidate_sync(app_id, app_tenant_id)
+        else:
+            logger.debug(
+                "[EmotionReply] skipped event=cache_invalidate_sync tenant_id=%s app_id=%s reason=%s",
+                app_tenant_id, app_id,
+                "provider_unavailable" if policy_provider is None else "tenant_missing",
+            )
 
         logger.info(
             "应用删除成功",

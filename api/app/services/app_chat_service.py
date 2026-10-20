@@ -842,7 +842,8 @@ class AppChatService:
         # 必须在 ToolOrchestrator / LangChainAgent 之前完成，保证它们拿到的是最终提示词。
         # write_cache=memory：记忆关闭时 dispatcher 不派发快写，缓存无消费方，不写避免孤儿 key。
         system_prompt = await apply_emotion_detection(
-            system_prompt, emotion_detection, user_message_id, write_cache=memory
+            system_prompt, emotion_detection, user_message_id,
+            app_id=config.app_id, tenant_id=tenant_id, write_cache=memory,
         )
 
         # 弱模型：用 ReAct prompt 驱动多轮工具调用，将轨迹注入 system_prompt
@@ -1421,7 +1422,8 @@ class AppChatService:
             # 必须在 ToolOrchestrator / LangChainAgent 之前完成。
             # write_cache=memory：记忆关闭时 dispatcher 不派发快写，缓存无消费方，不写避免孤儿 key。
             system_prompt = await apply_emotion_detection(
-                system_prompt, emotion_detection, user_message_id, write_cache=memory
+                system_prompt, emotion_detection, user_message_id,
+                app_id=config.app_id, tenant_id=tenant_id, write_cache=memory,
             )
 
             # 弱模型：用 ReAct prompt 驱动多轮工具调用，将轨迹注入 system_prompt

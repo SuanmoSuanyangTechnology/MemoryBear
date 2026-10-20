@@ -288,6 +288,10 @@ class Settings:
     FAST_WRITE_EMOTION_HTTP_TIMEOUT_SECONDS: float = max(
         0.1, float(os.getenv("FAST_WRITE_EMOTION_HTTP_TIMEOUT_SECONDS", "2.0"))
     )
+    # 情绪回复在首个 LLM token 前的可选策略链路预算；超时降级为原提示词。
+    EMOTION_REPLY_INJECTION_TIMEOUT_SECONDS: float = max(
+        0.01, float(os.getenv("EMOTION_REPLY_INJECTION_TIMEOUT_SECONDS", "2.0"))
+    )
 
     # Scene continuity BERT (/v1/rerank)
     SCENE_CONTINUITY_URL: str = os.getenv("SCENE_CONTINUITY_URL", "")
