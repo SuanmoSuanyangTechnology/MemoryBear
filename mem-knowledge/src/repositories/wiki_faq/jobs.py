@@ -76,6 +76,15 @@ def _job(session, kb_id, job_id, scope=None):
     return job, actual_scope
 
 
+def _delivery(job):
+    return {
+        "kb_id": str(job.kb_id),
+        "job_id": str(job.id),
+        "task_id": str(job.task_id),
+        "expected_row_version": job.row_version,
+    }
+
+
 def pending_deliveries(session, kb_id, page_id):
     _, scope = lock_knowledge(session, kb_id)
     rows = session.scalars(
@@ -86,12 +95,16 @@ def pending_deliveries(session, kb_id, page_id):
             WikiFAQGenerationJob.publish_confirmed.is_(False),
         )
     )
-    return [{"kb_id": str(kb_id), "job_id": str(r.id), "task_id": str(r.task_id)} for r in rows]
+    return [_delivery(row) for row in rows]
 
 
 def record_dispatch(session, delivery, *, succeeded):
     job, _ = _job(session, delivery["kb_id"], delivery["job_id"])
-    if str(job.task_id) != delivery["task_id"]:
+    if (
+        str(job.task_id) != delivery["task_id"]
+        or job.row_version != delivery["expected_row_version"]
+    ):
+        # 自动重试复用 task_id；上一轮迟到回执不能确认新一轮的消息交接。
         return
     job.dispatch_attempt += 1
     if succeeded:
@@ -115,7 +128,22 @@ def retry(session, scope, job_id, expected_row_version):
     job.failure_attempt = 0
     job.error_code, job.error_stage = None, None
     job.row_version += 1
-    return {"kb_id": str(scope["kb_id"]), "job_id": str(job.id), "task_id": str(job.task_id)}
+    return _delivery(job)
+
+
+def _claim_failure(job, code, message):
+    """返回本次新判定的业务失败，与重复投递无需执行的 None 区分。"""
+    job.status, job.error_code, job.error_stage = "failed", code, "claim"
+    job.execution_token, job.lease_expires_at = None, None
+    job.row_version += 1
+    return {
+        "job_id": str(job.id),
+        "wiki_page_id": str(job.wiki_page_id),
+        "status": "failed",
+        "error_code": code,
+        "error_stage": "claim",
+        "error_message": message,
+    }
 
 
 def claim(session, kb_id, job_id, task_id, lease_seconds, failure_limit):
@@ -128,10 +156,11 @@ def claim(session, kb_id, job_id, task_id, lease_seconds, failure_limit):
     if job.status == "running":
         job.failure_attempt += 1
         if job.failure_attempt >= failure_limit:
-            job.status, job.error_code, job.error_stage = "failed", "KB_FAQ_WORKER_LOST", "claim"
-            job.execution_token, job.lease_expires_at = None, None
-            job.row_version += 1
-            return None
+            return _claim_failure(
+                job,
+                "KB_FAQ_WORKER_LOST",
+                "Worker 执行租约已过期，领取恢复次数达到失败预算",
+            )
     page = session.scalar(
         select(WikiPage).where(
             WikiPage.id == job.wiki_page_id,
@@ -139,9 +168,11 @@ def claim(session, kb_id, job_id, task_id, lease_seconds, failure_limit):
         )
     )
     if page is None or page.status == "unavailable":
-        job.status, job.error_code, job.error_stage = "failed", "KB_FAQ_SOURCE_UNAVAILABLE", "claim"
-        job.row_version += 1
-        return None
+        return _claim_failure(
+            job,
+            "KB_FAQ_SOURCE_UNAVAILABLE",
+            "FAQ 来源页面不存在或已不可用",
+        )
     snapshot = session.scalar(
         select(WikiPageVersion).where(
             *scoped(WikiPageVersion, scope),
@@ -221,6 +252,9 @@ def fail(session, snapshot, code, stage, *, retryable, failure_limit):
     job.failure_attempt += 1
     again = retryable and job.failure_attempt < failure_limit
     job.status = "retry_wait" if again else "failed"
+    if again:
+        # self.retry 投递失败也能由页面重投/显式重试恢复；消费领取后再确认交接。
+        job.publish_confirmed = False
     job.error_code, job.error_stage = code[:80], stage[:80]
     job.execution_token, job.lease_expires_at = None, None
     job.row_version += 1

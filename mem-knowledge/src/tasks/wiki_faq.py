@@ -1,7 +1,10 @@
 """Wiki FAQ 首次生成任务，持久执行令牌防止重投和迟到结果重复落库。"""
 
+from sqlalchemy.exc import InterfaceError, OperationalError
+from sqlalchemy.exc import TimeoutError as DatabaseTimeoutError
+
 from ..rag.faq.generation import generate
-from ..rag.wiki.config import WikiDeferred, WikiError
+from ..rag.wiki.config import WikiDeferred, WikiError, WikiSuperseded
 from ..repositories.wiki_faq import jobs
 from ..runtime import get_worker_runtime
 from ..usage_context import bind_usage
@@ -28,7 +31,7 @@ def generate_wiki_faq(self, kb_id, job_id):
     ) as run:
         snapshot = None
         try:
-            snapshot = transaction(
+            claimed = transaction(
                 runtime,
                 jobs.claim,
                 kb_id,
@@ -37,14 +40,41 @@ def generate_wiki_faq(self, kb_id, job_id):
                 settings.kb_task_time_limit_seconds,
                 settings.kb_wiki_failure_attempts,
             )
-            if snapshot is None:
-                run.finish(BusinessOutcome.SUCCESS)
+            if claimed is None:
+                run.finish(BusinessOutcome.SKIPPED)
                 return {"job_id": job_id, "result": "no_work"}
+            if claimed.get("status") == "failed":
+                error = WikiError(
+                    claimed["error_code"],
+                    retryable=False,
+                    diagnostics={
+                        "stage": claimed["error_stage"],
+                        "job_id": job_id,
+                        "wiki_page_id": claimed["wiki_page_id"],
+                        "error_message": claimed["error_message"],
+                    },
+                )
+                _report_error(run, error)
+                run.finish(BusinessOutcome.FAILURE, error_code=error.code)
+                return claimed
+            snapshot = claimed
             model = make_model(runtime, snapshot)
             result = generate(model, snapshot)
             committed = transaction(runtime, jobs.complete, snapshot, result)
             run.finish(BusinessOutcome.SUCCESS)
             return committed
+        except WikiSuperseded as exc:
+            run.finish(BusinessOutcome.ABORTED, error_code=exc.code)
+            return {"job_id": job_id, "status": "cancelled", "error_code": exc.code}
+        except (OperationalError, InterfaceError, DatabaseTimeoutError) as exc:
+            # 状态库尚不可用时不能终结消息；业务失败预算只由持久 job 负责。
+            _report_error(run, exc, code="WIKI_STATE_UNAVAILABLE")
+            run.finish(BusinessOutcome.RETRY, error_code="WIKI_STATE_UNAVAILABLE")
+            raise self.retry(
+                exc=RuntimeError("WIKI_STATE_UNAVAILABLE"),
+                countdown=settings.kb_wiki_retry_delay_seconds,
+                max_retries=None,
+            ) from exc
         except WikiDeferred as exc:
             _report_error(run, exc)
             run.finish(BusinessOutcome.RETRY, error_code=exc.code)
@@ -54,7 +84,7 @@ def generate_wiki_faq(self, kb_id, job_id):
         except Exception as exc:
             error = _report_error(run, exc)
             if snapshot is None:
-                # 数据库不可用时不能把持久 job 留在未投递状态却 ACK 消息。
+                # 数据库暂时不可用已单独处理；其他领取异常保留有限的消息重试。
                 run.finish(BusinessOutcome.RETRY, error_code=error.code)
                 raise self.retry(
                     exc=RuntimeError(error.code),

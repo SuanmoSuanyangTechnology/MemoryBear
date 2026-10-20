@@ -132,6 +132,9 @@ def approve(session, scope, faq_id, actor_id, payload):
     _expected(row, payload["expected_row_version"])
     if row.content_revision != payload["content_revision"]:
         conflict()
+    if row.review_state == "approved" and row.wiki_page_id is None and target_id is None:
+        # 只跳过已通过的无来源条目，不能将缺失快照解释成“审核当前最新版”。
+        return {"changed": False, "faq": serialize(session, scope, row)}
     info = source(session, scope, row)
     if info["source_status"] != "available":
         conflict("KB_FAQ_SOURCE_UNAVAILABLE")

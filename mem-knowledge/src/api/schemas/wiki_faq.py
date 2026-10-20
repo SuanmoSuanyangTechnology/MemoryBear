@@ -47,6 +47,8 @@ class FAQBatchExpected(FAQExpected):
 
 class FAQBatchApproval(FAQApprove):
     faq_id: UUID
+    # 混合选择中已通过、无来源的手工 FAQ 无需审核；其余项仍须提交真实快照。
+    reviewed_wiki_snapshot_id: UUID | None = None
 
 
 class FAQBatchContext(FAQRequest):
