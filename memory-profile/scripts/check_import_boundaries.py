@@ -12,6 +12,7 @@ READ_ONLY_PG_REPOSITORIES = {
     SERVICE_ROOT / "src/modules/analytics/repository/end_user_profile.py",
     SERVICE_ROOT / "src/modules/analytics/repository/memory_statistics.py",
     SERVICE_ROOT / "src/modules/display/repository/memory_display.py",
+    SERVICE_ROOT / "src/modules/implicit_memory/repository/implicit_memory.py",
     SERVICE_ROOT / "src/modules/perceptual/repository/memory_perceptual.py",
 }
 FORBIDDEN_SQL_BUILDERS = {"text", "insert", "update", "delete"}
