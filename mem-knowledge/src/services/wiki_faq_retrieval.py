@@ -16,6 +16,7 @@ from ..rag.faq.index import (
     FAQTarget,
     embedding_for,
     is_indexed,
+    missing_projections,
     projection_id,
     query_vector,
     write_projection,
@@ -179,6 +180,69 @@ async def _search_faq_vectors(store, target, vector, options):
         raise
 
 
+async def _gather_with_cleanup(coroutines):
+    tasks = [asyncio.create_task(coroutine) for coroutine in coroutines]
+    try:
+        return await asyncio.gather(*tasks)
+    except BaseException:
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        raise
+
+
+async def _ensure_current_projections(runtime, client, target, versions, model_semaphore):
+    identities = {projection_id(faq_id, revision): faq_id for faq_id, revision in versions.items()}
+    try:
+        missing = await missing_projections(client, target, list(identities))
+        ready = set(identities) - missing
+        missing_ids = [identities[identity] for identity in missing]
+        for offset in range(0, len(missing_ids), FAQ_ID_BATCH_SIZE):
+            # 只读取缺失投影的当前内容；释放Session后才调用模型/ES。
+            async with runtime.database.async_session() as db:
+                rows = await repository.hydrate(
+                    db, target.scope, missing_ids[offset : offset + FAQ_ID_BATCH_SIZE]
+                )
+
+            async def repair(row):
+                async with model_semaphore:
+                    try:
+                        await write_projection(runtime, client, target, row)
+                    except Exception as exc:
+                        logger.exception(
+                            "FAQ 投影补建失败 kb_id=%s faq_id=%s revision=%s "
+                            "index=%s stage=index_repair details=%s",
+                            target.scope["kb_id"],
+                            row["id"],
+                            row["content_revision"],
+                            target.index_name,
+                            diagnostic_json(exception_details(exc)),
+                        )
+                        raise
+                    return projection_id(row["id"], row["content_revision"])
+
+            current_rows = [
+                row
+                for row in rows.values()
+                if row["content_revision"] == versions[uuid.UUID(row["id"])]
+            ]
+            for start in range(0, len(current_rows), FAQ_SYNC_CONCURRENCY):
+                ready.update(
+                    await _gather_with_cleanup(
+                        repair(row) for row in current_rows[start : start + FAQ_SYNC_CONCURRENCY]
+                    )
+                )
+        return [identity for identity in identities if identity in ready]
+    except Exception as exc:
+        logger.exception(
+            "FAQ 索引修复失败 kb_id=%s index=%s stage=index_repair details=%s",
+            target.scope["kb_id"],
+            target.index_name,
+            diagnostic_json(exception_details(exc)),
+        )
+        raise KnowledgeError.from_code("KB_FAQ_INDEX_FAILED") from exc
+
+
 async def retrieve(runtime, request, principal):
     validate_request(request)
     async with runtime.database.async_session() as db:
@@ -188,23 +252,30 @@ async def retrieve(runtime, request, principal):
     client = await runtime.elasticsearch.client()
     store = AsyncElasticSearchRetrieval(client)
     semaphore = asyncio.Semaphore(FAQ_SYNC_CONCURRENCY)
+    model_semaphore = asyncio.Semaphore(FAQ_SYNC_CONCURRENCY)
 
     async def search_target(target):
         async with semaphore:
             async with runtime.database.async_session() as db:
                 versions = await repository.eligible_versions(db, target.scope)
-            identities = [
-                projection_id(faq_id, revision)
+            versions = {
+                faq_id: revision
                 for faq_id, revision, negatives in versions
                 if request.query_text.strip().casefold()
                 not in {q.strip().casefold() for q in negatives}
-            ]
-            if not identities or not await client.indices.exists(index=target.index_name):
+            }
+            if not versions:
+                return target, []
+            identities = await _ensure_current_projections(
+                runtime, client, target, versions, model_semaphore
+            )
+            if not identities:
                 return target, []
             try:
-                vector = await query_vector(
-                    embedding_for(runtime, target), target, request.query_text
-                )
+                async with model_semaphore:
+                    vector = await query_vector(
+                        embedding_for(runtime, target), target, request.query_text
+                    )
             except Exception as exc:
                 logger.exception(
                     "FAQ 查询向量化失败 kb_id=%s index=%s stage=query_embedding details=%s",
@@ -242,14 +313,7 @@ async def retrieve(runtime, request, principal):
             candidates.sort(key=lambda chunk: (-chunk.metadata["score"], chunk.metadata["doc_id"]))
             return target, candidates[: target.top_k]
 
-    tasks = [asyncio.create_task(search_target(target)) for target in targets]
-    try:
-        groups = await asyncio.gather(*tasks)
-    except BaseException:
-        for task in tasks:
-            task.cancel()
-        await asyncio.gather(*tasks, return_exceptions=True)
-        raise
+    groups = await _gather_with_cleanup(search_target(target) for target in targets)
     # ES查询之后重新解析授权；分享撤销/知识库停用/模型切换均不能沿用旧快照放行。
     async with runtime.database.async_session() as db:
         current_targets = await Preparation.prepare_faq_with_db(db, request, principal)
