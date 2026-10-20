@@ -1,17 +1,39 @@
 """FAQ 召回快照与资格；只返回值，不跨线程传递 ORM 或 Session。"""
 
-from sqlalchemy import exists, or_, select
+from sqlalchemy import String, cast, exists, func, or_, select
 
-from ...models.owned import Knowledge, WikiPage
+from ...models.owned import Document, Knowledge, WikiPage
 from ...models.owned.wiki_faq import WikiFAQ
 from ...models.references import Workspace
-from ..wiki.read import scoped_pages
 from .common import get_faq, scoped
 
 
 def eligible(scope):
+    # 使用已发布来源而非当前Map就绪状态；普通重建不能暂停已审核FAQ的服务。
+    published = (
+        func.jsonb_array_elements(WikiPage.published_sources)
+        .table_valued("value")
+        .alias("faq_published_source")
+    )
+    live_document = exists(
+        select(Document.id).where(
+            Document.kb_id == WikiPage.kb_id,
+            Document.status == 1,
+            cast(Document.id, String) == published.c.value.op("->>")("document_id"),
+        )
+    ).correlate(WikiPage, published)
+    invalid_source = exists(
+        select(published.c.value).select_from(published).where(~live_document)
+    ).correlate(WikiPage)
     available_page = exists(
-        select(WikiPage.id).where(WikiPage.id == WikiFAQ.wiki_page_id, scoped_pages(scope))
+        select(WikiPage.id).where(
+            WikiPage.id == WikiFAQ.wiki_page_id,
+            *scoped(WikiPage, scope),
+            WikiPage.version > 0,
+            WikiPage.status != "unavailable",
+            func.jsonb_array_length(WikiPage.published_sources) > 0,
+            ~invalid_source,
+        )
     )
     return (
         *scoped(WikiFAQ, scope),

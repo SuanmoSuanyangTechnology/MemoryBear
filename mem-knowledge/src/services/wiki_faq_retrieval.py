@@ -74,8 +74,10 @@ async def index_state(runtime, scope, faq_id, *, synchronize=False, expected_row
     base = {"faq_id": str(faq_id), "content_revision": row["content_revision"]}
     if not row["eligible"]:
         return {**base, "status": "not_required", "error_code": None}
+    index_name = None
     try:
         target = await _target_for_sync(runtime, scope, row)
+        index_name = target.index_name
         client = await runtime.elasticsearch.client()
         if synchronize:
             await write_projection(runtime, client, target, row)
@@ -100,10 +102,11 @@ async def index_state(runtime, scope, faq_id, *, synchronize=False, expected_row
         return {**base, "status": status, "error_code": None}
     except Exception as exc:
         logger.exception(
-            "FAQ 索引处理失败 kb_id=%s faq_id=%s content_revision=%s stage=index_sync details=%s",
+            "FAQ 索引处理失败 kb_id=%s faq_id=%s revision=%s index=%s stage=index_sync details=%s",
             scope["kb_id"],
             faq_id,
             row["content_revision"],
+            index_name,
             diagnostic_json(exception_details(exc)),
         )
         return {
@@ -163,6 +166,19 @@ def result_chunk(row, target, score):
     )
 
 
+async def _search_faq_vectors(store, target, vector, options):
+    try:
+        return await store.search_by_query_vector(vector, options)
+    except Exception as exc:
+        logger.exception(
+            "FAQ 向量查询失败 kb_id=%s index=%s stage=vector_search details=%s",
+            target.scope["kb_id"],
+            target.index_name,
+            diagnostic_json(exception_details(exc)),
+        )
+        raise
+
+
 async def retrieve(runtime, request, principal):
     validate_request(request)
     async with runtime.database.async_session() as db:
@@ -190,6 +206,12 @@ async def retrieve(runtime, request, principal):
                     embedding_for(runtime, target), target, request.query_text
                 )
             except Exception as exc:
+                logger.exception(
+                    "FAQ 查询向量化失败 kb_id=%s index=%s stage=query_embedding details=%s",
+                    target.scope["kb_id"],
+                    target.index_name,
+                    diagnostic_json(exception_details(exc)),
+                )
                 mapped = map_text_embedding_error(exc)
                 if mapped is None or mapped is exc:
                     raise
@@ -197,7 +219,9 @@ async def retrieve(runtime, request, principal):
             candidates = []
             for offset in range(0, len(identities), FAQ_ID_BATCH_SIZE):
                 candidates.extend(
-                    await store.search_by_query_vector(
+                    await _search_faq_vectors(
+                        store,
+                        target,
                         vector,
                         RetrievalSearchOptions(
                             indices=target.index_name,
@@ -218,7 +242,14 @@ async def retrieve(runtime, request, principal):
             candidates.sort(key=lambda chunk: (-chunk.metadata["score"], chunk.metadata["doc_id"]))
             return target, candidates[: target.top_k]
 
-    groups = await asyncio.gather(*(search_target(target) for target in targets))
+    tasks = [asyncio.create_task(search_target(target)) for target in targets]
+    try:
+        groups = await asyncio.gather(*tasks)
+    except BaseException:
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        raise
     # ES查询之后重新解析授权；分享撤销/知识库停用/模型切换均不能沿用旧快照放行。
     async with runtime.database.async_session() as db:
         current_targets = await Preparation.prepare_faq_with_db(db, request, principal)

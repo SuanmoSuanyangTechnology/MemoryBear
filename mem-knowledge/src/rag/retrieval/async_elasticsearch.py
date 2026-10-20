@@ -45,6 +45,31 @@ EmbedChunksFunction = Callable[
 ]
 
 
+class ElasticsearchResponseError(RuntimeError):
+    """保留失败分片/超时原因供上层脱敏记录，不附带正常命中正文。"""
+
+    def __init__(self, response: Mapping[str, Any], operation: str):
+        super().__init__(f"Elasticsearch {operation} failed")
+        self.body = {
+            key: response[key]
+            for key in ("timed_out", "failures", "_shards", "error", "status")
+            if key in response
+        }
+        meta = getattr(response, "meta", None)
+        self.status_code = getattr(meta, "status", None)
+        headers = getattr(meta, "headers", None) or {}
+        self.request_id = headers.get("x-request-id") or headers.get("x-opaque-id")
+
+
+def _check_response(response: Mapping[str, Any], operation: str) -> None:
+    if (
+        response.get("timed_out")
+        or response.get("failures")
+        or (response.get("_shards") or {}).get("failed", 0)
+    ):
+        raise ElasticsearchResponseError(response, operation)
+
+
 class AsyncEmbeddingClient(Protocol):
     async def aembed_query(self, text: str) -> list[float]: ...
 
@@ -629,10 +654,7 @@ class AsyncChunkStore:
 
     @staticmethod
     def _raise_on_failed_response(response: Mapping[str, Any], operation: str) -> None:
-        if response.get("timed_out") or response.get("failures"):
-            raise RuntimeError(f"Elasticsearch {operation} failed")
-        if response.get("_shards", {}).get("failed", 0):
-            raise RuntimeError(f"Elasticsearch {operation} failed")
+        _check_response(response, operation)
 
 
 class AsyncElasticSearchRetrieval:
@@ -645,10 +667,7 @@ class AsyncElasticSearchRetrieval:
 
     @staticmethod
     def _raise_on_failed_response(response: Mapping[str, Any], operation: str) -> None:
-        if response.get("timed_out") or response.get("failures"):
-            raise RuntimeError(f"Elasticsearch {operation} failed")
-        if response.get("_shards", {}).get("failed", 0):
-            raise RuntimeError(f"Elasticsearch {operation} failed")
+        _check_response(response, operation)
 
     async def search_by_vector(
         self,
