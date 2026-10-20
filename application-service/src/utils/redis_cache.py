@@ -247,9 +247,9 @@ def redis_cache(
 
         async def _cache_read_write(cache_key: str, compute):
             """Shared cache read -> fallback compute -> write logic (async)."""
-            redis = get_thread_safe_redis()
-
+            redis = None
             try:
+                redis = await get_thread_safe_redis()
                 cached = await redis.get(cache_key)
             except Exception:
                 logger.warning("Redis GET failed for key=%s", cache_key, exc_info=True)
@@ -285,6 +285,8 @@ def redis_cache(
 
             if result is None and not cache_none:
                 return None
+            if redis is None:
+                return result
 
             try:
                 value = orjson.dumps(result, default=_orjson_default)
@@ -471,7 +473,7 @@ async def invalidate_cache(
         ValueError: No match condition was provided, or batch_size <= 0.
     """
     search = _resolve_invalidation(key, prefix, pattern, batch_size)
-    redis = get_thread_safe_redis()
+    redis = await get_thread_safe_redis()
 
     if key is not None:
         return await redis.delete(key)
@@ -589,7 +591,8 @@ def delete_json(key: str) -> None:
 
 async def get_json_async(key: str) -> Any:
     try:
-        raw = await get_thread_safe_redis().get(key)
+        redis = await get_thread_safe_redis()
+        raw = await redis.get(key)
         if raw is None:
             return CACHE_MISS
         return json.loads(raw)
@@ -600,15 +603,17 @@ async def get_json_async(key: str) -> Any:
 
 async def set_json_async(key: str, value: Any, ttl: int) -> None:
     try:
+        redis = await get_thread_safe_redis()
         payload = json.dumps(value, ensure_ascii=False, default=str, separators=(",", ":"))
-        await get_thread_safe_redis().set(key, payload, ex=ttl_with_jitter(ttl))
+        await redis.set(key, payload, ex=ttl_with_jitter(ttl))
     except Exception:
         logger.warning("Redis async cache write failed: key=%s", key, exc_info=True)
 
 
 async def delete_json_async(key: str) -> None:
     try:
-        await get_thread_safe_redis().delete(key)
+        redis = await get_thread_safe_redis()
+        await redis.delete(key)
     except Exception:
         logger.warning("Redis async cache invalidation failed: key=%s", key, exc_info=True)
 

@@ -3,12 +3,13 @@
 Port of the monolith ``ToolService`` management reads and writes: list, detail,
 CRUD, builtin bootstrap, method discovery, statistics and OpenAPI schema
 parsing, plus the execution-plane paths (execute, connection test, MCP tool
-sync) run against the caller's sync session. The host's async-session branches
-are not ported: the service is always constructed with a sync ``Session``, and
-its async methods are bridged with ``asyncio.run`` at the route layer.
-Repository access is instance-based (the host uses repository static methods);
-the OpenAPI parser is synchronous here, so call sites that awaited it in the
-host call it directly.
+sync) run against the caller's sync session. The service accepts either a sync
+``Session`` or an ``AsyncSession``: definition-plane paths use the sync
+session, while ``get_tool_instance_async`` mirrors the host's async branches
+for callers that resolve tool instances inside an async request (draft-run
+tool loading). Repository access is instance-based (the host uses repository
+static methods); the OpenAPI parser is synchronous here, so call sites that
+awaited it in the host call it directly.
 """
 
 from __future__ import annotations
@@ -22,6 +23,8 @@ import uuid
 from typing import Any
 
 import aiohttp
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from ..errors import BizCode, BusinessException
@@ -37,6 +40,7 @@ from ..models.tool_model import (
     ToolExecution,
     ToolStatus,
     ToolType,
+    WorkflowToolConfig,
 )
 from ..repositories.tool_repository import (
     BuiltinToolRepository,
@@ -79,7 +83,7 @@ BUILTIN_TOOLS = {
 class ToolService:
     """Unified tool service managing the full tool lifecycle."""
 
-    def __init__(self, db: Session):
+    def __init__(self, db: Session | AsyncSession):
         self.db = db
         self._tool_cache: dict[str, BaseTool] = {}
 
@@ -92,6 +96,9 @@ class ToolService:
         self.custom_repo = CustomToolRepository(db)
         self.mcp_repo = MCPToolRepository(db)
         self.workflow_repo = WorkflowToolRepository(db)
+
+    def _uses_async_session(self) -> bool:
+        return isinstance(self.db, AsyncSession)
 
     def list_tools(
             self,
@@ -1039,6 +1046,25 @@ class ToolService:
         """Get tool config (all records)."""
         return self.tool_repo.find_by_id_and_tenant_all(uuid.UUID(tool_id), tenant_id)
 
+    async def get_tool_config_async(self, tool_id: str, tenant_id: uuid.UUID) -> ToolConfig | None:
+        """Fetch a tool config (only is_active=True records)."""
+        if not self._uses_async_session():
+            return self._get_tool_config(tool_id, tenant_id)
+
+        stmt = select(ToolConfig).where(
+            ToolConfig.id == uuid.UUID(tool_id),
+            ToolConfig.tenant_id == tenant_id,
+            ToolConfig.is_active.is_(True),
+        )
+        return (await self.db.execute(stmt)).scalar_one_or_none()
+
+    async def _get_type_config_async(self, config_model: type, config_id: uuid.UUID):
+        if not self._uses_async_session():
+            return self.db.query(config_model).filter(config_model.id == config_id).first()
+
+        stmt = select(config_model).where(config_model.id == config_id)
+        return (await self.db.execute(stmt)).scalar_one_or_none()
+
     def get_tool_instance(self, tool_id: str, tenant_id: uuid.UUID) -> BaseTool | None:
         """Get a tool instance (only for is_active=True tools)."""
         if tool_id in self._tool_cache:
@@ -1057,6 +1083,26 @@ class ToolService:
             logger.error(f"创建工具实例失败: {tool_id}, {e}")
             return None
 
+    async def get_tool_instance_async(
+            self, tool_id: str, tenant_id: uuid.UUID
+    ) -> BaseTool | None:
+        """Get a tool instance (only for is_active=True tools)."""
+        if tool_id in self._tool_cache:
+            return self._tool_cache[tool_id]
+
+        config = await self.get_tool_config_async(tool_id, tenant_id)
+        if not config or not config.is_active:
+            return None
+
+        try:
+            tool = await self._create_tool_instance_async(config)
+            if tool:
+                self._tool_cache[tool_id] = tool
+            return tool
+        except Exception as e:
+            logger.error(f"异步创建工具实例失败: {tool_id}, {e}")
+            return None
+
     def _create_tool_instance(self, config: ToolConfig) -> BaseTool | None:
         """Create a tool instance."""
         if config.tool_type == ToolType.BUILTIN.value:
@@ -1067,6 +1113,18 @@ class ToolService:
             return self._create_mcp_instance(config)
         elif config.tool_type == ToolType.WORKFLOW.value:
             return self._create_workflow_instance(config)
+        return None
+
+    async def _create_tool_instance_async(self, config: ToolConfig) -> BaseTool | None:
+        """Create a tool instance through the async session."""
+        if config.tool_type == ToolType.BUILTIN.value:
+            return await self._create_builtin_instance_async(config)
+        if config.tool_type == ToolType.CUSTOM.value:
+            return await self._create_custom_instance_async(config)
+        if config.tool_type == ToolType.MCP.value:
+            return await self._create_mcp_instance_async(config)
+        if config.tool_type == ToolType.WORKFLOW.value:
+            return await self._create_workflow_instance_async(config)
         return None
 
     def _create_builtin_instance(self, config: ToolConfig) -> BaseTool | None:
@@ -1127,6 +1185,77 @@ class ToolService:
     def _create_workflow_instance(self, config: ToolConfig) -> WorkflowAsTool | None:
         """Create a workflow tool instance."""
         workflow_config = self.workflow_repo.find_by_tool_id(config.id)
+
+        if not workflow_config:
+            return None
+
+        return WorkflowAsTool(
+            db=self.db,
+            tool_id=str(config.id),
+            workflow_app_id=workflow_config.app_id,
+            release_id=workflow_config.release_id,
+            tool_name=config.name,
+            tool_description=config.description or "",
+            input_parameters=workflow_config.input_parameters or [],
+            output_schema=workflow_config.output_schema or {},
+            timeout=workflow_config.timeout or 300,
+        )
+
+    async def _create_builtin_instance_async(self, config: ToolConfig) -> BaseTool | None:
+        builtin_config = await self._get_type_config_async(BuiltinToolConfig, config.id)
+        if not builtin_config or builtin_config.tool_class not in BUILTIN_TOOLS:
+            return None
+
+        try:
+            module_path = BUILTIN_TOOLS[builtin_config.tool_class]
+            module = importlib.import_module(module_path)
+            tool_class = getattr(module, builtin_config.tool_class)
+
+            tool_config = {
+                **config.config_data,
+                "parameters": builtin_config.parameters,
+            }
+
+            return tool_class(str(config.id), tool_config)
+        except Exception as e:
+            logger.error(f"异步创建内置工具实例失败: {builtin_config.tool_class}, {e}")
+            return None
+
+    async def _create_custom_instance_async(self, config: ToolConfig) -> CustomTool | None:
+        custom_config = await self._get_type_config_async(CustomToolConfig, config.id)
+
+        if not custom_config:
+            return None
+
+        tool_config = {
+            "base_url": custom_config.base_url,
+            "auth_type": custom_config.auth_type,
+            "auth_config": custom_config.auth_config or {},
+            "timeout": custom_config.timeout or 30,
+            "schema_content": custom_config.schema_content,
+            "schema_url": custom_config.schema_url,
+        }
+
+        return CustomTool(str(config.id), tool_config)
+
+    async def _create_mcp_instance_async(self, config: ToolConfig) -> MCPTool | None:
+        mcp_config = await self._get_type_config_async(MCPToolConfig, config.id)
+
+        if not mcp_config:
+            return None
+
+        tool_config = {
+            "server_url": mcp_config.server_url,
+            "connection_config": mcp_config.connection_config or {},
+            "available_tools": mcp_config.available_tools or [],
+        }
+
+        return MCPTool(str(config.id), tool_config)
+
+    async def _create_workflow_instance_async(
+            self, config: ToolConfig
+    ) -> WorkflowAsTool | None:
+        workflow_config = await self._get_type_config_async(WorkflowToolConfig, config.id)
 
         if not workflow_config:
             return None

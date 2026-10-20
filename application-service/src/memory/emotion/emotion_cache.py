@@ -36,7 +36,7 @@ async def take_cached_emotion(message_id: str) -> Optional[FastWriteEmotionResul
     try:
         from ...aio_redis import get_thread_safe_redis
 
-        client = get_thread_safe_redis()
+        client = await get_thread_safe_redis()
         key = build_cache_key(str(message_id))
         # redis-py 4.0+ supports the atomic GETDEL operation; older/compatible implementations fall back to get + delete
         getdel = getattr(client, "getdel", None)
@@ -71,7 +71,8 @@ async def set_cached_emotion(message_id: str, result: Optional[FastWriteEmotionR
     try:
         from ...aio_redis import get_thread_safe_redis
 
-        await get_thread_safe_redis().set(
+        client = await get_thread_safe_redis()
+        await client.set(
             build_cache_key(str(message_id)),
             json.dumps({"emotion": result.emotion, "score": result.emotion_score}),
             ex=_TTL_SEC,

@@ -234,5 +234,14 @@ class BaseTool(ABC):
                 execution_time=execution_time
             )
 
+    def to_langchain_tool(self, operation: Optional[str] = None):
+        """Convert the tool into a langchain-compatible wrapper.
+
+        The adapter imports this module, so the import stays local to avoid a
+        circular import at module load time.
+        """
+        from .langchain_adapter import LangchainAdapter
+        return LangchainAdapter.convert_tool(self, operation)
+
     def __repr__(self):
         return f"<{self.__class__.__name__}(id={self.tool_id}, name={self.name})>"

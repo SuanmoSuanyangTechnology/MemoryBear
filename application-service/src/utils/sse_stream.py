@@ -11,6 +11,12 @@ a genuinely dead stream on the service side before the gateway would.
 Client disconnects surface as ``GeneratorExit``/``CancelledError`` inside the
 wrapper; the wrapper closes the source generator so in-flight upstream work
 (model invoke streams) is cancelled instead of running to completion.
+
+All source iterations run in one dedicated pump task. Awaiting each
+``__anext__`` from a fresh task would run the generator body in a different
+Context copy per chunk, so context variables bound across yields (usage
+attribution, for example) would be set and reset in different contexts and
+raise ``ValueError`` on teardown.
 """
 
 from __future__ import annotations
@@ -26,6 +32,14 @@ from ..config import current_settings
 
 logger = logging.getLogger(__name__)
 
+# Bounded hand-off queue: a fast source cannot outrun a slow client without
+# limit, and the pump parks on put() to apply backpressure.
+_QUEUE_MAXSIZE = 16
+
+_ITEM = "item"
+_ERROR = "error"
+_END = "end"
+
 # SSE comment frame: keeps the connection active without dispatching an event.
 HEARTBEAT_FRAME = ": heartbeat\n\n"
 
@@ -39,6 +53,30 @@ SSE_RESPONSE_HEADERS = {
 
 # Final frame emitted when the source stays silent past the idle timeout.
 IDLE_ERROR_FRAME = 'event: end\ndata: {"error": "stream idle timeout"}\n\n'
+
+
+async def _pump_source(
+        source: AsyncIterator[str],
+        queue: asyncio.Queue,
+) -> None:
+    """Iterate the source in this task and forward frames into ``queue``.
+
+    Keeping every ``__anext__`` in one task keeps the generator body inside a
+    single context for its whole lifetime. The terminal frame is always
+    delivered so the consumer can distinguish end-of-stream from silence.
+    """
+    try:
+        async for chunk in source:
+            await queue.put((_ITEM, chunk))
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:  # noqa: BLE001 - re-raised by the consumer
+        await queue.put((_ERROR, exc))
+    else:
+        await queue.put((_END, None))
+    finally:
+        with contextlib.suppress(BaseException):
+            await source.aclose()
 
 
 async def with_sse_keepalive(
@@ -61,14 +99,15 @@ async def with_sse_keepalive(
     idle_timeout = settings.application_service_sse_idle_timeout_seconds
 
     iterator = source.__aiter__()
-    pending: asyncio.Task | None = None
+    queue: asyncio.Queue = asyncio.Queue(maxsize=_QUEUE_MAXSIZE)
+    pump = asyncio.create_task(_pump_source(iterator, queue))
     idle_elapsed = 0.0
     try:
         while True:
-            if pending is None:
-                pending = asyncio.ensure_future(iterator.__anext__())
-            done, _ = await asyncio.wait({pending}, timeout=heartbeat_interval)
-            if not done:
+            try:
+                kind, payload = await asyncio.wait_for(
+                    queue.get(), timeout=heartbeat_interval)
+            except TimeoutError:
                 idle_elapsed += heartbeat_interval
                 if idle_elapsed >= idle_timeout:
                     logger.warning(
@@ -79,19 +118,19 @@ async def with_sse_keepalive(
                     return
                 yield HEARTBEAT_FRAME
                 continue
-            try:
-                chunk = pending.result()
-            except StopAsyncIteration:
+            if kind == _ERROR:
+                raise payload
+            if kind == _END:
                 return
-            pending = None
             idle_elapsed = 0.0
-            yield chunk
+            yield payload
     finally:
-        if pending is not None:
-            if not pending.done():
-                pending.cancel()
-            with contextlib.suppress(BaseException):
-                await pending
+        if not pump.done():
+            pump.cancel()
+        with contextlib.suppress(BaseException):
+            await pump
+        # Safety net for a pump cancelled before it ever ran; once it starts,
+        # the pump owns the source teardown.
         with contextlib.suppress(BaseException):
             await iterator.aclose()
 
