@@ -10,7 +10,7 @@ from app.schemas.app_schema import ModelParameters
 from app.services.conversation_state_manager import ConversationStateManager
 from app.models import ModelConfig, AgentConfig
 from app.core.logging_config import get_business_logger
-from app.core.db_txn import end_read_transaction
+from app.db import end_read_transaction
 from app.services.model_service import ModelConfigService
 
 logger = get_business_logger()
