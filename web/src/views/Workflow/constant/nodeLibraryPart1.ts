@@ -245,7 +245,7 @@ export const nodeLibraryPart1: NodeLibrary[] = [
             dependsOn: 'mode',
             dependsOnValue: 'inline',
             min: 1,
-            max: 50,
+            max: 10,
             step: 1,
             defaultValue: 10,
           },
@@ -318,7 +318,7 @@ export const nodeLibraryPart1: NodeLibrary[] = [
           model_id: {
             type: 'modelSelect',
             required: true,
-            params: { type: 'llm,chat' }, // llm/chat
+            params: { type: 'llm' }, // llm
           },
           text: {
             type: 'variableList',

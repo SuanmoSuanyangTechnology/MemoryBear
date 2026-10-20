@@ -53,7 +53,3 @@ sandbox/lib/seccomp_redbear/target
 .codex
 .drawio-tmp
 .worktreeinclude
-
-# QA 闭环处理脚本本地草稿（人手一份，易失，不进 git）
-api/scripts/qa_draft.csv
-
