@@ -6,7 +6,7 @@ import asyncio
 import logging
 import time
 import uuid
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 from ..bootstrap import get_settings
@@ -33,6 +33,7 @@ class TaskDispatcher:
         kwargs: dict[str, Any] | None = None,
         queue: str | None = None,
         task_id: str | None = None,
+        headers: Mapping[str, Any] | None = None,
     ) -> str:
         return await asyncio.to_thread(
             self.send_sync,
@@ -41,6 +42,7 @@ class TaskDispatcher:
             kwargs=kwargs,
             queue=queue,
             task_id=task_id,
+            headers=dict(headers) if headers is not None else None,
         )
 
     def send_sync(
@@ -51,6 +53,7 @@ class TaskDispatcher:
         kwargs: dict[str, Any] | None = None,
         queue: str | None = None,
         task_id: str | None = None,
+        headers: Mapping[str, Any] | None = None,
     ) -> str:
         """Validate and publish a task from a synchronous execution context."""
 
@@ -85,6 +88,7 @@ class TaskDispatcher:
                 "headers": {
                     key: value
                     for key, value in {
+                        **(headers or {}),
                         "kb_published_at_ms": int(time.time() * 1000),
                         "kb_trace_id": get_trace_id() or None,
                         "kb_parent_task_id": current_parent_task_id(),

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
 from collections.abc import Mapping
@@ -371,6 +372,7 @@ async def update_knowledge(
             db,
             plan,
             principal,
+            wiki_backfill_batch_size=runtime.settings.kb_wiki_backfill_batch_size,
         )
     if outcome.invalidate_workspace_id is not None:
         await knowledge_service.invalidate_storage_type_cache(
@@ -379,18 +381,36 @@ async def update_knowledge(
         )
     dispatcher = TaskDispatcher(runtime=runtime)
     if outcome.wiki_backfill_required:
-        import time
-
-        from ...rag.wiki.config import BACKFILL_TASK, WIKI_QUEUE
+        from ...rag.wiki.config import BACKFILL_REGISTERED_HEADER, BACKFILL_TASK, WIKI_QUEUE
+        from ...rag.wiki.diagnostics import diagnostic_json, exception_details
+        from ...services.wiki.backfill import record_backfill_publish_failure
+        from ...services.wiki.runtime import transaction
 
         try:
             await dispatcher.send(BACKFILL_TASK, kwargs={
-                "kb_id": str(knowledge_id), "upper_at_ms": int(time.time() * 1000)
-            }, queue=WIKI_QUEUE)
+                "kb_id": str(knowledge_id), "upper_at_ms": outcome.wiki_backfill_upper_at_ms,
+            }, queue=WIKI_QUEUE, task_id=outcome.wiki_backfill_task_id,
+                headers={BACKFILL_REGISTERED_HEADER: True})
         except Exception as exc:
             logger.error(
-                "Wiki configuration saved but backfill dispatch failed kb_id=%s", knowledge_id
+                "Wiki 配置与待处理状态已保存，但补录派发失败 "
+                "knowledge_id=%s admission_id=%s stage=backfill_publish 失败详情=%s",
+                knowledge_id, outcome.wiki_backfill_task_id,
+                diagnostic_json(exception_details(exc)),
             )
+            try:
+                await asyncio.to_thread(
+                    transaction, runtime, record_backfill_publish_failure,
+                    knowledge_id, outcome.wiki_backfill_task_id,
+                    runtime.settings.kb_wiki_backfill_batch_size,
+                )
+            except Exception as state_exc:
+                logger.error(
+                    "Wiki 补录派发失败状态保存失败 "
+                    "knowledge_id=%s admission_id=%s stage=backfill_failure_state 失败详情=%s",
+                    knowledge_id, outcome.wiki_backfill_task_id,
+                    diagnostic_json(exception_details(state_exc)),
+                )
             raise KnowledgeError.from_code(
                 "KB_WIKI_BACKFILL_DISPATCH_FAILED"
             ) from exc

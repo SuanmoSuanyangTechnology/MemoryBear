@@ -68,21 +68,22 @@ async def list_pages(
     kb_id: uuid.UUID,
     principal: PrincipalDep,
     runtime: RuntimeDep,
-    q: str = Query("", max_length=400),
     page_types: str | None = None,
     page: int = Query(1, ge=1),
-    limit: int = Query(50, ge=1, le=200),
+    pagesize: int = Query(50, ge=1, le=200),
+    limit: int | None = Query(None, ge=1, le=200, include_in_schema=False),
 ):
+    pagesize = pagesize if "pagesize" in request.query_params else limit or pagesize
     return _response(
         request,
         await _read(
             runtime,
             read.list_pages,
             _scope(kb_id, principal),
-            q=q,
             page_types=_types(page_types),
             page=page,
-            limit=limit,
+            pagesize=pagesize,
+            legacy=limit is not None and "pagesize" not in request.query_params,
         ),
     )
 
@@ -108,14 +109,20 @@ async def tree(
     runtime: RuntimeDep,
     folder_id: uuid.UUID | None = None,
     page_types: str | None = None,
-    cursor: str | None = Query(None, pattern=r"^[01]:[0-9a-fA-F-]{36}$"),
-    limit: int = Query(50, ge=1, le=200),
+    page: int = Query(1, ge=1),
+    pagesize: int = Query(50, ge=1, le=200),
+    cursor: str | None = Query(
+        None, pattern=r"^[01]:[0-9a-fA-F-]{36}$", include_in_schema=False
+    ),
+    limit: int | None = Query(None, ge=1, le=200, include_in_schema=False),
 ):
     if cursor:
         try:
             uuid.UUID(cursor[2:])
         except ValueError:
             raise HTTPException(422, "Invalid Wiki cursor") from None
+    pagesize = pagesize if "pagesize" in request.query_params else limit or pagesize
+    cursor = None if "page" in request.query_params else cursor
     return _response(
         request,
         await _read(
@@ -124,8 +131,14 @@ async def tree(
             _scope(kb_id, principal),
             folder_id=str(folder_id) if folder_id else None,
             page_types=_types(page_types),
+            page=page,
+            pagesize=pagesize,
             cursor=cursor,
-            limit=limit,
+            legacy=(
+                limit is not None
+                and "page" not in request.query_params
+                and "pagesize" not in request.query_params
+            ),
         ),
     )
 

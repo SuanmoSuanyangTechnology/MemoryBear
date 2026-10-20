@@ -119,34 +119,28 @@ def page_data(row, folders):
     }
 
 
-def list_pages(session, scope, *, q="", page_types=(), page=1, limit=50):
+def list_pages(session, scope, *, page_types=(), page=1, pagesize=50, legacy=False):
     begin_read(session, scope)
     condition = scoped_pages(scope, page_types)
-    if q:
-        pattern = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-        condition = and_(
-            condition,
-            or_(
-                WikiPage.title.ilike(f"%{pattern}%", escape="\\"),
-                WikiPage.summary.ilike(f"%{pattern}%", escape="\\"),
-            ),
-        )
     total = session.scalar(select(func.count()).select_from(WikiPage).where(condition))
     rows = session.execute(
         select(*PAGE_COLUMNS)
         .where(condition)
         .order_by(WikiPage.id)
-        .offset((page - 1) * limit)
-        .limit(limit)
+        .offset((page - 1) * pagesize)
+        .limit(pagesize)
     ).all()
     folders = _folders(session, scope)
-    return {
-        "items": [page_data(row, folders) for row in rows],
+    pagination = {
         "page": page,
-        "limit": limit,
+        "pagesize": pagesize,
         "total": total,
-        "has_next": page * limit < total,
+        "has_next": page * pagesize < total,
     }
+    items = [page_data(row, folders) for row in rows]
+    if legacy:
+        return {"items": items, **pagination, "limit": pagesize}
+    return {"items": items, "page": pagination}
 
 
 def detail(session, scope, page_id):
@@ -226,7 +220,45 @@ def detail(session, scope, page_id):
     return result
 
 
-def tree(session, scope, *, folder_id=None, page_types=(), cursor=None, limit=50):
+def _tree_page_node(row, folder_id):
+    return {
+        "id": str(row.id),
+        "node_kind": "page",
+        "parent_id": folder_id,
+        "title": row.title,
+        "page_type": row.page_type,
+        "version": row.version,
+    }
+
+
+def _next_tree_cursor(items, has_next):
+    if not items or not has_next:
+        return None
+    last = items[-1]
+    return ("0:" if last["node_kind"] == "folder" else "1:") + last["id"]
+
+
+def _tree_cursor_page(session, items, page_query, folder_id, cursor, pagesize):
+    """仅保留旧调用的游标语义，不作为新接口的主要分页方式。"""
+    items = [item for item in items if "0:" + item["id"] > cursor]
+    if cursor.startswith("1:"):
+        page_query = page_query.where(WikiPage.id > as_uuid(cursor[2:]))
+    items.extend(
+        _tree_page_node(row, folder_id)
+        for row in session.execute(page_query.order_by(WikiPage.id).limit(pagesize + 1))
+    )
+    has_next = len(items) > pagesize
+    items = items[:pagesize]
+    return {
+        "parent_id": folder_id,
+        "items": items,
+        "next_cursor": _next_tree_cursor(items, has_next),
+    }
+
+
+def tree(
+    session, scope, *, folder_id=None, page_types=(), page=1, pagesize=50, cursor=None, legacy=False
+):
     begin_read(session, scope)
     parent_id = as_uuid(folder_id) if folder_id else None
     folders = _folders(session, scope)
@@ -257,32 +289,40 @@ def tree(session, scope, *, folder_id=None, page_types=(), cursor=None, limit=50
         if folder.parent_id == parent_id and counts[folder.id]
     ]
     items.sort(key=lambda item: item["id"])
-    if cursor:
-        items = [item for item in items if "0:" + item["id"] > cursor]
     page_query = select(*PAGE_COLUMNS).where(
         scoped_pages(scope, page_types), WikiPage.folder_id == parent_id
     )
-    if cursor and cursor.startswith("1:"):
-        page_query = page_query.where(WikiPage.id > as_uuid(cursor[2:]))
-    for row in session.execute(page_query.order_by(WikiPage.id).limit(limit + 1)):
-        items.append(
-            {
-                "id": str(row.id),
-                "node_kind": "page",
-                "parent_id": folder_id,
-                "title": row.title,
-                "page_type": row.page_type,
-                "version": row.version,
-            }
+    if cursor or legacy:
+        return _tree_cursor_page(session, items, page_query, folder_id, cursor or "", pagesize)
+    folder_count = len(items)
+    page_count = session.scalar(
+        select(func.count()).select_from(WikiPage).where(
+            scoped_pages(scope, page_types), WikiPage.folder_id == parent_id
         )
-    items = sorted(items, key=lambda item: (item["node_kind"] != "folder", item["id"]))
-    has_next = len(items) > limit
-    items = items[:limit]
-    next_cursor = None
-    if items and has_next:
-        last = items[-1]
-        next_cursor = ("0:" if last["node_kind"] == "folder" else "1:") + last["id"]
-    return {"parent_id": folder_id, "items": items, "next_cursor": next_cursor}
+    )
+    total = folder_count + page_count
+    offset = (page - 1) * pagesize
+    items = items[offset : offset + pagesize]
+    remaining = pagesize - len(items)
+    # 目录和页面共用一个页码，仅查询这一页所需的页面节点。
+    if remaining and offset < total:
+        rows = session.execute(
+            page_query.order_by(WikiPage.id)
+            .offset(max(0, offset - folder_count))
+            .limit(remaining)
+        )
+        items.extend(_tree_page_node(row, folder_id) for row in rows)
+    has_next = page * pagesize < total
+    return {
+        "parent_id": folder_id,
+        "items": items,
+        "page": {
+            "page": page,
+            "pagesize": pagesize,
+            "total": total,
+            "has_next": has_next,
+        },
+    }
 
 
 def index(session, scope):

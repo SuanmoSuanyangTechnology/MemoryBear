@@ -34,7 +34,7 @@ from ..repositories.knowledge_share import (
     get_knowledgeshare_by_target_kb_id_in_source_workspace_async,
 )
 from ..repositories.reference import ReferenceRepository
-from ..utils.datetime_utils import utcnow_naive
+from ..utils.datetime_utils import to_timestamp_ms, utcnow_naive
 from .knowledge_model_validation import validate_requested_knowledge_models
 
 logger = logging.getLogger(__name__)
@@ -640,6 +640,8 @@ class KnowledgeMutationOutcome:
     parser_config: dict[str, Any]
     invalidate_workspace_id: uuid.UUID | None
     wiki_backfill_required: bool = False
+    wiki_backfill_task_id: str | None = None
+    wiki_backfill_upper_at_ms: int | None = None
 
 
 async def prepare_knowledge_update(
@@ -704,6 +706,8 @@ async def apply_knowledge_update(
     db: AsyncSession,
     plan: KnowledgeUpdatePlan,
     principal: Principal,
+    *,
+    wiki_backfill_batch_size: int | None = None,
 ) -> KnowledgeMutationOutcome:
     knowledge = await _resolve_knowledge_update_target(
         db,
@@ -752,14 +756,34 @@ async def apply_knowledge_update(
     await db.flush()
     await db.refresh(knowledge)
     outcome = await build_knowledge_mutation_outcome(db, knowledge)
-    wiki_update = (plan.parser_config_update or {}).get("wiki") or {}
-    outcome = replace(
-        outcome,
-        wiki_backfill_required=wiki_enabled_after and (
-            not wiki_enabled_before or wiki_update.get("enabled") is True
-        ),
-    )
-    await db.commit()
+    wiki_enable_transition = not wiki_enabled_before and wiki_enabled_after
+    registered = 0
+    try:
+        if wiki_enable_transition:
+            from ..bootstrap import get_settings
+            from .wiki.backfill import register_backfill
+
+            task_id = str(uuid.uuid4())
+            upper_at_ms = to_timestamp_ms(utcnow_naive())
+            batch_size = (
+                wiki_backfill_batch_size if wiki_backfill_batch_size is not None
+                else get_settings().kb_wiki_backfill_batch_size
+            )
+            registered = await db.run_sync(lambda session: register_backfill(
+                session, knowledge.id, upper_at_ms, task_id, batch_size,
+            ))
+            outcome = replace(
+                outcome, wiki_backfill_required=registered > 0,
+                wiki_backfill_task_id=task_id if registered else None,
+                wiki_backfill_upper_at_ms=upper_at_ms if registered else None,
+            )
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        raise
+    if wiki_enable_transition:
+        logger.info("Wiki 补录待处理登记已提交 knowledge_id=%s admission_id=%s documents=%s",
+                    knowledge.id, outcome.wiki_backfill_task_id, registered)
     return outcome
 
 
