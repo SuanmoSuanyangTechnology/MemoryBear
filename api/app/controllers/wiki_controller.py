@@ -30,8 +30,12 @@ async def tree(
     current_user: Annotated[User, Depends(get_current_user_async)],
     folder_id: uuid.UUID | None = None,
     page_types: str | None = None,
-    cursor: Annotated[str | None, Query(pattern=r"^[01]:[0-9a-fA-F-]{36}$")] = None,
-    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    page: Annotated[int, Query(ge=1)] = 1,
+    pagesize: Annotated[int, Query(ge=1, le=200)] = 50,
+    cursor: Annotated[
+        str | None, Query(pattern=r"^[01]:[0-9a-fA-F-]{36}$", include_in_schema=False)
+    ] = None,
+    limit: Annotated[int | None, Query(ge=1, le=200, include_in_schema=False)] = None,
 ):
     return _requires_service()
 
@@ -54,10 +58,10 @@ async def pages(
     request: Request,
     kb_id: uuid.UUID,
     current_user: Annotated[User, Depends(get_current_user_async)],
-    q: Annotated[str, Query(max_length=400)] = "",
     page_types: str | None = None,
     page: Annotated[int, Query(ge=1)] = 1,
-    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    pagesize: Annotated[int, Query(ge=1, le=200)] = 50,
+    limit: Annotated[int | None, Query(ge=1, le=200, include_in_schema=False)] = None,
 ):
     return _requires_service()
 

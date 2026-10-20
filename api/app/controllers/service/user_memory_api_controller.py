@@ -21,6 +21,7 @@
 import json
 from typing import Optional
 
+from fastapi import APIRouter, Body, Header, Query, Request
 from fastapi import APIRouter, Header, Query, Request, Body
 from pydantic import ValidationError
 
@@ -29,13 +30,9 @@ from app.core.api_key_utils import get_current_user_snapshot_from_api_key_async,
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
 from app.core.logging_config import get_business_logger
-from app.core.response_utils import fail, success
 from app.db import get_async_db_context
 from app.schemas.api_key_schema import ApiKeyAuth
 from app.schemas.memory_storage_schema import GenerateCacheRequest
-from app.services.workspace_memory_statistics_service import (
-    get_cached_workspace_statistics_async,
-)
 
 # 包装内部服务 controller
 from app.controllers import memory_analytics_controller
@@ -75,6 +72,7 @@ async def get_graph_data(
         depth=depth,
         center_node_id=center_node_id,
         current_user=current_user,
+        request=request,
     )
 
 
@@ -97,6 +95,7 @@ async def get_community_graph(
     return await memory_analytics_controller.get_community_graph_data_api(
         end_user_id=end_user_id,
         current_user=current_user,
+        request=request,
     )
 
 
@@ -122,6 +121,7 @@ async def get_node_statistics(
     return await memory_analytics_controller.get_node_statistics_api(
         end_user_id=end_user_id,
         current_user=current_user,
+        request=request,
     )
 
 
@@ -132,21 +132,15 @@ async def get_workspace_statistics(
     api_key_auth: ApiKeyAuth = None,
 ):
     """Get memory statistics for the API Key workspace."""
-    try:
-        result = await get_cached_workspace_statistics_async(
-            api_key_auth.workspace_id
+    async with get_async_db_context() as auth_db:
+        current_user = await get_current_user_snapshot_from_api_key_async(
+            auth_db, api_key_auth
         )
-        return success(data=result, msg="查询成功")
-    except BusinessException:
-        raise
-    except Exception as e:
-        logger.error(
-            "工作空间记忆统计查询失败: workspace_id=%s, error=%s",
-            api_key_auth.workspace_id,
-            str(e),
-            exc_info=True,
-        )
-        return fail(BizCode.INTERNAL_ERROR, "工作空间记忆统计查询失败")
+
+    return await memory_analytics_controller.get_workspace_statistics_api(
+        current_user=current_user,
+        request=request,
+    )
 
 
 # ==================== 用户摘要 & 洞察 ====================
@@ -173,6 +167,7 @@ async def get_user_summary(
         end_user_id=end_user_id,
         language_type=language_type,
         current_user=current_user,
+        request=request,
     )
 
 
@@ -195,6 +190,7 @@ async def get_memory_insight(
     return await memory_analytics_controller.get_memory_insight_report_api(
         end_user_id=end_user_id,
         current_user=current_user,
+        request=request,
     )
 
 

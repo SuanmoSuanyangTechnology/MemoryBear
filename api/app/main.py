@@ -1,3 +1,4 @@
+import asyncio
 import os
 import subprocess
 
@@ -7,7 +8,7 @@ import app.utils.dashscope_patch  # noqa: F401
 from app.repositories.neo4j.create_indexes import create_all_indexes
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, APIRouter
+from fastapi import FastAPI
 from fastapi import HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -96,6 +97,9 @@ async def lifespan(app: FastAPI):
     from app.integrations.knowledge.runtime import initialize_knowledge_integration
     await initialize_knowledge_integration()
 
+    from app.integrations.profile.runtime import initialize_memory_profile_integration
+    await initialize_memory_profile_integration()
+
     from app.integrations.model.runtime import initialize_model_integration
     await initialize_model_integration()
 
@@ -131,6 +135,8 @@ async def lifespan(app: FastAPI):
     await close_http_client()
     from app.integrations.knowledge.runtime import close_knowledge_integration
     await close_knowledge_integration()
+    from app.integrations.profile.runtime import close_memory_profile_integration
+    await close_memory_profile_integration()
     from app.integrations.model.runtime import close_model_integration
     await close_model_integration()
     from app.services.batch_persist_queue import BatchPersistQueue
@@ -203,15 +209,61 @@ def read_root():
 
 @app.get("/ready", include_in_schema=False)
 async def readiness():
-    """Return process readiness, including remote Knowledge when enabled."""
+    """Return process readiness, including enabled remote integrations.
 
-    if not settings.ENABLE_MEM_KNOWLEDGE:
-        return {"status": "ready", "knowledge_mode": "legacy"}
-    from app.integrations.knowledge.runtime import is_remote_knowledge_ready
+    Both enabled integrations are probed independently and concurrently, so a
+    failing knowledge probe no longer prevents the memory-profile probe from
+    running. The HTTP response shape stays unchanged: the original
+    ``{status, knowledge_mode, profile_mode}`` on success, and the original
+    HTTPException 503 detail on failure.
+    """
 
-    if await is_remote_knowledge_ready():
-        return {"status": "ready", "knowledge_mode": "remote"}
-    raise HTTPException(status_code=503, detail="Knowledge service unavailable")
+    async def _probe(name: str, check) -> tuple[str, bool]:
+        try:
+            return name, bool(await check())
+        except Exception as exc:  # noqa: BLE001 - a readiness probe must fail closed
+            logger.warning(
+                "readiness probe failed: integration=%s error=%s",
+                name,
+                type(exc).__name__,
+            )
+            return name, False
+
+    probes = []
+    if settings.ENABLE_MEM_KNOWLEDGE:
+        from app.integrations.knowledge.runtime import is_remote_knowledge_ready
+
+        probes.append(("knowledge", is_remote_knowledge_ready))
+    if settings.ENABLE_MEMORY_PROFILE:
+        from app.integrations.profile.runtime import is_remote_memory_profile_ready
+
+        probes.append(("memory_profile", is_remote_memory_profile_ready))
+
+    results = dict(
+        await asyncio.gather(*(_probe(name, check) for name, check in probes))
+    )
+    logger.debug("readiness probe results: %s", results)
+
+    knowledge_mode = "legacy"
+    if settings.ENABLE_MEM_KNOWLEDGE:
+        if not results.get("knowledge"):
+            raise HTTPException(status_code=503, detail="Knowledge service unavailable")
+        knowledge_mode = "remote"
+
+    profile_mode = "legacy"
+    if settings.ENABLE_MEMORY_PROFILE:
+        if not results.get("memory_profile"):
+            raise HTTPException(
+                status_code=503,
+                detail="Memory profile service unavailable",
+            )
+        profile_mode = "remote"
+
+    return {
+        "status": "ready",
+        "knowledge_mode": knowledge_mode,
+        "profile_mode": profile_mode,
+    }
 
 
 # 生命周期事件由 lifespan 管理，无需 on_event
