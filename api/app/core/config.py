@@ -265,8 +265,12 @@ class Settings:
     FAST_WRITE_EMOTION_URL: str = os.getenv("FAST_WRITE_EMOTION_URL", "")
     FAST_WRITE_EMOTION_MODEL: str = os.getenv("FAST_WRITE_EMOTION_MODEL", "")
     FAST_WRITE_EMOTION_API_KEY: str = os.getenv("FAST_WRITE_EMOTION_API_KEY", "")
+    # HTTPX 网络阶段超时；业务总耗时由调用方单独限制。
     FAST_WRITE_EMOTION_HTTP_TIMEOUT_SECONDS: float = max(
-        0.1, float(os.getenv("FAST_WRITE_EMOTION_HTTP_TIMEOUT_SECONDS", "2.0"))
+        0.1, float(os.getenv("FAST_WRITE_EMOTION_HTTP_TIMEOUT_SECONDS", "5.0"))
+    )
+    FAST_WRITE_EMOTION_TOTAL_TIMEOUT_SECONDS: float = max(
+        0.1, float(os.getenv("FAST_WRITE_EMOTION_TOTAL_TIMEOUT_SECONDS", "3.0"))
     )
 
     # Scene continuity BERT (/v1/rerank)
