@@ -24,6 +24,7 @@ from app.core.error_codes import BizCode
 from app.core.logging_config import get_business_logger
 from app.core.response_utils import fail, success
 from app.db import get_async_db_context, get_db_context
+from app.integrations.profile.contracts import MemoryProfileAuthSource
 from app.schemas.api_key_schema import ApiKeyAuth
 from app.schemas.memory_dashboard_schema import EndUserMemoryCountsRequest
 from app.schemas.response_schema import ApiResponse
@@ -390,6 +391,10 @@ async def get_dashboard_data(
             )
 
     result["workspace_statistics"] = (
-        await memory_dashboard_service.get_dashboard_workspace_statistics_async(workspace_id)
+        await memory_dashboard_service.get_dashboard_workspace_statistics_async(
+            workspace_id,
+            current_user=current_user,
+            source=MemoryProfileAuthSource.APIKEY,
+        )
     )
     return success(data=result, msg="Dashboard数据获取成功")

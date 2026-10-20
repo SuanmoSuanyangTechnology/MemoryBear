@@ -1,0 +1,56 @@
+[build-system]
+requires = ["hatchling>=1.26"]
+build-backend = "hatchling.build"
+
+[project]
+name = "memory-profile"
+version = "0.1.0"
+description = "Independent MemoryBear profile analytics service"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "alembic==1.17.0",
+    "asyncpg==0.32.0",
+    "auth-sdk",
+    "elasticsearch[async]==8.16.0",
+    "fastapi==0.143.0",
+    "neo4j==6.4.0",
+    "psutil==7.2.2",
+    "pydantic==2.14.1",
+    "pydantic-settings==2.15.0",
+    "python-dotenv==1.2.4",
+    "redis==8.1.0",
+    "sqlalchemy[asyncio]==2.1.4",
+    # Explicit transitive security pin; FastAPI 0.143.0 allows Starlette >=0.46.0.
+    "starlette==1.7.0",
+    "uvicorn[standard]==0.54.0",
+    "xxhash==4.0.1",
+    "zttp==0.0.34",
+]
+
+[tool.uv.sources]
+auth-sdk = { path = "../packages/auth-sdk" }
+
+[dependency-groups]
+dev = [
+    "httpx==0.28.1",
+    "pytest==9.0.3",
+    "pytest-asyncio==1.4.0",
+    "ruff==0.16.7",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "ASYNC", "TID"]
+
+[tool.ruff.lint.flake8-tidy-imports]
+ban-relative-imports = "all"

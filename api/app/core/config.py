@@ -184,6 +184,33 @@ class Settings:
         os.getenv("MEM_KNOWLEDGE_HEALTH_TIMEOUT_SECONDS", "3")
     )
 
+    # Independent memory profile service routing. Disabled keeps legacy analytics.
+    # Only endpoints carrying @memory_profile_proxy are forwarded; non-equivalent
+    # generation and workspace-refresh endpoints remain local during migration.
+    ENABLE_MEMORY_PROFILE: bool = os.getenv("ENABLE_MEMORY_PROFILE", "false").lower() == "true"
+    MEMORY_PROFILE_BASE_URL: str = os.getenv("MEMORY_PROFILE_BASE_URL", "")
+    MEMORY_PROFILE_CONNECT_TIMEOUT_SECONDS: float = float(
+        os.getenv("MEMORY_PROFILE_CONNECT_TIMEOUT_SECONDS", "5")
+    )
+    MEMORY_PROFILE_POOL_TIMEOUT_SECONDS: float = float(
+        os.getenv("MEMORY_PROFILE_POOL_TIMEOUT_SECONDS", "5")
+    )
+    MEMORY_PROFILE_READ_TIMEOUT_SECONDS: float = float(
+        os.getenv("MEMORY_PROFILE_READ_TIMEOUT_SECONDS", "120")
+    )
+    MEMORY_PROFILE_WRITE_TIMEOUT_SECONDS: float = float(
+        os.getenv("MEMORY_PROFILE_WRITE_TIMEOUT_SECONDS", "600")
+    )
+    MEMORY_PROFILE_HEALTH_TIMEOUT_SECONDS: float = float(
+        os.getenv("MEMORY_PROFILE_HEALTH_TIMEOUT_SECONDS", "3")
+    )
+    MEMORY_PROFILE_MAX_CONNECTIONS: int = int(
+        os.getenv("MEMORY_PROFILE_MAX_CONNECTIONS", "100")
+    )
+    MEMORY_PROFILE_MAX_KEEPALIVE_CONNECTIONS: int = int(
+        os.getenv("MEMORY_PROFILE_MAX_KEEPALIVE_CONNECTIONS", "100")
+    )
+
     # Independent model service routing（/api/models* 前缀代理；无开关：服务不可用即 fail-fast）
     MODEL_SERVICE_BASE_URL: str = os.getenv("MODEL_SERVICE_BASE_URL", "http://127.0.0.1:8080")
     MODEL_SERVICE_CONNECT_TIMEOUT_SECONDS: float = float(
