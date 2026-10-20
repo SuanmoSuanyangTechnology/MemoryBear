@@ -129,6 +129,26 @@ async def get_faq(
     raise HTTPException(status_code=503, detail="FAQ requires mem-knowledge")
 
 
+@router.get("/{faq_id}/index-status")
+@cur_workspace_access_guard_async()
+@route_through_knowledge_service(source=KnowledgeRetrievalSource.MANAGER_API)
+async def get_index_status(
+    request: Request, kb_id: UUID, faq_id: UUID,
+    current_user: Annotated[User, Depends(get_current_user_async)],
+):
+    raise HTTPException(status_code=503, detail="FAQ requires mem-knowledge")
+
+
+@router.post("/{faq_id}/index/retry")
+@cur_workspace_access_guard_async()
+@route_through_knowledge_service(source=KnowledgeRetrievalSource.MANAGER_API)
+async def retry_index(
+    request: Request, kb_id: UUID, faq_id: UUID, payload: FAQExpected,
+    current_user: Annotated[User, Depends(get_current_user_async)],
+):
+    raise HTTPException(status_code=503, detail="FAQ requires mem-knowledge")
+
+
 @router.patch("/{faq_id}")
 @cur_workspace_access_guard_async()
 @route_through_knowledge_service(source=KnowledgeRetrievalSource.MANAGER_API)

@@ -1,4 +1,5 @@
 {
+  "KB_FAQ_INDEX_FAILED": "FAQ indexing failed. The saved FAQ can be indexed again.",
   "KB_PRINCIPAL_INVALID": "Knowledge identity is invalid. Sign in again and retry.",
   "KB_VALIDATION_ERROR": "Request parameters are invalid. Check the configuration and retry.",
   "KB_RESOURCE_NOT_FOUND": "The resource does not exist or is not accessible. Check the selected resource.",

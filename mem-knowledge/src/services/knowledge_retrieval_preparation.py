@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 import uuid
 from dataclasses import dataclass, replace
@@ -134,6 +136,33 @@ def build_retrieval_policy(
 
 
 class KnowledgeRetrievalPreparation:
+    @classmethod
+    async def prepare_faq_with_db(cls, db, request, principal):
+        from ..rag.faq.index import FAQTarget
+        from ..repositories.wiki_faq.retrieval import has_eligible, scope_for_target
+
+        refs = await cls._resolve_retrievable_refs(db, request, principal, require_chunks=False)
+        targets = []
+        for ref in refs:
+            scope = await scope_for_target(db, ref.knowledge)
+            if not await has_eligible(db, scope):
+                continue
+            if ref.knowledge.embedding_id is None:
+                raise KnowledgeError.from_code("KB_RETRIEVAL_EMBEDDING_MODEL_NOT_CONFIGURED")
+            embedding = await cls._snapshot_model(
+                db, ref.knowledge.embedding_id, principal.tenant_id
+            )
+            params = cls._build_retrieval_params(request, ref.config)
+            targets.append(
+                FAQTarget(
+                    scope=scope,
+                    embedding=embedding,
+                    top_k=params.top_k,
+                    score_threshold=params.vector_similarity_weight,
+                )
+            )
+        return tuple(targets)
+
     @classmethod
     async def _resolve_policy_refs(
         cls,
@@ -664,6 +693,9 @@ class KnowledgeRetrievalPreparation:
             model_name=config.name,
             provider=config.provider.value,
             profile=config.profile,
+            config_fingerprint=hashlib.sha256(
+                json.dumps(config.config, sort_keys=True, default=str).encode()
+            ).hexdigest(),
         )
 
     @staticmethod

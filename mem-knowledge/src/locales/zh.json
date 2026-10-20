@@ -1,4 +1,5 @@
 {
+  "KB_FAQ_INDEX_FAILED": "FAQ 索引同步失败，问答已保存，可重试索引。",
   "KB_PRINCIPAL_INVALID": "知识库身份信息无效，请重新登录后重试",
   "KB_VALIDATION_ERROR": "请求参数无效，请检查配置后重试",
   "KB_RESOURCE_NOT_FOUND": "资源不存在或不可访问，请检查所选资源",

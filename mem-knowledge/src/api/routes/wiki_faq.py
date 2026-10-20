@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from ...repositories.wiki_faq import read, write
 from ...runtime import ProcessRuntime
 from ...services import wiki_faq as service
+from ...services.wiki_faq_retrieval import index_state
 from ..dependencies import Principal, get_principal, get_runtime, get_source
 from ..schemas.chunk import KnowledgeRetrievalSource
 from ..schemas.common import SuccessEnvelope, success
@@ -174,6 +175,30 @@ async def get_faq(
 ):
     scope = scope_for(kb_id, principal)
     return success(data=await service.run(runtime, read.detail, scope, faq_id))
+
+
+@router.get("/{faq_id}/index-status", response_model=SuccessEnvelope[dict])
+async def get_index_status(kb_id: UUID, faq_id: UUID, principal: PrincipalDep, runtime: RuntimeDep):
+    return success(data=await index_state(runtime, scope_for(kb_id, principal), faq_id))
+
+
+@router.post("/{faq_id}/index/retry", response_model=SuccessEnvelope[dict])
+async def retry_index(
+    kb_id: UUID,
+    faq_id: UUID,
+    payload: FAQExpected,
+    principal: PrincipalDep,
+    runtime: RuntimeDep,
+):
+    return success(
+        data=await index_state(
+            runtime,
+            scope_for(kb_id, principal),
+            faq_id,
+            synchronize=True,
+            expected_row_version=payload.expected_row_version,
+        )
+    )
 
 
 @router.patch("/{faq_id}", response_model=SuccessEnvelope[dict])

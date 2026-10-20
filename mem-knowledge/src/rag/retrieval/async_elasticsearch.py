@@ -67,9 +67,12 @@ class AsyncChunkStore:
         vector_indexed: bool = True,
         multimodal: bool | None = None,
         mutation_context: Callable[[], AbstractAsyncContextManager[None]] | None = None,
+        index_name: str | None = None,
+        document_id_field: str | None = None,
     ):
         self.client = client
-        self.index = collection_name_for_knowledge(knowledge_id)
+        self.index = index_name or collection_name_for_knowledge(knowledge_id)
+        self.document_id_field = document_id_field
         self.embed = embed
         self.embed_chunks = embed_chunks
         self.embed_unit_contents = embed_unit_contents
@@ -294,7 +297,10 @@ class AsyncChunkStore:
             ):
                 if metadata.get(key):
                     source[field.value] = metadata[key]
-            actions.append({"_index": self.index, "_source": source})
+            action = {"_index": self.index, "_source": source}
+            if self.document_id_field is not None:
+                action["_id"] = str(metadata[self.document_id_field])
+            actions.append(action)
         async with self._mutation_context():
             if not await self.client.indices.exists(index=self.index):
                 await self._create_index(embeddings)
@@ -671,7 +677,7 @@ class AsyncElasticSearchRetrieval:
                     options.file_names_filter,
                     options.document_ids_include,
                     require_vector=True,
-                ),
+                ) + list(options.extra_filters),
             ),
             allow_partial_search_results=False,
         )

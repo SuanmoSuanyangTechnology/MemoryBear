@@ -15,10 +15,21 @@ logger = logging.getLogger(__name__)
 
 
 async def run(runtime, operation, scope, *args, **kwargs):
+    synchronize_index = kwargs.pop("_synchronize_index", True)
     try:
-        return await asyncio.to_thread(transaction, runtime, operation, scope, *args, **kwargs)
+        result = await asyncio.to_thread(transaction, runtime, operation, scope, *args, **kwargs)
     except WikiError as exc:
         raise KnowledgeError.from_code("KB_RESOURCE_NOT_FOUND") from exc
+    if synchronize_index and operation in {
+        write.create,
+        write.edit,
+        write.set_enabled,
+        write.approve,
+    }:
+        from .wiki_faq_retrieval import synchronize_results
+
+        await synchronize_results(runtime, scope, [result])
+    return result
 
 
 def _publish(runtime, delivery):
@@ -80,7 +91,15 @@ async def batch(runtime, scope, actor_id, items, *, action, is_enabled=None):
             payload["is_enabled"] = is_enabled
         operation = write.approve if action == "approve" else write.set_enabled
         try:
-            value = await run(runtime, operation, scope, item["faq_id"], actor_id, payload)
+            value = await run(
+                runtime,
+                operation,
+                scope,
+                item["faq_id"],
+                actor_id,
+                payload,
+                _synchronize_index=False,
+            )
             results.append(
                 {
                     "faq_id": str(item["faq_id"]),
@@ -93,6 +112,9 @@ async def batch(runtime, scope, actor_id, items, *, action, is_enabled=None):
             results.append(
                 {"faq_id": str(item["faq_id"]), "result": "failed", "error_code": exc.code}
             )
+    from .wiki_faq_retrieval import synchronize_results
+
+    await synchronize_results(runtime, scope, [r for r in results if "faq" in r])
     return {
         "requested_count": len(items),
         **{
