@@ -65,12 +65,14 @@ def list_faqs(session, scope, *, review_status=None, is_enabled=None, page=1, li
     prefetch_sources(session, scope, rows)
     return {
         "items": [serialize(session, scope, row) for row in rows],
-        "total": total,
+        "page": {
+            "page": page,
+            "pagesize": limit,
+            "total": total,
+            "has_next": page * limit < total,
+        },
         "total_all": sum(counts.values()),
         "review_counts": {"all": sum(counts.values()), **counts},
-        "page": page,
-        "limit": limit,
-        "has_next": page * limit < total,
     }
 
 
@@ -180,4 +182,12 @@ def list_jobs(session, scope, *, wiki_page_id=None, page=1, limit=20):
         .offset((page - 1) * limit)
         .limit(limit)
     )
-    return {"items": [job_data(row) for row in rows], "total": total, "page": page, "limit": limit}
+    return {
+        "items": [job_data(row) for row in rows],
+        "page": {
+            "page": page,
+            "pagesize": limit,
+            "total": total,
+            "has_next": page * limit < total,
+        },
+    }
