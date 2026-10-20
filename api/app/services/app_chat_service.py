@@ -3,7 +3,7 @@ import asyncio
 import json
 import time
 import uuid
-from contextlib import nullcontext
+from contextlib import aclosing, nullcontext
 from types import SimpleNamespace
 from typing import Optional, Dict, Any, AsyncGenerator, Annotated, List, Literal
 from datetime import datetime, timezone
@@ -19,6 +19,8 @@ from app.core.logging_config import get_business_logger
 from app.core.exceptions import BusinessException
 from app.core.error_codes import BizCode
 from app.core.usage_context import bind_usage
+from app.core.stream_gate import BUSY_MESSAGE, get_multi_agent_stream_gate
+from app.core.db_txn import end_read_transaction
 from app.db import get_db, get_async_db_context
 from app.integrations.knowledge.contracts import KnowledgeRetrievalSource
 from app.models import (
@@ -2127,7 +2129,53 @@ class AppChatService:
             files: Optional[List[FileInput]] = None,
             source: str = HitLogSource.EXTERNAL,
     ) -> AsyncGenerator[str, None]:
-        """多 Agent 聊天（流式）
+        """多 Agent 聊天（流式）——并发闸门外壳。
+
+        单请求在准备阶段会同时持有共享 session 连接并另开独立连接，高并发下会互相等待
+        直到 QueuePool 超时。这里限制同时进行的请求数，超出的排队（排队期间不占 DB 连接）。
+        """
+        gate = get_multi_agent_stream_gate()
+        if not await gate.acquire():
+            yield f"event: error\ndata: {json.dumps({'error': BUSY_MESSAGE}, ensure_ascii=False)}\n\n"
+            return
+        try:
+            async with aclosing(self._multi_agent_chat_stream_impl(
+                    message=message,
+                    conversation_id=conversation_id,
+                    config=config,
+                    user_id=user_id,
+                    variables=variables,
+                    web_search=web_search,
+                    memory=memory,
+                    storage_type=storage_type,
+                    user_rag_memory_id=user_rag_memory_id,
+                    thinking=thinking,
+                    execution_mode=execution_mode,
+                    files=files,
+                    source=source,
+            )) as stream:
+                async for event in stream:
+                    yield event
+        finally:
+            gate.release()
+
+    async def _multi_agent_chat_stream_impl(
+            self,
+            message: str,
+            conversation_id: uuid.UUID,
+            config: MultiAgentConfig,
+            user_id: Optional[str] = None,
+            variables: Optional[Dict[str, Any]] = None,
+            web_search: bool = False,
+            memory: bool = True,
+            storage_type: Optional[str] = None,
+            user_rag_memory_id: Optional[str] = None,
+            thinking: bool = False,
+            execution_mode: Optional[str] = None,
+            files: Optional[List[FileInput]] = None,
+            source: str = HitLogSource.EXTERNAL,
+    ) -> AsyncGenerator[str, None]:
+        """多 Agent 聊天（流式）实现
 
         thinking / execution_mode 为对齐 Agent 应用新增的可选参数，缺省 = 旧行为。
         """
@@ -2149,6 +2197,9 @@ class AppChatService:
             total_tokens = 0
             # end 事件携带的对话能力附加字段（建议问题/引用/语音）；features 未开启时为空
             end_extras: Dict[str, Any] = {}
+            # end 事件先扣住，等落库入队完成后再下发：客户端收到 end 即断开会取消本生成器，
+            # 取消态下的 DB 查询/入队会被反复打断，连接以脏状态留在池里、消息也会丢。
+            held_end_event: Optional[str] = None
 
             # 标注命中（未配置/未启用标注返回 None，老集群无影响）；命中则不进编排器，
             # 直接落库并下发 message/end（与 Agent 应用一致）。
@@ -2169,6 +2220,9 @@ class AppChatService:
             opening_statement, opening_suggested_questions = await self._resolve_cluster_opening(
                 orchestrator, conversation_id, variables
             )
+            # 准备阶段的读库已完成：先结束共享 session 的事务把连接还给池，
+            # 后续长时间的路由/子 Agent/LLM 等待不再占着它（再用时自动开新事务）
+            await end_read_transaction(self.db, "multi_agent_chat_stream.prepare")
 
             # 3. 流式执行任务
             # message_id 下传：主执行记录据此带上本轮 assistant message_id，
@@ -2209,7 +2263,10 @@ class AppChatService:
                     except:
                         pass
 
-                yield event
+                if _event_name == "end":
+                    held_end_event = event
+                else:
+                    yield event
                 # 累加主气泡正文：只认集群级的 `message` 事件。
                 # 子 Agent 的正文走 `sub_agent_message`（已在各自区块展示），
                 # 若一并累加，落库的 assistant 正文会比界面显示多出一份重复内容，
@@ -2315,6 +2372,10 @@ class AppChatService:
                     "message_length": len(full_content)
                 }
             )
+
+            # 落库已入队，最后再下发 end
+            if held_end_event is not None:
+                yield held_end_event
 
         except (GeneratorExit, asyncio.CancelledError):
             # 生成器被关闭或任务被取消，正常退出

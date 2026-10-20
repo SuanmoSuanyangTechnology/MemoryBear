@@ -88,9 +88,44 @@ async_engine = create_async_engine(
     pool_timeout=settings.DB_POOL_TIMEOUT,
 )
 
+# 后台收尾任务的强引用集合，避免 task 被 GC 回收导致收尾中断
+_shielded_tasks: set[asyncio.Task] = set()
+
+
+async def _run_shielded(coro, what: str) -> None:
+    """在独立 task 里跑 coro，并对调用方屏蔽取消。
+
+    客户端断开时 Starlette/anyio 的 cancel scope 是电平触发的：被取消的任务里
+    每一个 await 都会再次收到 CancelledError，直接 await session.close() 会在
+    rollback/归还连接的中途被打断，asyncpg 连接停在事务里（DIRTY_CHECKIN）或
+    terminate 被取消（Exception terminating connection）。独立 task 不属于该
+    cancel scope，shield 保证外层被取消时它仍会跑完；外层仍会收到 CancelledError。
+    """
+    task = asyncio.ensure_future(coro)
+    _shielded_tasks.add(task)
+
+    def _done(t: asyncio.Task) -> None:
+        _shielded_tasks.discard(t)
+        if not t.cancelled() and t.exception() is not None:
+            logger.warning("%s failed", what, exc_info=t.exception())
+
+    task.add_done_callback(_done)
+    await asyncio.shield(task)
+
+
+class CancelSafeAsyncSession(AsyncSession):
+    """close() 对取消免疫的 AsyncSession，保证连接一定被干净归还连接池。
+
+    只覆盖 close()：它会回滚未提交事务并归还连接；rollback() 保持原语义不动。
+    """
+
+    async def close(self) -> None:
+        await _run_shielded(super().close(), "AsyncSession.close")
+
+
 AsyncSessionLocal = async_sessionmaker(
     async_engine,
-    class_=AsyncSession,
+    class_=CancelSafeAsyncSession,
     expire_on_commit=False,  # async 场景下避免 lazy load 触发同步 IO
 )
 
@@ -144,6 +179,11 @@ def _asyncpg_checkin(dbapi_connection, connection_record):
     )()
 
     if is_in_transaction:
+        # 软失效：连接不再被复用，下次该槽位 checkout 时在正常上下文里重建，
+        # 避免脏连接被下一个请求拿到（此处不能同步 terminate，可能处于被取消的上下文）
+        connection_record.invalidate(
+            Exception("dirty asyncpg connection on checkin"), soft=True
+        )
         logger.error(
             "[DB_POOL_DIRTY_CHECKIN] "
             "returning dirty asyncpg connection to pool "

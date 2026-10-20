@@ -1378,6 +1378,30 @@ class MultiAgentOrchestrator:
             # total）。外层入口（app_chat_service / multi_agent_service）不再拦截
             # sub_usage 字符串自行累加，统一从本事件读取。
             _usage_total = self._turn_routing_tokens + self._turn_sub_tokens + self._turn_merge_tokens
+
+            # 收尾（DB 更新 + commit）必须在 end 之前完成：客户端收到 end 即断开会取消
+            # 本生成器，取消态下的 DB 操作会被反复打断，连接以脏状态留在池里。
+            logger.info(
+                "多 Agent 任务完成（流式）",
+                extra={
+                    "mode": self._normalized_mode,
+                    "elapsed_time": elapsed_time,
+                    "routing_tokens": self._turn_routing_tokens,
+                    "sub_tokens": self._turn_sub_tokens,
+                    "merge_tokens": self._turn_merge_tokens
+                }
+            )
+
+            await self._finalize_master_execution(
+                status="completed",
+                elapsed_time=time.time() - start_time,
+                token_usage={
+                    "prompt_tokens": 0,
+                    "completion_tokens": 0,
+                    "total_tokens": _usage_total,
+                },
+            )
+
             yield self._format_sse_event("end", {
                 "elapsed_time": elapsed_time,
                 "conversation_id": str(conversation_id) if conversation_id else None,
@@ -1399,27 +1423,6 @@ class MultiAgentOrchestrator:
                 },
                 "timestamp": time.time()
             })
-
-            logger.info(
-                "多 Agent 任务完成（流式）",
-                extra={
-                    "mode": self._normalized_mode,
-                    "elapsed_time": elapsed_time,
-                    "routing_tokens": self._turn_routing_tokens,
-                    "sub_tokens": self._turn_sub_tokens,
-                    "merge_tokens": self._turn_merge_tokens
-                }
-            )
-
-            await self._finalize_master_execution(
-                status="completed",
-                elapsed_time=time.time() - start_time,
-                token_usage={
-                    "prompt_tokens": 0,
-                    "completion_tokens": 0,
-                    "total_tokens": _usage_total,
-                },
-            )
 
         except Exception as e:
             logger.error(
