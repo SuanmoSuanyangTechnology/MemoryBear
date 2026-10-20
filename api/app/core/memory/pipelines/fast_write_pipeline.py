@@ -320,6 +320,7 @@ class FastWritePipeline:
     async def _extract_emotion(self, text: str, message_id: str = ""):
         """Step 2 并行分支 — 复用回复链路缓存，未命中才调 BERT /v1/rerank。
 
+        - memory_config.emotion_enabled 关闭时跳过情绪判断，DialogueNode 情绪保持为空。
         - 先按 message_id（= memory_messages.original_message_id = 回复链路的
           user_message_id）读情绪缓存，**读后即删**（GETDEL）：快写是唯一消费者，
           命中即复用 emotion + score 并跳过 BERT。
@@ -329,7 +330,7 @@ class FastWritePipeline:
         - 关键约束：服务故障绝不伪造 neutral；真实中性(emotion='neutral')
           与服务失败(emotion=None)必须可区分。
         """
-        if not text:
+        if not getattr(self.memory_config, "emotion_enabled", True) or not text:
             return None
         # 先读回复链路写入的缓存（读后即删）：命中则跳过 BERT
         if message_id:
