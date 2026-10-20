@@ -1,5 +1,7 @@
 """Wiki FAQ 首次生成任务，持久执行令牌防止重投和迟到结果重复落库。"""
 
+import uuid
+
 from sqlalchemy.exc import InterfaceError, OperationalError
 from sqlalchemy.exc import TimeoutError as DatabaseTimeoutError
 
@@ -20,26 +22,44 @@ from .wiki import _report_error
 
 @celery_app.task(bind=True, name="mem_knowledge.tasks.generate_wiki_faq", max_retries=None)
 @bind_usage("kb", "kb_id")
-def generate_wiki_faq(self, kb_id, job_id):
+def generate_wiki_faq(self, kb_id, job_id, recovery=None):
     from ..services.wiki.runtime import make_model, transaction
 
     runtime = get_worker_runtime()
     settings = runtime.settings
+    delivery = {"kb_id": kb_id, "job_id": job_id}
     context = task_context_from_current_task(role="wiki_worker", knowledge_id=kb_id)
     with observe_task(
         context, sinks=[StructuredLogSink()], heartbeat_seconds=settings.kb_task_heartbeat_seconds
     ) as run:
         snapshot = None
+        claim_token = None
         try:
-            claimed = transaction(
-                runtime,
-                jobs.claim,
-                kb_id,
-                job_id,
-                self.request.id,
-                settings.kb_task_time_limit_seconds,
-                settings.kb_wiki_failure_attempts,
-            )
+            claimed = None
+            if recovery is not None:
+                claimed = transaction(
+                    runtime,
+                    jobs.recover,
+                    kb_id,
+                    job_id,
+                    self.request.id,
+                    recovery,
+                    failure_limit=settings.kb_wiki_failure_attempts,
+                )
+                recovery = None
+            if claimed is None:
+                # 领取提交的回执也可能丢失，事务前生成令牌才能恢复这一不确定窗口。
+                claim_token = str(uuid.uuid4())
+                claimed = transaction(
+                    runtime,
+                    jobs.claim,
+                    kb_id,
+                    job_id,
+                    self.request.id,
+                    settings.kb_task_time_limit_seconds,
+                    settings.kb_wiki_failure_attempts,
+                    execution_token=claim_token,
+                )
             if claimed is None:
                 run.finish(BusinessOutcome.SKIPPED)
                 return {"job_id": job_id, "result": "no_work"}
@@ -67,11 +87,17 @@ def generate_wiki_faq(self, kb_id, job_id):
             run.finish(BusinessOutcome.ABORTED, error_code=exc.code)
             return {"job_id": job_id, "status": "cancelled", "error_code": exc.code}
         except (OperationalError, InterfaceError, DatabaseTimeoutError) as exc:
-            # 状态库尚不可用时不能终结消息；业务失败预算只由持久 job 负责。
+            # 保留已知执行令牌，让恢复消息释放原租约，而不是等待过期并消耗失联预算。
+            if snapshot is not None:
+                recovery = {"execution_token": snapshot["execution_token"]}
+            elif claim_token is not None:
+                recovery = {"execution_token": claim_token}
             _report_error(run, exc, code="WIKI_STATE_UNAVAILABLE")
             run.finish(BusinessOutcome.RETRY, error_code="WIKI_STATE_UNAVAILABLE")
             raise self.retry(
                 exc=RuntimeError("WIKI_STATE_UNAVAILABLE"),
+                args=(),
+                kwargs={**delivery, "recovery": recovery},
                 countdown=settings.kb_wiki_retry_delay_seconds,
                 max_retries=None,
             ) from exc
@@ -79,7 +105,10 @@ def generate_wiki_faq(self, kb_id, job_id):
             _report_error(run, exc)
             run.finish(BusinessOutcome.RETRY, error_code=exc.code)
             raise self.retry(
-                exc=RuntimeError(exc.code), countdown=settings.kb_wiki_retry_delay_seconds
+                exc=RuntimeError(exc.code),
+                args=(),
+                kwargs=delivery,
+                countdown=settings.kb_wiki_retry_delay_seconds,
             ) from exc
         except Exception as exc:
             error = _report_error(run, exc)
@@ -88,17 +117,20 @@ def generate_wiki_faq(self, kb_id, job_id):
                 run.finish(BusinessOutcome.RETRY, error_code=error.code)
                 raise self.retry(
                     exc=RuntimeError(error.code),
+                    args=(),
+                    kwargs={**delivery, "recovery": recovery},
                     countdown=settings.kb_wiki_retry_delay_seconds,
                     max_retries=settings.kb_wiki_failure_attempts,
                 ) from exc
             retryable = error.retryable if isinstance(exc, WikiError) else True
+            error_stage = (error.diagnostics or {}).get("stage", "faq_generate")
             try:
                 again = transaction(
                     runtime,
                     jobs.fail,
                     snapshot,
                     error.code,
-                    (error.diagnostics or {}).get("stage", "faq_generate"),
+                    error_stage,
                     retryable=retryable,
                     failure_limit=settings.kb_wiki_failure_attempts,
                 )
@@ -108,13 +140,29 @@ def generate_wiki_faq(self, kb_id, job_id):
                 run.finish(BusinessOutcome.RETRY, error_code="WIKI_STATE_UNAVAILABLE")
                 raise self.retry(
                     exc=RuntimeError("WIKI_STATE_UNAVAILABLE"),
+                    args=(),
+                    kwargs={
+                        **delivery,
+                        "recovery": {
+                            "execution_token": snapshot["execution_token"],
+                            "failure": {
+                                "code": error.code,
+                                "stage": error_stage,
+                                "retryable": retryable,
+                            },
+                        },
+                    },
                     countdown=settings.kb_wiki_retry_delay_seconds,
+                    max_retries=None,
                 ) from state_error
             run.finish(
                 BusinessOutcome.RETRY if again else BusinessOutcome.FAILURE, error_code=error.code
             )
             if again:
                 raise self.retry(
-                    exc=RuntimeError(error.code), countdown=settings.kb_wiki_retry_delay_seconds
+                    exc=RuntimeError(error.code),
+                    args=(),
+                    kwargs=delivery,
+                    countdown=settings.kb_wiki_retry_delay_seconds,
                 ) from exc
             return {"job_id": job_id, "status": "failed", "error_code": error.code}

@@ -136,17 +136,51 @@ def _claim_failure(job, code, message):
     job.status, job.error_code, job.error_stage = "failed", code, "claim"
     job.execution_token, job.lease_expires_at = None, None
     job.row_version += 1
+    return _failure_result(job, message)
+
+
+def _failure_result(job, message):
     return {
         "job_id": str(job.id),
         "wiki_page_id": str(job.wiki_page_id),
         "status": "failed",
-        "error_code": code,
-        "error_stage": "claim",
+        "error_code": job.error_code,
+        "error_stage": job.error_stage,
         "error_message": message,
     }
 
 
-def claim(session, kb_id, job_id, task_id, lease_seconds, failure_limit):
+def recover(session, kb_id, job_id, task_id, recovery, *, failure_limit):
+    """仅恢复已知执行的状态写入，不把数据库故障当作未知 Worker 失联。"""
+    job, _ = _job(session, kb_id, job_id)
+    if (
+        str(job.task_id) != str(task_id)
+        or job.status != "running"
+        or str(job.execution_token) != recovery["execution_token"]
+    ):
+        # 提交可能已成功，或任务已被重投；迟到恢复不得释放其他执行的租约。
+        return None
+    failure = recovery.get("failure")
+    if failure is not None:
+        again = _fail_job(
+            job,
+            failure["code"],
+            failure["stage"],
+            retryable=failure["retryable"],
+            failure_limit=failure_limit,
+        )
+        if not again:
+            return _failure_result(job, "数据库恢复后已持久化原执行的业务失败")
+    else:
+        # 已知执行已退出；原令牌只允许释放一次，不增加业务失败计数。
+        job.status, job.execution_token, job.lease_expires_at = "retry_wait", None, None
+        job.publish_confirmed = False
+        job.error_code, job.error_stage = "WIKI_STATE_UNAVAILABLE", "faq_state_recovery"
+        job.row_version += 1
+    return None
+
+
+def claim(session, kb_id, job_id, task_id, lease_seconds, failure_limit, *, execution_token=None):
     job, scope = _job(session, kb_id, job_id)
     if str(job.task_id) != str(task_id) or job.status in {"succeeded", "failed", "cancelled"}:
         return None
@@ -183,7 +217,8 @@ def claim(session, kb_id, job_id, task_id, lease_seconds, failure_limit):
     )
     if snapshot is None:
         conflict("KB_FAQ_SOURCE_UNAVAILABLE")
-    job.status, job.execution_token = "running", uuid.uuid4()
+    job.status = "running"
+    job.execution_token = as_uuid(execution_token) if execution_token is not None else uuid.uuid4()
     job.lease_expires_at = now + timedelta(seconds=lease_seconds)
     job.publish_confirmed = True
     job.error_code, job.error_stage = None, None
@@ -249,6 +284,10 @@ def fail(session, snapshot, code, stage, *, retryable, failure_limit):
     job, _ = _job(session, snapshot["kb_id"], snapshot["job_id"])
     if job.status != "running" or str(job.execution_token) != snapshot["execution_token"]:
         return False
+    return _fail_job(job, code, stage, retryable=retryable, failure_limit=failure_limit)
+
+
+def _fail_job(job, code, stage, *, retryable, failure_limit):
     job.failure_attempt += 1
     again = retryable and job.failure_attempt < failure_limit
     job.status = "retry_wait" if again else "failed"
