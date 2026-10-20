@@ -2542,6 +2542,7 @@ class MultiAgentOrchestrator:
 
         tools = []
         self._loop_tool_instances = []
+        _used_tool_names: set = set()
         for agent_id, data in self.sub_agents.items():
             info = data.get("info", {})
             wrapper = SubAgentTool(
@@ -2550,6 +2551,20 @@ class MultiAgentOrchestrator:
                 info.get("name", agent_id),
                 _sub_agent_brief(data),
             )
+            # 工具名去重：_sanitize_tool_name 会把非 ASCII 字符抹成下划线，
+            # 仅靠中文区分的子 Agent 名（如「xxx-提取 / xxx-计算 / xxx-审校」）
+            # 会得到同一个工具名，LangChain 按名字取工具时只剩最后一个，
+            # 主管永远只能调到它。冲突时追加 agent_id 短后缀保证唯一
+            # （原名仍在 description 里供主管认人）。
+            if wrapper.tool_name in _used_tool_names:
+                _suffix = str(agent_id).replace("-", "")[:8] or "x"
+                _candidate = f"{wrapper.tool_name[:55]}_{_suffix}"
+                _n = 2
+                while _candidate in _used_tool_names:
+                    _candidate = f"{wrapper.tool_name[:50]}_{_suffix}_{_n}"
+                    _n += 1
+                wrapper.tool_name = _candidate
+            _used_tool_names.add(wrapper.tool_name)
             self._loop_tool_instances.append(wrapper)
             tools.append(wrapper.build())
 
