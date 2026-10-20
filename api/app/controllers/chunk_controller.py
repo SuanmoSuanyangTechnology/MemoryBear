@@ -1043,8 +1043,6 @@ async def retrieve_chunks_with_source(
     """
     retrieve chunk
     """
-    if retrieve_data.retrieve_type == chunk_schema.RetrieveType.WIKI_FAQ:
-        raise HTTPException(status_code=503, detail="Wiki FAQ retrieval requires mem-knowledge")
     normalized_query = retrieve_data.normalized_query
     if isinstance(normalized_query, chunk_schema.ImageRetrievalQuery):
         api_logger.warning(
