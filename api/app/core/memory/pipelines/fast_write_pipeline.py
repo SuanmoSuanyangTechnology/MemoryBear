@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+import time
 import uuid
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, List, Optional, Tuple
@@ -320,6 +321,7 @@ class FastWritePipeline:
     async def _extract_emotion(self, text: str, message_id: str = ""):
         """Step 2 并行分支 — 复用回复链路缓存，未命中才调 BERT /v1/rerank。
 
+        - memory_config.emotion_enabled 关闭时跳过情绪判断，DialogueNode 情绪保持为空。
         - 先按 message_id（= memory_messages.original_message_id = 回复链路的
           user_message_id）读情绪缓存，**读后即删**（GETDEL）：快写是唯一消费者，
           命中即复用 emotion + score 并跳过 BERT。
@@ -329,7 +331,17 @@ class FastWritePipeline:
         - 关键约束：服务故障绝不伪造 neutral；真实中性(emotion='neutral')
           与服务失败(emotion=None)必须可区分。
         """
-        if not text:
+        skip_reason = (
+            "emotion_disabled" if not getattr(self.memory_config, "emotion_enabled", True)
+            else "empty_text" if not text else None
+        )
+        if skip_reason:
+            logger.debug(
+                "[FastWrite] emotion skipped: reason=%s, mid=%s, end_user_id=%s",
+                skip_reason,
+                message_id,
+                self.end_user_id,
+            )
             return None
         # 先读回复链路写入的缓存（读后即删）：命中则跳过 BERT
         if message_id:
@@ -353,6 +365,7 @@ class FastWritePipeline:
             return None
         try:
             from app.services.fast_write_emotion_client import predict as _predict_emotion
+            started_at = time.perf_counter()
             return await asyncio.wait_for(
                 _predict_emotion(text),
                 timeout=self.EMOTION_TIMEOUT_SEC,
@@ -360,8 +373,9 @@ class FastWritePipeline:
         except asyncio.TimeoutError:
             logger.warning(
                 "[FastWrite] emotion timed out, degrading to None: text_len=%s, "
-                "timeout=%ss, end_user_id=%s",
+                "elapsed=%.3fs, timeout=%ss, end_user_id=%s",
                 len(text),
+                time.perf_counter() - started_at,
                 self.EMOTION_TIMEOUT_SEC,
                 self.end_user_id,
             )
