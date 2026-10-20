@@ -8,13 +8,21 @@ import asyncio
 import hashlib
 import json
 import logging
+import os
 from typing import Any
 
 from app.aioRedis import get_thread_safe_sync_redis, pubsub_manager
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
-CHANNEL = "auth:invalidations"
+# Deployment-scoped channel: deployments sharing one Redis but owning separate
+# databases must not consume each other's invalidations. Empty env derives
+# auth:invalidations:<DB_NAME>, matching model-service's channel-invalidations.
+CHANNEL = (
+    os.getenv("AUTH_INVALIDATION_CHANNEL", "").strip()
+    or f"auth:invalidations:{settings.DB_NAME}"
+)
 
 
 def api_key_hash(plain: str) -> str:

@@ -58,6 +58,14 @@ class Settings:
     AUDIT_RETENTION_INTERVAL_SEC: int = int(os.getenv("AUDIT_RETENTION_INTERVAL_SEC", "3600"))
     # 快照定时校正任务（reconcile）扫描间隔（秒），补偿老单体埋点丢失的快照失效事件
     RECONCILE_INTERVAL_SEC: int = int(os.getenv("RECONCILE_INTERVAL_SEC", "60"))
+    # AUTH_INVALIDATION_CHANNEL: subscriber side of the invalidation channel; must
+    # match the monolith publisher. Empty derives auth:invalidations:<DB_NAME> so
+    # deployments sharing one Redis but owning separate databases stay isolated
+    # (same convention as model-service's channel-invalidations).
+    AUTH_INVALIDATION_CHANNEL: str = (
+        os.getenv("AUTH_INVALIDATION_CHANNEL", "").strip()
+        or f"auth:invalidations:{DB_NAME}"
+    )
 
 
 settings = Settings()
