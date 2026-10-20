@@ -14,6 +14,7 @@ from app.dependencies import cur_workspace_access_guard, get_current_user
 from app.models.user_model import User
 from app.repositories.end_user_repository import get_end_user_by_id
 from app.services.memory_config_service import MemoryConfigService
+from app.services.memory_engine_display_service import MemoryEngineDisplayService
 from app.utils.sse_utils import format_sse_message
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
@@ -95,6 +96,17 @@ async def stream_prediction(
                     max_rounds=payload.max_rounds,
                     on_event=emit,
                 )
+                # best effort 写 PREDICTION 展示事件：失败只记日志，
+                # 不影响 done 事件发出与 SSE 流正常收尾
+                try:
+                    await MemoryEngineDisplayService.save_prediction_event(
+                        end_user_id=resolved_end_user_id,
+                        result=result,
+                    )
+                except Exception:
+                    logger.exception(
+                        "[EngineDisplay] Prediction event write failed"
+                    )
                 await emit("done", result.export())
             except ProfileNotFound as exc:
                 await emit("error", {"message": str(exc), "code": "PROFILE_NOT_FOUND"})

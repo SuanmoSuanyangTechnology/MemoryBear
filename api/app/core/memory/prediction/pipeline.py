@@ -45,6 +45,7 @@ EventSink = Callable[[str, dict[str, object]], Awaitable[None]]
 
 @dataclass
 class RunResult:
+    run_id: str
     run_dir: Path
     report: PredictionReport
     world: WorldState | None = None
@@ -234,8 +235,10 @@ class PredictionPipeline:
             )
 
         stamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        run_uuid = uuid.uuid4()
+        run_id = str(run_uuid)
         run_dir = self._settings.out_dir / (
-            f"{end_user_id[:8]}_{stamp}_{uuid.uuid4().hex[:6]}"
+            f"{end_user_id[:8]}_{stamp}_{run_uuid.hex[:6]}"
         )
         limits = self._settings.limits
         rounds_cap = max_rounds or self._settings.max_turns
@@ -263,6 +266,7 @@ class PredictionPipeline:
 
         def result(report: PredictionReport) -> RunResult:
             return RunResult(
+                run_id=run_id,
                 run_dir=run_dir,
                 report=report,
                 world=world,
