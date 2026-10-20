@@ -184,8 +184,8 @@ async def delete_faq(
     request: Request,
     kb_id: UUID,
     faq_id: UUID,
-    payload: FAQExpected,
     current_user: Annotated[User, Depends(get_current_user_async)],
+    expected_row_version: int = Query(..., ge=1, description="FAQ 当前行版本，删除前校验并发"),
 ):
     raise HTTPException(status_code=503, detail="FAQ requires mem-knowledge")
 

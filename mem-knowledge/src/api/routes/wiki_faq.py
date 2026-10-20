@@ -243,14 +243,19 @@ async def enable_faq(
 async def delete_faq(
     kb_id: UUID,
     faq_id: UUID,
-    payload: FAQExpected,
     principal: PrincipalDep,
     runtime: RuntimeDep,
+    expected_row_version: int = Query(..., ge=1, description="FAQ 当前行版本，删除前校验并发"),
 ):
     scope = scope_for(kb_id, principal)
     return success(
         data=await service.run(
-            runtime, write.delete, scope, faq_id, principal.actor_id, payload.model_dump()
+            runtime,
+            write.delete,
+            scope,
+            faq_id,
+            principal.actor_id,
+            {"expected_row_version": expected_row_version},
         )
     )
 
