@@ -37,7 +37,8 @@ async def list_faqs(
     review_status: Literal["pending", "approved", "change_pending"] | None = None,
     is_enabled: bool | None = None,
     page: int = Query(1, ge=1),
-    limit: int = Query(20, ge=1, le=100),
+    pagesize: int = Query(20, ge=1, le=100),
+    limit: int | None = Query(None, ge=1, le=100, include_in_schema=False),
 ):
     raise HTTPException(status_code=503, detail="FAQ requires mem-knowledge")
 
@@ -99,7 +100,8 @@ async def list_generation_jobs(
     current_user: Annotated[User, Depends(get_current_user_async)],
     wiki_page_id: UUID | None = None,
     page: int = Query(1, ge=1),
-    limit: int = Query(20, ge=1, le=100),
+    pagesize: int = Query(20, ge=1, le=100),
+    limit: int | None = Query(None, ge=1, le=100, include_in_schema=False),
 ):
     raise HTTPException(status_code=503, detail="FAQ requires mem-knowledge")
 

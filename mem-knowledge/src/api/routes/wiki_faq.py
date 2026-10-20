@@ -3,7 +3,7 @@
 from typing import Annotated, Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from ...repositories.wiki_faq import read, write
 from ...runtime import ProcessRuntime
@@ -48,15 +48,18 @@ def scope_for(kb_id, principal):
 
 @router.get("", response_model=SuccessEnvelope[dict])
 async def list_faqs(
+    request: Request,
     kb_id: UUID,
     principal: PrincipalDep,
     runtime: RuntimeDep,
     review_status: Literal["pending", "approved", "change_pending"] | None = None,
     is_enabled: bool | None = None,
     page: int = Query(1, ge=1),
-    limit: int = Query(20, ge=1, le=100),
+    pagesize: int = Query(20, ge=1, le=100),
+    limit: int | None = Query(None, ge=1, le=100, include_in_schema=False),
 ):
     scope = scope_for(kb_id, principal)
+    pagesize = pagesize if "pagesize" in request.query_params else limit or pagesize
     return success(
         data=await service.run(
             runtime,
@@ -65,7 +68,7 @@ async def list_faqs(
             review_status=review_status,
             is_enabled=is_enabled,
             page=page,
-            limit=limit,
+            limit=pagesize,
         )
     )
 
@@ -137,17 +140,20 @@ async def batch_enabled(
 
 @router.get("/generation-jobs", response_model=SuccessEnvelope[dict])
 async def list_generation_jobs(
+    request: Request,
     kb_id: UUID,
     principal: PrincipalDep,
     runtime: RuntimeDep,
     wiki_page_id: UUID | None = None,
     page: int = Query(1, ge=1),
-    limit: int = Query(20, ge=1, le=100),
+    pagesize: int = Query(20, ge=1, le=100),
+    limit: int | None = Query(None, ge=1, le=100, include_in_schema=False),
 ):
     scope = scope_for(kb_id, principal)
+    pagesize = pagesize if "pagesize" in request.query_params else limit or pagesize
     return success(
         data=await service.run(
-            runtime, read.list_jobs, scope, wiki_page_id=wiki_page_id, page=page, limit=limit
+            runtime, read.list_jobs, scope, wiki_page_id=wiki_page_id, page=page, limit=pagesize
         )
     )
 
