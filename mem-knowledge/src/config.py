@@ -287,6 +287,7 @@ class KnowledgeSettings(BaseSettings):
         "graphrag_worker",
         "qa_import_worker",
         "wiki_worker",
+        "faq_worker",
     ] = Field(default="api", validation_alias="KB_PROCESS_ROLE")
     kb_log_level: str = Field(default="INFO", validation_alias="KB_LOG_LEVEL")
     kb_db_pool_size: int = Field(

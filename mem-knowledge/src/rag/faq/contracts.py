@@ -5,6 +5,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 FAQ_GENERATE_TASK = "mem_knowledge.tasks.generate_wiki_faq"
+FAQ_QUEUE = "faq_tasks"
 FAQ_PROMPT_VERSION = "wiki_faq_v1"
 
 

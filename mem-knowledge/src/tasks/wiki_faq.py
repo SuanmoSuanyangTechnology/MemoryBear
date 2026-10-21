@@ -5,6 +5,7 @@ import uuid
 from sqlalchemy.exc import InterfaceError, OperationalError
 from sqlalchemy.exc import TimeoutError as DatabaseTimeoutError
 
+from ..rag.faq.contracts import FAQ_QUEUE
 from ..rag.faq.generation import generate
 from ..rag.wiki.config import WikiDeferred, WikiError, WikiSuperseded
 from ..repositories.wiki_faq import jobs
@@ -28,7 +29,7 @@ def generate_wiki_faq(self, kb_id, job_id, recovery=None):
     runtime = get_worker_runtime()
     settings = runtime.settings
     delivery = {"kb_id": kb_id, "job_id": job_id}
-    context = task_context_from_current_task(role="wiki_worker", knowledge_id=kb_id)
+    context = task_context_from_current_task(role="faq_worker", knowledge_id=kb_id)
     with observe_task(
         context, sinks=[StructuredLogSink()], heartbeat_seconds=settings.kb_task_heartbeat_seconds
     ) as run:
@@ -95,6 +96,7 @@ def generate_wiki_faq(self, kb_id, job_id, recovery=None):
             _report_error(run, exc, code="WIKI_STATE_UNAVAILABLE")
             run.finish(BusinessOutcome.RETRY, error_code="WIKI_STATE_UNAVAILABLE")
             raise self.retry(
+                queue=FAQ_QUEUE,
                 exc=RuntimeError("WIKI_STATE_UNAVAILABLE"),
                 args=(),
                 kwargs={**delivery, "recovery": recovery},
@@ -105,6 +107,7 @@ def generate_wiki_faq(self, kb_id, job_id, recovery=None):
             _report_error(run, exc)
             run.finish(BusinessOutcome.RETRY, error_code=exc.code)
             raise self.retry(
+                queue=FAQ_QUEUE,
                 exc=RuntimeError(exc.code),
                 args=(),
                 kwargs=delivery,
@@ -116,6 +119,7 @@ def generate_wiki_faq(self, kb_id, job_id, recovery=None):
                 # 数据库暂时不可用已单独处理；其他领取异常保留有限的消息重试。
                 run.finish(BusinessOutcome.RETRY, error_code=error.code)
                 raise self.retry(
+                    queue=FAQ_QUEUE,
                     exc=RuntimeError(error.code),
                     args=(),
                     kwargs={**delivery, "recovery": recovery},
@@ -139,6 +143,7 @@ def generate_wiki_faq(self, kb_id, job_id, recovery=None):
                 _report_error(run, state_error, code="WIKI_STATE_UNAVAILABLE")
                 run.finish(BusinessOutcome.RETRY, error_code="WIKI_STATE_UNAVAILABLE")
                 raise self.retry(
+                    queue=FAQ_QUEUE,
                     exc=RuntimeError("WIKI_STATE_UNAVAILABLE"),
                     args=(),
                     kwargs={
@@ -160,6 +165,7 @@ def generate_wiki_faq(self, kb_id, job_id, recovery=None):
             )
             if again:
                 raise self.retry(
+                    queue=FAQ_QUEUE,
                     exc=RuntimeError(error.code),
                     args=(),
                     kwargs=delivery,

@@ -471,6 +471,7 @@ def _scan_worker_observability(root: Path) -> list[str]:
         ("graphrag_worker", "graphrag_tasks"),
         ("qa_import_worker", "qa_import"),
         ("wiki_worker", "wiki_tasks"),
+        ("faq_worker", "faq_tasks"),
     ):
         if role not in worker_source or queue not in worker_source:
             errors.append(

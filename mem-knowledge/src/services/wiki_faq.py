@@ -4,8 +4,8 @@ import asyncio
 import logging
 
 from ..errors import KnowledgeError
-from ..rag.faq.contracts import FAQ_GENERATE_TASK
-from ..rag.wiki.config import WIKI_QUEUE, WikiError
+from ..rag.faq.contracts import FAQ_GENERATE_TASK, FAQ_QUEUE
+from ..rag.wiki.config import WikiError
 from ..rag.wiki.diagnostics import diagnostic_json, exception_details
 from ..repositories.wiki_faq import jobs, read, write
 from ..tasks.dispatch import TaskDispatcher
@@ -38,7 +38,7 @@ def _publish(runtime, delivery):
         dispatcher.send_sync(
             FAQ_GENERATE_TASK,
             kwargs={"kb_id": delivery["kb_id"], "job_id": delivery["job_id"]},
-            queue=WIKI_QUEUE,
+            queue=FAQ_QUEUE,
             task_id=delivery["task_id"],
         )
         transaction(runtime, jobs.record_dispatch, delivery, succeeded=True)
