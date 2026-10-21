@@ -1532,21 +1532,10 @@ async def _async_get_working_memory_stats(end_user_id: str) -> Tuple[int, int]:
 
 
 async def _async_get_short_term_count(end_user_id: str) -> int:
-    """统计短期记忆条数（通过 Repository 异步方法）。"""
-    from app.db import get_async_db_context
-    from app.repositories.memory_short_repository import ShortTermMemoryRepository
-    async with get_async_db_context() as db:
-        repo = ShortTermMemoryRepository(db)
-        return await repo.count_by_user_id_async(end_user_id)
+    """Count all eligible Statement memos rather than retrievals or pending writes."""
+    from app.services.short_term_memo_service import count_short_term_memos
 
-
-async def _async_get_long_term_conversation_count(end_user_id: str) -> int:
-    """统计有待写入长期记忆的会话数（通过 Repository 异步方法）。"""
-    from app.db import get_async_db_context
-    from app.repositories.conversation_repository import ConversationRepository
-    async with get_async_db_context() as db:
-        repo = ConversationRepository(db)
-        return await repo.get_pending_write_conversation_count_async(end_user_id)
+    return await count_short_term_memos(end_user_id)
 
 
 async def _async_get_forgetting_threshold(end_user_id: str) -> float:
@@ -1593,7 +1582,7 @@ async def analytics_memory_types_async(
         _async_get_forgetting_threshold(end_user_id),
     )
 
-    # ==== 第二阶段：所有独立查询并行（3 个 PG + 5 个 Neo4j）====
+    # ==== 第二阶段：所有独立统计并行查询 ====
     async def _work_count_task() -> int:
         try:
             agent_wf, api_mcp = await _async_get_working_memory_stats(end_user_id)
@@ -1602,34 +1591,18 @@ async def analytics_memory_types_async(
             logger.warning(f"获取工作记忆数量失败，设为0: {e}")
             return 0
 
-    async def _short_term_task() -> int:
-        try:
-            return await _async_get_short_term_count(end_user_id)
-        except Exception as e:
-            logger.warning(f"获取短期记忆数量失败，设为0: {e}")
-            return 0
-
-    async def _long_term_task() -> int:
-        try:
-            return await _async_get_long_term_conversation_count(end_user_id)
-        except Exception as e:
-            logger.warning(f"获取长期记忆数量失败，设为0: {e}")
-            return 0
-
     (
         work_count,
         short_term_count,
-        long_term_number,
-        memory_summary_count,
+        implicit_count,
         episodic_count,
         explicit_count,
         emotion_count,
         forget_count,
     ) = await asyncio.gather(
         _work_count_task(),
-        _short_term_task(),
-        _long_term_task(),
-        base_service.get_valid_memory_summary_count(end_user_id),
+        _async_get_short_term_count(end_user_id),
+        _async_get_implicit_habit_count(end_user_id),
         base_service.get_episodic_memory_count(end_user_id),
         base_service.get_explicit_memory_count(end_user_id),
         base_service.get_emotional_memory_count(end_user_id, perceptual_count),
@@ -1641,7 +1614,7 @@ async def analytics_memory_types_async(
     memory_counts = {
         "PERCEPTUAL_MEMORY": perceptual_count,
         "WORKING_MEMORY": work_count,
-        "SHORT_TERM_MEMORY": short_term_count + long_term_number,
+        "SHORT_TERM_MEMORY": short_term_count,
         "EXPLICIT_MEMORY": explicit_count,
         "IMPLICIT_MEMORY": implicit_count,
         "EMOTIONAL_MEMORY": emotion_count,

@@ -142,7 +142,5 @@ COUNT_KEYS: tuple[str, ...] = (
     "perceptual",
     "active_conversations",
     "direct_sources",
-    "short_term",
-    "pending_conversations",
     "forgotten",
 )
