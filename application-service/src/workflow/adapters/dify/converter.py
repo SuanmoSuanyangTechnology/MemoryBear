@@ -1,0 +1,1418 @@
+# -*- coding: UTF-8 -*-
+# Author: Eternity
+# @Email: 1533512157@qq.com
+# @Time : 2026/2/25 18:21
+import base64
+import json
+import re
+from typing import Any
+from urllib.parse import quote
+
+from ...adapters.base_converter import BaseConverter
+from ...adapters.errors import (
+    UnsupportedVariableType,
+    UnknownModelWarning,
+    ExceptionDefinition,
+    ExceptionType
+)
+from ...nodes.assigner.config import AssignmentItem
+from ...nodes.base_config import VariableDefinition as NodeVariableDefinition, BaseNodeConfig
+from ...nodes.code.config import InputVariable, OutputVariable
+from ...nodes.configs import (
+    StartNodeConfig,
+    LLMNodeConfig,
+    AssignerNodeConfig,
+    CodeNodeConfig,
+    LoopNodeConfig,
+    IterationNodeConfig,
+    EndNodeConfig,
+    HttpRequestNodeConfig,
+    IfElseNodeConfig,
+    JinjaRenderNodeConfig,
+    KnowledgeRetrievalNodeConfig,
+    NoteNodeConfig,
+    ParameterExtractorNodeConfig,
+    QuestionClassifierNodeConfig,
+    VariableAggregatorNodeConfig,
+    ListOperatorNodeConfig,
+    DocExtractorNodeConfig,
+)
+from ...nodes.human_intervention.config import (
+    HumanInterventionNodeConfig,
+    DeliveryMethodConfig,
+    WebappConfig,
+    EmailConfig as HITLEmailConfig,
+    FormFieldConfig,
+    ActionConfig,
+    TimeoutConfig,
+)
+from ....schemas.workflow_schema import (
+    VariableDefinition as SchemaVariableDefinition,
+    EnvironmentVariableDefinition,
+)
+from ...nodes.cycle_graph.config import (
+    ConditionDetail as LoopConditionDetail,
+    ConditionsConfig,
+    CycleVariable
+)
+from ....utils.workflow_node_types import (
+    ValueInputType,
+    ComparisonOperator,
+    AssignmentOperator,
+    HttpAuthType,
+    HttpContentType,
+    HttpErrorHandle,
+    NodeType
+)
+from ...nodes.http_request.config import (
+    HttpAuthConfig,
+    HttpContentTypeConfig,
+    HttpFormData,
+    HttpTimeOutConfig,
+    HttpRetryConfig,
+    HttpErrorDefaultTemplate,
+    HttpErrorHandleConfig
+)
+from ...nodes.if_else.config import ConditionDetail, ConditionBranchConfig
+from ...nodes.jinja_render.config import VariablesMappingConfig
+from ...nodes.llm.config import MemoryWindowSetting, MessageConfig
+from ...nodes.agent.config import (
+    AgentNodeConfig,
+    AgentErrorHandleConfig,
+    ToolSelector,
+)
+from ...nodes.parameter_extractor.config import ParamsConfig
+from ...nodes.question_classifier.config import ClassifierConfig
+from ...variable.base_variable import VariableType, DEFAULT_VALUE
+
+
+class DifyConverter(BaseConverter):
+    errors: list
+    warnings: list
+    branch_node_cache: dict
+    error_branch_node_cache: list
+    node_output_map: dict
+
+    def __init__(self):
+        self.CONFIG_CONVERT_MAP = {
+            NodeType.START: self.convert_start_node_config,
+            NodeType.TRIGGER: lambda x: x,
+            NodeType.LLM: self.convert_llm_node_config,
+            NodeType.END: self.convert_end_node_config,
+            NodeType.OUTPUT: self.convert_output_node_config,
+            NodeType.IF_ELSE: self.convert_if_else_node_config,
+            NodeType.LOOP: self.convert_loop_node_config,
+            NodeType.ITERATION: self.convert_iteration_node_config,
+            NodeType.ASSIGNER: self.convert_assigner_node_config,
+            NodeType.CODE: self.convert_code_node_config,
+            NodeType.HTTP_REQUEST: self.convert_http_node_config,
+            NodeType.JINJARENDER: self.convert_jinja_render_node_config,
+            NodeType.KNOWLEDGE_RETRIEVAL: self.convert_knowledge_node_config,
+            NodeType.PARAMETER_EXTRACTOR: self.convert_parameter_extractor_node_config,
+            NodeType.QUESTION_CLASSIFIER: self.convert_question_classifier_node_config,
+            NodeType.VAR_AGGREGATOR: self.convert_variable_aggregator_node_config,
+            NodeType.TOOL: self.convert_tool_node_config,
+            NodeType.AGENT: self.convert_agent_node_config,
+            NodeType.NOTES: self.convert_notes_config,
+            NodeType.LIST_OPERATOR: self.convert_list_operator_node_config,
+            NodeType.DOCUMENT_EXTRACTOR: self.convert_document_extractor_node_config,
+            NodeType.HUMAN_INTERVENTION: self.convert_human_intervention_node_config,
+            NodeType.CYCLE_START: lambda x: {},
+            NodeType.BREAK: lambda x: {},
+        }
+        self._file_vars_to_conv: list[SchemaVariableDefinition] = []
+
+    def get_node_convert(self, node_type):
+        func = self.CONFIG_CONVERT_MAP.get(node_type, lambda x: {})
+        return func
+
+    def config_validate(
+            self,
+            node_id: str,
+            node_name: str,
+            config: type[BaseNodeConfig],
+            value: dict
+    ):
+        try:
+            return config.model_validate(value)
+        except Exception as e:
+            self.errors.append(ExceptionDefinition(
+                type=ExceptionType.CONFIG,
+                node_id=node_id,
+                node_name=node_name,
+                detail=str(e)
+            ))
+            return None
+
+    @staticmethod
+    def is_variable(expression) -> bool:
+        return bool(re.match(r"\{\{#(.*?)#}}", expression))
+
+    def process_var_selector(self, var_selector):
+        if not var_selector:
+            return ""
+        selector = var_selector.split('.')
+        if len(selector) not in [2, 3] and var_selector != "context":
+            raise Exception(f"invalid variable selector: {var_selector}")
+        if len(selector) == 3 and selector[0] in ("conversation", "sys"):
+            selector = selector[1:]
+        if selector[0] == "conversation":
+            selector[0] = "conv"
+        var_selector = ".".join(selector)
+        mapping = {
+                      "sys.query": "sys.message"
+                  } | self.node_output_map
+
+        var_selector = mapping.get(var_selector, var_selector)
+        return var_selector
+
+    def _process_list_variable_literal(self, variable_selector: list) -> str | None:
+        if not self.process_var_selector(".".join(variable_selector)):
+            return None
+        return "{{" + self.process_var_selector(".".join(variable_selector)) + "}}"
+
+    def trans_variable_format(self, content):
+        pattern = re.compile(r"\{\{#(.*?)#}}")
+
+        def replacer(match: re.Match) -> str:
+            raw_name = match.group(1)
+            try:
+                new_name = self.process_var_selector(raw_name)
+                if not new_name:
+                    return match.group(0)
+                return f"{{{{{new_name}}}}}"
+            except Exception:
+                return match.group(0)
+
+        return pattern.sub(replacer, content)
+
+    @staticmethod
+    def _convert_file(var):
+        return None
+
+    @staticmethod
+    def _convert_array_file(var):
+        return []
+
+    @staticmethod
+    def variable_type_map(source_type) -> VariableType | None:
+        type_map = {
+            "file": VariableType.FILE,
+            "paragraph": VariableType.STRING,
+            "text-input": VariableType.STRING,
+            "string": VariableType.STRING,
+            "number": VariableType.NUMBER,
+            "integer": VariableType.NUMBER,
+            "float": VariableType.NUMBER,
+            "checkbox": VariableType.BOOLEAN,
+            "boolean": VariableType.BOOLEAN,
+            "object": VariableType.OBJECT,
+            "file-list": VariableType.ARRAY_FILE,
+            "array[string]": VariableType.ARRAY_STRING,
+            "array[number]": VariableType.ARRAY_NUMBER,
+            "array[boolean]": VariableType.ARRAY_BOOLEAN,
+            "array[object]": VariableType.ARRAY_OBJECT,
+            "array[file]": VariableType.ARRAY_FILE,
+            "select": VariableType.STRING,
+        }
+        var_type = type_map.get(source_type, source_type)
+        return var_type
+
+    def convert_variable_type(self, target_type: VariableType, origin_value: Any):
+        if not origin_value:
+            return DEFAULT_VALUE(target_type)
+        try:
+            match target_type:
+                case VariableType.STRING:
+                    return self._convert_string(origin_value)
+                case VariableType.NUMBER:
+                    return self._convert_number(origin_value)
+                case VariableType.BOOLEAN:
+                    return self._convert_boolean(origin_value)
+                case VariableType.FILE:
+                    return self._convert_file(origin_value)
+                case VariableType.ARRAY_FILE:
+                    return self._convert_array_file(origin_value)
+                case _:
+                    return origin_value
+        except:
+            raise Exception(f"convert variable failed: {target_type}")
+
+    def convert_environment_variable(self, variable: dict[str, Any]) -> EnvironmentVariableDefinition:
+        name = variable.get("name") or variable.get("variable") or variable.get("key")
+        value_type = variable.get("value_type") or variable.get("type") or "string"
+        if value_type not in {"string", "number", "secret"}:
+            raise Exception(f"unsupported environment variable type: {value_type}")
+
+        value = variable.get("value")
+        if value_type == "number" and value is not None:
+            value = self._convert_number(value)
+        elif value is not None:
+            value = self._convert_string(value)
+
+        return EnvironmentVariableDefinition(
+            name=name,
+            value_type=value_type,
+            required=variable.get("required", False),
+            value=value,
+            description=variable.get("description") or variable.get("label"),
+        )
+
+    @staticmethod
+    def convert_compare_operator(operator):
+        operator_map = {
+            "is": ComparisonOperator.EQ,
+            "is not": ComparisonOperator.NE,
+            "=": ComparisonOperator.EQ,
+            "≠": ComparisonOperator.NE,
+            ">": ComparisonOperator.GT,
+            "<": ComparisonOperator.LT,
+            "≥": ComparisonOperator.GE,
+            "≤": ComparisonOperator.LE,
+            "not empty": ComparisonOperator.NOT_EMPTY,
+            "start with": ComparisonOperator.START_WITH,
+            "end with": ComparisonOperator.END_WITH,
+            "not contains": ComparisonOperator.NOT_CONTAINS,
+            "exists": ComparisonOperator.NOT_EMPTY,
+            "not exists": ComparisonOperator.EMPTY,
+            "in": ComparisonOperator.IN,
+            "not in": ComparisonOperator.NOT_IN,
+        }
+        return operator_map.get(operator, operator)
+
+    @staticmethod
+    def convert_assignment_operator(operator):
+        operator_map = {
+            "+=": AssignmentOperator.ADD,
+            "-=": AssignmentOperator.SUBTRACT,
+            "*=": AssignmentOperator.MULTIPLY,
+            "/=": AssignmentOperator.DIVIDE,
+            "over-write": AssignmentOperator.COVER,
+            "remove-last": AssignmentOperator.REMOVE_LAST,
+            "remove-first": AssignmentOperator.REMOVE_FIRST,
+            "set": AssignmentOperator.ASSIGN,
+        }
+        return operator_map.get(operator, operator)
+
+    @staticmethod
+    def convert_http_auth_type(auth_type):
+        auth_type_map = {
+            "no-auth": HttpAuthType.NONE,
+            "bearer": HttpAuthType.BEARER,
+            "basic": HttpAuthType.BASIC,
+            "custom": HttpAuthType.CUSTOM,
+        }
+        return auth_type_map.get(auth_type, auth_type)
+
+    @staticmethod
+    def convert_http_content_type(content_type):
+        content_type_map = {
+            "none": HttpContentType.NONE,
+            "form-data": HttpContentType.FROM_DATA,
+            "x-www-form-urlencoded": HttpContentType.WWW_FORM,
+            "json": HttpContentType.JSON,
+            "raw-text": HttpContentType.RAW,
+            "binary": HttpContentType.BINARY,
+        }
+        return content_type_map.get(content_type, content_type)
+
+    @staticmethod
+    def convert_http_error_handle_type(handle_type):
+        handle_type_map = {
+            "none": HttpErrorHandle.NONE,
+            "fail-branch": HttpErrorHandle.BRANCH,
+            "default-value": HttpErrorHandle.DEFAULT,
+        }
+        return handle_type_map.get(handle_type, handle_type)
+
+    def convert_start_node_config(self, node: dict) -> dict:
+        node_data = node["data"]
+        start_vars = []
+        # workflow mode uses user_input_form, advanced-chat uses variables
+        raw_vars = node_data.get("variables") or []
+        if not raw_vars:
+            for form_item in node_data.get("user_input_form") or []:
+                # Each form_item is {"text-input": {...}} or {"paragraph": {...}}, etc.
+                for input_type, var in form_item.items():
+                    var["type"] = input_type
+                    var.setdefault("variable", var.get("variable", ""))
+                    var.setdefault("required", var.get("required", False))
+                    var.setdefault("label", var.get("label", ""))
+                    raw_vars.append(var)
+
+        ui_type_map = {
+            "text-input": "text-input",
+            "paragraph": "paragraph",
+            "select": "select",
+            "checkbox": "checkbox",
+            "number": "number",
+        }
+
+        for var in raw_vars:
+            var_type = self.variable_type_map(var["type"])
+            if not var_type:
+                self.errors.append(
+                    UnsupportedVariableType(
+                        scope=node["id"],
+                        name=var["variable"],
+                        var_type=var["type"],
+                        node_id=node["id"],
+                        node_name=node_data["title"]
+                    )
+                )
+                continue
+
+            source_type = var["type"]
+            ui_type_val = ui_type_map.get(source_type)
+            if var_type == VariableType.FILE:
+                ui_type_val = "file-upload"
+            elif var_type == VariableType.ARRAY_FILE:
+                ui_type_val = "file-list-upload"
+            elif var_type == VariableType.OBJECT:
+                ui_type_val = "json-editor"
+
+            max_length = var.get("max_length", 50 if ui_type_val == "text-input" else 2000)
+            if ui_type_val == "paragraph":
+                max_length = var.get("max_length", 2000)
+
+            var_def = NodeVariableDefinition(
+                name=var["variable"],
+                type=var_type,
+                ui_type=ui_type_val,
+                required=var.get("required", False),
+                default=self.convert_variable_type(var_type, var.get("default")),
+                description=var.get("label", ""),
+                max_length=max_length,
+                options=var.get("options") if ui_type_val == "select" else None,
+                allowed_file_types=var.get("allowed_file_types") if ui_type_val in ("file-upload", "file-list-upload") else None,
+                max_file_count=var.get("max_file_count", 5) if ui_type_val == "file-list-upload" else None,
+                max_file_size_mb=var.get("max_file_size_mb", 50.0) if ui_type_val in ("file-upload", "file-list-upload") else None,
+            )
+            start_vars.append(var_def)
+        result = StartNodeConfig.model_construct(
+            variables=start_vars
+        ).model_dump()
+        self.config_validate(node["id"], node["data"]["title"], StartNodeConfig, result)
+        return result
+
+    def convert_question_classifier_node_config(self, node: dict) -> dict:
+        node_data = node["data"]
+        self.warnings.append(
+            UnknownModelWarning(
+                node_id=node["id"],
+                node_name=node_data["title"],
+                model_name=node_data["model"].get("name")
+            )
+        )
+        categories = []
+        for category in node_data["classes"]:
+            self.branch_node_cache[node["id"]].append(category["id"])
+            categories.append(
+                ClassifierConfig.model_construct(
+                    class_name=category["name"],
+                )
+            )
+
+        vision = node_data.get("vision", {}).get("enabled", False)
+        vision_input = self._process_list_variable_literal(
+            node_data["vision"]["configs"]["variable_selector"]
+        ) if vision else None
+
+        result = QuestionClassifierNodeConfig.model_construct(
+            input_variable=self._process_list_variable_literal(node_data.get("query_variable_selector")),
+            user_supplement_prompt=self.trans_variable_format(node_data.get("instructions", "")),
+            categories=categories,
+            vision=vision,
+            vision_input=vision_input,
+        ).model_dump()
+        self.config_validate(node["id"], node["data"]["title"], QuestionClassifierNodeConfig, result)
+        return result
+
+    @staticmethod
+    def _get_dify_model_config(node_data: dict[str, Any]) -> dict[str, Any]:
+        model = node_data.get("model") or {}
+        if isinstance(model, dict) and isinstance(model.get("value"), dict):
+            return model["value"]
+        return model if isinstance(model, dict) else {}
+
+    @classmethod
+    def _get_dify_model_name(cls, node_data: dict[str, Any]) -> str | None:
+        model = cls._get_dify_model_config(node_data)
+        return model.get("name") or model.get("model")
+
+    @staticmethod
+    def _has_param(params: dict[str, Any], key: str) -> bool:
+        return key in params and params.get(key) not in (None, "")
+
+    @staticmethod
+    def _to_int(value: Any) -> int | None:
+        if value in (None, ""):
+            return None
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _to_float(value: Any) -> float | None:
+        if value in (None, ""):
+            return None
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _enabled_value(value: Any, default: Any = None) -> dict[str, Any]:
+        if value in (None, ""):
+            return {"enable": False, "value": default}
+        return {"enable": True, "value": value}
+
+    @classmethod
+    def _convert_dify_completion_params(cls, completion_params: dict[str, Any] | None) -> dict[str, Any]:
+        if not isinstance(completion_params, dict):
+            return {}
+
+        result: dict[str, Any] = {}
+
+        if cls._has_param(completion_params, "temperature"):
+            value = cls._to_float(completion_params.get("temperature"))
+            if value is not None:
+                result["temperature"] = value
+
+        if cls._has_param(completion_params, "max_tokens"):
+            value = cls._to_int(completion_params.get("max_tokens"))
+            if value is not None:
+                result["max_tokens"] = value
+
+        optional_params: dict[str, tuple[Any, Any]] = {
+            "top_p": (0.8, cls._to_float),
+            "top_k": (50, cls._to_int),
+            "seed": (1234, cls._to_int),
+            "repetition_penalty": (1.0, cls._to_float),
+            "presence_penalty": (0, cls._to_float),
+            "frequency_penalty": (0, cls._to_float),
+        }
+        for key, (default, converter) in optional_params.items():
+            if cls._has_param(completion_params, key):
+                value = converter(completion_params.get(key))
+                if value is not None:
+                    result[key] = cls._enabled_value(value, default)
+
+        if "enable_search" in completion_params:
+            result["search"] = bool(completion_params.get("enable_search"))
+        elif "search" in completion_params:
+            result["search"] = bool(completion_params.get("search"))
+
+        thinking_enabled = bool(completion_params.get("enable_thinking"))
+        thinking_budget = (
+            completion_params.get("thinking_budget")
+            if "thinking_budget" in completion_params
+            else completion_params.get("thinking_budget_tokens")
+        )
+        budget_value = cls._to_int(thinking_budget)
+        if "enable_thinking" in completion_params or budget_value is not None:
+            result["thinking"] = {
+                "enable": thinking_enabled,
+                "budget": {
+                    "enable": thinking_enabled and budget_value is not None,
+                    "value": budget_value if budget_value is not None else 256,
+                }
+            }
+
+        response_format = completion_params.get("response_format")
+        if isinstance(response_format, dict):
+            response_format_value = response_format.get("type") or response_format.get("value")
+        else:
+            response_format_value = response_format
+        if response_format_value:
+            result["response_format"] = cls._enabled_value(response_format_value, "text")
+        elif "response_format" in completion_params:
+            result["response_format"] = cls._enabled_value(None, "text")
+
+        if cls._has_param(completion_params, "extra_headers"):
+            extra_headers = completion_params.get("extra_headers")
+            if isinstance(extra_headers, (dict, list)):
+                extra_headers = json.dumps(extra_headers, ensure_ascii=False)
+            result["extra_headers"] = cls._enabled_value(str(extra_headers), None)
+        elif "extra_headers" in completion_params:
+            result["extra_headers"] = cls._enabled_value(None, None)
+
+        if cls._has_param(completion_params, "stop"):
+            stop = completion_params.get("stop")
+            if isinstance(stop, str):
+                stop = [stop]
+            elif not isinstance(stop, list):
+                stop = []
+            result["stop"] = cls._enabled_value(stop, [])
+
+        return result
+
+    def convert_llm_node_config(self, node: dict) -> dict:
+        node_data = node["data"]
+        self.warnings.append(
+            UnknownModelWarning(
+                node_id=node["id"],
+                node_name=node_data["title"],
+                model_name=self._get_dify_model_name(node_data)
+            )
+        )
+        model_config = self._get_dify_model_config(node_data)
+        model_params = self._convert_dify_completion_params(model_config.get("completion_params"))
+        context = self._process_list_variable_literal(node_data["context"]["variable_selector"])
+        memory = MemoryWindowSetting(
+            enable=bool(node_data.get("memory")),
+            enable_window=bool(node_data.get("memory", {}).get("window", {}).get("enabled", False)),
+            window_size=int(node_data.get("memory", {}).get("window", {}).get("size", 20))
+        )
+        messages = []
+        for message in node_data["prompt_template"]:
+            messages.append(
+                MessageConfig(
+                    role=message["role"],
+                    content=self.trans_variable_format(message["text"])
+                )
+            )
+        if memory.enable:
+            messages.append(
+                MessageConfig(
+                    role="user",
+                    content=self.trans_variable_format(
+                        node_data["memory"].get("query_prompt_template") or "{{#sys.query#}}"
+                    )
+                )
+            )
+        vision = node_data["vision"]["enabled"]
+        vision_input = self._process_list_variable_literal(
+            node_data["vision"]["configs"]["variable_selector"]
+        ) if vision else None
+        result = LLMNodeConfig.model_construct(
+            model_id=None,
+            context=context,
+            memory=memory,
+            vision=vision,
+            vision_input=vision_input,
+            messages=messages,
+            **model_params,
+        ).model_dump()
+        self.config_validate(node["id"], node["data"]["title"], LLMNodeConfig, result)
+        return result
+
+    def convert_end_node_config(self, node: dict) -> dict:
+        node_data = node["data"]
+        result = EndNodeConfig.model_construct(
+            output=self.trans_variable_format(node_data.get("answer", "")),
+        ).model_dump()
+        self.config_validate(node["id"], node["data"]["title"], EndNodeConfig, result)
+        return result
+
+    def convert_output_node_config(self, node: dict) -> dict:
+        node_data = node["data"]
+        outputs = []
+        for item in node_data.get("outputs", []):
+            value_selector = item.get("value_selector") or []
+            var_type = self.variable_type_map(item.get("value_type", "string")) or VariableType.STRING
+            outputs.append({
+                "name": item.get("variable") or item.get("name", ""),
+                "type": var_type,
+                "value": self._process_list_variable_literal(value_selector) or "",
+            })
+        return {"outputs": outputs}
+
+    def convert_if_else_node_config(self, node: dict) -> dict:
+        node_data = node["data"]
+        cases = []
+        for case in node_data["cases"]:
+            case_id = case.get("id") or case.get("case_id")
+            logical_operator = case["logical_operator"]
+            conditions = []
+            for condition in case["conditions"]:
+                right_value = condition["value"]
+                condition_detail = ConditionDetail(
+                    operator=self.convert_compare_operator(condition["comparison_operator"]),
+                    left="{{" + self.process_var_selector(".".join(condition["variable_selector"])) + "}}",
+                    right=self.trans_variable_format(
+                        right_value
+                    ) if isinstance(right_value, str) and self.is_variable(right_value) else self.convert_variable_type(
+                        self.variable_type_map(condition["varType"]),
+                        condition["value"]
+                    ),
+                    input_type=ValueInputType.VARIABLE
+                    if isinstance(right_value, str) and self.is_variable(right_value) else ValueInputType.CONSTANT,
+                )
+                conditions.append(condition_detail)
+            cases.append(
+                ConditionBranchConfig(
+                    logical_operator=logical_operator,
+                    expressions=conditions
+                )
+            )
+            self.branch_node_cache[node["id"]].append(case_id)
+        result = IfElseNodeConfig.model_construct(
+            cases=cases
+        ).model_dump()
+        self.config_validate(node["id"], node["data"]["title"], IfElseNodeConfig, result)
+        return result
+
+    def convert_loop_node_config(self, node: dict) -> dict:
+        node_data = node["data"]
+        logical_operator = node_data["logical_operator"]
+        conditions = []
+        for condition in node_data["break_conditions"]:
+            right_value = condition["value"]
+            conditions.append(
+                LoopConditionDetail.model_construct(
+                    operator=self.convert_compare_operator(condition["comparison_operator"]),
+                    left=self._process_list_variable_literal(condition["variable_selector"]),
+                    right=self.trans_variable_format(
+                        right_value
+                    ) if isinstance(right_value, str) and self.is_variable(right_value) else self.convert_variable_type(
+                        self.variable_type_map(condition["varType"]),
+                        condition["value"]
+                    ),
+                    input_type=ValueInputType.VARIABLE
+                    if isinstance(right_value, str) and self.is_variable(right_value) else ValueInputType.CONSTANT,
+                )
+            )
+        condition_config = ConditionsConfig.model_construct(
+            logical_operator=logical_operator,
+            expressions=conditions
+        )
+        loop_variables = []
+        for variable in node_data["loop_variables"]:
+            right_input_type = variable["value_type"]
+            right_value_type = self.variable_type_map(variable["var_type"])
+            if right_input_type == ValueInputType.VARIABLE:
+                right_value = self._process_list_variable_literal(variable.get("value", ""))
+            else:
+                right_value = self.convert_variable_type(right_value_type, variable.get("value", ""))
+            loop_variables.append(
+                CycleVariable(
+                    name=variable["label"],
+                    type=right_value_type,
+                    value=right_value,
+                    input_type=right_input_type
+                )
+            )
+        result = LoopNodeConfig.model_construct(
+            condition=condition_config,
+            cycle_vars=loop_variables,
+            max_loop=node_data.get("loop_count", 10)
+        ).model_dump()
+        self.config_validate(node["id"], node["data"]["title"], LoopNodeConfig, result)
+        return result
+
+    def convert_iteration_node_config(self, node: dict) -> dict:
+        node_data = node["data"]
+        result = IterationNodeConfig.model_construct(
+            input=self._process_list_variable_literal(node_data["iterator_selector"]),
+            parallel=node_data.get("is_parallel", False),
+            parallel_count=node_data.get("parallel_nums", 4),
+            output=self._process_list_variable_literal(node_data["output_selector"]),
+            output_type=self.variable_type_map(node_data.get("output_type")),
+            flatten=node_data.get("flatten_output", False),
+        ).model_dump()
+
+        self.config_validate(node["id"], node["data"]["title"], IterationNodeConfig, result)
+        return result
+
+    def convert_assigner_node_config(self, node: dict) -> dict:
+        node_data = node["data"]
+        assignments = []
+
+        # Support both formats:
+        # 1. New format: node_data["items"] list
+        # 2. Flat format: assigned_variable_selector + input_variable_selector + write_mode
+        if "items" in node_data:
+            raw_items = node_data["items"]
+        elif "assigned_variable_selector" in node_data and "input_variable_selector" in node_data:
+            raw_items = [{
+                "variable_selector": node_data["assigned_variable_selector"],
+                "value": node_data["input_variable_selector"],
+                "input_type": ValueInputType.VARIABLE,
+                "operation": node_data.get("write_mode", "over-write"),
+            }]
+        else:
+            raw_items = []
+
+        for assignment in raw_items:
+            if assignment.get("operation") is None or assignment.get("value") is None:
+                continue
+            assignments.append(
+                AssignmentItem(
+                    variable_selector=self._process_list_variable_literal(assignment["variable_selector"]),
+                    value=self._process_list_variable_literal(
+                        assignment["value"]
+                    ) if assignment["input_type"] == ValueInputType.VARIABLE else assignment["value"],
+                    operation=self.convert_assignment_operator(assignment["operation"])
+                )
+            )
+        result = AssignerNodeConfig.model_construct(
+            assignments=assignments
+        ).model_dump()
+        self.config_validate(node["id"], node["data"]["title"], AssignerNodeConfig, result)
+        return result
+
+    def convert_code_node_config(self, node: dict) -> dict:
+        node_data = node["data"]
+        input_variables = []
+        for input_variable in node_data["variables"]:
+            input_variables.append(
+                InputVariable.model_construct(
+                    name=input_variable["variable"],
+                    variable=self._process_list_variable_literal(input_variable["value_selector"]),
+                )
+            )
+
+        output_variables = []
+        for output_variable in node_data["outputs"]:
+            output_variables.append(
+                OutputVariable.model_construct(
+                    name=output_variable,
+                    type=node_data["outputs"][output_variable]["type"],
+                )
+            )
+
+        code = base64.b64encode(quote(node_data["code"]).encode("utf-8")).decode("utf-8")
+
+        result = CodeNodeConfig.model_construct(
+            input_variables=input_variables,
+            language=node_data["code_language"],
+            output_variables=output_variables,
+            code=code
+        ).model_dump()
+        self.config_validate(node["id"], node["data"]["title"], CodeNodeConfig, result)
+        return result
+
+    def convert_http_node_config(self, node: dict) -> dict:
+        node_data = node["data"]
+        if node_data["authorization"]["type"] != 'no-auth':
+            auth_type = self.convert_http_auth_type(node_data["authorization"]["config"]["type"])
+            auth_config = HttpAuthConfig.model_construct(
+                auth_type=auth_type,
+                header=node_data["authorization"]["config"].get("header"),
+                api_key=node_data["authorization"]["config"].get("api_key"),
+            )
+        else:
+            auth_config = HttpAuthConfig()
+
+        content_type = self.convert_http_content_type(node_data["body"]["type"])
+        if content_type == HttpContentType.FROM_DATA:
+            body_content = []
+            for content in node_data["body"]["data"]:
+                body_content.append(
+                    HttpFormData(
+                        key=self.trans_variable_format(content["key"]),
+                        type=content["type"],
+                        value=self.trans_variable_format(content["value"]),
+                    )
+                )
+        elif content_type == HttpContentType.WWW_FORM:
+            body_content = {}
+            for content in node_data["body"]["data"]:
+                body_content[
+                    self.trans_variable_format(content["key"])
+                ] = self.trans_variable_format(content["value"])
+        else:
+            if node_data["body"]["data"]:
+                data_entry = node_data["body"]["data"][0]
+                body_content = data_entry.get("value")
+                if not body_content and data_entry.get("file"):
+                    body_content = self._process_list_variable_literal(data_entry.get("file"))
+                if not body_content:
+                    body_content = ""
+                elif isinstance(body_content, str):
+                    # Convert session variable format for JSON body
+                    body_content = self.trans_variable_format(body_content)
+            else:
+                body_content = ""
+
+        headers = {}
+        for header in node_data.get("headers", "").split("\n"):
+            if not header:
+                continue
+
+            key_value = header.split(":")
+            if len(key_value) == 2:
+                headers[
+                    self.trans_variable_format(key_value[0])
+                ] = self.trans_variable_format(key_value[1])
+            else:
+                self.warnings.append(ExceptionDefinition(
+                    type=ExceptionType.CONFIG,
+                    node_id=node["id"],
+                    node_name=node_data["title"],
+                    detail=f"Invalid header/param - {header}",
+                ))
+
+        params = {}
+        for param in node_data.get("params", "").split("\n"):
+            if not param:
+                continue
+
+            key_value = param.split(":")
+            if len(key_value) == 2:
+                params[
+                    self.trans_variable_format(key_value[0])
+                ] = self.trans_variable_format(key_value[1])
+            else:
+                self.warnings.append(ExceptionDefinition(
+                    type=ExceptionType.CONFIG,
+                    node_id=node["id"],
+                    node_name=node_data["title"],
+                    detail=f"Invalid header/param - {param}",
+                ))
+
+        error_handle_type = self.convert_http_error_handle_type(
+            node_data.get("error_strategy", "none")
+        )
+        default_value = None
+        if error_handle_type == HttpErrorHandle.DEFAULT:
+            default_body = ""
+            default_header = {}
+            default_status_code = 0
+            for var in node_data.get("default_value") or []:
+                if var["key"] == "body":
+                    default_body = var["value"]
+                elif var["key"] == "header":
+                    default_header = var["value"]
+                elif var["key"] == "status_code":
+                    default_status_code = var["value"]
+            default_value = HttpErrorDefaultTemplate(
+                body=default_body,
+                headers=default_header,
+                status_code=default_status_code,
+            )
+
+        self.error_branch_node_cache.append(node['id'])
+        result = HttpRequestNodeConfig.model_construct(
+            method=node_data["method"].upper(),
+            url=node_data["url"],
+            auth=auth_config,
+            body=HttpContentTypeConfig.model_construct(
+                content_type=self.convert_http_content_type(node_data["body"]["type"]),
+                data=body_content,
+            ),
+            headers=headers,
+            params=params,
+            verify_ssl=node_data.get("ssl_verify", False),
+            timeouts=HttpTimeOutConfig.model_construct(
+                connect_timeout=node_data["timeout"]["max_connect_timeout"] or 5,
+                read_timeout=node_data["timeout"]["max_read_timeout"] or 5,
+                write_timeout=node_data["timeout"]["max_write_timeout"] or 5,
+            ),
+            retry=HttpRetryConfig.model_construct(
+                enable=node_data["retry_config"]["retry_enabled"],
+                max_attempts=node_data["retry_config"]["max_retries"],
+                retry_interval=node_data["retry_config"]["retry_interval"],
+            ),
+            error_handle=HttpErrorHandleConfig.model_construct(
+                method=error_handle_type,
+                default=default_value,
+            )
+        ).model_dump()
+
+        self.config_validate(node["id"], node["data"]["title"], HttpRequestNodeConfig, result)
+        return result
+
+    def convert_jinja_render_node_config(self, node: dict) -> dict:
+        node_data = node["data"]
+        mapping = []
+        for variable in node_data["variables"]:
+            mapping.append(VariablesMappingConfig.model_construct(
+                name=variable["variable"],
+                value=self._process_list_variable_literal(variable["value_selector"])
+            ))
+        result = JinjaRenderNodeConfig.model_construct(
+            template=node_data["template"],
+            mapping=mapping,
+        ).model_dump()
+        self.config_validate(node["id"], node["data"]["title"], JinjaRenderNodeConfig, result)
+        return result
+
+    def convert_knowledge_node_config(self, node: dict) -> dict:
+        node_data = node["data"]
+        self.warnings.append(ExceptionDefinition(
+            node_id=node["id"],
+            node_name=node_data["title"],
+            type=ExceptionType.CONFIG,
+            detail=f"Please reconfigure the Knowledge Retrieval node.",
+        ))
+        result = KnowledgeRetrievalNodeConfig.model_construct(
+            query=self._process_list_variable_literal(node_data["query_variable_selector"]),
+        ).model_dump()
+
+        self.config_validate(node["id"], node["data"]["title"], KnowledgeRetrievalNodeConfig, result)
+        return result
+
+    def convert_parameter_extractor_node_config(self, node: dict) -> dict:
+        node_data = node["data"]
+        self.warnings.append(
+            UnknownModelWarning(
+                node_id=node["id"],
+                node_name=node_data["title"],
+                model_name=node_data["model"].get("name")
+            )
+        )
+        params = []
+        for param in node_data.get("parameters", []):
+            params.append(
+                ParamsConfig.model_construct(
+                    name=param["name"],
+                    desc=param["description"],
+                    required=param["required"],
+                    type=param["type"],
+                )
+            )
+        result = ParameterExtractorNodeConfig.model_construct(
+            text=self._process_list_variable_literal(node_data["query"]),
+            params=params,
+            prompt=node_data.get("instruction"),
+            inference_mode="prompt",
+        ).model_dump()
+
+        self.config_validate(node["id"], node["data"]["title"], ParameterExtractorNodeConfig, result)
+        return result
+
+    def convert_variable_aggregator_node_config(self, node: dict) -> dict:
+        node_data = node["data"]
+        advanced_settings = node_data.get("advanced_settings", {})
+        group_variables = {}
+        group_type = {}
+        if not advanced_settings or not advanced_settings["group_enabled"]:
+            group_variables = [
+                self._process_list_variable_literal(variable)
+                for variable in node_data["variables"]
+            ]
+            group_type["output"] = node_data["output_type"]
+        else:
+            for group in advanced_settings["groups"]:
+                group_variables[group["group_name"]] = [
+                    self._process_list_variable_literal(variable)
+                    for variable in group["variables"]
+                ]
+                group_type[group["group_name"]] = group["output_type"]
+
+        result = VariableAggregatorNodeConfig.model_construct(
+            group=advanced_settings.get("group_enabled", False),
+            group_variables=group_variables,
+            group_type=group_type,
+        ).model_dump()
+
+        self.config_validate(node["id"], node["data"]["title"], VariableAggregatorNodeConfig, result)
+
+        return result
+
+    def convert_tool_node_config(self, node: dict) -> dict:
+        node_data = node["data"]
+        self.warnings.append(ExceptionDefinition(
+            node_id=node["id"],
+            node_name=node_data["title"],
+            type=ExceptionType.CONFIG,
+            detail=f"Please reconfigure the tool node.",
+        ))
+        return {}
+
+    # Mapping table from Dify builtin tool names to MemoryBear builtin tool names.
+    # Only builtin tools with matching names; other Dify plugin tools need manual reconfiguration.
+    DIFY_TOOL_NAME_MAPPING = {
+        "web_search": "web_search",
+        "google_search": "web_search",
+        "bing_search": "web_search",
+        "current_time": "datetime_tool",
+        "current_date": "datetime_tool",
+        "datetime": "datetime_tool",
+        "json_process": "json_tool",
+        "json_processor": "json_tool",
+    }
+
+    def _match_dify_tool(self, node_id: str, node_name: str, raw_tool: dict) -> ToolSelector | None:
+        """Map a Dify Agent tool entry to a MemoryBear ToolSelector.
+
+        Tools that cannot be auto-mapped raise a warning telling the user to reconfigure.
+        """
+        tool_name = (
+            raw_tool.get("tool_name")
+            or raw_tool.get("tool_label")
+            or raw_tool.get("provider_name")
+            or ""
+        )
+        mapped = self.DIFY_TOOL_NAME_MAPPING.get(tool_name)
+        if not mapped:
+            self.warnings.append(ExceptionDefinition(
+                type=ExceptionType.CONFIG,
+                node_id=node_id,
+                node_name=node_name,
+                detail=f"Agent tool '{tool_name}' cannot be auto-mapped. Please reconfigure.",
+            ))
+            return None
+        # tool_id temporarily holds the mapped name; frontend rebinds the real ID on import
+        return ToolSelector(
+            tool_id=mapped,
+            tool_type="builtin",
+            operation=None,
+            enabled=bool(raw_tool.get("enabled", True)),
+        )
+
+    def convert_agent_node_config(self, node: dict) -> dict:
+        """Convert a Dify Agent node config to a MemoryBear AgentNodeConfig.
+
+        Pure configuration-layer field mapping, not involving the execution engine. Models
+        and plugin tools cannot be auto-mapped; a warning asks the user to complete them
+        on the canvas before running.
+        """
+        node_data = node["data"]
+
+        # Models cannot be auto-mapped -> emit UnknownModelWarning and leave model_id empty
+        model_config = self._get_dify_model_config(node_data)
+        model_name = self._get_dify_model_name(node_data)
+        model_params = self._convert_dify_completion_params(model_config.get("completion_params"))
+        self.warnings.append(
+            UnknownModelWarning(
+                node_id=node["id"],
+                node_name=node_data.get("title"),
+                model_name=model_name,
+            )
+        )
+
+        agent_parameters = node_data.get("agent_parameters") or {}
+
+        # System prompt: agent_parameters.prompt.value
+        prompt_param = agent_parameters.get("prompt") or {}
+        raw_prompt = prompt_param.get("value")
+        if isinstance(raw_prompt, list):
+            # mixed/messages form: concatenate the text of each segment
+            raw_prompt = "\n".join(
+                seg.get("text", "") for seg in raw_prompt if isinstance(seg, dict)
+            )
+        system_prompt = self.trans_variable_format(raw_prompt) if raw_prompt else ""
+
+        # Tool list: agent_parameters.tools.value[]
+        tools_param = agent_parameters.get("tools") or {}
+        raw_tools = tools_param.get("value") or []
+        if not isinstance(raw_tools, list):
+            raw_tools = []
+        tools: list[ToolSelector] = []
+        for raw_tool in raw_tools:
+            if not isinstance(raw_tool, dict):
+                continue
+            selector = self._match_dify_tool(node["id"], node_data.get("title"), raw_tool)
+            if selector:
+                tools.append(selector)
+
+        # Maximum iteration count
+        max_iterations = node_data.get("max_iteration") or node_data.get("max_iterations") or 10
+
+        # Agent strategy: map the Dify strategy field to MemoryBear's strategy string
+        dify_strategy_label_raw = node_data.get("agent_strategy_label") or ""
+        # Compatibility with older Dify versions (agent_mode.strategy)
+        if not dify_strategy_label_raw:
+            agent_mode = node_data.get("agent_mode") or {}
+            dify_strategy_label_raw = agent_mode.get("strategy", "")
+        # label (execution mode) mapping: function_call -> function_calling, otherwise -> react
+        if dify_strategy_label_raw in ("function_call", "function_calling"):
+            strategy = "function_calling"
+        else:
+            strategy = dify_strategy_label_raw or "react"
+
+        # Memory config (same as the LLM node conversion)
+        memory = MemoryWindowSetting(
+            enable=bool(node_data.get("memory")),
+            enable_window=bool(node_data.get("memory", {}).get("window", {}).get("enabled", False)),
+            window_size=int(node_data.get("memory", {}).get("window", {}).get("size", 20))
+        )
+
+        context = ""
+        raw_context = node_data.get("context") or {}
+        variable_selector = raw_context.get("variable_selector") if isinstance(raw_context, dict) else None
+        if isinstance(variable_selector, list):
+            processed_literal = self._process_list_variable_literal(variable_selector)
+            if processed_literal:
+                context = processed_literal
+
+        # Error handling: fail-branch -> BRANCH, otherwise -> NONE
+        error_strategy = node_data.get("error_strategy")
+        if error_strategy == "fail-branch":
+            error_handle = AgentErrorHandleConfig(method=HttpErrorHandle.BRANCH)
+            self.error_branch_node_cache.append(node["id"])
+        else:
+            error_handle = AgentErrorHandleConfig(method=HttpErrorHandle.NONE)
+
+        result_data = {
+            "model": {
+                "model_id": None,
+                "provider": model_config.get("provider"),
+                "model": model_config.get("model") or model_config.get("name"),
+                "model_type": model_config.get("model_type") or "llm",
+                "completion_params": model_params,
+            },
+            "system_prompt": system_prompt,
+            "message": "{{ sys.message }}",
+            "tools": tools,
+            "context": context,
+            "max_iterations": int(max_iterations),
+            "strategy": strategy,
+            "memory": memory,
+            "error_handle": error_handle,
+        }
+        result = AgentNodeConfig.model_validate(result_data).model_dump()
+        self.config_validate(node["id"], node["data"]["title"], AgentNodeConfig, result)
+        return result
+
+    @staticmethod
+    def convert_notes_config(node: dict):
+        node_data = node["data"]
+        result = NoteNodeConfig.model_construct(
+            author=node_data.get("author", ""),
+            text=node_data.get("text", ""),
+            width=node_data.get("width", 80),
+            height=node_data.get("height", 80),
+            theme=node_data.get("theme", "blue"),
+            show_author=node_data.get("showAuthor", True)
+        ).model_dump()
+        return result
+
+    def convert_list_operator_node_config(self, node: dict) -> dict:
+        """Dify list-operator — convert variable path array to {{ }} selector format."""
+        node_data = node["data"]
+        variable_path = node_data.get("variable", [])
+        input_list = self._process_list_variable_literal(variable_path) or ""
+        filter_by = node_data.get("filter_by", {"enabled": False, "conditions": []})
+        # Convert each condition's comparison_operator from Dify format to native
+        if filter_by.get("conditions"):
+            converted_conditions = []
+            for cond in filter_by["conditions"]:
+                converted_conditions.append({
+                    **cond,
+                    "comparison_operator": self.convert_compare_operator(
+                        cond.get("comparison_operator", "")
+                    )
+                })
+            filter_by = {**filter_by, "conditions": converted_conditions}
+        result = {
+            "input_list": input_list,
+            "filter_by": filter_by,
+            "order_by": node_data.get("order_by", {"enabled": False, "key": "", "value": "asc"}),
+            "limit": node_data.get("limit", {"enabled": False, "size": -1}),
+            "extract_by": node_data.get("extract_by", {"enabled": False, "serial": "1"}),
+        }
+        self.config_validate(node["id"], node["data"]["title"], ListOperatorNodeConfig, result)
+        return result
+
+    def convert_document_extractor_node_config(self, node: dict) -> dict:
+        """Convert Dify document-extractor node to MemoryBear DocExtractorNodeConfig.
+
+        Dify document-extractor data fields:
+          variable_selector: list[str]  - file variable path
+        """
+        node_data = node["data"]
+        file_selector = self._process_list_variable_literal(
+            node_data.get("variable_selector", [])
+        ) or ""
+        result = DocExtractorNodeConfig.model_construct(
+            file_selector=file_selector,
+        ).model_dump()
+        self.config_validate(node["id"], node["data"]["title"], DocExtractorNodeConfig, result)
+        return result
+
+    def convert_human_intervention_node_config(self, node: dict) -> dict:
+        """Convert Dify human-input node to MemoryBear human-intervention node.
+
+        Dify HumanInputNodeType:
+          delivery_methods: [{id, type, enabled, config}]
+          form_content: string (uses {{#nodeId.var#}} and {{#$output.varName#}} syntax)
+          inputs: [{type, output_variable_name, default: {selector, type, value}}]
+          user_actions: [{id, title, button_style}]
+          timeout: number
+          timeout_unit: 'hour' | 'day'
+
+        MemoryBear HumanInterventionNodeConfig:
+          delivery_method: {webapp: {enabled}, email: {enabled}}
+          content: string (uses {{ nodeId.var }} syntax)
+          form_fields: [{id, label, mode, placeholder, default_value, variable_ref}]
+          actions: [{id, label, variant}]
+          timeout: {unit, value}
+        """
+        node_data = node["data"]
+
+        # --- delivery_method ---
+        dify_delivery_methods = node_data.get("delivery_methods") or []
+        webapp_enabled = False
+        email_enabled = False
+        for dm in dify_delivery_methods:
+            if dm.get("enabled", False):
+                dm_type = dm.get("type", "")
+                if dm_type in ("webapp", "WEBAPP"):
+                    webapp_enabled = True
+                elif dm_type in ("email", "EMAIL"):
+                    email_enabled = True
+        # Default: webapp enabled if no delivery methods specified
+        if not dify_delivery_methods:
+            webapp_enabled = True
+        delivery_method = DeliveryMethodConfig(
+            webapp=WebappConfig(enabled=webapp_enabled),
+            email=HITLEmailConfig(enabled=email_enabled),
+        )
+
+        # --- content ---
+        # Dify uses {{#nodeId.var#}} and {{#$output.varName#}} syntax
+        # MemoryBear uses {{ nodeId.var }} syntax
+        # Convert Dify's variable format to MemoryBear's format
+        dify_form_content = node_data.get("form_content", "")
+        # FIRST: replace HITL input field markers {{#$output.varName#}} with {{form_field:varName}}
+        # Must do this BEFORE trans_variable_format which would mangle the $output prefix
+        content = re.sub(
+            r"\{\{#\$output\.(\w+)#\}\}",
+            lambda m: f"{{{{form_field:{m.group(1)}}}}}",
+            dify_form_content,
+        )
+        # THEN: convert remaining {{#nodeId.var#}} syntax to {{ nodeId.var }}
+        content = self.trans_variable_format(content)
+
+        # --- form_fields ---
+        dify_inputs = node_data.get("inputs") or []
+        form_fields = []
+        for inp in dify_inputs:
+            field_id = inp.get("output_variable_name", "")
+
+            # Type is derived from Dify's default.type:
+            #   Dify: default.type = "constant" -> default_value
+            #   Dify: default.type = "variable" -> variable_ref
+            default_config = inp.get("default") or {}
+            default_type = default_config.get("type", "constant")
+            if default_type == "variable":
+                selector = default_config.get("selector") or []
+                variable_ref = "{{ " + self.process_var_selector(".".join(selector)) + " }}" if selector else None
+                default_value = None
+            else:
+                default_value = default_config.get("value") or None
+                variable_ref = None
+
+            form_fields.append(FormFieldConfig(
+                id=field_id,
+                default_value=default_value,
+                variable_ref=variable_ref,
+            ))
+
+        # --- actions ---
+        dify_user_actions = node_data.get("user_actions") or []
+        actions = []
+        # Cache action IDs for edge port mapping
+        self.branch_node_cache[node["id"]] = []
+        for ua in dify_user_actions:
+            # Dify uses "title", MemoryBear uses "label"
+            # Dify uses "button_style" enum, MemoryBear uses "variant" string
+            style_map = {
+                "primary": "primary",
+                "default": "default",
+                "accent": "primary",
+                "ghost": "default",
+            }
+            variant = style_map.get(ua.get("button_style", ""), "default")
+            actions.append(ActionConfig(
+                id=ua.get("id", ""),
+                label=ua.get("title", ""),
+                variant=variant,
+            ))
+            # Cache action IDs for sourceHandle -> CASE label mapping
+            self.branch_node_cache[node["id"]].append(ua.get("id", ""))
+
+        # Ensure at least one action (required by MemoryBear config)
+        if not actions:
+            actions.append(ActionConfig(id="action_1", label="Submit", variant="primary"))
+
+        # --- timeout ---
+        dify_timeout = node_data.get("timeout", 1)
+        dify_timeout_unit = node_data.get("timeout_unit", "hour")
+        unit_map = {
+            "hour": "hours",
+            "day": "days",
+        }
+        timeout_unit = unit_map.get(dify_timeout_unit, "hours")
+        timeout = TimeoutConfig(
+            unit=timeout_unit,
+            value=int(dify_timeout),
+        )
+
+        result = HumanInterventionNodeConfig.model_construct(
+            delivery_method=delivery_method,
+            content=content,
+            form_fields=form_fields,
+            actions=actions,
+            timeout=timeout,
+        ).model_dump()
+        self.config_validate(node["id"], node["data"]["title"], HumanInterventionNodeConfig, result)
+        return result
+
+    @staticmethod
+    def convert_features(features: dict) -> dict:
+        """Convert Dify features to MemoryBear FeaturesConfigForm format."""
+        if not features:
+            return {}
+
+        result: dict = {}
+
+        # opening_statement
+        opening = features.get("opening_statement", "")
+        suggested = features.get("suggested_questions", [])
+        result["opening_statement"] = {
+            "enabled": bool(opening),
+            "statement": opening or None,
+            "suggested_questions": suggested,
+        }
+
+        # citation (corresponds to Dify retriever_resource)
+        retriever = features.get("retriever_resource", {})
+        result["citation"] = {
+            "enabled": retriever.get("enabled", False) if isinstance(retriever, dict) else False,
+        }
+
+        # file_upload: Dify allowed_file_types array -> flat frontend fields
+        file_upload = features.get("file_upload", {})
+        allowed_types = file_upload.get("allowed_file_types", []) if file_upload else []
+        allowed_methods = file_upload.get("allowed_file_upload_methods", ["local_file", "remote_url"])
+        if isinstance(allowed_methods, list):
+            if len(allowed_methods) >= 2:
+                transfer_method = "both"
+            elif allowed_methods:
+                transfer_method = allowed_methods[0]
+            else:
+                transfer_method = "both"
+        else:
+            transfer_method = allowed_methods or "both"
+
+        file_config = file_upload.get("fileUploadConfig", {})
+        result["file_upload"] = {
+            "enabled": file_upload.get("enabled", False) if file_upload else False,
+            "image_enabled": "image" in allowed_types,
+            "image_max_size_mb": file_config.get("image_file_size_limit", 10) if file_config else 10,
+            "image_allowed_extensions": ["png", "jpg", "jpeg"],
+            "audio_enabled": "audio" in allowed_types,
+            "audio_max_size_mb": file_config.get("audio_file_size_limit", 50) if file_config else 50,
+            "audio_allowed_extensions": ["mp3", "wav", "m4a"],
+            "document_enabled": "document" in allowed_types,
+            "document_max_size_mb": file_config.get("file_size_limit", 100) if file_config else 100,
+            "document_allowed_extensions": ["pdf", "docx", "doc", "xlsx", "xls", "txt", "csv", "json", "md"],
+            "video_enabled": "video" in allowed_types,
+            "video_max_size_mb": file_config.get("video_file_size_limit", 100) if file_config else 100,
+            "video_allowed_extensions": ["mp4", "mov"],
+            "max_file_count": file_upload.get("number_limits", 1) if file_upload else 1,
+            "allowed_transfer_methods": transfer_method,
+        }
+
+        # text_to_speech
+        tts = features.get("text_to_speech", {})
+        result["text_to_speech"] = {
+            "enabled": tts.get("enabled", False) if isinstance(tts, dict) else False,
+            "voice": tts.get("voice") if isinstance(tts, dict) else None,
+            "language": tts.get("language") if isinstance(tts, dict) else None,
+            "autoplay": False,
+        }
+
+        # suggested_questions_after_answer
+        sqa = features.get("suggested_questions_after_answer", {})
+        result["suggested_questions_after_answer"] = {
+            "enabled": sqa.get("enabled", False) if isinstance(sqa, dict) else False,
+        }
+
+        return result

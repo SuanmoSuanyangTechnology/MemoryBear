@@ -1787,6 +1787,7 @@ class ToolService:
 
     async def sync_mcp_tools(self, tool_id: str, tenant_id: uuid.UUID) -> Dict[str, Any]:
         """同步MCP工具列表到数据库"""
+        config = None
         try:
             config = self._get_tool_config(tool_id, tenant_id)
             if not config or config.tool_type != ToolType.MCP.value:
@@ -1836,17 +1837,18 @@ class ToolService:
                 }
 
         except Exception as e:
-            # 更新错误状态
+            # 更新错误状态（best-effort，健康状态写入不得掩盖原始异常）
             try:
-                mcp_config = self.mcp_repo.find_by_tool_id(self.db, config.id)
-                if mcp_config:
-                    mcp_config.last_health_check = utcnow_naive()
-                    mcp_config.health_status = "error"
-                    mcp_config.error_message = str(e)
-                    config.status = ToolStatus.ERROR.value
-                    self.db.commit()
-            except:
-                pass
+                if config is not None:
+                    mcp_config = self.mcp_repo.find_by_tool_id(self.db, config.id)
+                    if mcp_config:
+                        mcp_config.last_health_check = utcnow_naive()
+                        mcp_config.health_status = "error"
+                        mcp_config.error_message = str(e)
+                        config.status = ToolStatus.ERROR.value
+                        self.db.commit()
+            except Exception as recovery_error:
+                logger.error(f"更新MCP错误状态失败: {tool_id}, 错误: {recovery_error}")
 
             logger.error(f"同步MCP工具列表失败: {tool_id}, 错误: {e}")
             return {"success": False, "message": f"同步失败: {str(e)}"}

@@ -4,10 +4,12 @@ Forwarder: unified forwarding — external paths /api|/v1 → internal /internal
 forward-whitelisted request headers plus all x-* headers (identity headers were
 sanitized and re-injected by the middleware after termination). Credential face:
 both strategies terminate credentials in the middleware, so this layer never
-carries external authorization / x-api-key; the enterprise gateway rewrites the
-middleware-injected internal token as authorization: Bearer (the
-x-internal-token header itself is not forwarded — avoids a second credential
-source downstream).
+carries external authorization / x-api-key — except on the public share-view
+exemption, where the client's Authorization is deliberately captured by the
+middleware (it carries a share access token, not a platform credential) and
+forwarded verbatim; the enterprise gateway rewrites the middleware-injected
+internal token as authorization: Bearer (the x-internal-token header itself is
+not forwarded — avoids a second credential source downstream).
 
 Streaming/buffered is not route-configured: every request goes send(stream=True)
 and the split follows upstream response headers (response-header driven, see
@@ -131,6 +133,15 @@ class Forwarder:
             # authorization: Bearer <internal token> (the x-internal-token header
             # itself is not forwarded — avoids a second credential source downstream).
             headers["authorization"] = f"Bearer {internal}"
+        else:
+            # Public share-view exemption: the client's Authorization was
+            # captured by the middleware (it carries the viewer's share access
+            # token, not a platform credential) and is forwarded verbatim — the
+            # split's public share routes verify it. Never set on terminated
+            # paths (the middleware sanitizes it out of the scope there).
+            exempted = getattr(request.state, "forward_authorization", None)
+            if exempted:
+                headers["authorization"] = exempted
         return headers
 
     async def forward(self, request: Request, route: TargetRoute) -> Response:

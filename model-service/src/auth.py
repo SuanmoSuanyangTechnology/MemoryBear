@@ -73,6 +73,10 @@ class ModelAuthConfig:
     # no Redis connection is made at app build time). None -> no rules loaded
     # (fail-safe: every request denied). Consumed by the gateway handler only.
     redis: object | None = None
+    # Deployment-scoped ACL names; main.py passes DB_NAME-derived values. The
+    # defaults match the legacy global names for direct construction in tests.
+    acl_rules_key: str = "acl:rules"
+    acl_rules_changed_channel: str = "acl:rules:changed"
 
 
 def is_public_path(path: str, method: str) -> bool:
@@ -126,14 +130,18 @@ def _auth_error(
 
 
 class ModelAuthMiddleware(BaseHTTPMiddleware):
-    def __init__(self, app, model_auth: ModelAuthConfig) -> None:
+    def __init__(self, app, model_auth: ModelAuthConfig, gateway=None) -> None:
         super().__init__(app)
         self._model_auth = model_auth
         # gateway channel-1 verification/ACL assembly lives in the enterprise
-        # handler; direct needs no verifier — credentials are terminated upstream.
-        self._gateway = (
-            _load_gateway_auth(model_auth) if model_auth.auth_mode == "gateway" else None
-        )
+        # handler; direct needs no verifier — credentials are terminated
+        # upstream. main.py builds the handler once and shares the instance
+        # with the lifespan (which owns its start/stop); without it the lazy
+        # load below preserves the original construction timing, including the
+        # fail-closed RuntimeError when the package is missing.
+        self._gateway = gateway
+        if self._gateway is None and model_auth.auth_mode == "gateway":
+            self._gateway = _load_gateway_auth(model_auth)
 
     async def dispatch(self, request: Request, call_next):
         if is_public_path(request.url.path, request.method):
@@ -180,8 +188,10 @@ class ModelAuthMiddleware(BaseHTTPMiddleware):
         return await call_next(request)
 
 
-def build_model_auth_middleware(app, model_auth: ModelAuthConfig) -> ModelAuthMiddleware:
-    return ModelAuthMiddleware(app, model_auth)
+def build_model_auth_middleware(
+    app, model_auth: ModelAuthConfig, gateway=None
+) -> ModelAuthMiddleware:
+    return ModelAuthMiddleware(app, model_auth, gateway=gateway)
 
 
 __all__ = [

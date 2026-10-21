@@ -129,7 +129,7 @@ celery_app.conf.update(
         'app.tasks.do_layer2_dedup_full_scan': {'queue': 'reflection_tasks'},
         'app.tasks.scan_reflection_retry': {'queue': 'periodic_tasks'},
         'app.tasks.regenerate_memory_cache': {'queue': 'periodic_tasks'},
-        # 网关告警评估（B9）：独立消费组读 model:usage，喂宿主企业告警插件
+        # 网关告警评估（B9）：独立消费组读部署域用量流，喂宿主企业告警插件
         'app.tasks.consume_model_gateway_alerts': {'queue': 'periodic_tasks'},
 
         # GDS 拓扑分数：scan 在 periodic 扫描，计算在 memory_heavy 执行
@@ -489,7 +489,7 @@ if _HAS_NOTIFICATION_TASKS:
             ),
             "options": {"queue": "notification_state_tasks", "expires": 120},
         },
-        # 网关告警评估（B9）：独立消费组读 model:usage（服务侧调用终态），
+        # 网关告警评估（B9）：独立消费组读部署域用量流（服务侧调用终态），
         # 交给宿主企业告警插件；社区版无 premium 时不排期（不进本块）。
         "consume-model-gateway-alerts": {
             "task": "app.tasks.consume_model_gateway_alerts",

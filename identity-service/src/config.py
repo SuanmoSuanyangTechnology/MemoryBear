@@ -51,13 +51,38 @@ class Settings:
 
     # ---- 服务自身配置 ----
     SERVICE_NAME: str = "identity"
-    AUDIT_QUEUE_KEY: str = os.getenv("AUDIT_QUEUE_KEY", "audit:queue")
-    AUDIT_STREAM_KEY: str = os.getenv("AUDIT_STREAM_KEY", "audit:stream")
+    # The audit stream key is deployment-scoped: empty derives
+    # audit:stream:<DB_NAME> so deployments sharing one Redis do not consume
+    # each other's events (a shared stream would load-balance events across
+    # deployments through the same consumer group).
+    AUDIT_STREAM_KEY: str = (
+        os.getenv("AUDIT_STREAM_KEY", "").strip() or f"audit:stream:{DB_NAME}"
+    )
     # 审计保留（天）：0 禁用清理；设计 §7 要求 append-only 审计流 ≥180 天
     AUDIT_RETENTION_DAYS: int = int(os.getenv("AUDIT_RETENTION_DAYS", "180"))
     AUDIT_RETENTION_INTERVAL_SEC: int = int(os.getenv("AUDIT_RETENTION_INTERVAL_SEC", "3600"))
     # 快照定时校正任务（reconcile）扫描间隔（秒），补偿老单体埋点丢失的快照失效事件
     RECONCILE_INTERVAL_SEC: int = int(os.getenv("RECONCILE_INTERVAL_SEC", "60"))
+    # AUTH_INVALIDATION_CHANNEL: subscriber side of the invalidation channel; must
+    # match the monolith publisher. Empty derives auth:invalidations:<DB_NAME> so
+    # deployments sharing one Redis but owning separate databases stay isolated
+    # (same convention as model-service's channel-invalidations).
+    AUTH_INVALIDATION_CHANNEL: str = (
+        os.getenv("AUTH_INVALIDATION_CHANNEL", "").strip()
+        or f"auth:invalidations:{DB_NAME}"
+    )
+    # ACL rule blob key and hot-reload channel. Empty derives
+    # acl:rules:<DB_NAME> / acl:rules:changed:<DB_NAME>; deployments sharing one
+    # Redis but owning separate databases must not overwrite each other's rule
+    # set. The channel is namespaced too: Redis pub/sub is global, not scoped
+    # by logical DB.
+    ACL_RULES_KEY: str = (
+        os.getenv("ACL_RULES_KEY", "").strip() or f"acl:rules:{DB_NAME}"
+    )
+    ACL_RULES_CHANGED_CHANNEL: str = (
+        os.getenv("ACL_RULES_CHANGED_CHANNEL", "").strip()
+        or f"acl:rules:changed:{DB_NAME}"
+    )
 
 
 settings = Settings()

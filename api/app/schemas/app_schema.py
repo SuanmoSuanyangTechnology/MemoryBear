@@ -165,7 +165,7 @@ class ToolConfig(BaseModel):
 class SkillConfig(BaseModel):
     """技能配置"""
     enabled: bool = Field(default=True, description="是否启用该技能")
-    skill_ids: Optional[list[str]] = Field(default=list, description="技能ID列表")
+    skill_ids: Optional[list[str]] = Field(default_factory=list, description="技能ID列表")
     all_skills: Optional[bool] = Field(default=False, description="是否允许访问所有技能")
 
 
@@ -367,7 +367,7 @@ class AgentConfigCreate(BaseModel):
     )
 
     # 技能配置
-    skills: Optional[SkillConfig] = Field(default=dict, description="关联的技能列表")
+    skills: Optional[SkillConfig] = Field(default_factory=dict, description="关联的技能列表")
 
     # 功能特性
     features: Optional[AppFeatures] = Field(default=None, description="功能特性配置")
@@ -431,7 +431,7 @@ class AgentConfigUpdate(BaseModel):
     tools: Optional[List[ToolConfig]] = Field(default_factory=list, description="工具列表")
 
     # 技能配置
-    skills: Optional[SkillConfig] = Field(default=dict, description="关联的技能列表")
+    skills: Optional[SkillConfig] = Field(default_factory=dict, description="关联的技能列表")
 
     # 功能特性
     features: Optional[AppFeatures] = Field(default=None, description="功能特性配置")

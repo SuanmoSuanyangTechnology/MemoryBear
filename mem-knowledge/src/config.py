@@ -444,6 +444,15 @@ class KnowledgeSettings(BaseSettings):
         default=None,
         validation_alias="KB_KILL_SWITCH_FILE",
     )
+    # ACL rule key and hot-reload channel. Empty derives
+    # acl:rules:<DB_NAME> / acl:rules:changed:<DB_NAME> to match identity's
+    # write side; deployments sharing one Redis but owning separate databases
+    # stay isolated (pub/sub channels are global across logical DBs).
+    acl_rules_key: str = Field(default="", validation_alias="ACL_RULES_KEY")
+    acl_rules_changed_channel: str = Field(
+        default="",
+        validation_alias="ACL_RULES_CHANGED_CHANNEL",
+    )
 
     # Knowledge business environment variables
     max_file_size: int = Field(
@@ -538,6 +547,37 @@ class KnowledgeSettings(BaseSettings):
     @property
     def redis_url(self) -> str:
         return self.redis_url_for_db(self.redis_db)
+
+    def _deployment_scoped_name(self, explicit: str, base: str, env_name: str) -> str:
+        """Resolve a deployment-scoped Redis name from an override or DB_NAME."""
+
+        explicit = explicit.strip()
+        if explicit:
+            if any(ch.isspace() for ch in explicit):
+                raise ValueError(f"{env_name} must not contain whitespace")
+            return explicit
+        db_name = self.db_name.strip()
+        if not db_name or any(ch.isspace() for ch in db_name):
+            raise ValueError(
+                f"DB_NAME must be non-empty without whitespace to derive {env_name}"
+            )
+        return f"{base}:{db_name}"
+
+    @property
+    def acl_rules_key_name(self) -> str:
+        """Resolve the deployment-scoped ACL rule blob key."""
+
+        return self._deployment_scoped_name(self.acl_rules_key, "acl:rules", "ACL_RULES_KEY")
+
+    @property
+    def acl_rules_changed_channel_name(self) -> str:
+        """Resolve the deployment-scoped ACL change pub/sub channel."""
+
+        return self._deployment_scoped_name(
+            self.acl_rules_changed_channel,
+            "acl:rules:changed",
+            "ACL_RULES_CHANGED_CHANNEL",
+        )
 
     @property
     def celery_broker_url(self) -> str:

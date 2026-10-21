@@ -5,8 +5,11 @@
 - 进程级共享 ChannelSnapshotCache（TTL 60s）：per-request registry 复用同一实例，
   写路径（ChannelService）经 notify_channel_change 主动失效（本地 + 跨副本广播），
   不依赖 TTL 兜底
-- 多副本失效广播（M8 §2.7）：写副本 publish `model:channel-invalidations`，各副本常驻
-  订阅（run_channel_invalidation_listener）→ 本地失效；无广播时他副本只能等 TTL 兜底。
+- 多副本失效广播（M8 §2.7）：写副本 publish 部署域
+  `model:channel-invalidations:<DB_NAME>`，各副本常驻订阅
+  （run_channel_invalidation_listener）→ 本地失效；无广播时他副本只能等 TTL 兜底。
+  频道按部署作用域隔离：共用 Redis 的不同环境不会互相触发缓存失效；滚动发布期间
+  新旧副本频道不同，跨版本副本失效退化为 TTL 兜底。
   广播是 best-effort（Redis 不可用只告警），订阅断连退避重连，二者都不阻塞写读主流程
 - sync/async 双读：管理面/worker/同步链路用 resolve_config_sync；异步链路用
   resolve_config_async（GC#11：async 上下文禁止 sync session）
@@ -34,7 +37,6 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import json
 import logging
 import os
@@ -43,6 +45,7 @@ import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass
 
+from auth_sdk.pubsub import run_pubsub_listener
 from redbear_model import (
     AsyncSQLChannelRegistry,
     ChannelSnapshot,
@@ -65,10 +68,12 @@ from redbear_model import (
     resolve_and_chain_from_pool,
     resolve_composite_head,
 )
+from redis.exceptions import TimeoutError as RedisTimeoutError
 from sqlalchemy import select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session, joinedload
 
+from ..config import current_settings
 from ..infrastructure.redis import get_async_client, get_sync_client
 from ..infrastructure.redis_cache import invalidate_workspace_model_options
 from ..models.models_model import ModelBase, ModelChannel, ModelConfig
@@ -80,12 +85,17 @@ _CHANNEL_CACHE_TTL_MS = 60_000
 _shared_cache = ChannelSnapshotCache(ttl_ms=_CHANNEL_CACHE_TTL_MS)
 
 # 多副本失效广播：写副本 publish、各副本订阅后本地失效（M8 §2.7）
-CHANNEL_INVALIDATION_CHANNEL = "model:channel-invalidations"
 _INSTANCE_ID = f"{socket.gethostname()}:{os.getpid()}"
 _RECONNECT_BASE_DELAY_S = 1.0
 _RECONNECT_MAX_DELAY_S = 30.0
 
 logger = logging.getLogger(__name__)
+
+
+def channel_invalidation_channel() -> str:
+    """Return the deployment-scoped channel invalidation pub/sub channel."""
+
+    return current_settings().model_channel_invalidation_channel_name
 
 
 @dataclass(frozen=True)
@@ -376,7 +386,7 @@ def broadcast_channel_invalidation(
         separators=(",", ":"),
     )
     try:
-        get_sync_client().publish(CHANNEL_INVALIDATION_CHANNEL, payload)
+        get_sync_client().publish(channel_invalidation_channel(), payload)
     except Exception:
         logger.warning(
             "渠道失效广播失败（本地已失效，他副本退回 TTL 兜底）: tenant=%s provider=%s",
@@ -430,37 +440,48 @@ async def run_channel_invalidation_listener() -> None:
     本地失效经 ``asyncio.to_thread``：``invalidate_channel_cache`` 内含同步 Redis 删除，
     事件循环内直调会阻塞（GC#11）。取消（进程收尾）即退出，重连退避不吞取消。
     """
-    delay = _RECONNECT_BASE_DELAY_S
-    while True:
-        pubsub = None
+    channel = channel_invalidation_channel()
+
+    # Idle socket timeouts on the shared client are routine (redis-py drops the
+    # socket on timeout): keep that whole reconnect at debug. Real faults stay
+    # warnings so actual subscription problems remain visible.
+    idle_reconnect = False
+
+    async def _on_subscribed() -> None:
+        log = logger.debug if idle_reconnect else logger.info
+        log(
+            "渠道失效订阅就绪: channel=%s instance=%s",
+            channel,
+            _INSTANCE_ID,
+        )
+
+    async def _on_interrupted(exc: Exception, delay: float) -> None:
+        nonlocal idle_reconnect
+        if isinstance(exc, RedisTimeoutError):
+            idle_reconnect = True
+            logger.debug("渠道失效订阅空闲超时，%.1fs 后重连", delay)
+            return
+        idle_reconnect = False
+        logger.warning("渠道失效订阅中断，%.1fs 后重连: %s", delay, exc)
+
+    async def _on_message(message) -> None:
+        data = message.get("data") if isinstance(message, dict) else None
+        if data is None:
+            return
         try:
-            client = await get_async_client()
-            pubsub = client.pubsub(ignore_subscribe_messages=True)
-            await pubsub.subscribe(CHANNEL_INVALIDATION_CHANNEL)
-            delay = _RECONNECT_BASE_DELAY_S
-            logger.info(
-                "渠道失效订阅就绪: channel=%s instance=%s",
-                CHANNEL_INVALIDATION_CHANNEL,
-                _INSTANCE_ID,
-            )
-            async for message in pubsub.listen():
-                data = message.get("data") if isinstance(message, dict) else None
-                if data is None:
-                    continue
-                try:
-                    await asyncio.to_thread(apply_channel_invalidation, data)
-                except Exception:
-                    logger.warning("应用渠道失效广播失败: %r", data, exc_info=True)
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:
-            logger.warning("渠道失效订阅中断，%.1fs 后重连: %s", delay, exc)
-            await asyncio.sleep(delay)
-            delay = min(delay * 2, _RECONNECT_MAX_DELAY_S)
-        finally:
-            if pubsub is not None:
-                with contextlib.suppress(Exception):
-                    await pubsub.aclose()
+            await asyncio.to_thread(apply_channel_invalidation, data)
+        except Exception:
+            logger.warning("应用渠道失效广播失败: %r", data, exc_info=True)
+
+    await run_pubsub_listener(
+        get_async_client,
+        channel,
+        _on_message,
+        on_subscribed=_on_subscribed,
+        on_interrupted=_on_interrupted,
+        base_delay=_RECONNECT_BASE_DELAY_S,
+        max_delay=_RECONNECT_MAX_DELAY_S,
+    )
 
 
 def parse_members(config: dict | None) -> list[tuple[str, str]]:
@@ -935,7 +956,6 @@ def affected_config_ids(
 
 
 __all__ = [
-    "CHANNEL_INVALIDATION_CHANNEL",
     "SOURCE",
     "ResolvedWithPlan",
     "affected_config_ids",
@@ -944,6 +964,7 @@ __all__ = [
     "candidate_channels_async",
     "candidate_channels_batch_sync",
     "candidate_channels_sync",
+    "channel_invalidation_channel",
     "invalidate_channel_cache",
     "notify_channel_change",
     "parse_members",
