@@ -37,7 +37,7 @@ jobs:
           # 复用现有的百炼密钥（OpenAI 兼容端点），无需新增 secret
           llm_url: https://dashscope.aliyuncs.com/compatible-mode/v1
           llm_auth_token: ${{ secrets.DASHSCOPE_API_KEY }}
-          llm_model: qwen3.7-plus
+          llm_model: deepseek-v4.1-flash
           llm_use_anthropic: "false"
           language: Chinese
           # CLI 版本与上面固定的 action SHA 保持一致：action 内部默认装 @latest，

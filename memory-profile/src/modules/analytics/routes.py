@@ -6,6 +6,7 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Query, Request
 
+from src.common.external_api import external_api
 from src.common.responses import ApiResponse
 from src.i18n import get_request_language
 from src.middleware.auth import MemoryPrincipal
@@ -23,6 +24,7 @@ def _handler(request: Request) -> AnalyticsHandler:
 
 
 @router.get("/memory_insight", response_model=ObjectApiResponse)
+@external_api
 async def memory_insight(
     request: Request,
     context: Context,
@@ -34,17 +36,17 @@ async def memory_insight(
 
 
 @router.get("/user_summary", response_model=ObjectApiResponse)
+@external_api
 async def user_summary(
     request: Request,
     context: Context,
     end_user_id: str = Query(...),
 ) -> ObjectApiResponse:
-    return await _handler(request).user_summary(
-        context, end_user_id, get_request_language(request)
-    )
+    return await _handler(request).user_summary(context, end_user_id, get_request_language(request))
 
 
 @router.get("/node_statistics", response_model=ListApiResponse)
+@external_api
 async def node_statistics(
     request: Request,
     context: Context,
@@ -56,13 +58,13 @@ async def node_statistics(
 
 
 @router.get("/workspace_statistics", response_model=ObjectApiResponse)
+@external_api
 async def workspace_statistics(request: Request, context: Context) -> ObjectApiResponse:
-    return await _handler(request).workspace_statistics(
-        context, get_request_language(request)
-    )
+    return await _handler(request).workspace_statistics(context, get_request_language(request))
 
 
 @router.get("/graph_data", response_model=ObjectApiResponse)
+@external_api
 async def graph_data(
     request: Request,
     context: Context,
@@ -86,6 +88,7 @@ async def graph_data(
 
 
 @router.get("/community_graph", response_model=ObjectApiResponse)
+@external_api
 async def community_graph(
     request: Request,
     context: Context,
