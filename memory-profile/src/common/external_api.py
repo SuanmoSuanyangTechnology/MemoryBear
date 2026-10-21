@@ -408,58 +408,69 @@ _PARAMETER_LISTS = (
     ("cookie_params", "cookie"),
 )
 
-
-def _store_parameter(
-    out: dict[str, dict[str, Any]],
-    sources: dict[str, str],
-    key: str,
-    contract: dict[str, Any],
-    source: str,
-) -> None:
-    """Record by ``location:name``; disambiguate a genuine same-slot collision."""
-
-    existing = out.get(key)
-    if existing is None:
-        out[key] = contract
-        sources[key] = source
-        return
-    if existing == contract:
-        return
-
-    first_source = sources.pop(key)
-    out.pop(key)
-    out[f"{key}@{first_source}"] = existing
-    out[f"{key}@{source}"] = contract
+_ParameterEntry = tuple[str, dict[str, Any], str]
 
 
 def _collect_parameters(
     dependant: Any,
-    out: dict[str, dict[str, Any]],
-    sources: dict[str, str],
+    entries: list[_ParameterEntry],
     source: str = "endpoint",
 ) -> None:
     """Flatten route params and every ``Depends`` layer below it.
 
     A parameter is identified by location and name, so the same name may appear
-    as both a query parameter and a header. A genuine collision in the same slot
-    keeps both entries, qualified by their source, instead of silently dropping
-    the later one and letting its changes pass the check.
+    as both a query parameter and a header. Entries are collected before keys
+    are assigned, so a same-slot collision can be resolved consistently no
+    matter how many sources expose it.
     """
 
     for attribute, location in _PARAMETER_LISTS:
         for field in getattr(dependant, attribute, None) or ():
-            key = f"{location}:{field.name}"
-            _store_parameter(out, sources, key, _field_contract(field, location), source)
+            entries.append((f"{location}:{field.name}", _field_contract(field, location), source))
 
     for field in getattr(dependant, "body_params", None) or ():
         location = _body_location(field.field_info)
-        key = f"{location}:{field.name}"
-        _store_parameter(out, sources, key, _field_contract(field, location), source)
+        entries.append((f"{location}:{field.name}", _field_contract(field, location), source))
 
     for child in getattr(dependant, "dependencies", None) or ():
         name = getattr(child.call, "__qualname__", "dependency")
         child_source = name if source == "endpoint" else f"{source}.{name}"
-        _collect_parameters(child, out, sources, child_source)
+        _collect_parameters(child, entries, child_source)
+
+
+def _merge_parameters(entries: list[_ParameterEntry]) -> dict[str, dict[str, Any]]:
+    """Assign keys by ``location:name``; qualify every entry in a real collision.
+
+    Identical contracts for the same slot are deduplicated. When contracts
+    differ, *all* of them are keyed by source, so a third or later dependency
+    cannot fall back to the bare key and leave the key set inconsistent.
+    """
+
+    grouped: dict[str, list[tuple[dict[str, Any], str]]] = {}
+    for key, contract, source in entries:
+        grouped.setdefault(key, []).append((contract, source))
+
+    merged: dict[str, dict[str, Any]] = {}
+    for key, items in grouped.items():
+        unique: list[tuple[dict[str, Any], str]] = []
+        for contract, source in items:
+            if all(contract != seen for seen, _ in unique):
+                unique.append((contract, source))
+
+        if len(unique) == 1:
+            merged[key] = unique[0][0]
+            continue
+
+        used: set[str] = set()
+        for contract, source in unique:
+            candidate = f"{key}@{source}"
+            index = 2
+            while candidate in used:
+                candidate = f"{key}@{source}#{index}"
+                index += 1
+            used.add(candidate)
+            merged[candidate] = contract
+    return merged
 
 
 def _response_contract(route: Any) -> dict[str, Any]:
@@ -481,9 +492,9 @@ def _route_key(route: object) -> str:
 
 
 def _route_contract(route: Any) -> dict[str, Any]:
-    parameters: dict[str, dict[str, Any]] = {}
-    sources: dict[str, str] = {}
-    _collect_parameters(route.dependant, parameters, sources)
+    entries: list[_ParameterEntry] = []
+    _collect_parameters(route.dependant, entries)
+    parameters = _merge_parameters(entries)
     return {
         "endpoint": getattr(route.endpoint, "__name__", repr(route.endpoint)),
         "parameters": parameters,
