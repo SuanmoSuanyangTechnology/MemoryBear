@@ -1,18 +1,9 @@
-/*
- * @Author: ZhaoYing 
- * @Date: 2026-05-28 13:41:06 
- * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-28 15:12:27
- */
-
 import React, { useEffect, useState, useRef, type ReactNode } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { Tooltip, Row, Col, Flex, Space, App } from 'antd';
 
 import type { WorkflowToolItem, WorkflowToolModalRef } from './types';
 import RbCard from '@/components/RbCard'
-import { switchWorkspace } from '@/api/workspaces'
 import BodyWrapper from '@/components/Empty/BodyWrapper'
 import PublishAsToolModal from './components/PublishAsToolModal'
 import { getTools, deleteTool } from '@/api/tools'
@@ -23,7 +14,6 @@ import MoreDropdown from '@/components/MoreDropdown';
 const Workflow: React.FC<{ getStatusTag: (status: string) => ReactNode; keyword?: string }> = ({ getStatusTag, keyword }) => {
   const { t } = useTranslation();
   const { modal, message } = App.useApp();
-  const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState<WorkflowToolItem[]>([]);
   const publishAsToolModalRef = useRef<WorkflowToolModalRef>(null);
@@ -47,13 +37,6 @@ const Workflow: React.FC<{ getStatusTag: (status: string) => ReactNode; keyword?
     getData();
   }, [keyword]);
 
-  /** Switch to selected workspace */
-  const handleJump = (item: WorkflowToolItem) => {
-    // switchWorkspace(item.id)
-    //   .then(() => {
-    //     navigate('/')
-    //   })
-  }
   const handleEdit = (item: WorkflowToolItem) => {
     publishAsToolModalRef.current?.handleOpen(item);
   }
@@ -99,12 +82,6 @@ const Workflow: React.FC<{ getStatusTag: (status: string) => ReactNode; keyword?
                           onClick: () => handleEdit(item),
                         },
                         {
-                          key: 'view',
-                          icon: <div className="rb:size-4 rb:bg-cover rb:cursor-pointer rb:bg-[url('@/assets/images/common/eye.svg')]" />,
-                          label: t('common.view'),
-                          onClick: () => handleJump(item),
-                        },
-                        {
                           key: 'delete',
                           danger: true,
                           icon: <div className="rb:size-4 rb:bg-cover rb:cursor-pointer rb:bg-[url('@/assets/images/common/delete_red_big.svg')]" />,
@@ -125,25 +102,11 @@ const Workflow: React.FC<{ getStatusTag: (status: string) => ReactNode; keyword?
                       numTag={(num?: number) => <Tag variant="borderless" color="dark">{`+${num}`}</Tag>}
                     />
                   </div>
-                  : <div className="rb:text-[#A8A9AA] rb:leading-5">{t('tool.noTags')}</div>
+                  : <div className="rb:text-gray-500 rb:leading-5">{t('tool.noTags')}</div>
                 }
                 <Tooltip title={item.description}>
                   <div className="rb:h-10 rb:wrap-break-word rb:line-clamp-2 rb:leading-5">{item.description}</div>
                 </Tooltip>
-                {/* <div className="rb:absolute rb:bottom-4 rb:left-6 rb:right-6">
-                  <Row gutter={12}>
-                    <Col span={12}>
-                      <Button block
-                        // onClick={() => handleJump(item)}
-                      >{t('common.view')}</Button>
-                    </Col>
-                    <Col span={12}>
-                      <Button type="primary" ghost block
-                        onClick={() => publishAsToolModalRef.current?.handleOpen(item)}
-                      >{t('common.edit')}</Button>
-                    </Col>
-                  </Row>
-                </div> */}
               </RbCard>
             </Col>
           ))}

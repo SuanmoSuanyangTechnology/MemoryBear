@@ -1608,6 +1608,7 @@ async def regenerate_message(
                             user_rag_memory_id=user_rag_memory_id,
                             thinking=thinking,
                             config=cluster_cfg,
+                            source=HitLogSource.EXTERNAL,
                     ):
                         # 集群路径吐出的是已序列化 SSE 字符串；按 event 行白名单过滤
                         m = SSE_EVENT_LINE.search(event)
@@ -1636,6 +1637,7 @@ async def regenerate_message(
             user_rag_memory_id=user_rag_memory_id,
             thinking=thinking,
             config=cluster_cfg,
+            source=HitLogSource.EXTERNAL,
         )
         return success(data=app_schema.RegenerateResponse(**result))
 

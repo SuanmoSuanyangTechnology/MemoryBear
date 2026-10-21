@@ -2,12 +2,13 @@
  * @Author: ZhaoYing 
  * @Date: 2025-12-26 11:57:50
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-07-13 16:11:06
+ * @Last Modified time: 2026-10-16 16:57:55
  */
 export type ToolType = 'mcp' | 'builtin' | 'custom' | 'workflow'
 export interface Query {
   name?: string;
-  tool_type: ToolType
+  tool_type: ToolType;
+  status?: ToolItem['status']
 }
 
 interface ApiKeyAuth {

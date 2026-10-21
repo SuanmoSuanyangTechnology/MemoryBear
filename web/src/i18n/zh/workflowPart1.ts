@@ -444,9 +444,9 @@ export const workflowPart1 = {
         agent: {
           mode: '配置模式',
           inlineMode: '节点内配置',
-          referenceMode: '关联Agent',
-          referenceAgent: '关联Agent',
-          referenceAgentPlaceholder: '请选择当前工作空间内可关联的 Agent',
+          referenceMode: '关联Agent/集群',
+          referenceAgent: '关联Agent/集群',
+          referenceAgentPlaceholder: '请选择当前工作空间内可关联的Agent/集群',
           releasePolicy: '版本策略',
           currentRelease: '跟随最新发布版本',
           pinnedRelease: '固定发布版本',

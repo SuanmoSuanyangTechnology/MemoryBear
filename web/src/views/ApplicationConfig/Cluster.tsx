@@ -25,6 +25,7 @@ import Empty from '@/components/Empty'
 import RadioGroupCard from '@/components/RadioGroupCard'
 import ModelSelect from '@/components/ModelSelect'
 import ModelConfigModal from './components/ModelConfigModal'
+import { defaultThinkingBudgetTokens } from './components/ModelConfigModal/constants'
 import { configFields } from './components/ModelConfigModal/constants';
 import type { Model } from '@/views/ModelManagement/types'
 import ChatVariableConfigModal from './components/ChatVariableConfigModal'
@@ -127,6 +128,7 @@ const Cluster = forwardRef<ClusterRef, { onFeaturesLoad?: (features: FeaturesCon
     if (!id) {
       return
     }
+    setChatList([{ list: [] }])
     setLoading(true)
     getMultiAgentConfig(id as string).then(async res => {
       const response = await enrichMissingModelFields(res as Config)
@@ -250,6 +252,7 @@ const Cluster = forwardRef<ClusterRef, { onFeaturesLoad?: (features: FeaturesCon
   const handleChangeModel: SelectProps['onChange'] = (value, option) => {
     const model = option as Model | undefined
     const nextModelConfigId = typeof value === 'string' ? value : undefined
+    const features = model?.features ?? []
 
     resetFileUploadWhenModelChanges(nextModelConfigId)
     form.setFieldsValue({
@@ -257,7 +260,8 @@ const Cluster = forwardRef<ClusterRef, { onFeaturesLoad?: (features: FeaturesCon
       output_modalities: model?.output_modalities,
       model_parameters: {
         ...(values?.model_parameters || {}),
-        features: model?.features ?? [],
+        features,
+        thinking_budget_tokens: (features?.includes('thinking') || features?.includes('thinking_only')) ? defaultThinkingBudgetTokens : undefined,
       },
     })
   }
