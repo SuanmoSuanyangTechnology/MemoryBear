@@ -4,7 +4,7 @@ from datetime import datetime
 
 from app.aioRedis import aio_redis_set, aio_redis_get, aio_redis_delete
 from app.core.config import settings
-from app.core.utils.datetime_utils import to_iso_z, utcnow
+from app.core.utils.datetime_utils import as_utc_aware, to_iso_z, utcnow
 
 
 class SessionService:
@@ -34,12 +34,13 @@ class SessionService:
             
         session_key = SessionService._get_user_session_key(username)
         current_time = utcnow()
+        expires_at = as_utc_aware(expires_at)
         session_data = {
             "token_id": token_id,
             "created_at": to_iso_z(current_time),
             "expires_at": to_iso_z(expires_at)
         }
-        
+
         # 计算过期时间（秒）
         expire_seconds = int((expires_at - current_time).total_seconds())
         if expire_seconds > 0:

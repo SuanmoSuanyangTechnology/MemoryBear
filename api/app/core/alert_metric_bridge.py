@@ -2,8 +2,8 @@
 
 两条出口：
 - 内联发射（本进程调用点直接上报）：`report_*` 系列，覆盖宿主本地模型调用/认证路径；
-- 用量事件流消费（B9）：`consume_model_gateway_alerts` 读 `model:usage` 流，
-  把服务侧（model-service）的调用终态喂给同一套网关健康规则。
+- 用量事件流消费（B9）：`consume_model_gateway_alerts` 读部署域用量流
+  （`model:usage:<DB_NAME>`），把服务侧（model-service）的调用终态喂给同一套网关健康规则。
 
 双报防护约定：`source_service == SOURCE_SERVICE`（宿主本地发射）的事件由内联路径
 负责告警，流消费一律跳过；若新增宿主本地发射点，必须同时接内联上报，否则该来源
@@ -30,7 +30,7 @@ from app.aioRedis import get_thread_safe_sync_redis
 from app.core.logging_config import get_logger
 from app.core.usage_bridge import SOURCE_SERVICE
 from app.plugins import get_plugin
-from app.usage_publisher import MODEL_USAGE_STREAM
+from app.usage_publisher import model_usage_stream
 
 logger = get_logger(__name__)
 
@@ -326,7 +326,7 @@ def is_model_gateway_failure_type(error_type: str | None) -> bool:
 def _ensure_alert_group(client: Any) -> None:
     try:
         client.xgroup_create(
-            MODEL_USAGE_STREAM, MODEL_USAGE_ALERT_CONSUMER_GROUP, id="$", mkstream=True
+            model_usage_stream(), MODEL_USAGE_ALERT_CONSUMER_GROUP, id="$", mkstream=True
         )
     except ResponseError as exc:
         if "BUSYGROUP" not in str(exc):
@@ -425,7 +425,7 @@ def _reclaim_stale_entries(client: Any, reporter: Any, stats: dict[str, int]) ->
     while True:
         try:
             claimed = client.xautoclaim(
-                MODEL_USAGE_STREAM,
+                model_usage_stream(),
                 MODEL_USAGE_ALERT_CONSUMER_GROUP,
                 _consumer_name(),
                 min_idle_time=_ALERT_RECLAIM_MIN_IDLE_MS,
@@ -440,13 +440,13 @@ def _reclaim_stale_entries(client: Any, reporter: Any, stats: dict[str, int]) ->
             stats["reclaimed"] += len(messages)
             ack_ids = _handle_alert_entries(messages, reporter, stats)
             if ack_ids:
-                client.xack(MODEL_USAGE_STREAM, MODEL_USAGE_ALERT_CONSUMER_GROUP, *ack_ids)
+                client.xack(model_usage_stream(), MODEL_USAGE_ALERT_CONSUMER_GROUP, *ack_ids)
         if not messages or cursor in ("0-0", "0", None):
             return
 
 
 def consume_model_gateway_alerts() -> dict[str, Any]:
-    """消费 `model:usage` 事件流，按网关健康规则评估（尽力而为 + 新鲜度优先）。
+    """消费部署域用量流（`model:usage:<DB_NAME>`），按网关健康规则评估（尽力而为 + 新鲜度优先）。
 
     仅供 beat 周期任务调用（同步 Redis + 同步告警引擎）；社区版无 premium 插件时
     直接跳过——不建组、不读流，零足迹。
@@ -476,7 +476,7 @@ def consume_model_gateway_alerts() -> dict[str, Any]:
         response = client.xreadgroup(
             MODEL_USAGE_ALERT_CONSUMER_GROUP,
             _consumer_name(),
-            {MODEL_USAGE_STREAM: ">"},
+            {model_usage_stream(): ">"},
             count=_ALERT_BATCH_SIZE,
         )
         entries = [entry for _stream, messages in (response or []) for entry in messages]
@@ -484,5 +484,5 @@ def consume_model_gateway_alerts() -> dict[str, Any]:
             break
         ack_ids = _handle_alert_entries(entries, reporter, stats)
         if ack_ids:
-            client.xack(MODEL_USAGE_STREAM, MODEL_USAGE_ALERT_CONSUMER_GROUP, *ack_ids)
+            client.xack(model_usage_stream(), MODEL_USAGE_ALERT_CONSUMER_GROUP, *ack_ids)
     return {"status": "SUCCESS", **stats}

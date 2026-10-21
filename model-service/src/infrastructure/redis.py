@@ -42,6 +42,10 @@ class RedisManager:
                     self._settings.redis_url,
                     decode_responses=True,
                     max_connections=self._settings.model_service_redis_pool_size,
+                    # Must exceed the usage consumer's XREADGROUP block (5000 ms),
+                    # otherwise idle reads race the socket timeout.
+                    socket_connect_timeout=5,
+                    socket_timeout=10,
                     health_check_interval=30,
                 )
                 self._pid = os.getpid()

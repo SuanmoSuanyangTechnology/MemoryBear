@@ -9,10 +9,10 @@ API_KEY_PATH_PREFIXES; these handlers only echo the injected identity.
 """
 import logging
 
+from auth_sdk.schema import ApiKeyContext, UserContext
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
-from auth_sdk.schema import UserContext, ApiKeyContext
 from src.forward import Forwarder
 
 router = APIRouter()

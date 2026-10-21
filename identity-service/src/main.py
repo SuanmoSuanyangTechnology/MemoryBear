@@ -13,7 +13,8 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from src import db, redis as iredis
+from src import db
+from src import redis as iredis
 from src.controllers import acl, jwks, user_snapshot
 from src.services import audit_consumer, notify, reconcile, retention, schema_check
 
@@ -28,7 +29,8 @@ async def lifespan(app: FastAPI):
         await schema_check.assert_readonly_schema(session)
     await iredis.init_redis()
     # 自有表（acl_rules/audit_logs）由 alembic 迁移链管理（migrations/），部署时 upgrade head
-    # 密钥为注入模式（决策 #15，K8s Secret 管理、不轮换）；key_loader 在 controllers/jwks.py 模块级就位
+    # 密钥为注入模式（决策 #15，K8s Secret 管理、不轮换）；
+    # key_loader 在 controllers/jwks.py 模块级就位
     notify_task = asyncio.create_task(notify.subscribe(iredis.redis))
     audit_task = asyncio.create_task(audit_consumer.audit_loop())
     reconcile_task = asyncio.create_task(reconcile.reconcile_loop())

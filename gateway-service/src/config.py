@@ -55,7 +55,8 @@ class Settings:
 
     # ---- 用户 JWT 验签（与老单体 security.py 一致；TokenVerifier 按 header alg
     # 自适应 HS256/RS256，网关未配 JWKS → 实际仅 HS256 可走通，fail-closed）----
-    SECRET_KEY: str = os.getenv("SECRET_KEY")                  # 无默认：缺失时验签必然失败，fail-closed
+    # 无默认：缺失时验签必然失败，fail-closed
+    SECRET_KEY: str = os.getenv("SECRET_KEY")
 
     # ---- 内部 token 签发（决策 #5：本地 RS256；KMS 降级：环境变量/挂载注入私钥）----
     INTERNAL_ISSUER_PRIVATE_KEY: str = os.getenv("INTERNAL_ISSUER_PRIVATE_KEY")
@@ -65,11 +66,32 @@ class Settings:
 
     # ---- 服务自身配置 ----
     SERVICE_NAME: str = "gateway"
-    # 审计入队 Stream（identity 消费者 XREADGROUP + event_id 幂等落库）
-    AUDIT_STREAM_KEY: str = os.getenv("AUDIT_STREAM_KEY", "audit:stream")
+    # Audit stream (identity consumes it via XREADGROUP and persists events).
+    # An explicit key wins; otherwise derive audit:stream:<DB_NAME>, which must
+    # match identity's write-side name. Gateway connects to no database: DB_NAME
+    # is only the shared deployment namespace.
+    AUDIT_STREAM_KEY: str = os.getenv("AUDIT_STREAM_KEY", "").strip()
+    DB_NAME: str = os.getenv("DB_NAME", "").strip()
     # 凭据类型判定路径前缀（设计 §3.2）：命中前缀 → API key 路径，其余 → 用户 JWT 路径
     API_KEY_PATH_PREFIXES: tuple[str, ...] = tuple(
         p for p in os.getenv("API_KEY_PATH_PREFIXES", "/v1/").split(",") if p)
+
+    @property
+    def audit_stream_key_name(self) -> str:
+        """Resolve the deployment-scoped audit stream key (fail-fast).
+
+        Never falls back to the legacy shared ``audit:stream``: identity no
+        longer consumes that key, so silently writing there would drop audit
+        events while both sides look healthy.
+        """
+
+        if self.AUDIT_STREAM_KEY:
+            return self.AUDIT_STREAM_KEY
+        if not self.DB_NAME:
+            raise RuntimeError(
+                "AUDIT_STREAM_KEY or DB_NAME is required to scope the audit stream"
+            )
+        return f"audit:stream:{self.DB_NAME}"
 
     # ---- 鉴权策略（direct 内置社区版 / gateway 企业插件）----
     # 惰性读 env（理由同 TARGET_ROUTES：类体 env 在 import 时冻结，property

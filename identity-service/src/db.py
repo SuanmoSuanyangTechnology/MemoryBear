@@ -1,12 +1,13 @@
-"""数据库连接层：对齐 core/api/app/db.py 的 async 部分（纯 async，无同步引擎；模型使用本地 identity/models，不依赖 core）。
+"""数据库连接层：对齐 core/api/app/db.py 的 async 部分（纯 async，无同步引擎；
+模型使用本地 identity/models，不依赖 core）。
 
 - URL 由 settings 从 .env 原始变量（DB_HOST 等）拼接（identity/config.py）
 - 连接池参数与 core 同名配置对齐（pool_pre_ping/pool_recycle/...）
 - connect_args 强制 UTC 时区 + statement_timeout，与老单体连接语义一致（DB 存 naive UTC）
 - 惰性初始化（init_db/close_db）：由服务 lifespan 与测试 boot fixture 显式控制
 """
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator
 
 from sqlalchemy.ext.asyncio import (  # noqa: E402
     AsyncSession,

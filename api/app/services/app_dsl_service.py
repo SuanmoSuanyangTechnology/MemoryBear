@@ -25,6 +25,7 @@ from app.services.workflow_service import WorkflowService
 from app.core.workflow.adapters.memory_bear.memory_bear_adapter import MemoryBearAdapter
 from app.core.workflow.nodes.enums import NodeType
 from app.models.memory_config_model import MemoryConfig as MemoryConfigModel
+from app.utils.redis_cache import delete_json, workflow_config_key
 
 
 class AppDslService:
@@ -525,6 +526,8 @@ class AppDslService:
                     existing.features = raw_wf.get("features", {})
                     existing.triggers = raw_wf.get("triggers", [])
                     existing.updated_at = now
+                    # 直接属性赋值绕过了 create_workflow_config 的缓存失效，需手动补上
+                    delete_json(workflow_config_key(app_id))
                 else:
                     wf_service.create_workflow_config(
                         app_id=app_id,

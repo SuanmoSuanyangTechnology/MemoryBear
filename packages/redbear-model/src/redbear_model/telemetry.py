@@ -51,7 +51,7 @@ class NoOpModelTelemetry:
 
 
 class UsagePublisher(Protocol):
-    """旁路计量出口（spec §13.2）：宿主注册 RedisStreamPublisher（XADD model:usage）。
+    """旁路计量出口（spec §13.2）：宿主注册 RedisStreamPublisher（XADD 部署域用量流）。
 
     计量是旁路——publisher 失败仅告警，绝不阻塞/回滚业务调用。
     """

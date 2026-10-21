@@ -676,24 +676,24 @@ async def list_v1_conversations(
 
 
 @router.get("/conversations/{conversation_id}/messages")
-@require_api_key(scopes=["app"])
+@require_api_key_self_db(scopes=["app"])
 async def list_v1_conversation_messages(
         request: Request,
         conversation_id: uuid.UUID,
         api_key_auth: ApiKeyAuth = None,
-        db: Session = Depends(get_db),
-        conversation_service: Annotated[ConversationService, Depends(get_conversation_service)] = None,
         user_id: str = Query("", description="外部系统用户 ID"),
         limit: int = Query(20, description="返回消息数量，最大 200"),
 ):
     """获取当前应用下指定会话的历史消息。"""
-    result = await conversation_service.list_v1_conversation_messages_async(
-        app_id=api_key_auth.resource_id,
-        workspace_id=api_key_auth.workspace_id,
-        external_user_id=user_id,
-        conversation_id=conversation_id,
-        limit=limit,
-    )
+    async with get_async_db_context() as db:
+        conversation_service = ConversationService(db)
+        result = await conversation_service.list_v1_conversation_messages_async(
+            app_id=api_key_auth.resource_id,
+            workspace_id=api_key_auth.workspace_id,
+            external_user_id=user_id,
+            conversation_id=conversation_id,
+            limit=limit,
+        )
     return success(data=conversation_schema.V1ConversationMessageListResponse(**result).model_dump(mode="json"))
 
 

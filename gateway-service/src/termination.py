@@ -44,6 +44,7 @@ logger = logging.getLogger(__name__)
 _PROFILE_HEADERS: dict[str, tuple[str, str, str]] = {
     "kb": ("X-KB-Actor-ID", "X-KB-Tenant-ID", "X-KB-Workspace-ID"),
     "model-service": ("X-Model-Actor-ID", "X-Model-Tenant-ID", "X-Model-Workspace-ID"),
+    "application-service": ("X-App-Actor-ID", "X-App-Tenant-ID", "X-App-Workspace-ID"),
 }
 
 # The face the credentials were terminated on, injected for every downstream as the
@@ -75,7 +76,7 @@ def _profile_headers(
     names = _PROFILE_HEADERS.get(route.service) if route is not None else None
     if names is None:
         return {}
-    return dict(zip(names, (actor_id, tenant_id, workspace_id)))
+    return dict(zip(names, (actor_id, tenant_id, workspace_id), strict=False))
 
 
 async def terminate_user(request: Request, deps: GatewayDeps) -> AuthResult:

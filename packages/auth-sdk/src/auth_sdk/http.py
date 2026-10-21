@@ -1,18 +1,18 @@
 """HTTP 入站/出站 interceptor。入站：验内部 token → claims 权威读身份；出站：附内部 token + 身份头。"""
 import logging
 
-from fastapi import Request, HTTPException
+from fastapi import HTTPException, Request
 from jose.exceptions import JWTError
 
-from auth_sdk.token import TokenVerifier
-from auth_sdk.acl import AclMatcher
+from auth_sdk.acl import AclEvaluator
 from auth_sdk.schema import UserContext
+from auth_sdk.token import TokenVerifier
 
 logger = logging.getLogger(__name__)
 
 
 class InboundInterceptor:
-    def __init__(self, verifier: TokenVerifier, acl: AclMatcher, service_name: str):
+    def __init__(self, verifier: TokenVerifier, acl: AclEvaluator, service_name: str):
         self._verifier = verifier
         self._acl = acl
         self._service_name = service_name

@@ -28,7 +28,8 @@ async def build_api_key_snapshot(session, api_key: str) -> dict | None:
         "daily_request_limit": row.daily_request_limit,
         "rate_limit_disabled": bool(row.rate_limit_disabled),
         "user_id": str(creator.id) if creator else None,
-        "expires_at": row.expires_at.isoformat() if row.expires_at else None,  # 仅写入用，不落 Redis
+        # 仅写入用，不落 Redis
+        "expires_at": row.expires_at.isoformat() if row.expires_at else None,
     }
 
 

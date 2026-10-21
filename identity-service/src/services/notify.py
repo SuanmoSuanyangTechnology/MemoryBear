@@ -12,6 +12,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src import db
+from src.config import settings
 from src.repositories.user import get_user_ids_by_tenant
 from src.services import snapshot as snap
 from src.services.api_keys import build_api_key_snapshot, write_api_key_snapshot
@@ -23,10 +24,18 @@ async def handle_invalidation(redis: Redis, session: AsyncSession, payload: dict
     kind = payload.get("kind")
     if kind == "user":
         user_id = payload["id"]
-        await redis.delete(f"user:{user_id}")
-        rebuilt = await snap.build_user_snapshot(session, user_id, redis=redis)
-        if rebuilt is not None:                       # 查无此人（用户已删除）→ 保持删除
-            await redis.set(f"user:{user_id}", snapshot_to_json(rebuilt), ex=SNAPSHOT_TTL)
+        # Build first, replace atomically: deleting before the rebuild leaves a
+        # miss window where the gateway (no backfill) rejects every request with
+        # 401. Any rebuild failure still deletes the old key to stay fail-closed.
+        try:
+            rebuilt = await snap.build_user_snapshot(session, user_id, redis=redis)
+            if rebuilt is None:                       # 查无此人（用户已删除）→ 保持删除
+                await redis.delete(f"user:{user_id}")
+            else:
+                await redis.set(f"user:{user_id}", snapshot_to_json(rebuilt), ex=SNAPSHOT_TTL)
+        except Exception:
+            await redis.delete(f"user:{user_id}")
+            raise
     elif kind == "api_key":
         await redis.delete(f"api_key:{payload['hash']}")
         # 创建/重建消息带明文 key（老单体 notify_api_key_created）：删旧 + 直连 DB 组装写回，
@@ -45,7 +54,8 @@ async def handle_invalidation(redis: Redis, session: AsyncSession, payload: dict
             await redis.delete(*(f"user:{uid}" for uid in user_ids))
 
 
-async def subscribe(redis, channel: str = "auth:invalidations") -> None:
+async def subscribe(redis, channel: str | None = None) -> None:
+    channel = channel or settings.AUTH_INVALIDATION_CHANNEL
     while True:
         pubsub = redis.pubsub()
         try:

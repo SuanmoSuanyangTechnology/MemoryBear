@@ -445,7 +445,7 @@ class MultiAgentService:
         # 3. 验证子 Agent 存在并获取发布版本 ID
         # agent_id 始终存子 Agent 的应用 ID（身份稳定）；版本由 release_policy / release_id 表达：
         # current=跟随最新，release_id 置空；pinned=落库校验过的 release_id。
-        for sub_agent in data.sub_agents:
+        for sub_agent in (data.sub_agents or []):
             agent_app_release = resolve_release_for_save(
                 self.db,
                 sub_agent.agent_id,
@@ -459,7 +459,13 @@ class MultiAgentService:
                 sub_agent.release_id = None
 
         # 5. 创建配置（转换 UUID 为字符串以支持 JSON 序列化）
-        sub_agents_data = [convert_uuids_to_str(sub_agent.model_dump()) for sub_agent in data.sub_agents]
+        # sub_agents=None means "keep existing" on the update branch; the create
+        # branch fills the NOT NULL column with an empty list.
+        sub_agents_data = (
+            None
+            if data.sub_agents is None
+            else [convert_uuids_to_str(sub_agent.model_dump()) for sub_agent in data.sub_agents]
+        )
         # routing_rules_data = [convert_uuids_to_str(rule.model_dump()) for rule in data.routing_rules] if data.routing_rules else None
 
         # 处理 execution_config（可能是 None、字典或 Pydantic 模型）
@@ -522,6 +528,11 @@ class MultiAgentService:
         newConfig = self.check_config_data(app_id, data)
         if not config:
             config = newConfig
+            # "Keep original" has no meaning on the create branch; the NOT NULL
+            # sub_agents column defaults to an empty list, mirroring the GET
+            # default template.
+            if config.sub_agents is None:
+                config.sub_agents = []
             self.db.add(config)
             self.db.commit()
             self.db.refresh(config)
@@ -531,7 +542,7 @@ class MultiAgentService:
                     "config_id": str(config.id),
                     "app_id": str(app_id),
                     "mode": data.orchestration_mode,
-                    "sub_agent_count": len(data.sub_agents)
+                    "sub_agent_count": len(config.sub_agents)
                 }
             )
             return config
@@ -598,14 +609,13 @@ class MultiAgentService:
         Returns:
             执行结果
         """
-        # 1. 获取配置（draft/run 入口用 AsyncSession，get_config 是同步 scalars 会拿到协程；
-        #    用 get_config_async 兼容两种 session——AsyncSession 走 execute，sync 走 get_config）
+        # 1. 获取配置（运行面 self.db 为 AsyncSession，须走异步读取）
         config = await self.get_config_async(app_id)
         if not config:
             raise ResourceNotFoundException("多 Agent 配置", str(app_id))
 
         if not config.is_active:
-            raise BusinessException("多 Agent 配置已禁用", BizCode.RESOURCE_DISABLED)
+            raise BusinessException("多 Agent 配置已禁用", BizCode.NOT_FOUND)
 
         # S1 轮次锚点：预生成 assistant 消息 ID，下传给编排器写 master 执行记录，
         # 落库用同一 ID，日志详情按消息挂载节点不依赖时序吸附。
