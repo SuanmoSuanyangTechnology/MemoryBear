@@ -1,6 +1,9 @@
 """基于 API Key 认证的 V1 单用户隐性记忆查询接口。"""
 
-from fastapi import APIRouter, Query, Request
+from dataclasses import dataclass
+from uuid import UUID
+
+from fastapi import APIRouter, Query, Request, Response
 
 from app.core.api_key_auth import get_current_api_key_auth, require_api_key_self_db
 from app.core.api_key_utils import validate_end_user_in_workspace_async
@@ -8,14 +11,25 @@ from app.core.error_codes import BizCode
 from app.core.logging_config import get_api_logger
 from app.core.response_utils import fail, success
 from app.db import get_async_db_context, get_db_context
+from app.integrations.profile.contracts import MemoryProfileAuthSource
+from app.integrations.profile.proxy import memory_profile_proxy
+from app.repositories.implicit_emotions_storage_repository import (
+    ImplicitEmotionsStorageRepository,
+)
 from app.schemas.response_schema import ApiResponse
-from app.repositories.implicit_emotions_storage_repository import ImplicitEmotionsStorageRepository
 
 router = APIRouter(
     prefix="/memory/implicit-memory",
     tags=["V1 - Implicit Memory API"],
 )
 logger = get_api_logger()
+
+
+@dataclass(frozen=True, slots=True)
+class _ApiKeyProfilePrincipal:
+    id: UUID
+    current_workspace_id: UUID
+    tenant_id: UUID | None
 
 
 def _handle_implicit_memory_error(
@@ -84,33 +98,25 @@ def _handle_implicit_memory_error(
     return fail(BizCode.INTERNAL_ERROR, f"{operation}失败")
 
 
-@router.get("", response_model=ApiResponse)
-@require_api_key_self_db(scopes=["memory"])
-async def get_implicit_memory(
-    request: Request,
-    end_user_id: str = Query(..., description="终端用户ID"),
+@memory_profile_proxy(
+    query_fields=("end_user_id",),
+    source=MemoryProfileAuthSource.APIKEY,
+)
+async def _get_implicit_memory_profile(
+    end_user_id: str,
+    current_user: _ApiKeyProfilePrincipal,
+    request: Request = None,
 ) -> dict:
-    """返回单个终端用户已持久化的隐性记忆快照。"""
-    # API Key 的授权边界是 workspace；先校验用户归属，再读取业务数据。
-    api_key_auth = get_current_api_key_auth()
-    async with get_async_db_context() as auth_db:
-        end_user = await validate_end_user_in_workspace_async(
-            auth_db,
-            end_user_id,
-            api_key_auth.workspace_id,
-        )
-        resolved_end_user_id = str(end_user.id)
-
     try:
         # 对合并用户使用归一化后的 ID，直接读取快照，避免初始化分析和配置组件。
         with get_db_context() as db:
             storage = ImplicitEmotionsStorageRepository(db).get_by_end_user_id(
-                resolved_end_user_id
+                end_user_id
             )
             cached_profile = storage.implicit_profile if storage else None
 
         if cached_profile is None:
-            logger.info("用户 %s 的画像数据不存在", resolved_end_user_id)
+            logger.info("用户 %s 的画像数据不存在", end_user_id)
             return fail(BizCode.NOT_FOUND, "隐性记忆快照尚未生成")
 
         # 四类数据保持落库原始结构，仅对偏好应用 API 接口的默认置信度阈值。
@@ -125,7 +131,7 @@ async def get_implicit_memory(
 
         return success(
             data={
-                "end_user_id": resolved_end_user_id,
+                "end_user_id": end_user_id,
                 "habits": habits,
                 "preferences": preferences,
                 "portrait": portrait,
@@ -137,5 +143,33 @@ async def get_implicit_memory(
         return _handle_implicit_memory_error(
             exc,
             "隐性记忆查询",
-            resolved_end_user_id,
+            end_user_id,
         )
+
+
+@router.get("", response_model=ApiResponse)
+@require_api_key_self_db(scopes=["memory"])
+async def get_implicit_memory(
+    request: Request,
+    end_user_id: str = Query(..., description="终端用户ID"),
+) -> dict | Response:
+    """返回单个终端用户已持久化的隐性记忆快照。"""
+    # API Key 的授权边界是 workspace；先校验用户归属，再读取业务数据。
+    api_key_auth = get_current_api_key_auth()
+    async with get_async_db_context() as auth_db:
+        end_user = await validate_end_user_in_workspace_async(
+            auth_db,
+            end_user_id,
+            api_key_auth.workspace_id,
+        )
+        resolved_end_user_id = str(end_user.id)
+
+    return await _get_implicit_memory_profile(
+        end_user_id=resolved_end_user_id,
+        current_user=_ApiKeyProfilePrincipal(
+            id=api_key_auth.api_key_id,
+            current_workspace_id=api_key_auth.workspace_id,
+            tenant_id=api_key_auth.tenant_id,
+        ),
+        request=request,
+    )

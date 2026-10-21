@@ -31,6 +31,20 @@ def as_utc(value: datetime) -> datetime:
     return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
 
 
+def as_utc_naive(value: datetime) -> datetime:
+    """Normalize a datetime to a naive UTC value for database comparisons."""
+
+    return as_utc(value).replace(tzinfo=None)
+
+
+def epoch_ms_to_datetime(value: int | float | None) -> datetime | None:
+    """Convert epoch milliseconds to a naive UTC datetime."""
+
+    if value is None:
+        return None
+    return datetime.fromtimestamp(value / 1000.0, tz=UTC).replace(tzinfo=None)
+
+
 def datetime_to_epoch_ms(value: datetime | None) -> int | None:
     """Convert a datetime to epoch milliseconds (naive values are UTC)."""
 

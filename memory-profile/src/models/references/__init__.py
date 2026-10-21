@@ -5,6 +5,7 @@ never used as a migration metadata target.
 """
 
 from src.models.references.end_user_model import EndUser, EndUserMerge
+from src.models.references.memory_implicit_model import ImplicitEmotionsStorage
 from src.models.references.memory_statistics_model import (
     Conversation,
     ForgetAudit,
@@ -19,6 +20,7 @@ __all__ = [
     "EndUser",
     "EndUserMerge",
     "ForgetAudit",
+    "ImplicitEmotionsStorage",
     "MemoryMessage",
     "MemoryPerceptual",
     "ShortTermMemory",
