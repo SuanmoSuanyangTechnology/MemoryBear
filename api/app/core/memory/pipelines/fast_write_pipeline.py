@@ -357,12 +357,22 @@ class FastWritePipeline:
                     self.end_user_id,
                 )
                 return cached
-        # 未配置（URL / API_KEY / MODEL 任一缺失）直接跳过，不发请求、不空等超时
-        if (
-            not settings.FAST_WRITE_EMOTION_URL
-            or not settings.FAST_WRITE_EMOTION_API_KEY
-            or not settings.FAST_WRITE_EMOTION_MODEL
-        ):
+        # 开关已启用但服务参数不全时，说明无法判断情绪；只记录缺失的字段名。
+        missing_settings = [
+            name for name in (
+                "FAST_WRITE_EMOTION_URL",
+                "FAST_WRITE_EMOTION_API_KEY",
+                "FAST_WRITE_EMOTION_MODEL",
+            ) if not getattr(settings, name)
+        ]
+        if missing_settings:
+            logger.warning(
+                "[FastWrite] emotion enabled but BERT unconfigured: "
+                "config_id=%s, missing=%s, end_user_id=%s",
+                self.memory_config.config_id,
+                ",".join(missing_settings),
+                self.end_user_id,
+            )
             return None
         try:
             from app.services.fast_write_emotion_client import predict as _predict_emotion
