@@ -19,7 +19,7 @@ import json
 import logging
 import time
 import uuid
-from contextlib import nullcontext
+from contextlib import aclosing, nullcontext
 from datetime import datetime
 from types import SimpleNamespace
 from typing import Annotated, Any, AsyncGenerator, Dict, List, Literal, Optional
@@ -31,7 +31,7 @@ from sqlalchemy.orm import Session
 
 from ..agent.langchain_agent import LangChainAgent
 from ..config import current_settings
-from ..db import get_async_db_context, get_db
+from ..db import end_read_transaction, get_async_db_context, get_db
 from ..errors import BizCode, BusinessException
 from ..integrations.knowledge.contracts import KnowledgeRetrievalSource
 from ..memory.emotion.emotion_resolver import (
@@ -89,6 +89,85 @@ from .tool_orchestrator import ToolOrchestrator
 from .workflow_service import WorkflowService
 
 logger = logging.getLogger(__name__)
+
+
+class StreamConcurrencyGate:
+    """Per-process concurrency gate for multi-agent streams (asyncio semaphore).
+
+    A streaming turn holds the shared session's connection during preparation
+    and opens another one, so the per-request peak is greater than one. Under
+    load, "hold one, request another" makes requests wait on each other until
+    the QueuePool times out. The gate caps the number of concurrent streams;
+    extra requests queue without a DB connection (a session takes a connection
+    on first use). ``limit <= 0`` disables the cap.
+
+    Usage: after ``acquire()`` returns True, ``release()`` must be called in a
+    ``finally``; returning False means the queue wait timed out and must not
+    release.
+    """
+
+    def __init__(self, name: str, limit: int, queue_timeout: float) -> None:
+        self.name = name
+        self.limit = max(0, int(limit))
+        self.queue_timeout = float(queue_timeout)
+        # Lazily created so the semaphore binds to the running event loop.
+        self._sem: Optional[asyncio.Semaphore] = None
+        self._waiting = 0
+
+    @property
+    def enabled(self) -> bool:
+        return self.limit > 0
+
+    async def acquire(self) -> bool:
+        if not self.enabled:
+            return True
+        if self._sem is None:
+            self._sem = asyncio.Semaphore(self.limit)
+        sem = self._sem
+        if not sem.locked():
+            await sem.acquire()  # does not suspend while permits remain
+            return True
+
+        self._waiting += 1
+        logger.info(
+            "stream gate full, request queued name=%s limit=%d waiting=%d",
+            self.name, self.limit, self._waiting,
+        )
+        try:
+            if self.queue_timeout > 0:
+                await asyncio.wait_for(sem.acquire(), timeout=self.queue_timeout)
+            else:
+                await sem.acquire()
+            return True
+        except asyncio.TimeoutError:
+            logger.warning(
+                "stream gate queue timeout name=%s limit=%d timeout=%.1fs",
+                self.name, self.limit, self.queue_timeout,
+            )
+            return False
+        finally:
+            self._waiting -= 1
+
+    def release(self) -> None:
+        if self.enabled and self._sem is not None:
+            self._sem.release()
+
+
+_multi_agent_gate: Optional[StreamConcurrencyGate] = None
+
+BUSY_MESSAGE = "服务繁忙，请稍后重试"
+
+
+def get_multi_agent_stream_gate() -> StreamConcurrencyGate:
+    global _multi_agent_gate
+    if _multi_agent_gate is None:
+        settings = current_settings()
+        _multi_agent_gate = StreamConcurrencyGate(
+            "multi_agent_stream",
+            settings.multi_agent_stream_max_concurrency,
+            settings.multi_agent_stream_queue_timeout,
+        )
+    return _multi_agent_gate
 
 
 def _snapshot_annotations(annotations: List[Any]) -> List[SimpleNamespace]:
@@ -2031,11 +2110,14 @@ class AppChatService:
             thinking: bool = False,
             execution_mode: Optional[str] = None,
             files: Optional[List[FileInput]] = None,
+            source: str = "",
     ) -> Dict[str, Any]:
         """Multi-agent chat (non-streaming).
 
         thinking / execution_mode / files are optional additions aligned with
-        Agent apps; absent = the previous behavior.
+        Agent apps; absent = the previous behavior. ``source`` identifies the
+        entry face for annotation hit logs (console vs external); empty keeps
+        the external default.
         """
 
         start_time = time.time()
@@ -2056,7 +2138,8 @@ class AppChatService:
         # the orchestrator and persists the annotation answer directly (same
         # as Agent apps).
         _annotation_hit = await self._cluster_annotation_hit(
-            config, message, conversation_id, message_id, user_message_id
+            config, message, conversation_id, message_id, user_message_id,
+            source=source,
         )
         if _annotation_hit is not None:
             return {
@@ -2228,8 +2311,59 @@ class AppChatService:
             thinking: bool = False,
             execution_mode: Optional[str] = None,
             files: Optional[List[FileInput]] = None,
+            source: str = "",
     ) -> AsyncGenerator[str, None]:
-        """Multi-agent chat (streaming).
+        """Multi-agent chat (streaming) - concurrency-gate shell.
+
+        A single turn holds the shared session's connection during preparation
+        and opens another one; under load those requests wait on each other
+        until the QueuePool times out. The gate caps concurrent streams and
+        makes the rest queue without a DB connection. ``source`` identifies
+        the entry face for annotation hit logs.
+        """
+
+        gate = get_multi_agent_stream_gate()
+        if not await gate.acquire():
+            yield f"event: error\ndata: {json.dumps({'error': BUSY_MESSAGE}, ensure_ascii=False)}\n\n"
+            return
+        try:
+            async with aclosing(self._multi_agent_chat_stream_impl(
+                    message=message,
+                    conversation_id=conversation_id,
+                    config=config,
+                    user_id=user_id,
+                    variables=variables,
+                    web_search=web_search,
+                    memory=memory,
+                    storage_type=storage_type,
+                    user_rag_memory_id=user_rag_memory_id,
+                    thinking=thinking,
+                    execution_mode=execution_mode,
+                    files=files,
+                    source=source,
+            )) as stream:
+                async for event in stream:
+                    yield event
+        finally:
+            gate.release()
+
+    async def _multi_agent_chat_stream_impl(
+            self,
+            message: str,
+            conversation_id: uuid.UUID,
+            config: MultiAgentConfig,
+            user_id: Optional[str] = None,
+            variables: Optional[Dict[str, Any]] = None,
+            web_search: bool = False,
+            memory: bool = True,
+            storage_type: Optional[str] = None,
+            user_rag_memory_id: Optional[str] = None,
+            thinking: bool = False,
+            execution_mode: Optional[str] = None,
+            files: Optional[List[FileInput]] = None,
+            source: str = "",
+    ) -> AsyncGenerator[str, None]:
+        """Multi-agent chat (streaming) implementation.
 
         thinking / execution_mode are optional additions aligned with Agent
         apps; absent = the previous behavior.
@@ -2253,6 +2387,11 @@ class AppChatService:
             # Conversation-capability extras (suggested questions / citations /
             # audio) carried by the end event; empty when features are off
             end_extras: Dict[str, Any] = {}
+            # Hold the end event until persistence is enqueued: the client
+            # disconnects as soon as it sees end, and cancelling the generator
+            # mid-persist interrupts the DB query/enqueue, losing the message
+            # and leaving the connection dirty in the pool.
+            held_end_event: Optional[str] = None
 
             # Annotation hit (unconfigured / disabled returns None, no impact
             # on legacy clusters); a hit bypasses the orchestrator, persists
@@ -2260,6 +2399,7 @@ class AppChatService:
             _annotation_hit = await self._cluster_annotation_hit(
                 config, message, conversation_id, message_id, user_message_id,
                 storage_type=storage_type, user_rag_memory_id=user_rag_memory_id,
+                source=source,
             )
             if _annotation_hit is not None:
                 _answer = _annotation_hit["answer"]
@@ -2276,6 +2416,10 @@ class AppChatService:
             opening_statement, opening_suggested_questions = await self._resolve_cluster_opening(
                 orchestrator, conversation_id, variables
             )
+            # Preparation reads are done: end the shared session's transaction
+            # so the long routing/sub-agent/LLM wait does not hold a pooled
+            # connection (the next statement opens a new transaction).
+            await end_read_transaction(self.db, "multi_agent_chat_stream.prepare")
 
             # 3. Stream the task
             # message_id is passed down: the master execution record carries
@@ -2321,7 +2465,10 @@ class AppChatService:
                     except Exception:
                         pass
 
-                yield event
+                if _event_name == "end":
+                    held_end_event = event
+                else:
+                    yield event
                 # Accumulate the main bubble body: only cluster-level
                 # `message` events count. Sub-agent bodies use
                 # `sub_agent_message` (shown in their own blocks); including
@@ -2448,6 +2595,10 @@ class AppChatService:
                     "message_length": len(full_content)
                 }
             )
+
+            # Persistence is enqueued; release the held end event last.
+            if held_end_event is not None:
+                yield held_end_event
 
         except (GeneratorExit, asyncio.CancelledError):
             # Generator closed or task cancelled — normal exit

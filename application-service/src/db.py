@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
+import asyncio
+import inspect
+import logging
 import threading
+import traceback
 from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager, contextmanager
 
-from sqlalchemy import Engine, create_engine, text
+from sqlalchemy import Engine, create_engine, event, text
+from sqlalchemy.exc import DisconnectionError
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -16,6 +21,106 @@ from sqlalchemy.ext.asyncio import (
 from sqlalchemy.orm import Session, sessionmaker
 
 from .config import AppServiceSettings
+from .trace import get_trace_id
+
+logger = logging.getLogger(__name__)
+
+# Strong references to background close-out tasks so the GC cannot collect a
+# task mid-flight.
+_shielded_tasks: set[asyncio.Task] = set()
+
+
+async def _run_shielded(coro, what: str) -> None:
+    """Run a coroutine in a separate task that survives caller cancellation.
+
+    Cancellation from Starlette/anyio cancel scopes is level-triggered: every
+    await in a cancelled task receives CancelledError again, so awaiting
+    ``session.close()`` directly can be interrupted in the middle of the
+    rollback/connection return and leave an asyncpg connection inside a
+    transaction. A separate task is outside that cancel scope; shield keeps
+    the caller's CancelledError propagating while the inner task finishes.
+    """
+
+    task = asyncio.ensure_future(coro)
+    _shielded_tasks.add(task)
+
+    def _done(t: asyncio.Task) -> None:
+        _shielded_tasks.discard(t)
+        if not t.cancelled() and t.exception() is not None:
+            logger.warning("%s failed", what, exc_info=t.exception())
+
+    task.add_done_callback(_done)
+    await asyncio.shield(task)
+
+
+class CancelSafeAsyncSession(AsyncSession):
+    """AsyncSession whose ``close()`` cannot be interrupted by cancellation.
+
+    Only ``close()`` is overridden: it rolls back any open transaction and
+    returns the connection to the pool. ``rollback()`` keeps its original
+    semantics.
+    """
+
+    async def close(self) -> None:
+        await _run_shielded(super().close(), "AsyncSession.close")
+
+
+def _driver_conn(dbapi_connection):
+    return (
+        getattr(dbapi_connection, "driver_connection", None)
+        or getattr(dbapi_connection, "_connection", None)
+    )
+
+
+def _asyncpg_checkout(dbapi_connection, connection_record, connection_proxy) -> None:
+    driver = _driver_conn(dbapi_connection)
+    if driver is None:
+        return
+
+    if getattr(driver, "is_in_transaction", lambda: False)():
+        logger.error(
+            "[DB_POOL_DIRTY_CHECKOUT] asyncpg connection is already in transaction "
+            "conn_id=%s previous_trace_id=%s previous_checkout_stack=%s",
+            id(driver),
+            connection_record.info.get("checkout_trace_id"),
+            connection_record.info.get("checkout_stack"),
+        )
+        connection_record.invalidate(
+            Exception("dirty asyncpg connection on checkout")
+        )
+        raise DisconnectionError("dirty asyncpg connection on checkout")
+
+    connection_record.info["checkout_trace_id"] = get_trace_id()
+    connection_record.info["checkout_stack"] = "".join(
+        traceback.format_stack(limit=20)
+    )
+
+
+def _asyncpg_checkin(dbapi_connection, connection_record) -> None:
+    if dbapi_connection is None:
+        return
+
+    driver = _driver_conn(dbapi_connection)
+    if driver is None:
+        return
+
+    if not getattr(driver, "is_in_transaction", lambda: False)():
+        return
+
+    # Soft invalidation: the slot is rebuilt on the next checkout in a normal
+    # context. The connection cannot be terminated synchronously here because
+    # checkin may be running inside a cancelled context.
+    connection_record.invalidate(
+        Exception("dirty asyncpg connection on checkin"), soft=True
+    )
+    logger.error(
+        "[DB_POOL_DIRTY_CHECKIN] returning dirty asyncpg connection to pool "
+        "conn_id=%s checkout_trace_id=%s checkout_stack=%s checkin_stack=%s",
+        id(driver),
+        connection_record.info.get("checkout_trace_id"),
+        connection_record.info.get("checkout_stack"),
+        "".join(traceback.format_stack(limit=20)),
+    )
 
 
 class DatabaseManager:
@@ -68,6 +173,12 @@ class DatabaseManager:
                         }
                     },
                 )
+                event.listen(
+                    self._async_engine.sync_engine, "checkout", _asyncpg_checkout
+                )
+                event.listen(
+                    self._async_engine.sync_engine, "checkin", _asyncpg_checkin
+                )
             return self._async_engine
 
     def _get_sync_session_factory(self) -> sessionmaker[Session]:
@@ -85,7 +196,7 @@ class DatabaseManager:
             if self._async_session_factory is None:
                 self._async_session_factory = async_sessionmaker(
                     bind=self._get_async_engine(),
-                    class_=AsyncSession,
+                    class_=CancelSafeAsyncSession,
                     autoflush=False,
                     expire_on_commit=False,
                 )
@@ -194,6 +305,29 @@ async def get_async_db_context() -> AsyncIterator[AsyncSession]:
 
     async with get_process_runtime().database.async_session() as session:
         yield session
+
+
+async def end_read_transaction(db: AsyncSession | None, where: str = "") -> None:
+    """End the open transaction on ``db`` and return its connection to the pool.
+
+    Use right after a read phase when the next step waits on an LLM or a
+    sub-agent for a long time. Sessions are ``expire_on_commit=False``, so ORM
+    objects loaded before the commit stay readable; the next statement opens a
+    fresh transaction. Failures only log a warning: this is a side-channel
+    optimization and must never affect the business path. No-op for ``None``
+    or a session without an open transaction.
+    """
+
+    if db is None:
+        return
+    try:
+        if not db.in_transaction():
+            return
+        result = db.commit()
+        if inspect.isawaitable(result):
+            await result
+    except Exception as exc:  # noqa: BLE001 - side-channel optimization
+        logger.warning("end_read_transaction failed where=%s error=%s", where, exc)
 
 
 def get_db() -> Iterator[Session]:

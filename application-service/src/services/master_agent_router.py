@@ -8,6 +8,7 @@ from typing import Dict, Any, List, Optional, Tuple
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
+from ..db import end_read_transaction
 from ..schemas.app_schema import ModelParameters
 from .conversation_state_manager import ConversationStateManager
 from ..models import ModelConfig, AgentConfig
@@ -280,6 +281,12 @@ class MasterAgentRouter:
                 self.master_model_config.id,
                 tenant_id=self.tenant_id,
             )
+            # The model view is already materialized; the next step is a long
+            # routing LLM call. Release the shared session's connection first
+            # (sync-session routers are already blocking paths, so only async
+            # sessions need this).
+            if isinstance(self.db, AsyncSession):
+                await end_read_transaction(self.db, "master_router.model_view")
 
             logger.info(
                 "调用 Master Agent LLM",

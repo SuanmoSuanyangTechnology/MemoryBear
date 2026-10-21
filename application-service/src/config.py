@@ -311,6 +311,18 @@ class AppServiceSettings(BaseSettings):
     agent_max_history: int = Field(
         default=20, ge=1, validation_alias="AGENT_MAX_HISTORY"
     )
+    # Multi-agent streaming concurrency gate (per process). Requests beyond the
+    # limit queue without holding a DB connection; 0 disables the limit. A
+    # streaming turn holds one connection for the shared session and opens
+    # another one, so keep the limit below a quarter of (pool + overflow).
+    multi_agent_stream_max_concurrency: int = Field(
+        default=16, ge=0, validation_alias="MULTI_AGENT_STREAM_MAX_CONCURRENCY"
+    )
+    # Queue wait budget in seconds; on timeout the stream emits an error event.
+    # 0 means wait indefinitely.
+    multi_agent_stream_queue_timeout: float = Field(
+        default=120.0, ge=0, validation_alias="MULTI_AGENT_STREAM_QUEUE_TIMEOUT"
+    )
     # In-process batch persistence queue tuning (host `settings.BATCH_PERSIST_*`);
     # same env names and defaults.
     batch_persist_queue_size: int = Field(

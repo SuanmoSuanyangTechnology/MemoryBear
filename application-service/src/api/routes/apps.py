@@ -834,8 +834,9 @@ def import_app(
     """Import an agent / multi_agent / workflow app from a YAML file.
     When app_id is passed, the app's config is overwritten (types must match);
     otherwise a new app is created.
-    On cross-workspace / cross-tenant import, models / tools / knowledge bases are
-    matched by name; unmatched refs are blanked and reported in warnings.
+    On cross-workspace / cross-tenant import, resources are matched by name:
+    unmatched models / tools / knowledge bases are blanked; unmatched sub-agent /
+    routing entries are dropped outright. All of them are reported in warnings.
     """
     if not file.filename.lower().endswith((".yaml", ".yml")):
         return fail(code=BizCode.BAD_REQUEST.value, msg="仅支持 YAML 文件")

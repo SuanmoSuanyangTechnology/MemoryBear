@@ -15,6 +15,7 @@ from ....db import get_async_db_context
 from ....models.workspace_model import Workspace
 from ....services.tool_service import ToolService
 from ....models.tool_model import ToolType
+from ....schemas.tool_schema import ParameterType
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +65,46 @@ class ToolNode(BaseNode):
                 )
             ).scalar_one_or_none()
 
+    @staticmethod
+    def _resolve_parameter_defs(tool_instance: Any, operation: str | None) -> list:
+        """Parameter definitions of the target tool.
+
+        MCP tools read inputSchema for the selected operation without mutating
+        the shared cached instance.
+        """
+        try:
+            if tool_instance.tool_type == ToolType.MCP:
+                info = tool_instance._get_tool_info(operation) if operation else None
+                schema = (info or {}).get("inputSchema") or {}
+                return tool_instance._generate_parameters_from_schema(schema) if schema else []
+            return list(tool_instance.parameters)
+        except Exception as e:
+            logger.warning(f"获取工具参数定义失败，跳过类型转换: {e}")
+            return []
+
+    @staticmethod
+    def _coerce_parameter_types(params: dict[str, Any], param_defs: list) -> None:
+        """Restore object/array parameters from the JSON strings sent by the UI.
+
+        On parse failure or a type mismatch the original value is kept so the
+        tool's own parameter validation reports the error.
+        """
+        expected_types = {
+            d.name: dict if d.type == ParameterType.OBJECT else list
+            for d in param_defs
+            if d.type in (ParameterType.OBJECT, ParameterType.ARRAY)
+        }
+        for name, value in params.items():
+            expected = expected_types.get(name)
+            if expected is None or not isinstance(value, str) or not value.strip():
+                continue
+            try:
+                parsed = json.loads(value)
+            except ValueError:
+                continue
+            if isinstance(parsed, expected):
+                params[name] = parsed
+
     async def execute(self, state: WorkflowState, variable_pool: VariablePool) -> dict[str, Any]:
         """Execute the tool."""
         self.typed_config = ToolNodeConfig(**self.config)
@@ -108,6 +149,13 @@ class ToolNode(BaseNode):
                 raise ValueError(f"工具不存在或未激活: {self.typed_config.tool_id}")
 
             tool_instance = await tool_service.get_tool_instance_async(str(self.typed_config.tool_id), tenant_id)
+            # The UI submits object/array inputs as JSON strings; restore them to
+            # the types declared by the tool parameters
+            if tool_instance:
+                self._coerce_parameter_types(
+                    rendered_parameters,
+                    self._resolve_parameter_defs(tool_instance, rendered_parameters.get("operation")),
+                )
             # MCP tools: map operation to tool_name and wrap the remaining parameters into arguments
             if tool_instance and tool_instance.tool_type == ToolType.MCP:
                 operation = rendered_parameters.pop("operation", None)

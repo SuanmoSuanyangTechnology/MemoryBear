@@ -1526,6 +1526,20 @@ class MultiAgentOrchestrator:
             # sub_usage strings to accumulate on their own; everything reads
             # from this event.
             _usage_total = self._turn_routing_tokens + self._turn_sub_tokens + self._turn_merge_tokens
+
+            # Finalize the master execution record before publishing end: the
+            # client disconnects as soon as it sees end, which cancels this
+            # generator and would otherwise skip the finalize step.
+            await self._finalize_master_execution(
+                status="completed",
+                elapsed_time=time.time() - start_time,
+                token_usage={
+                    "prompt_tokens": 0,
+                    "completion_tokens": 0,
+                    "total_tokens": _usage_total,
+                },
+            )
+
             yield self._format_sse_event("end", {
                 "elapsed_time": elapsed_time,
                 "conversation_id": str(conversation_id) if conversation_id else None,
@@ -1558,16 +1572,6 @@ class MultiAgentOrchestrator:
                     "sub_tokens": self._turn_sub_tokens,
                     "merge_tokens": self._turn_merge_tokens
                 }
-            )
-
-            await self._finalize_master_execution(
-                status="completed",
-                elapsed_time=time.time() - start_time,
-                token_usage={
-                    "prompt_tokens": 0,
-                    "completion_tokens": 0,
-                    "total_tokens": _usage_total,
-                },
             )
 
         except Exception as e:
@@ -2553,6 +2557,21 @@ class MultiAgentOrchestrator:
                 "- 自定义工具：按各工具描述在适用场景调用。"
             )
 
+        # Final answer format constraint: with json_output on, the supervisor
+        # always carries tools, so response_format is removed (compatible_chat /
+        # openai-compatible providers) and deep thinking also skips it; JSON can
+        # only be enforced by the prompt. The former fixed "reply in Chinese"
+        # text conflicts with the engine's appended JSON instruction, producing
+        # natural language and silently disabling json_output.
+        if self._supervisor_json_output_on():
+            final_answer_rule = (
+                "最终答案输出格式（强制）：调用工具/子 Agent 的过程不受限制，但最终答案必须且只能是"
+                "一个合法的 JSON 对象（以 { 开头、以 } 结尾），JSON 内的文字内容使用中文；"
+                "不要输出 Markdown 代码块（```）、不要在 JSON 前后附加任何说明文字，不要提及调度过程。"
+            )
+        else:
+            final_answer_rule = "最终答案必须是完整、自洽的中文回复，不要提及调度过程。"
+
         own_tools_section = ""
         if own_tool_guidance:
             own_tools_section = (
@@ -2577,7 +2596,7 @@ class MultiAgentOrchestrator:
             "派单动机（重要）：派单是为了**上下文隔离**——探索性搜索、长文档处理、"
             "代码执行这类会产生大量中间输出的任务，交给子 Agent 在独立上下文里跑，"
             "避免主对话被工具输出淹没；结论性小问题用你自己的工具或知识直接回答。\n"
-            "最终答案必须是完整、自洽的中文回复，不要提及调度过程。"
+            f"{final_answer_rule}"
         )
         if not self.sub_agents:
             # No sub-agents: the supervisor is a bare agent. The standard prompt above
@@ -2587,11 +2606,19 @@ class MultiAgentOrchestrator:
                 "你是多智能体集群的主管（supervisor），当前没有配置子 Agent，"
                 "请直接回答用户问题。"
                 f"{own_tools_section}\n\n"
-                "最终答案必须是完整、自洽的中文回复。"
+                f"{final_answer_rule}"
             )
         if not custom_prompt:
             return auto_prompt
         return f"{custom_prompt}\n\n---\n\n{auto_prompt}"
+
+    def _supervisor_json_output_on(self) -> bool:
+        """Whether the cluster's model_parameters.json_output is on (same read as _build_supervisor_agent)."""
+        mp = self.model_parameters
+        if mp is None:
+            return False
+        val = mp.get("json_output", False) if isinstance(mp, dict) else getattr(mp, "json_output", False)
+        return bool(val)
 
     def _supervisor_skill_prompt_section(self) -> str:
         """Supervisor skill prompt section: written when _load_supervisor_own_tools loads skills.
@@ -2721,6 +2748,7 @@ class MultiAgentOrchestrator:
 
         tools = []
         self._loop_tool_instances = []
+        _used_tool_names: set = set()
         for agent_id, data in self.sub_agents.items():
             info = data.get("info", {})
             wrapper = SubAgentTool(
@@ -2729,6 +2757,21 @@ class MultiAgentOrchestrator:
                 info.get("name", agent_id),
                 _sub_agent_brief(data),
             )
+            # Tool-name de-duplication: _sanitize_tool_name replaces non-ASCII
+            # characters with underscores, so sub-agent names distinguished only
+            # by Chinese text (e.g. "extract / calculate / review") collapse to
+            # the same tool name; LangChain then keeps only the last one by name
+            # and the supervisor can only ever call it. Append an agent-id suffix
+            # on conflict (the original name stays in the description).
+            if wrapper.tool_name in _used_tool_names:
+                _suffix = str(agent_id).replace("-", "")[:8] or "x"
+                _candidate = f"{wrapper.tool_name[:55]}_{_suffix}"
+                _n = 2
+                while _candidate in _used_tool_names:
+                    _candidate = f"{wrapper.tool_name[:50]}_{_suffix}_{_n}"
+                    _n += 1
+                wrapper.tool_name = _candidate
+            _used_tool_names.add(wrapper.tool_name)
             self._loop_tool_instances.append(wrapper)
             tools.append(wrapper.build())
 
@@ -3030,6 +3073,29 @@ class MultiAgentOrchestrator:
         except Exception as e:
             logger.warning(f"S8 loop：读取集群会话历史失败（降级为空）: {e}")
             return []
+
+    async def _sub_agent_history(
+        self,
+        conversation_id: Optional[uuid.UUID],
+    ) -> List[Dict[str, Any]]:
+        """History a sub-agent runtime carries.
+
+        - supervisor_loop: the supervisor holds the cluster history itself and
+          sub-agents only see the task brief + variable bag, so the history is
+          empty (by design, to keep supervisor messages and a sub-agent's
+          previous turn out).
+        - supervisor (three-stage): the router only picks the agent and the
+          sub-agent answers the user directly; passing no history makes every
+          turn a fresh conversation (multi-turn corrections, "remember this
+          order" all fail). Here the cluster history is passed (same source as
+          the supervisor loop: 20 turns, plain text, regeneration truncated at
+          the original question time; this turn is not persisted yet, so no
+          duplication).
+        - Other modes keep the previous behavior (empty history).
+        """
+        if self._normalized_mode == OrchestrationMode.SUPERVISOR:
+            return await self._load_cluster_history(conversation_id)
+        return []
 
     async def _execute_supervisor_loop_stream(
         self,
@@ -4039,12 +4105,10 @@ class MultiAgentOrchestrator:
             # exists only for signature compatibility and no longer drives decisions
             memory=self.cluster_memory_enabled(),
             sub_agent=True,
-            # A sub-agent's context comes only from this turn's dispatched task brief +
-            # the variable bag, never the cluster conversation history (supervisor
-            # messages or this sub-agent's previous turn). Explicit empty history skips
-            # run_stream's internal DB lookup / context-engine loading keyed by the
-            # shared conversation_id.
-            history=[],
+            # History convention, see _sub_agent_history: supervisor_loop sees
+            # only the task brief (empty history); three-stage supervisor
+            # sub-agents answer the user directly and carry the cluster history.
+            history=await self._sub_agent_history(conversation_id),
             parent_execution_id=self.current_execution_id,
             orchestration_mode=self._normalized_mode,
             execution_owner=self._resolve_agent_identity(agent_config),
@@ -4114,9 +4178,8 @@ class MultiAgentOrchestrator:
             storage_type=storage_type,
             user_rag_memory_id=user_rag_memory_id,
             sub_agent=True,
-            # Same as the streaming path: a sub-agent sees only this turn's task brief,
-            # never the cluster conversation history
-            history=[],
+            # Same as the streaming path (see _sub_agent_history)
+            history=await self._sub_agent_history(conversation_id),
             parent_execution_id=self.current_execution_id,
             orchestration_mode=self._normalized_mode,
             execution_owner=self._resolve_agent_identity(agent_config),

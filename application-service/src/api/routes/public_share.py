@@ -772,6 +772,7 @@ async def regenerate_message(
                             user_rag_memory_id=user_rag_memory_id,
                             thinking=thinking,
                             config=cluster_cfg,
+                            source=HitLogSource.EXTERNAL,
                     ):
                         # The cluster path yields serialized SSE strings; filter
                         # on the `event:` line against the whitelist
@@ -793,6 +794,7 @@ async def regenerate_message(
             user_rag_memory_id=user_rag_memory_id,
             thinking=thinking,
             config=cluster_cfg,
+            source=HitLogSource.EXTERNAL,
         )
         return success(data=app_schema.RegenerateResponse(**result))
 

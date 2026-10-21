@@ -1001,6 +1001,15 @@ class AppService:
                     # multi_agent: tenant-level model_config_id/sub_agents/routing_rules
                     # are kept as is; master_agent_id (an AppRelease) belongs to the
                     # source workspace, so clear it on cross-workspace copies
+                    # supervisor_config carries the master agent's own capability
+                    # surface (features/prompt/memory/knowledge/skills/variables/
+                    # tools); omitting it degrades the copy to a bare supervisor.
+                    new_supervisor_config = self._clone_supervisor_config(
+                        source_config.supervisor_config,
+                        is_cross_workspace=is_cross_workspace,
+                        target_tenant_id=target_tenant_id,
+                        target_workspace_id=target_workspace_id,
+                    )
                     new_config = MultiAgentConfig(
                         id=uuid.uuid4(),
                         app_id=new_app.id,
@@ -1027,6 +1036,7 @@ class AppService:
                             copy.deepcopy(source_config.execution_config)
                             if source_config.execution_config else {}
                         ),
+                        supervisor_config=new_supervisor_config,
                         aggregation_strategy=source_config.aggregation_strategy,
                         is_active=True,
                         created_at=now,
@@ -1168,6 +1178,52 @@ class AppService:
             if not exists:
                 cleaned["memory_config_id"] = None
                 cleaned.pop("memory_content", None)
+
+        return cleaned
+
+    def _clone_supervisor_config(
+            self,
+            supervisor_config: dict | None,
+            *,
+            is_cross_workspace: bool,
+            target_tenant_id: uuid.UUID | None,
+            target_workspace_id: uuid.UUID,
+    ) -> dict | None:
+        """Copy the cluster supervisor_config (the master agent's capability surface).
+
+        supervisor_config holds the whole master-agent configuration: features,
+        system_prompt, memory, knowledge_retrieval, skills, variables and tools.
+        Omitting the field entirely drops the copy back to a bare supervisor
+        (hardcoded prompt + SubAgentTool only).
+
+        Cross-workspace cleaning follows the AgentConfig branch:
+        - knowledge_retrieval is workspace-level: keep only KBs available in the
+          target workspace;
+        - memory is workspace-level: clear memory_config_id when it does not
+          belong to the target workspace;
+        - model/tools/skills are tenant-level and kept as is.
+        """
+        if not supervisor_config:
+            return None
+
+        cleaned = copy.deepcopy(supervisor_config)
+        if not isinstance(cleaned, dict):
+            return None
+
+        if is_cross_workspace:
+            knowledge_retrieval = cleaned.get("knowledge_retrieval")
+            if knowledge_retrieval:
+                _, kb_ids = self._collect_resource_ids_from_config(None, knowledge_retrieval)
+                _, available_kb_ids = self._preload_cross_workspace_resources(
+                    target_tenant_id, target_workspace_id, set(), kb_ids
+                )
+                cleaned["knowledge_retrieval"] = self._clean_knowledge_retrieval(
+                    knowledge_retrieval, available_kb_ids
+                )
+            if cleaned.get("memory"):
+                cleaned["memory"] = self._clean_memory_cross_workspace(
+                    cleaned["memory"], target_workspace_id
+                )
 
         return cleaned
 

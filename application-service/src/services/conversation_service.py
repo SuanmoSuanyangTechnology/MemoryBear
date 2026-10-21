@@ -857,18 +857,45 @@ class ConversationService:
         failures are logged and never fail the chat turn.
         """
 
-        conversation = await self.conversation_repo.get_conversation_by_conversation_id_async(
-            conversation_id
-        )
-        if not conversation:
-            return
-
+        from ..db import get_async_db_context
         from ..memory.memory_service import MemoryService
 
+        # Always read the conversation and memory config on an independent
+        # async session, never on self.db:
+        #   1) this is a fire-and-forget dispatch, unrelated to the caller's
+        #      transaction;
+        #   2) the caller's db may be a sync Session (share / regenerate paths):
+        #      awaiting a sync Session's execute yields a ChunkedIteratorResult
+        #      and raises "can't be used in 'await' expression", which used to
+        #      break the annotation-hit branch too.
         try:
-            config_id = await MemoryConfigService().get_workspace_active_config_id_async(
-                conversation.workspace_id
+            async with get_async_db_context() as db:
+                repo = ConversationRepository(db)
+                conversation = await repo.get_conversation_by_conversation_id_async(
+                    conversation_id
+                )
+                if not conversation:
+                    return
+                # Snapshot every scalar used after the session closes: the ORM
+                # object is detached and expired on exit and attribute access
+                # raises DetachedInstanceError.
+                conv_id_str = str(conversation.id)
+                conv_app_id = str(conversation.app_id)
+                conv_workspace_id = str(conversation.workspace_id)
+                conv_user_id = str(conversation.user_id) if conversation.user_id else ""
+                config_id = await MemoryConfigService().get_workspace_active_config_id_async(
+                    conversation.workspace_id
+                )
+        except Exception as exc:
+            logger.warning(
+                "dispatch_memory_pair conversation/config lookup failed (skipped): conv=%s, err=%s",
+                conversation_id,
+                exc,
+                exc_info=True,
             )
+            return
+
+        try:
             now = utcnow()
             messages = [
                 SimpleNamespace(
@@ -884,12 +911,12 @@ class ConversationService:
             ]
             asyncio.create_task(
                 MemoryService.ingest_agent_messages(
-                    conversation_id=str(conversation.id),
+                    conversation_id=conv_id_str,
                     messages=messages,
-                    app_id=str(conversation.app_id),
+                    app_id=conv_app_id,
                     config_id=str(config_id),
-                    workspace_id=str(conversation.workspace_id),
-                    end_user_id=str(conversation.user_id) if conversation.user_id else "",
+                    workspace_id=conv_workspace_id,
+                    end_user_id=conv_user_id,
                     storage_type=storage_type or "neo4j",
                     user_rag_memory_id=user_rag_memory_id,
                 )
@@ -897,7 +924,7 @@ class ConversationService:
         except Exception as exc:
             logger.warning(
                 "dispatch_memory_pair failed: conv=%s, err=%s",
-                conversation.id,
+                conversation_id,
                 exc,
                 exc_info=True,
             )

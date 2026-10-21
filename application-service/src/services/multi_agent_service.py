@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 
 from ..errors import BizCode, BusinessException, ResourceNotFoundException
 from ..models import App, AppRelease
+from ..models.annotation_model import HitLogSource
 from ..models.multi_agent_model import MultiAgentConfig
 from ..repositories import cross_domain_read
 from ..repositories.multi_agent_repository import MultiAgentConfigRepository
@@ -125,6 +126,50 @@ class MultiAgentService:
             limit=1,
         )
         return len(existing_messages) > 0
+
+    async def _cluster_annotation_hit(
+        self,
+        config,
+        message: str,
+        conversation_id,
+        message_id,
+        user_message_id,
+        storage_type: str | None = None,
+        user_rag_memory_id: str | None = None,
+        source: str = HitLogSource.CONSOLE,
+    ) -> dict[str, Any] | None:
+        """Cluster annotation hit for the first turn of run/run_stream.
+
+        Delegates to the AppChatService implementation (works with sync and
+        async sessions) so both entry points share one code path: not
+        configured / disabled / no match / any exception all return None and
+        the caller proceeds with normal orchestration.
+        """
+        from .app_chat_service import AppChatService
+        return await AppChatService(self.db)._cluster_annotation_hit(
+            config, message, conversation_id, message_id, user_message_id,
+            storage_type=storage_type, user_rag_memory_id=user_rag_memory_id, source=source,
+        )
+
+    async def _build_cluster_files_persist(self, files, orchestrator) -> tuple:
+        """Files persisted for this cluster turn (files_meta, history_files).
+
+        Same contract as the share-side cluster path: metadata lookups run in an
+        independent async session, so this does not depend on the type of
+        ``self.db``.
+        """
+        from .app_chat_service import AppChatService
+        return await AppChatService(self.db)._build_cluster_files_persist(files, orchestrator)
+
+    async def _match_cluster_annotation(
+        self, app_id, message: str, source: str = HitLogSource.CONSOLE
+    ) -> dict[str, Any] | None:
+        """Annotation match only (no message writes), used by regeneration —
+        message versions are persisted by regenerate itself."""
+        from .app_chat_service import AppChatService
+        return await AppChatService(self.db)._check_annotation_match_async(
+            app_id, message, source=source
+        )
 
     async def _resolve_cluster_opening(
         self,
@@ -405,13 +450,15 @@ class MultiAgentService:
     async def run(
         self,
         app_id: uuid.UUID,
-        request: MultiAgentRunRequest
+        request: MultiAgentRunRequest,
+        source: str = HitLogSource.CONSOLE,
     ) -> dict:
         """Run a multi-agent task (non-streaming).
 
         Args:
             app_id: App ID
             request: Run request
+            source: Annotation hit source (console trial run vs external share)
 
         Returns:
             Execution result
@@ -430,14 +477,31 @@ class MultiAgentService:
             # paths use NOT_FOUND.
             raise BusinessException("多 Agent 配置已禁用", BizCode.NOT_FOUND)
 
-        # 2. Build the orchestrator
-        orchestrator = await MultiAgentOrchestrator.create(self.db, config)
-
         # Pre-generate the assistant message ID and hand it to the orchestrator
         # so the master execution record and the persisted message share one ID;
         # log details attach nodes by message instead of relying on timing order.
         message_id = uuid.uuid4()
         user_message_id = uuid.uuid4()
+
+        # Annotation hit: on a hit the orchestrator is skipped entirely and the
+        # annotated answer is persisted and returned (same as Agent apps)
+        _annotation_hit = await self._cluster_annotation_hit(
+            config, request.message, request.conversation_id, message_id, user_message_id,
+            source=source,
+        )
+        if _annotation_hit is not None:
+            return {
+                "conversation_id": (
+                    str(request.conversation_id) if request.conversation_id else None
+                ),
+                "message": _annotation_hit["answer"],
+                "message_id": str(message_id),
+                "user_message_id": str(user_message_id),
+                "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+            }
+
+        # 2. Build the orchestrator
+        orchestrator = await MultiAgentOrchestrator.create(self.db, config)
 
         # New-conversation opening statement (queried only when
         # features.opening_statement is enabled; legacy clusters have no features,
@@ -510,6 +574,16 @@ class MultiAgentService:
                 ),
                 "should_memorize": orchestrator.cluster_memory_enabled(),
             }
+            # Attachment persistence (same contract as Agent apps and the share-side
+            # cluster): without meta.files a regeneration cannot restore FileInput
+            # and attachments parse on the first turn but are lost afterwards.
+            if getattr(request, "files", None):
+                _files_meta, _history_files = await self._build_cluster_files_persist(
+                    request.files, orchestrator
+                )
+                _persist_args["files_meta"] = _files_meta
+                if _history_files:
+                    _result.history_files = _history_files
             # New-conversation opening statement persists with this round (same as
             # Agent apps): the first-turn user attaches under the opening, so the
             # version-switch branch chain can include it
@@ -560,7 +634,8 @@ class MultiAgentService:
         app_id: uuid.UUID,
         request: MultiAgentRunRequest,
         storage_type: str,
-        user_rag_memory_id: str
+        user_rag_memory_id: str,
+        source: str = HitLogSource.CONSOLE,
     ) -> AsyncGenerator[str, None]:
         """Run a multi-agent task (streaming SSE events).
 
@@ -569,6 +644,7 @@ class MultiAgentService:
             request: Run request
             storage_type: Memory storage type (neo4j / ...)
             user_rag_memory_id: User RAG memory knowledge-base ID
+            source: Annotation hit source (console trial run vs external share)
 
         Yields:
             SSE events
@@ -581,9 +657,6 @@ class MultiAgentService:
         if not config.is_active:
             raise BusinessException("多 Agent 配置已禁用", BizCode.NOT_FOUND)
 
-        # 2. Build the orchestrator
-        orchestrator = await MultiAgentOrchestrator.create(self.db, config)
-
         full_content = ""
         total_tokens = 0
         # Pre-generate the assistant message ID and hand it to the orchestrator:
@@ -593,6 +666,36 @@ class MultiAgentService:
         # concurrent sub-agents).
         message_id = uuid.uuid4()
         user_message_id = uuid.uuid4()
+
+        # Annotation hit: on a hit the orchestrator is skipped and the annotated
+        # answer is persisted and streamed as message/end (same as Agent apps)
+        _annotation_hit = await self._cluster_annotation_hit(
+            config, request.message, request.conversation_id, message_id, user_message_id,
+            storage_type=storage_type, user_rag_memory_id=user_rag_memory_id, source=source,
+        )
+        if _annotation_hit is not None:
+            _answer = _annotation_hit["answer"]
+            _cid = str(request.conversation_id) if request.conversation_id else None
+            _zero_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+            _start_data = {
+                "conversation_id": _cid,
+                "message_id": str(message_id),
+                "user_message_id": str(user_message_id),
+            }
+            _message_data = {"content": _answer, "conversation_id": _cid}
+            _end_data = {
+                "conversation_id": _cid,
+                "message_id": str(message_id),
+                "message_length": len(_answer),
+                "usage": _zero_usage,
+            }
+            yield f"event: start\ndata: {json.dumps(_start_data, ensure_ascii=False)}\n\n"
+            yield f"event: message\ndata: {json.dumps(_message_data, ensure_ascii=False)}\n\n"
+            yield f"event: end\ndata: {json.dumps(_end_data, ensure_ascii=False)}\n\n"
+            return
+
+        # 2. Build the orchestrator
+        orchestrator = await MultiAgentOrchestrator.create(self.db, config)
 
         # New-conversation opening statement (queried only when
         # features.opening_statement is enabled; legacy clusters have no features,
@@ -690,6 +793,16 @@ class MultiAgentService:
             if end_extras.get("audio_url"):
                 _result.audio_url = end_extras.get("audio_url")
                 _result.audio_status = end_extras.get("audio_status")
+        # Attachment persistence (same contract as Agent apps and the share-side
+        # cluster): without meta.files a regeneration cannot restore FileInput
+        # and attachments parse on the first turn but are lost afterwards.
+        _files_meta: list = []
+        if getattr(request, "files", None):
+            _files_meta, _history_files = await self._build_cluster_files_persist(
+                request.files, orchestrator
+            )
+            if _history_files:
+                _result.history_files = _history_files
         await BatchPersistQueue.enqueue(PersistTask(
             task_type="save_messages",
             args={
@@ -700,6 +813,9 @@ class MultiAgentService:
                 # This turn's variable values are persisted on the user row so a
                 # cluster regeneration can read them back (key omitted when absent)
                 "variables_meta": request.variables or None,
+                # Attachment references persisted for this turn (regeneration
+                # restores FileInput from them)
+                "files_meta": _files_meta,
                 # The user message attaches to the version the user is currently
                 # viewing, so a version switch isolates follow-up turns by parent
                 "user_parent_message_id": await self._get_last_current_assistant_id(
@@ -1007,6 +1123,7 @@ class MultiAgentService:
         user_rag_memory_id: str = '',
         thinking: bool = False,
         config: MultiAgentConfig | None = None,
+        source: str = HitLogSource.CONSOLE,
     ) -> dict[str, Any]:
         """Regenerate a cluster reply (non-streaming, multi-version support).
 
@@ -1056,9 +1173,54 @@ class MultiAgentService:
         # 6. Resolve the config and rebuild the orchestrator; inject the history
         # truncation time (= parent message created_at)
         resolved_config = await self._resolve_regenerate_config(app_id, config)
-        orchestrator = await MultiAgentOrchestrator.create(self.db, resolved_config)
 
         new_message_id = uuid.uuid4()
+
+        # Annotation hit: regeneration also checks annotations first; on a hit the
+        # orchestrator is skipped and the annotated answer is persisted as the new
+        # version (match only — the user message is not rewritten)
+        _annotation_hit = await self._match_cluster_annotation(
+            resolved_config.app_id, user_message_content, source=source
+        )
+        if _annotation_hit is not None:
+            new_msg = self._save_regenerated_message(
+                conversation_id=conversation_id,
+                content=_annotation_hit["answer"],
+                version=new_version,
+                parent_message_id=parent_msg_id,
+                meta_data=self._build_regenerate_meta(
+                    message_id,
+                    usage={"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+                    extra={"annotation_hit": {
+                        "annotation_id": _annotation_hit["annotation_id"],
+                        "similarity": _annotation_hit["similarity"],
+                        "question": _annotation_hit["question"],
+                    }},
+                ),
+                message_id=new_message_id,
+            )
+            logger.info(
+                "集群重新生成命中标注",
+                extra={
+                    "original_message_id": str(message_id),
+                    "new_message_id": str(new_msg.id),
+                    "version": new_version,
+                    "conversation_id": str(conversation_id),
+                },
+            )
+            return {
+                "message_id": str(new_msg.id),
+                "message": _annotation_hit["answer"],
+                "reasoning_content": None,
+                "version": new_version,
+                "conversation_id": str(conversation_id),
+                "suggested_questions": [],
+                "citations": [],
+                "audio_url": None,
+                "audio_status": None,
+            }
+
+        orchestrator = await MultiAgentOrchestrator.create(self.db, resolved_config)
         try:
             result = await orchestrator.execute(
                 message=user_message_content,
@@ -1147,6 +1309,7 @@ class MultiAgentService:
         user_rag_memory_id: str = '',
         thinking: bool = False,
         config: MultiAgentConfig | None = None,
+        source: str = HitLogSource.CONSOLE,
     ) -> AsyncGenerator[str, None]:
         """Regenerate a cluster reply (streaming, multi-version support).
 
@@ -1185,7 +1348,6 @@ class MultiAgentService:
         # so the user does not re-enter required variables
         variables = self._restore_variables_from_parent(parent_msg, variables)
         resolved_config = await self._resolve_regenerate_config(app_id, config)
-        orchestrator = await MultiAgentOrchestrator.create(self.db, resolved_config)
 
         new_message_id = uuid.uuid4()
         start_time = _time.time()
@@ -1199,6 +1361,48 @@ class MultiAgentService:
             "version": new_version,
             "timestamp": start_time,
         })
+
+        # Annotation hit: regeneration checks annotations first; on a hit the
+        # orchestrator is skipped and the annotated answer is persisted as the new
+        # version, emitting the same message/end/regenerate_end contract.
+        _annotation_hit = await self._match_cluster_annotation(
+            resolved_config.app_id, user_message_content, source=source
+        )
+        if _annotation_hit is not None:
+            _answer = _annotation_hit["answer"]
+            self._save_regenerated_message(
+                conversation_id=conversation_id,
+                content=_answer,
+                version=new_version,
+                parent_message_id=parent_msg_id,
+                meta_data=self._build_regenerate_meta(
+                    message_id,
+                    usage={"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+                    extra={"annotation_hit": {
+                        "annotation_id": _annotation_hit["annotation_id"],
+                        "similarity": _annotation_hit["similarity"],
+                        "question": _annotation_hit["question"],
+                    }},
+                ),
+                message_id=new_message_id,
+            )
+            yield _sse("message", {"content": _answer})
+            yield _sse("end", {
+                "status": "completed",
+                "elapsed_time": _time.time() - start_time,
+                "conversation_id": str(conversation_id),
+                "message_id": str(new_message_id),
+                "message_length": len(_answer),
+                "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+            })
+            yield _sse("regenerate_end", {
+                "message_id": str(new_message_id),
+                "version": new_version,
+                "conversation_id": str(conversation_id),
+            })
+            return
+
+        orchestrator = await MultiAgentOrchestrator.create(self.db, resolved_config)
 
         full_content = ""
         usage: dict[str, Any] = {}
