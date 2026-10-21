@@ -47,7 +47,7 @@ logger = logging.getLogger(__name__)
 
 #: Attribute the decorator writes; route objects never see it, their endpoint does.
 EXTERNAL_API_MARKER = "__memory_external_api__"
-SNAPSHOT_SCHEMA = 2
+SNAPSHOT_SCHEMA = 1
 #: Committed at the package root (``src/``), which is already shipped by the
 #: image; resolved from the file so it works both in the source tree and in
 #: the container, where ``src/`` is copied wholesale to ``/app/src``.
@@ -400,23 +400,57 @@ _PARAMETER_LISTS = (
 )
 
 
-def _collect_parameters(dependant: Any, out: dict[str, dict[str, Any]]) -> None:
+def _store_parameter(
+    out: dict[str, dict[str, Any]],
+    sources: dict[str, str],
+    key: str,
+    contract: dict[str, Any],
+    source: str,
+) -> None:
+    """Record by ``location:name``; disambiguate a genuine same-slot collision."""
+
+    existing = out.get(key)
+    if existing is None:
+        out[key] = contract
+        sources[key] = source
+        return
+    if existing == contract:
+        return
+
+    first_source = sources.pop(key)
+    out.pop(key)
+    out[f"{key}@{first_source}"] = existing
+    out[f"{key}@{source}"] = contract
+
+
+def _collect_parameters(
+    dependant: Any,
+    out: dict[str, dict[str, Any]],
+    sources: dict[str, str],
+    source: str = "endpoint",
+) -> None:
     """Flatten route params and every ``Depends`` layer below it.
 
-    Dependency parameters are part of the wire contract (FastAPI puts them in
-    OpenAPI and accepts them from callers), so they must be snapshotted too.
+    A parameter is identified by location and name, so the same name may appear
+    as both a query parameter and a header. A genuine collision in the same slot
+    keeps both entries, qualified by their source, instead of silently dropping
+    the later one and letting its changes pass the check.
     """
 
     for attribute, location in _PARAMETER_LISTS:
         for field in getattr(dependant, attribute, None) or ():
-            out.setdefault(field.name, _field_contract(field, location))
+            key = f"{location}:{field.name}"
+            _store_parameter(out, sources, key, _field_contract(field, location), source)
 
     for field in getattr(dependant, "body_params", None) or ():
         location = _body_location(field.field_info)
-        out.setdefault(field.name, _field_contract(field, location))
+        key = f"{location}:{field.name}"
+        _store_parameter(out, sources, key, _field_contract(field, location), source)
 
     for child in getattr(dependant, "dependencies", None) or ():
-        _collect_parameters(child, out)
+        name = getattr(child.call, "__qualname__", "dependency")
+        child_source = name if source == "endpoint" else f"{source}.{name}"
+        _collect_parameters(child, out, sources, child_source)
 
 
 def _response_contract(route: Any) -> dict[str, Any]:
@@ -439,7 +473,8 @@ def _route_key(route: object) -> str:
 
 def _route_contract(route: Any) -> dict[str, Any]:
     parameters: dict[str, dict[str, Any]] = {}
-    _collect_parameters(route.dependant, parameters)
+    sources: dict[str, str] = {}
+    _collect_parameters(route.dependant, parameters, sources)
     return {
         "endpoint": getattr(route.endpoint, "__name__", repr(route.endpoint)),
         "parameters": parameters,
@@ -510,6 +545,15 @@ def _diff_entry(
 
 def diff_external_api_contract(expected: Mapping[str, Any], actual: Mapping[str, Any]) -> list[str]:
     """Human-readable differences between the committed and running contracts."""
+
+    expected_schema = expected.get("schema") if isinstance(expected, Mapping) else None
+    actual_schema = actual.get("schema") if isinstance(actual, Mapping) else None
+    if expected_schema != SNAPSHOT_SCHEMA or actual_schema != SNAPSHOT_SCHEMA:
+        raise ValueError(
+            "contract schema mismatch: "
+            f"snapshot={expected_schema!r}, runtime={actual_schema!r}, "
+            f"expected={SNAPSHOT_SCHEMA}"
+        )
 
     expected_routes = expected.get("routes") if isinstance(expected, Mapping) else None
     actual_routes = actual.get("routes") if isinstance(actual, Mapping) else None

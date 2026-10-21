@@ -3,7 +3,7 @@
     "GET /internal/v1/memory/analytics/community_graph": {
       "endpoint": "community_graph",
       "parameters": {
-        "end_user_id": {
+        "query:end_user_id": {
           "annotation": "str",
           "constraints": [],
           "default": null,
@@ -52,14 +52,14 @@
     "GET /internal/v1/memory/analytics/graph_data": {
       "endpoint": "graph_data",
       "parameters": {
-        "center_node_id": {
+        "query:center_node_id": {
           "annotation": "str | None",
           "constraints": [],
           "default": null,
           "in": "query",
           "required": false
         },
-        "depth": {
+        "query:depth": {
           "annotation": "int",
           "constraints": [
             "Ge(ge=1)",
@@ -69,14 +69,14 @@
           "in": "query",
           "required": false
         },
-        "end_user_id": {
+        "query:end_user_id": {
           "annotation": "str",
           "constraints": [],
           "default": null,
           "in": "query",
           "required": true
         },
-        "limit": {
+        "query:limit": {
           "annotation": "int",
           "constraints": [
             "Ge(ge=0)",
@@ -86,14 +86,14 @@
           "in": "query",
           "required": false
         },
-        "node_types": {
+        "query:node_types": {
           "annotation": "str | None",
           "constraints": [],
           "default": null,
           "in": "query",
           "required": false
         },
-        "per_type_limits": {
+        "query:per_type_limits": {
           "annotation": "str | None",
           "constraints": [],
           "default": null,
@@ -142,7 +142,7 @@
     "GET /internal/v1/memory/analytics/memory_insight": {
       "endpoint": "memory_insight",
       "parameters": {
-        "end_user_id": {
+        "query:end_user_id": {
           "annotation": "str",
           "constraints": [],
           "default": null,
@@ -191,7 +191,7 @@
     "GET /internal/v1/memory/analytics/node_statistics": {
       "endpoint": "node_statistics",
       "parameters": {
-        "end_user_id": {
+        "query:end_user_id": {
           "annotation": "str",
           "constraints": [],
           "default": null,
@@ -240,7 +240,7 @@
     "GET /internal/v1/memory/analytics/user_summary": {
       "endpoint": "user_summary",
       "parameters": {
-        "end_user_id": {
+        "query:end_user_id": {
           "annotation": "str",
           "constraints": [],
           "default": null,
@@ -328,5 +328,5 @@
       }
     }
   },
-  "schema": 2
+  "schema": 1
 }
