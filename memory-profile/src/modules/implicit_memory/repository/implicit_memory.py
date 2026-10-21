@@ -7,8 +7,8 @@ from uuid import UUID
 
 from sqlalchemy import select
 
+from src.common.user_scope import user_exists_in_workspace
 from src.infrastructure.postgres import PostgresManager
-from src.models.references.end_user_model import EndUser
 from src.models.references.memory_implicit_model import ImplicitEmotionsStorage
 
 
@@ -19,13 +19,11 @@ class ImplicitMemoryRepository:
     async def check_user_in_workspace(
         self, end_user_id: UUID, workspace_id: UUID
     ) -> bool:
-        statement = select(EndUser.id).where(
-            EndUser.id == end_user_id,
-            EndUser.workspace_id == workspace_id,
-            EndUser.is_active.is_(True),
+        return await user_exists_in_workspace(
+            self.postgres,
+            end_user_id,
+            workspace_id,
         )
-        async with self.postgres.session() as session:
-            return (await session.scalar(statement)) is not None
 
     async def get_profile(self, end_user_id: UUID) -> dict[str, Any] | None:
         statement = (

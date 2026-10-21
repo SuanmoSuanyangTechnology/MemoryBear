@@ -8,6 +8,7 @@ from uuid import UUID
 
 from src.common.errors import BizCode, ProfileError
 from src.common.normalization import datetime_to_epoch_ms
+from src.common.user_scope import require_user_in_workspace
 from src.modules.perceptual.constants import FileStorageService, PerceptualType
 from src.modules.perceptual.repository.memory_perceptual import (
     MemoryPerceptualRepository,
@@ -31,17 +32,12 @@ class PerceptualMemoryService:
         else:
             raise ValueError("Either runtime or repository must be provided")
 
-    async def _ensure_user(self, end_user_id: UUID, workspace_id: UUID) -> None:
-        if not await self.repository.check_user_in_workspace(end_user_id, workspace_id):
-            raise ProfileError(
-                BizCode.USER_NOT_FOUND,
-                "终端用户不存在",
-                detail="end_user not found in current workspace",
-                status_code=404,
-            )
-
     async def count(self, *, end_user_id: UUID, workspace_id: UUID) -> dict[str, Any]:
-        await self._ensure_user(end_user_id, workspace_id)
+        await require_user_in_workspace(
+            self.repository,
+            end_user_id=end_user_id,
+            workspace_id=workspace_id,
+        )
         counts = await self.repository.count_by_type(end_user_id)
         return {
             "total": sum(counts.values()),
@@ -62,7 +58,11 @@ class PerceptualMemoryService:
         page: int,
         page_size: int,
     ) -> dict[str, Any]:
-        await self._ensure_user(end_user_id, workspace_id)
+        await require_user_in_workspace(
+            self.repository,
+            end_user_id=end_user_id,
+            workspace_id=workspace_id,
+        )
         rows, total = await self.repository.timeline(
             end_user_id=end_user_id,
             perceptual_type=(
@@ -86,7 +86,11 @@ class PerceptualMemoryService:
         workspace_id: UUID,
         perceptual_type: PerceptualType,
     ) -> dict[str, Any] | None:
-        await self._ensure_user(end_user_id, workspace_id)
+        await require_user_in_workspace(
+            self.repository,
+            end_user_id=end_user_id,
+            workspace_id=workspace_id,
+        )
         row = await self.repository.latest(
             end_user_id=end_user_id,
             perceptual_type=int(perceptual_type),

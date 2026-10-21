@@ -2,32 +2,30 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Any
 from uuid import UUID
 
 from src.common.errors import BizCode, ProfileError
+from src.common.normalization import as_utc_naive
+from src.common.user_scope import require_user_in_workspace
 from src.modules.implicit_memory.repository.implicit_memory import (
     ImplicitMemoryRepository,
 )
 from src.runtime import ProfileRuntime
 
 
-def _naive_datetime(value: datetime) -> datetime:
-    if value.tzinfo is None:
-        return value
-    return value.astimezone(UTC).replace(tzinfo=None)
-
-
 def _profile_timestamp(value: Any) -> datetime | None:
     if isinstance(value, (int, float)):
+        # Preserve the legacy API behavior: epoch values were converted in the
+        # process-local timezone before comparing them with request datetimes.
         return datetime.fromtimestamp(value / 1000)
     if isinstance(value, str):
         try:
             parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
         except ValueError:
             return None
-        return _naive_datetime(parsed)
+        return as_utc_naive(parsed)
     return None
 
 
@@ -48,13 +46,11 @@ class ImplicitMemoryService:
     async def _profile(
         self, *, end_user_id: UUID, workspace_id: UUID
     ) -> dict[str, Any] | None:
-        if not await self.repository.check_user_in_workspace(end_user_id, workspace_id):
-            raise ProfileError(
-                BizCode.USER_NOT_FOUND,
-                "终端用户不存在",
-                detail="end_user not found in current workspace",
-                status_code=404,
-            )
+        await require_user_in_workspace(
+            self.repository,
+            end_user_id=end_user_id,
+            workspace_id=workspace_id,
+        )
         return await self.repository.get_profile(end_user_id)
 
     async def check_data(self, *, end_user_id: UUID, workspace_id: UUID) -> bool:
@@ -96,8 +92,8 @@ class ImplicitMemoryService:
         preferences = profile.get("preferences", [])
         if not isinstance(preferences, list):
             return []
-        start = _naive_datetime(start_date) if start_date else None
-        end = _naive_datetime(end_date) if end_date else None
+        start = as_utc_naive(start_date) if start_date else None
+        end = as_utc_naive(end_date) if end_date else None
         result = []
         for preference in preferences:
             if not isinstance(preference, dict):

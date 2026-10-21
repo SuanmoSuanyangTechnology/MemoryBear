@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
-from src.common.errors import BizCode, ProfileError
+from src.common.normalization import datetime_to_epoch_ms, epoch_ms_to_datetime
+from src.common.user_scope import require_user_in_workspace
 from src.modules.display.engine_cards import build_cards_from_groups
 from src.modules.display.repository.memory_display import MemoryDisplayRepository
 from src.runtime import ProfileRuntime
@@ -15,20 +15,6 @@ from src.runtime import ProfileRuntime
 logger = logging.getLogger(__name__)
 
 ALL_ITEM_LIMIT = 1000
-
-
-def parse_timestamp_to_utc_naive(ts_ms: int | None) -> datetime | None:
-    if ts_ms is None:
-        return None
-    return datetime.fromtimestamp(ts_ms / 1000.0, tz=UTC).replace(tzinfo=None)
-
-
-def to_timestamp_ms(dt: datetime | None) -> int | None:
-    if dt is None:
-        return None
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=UTC)
-    return int(dt.timestamp() * 1000)
 
 
 class MemoryDisplayService:
@@ -50,17 +36,11 @@ class MemoryDisplayService:
     ) -> None:
         if end_user_id is None:
             return
-        is_member = await self.repository.check_user_in_workspace(
+        await require_user_in_workspace(
+            self.repository,
             end_user_id=end_user_id,
             workspace_id=workspace_id,
         )
-        if not is_member:
-            raise ProfileError(
-                BizCode.USER_NOT_FOUND,
-                "终端用户不存在",
-                detail="end_user not found in current workspace",
-                status_code=404,
-            )
 
     async def query_written(
         self,
@@ -78,8 +58,8 @@ class MemoryDisplayService:
             page=page,
             pagesize=pagesize,
             end_user_id=end_user_id,
-            start_time=parse_timestamp_to_utc_naive(start_time),
-            end_time=parse_timestamp_to_utc_naive(end_time),
+            start_time=epoch_ms_to_datetime(start_time),
+            end_time=epoch_ms_to_datetime(end_time),
         )
 
         items = [
@@ -90,7 +70,7 @@ class MemoryDisplayService:
                 "memory_type": record["memory_type"],
                 "name": record["name"],
                 "content": record["content"],
-                "occurred_at": to_timestamp_ms(record["occurred_at"]),
+                "occurred_at": datetime_to_epoch_ms(record["occurred_at"]),
             }
             for record in records
         ]
@@ -112,8 +92,8 @@ class MemoryDisplayService:
             page=page,
             pagesize=pagesize,
             end_user_id=end_user_id,
-            start_time=parse_timestamp_to_utc_naive(start_time),
-            end_time=parse_timestamp_to_utc_naive(end_time),
+            start_time=epoch_ms_to_datetime(start_time),
+            end_time=epoch_ms_to_datetime(end_time),
         )
 
         items = [
@@ -123,7 +103,7 @@ class MemoryDisplayService:
                 "search_mode": record["search_mode"],
                 "query": record["query"] or "",
                 "content": record["content"],
-                "occurred_at": to_timestamp_ms(record["occurred_at"]),
+                "occurred_at": datetime_to_epoch_ms(record["occurred_at"]),
             }
             for record in records
         ]
@@ -148,8 +128,8 @@ class MemoryDisplayService:
             page=page,
             pagesize=pagesize,
             end_user_id=end_user_id,
-            start_time=parse_timestamp_to_utc_naive(start_time),
-            end_time=parse_timestamp_to_utc_naive(end_time),
+            start_time=epoch_ms_to_datetime(start_time),
+            end_time=epoch_ms_to_datetime(end_time),
         )
         cards = build_cards_from_groups(
             groups=groups,

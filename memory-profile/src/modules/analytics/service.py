@@ -16,6 +16,7 @@ from uuid import UUID, uuid4
 from src.common import redis_cache
 from src.common.errors import BizCode, LocalizedProfileError
 from src.common.normalization import (
+    as_utc_naive,
     collapse_whitespace,
     datetime_to_epoch_ms,
     is_blank,
@@ -375,7 +376,7 @@ class WorkspaceStatisticsRefreshTimeoutError(RuntimeError):
 
 
 def _utcnow_naive() -> datetime:
-    return datetime.now(UTC).replace(tzinfo=None)
+    return as_utc_naive(datetime.now(UTC))
 
 
 def _snapshot_age(snapshot: dict[str, Any], now: datetime) -> timedelta:
@@ -389,11 +390,7 @@ def _snapshot_age(snapshot: dict[str, Any], now: datetime) -> timedelta:
         generated_at_datetime = datetime.fromtimestamp(seconds, UTC).replace(tzinfo=None)
     elif isinstance(generated_at, str) and generated_at:
         parsed = datetime.fromisoformat(generated_at.replace("Z", "+00:00"))
-        generated_at_datetime = (
-            parsed.replace(tzinfo=None)
-            if parsed.tzinfo is None
-            else parsed.astimezone(UTC).replace(tzinfo=None)
-        )
+        generated_at_datetime = as_utc_naive(parsed)
     else:
         raise ValueError("workspace statistics snapshot has no generated_at")
     return now - generated_at_datetime

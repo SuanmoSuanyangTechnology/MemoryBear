@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 from typing import Any
-from uuid import UUID
 
-from src.common.errors import BizCode, ProfileError
 from src.common.responses import ApiResponse
+from src.common.validation import parse_required_uuid
 from src.middleware.auth import MemoryPrincipal
 from src.modules.perceptual.constants import PerceptualType
 from src.modules.perceptual.service import PerceptualMemoryService
@@ -14,18 +13,6 @@ from src.runtime import ProfileRuntime
 
 ObjectApiResponse = ApiResponse[dict[str, Any]]
 LatestApiResponse = ApiResponse[dict[str, Any]]
-
-
-def parse_end_user_id(value: str) -> UUID:
-    try:
-        return UUID(value)
-    except (TypeError, ValueError, AttributeError) as exc:
-        raise ProfileError(
-            BizCode.INVALID_PARAMETER,
-            "无效的 end_user_id",
-            detail=f"'{value}' is not a valid UUID",
-            status_code=400,
-        ) from exc
 
 
 class PerceptualMemoryHandler:
@@ -46,7 +33,7 @@ class PerceptualMemoryHandler:
         self, context: MemoryPrincipal, end_user_id: str
     ) -> ObjectApiResponse:
         data = await self.service.count(
-            end_user_id=parse_end_user_id(end_user_id),
+            end_user_id=parse_required_uuid(end_user_id),
             workspace_id=context.workspace_id,
         )
         return ObjectApiResponse(data=data, msg="Memory statistics retrieved successfully")
@@ -61,7 +48,7 @@ class PerceptualMemoryHandler:
         page_size: int,
     ) -> ObjectApiResponse:
         data = await self.service.timeline(
-            end_user_id=parse_end_user_id(end_user_id),
+            end_user_id=parse_required_uuid(end_user_id),
             workspace_id=context.workspace_id,
             perceptual_type=perceptual_type,
             page=page,
@@ -79,7 +66,7 @@ class PerceptualMemoryHandler:
         perceptual_type: PerceptualType,
     ) -> LatestApiResponse:
         data = await self.service.latest(
-            end_user_id=parse_end_user_id(end_user_id),
+            end_user_id=parse_required_uuid(end_user_id),
             workspace_id=context.workspace_id,
             perceptual_type=perceptual_type,
         )

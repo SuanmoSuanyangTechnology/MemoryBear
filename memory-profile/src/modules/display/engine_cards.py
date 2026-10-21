@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import uuid
 from collections import defaultdict
-from datetime import UTC, date, datetime
+from datetime import date, datetime
 from typing import Any
+
+from src.common.normalization import datetime_to_epoch_ms
 
 _REFLECTION_COUNT_KEYS = (
     "entity_merged_count",
@@ -617,9 +619,7 @@ def build_cards_from_groups(
         name, content = generate_card_text(engine_type, merged, language)
 
         if max_occurred_at is not None:
-            if max_occurred_at.tzinfo is None:
-                max_occurred_at = max_occurred_at.replace(tzinfo=UTC)
-            ms = int(max_occurred_at.timestamp() * 1000)
+            ms = datetime_to_epoch_ms(max_occurred_at)
         else:
             ms = 0
         cards.append({

@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import logging
 from typing import Any
-from uuid import UUID
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from src.common.errors import BizCode, ProfileError
 from src.common.pagination import PageData
 from src.common.responses import ApiResponse
+from src.common.validation import parse_optional_uuid
+from src.i18n import resolve_language
 from src.middleware.auth import MemoryPrincipal
 from src.modules.display.service import MemoryDisplayService
 from src.runtime import ProfileRuntime
@@ -17,13 +18,6 @@ from src.runtime import ProfileRuntime
 logger = logging.getLogger(__name__)
 
 DisplayPageApiResponse = ApiResponse[PageData[dict[str, Any]]]
-
-
-def resolve_language(language_type: str | None) -> str:
-    if not language_type:
-        return "zh"
-    normalized = language_type.strip().lower()
-    return normalized if normalized in {"zh", "en"} else "zh"
 
 
 def validate_time_window(start_time: int | None, end_time: int | None) -> None:
@@ -55,21 +49,6 @@ def validate_timezone(timezone_str: str | None) -> str:
             status_code=400,
         ) from exc
     return normalized
-
-
-def parse_optional_uuid(value: str | None, name: str = "end_user_id") -> UUID | None:
-    if value is None or not value.strip():
-        return None
-    normalized = value.strip()
-    try:
-        return UUID(normalized)
-    except (ValueError, AttributeError) as exc:
-        raise ProfileError(
-            BizCode.INVALID_PARAMETER,
-            f"无效的 {name}",
-            detail=f"'{normalized}' is not a valid UUID",
-            status_code=400,
-        ) from exc
 
 
 class MemoryDisplayHandler:
