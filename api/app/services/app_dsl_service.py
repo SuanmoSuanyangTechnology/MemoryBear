@@ -12,7 +12,7 @@ from app.core.config import settings
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException, ResourceNotFoundException
 from app.models import AgentConfig, MultiAgentConfig
-from app.models.app_model import App, AppType
+from app.models.app_model import App, AppStatus, AppType
 from app.models.appshare_model import AppShare
 from app.models.app_release_model import AppRelease
 from app.models.knowledge_model import Knowledge
@@ -232,11 +232,11 @@ class AppDslService:
                     config["model"] = model
 
                 # 引用模式：把被引用 Agent 应用的 app_id 转成名称引用，便于跨环境按名重绑。
-                # release_id 跨环境无效，导出时丢弃，导入后统一回退 current。
+                # release_id 保留导出：导入时按 UUID 精确校验，同环境可还原固定版本，
+                # 跨环境命中不了会自动回退 current（见 _bind_agent_release）。
                 if config.get("mode") == "reference":
                     reference = dict(config.get("reference") or {})
                     ref_app_id = reference.pop("app_id", None)
-                    reference.pop("release_id", None)
                     if ref_app_id:
                         reference["_ref"] = self._agent_ref(ref_app_id)
                     config["reference"] = reference
@@ -759,6 +759,65 @@ class AppDslService:
             ).first()
         return None
 
+    @staticmethod
+    def _is_published_agent(app: Optional[App]) -> bool:
+        """目标 Agent 应用是否已发布可用（存在发布版本）。
+
+        与保存/引用链路的口径一致（app_service 保存引用要求 status 为 active，
+        published_agent_runner 运行期同样要求），并额外要求 current_release_id 有值：
+        发布时两字段一起写入，而 release 记录从不失效，故以 status 为准，未发布的引用
+        运行期会直接报 APP_NOT_PUBLISHED（multi_agent_release_resolver），
+        因此导入阶段就必须把未发布的引用清掉。
+        """
+        if app is None:
+            return False
+        return app.status == AppStatus.ACTIVE and app.current_release_id is not None
+
+    @staticmethod
+    def _as_uuid(value) -> Optional[uuid.UUID]:
+        """宽容地把值转成 UUID；非法值返回 None（不抛错，避免导入整体失败）。"""
+        if isinstance(value, uuid.UUID):
+            return value
+        if value is None or value == "":
+            return None
+        try:
+            return uuid.UUID(str(value))
+        except (ValueError, AttributeError, TypeError):
+            return None
+
+    def _match_pinned_release(self, app: App, *candidates) -> Optional[AppRelease]:
+        """在目标环境按 UUID 精确匹配固定版本：必须存在、归属该应用、且未下线。
+
+        用 UUID 而不是版本号匹配：AppRelease.version 是应用内自增整数（跨环境不复用），
+        源环境的 v3 与目标环境的 v3 内容不同，按版本号重绑会静默绑错。
+        """
+        for candidate in candidates:
+            release_id = self._as_uuid(candidate)
+            if release_id is None:
+                continue
+            release = self.db.query(AppRelease).filter(
+                AppRelease.id == release_id,
+                AppRelease.app_id == app.id,
+                AppRelease.is_active.is_(True),
+            ).first()
+            if release is not None:
+                return release
+        return None
+
+    def _bind_agent_release(self, app: Optional[App], *candidates) -> tuple[Optional[str], Optional[AppRelease]]:
+        """解析引用的版本策略：以发布状态为唯一门槛，已发布才谈固定/跟随最新。
+
+        返回 (policy, release)：已发布时 ("pinned", release) 精确命中固定版本，
+        否则 ("current", None) 跟随最新发布版本；未发布（status != active，含 draft/archived）
+        或应用不存在时 (None, None)，调用方应清空引用。
+        """
+        if not self._is_published_agent(app):
+            return None, None
+        pinned = self._match_pinned_release(app, *candidates)
+        if pinned is not None:
+            return "pinned", pinned
+        return "current", None
+
     def _resolve_sub_agents(self, sub_agents: list, warnings: list, workspace_id: uuid.UUID) -> list:
         result = []
         for s in (sub_agents or []):
@@ -779,10 +838,28 @@ class AppDslService:
                 # 目标工作空间不存在对应子 Agent 时，直接清空该子 Agent 配置（整条剔除）
                 warnings.append(f"子 Agent '{label}' 在目标工作空间不存在，已清空，请导入后手动添加")
                 continue
+            original_agent_id = entry.get("agent_id")
             entry["agent_id"] = str(a.id)
-            # agent_id 现为子 Agent 应用 ID。release_id 跨环境无效，导入后一律跟随最新发布版本
-            entry["release_policy"] = "current"
-            entry["release_id"] = None
+            # agent_id 现为子 Agent 应用 ID。版本：release_id 能在目标环境精确命中（同一应用、
+            # 未下线）就保留 pinned；否则回退 current（跟随最新发布版本）；无可用版本则整条剔除。
+            # 旧 DSL 的 agent_id 本身可能就是固定 release ID，一并作为候选。
+            policy, release = self._bind_agent_release(
+                a, entry.get("release_id"), original_agent_id
+            )
+            if policy is None:
+                # 应用不存在/已归档/从未发布：绑定后运行期解析不到发布版本，整条剔除
+                warnings.append(f"子 Agent '{label}' 尚未发布，已清空，请发布后重新添加")
+                continue
+            if policy == "pinned":
+                entry["release_policy"] = "pinned"
+                entry["release_id"] = str(release.id)
+            else:
+                if entry.get("release_id") or entry.get("release_policy") == "pinned":
+                    warnings.append(
+                        f"子 Agent '{label}' 的固定版本在目标环境不存在或已下线，已改为跟随最新发布版本"
+                    )
+                entry["release_policy"] = "current"
+                entry["release_id"] = None
             result.append(entry)
         return result
 
@@ -804,6 +881,10 @@ class AppDslService:
             if not a:
                 # 目标 Agent 在目标工作空间不存在（可能对应子 Agent 已被清空），整条剔除避免悬空路由
                 warnings.append(f"路由目标 Agent '{label}' 在目标工作空间不存在，已清空该路由规则")
+                continue
+            if not self._is_published_agent(a):
+                # 目标 Agent 未发布：与子 Agent 同口径剔除，避免运行期悬空路由
+                warnings.append(f"路由目标 Agent '{label}' 尚未发布，已清空该路由规则")
                 continue
             entry["target_agent_id"] = str(a.id)
             result.append(entry)
@@ -986,11 +1067,33 @@ class AppDslService:
                         if ref_name
                         else None
                     )
-                    if target_app:
+                    # 固定版本优先：release_id 能在目标环境精确命中（同一应用、未下线）就保留
+                    # pinned；否则回退 current 跟随最新；都没有则回退内置。
+                    policy, release = self._bind_agent_release(
+                        target_app, reference.get("release_id")
+                    )
+                    if policy is not None:
+                        if policy == "pinned":
+                            reference["release_policy"] = "pinned"
+                            reference["release_id"] = str(release.id)
+                        else:
+                            if reference.get("release_id") or reference.get("release_policy") == "pinned":
+                                warnings.append(
+                                    f"[{node_label}] 引用的 Agent 应用 '{ref_name}' 的固定版本"
+                                    "在目标环境不存在或已下线，已改为跟随最新发布版本"
+                                )
+                            reference["release_policy"] = "current"
+                            reference["release_id"] = None
                         reference["app_id"] = str(target_app.id)
-                        reference["release_policy"] = "current"
-                        reference["release_id"] = None
                         config["reference"] = reference
+                    elif target_app:
+                        # 应用存在但从未发布（或已归档）：保留引用会在运行期报未发布，回退内置
+                        warnings.append(
+                            f"[{node_label}] 引用的 Agent 应用 '{ref_name}' 尚未发布，"
+                            "已回退为内置模式，请发布后手动重新引用"
+                        )
+                        config["mode"] = "inline"
+                        config["reference"] = None
                     else:
                         warnings.append(
                             f"[{node_label}] 引用的 Agent 应用 '{ref_name or reference.get('app_id')}' "
