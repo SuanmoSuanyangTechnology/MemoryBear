@@ -22,6 +22,7 @@
     "@codemirror/lang-json": "^6.0.2",
     "@codemirror/lang-python": "^6.2.1",
     "@codemirror/lang-rust": "^6.0.2",
+    "@codemirror/merge": "^6.12.3",
     "@codemirror/state": "^6.5.4",
     "@codemirror/theme-one-dark": "^6.1.3",
     "@codemirror/view": "^6.39.12",

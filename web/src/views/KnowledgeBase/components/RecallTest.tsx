@@ -178,8 +178,12 @@ const RecallTest = () => {
             ? { modality: 'image', content: image }
             : { modality: 'text', content: query || '' },
           kb_ids: knowledgeBaseId ? [knowledgeBaseId] : [],
-          similarity_threshold:
-            retrieve_type === 'participle' ? undefined : similarity_threshold || 0.2,
+          ...(retrieve_type !== 'wiki-FAQ'
+            ? {
+                similarity_threshold:
+                  retrieve_type === 'participle' ? undefined : similarity_threshold || 0.2,
+              }
+            : {}),
           vector_similarity_weight: vector_similarity_weight || 0.3,
           top_k: top_k || 100,
           // hybrid: values.retrieve_type !== hybrid ? true : false,
@@ -348,8 +352,9 @@ const RecallTest = () => {
               </>
             )}
 
-            {/* Show when retrieve_type = participle or hybrid */}
-            {(formValues.retrieve_type === 'semantic' ||
+            {/* Semantic similarity configuration for supported retrieval modes */}
+            {(formValues.retrieve_type === 'wiki-FAQ' ||
+              formValues.retrieve_type === 'semantic' ||
               (formValues.retrieve_type === 'hybrid' &&
                 formValues.rerank_mode === 'reranking_model')) && (
               <div>

@@ -76,6 +76,15 @@ export interface RecallTestMetadata {
   sort_id: number;
   score: number | null;
   status?: number;
+
+  chunk_type: 'wiki-FAQ',
+  faq_id: string;
+  wiki_page_id: string;
+  question: string;
+  answer: string;
+  answers: string[];
+  answer_strategy: 'all',
+  content_revision: number;
 }
 
 export interface RecallTestData {
@@ -113,6 +122,7 @@ export interface FolderFormData {
   id?: string; // 文件夹ID 新建时为空
   kb_id: string; // 知识库ID
   parent_id: string; // 父ID 最顶层=知识库id
+  parent_name?: string; // 父目录名称
   folder_name?: string; // 文件夹名称
   page?: number;
   pagesize?: number;
@@ -160,6 +170,12 @@ export interface ParserConfig {
     vision_enabled?: boolean; // 是否启用图片视觉
     vision_mode?: 0 | 1 | 2 | string; // 图片视觉模式 0 文本图片 1 混合图片 2 纯图像
   }
+
+  wiki?: {
+    enabled: boolean;
+    language: 'zh-CN';
+    extract_prompt: string; // 主题抽取关注方向，最多 12000 字符，默认空字符串
+  }
 }
 // 文件数据
 export interface KnowledgeBaseDocumentData { // 知识库文档数据
@@ -205,7 +221,11 @@ export interface KnowledgeBaseModalProps {
 }
 // 定义组件暴露的方法接口
 export interface CreateModalRef {
-  handleOpen: (knowledgeBaseListItem?: KnowledgeBaseListItem | null, type?: string) => void;
+  handleOpen: (
+    knowledgeBaseListItem?: KnowledgeBaseListItem | null,
+    type?: string,
+    step?: number,
+  ) => void;
 }
 export interface CreateModalRefProps {
   refreshTable?: () => void;
@@ -234,7 +254,11 @@ export interface MetadataModalRef {
 }
 
 export interface CreateFolderModalRef {
-  handleOpen: (folder?: FolderFormData | null,type?:string) => void;
+  handleOpen: (
+    folder?: FolderFormData | null,
+    type?: string,
+    parentPath?: string[],
+  ) => void;
 }
 
 export interface CreateFolderModalRefProps{
