@@ -444,9 +444,9 @@ export const workflowPart1 = {
         agent: {
           mode: 'Configuration Mode',
           inlineMode: 'Configure in Node',
-          referenceMode: 'Associated Agent',
-          referenceAgent: 'Associated Agent',
-          referenceAgentPlaceholder: 'Select an Agent to associate in this workspace',
+          referenceMode: 'Associated Agent/Cluster',
+          referenceAgent: 'Associated Agent/Cluster',
+          referenceAgentPlaceholder: 'Select an Agent/Cluster to associate in this workspace',
           releasePolicy: 'Version Policy',
           currentRelease: 'Follow Current Release',
           pinnedRelease: 'Pin Release',

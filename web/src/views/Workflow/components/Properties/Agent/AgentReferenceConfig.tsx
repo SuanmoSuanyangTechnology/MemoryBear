@@ -1,11 +1,13 @@
 import { type FC, useEffect } from 'react'
-import { Form, Select } from 'antd'
+import { Form, Select, Space } from 'antd'
 import { useTranslation } from 'react-i18next'
 
 import { getApplicationListUrl } from '@/api/application'
-import DebounceSelect from '@/components/DebounceSelect'
+import CustomSelect from '@/components/CustomSelect';
 import type { AgentReference } from '../../../types'
 import type { Release } from '@/views/ApplicationConfig/types/release'
+import Tag from '@/components/Tag';
+import { colorObj } from '@/views/ApplicationConfig/constants';
 
 interface AgentReferenceConfigProps {
   releaseList: Release[]
@@ -51,15 +53,25 @@ const AgentReferenceConfig: FC<AgentReferenceConfigProps> = ({
         label={t('workflow.config.agent.referenceAgent')}
         required
       >
-        <DebounceSelect
+        <CustomSelect
           url={getApplicationListUrl}
-          params={{ status: 'active', type: 'agent', include_shared: false }}
+          params={{ pagesize: 100, status: 'active', type: 'agent,multi_agent', orchestration_mode: 'supervisor_loop' }}
           valueKey="id"
-          labelKey="name"
-          pageSize={100}
-          labelInValue={false}
-          placeholder={t('workflow.config.agent.referenceAgentPlaceholder')}
-          className="rb:w-full"
+          labelKey="label"
+          format={(items) => {
+            return items.map(item => ({
+              ...item,
+              label: (
+                <Space align="center" size={8} data-name={item.name}>
+                  {item.name}
+                  <Tag color={colorObj[item.type]}>{t(`application.${item.type}`)}</Tag>
+                </Space>
+              )
+            }))
+          }}
+          hasAll={false}
+          optionFilterProp="search"
+          showSearch={true}
           onChange={handleApplicationChange}
         />
       </Form.Item>

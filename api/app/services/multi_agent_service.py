@@ -25,6 +25,7 @@ from app.services.multi_agent_release_resolver import (
     describe_release_state,
     resolve_release_for_save,
 )
+from app.models.annotation_model import HitLogSource
 
 logger = get_business_logger()
 
@@ -111,6 +112,39 @@ class MultiAgentService:
             limit=1,
         )
         return len(existing_messages) > 0
+
+    async def _cluster_annotation_hit(
+        self,
+        config,
+        message: str,
+        conversation_id,
+        message_id,
+        user_message_id,
+        storage_type: Optional[str] = None,
+        user_rag_memory_id: Optional[str] = None,
+        source: str = HitLogSource.CONSOLE,
+    ) -> Optional[dict]:
+        """集群标注命中并落库 user/assistant（用于 run/run_stream 首轮对话）。
+
+        委托 AppChatService 同一份实现（兼容同步/异步 Session），未配置/未启用/
+        未命中/任何异常均返回 None，调用方继续走正常编排，不阻断对话。
+        """
+        from app.services.app_chat_service import AppChatService
+        return await AppChatService(self.db)._cluster_annotation_hit(
+            config, message, conversation_id, message_id, user_message_id,
+            storage_type=storage_type, user_rag_memory_id=user_rag_memory_id, source=source,
+        )
+
+    async def _build_cluster_files_persist(self, files, orchestrator) -> tuple:
+        """集群本轮附件落库内容（files_meta, history_files），委托 AppChatService 同一份实现，
+        与分享端集群同口径（元数据查询走独立 async session，不依赖 self.db 类型）。"""
+        from app.services.app_chat_service import AppChatService
+        return await AppChatService(self.db)._build_cluster_files_persist(files, orchestrator)
+
+    async def _match_cluster_annotation(self, app_id, message: str, source: str = HitLogSource.CONSOLE) -> Optional[dict]:
+        """仅做集群标注匹配（不落库消息），用于重新生成场景——消息版本由 regenerate 统一落库。"""
+        from app.services.app_chat_service import AppChatService
+        return await AppChatService(self.db)._check_annotation_match_async(app_id, message, source=source)
 
     async def _resolve_cluster_opening(
         self,
@@ -562,13 +596,15 @@ class MultiAgentService:
     async def run(
         self,
         app_id: uuid.UUID,
-        request: MultiAgentRunRequest
+        request: MultiAgentRunRequest,
+        source: str = HitLogSource.CONSOLE,
     ) -> dict:
         """运行多 Agent 任务
 
         Args:
             app_id: 应用 ID
             request: 运行请求
+            source: 标注命中来源（console=控制台试运行，external=外部/分享入口）
 
         Returns:
             执行结果
@@ -581,13 +617,27 @@ class MultiAgentService:
         if not config.is_active:
             raise BusinessException("多 Agent 配置已禁用", BizCode.NOT_FOUND)
 
-        # 2. 创建编排器
-        orchestrator = await MultiAgentOrchestrator.create(self.db, config)
-
         # S1 轮次锚点：预生成 assistant 消息 ID，下传给编排器写 master 执行记录，
         # 落库用同一 ID，日志详情按消息挂载节点不依赖时序吸附。
         message_id = uuid.uuid4()
         user_message_id = uuid.uuid4()
+
+        # 标注命中：命中则不进编排器，直接落库返回标注答案（与正式对话/Agent 试运行一致）
+        _annotation_hit = await self._cluster_annotation_hit(
+            config, request.message, request.conversation_id, message_id, user_message_id,
+            source=source,
+        )
+        if _annotation_hit is not None:
+            return {
+                "conversation_id": str(request.conversation_id) if request.conversation_id else None,
+                "message": _annotation_hit["answer"],
+                "message_id": str(message_id),
+                "user_message_id": str(user_message_id),
+                "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+            }
+
+        # 2. 创建编排器
+        orchestrator = await MultiAgentOrchestrator.create(self.db, config)
 
         # 新会话开场白（features.opening_statement 开启才查库；老集群 features 为空，零开销）
         opening_statement, _opening_suggested_questions = await self._resolve_cluster_opening(
@@ -650,6 +700,15 @@ class MultiAgentService:
                 "user_parent_message_id": await self._get_last_current_assistant_id(request.conversation_id),
                 "should_memorize": orchestrator.cluster_memory_enabled(),
             }
+            # 附件落库（与 Agent / 分享端集群同口径）：缺了 meta.files，重新生成时
+            # _restore_files_from_parent 拿不到 FileInput，表现为"首轮能解析附件、重新生成取不到"。
+            if getattr(request, "files", None):
+                _files_meta, _history_files = await self._build_cluster_files_persist(
+                    request.files, orchestrator
+                )
+                _persist_args["files_meta"] = _files_meta
+                if _history_files:
+                    _result.history_files = _history_files
             # 新会话开场白落库（与 Agent 一致）：首轮 user 挂在开场白下，切版本分支链才带得出开场白
             if opening_statement:
                 _persist_args["is_new_conversation"] = True
@@ -691,13 +750,15 @@ class MultiAgentService:
         app_id: uuid.UUID,
         request: MultiAgentRunRequest,
         storage_type :str,
-        user_rag_memory_id :str
+        user_rag_memory_id :str,
+        source: str = HitLogSource.CONSOLE,
     ):
         """运行多 Agent 任务（流式返回）
 
         Args:
             app_id: 应用 ID
             request: 运行请求
+            source: 标注命中来源（console=控制台试运行，external=外部/分享入口）
 
         Yields:
             SSE 格式的事件流
@@ -710,9 +771,6 @@ class MultiAgentService:
         if not config.is_active:
             raise BusinessException("多 Agent 配置已禁用", BizCode.NOT_FOUND)
 
-        # 2. 创建编排器
-        orchestrator = await MultiAgentOrchestrator.create(self.db, config)
-
         full_content = ""
         total_tokens = 0
         # 本轮 assistant 消息 ID（S1 轮次锚点）：预先生成并下传给编排器，
@@ -722,6 +780,21 @@ class MultiAgentService:
         # 表现为"一轮会话分散到多条日志消息"。
         message_id = uuid.uuid4()
         user_message_id = uuid.uuid4()
+
+        # 标注命中：命中则不进编排器，直接落库并下发 message/end（与正式对话一致）
+        _annotation_hit = await self._cluster_annotation_hit(
+            config, request.message, request.conversation_id, message_id, user_message_id,
+            storage_type=storage_type, user_rag_memory_id=user_rag_memory_id, source=source,
+        )
+        if _annotation_hit is not None:
+            _answer = _annotation_hit["answer"]
+            yield f"event: start\ndata: {json.dumps({'conversation_id': str(request.conversation_id) if request.conversation_id else None, 'message_id': str(message_id), 'user_message_id': str(user_message_id)}, ensure_ascii=False)}\n\n"
+            yield f"event: message\ndata: {json.dumps({'content': _answer, 'conversation_id': str(request.conversation_id) if request.conversation_id else None}, ensure_ascii=False)}\n\n"
+            yield f"event: end\ndata: {json.dumps({'conversation_id': str(request.conversation_id) if request.conversation_id else None, 'message_id': str(message_id), 'message_length': len(_answer), 'usage': {'prompt_tokens': 0, 'completion_tokens': 0, 'total_tokens': 0}}, ensure_ascii=False)}\n\n"
+            return
+
+        # 2. 创建编排器
+        orchestrator = await MultiAgentOrchestrator.create(self.db, config)
 
         # 新会话开场白（features.opening_statement 开启才查库；老集群 features 为空，零开销）
         opening_statement, _opening_suggested_questions = await self._resolve_cluster_opening(
@@ -812,6 +885,13 @@ class MultiAgentService:
             if end_extras.get("audio_url"):
                 _result.audio_url = end_extras.get("audio_url")
                 _result.audio_status = end_extras.get("audio_status")
+        # 附件落库（与 Agent / 分享端集群同口径）：缺了 meta.files，重新生成时
+        # _restore_files_from_parent 拿不到 FileInput，表现为"首轮能解析附件、重新生成取不到"。
+        _files_meta: list = []
+        if getattr(request, "files", None):
+            _files_meta, _history_files = await self._build_cluster_files_persist(request.files, orchestrator)
+            if _history_files:
+                _result.history_files = _history_files
         await BatchPersistQueue.enqueue(PersistTask(
             task_type="save_messages",
             args={
@@ -819,8 +899,10 @@ class MultiAgentService:
                 "result": _result,
                 "user_message_id_override": user_message_id,
                 "user_message_content": request.message,
-                # 本轮变量值随 user 消息落库，重新生成时回读（无变量不加键）
+                # 本轮变量值随user 消息落库，重新生成时回读（无变量不加键）
                 "variables_meta": request.variables or None,
+                # 本轮附件引用（重新生成时据此还原 FileInput）
+                "files_meta": _files_meta,
 
                 # user 消息接在用户当前所处的 assistant 版本之后，使切换版本时按 parent 隔离后续对话
                 "user_parent_message_id": await self._get_last_current_assistant_id(request.conversation_id),
@@ -1087,6 +1169,7 @@ class MultiAgentService:
         user_rag_memory_id: str = '',
         thinking: bool = False,
         config: Optional[MultiAgentConfig] = None,
+        source: str = HitLogSource.CONSOLE,
     ) -> Dict[str, Any]:
         """重新生成集群回复（非流式，多版本支持）。
 
@@ -1129,9 +1212,54 @@ class MultiAgentService:
 
         # 6. 解析配置并重建编排器；注入历史截断时间（= 父消息创建时间）
         resolved_config = await self._resolve_regenerate_config(app_id, config)
-        orchestrator = await MultiAgentOrchestrator.create(self.db, resolved_config)
 
         new_message_id = uuid.uuid4()
+
+        # 标注命中：重新生成同样先查标注，命中则不进编排器，直接把标注答案作为新版本落库
+        #（仅匹配，不重写 user 消息；版本化落库走 _save_regenerated_message，与正常重跑同口径）
+        _annotation_hit = await self._match_cluster_annotation(
+            resolved_config.app_id, user_message_content, source=source
+        )
+        if _annotation_hit is not None:
+            new_msg = self._save_regenerated_message(
+                conversation_id=conversation_id,
+                content=_annotation_hit["answer"],
+                version=new_version,
+                parent_message_id=parent_msg_id,
+                meta_data=self._build_regenerate_meta(
+                    message_id,
+                    usage={"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+                    extra={"annotation_hit": {
+                        "annotation_id": _annotation_hit["annotation_id"],
+                        "similarity": _annotation_hit["similarity"],
+                        "question": _annotation_hit["question"],
+                    }},
+                ),
+                message_id=new_message_id,
+            )
+            logger.info(
+                "集群重新生成命中标注",
+                extra={
+                    "original_message_id": str(message_id),
+                    "new_message_id": str(new_msg.id),
+                    "version": new_version,
+                    "conversation_id": str(conversation_id),
+                },
+            )
+            return {
+                "message_id": str(new_msg.id),
+                "message": _annotation_hit["answer"],
+                "reasoning_content": None,
+                "version": new_version,
+                "conversation_id": str(conversation_id),
+                "suggested_questions": [],
+                "citations": [],
+                "audio_url": None,
+                "audio_status": None,
+            }
+
+        orchestrator = await MultiAgentOrchestrator.create(self.db, resolved_config)
+
         try:
             result = await orchestrator.execute(
                 message=user_message_content,
@@ -1216,6 +1344,7 @@ class MultiAgentService:
         user_rag_memory_id: str = '',
         thinking: bool = False,
         config: Optional[MultiAgentConfig] = None,
+        source: str = HitLogSource.CONSOLE,
     ) -> AsyncGenerator[str, None]:
         """重新生成集群回复（流式输出，多版本支持）。
 
@@ -1250,7 +1379,6 @@ class MultiAgentService:
         # 沿用首轮对话的变量值（请求显式传入的覆盖其上），用户不必重传必填变量
         variables = self._restore_variables_from_parent(parent_msg, variables)
         resolved_config = await self._resolve_regenerate_config(app_id, config)
-        orchestrator = await MultiAgentOrchestrator.create(self.db, resolved_config)
 
         new_message_id = uuid.uuid4()
         start_time = _time.time()
@@ -1263,6 +1391,47 @@ class MultiAgentService:
             "version": new_version,
             "timestamp": start_time,
         })
+
+        # 标注命中：重新生成同样先查标注，命中则不进编排器，直接把标注答案作为新版本落库，
+        # 下发 message/end/regenerate_end（与正常重跑同一事件契约）。
+        _annotation_hit = await self._match_cluster_annotation(
+            resolved_config.app_id, user_message_content, source=source
+        )
+        if _annotation_hit is not None:
+            _answer = _annotation_hit["answer"]
+            self._save_regenerated_message(
+                conversation_id=conversation_id,
+                content=_answer,
+                version=new_version,
+                parent_message_id=parent_msg_id,
+                meta_data=self._build_regenerate_meta(
+                    message_id,
+                    usage={"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+                    extra={"annotation_hit": {
+                        "annotation_id": _annotation_hit["annotation_id"],
+                        "similarity": _annotation_hit["similarity"],
+                        "question": _annotation_hit["question"],
+                    }},
+                ),
+                message_id=new_message_id,
+            )
+            yield _sse("message", {"content": _answer})
+            yield _sse("end", {
+                "status": "completed",
+                "elapsed_time": _time.time() - start_time,
+                "conversation_id": str(conversation_id),
+                "message_id": str(new_message_id),
+                "message_length": len(_answer),
+                "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+            })
+            yield _sse("regenerate_end", {
+                "message_id": str(new_message_id),
+                "version": new_version,
+                "conversation_id": str(conversation_id),
+            })
+            return
+
+        orchestrator = await MultiAgentOrchestrator.create(self.db, resolved_config)
 
         full_content = ""
         usage: Dict[str, Any] = {}

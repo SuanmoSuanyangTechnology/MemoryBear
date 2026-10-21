@@ -1,4 +1,5 @@
 """App 服务接口 - 基于 API Key 认证"""
+import asyncio
 import datetime
 import json
 import time
@@ -23,7 +24,7 @@ from app.core.config import settings
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
 from app.core.logging_config import get_business_logger
-from app.core.quota_manager import check_end_user_quota_async, report_quota_change
+from app.core.quota_manager import check_end_user_quota_async, report_quota_change_sync
 from app.core.response_utils import success
 from app.db import get_db, get_async_db_context
 from app.models.app_model import AppType
@@ -48,6 +49,33 @@ from app.utils.redis_cache import CACHE_MISS, get_json_async, set_json_async, re
 
 router = APIRouter(prefix="/app", tags=["V1 - App API"])
 logger = get_business_logger()
+
+# 后台告警任务的强引用集合，避免 task 被 GC 回收
+_quota_alert_tasks: set[asyncio.Task] = set()
+
+
+def _report_end_user_quota_in_background(tenant_id: uuid.UUID, workspace_id: uuid.UUID) -> None:
+    """新建终端用户后的配额告警评估：放到线程里后台执行，不占用 chat() 的请求链路。
+
+    告警评估器内部使用同步 get_db_context()，直接在事件循环里 await 会阻塞循环，
+    并在 chat() 持有 DB 会话期间拉长占用时间（高并发新用户时拖垮连接池）。
+    告警本就是尽力而为（失败不影响主业务），所以不等待结果。
+    """
+
+    async def _run() -> None:
+        try:
+            await asyncio.to_thread(
+                report_quota_change_sync,
+                tenant_id,
+                "end_user_quota",
+                workspace_id,
+            )
+        except Exception as exc:  # noqa: BLE001 - 告警旁路，不影响主业务
+            logger.warning(f"终端用户配额告警评估失败（已忽略）: {exc}")
+
+    task = asyncio.create_task(_run())
+    _quota_alert_tasks.add(task)
+    task.add_done_callback(_quota_alert_tasks.discard)
 
 
 @redis_cache(ttl=120, prefix="storage_type", skip_args=["db"], id_arg="workspace_id")
@@ -129,11 +157,7 @@ async def _get_or_create_v1_end_user_async(
     )
     # 终端用户已落库，用量真正发生变化后才评估告警。
     if workspace_tenant_id is not None:
-        await report_quota_change(
-            workspace_tenant_id,
-            "end_user_quota",
-            workspace_id=workspace_id,
-        )
+        _report_end_user_quota_in_background(workspace_tenant_id, workspace_id)
     await set_json_async(cache_key, {
         "id": str(new_user.id),
         "app_id": str(new_user.app_id),

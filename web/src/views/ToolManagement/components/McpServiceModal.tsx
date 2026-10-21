@@ -1,5 +1,5 @@
 import { forwardRef, useImperativeHandle, useState, useRef } from 'react';
-import { Form, Input, Select, App, Button, Tabs, Space, Flex } from 'antd';
+import { Form, Input, InputNumber, Select, App, Button, Tabs, Space, Flex } from 'antd';
 import { useTranslation } from 'react-i18next';
 
 import type { MCPToolItem, ToolItem } from '../types'
@@ -78,10 +78,6 @@ const McpServiceModal = forwardRef<McpServiceModalRef, McpServiceModalProps>(({
       })
 
       if (config_data?.connection_config?.headers) {
-        console.log(Object.keys(config_data.connection_config.headers).map(key => ({
-          key,
-          value: config_data.connection_config.headers[key]
-        })))
         setRequestHeaderList(Object.keys(config_data.connection_config.headers).map(key => ({
           key,
           value: config_data.connection_config.headers[key]
@@ -124,6 +120,7 @@ const McpServiceModal = forwardRef<McpServiceModalRef, McpServiceModalProps>(({
             ...config,
             connection_config: {
               ...config.connection_config,
+              timeout: typeof config.connection_config?.timeout === 'string' ? Number(config.connection_config?.timeout) : config.connection_config?.timeout,
               headers: requestHeaderList.reduce((acc: Record<string, string>, cur) => {
                 acc[cur.key] = cur.value
                 return acc
@@ -408,7 +405,7 @@ const McpServiceModal = forwardRef<McpServiceModalRef, McpServiceModalProps>(({
             label={t('tool.timeout')}
             hidden={activeTab !== 'config'}
           >
-            <Input type="number" min={5} max={300} placeholder={t('common.pleaseEnter')} />
+            <InputNumber min={5} max={300} placeholder={t('common.pleaseEnter')} className="rb:w-full!" />
           </FormItem>
         </>
       </Form>

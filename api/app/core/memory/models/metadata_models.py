@@ -348,16 +348,19 @@ def _trace(
     new: Optional[str],
     status: str = "applied",
     reason: Optional[str] = None,
+    normalize_entries: bool = True,
 ) -> None:
     """向快照 sink 追加一条变更记录；sink 为 None（未开启快照）时不做任何事。"""
     if sink is None:
         return
+    old_value = _normalize_entry(old) if normalize_entries and old else old
+    new_value = _normalize_entry(new) if normalize_entries and new else new
     sink.append({
         "chunk_index": None,
         "action": action,
         "field": field,
-        "old": _normalize_entry(old) if old else None,
-        "new": _normalize_entry(new) if new else None,
+        "old": old_value or None,
+        "new": new_value or None,
         "status": status,
         "reason": reason,
     })
@@ -572,6 +575,110 @@ def apply_metadata_operations(
                 _trace(trace_sink, action, trace_field, None, val)
             else:
                 _trace(trace_sink, action, trace_field, None, val, status="skipped", reason="duplicate")
+
+    return updated
+
+
+def apply_legacy_metadata_operations(
+    current_meta: Dict[str, Any],
+    operations: List[MetadataOperation],
+    trace_sink: Optional[List[Dict[str, Any]]] = None,
+) -> Dict[str, Any]:
+    """将旧 8 字段的增量操作应用到 PG 当前快照。
+
+    仅处理 ``LEGACY_METADATA_FIELDS``，其他 field 的操作丢弃。字符串按忽略大小写
+    去重，非字符串历史值原样保留；未匹配到的 delete/update 不追加新值。
+    """
+    updated: Dict[str, List[Any]] = {
+        field: normalize_legacy_metadata_values(current_meta.get(field))
+        for field in LEGACY_METADATA_FIELDS
+    }
+    act_map = {"add": "add_field", "update": "update_field", "delete": "delete_field"}
+
+    for op in operations:
+        field = op.field
+        action = act_map.get(op.op, "update_field")
+        if field not in LEGACY_METADATA_FIELDS:
+            logger.warning(f"[Metadata] 旧元数据链路丢弃未知 field 的操作: op={op.op}, field={field}")
+            _trace(
+                trace_sink,
+                action,
+                field,
+                op.old_value,
+                op.new_value or op.value,
+                status="skipped",
+                reason="undeclared_field",
+                normalize_entries=False,
+            )
+            continue
+
+        target_list = updated[field]
+        if op.op == "delete":
+            target_val = op.old_value or op.value
+            if not target_val:
+                _trace(
+                    trace_sink, action, field, None, None,
+                    status="skipped", reason="missing_value", normalize_entries=False,
+                )
+                continue
+            target_key = _legacy_metadata_entry_key(target_val)
+            updated_list = [x for x in target_list if _legacy_metadata_entry_key(x) != target_key]
+            if len(updated_list) == len(target_list):
+                logger.warning(f"[Metadata] 旧元数据 delete 未匹配到已有条目，丢弃操作: {target_val}")
+                _trace(
+                    trace_sink, action, field, target_val, None,
+                    status="skipped", reason="old_value_not_found", normalize_entries=False,
+                )
+                continue
+            updated[field] = updated_list
+            _trace(trace_sink, action, field, target_val, None, normalize_entries=False)
+
+        elif op.op == "update":
+            old_val = op.old_value
+            new_val = op.new_value or op.value
+            if not old_val or not new_val:
+                _trace(
+                    trace_sink, action, field, old_val, new_val,
+                    status="skipped", reason="missing_value", normalize_entries=False,
+                )
+                continue
+            old_key = _legacy_metadata_entry_key(old_val)
+            replaced = False
+            new_list: List[Any] = []
+            for item in target_list:
+                if _legacy_metadata_entry_key(item) == old_key:
+                    if not replaced:
+                        new_list.append(new_val)
+                        replaced = True
+                else:
+                    new_list.append(item)
+            if not replaced:
+                logger.warning(f"[Metadata] 旧元数据 update.old_value 未匹配到已有条目，丢弃操作: old={old_val}")
+                _trace(
+                    trace_sink, action, field, old_val, new_val,
+                    status="skipped", reason="old_value_not_found", normalize_entries=False,
+                )
+                continue
+            updated[field] = new_list
+            _trace(trace_sink, action, field, old_val, new_val, normalize_entries=False)
+
+        elif op.op == "add":
+            val = op.value
+            if not val:
+                _trace(
+                    trace_sink, action, field, None, None,
+                    status="skipped", reason="missing_value", normalize_entries=False,
+                )
+                continue
+            val_key = _legacy_metadata_entry_key(val)
+            if all(_legacy_metadata_entry_key(x) != val_key for x in target_list):
+                target_list.append(val)
+                _trace(trace_sink, action, field, None, val, normalize_entries=False)
+            else:
+                _trace(
+                    trace_sink, action, field, None, val,
+                    status="skipped", reason="duplicate", normalize_entries=False,
+                )
 
     return updated
 

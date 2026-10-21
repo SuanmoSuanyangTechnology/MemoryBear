@@ -1,27 +1,18 @@
-/*
- * @Author: ZhaoYing 
- * @Date: 2026-02-03 16:28:51 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-03 16:28:51 
- */
 /**
  * Sub-Agent Modal
  * Allows adding or editing sub-agents in multi-agent cluster configuration
  */
 
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState, type Key } from 'react';
-import { Form, Select, Input, InputNumber, Space } from 'antd';
+import { Form, Select, Input, InputNumber } from 'antd';
 import type { DefaultOptionType } from 'antd/es/select'
 import { useTranslation } from 'react-i18next';
-import { useParams } from 'react-router-dom';
 
 import type { SubAgentModalRef, SubAgentItem } from '../types'
 import RbModal from '@/components/RbModal'
 import CustomSelect from '@/components/CustomSelect';
 import { getApplicationListUrl, getReleaseList } from '@/api/application';
 import type { Release } from '@/views/ApplicationConfig/types/release'
-import Tag from '@/components/Tag';
-import { colorObj } from '../constants';
 
 const FormItem = Form.Item;
 /**
@@ -39,7 +30,6 @@ const SubAgentModal = forwardRef<SubAgentModalRef, SubAgentModalProps>(({
   refresh,
 }, ref) => {
   const { t } = useTranslation();
-  const { id } = useParams()
   const [visible, setVisible] = useState(false);
   const [form] = Form.useForm<SubAgentItem>();
   const [loading, setLoading] = useState(false)
@@ -183,20 +173,9 @@ const SubAgentModal = forwardRef<SubAgentModalRef, SubAgentModalProps>(({
         >
           <CustomSelect
             url={getApplicationListUrl}
-            params={{ pagesize: 100, status: 'active', type: 'agent,multi_agent', orchestration_mode: 'supervisor_loop' }}
+            params={{ pagesize: 100, status: 'active', type: 'agent' }}
             valueKey="id"
-            labelKey="label"
-            format={(items) => {
-              return (id == null ? items : items.filter((item) => String(item.id) !== id)).map(item => ({
-                ...item,
-                label: (
-                  <Space align="center" size={8} data-name={item.name}>
-                    {item.name}
-                    <Tag color={colorObj[item.type]}>{t(`application.${item.type}`)}</Tag>
-                  </Space>
-                )
-              }))
-            }}
+            labelKey="name"
             hasAll={false}
             optionFilterProp="search"
             showSearch={true}
