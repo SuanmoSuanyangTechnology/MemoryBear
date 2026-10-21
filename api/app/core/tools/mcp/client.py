@@ -23,7 +23,12 @@ class SimpleMCPClient:
     def __init__(self, server_url: str, connection_config: Dict[str, Any] = None):
         self.server_url = server_url
         self.connection_config = connection_config or {}
-        self.timeout = self.connection_config.get("timeout", 10)
+        # 前端可能传入字符串类型的超时值（如 "30"），统一转为 float
+        raw_timeout = self.connection_config.get("timeout", 10)
+        try:
+            self.timeout = float(raw_timeout)
+        except (TypeError, ValueError):
+            self.timeout = 10.0
         
         # 确定连接类型
         self.is_websocket = server_url.startswith(("ws://", "wss://"))
