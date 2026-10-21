@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -26,6 +27,8 @@ from src.middleware.trace import TraceIdMiddleware
 from src.modules import router as modules_router
 from src.runtime import ProfileRuntime
 
+logger = logging.getLogger(__name__)
+
 
 def create_app(
     settings: ProfileSettings | None = None,
@@ -45,11 +48,43 @@ def create_app(
         supported_languages=resolved_settings.i18n_language_list,
     )
 
+    auth_config = MemoryAuthConfig(
+        auth_mode=resolved_settings.memory_auth_mode,
+        service_name=resolved_settings.memory_auth_service_name,
+        public_paths=frozenset(
+            {
+                "/internal/v1/health/live",
+                "/internal/v1/health/ready",
+                "/internal/v1/health/metrics",
+            }
+        ),
+        kill_switch_file=resolved_settings.memory_auth_kill_switch_file or None,
+        jwks_url=resolved_settings.memory_auth_jwks_url or None,
+        redis=process_runtime.redis.client,
+        acl_rules_key=resolved_settings.acl_rules_key_name,
+        acl_rules_changed_channel=resolved_settings.acl_rules_changed_channel_name,
+    )
+    # Built once here so the middleware and the lifespan share the same handler
+    # (the lifespan owns its ACL rule-refresh task).
+    gateway_auth = (
+        load_gateway_auth(auth_config) if resolved_settings.memory_auth_mode == "gateway" else None
+    )
+
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+        # A failed refresh start degrades hot reload only; channel-1 auth keeps
+        # the rules loaded so far, so startup must not be blocked by it.
+        if gateway_auth is not None and hasattr(gateway_auth, "start"):
+            try:
+                await gateway_auth.start()
+            except Exception:
+                logger.exception("memory gateway auth refresh start failed")
         try:
             yield
         finally:
+            # Stop the subscription task before the redis pool closes.
+            if gateway_auth is not None and hasattr(gateway_auth, "aclose"):
+                await gateway_auth.aclose()
             clear_redis_cache()
             clear_i18n()
             await process_runtime.aclose()
@@ -65,23 +100,6 @@ def create_app(
     application.state.runtime = process_runtime
     application.state.http_metrics = process_runtime.http_metrics
 
-    auth_config = MemoryAuthConfig(
-        auth_mode=resolved_settings.memory_auth_mode,
-        service_name=resolved_settings.memory_auth_service_name,
-        public_paths=frozenset(
-            {
-                "/internal/v1/health/live",
-                "/internal/v1/health/ready",
-                "/internal/v1/health/metrics",
-            }
-        ),
-        kill_switch_file=resolved_settings.memory_auth_kill_switch_file or None,
-        jwks_url=resolved_settings.memory_auth_jwks_url or None,
-        redis=process_runtime.redis.client,
-    )
-    gateway_auth = (
-        load_gateway_auth(auth_config) if resolved_settings.memory_auth_mode == "gateway" else None
-    )
     # Starlette executes the last registered middleware first. With access
     # logging enabled the resulting order is:
     # RequestLogging -> TraceId -> Language -> Metrics -> MemoryAuth -> routing.
