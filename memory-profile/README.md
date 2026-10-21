@@ -81,8 +81,9 @@ records:
 - where each parameter lives — query, path, header, cookie, form, file, or body;
   entries are keyed by `location:name`, so the same name exposed as both a query
   parameter and a header is kept separately. A genuine same-slot collision
-  (route and dependency both exposing `query:limit`) keeps both entries as
-  `query:limit@endpoint` and `query:limit@<dependency>` instead of dropping one;
+  (route and dependency both exposing `query:limit`) keeps every entry as
+  `query:limit@endpoint` and `query:limit@<dependency>` — each additional source
+  gets its own qualified key — instead of dropping one;
 - the default FastAPI actually uses, including a signature default overriding
   `Annotated[..., Query(...)]`; `default_factory` is captured by a code-structure
   digest that ignores filenames and line numbers (never called — non-deterministic
