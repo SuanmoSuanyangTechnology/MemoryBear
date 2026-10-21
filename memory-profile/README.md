@@ -79,10 +79,16 @@ FastAPI's resolved route analysis, not re-derived from the signature, so it
 records:
 
 - where each parameter lives — query, path, header, cookie, form, file, or body;
+  entries are keyed by `location:name`, so the same name exposed as both a query
+  parameter and a header is kept separately. A genuine same-slot collision
+  (route and dependency both exposing `query:limit`) keeps both entries as
+  `query:limit@endpoint` and `query:limit@<dependency>` instead of dropping one;
 - the default FastAPI actually uses, including a signature default overriding
   `Annotated[..., Query(...)]`; `default_factory` is captured by a code-structure
   digest that ignores filenames and line numbers (never called — non-deterministic
-  factories would churn the snapshot), so host, CI, and image agree;
+  factories would churn the snapshot), so host, CI, and image agree; set and
+  frozenset defaults are sorted before serialisation, so hash randomisation
+  cannot reorder them;
 - validation constraints from both `Query`/`Body` and `Annotated[..., Field(...)]`;
 - parameters contributed by `Depends(...)` dependencies, which FastAPI exposes
   to callers and documents in OpenAPI;
@@ -97,9 +103,10 @@ Middleware-enforced identity headers (`x-tenant-id`, `x-workspace-id`,
 documented under Authentication rather than repeated in every route entry.
 
 Drift logs `external API contract changed: ...` at WARNING level per change. A
-missing, unreadable, or structurally invalid snapshot fails startup instead of
-silently disabling the guard. After intentionally accepting a contract change,
-regenerate the snapshot and commit the diff:
+missing, unreadable, or structurally invalid snapshot — including one whose
+`schema` is absent or differs from the code's `SNAPSHOT_SCHEMA` — fails startup
+instead of silently disabling the guard. After intentionally accepting a
+contract change, regenerate the snapshot and commit the diff:
 
 ```bash
 uv run python scripts/update_external_api_contract.py

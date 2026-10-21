@@ -135,8 +135,17 @@ def _annotation_text(annotation: object) -> str:
 def _json_value(value: object) -> object:
     if value is None or isinstance(value, (bool, int, float, str)):
         return value
-    if isinstance(value, (list, tuple, set, frozenset)):
+    if isinstance(value, (list, tuple)):
         return [_json_value(item) for item in value]
+    if isinstance(value, (set, frozenset)):
+        # Set iteration order depends on hash randomisation, so sort by the
+        # normalised JSON form; otherwise the same default serialises in a
+        # different order in each process and looks like contract drift.
+        items = [_json_value(item) for item in value]
+        return sorted(
+            items,
+            key=lambda item: json.dumps(item, sort_keys=True, ensure_ascii=False, default=repr),
+        )
     if isinstance(value, Mapping):
         return {str(key): _json_value(item) for key, item in value.items()}
     return repr(value)

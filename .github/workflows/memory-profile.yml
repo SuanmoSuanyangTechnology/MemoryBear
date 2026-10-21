@@ -25,7 +25,14 @@ jobs:
           python-version: '3.12'
 
       - name: Install uv
-        run: pip install uv==0.10.11
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: '0.10.11'
+          enable-cache: true
+          cache-dependency-glob: |
+            memory-profile/uv.lock
+            memory-profile/pyproject.toml
+            packages/auth-sdk/pyproject.toml
 
       - name: Install dependencies
         run: uv sync --frozen
