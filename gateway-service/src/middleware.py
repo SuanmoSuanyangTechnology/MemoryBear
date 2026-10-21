@@ -112,6 +112,22 @@ def is_app_public_share_api(path: str, method: str) -> bool:
             and _APP_PUBLIC_SHARE_API_RE.match(path) is not None)
 
 
+# App citation-download exemption (mirrors the split public path
+# /internal/v1/apps/citations/{uuid}/download in application-service
+# src/auth.py and the monolith route, which performs no permission check — the
+# document UUID is the capability). The console opens the URL in a new tab, so
+# no Authorization header can ride along. Exact UUID, GET only; every other
+# /api/apps/* path stays authenticated.
+_APP_PUBLIC_CITATION_DOWNLOAD_RE = re.compile(
+    r"/api/apps/citations/[0-9a-fA-F-]{36}/download"
+)
+
+
+def is_app_public_citation_download(path: str, method: str) -> bool:
+    return (method == "GET"
+            and _APP_PUBLIC_CITATION_DOWNLOAD_RE.fullmatch(path) is not None)
+
+
 def _has_credentials(request: Request) -> bool:
     """请求是否携带可验证凭据（Bearer 用户 JWT 或 API key）。"""
     auth = request.headers.get("authorization", "")
@@ -215,6 +231,14 @@ class GatewayMiddleware(BaseHTTPMiddleware):
         if is_app_public_share_api(request.url.path, request.method):
             self._public_share_api_headers(request)
             return await call_next(request)
+        # App anonymous citation-download exemption: the browser opens the URL
+        # in a new tab with no credentials. Requests carrying credentials always
+        # run the pipeline, so a failing declared identity rejects 401 instead
+        # of falling back to anonymous.
+        if (is_app_public_citation_download(request.url.path, request.method)
+                and not _has_credentials(request)):
+            self._public_citation_download_headers(request)
+            return await call_next(request)
         result = await strategy.authenticate(request, deps)
         if result.status_code is not None:
             # Rejection: 401 semantics / 429 rate limit; rate-limit headers ride
@@ -271,6 +295,15 @@ class GatewayMiddleware(BaseHTTPMiddleware):
         the viewer has no identity to assert and the split serves the view from
         its public path. Forged X-App-* / X-User-* headers must not survive
         even so: the namespace is gateway-managed on every other path."""
+        headers = _sanitize_headers(request.headers)
+        request.scope["headers"] = [(k.lower().encode(), v.encode()) for k, v in headers.items()]
+
+    @staticmethod
+    def _public_citation_download_headers(request: Request) -> None:
+        """Header cleanup for the anonymous citation-download exemption: the
+        same sanitization set as terminated requests and no identity injected —
+        the endpoint has no permission check (the document UUID is the
+        capability). Forged X-App-* / X-User-* headers must not survive."""
         headers = _sanitize_headers(request.headers)
         request.scope["headers"] = [(k.lower().encode(), v.encode()) for k, v in headers.items()]
 

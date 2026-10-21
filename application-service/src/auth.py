@@ -57,9 +57,18 @@ _PUBLIC_PATHS = frozenset(
 # it. GET covers the read face, POST the token exchange / chat / regenerate /
 # interaction writes, DELETE the two self-owned removals (revoke a share
 # link, delete one's own message). PUT/PATCH stay authenticated.
+#
+# The citation download is anonymous by host contract too: the monolith route
+# performs no permission check (the document UUID is the capability) and the
+# console opens it as a top-level navigation with no credentials. Exact UUID,
+# GET only.
 _PUBLIC_PATH_PATTERNS = (
     (re.compile(r"^/internal/v1/apps/share/[^/]+$"), ("GET",)),
     (re.compile(r"^/internal/v1/public/share(?:$|/)"), ("GET", "POST", "DELETE")),
+    (
+        re.compile(r"^/internal/v1/apps/citations/[0-9a-fA-F-]{36}/download$"),
+        ("GET",),
+    ),
 )
 
 
