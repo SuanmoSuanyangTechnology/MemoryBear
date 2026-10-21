@@ -3557,47 +3557,6 @@
         }
       }
     },
-    "/v1/chunks/retrieval-policy": {
-      "post": {
-        "tags": [
-          "V1 - RAG API"
-        ],
-        "summary": "Get Retrieval Policy",
-        "operationId": "get_retrieval_policy_v1_chunks_retrieval_policy_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/RetrievalPolicyRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RetrievalPolicyResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/v1/chunks/retrieval": {
       "post": {
         "tags": [

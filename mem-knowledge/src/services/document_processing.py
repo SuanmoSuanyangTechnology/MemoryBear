@@ -49,7 +49,6 @@ from ..rag.vdb.vector_store import TaskVectorStore
 from ..runtime import ProcessRuntime
 from ..tasks.dispatch import TaskDispatcher
 from ..tasks.observability import BusinessOutcome, TaskRun
-from ..tasks.state import PARSE_TASK_KEY
 from ..utils.datetime_utils import to_iso_z, to_timestamp_ms, utcnow, utcnow_naive
 from .document_mutation_guard import (
     DocumentMutationLeaseLost,
@@ -214,7 +213,9 @@ def _update_document(
                 document_id,
             )
             return False
-        updater(document)
+        from .wiki.source import apply_source_update
+
+        apply_source_update(session, document, updater)
         session.commit()
         return True
 
@@ -222,7 +223,10 @@ def _update_document(
 def _clear_parse_state(runtime: ProcessRuntime, document_id: object) -> None:
     try:
         redis = runtime.redis.sync_client()
-        redis.delete(PARSE_TASK_KEY.format(doc_id=document_id))
+        from ..tasks.observability import current_parent_task_id
+        from ..tasks.state import release_parse_task
+
+        release_parse_task(redis, document_id, current_parent_task_id() or "")
         # Let the existing cancellation marker expire naturally so an upload
         # still running after a worker interruption can observe it.
     except Exception as exc:  # noqa: BLE001 - cleanup must not replace task results.
@@ -233,9 +237,10 @@ def _clear_parse_state(runtime: ProcessRuntime, document_id: object) -> None:
         )
 
 
-def _should_abort(runtime: ProcessRuntime, document_id: uuid.UUID) -> bool:
+def _should_abort(runtime: ProcessRuntime, document_id: uuid.UUID, *,
+                  source_task_id: str | None = None) -> bool:
     try:
-        ensure_document_active(runtime, document_id)
+        ensure_document_active(runtime, document_id, source_task_id=source_task_id)
         return False
     except DocumentTaskAborted:
         logger.info("Document parsing cancelled: document=%s", document_id)
@@ -679,19 +684,21 @@ def _write_chunks_with_retry(
     batches: list[list[DocumentChunk]],
     document_id: uuid.UUID,
     write_started: Event | None = None,
+    *,
+    source_task_id: str | None = None,
 ) -> None:
     batch_errors: dict[int, Exception] = {}
     total_batches = len(batches)
 
     def write(batch_index: int, chunks: list[DocumentChunk]) -> None:
         def prepare_and_write() -> None:
-            if _should_abort(runtime, document_id):
+            if _should_abort(runtime, document_id, source_task_id=source_task_id):
                 raise _ParseAborted
             prepared = vector_store.prepare_chunks(chunks)
             with sync_document_mutation_guard(
                 runtime.redis.sync_client(), document_id
             ) as guard:
-                if _should_abort(runtime, document_id):
+                if _should_abort(runtime, document_id, source_task_id=source_task_id):
                     raise _ParseAborted
                 guard.ensure_owned()
                 if write_started is not None:
@@ -759,7 +766,7 @@ def _write_chunks_with_retry(
 
 def _dispatcher(runtime: ProcessRuntime) -> TaskDispatcher:
     configured = getattr(runtime, "task_dispatcher", None)
-    return configured if configured is not None else TaskDispatcher()
+    return configured if configured is not None else TaskDispatcher(runtime=runtime)
 
 
 def _current_graph_config(
@@ -832,6 +839,13 @@ def process_document(
                 file_name,
             )
         document_label = snapshot.file_name or str(normalized_document_id)
+        from .wiki.source import begin_source, finish_source
+
+        wiki_source = begin_source(runtime, normalized_document_id, run.context.task_id)
+        if wiki_source and wiki_source["source_ready"]:
+            finish_source(runtime, normalized_document_id, run.context.task_id)
+            run.finish(BusinessOutcome.SUCCESS)
+            return "Source already committed; Wiki handoff recovered."
         _mark_running(runtime, normalized_document_id, progress_lines)
         with run.stage("preflight"):
             preflight = _preflight_document(runtime, snapshot, file_key)
@@ -983,7 +997,8 @@ def process_document(
             total_batches = len(batches)
             with run.stage("embedding"):
                 _write_chunks_with_retry(
-                    runtime, vector_store, batches, normalized_document_id, write_started
+                    runtime, vector_store, batches, normalized_document_id, write_started,
+                    source_task_id=run.context.task_id,
                 )
             if _should_abort(runtime, normalized_document_id):
                 raise _ParseAborted
@@ -993,6 +1008,7 @@ def process_document(
             )
 
             def mark_vectorized(document: Document) -> None:
+                document.chunk_num = total_chunks
                 document.progress = 1.0
                 document.progress_msg = _progress_message(progress_lines)
                 document.process_duration = time.time() - started_at
@@ -1018,6 +1034,11 @@ def process_document(
             raise _ParseAborted
         with run.stage("dispatch_graph"):
             _dispatch_graph(runtime, snapshot, progress_lines)
+        finish_source(
+            runtime, normalized_document_id, run.context.task_id,
+            expected_chunk_ids=[str(chunk.metadata["doc_id"]) for chunk in all_chunks],
+            replace_source=True,
+        )
         logger.info(
             "Document parsing completed: document=%s duration=%.1f chunks=%s",
             normalized_document_id,
@@ -1030,6 +1051,11 @@ def process_document(
         )
         return f"parse document '{snapshot.source_file_name}' processed successfully."
     except Exception as exc:  # noqa: BLE001 - task returns a legacy failure string.
+        from ..rag.wiki.config import WikiSuperseded
+        from .wiki.source import WikiHandoffPending
+
+        if isinstance(exc, (WikiHandoffPending, WikiSuperseded)):
+            raise
         aborted = isinstance(exc, _ParseAborted)
         if (
             isinstance(exc, (DocumentMutationLeaseLost, _ParseAborted))

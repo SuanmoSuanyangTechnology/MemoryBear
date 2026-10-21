@@ -22,6 +22,40 @@ class KnowledgeSettings(BaseSettings):
 
     service_name: Literal["mem-knowledge"] = "mem-knowledge"
 
+    # Wiki execution budgets are ceilings, not content truncation policies.
+    kb_wiki_segment_tokens: int = Field(default=32768, ge=128,
+                                       validation_alias="KB_WIKI_SEGMENT_TOKENS")
+    kb_wiki_input_tokens: int = Field(default=65536, ge=512,
+                                     validation_alias="KB_WIKI_INPUT_TOKENS")
+    kb_wiki_output_tokens: int = Field(default=32768, ge=256,
+                                      validation_alias="KB_WIKI_OUTPUT_TOKENS")
+    kb_wiki_max_segments: int = Field(default=256, ge=1,
+                                     validation_alias="KB_WIKI_MAX_SEGMENTS")
+    # Zero permits the complete candidate set; positive limits fail instead of truncating.
+    kb_wiki_max_topics: int = Field(default=0, ge=0, validation_alias="KB_WIKI_MAX_TOPICS")
+    kb_wiki_parallelism: int = Field(default=4, ge=1, le=16,
+                                     validation_alias="KB_WIKI_PARALLELISM")
+    kb_wiki_continuations: int = Field(default=3, ge=0, le=8,
+                                      validation_alias="KB_WIKI_CONTINUATIONS")
+    kb_wiki_repair_attempts: int = Field(default=2, ge=0,
+                                        validation_alias="KB_WIKI_REPAIR_ATTEMPTS")
+    kb_wiki_failure_attempts: int = Field(default=3, ge=1,
+                                         validation_alias="KB_WIKI_FAILURE_ATTEMPTS")
+    kb_wiki_defer_attempts: int = Field(default=240, ge=1,
+                                       validation_alias="KB_WIKI_DEFER_ATTEMPTS")
+    kb_wiki_wait_timeout_seconds: int = Field(default=3600, ge=1,
+                                             validation_alias="KB_WIKI_WAIT_TIMEOUT_SECONDS")
+    kb_wiki_retry_delay_seconds: int = Field(default=15, ge=1,
+                                            validation_alias="KB_WIKI_RETRY_DELAY_SECONDS")
+    kb_wiki_compact_depth: int = Field(default=3, ge=1,
+                                      validation_alias="KB_WIKI_COMPACT_DEPTH")
+    kb_wiki_backfill_batch_size: int = Field(default=100, ge=1, le=1000,
+                                            validation_alias="KB_WIKI_BACKFILL_BATCH_SIZE")
+    kb_wiki_graph_node_limit: int = Field(default=500, ge=1,
+                                         validation_alias="KB_WIKI_GRAPH_NODE_LIMIT")
+    kb_wiki_graph_edge_limit: int = Field(default=2000, ge=1,
+                                         validation_alias="KB_WIKI_GRAPH_EDGE_LIMIT")
+
     # Shared environment variables
     deployment_mode: str = Field(default="community", validation_alias="DEPLOYMENT_MODE")
     db_host: str = Field(default="127.0.0.1", validation_alias="DB_HOST")
@@ -29,6 +63,7 @@ class KnowledgeSettings(BaseSettings):
     db_user: str = Field(default="postgres", validation_alias="DB_USER")
     db_password: SecretStr = Field(default=SecretStr("password"), validation_alias="DB_PASSWORD")
     db_name: str = Field(default="redbear-mem", validation_alias="DB_NAME")
+    db_auto_upgrade: bool = Field(default=False, validation_alias="DB_AUTO_UPGRADE")
     redis_host: str = Field(default="127.0.0.1", validation_alias="REDIS_HOST")
     redis_port: int = Field(default=6379, ge=1, le=65535, validation_alias="REDIS_PORT")
     redis_password: SecretStr = Field(default=SecretStr(""), validation_alias="REDIS_PASSWORD")
@@ -251,6 +286,7 @@ class KnowledgeSettings(BaseSettings):
         "document_worker",
         "graphrag_worker",
         "qa_import_worker",
+        "wiki_worker",
     ] = Field(default="api", validation_alias="KB_PROCESS_ROLE")
     kb_log_level: str = Field(default="INFO", validation_alias="KB_LOG_LEVEL")
     kb_db_pool_size: int = Field(
@@ -585,6 +621,7 @@ class KnowledgeSettings(BaseSettings):
             "elasticsearch_hosts": self.elasticsearch_hosts,
             "storage_type": self.storage_type,
             "db_pool_size": self.kb_db_pool_size,
+            "db_auto_upgrade": self.db_auto_upgrade,
             "max_document_pages": self.max_document_pages,
             "task_heartbeat_seconds": self.kb_task_heartbeat_seconds,
             "progress_flush_interval_seconds": self.kb_progress_flush_interval_seconds,

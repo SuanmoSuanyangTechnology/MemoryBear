@@ -28,9 +28,12 @@ def process_qa_import(*args, **kwargs):
     return _load_qa_processor()(*args, **kwargs)
 
 
-@celery_app.task(name="app.core.rag.tasks.import_qa_chunks", queue="qa_import")
+@celery_app.task(
+    bind=True, name="app.core.rag.tasks.import_qa_chunks", queue="qa_import", max_retries=3
+)
 @bind_usage("document", "document_id")
 def import_qa_chunks(
+    self,
     kb_id: str,
     document_id: str,
     filename: str,
@@ -60,16 +63,36 @@ def import_qa_chunks(
     ) as run:
         with run.stage("lazy_import"):
             process = _load_qa_processor()
-        return process(
-            runtime,
-            kb_id,
-            document_id,
-            filename,
-            contents=contents,
-            file_key=file_key,
-            clear_parse_task=clear_parse_task,
-            run=run,
-        )
+        from ..rag.wiki.config import WikiSuperseded
+        from ..services.wiki.source import WikiHandoffPending
+        from .observability import BusinessOutcome
+
+        try:
+            return process(
+                runtime,
+                kb_id,
+                document_id,
+                filename,
+                contents=contents,
+                file_key=file_key,
+                clear_parse_task=clear_parse_task,
+                run=run,
+            )
+        except WikiHandoffPending:
+            if self.request.retries >= self.max_retries:
+                from ..services.wiki.source import handoff_failed
+
+                handoff_failed(runtime, document_id, str(self.request.id))
+                run.finish(BusinessOutcome.FAILURE, error_code="WIKI_DISPATCH_FAILED")
+                return {"error_code": "WIKI_DISPATCH_FAILED"}
+            run.finish(BusinessOutcome.RETRY)
+            raise self.retry(
+                exc=RuntimeError("WIKI_HANDOFF_FAILED"),
+                countdown=settings.kb_wiki_retry_delay_seconds,
+            ) from None
+        except WikiSuperseded:
+            run.finish(BusinessOutcome.SKIPPED)
+            return {"status": "superseded"}
 
 
 __all__ = ["import_qa_chunks"]

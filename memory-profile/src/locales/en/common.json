@@ -1,0 +1,11 @@
+{
+  "auth": {
+    "failed": "Authentication failed",
+    "missing_principal": "Missing authenticated principal"
+  },
+  "validation": {
+    "request_failed": "Request validation failed"
+  },
+  "internal_error": "Internal service error",
+  "service_unavailable": "Service temporarily unavailable"
+}

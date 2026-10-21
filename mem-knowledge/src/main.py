@@ -14,6 +14,7 @@ from .api.router import internal_v1_router
 from .api.schemas.common import ApiResponse
 from .bootstrap import get_settings
 from .config import KnowledgeSettings
+from .database_migrations import upgrade_database_on_startup
 from .i18n import load_catalogs
 from .logging import setup_logging
 from .request_logging import RequestLoggingFastAPI
@@ -63,10 +64,6 @@ def create_app(settings: KnowledgeSettings | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
-        logger.info(
-            "Knowledge service started: %s",
-            service_settings.safe_summary(),
-        )
         # A failed refresh start degrades hot reload only; channel-1 auth keeps
         # the rules loaded so far, so startup must not be blocked by it.
         if gateway_auth is not None and hasattr(gateway_auth, "start"):
@@ -75,6 +72,11 @@ def create_app(settings: KnowledgeSettings | None = None) -> FastAPI:
             except Exception:
                 logger.exception("gateway auth refresh start failed")
         try:
+            await upgrade_database_on_startup(runtime)
+            logger.info(
+                "Knowledge service started: %s",
+                service_settings.safe_summary(),
+            )
             yield
         finally:
             # Stop the subscription task before the redis pool closes.

@@ -113,6 +113,12 @@ def clear_parse_state(redis: Any, doc_id: str | uuid.UUID) -> int:
     )
 
 
+def release_parse_task(redis: Any, doc_id: str | uuid.UUID, task_id: str) -> int:
+    """A late worker cannot release a newer source task's dispatch claim."""
+    return int(redis.eval(_COMPARE_AND_DELETE_SCRIPT, 1,
+                          PARSE_TASK_KEY.format(doc_id=doc_id), task_id))
+
+
 def claim_or_get_rebuild_job(
     redis: Any,
     knowledge_id: str | uuid.UUID,

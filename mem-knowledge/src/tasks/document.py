@@ -42,9 +42,9 @@ def process_knowledge_sync(*args, **kwargs):
     return _load_knowledge_sync_processor()(*args, **kwargs)
 
 
-@celery_app.task(name="app.core.rag.tasks.parse_document")
+@celery_app.task(bind=True, name="app.core.rag.tasks.parse_document", max_retries=3)
 @bind_usage("document", "document_id")
-def parse_document(file_key: str, document_id, file_name: str = ""):
+def parse_document(self, file_key: str, document_id, file_name: str = ""):
     settings = get_settings()
     runtime = get_worker_runtime()
     context = task_context_from_current_task(
@@ -66,13 +66,27 @@ def parse_document(file_key: str, document_id, file_name: str = ""):
     ) as run:
         with run.stage("lazy_import"):
             process = _load_document_processor()
-        return process(
-            runtime,
-            file_key,
-            document_id,
-            file_name,
-            run=run,
-        )
+        from ..rag.wiki.config import WikiSuperseded
+        from ..services.wiki.source import WikiHandoffPending
+        from .observability import BusinessOutcome
+
+        try:
+            return process(runtime, file_key, document_id, file_name, run=run)
+        except WikiHandoffPending:
+            if self.request.retries >= self.max_retries:
+                from ..services.wiki.source import handoff_failed
+
+                handoff_failed(runtime, document_id, str(self.request.id))
+                run.finish(BusinessOutcome.FAILURE, error_code="WIKI_DISPATCH_FAILED")
+                return {"error_code": "WIKI_DISPATCH_FAILED"}
+            run.finish(BusinessOutcome.RETRY)
+            raise self.retry(
+                exc=RuntimeError("WIKI_HANDOFF_FAILED"),
+                countdown=settings.kb_wiki_retry_delay_seconds,
+            ) from None
+        except WikiSuperseded:
+            run.finish(BusinessOutcome.SKIPPED)
+            return "Source round superseded."
 
 
 @celery_app.task(name="app.core.rag.tasks.sync_knowledge_for_kb")

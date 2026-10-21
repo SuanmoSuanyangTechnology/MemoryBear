@@ -217,6 +217,9 @@ class ApiKeyAuth(BaseModel):
     type: str
     scopes: List[str]
     resource_id: Optional[uuid.UUID]
+    # 装饰器已经查过 api_keys，把 creator 一并带出，避免下游
+    # get_current_user_snapshot_from_api_key_async 再查一次同一行。
+    created_by: Optional[uuid.UUID] = None
 
 
 class ApiKeyLog(BaseModel):

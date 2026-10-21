@@ -23,7 +23,6 @@ from ..rag.vdb.field import Field
 from ..rag.vdb.vector_store import TaskVectorStore
 from ..runtime import ProcessRuntime
 from ..tasks.observability import BusinessOutcome, TaskRun
-from ..tasks.state import PARSE_TASK_KEY
 from ..utils.datetime_utils import to_iso_z, to_timestamp_ms, utcnow, utcnow_naive
 from .document_mutation_guard import DocumentMutationLeaseLost, sync_document_mutation_guard
 from .document_task_lifecycle import (
@@ -71,7 +70,7 @@ def _mark_running(
     with runtime.database.sync_session() as session:
         document = session.get(Document, document_id)
         knowledge = session.get(Knowledge, kb_id)
-        if document is None or knowledge is None:
+        if document is None or knowledge is None or document.kb_id != kb_id:
             logger.error(
                 "QA import document or knowledge not found: document=%s knowledge=%s",
                 document_id,
@@ -92,11 +91,16 @@ def _mark_running(
             tenant_id=workspace.tenant_id,
         )
         progress_lines.append(f"{_progress_ts()} Start to import QA.")
-        document.progress = 0.0
-        document.progress_msg = _progress_message(progress_lines)
-        document.process_begin_at = utcnow_naive()
-        document.process_duration = 0.0
-        document.run = 1
+        from .wiki.source import apply_source_update
+
+        def update(document):
+            document.progress = 0.0
+            document.progress_msg = _progress_message(progress_lines)
+            document.process_begin_at = utcnow_naive()
+            document.process_duration = 0.0
+            document.run = 1
+
+        apply_source_update(session, document, update)
         session.commit()
         return snapshot
 
@@ -228,14 +232,19 @@ def _mark_complete(
                 document_id,
             )
             return {"error": "document not found", "imported": 0}
-        if clear_parse_task:
-            document.chunk_num = 0
-        document.chunk_num += chunk_count
-        document.progress = 1.0
-        document.process_duration = time.time() - start_time
-        document.run = 0
         progress_lines.append(f"{_progress_ts()} QA import done: {chunk_count} chunks.")
-        document.progress_msg = _progress_message(progress_lines)
+        from .wiki.source import apply_source_update
+
+        def update(document):
+            if clear_parse_task:
+                document.chunk_num = 0
+            document.chunk_num += chunk_count
+            document.progress = 1.0
+            document.process_duration = time.time() - start_time
+            document.run = 0
+            document.progress_msg = _progress_message(progress_lines)
+
+        apply_source_update(session, document, update)
         session.commit()
     return None
 
@@ -255,10 +264,15 @@ def _mark_failed(
             progress_lines.append(
                 f"{_progress_ts()} QA import failed: {str(safe_error)[:200]}"
             )
-            document.progress = -1.0
-            document.progress_msg = _progress_message(progress_lines)
-            document.process_duration = time.time() - start_time
-            document.run = 0
+            from .wiki.source import apply_source_update
+
+            def update(document):
+                document.progress = -1.0
+                document.progress_msg = _progress_message(progress_lines)
+                document.process_duration = time.time() - start_time
+                document.run = 0
+
+            apply_source_update(session, document, update)
             session.commit()
     except Exception as state_exc:
         logger.warning(
@@ -293,6 +307,13 @@ def process_qa_import(
             normalized_kb_id = uuid.UUID(str(kb_id))
         except ValueError:
             raise _SafeQAImportError("badly formed hexadecimal UUID string") from None
+        from .wiki.source import begin_source, finish_source
+
+        wiki_source = begin_source(runtime, normalized_document_id, run.context.task_id)
+        if wiki_source and wiki_source["source_ready"]:
+            finish_source(runtime, normalized_document_id, run.context.task_id)
+            run.finish(BusinessOutcome.SUCCESS)
+            return {"wiki_handoff_recovered": True}
         with run.stage("load_document"):
             snapshot = _mark_running(
                 runtime,
@@ -439,6 +460,16 @@ def process_qa_import(
                 error_code="KB_QA_IMPORT_ABORTED",
             )
             return completion_error
+        if not failed_rows:
+            finish_source(
+                runtime, normalized_document_id, run.context.task_id,
+                expected_chunk_ids=[str(chunk.metadata["doc_id"]) for chunk in chunks],
+                replace_source=clear_parse_task,
+            )
+        elif wiki_source:
+            from .wiki.source import incomplete_source
+
+            incomplete_source(runtime, normalized_document_id, run.context.task_id)
         logger.info(
             "QA import completed: document=%s imported=%s failed=%s",
             normalized_document_id,
@@ -451,6 +482,11 @@ def process_qa_import(
         )
         return {"imported": len(chunks), "failed_rows": failed_rows}
     except Exception as exc:
+        from ..rag.wiki.config import WikiSuperseded
+        from .wiki.source import WikiHandoffPending
+
+        if isinstance(exc, (WikiHandoffPending, WikiSuperseded)):
+            raise
         aborted = isinstance(exc, DocumentTaskAborted)
         if (
             isinstance(exc, (DocumentMutationLeaseLost, DocumentTaskAborted))
@@ -507,11 +543,10 @@ def process_qa_import(
     finally:
         if clear_parse_task:
             try:
-                runtime.redis.sync_client().delete(
-                    PARSE_TASK_KEY.format(
-                        doc_id=normalized_document_id or document_id
-                    )
-                )
+                from ..tasks.state import release_parse_task
+
+                release_parse_task(runtime.redis.sync_client(),
+                                   normalized_document_id or document_id, run.context.task_id)
             except Exception as cleanup_exc:
                 logger.warning(
                     "Failed to clear QA parse state: document=%s error_type=%s",

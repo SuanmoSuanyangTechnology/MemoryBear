@@ -1,0 +1,11 @@
+{
+  "auth": {
+    "failed": "认证失败",
+    "missing_principal": "缺少认证主体"
+  },
+  "validation": {
+    "request_failed": "请求参数校验失败"
+  },
+  "internal_error": "内部服务错误",
+  "service_unavailable": "服务暂不可用"
+}
