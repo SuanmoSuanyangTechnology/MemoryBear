@@ -95,7 +95,7 @@ def check_migration_scaffold() -> list[str]:
     required_contracts = (
         "target_metadata = ProfileBase.metadata",
         'VERSION_TABLE = "alembic_version_profile"',
-        'poolclass=NullPool',
+        "poolclass=NullPool",
     )
     for contract in required_contracts:
         if contract not in env_source:

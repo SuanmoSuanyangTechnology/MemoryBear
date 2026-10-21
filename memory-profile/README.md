@@ -1,10 +1,10 @@
 # memory-profile
 
-Independent, internal-only profile analytics service. It currently exposes six read-only analytics use cases. The API cuts over the five read operations whose contracts are equivalent: `memory_insight`, `user_summary`, `node_statistics`, `graph_data`, and `community_graph`; `workspace_statistics` remains locally served until snapshot refresh is migrated.
+Independent, internal-only service hosting Memory domain modules. Routes are composed in `src/modules/__init__.py`; that module is the authoritative endpoint inventory, and the API-key reachable subset is mirrored by `src/external_api_contract.json`. This README deliberately does not enumerate endpoints or per-domain behavior, because more domains migrate in over time.
 
 ## Boundary and ownership
 
-- This service reads the shared PostgreSQL `end_users` and narrow analytics tables, Neo4j graph, Redis caches, and Elasticsearch-backed memory indexes. It does not import `api` or `app` code.
+- This service reads shared PostgreSQL tables through read-only mappings, plus Neo4j, Redis, and Elasticsearch. It does not import `api` or `app` code.
 - PostgreSQL, Neo4j, Redis, and Elasticsearch each have a dedicated lifecycle manager under `src/infrastructure/`; `src/runtime.py` only composes, probes, and closes them.
 - `src/common/redis_cache.py` provides shared JSON helpers, zset JSON reads, exact/prefix/pattern invalidation, and the async `@redis_cache` cache-aside decorator. It reuses the existing `ProfileRuntime.redis` provider and does not add cache state to runtime.
 
@@ -33,14 +33,13 @@ await invalidate_cache(pattern="cache:memory_summary:*")
 ```
 
 Exact invalidation uses `DEL`; prefix/pattern invalidation uses cursor-based `SCAN` and batched `UNLINK`.
-- `auth-sdk` is consumed from the repository-local `../packages/auth-sdk` path without a version constraint, so profile builds always use the current monorepo SDK source.
+- `auth-sdk` is consumed from the repository-local `../packages/auth-sdk` path without a version constraint, so service builds always use the current monorepo SDK source.
 - The API service remains the owner of shared PostgreSQL tables. `memory-profile` owns and migrates only models registered under `src/models/owned/`; shared mappings under `src/models/references/` are never migration targets.
-- Workspace statistics are snapshot-only. The API worker remains responsible for producing `cache:memory:workspace_statistics:v1:{workspace_id}`; this service does not synchronously recompute a whole workspace.
 - Direct mode trusts internal identity headers and therefore requires network-level isolation. Every non-public Memory request requires a complete generic identity principal (`x-user-id` or `x-api-key-id`, plus `x-tenant-id` / `x-workspace-id`), and user-scoped operations verify the active workspace owner.
 
 ## Localization
 
-Response text — analytics messages, enum display names, and error envelopes —
+Response text — module messages, enum display names, and error envelopes —
 is translated by `src/i18n` from the JSON catalogs under
 `src/locales/<locale>/`. `LanguageMiddleware` resolves the request language
 once, in this order: `X-Language-Type`, `Accept-Language`, then
@@ -50,9 +49,9 @@ once, in this order: `X-Language-Type`, `Accept-Language`, then
 `zh` output stays byte-identical to the legacy API contract. Error text is
 raised as translation keys (`LocalizedProfileError`) and rendered once by the
 global exception handler; empty-state payloads carry a `message_key` that the
-handler renders, so those messages stay language-neutral in the cache.
-`graph_data` includes the language in its Redis cache key because enum display
-names are part of the cached payload. To add a language, add a directory under
+handler renders, so those messages stay language-neutral in the cache. Any
+module that caches translated display text must include the language in its
+cache key. To add a language, add a directory under
 `src/locales` with the same namespaces and list it in
 `I18N_SUPPORTED_LANGUAGES`.
 
@@ -62,9 +61,54 @@ names are part of the cached payload. To add a language, add a directory under
 
 `MEMORY_AUTH_MODE=gateway` loads `enterprise_ext.memory.MemoryGatewayAuth`. Missing enterprise code or missing JWKS configuration fails startup instead of downgrading to direct. Bearer JWT claims are authoritative for actor, tenant, workspace, and credential type; API-key tokens must include the `memory` scope. The enterprise extension retains a transitional channel for the existing API direct proxy only when no Bearer is supplied and all trusted headers are present; an invalid Bearer never falls back.
 
-Authentication failures use the normal `{code,msg,data,error,time}` envelope and include `X-Trace-Id`. `MEMORY_AUTH_KILL_SWITCH_FILE` only disables gateway verification during a controlled rollback; identity headers remain mandatory because analytics cannot execute without workspace context.
+Authentication failures use the normal `{code,msg,data,error,time}` envelope and include `X-Trace-Id`. `MEMORY_AUTH_KILL_SWITCH_FILE` only disables gateway verification during a controlled rollback; identity headers remain mandatory because modules cannot execute without workspace context.
 
 Domain modules never read `request.state`. Handlers and routes take the caller from `src.middleware.identity.require_memory_context`, which returns `src.middleware.auth.MemoryPrincipal`; `request.state.memory_context` stays an internal detail of the middleware layer, so a new Memory module adds routes without importing another domain's dependencies.
+
+## External API contract
+
+Routes reachable through the API-key face (`ex_api`) carry `@external_api` from
+`src/common/external_api.py`. The decorator is metadata only — it sets one
+attribute and returns the function unchanged, so it adds no request-time cost.
+Health routes are unauthenticated but are not part of the API-key contract, so
+they are not marked.
+
+Their HTTP contract is snapshotted in `src/external_api_contract.json` and
+compared once while the application is built. The snapshot is read from
+FastAPI's resolved route analysis, not re-derived from the signature, so it
+records:
+
+- where each parameter lives — query, path, header, cookie, form, file, or body;
+- the default FastAPI actually uses, including a signature default overriding
+  `Annotated[..., Query(...)]`; `default_factory` is captured by a code-structure
+  digest that ignores filenames and line numbers (never called — non-deterministic
+  factories would churn the snapshot), so host, CI, and image agree;
+- validation constraints from both `Query`/`Body` and `Annotated[..., Field(...)]`;
+- parameters contributed by `Depends(...)` dependencies, which FastAPI exposes
+  to callers and documents in OpenAPI;
+- request-body models field by field (nested models, PEP 695 aliases, unions of
+  models, and dataclasses included), plus wire-relevant `model_config`
+  (`extra`, `strict`, `populate_by_name`, `from_attributes`) and field
+  `validation_alias` / `serialization_alias`;
+- the response model and its fields, the status code, and declared responses.
+
+Middleware-enforced identity headers (`x-tenant-id`, `x-workspace-id`,
+`x-source`, `x-user-id` / `x-api-key-id`) are global, not per-route, and are
+documented under Authentication rather than repeated in every route entry.
+
+Drift logs `external API contract changed: ...` at WARNING level per change. A
+missing, unreadable, or structurally invalid snapshot fails startup instead of
+silently disabling the guard. After intentionally accepting a contract change,
+regenerate the snapshot and commit the diff:
+
+```bash
+uv run python scripts/update_external_api_contract.py
+uv run python scripts/check_external_api_contract.py   # manual check; exit 1 on drift
+```
+
+`tests/test_external_api_contract.py` covers the same comparison locally; the
+`memory-profile` workflow runs `scripts/check_external_api_contract.py`, so CI
+catches a stale snapshot before deployment.
 
 ## Internal HTTP contract
 
@@ -75,34 +119,24 @@ the Gateway's `/api|/v1 → /internal/v1` rewrite lands on the same routes. The 
 does not survive in the path: the request carries it as `x-source` (which face it
 arrived on — `ex_api` or `in_api`).
 
-Health (no identity header — the only public paths, and the container HEALTHCHECK
-target):
+Health probes are the only identity-free paths and the container HEALTHCHECK
+target; they live under `/internal/v1/health/`.
 
-- `GET /internal/v1/health/live`
-- `GET /internal/v1/health/ready`
-- `GET /internal/v1/health/metrics` (diagnostic; see Runtime monitoring)
-
-Analytics, reachable at `/internal/v1/memory/analytics/*` (requires
-`x-workspace-id: <uuid>`):
-
-- `GET /memory_insight?end_user_id=<uuid>`
-- `GET /user_summary?end_user_id=<uuid>`
-- `GET /node_statistics?end_user_id=<uuid>`
-- `GET /workspace_statistics`
-- `GET /graph_data?end_user_id=<uuid>`
-- `GET /community_graph?end_user_id=<uuid>`
+Domain routes are mounted under `/internal/v1/<domain>/...`; workspace-scoped
+operations require `x-workspace-id: <uuid>`. The composed router in
+`src/modules/__init__.py` is the authoritative inventory of routes; API-key
+reachable routes and their parameter contract are mirrored in
+`src/external_api_contract.json`. This README does not duplicate that list.
 
 Required direct-mode headers are `x-tenant-id`, `x-workspace-id`, `x-source`, and the acting id — whose header the face decides: `ex_api` carries the key that authenticated as `x-api-key-id`, and every other face carries the user as `x-user-id`. Both terminators follow that rule (the Gateway when it terminates an API key, the API's own proxy on its `/v1` route), so an `ex_api` request resolves to one principal whichever hop terminated it, and the acting id is never a key id on one path and a creator's user id on another. The request log records which of the two it got, as `actor_kind` (`apikey` or `actor`), so a key id is never read as an actor. `X-Trace-Id` is optional; all identity IDs must be UUIDs. In gateway mode the actor, tenant, workspace, and authenticated face come from verified token claims (the claim keeps its own `api_key` / absent spelling and is mapped onto `ex_api` / `in_api`); conflicting request headers are ignored.
 
-The legacy analytics envelope is exactly:
+The legacy response envelope is exactly:
 
 ```json
 {"code":0,"msg":"OK","data":{},"error":"","time":1710000000000}
 ```
 
 The field names intentionally remain `msg`, `error`, and millisecond `time`, matching `api/app/core/response_utils.py`. Health responses use their dedicated probe shape.
-
-`graph_data` accepts comma-separated `node_types`, `limit` up to 1000, `depth` up to 3, `center_node_id`, and `per_type_limits` such as `Statement:50,Chunk:20`. Only the fixed supported node labels are accepted, and every Neo4j query includes `end_user_id` isolation. The response also carries the response-time virtual objects the API returns for `Preference` nodes — a `PreferenceGroup` node joined by `HAS_PREFERENCE` edges, counted as `PreferenceGroup` in `statistics.node_types` and `HAS_PREFERENCE` in `statistics.edge_types` — and a virtual node id is rejected as `center_node_id`.
 
 ## Source layout
 
@@ -117,7 +151,7 @@ src/entry.py
   -> src/infrastructure/
 ```
 
-`src/modules/__init__.py` composes every domain router into the single router `src/app.py` mounts, so a new module is registered there and nowhere else. Routes only bind HTTP parameters. Handlers translate transport contracts and response envelopes. Services own use-case orchestration. Repositories are named by domain capability (`end_user_profile`, `memory_statistics`, `memory_graph`, `workspace_statistics`) and depend on shared infrastructure managers.
+`src/modules/__init__.py` composes every domain router into the single router `src/app.py` mounts, so a new module is registered there and nowhere else. Routes only bind HTTP parameters. Handlers translate transport contracts and response envelopes. Services own use-case orchestration. Repositories are named by domain capability and depend on shared infrastructure managers.
 
 API-owned PostgreSQL tables are mapped under `src/models/references/` with a separate `ReadOnlyBase.metadata`, no foreign keys, and no relationships. Profile-owned tables belong under `src/models/owned/`, inherit `ProfileBase`, and are the only tables exposed to Alembic. PostgreSQL reference repositories use SQLAlchemy ORM/select expressions only; native `text()` SQL and ORM write methods are rejected by the boundary script. Reference connections also set `default_transaction_read_only=on`, explicitly use rollback-on-return, and invalidate any asyncpg connection still in a transaction at checkin or checkout; Alembic uses a separate short-lived migration engine without pooling or the runtime read-only setting.
 
@@ -168,6 +202,12 @@ The payload matches the API service exactly:
 
 Configuration is frozen after bootstrap. Paths are derived from the source location, never the current working directory. Precedence is repository `.env`, then `memory-profile/.env`, then process environment. Existing `DATABASE_*`/`POSTGRES_*`, `NEO4J_*`, `REDIS_*`, and `ELASTICSEARCH_*` variables are reused; service-specific settings use `PROFILE_*`. See `.env.example`.
 
+This service must use the same Redis logical DB as the API (the shared
+deployment uses `REDIS_DB=3`) so keys written by API workers stay visible.
+`REDIS_URL`, when set, takes precedence over
+`REDIS_HOST`/`REDIS_PORT`/`REDIS_DB`; keep its path in sync with the API's DB
+as well.
+
 ## API cutover
 
 The monolith keeps distinct public JWT (`/api`) and API-key (`/v1`) adapters. Their authentication, workspace selection, end-user validation/merge behavior, and request-body semantics are intentionally not collapsed. Contract-equivalent endpoints opt into forwarding with the API-side `@memory_profile_proxy(...)` decorator; undecorated endpoints always execute their original local implementation. It defaults to the legacy implementation. After deploying this service, enable proxying in the API process:
@@ -177,7 +217,7 @@ ENABLE_MEMORY_PROFILE=true
 MEMORY_PROFILE_BASE_URL=http://memory-profile:8082
 ```
 
-With the flag enabled, only the five contract-equivalent read operations listed above use the remote service. `generate_cache` and `interest_distribution` are not exposed by `memory-profile` and remain on their original implementations; `workspace_statistics` remains local until the profile service owns equivalent snapshot-refresh infrastructure. The API marks API-key calls `x-source: ex_api` and everything else `in_api`, the same labelling the Gateway applies to the face it terminated credentials on, and it identifies the API-key face by the key itself (`x-api-key-id`) exactly as the Gateway does. The mode is derived from the caller's own path, so it cannot drift from the forwarded path. Transport/protocol failures fail closed as `SERVICE_UNAVAILABLE`. Set the flag back to `false` for a reversible rollback.
+With the flag enabled, every endpoint carrying `@memory_profile_proxy(...)` uses the remote service; endpoints without it keep their local implementation. The API marks API-key calls `x-source: ex_api` and everything else `in_api`, the same labelling the Gateway applies on the face it terminated credentials on, and it identifies the API-key face by the key itself (`x-api-key-id`) exactly as the Gateway does. The mode is derived from the caller's own path, so it cannot drift from the forwarded path. Transport/protocol failures fail closed as `SERVICE_UNAVAILABLE`. Set the flag back to `false` for a reversible rollback.
 
 ## Logging
 
@@ -199,7 +239,8 @@ Uvicorn runs with `--http zttp --http2`. Port `8082` accepts HTTP/1.1 and cleart
 
 `GET /internal/v1/health/metrics` is an unauthenticated, read-only diagnostic
 probe with the same network-isolation assumption as `/health/live` and
-`/health/ready`. It returns a dedicated JSON shape (not the analytics envelope)
+`/health/ready`. It returns a dedicated JSON shape (not the standard response
+envelope)
 and sets `Cache-Control: no-store`. It never pings a dependency; `/health/ready`
 remains the connectivity contract.
 

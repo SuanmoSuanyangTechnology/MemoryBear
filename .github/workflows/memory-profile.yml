@@ -1,0 +1,40 @@
+name: Memory Profile Checks
+
+on:
+  pull_request:
+    paths:
+      - 'memory-profile/**'
+      - 'packages/auth-sdk/**'
+      - '.github/workflows/memory-profile.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: memory-profile
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install uv
+        run: pip install uv==0.10.11
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Lint
+        run: uv run ruff check .
+
+      - name: Import boundaries
+        run: uv run python scripts/check_import_boundaries.py
+
+      - name: External API contract
+        run: uv run python scripts/check_external_api_contract.py
