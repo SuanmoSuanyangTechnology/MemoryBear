@@ -58,6 +58,10 @@ class MemoryAuthConfig:
     kill_switch_file: str | None = None
     jwks_url: str | None = None
     redis: object | None = None
+    # Deployment-scoped ACL names; app.py passes DB_NAME-derived values. The
+    # defaults match the legacy global names for direct construction in tests.
+    acl_rules_key: str = "acl:rules"
+    acl_rules_changed_channel: str = "acl:rules:changed"
 
 
 def load_gateway_auth(config: MemoryAuthConfig):
