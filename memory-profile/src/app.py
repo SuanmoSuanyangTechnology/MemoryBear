@@ -8,6 +8,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from src.bootstrap import get_settings
+from src.common.external_api import verify_external_api_contract
 from src.common.observability import setup_logging
 from src.common.observability.runtime_metrics import start_tracemalloc
 from src.common.redis_cache import clear_redis_cache, configure_redis_cache
@@ -102,5 +103,8 @@ def create_app(
         application.add_middleware(RequestLoggingMiddleware)
 
     application.include_router(modules_router)
+    # Public (API-key reachable) endpoints are an external contract: compare
+    # their request parameters with the committed snapshot once, at startup.
+    verify_external_api_contract(modules_router.routes)
     register_error_handlers(application)
     return application
