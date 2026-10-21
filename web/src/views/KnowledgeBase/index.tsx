@@ -366,12 +366,13 @@ const KnowledgeBaseManagement: FC = () => {
             <Flex key="knowledge-base-items" align="flex-start" gap={12} className="rb:mb-2!">
               {columns.map((columnItems, colIdx) => (
                 <div key={colIdx} style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 12 }}>
-                  {columnItems.map((item) => {
+                  {columnItems.map((item, itemIndex) => {
                     const modelInfo = modelMenus[item.id];
                     const hasModelInfo = modelInfo && modelInfo.menu.length > 1;
+                    const itemKey = item.id || `knowledge-base-${colIdx}-${itemIndex}`;
                     return (
                       <RbCard
-                        key={item.id}
+                        key={itemKey}
                         title={item.name}
                         headerType="borderless"
                         bodyClassName="rb:px-4! rb:pt-0! rb:pb-4!"
@@ -426,7 +427,11 @@ const KnowledgeBaseManagement: FC = () => {
                               }}
                             >
                               <span className="rb:truncate rb:flex-1 rb:text-gray-500">
-                                {modelInfo.menu.slice(1, 2).map(item => item?.label ? <div>{item?.label}</div> : null)}
+                                {modelInfo.menu.slice(1, 2).map((menuItem, menuIndex) => menuItem?.label ? (
+                                  <div key={menuItem.key ?? `${item.id}-menu-${menuIndex}`}>
+                                    {menuItem.label}
+                                  </div>
+                                ) : null)}
                               </span>
                               <span className="rb:text-gray-400 rb:text-[10px]">
                                 {expandedItems[item.id] ? <DownOutlined /> : <RightOutlined />}
@@ -434,10 +439,10 @@ const KnowledgeBaseManagement: FC = () => {
                             </Flex>
                             {expandedItems[item.id] && (
                               <Flex vertical gap={8} className="rb:text-[12px] rb:mt-2!">
-                                {modelInfo.menu.slice(2).map((text, idx) => {
+                                {modelInfo.menu.slice(2).map((menuItem, menuIndex) => {
                                   return (
-                                    <div key={idx} className="rb:text-gray-500">
-                                      {text?.label}
+                                    <div key={menuItem.key ?? `${item.id}-menu-${menuIndex}`} className="rb:text-gray-500">
+                                      {menuItem.label}
                                     </div>
                                   );
                                 })}

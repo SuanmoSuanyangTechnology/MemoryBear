@@ -19,6 +19,7 @@ import type {
 } from '@/views/KnowledgeBase/types';
 import CreateModalBasicConfig from './CreateModalBasicConfig';
 import CreateModalKnowledgeGraphConfig from './CreateModalKnowledgeGraphConfig';
+import CreateModalWikiConfig from './CreateModalWikiConfig';
 import useCreateModalModels from './useCreateModalModels';
 import { baseModelFields, multimodalModelFields } from '../../constants'
 
@@ -128,6 +129,12 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({ refreshTa
           community: false,
           ...(record.parser_config?.graphrag || {}),
         },
+        wiki: {
+          enabled: false,
+          language: 'zh-CN',
+          extract_prompt: '',
+          ...(record.parser_config?.wiki || {}),
+        },
       },
     };
 
@@ -144,7 +151,11 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({ refreshTa
     form.setFieldsValue(baseValues);
   };
 
-  const handleOpen = (record?: KnowledgeBaseListItem | null, type?: string) => {
+  const handleOpen = (
+    record?: KnowledgeBaseListItem | null,
+    type?: string,
+    step?: number,
+  ) => {
     setDatasets(record || null);
     const isRebuild = type === 'rebuild';
     const actualType = isRebuild
@@ -154,7 +165,7 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({ refreshTa
     setCurrentType(actualType as any);
     setIsRebuildMode(isRebuild);
     setOriginalType(type || '');
-    setCurrentStep(isRebuild ? 1 : 0);
+    setCurrentStep(step ?? (isRebuild ? 1 : 0));
     setBaseFields(record || null, actualType);
     setVisible(true);
     getTypeList();
@@ -187,6 +198,7 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({ refreshTa
                     entity_types: entityTypes,
                   }
                 : undefined,
+              wiki: formValues.parser_config?.wiki,
             },
           };
           console.log('Saving payload:', payload);
@@ -345,17 +357,20 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({ refreshTa
           onGenerateEntityTypes={generateEntityTypes}
         />
       ),
+    }, {
+      title: t('knowledgeBase.wiki'),
+      content: <CreateModalWikiConfig />,
     }] : []),
   ];
 
   const handleStepSave = () => {
-    if (isFolder || currentStep === 1) {
+    if (isFolder || currentStep === stepItems.length - 1) {
       handleSave();
       return;
     }
 
     form.validateFields().then(() => {
-      setCurrentStep(1);
+      setCurrentStep((step) => step + 1);
     });
   };
 
@@ -379,13 +394,14 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({ refreshTa
           onClick={handleStepSave}
         >
           {t(
-            isFolder || currentStep === 1
+            isFolder || currentStep === stepItems.length - 1
               ? (datasets?.id ? 'common.save' : 'common.create')
               : 'common.nextStep',
           )}
         </Button>,
       ]}
       confirmLoading={loading}
+      width={640}
     >
       {!isFolder && (
         <Steps
@@ -409,6 +425,11 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({ refreshTa
               method: 'general',
               resolution: false,
               community: false,
+            },
+            wiki: {
+              enabled: false,
+              language: 'zh-CN',
+              extract_prompt: '',
             },
           },
         }}
