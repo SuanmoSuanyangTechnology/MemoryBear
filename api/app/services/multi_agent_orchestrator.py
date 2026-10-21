@@ -814,6 +814,24 @@ class MultiAgentOrchestrator:
             return None
         return await self._maybe_await(self.db.get(model, identity))
 
+    async def _ensure_db_connection(self) -> None:
+        """并发派发子 Agent 前，先让共享 AsyncSession 拿到连接（串行化“建连”这一步）。
+
+        准备阶段结束后会 end_read_transaction，session 此时没有连接。主管同一轮并行派发
+        多个子 Agent 时，它们几乎同时对同一个 session 做第一次读库，后到的会撞上
+        “This session is provisioning a new connection; concurrent operations are not
+        permitted”。连接建好后 asyncpg 适配层本身会串行化语句，所以只需要保证
+        建连这一步不并发：用锁包住 db.connection()，已有连接时它不会产生网络开销。
+        """
+        db = self.db
+        if not isinstance(db, AsyncSession):
+            return
+        lock = getattr(self, "_db_connect_lock", None)
+        if lock is None:
+            lock = self._db_connect_lock = asyncio.Lock()
+        async with lock:
+            await db.connection()
+
     # ──────────────────────────────────────────────────────────────────
     # 多 Agent 日志：主执行记录的生命周期
     # ──────────────────────────────────────────────────────────────────
@@ -3765,7 +3783,8 @@ class MultiAgentOrchestrator:
         """
         from app.services.draft_run_service import AgentRunService
 
-        # 获取模型配置
+        # 获取模型配置（并行派发时先串行建连，避免共享 session 并发建连报错）
+        await self._ensure_db_connection()
         model_config = await self._db_get(ModelConfig, agent_config.default_model_config_id)
         if not model_config:
             raise BusinessException(
@@ -3839,7 +3858,8 @@ class MultiAgentOrchestrator:
         """
         from app.services.draft_run_service import AgentRunService
 
-        # 获取模型配置
+        # 获取模型配置（并行派发时先串行建连，避免共享 session 并发建连报错）
+        await self._ensure_db_connection()
         model_config = await self._db_get(ModelConfig, agent_config.default_model_config_id)
         if not model_config:
             raise BusinessException(

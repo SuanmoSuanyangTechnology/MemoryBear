@@ -27,8 +27,20 @@ class CompatibleChatOpenAI(ChatOpenAI):
         **kwargs: Any,
     ) -> dict:
         payload = super()._get_request_payload(input_, stop=stop, **kwargs)
-        if payload.get("tools") and "response_format" in payload:
+        # json_output 开启时 response_format 是字典（json_object 等）。留在顶层会让
+        # langchain_openai 切到 .parse()/.stream()，而该路径要求所有工具 strict=True，
+        # 动态工具不满足会直接报错。所以字典形式一律改经 extra_body 透传（SDK 合并进
+        # 请求体顶层），上游 API 仍能收到 JSON 约束——与是否带工具无关：只要 json_output
+        # 开着就走 extra_body，没开时 payload 里没有该键，行为完全不变。
+        # pydantic 类（with_structured_output(json_schema)）必须留在顶层：它依赖 .parse()
+        # 的 parsed 解析与截断报错，且无法序列化进 extra_body。
+        response_format = payload.get("response_format")
+        if isinstance(response_format, dict):
             payload.pop("response_format")
+            payload["extra_body"] = {
+                **(payload.get("extra_body") or {}),
+                "response_format": response_format,
+            }
         return payload
 
     def _create_chat_result(
