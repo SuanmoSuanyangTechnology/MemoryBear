@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 from typing import Any
 
 from langchain_core.messages import BaseMessage
@@ -15,8 +14,6 @@ from redbear_model.contracts import (
     ResolvedModelConfig,
 )
 from redbear_model.runtime.client_pool import HttpClients
-
-logger = logging.getLogger(__name__)
 
 
 class CompatibleChatOpenAI(ChatOpenAI):
@@ -44,13 +41,6 @@ class CompatibleChatOpenAI(ChatOpenAI):
                 **(payload.get("extra_body") or {}),
                 "response_format": response_format,
             }
-            logger.info(
-                "[json_output] response_format=%s 经 extra_body 下发"
-                "（API 层约束生效, 非提示词兜底）model=%s tools=%d",
-                response_format,
-                getattr(self, "model_name", "?"),
-                len(payload.get("tools") or []),
-            )
         return payload
 
     def _create_chat_result(
@@ -211,12 +201,6 @@ def build_openai_compatible_params(
     thinking_conflict = (
         ModelFeature.THINKING in features and config.deep_thinking
     )
-    if should_send_json and thinking_conflict:
-        logger.info(
-            "[json_output] 已开启但深度思考生效, response_format 不下发, "
-            "仅靠提示词兜底 model=%s",
-            config.model_name,
-        )
     if should_send_json and not thinking_conflict:
         params.setdefault("model_kwargs", {})["response_format"] = _response_format(
             config

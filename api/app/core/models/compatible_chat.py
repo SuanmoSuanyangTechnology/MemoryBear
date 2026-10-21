@@ -6,14 +6,11 @@ ChatOpenAI 在解析流式 SSE 时只取 delta.content，会丢弃 delta.reasoni
 """
 from __future__ import annotations
 
-import logging
 from typing import Any, Optional, Union
 
 from langchain_core.messages import BaseMessage
 from langchain_core.outputs import ChatGenerationChunk, ChatResult
 from langchain_openai import ChatOpenAI
-
-logger = logging.getLogger(__name__)
 
 
 class CompatibleChatOpenAI(ChatOpenAI):
@@ -48,13 +45,6 @@ class CompatibleChatOpenAI(ChatOpenAI):
                 **(payload.get("extra_body") or {}),
                 "response_format": response_format,
             }
-            logger.info(
-                "[json_output] response_format=%s 经 extra_body 下发"
-                "（API 层约束生效, 非提示词兜底）model=%s tools=%d",
-                response_format,
-                getattr(self, "model_name", "?"),
-                len(payload.get("tools") or []),
-            )
         return payload
 
     def _create_chat_result(self, response: Union[dict, Any], generation_info: Optional[dict] = None) -> ChatResult:

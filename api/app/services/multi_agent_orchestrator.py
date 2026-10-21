@@ -102,25 +102,6 @@ def _sub_agent_brief(agent_data: Dict[str, Any]) -> str:
     return app_desc.rstrip(" 。.;；")
 
 
-def _classify_json_output(text: str) -> str:
-    """json_output 诊断（只读，不改写内容）：主管最终输出的形态。
-
-    pure_json=整段就是 JSON 对象；code_fence=带 ``` 围栏；json_with_extra_text=
-    JSON 前后夹带文字；not_json=没有 JSON。
-    """
-    stripped = (text or "").strip()
-    try:
-        if isinstance(json.loads(stripped), dict):
-            return "pure_json"
-    except ValueError:
-        pass
-    if stripped.startswith("```"):
-        return "code_fence"
-    if "{" in stripped and "}" in stripped:
-        return "json_with_extra_text"
-    return "not_json"
-
-
 class SubAgentTool:
     """子 Agent 工具的工厂/执行体（S8 桥接层核心）。
 
@@ -2463,24 +2444,6 @@ class MultiAgentOrchestrator:
             return auto_prompt
         return f"{custom_prompt}\n\n---\n\n{auto_prompt}"
 
-    def _log_json_output_check(self, path: str, text: str) -> None:
-        """json_output 开启时打一条诊断日志：最终输出形态 + 本轮子 Agent 调用数（不改内容）。"""
-        if not self._supervisor_json_output_on() or not (text or "").strip():
-            return
-        kind = _classify_json_output(text)
-        calls = sum(
-            int(getattr(w, "calls", 0) or 0)
-            for w in (getattr(self, "_loop_tool_instances", None) or [])
-        )
-        message = (
-            f"[json_output诊断] path={path} 最终输出={kind} 子Agent调用数={calls} "
-            f"stop_reason={self._loop_stop_reason}"
-        )
-        if kind == "pure_json":
-            logger.info(message)
-        else:
-            logger.warning(f"{message} 输出前200字={text.strip()[:200]!r}")
-
     def _supervisor_json_output_on(self) -> bool:
         """集群 model_parameters.json_output 是否开启（与 _build_supervisor_agent 传给引擎的口径一致）。"""
         mp = self.model_parameters
@@ -3078,7 +3041,6 @@ class MultiAgentOrchestrator:
                 yield _pending
 
         self._loop_stop_reason = self._resolve_loop_stop_reason(loop_error)
-        self._log_json_output_check("stream", final_content)
 
         # 主管 token 记账（S4：routing 层 = 主管决策与生成；sub 层 = 子 Agent）
         self._turn_routing_tokens += int(supervisor_tokens or 0)
@@ -3214,7 +3176,6 @@ class MultiAgentOrchestrator:
             total_tokens = int(((result or {}).get("usage") or {}).get("total_tokens") or 0)
             self._turn_routing_tokens += total_tokens
             self._loop_stop_reason = self._resolve_loop_stop_reason(None)
-            self._log_json_output_check("non_stream", content)
             if not (content or "").strip():
                 logger.warning("S9 supervisor_loop（非流式）：主管未产出正文")
                 self._set_merge_mode_actual("loop", "loop 无正文产出")
