@@ -253,7 +253,7 @@ const KnowledgeBaseManagement: FC = () => {
         ...prev,
         parent_id: knowledgeBase.id,
       }));
-      
+
       return;
     }
     

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
+from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from datetime import datetime, timedelta
 from typing import Any
@@ -28,7 +29,7 @@ from app.core.utils.datetime_utils import (
     parse_timestamp_to_utc_naive,
     utcnow_naive,
 )
-from app.db import get_async_db_context
+from app.db import get_async_db_context, get_db_read
 from app.repositories.conversation_repository import ConversationRepository
 from app.repositories.end_user_repository import EndUserRepository
 from app.repositories.forget_log_repository import ForgetLogRepository
@@ -68,25 +69,33 @@ class WorkspaceStatisticsRefreshTimeoutError(BusinessException):
 
 async def _get_postgresql_statistics(
     end_user_ids: list[uuid.UUID],
+    *,
+    use_sync_pg: bool = False,
 ) -> dict[str, int]:
     async with asyncio.TaskGroup() as task_group:
         perceptual_task = task_group.create_task(
-            _get_perceptual_count(end_user_ids)
+            asyncio.to_thread(_get_perceptual_count_sync, end_user_ids)
+            if use_sync_pg else _get_perceptual_count(end_user_ids)
         )
         active_conversation_task = task_group.create_task(
-            _get_active_conversation_count(end_user_ids)
+            asyncio.to_thread(_get_active_conversation_count_sync, end_user_ids)
+            if use_sync_pg else _get_active_conversation_count(end_user_ids)
         )
         api_mcp_source_task = task_group.create_task(
-            _get_api_mcp_source_count(end_user_ids)
+            asyncio.to_thread(_get_api_mcp_source_count_sync, end_user_ids)
+            if use_sync_pg else _get_api_mcp_source_count(end_user_ids)
         )
         short_term_task = task_group.create_task(
-            _get_short_term_count(end_user_ids)
+            asyncio.to_thread(_get_short_term_count_sync, end_user_ids)
+            if use_sync_pg else _get_short_term_count(end_user_ids)
         )
         pending_conversation_task = task_group.create_task(
-            _get_pending_conversation_count(end_user_ids)
+            asyncio.to_thread(_get_pending_conversation_count_sync, end_user_ids)
+            if use_sync_pg else _get_pending_conversation_count(end_user_ids)
         )
         forget_task = task_group.create_task(
-            _get_forget_count(end_user_ids)
+            asyncio.to_thread(_get_forget_count_sync, end_user_ids)
+            if use_sync_pg else _get_forget_count(end_user_ids)
         )
 
     return {
@@ -159,8 +168,75 @@ async def _get_active_end_user_ids_page(
         )
 
 
+def _get_perceptual_count_sync(end_user_ids: list[uuid.UUID]) -> int:
+    with get_db_read() as db:
+        return MemoryPerceptualRepository(
+            db
+        ).get_count_by_user_ids(end_user_ids)
+
+
+def _get_active_conversation_count_sync(
+    end_user_ids: list[uuid.UUID],
+) -> int:
+    with get_db_read() as db:
+        return ConversationRepository(
+            db
+        ).get_active_conversation_count_by_user_ids(end_user_ids)
+
+
+def _get_api_mcp_source_count_sync(end_user_ids: list[uuid.UUID]) -> int:
+    with get_db_read() as db:
+        return MemoryMessageRepository(
+            db
+        ).get_working_memory_source_count_by_user_ids(end_user_ids)
+
+
+def _get_short_term_count_sync(end_user_ids: list[uuid.UUID]) -> int:
+    with get_db_read() as db:
+        return ShortTermMemoryRepository(db).count_by_user_ids(
+            end_user_ids
+        )
+
+
+def _get_pending_conversation_count_sync(
+    end_user_ids: list[uuid.UUID],
+) -> int:
+    with get_db_read() as db:
+        return ConversationRepository(
+            db,
+        ).get_pending_write_conversation_count_by_user_ids(end_user_ids)
+
+
+def _get_forget_count_sync(end_user_ids: list[uuid.UUID]) -> int:
+    with get_db_read() as db:
+        return ForgetLogRepository.get_total_by_user_ids_sync(
+            db, end_user_ids
+        )
+
+
+def _get_active_end_user_ids_page_sync(
+    workspace_id: uuid.UUID,
+    after_id: uuid.UUID | None,
+) -> list[uuid.UUID]:
+    with get_db_read() as db:
+        return EndUserRepository(db).get_active_end_user_ids_page(
+            workspace_id,
+            after_id=after_id,
+            limit=WORKSPACE_STATISTICS_BATCH_SIZE,
+        )
+
+
+async def get_workspace_statistics_for_worker_async(
+    workspace_id: uuid.UUID,
+) -> dict:
+    """Calculate worker snapshots using thread-local synchronous PG sessions."""
+    return await get_workspace_statistics_async(workspace_id, use_sync_pg=True)
+
+
 async def get_workspace_statistics_async(
     workspace_id: uuid.UUID,
+    *,
+    use_sync_pg: bool = False,
 ) -> dict:
     """汇总指定 workspace 下所有活跃终端用户的八类记忆。"""
     totals = {memory_type: 0 for memory_type in MEMORY_TYPE_ORDER}
@@ -172,10 +248,14 @@ async def get_workspace_statistics_async(
     workspace_statistics_storage: WorkspaceStatisticsStorage | None = None
     try:
         while True:
-            end_user_ids = await _get_active_end_user_ids_page(
-                workspace_id,
-                after_id,
-            )
+            if use_sync_pg:
+                end_user_ids = await asyncio.to_thread(
+                    _get_active_end_user_ids_page_sync, workspace_id, after_id
+                )
+            else:
+                end_user_ids = await _get_active_end_user_ids_page(
+                    workspace_id, after_id
+                )
             if not end_user_ids:
                 break
 
@@ -191,7 +271,7 @@ async def get_workspace_statistics_async(
 
             async with asyncio.TaskGroup() as task_group:
                 postgresql_task = task_group.create_task(
-                    _get_postgresql_statistics(end_user_ids)
+                    _get_postgresql_statistics(end_user_ids, use_sync_pg=use_sync_pg)
                 )
                 graph_task = task_group.create_task(
                     workspace_statistics_storage.get_statistics(
@@ -365,9 +445,10 @@ async def _renew_refresh_lock(
 async def _calculate_while_lease_is_valid(
     workspace_id: uuid.UUID,
     renewal_task: asyncio.Task[None],
+    calculate_statistics: Callable[[uuid.UUID], Awaitable[dict]],
 ) -> dict:
     calculation_task = asyncio.create_task(
-        get_workspace_statistics_async(workspace_id)
+        calculate_statistics(workspace_id)
     )
     done, _ = await asyncio.wait(
         {calculation_task, renewal_task},
@@ -389,6 +470,7 @@ async def _refresh_under_lock(
     workspace_id: uuid.UUID,
     token: str,
     initial_version: int | str | None,
+    calculate_statistics: Callable[[uuid.UUID], Awaitable[dict]],
 ) -> tuple[dict[str, Any], bool]:
     renewal_task = asyncio.create_task(_renew_refresh_lock(workspace_id, token))
     try:
@@ -403,6 +485,7 @@ async def _refresh_under_lock(
         statistics = await _calculate_while_lease_is_valid(
             workspace_id,
             renewal_task,
+            calculate_statistics,
         )
         await add_workspace_statistics_snapshot(
             workspace_id,
@@ -434,8 +517,11 @@ async def get_or_refresh_workspace_statistics_async(
     allow_cached_response: bool = True,
     baseline_version: int | str | None = None,
     baseline_captured: bool = False,
+    calculate_statistics: Callable[[uuid.UUID], Awaitable[dict]] | None = None,
 ) -> tuple[dict[str, Any], bool]:
     """读取或串行刷新快照，返回响应数据及本调用是否实际写入。"""
+    if calculate_statistics is None:
+        calculate_statistics = get_workspace_statistics_async
     snapshots = await get_workspace_statistics_snapshots(workspace_id)
     cached_response = _fresh_cached_response(snapshots)
     if allow_cached_response and cached_response is not None:
@@ -455,6 +541,7 @@ async def get_or_refresh_workspace_statistics_async(
             workspace_id,
             token,
             initial_version,
+            calculate_statistics,
         )
 
     while loop.time() < deadline:
@@ -476,6 +563,7 @@ async def get_or_refresh_workspace_statistics_async(
                 workspace_id,
                 token,
                 initial_version,
+                calculate_statistics,
             )
 
     final_snapshots = await get_workspace_statistics_snapshots(workspace_id)
@@ -511,7 +599,7 @@ def _with_yesterday_changes(response: dict[str, Any]) -> dict[str, Any]:
         "total_count_change": _calculate_yesterday_change(
             response["total_count"], yesterday["total_count"]
         ),
-        "update": response["total_count"] - yesterday["total_count"],
+        "update": response["total_count"] - yesterday["total_count"], # v0.5.6计划删除此字段，v0.5.2已有公告
     }
     result.pop("yesterday")
     return result

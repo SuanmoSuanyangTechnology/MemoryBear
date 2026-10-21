@@ -1,6 +1,7 @@
 /**
  * Core application / model / multi-agent configuration data models.
  */
+import type { ReactElement } from 'react';
 import type { KnowledgeConfig } from '@/components/Knowledge/types'
 import type { Variable } from '../components/VariableList/types'
 import type { ToolOption } from '../components/ToolList/types'
@@ -125,6 +126,7 @@ export interface SupervisorConfig {
   tools?: ToolOption[] | null;
   skills?: SkillConfigForm | null;
   variables?: Variable[] | null;
+  features?: FeaturesConfigForm;
 }
 
 /**
@@ -132,7 +134,7 @@ export interface SupervisorConfig {
  */
 export interface SubAgentConfigInputBase {
   agent_id: string;
-  name?: string;
+  name?: string | ReactElement;
   role?: string | null;
   priority?: number;
   capabilities?: string[];

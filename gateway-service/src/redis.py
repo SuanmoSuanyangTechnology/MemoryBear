@@ -1,6 +1,7 @@
 """Redis 连接（惰性初始化，由 lifespan/boot fixture 显式控制）。decode_responses=False：
 快照为 bytes 语义，消费者侧自行 JSON 解码。"""
 import redis.asyncio as aioredis
+
 from src.config import settings
 
 redis = None

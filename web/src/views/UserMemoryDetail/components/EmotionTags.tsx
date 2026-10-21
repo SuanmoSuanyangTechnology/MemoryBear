@@ -1,9 +1,3 @@
-/*
- * @Author: ZhaoYing 
- * @Date: 2026-02-03 18:33:39 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-03-16 15:01:39 
- */
 import { type FC, useEffect, useState, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useParams } from 'react-router-dom'
@@ -14,6 +8,7 @@ import { Flex, Divider } from 'antd';
 import Empty from '@/components/Empty'
 import RbCard from '@/components/RbCard/Card'
 import { getWordCloud } from '@/api/memory'
+import { getEmotionColor } from '../constant'
 
 /**
  * Tag list data structure
@@ -49,23 +44,6 @@ const EmotionTags: FC = () => {
       .then((res) => {
         setData(res as TagList)
       })
-  }
-
-  /**
-   * Get color for emotion type
-   * @param {string} emotionType - Emotion type (joy, anger, sadness, etc.)
-   * @returns {string} Color hex code
-   */
-  const getEmotionColor = (emotionType: string) => {
-    const colors: Record<string, string> = {
-      joy: '#FF8A4C',
-      anger: '#FF5D34', 
-      sadness: '#155EEF',
-      fear: '#9C6FFF',
-      neutral: '#4DA8FF',
-      surprise: '#369F21'
-    }
-    return colors[emotionType] || '#8c8c8c'
   }
 
   useEffect(() => {
@@ -128,16 +106,16 @@ const EmotionTags: FC = () => {
       title={t('statementDetail.emotionTags')}
       headerType="borderless"
       headerClassName="rb:min-h-[46px]! rb:font-[MiSans-Bold] rb:font-bold"
-      bodyClassName="rb:p-0!"
+      bodyClassName="rb:p-0! rb:pt-4! rb:h-[calc(100%-46px)]!"
       className="rb:h-full!"
     >
       {data?.keywords && data?.keywords.length > 0
-        ? <div>
-          <div ref={chartRef} className="rb:mt-4 rb:px-3 rb:h-53 rb:w-full" />
+        ? <Flex vertical>
+          <div ref={chartRef} className="rb:px-3 rb:min-h-53 rb:flex-1 rb:w-full" />
           
-          <div className="rb:px-4 rb:pb-2.5">
+          <div className="rb:px-4 rb:pb-2.5 rb:shrink-0">
             <Divider className="rb:my-2.5!" />
-            <Flex wrap justify="space-between" className="rb:px-1.5!">
+            <Flex wrap gap={12} className="rb:px-1.5!">
               {Object.keys(emotionStats).map((type) => {
                 return (
                   <Flex key={type} align="center" gap={4}>
@@ -148,8 +126,8 @@ const EmotionTags: FC = () => {
               })}
             </Flex>
           </div>
-        </div>
-        : <Empty size={88} className="rb:h-full rb:mb-4" />
+        </Flex>
+        : <Empty size={88} className="rb:h-full! rb:mb-4" />
       }
     </RbCard>
   )

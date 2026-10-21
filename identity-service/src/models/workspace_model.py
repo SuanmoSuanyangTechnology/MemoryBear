@@ -1,4 +1,6 @@
-"""只读映射 core workspaces/workspace_members 表；表结构归 core 管理，core 改列名/删列时须同步本文件。"""
+"""只读映射 core workspaces/workspace_members 表；表结构归 core 管理，
+core 改列名/删列时须同步本文件。
+"""
 from sqlalchemy import Boolean, Column, DateTime, String
 from sqlalchemy.dialects.postgresql import UUID
 

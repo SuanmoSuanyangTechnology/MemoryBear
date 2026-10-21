@@ -1,16 +1,11 @@
-/*
- * @Author: ZhaoYing 
- * @Date: 2026-02-03 16:29:33 
- * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-08-13 12:18:11
- */
-import { useEffect, useState, useRef, forwardRef, useImperativeHandle } from 'react'
+import { useEffect, useState, useRef, forwardRef, useImperativeHandle, useCallback, type ReactElement } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useParams } from 'react-router-dom';
-import { Form, Space, Row, Col, Button, Flex, App, Select, Spin } from 'antd'
+import { Form, Space, Row, Col, Button, Flex, App, Select, Spin, type SelectProps } from 'antd'
 
 import Card from './components/Card'
 import Tag from './components/Tag'
+import RbTag from '@/components/Tag';
 import { getMultiAgentConfig, saveMultiAgentConfig, getApplicationList } from '@/api/application';
 import type { 
   Config,
@@ -20,7 +15,8 @@ import type {
   ClusterRef,
   ModelConfigModalRef,
   FeaturesConfigForm,
-  ChatVariableConfigModalRef
+  ChatVariableConfigModalRef,
+  ModelConfig
 } from './types'
 import Chat from './components/Chat'
 import RbCard from '@/components/RbCard/Card'
@@ -29,15 +25,20 @@ import Empty from '@/components/Empty'
 import RadioGroupCard from '@/components/RadioGroupCard'
 import ModelSelect from '@/components/ModelSelect'
 import ModelConfigModal from './components/ModelConfigModal'
+import { defaultThinkingBudgetTokens } from './components/ModelConfigModal/constants'
+import { configFields } from './components/ModelConfigModal/constants';
+import type { Model } from '@/views/ModelManagement/types'
 import ChatVariableConfigModal from './components/ChatVariableConfigModal'
 import SupervisorCapabilityConfig from './components/SupervisorCapabilityConfig'
-import type { Variable } from './components/VariableList/types'
+import { useClusterFeatureSync } from './hooks/useClusterFeatureSync'
 import type { Application } from '@/views/ApplicationManagement/types'
 import {
   normalizeSupervisorConfigForForm,
   normalizeSupervisorConfigForSave,
-} from './utils/supervisorConfig'
-// import FeaturesConfig from './components/FeaturesConfig'
+  enrichMissingModelFields,
+} from './utils/clusterConfig'
+import FeaturesConfig from './components/FeaturesConfig'
+import { colorObj } from './constants';
 
 const MAX_LENGTH = 5;
 /**
@@ -51,7 +52,6 @@ const Cluster = forwardRef<ClusterRef, { onFeaturesLoad?: (features: FeaturesCon
   const { id } = useParams()
   const subAgentModalRef = useRef<SubAgentModalRef>(null)
   const [data, setData] = useState<Config | null>(null)
-  const values = Form.useWatch([], form)
   const [subAgents, setSubAgents] = useState<SubAgentItem[]>([])
   const [chatList, setChatList] = useState<ChatData[]>([
     {
@@ -60,23 +60,21 @@ const Cluster = forwardRef<ClusterRef, { onFeaturesLoad?: (features: FeaturesCon
   ])
   const [loading, setLoading] = useState(false)
   const chatVariableConfigModalRef = useRef<ChatVariableConfigModalRef>(null)
-  const [chatVariables, setChatVariables] = useState<Variable[]>([])
-  const supervisorVariables = values?.supervisor_config?.variables as Variable[] | undefined
-
-  useEffect(() => {
-    setChatVariables(
-      values?.orchestration_mode === 'supervisor_loop'
-        ? supervisorVariables || []
-        : []
-    )
-  }, [supervisorVariables, values?.orchestration_mode])
+  const values = Form.useWatch([], form)
+  const {
+    chatVariables,
+    handleSaveChatVariable,
+    handleSaveFeaturesConfig,
+  } = useClusterFeatureSync({
+    form,
+    values,
+    chatListLength: chatList.length,
+    setChatList,
+    onFeaturesLoad,
+  })
 
   const handleOpenVariableConfig = () => {
     chatVariableConfigModalRef.current?.handleOpen(chatVariables)
-  }
-
-  const handleSaveChatVariable = (variables: Variable[]) => {
-    setChatVariables(variables)
   }
 
   /**
@@ -90,7 +88,6 @@ const Cluster = forwardRef<ClusterRef, { onFeaturesLoad?: (features: FeaturesCon
       message.warning(t('common.selectPlaceholder', { title: t('application.model') }))
       return Promise.resolve()
     }
-
     const params = {
       id: data.id,
       app_id: data.app_id,
@@ -99,7 +96,10 @@ const Cluster = forwardRef<ClusterRef, { onFeaturesLoad?: (features: FeaturesCon
         values.supervisor_config,
         data.supervisor_config
       ),
-      sub_agents: (subAgents || [])
+      sub_agents: (subAgents || []).map(item => ({
+        ...item,
+        name: typeof item.name === 'string' ? item.name : (item.name as ReactElement)?.props?.['data-name']
+      }))
     }
 
     return new Promise((resolve, reject) => {
@@ -120,20 +120,18 @@ const Cluster = forwardRef<ClusterRef, { onFeaturesLoad?: (features: FeaturesCon
         })
     })
   }
-  useEffect(() => {
-    getData()
-  }, [id])
 
   /**
    * Fetch cluster configuration data
    */
-  const getData = () => {
+  const getData = useCallback(() => {
     if (!id) {
       return
     }
+    setChatList([{ list: [] }])
     setLoading(true)
-    getMultiAgentConfig(id as string).then(res => {
-      const response = res as Config
+    getMultiAgentConfig(id as string).then(async res => {
+      const response = await enrichMissingModelFields(res as Config)
       setData(response)
       form.setFieldsValue({
         ...response,
@@ -150,7 +148,12 @@ const Cluster = forwardRef<ClusterRef, { onFeaturesLoad?: (features: FeaturesCon
               if (filterVO) {
                 return {
                   ...vo,
-                  name: filterVO.name,
+                  name: (
+                    <Space align="center" size={8} data-name={filterVO.name}>
+                      {filterVO.name}
+                      <RbTag color={colorObj[filterVO.type]}>{t(`application.${filterVO.type}`)}</RbTag>
+                    </Space>
+                  ),
                   is_active: filterVO.is_active
                 }
               }
@@ -160,12 +163,15 @@ const Cluster = forwardRef<ClusterRef, { onFeaturesLoad?: (features: FeaturesCon
       } else {
         setSubAgents(sub_agents)
       }
-      onFeaturesLoad?.(response.features)
+      onFeaturesLoad?.(response?.supervisor_config?.features)
     })
     .finally(() => {
       setLoading(false)
     })
-  }
+  }, [onFeaturesLoad, form, id])
+  useEffect(() => {
+    getData()
+  }, [id, getData])
   /**
    * Open sub-agent modal for add or edit
    * @param agent - Optional agent data for edit mode
@@ -200,7 +206,7 @@ const Cluster = forwardRef<ClusterRef, { onFeaturesLoad?: (features: FeaturesCon
   }
   useImperativeHandle(ref, () => ({
     handleSave,
-    features: data?.features
+    features: data?.supervisor_config?.features
   }))
 
   const modelConfigModalRef = useRef<ModelConfigModalRef>(null)
@@ -208,21 +214,68 @@ const Cluster = forwardRef<ClusterRef, { onFeaturesLoad?: (features: FeaturesCon
    * Open model configuration modal
    */
   const handleEditModelConfig = () => {
-    modelConfigModalRef.current?.handleOpen('multi_agent', values.model_parameters)
-  }
-  /**
-   * Save model configuration
-   * @param values - Model parameters
-   */
-  const handleSaveModelConfig = (values: Config['model_parameters']) => {
-    form.setFieldsValue({
-      model_parameters: values
+    modelConfigModalRef.current?.handleOpen('multi_agent', {
+      ...(values?.model_parameters || {}),
+      default_model_config_id: values?.default_model_config_id
     })
   }
-  // const handleSaveFeaturesConfig = (value: FeaturesConfigForm) => {
-  //   form.setFieldValue('features', value)
-  // }
+  /**
+   * Disable file upload capabilities when the selected model changes
+   */
+  const resetFileUploadWhenModelChanges = (nextModelConfigId?: string) => {
+    if (nextModelConfigId === values?.default_model_config_id) return
 
+    const fileUpload = { ...values?.supervisor_config?.features?.file_upload }
+    Object.keys(fileUpload).forEach(key => {
+      if (key.includes('enabled')) {
+        (fileUpload as Record<string, unknown>)[key] = false
+      }
+    })
+    form.setFieldValue(['supervisor_config', 'features', 'file_upload'], fileUpload)
+    message.warning(t('application.resetFeaturesTip'))
+  }
+
+  /**
+   * Save model configuration
+   * @param vo - Model parameters
+   */
+  const handleSaveModelConfig = (vo: ModelConfig) => {
+    const { default_model_config_id, input_modalities, output_modalities, ...rest } = vo
+    resetFileUploadWhenModelChanges(default_model_config_id)
+    form.setFieldsValue({
+      default_model_config_id,
+      input_modalities,
+      output_modalities,
+      model_parameters: {...rest}
+    })
+  }
+  const handleChangeModel: SelectProps['onChange'] = (value, option) => {
+    const model = option as Model | undefined
+    const nextModelConfigId = typeof value === 'string' ? value : undefined
+    const features = model?.features ?? []
+
+    resetFileUploadWhenModelChanges(nextModelConfigId)
+    form.setFieldsValue({
+      input_modalities: model?.input_modalities,
+      output_modalities: model?.output_modalities,
+      model_parameters: {
+        ...(values?.model_parameters || {}),
+        features,
+        thinking_budget_tokens: (features?.includes('thinking') || features?.includes('thinking_only')) ? defaultThinkingBudgetTokens : undefined,
+      },
+    })
+  }
+  const handleChangeMode = (value?: string | null) => {
+    if (value === 'supervisor_loop') {
+      const model_parameters: ModelConfig = {};
+      configFields.forEach(item => {
+        model_parameters[item.key] = item.defaultValue;
+      })
+      form.setFieldValue('model_parameters', model_parameters)
+    }
+    form.setFieldValue('supervisor_config', null)
+  }
+  console.log('chatList', chatList, values)
   return (
     <>
       {loading && <Spin fullscreen></Spin>}
@@ -230,14 +283,25 @@ const Cluster = forwardRef<ClusterRef, { onFeaturesLoad?: (features: FeaturesCon
         <Col span={12} className="rb:h-full! rb:overflow-y-hidden">
           <Form form={form} layout="vertical" className="rb:h-full! rb:overflow-hidden!">
             <Flex gap={12} vertical className="rb:h-full! rb:overflow-hidden!">
-              <Flex align="center" justify="end" className="rb:p-3! rb:bg-white rb:rounded-xl">
-                {/* <FeaturesConfig value={values?.features as FeaturesConfigForm} refresh={handleSaveFeaturesConfig} /> */}
+              <Flex gap={12} align="center" justify="end" className="rb:p-3! rb:bg-white rb:rounded-xl">
+                {values?.orchestration_mode === 'supervisor_loop' &&
+                  <>
+                    <FeaturesConfig
+                      value={values?.supervisor_config?.features as FeaturesConfigForm}
+                      input_modalities={values?.input_modalities || []}
+                      refresh={handleSaveFeaturesConfig}
+                      chatVariables={chatVariables}
+                    />
+                    <Form.Item name="input_modalities" hidden noStyle />
+                    <Form.Item name="output_modalities" hidden noStyle />
+                    <Form.Item name={['supervisor_config', 'features']} hidden noStyle />
+                  </>
+                }
                 <Button type="primary" onClick={() => handleSave()}>
                   {t('common.save')}
                 </Button>
               </Flex>
               <Flex gap={12} vertical className="rb:flex-1! rb:overflow-y-auto!">
-                <Form.Item name="features" hidden noStyle></Form.Item>
                 <Card title={t('application.collaboration')}>
                   <Form.Item
                     name="orchestration_mode"
@@ -251,6 +315,7 @@ const Cluster = forwardRef<ClusterRef, { onFeaturesLoad?: (features: FeaturesCon
                       }))}
                       allowClear={false}
                       block={true}
+                      onChange={handleChangeMode}
                     />
                   </Form.Item>
                 </Card>
@@ -263,7 +328,7 @@ const Cluster = forwardRef<ClusterRef, { onFeaturesLoad?: (features: FeaturesCon
                   extra={<Button className="rb:py-0! rb:px-2! rb:h-6!" disabled={subAgents.length >= MAX_LENGTH} onClick={() => handleSubAgentModal()}>+ {t('application.addSubAgent')}</Button>}
                 >
                   {subAgents.length === 0
-                    ? <div className="rb-border rb:rounded-xl rb:pt-4 rb:pb-6"><Empty size={88} /></div>
+                    ? <Empty size={88} className="rb-border rb:rounded-xl rb:pt-4! rb:pb-6!" />
                     : <Flex vertical gap={12}>
                       {subAgents.map((agent, index) => (
                         <Flex key={index} align="center" justify="space-between"
@@ -271,7 +336,9 @@ const Cluster = forwardRef<ClusterRef, { onFeaturesLoad?: (features: FeaturesCon
                         >
                           <Flex justify="center" vertical className="rb:max-w-[calc(100%-60px)]">
                             <div>
-                              <span className="rb:text-gray-800 rb:leading-5">{agent.name}</span>
+                              <span className="rb:text-gray-800 rb:leading-5">
+                                {agent.name}
+                              </span>
                               <Tag color={agent.is_active ? 'success' : 'warning'} className="rb:ml-2">
                                 {agent.is_active ? t('common.enable') : t('common.deleted')}
                               </Tag>
@@ -310,6 +377,7 @@ const Cluster = forwardRef<ClusterRef, { onFeaturesLoad?: (features: FeaturesCon
                           <ModelSelect
                             params={{ type: 'llm' }}
                             className="rb:w-full!"
+                            onChange={handleChangeModel}
                           />
                         </Form.Item>
                         <Form.Item name="model_parameters" noStyle>
@@ -370,7 +438,7 @@ const Cluster = forwardRef<ClusterRef, { onFeaturesLoad?: (features: FeaturesCon
             className="rb:h-full!"
           >
             <Chat
-              data={data as Config}
+              data={values as Config}
               chatList={chatList}
               updateChatList={setChatList}
               handleSave={handleSave}

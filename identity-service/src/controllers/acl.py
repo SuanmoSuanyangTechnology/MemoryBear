@@ -7,6 +7,7 @@
 (caller_service, target_service, endpoint) 三元组唯一（约束 uq_acl_rules_triple）：撞键返回
 409 + 已存在规则 id，改 effect 须显式走 PUT，避免 POST 静默翻转 allow/deny。
 """
+import asyncio
 import logging
 
 from fastapi import APIRouter, Depends
@@ -19,6 +20,7 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src import redis as iredis
+from src.config import settings
 from src.db import get_async_db
 from src.models import AclRule
 from src.schemas.acl import rules_to_redis
@@ -27,7 +29,14 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-REDIS_ACL_KEY = "acl:rules"
+# Deployment-scoped key/channel (derived from DB_NAME unless explicitly set):
+# deployments sharing one Redis must not overwrite each other's full rule set.
+REDIS_ACL_KEY = settings.ACL_RULES_KEY
+REDIS_ACL_CHANGED_CHANNEL = settings.ACL_RULES_CHANGED_CHANNEL
+
+# Change-notification tuning: one bounded retry on top of the initial attempt.
+_NOTIFY_TIMEOUT_S = 1.0
+_NOTIFY_ATTEMPTS = 2
 
 ALLOWED_EFFECTS = {"allow", "deny"}
 
@@ -70,11 +79,41 @@ def _conflict_response(existing: AclRule) -> JSONResponse:
     })
 
 
+async def _notify_rules_changed() -> None:
+    """Broadcast a change hint for hot-reloading consumers (best-effort).
+
+    One bounded retry covers a transient publish failure: a dropped hint on a
+    healthy consumer connection would otherwise delay propagation until the
+    next unrelated change. Failures are then swallowed — letting the error
+    escape would turn a successful push into a 500 at the call sites below.
+    """
+    for attempt in range(1, _NOTIFY_ATTEMPTS + 1):
+        try:
+            await asyncio.wait_for(
+                iredis.redis.publish(REDIS_ACL_CHANGED_CHANNEL, "changed"),
+                timeout=_NOTIFY_TIMEOUT_S,
+            )
+            return
+        except Exception:
+            if attempt < _NOTIFY_ATTEMPTS:
+                logger.warning(
+                    "acl change notification attempt %d failed; retrying",
+                    attempt,
+                    exc_info=True,
+                )
+            else:
+                logger.exception(
+                    "acl rules pushed but change notification failed after %d attempts",
+                    attempt,
+                )
+
+
 async def _push_rules(session) -> None:
     """全量读表 → 下发 Redis；任何一步失败抛 SQLAlchemyError/RedisError 由调用方转 500。"""
     rules = (await session.execute(select(AclRule))).scalars().all()
     blob = rules_to_redis([jsonable_encoder(r) for r in rules])
     await iredis.redis.set(REDIS_ACL_KEY, blob)
+    await _notify_rules_changed()
 
 
 async def _rule_or_404(session, rule_id: str) -> AclRule:
@@ -178,5 +217,7 @@ async def delete_rule(rule_id: str, session: AsyncSession = Depends(get_async_db
         await _push_rules(session)
     except (SQLAlchemyError, RedisError):
         logger.exception("acl rule deleted but redis push failed")
-        return JSONResponse(status_code=500, content={"error": "rule deleted but redis push failed"})
+        return JSONResponse(
+            status_code=500, content={"error": "rule deleted but redis push failed"}
+        )
     return JSONResponse(status_code=200, content={"deleted": rule_id})

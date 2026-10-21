@@ -363,7 +363,11 @@ class AppService:
                 )
 
         # 3. 检查子 Agent 配置
-        if not multi_agent_config.sub_agents or len(multi_agent_config.sub_agents) == 0:
+        # supervisor_loop 允许零子 Agent（主管退化为裸 Agent 直接作答）；其余模式依赖子 Agent 才能运行
+        if (
+            multi_agent_config.orchestration_mode != "supervisor_loop"
+            and (not multi_agent_config.sub_agents or len(multi_agent_config.sub_agents) == 0)
+        ):
             raise BusinessException(
                 "未配置子 Agent，无法运行",
                 BizCode.AGENT_CONFIG_MISSING
@@ -991,6 +995,8 @@ class AppService:
 
         app = self._get_app_or_404(app_id)
         self._validate_workspace_access(app, workspace_id)
+        app_workspace = self.db.get(Workspace, app.workspace_id)
+        app_tenant_id = app_workspace.tenant_id if app_workspace else None
 
         # 逻辑删除应用
         app.is_active = False
@@ -1006,6 +1012,20 @@ class AppService:
         self.db.execute(stmt)
         
         self.db.commit()
+        # 应用删除：停用提交后失效其情绪策略缓存。
+        logger.info(
+            "[EmotionReply] completed event=app_delete_persist tenant_id=%s app_id=%s result=committed",
+            app_tenant_id, app_id,
+        )
+        policy_provider = get_plugin("memory.emotion_reply_policy")
+        if policy_provider is not None and app_tenant_id is not None:
+            policy_provider.invalidate_sync(app_id, app_tenant_id)
+        else:
+            logger.debug(
+                "[EmotionReply] skipped event=cache_invalidate_sync tenant_id=%s app_id=%s reason=%s",
+                app_tenant_id, app_id,
+                "provider_unavailable" if policy_provider is None else "tenant_missing",
+            )
 
         logger.info(
             "应用删除成功",
@@ -1169,6 +1189,14 @@ class AppService:
                 if source_config:
                     # multi_agent 的 model_config_id/sub_agents/routing_rules 均属于 tenant 级别直接保留
                     # 跨空间时 master_agent_id（AppRelease）属于源空间，需清空
+                    # supervisor_config 承载主管循环模式下的主管本体能力面
+                    # （对话功能/提示词/记忆/知识库/技能/变量/工具），漏拷会让副本退回"裸主管"。
+                    new_supervisor_config = self._clone_supervisor_config(
+                        source_config.supervisor_config,
+                        is_cross_workspace=is_cross_workspace,
+                        target_tenant_id=target_tenant_id,
+                        target_workspace_id=target_workspace_id,
+                    )
                     new_config = MultiAgentConfig(
                         id=uuid.uuid4(),
                         app_id=new_app.id,
@@ -1180,6 +1208,7 @@ class AppService:
                         sub_agents=copy.deepcopy(source_config.sub_agents) if source_config.sub_agents else [],
                         routing_rules=copy.deepcopy(source_config.routing_rules) if source_config.routing_rules else None,
                         execution_config=copy.deepcopy(source_config.execution_config) if source_config.execution_config else {},
+                        supervisor_config=new_supervisor_config,
                         aggregation_strategy=source_config.aggregation_strategy,
                         is_active=True,
                         created_at=now,
@@ -1262,6 +1291,51 @@ class AppService:
                     available_kb_ids.update(self.db.scalars(stmt).all())
 
         return available_model_ids, available_kb_ids
+
+    def _clone_supervisor_config(
+            self,
+            supervisor_config: Optional[dict],
+            *,
+            is_cross_workspace: bool,
+            target_tenant_id: Optional[uuid.UUID],
+            target_workspace_id: uuid.UUID,
+    ) -> Optional[dict]:
+        """复制集群 supervisor_config（主管本体能力面），跨空间时按 Agent 分支同口径清洗。
+
+        supervisor_config 是主管循环模式下主管的全部配置载体：
+        对话功能（features）/ 提示词（system_prompt）/ 记忆（memory）/
+        知识库（knowledge_retrieval）/ 技能（skills）/ 变量（variables）/ 工具（tools）。
+        漏拷整个字段 = 副本退回"裸主管"（硬编码 prompt + 仅 SubAgentTool），
+        用户配的七项能力面全部消失——这是集群复制最主要的配置丢失来源。
+
+        清洗口径对齐 AgentConfig 分支：
+        - knowledge_retrieval 属workspace 级，需按目标空间可用 KB 过滤；
+        - memory 属 workspace 级，memory_config_id 不属于目标空间时置空；
+        - model/tools/skills 属 tenant 级，直接保留。
+        """
+        if not supervisor_config:
+            return None
+
+        cleaned = copy.deepcopy(supervisor_config)
+        if not isinstance(cleaned, dict):
+            return None
+
+        if is_cross_workspace:
+            knowledge_retrieval = cleaned.get("knowledge_retrieval")
+            if knowledge_retrieval:
+                _, kb_ids = self._collect_resource_ids_from_config(None, knowledge_retrieval)
+                _, available_kb_ids = self._preload_cross_workspace_resources(
+                    target_tenant_id, target_workspace_id, set(), kb_ids
+                )
+                cleaned["knowledge_retrieval"] = self._clean_knowledge_retrieval(
+                    knowledge_retrieval, available_kb_ids
+                )
+            if cleaned.get("memory"):
+                cleaned["memory"] = self._clean_memory_cross_workspace(
+                    cleaned["memory"], target_workspace_id
+                )
+
+        return cleaned
 
     @staticmethod
     def _collect_resource_ids_from_config(
@@ -1364,6 +1438,7 @@ class AppService:
             pagesize: int = 10,
             ontology_status: str = "all",
             field_search: Optional[str] = None,
+            orchestration_mode: Optional[str] = None,
     ) -> Tuple[List[App], int]:
         """列出工作空间中的应用（分页）
 
@@ -1373,7 +1448,7 @@ class AppService:
 
         Args:
             workspace_id: 工作空间ID
-            type: 应用类型过滤
+            type: 应用类型过滤（支持逗号分隔多值，如 "agent,multi_agent"）
             visibility: 可见性过滤
             status: 状态过滤
             search: 搜索关键词（模糊匹配应用名称）
@@ -1383,6 +1458,7 @@ class AppService:
             pagesize: 每页数量
             ontology_status: 本体状态筛选 all | bound（已关联本体）| default（仅默认本体）
             field_search: 标签模式搜索，模糊匹配绑定本体的场景自定义字段展示名
+            orchestration_mode: 编排模式过滤（仅约束集群；按当前发布版本快照 config.orchestration_mode 过滤）
 
         Returns:
             Tuple[List[App], int]: (应用列表, 总数)
@@ -1401,8 +1477,34 @@ class AppService:
 
         # 构建查询条件
         filters = [App.is_active.is_(True)]
-        if type:
-            filters.append(App.type == type)
+        # type 支持逗号分隔多值（如 "agent,multi_agent"），向后兼容单值
+        type_list = [t.strip() for t in type.split(",") if t.strip()] if type else []
+        if orchestration_mode:
+            # 编排模式过滤（仅约束集群）：按"当前发布版本快照"的 orchestration_mode 过滤——
+            # 工作流 Agent 节点引用的是已发布集群的运行时产物，口径必须与运行时读取的
+            # 发布快照一致（草稿态改了模式但未发布的集群不应被引用）。
+            # 集群分支 + 其余类型并集（OR 语义）：
+            #   type=agent,multi_agent&orchestration_mode=supervisor_loop
+            #   → agent 全部 + 已发布且快照为 supervisor_loop 的集群；不传 type 时仅出该模式集群。
+            mode_apps = (
+                select(AppRelease.app_id)
+                .where(
+                    AppRelease.is_active.is_(True),
+                    AppRelease.config["orchestration_mode"].astext == orchestration_mode,
+                )
+                .where(AppRelease.id == App.current_release_id)
+            )
+            other_types = [t for t in type_list if t != AppType.MULTI_AGENT]
+            cluster_branch = and_(App.type == AppType.MULTI_AGENT, App.id.in_(mode_apps))
+            if other_types:
+                filters.append(or_(App.type.in_(other_types), cluster_branch))
+            else:
+                filters.append(cluster_branch)
+        elif type_list:
+            if len(type_list) == 1:
+                filters.append(App.type == type_list[0])
+            else:
+                filters.append(App.type.in_(type_list))
         if visibility:
             filters.append(App.visibility == visibility)
         if status:
@@ -3027,6 +3129,7 @@ def list_apps(
         pagesize: int = 10,
         ontology_status: str = "all",
         field_search: Optional[str] = None,
+        orchestration_mode: Optional[str] = None,
 ) -> Tuple[List[App], int]:
     """列出应用（向后兼容接口）"""
     service = AppService(db)
@@ -3043,6 +3146,7 @@ def list_apps(
         pagesize=pagesize,
         ontology_status=ontology_status,
         field_search=field_search,
+        orchestration_mode=orchestration_mode,
     )
 
 

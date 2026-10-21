@@ -25,6 +25,7 @@ REEMBED_TARGETS: tuple[ReembedTarget, ...] = (
         "content",
     ),
     ReembedTarget(MemoryNodeType.SCENE_SUMMARY, "summary_embedding", "content"),
+    ReembedTarget(MemoryNodeType.SCENE_COMMUNITY, "summary_embedding", "summary"),
     ReembedTarget(MemoryNodeType.COMMUNITY, "summary_embedding", "summary"),
     ReembedTarget(MemoryNodeType.PERCEPTUAL, "summary_embedding", "summary"),
     ReembedTarget(MemoryNodeType.DIALOGUE, "dialog_embedding", "content"),

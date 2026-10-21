@@ -1,0 +1,16 @@
+**
+
+!application-service/
+!application-service/pyproject.toml
+!application-service/uv.lock
+!application-service/src/
+!application-service/src/**
+
+!packages/
+!packages/auth-sdk/
+!packages/auth-sdk/**
+
+**/__pycache__/**
+**/__pycache__
+**/*.pyc
+**/*.pyo

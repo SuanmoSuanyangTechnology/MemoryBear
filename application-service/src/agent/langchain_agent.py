@@ -1,0 +1,1394 @@
+"""
+LangChain Agent wrapper
+
+Uses the standard LangChain 1.x approach:
+- create the agent graph via create_agent
+- support the tool-calling loop
+- support streaming output
+- support multiple providers through the remote model service (RedBearChatModel.for_invoke)
+"""
+
+import logging
+
+import asyncio
+import functools
+import inspect
+import json
+import time
+import uuid as _uuid
+from typing import TYPE_CHECKING, Any, AsyncGenerator, Dict, List, Optional, Sequence
+
+from langchain.agents import create_agent
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
+from langchain_core.tools import BaseTool
+from langgraph.errors import GraphRecursionError
+
+from ..memory.retrieval_trace.stage_events import is_memory_stage_capture_enabled
+from ..model_clients import RedBearChatModel
+from ..utils.datetime_utils import to_iso_z, utcnow
+
+if TYPE_CHECKING:
+    from ..schemas.model_schema import ModelInfo
+
+logger = logging.getLogger(__name__)
+
+
+class AgentTraceRecorder:
+    """Builds a Dify-style agent execution log grouped by LLM round."""
+
+    def __init__(self, *, model: str, strategy: str, system_prompt: str, messages: Sequence[BaseMessage]):
+        self._started_at = time.time()
+        self._model = model
+        self._current_iteration: dict[str, Any] | None = None
+        self._current_llm: dict[str, Any] | None = None
+        self._tools_by_id: dict[str, dict[str, Any]] = {}
+        self.log: dict[str, Any] = {
+            "meta": {
+                "status": "running",
+                "model": model,
+                "strategy": strategy,
+                "start_time": self._now_iso(),
+                "elapsed_time": 0,
+                "total_tokens": 0,
+                "iterations": 0,
+            },
+            "iterations": [],
+        }
+        self._base_input = {
+            "system_prompt": system_prompt,
+            "messages": [self._message_to_dict(msg) for msg in messages],
+        }
+
+    @staticmethod
+    def _now_iso() -> str:
+        return to_iso_z(utcnow()) or ""
+
+    @classmethod
+    def _jsonable(cls, value: Any, max_length: int = 2000) -> Any:
+        if value is None or isinstance(value, (bool, int, float)):
+            return value
+        if isinstance(value, str):
+            return value[:max_length] + "...[truncated]" if len(value) > max_length else value
+        if isinstance(value, BaseMessage):
+            return cls._message_to_dict(value)
+        if isinstance(value, dict):
+            return {str(k): cls._jsonable(v, max_length) for k, v in value.items()}
+        if isinstance(value, (list, tuple)):
+            return [cls._jsonable(item, max_length) for item in value]
+        content = getattr(value, "content", None)
+        if content is not None:
+            return cls._jsonable(content, max_length)
+        try:
+            text = json.dumps(value, ensure_ascii=False, default=str)
+        except (TypeError, ValueError):
+            text = str(value)
+        return text[:max_length] + "...[truncated]" if len(text) > max_length else text
+
+    @classmethod
+    def _message_to_dict(cls, message: BaseMessage) -> dict[str, Any]:
+        return {
+            "role": getattr(message, "type", message.__class__.__name__.replace("Message", "").lower()),
+            "content": cls._jsonable(getattr(message, "content", "")),
+        }
+
+    @staticmethod
+    def _strip_private(value: Any) -> Any:
+        if isinstance(value, dict):
+            return {k: AgentTraceRecorder._strip_private(v) for k, v in value.items() if not str(k).startswith("_")}
+        if isinstance(value, list):
+            return [AgentTraceRecorder._strip_private(item) for item in value]
+        return value
+
+    def start_llm(self) -> dict[str, Any]:
+        self.finish_llm()
+        index = len(self.log["iterations"]) + 1
+        llm_input = dict(self._base_input)
+        iteration = {
+            "id": str(_uuid.uuid4()),
+            "index": index,
+            "created_at": self._now_iso(),
+            "llm": {
+                "id": str(_uuid.uuid4()),
+                "model": self._model,
+                "status": "running",
+                "input": llm_input,
+                "output": "",
+                "reasoning_content": "",
+                "tokens": 0,
+                "elapsed_time": 0,
+                "error": None,
+                "_started_at": time.time(),
+            },
+            "tool_calls": [],
+        }
+        self.log["iterations"].append(iteration)
+        self._current_iteration = iteration
+        self._current_llm = iteration["llm"]
+        self.log["meta"]["iterations"] = len(self.log["iterations"])
+        return iteration
+
+    def ensure_iteration(self) -> dict[str, Any]:
+        if not self._current_iteration:
+            return self.start_llm()
+        return self._current_iteration
+
+    def append_llm_chunk(self, *, output: str = "", reasoning: str = "") -> None:
+        llm = self.ensure_iteration()["llm"]
+        if output:
+            llm["output"] = f"{llm.get('output', '')}{output}"
+        if reasoning:
+            llm["reasoning_content"] = f"{llm.get('reasoning_content', '')}{reasoning}"
+
+    def finish_llm(self, *, output: str = "", tokens: int = 0, error: str | None = None) -> None:
+        llm = self._current_llm
+        if not llm or llm.get("status") != "running":
+            return
+        if output and not llm.get("output"):
+            llm["output"] = output
+        if tokens:
+            llm["tokens"] = tokens
+            self.log["meta"]["total_tokens"] = int(self.log["meta"].get("total_tokens") or 0) + tokens
+        llm["status"] = "error" if error else "success"
+        llm["error"] = error
+        llm["elapsed_time"] = round(time.time() - llm.get("_started_at", time.time()), 3)
+
+    def start_tool(self, *, step_id: str, tool_name: str, tool_input: Any, meta: dict[str, Any] | None) -> dict[str, Any]:
+        iteration = self.ensure_iteration()
+        tool_call = {
+            "id": step_id,
+            "status": "running",
+            "tool_name": tool_name,
+            "tool_label": (meta or {}).get("label") or (meta or {}).get("name") or tool_name,
+            "tool_input": self._jsonable(tool_input),
+            "tool_output": None,
+            "tool_parameters": (meta or {}).get("tool_parameters", {}),
+            "tool_icon": (meta or {}).get("icon") or (meta or {}).get("icon_url"),
+            "time_cost": 0,
+            "error": None,
+            "meta": self._jsonable(meta or {}),
+            "_started_at": time.time(),
+        }
+        iteration["tool_calls"].append(tool_call)
+        self._tools_by_id[step_id] = tool_call
+        return tool_call
+
+    def finish_tool(
+            self,
+            *,
+            step_id: str | None,
+            tool_name: str,
+            status: str,
+            output: Any = None,
+            error: str | None = None,
+            meta: dict[str, Any] | None = None,
+    ) -> None:
+        tool_call = self._tools_by_id.get(step_id or "")
+        if not tool_call:
+            for iteration in reversed(self.log["iterations"]):
+                for item in reversed(iteration.get("tool_calls") or []):
+                    if item.get("tool_name") == tool_name and item.get("status") == "running":
+                        tool_call = item
+                        break
+                if tool_call:
+                    break
+        if not tool_call:
+            return
+        tool_call["status"] = status
+        tool_call["tool_output"] = self._jsonable(output)
+        tool_call["error"] = error
+        if meta is not None:
+            tool_call["meta"] = self._jsonable(meta)
+        tool_call["time_cost"] = round(time.time() - tool_call.get("_started_at", time.time()), 3)
+
+    def finalize(self, *, status: str = "success", total_tokens: int = 0, error: str | None = None) -> dict[str, Any]:
+        final_error = error or (None if status == "success" else status)
+        self.finish_llm(tokens=0, error=final_error)
+        self.log["meta"]["status"] = status
+        self.log["meta"]["elapsed_time"] = round(time.time() - self._started_at, 3)
+        if total_tokens:
+            self.log["meta"]["total_tokens"] = total_tokens
+        if final_error:
+            self.log["meta"]["error"] = final_error
+        return self.to_dict()
+
+    def to_dict(self) -> dict[str, Any]:
+        self.log["meta"]["elapsed_time"] = round(time.time() - self._started_at, 3)
+        self.log["meta"]["iterations"] = len(self.log["iterations"])
+        return self._strip_private(self.log)
+
+
+class LangChainAgent:
+
+    def __init__(
+            self,
+            model_name: str,
+            provider: str = "openai",
+            temperature: float = 0.7,
+            max_tokens: int = 2000,
+            system_prompt: Optional[str] = None,
+            tools: Optional[Sequence[BaseTool]] = None,
+            streaming: bool = False,
+            top_p: Optional[float] = None,
+            top_k: Optional[int] = None,
+            seed: Optional[int] = None,
+            repetition_penalty: Optional[float] = None,
+            frequency_penalty: Optional[float] = None,
+            presence_penalty: Optional[float] = None,
+            enable_search: bool = False,
+            stop: Optional[List[str]] = None,
+            extra_headers: Optional[Dict[str, Any]] = None,
+            max_iterations: Optional[int] = None,  # Max iterations (None means auto-calculate)
+            strategy: str = "react",  # Agent execution strategy: 'react' or 'function_calling'
+            deep_thinking: bool = False,  # Whether deep-thinking mode is enabled
+            thinking_budget_tokens: Optional[int] = None,  # Deep-thinking token budget
+            json_output: bool = False,  # Whether to force JSON output
+            tool_call_limit: int = 1,  # Max calls per tool (prevents the model from looping on tools)
+            context_evidence: Optional[List[Any]] = None,
+            context_query: str = "",
+            context_base_text: str = "",
+            context_evidence_loader: Optional[Any] = None,
+            model_view: Optional["ModelInfo"] = None,  # Remote mode: undecrypted runtime model view
+    ):
+        """Initialize the LangChain Agent
+
+        Args:
+            model_name: Model name
+            provider: Provider (openai, xinference, gpustack, ollama, dashscope)
+            temperature: Temperature parameter
+            max_tokens: Max token count
+            system_prompt: System prompt
+            tools: Tool list (optional; the framework runs the ReAct loop automatically)
+            streaming: Whether to enable streaming output
+            max_iterations: Max iterations (None means auto-calculate, based on LangGraph graph steps)
+            strategy: Agent execution strategy ('react' uses the ReAct reasoning loop,
+                'function_calling' uses native tool calling)
+            tool_call_limit: Max calls per tool; call N+1 is rejected with a hint telling
+                the model to answer directly
+        """
+        self.model_name = model_name
+        self.provider = provider
+        self.tools = tools or []
+        self.streaming = streaming
+        self.strategy = strategy
+        self.tool_call_limit = tool_call_limit
+        self._initial_context_evidence = list(context_evidence or [])
+        self._context_query = context_query
+        self._context_base_text = context_base_text
+        self._context_evidence_loader = context_evidence_loader
+        from ..services.context_assembler import resolve_evidence_max_tokens
+        self._evidence_max_tokens = resolve_evidence_max_tokens(max_tokens)
+
+        # Build a tool-name -> metadata map (enriches execution records with resource details)
+        self._tool_meta_map: Dict[str, Dict[str, Any]] = {}
+        for t in self.tools:
+            tool_name = getattr(t, "name", None)
+            tool_meta = getattr(t, "_tool_meta", None)
+            if tool_name and tool_meta:
+                self._tool_meta_map[tool_name] = tool_meta
+
+        # Wrap each tool with a call-count limit (cap each tool at N calls before the recursion limit hits)
+        # Call N+1 returns a rejection message that steers the LLM to a final answer instead of looping
+        self._tool_call_counts: Dict[str, int] = {}
+        self._wrap_tools_with_call_limit(self.tool_call_limit)
+
+        # Adjust the max iteration count dynamically based on the tool count
+        # Note: LangGraph's recursion_limit counts graph node steps; one full
+        # LLM -> Tool -> LLM cycle consumes roughly 4 graph steps (on_chat_model_start,
+        # on_tool_start, on_tool_end, on_chat_model_end count 1 step each, plus intermediate state).
+        # Base LLM response: ~2 steps + each tool call: ~4 steps + closing LLM: ~2 steps
+        if max_iterations is None:
+            base_steps = 5  # Graph steps for the opening and closing LLM
+            steps_per_tool_call = 2  # Graph steps per tool call
+            self.max_iterations = (
+                base_steps
+                + len(self.tools) * self.tool_call_limit * steps_per_tool_call
+            )
+        else:
+            self.max_iterations = max_iterations
+
+        self.system_prompt = system_prompt or "你是一个专业的AI助手"
+
+        # Inject a JSON prompt fallback for all providers so JSON output is still guided
+        # even when the API-level response_format has no effect
+        if json_output:
+            self.system_prompt += "\n请仅输出一个合法JSON对象，不要输出Markdown代码块或额外说明。"
+
+        logger.debug(
+            f"Agent 迭代次数配置: max_iterations={self.max_iterations}, "
+            f"tool_count={len(self.tools)}, "
+            f"auto_calculated={max_iterations is None}"
+        )
+
+        # Filter per-request parameters through the allowlist (contract enforced service-side;
+        # unknown keys are dropped by the remote adapter)
+        extra_params: Dict[str, Any] = {
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+            "streaming": streaming,
+        }
+        optional_params = {
+            "top_p": top_p,
+            "top_k": top_k,
+            "seed": seed,
+            "repetition_penalty": repetition_penalty,
+            "frequency_penalty": frequency_penalty,
+            "presence_penalty": presence_penalty,
+        }
+        for key, value in optional_params.items():
+            if value is not None:
+                extra_params[key] = value
+        if enable_search:
+            extra_params["enable_search"] = True
+        if stop:
+            extra_params["stop"] = stop[:4]
+        if extra_headers:
+            extra_params["default_headers"] = extra_headers
+
+        if model_view is None:
+            raise ValueError("LangChainAgent 需要远端模型视图（model_view）")
+        # Remote mode: the host carries only config references and per-request parameters;
+        # credential decryption, routing, channel failover, and capability arbitration
+        # all live in the model service.
+        remote_params: Dict[str, Any] = {
+            key: value for key, value in extra_params.items() if key != "streaming"
+        }
+        remote_params["deep_thinking"] = deep_thinking
+        if thinking_budget_tokens is not None:
+            remote_params["thinking_budget_tokens"] = thinking_budget_tokens
+        remote_params["json_output"] = json_output
+        self.llm = RedBearChatModel.for_invoke(
+            model_view, params=remote_params, streaming=streaming
+        )
+        # Thinking-state detection stays in the host (used to strip reasoning content);
+        # capability arbitration is executed service-side from profile facts
+        self.deep_thinking = deep_thinking
+        self.json_output = json_output
+
+        self._wrap_tools_with_external_context()
+
+        # Grab the underlying model for the actual streaming calls
+        self._underlying_llm = self.llm._model if hasattr(self.llm, '_model') else self.llm
+
+        # Make sure the underlying model also has streaming enabled
+        if streaming and hasattr(self._underlying_llm, 'streaming'):
+            self._underlying_llm.streaming = True
+
+        # Create the agent graph via create_agent (the standard LangChain 1.x approach)
+        # Handle everything through the agent whether or not tools are present
+        self.agent = create_agent(
+            model=self.llm,
+            tools=self.tools,
+            system_prompt=self.system_prompt
+        )
+
+        logger.info(
+            "LangChain Agent 初始化完成",
+            extra={
+                "model": model_name,
+                "provider": provider,
+                "temperature": temperature,
+                "streaming": streaming,
+                "max_iterations": self.max_iterations,
+                "strategy": self.strategy,
+                "tool_count": len(self.tools),
+                "tool_names": [tool.name for tool in self.tools] if self.tools else [],
+                "tool_call_limit": self.tool_call_limit,
+            }
+        )
+
+    def _wrap_tools_with_external_context(self) -> None:
+        """Assemble per-tool evidence and append it to the tool return value so it enters the ToolMessage."""
+        if not self.tools:
+            return
+        from ..services.context_assembler import (
+            ContextAssembler,
+            context_evidence_from_tool_result,
+            create_evidence_compressor,
+        )
+
+        assembly_lock = asyncio.Lock()
+        pending_shared_evidence = list(self._initial_context_evidence)
+        loaded_annotations = False
+
+        assembler = ContextAssembler(
+            self._evidence_max_tokens,
+            compressor=create_evidence_compressor(self.llm, self._content_to_text),
+        )
+        for tool in self.tools:
+            # ToolNode drives native tools through BaseTool.ainvoke().  Do not
+            # only wrap _arun: synchronous StructuredTool instances are
+            # otherwise executed through _run and bypass the assembly hook.
+            original_ainvoke = getattr(tool, "ainvoke", None)
+            if not callable(original_ainvoke):
+                continue
+
+            def make_ainvoke(current_tool, original):
+                @functools.wraps(original)
+                async def wrapped(*args, **kwargs):
+                    nonlocal loaded_annotations
+                    result = await original(*args, **kwargs)
+                    evidence = getattr(current_tool, "_context_evidence", None)
+                    if not evidence:
+                        tool_input = args[0] if args and isinstance(args[0], dict) else None
+                        evidence = context_evidence_from_tool_result(current_tool, result, tool_input)
+                    if evidence:
+                        # Native ToolNode may execute several tool calls in
+                        # parallel. Keep each ToolMessage scoped to its own
+                        # evidence; otherwise the second result repeats all
+                        # evidence already returned by the first result.
+                        async with assembly_lock:
+                            evidence_for_message = list(evidence)
+                            current_tool._context_evidence = []
+                            if pending_shared_evidence:
+                                evidence_for_message.extend(pending_shared_evidence)
+                                pending_shared_evidence.clear()
+                            if not loaded_annotations and self._context_evidence_loader:
+                                extra = self._context_evidence_loader()
+                                if inspect.isawaitable(extra):
+                                    extra = await extra
+                                evidence_for_message.extend(extra or [])
+                                loaded_annotations = True
+                            assembled = await assembler.assemble(
+                                evidence_for_message,
+                                query=self._context_query,
+                                base_text=self._context_base_text,
+                                triggered_by=[current_tool.name],
+                            )
+                        current_tool._context_assembly_stats = {
+                            "triggered_by": assembled.triggered_by,
+                            "evidence_count": len(assembled.evidence),
+                            "compressed_count": len(assembled.compressed_evidence_keys),
+                            "dropped_count": len(assembled.dropped_evidence),
+                            "estimated_tokens": assembled.estimated_tokens,
+                        }
+                        if assembled.context_text:
+                            if isinstance(result, ToolMessage):
+                                return result.model_copy(
+                                    update={"content": assembled.context_text}
+                                )
+                            logger.warning(
+                                "[上下文组装] 原生工具返回值不是 ToolMessage，"
+                                "无法安全替换注入内容 | "
+                                f"工具={current_tool.name} | 类型={type(result).__name__}"
+                            )
+                            return result
+                    logger.info(
+                        "[上下文组装] 原生 Function Call 工具未产生可组装证据 | "
+                        f"工具={current_tool.name} | 保留原始工具结果"
+                    )
+                    return result
+                return wrapped
+            object.__setattr__(tool, "ainvoke", make_ainvoke(tool, original_ainvoke))
+
+    def _wrap_tools_with_call_limit(self, max_calls: int) -> None:
+        """Wrap each tool with a call-count limit
+
+        Overrides the tool's _run / _arun methods to increment a counter before each
+        execution; once a tool's cumulative call count exceeds max_calls, the tool is no
+        longer executed and a hint message is returned instead, guiding the LLM to give
+        a final answer instead of looping on the same tool.
+
+        Args:
+            max_calls: Max call count allowed per tool
+        """
+        if not self.tools:
+            return
+
+        for tool in self.tools:
+            tool_name = getattr(tool, "name", None) or str(id(tool))
+            original_run = tool._run
+            original_arun = getattr(tool, "_arun", None)
+
+            # Wrap the synchronous path
+            # Note: functools.wraps must preserve the original signature, otherwise
+            # BaseTool.run checks for the "config" / "run_manager" parameters via
+            # inspect.signature before calling self._run; without the signature
+            # LangChain will not inject config, and StructuredTool._run raises
+            # TypeError: missing 1 required keyword-only argument: 'config'
+            def _make_wrapped_run(t_name: str, orig):
+                @functools.wraps(orig)
+                def wrapped_run(*args, **kwargs):
+                    self._tool_call_counts[t_name] = (
+                        self._tool_call_counts.get(t_name, 0) + 1
+                    )
+                    count = self._tool_call_counts[t_name]
+                    logger.info(
+                        f"工具调用计数: tool={t_name}, count={count}/{max_calls}"
+                    )
+                    if count > max_calls:
+                        logger.warning(
+                            f"工具 {t_name} 已达到最大调用次数限制 ({max_calls})，"
+                            f"拒绝第 {count} 次调用，引导 LLM 输出最终答案"
+                        )
+                        return (
+                            f"[工具调用限制] 工具 '{t_name}' 已被调用 {max_calls} 次，"
+                            f"达到最大调用次数限制。请勿再调用此工具，"
+                            f"直接基于已有信息给出最终答案。"
+                        )
+                    return orig(*args, **kwargs)
+
+                return wrapped_run
+
+            # Wrap the asynchronous path
+            def _make_wrapped_arun(t_name: str, orig):
+                if orig is None:
+                    return None
+
+                @functools.wraps(orig)
+                async def wrapped_arun(*args, **kwargs):
+                    self._tool_call_counts[t_name] = (
+                        self._tool_call_counts.get(t_name, 0) + 1
+                    )
+                    count = self._tool_call_counts[t_name]
+                    logger.info(
+                        f"工具调用计数: tool={t_name}, count={count}/{max_calls}"
+                    )
+                    if count > max_calls:
+                        logger.warning(
+                            f"工具 {t_name} 已达到最大调用次数限制 ({max_calls})，"
+                            f"拒绝第 {count} 次调用，引导 LLM 输出最终答案"
+                        )
+                        return (
+                            f"[工具调用限制] 工具 '{t_name}' 已被调用 {max_calls} 次，"
+                            f"达到最大调用次数限制。请勿再调用此工具，"
+                            f"直接基于已有信息给出最终答案。"
+                        )
+                    return await orig(*args, **kwargs)
+
+                return wrapped_arun
+
+            tool._run = _make_wrapped_run(tool_name, original_run)
+            wrapped_arun = _make_wrapped_arun(tool_name, original_arun)
+            if wrapped_arun is not None:
+                tool._arun = wrapped_arun
+
+        logger.debug(
+            f"工具调用次数限制已启用: max_calls_per_tool={max_calls}, "
+            f"tool_names={[t.name for t in self.tools]}"
+        )
+
+    def _prepare_messages(
+            self,
+            message: str,
+            history: Optional[List[Dict[str, str]]] = None,
+            context: Optional[str] = None,
+            files: Optional[List[Dict[str, Any]]] = None
+    ) -> List[BaseMessage]:
+        """Prepare the message list
+
+        Args:
+            message: User message
+            history: History message list
+            context: Context information
+            files: Multimodal file content list (already processed)
+
+        Returns:
+            List[BaseMessage]: Message list
+        """
+        messages: list = []
+
+        # Append history messages
+        if history:
+            for msg in history:
+                if msg["role"] == "user":
+                    messages.append(HumanMessage(content=msg["content"]))
+                elif msg["role"] == "assistant":
+                    messages.append(AIMessage(content=msg["content"]))
+
+        # Append the current user message
+        user_content = message
+        if context:
+            user_content = f"参考信息：\n{context}\n\n用户问题：\n{user_content}"
+
+        # Build the user message (multimodal supported)
+        if files and len(files) > 0:
+            content_parts = self._build_multimodal_content(user_content, files)
+            messages.append(HumanMessage(content=content_parts))
+        else:
+            # Plain-text message
+            messages.append(HumanMessage(content=user_content))
+
+        return messages
+
+    @staticmethod
+    def _extract_tokens_from_message(msg) -> int:
+        """Extract total_tokens from an AIMessage or similar object, supporting several provider formats
+
+        Supported formats:
+        - response_metadata.token_usage.total_tokens (OpenAI/ChatOpenAI)
+        - response_metadata.usage.total_tokens (some providers)
+        - usage_metadata.total_tokens (newer LangChain)
+        """
+        total = 0
+        # 1. response_metadata
+        response_meta = getattr(msg, "response_metadata", None)
+        if response_meta and isinstance(response_meta, dict):
+            # Try the token_usage path
+            token_usage = response_meta.get("token_usage") or response_meta.get("usage", {})
+            if isinstance(token_usage, dict):
+                total = token_usage.get("total_tokens", 0)
+        # 2. usage_metadata (newer LangChain AIMessage attribute)
+        if not total:
+            usage_meta = getattr(msg, "usage_metadata", None)
+            if usage_meta:
+                if isinstance(usage_meta, dict):
+                    total = usage_meta.get("total_tokens", 0)
+                else:
+                    total = getattr(usage_meta, "total_tokens", 0)
+        return total or 0
+
+    def _build_multimodal_content(self, text: str, files: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        Build multimodal message content
+
+        Args:
+            text: Text content
+            files: File list (already converted by MultimodalService to the provider's format)
+
+        Returns:
+            List[Dict]: Message content list
+        """
+        content_parts = [{"type": "text", "text": text}]
+
+        # Append file content
+        # MultimodalService already returns the correct per-provider format, use as-is
+        content_parts.extend(files)
+
+        logger.debug(
+            f"构建多模态消息: provider={self.provider}, "
+            f"parts={len(content_parts)}, "
+            f"files={len(files)}"
+        )
+
+        return content_parts
+
+    @staticmethod
+    def _extract_reasoning_content(msg) -> str:
+        """Extract the deep-thinking content (reasoning_content) from an AIMessage
+
+        All providers deliver it uniformly via additional_kwargs.reasoning_content:
+        - DeepSeek-R1 / QwQ: native field
+        - Volcano (Doubao-thinking): injected by VolcanoChatOpenAI from delta.reasoning_content
+        """
+        additional = getattr(msg, "additional_kwargs", None) or {}
+        return additional.get("reasoning_content") or additional.get("reasoning", "")
+
+    @staticmethod
+    def _content_to_text(content: Any) -> str:
+        if content is None:
+            return ""
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            text_parts: list[str] = []
+            for item in content:
+                if isinstance(item, dict):
+                    if "text" in item:
+                        text_parts.append(str(item.get("text") or ""))
+                    elif item.get("type") == "text":
+                        text_parts.append(str(item.get("text") or ""))
+                elif isinstance(item, str):
+                    text_parts.append(item)
+            return "".join(text_parts)
+        return str(content)
+
+    @staticmethod
+    def _extract_message_from_event_output(output: Any) -> AIMessage | None:
+        if isinstance(output, AIMessage):
+            return output
+        if isinstance(output, dict):
+            value = output.get("message") or output.get("output")
+            if isinstance(value, AIMessage):
+                return value
+            generations = output.get("generations")
+            if generations and isinstance(generations, list):
+                for generation_group in generations:
+                    items = generation_group if isinstance(generation_group, list) else [generation_group]
+                    for generation in items:
+                        message = getattr(generation, "message", None)
+                        if isinstance(message, AIMessage):
+                            return message
+        message = getattr(output, "message", None)
+        if isinstance(message, AIMessage):
+            return message
+        return None
+
+    @staticmethod
+    def _truncate_data(data, max_length: int = 2000) -> Any:
+        if data is None:
+            return None
+        if isinstance(data, str):
+            return data[:max_length] + "..." if len(data) > max_length else data
+        try:
+            text = json.dumps(data, ensure_ascii=False, default=str)
+        except (TypeError, ValueError):
+            text = str(data)
+        return text[:max_length] + "...[truncated]" if len(text) > max_length else text
+
+    def _extract_tool_sources(self, tool_name: str, node: Dict[str, Any]) -> None:
+        """Extract source information from the tool instance and merge it into node["meta"]"""
+        for t in self.tools:
+            t_name = getattr(t, "name", None)
+            if t_name == tool_name:
+                sources = getattr(t, "_last_sources", None)
+                context_stats = getattr(t, "_context_assembly_stats", None)
+                if sources:
+                    if not node.get("meta"):
+                        node["meta"] = {}
+                    node["meta"]["sources"] = sources
+                    t._last_sources = []
+                if context_stats:
+                    if not node.get("meta"):
+                        node["meta"] = {}
+                    node["meta"]["context_assembly"] = context_stats
+                    t._context_assembly_stats = None
+                break
+
+    async def chat(
+            self,
+            message: str,
+            history: Optional[List[Dict[str, str]]] = None,
+            context: Optional[str] = None,
+            files: Optional[List[Dict[str, Any]]] = None
+    ) -> Dict[str, Any]:
+        """Run a chat turn
+
+        Args:
+            message: User message
+            history: History message list [{"role": "user/assistant", "content": "..."}]
+            context: Context information (e.g. knowledge base retrieval results)
+            files: Multimodal files
+
+        Returns:
+            Dict: Dictionary containing content, node_executions, and metadata
+        """
+        start_time = time.time()
+        # Collect node execution records
+        node_executions: List[Dict[str, Any]] = []
+        # Temporary stack used to match tool_start/tool_end events
+        _tool_stack: List[Dict[str, Any]] = []
+
+        try:
+            # Prepare the message list (multimodal supported)
+            messages = self._prepare_messages(message, history, context, files)
+            trace = AgentTraceRecorder(
+                model=self.model_name,
+                strategy=self.strategy,
+                system_prompt=self.system_prompt,
+                messages=messages,
+            )
+
+            logger.debug(
+                "准备调用 LangChain Agent",
+                extra={
+                    "has_context": bool(context),
+                    "has_history": bool(history),
+                    "has_tools": bool(self.tools),
+                    "has_files": bool(files),
+                    "message_count": len(messages),
+                    "max_iterations": self.max_iterations
+                }
+            )
+
+            # Use astream_events to capture intermediate steps
+            content = ""
+            total_tokens = 0
+            reasoning_content = ""
+            last_event = {}
+
+            try:
+                async for event in self.agent.astream_events(
+                    {"messages": messages},
+                    version="v2",
+                    config={"recursion_limit": self.max_iterations}
+                ):
+                    last_event = event
+                    kind = event.get("event")
+
+                    if kind in ("on_chat_model_start", "on_llm_start"):
+                        trace.start_llm()
+
+                    elif kind in ("on_chat_model_end", "on_llm_end"):
+                        output_message = self._extract_message_from_event_output(event.get("data", {}).get("output"))
+                        output_text = self._content_to_text(output_message.content) if output_message else ""
+                        tokens = self._extract_tokens_from_message(output_message) if output_message else 0
+                        trace.finish_llm(output=output_text, tokens=tokens)
+
+                    elif kind == "on_tool_start":
+                        tool_name = event.get("name", "unknown")
+                        tool_input = event.get("data", {}).get("input")
+                        step_id = str(_uuid.uuid4())
+                        tool_meta = self._tool_meta_map.get(tool_name, {})
+                        node = {
+                            "step_id": step_id,
+                            "node_type": "tool",
+                            "node_name": tool_name,
+                            "status": "running",
+                            "input": self._truncate_data(tool_input),
+                            "output": None,
+                            "elapsed_time": 0,
+                            "started_at": time.time(),
+                            "error": None,
+                            "meta": tool_meta if tool_meta else None,
+                        }
+                        _tool_stack.append(node)
+                        node_executions.append(node)
+                        trace.start_tool(
+                            step_id=step_id,
+                            tool_name=tool_name,
+                            tool_input=tool_input,
+                            meta=tool_meta if tool_meta else None,
+                        )
+
+                    elif kind == "on_tool_end":
+                        tool_output = event.get("data", {}).get("output")
+                        tool_name = event.get("name", "unknown")
+                        matched_node = None
+                        if _tool_stack:
+                            matched_node = _tool_stack.pop()
+                        else:
+                            for n in reversed(node_executions):
+                                if n["node_name"] == tool_name and n["status"] == "running":
+                                    matched_node = n
+                                    break
+                        if matched_node:
+                            matched_node["status"] = "completed"
+                            matched_node["output"] = self._truncate_data(tool_output)
+                            matched_node["elapsed_time"] = round(
+                                (time.time() - matched_node.get("started_at", time.time())) * 1000, 2
+                            )
+                            # Extract extra source info from the tool (e.g. knowledge base retrieval sources)
+                            self._extract_tool_sources(tool_name, matched_node)
+
+                        trace.finish_tool(
+                            step_id=matched_node.get("step_id") if matched_node else None,
+                            tool_name=tool_name,
+                            status="success",
+                            output=tool_output,
+                            meta=matched_node.get("meta") if matched_node else None,
+                        )
+
+                    elif kind == "on_tool_error":
+                        error_msg = str(event.get("data", {}).get("error", ""))
+                        tool_name = event.get("name", "unknown")
+                        matched_node = None
+                        if _tool_stack:
+                            matched_node = _tool_stack.pop()
+                        else:
+                            for n in reversed(node_executions):
+                                if n["node_name"] == tool_name and n["status"] == "running":
+                                    matched_node = n
+                                    break
+                        if matched_node:
+                            matched_node["status"] = "failed"
+                            matched_node["error"] = error_msg[:500]
+                            matched_node["elapsed_time"] = round(
+                                (time.time() - matched_node.get("started_at", time.time())) * 1000, 2
+                            )
+
+                        trace.finish_tool(
+                            step_id=matched_node.get("step_id") if matched_node else None,
+                            tool_name=tool_name,
+                            status="error",
+                            error=error_msg[:500],
+                            meta=matched_node.get("meta") if matched_node else None,
+                        )
+
+                    elif kind == "on_chat_model_stream":
+                        chunk = event.get("data", {}).get("chunk")
+                        if chunk and hasattr(chunk, "content"):
+                            if self.deep_thinking:
+                                rc = self._extract_reasoning_content(chunk)
+                                if rc:
+                                    reasoning_content += rc
+                                    trace.append_llm_chunk(reasoning=rc)
+                            chunk_content = chunk.content
+                            chunk_text = self._content_to_text(chunk_content)
+                            if chunk_text:
+                                content += chunk_text
+                                trace.append_llm_chunk(output=chunk_text)
+
+                # Extract token statistics from the last event
+                output_messages = last_event.get("data", {}).get("output", {}).get("messages", [])
+                for msg in reversed(output_messages):
+                    if isinstance(msg, AIMessage):
+                        total_tokens = self._extract_tokens_from_message(msg)
+                        if not content:
+                            # If streaming produced no content, extract it from the final message
+                            if isinstance(msg.content, str):
+                                content = msg.content
+                            elif isinstance(msg.content, list):
+                                text_parts = []
+                                for item in msg.content:
+                                    if isinstance(item, dict):
+                                        if "text" in item:
+                                            text_parts.append(item.get("text", ""))
+                                        elif item.get("type") == "text":
+                                            text_parts.append(item.get("text", ""))
+                                    elif isinstance(item, str):
+                                        text_parts.append(item)
+                                content = "".join(text_parts)
+                            else:
+                                content = str(msg.content)
+                        if self.deep_thinking and not reasoning_content:
+                            reasoning_content = self._extract_reasoning_content(msg)
+                        break
+
+            except (RecursionError, GraphRecursionError) as e:
+                logger.warning(
+                    f"Agent 达到最大迭代次数限制 ({self.max_iterations})，可能存在工具调用循环",
+                    extra={"error": str(e)}
+                )
+                # Mark unfinished tools as failed
+                for node in _tool_stack:
+                    node["status"] = "failed"
+                    node["error"] = "达到最大迭代次数限制"
+                    node["elapsed_time"] = round(
+                        (time.time() - node.get("started_at", time.time())) * 1000, 2
+                    )
+                _tool_stack.clear()
+
+                # Strip started_at (not needed in the persisted output)
+                for node in node_executions:
+                    node.pop("started_at", None)
+
+                return {
+                    "content": f"抱歉，我在处理您的请求时遇到了问题。已达到最大处理步骤限制（{self.max_iterations}次）。请尝试简化您的问题或稍后再试。",
+                    "model": self.model_name,
+                    "elapsed_time": time.time() - start_time,
+                    "usage": {
+                        "prompt_tokens": 0,
+                        "completion_tokens": 0,
+                        "total_tokens": 0
+                    },
+                    "node_executions": node_executions,
+                    "agent_log": trace.finalize(
+                        status="error",
+                        error=f"Reached max iteration limit: {self.max_iterations}",
+                    ),
+                }
+
+            trace.finish_llm(output=content, tokens=total_tokens)
+            logger.info(f"最终提取的内容长度: {len(content)}")
+
+            # Strip started_at and make sure every node has a final status
+            for node in node_executions:
+                node.pop("started_at", None)
+                # Still "running" here means the on_tool_end event was lost; mark as completed
+                if node.get("status") == "running":
+                    node["status"] = "completed"
+
+            elapsed_time = time.time() - start_time
+            response = {
+                "content": content,
+                "model": self.model_name,
+                "elapsed_time": elapsed_time,
+                "usage": {
+                    "prompt_tokens": 0,
+                    "completion_tokens": 0,
+                    "total_tokens": total_tokens
+                },
+                "node_executions": node_executions,
+                "agent_log": trace.finalize(status="success", total_tokens=total_tokens),
+            }
+            if reasoning_content:
+                response["reasoning_content"] = reasoning_content
+
+            logger.debug(
+                "Agent 调用完成",
+                extra={
+                    "elapsed_time": elapsed_time,
+                    "content_length": len(response["content"]),
+                    "node_execution_count": len(node_executions)
+                }
+            )
+
+            return response
+
+        except Exception as e:
+            logger.error("Agent 调用失败", extra={"error": str(e)})
+            raise
+
+    async def chat_stream(
+            self,
+            message: str,
+            history: Optional[List[Dict[str, str]]] = None,
+            context: Optional[str] = None,
+            files: Optional[List[Dict[str, Any]]] = None
+    ) -> AsyncGenerator[str | int | dict[str, Any] | list, None]:
+        """Run a streaming chat turn
+
+        Args:
+            message: User message
+            history: History message list
+            context: Context information
+            files: Multimodal files
+
+        Yields:
+            str: Message content chunk
+            int: Token statistics
+            Dict: Deep-thinking content {"type": "reasoning", "content": "..."}
+            list: Node execution records [{"node_type": ..., ...}] (yielded last)
+        """
+        logger.info("=" * 80)
+        logger.info(" chat_stream 方法开始执行")
+        logger.info(f"  Message: {message[:100]}")
+        logger.info(f"  Has tools: {bool(self.tools)}")
+        logger.info(f"  Tool count: {len(self.tools) if self.tools else 0}")
+        logger.info("=" * 80)
+
+        # Collect node execution records
+        node_executions: List[Dict[str, Any]] = []
+        _tool_stack: List[Dict[str, Any]] = []
+        # LangChain custom events only carry run lineage; this map attributes events
+        # from parallel runs to product step_ids.
+        _tool_runs: Dict[str, str] = {}
+
+        try:
+            # Prepare the message list (multimodal supported)
+            messages = self._prepare_messages(message, history, context, files)
+            trace = AgentTraceRecorder(
+                model=self.model_name,
+                strategy=self.strategy,
+                system_prompt=self.system_prompt,
+                messages=messages,
+            )
+
+            logger.debug(
+                f"准备流式调用，has_tools={bool(self.tools)}, has_files={bool(files)}, message_count={len(messages)}"
+            )
+
+            chunk_count = 0
+
+            # Use the agent's astream_events uniformly for streaming output
+            logger.debug("使用 Agent astream_events 实现流式输出")
+            full_content = ''
+            full_reasoning = ''
+            try:
+                last_event = {}
+                async for event in self.agent.astream_events(
+                        {"messages": messages},
+                        version="v2",
+                        config={"recursion_limit": self.max_iterations}
+                ):
+                    last_event = event
+                    chunk_count += 1
+                    kind = event.get("event")
+
+                    # Handle every possible streaming event
+                    if kind in ("on_chat_model_start", "on_llm_start"):
+                        trace.start_llm()
+                        yield {"type": "agent_log", "data": trace.to_dict()}
+
+                    elif kind in ("on_chat_model_end", "on_llm_end"):
+                        output_message = self._extract_message_from_event_output(event.get("data", {}).get("output"))
+                        output_text = self._content_to_text(output_message.content) if output_message else ""
+                        tokens = self._extract_tokens_from_message(output_message) if output_message else 0
+                        trace.finish_llm(output=output_text, tokens=tokens)
+                        yield {"type": "agent_log", "data": trace.to_dict()}
+
+                    elif kind == "on_chat_model_stream":
+                        # LLM streaming output
+                        chunk = event.get("data", {}).get("chunk")
+                        if chunk and hasattr(chunk, "content"):
+                            # Extract deep-thinking content (only when deep thinking is enabled)
+                            if self.deep_thinking:
+                                reasoning_chunk = self._extract_reasoning_content(chunk)
+                                if reasoning_chunk:
+                                    full_reasoning += reasoning_chunk
+                                    trace.append_llm_chunk(reasoning=reasoning_chunk)
+                                    yield {"type": "reasoning", "content": reasoning_chunk}
+
+                            # Handle multimodal responses: content may be a string or a list
+                            chunk_content = chunk.content
+                            if isinstance(chunk_content, str) and chunk_content:
+                                full_content += chunk_content
+                                trace.append_llm_chunk(output=chunk_content)
+                                yield chunk_content
+                            elif isinstance(chunk_content, list):
+                                # Multimodal response: extract the text parts
+                                for item in chunk_content:
+                                    if isinstance(item, dict):
+                                        # Qwen format: {"text": "..."}
+                                        if "text" in item:
+                                            text = item.get("text", "")
+                                            if text:
+                                                full_content += text
+                                                trace.append_llm_chunk(output=text)
+                                                yield text
+                                        # OpenAI format: {"type": "text", "text": "..."}
+                                        elif item.get("type") == "text":
+                                            text = item.get("text", "")
+                                            if text:
+                                                full_content += text
+                                                trace.append_llm_chunk(output=text)
+                                                yield text
+                                    elif isinstance(item, str):
+                                        full_content += item
+                                        trace.append_llm_chunk(output=item)
+                                        yield item
+
+                    elif kind == "on_llm_stream":
+                        # Another variant of LLM streaming event
+                        chunk = event.get("data", {}).get("chunk")
+                        if chunk:
+                            if hasattr(chunk, "content"):
+                                # Extract deep-thinking content (only when deep thinking is enabled)
+                                if self.deep_thinking:
+                                    reasoning_chunk = self._extract_reasoning_content(chunk)
+                                    if reasoning_chunk:
+                                        full_reasoning += reasoning_chunk
+                                        trace.append_llm_chunk(reasoning=reasoning_chunk)
+                                        yield {"type": "reasoning", "content": reasoning_chunk}
+
+                                chunk_content = chunk.content
+                                if isinstance(chunk_content, str) and chunk_content:
+                                    full_content += chunk_content
+                                    trace.append_llm_chunk(output=chunk_content)
+                                    yield chunk_content
+                                elif isinstance(chunk_content, list):
+                                    # Multimodal response: extract the text parts
+                                    for item in chunk_content:
+                                        if isinstance(item, dict):
+                                            # Qwen format: {"text": "..."}
+                                            if "text" in item:
+                                                text = item.get("text", "")
+                                                if text:
+                                                    full_content += text
+                                                    trace.append_llm_chunk(output=text)
+                                                    yield text
+                                            # OpenAI format: {"type": "text", "text": "..."}
+                                            elif item.get("type") == "text":
+                                                text = item.get("text", "")
+                                                if text:
+                                                    full_content += text
+                                                    trace.append_llm_chunk(output=text)
+                                                    yield text
+                                        elif isinstance(item, str):
+                                            full_content += item
+                                            trace.append_llm_chunk(output=item)
+                                            yield item
+                            elif isinstance(chunk, str):
+                                full_content += chunk
+                                trace.append_llm_chunk(output=chunk)
+                                yield chunk
+
+                    # Record tool calls
+                    elif kind == "on_tool_start":
+                        tool_name = event.get("name", "unknown")
+                        tool_input = event.get("data", {}).get("input")
+                        step_id = str(_uuid.uuid4())
+                        tool_meta = self._tool_meta_map.get(tool_name, {})
+                        node = {
+                            "step_id": step_id,
+                            "node_type": "tool",
+                            "node_name": tool_name,
+                            "status": "running",
+                            "input": self._truncate_data(tool_input),
+                            "output": None,
+                            "elapsed_time": 0,
+                            "started_at": time.time(),
+                            "error": None,
+                            "meta": tool_meta if tool_meta else None,
+                        }
+                        _tool_stack.append(node)
+                        node_executions.append(node)
+                        run_id = event.get("run_id")
+                        if run_id:
+                            _tool_runs[str(run_id)] = step_id
+                        trace.start_tool(
+                            step_id=step_id,
+                            tool_name=tool_name,
+                            tool_input=tool_input,
+                            meta=tool_meta if tool_meta else None,
+                        )
+                        logger.debug(f"工具调用开始: {tool_name}")
+                        # Push the tool-start event in real time
+                        yield {"type": "agent_log", "data": trace.to_dict()}
+                        yield {"type": "tool_start", "step_id": step_id, "name": tool_name, "input": self._truncate_data(tool_input), "meta": tool_meta if tool_meta else None}
+                    elif kind == "on_custom_event" and event.get("name") == "memory_stage":
+                        if not is_memory_stage_capture_enabled():
+                            continue
+                        raw_stage = event.get("data") or {}
+                        event_run_id = event.get("run_id")
+                        parents = event.get("parent_ids") or []
+                        # Providers differ in the run_id hierarchy of custom events; walk from the
+                        # event itself up through its ancestors to find the nearest tool call.
+                        candidate_run_ids = [event_run_id, *reversed(parents)]
+                        matched_step_id = None
+                        for candidate in candidate_run_ids:
+                            if candidate and str(candidate) in _tool_runs:
+                                matched_step_id = _tool_runs[str(candidate)]
+                                break
+                        if not matched_step_id:
+                            logger.warning("丢弃无法归属工具调用的 memory_stage: run_id=%s", event_run_id)
+                            continue
+                        matched_node = next(
+                            (node for node in reversed(node_executions) if node.get("step_id") == matched_step_id),
+                            None,
+                        )
+                        if not matched_node or matched_node.get("node_name") != "long_term_memory":
+                            logger.warning("丢弃归属非长期记忆工具的 memory_stage: run_id=%s", event_run_id)
+                            continue
+                        stage_payload = {
+                            "type": "memory_stage",
+                            "step_id": matched_step_id,
+                            "stage": raw_stage.get("stage"),
+                            "status": raw_stage.get("status", "completed"),
+                            "data": raw_stage.get("data") or {},
+                        }
+                        matched_node.setdefault("_memory_stages", []).append(stage_payload)
+                        yield stage_payload
+                    elif kind == "on_tool_end":
+                        tool_output = event.get("data", {}).get("output")
+                        tool_name = event.get("name", "unknown")
+                        run_id = event.get("run_id")
+                        matched_step_id = _tool_runs.pop(str(run_id), None) if run_id else None
+                        matched_node = None
+                        if matched_step_id:
+                            matched_node = next(
+                                (node for node in reversed(node_executions) if node.get("step_id") == matched_step_id),
+                                None,
+                            )
+                            _tool_stack[:] = [
+                                node for node in _tool_stack
+                                if node.get("step_id") != matched_step_id
+                            ]
+                        elif _tool_stack:
+                            matched_node = _tool_stack.pop()
+                        else:
+                            for n in reversed(node_executions):
+                                if n["node_name"] == tool_name and n["status"] == "running":
+                                    matched_node = n
+                                    break
+                        matched_step_id = matched_node.get("step_id") if matched_node else matched_step_id
+                        if matched_node:
+                            matched_node["status"] = "completed"
+                            matched_node["output"] = self._truncate_data(tool_output)
+                            matched_node["elapsed_time"] = round(
+                                (time.time() - matched_node.get("started_at", time.time())) * 1000, 2
+                            )
+                            # Extract extra source info from the tool
+                            self._extract_tool_sources(tool_name, matched_node)
+                        trace.finish_tool(
+                            step_id=matched_step_id,
+                            tool_name=tool_name,
+                            status="success",
+                            output=tool_output,
+                            meta=matched_node.get("meta") if matched_node else None,
+                        )
+                        logger.debug(f"工具调用结束: {tool_name}")
+                        # Push the tool-end event in real time (with the updated meta)
+                        yield {"type": "agent_log", "data": trace.to_dict()}
+                        yield {"type": "tool_end", "step_id": matched_step_id, "name": tool_name, "output": self._truncate_data(tool_output), "meta": matched_node.get("meta") if matched_node else None}
+                    elif kind == "on_tool_error":
+                        error_msg = str(event.get("data", {}).get("error", ""))
+                        tool_name = event.get("name", "unknown")
+                        run_id = event.get("run_id")
+                        matched_step_id = _tool_runs.pop(str(run_id), None) if run_id else None
+                        matched_node = None
+                        if matched_step_id:
+                            matched_node = next(
+                                (node for node in reversed(node_executions) if node.get("step_id") == matched_step_id),
+                                None,
+                            )
+                            _tool_stack[:] = [
+                                node for node in _tool_stack
+                                if node.get("step_id") != matched_step_id
+                            ]
+                        elif _tool_stack:
+                            matched_node = _tool_stack.pop()
+                        else:
+                            for n in reversed(node_executions):
+                                if n["node_name"] == tool_name and n["status"] == "running":
+                                    matched_node = n
+                                    break
+                        matched_step_id = matched_node.get("step_id") if matched_node else matched_step_id
+                        if matched_node:
+                            matched_node["status"] = "failed"
+                            matched_node["error"] = error_msg[:500]
+                            matched_node["elapsed_time"] = round(
+                                (time.time() - matched_node.get("started_at", time.time())) * 1000, 2
+                            )
+                        # Push the tool-error event in real time
+                        trace.finish_tool(
+                            step_id=matched_step_id,
+                            tool_name=tool_name,
+                            status="error",
+                            error=error_msg[:500],
+                            meta=matched_node.get("meta") if matched_node else None,
+                        )
+                        yield {"type": "agent_log", "data": trace.to_dict()}
+                        yield {"type": "tool_error", "step_id": matched_step_id, "name": tool_name, "error": error_msg[:500]}
+
+                logger.debug(f"Agent 流式完成，共 {chunk_count} 个事件")
+                # Aggregate token usage
+                output_messages = last_event.get("data", {}).get("output", {}).get("messages", [])
+                stream_total_tokens = 0
+                for msg in reversed(output_messages):
+                    if isinstance(msg, AIMessage):
+                        stream_total_tokens = self._extract_tokens_from_message(msg)
+                        logger.info(f"流式 token 统计: total_tokens={stream_total_tokens}")
+                        yield stream_total_tokens
+                        break
+
+                trace.finish_llm(output=full_content, tokens=stream_total_tokens)
+                final_agent_log = trace.finalize(status="success", total_tokens=stream_total_tokens)
+                yield {"type": "agent_log", "data": final_agent_log}
+                yield {"type": "agent_log_final", "data": final_agent_log}
+
+                # Yield node execution records (strip started_at and settle statuses)
+                for node in node_executions:
+                    node.pop("started_at", None)
+                    if node.get("status") == "running":
+                        node["status"] = "completed"
+                if node_executions:
+                    yield {"type": "node_executions", "data": node_executions}
+
+            except GraphRecursionError:
+                logger.warning(
+                    f"Agent 达到最大迭代次数限制 ({self.max_iterations})，模型可能不支持正确的工具调用停止判断"
+                )
+                if not full_content:
+                    yield "抱歉，我在处理您的请求时遇到了问题（已达最大处理步骤限制）。请尝试简化问题或更换模型后重试。"
+                # Mark unfinished tools as failed
+                for node in _tool_stack:
+                    node["status"] = "failed"
+                    node["error"] = "达到最大迭代次数限制"
+                    node["elapsed_time"] = round(
+                        (time.time() - node.get("started_at", time.time())) * 1000, 2
+                    )
+                    trace.finish_tool(
+                        step_id=node.get("step_id"),
+                        tool_name=node.get("node_name", "unknown"),
+                        status="error",
+                        error=node["error"],
+                        meta=node.get("meta"),
+                    )
+                _tool_stack.clear()
+                for node in node_executions:
+                    node.pop("started_at", None)
+                final_agent_log = trace.finalize(
+                    status="error",
+                    error=f"Reached max iteration limit: {self.max_iterations}",
+                )
+                yield {"type": "agent_log", "data": final_agent_log}
+                yield {"type": "agent_log_final", "data": final_agent_log}
+                if node_executions:
+                    yield {"type": "node_executions", "data": node_executions}
+            except Exception as e:
+                # The caller converts this into a safe SSE-facing hint; the server keeps
+                # the full exception for troubleshooting via model request_id and context.
+                logger.error(f"Agent astream_events 失败: {str(e)}", exc_info=True)
+                raise
+
+        except Exception as e:
+            logger.error("=" * 80)
+            logger.error(f"chat_stream 异常: {str(e)}")
+            logger.error("=" * 80, exc_info=True)
+            raise
+        finally:
+            _tool_runs.clear()
+            logger.info("=" * 80)
+            logger.info("chat_stream 方法执行结束")
+            logger.info("=" * 80)

@@ -55,6 +55,8 @@ from . import (
     upload_controller,
     user_controller,
     user_memory_controllers,
+    wiki_controller,
+    wiki_faq_controller,
     workflow_trigger_controller,
     workspace_controller,
     ontology_controller,
@@ -62,7 +64,7 @@ from . import (
     tenant_quota_controller,
     tenant_subscription_controller,
 )
-from .internal import internal_sandbox_controller
+from .internal import internal_app_service_controller, internal_sandbox_controller
 
 # 创建管理端 API 路由器
 manager_router = APIRouter()
@@ -78,6 +80,8 @@ manager_router.include_router(model_controller.router)
 manager_router.include_router(file_controller.router)
 manager_router.include_router(document_controller.router)
 manager_router.include_router(knowledge_controller.router)
+manager_router.include_router(wiki_controller.router)
+manager_router.include_router(wiki_faq_controller.router)
 manager_router.include_router(knowledge_metadata_controller.router)
 manager_router.include_router(mcp_market_controller.router)
 manager_router.include_router(mcp_market_config_controller.router)
@@ -128,5 +132,6 @@ manager_router.include_router(memory_display_controller.router)  # 记忆和引�
 manager_router.include_router(workflow_trigger_controller.router)
 manager_router.include_router(human_intervention_controller.router)  # 人工介入功能
 manager_router.include_router(internal_sandbox_controller.router)
+manager_router.include_router(internal_app_service_controller.router)
 
 __all__ = ["manager_router"]

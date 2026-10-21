@@ -5,12 +5,17 @@
 !mem-knowledge/uv.lock
 !mem-knowledge/src/
 !mem-knowledge/src/**
+!mem-knowledge/alembic.ini
+!mem-knowledge/migrations/
+!mem-knowledge/migrations/**
 
 !packages/
 !packages/redbear-model/
 !packages/redbear-model/**
 !packages/storage-core/
 !packages/storage-core/**
+!packages/auth-sdk/
+!packages/auth-sdk/**
 
 **/__pycache__/**
 **/__pycache__

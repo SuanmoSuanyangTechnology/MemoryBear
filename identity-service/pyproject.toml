@@ -22,7 +22,7 @@ dependencies = [
 ]
 
 [dependency-groups]
-dev = ["pytest>=8", "pytest-asyncio>=0.23", "fakeredis>=2.23"]
+dev = ["pytest>=8", "pytest-asyncio>=0.23", "fakeredis>=2.23", "ruff>=0.16,<1"]
 
 [tool.uv.sources]
 auth-sdk = { path = "../packages/auth-sdk" }
@@ -37,3 +37,14 @@ packages = ["src", "src.controllers", "src.models",
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "ASYNC"]
+
+[tool.ruff.lint.per-file-ignores]
+# FastAPI dependencies are injected via Depends() defaults by convention.
+"src/controllers/*.py" = ["B008"]

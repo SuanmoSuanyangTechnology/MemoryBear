@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next'
 import ScoreBreakdown from './ScoreBreakdown'
 import type { LogItem } from '../types'
 import { OLD_META_DATA_KEY_FIELDS, NEW_META_DATA_KEY_FIELDS } from '@/views/UserMemoryDetail/constant'
+import Empty from '@/components/Empty';
 
 type RecordValue = Record<string, unknown>
 
@@ -56,7 +57,9 @@ const UserMetadataContent: FC<{ log: LogItem }> = ({ log }) => {
       name: metadataText || name,
       fields: fields.join(','),
     })
-
+  if (!data?.has_profile) {
+    return <Empty size={88} subTitle={t('memoryConversation.userMetadata.noMetadataBadge')} />
+  }
   return (
     <div>
       <div className="rb:text-[12px] rb:font-medium rb:text-blue-500">

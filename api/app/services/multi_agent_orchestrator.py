@@ -486,6 +486,9 @@ class MultiAgentOrchestrator:
         self._turn_used_context_engine: bool = False
         self._turn_ctx_provider: Optional[str] = None
         self._turn_ctx_model_config_id: Any = None
+        # 重新生成场景：主管历史截断到该时间之前（= 原提问 user 消息的 created_at），
+        # 保证重跑上下文与被重新生成的那一轮一致。None = 不截断（正常新轮对话）。
+        self._regenerate_before: Any = None
 
     def _prepare_turn_chat_features(
         self,
@@ -782,7 +785,12 @@ class MultiAgentOrchestrator:
 
         每轮都重算（同一 orchestrator 实例会跑多轮，且子 Agent 配置可能已更新）。
         """
-        bag = build_cluster_variable_bag(self.config, self.sub_agents, variables)
+        # 重新生成（_regenerate_before 非空）：变量沿用首轮落库值，存量会话没有落库变量时
+        # 不应因必填缺失拦截重跑（首轮已通过入口校验），因此放宽为不抛错、仅记观测。
+        strict_required = False if self._regenerate_before is not None else None
+        bag = build_cluster_variable_bag(
+            self.config, self.sub_agents, variables, strict_required=strict_required
+        )
         self._cluster_variables = bag
         return bag
 
@@ -1225,6 +1233,7 @@ class MultiAgentOrchestrator:
         execution_mode: Optional[str] = None,
         files: Optional[List[Any]] = None,
         user_message_id: Optional[uuid.UUID] = None,
+        regenerate_before: Any = None,
     ):
         """执行多 Agent 任务（流式返回）
 
@@ -1239,12 +1248,16 @@ class MultiAgentOrchestrator:
             storage_type: 存储类型
             user_rag_memory_id: 用户 RAG 记忆 ID
             message_id: 本轮 assistant 消息 ID（写入主执行记录，供日志详情按消息挂载节点）
+            regenerate_before: 重新生成场景的历史截断时间（= 原提问 user 消息 created_at），
+                非空时主管历史只取该时间之前的消息；None = 正常新轮对话（旧行为）
 
         Yields:
             SSE 格式的事件流
         """
 
         start_time = time.time()
+        # 重新生成：历史截断钩子（仅主管链路 _load_cluster_history 消费；缺省 None = 旧行为）
+        self._regenerate_before = regenerate_before
 
         # S3：每轮开始重置整合模式观测值（同一 orchestrator 实例可能跑多轮）
         self._merge_mode_actual = None
@@ -1365,6 +1378,30 @@ class MultiAgentOrchestrator:
             # total）。外层入口（app_chat_service / multi_agent_service）不再拦截
             # sub_usage 字符串自行累加，统一从本事件读取。
             _usage_total = self._turn_routing_tokens + self._turn_sub_tokens + self._turn_merge_tokens
+
+            # 收尾（DB 更新 + commit）必须在 end 之前完成：客户端收到 end 即断开会取消
+            # 本生成器，取消态下的 DB 操作会被反复打断，连接以脏状态留在池里。
+            logger.info(
+                "多 Agent 任务完成（流式）",
+                extra={
+                    "mode": self._normalized_mode,
+                    "elapsed_time": elapsed_time,
+                    "routing_tokens": self._turn_routing_tokens,
+                    "sub_tokens": self._turn_sub_tokens,
+                    "merge_tokens": self._turn_merge_tokens
+                }
+            )
+
+            await self._finalize_master_execution(
+                status="completed",
+                elapsed_time=time.time() - start_time,
+                token_usage={
+                    "prompt_tokens": 0,
+                    "completion_tokens": 0,
+                    "total_tokens": _usage_total,
+                },
+            )
+
             yield self._format_sse_event("end", {
                 "elapsed_time": elapsed_time,
                 "conversation_id": str(conversation_id) if conversation_id else None,
@@ -1386,27 +1423,6 @@ class MultiAgentOrchestrator:
                 },
                 "timestamp": time.time()
             })
-
-            logger.info(
-                "多 Agent 任务完成（流式）",
-                extra={
-                    "mode": self._normalized_mode,
-                    "elapsed_time": elapsed_time,
-                    "routing_tokens": self._turn_routing_tokens,
-                    "sub_tokens": self._turn_sub_tokens,
-                    "merge_tokens": self._turn_merge_tokens
-                }
-            )
-
-            await self._finalize_master_execution(
-                status="completed",
-                elapsed_time=time.time() - start_time,
-                token_usage={
-                    "prompt_tokens": 0,
-                    "completion_tokens": 0,
-                    "total_tokens": _usage_total,
-                },
-            )
 
         except Exception as e:
             logger.error(
@@ -1442,6 +1458,7 @@ class MultiAgentOrchestrator:
         execution_mode: Optional[str] = None,
         files: Optional[List[Any]] = None,
         user_message_id: Optional[uuid.UUID] = None,
+        regenerate_before: Any = None,
     ) -> Dict[str, Any]:
         """执行多 Agent 任务（基于 Master Agent 决策）
 
@@ -1454,11 +1471,15 @@ class MultiAgentOrchestrator:
             message_id: 本轮 assistant 消息 ID（写入主执行记录）
             storage_type: 存储类型（S5：透传给 collaboration 调用上下文）
             user_rag_memory_id: 用户 RAG 记忆 ID（S5：同上）
+            regenerate_before: 重新生成场景的历史截断时间（= 原提问 user 消息 created_at），
+                非空时主管历史只取该时间之前的消息；None = 正常新轮对话（旧行为）
 
         Returns:
             执行结果
         """
         start_time = time.time()
+        # 重新生成：历史截断钩子（仅主管链路 _load_cluster_history 消费；缺省 None = 旧行为）
+        self._regenerate_before = regenerate_before
 
         # S5：与流式同口径 —— 变量契约在入口一次性处理，两模式共用渲染后的消息。
         cluster_variables = self._build_cluster_variables(variables)
@@ -2353,6 +2374,19 @@ class MultiAgentOrchestrator:
                 "- 自定义工具：按各工具描述在适用场景调用。"
             )
 
+        # 最终答案格式约束：json_output 开启时，主管必带工具 → response_format 被移除
+        #（compatible_chat / redbear_model openai provider），深度思考也会跳过 response_format，
+        # JSON 只能靠提示词保证。此前固定要求"中文回复"，与引擎追加的 JSON 指令冲突，
+        # 模型按自动段输出自然语言，json_output 形同失效。
+        if self._supervisor_json_output_on():
+            final_answer_rule = (
+                "最终答案输出格式（强制）：调用工具/子 Agent 的过程不受限制，但最终答案必须且只能是"
+                "一个合法的 JSON 对象（以 { 开头、以 } 结尾），JSON 内的文字内容使用中文；"
+                "不要输出 Markdown 代码块（```）、不要在 JSON 前后附加任何说明文字，不要提及调度过程。"
+            )
+        else:
+            final_answer_rule = "最终答案必须是完整、自洽的中文回复，不要提及调度过程。"
+
         own_tools_section = ""
         if own_tool_guidance:
             own_tools_section = (
@@ -2377,11 +2411,28 @@ class MultiAgentOrchestrator:
             "派单动机（重要）：派单是为了**上下文隔离**——探索性搜索、长文档处理、"
             "代码执行这类会产生大量中间输出的任务，交给子 Agent 在独立上下文里跑，"
             "避免主对话被工具输出淹没；结论性小问题用你自己的工具或知识直接回答。\n"
-            "最终答案必须是完整、自洽的中文回复，不要提及调度过程。"
+            f"{final_answer_rule}"
         )
+        if not self.sub_agents:
+            # 无子 Agent：主管就是裸 Agent，不能再提"调用子 Agent 工具/可用子 Agent: (空)"，
+            # 否则模型会被空名册误导去幻想工具。自用工具引导保留。
+            auto_prompt = (
+                "你是多智能体集群的主管（supervisor），当前没有配置子 Agent，"
+                "请直接回答用户问题。"
+                f"{own_tools_section}\n\n"
+                f"{final_answer_rule}"
+            )
         if not custom_prompt:
             return auto_prompt
         return f"{custom_prompt}\n\n---\n\n{auto_prompt}"
+
+    def _supervisor_json_output_on(self) -> bool:
+        """集群 model_parameters.json_output 是否开启（与 _build_supervisor_agent 传给引擎的口径一致）。"""
+        mp = self.model_parameters
+        if mp is None:
+            return False
+        val = mp.get("json_output", False) if isinstance(mp, dict) else getattr(mp, "json_output", False)
+        return bool(val)
 
     def _supervisor_skill_prompt_section(self) -> str:
         """主管技能 prompt 段：_load_supervisor_own_tools 加载技能时写入。
@@ -2491,6 +2542,7 @@ class MultiAgentOrchestrator:
 
         tools = []
         self._loop_tool_instances = []
+        _used_tool_names: set = set()
         for agent_id, data in self.sub_agents.items():
             info = data.get("info", {})
             wrapper = SubAgentTool(
@@ -2499,6 +2551,20 @@ class MultiAgentOrchestrator:
                 info.get("name", agent_id),
                 _sub_agent_brief(data),
             )
+            # 工具名去重：_sanitize_tool_name 会把非 ASCII 字符抹成下划线，
+            # 仅靠中文区分的子 Agent 名（如「xxx-提取 / xxx-计算 / xxx-审校」）
+            # 会得到同一个工具名，LangChain 按名字取工具时只剩最后一个，
+            # 主管永远只能调到它。冲突时追加 agent_id 短后缀保证唯一
+            # （原名仍在 description 里供主管认人）。
+            if wrapper.tool_name in _used_tool_names:
+                _suffix = str(agent_id).replace("-", "")[:8] or "x"
+                _candidate = f"{wrapper.tool_name[:55]}_{_suffix}"
+                _n = 2
+                while _candidate in _used_tool_names:
+                    _candidate = f"{wrapper.tool_name[:50]}_{_suffix}_{_n}"
+                    _n += 1
+                wrapper.tool_name = _candidate
+            _used_tool_names.add(wrapper.tool_name)
             self._loop_tool_instances.append(wrapper)
             tools.append(wrapper.build())
 
@@ -2524,6 +2590,8 @@ class MultiAgentOrchestrator:
                     _supervisor_prompt,
                     self._turn_emotion_detection,
                     self._turn_user_message_id,
+                    app_id=self._app_id,
+                    tenant_id=self.tenant_id,
                     write_cache=self.cluster_memory_enabled(),
                 )
             except Exception as e:  # noqa: BLE001 - 情绪感知失败不阻断对话
@@ -2729,6 +2797,35 @@ class MultiAgentOrchestrator:
         if not conversation_id or self.db is None:
             return []
         try:
+            # 重新生成场景（_regenerate_before 非空）：按原提问消息的创建时间截断，
+            # 主管只感知"被重新生成轮次之前"的上下文，与单 Agent regenerate 同口径
+            #（AppChatService._load_history_before_message 的 before_time 语义）。
+            # get_conversation_history 不带 created_at，这里直查 Message 表。
+            if self._regenerate_before is not None:
+                from app.models import Message
+                from sqlalchemy import select
+                from sqlalchemy.ext.asyncio import AsyncSession as _AsyncSession
+
+                stmt = (
+                    select(Message)
+                    .where(
+                        Message.conversation_id == conversation_id,
+                        Message.is_current.is_not(False),
+                        Message.is_deleted.is_not(True),
+                        Message.created_at < self._regenerate_before,
+                    )
+                    .order_by(Message.created_at.asc())
+                )
+                if isinstance(self.db, _AsyncSession):
+                    rows = (await self.db.execute(stmt)).scalars().all()
+                else:
+                    rows = self.db.scalars(stmt).all()
+                return [
+                    {"role": m.role, "content": m.content}
+                    for m in (rows or [])
+                    if isinstance(m.content, str)
+                ]
+
             from app.services.conversation_service import ConversationService
 
             conv_service = ConversationService(self.db)
@@ -2788,10 +2885,8 @@ class MultiAgentOrchestrator:
         # 本轮入口消息（主管技能过滤 load_skill_config 用，同 Agent 应用口径）
         self._loop_entry_message = message
 
-        # S9：前置校验失败直接抛错（模式语义可预期，不静默换档）
-        if not self.sub_agents:
-            self._loop_stop_reason = "error"
-            raise BusinessException("没有可用的子 Agent", BizCode.AGENT_CONFIG_MISSING)
+        # 子 Agent 可为空：此时主管就是一个裸 Agent（只用自用工具/知识直接作答），
+        # 不拦截。主模型缺失仍在下面的 _resolve_supervisor_model_view 前置校验里抛错。
         model_view = await self._resolve_supervisor_model_view()
 
         self._set_merge_mode_actual("loop", "supervisor_loop 模式（主管 ReAct 循环）")
@@ -3030,10 +3125,7 @@ class MultiAgentOrchestrator:
         self._loop_stop_reason = None
         self._loop_entry_message = message
 
-        # S9：前置校验失败直接抛错
-        if not self.sub_agents:
-            self._loop_stop_reason = "error"
-            raise BusinessException("没有可用的子 Agent", BizCode.AGENT_CONFIG_MISSING)
+        # 子 Agent 可为空（同流式版）：主管退化为裸 Agent 直接作答，不拦截
         model_view = await self._resolve_supervisor_model_view()
 
         self._set_merge_mode_actual("loop", "supervisor_loop 模式（主管 ReAct 循环）")
@@ -3631,6 +3723,24 @@ class MultiAgentOrchestrator:
                     except Exception:  # noqa: BLE001
                         pass
 
+    async def _sub_agent_history(
+        self,
+        conversation_id: Optional[uuid.UUID],
+    ) -> List[Dict[str, Any]]:
+        """子 Agent 运行时携带的历史。
+
+        - supervisor_loop：主管自己持有集群会话历史，子 Agent 只看主管任务书 + 变量包，
+          返回空历史（24abc4d25 的设计，避免主管消息/子 Agent 上一轮串入）。
+        - supervisor（三段式）：路由器只做选 Agent，最终答案由子 Agent 直接面向用户生成，
+          不带历史就等于每轮都是新会话（多轮更正、"记住本订单"全部失效）。这里给它
+          集群会话历史（与主管 loop 同一份 _load_cluster_history：20 轮、纯文本、
+          重新生成按原提问时间截断；当前轮尚未落库，不会重复）。
+        - 其他模式维持原行为（空历史）。
+        """
+        if self._normalized_mode == OrchestrationMode.SUPERVISOR:
+            return await self._load_cluster_history(conversation_id)
+        return []
+
     async def _execute_sub_agent_stream_once(
         self,
         agent_config: AgentConfig,
@@ -3686,6 +3796,9 @@ class MultiAgentOrchestrator:
             # 入参 memory 仅为兼容既有签名，不再参与决策
             memory=self.cluster_memory_enabled(),
             sub_agent=True,
+            # 历史口径见 _sub_agent_history：supervisor_loop 只看任务书（空历史）；
+            # supervisor 三段式子 Agent 直接面向用户作答，需带集群会话历史。
+            history=await self._sub_agent_history(conversation_id),
             parent_execution_id=self.current_execution_id,
             orchestration_mode=self._normalized_mode,
             execution_owner=self._resolve_agent_identity(agent_config),
@@ -3753,6 +3866,8 @@ class MultiAgentOrchestrator:
             storage_type=storage_type,
             user_rag_memory_id=user_rag_memory_id,
             sub_agent=True,
+            # 与流式路径一致（见 _sub_agent_history）
+            history=await self._sub_agent_history(conversation_id),
             parent_execution_id=self.current_execution_id,
             orchestration_mode=self._normalized_mode,
             execution_owner=self._resolve_agent_identity(agent_config),
@@ -4043,12 +4158,15 @@ class MultiAgentOrchestrator:
                         "orchestration_mode": self._normalized_mode,
                     })
 
-                # handoffs 自己的 end 属于"协作运行生命周期"，不是集群会话事件：
-                # 集群级 end 由 execute_stream 在模式分支之后统一发出，这里不透传，
-                # 否则上层会看到两个 end（且第二个 end 已经把外层消息收过尾了）。
+                # handoffs 自己的 start / end 属于"协作运行生命周期"，不是集群会话事件
+                # （与 supervisor 分支同口径，见 _SUB_RUN_LIFECYCLE_EVENTS），不透传：
+                # - end：集群级 end 由 execute_stream 统一发出，透传会出现两个 end；
+                # - start：剥离 conversation_id 后变成空 start，体验分享前端 start 分支
+                #   会用它把已捕获的会话 ID 覆盖成 undefined → 轮末不回填 →
+                #   下一轮带 null 会话 ID → 后端每轮新建会话（对话分裂成多个窗口）。
                 # 其余事件先剥离子运行 conversation_id（S3：防前端会话指针被
                 # handoffs 内部会话 ID 污染——集群会话 ID 只由 start/end 发布）。
-                if event_name != "end":
+                if event_name not in _SUB_RUN_LIFECYCLE_EVENTS:
                     yield self._strip_conversation_id(event)
 
                 if event_name in ("end", "error") and active_execution_id is not None:

@@ -1,9 +1,3 @@
-/*
- * @Author: ZhaoYing 
- * @Date: 2026-02-03 16:28:51 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-03 16:28:51 
- */
 /**
  * Sub-Agent Modal
  * Allows adding or editing sub-agents in multi-agent cluster configuration
@@ -21,7 +15,6 @@ import { getApplicationListUrl, getReleaseList } from '@/api/application';
 import type { Release } from '@/views/ApplicationConfig/types/release'
 
 const FormItem = Form.Item;
-
 /**
  * Component props
  */

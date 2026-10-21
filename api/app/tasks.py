@@ -6922,6 +6922,25 @@ def run_scene_community_incremental(self, end_user_id: str):
             expire=1800,
         )
         result = loop.run_until_complete(_run())
+        if result.get("status") == "success":
+            # 展示写入：best effort，在取得成功结果后、派发下一批之前执行；
+            # _persist_events 内部已兜底 PG 异常，此处 try/except 为第二层隔离，
+            # 失败不触发 Celery 自动重试、不改变任务成功结果。
+            try:
+                from app.services.memory_engine_display_service import (
+                    MemoryEngineDisplayService,
+                )
+
+                loop.run_until_complete(
+                    MemoryEngineDisplayService.save_scene_reconstruction_event(
+                        end_user_id=end_user_id,
+                        result=result,
+                    )
+                )
+            except Exception:
+                logger.exception(
+                    "[EngineDisplay] Scene reconstruction event write failed"
+                )
         if result.get("dispatch_next"):
             stage = "dispatch_next"
             next_task = run_scene_community_incremental.apply_async(
@@ -7139,7 +7158,7 @@ def scan_scene_summary_idle(
     soft_time_limit=50,
 )
 def consume_model_gateway_alerts_task() -> dict[str, Any]:
-    """定时任务：消费 model:usage 事件做网关健康告警评估（B9）。
+    """定时任务：消费部署域用量流（model:usage:<DB_NAME>）做网关健康告警评估（B9）。
 
     服务侧（model-service）的调用终态只进 stream，本任务用独立消费组
     `model-usage-alerts` 读该 stream 喂给宿主企业告警插件；beat 周期由
@@ -7353,6 +7372,7 @@ def do_workspace_statistics_snapshot(
     """串行刷新一个空间的统计快照；失败时最多补偿一次。"""
     from app.services.workspace_memory_statistics_service import (
         get_or_refresh_workspace_statistics_async,
+        get_workspace_statistics_for_worker_async,
         get_workspace_statistics_snapshot_version_async,
     )
 
@@ -7382,6 +7402,7 @@ def do_workspace_statistics_snapshot(
             allow_cached_response=False,
             baseline_version=attempt_baseline_version,
             baseline_captured=True,
+            calculate_statistics=get_workspace_statistics_for_worker_async,
         )
         return {
             "status": "SUCCESS" if generated else "SKIPPED_COALESCED",

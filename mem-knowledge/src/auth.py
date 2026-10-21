@@ -62,6 +62,10 @@ class KbAuthConfig:
     # connection at app-build time). None → no rules loaded. Consumed by the
     # gateway handler only; direct mode does not use Redis.
     redis: object | None = None
+    # Deployment-scoped ACL names; main.py passes DB_NAME-derived values. The
+    # defaults match the legacy global names for direct construction in tests.
+    acl_rules_key: str = "acl:rules"
+    acl_rules_changed_channel: str = "acl:rules:changed"
 
 
 def _is_single_file_download(path: str, method: str) -> bool:
@@ -120,13 +124,18 @@ def _auth_error(
 
 
 class KbAuthMiddleware(BaseHTTPMiddleware):
-    def __init__(self, app, kb_auth: KbAuthConfig) -> None:
+    def __init__(self, app, kb_auth: KbAuthConfig, gateway=None) -> None:
         super().__init__(app)
         self._kb_auth = kb_auth
         # gateway channel-1 verification/ACL assembly lives in the enterprise
         # handler (enterprise_ext.kb); direct needs no verifier — credentials
-        # are terminated upstream.
-        self._gateway = _load_gateway_auth(kb_auth) if kb_auth.auth_mode == "gateway" else None
+        # are terminated upstream. main.py builds the handler once and shares
+        # the instance with the lifespan (which owns its start/stop); without
+        # it the lazy load below preserves the original construction timing,
+        # including the fail-closed RuntimeError when the package is missing.
+        self._gateway = gateway
+        if self._gateway is None and kb_auth.auth_mode == "gateway":
+            self._gateway = _load_gateway_auth(kb_auth)
 
     async def dispatch(self, request: Request, call_next):
         request.state.kb_legacy_proxy_authenticated = False
@@ -196,8 +205,8 @@ class KbAuthMiddleware(BaseHTTPMiddleware):
         return os.path.exists(path)
 
 
-def build_kb_auth_middleware(app, kb_auth: KbAuthConfig) -> KbAuthMiddleware:
-    return KbAuthMiddleware(app, kb_auth)
+def build_kb_auth_middleware(app, kb_auth: KbAuthConfig, gateway=None) -> KbAuthMiddleware:
+    return KbAuthMiddleware(app, kb_auth, gateway=gateway)
 
 
 __all__ = ["KbAuthConfig", "KbAuthMiddleware", "build_kb_auth_middleware", "is_public_path"]

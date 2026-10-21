@@ -9,7 +9,8 @@ from ..sidecar_factory import SidecarStepFactory, SidecarTiming  # noqa: F401
 # Step implementations — importing triggers @register self-registration.
 from .statement_temporal_step import StatementTemporalExtractionStep  # noqa: F401
 from .triplet_step import TripletExtractionStep  # noqa: F401
-from .emotion_step import EmotionExtractionStep  # noqa: F401
+# [DEPRECATED v0.5.2] Statement LLM 情绪提取已废弃，改为继承快写 BERT 情绪（见 emotion_inheritance），暂时保留代码不删除
+# from .emotion_step import EmotionExtractionStep  # noqa: F401
 from .embedding_step import EmbeddingStep  # noqa: F401
 
 # Refactored orchestrator

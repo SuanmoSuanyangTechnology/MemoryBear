@@ -9,7 +9,8 @@
    换候选、terminal/不可分类原样透传、空链/耗尽抛包内错误。
 4. 归因 ``UsageEvent``：config_id 恒为入口 config（组合链成员同样归到入口）；
    provider/model_name/channel_id 取实际尝试/命中候选（成功与失败同口径）；终态经
-   ``usage_publisher`` 旁路发射进 ``model:usage``（§2.6：发射失败仅计数告警，不影响调用）。
+   ``usage_publisher`` 旁路发射进部署域用量流 ``model:usage:<DB_NAME>``
+   （§2.6：发射失败仅计数告警，不影响调用）。
 
 凭据边界：明文只经 ``SecretStr`` 在包内解密点与 runtime 构造器之间流转；本模块不入日志、
 不进返回值、不进 usage（失败 usage 的 error_type 只取异常类名，不取 message）。
@@ -1013,7 +1014,8 @@ async def invoke(
 ) -> InvokeOutcome:
     """单次 invoke：解析 → 选路/解密/调用 → 归因（终态旁路发射 usage）。失败抛 ``InvokeFailure``。
 
-    终态（成功 / 已发起调用的失败）经 ``model:usage`` 旁路发射；零尝试失败无调用事实，不发射
+    终态（成功 / 已发起调用的失败）经部署域用量流 ``model:usage:<DB_NAME>`` 旁路发射；
+    零尝试失败无调用事实，不发射
     （§2.6：发射失败仅计数告警，不影响调用返回）。
 
     ``client_pool`` = 进程级模型客户端池（端点注入 ``runtime.model_runtime.pool``）：

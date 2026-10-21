@@ -4,7 +4,7 @@
 本模块提供情绪数据的查询功能，用于情绪分析和统计。
 
 Classes:
-    EmotionRepository: 情绪数据仓储，提供情绪标签、词云、健康指数等查询方法（Statement 节点，LLM 六情绪体系）
+    EmotionRepository: 情绪数据仓储，提供情绪标签、词云、健康指数等查询方法（Statement 节点，十情绪体系，兼容旧值 fear/surprise）
     DialogueEmotionRepository: Dialogue 节点 BERT 情绪仓储，提供原始对话明细查询（十情绪体系，情绪统计模块专用）
 """
 
@@ -13,10 +13,28 @@ from datetime import datetime, timedelta, timezone
 import json
 
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
+from app.core.memory.emotion.emotion_buckets import (
+    emotion_storage_aliases,
+    legacy_case_cypher,
+    normalize_emotion_type,
+    normalize_emotion_type_or_raw,
+)
 from app.core.utils.datetime_utils import to_iso_z, utcnow_naive
 from app.core.logging_config import get_business_logger
 
 logger = get_business_logger()
+
+
+def _emotion_filter_values(emotion_type: str) -> List[str]:
+    """情绪过滤参数 → Cypher `IN $emotion_types` 的取值列表
+
+    已知类别（含旧值）展开为 code + 旧值别名（如 anxiety → [anxiety, fear]）；
+    未知值原样传入，保持既有「查不到」行为。
+    """
+    code = normalize_emotion_type(emotion_type)
+    if code is None:
+        return [emotion_type]
+    return list(emotion_storage_aliases(code))
 
 
 def _to_naive_utc(value: Any) -> datetime:
@@ -61,25 +79,26 @@ class EmotionRepository:
         emotion_type: Optional[str] = None,
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
-        limit: int = 10
     ) -> List[Dict[str, Any]]:
-        """获取情绪标签统计
-        
-        查询指定用户的情绪类型分布，包括计数、百分比和平均强度。
-        
+        """获取情绪标签原始统计
+
+        按 Statement 上的**原始** emotion_type 分组返回计数与强度累计，
+        归一化合并（fear→anxiety、surprise→neutral）、百分比与平均强度由 service 层完成。
+        原始取值种类有上限（10 类 + 旧值 + 极少量脏值），因此不加 LIMIT。
+
         Args:
             end_user_id: 用户组ID（宿主ID）
-            emotion_type: 可选的情绪类型过滤（joy/sadness/anger/fear/surprise/neutral）
+            emotion_type: 可选的情绪类型过滤（10 类 code；旧值 fear/surprise 兼容）。
+                已知类别会同时命中其旧值别名（如 anxiety 命中 fear），未知值原样过滤
             start_date: 可选的开始日期（ISO格式字符串）
             end_date: 可选的结束日期（ISO格式字符串）
-            limit: 返回结果的最大数量
-            
+
         Returns:
-            List[Dict]: 情绪标签列表，每个包含：
-                - emotion_type: 情绪类型
+            List[Dict]: 每个原始情绪值一行：
+                - emotion_type: 原始情绪类型
                 - count: 该类型的数量
-                - percentage: 占比百分比
-                - avg_intensity: 平均强度
+                - intensity_sum: 非空强度之和（无非空强度时可能为 0 或 None）
+                - intensity_count: 非空强度个数
         """
         # 构建查询条件
         where_clauses = [
@@ -87,11 +106,11 @@ class EmotionRepository:
             "s.delete_at IS NULL",
             "s.emotion_type IS NOT NULL",
         ]
-        params = {"end_user_id": end_user_id, "limit": limit}
-        
+        params: Dict[str, Any] = {"end_user_id": end_user_id}
+
         if emotion_type:
-            where_clauses.append("s.emotion_type = $emotion_type")
-            params["emotion_type"] = emotion_type
+            where_clauses.append("s.emotion_type IN $emotion_types")
+            params["emotion_types"] = _emotion_filter_values(emotion_type)
         
         if start_date:
             where_clauses.append("s.created_at IS NOT NULL AND datetime(s.created_at) >= datetime($start_date)")
@@ -103,37 +122,25 @@ class EmotionRepository:
         
         where_str = " AND ".join(where_clauses)
         
-        # 优化的 Cypher 查询：使用索引，减少中间结果
+        # 按原始值分组；归一化合并在 service 层完成
         query = f"""
         MATCH (s:Statement)
         WHERE {where_str}
-        WITH s.emotion_type as emotion_type, 
-             count(*) as count,
-             avg(s.emotion_intensity) as avg_intensity
-        WITH collect({{emotion_type: emotion_type, count: count, avg_intensity: avg_intensity}}) as results,
-             sum(count) as total_count
-        UNWIND results as result
-        RETURN result.emotion_type as emotion_type,
-               result.count as count,
-               toFloat(result.count) / total_count * 100 as percentage,
-               result.avg_intensity as avg_intensity
-        ORDER BY count DESC
-        LIMIT $limit
+        RETURN s.emotion_type AS emotion_type, count(*) AS count,
+               sum(s.emotion_intensity) AS intensity_sum, count(s.emotion_intensity) AS intensity_count
         """
-        
+
         try:
             results = await self.connector.execute_query(query, **params)
-            formatted_results = [
+            return [
                 {
                     "emotion_type": record["emotion_type"],
                     "count": record["count"],
-                    "percentage": round(record["percentage"], 2),
-                    "avg_intensity": round(record["avg_intensity"], 3) if record["avg_intensity"] else 0.0
+                    "intensity_sum": record["intensity_sum"],
+                    "intensity_count": record["intensity_count"],
                 }
                 for record in results
             ]
-            
-            return formatted_results
         except Exception as e:
             logger.error(f"查询情绪标签失败: {str(e)}", exc_info=True)
             return []
@@ -161,22 +168,28 @@ class EmotionRepository:
                 - avg_intensity: 平均强度
         """
         # 构建查询条件
-        where_clauses = ["s.end_user_id = $end_user_id", "s.emotion_keywords IS NOT NULL"]
-        params = {"end_user_id": end_user_id, "limit": limit}
-        
+        where_clauses = [
+            "s.end_user_id = $end_user_id",
+            "s.emotion_keywords IS NOT NULL",
+            "s.emotion_type IS NOT NULL",
+        ]
+        params: Dict[str, Any] = {"end_user_id": end_user_id, "limit": limit}
+
         if emotion_type:
-            where_clauses.append("s.emotion_type = $emotion_type")
-            params["emotion_type"] = emotion_type
-        
+            where_clauses.append("s.emotion_type IN $emotion_types")
+            params["emotion_types"] = _emotion_filter_values(emotion_type)
+
         where_str = " AND ".join(where_clauses)
-        
-        # 优化的 Cypher 查询：使用索引，减少不必要的计算
+
+        # 在 Cypher 中先把旧值归一化（fear→anxiety、surprise→neutral）再分组，
+        # 保证 ORDER BY frequency DESC LIMIT $limit 的结果正确
         query = f"""
         MATCH (s:Statement)
         WHERE {where_str}
+        WITH s, {legacy_case_cypher("s.emotion_type")} AS emotion_type
         UNWIND s.emotion_keywords as keyword
-        WITH keyword, 
-             s.emotion_type as emotion_type,
+        WITH keyword,
+             emotion_type,
              count(*) as frequency,
              avg(s.emotion_intensity) as avg_intensity
         WHERE keyword IS NOT NULL AND keyword <> ''
@@ -255,7 +268,7 @@ class EmotionRepository:
             formatted_results = [
                 {
                     "statement_id": record["statement_id"],
-                    "emotion_type": record["emotion_type"],
+                    "emotion_type": normalize_emotion_type_or_raw(record["emotion_type"]),
                     "emotion_intensity": record["emotion_intensity"],
                     "created_at": to_iso_z(record["created_at"]) if hasattr(record["created_at"], "isoformat") else str(record["created_at"])
                 }

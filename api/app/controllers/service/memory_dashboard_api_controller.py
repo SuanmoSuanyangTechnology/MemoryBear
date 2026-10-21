@@ -24,6 +24,7 @@ from app.core.error_codes import BizCode
 from app.core.logging_config import get_business_logger
 from app.core.response_utils import fail, success
 from app.db import get_async_db_context, get_db_context
+from app.integrations.profile.contracts import MemoryProfileAuthSource
 from app.schemas.api_key_schema import ApiKeyAuth
 from app.schemas.memory_dashboard_schema import EndUserMemoryCountsRequest
 from app.schemas.response_schema import ApiResponse
@@ -241,7 +242,14 @@ async def get_dashboard_data(
     total_app / total_knowledge / total_api_call and their day-over-day changes.
 
     Returns:
-        ApiResponse: {"storage_type", "neo4j_data": {...} | null, "rag_data": {...} | null}
+        ApiResponse.data: {
+            "storage_type": str,
+            "memory_update": int | null,
+            "memory_update_change": int | null,
+            "neo4j_data": dict | null,
+            "rag_data": dict | null,
+            "workspace_statistics": dict | null
+        }
     """
     # 1. 异步提取用户快照（snapshot.current_workspace_id = API Key 绑定空间）
     async with get_async_db_context() as auth_db:
@@ -265,6 +273,8 @@ async def get_dashboard_data(
         # 只回填与 storage_type 匹配的那一份数据，另一份保持 null
         result = {
             "storage_type": storage_type,
+            "memory_update": None,
+            "memory_update_change": None,
             "neo4j_data": None,
             "rag_data": None,
         }
@@ -317,6 +327,11 @@ async def get_dashboard_data(
                     })
 
                 result["neo4j_data"] = neo4j_data
+                result.update(await memory_dashboard_service.get_dashboard_memory_updates_async(
+                    workspace_id=workspace_id,
+                    storage_type=storage_type,
+                    current_total=neo4j_data["total_memory"],
+                ))
 
             elif storage_type == "rag":
                 rag_data: dict[str, int | None] = {
@@ -362,6 +377,11 @@ async def get_dashboard_data(
                     })
 
                 result["rag_data"] = rag_data
+                result.update(await memory_dashboard_service.get_dashboard_memory_updates_async(
+                    workspace_id=workspace_id,
+                    storage_type=storage_type,
+                    current_total=rag_data["total_memory"],
+                ))
 
         except Exception as e:
             api_logger.error(f"[V1] 获取dashboard整合数据失败: {str(e)}")
@@ -370,4 +390,11 @@ async def get_dashboard_data(
                 content=fail(BizCode.INTERNAL_ERROR, "获取dashboard整合数据失败"),
             )
 
+    result["workspace_statistics"] = (
+        await memory_dashboard_service.get_dashboard_workspace_statistics_async(
+            workspace_id,
+            current_user=current_user,
+            source=MemoryProfileAuthSource.APIKEY,
+        )
+    )
     return success(data=result, msg="Dashboard数据获取成功")

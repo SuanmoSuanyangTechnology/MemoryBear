@@ -1,0 +1,484 @@
+"""Remote implementation of knowledge route and retrieval interfaces."""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import logging
+import time
+from collections.abc import AsyncIterator, Mapping
+from typing import Any
+from urllib.parse import unquote, urlencode
+
+import httpx
+from fastapi import Request
+from fastapi.exceptions import RequestValidationError
+from pydantic import ValidationError
+from starlette.datastructures import UploadFile
+from starlette.responses import StreamingResponse
+
+from ...schemas.chunk_schema import ApiChunkRetrieve, V1ChunkRetrieve
+from ...schemas.knowledge_retrieval_schema import (
+    KnowledgeRetrievalRequest,
+    KnowledgeRetrievalResult,
+)
+
+from .call_profile import CallProfile
+from .contracts import KnowledgeCallContext
+from .errors import (
+    KnowledgeProtocolError,
+    KnowledgeServiceError,
+    KnowledgeTimeoutError,
+    KnowledgeUnavailableError,
+)
+from .transport import KnowledgeHttpTransport
+from ...config import current_settings
+
+logger = logging.getLogger(__name__)
+_HTTP_RETRIEVAL_REQUEST_SCHEMAS = {
+    "/api/chunks/retrieval": ApiChunkRetrieve,
+    "/v1/chunks/retrieval": V1ChunkRetrieve,
+}
+_REQUEST_RERANK_WIRE_FIELDS = ("rerank_id", "rerank_mode", "rerank_weights")
+_KNOWLEDGE_BASE_RERANK_WIRE_FIELDS = ("rerank_mode", "rerank_weights")
+
+
+def _retrieval_wire_payload(
+    request: KnowledgeRetrievalRequest,
+    context: KnowledgeCallContext,
+) -> dict[str, Any]:
+    normalized = request.model_copy(update={"source": context.source})
+    payload = normalized.model_dump(mode="json")
+    for field_name in _REQUEST_RERANK_WIRE_FIELDS:
+        if getattr(normalized, field_name) is None:
+            payload.pop(field_name, None)
+    knowledge_bases = []
+    for config in normalized.knowledge_bases:
+        config_payload = config.model_dump(
+            mode="json",
+            include=config.model_fields_set | {"kb_id"},
+        )
+        for field_name in _KNOWLEDGE_BASE_RERANK_WIRE_FIELDS:
+            if getattr(config, field_name) is None:
+                config_payload.pop(field_name, None)
+        knowledge_bases.append(config_payload)
+    payload["knowledge_bases"] = knowledge_bases
+    return payload
+
+
+class KnowledgeServiceClient:
+    """HTTP adapter used by both route forwarding and semantic retrieval."""
+
+    def __init__(self, transport: KnowledgeHttpTransport):
+        self._transport = transport
+
+    @classmethod
+    def from_settings(cls, settings: Any) -> KnowledgeServiceClient:
+        timeout = httpx.Timeout(
+            connect=current_settings().mem_knowledge_connect_timeout_seconds,
+            pool=current_settings().mem_knowledge_pool_timeout_seconds,
+            read=current_settings().mem_knowledge_read_timeout_seconds,
+            write=current_settings().mem_knowledge_write_timeout_seconds,
+        )
+        stream_timeout = httpx.Timeout(
+            connect=current_settings().mem_knowledge_connect_timeout_seconds,
+            pool=current_settings().mem_knowledge_pool_timeout_seconds,
+            read=current_settings().mem_knowledge_stream_read_timeout_seconds,
+            write=current_settings().mem_knowledge_write_timeout_seconds,
+        )
+        limits = httpx.Limits(
+            max_connections=current_settings().mem_knowledge_max_connections,
+            max_keepalive_connections=current_settings().mem_knowledge_max_keepalive_connections,
+        )
+        return cls(
+            KnowledgeHttpTransport(
+                base_url=current_settings().mem_knowledge_base_url,
+                timeout=timeout,
+                limits=limits,
+                stream_timeout=stream_timeout,
+                health_timeout=current_settings().mem_knowledge_health_timeout_seconds,
+            )
+        )
+
+    @classmethod
+    def for_test(
+        cls,
+        base_url: str,
+        transport: httpx.AsyncBaseTransport,
+    ) -> KnowledgeServiceClient:
+        timeout = httpx.Timeout(5.0)
+        return cls(
+            KnowledgeHttpTransport(
+                base_url=base_url,
+                timeout=timeout,
+                limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
+                stream_timeout=timeout,
+                health_timeout=1.0,
+                transport=transport,
+            )
+        )
+
+    async def forward(
+        self,
+        request: Request,
+        context: KnowledgeCallContext,
+        *,
+        profile: CallProfile = CallProfile.JSON,
+    ) -> StreamingResponse:
+        started_at = time.perf_counter()
+        path = self._transport.internal_path(request.url.path)
+        url = self._transport.internal_url(path, request.scope.get("query_string", b""))
+        headers = self._transport.request_headers(request.headers, context, profile)
+        send_kwargs: dict[str, Any] = {}
+        if profile is CallProfile.MULTIPART_UPLOAD:
+            form = await request.form()
+            data: dict[str, str] = {}
+            files: list[tuple[str, tuple[str, Any, str | None]]] = []
+            for key, value in form.multi_items():
+                if isinstance(value, UploadFile):
+                    await value.seek(0)
+                    files.append(
+                        (key, (value.filename or "", value.file, value.content_type))
+                    )
+                else:
+                    data[key] = str(value)
+            send_kwargs = {"data": data, "files": files}
+        else:
+            body = await request.body()
+            if body:
+                schema = _HTTP_RETRIEVAL_REQUEST_SCHEMAS.get(request.url.path)
+                if request.method == "POST" and schema is not None:
+                    try:
+                        retrieval_request = schema.model_validate(await request.json())
+                    except ValidationError as exc:
+                        raise RequestValidationError(exc.errors()) from exc
+                    body = retrieval_request.model_dump_json(
+                        exclude_unset=True,
+                    ).encode("utf-8")
+                send_kwargs["content"] = body
+        upstream = await self._transport.send(
+            method=request.method,
+            url=url,
+            headers=headers,
+            profile=profile,
+            **send_kwargs,
+        )
+        headers_at = time.perf_counter()
+
+        async def body_iterator() -> AsyncIterator[bytes]:
+            bytes_forwarded = 0
+            first_byte_at: float | None = None
+            completion = "closed_early"
+            error_type = "none"
+            try:
+                async for chunk in upstream.aiter_raw():
+                    if first_byte_at is None:
+                        first_byte_at = time.perf_counter()
+                    bytes_forwarded += len(chunk)
+                    yield chunk
+                completion = "complete"
+            except asyncio.CancelledError:
+                completion = "cancelled"
+                error_type = "CancelledError"
+                raise
+            except Exception as exc:
+                completion = "error"
+                error_type = type(exc).__name__
+                raise
+            finally:
+                await upstream.aclose()
+                finished_at = time.perf_counter()
+                logger.info(
+                    "knowledge_proxy_stream_finished method=%s path=%s status=%s "
+                    "profile=%s source=%s completion=%s bytes=%s header_ms=%.2f "
+                    "ttfb_ms=%.2f elapsed_ms=%.2f error=%s trace_id=%s",
+                    request.method,
+                    path,
+                    upstream.status_code,
+                    profile.value,
+                    context.source.value,
+                    completion,
+                    bytes_forwarded,
+                    (headers_at - started_at) * 1000,
+                    (
+                        (first_byte_at - started_at) * 1000
+                        if first_byte_at is not None
+                        else -1.0
+                    ),
+                    (finished_at - started_at) * 1000,
+                    error_type,
+                    context.trace_id,
+                )
+
+        return StreamingResponse(
+            body_iterator(),
+            status_code=upstream.status_code,
+            headers=self._transport.response_headers(upstream.headers),
+        )
+
+    async def retrieval_policy(
+        self,
+        *,
+        kb_ids: list[str],
+        context: KnowledgeCallContext,
+        rerank_id: str | None = None,
+    ) -> dict[str, frozenset[str]]:
+        """Fetch supported query modalities from the knowledge service."""
+        payload: dict[str, Any] = {"kb_ids": kb_ids}
+        if rerank_id:
+            payload["rerank_id"] = rerank_id
+        headers = self._transport.request_headers(
+            {"Content-Type": "application/json"},
+            context,
+            CallProfile.JSON,
+        )
+        upstream = await self._transport.send(
+            method="POST",
+            url=self._transport.internal_url("/internal/v1/chunks/retrieval-policy"),
+            headers=headers,
+            profile=CallProfile.JSON,
+            content=json.dumps(payload, separators=(",", ":")).encode(),
+        )
+        try:
+            raw = await upstream.aread()
+            envelope = json.loads(raw)
+            if not isinstance(envelope, dict) or envelope.get("code") != 0:
+                raise KnowledgeProtocolError("Knowledge retrieval policy request failed")
+            data = envelope.get("data")
+            if not isinstance(data, dict):
+                raise KnowledgeProtocolError("Knowledge retrieval policy data is incompatible")
+            policy: dict[str, frozenset[str]] = {}
+            for retrieve_type, modalities in data.items():
+                if isinstance(retrieve_type, str) and isinstance(modalities, list):
+                    policy[retrieve_type] = frozenset(
+                        modality for modality in modalities if isinstance(modality, str)
+                    )
+            return policy
+        except (TypeError, ValueError, json.JSONDecodeError) as exc:
+            raise KnowledgeProtocolError("Knowledge retrieval policy is invalid") from exc
+        finally:
+            await upstream.aclose()
+
+    async def retrieve(
+        self,
+        request: KnowledgeRetrievalRequest,
+        context: KnowledgeCallContext,
+    ) -> KnowledgeRetrievalResult:
+        started_at = time.perf_counter()
+        payload = json.dumps(
+            _retrieval_wire_payload(request, context),
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ).encode()
+        url = self._transport.internal_url("/internal/v1/chunks/retrieval")
+        headers = self._transport.request_headers(
+            {"Content-Type": "application/json"},
+            context,
+            CallProfile.JSON,
+        )
+        upstream = await self._transport.send(
+            method="POST",
+            url=url,
+            headers=headers,
+            profile=CallProfile.JSON,
+            content=payload,
+        )
+        headers_at = time.perf_counter()
+        try:
+            try:
+                raw = await upstream.aread()
+            except httpx.TimeoutException as exc:
+                raise KnowledgeTimeoutError(
+                    "Knowledge service request timed out"
+                ) from exc
+            except httpx.RequestError as exc:
+                raise KnowledgeUnavailableError(
+                    "Knowledge service is unavailable"
+                ) from exc
+            trace_id = upstream.headers.get("X-Trace-Id", context.trace_id)
+            try:
+                envelope = json.loads(raw)
+            except (TypeError, ValueError) as exc:
+                raise KnowledgeProtocolError(
+                    "Knowledge service returned invalid JSON"
+                ) from exc
+            if not isinstance(envelope, dict):
+                raise KnowledgeProtocolError("Knowledge service envelope must be an object")
+            code = envelope.get("code")
+            if not isinstance(code, int):
+                raise KnowledgeProtocolError("Knowledge service envelope code must be an integer")
+            if not 200 <= upstream.status_code < 300 or code != 0:
+                message = str(envelope.get("error") or envelope.get("msg") or "Knowledge error")
+                raise KnowledgeServiceError(upstream.status_code, code, message, trace_id)
+            data = envelope.get("data")
+            try:
+                if isinstance(data, list):
+                    result = KnowledgeRetrievalResult(chunks=data)
+                elif isinstance(data, dict):
+                    result = KnowledgeRetrievalResult.model_validate(data)
+                else:
+                    raise KnowledgeProtocolError(
+                        "Knowledge retrieval data must be a list or object"
+                    )
+            except ValueError as exc:
+                raise KnowledgeProtocolError(
+                    "Knowledge retrieval data is incompatible"
+                ) from exc
+            logger.info(
+                "knowledge_retrieval_completed status=%s code=%s source=%s "
+                "bytes=%s chunks=%s entities=%s relationships=%s header_ms=%.2f "
+                "elapsed_ms=%.2f trace_id=%s",
+                upstream.status_code,
+                code,
+                context.source.value,
+                len(raw),
+                len(result.chunks),
+                len(result.entities),
+                len(result.relationships),
+                (headers_at - started_at) * 1000,
+                (time.perf_counter() - started_at) * 1000,
+                trace_id,
+            )
+            return result
+        except Exception as exc:
+            logger.warning(
+                "knowledge_retrieval_failed status=%s source=%s error=%s "
+                "elapsed_ms=%.2f trace_id=%s",
+                upstream.status_code,
+                context.source.value,
+                type(exc).__name__,
+                (time.perf_counter() - started_at) * 1000,
+                upstream.headers.get("X-Trace-Id", context.trace_id),
+            )
+            raise
+        finally:
+            await upstream.aclose()
+
+    @staticmethod
+    def _validate_internal_path(path: str) -> None:
+        """Reject paths that could escape the /internal/v1/ prefix.
+
+        A bare ``startswith`` is not enough: httpx collapses dot segments
+        before sending (``/internal/v1/../admin`` is sent as
+        ``/internal/admin``), so a crafted path would reach a different
+        upstream route. Dot segments are rejected both raw and percent-decoded,
+        and query/fragment/backslash characters are refused because the query
+        must go through the ``query`` argument.
+        """
+
+        if not path.startswith("/internal/v1/"):
+            raise ValueError("Knowledge internal call path must start with /internal/v1/")
+        decoded = unquote(path)
+        if any(ch in path or ch in decoded for ch in ("?", "#", "\\")):
+            raise ValueError("Knowledge internal call path contains illegal characters")
+        if any(segment in (".", "..") for segment in decoded.split("/")):
+            raise ValueError("Knowledge internal call path must not contain dot segments")
+
+    async def call_internal(
+        self,
+        *,
+        method: str,
+        path: str,
+        context: KnowledgeCallContext,
+        payload: Any | None = None,
+        query: Mapping[str, str | None] | None = None,
+    ) -> dict[str, Any]:
+        """Detached JSON call for in-process callers without an inbound Request.
+
+        Follows the transport.request_headers / transport.send / envelope
+        conventions used by retrieval_policy() and retrieve(), so detached
+        callers share the same identity headers, pool, timeouts and logs as
+        forwarded manager-API traffic.
+
+        Return contract: this is a generic envelope passthrough. Only the
+        envelope structure is validated (JSON object, integer ``code``, HTTP
+        2xx and ``code == 0``; anything else raises). The shape of ``data`` is
+        owned by each upstream endpoint and is deliberately NOT validated here:
+        some endpoints legitimately return no ``data`` (e.g. delete). Callers
+        that need specific fields must read them defensively
+        (``result.get("data")``) or validate against their own schema, as
+        ``retrieve()`` does for retrieval results. The returned dict is the
+        upstream envelope with ``time`` refreshed to the local epoch ms.
+        """
+
+        self._validate_internal_path(path)
+        send_query = b""
+        if query:
+            normalized = [
+                (key, value)
+                for key, value in query.items()
+                if value is not None and value != ""
+            ]
+            if normalized:
+                send_query = urlencode(normalized).encode("utf-8")
+        url = self._transport.internal_url(path, send_query)
+        headers = self._transport.request_headers(
+            {"Content-Type": "application/json"},
+            context,
+            CallProfile.JSON,
+        )
+        content = (
+            json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode()
+            if payload is not None
+            else None
+        )
+        started_at = time.perf_counter()
+        upstream = await self._transport.send(
+            method=method.upper(),
+            url=url,
+            headers=headers,
+            profile=CallProfile.JSON,
+            content=content,
+        )
+        headers_at = time.perf_counter()
+        # Snapshot status/trace id before the body is read and the response is
+        # closed, so nothing below depends on reading a closed Response.
+        status_code = upstream.status_code
+        trace_id = upstream.headers.get("X-Trace-Id", context.trace_id)
+        try:
+            raw = await upstream.aread()
+        except httpx.TimeoutException as exc:
+            raise KnowledgeTimeoutError(
+                "Knowledge service request timed out"
+            ) from exc
+        except httpx.RequestError as exc:
+            raise KnowledgeUnavailableError(
+                "Knowledge service is unavailable"
+            ) from exc
+        finally:
+            await upstream.aclose()
+        try:
+            envelope = json.loads(raw)
+        except (TypeError, ValueError) as exc:
+            raise KnowledgeProtocolError(
+                "Knowledge service returned invalid JSON"
+            ) from exc
+        if not isinstance(envelope, dict):
+            raise KnowledgeProtocolError("Knowledge service envelope must be an object")
+        code = envelope.get("code")
+        if not isinstance(code, int):
+            raise KnowledgeProtocolError("Knowledge service envelope code must be an integer")
+        message = str(envelope.get("error") or envelope.get("msg") or "Knowledge error")
+        if not 200 <= status_code < 300 or code != 0:
+            raise KnowledgeServiceError(status_code, code, message, trace_id)
+        envelope["time"] = int(time.time() * 1000)
+        logger.info(
+            "knowledge_detached_call_completed method=%s path=%s status=%s code=%s "
+            "source=%s bytes=%s header_ms=%.2f elapsed_ms=%.2f trace_id=%s",
+            method.upper(),
+            path,
+            status_code,
+            code,
+            context.source.value,
+            len(raw),
+            (headers_at - started_at) * 1000,
+            (time.perf_counter() - started_at) * 1000,
+            trace_id,
+        )
+        return envelope
+
+    async def ready(self) -> bool:
+        return await self._transport.ready()
+
+    async def aclose(self) -> None:
+        await self._transport.aclose()

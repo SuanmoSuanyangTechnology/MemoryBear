@@ -1,7 +1,9 @@
-"""宿主计量出口：包 UsagePublisher 协议的 Redis Stream 实现（spec §13.2）。
+"""Host metering egress: Redis Stream implementation of the UsagePublisher protocol.
 
-XADD `model:usage`（单 payload 字段 = 事件 JSON 文本），XTRIM 限长 500k；
-publisher 失败仅告警（`publish_usage_safely` 兜底），绝不阻塞/回滚业务调用。
+XADD to the deployment-scoped usage stream (``model:usage:<DB_NAME>`` by default,
+overridable via ``MODEL_USAGE_STREAM``), capped at 500k entries. Publisher failures
+only log a warning (``publish_usage_safely`` backstop) and never block or roll back
+a business call.
 """
 
 from __future__ import annotations
@@ -11,17 +13,26 @@ import json
 from redbear_model import UsageEvent, UsagePublisher
 
 from app.aioRedis import get_thread_safe_sync_redis
+from app.core.config import settings
 
-MODEL_USAGE_STREAM = "model:usage"
 MODEL_USAGE_STREAM_MAXLEN = 500_000
 
 
+def model_usage_stream() -> str:
+    """Return the deployment-scoped usage stream name."""
+
+    return settings.MODEL_USAGE_STREAM
+
+
 class RedisStreamPublisher(UsagePublisher):
-    """用量事件 → `model:usage` Stream（消费组 `model-usage-consumers` 由消费端建立）。"""
+    """Usage events -> the deployment-scoped Stream.
+
+    Consumer groups are created on the consuming side.
+    """
 
     def report_usage(self, event: UsageEvent) -> None:
         get_thread_safe_sync_redis().xadd(
-            MODEL_USAGE_STREAM,
+            model_usage_stream(),
             {"payload": json.dumps(event.to_stream_dict(), ensure_ascii=False)},
             maxlen=MODEL_USAGE_STREAM_MAXLEN,
             approximate=True,

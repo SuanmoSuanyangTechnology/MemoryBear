@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
 from collections.abc import Mapping
@@ -36,6 +37,7 @@ from ...services.knowledge_commands import (
     load_reparse_snapshots,
 )
 from ...services.knowledge_file_storage import KnowledgeFileStorage
+from ...services.knowledge_model_validation import validate_requested_knowledge_model_availability
 from ...services.qa_export import (
     cleanup_export_file,
     iter_export_file,
@@ -258,6 +260,9 @@ async def create_knowledge(
     runtime: Annotated[ProcessRuntime, Depends(get_runtime)],
     source: Annotated[KnowledgeRetrievalSource, Depends(get_source)],
 ) -> SuccessEnvelope[dict[str, Any]]:
+    await validate_requested_knowledge_model_availability(
+        create_data.model_dump(exclude_unset=True), principal, runtime.model_runtime
+    )
     async with runtime.database.async_session() as db:
         knowledge = await knowledge_service.create_knowledge(db, create_data, principal)
         data = await knowledge_service.knowledge_to_data(db, knowledge)
@@ -354,6 +359,9 @@ async def update_knowledge(
             update_data,
             principal,
         )
+    await validate_requested_knowledge_model_availability(
+        update_data.model_dump(exclude_unset=True), principal, runtime.model_runtime
+    )
     if plan.delete_vector_index:
         await (await runtime.elasticsearch.client()).indices.delete(
             index=collection_name_for_knowledge(knowledge_id),
@@ -364,13 +372,48 @@ async def update_knowledge(
             db,
             plan,
             principal,
+            wiki_backfill_batch_size=runtime.settings.kb_wiki_backfill_batch_size,
         )
     if outcome.invalidate_workspace_id is not None:
         await knowledge_service.invalidate_storage_type_cache(
             runtime.redis,
             outcome.invalidate_workspace_id,
         )
-    dispatcher = TaskDispatcher()
+    dispatcher = TaskDispatcher(runtime=runtime)
+    if outcome.wiki_backfill_required:
+        from ...rag.wiki.config import BACKFILL_REGISTERED_HEADER, BACKFILL_TASK, WIKI_QUEUE
+        from ...rag.wiki.diagnostics import diagnostic_json, exception_details
+        from ...services.wiki.backfill import record_backfill_publish_failure
+        from ...services.wiki.runtime import transaction
+
+        try:
+            await dispatcher.send(BACKFILL_TASK, kwargs={
+                "kb_id": str(knowledge_id), "upper_at_ms": outcome.wiki_backfill_upper_at_ms,
+            }, queue=WIKI_QUEUE, task_id=outcome.wiki_backfill_task_id,
+                headers={BACKFILL_REGISTERED_HEADER: True})
+        except Exception as exc:
+            logger.error(
+                "Wiki 配置与待处理状态已保存，但补录派发失败 "
+                "knowledge_id=%s admission_id=%s stage=backfill_publish 失败详情=%s",
+                knowledge_id, outcome.wiki_backfill_task_id,
+                diagnostic_json(exception_details(exc)),
+            )
+            try:
+                await asyncio.to_thread(
+                    transaction, runtime, record_backfill_publish_failure,
+                    knowledge_id, outcome.wiki_backfill_task_id,
+                    runtime.settings.kb_wiki_backfill_batch_size,
+                )
+            except Exception as state_exc:
+                logger.error(
+                    "Wiki 补录派发失败状态保存失败 "
+                    "knowledge_id=%s admission_id=%s stage=backfill_failure_state 失败详情=%s",
+                    knowledge_id, outcome.wiki_backfill_task_id,
+                    diagnostic_json(exception_details(state_exc)),
+                )
+            raise KnowledgeError.from_code(
+                "KB_WIKI_BACKFILL_DISPATCH_FAILED"
+            ) from exc
     if plan.graph_enabled_before is not None:
         try:
             await dispatch_graph_transition(
@@ -480,7 +523,7 @@ async def delete_knowledge_graph(
         if knowledge is None:
             raise knowledge_service._not_found()
         snapshot = knowledge_service.knowledge_snapshot(knowledge)
-    task_id = await graph_service.delete_graph(snapshot, TaskDispatcher())
+    task_id = await graph_service.delete_graph(snapshot, TaskDispatcher(runtime=runtime))
     return _success(
         request,
         {"task_id": task_id},
@@ -521,7 +564,7 @@ async def rebuild_knowledge_graph(
     task_id = claim.task_id
     if claim.claimed:
         try:
-            task_id = await TaskDispatcher().send(
+            task_id = await TaskDispatcher(runtime=runtime).send(
                 "app.core.rag.tasks.rebuild_evidence_graph_knowledge",
                 args=[str(knowledge_id)],
                 queue="graphrag_tasks",
@@ -555,7 +598,7 @@ async def sync_knowledge(
         knowledge = await knowledge_service.get_knowledge(db, knowledge_id, principal)
         if knowledge is None:
             raise knowledge_service._not_found()
-    task_id = await dispatch_sync(TaskDispatcher(), knowledge_id)
+    task_id = await dispatch_sync(TaskDispatcher(runtime=runtime), knowledge_id)
     return _success(
         request,
         {"task_id": task_id},

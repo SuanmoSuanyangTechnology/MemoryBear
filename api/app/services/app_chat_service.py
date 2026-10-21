@@ -3,7 +3,7 @@ import asyncio
 import json
 import time
 import uuid
-from contextlib import nullcontext
+from contextlib import aclosing, nullcontext
 from types import SimpleNamespace
 from typing import Optional, Dict, Any, AsyncGenerator, Annotated, List, Literal
 from datetime import datetime, timezone
@@ -19,7 +19,7 @@ from app.core.logging_config import get_business_logger
 from app.core.exceptions import BusinessException
 from app.core.error_codes import BizCode
 from app.core.usage_context import bind_usage
-from app.db import get_db, get_async_db_context
+from app.db import get_db, get_async_db_context, end_read_transaction
 from app.integrations.knowledge.contracts import KnowledgeRetrievalSource
 from app.models import (
     App,
@@ -31,6 +31,7 @@ from app.schemas import DraftRunRequest
 from app.schemas.app_schema import FileInput, FileType, TransferMethod
 from app.schemas.prompt_schema import render_prompt_message, PromptMessageRole
 from app.services.annotation_service import AnnotationService
+from app.models.annotation_model import HitLogSource
 from app.services.conversation_service import ConversationService
 from app.services.context_engine_manager import ContextEngineManager
 from app.core.config import settings
@@ -62,6 +63,81 @@ from app.core.memory.retrieval_trace.message_trace import (
 from app.core.memory.retrieval_trace.stage_events import capture_memory_stage_stream, memory_stage_capture
 
 logger = get_business_logger()
+
+
+class StreamConcurrencyGate:
+    """多 Agent 流式请求并发闸门（基于 asyncio.Semaphore）；limit<=0 表示不限制。
+
+    多 Agent 流式请求在准备阶段会同时持有共享 session 的连接并另开独立连接，
+    单请求的连接峰值 > 1。高并发下"持有一个、再申请一个"会让连接池互相等待直到
+    QueuePool 超时。闸门把同时进行的请求数限制在池可承载的范围内，超出的排队，
+    排队期间不占用 DB 连接（session 在首次使用前不会取连接）。
+
+    用法：acquire() 返回 True 后必须在 finally 里 release()；返回 False 表示排队超时，
+    此时不能 release()。
+    """
+
+    def __init__(self, name: str, limit: int, queue_timeout: float) -> None:
+        self.name = name
+        self.limit = max(0, int(limit))
+        self.queue_timeout = float(queue_timeout)
+        # 延迟到首次使用时创建，保证在运行中的事件循环里构造
+        self._sem: Optional[asyncio.Semaphore] = None
+        self._waiting = 0
+
+    @property
+    def enabled(self) -> bool:
+        return self.limit > 0
+
+    async def acquire(self) -> bool:
+        if not self.enabled:
+            return True
+        if self._sem is None:
+            self._sem = asyncio.Semaphore(self.limit)
+        sem = self._sem
+        if not sem.locked():
+            await sem.acquire()  # 未满时不会挂起
+            return True
+
+        self._waiting += 1
+        logger.info(
+            "stream gate full, request queued name=%s limit=%d waiting=%d",
+            self.name, self.limit, self._waiting,
+        )
+        try:
+            if self.queue_timeout > 0:
+                await asyncio.wait_for(sem.acquire(), timeout=self.queue_timeout)
+            else:
+                await sem.acquire()
+            return True
+        except asyncio.TimeoutError:
+            logger.warning(
+                "stream gate queue timeout name=%s limit=%d timeout=%.1fs",
+                self.name, self.limit, self.queue_timeout,
+            )
+            return False
+        finally:
+            self._waiting -= 1
+
+    def release(self) -> None:
+        if self.enabled and self._sem is not None:
+            self._sem.release()
+
+
+_multi_agent_gate: Optional[StreamConcurrencyGate] = None
+
+BUSY_MESSAGE = "服务繁忙，请稍后重试"
+
+
+def get_multi_agent_stream_gate() -> StreamConcurrencyGate:
+    global _multi_agent_gate
+    if _multi_agent_gate is None:
+        _multi_agent_gate = StreamConcurrencyGate(
+            "multi_agent_stream",
+            settings.MULTI_AGENT_STREAM_MAX_CONCURRENCY,
+            settings.MULTI_AGENT_STREAM_QUEUE_TIMEOUT,
+        )
+    return _multi_agent_gate
 
 
 def _snapshot_annotations(annotations: List[Any]) -> List[SimpleNamespace]:
@@ -164,6 +240,32 @@ class AppChatService:
             return await self.db.get(model, identity)
         return self.db.get(model, identity)
 
+    async def _get_last_current_assistant_id(self, conversation_id) -> Optional[uuid.UUID]:
+        """本轮提问之前，会话里最后一条 is_current 的 assistant 消息 ID。
+
+        用作本轮 user 消息的 parent_message_id（user 接在用户当前所处的版本之后），
+        使 _load_branch_chain 能按 parent 精确隔离各版本的后续对话，
+        而不是靠时间兜底把同一批后续对话挂到每个版本上。必须在本轮消息入队之前调用。
+        查询失败只降级为 None（等同旧行为），不影响对话落库。
+        """
+        if not conversation_id:
+            return None
+        try:
+            conv_uuid = conversation_id if isinstance(conversation_id, uuid.UUID) else uuid.UUID(str(conversation_id))
+            async with get_async_db_context() as db:
+                result = await db.execute(
+                    select(Message.id).where(
+                        Message.conversation_id == conv_uuid,
+                        Message.role == "assistant",
+                        Message.is_current.is_(True),
+                        Message.is_deleted.is_not(True),
+                    ).order_by(Message.created_at.desc()).limit(1)
+                )
+                return result.scalar_one_or_none()
+        except Exception as e:
+            logger.warning("查询上一条当前 assistant 消息失败，user 消息不记录 parent", extra={"error": str(e)})
+            return None
+
     async def _fetch_completed_file_metadata(self, local_ids: list[uuid.UUID]) -> dict[str, SimpleNamespace]:
         if not local_ids:
             return {}
@@ -255,12 +357,15 @@ class AppChatService:
             if not match:
                 return None
             answer = match["answer"]
+            # user 消息接在用户当前所处的 assistant 版本之后（须在本轮消息写入前查询）
+            _user_parent_id = await self._get_last_current_assistant_id(conversation_id)
             await self.conversation_service.add_message_async(
                 message_id=user_message_id,
                 conversation_id=conversation_id,
                 role="user",
                 content=message,
                 meta_data={"files": []},
+                parent_message_id=_user_parent_id,
             )
             await self.conversation_service.add_message_async(
                 message_id=message_id,
@@ -292,6 +397,9 @@ class AppChatService:
             orchestrator: Any,
     ) -> tuple:
         """集群本轮附件的落库内容（与 Agent 应用同口径）。
+
+        试运行入口（MultiAgentService.run/run_stream）委托本方法，与分享端共用一份实现，
+        避免"首轮能解析附件、重新生成取不到"这类落库口径漂移。
 
         Returns:
             (files_meta, history_files)：files_meta 写 user 消息 meta.files；
@@ -813,7 +921,8 @@ class AppChatService:
         # 必须在 ToolOrchestrator / LangChainAgent 之前完成，保证它们拿到的是最终提示词。
         # write_cache=memory：记忆关闭时 dispatcher 不派发快写，缓存无消费方，不写避免孤儿 key。
         system_prompt = await apply_emotion_detection(
-            system_prompt, emotion_detection, user_message_id, write_cache=memory
+            system_prompt, emotion_detection, user_message_id,
+            app_id=config.app_id, tenant_id=tenant_id, write_cache=memory,
         )
 
         # 弱模型：用 ReAct prompt 驱动多轮工具调用，将轨迹注入 system_prompt
@@ -1392,7 +1501,8 @@ class AppChatService:
             # 必须在 ToolOrchestrator / LangChainAgent 之前完成。
             # write_cache=memory：记忆关闭时 dispatcher 不派发快写，缓存无消费方，不写避免孤儿 key。
             system_prompt = await apply_emotion_detection(
-                system_prompt, emotion_detection, user_message_id, write_cache=memory
+                system_prompt, emotion_detection, user_message_id,
+                app_id=config.app_id, tenant_id=tenant_id, write_cache=memory,
             )
 
             # 弱模型：用 ReAct prompt 驱动多轮工具调用，将轨迹注入 system_prompt
@@ -1690,6 +1800,8 @@ class AppChatService:
                     "conversation_id": str(conversation_id),
                     "user_message_id_override": user_message_id,
                     "user_message_content": message,
+                    # user 消息接在用户当前所处的 assistant 版本之后，使切换版本时按 parent 隔离后续对话
+                    "user_parent_message_id": await self._get_last_current_assistant_id(conversation_id),
                     "files_meta": human_meta.get("files", []),
                     "api_key_model_name": _api_key_model_name,
                     "should_memorize": memory,
@@ -1911,6 +2023,7 @@ class AppChatService:
             thinking: bool = False,
             execution_mode: Optional[str] = None,
             files: Optional[List[FileInput]] = None,
+            source: str = HitLogSource.EXTERNAL,
     ) -> Dict[str, Any]:
         """多 Agent 聊天（非流式）
 
@@ -1931,7 +2044,7 @@ class AppChatService:
         # 标注命中（按 app_id 取 AppAnnotationSetting；未配置/未启用直接返回 None，老集群无影响）。
         # 命中则不进编排器，直接落库返回标注答案（与 Agent 应用一致）。
         _annotation_hit = await self._cluster_annotation_hit(
-            config, message, conversation_id, message_id, user_message_id
+            config, message, conversation_id, message_id, user_message_id, source=source
         )
         if _annotation_hit is not None:
             return {
@@ -1985,17 +2098,26 @@ class AppChatService:
         # 保存消息
         # 附件落库（与 Agent 应用一致）；无 files 时不传 meta_data，老集群落库不变
         _user_meta_kwargs: Dict[str, Any] = {}
+        _user_meta: Dict[str, Any] = {}
         if files:
             _files_meta, _history_files = await self._build_cluster_files_persist(files, orchestrator)
             _user_meta = {"files": _files_meta}
             if _history_files:
                 _user_meta["history_files"] = _history_files
+        # 本轮变量值随 user 消息落库，重新生成时回读（无变量不加键，老集群落库不变）
+        if variables:
+            _user_meta.setdefault("files", [])
+            _user_meta["variables"] = variables
+        if _user_meta:
             _user_meta_kwargs["meta_data"] = _user_meta
+        # user 消息接在用户当前所处的 assistant 版本之后（须在本轮消息写入前查询）
+        _user_parent_id = await self._get_last_current_assistant_id(conversation_id)
         await self.conversation_service.add_message_async(
             message_id=user_message_id,
             conversation_id=conversation_id,
             role="user",
             content=message,
+            parent_message_id=_user_parent_id,
             **_user_meta_kwargs,
         )
 
@@ -2080,8 +2202,55 @@ class AppChatService:
             thinking: bool = False,
             execution_mode: Optional[str] = None,
             files: Optional[List[FileInput]] = None,
+            source: str = HitLogSource.EXTERNAL,
     ) -> AsyncGenerator[str, None]:
-        """多 Agent 聊天（流式）
+        """多 Agent 聊天（流式）——并发闸门外壳。
+
+        单请求在准备阶段会同时持有共享 session 连接并另开独立连接，高并发下会互相等待
+        直到 QueuePool 超时。这里限制同时进行的请求数，超出的排队（排队期间不占 DB 连接）。
+        """
+        gate = get_multi_agent_stream_gate()
+        if not await gate.acquire():
+            yield f"event: error\ndata: {json.dumps({'error': BUSY_MESSAGE}, ensure_ascii=False)}\n\n"
+            return
+        try:
+            async with aclosing(self._multi_agent_chat_stream_impl(
+                    message=message,
+                    conversation_id=conversation_id,
+                    config=config,
+                    user_id=user_id,
+                    variables=variables,
+                    web_search=web_search,
+                    memory=memory,
+                    storage_type=storage_type,
+                    user_rag_memory_id=user_rag_memory_id,
+                    thinking=thinking,
+                    execution_mode=execution_mode,
+                    files=files,
+                    source=source,
+            )) as stream:
+                async for event in stream:
+                    yield event
+        finally:
+            gate.release()
+
+    async def _multi_agent_chat_stream_impl(
+            self,
+            message: str,
+            conversation_id: uuid.UUID,
+            config: MultiAgentConfig,
+            user_id: Optional[str] = None,
+            variables: Optional[Dict[str, Any]] = None,
+            web_search: bool = False,
+            memory: bool = True,
+            storage_type: Optional[str] = None,
+            user_rag_memory_id: Optional[str] = None,
+            thinking: bool = False,
+            execution_mode: Optional[str] = None,
+            files: Optional[List[FileInput]] = None,
+            source: str = HitLogSource.EXTERNAL,
+    ) -> AsyncGenerator[str, None]:
+        """多 Agent 聊天（流式）实现
 
         thinking / execution_mode 为对齐 Agent 应用新增的可选参数，缺省 = 旧行为。
         """
@@ -2103,12 +2272,15 @@ class AppChatService:
             total_tokens = 0
             # end 事件携带的对话能力附加字段（建议问题/引用/语音）；features 未开启时为空
             end_extras: Dict[str, Any] = {}
+            # end 事件先扣住，等落库入队完成后再下发：客户端收到 end 即断开会取消本生成器，
+            # 取消态下的 DB 查询/入队会被反复打断，连接以脏状态留在池里、消息也会丢。
+            held_end_event: Optional[str] = None
 
             # 标注命中（未配置/未启用标注返回 None，老集群无影响）；命中则不进编排器，
             # 直接落库并下发 message/end（与 Agent 应用一致）。
             _annotation_hit = await self._cluster_annotation_hit(
                 config, message, conversation_id, message_id, user_message_id,
-                storage_type=storage_type, user_rag_memory_id=user_rag_memory_id,
+                storage_type=storage_type, user_rag_memory_id=user_rag_memory_id, source=source,
             )
             if _annotation_hit is not None:
                 _answer = _annotation_hit["answer"]
@@ -2123,6 +2295,9 @@ class AppChatService:
             opening_statement, opening_suggested_questions = await self._resolve_cluster_opening(
                 orchestrator, conversation_id, variables
             )
+            # 准备阶段的读库已完成：先结束共享 session 的事务把连接还给池，
+            # 后续长时间的路由/子 Agent/LLM 等待不再占着它（再用时自动开新事务）
+            await end_read_transaction(self.db, "multi_agent_chat_stream.prepare")
 
             # 3. 流式执行任务
             # message_id 下传：主执行记录据此带上本轮 assistant message_id，
@@ -2163,7 +2338,10 @@ class AppChatService:
                     except:
                         pass
 
-                yield event
+                if _event_name == "end":
+                    held_end_event = event
+                else:
+                    yield event
                 # 累加主气泡正文：只认集群级的 `message` 事件。
                 # 子 Agent 的正文走 `sub_agent_message`（已在各自区块展示），
                 # 若一并累加，落库的 assistant 正文会比界面显示多出一份重复内容，
@@ -2208,8 +2386,13 @@ class AppChatService:
                 "result": _result,
                 "user_message_id_override": user_message_id,
                 "user_message_content": message,
+                # user 消息接在用户当前所处的 assistant 版本之后，使切换版本时按 parent 隔离后续对话
+                "user_parent_message_id": await self._get_last_current_assistant_id(conversation_id),
                 "should_memorize": orchestrator.cluster_memory_enabled(),
             }
+            # 本轮变量值随 user 消息落库，重新生成时回读（无变量不加键，老集群落库不变）
+            if variables:
+                _persist_args["variables_meta"] = variables
             # 新会话开场白落库（与 Agent 应用一致）；无开场白时不加任何新键，老集群落库不变
             if opening_statement:
                 _persist_args["is_new_conversation"] = True
@@ -2264,6 +2447,10 @@ class AppChatService:
                     "message_length": len(full_content)
                 }
             )
+
+            # 落库已入队，最后再下发 end
+            if held_end_event is not None:
+                yield held_end_event
 
         except (GeneratorExit, asyncio.CancelledError):
             # 生成器被关闭或任务被取消，正常退出

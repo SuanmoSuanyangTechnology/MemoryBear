@@ -123,7 +123,7 @@ const ToolConfig: FC<{ options: Suggestion[]; }> = ({
   const loadData = (selectedOptions: Option[]) => {
     const targetOption = selectedOptions[selectedOptions.length - 1];
     if (selectedOptions.length === 1) {
-      getTools({ tool_type: targetOption.value as ToolType })
+      getTools({ tool_type: targetOption.value as ToolType, status: 'available' })
         .then(res => {
           const response = res as ToolItem[]
           targetOption.children = response.map((vo: any) => {
@@ -210,7 +210,7 @@ const ToolConfig: FC<{ options: Suggestion[]; }> = ({
             <Form.Item
               name={['tool_parameters', parameter.name]}
               label={<>
-                {parameter.name} <span className="rb:text-[#5B6167] rb:mx-1">({parameter.type})</span>
+                {parameter.name} <span className="rb:text-gray-600 rb:mx-1">({parameter.type})</span>
                 <Tooltip title={parameter.description} placement="right">
                   <div className="rb:size-3 rb:ml-0.5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/question.svg')]"></div>
                 </Tooltip>
@@ -260,7 +260,7 @@ const ToolConfig: FC<{ options: Suggestion[]; }> = ({
                 />
               }
             </Form.Item>
-            {parameter.type === 'boolean' && <div className="rb:mt-1 rb:text-[12px] rb:text-[#5B6167] rb:font-regular rb:leading-4 rb:mb-6">{parameter.description}</div>}
+            {parameter.type === 'boolean' && <div className="rb:mt-1 rb:text-[12px] rb:text-gray-600 rb:font-regular rb:leading-4 rb:mb-6">{parameter.description}</div>}
           </div>
         )
       })}

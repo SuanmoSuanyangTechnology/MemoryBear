@@ -15,6 +15,9 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from app.core.memory.constants.graph_data_constants import (
     DEFAULT_PER_TYPE_LIMIT_MAP,
+    PREFERENCE_GROUP_EDGE_TYPE,
+    PREFERENCE_GROUP_LABEL,
+    PREFERENCE_GROUP_NODE_ID_PREFIX,
     SINGLE_TYPE_LIMIT_HARD_MAX,
     SUPPORTED_NODE_TYPES,
     TOTAL_NODES_CAP,
@@ -44,6 +47,7 @@ __all__ = [
     "assemble_per_type_stat",
     "assemble_center_per_type_stat",
     "build_unified_edges",
+    "attach_preference_group",
     # Neo4j 查询封装
     "query_nodes_by_type_limits",
     "query_rel_count_batch",
@@ -573,6 +577,54 @@ def build_unified_edges(
         })
 
     return result
+
+
+def attach_preference_group(
+    nodes: List[Dict[str, Any]],
+    edges: List[Dict[str, Any]],
+    *,
+    end_user_id: str,
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """在响应中将真实 Preference 节点连接到一个虚拟分组节点。
+
+    返回新列表；真实节点的 associative_memory 只统计 Neo4j 关系，
+    因此这里既不修改真实节点属性，也不向数据库查询传入虚拟 ID。
+    """
+    preference_ids = [
+        node["id"] for node in nodes if node.get("label") == "Preference"
+    ]
+    if not preference_ids:
+        return list(nodes), list(edges)
+
+    group_id = f"{PREFERENCE_GROUP_NODE_ID_PREFIX}{end_user_id}"
+    group_node = {
+        "id": group_id,
+        "label": PREFERENCE_GROUP_LABEL,
+        "caption": PREFERENCE_GROUP_LABEL,
+        "properties": {
+            "name": "偏好",
+            "virtual": True,
+            "preference_count": len(preference_ids),
+        },
+    }
+    virtual_edges: List[Dict[str, Any]] = []
+    for preference_id in preference_ids:
+        node_a, node_b = sorted((group_id, preference_id))
+        item = {
+            "id": f"virtual:has-preference:{preference_id}",
+            "type": PREFERENCE_GROUP_EDGE_TYPE,
+            "predicate": PREFERENCE_GROUP_EDGE_TYPE,
+        }
+        virtual_edges.append({
+            "node_a": node_a,
+            "node_b": node_b,
+            "total": 1,
+            "edge_type": "SINGLE",
+            "a_to_b": [item] if node_a == group_id else [],
+            "b_to_a": [item] if node_b == group_id else [],
+        })
+
+    return [*nodes, group_node], [*edges, *virtual_edges]
 
 
 # ---------------------------------------------------------------------------

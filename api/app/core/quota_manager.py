@@ -21,7 +21,7 @@ from app.utils.redis_cache import redis_cache
 
 logger = get_auth_logger()
 
-# Redis key 格式常量，与 RateLimiterService.check_qps 保持一致（per api_key 独立计数）
+# Redis key 格式常量，与 RateLimiterService 的 QPS 计数保持一致（per api_key 独立计数）
 API_KEY_QPS_REDIS_KEY = "rate_limit:qps:{api_key_id}"
 
 

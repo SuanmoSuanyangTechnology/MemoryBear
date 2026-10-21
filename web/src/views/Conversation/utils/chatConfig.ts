@@ -19,7 +19,7 @@ export const buildSharedChatProps = (ctx: ConversationCtx) => {
     handleInterventionActionClick,
   } = ctx
 
-  const isSupportTools = ['agent', 'workflow'].includes(config.app_type)
+  const isSupportTools = !!config.app_type
   return {
     contentClassName: clsx({
       'rb:h-full rb:w-full': isShare,
