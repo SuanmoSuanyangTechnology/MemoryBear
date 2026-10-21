@@ -8,14 +8,12 @@ import Empty from '@/components/Empty';
 interface WikiCatalogProps {
   knowledgeBaseId: string;
   summaryOnly: boolean;
-  onPagesLoaded: (pages: WikiPage[]) => void;
   onPageSelect: (id: string) => void;
 }
 
 const WikiCatalog = ({
   knowledgeBaseId,
   summaryOnly,
-  onPagesLoaded,
   onPageSelect,
 }: WikiCatalogProps) => {
   const { t } = useTranslation();
@@ -51,12 +49,11 @@ const WikiCatalog = ({
             relatedIds: [],
             importance: 0,
           })));
-          hasNext = response.page.hasnext;
+          hasNext = response.page.has_next;
           page += 1;
         }
         if (active) {
           setCatalogPages(result);
-          if (summaryOnly) onPagesLoaded(result);
         }
       } catch {
         if (active) setError(true);
@@ -68,7 +65,7 @@ const WikiCatalog = ({
     return () => {
       active = false;
     };
-  }, [knowledgeBaseId, summaryOnly, reload, onPagesLoaded]);
+  }, [knowledgeBaseId, summaryOnly, reload]);
 
   if (loading) return <Skeleton active paragraph={{ rows: 12 }} />;
   if (error) {

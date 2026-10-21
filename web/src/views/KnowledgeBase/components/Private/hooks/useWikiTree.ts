@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { getKnowledgeWikiTree } from '@/api/kbWiki';
-import type { WikiTreeItem } from '../Wiki/types';
+import type { PageTypesQuery, WikiTreeItem } from '../Wiki/types';
 
 interface Branch {
   items: WikiTreeItem[];
@@ -10,7 +10,7 @@ interface Branch {
   error: boolean;
 }
 
-export const useWikiTree = (knowledgeBaseId: string, active = true) => {
+export const useWikiTree = (knowledgeBaseId: string, pageTypes: PageTypesQuery, active = true) => {
   const [branches, setBranches] = useState<Record<string, Branch>>({});
   const cache = useRef<Record<string, Branch>>({});
   const generation = useRef(0);
@@ -32,7 +32,7 @@ export const useWikiTree = (knowledgeBaseId: string, active = true) => {
     try {
       const response = await getKnowledgeWikiTree(knowledgeBaseId, {
         folder_id: folderId || undefined,
-        page_types: 'entity,concept',
+        page_types: pageTypes,
         page: next.page + 1,
         pagesize: 50,
       });
@@ -44,7 +44,7 @@ export const useWikiTree = (knowledgeBaseId: string, active = true) => {
         [folderId]: {
           items: [...items.values()],
           page: response.page.page,
-          hasNext: response.page.hasnext,
+          hasNext: response.page.has_next,
           loading: false,
           error: false,
         },
@@ -54,16 +54,18 @@ export const useWikiTree = (knowledgeBaseId: string, active = true) => {
       cache.current = { ...cache.current, [folderId]: { ...next, loading: false, error: true } };
     }
     setBranches(cache.current);
-  }, [knowledgeBaseId, active]);
+  }, [knowledgeBaseId, pageTypes, active]);
 
+  // Tab 停用时保留它的缓存；只有知识库/类型变更或卸载才让旧响应失效。
   useEffect(() => {
     generation.current += 1;
     cache.current = {};
     setBranches({});
+    return () => { generation.current += 1; };
+  }, [knowledgeBaseId, pageTypes]);
+
+  useEffect(() => {
     if (active && knowledgeBaseId) void load();
-    return () => {
-      generation.current += 1;
-    };
   }, [knowledgeBaseId, active, load]);
 
   return { branches, load };

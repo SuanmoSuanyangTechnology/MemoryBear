@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FC, type ReactNode } from 'react';
+import { useCallback, useState, type FC, type ReactNode } from 'react';
 import { Flex, Tabs } from 'antd';
 import FaqWorkspace from './FAQ/FaqWorkspace';
 import KnowledgeGraphCard from '../KnowledgeGraphCard';
@@ -15,10 +15,10 @@ import WikiReader from './Wiki/WikiReader';
 import {
   WIKI_CATALOG_PAGE_ID,
   WIKI_SUMMARY_PAGE_ID,
-  type WikiPage,
   type WikiWorkspaceMode,
 } from './Wiki/types';
 import { useWikiData } from './hooks/useWikiData';
+import { useWikiPageDetail } from './hooks/useWikiPageDetail';
 
 interface PrivateKnowledgeBaseWorkspaceProps {
   breadcrumbPath: BreadcrumbPath;
@@ -37,23 +37,6 @@ interface PrivateKnowledgeBaseWorkspaceProps {
   onBatchDownloadKnowledgeBase: () => void;
   onExportKnowledgeBaseQa: () => void;
 }
-
-const buildCatalogPage = (
-  pages: WikiPage[],
-  title: string,
-  summary: string,
-): WikiPage => {
-  return {
-    id: WIKI_CATALOG_PAGE_ID,
-    title,
-    category: title,
-    summary,
-    markdown: '',
-    sourceIds: [...new Set(pages.flatMap((page) => page.sourceIds))],
-    relatedIds: pages.map((page) => page.id),
-    importance: 1,
-  };
-};
 
 const PrivateKnowledgeBaseWorkspace: FC<PrivateKnowledgeBaseWorkspaceProps> = ({
   breadcrumbPath,
@@ -75,66 +58,38 @@ const PrivateKnowledgeBaseWorkspace: FC<PrivateKnowledgeBaseWorkspaceProps> = ({
   const { t } = useTranslation();
   const [mode, setMode] = useState<WikiWorkspaceMode>('files');
   const [directoryTab, setDirectoryTab] = useState<'files' | 'wiki'>('files');
-  const [selectedPageId, setSelectedPageId] = useState<string>();
+  const [selection, setSelection] = useState({ knowledgeBaseId, pageId: WIKI_CATALOG_PAGE_ID });
+  const selectedPageId = selection.knowledgeBaseId === knowledgeBaseId ? selection.pageId : WIKI_CATALOG_PAGE_ID;
   const [catalogRefreshKey, setCatalogRefreshKey] = useState(0);
   const [graphInitialPageId, setGraphInitialPageId] = useState<string>();
-  const { pages, loading, error } = useWikiData(knowledgeBaseId);
-  const [summaryPages, setSummaryPages] = useState<WikiPage[]>([]);
-  useEffect(() => {
-    setSummaryPages([]);
-  }, [knowledgeBaseId]);
-  const allPages = useMemo(() => [...pages, ...summaryPages], [pages, summaryPages]);
-  const catalogPage = useMemo(
-    () =>
-      buildCatalogPage(
-        pages,
-        t('knowledgeBase.wikiCatalog'),
-        t('knowledgeBase.wikiCatalogSummary'),
-      ),
-    [pages, t],
-  );
-  const selectedPage =
-    selectedPageId === WIKI_CATALOG_PAGE_ID
-      ? catalogPage
-      : selectedPageId === WIKI_SUMMARY_PAGE_ID
-        ? { ...catalogPage, id: WIKI_SUMMARY_PAGE_ID, title: t('knowledgeBase.wikiSummary') }
-        : (allPages.find((page) => page.id === selectedPageId) ?? pages[0]);
+  const [graphPreview, setGraphPreview] = useState<{ knowledgeBaseId: string; pageId?: string }>({ knowledgeBaseId });
+  const { pages } = useWikiData(knowledgeBaseId);
+  const previewPageId = graphPreview.knowledgeBaseId === knowledgeBaseId ? graphPreview.pageId : undefined;
+  const activePageId = mode === 'wikiGraph' ? previewPageId : mode === 'wiki' ? selectedPageId : undefined;
+  const detailState = useWikiPageDetail(knowledgeBaseId,
+    activePageId === WIKI_CATALOG_PAGE_ID || activePageId === WIKI_SUMMARY_PAGE_ID ? undefined : activePageId);
 
-  useEffect(() => {
-    if (!selectedPageId && pages[0]) setSelectedPageId(pages[0].id);
-    if (selectedPageId === WIKI_CATALOG_PAGE_ID || selectedPageId === WIKI_SUMMARY_PAGE_ID) {
-      return;
-    }
-    if (
-      selectedPageId &&
-      pages.length &&
-      !allPages.some((page) => page.id === selectedPageId)
-    ) {
-      setSelectedPageId(pages[0].id);
-    }
-  }, [pages, allPages, selectedPageId]);
-
-  const openWikiPage = (pageId: string) => {
-    if (pageId === WIKI_CATALOG_PAGE_ID) {
-      setCatalogRefreshKey((value) => value + 1);
-    }
-    setSelectedPageId(pageId);
+  const openWikiPage = useCallback((pageId: string) => {
+    if (pageId === WIKI_CATALOG_PAGE_ID) setCatalogRefreshKey((value) => value + 1);
+    setSelection({ knowledgeBaseId, pageId });
     setDirectoryTab('wiki');
     setMode('wiki');
-  };
+  }, [knowledgeBaseId]);
+  const selectGraphPreview = useCallback((pageId?: string) => {
+    setGraphPreview({ knowledgeBaseId, pageId });
+  }, [knowledgeBaseId]);
 
   const handleModeChange = (nextMode: WikiWorkspaceMode) => {
     if (nextMode === 'wikiGraph') {
-      setGraphInitialPageId(
-        mode === 'wiki' && selectedPage?.id !== WIKI_CATALOG_PAGE_ID && selectedPage?.id !== WIKI_SUMMARY_PAGE_ID
-          ? selectedPage?.id
-          : undefined,
-      );
+      const pageId = mode === 'wiki' && selectedPageId !== WIKI_CATALOG_PAGE_ID && selectedPageId !== WIKI_SUMMARY_PAGE_ID
+        ? selectedPageId : undefined;
+      setGraphInitialPageId(pageId);
+      setGraphPreview({ knowledgeBaseId, pageId });
     } else if (nextMode === 'files' || nextMode === 'wiki') {
       setDirectoryTab(nextMode);
     }
     if (nextMode === 'wiki') {
-      setSelectedPageId(WIKI_CATALOG_PAGE_ID);
+      setSelection({ knowledgeBaseId, pageId: WIKI_CATALOG_PAGE_ID });
     }
     setMode(nextMode);
   };
@@ -158,6 +113,7 @@ const PrivateKnowledgeBaseWorkspace: FC<PrivateKnowledgeBaseWorkspaceProps> = ({
         onChange={(key) => {
           if (key === 'wikiGraph') {
             setGraphInitialPageId(undefined);
+            setGraphPreview({ knowledgeBaseId });
             setMode('wikiGraph');
             return;
           }
@@ -185,7 +141,8 @@ const PrivateKnowledgeBaseWorkspace: FC<PrivateKnowledgeBaseWorkspaceProps> = ({
             directoryTab={directoryTab}
             wikiActive={mode === 'wiki'}
             pages={pages}
-            selectedPageId={selectedPage?.id}
+            selectedPageId={selectedPageId}
+            selectedDetail={mode === 'wiki' ? detailState.detail : null}
             fileDirectory={fileDirectory}
             onPageSelect={openWikiPage}
           />
@@ -199,15 +156,12 @@ const PrivateKnowledgeBaseWorkspace: FC<PrivateKnowledgeBaseWorkspaceProps> = ({
             : mode === 'wiki'
             ? (
               <WikiReader
-                key={`${knowledgeBaseId}:${selectedPage?.id}:${selectedPage?.id === WIKI_CATALOG_PAGE_ID ? catalogRefreshKey : 0}`}
+                key={`${knowledgeBaseId}:${selectedPageId}:${selectedPageId === WIKI_CATALOG_PAGE_ID ? catalogRefreshKey : 0}`}
                 knowledgeBase={knowledgeBase}
                 knowledgeBaseId={knowledgeBaseId}
                 breadcrumbPath={breadcrumbPath}
-                page={selectedPage}
-                pages={pages}
-                onSummaryPagesLoaded={setSummaryPages}
-                loading={loading}
-                error={error}
+                pageId={selectedPageId}
+                detailState={detailState}
                 directoryCollapsed={directoryCollapsed}
                 onToggleDirectory={onToggleDirectory}
                 onOpenGraph={() => handleModeChange('wikiGraph')}
@@ -219,12 +173,15 @@ const PrivateKnowledgeBaseWorkspace: FC<PrivateKnowledgeBaseWorkspaceProps> = ({
             : mode === 'wikiGraph'
             ? (
               <WikiGraph
+                key={knowledgeBaseId}
                 breadcrumbPath={breadcrumbPath}
                 knowledgeBaseId={knowledgeBaseId}
                 pages={pages}
                 directoryCollapsed={directoryCollapsed}
                 onToggleDirectory={onToggleDirectory}
-                initialPageId={graphInitialPageId}
+                initialPageId={selection.knowledgeBaseId === knowledgeBaseId ? graphInitialPageId : undefined}
+                detailState={detailState}
+                onPreviewPageChange={selectGraphPreview}
                 onBack={() => {
                   setDirectoryTab('wiki');
                   setMode('wiki');

@@ -6,7 +6,7 @@ import { useTranslation } from 'react-i18next';
 
 import type { BreadcrumbPath } from '@/hooks/useBreadcrumbManager';
 import WikiArticle from './WikiArticle';
-import { useWikiPageDetail } from '../hooks/useWikiPageDetail';
+import type { WikiPageDetailState } from '../hooks/useWikiPageDetail';
 import Empty from '@/components/Empty';
 
 import { getKnowledgeWikiGraph } from '@/api/kbWiki';
@@ -20,6 +20,8 @@ interface WikiGraphProps {
   directoryCollapsed: boolean;
   onToggleDirectory: () => void;
   initialPageId?: string;
+  detailState: WikiPageDetailState;
+  onPreviewPageChange: (pageId?: string) => void;
   onBack: () => void;
   onOpenPage: (pageId: string) => void;
 }
@@ -35,6 +37,8 @@ const WikiGraph: FC<WikiGraphProps> = ({
   breadcrumbPath,
   knowledgeBaseId,
   initialPageId,
+  detailState,
+  onPreviewPageChange,
   onBack,
   onOpenPage,
   directoryCollapsed,
@@ -60,6 +64,7 @@ const WikiGraph: FC<WikiGraphProps> = ({
     setLoading(true);
     setError(false);
     setSelectedPageId(centerPageId);
+    onPreviewPageChange(centerPageId);
     setPreviewVisible(true);
 
     if (!knowledgeBaseId) {
@@ -70,7 +75,7 @@ const WikiGraph: FC<WikiGraphProps> = ({
     getKnowledgeWikiGraph(knowledgeBaseId, {
       mode: centerPageId ? 'ego' : 'overview',
       ...(centerPageId ? { center_page_id: centerPageId } : {}),
-      types: 'entity,concept' as PageType,
+      types: centerPageId ? 'summary,entity,concept' : 'entity,concept',
       limit: 200,
     }).then((data) => {
       if (active) {
@@ -89,7 +94,7 @@ const WikiGraph: FC<WikiGraphProps> = ({
     return () => {
       active = false;
     };
-  }, [knowledgeBaseId, centerPageId]);
+  }, [knowledgeBaseId, centerPageId, onPreviewPageChange]);
 
   const relations = useMemo<WikiRelation[]>(() => (
     graph?.edges.map((edge) => ({
@@ -126,15 +131,11 @@ const WikiGraph: FC<WikiGraphProps> = ({
     }) ?? [];
   }, [graph, wikiPages, relations]);
   const [previewVisible, setPreviewVisible] = useState(true);
-  const {
-    detail,
-    loading: detailLoading,
-    error: detailError,
-    refresh,
-  } = useWikiPageDetail(knowledgeBaseId, selectedPageId);
+  const { detail, loading: detailLoading, error: detailError, refresh } = detailState;
 
   const handleSelectPage = (pageId: string) => {
     setSelectedPageId(pageId);
+    onPreviewPageChange(pageId);
     setPreviewVisible(true);
     if (!pages.some((page) => page.id === pageId)) {
       setCenterPageId(pageId);
@@ -270,6 +271,7 @@ const WikiGraph: FC<WikiGraphProps> = ({
               onClick={() => {
                 setPreviewVisible(false);
                 setSelectedPageId(undefined);
+                onPreviewPageChange(undefined);
               }}
             />
           </Flex>

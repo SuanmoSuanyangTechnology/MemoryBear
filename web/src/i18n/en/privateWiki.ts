@@ -1,4 +1,6 @@
 export const privateWiki = {
+  directoryPages: "Wiki",
+  directorySummary: "Summary",
   pending: "Generating page",
   updating: "Updating page",
   cleanup: "Updating page sources",

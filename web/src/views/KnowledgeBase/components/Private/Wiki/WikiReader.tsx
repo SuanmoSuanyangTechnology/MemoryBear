@@ -1,13 +1,13 @@
 import { type FC, type MouseEvent } from 'react';
 import { Breadcrumb, Button, Flex } from 'antd';
-import { useWikiPageDetail } from '../hooks/useWikiPageDetail';
+import type { WikiPageDetailState } from '../hooks/useWikiPageDetail';
 import { useTranslation } from 'react-i18next';
 
 import WikiCatalog from './WikiCatalog';
 
 import type { BreadcrumbPath } from '@/hooks/useBreadcrumbManager';
 import type { KnowledgeBaseListItem } from '@/views/KnowledgeBase/types';
-import { WIKI_CATALOG_PAGE_ID, WIKI_SUMMARY_PAGE_ID, type WikiPage } from './types';
+import { WIKI_CATALOG_PAGE_ID, WIKI_SUMMARY_PAGE_ID } from './types';
 import DirectoryToggle from '../DirectoryToggle';
 import WikiHistory from './WikiHistory';
 import Empty from '@/components/Empty';
@@ -16,14 +16,11 @@ import WikiArticle from './WikiArticle';
 interface WikiReaderProps {
   breadcrumbPath: BreadcrumbPath;
   knowledgeBase: KnowledgeBaseListItem;
-  page?: WikiPage;
-  pages: WikiPage[];
-  onSummaryPagesLoaded: (pages: WikiPage[]) => void;
+  pageId: string;
+  detailState: WikiPageDetailState;
   knowledgeBaseId: string;
   directoryCollapsed: boolean;
   onToggleDirectory: () => void;
-  loading: boolean;
-  error: boolean;
   onOpenGraph: () => void;
   onOpenFiles: () => void;
   onOpenKnowledgeBaseSettings: (step?: number) => void;
@@ -32,12 +29,10 @@ interface WikiReaderProps {
 
 const WikiReader: FC<WikiReaderProps> = ({
   breadcrumbPath,
-  page,
-  onSummaryPagesLoaded,
+  pageId,
+  detailState,
   knowledgeBase,
   knowledgeBaseId,
-  loading,
-  error,
   onOpenGraph,
   onOpenFiles,
   onOpenKnowledgeBaseSettings,
@@ -46,15 +41,13 @@ const WikiReader: FC<WikiReaderProps> = ({
   onToggleDirectory,
 }) => {
   const { t } = useTranslation();
-  const pageId = page?.id;
   const isSummary = pageId === WIKI_SUMMARY_PAGE_ID;
   const isCatalog = pageId === WIKI_CATALOG_PAGE_ID || isSummary;
-  const {
-    detail,
-    loading: detailLoading,
-    error: detailError,
-    refresh,
-  } = useWikiPageDetail(knowledgeBaseId, isCatalog ? undefined : pageId);
+  const { detail, loading: detailLoading, error: detailError, refresh } = detailState;
+  const pageTitle = isCatalog
+    ? t(isSummary ? 'knowledgeBase.wikiSummary' : 'knowledgeBase.wikiCatalog')
+    : detail?.title ?? '';
+  const category = detail?.folder_path.map((folder) => folder.name).join(' / ') ?? '';
   const markdown = detail?.content ?? '';
 
   const handleMarkdownClick = (event: MouseEvent<HTMLDivElement>) => {
@@ -90,10 +83,10 @@ const WikiReader: FC<WikiReaderProps> = ({
             </span>
           ),
         },
-        ...(page
+        ...(pageId
           ? [
-            ...(isCatalog ? [] : [{ title: page.category }]),
-            { title: page.title },
+            ...(isCatalog ? [] : [{ title: category }]),
+            { title: pageTitle },
           ]
           : []),
       ]}
@@ -103,16 +96,14 @@ const WikiReader: FC<WikiReaderProps> = ({
   const wikiDisabled = !knowledgeBase?.parser_config?.wiki?.enabled;
   const noSourceFiles = !(knowledgeBase.doc_num ?? 0);
 
-  if (loading || error || wikiDisabled || noSourceFiles || !page) {
+  if (wikiDisabled || noSourceFiles || !pageId) {
     const emptyProps = wikiDisabled
       ? {
         size: 140,
         title: t('knowledgeBase.privateWiki.disabled'),
         subTitle: t('knowledgeBase.privateWiki.disabledHint'),
       }
-      : error
-        ? { subTitle: t('knowledgeBase.wikiLoadFailed') }
-        : noSourceFiles
+      : noSourceFiles
           ? {
             size: 140,
             title: t('knowledgeBase.wikiNoSourceFiles'),
@@ -135,21 +126,19 @@ const WikiReader: FC<WikiReaderProps> = ({
           justify="center"
           className="rb:flex-1 rb:p-8"
         >
-          {loading ? t('common.loading') : (
-            <Flex vertical align="center" justify="center">
-              <Empty {...emptyProps} />
-              {noSourceFiles && !wikiDisabled && (
-                <Button type="primary" onClick={onOpenFiles}>
-                  {t('knowledgeBase.uploadFile')}
-                </Button>
-              )}
-              {wikiDisabled && (
-                <Button type="primary" onClick={() => onOpenKnowledgeBaseSettings(2)}>
-                  {t('knowledgeBase.privateWiki.configure')}
-                </Button>
-              )}
-            </Flex>
-          )}
+          <Flex vertical align="center" justify="center">
+            <Empty {...emptyProps} />
+            {noSourceFiles && !wikiDisabled && (
+              <Button type="primary" onClick={onOpenFiles}>
+                {t('knowledgeBase.uploadFile')}
+              </Button>
+            )}
+            {wikiDisabled && (
+              <Button type="primary" onClick={() => onOpenKnowledgeBaseSettings(2)}>
+                {t('knowledgeBase.privateWiki.configure')}
+              </Button>
+            )}
+          </Flex>
         </Flex>
       </Flex>
     );
@@ -191,9 +180,9 @@ const WikiReader: FC<WikiReaderProps> = ({
           </Button>
           {!isCatalog && (
             <WikiHistory
-              key={`${knowledgeBaseId}:${page.id}`}
+              key={`${knowledgeBaseId}:${pageId}`}
               knowledgeBaseId={knowledgeBaseId}
-              pageId={page.id}
+              pageId={pageId}
             />
           )}
         </Flex>
@@ -207,7 +196,6 @@ const WikiReader: FC<WikiReaderProps> = ({
             <WikiCatalog
               knowledgeBaseId={knowledgeBaseId}
               summaryOnly={isSummary}
-              onPagesLoaded={onSummaryPagesLoaded}
               onPageSelect={onPageSelect}
             />
           ) : (

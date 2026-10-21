@@ -7,6 +7,7 @@ export interface WikiPage {
   id: string;
   title: string;
   category: string;
+  pageType?: PageType;
   folderId?: string;
   folderPath?: FolderPathItem[];
   summary: string;
@@ -49,7 +50,7 @@ export interface PageResponse {
   page: number;
   pagesize: number;
   total: number;
-  hasnext: boolean;
+  has_next: boolean;
 }
 // Wiki 目录树（逐层分页）
 export type PageType = 'summary' | 'entity' | 'concept';

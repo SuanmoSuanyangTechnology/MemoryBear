@@ -1,4 +1,6 @@
 export const privateWiki = {
+  directoryPages: "Wiki",
+  directorySummary: "摘要",
   pending: "正在生成页面",
   updating: "页面更新中",
   cleanup: "正在更新页面来源",

@@ -51,7 +51,6 @@ export default function WikiArticle({
       .map((heading) => ({ id: heading.id, title: heading.textContent ?? '', level: Number(heading.tagName.slice(1)) })));
   }, [markdown, detail?.status, loading, error]);
 
-  if (loading || !detail) return <Skeleton active paragraph={{ rows: 12 }} />;
   if (error) {
     return (
       <RbAlert color="red">
@@ -62,6 +61,8 @@ export default function WikiArticle({
       </RbAlert>
     );
   }
+
+  if (loading || !detail) return <Skeleton active paragraph={{ rows: 12 }} />;
 
   const readable = detail.status === 'ready' && detail.content !== null;
   const groups = new Map<string, WikiPageDetail['sources']>();

@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState, type FC, type Key, type ReactNode } from 'react';
-import { Tree, Skeleton } from 'antd';
+import { useCallback, useEffect, useRef, useState, type FC, type Key, type ReactNode } from 'react';
+import { Tree, Skeleton, Tabs } from 'antd';
 import type { DataNode } from 'antd/es/tree';
 import clsx from 'clsx';
 import { useTranslation } from 'react-i18next';
@@ -13,6 +13,7 @@ import {
   WIKI_CATALOG_PAGE_ID,
   WIKI_SUMMARY_PAGE_ID,
   type WikiPage,
+  type WikiPageDetail,
 } from './Wiki/types';
 
 interface PrivateDirectoryPanelProps {
@@ -21,6 +22,7 @@ interface PrivateDirectoryPanelProps {
   pages: WikiPage[];
   knowledgeBaseId: string;
   selectedPageId?: string;
+  selectedDetail: WikiPageDetail | null;
   fileDirectory: ReactNode;
   onPageSelect: (pageId: string) => void;
 }
@@ -51,18 +53,40 @@ const PrivateDirectoryPanel: FC<PrivateDirectoryPanelProps> = ({
   pages,
   knowledgeBaseId,
   selectedPageId,
+  selectedDetail,
   fileDirectory,
   onPageSelect,
 }) => {
   const { t } = useTranslation();
-  const [keyword, setKeyword] = useState('');
+  const [wikiTab, setWikiTab] = useState<'pages' | 'summary'>('pages');
+  const [keywords, setKeywords] = useState({ pages: '', summary: '' });
+  const keyword = keywords[wikiTab];
+  const [searchResetKey, setSearchResetKey] = useState(0);
+  const setKeyword = (value: string) => setKeywords((current) => ({ ...current, [wikiTab]: value }));
   const directoryRef = useRef<HTMLDivElement>(null);
-  const [expandedKeys, setExpandedKeys] = useState<Key[]>([]);
-  const { branches, load } = useWikiTree(knowledgeBaseId, wikiActive);
+  const [expandedByTab, setExpandedByTab] = useState<{ pages: Key[]; summary: Key[] }>({ pages: [], summary: [] });
+  const expandedKeys = expandedByTab[wikiTab];
+  const setExpandedKeys = useCallback((next: Key[] | ((keys: Key[]) => Key[])) => {
+    setExpandedByTab((current) => ({
+      ...current, [wikiTab]: typeof next === 'function' ? next(current[wikiTab]) : next,
+    }));
+  }, [wikiTab]);
+  const pageTree = useWikiTree(knowledgeBaseId, 'entity,concept', wikiActive && wikiTab === 'pages');
+  const summaryTree = useWikiTree(knowledgeBaseId, 'summary', wikiActive && wikiTab === 'summary');
+  const { branches, load } = wikiTab === 'summary' ? summaryTree : pageTree;
+  const currentDetail = selectedDetail && (selectedDetail.page_id || selectedDetail.id) === selectedPageId
+    ? selectedDetail : null;
+  const detailTab = currentDetail?.type === 'summary' ? 'summary' : 'pages';
 
   useEffect(() => {
-    setExpandedKeys([]);
-  }, [knowledgeBaseId, wikiActive]);
+    if (selectedPageId === WIKI_SUMMARY_PAGE_ID || selectedPageId === WIKI_CATALOG_PAGE_ID) {
+      setWikiTab(selectedPageId === WIKI_SUMMARY_PAGE_ID ? 'summary' : 'pages');
+    } else if (currentDetail?.id) {
+      setWikiTab(detailTab);
+      setKeywords((current) => ({ ...current, [detailTab]: '' }));
+      setSearchResetKey((value) => value + 1);
+    }
+  }, [selectedPageId, currentDetail?.id, detailTab]);
   const loading = !branches[''] || (branches[''].loading && !branches[''].items.length);
   const isFilesMode = directoryTab === 'files';
   const buildBranch = (folderId = '', ancestors = new Set<string>()): DataNode[] => {
@@ -99,20 +123,22 @@ const PrivateDirectoryPanel: FC<PrivateDirectoryPanelProps> = ({
     }
     return nodes;
   };
-  const hasWikiTreeData = Boolean(branches['']?.items.length);
+  const matchingPages = pages.filter((page) =>
+    (wikiTab === 'summary' ? page.pageType === 'summary' : page.pageType !== 'summary') &&
+    `${page.title} ${page.summary} ${page.category}`.toLocaleLowerCase().includes(keyword.trim().toLocaleLowerCase()),
+  );
   const treeData: DataNode[] = [
-    { key: WIKI_CATALOG_PAGE_ID, title: t('knowledgeBase.wikiCatalog'), isLeaf: true },
-    ...(hasWikiTreeData ? [
-      { key: WIKI_SUMMARY_PAGE_ID, title: t('knowledgeBase.wikiSummary'), isLeaf: true },
-      ...(keyword.trim() ? pages.filter((page) =>
-        `${page.title} ${page.summary} ${page.category}`.toLocaleLowerCase().includes(keyword.trim().toLocaleLowerCase()),
-      ).map((page) => ({ key: page.id, title: page.title, isLeaf: true })) : buildBranch()),
-    ] : []),
+    {
+      key: wikiTab === 'summary' ? WIKI_SUMMARY_PAGE_ID : WIKI_CATALOG_PAGE_ID,
+      title: t(wikiTab === 'summary' ? 'knowledgeBase.wikiSummary' : 'knowledgeBase.wikiCatalog'),
+      isLeaf: true,
+    },
+    ...(keyword.trim() ? matchingPages.map((page) => ({ key: page.id, title: page.title, isLeaf: true })) : buildBranch()),
   ];
 
   useEffect(() => {
-    if (!wikiActive) return;
-    const path = pages.find((item) => item.id === selectedPageId)?.folderPath ?? [];
+    if (!wikiActive || !currentDetail || detailTab !== wikiTab || keyword.trim()) return;
+    const path = currentDetail.folder_path;
     setExpandedKeys((keys) => [...new Set([...keys, ...path.map((folder) => `folder:${folder.id}`)])]);
     let active = true;
     const reveal = async () => {
@@ -120,6 +146,7 @@ const PrivateDirectoryPanel: FC<PrivateDirectoryPanelProps> = ({
       for (const id of ids) {
         if (!active) return;
         const branch = branches[id];
+        if (branch?.loading) return;
         if (!branch) {
           await load(id);
           return;
@@ -133,7 +160,7 @@ const PrivateDirectoryPanel: FC<PrivateDirectoryPanelProps> = ({
     };
     if (selectedPageId && selectedPageId !== WIKI_CATALOG_PAGE_ID && selectedPageId !== WIKI_SUMMARY_PAGE_ID) void reveal();
     return () => { active = false; };
-  }, [pages, selectedPageId, branches, load, wikiActive]);
+  }, [currentDetail, detailTab, wikiTab, keyword, selectedPageId, branches, load, wikiActive, setExpandedKeys]);
   useEffect(() => {
     if (isFilesMode || loading || !selectedPageId) return;
     const container = directoryRef.current;
@@ -175,19 +202,31 @@ const PrivateDirectoryPanel: FC<PrivateDirectoryPanelProps> = ({
       mutationObserver.disconnect();
       resizeObserver.disconnect();
     };
-  }, [selectedPageId, expandedKeys, isFilesMode, loading, keyword]);
+  }, [selectedPageId, expandedKeys, isFilesMode, loading, keyword, wikiTab]);
 
   return (
     <aside className="rb:flex rb:h-full rb:w-63 rb:p-3 rb:shrink-0 rb:flex-col rb:border-r rb:border-[#EAECEE] rb:bg-[#FBFCFD]">
       {!isFilesMode && (
-        <SearchInput
-          defaultValue={keyword}
-          debounceDelay={300}
-          variant="outlined"
-          className="rb:w-full!"
-          placeholder={t('knowledgeBase.wikiSearch')}
-          onSearch={setKeyword}
-        />
+        <>
+          <Tabs
+            size="small"
+            activeKey={wikiTab}
+            onChange={(key) => setWikiTab(key as 'pages' | 'summary')}
+            items={[
+              { key: 'pages', label: t('knowledgeBase.privateWiki.directoryPages') },
+              { key: 'summary', label: t('knowledgeBase.privateWiki.directorySummary') },
+            ]}
+          />
+          <SearchInput
+            key={wikiTab + ':' + searchResetKey}
+            defaultValue={keyword}
+            debounceDelay={300}
+            variant="outlined"
+            className="rb:w-full!"
+            placeholder={t('knowledgeBase.wikiSearch')}
+            onSearch={setKeyword}
+          />
+        </>
       )}
 
       <div data-wiki-scroll ref={directoryRef} className="rb:min-h-0 rb:flex-1 rb:overflow-y-auto">
