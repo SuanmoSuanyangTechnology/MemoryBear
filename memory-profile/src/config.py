@@ -131,12 +131,9 @@ class ProfileSettings(BaseSettings):
         "",
         validation_alias=AliasChoices("DATABASE_PASSWORD", "POSTGRES_PASSWORD", "DB_PASSWORD"),
     )
-    database_name: str = Field(
-        "postgres",
-        validation_alias=AliasChoices(
-            "DATABASE_NAME", "POSTGRES_DB", "POSTGRES_DATABASE", "DB_NAME"
-        ),
-    )
+    # Single source for the database name; the same value scopes the derived
+    # ACL rule names, which must match identity's DB_NAME-derived names.
+    database_name: str = Field("postgres", validation_alias="DB_NAME")
     database_pool_size: int = Field(5, validation_alias="PROFILE_DATABASE_POOL_SIZE")
     database_max_overflow: int = Field(5, validation_alias="PROFILE_DATABASE_MAX_OVERFLOW")
     database_pool_timeout_seconds: float = Field(
