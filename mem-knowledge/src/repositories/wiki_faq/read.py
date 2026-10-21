@@ -1,6 +1,6 @@
 """列表全库计数不受筛选影响；审核按每条 FAQ 的真实 Wiki 基线取数。"""
 
-from sqlalchemy import case, func, select
+from sqlalchemy import case, func, or_, select
 
 from ...models.owned.wiki import WikiPage
 from ...models.owned.wiki_faq import WikiFAQ, WikiFAQGenerationJob, WikiPageVersion
@@ -18,7 +18,9 @@ from .common import (
 )
 
 
-def list_faqs(session, scope, *, review_status=None, is_enabled=None, page=1, limit=20):
+def list_faqs(
+    session, scope, *, review_status=None, is_enabled=None, keywords=None, page=1, limit=20
+):
     begin_read(session, scope)
     status = case(
         (WikiFAQ.review_state == "pending", "pending"),
@@ -51,6 +53,14 @@ def list_faqs(session, scope, *, review_status=None, is_enabled=None, page=1, li
         base = base.where(status == review_status)
     if is_enabled is not None:
         base = base.where(WikiFAQ.is_enabled == is_enabled)
+    keywords = (keywords or "").strip()
+    if keywords:
+        base = base.where(
+            or_(
+                WikiFAQ.standard_question.icontains(keywords, autoescape=True),
+                WikiFAQ.answers[0].astext.icontains(keywords, autoescape=True),
+            )
+        )
     selected = base.subquery()
     total = session.scalar(select(func.count()).select_from(selected))
     rows = list(
