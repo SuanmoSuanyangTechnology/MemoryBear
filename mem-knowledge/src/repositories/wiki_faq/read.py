@@ -19,7 +19,7 @@ from .common import (
 
 
 def list_faqs(
-    session, scope, *, review_status=None, is_enabled=None, keywords=None, page=1, limit=20
+    session, scope, *, review_status=None, is_enabled=None, keyword=None, page=1, limit=20
 ):
     begin_read(session, scope)
     status = case(
@@ -53,12 +53,12 @@ def list_faqs(
         base = base.where(status == review_status)
     if is_enabled is not None:
         base = base.where(WikiFAQ.is_enabled == is_enabled)
-    keywords = (keywords or "").strip()
-    if keywords:
+    keyword = (keyword or "").strip()
+    if keyword:
         base = base.where(
             or_(
-                WikiFAQ.standard_question.icontains(keywords, autoescape=True),
-                WikiFAQ.answers[0].astext.icontains(keywords, autoescape=True),
+                WikiFAQ.standard_question.icontains(keyword, autoescape=True),
+                WikiFAQ.answers[0].astext.icontains(keyword, autoescape=True),
             )
         )
     selected = base.subquery()

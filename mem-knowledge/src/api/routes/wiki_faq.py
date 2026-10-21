@@ -54,7 +54,7 @@ async def list_faqs(
     runtime: RuntimeDep,
     review_status: Literal["pending", "approved", "change_pending"] | None = None,
     is_enabled: bool | None = None,
-    keywords: str | None = Query(
+    keyword: str | None = Query(
         None,
         description="搜索标准问和标准答（answers[0]），不区分大小写的包含匹配；"
         "忽略首尾空白，空白不过滤，% 和 _ 按普通字符匹配。",
@@ -72,7 +72,7 @@ async def list_faqs(
             scope,
             review_status=review_status,
             is_enabled=is_enabled,
-            keywords=keywords,
+            keyword=keyword,
             page=page,
             limit=pagesize,
         )
