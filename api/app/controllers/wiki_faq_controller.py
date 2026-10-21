@@ -36,6 +36,11 @@ async def list_faqs(
     current_user: Annotated[User, Depends(get_current_user_async)],
     review_status: Literal["pending", "approved", "change_pending"] | None = None,
     is_enabled: bool | None = None,
+    keyword: str | None = Query(
+        None,
+        description="搜索标准问和标准答（answers[0]），不区分大小写的包含匹配；"
+        "忽略首尾空白，空白不过滤，% 和 _ 按普通字符匹配。",
+    ),
     page: int = Query(1, ge=1),
     pagesize: int = Query(20, ge=1, le=100),
     limit: int | None = Query(None, ge=1, le=100, include_in_schema=False),
