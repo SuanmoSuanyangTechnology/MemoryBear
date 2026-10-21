@@ -15,6 +15,7 @@ from app.db import get_async_db_context
 from app.models.workspace_model import Workspace
 from app.services.tool_service import ToolService
 from app.models.tool_model import ToolType
+from app.core.tools.base import ParameterType
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +65,41 @@ class ToolNode(BaseNode):
                 )
             ).scalar_one_or_none()
 
+    @staticmethod
+    def _resolve_parameter_defs(tool_instance: Any, operation: str | None) -> list:
+        """取目标工具的参数定义；MCP 工具按所选 operation 读 inputSchema（不改动共享缓存实例）。"""
+        try:
+            if tool_instance.tool_type == ToolType.MCP:
+                info = tool_instance._get_tool_info(operation) if operation else None
+                schema = (info or {}).get("inputSchema") or {}
+                return tool_instance._generate_parameters_from_schema(schema) if schema else []
+            return list(tool_instance.parameters)
+        except Exception as e:
+            logger.warning(f"获取工具参数定义失败，跳过类型转换: {e}")
+            return []
+
+    @staticmethod
+    def _coerce_parameter_types(params: dict[str, Any], param_defs: list) -> None:
+        """object/array 参数在前端文本框里是 JSON 字符串，按声明类型解析回 dict/list。
+
+        解析失败或解析结果类型不符时保持原值，由工具自身的参数校验给出报错。
+        """
+        expected_types = {
+            d.name: dict if d.type == ParameterType.OBJECT else list
+            for d in param_defs
+            if d.type in (ParameterType.OBJECT, ParameterType.ARRAY)
+        }
+        for name, value in params.items():
+            expected = expected_types.get(name)
+            if expected is None or not isinstance(value, str) or not value.strip():
+                continue
+            try:
+                parsed = json.loads(value)
+            except ValueError:
+                continue
+            if isinstance(parsed, expected):
+                params[name] = parsed
+
     async def execute(self, state: WorkflowState, variable_pool: VariablePool) -> dict[str, Any]:
         """执行工具"""
         self.typed_config = ToolNodeConfig(**self.config)
@@ -107,6 +143,12 @@ class ToolNode(BaseNode):
                 raise ValueError(f"工具不存在或未激活: {self.typed_config.tool_id}")
 
             tool_instance = await tool_service.get_tool_instance_async(str(self.typed_config.tool_id), tenant_id)
+            # 前端 object/array 输入以 JSON 字符串提交，按工具声明的参数类型还原
+            if tool_instance:
+                self._coerce_parameter_types(
+                    rendered_parameters,
+                    self._resolve_parameter_defs(tool_instance, rendered_parameters.get("operation")),
+                )
             # MCP 工具：将 operation 映射为 tool_name，其余参数包装进 arguments
             if tool_instance and tool_instance.tool_type == ToolType.MCP:
                 operation = rendered_parameters.pop("operation", None)

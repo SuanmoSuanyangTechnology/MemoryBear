@@ -238,7 +238,9 @@ async def delete_chunk(
     public=True,
 )
 def get_retrieve_types(request: Request = None):
-    return success(msg="Successfully obtained the retrieval type", data=list(chunk_schema.RetrieveType))
+    return success(msg="Successfully obtained the retrieval type", data=[
+        kind for kind in chunk_schema.RetrieveType if kind != chunk_schema.RetrieveType.WIKI_FAQ
+    ])
 
 
 @router.post("/retrieval", response_model=Any, status_code=status.HTTP_200_OK)

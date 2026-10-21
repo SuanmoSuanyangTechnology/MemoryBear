@@ -3,9 +3,18 @@
 
 # Task
 
-你的任务是从 `input_json` 中当前 `entity_id` 对应的 `descriptions` 列表，为当前 EndUser 生成对本 batch 开始前完整 `existing_metadata` 的最小、可执行 operations patch。除通用的身份背景与重要关系外，若当前声明了特殊业务领域（`fields_schema.special_domains`），必须同时提取属于该特殊领域的专属事实。
+你的任务是从 `input_json` 中当前 `entity_id` 对应的 `descriptions` 列表，为当前 EndUser 生成对本 batch 开始前完整 `existing_metadata` 的最小、可执行 operations patch。除通用的身份背景与重要关系外，仅当 `descriptions` 中存在明确命中特殊业务领域（`fields_schema.special_domains`）字段的事实，才提取对应的专属事实。
 
 # Rules
+
+## 事实正文边界
+
+- `operation.value` 只能包含可直接由 `descriptions` 支持的用户事实，不得包含任何非事实内容。
+- 已声明字段只是候选字段，不是必须输出的字段。没有明确事实时直接省略该字段；不得生成默认值、占位内容或任何用于解释未提取原因的文字。
+- `existing_metadata` 只用于 `update` / `delete` 的精确匹配，不能作为本批次新增事实的依据。
+- 同一事实需要从旧值变更时使用 `update`，不得用 `add` 追加一条语义相同但措辞不同的新值。
+- 字段配置中的 `format` 只约束事实内容的表示形式，不得改变 `<字段> | <子项> | <事实>` 的三段式结构，也不得要求在 `value` 中附加事实之外的内容。
+- “可以提取”不等于“必须提取”。没有合格事实时，`operations` 必须为空数组。
 
 ## 1. `identity_background` — 用户身份与背景
 
@@ -144,7 +153,7 @@
 
 ### 3.1 特殊业务领域（Special Domains）判断与提取
 
-当且仅当输入中明确声明了特殊业务领域及其专属字段（见文末“当前声明的特殊领域及其字段”），且输入事实明确命中相应字段时，才生成该特殊领域的操作。
+当且仅当输入中明确声明了特殊业务领域及其专属字段（见文末“当前声明的特殊领域及其字段”），且输入事实明确命中相应字段时，才生成该特殊领域的操作。声明字段不代表必须为该字段生成操作；未命中的字段直接省略。
 
 ### 3.2 概念映射与格式要求
 
@@ -382,6 +391,8 @@
 - 不得对未在 `fields_schema.special_domains` 中声明的领域生成 operation；`domain_specific_info` 不得出现在 patch 顶层。
 - 当前未定义丢弃操作的计数机制，`dropped_ops_count` 固定为 `0`。
 - 没有合格变化时，仍输出一个 item，其中 `operations` 为 `[]`。
+- 特殊领域没有明确事实时，不生成该领域的 operation；不得用 `value` 承载模型的判断结果或未提取原因。
+- `value` 中不得出现不属于用户事实的任何内容。
 - 使用标准 JSON 双引号，不得有尾逗号或额外键。
 - 自然语言事实内容遵循原始描述的主要语言；`language` 不改变 JSON 键、字段枚举或固定分隔符。
 
@@ -403,9 +414,18 @@ You are an assistant that generates incremental patches for user-profile metadat
 
 # Task
 
-From the `descriptions` list in `input_json` belonging to the current `entity_id`, generate a minimal, executable operations patch against the complete `existing_metadata` committed before this batch for the current EndUser. In addition to general identity background and significant relationships, if special business domains (`fields_schema.special_domains`) are declared in the current batch, extract domain-specific facts belonging to those special domains.
+From the `descriptions` list in `input_json` belonging to the current `entity_id`, generate a minimal, executable operations patch against the complete `existing_metadata` committed before this batch for the current EndUser. In addition to general identity background and significant relationships, extract domain-specific facts for a declared special domain (`fields_schema.special_domains`) only when the descriptions explicitly contain facts matching that domain's fields.
 
 # Rules
+
+## Fact-content boundary
+
+- `operation.value` may contain only user facts directly supported by `descriptions`; it must not contain any non-factual content.
+- Declared fields are candidates, not required outputs. If there is no explicit supporting fact, omit that field entirely. Do not generate defaults, placeholders, or any text explaining why a field was not extracted.
+- `existing_metadata` may be used only for exact `update` / `delete` matching. It is not evidence for new facts in the current batch.
+- When an existing fact changes, use `update`; do not use `add` to append a semantically equivalent but differently worded value.
+- A field's configured `format` constrains only how the fact content is represented. It must not change the `<field> | <subitem> | <fact>` triplet structure or require anything beyond the user fact in `value`.
+- "May extract" does not mean "must extract". When no qualifying fact exists, `operations` must be an empty array.
 
 ## 1. `identity_background` — User identity and background
 
@@ -544,7 +564,7 @@ All relationship types have cardinality `0..N`. Keep only one entry for the same
 
 ### 3.1 Identifying and Extracting Special Domains
 
-Generate an operation for a special domain if and only if the input explicitly declares that domain and its fields (see “Currently Declared Special Domains and Their Fields” at the end), and an input fact clearly matches one of those fields.
+Generate an operation for a special domain if and only if the input explicitly declares that domain and its fields (see “Currently Declared Special Domains and Their Fields” at the end), and an input fact clearly matches one of those fields. A declared field is not a required output; omit every field that has no matching fact.
 
 ### 3.2 Field Mapping and Format Requirements
 
@@ -782,6 +802,8 @@ Using explicit evidence about the EndUser in the current descriptions, generate 
 - Never generate an operation for a domain not declared in `fields_schema.special_domains`; `domain_specific_info` must not appear at the patch's top level.
 - No mechanism for counting discarded operations is currently defined, so `dropped_ops_count` is fixed at `0`.
 - If there is no qualifying change, still output one item with `operations` set to `[]`.
+- If a special domain has no explicit supporting fact, do not generate an operation for it. Never use `value` to carry model decisions or reasons for not extracting a field.
+- `value` must not contain anything other than the user fact itself.
 - Use standard JSON double quotes; no trailing commas or extra keys.
 - Natural-language fact content follows the primary language of the original descriptions; `language` does not change JSON keys, field enumerations, or fixed separators.
 
@@ -834,6 +856,8 @@ language:
 {%- endif %}
 {%- endfor %}
 {% endfor %}
+
+再次强调：以上字段均为候选字段。只有 `descriptions` 中明确支持时才生成对应 operation；没有事实时必须省略该字段，`value` 只能包含用户事实本身。
 {% endif %}
 
 {% if existing_metadata_json is defined and existing_metadata_json %}
@@ -879,6 +903,8 @@ Currently declared special domains and their fields:
 {%- endif %}
 {%- endfor %}
 {% endfor %}
+
+Reminder: every field above is only a candidate. Generate an operation only when `descriptions` explicitly support it. When no fact exists, omit the field; `value` may contain only the user fact itself.
 {% endif %}
 
 {% if existing_metadata_json is defined and existing_metadata_json %}
