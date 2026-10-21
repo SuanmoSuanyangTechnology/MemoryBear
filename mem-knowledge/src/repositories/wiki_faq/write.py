@@ -120,14 +120,14 @@ def delete(session, scope, faq_id, actor_id, payload):
 
 def approve(session, scope, faq_id, actor_id, payload):
     row = _lock(session, scope, faq_id)
-    target_id, request_id = payload["reviewed_wiki_snapshot_id"], payload["idempotency_key"]
-    # 重放成功请求只可读取原结果，不能在后续编辑后再次推进审核。
-    if row.last_review_request_id == request_id:
-        if (
-            row.approved_wiki_snapshot_id != target_id
-            or row.content_revision != payload["content_revision"]
-        ):
-            conflict()
+    target_id = payload["reviewed_wiki_snapshot_id"]
+    # 相同内容与Wiki快照已通过时直接返回；不能推进后来Wiki版本的审核基线。
+    if (
+        target_id is not None
+        and row.review_state == "approved"
+        and row.approved_wiki_snapshot_id == target_id
+        and row.content_revision == payload["content_revision"]
+    ):
         return {"changed": False, "faq": serialize(session, scope, row)}
     _expected(row, payload["expected_row_version"])
     if row.content_revision != payload["content_revision"]:
@@ -145,11 +145,8 @@ def approve(session, scope, faq_id, actor_id, payload):
         or target.page_version != info["latest_wiki_version"]
     ):
         conflict("KB_FAQ_SOURCE_CHANGED")
-    if row.review_state == "approved" and row.approved_wiki_snapshot_id == target_id:
-        return {"changed": False, "faq": serialize(session, scope, row)}
     row.review_state = "approved"
     row.approved_wiki_snapshot_id = target_id
-    row.last_review_request_id = request_id
     row.reviewed_by, row.reviewed_at = actor_id, utcnow_naive()
     _touch(row, actor_id)
     session.flush()

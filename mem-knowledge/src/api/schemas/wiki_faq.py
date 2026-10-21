@@ -1,5 +1,6 @@
 """FAQ 管理只开放标准问与答案首项，批量操作使用显式 ID。"""
 
+from typing import Any
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -38,7 +39,14 @@ class FAQEnabled(FAQExpected):
 class FAQApprove(FAQExpected):
     content_revision: int = Field(ge=1)
     reviewed_wiki_snapshot_id: UUID
-    idempotency_key: UUID
+
+    @model_validator(mode="before")
+    @classmethod
+    def ignore_legacy_request_key(cls, value: Any) -> Any:
+        # 历史调用可继续携带此字段，但不声明、不传入业务层，也不放宽其他额外字段。
+        if isinstance(value, dict) and "idempotency_key" in value:
+            return {key: item for key, item in value.items() if key != "idempotency_key"}
+        return value
 
 
 class FAQBatchExpected(FAQExpected):
