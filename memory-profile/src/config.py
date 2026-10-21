@@ -64,6 +64,48 @@ class ProfileSettings(BaseSettings):
         None, validation_alias="MEMORY_AUTH_KILL_SWITCH_FILE"
     )
     memory_auth_jwks_url: str | None = Field(None, validation_alias="MEMORY_AUTH_JWKS_URL")
+    # ACL rule key and hot-reload channel. Empty derives
+    # acl:rules:<DB_NAME> / acl:rules:changed:<DB_NAME> to match identity's
+    # write side; deployments sharing one Redis but owning separate databases
+    # stay isolated (pub/sub channels are global across logical DBs).
+    acl_rules_key: str = Field(default="", validation_alias="ACL_RULES_KEY")
+    acl_rules_changed_channel: str = Field(
+        default="",
+        validation_alias="ACL_RULES_CHANGED_CHANNEL",
+    )
+
+    # 生成类用例（memory insight / user summary / interest distribution）走模型服务
+    # invoke 接缝；凭据、渠道选路与 failover 都在模型服务侧（与 api 同口径）。
+    model_service_base_url: str = Field(
+        "http://127.0.0.1:8080", validation_alias="MODEL_SERVICE_BASE_URL"
+    )
+    model_service_connect_timeout_seconds: float = Field(
+        5.0, validation_alias="MODEL_SERVICE_INVOKE_CONNECT_TIMEOUT_SECONDS"
+    )
+    model_service_idle_timeout_seconds: float = Field(
+        180.0, validation_alias="MODEL_SERVICE_INVOKE_IDLE_TIMEOUT_SECONDS"
+    )
+    model_service_write_timeout_seconds: float = Field(
+        60.0, validation_alias="MODEL_SERVICE_INVOKE_WRITE_TIMEOUT_SECONDS"
+    )
+    model_service_pool_timeout_seconds: float = Field(
+        5.0, validation_alias="MODEL_SERVICE_POOL_TIMEOUT_SECONDS"
+    )
+    model_service_max_connections: int = Field(
+        100, validation_alias="MODEL_SERVICE_MAX_CONNECTIONS"
+    )
+    model_service_max_keepalive_connections: int = Field(
+        20, validation_alias="MODEL_SERVICE_MAX_KEEPALIVE_CONNECTIONS"
+    )
+    #: 兴趣分布缓存 TTL（api ``INTEREST_CACHE_EXPIRE`` 同值）。
+    interest_cache_expire_seconds: int = Field(
+        24 * 60 * 60, validation_alias="PROFILE_INTEREST_CACHE_EXPIRE_SECONDS"
+    )
+    #: 生成类接口的写路径连接池（写引擎与只读引擎分离）。
+    database_write_pool_size: int = Field(2, validation_alias="PROFILE_DATABASE_WRITE_POOL_SIZE")
+    database_write_max_overflow: int = Field(
+        3, validation_alias="PROFILE_DATABASE_WRITE_MAX_OVERFLOW"
+    )
 
     migration_database_url: str | None = Field(
         None,
@@ -141,6 +183,16 @@ class ProfileSettings(BaseSettings):
         20, validation_alias="PROFILE_ELASTICSEARCH_CONNECTIONS_PER_NODE"
     )
 
+    @field_validator("model_service_base_url")
+    @classmethod
+    def validate_model_service_base_url(cls, value: str) -> str:
+        parsed = urlparse(value)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            raise ValueError("MODEL_SERVICE_BASE_URL must be an absolute HTTP(S) URL")
+        if parsed.query or parsed.fragment:
+            raise ValueError("MODEL_SERVICE_BASE_URL must not contain query or fragment")
+        return value
+
     @field_validator("log_level", mode="before")
     @classmethod
     def normalize_log_level(cls, value: object) -> object:
@@ -193,6 +245,37 @@ class ProfileSettings(BaseSettings):
             return self.redis_url
         password = f":{quote_plus(self.redis_password)}@" if self.redis_password else ""
         return f"redis://{password}{self.redis_host}:{self.redis_port}/{self.redis_db}"
+
+    def _deployment_scoped_name(self, explicit: str, base: str, env_name: str) -> str:
+        """Resolve a deployment-scoped Redis name from an override or DB_NAME."""
+
+        explicit = explicit.strip()
+        if explicit:
+            if any(ch.isspace() for ch in explicit):
+                raise ValueError(f"{env_name} must not contain whitespace")
+            return explicit
+        db_name = self.database_name.strip()
+        if not db_name or any(ch.isspace() for ch in db_name):
+            raise ValueError(
+                f"DB_NAME must be non-empty without whitespace to derive {env_name}"
+            )
+        return f"{base}:{db_name}"
+
+    @property
+    def acl_rules_key_name(self) -> str:
+        """Resolve the deployment-scoped ACL rule blob key."""
+
+        return self._deployment_scoped_name(self.acl_rules_key, "acl:rules", "ACL_RULES_KEY")
+
+    @property
+    def acl_rules_changed_channel_name(self) -> str:
+        """Resolve the deployment-scoped ACL change pub/sub channel."""
+
+        return self._deployment_scoped_name(
+            self.acl_rules_changed_channel,
+            "acl:rules:changed",
+            "ACL_RULES_CHANGED_CHANNEL",
+        )
 
     @property
     def elasticsearch_hosts(self) -> list[str]:
