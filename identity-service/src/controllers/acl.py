@@ -217,5 +217,7 @@ async def delete_rule(rule_id: str, session: AsyncSession = Depends(get_async_db
         await _push_rules(session)
     except (SQLAlchemyError, RedisError):
         logger.exception("acl rule deleted but redis push failed")
-        return JSONResponse(status_code=500, content={"error": "rule deleted but redis push failed"})
+        return JSONResponse(
+            status_code=500, content={"error": "rule deleted but redis push failed"}
+        )
     return JSONResponse(status_code=200, content={"deleted": rule_id})

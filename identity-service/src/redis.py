@@ -7,6 +7,7 @@ socket 超时与 gateway 对齐：后台循环（pubsub/reconcile/audit/retentio
 触发时会抛 TimeoutError（RedisError 子类），由 notify.subscribe 的重连逻辑兜底。
 """
 import redis.asyncio as aioredis
+
 from src.config import settings
 
 redis = None

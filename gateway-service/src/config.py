@@ -55,7 +55,8 @@ class Settings:
 
     # ---- 用户 JWT 验签（与老单体 security.py 一致；TokenVerifier 按 header alg
     # 自适应 HS256/RS256，网关未配 JWKS → 实际仅 HS256 可走通，fail-closed）----
-    SECRET_KEY: str = os.getenv("SECRET_KEY")                  # 无默认：缺失时验签必然失败，fail-closed
+    # 无默认：缺失时验签必然失败，fail-closed
+    SECRET_KEY: str = os.getenv("SECRET_KEY")
 
     # ---- 内部 token 签发（决策 #5：本地 RS256；KMS 降级：环境变量/挂载注入私钥）----
     INTERNAL_ISSUER_PRIVATE_KEY: str = os.getenv("INTERNAL_ISSUER_PRIVATE_KEY")

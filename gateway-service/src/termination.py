@@ -76,7 +76,7 @@ def _profile_headers(
     names = _PROFILE_HEADERS.get(route.service) if route is not None else None
     if names is None:
         return {}
-    return dict(zip(names, (actor_id, tenant_id, workspace_id)))
+    return dict(zip(names, (actor_id, tenant_id, workspace_id), strict=False))
 
 
 async def terminate_user(request: Request, deps: GatewayDeps) -> AuthResult:

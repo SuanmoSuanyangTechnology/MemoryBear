@@ -6,23 +6,27 @@ injection. Enterprise gateway mode additionally signs an internal token (RS256,
 TTL 120s); direct mode does not. deps are injected via app.state so tests can
 replace them (ASGITransport does not trigger lifespan).
 """
-import httpx
 from contextlib import asynccontextmanager
+
+import httpx
+from auth_sdk.audit import AuditLogger
+from auth_sdk.ratelimit import ApiKeyRateLimiter
+from auth_sdk.snapshot import SnapshotReader
+from auth_sdk.token import LocalTokenIssuer, TokenVerifier
 from fastapi import FastAPI
-from src import config, redis as gredis
+
+from src import config
+from src import redis as gredis
 from src.forward import Forwarder, StaticTargetResolver
 from src.middleware import GatewayDeps, GatewayMiddleware
 from src.routes import router
-from auth_sdk.token import TokenVerifier, LocalTokenIssuer
-from auth_sdk.snapshot import SnapshotReader
-from auth_sdk.ratelimit import ApiKeyRateLimiter
-from auth_sdk.audit import AuditLogger
 
 
 def build_gateway_deps() -> GatewayDeps:
     # 目标路由 + 转发器只建一次（lifespan 内调用，此时模块级 app 已就绪）
     resolver = StaticTargetResolver(routes=config.settings.target_routes)
-    forwarder = Forwarder(client=httpx.AsyncClient(timeout=httpx.Timeout(connect=5.0, read=30.0, write=30.0, pool=5.0)))
+    timeout = httpx.Timeout(connect=5.0, read=30.0, write=30.0, pool=5.0)
+    forwarder = Forwarder(client=httpx.AsyncClient(timeout=timeout))
     app.state.forwarder = forwarder
     return GatewayDeps(
         verifier=TokenVerifier(secret=config.settings.SECRET_KEY),

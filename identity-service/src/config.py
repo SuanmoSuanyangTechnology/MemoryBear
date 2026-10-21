@@ -51,13 +51,10 @@ class Settings:
 
     # ---- 服务自身配置 ----
     SERVICE_NAME: str = "identity"
-    # Audit keys are deployment-scoped: empty derives audit:queue:<DB_NAME> /
+    # The audit stream key is deployment-scoped: empty derives
     # audit:stream:<DB_NAME> so deployments sharing one Redis do not consume
     # each other's events (a shared stream would load-balance events across
     # deployments through the same consumer group).
-    AUDIT_QUEUE_KEY: str = (
-        os.getenv("AUDIT_QUEUE_KEY", "").strip() or f"audit:queue:{DB_NAME}"
-    )
     AUDIT_STREAM_KEY: str = (
         os.getenv("AUDIT_STREAM_KEY", "").strip() or f"audit:stream:{DB_NAME}"
     )

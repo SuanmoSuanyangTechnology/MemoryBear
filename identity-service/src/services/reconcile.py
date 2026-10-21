@@ -1,13 +1,14 @@
 """校正任务（5.3）：1min 增量扫描 updated_at，只删不建——安全态（禁用/删除/吊销）不长期滞后。"""
 import asyncio
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from auth_sdk.snapshot import api_key_hash
 from redis.exceptions import RedisError
 from sqlalchemy.exc import SQLAlchemyError
 
-from src import db, redis as iredis
+from src import db
+from src import redis as iredis
 from src.config import settings
 from src.repositories.api_key import get_inactive_keys_since
 from src.repositories.user import (
@@ -23,7 +24,7 @@ _LAST_RUN_KEY = "reconcile:last_run"
 
 
 async def reconcile_once(session, redis, now: datetime | None = None) -> int:
-    now = now or datetime.now(timezone.utc).replace(tzinfo=None)
+    now = now or datetime.now(UTC).replace(tzinfo=None)
     last_raw = await redis.get(_LAST_RUN_KEY)
     last = datetime.fromisoformat(last_raw.decode()) if last_raw else now - timedelta(minutes=5)
     deleted = 0
