@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { getKnowledgeWikiTree } from '@/api/kbWiki';
+import { getKnowledgeWikiTree, getKnowledgeWikiPages } from '@/api/kbWiki';
 import type { PageTypesQuery, WikiTreeItem } from '../Wiki/types';
 
 interface Branch {
@@ -41,13 +41,27 @@ export const useWikiTree = (
     cache.current = { ...cache.current, [folderId]: next };
     setBranches(cache.current);
     try {
-      const response = await getKnowledgeWikiTree(knowledgeBaseId, {
-        folder_id: folderId || undefined,
+      const params = {
         page_types: pageTypes,
-        keyword: keyword || undefined,
         page: next.page + 1,
         pagesize: 50,
-      });
+      };
+      const response = keyword
+        ? await getKnowledgeWikiPages(knowledgeBaseId, { ...params, keyword }).then((result) => ({
+          ...result,
+          items: result.items.map((item): WikiTreeItem => ({
+            id: item.page_id || item.id,
+            node_kind: 'page',
+            parent_id: item.folder_id,
+            title: item.title,
+            page_type: item.type,
+            version: item.version,
+          })),
+        }))
+        : await getKnowledgeWikiTree(knowledgeBaseId, {
+          ...params,
+          folder_id: folderId || undefined,
+        });
       if (version !== generation.current) return;
       const items = new Map(next.items.map((item) => [`${item.node_kind}:${item.id}`, item]));
       response.items.forEach((item) => items.set(`${item.node_kind}:${item.id}`, item));

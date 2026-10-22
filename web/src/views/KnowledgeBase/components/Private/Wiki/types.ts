@@ -57,7 +57,6 @@ export type PageType = 'summary' | 'entity' | 'concept';
 // 支持单个类型或最多三个类型的逗号分隔组合。
 export type PageTypesQuery = PageType | `${PageType},${PageType}` | `${PageType},${PageType},${PageType}`;
 export interface  WikiTreeQuery {
-  keyword?: string;
   /**
    * 父级目录
    */
@@ -121,7 +120,7 @@ export interface WikiPagesQuery {
    * 按标题或简述执行不区分大小写的包含搜索；
    * 默认空字符串，不搜索正文。
    */
-  q?: string;
+  keyword?: string;
   /**
    * 逗号分隔：summary、entity、concept；
    * 省略表示全部。

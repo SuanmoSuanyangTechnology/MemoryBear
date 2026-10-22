@@ -83,9 +83,19 @@ const PrivateKnowledgeBaseWorkspace: FC<PrivateKnowledgeBaseWorkspaceProps> = ({
   const [openedPage, setOpenedPage] = useState<WikiPage>();
   const [openedDetail, setOpenedDetail] = useState<WikiPageDetail>();
   const [directoryTab, setDirectoryTab] = useState<'files' | 'wiki' | 'summary'>('files');
+  const wikiActive = mode === 'wiki' || mode === 'summary';
+  const searchScope = `${knowledgeBaseId}:${directoryTab}:${wikiActive}`;
+  const [search, setSearch] = useState<{ scope?: string; keyword?: string }>({});
+  const keyword = search.scope === searchScope ? search.keyword : undefined;
+
+  useEffect(() => {
+    setSearch({ scope: searchScope, keyword: undefined });
+  }, [searchScope]);
+
   const [selectedPageId, setSelectedPageId] = useState<string>();
   const [catalogRefreshKey, setCatalogRefreshKey] = useState(0);
   const [graphInitialPageId, setGraphInitialPageId] = useState<string>();
+  const [showGraphBack, setShowGraphBack] = useState(false);
   const { pages, loading, error } = useWikiData(knowledgeBaseId);
   const [summaryPages, setSummaryPages] = useState<WikiPage[]>([]);
   useEffect(() => {
@@ -156,6 +166,7 @@ const PrivateKnowledgeBaseWorkspace: FC<PrivateKnowledgeBaseWorkspaceProps> = ({
   const handleModeChange = (nextMode: WikiWorkspaceMode, fromTabs = false) => {
     navigationRequest.current += 1;
     if (nextMode === 'wikiGraph') {
+      setShowGraphBack(!fromTabs);
       setGraphInitialPageId(
         (mode === 'wiki' || mode === 'summary') && selectedPage?.id !== WIKI_CATALOG_PAGE_ID && selectedPage?.id !== WIKI_SUMMARY_PAGE_ID
           ? selectedPage?.id
@@ -195,6 +206,7 @@ const PrivateKnowledgeBaseWorkspace: FC<PrivateKnowledgeBaseWorkspaceProps> = ({
           if (key === 'wikiGraph') {
             navigationRequest.current += 1;
             setGraphInitialPageId(undefined);
+            setShowGraphBack(false);
             setMode('wikiGraph');
             return;
           }
@@ -221,7 +233,9 @@ const PrivateKnowledgeBaseWorkspace: FC<PrivateKnowledgeBaseWorkspaceProps> = ({
             key={knowledgeBaseId}
             knowledgeBaseId={knowledgeBaseId}
             directoryTab={directoryTab}
-            wikiActive={mode === 'wiki' || mode === 'summary'}
+            wikiActive={wikiActive}
+            keyword={keyword}
+            onSearch={(value) => setSearch({ scope: searchScope, keyword: value })}
             pages={[
               ...(directoryTab === 'summary' ? summaryPages : pages),
               ...(openedPage && openedPage.id === selectedPageId ? [openedPage] : []),
@@ -248,6 +262,7 @@ const PrivateKnowledgeBaseWorkspace: FC<PrivateKnowledgeBaseWorkspaceProps> = ({
               <WikiReader
                 key={`${knowledgeBaseId}:${selectedPage?.id}:${catalogRefreshKey}`}
                 summaryMode={mode === 'summary'}
+                keyword={keyword}
                 knowledgeBase={knowledgeBase}
                 knowledgeBaseId={knowledgeBaseId}
                 breadcrumbPath={breadcrumbPath}
@@ -272,7 +287,7 @@ const PrivateKnowledgeBaseWorkspace: FC<PrivateKnowledgeBaseWorkspaceProps> = ({
                 knowledgeBaseId={knowledgeBaseId}
                 pages={pages}
                 initialPageId={graphInitialPageId}
-                onBack={() => handleModeChange(directoryTab === 'summary' ? 'summary' : 'wiki')}
+                onBack={showGraphBack ? () => handleModeChange(directoryTab === 'summary' ? 'summary' : 'wiki') : undefined}
                 onOpenPage={openWikiPage}
               />
             )

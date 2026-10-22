@@ -10,6 +10,7 @@ import type {
   WikiGraph,
 } from '@/views/KnowledgeBase/components/Private/Wiki/types';
 import type {
+  FaqQuery,
   FaqItem,
   FaqListResponse,
   FaqForm,
@@ -85,8 +86,8 @@ export const getWikiPageHistory = (knowledgeBaseId: string, pageId: string, offs
 
 // FAQ 列表与全库状态计数
 export const getFaqListUrl = (kb_id: string) => `/knowledges/${kb_id}/faqs`;
-export const getFaqList = (kb_id: string) => {
-  return request.get<FaqListResponse>(getFaqListUrl(kb_id))
+export const getFaqList = (kb_id: string, data: FaqQuery) => {
+  return request.get<FaqListResponse>(getFaqListUrl(kb_id), data)
 };
 
 // 手工新建 FAQ

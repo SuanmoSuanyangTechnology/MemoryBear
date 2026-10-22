@@ -17,7 +17,7 @@ interface WikiGraphProps {
   pages: WikiPage[];
   knowledgeBaseId: string;
   initialPageId?: string;
-  onBack: () => void;
+  onBack?: () => void;
   onOpenPage: (pageId: string) => void;
 }
 
@@ -138,7 +138,7 @@ const WikiGraph: FC<WikiGraphProps> = ({
     [pages],
   );
 
-  const navigation = (
+  const navigation = onBack ? (
     <Flex
       align="center"
       gap={12}
@@ -150,7 +150,7 @@ const WikiGraph: FC<WikiGraphProps> = ({
         {t('knowledgeBase.backToWiki')}
       </Button>
     </Flex>
-  );
+  ) : null;
 
   if (loading || error || !pages.length) {
     return (
@@ -158,7 +158,7 @@ const WikiGraph: FC<WikiGraphProps> = ({
         vertical
         className="rb:h-full"
       >
-        <div className="rb:p-4!">{navigation}</div>
+        {navigation && <div className="rb:p-4!">{navigation}</div>}
         <Flex
           align="center"
           justify="center"
@@ -184,7 +184,7 @@ const WikiGraph: FC<WikiGraphProps> = ({
   return (
     <Flex className="rb:h-full rb:min-w-0 rb:overflow-hidden rb:bg-white">
       <div className="rb:relative rb:min-w-0 rb:flex-1">
-        <div className="rb:absolute rb:left-0 rb:top-3 rb:z-10">{navigation}</div>
+        {navigation && <div className="rb:absolute rb:left-0 rb:top-3 rb:z-10">{navigation}</div>}
         <WikiD3Graph
           ref={graphRef}
           pages={pages}
