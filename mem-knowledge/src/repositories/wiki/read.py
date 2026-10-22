@@ -119,9 +119,18 @@ def page_data(row, folders):
     }
 
 
-def list_pages(session, scope, *, page_types=(), page=1, pagesize=50, legacy=False):
+def list_pages(
+    session, scope, *, page_types=(), keyword=None, page=1, pagesize=50, legacy=False
+):
     begin_read(session, scope)
     condition = scoped_pages(scope, page_types)
+    keyword = (keyword or "").strip()
+    if keyword:
+        condition = and_(condition, or_(
+            WikiPage.title.icontains(keyword, autoescape=True),
+            WikiPage.summary.icontains(keyword, autoescape=True),
+            WikiPage.content.icontains(keyword, autoescape=True),
+        ))
     total = session.scalar(select(func.count()).select_from(WikiPage).where(condition))
     rows = session.execute(
         select(*PAGE_COLUMNS)
@@ -135,7 +144,7 @@ def list_pages(session, scope, *, page_types=(), page=1, pagesize=50, legacy=Fal
         "page": page,
         "pagesize": pagesize,
         "total": total,
-        "has_next": page * pagesize < total,
+        "hasnext": page * pagesize < total,
     }
     items = [page_data(row, folders) for row in rows]
     if legacy:
@@ -320,7 +329,7 @@ def tree(
             "page": page,
             "pagesize": pagesize,
             "total": total,
-            "has_next": has_next,
+            "hasnext": has_next,
         },
     }
 

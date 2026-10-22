@@ -79,7 +79,7 @@ def list_faqs(
             "page": page,
             "pagesize": limit,
             "total": total,
-            "has_next": page * limit < total,
+            "hasnext": page * limit < total,
         },
         "total_all": sum(counts.values()),
         "review_counts": {"all": sum(counts.values()), **counts},
@@ -198,6 +198,6 @@ def list_jobs(session, scope, *, wiki_page_id=None, page=1, limit=20):
             "page": page,
             "pagesize": limit,
             "total": total,
-            "has_next": page * limit < total,
+            "hasnext": page * limit < total,
         },
     }
