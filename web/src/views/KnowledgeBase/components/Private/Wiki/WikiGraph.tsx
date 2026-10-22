@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState, type FC } from 'react';
 import { Button, Flex, Tooltip } from 'antd';
 import { AimOutlined, MinusOutlined, PlusOutlined } from '@ant-design/icons';
-import WikiD3Graph, { type WikiD3GraphRef } from './WikiD3Graph';
 import { useTranslation } from 'react-i18next';
 
+import WikiD3Graph, { type WikiD3GraphRef } from './WikiD3Graph';
 import type { BreadcrumbPath } from '@/hooks/useBreadcrumbManager';
 import WikiArticle from './WikiArticle';
 import { useWikiPageDetail } from '../hooks/useWikiPageDetail';
@@ -11,14 +11,11 @@ import Empty from '@/components/Empty';
 
 import { getKnowledgeWikiGraph } from '@/api/kbWiki';
 import { WIKI_CATALOG_PAGE_ID, type PageType, type WikiGraph as WikiGraphData, type WikiPage, type WikiRelation } from './types';
-import DirectoryToggle from '../DirectoryToggle';
 
 interface WikiGraphProps {
   breadcrumbPath: BreadcrumbPath;
   pages: WikiPage[];
   knowledgeBaseId: string;
-  directoryCollapsed: boolean;
-  onToggleDirectory: () => void;
   initialPageId?: string;
   onBack: () => void;
   onOpenPage: (pageId: string) => void;
@@ -37,8 +34,6 @@ const WikiGraph: FC<WikiGraphProps> = ({
   initialPageId,
   onBack,
   onOpenPage,
-  directoryCollapsed,
-  onToggleDirectory,
 }) => {
   const { t } = useTranslation();
   const graphRef = useRef<WikiD3GraphRef>(null);
@@ -70,8 +65,6 @@ const WikiGraph: FC<WikiGraphProps> = ({
     getKnowledgeWikiGraph(knowledgeBaseId, {
       mode: centerPageId ? 'ego' : 'overview',
       ...(centerPageId ? { center_page_id: centerPageId } : {}),
-      types: 'entity,concept' as PageType,
-      limit: 200,
     }).then((data) => {
       if (active) {
         setGraph(data);
@@ -150,10 +143,6 @@ const WikiGraph: FC<WikiGraphProps> = ({
       align="center"
       gap={12}
     >
-      <DirectoryToggle
-        directoryCollapsed={directoryCollapsed}
-        onToggleDirectory={onToggleDirectory}
-      />
       <Button
         icon={<div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/common/arrow_right_dark.svg')] rb:rotate-180" />}
         onClick={onBack}

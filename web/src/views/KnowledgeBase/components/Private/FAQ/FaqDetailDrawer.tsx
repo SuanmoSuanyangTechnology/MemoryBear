@@ -155,15 +155,17 @@ const FaqDetailDrawer = forwardRef<FaqDetailDrawerRef, FaqDetailDrawerProps>(({
         : detail
         ? (
           <Flex vertical gap={12}>
-            <Flex gap={12} align="center" className="rb:text-gray-600 rb:text-[12px] rb:mb-3!">
+            <Flex wrap gap={12} align="center" className="rb:text-gray-600 rb:text-[12px] rb:mb-3!">
               <StatusTag
                 status={statusColors[detail.review_status]}
                 text={t(`knowledgeBase.faq.${detail.review_status}`)}
               />
 
-              <span>{t(detail.is_enabled ? 'knowledgeBase.faq.enabledHint' : 'knowledgeBase.faq.disabledHint')}</span>
+              <Tag color={detail.is_enabled ? 'success' : 'default'}>
+                {t(detail.is_enabled ? 'knowledgeBase.faq.enabledHint' : 'knowledgeBase.faq.disabledHint')}
+              </Tag>
 
-              <span>{t('knowledgeBase.faq.updatedAtTime', { time: formatDateTime(detail.updated_at_ms) })}</span>
+              <Tag color="default">{t('knowledgeBase.faq.updatedAtTime', { time: formatDateTime(detail.updated_at_ms) })}</Tag>
             </Flex>
 
             <div className="rb:text-gray-600">{t('knowledgeBase.faq.question')}</div>

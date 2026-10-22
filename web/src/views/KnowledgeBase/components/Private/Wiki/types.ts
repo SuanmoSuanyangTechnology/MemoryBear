@@ -1,7 +1,7 @@
 export const WIKI_CATALOG_PAGE_ID = '__wiki_catalog__';
 export const WIKI_SUMMARY_PAGE_ID = '__wiki_summary__';
 
-export type WikiWorkspaceMode = 'files' | 'wiki' | 'wikiGraph' | 'faq' | 'knowledgeGraph';
+export type WikiWorkspaceMode = 'files' | 'wiki' | 'summary' | 'wikiGraph' | 'faq' | 'knowledgeGraph';
 
 export interface WikiPage {
   id: string;
@@ -57,6 +57,7 @@ export type PageType = 'summary' | 'entity' | 'concept';
 // 支持单个类型或最多三个类型的逗号分隔组合。
 export type PageTypesQuery = PageType | `${PageType},${PageType}` | `${PageType},${PageType},${PageType}`;
 export interface  WikiTreeQuery {
+  keyword?: string;
   /**
    * 父级目录
    */
@@ -201,7 +202,7 @@ export interface WikiGraphQuery {
    * 逗号分隔 summary/entity/concept；
    * 注意图谱参数名为 types，不是 page_types。
    */
-  types: PageTypesQuery;
+  types?: PageTypesQuery;
   /**
    * ego 扩展深度，默认 1，最多 2。
    */

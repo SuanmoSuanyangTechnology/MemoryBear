@@ -41,8 +41,9 @@ export const getKnowledgeWikiIndex = (kb_id: string) => {
   return request.get<WikiIndexResponse>(`/knowledges/${kb_id}/wiki/index`)
 }
 // Wiki 页面列表与搜索
+export const getKnowledgeWikiPagesUrl = (kb_id: string) => `/knowledges/${kb_id}/wiki/pages`;
 export const getKnowledgeWikiPages = (kb_id: string, params?: WikiPagesQuery) => {
-  return request.get<WikiPagesResponse>(`/knowledges/${kb_id}/wiki/pages`, params)
+  return request.get<WikiPagesResponse>(getKnowledgeWikiPagesUrl(kb_id), params)
 }
 // Wiki 页面详情与来源
 export const getKnowledgeWikiPageDetail = (kb_id: string, page_id: string) => {

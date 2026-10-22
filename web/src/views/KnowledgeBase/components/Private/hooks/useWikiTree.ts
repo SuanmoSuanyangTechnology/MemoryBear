@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { getKnowledgeWikiTree } from '@/api/kbWiki';
-import type { WikiTreeItem } from '../Wiki/types';
+import type { PageTypesQuery, WikiTreeItem } from '../Wiki/types';
 
 interface Branch {
   items: WikiTreeItem[];
@@ -10,10 +10,21 @@ interface Branch {
   error: boolean;
 }
 
-export const useWikiTree = (knowledgeBaseId: string, active = true) => {
+export const useWikiTree = (
+  knowledgeBaseId: string,
+  active = true,
+  pageTypes: PageTypesQuery = 'entity,concept',
+  keyword = '',
+  onLoaded?: () => void,
+) => {
   const [branches, setBranches] = useState<Record<string, Branch>>({});
   const cache = useRef<Record<string, Branch>>({});
   const generation = useRef(0);
+  const onLoadedRef = useRef(onLoaded);
+
+  useEffect(() => {
+    onLoadedRef.current = onLoaded;
+  }, [onLoaded]);
 
   const load = useCallback(async (folderId = '', more = false) => {
     if (!active || !knowledgeBaseId) return;
@@ -32,7 +43,8 @@ export const useWikiTree = (knowledgeBaseId: string, active = true) => {
     try {
       const response = await getKnowledgeWikiTree(knowledgeBaseId, {
         folder_id: folderId || undefined,
-        page_types: 'entity,concept',
+        page_types: pageTypes,
+        keyword: keyword || undefined,
         page: next.page + 1,
         pagesize: 50,
       });
@@ -52,9 +64,12 @@ export const useWikiTree = (knowledgeBaseId: string, active = true) => {
     } catch {
       if (version !== generation.current) return;
       cache.current = { ...cache.current, [folderId]: { ...next, loading: false, error: true } };
+      setBranches(cache.current);
+      return;
     }
     setBranches(cache.current);
-  }, [knowledgeBaseId, active]);
+    if (!folderId) onLoadedRef.current?.();
+  }, [knowledgeBaseId, active, pageTypes, keyword]);
 
   useEffect(() => {
     generation.current += 1;

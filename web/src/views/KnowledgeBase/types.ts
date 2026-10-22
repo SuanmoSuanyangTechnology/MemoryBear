@@ -18,7 +18,7 @@ export interface KnowledgeBaseFormData {
   parent_id?: string; // 父ID
   type?: string; // 知识库类型
   status?: number; // 状态
-  parser_config: ParserConfig; // 解析器配置
+  parser_config?: ParserConfig; // 解析器配置
 }
 export interface GraphragConfig{
   use_graphrag:boolean; // 是否启用图谱

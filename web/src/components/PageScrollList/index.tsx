@@ -65,6 +65,7 @@ interface PageScrollListProps<T, Q = Record<string, unknown>> {
   gutter?: [number, number] | number;
   onTotalChange?: (total: number) => void;
   empty?: React.ReactNode;
+  onLoad?: (res: any) => void;
 }
 
 const defaultHeightClass = 'rb:h-[calc(100vh-118px)]!';
@@ -83,6 +84,7 @@ const PageScrollList = forwardRef(<T, Q = Record<string, unknown>>({
   gutter = [12, 12],
   onTotalChange,
   empty,
+  onLoad,
 }: PageScrollListProps<T, Q>, ref: React.Ref<PageScrollListRef>) => {
   const scrollableTargetId = `page-scroll-list-${useId().replace(/:/g, '')}`;
   /** Expose refresh method to parent component */
@@ -105,6 +107,10 @@ const PageScrollList = forwardRef(<T, Q = Record<string, unknown>>({
   const loadingRef = useRef(false);
   const hasMoreRef = useRef(true);
   const [total, setTotal] = useState(0);
+  const onLoadRef = useRef(onLoad);
+  useEffect(() => {
+    onLoadRef.current = onLoad;
+  }, [onLoad]);
 
   /** Load more data from API with pagination */
   const loadMoreData = (reset?: boolean) => {
@@ -127,6 +133,7 @@ const PageScrollList = forwardRef(<T, Q = Record<string, unknown>>({
         const newTotal = response.page?.total || 0;
         setTotal(newTotal);
         onTotalChange?.(newTotal);
+        onLoadRef.current?.(res)
       })
       .catch(() => {
         hasMoreRef.current = false;
