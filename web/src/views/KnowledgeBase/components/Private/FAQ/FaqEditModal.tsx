@@ -2,12 +2,12 @@ import { forwardRef, useImperativeHandle, useState } from 'react';
 import { App, Form, Input } from 'antd';
 import { useTranslation } from 'react-i18next';
 
-import { createFaq, updateFaq } from '@/api/kbWiki';
+import { createFaq } from '@/api/kbWiki';
 import RbModal from '@/components/RbModal';
-import type { FaqItem, FaqForm } from './types'
+import type { FaqForm } from './types'
 
 export interface FaqEditModalRef {
-  handleOpen: (item?: FaqItem) => void;
+  handleOpen: () => void;
 }
 
 interface FaqEditModalProps {
@@ -20,14 +20,12 @@ const FaqEditModal = forwardRef<FaqEditModalRef, FaqEditModalProps>(({
 }, ref) => {
   const { t } = useTranslation();
   const [visible, setVisible] = useState(false);
-  const [editing, setEditing] = useState<FaqItem | undefined>(undefined);
   const [form] = Form.useForm<FaqForm>();
   const { message } = App.useApp();
   const [loading, setLoading] = useState(false);
 
   const handleClose = () => {
     setVisible(false);
-    setEditing(undefined)
     form.resetFields()
   };
 
@@ -35,19 +33,9 @@ const FaqEditModal = forwardRef<FaqEditModalRef, FaqEditModalProps>(({
     form.validateFields()
       .then((values) => {
         setLoading(true)
-        const request = editing
-          ? updateFaq(knowledgeBaseId, editing.id, {
-            ...values,
-            expected_row_version: editing.row_version
-          })
-          : createFaq(knowledgeBaseId, values)
-        request
+        createFaq(knowledgeBaseId, values)
           .then(() => {
-            if (editing) {
-              message.success(t('common.updateSuccess'))
-            } else {
-              message.success(t('common.createSuccess'))
-            }
+            message.success(t('common.createSuccess'))
             refresh?.()
             handleClose()
           })
@@ -58,18 +46,14 @@ const FaqEditModal = forwardRef<FaqEditModalRef, FaqEditModalProps>(({
   };
 
   useImperativeHandle(ref, () => ({
-    handleOpen: (item) => {
+    handleOpen: () => {
       setVisible(true);
-      if (item) {
-        form.setFieldsValue(item)
-        setEditing(item);
-      }
     },
   }));
 
   return (
     <RbModal
-      title={t(editing ? 'knowledgeBase.faq.editTitle' : 'knowledgeBase.faq.add')}
+      title={t('knowledgeBase.faq.add')}
       open={visible}
       confirmLoading={loading}
       onOk={handleSave}
@@ -77,7 +61,6 @@ const FaqEditModal = forwardRef<FaqEditModalRef, FaqEditModalProps>(({
     >
       <Form
         form={form}
-        key={editing?.id ?? 'new'}
         layout="vertical"
       >
         <Form.Item

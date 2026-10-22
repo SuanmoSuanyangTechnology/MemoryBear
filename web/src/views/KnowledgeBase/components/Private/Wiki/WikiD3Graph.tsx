@@ -1,4 +1,4 @@
-import { forwardRef, useEffect, useId, useImperativeHandle, useRef } from 'react';
+import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react';
 import * as d3 from 'd3';
 
 import type { WikiPage, WikiRelation } from './types';
@@ -12,7 +12,6 @@ interface GraphNode extends d3.SimulationNodeDatum {
 
 interface GraphLink extends d3.SimulationLinkDatum<GraphNode> {
   weight: number;
-  bidirectional: boolean;
 }
 
 interface WikiD3GraphProps {
@@ -39,7 +38,6 @@ const WikiD3Graph = forwardRef<WikiD3GraphRef, WikiD3GraphProps>(({ pages, relat
   }), []);
 
   const containerRef = useRef<HTMLDivElement>(null);
-  const arrowId = `wiki-arrow-${useId().replace(/:/g, '')}`;
   const selectionRef = useRef(selectedPageId);
   const onSelectRef = useRef(onSelect);
   const highlightRef = useRef<(() => void) | null>(null);
@@ -66,14 +64,25 @@ const WikiD3Graph = forwardRef<WikiD3GraphRef, WikiD3GraphProps>(({ pages, relat
       color: colors[page.category] ?? '#6B8FA3',
     }));
     const ids = new Set(nodes.map((node) => node.id));
-    const directions = new Set(relations.map(({ source, target }) => JSON.stringify([source, target])));
+    const seenPairs = new Set<string>();
     const links: GraphLink[] = relations
-      .filter((relation) => ids.has(relation.source) && ids.has(relation.target))
+      .filter(({ source, target }) => {
+        if (!ids.has(source) || !ids.has(target)) {
+          return false;
+        }
+
+        const key = JSON.stringify([source, target].sort());
+        if (seenPairs.has(key)) {
+          return false;
+        }
+
+        seenPairs.add(key);
+        return true;
+      })
       .map((relation) => ({
         source: relation.source,
         target: relation.target,
         weight: relation.weight,
-        bidirectional: relation.source !== relation.target && directions.has(JSON.stringify([relation.target, relation.source])),
       }));
     const endpointId = (endpoint: GraphLink['source']) =>
       typeof endpoint === 'object' ? endpoint.id : String(endpoint);
@@ -82,17 +91,6 @@ const WikiD3Graph = forwardRef<WikiD3GraphRef, WikiD3GraphProps>(({ pages, relat
       .attr('width', '100%')
       .attr('height', '100%')
       .style('display', 'block');
-    svg.append('defs').append('marker')
-      .attr('id', arrowId)
-      .attr('viewBox', '-6 -6 12 12')
-      .attr('refX', 5)
-      .attr('refY', 0)
-      .attr('markerWidth', 8)
-      .attr('markerHeight', 8)
-      .attr('orient', 'auto')
-      .append('path')
-      .attr('d', 'M-3,-3L5,0L-3,3')
-      .attr('fill', '#5B6167');
     const group = svg.append('g');
     const zoom = d3.zoom<SVGSVGElement, unknown>()
       .scaleExtent([0.2, 5])
@@ -120,8 +118,7 @@ const WikiD3Graph = forwardRef<WikiD3GraphRef, WikiD3GraphProps>(({ pages, relat
       },
     };
     const edges = group.append('g').selectAll('line').data(links).join('line')
-      .attr('stroke', '#A8ABB2')
-      .attr('marker-end', `url(#${arrowId})`);
+      .attr('stroke', '#A8ABB2');
     const nodeGroups = group.append('g').selectAll<SVGGElement, GraphNode>('g').data(nodes).join('g')
       .style('cursor', 'pointer');
     const circles = nodeGroups.append('circle').attr('fill', (node) => node.color);
@@ -191,14 +188,13 @@ const WikiD3Graph = forwardRef<WikiD3GraphRef, WikiD3GraphProps>(({ pages, relat
           const distance = Math.hypot(dx, dy) || 1;
           const ux = dx / distance;
           const uy = dy / distance;
-          const offset = link.bidirectional ? 3 : 0;
-          const sourcePadding = Math.sqrt(Math.max(0, (source.radius + 2) ** 2 - offset ** 2));
-          const targetPadding = Math.sqrt(Math.max(0, (target.radius + 2) ** 2 - offset ** 2));
+          const sourcePadding = source.radius + 2;
+          const targetPadding = target.radius + 2;
           d3.select(this)
-            .attr('x1', (source.x ?? 0) + ux * sourcePadding - uy * offset)
-            .attr('y1', (source.y ?? 0) + uy * sourcePadding + ux * offset)
-            .attr('x2', (target.x ?? 0) - ux * targetPadding - uy * offset)
-            .attr('y2', (target.y ?? 0) - uy * targetPadding + ux * offset);
+            .attr('x1', (source.x ?? 0) + ux * sourcePadding)
+            .attr('y1', (source.y ?? 0) + uy * sourcePadding)
+            .attr('x2', (target.x ?? 0) - ux * targetPadding)
+            .attr('y2', (target.y ?? 0) - uy * targetPadding);
         });
         nodeGroups.attr('transform', (node) => `translate(${node.x ?? 0},${node.y ?? 0})`);
       });
@@ -238,7 +234,7 @@ const WikiD3Graph = forwardRef<WikiD3GraphRef, WikiD3GraphProps>(({ pages, relat
       controlsRef.current = null;
       svg.remove();
     };
-  }, [pages, relations, colors, arrowId]);
+  }, [pages, relations, colors]);
 
   return <div ref={containerRef} className="rb:absolute rb:inset-0" />;
 });

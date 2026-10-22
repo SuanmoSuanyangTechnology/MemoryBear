@@ -4,12 +4,10 @@ import { useWikiPageDetail } from '../hooks/useWikiPageDetail';
 import { useTranslation } from 'react-i18next';
 
 import WikiCatalog from './WikiCatalog';
-
 import type { BreadcrumbPath } from '@/hooks/useBreadcrumbManager';
 import type { KnowledgeBaseListItem } from '@/views/KnowledgeBase/types';
-import { WIKI_CATALOG_PAGE_ID, WIKI_SUMMARY_PAGE_ID, type WikiPage } from './types';
+import { WIKI_CATALOG_PAGE_ID, WIKI_SUMMARY_PAGE_ID, type WikiPage, type WikiPageDetail } from './types';
 import DirectoryToggle from '../DirectoryToggle';
-import WikiHistory from './WikiHistory';
 import Empty from '@/components/Empty';
 import WikiArticle from './WikiArticle';
 
@@ -17,6 +15,8 @@ interface WikiReaderProps {
   breadcrumbPath: BreadcrumbPath;
   knowledgeBase: KnowledgeBaseListItem;
   page?: WikiPage;
+  initialDetail?: WikiPageDetail;
+  summaryMode?: boolean;
   pages: WikiPage[];
   onSummaryPagesLoaded: (pages: WikiPage[]) => void;
   knowledgeBaseId: string;
@@ -33,6 +33,8 @@ interface WikiReaderProps {
 const WikiReader: FC<WikiReaderProps> = ({
   breadcrumbPath,
   page,
+  initialDetail,
+  summaryMode = false,
   onSummaryPagesLoaded,
   knowledgeBase,
   knowledgeBaseId,
@@ -54,7 +56,7 @@ const WikiReader: FC<WikiReaderProps> = ({
     loading: detailLoading,
     error: detailError,
     refresh,
-  } = useWikiPageDetail(knowledgeBaseId, isCatalog ? undefined : pageId);
+  } = useWikiPageDetail(knowledgeBaseId, isCatalog ? undefined : pageId, initialDetail);
   const markdown = detail?.content ?? '';
 
   const handleMarkdownClick = (event: MouseEvent<HTMLDivElement>) => {
@@ -84,18 +86,19 @@ const WikiReader: FC<WikiReaderProps> = ({
           title: (
             <span
               className="rb:cursor-pointer rb:border-0 rb:bg-transparent rb:p-0! rb:text-inherit rb:hover:text-blue-500"
-              onClick={() => onPageSelect(WIKI_CATALOG_PAGE_ID)}
+              onClick={() => onPageSelect(summaryMode ? WIKI_SUMMARY_PAGE_ID : WIKI_CATALOG_PAGE_ID)}
             >
-              {t('knowledgeBase.wiki')}
+              {t(summaryMode ? 'knowledgeBase.wikiSummary' : 'knowledgeBase.wiki')}
             </span>
           ),
         },
         ...(page
           ? [
-            ...(isCatalog ? [] : [{ title: page.category }]),
-            { title: page.title },
+            ...(isCatalog ? [] : (page.category ? [{ title: page.category }] : [])),
+            ...(page.title ? [{ title: page.title }] : []),
           ]
-          : []),
+          : []
+        ),
       ]}
     />
   );
@@ -189,13 +192,6 @@ const WikiReader: FC<WikiReaderProps> = ({
           >
             {t('knowledgeBase.graph')}
           </Button>
-          {!isCatalog && (
-            <WikiHistory
-              key={`${knowledgeBaseId}:${page.id}`}
-              knowledgeBaseId={knowledgeBaseId}
-              pageId={page.id}
-            />
-          )}
         </Flex>
       </Flex>
       <div className="rb:flex-1 rb:pl-5! rb:pr-8! rb:py-3! rb:overflow-hidden">

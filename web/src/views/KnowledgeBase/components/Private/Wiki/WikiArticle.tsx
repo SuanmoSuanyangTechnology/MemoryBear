@@ -151,7 +151,7 @@ export default function WikiArticle({
               />
             </div>
             {groups.size > 0 && (
-              <section>
+              <section className="rb:mt-4">
                 <h2 className="rb:text-lg rb:font-medium rb:mb-3!">{t('knowledgeBase.privateWiki.sources')}</h2>
                 <ul className="rb:pl-6! rb:list-disc">
                   {[...groups.entries()].map(([documentId, excerpts]) => (
@@ -185,25 +185,13 @@ export default function WikiArticle({
                           excerpts[0].document_title || t('knowledgeBase.privateWiki.sources')
                         )}
                       </div>
-                      {excerpts.map((source, index) => (
-                        <details
-                          key={`${source.ref}:${index}`}
-                          id={`wiki-source-${source.ref}`}
-                          tabIndex={-1}
-                          className="rb:mt-2! rb:rounded-lg rb:bg-gray-50 rb:p-3! rb:text-gray-600 rb:text-[12px]"
-                        >
-                          <summary className="rb:cursor-pointer">{t('knowledgeBase.privateWiki.excerpt', { ref: source.ref })}</summary>
-                          <blockquote className="rb:my-2! rb:whitespace-pre-wrap">{source.quote}</blockquote>
-                          <span className="rb:text-xs rb:text-gray-500">{t('knowledgeBase.privateWiki.chunkId', { id: source.chunk_id })}</span>
-                        </details>
-                      ))}
                     </li>
                   ))}
                 </ul>
               </section>
             )}
             {detail.outlinks.length > 0 && (
-              <section>
+              <section className="rb:mt-4">
                 <h2 className="rb:text-lg rb:font-medium">{t('knowledgeBase.privateWiki.related')}</h2>
                 <ul className="rb:list-disc! rb:pl-6!">
                   {detail.outlinks.map((link) => (

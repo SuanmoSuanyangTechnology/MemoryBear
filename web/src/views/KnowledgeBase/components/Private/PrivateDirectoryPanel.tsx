@@ -16,13 +16,14 @@ import {
 } from './Wiki/types';
 
 interface PrivateDirectoryPanelProps {
-  directoryTab: 'files' | 'wiki';
+  directoryTab: 'files' | 'wiki' | 'summary';
   wikiActive: boolean;
   pages: WikiPage[];
   knowledgeBaseId: string;
   selectedPageId?: string;
   fileDirectory: ReactNode;
   onPageSelect: (pageId: string) => void;
+  onTreeLoaded: (pageId: string) => void;
 }
 
 // Each visible branch has its own pagination sentinel.
@@ -53,16 +54,31 @@ const PrivateDirectoryPanel: FC<PrivateDirectoryPanelProps> = ({
   selectedPageId,
   fileDirectory,
   onPageSelect,
+  onTreeLoaded,
 }) => {
   const { t } = useTranslation();
-  const [keyword, setKeyword] = useState('');
+  const isSummaryMode = directoryTab === 'summary';
+  const searchScope = `${knowledgeBaseId}:${directoryTab}:${wikiActive}`;
+  const [search, setSearch] = useState<{ scope?: string; keyword?: string; }>({ scope: searchScope, keyword: undefined });
+  const keyword = search.scope === searchScope ? search.keyword : undefined;
   const directoryRef = useRef<HTMLDivElement>(null);
   const [expandedKeys, setExpandedKeys] = useState<Key[]>([]);
-  const { branches, load } = useWikiTree(knowledgeBaseId, wikiActive);
+  const { branches, load } = useWikiTree(
+    knowledgeBaseId,
+    wikiActive,
+    isSummaryMode ? 'summary' : 'entity,concept',
+    keyword,
+    () => {
+      // Refreshing the tree must not override an explicitly opened page.
+      if (!keyword && selectedPageId && selectedPageId !== WIKI_CATALOG_PAGE_ID && selectedPageId !== WIKI_SUMMARY_PAGE_ID) return;
+      onTreeLoaded(isSummaryMode ? WIKI_SUMMARY_PAGE_ID : WIKI_CATALOG_PAGE_ID);
+    },
+  );
 
   useEffect(() => {
     setExpandedKeys([]);
-  }, [knowledgeBaseId, wikiActive]);
+    setSearch({ scope: searchScope, keyword: undefined });
+  }, [searchScope]);
   const loading = !branches[''] || (branches[''].loading && !branches[''].items.length);
   const isFilesMode = directoryTab === 'files';
   const buildBranch = (folderId = '', ancestors = new Set<string>()): DataNode[] => {
@@ -92,7 +108,7 @@ const PrivateDirectoryPanel: FC<PrivateDirectoryPanelProps> = ({
             folderId={folderId}
             load={load}
             failed={branch.error}
-            label={branch.error ? t('knowledgeBase.wikiLoadFailed') : t('common.loading')}
+            label={branch.error ? t(isSummaryMode ? 'knowledgeBase.summaryLoadFailed' : 'knowledgeBase.wikiLoadFailed') : t('common.loading')}
           />
         ),
       });
@@ -101,17 +117,16 @@ const PrivateDirectoryPanel: FC<PrivateDirectoryPanelProps> = ({
   };
   const hasWikiTreeData = Boolean(branches['']?.items.length);
   const treeData: DataNode[] = [
-    { key: WIKI_CATALOG_PAGE_ID, title: t('knowledgeBase.wikiCatalog'), isLeaf: true },
-    ...(hasWikiTreeData ? [
-      { key: WIKI_SUMMARY_PAGE_ID, title: t('knowledgeBase.wikiSummary'), isLeaf: true },
-      ...(keyword.trim() ? pages.filter((page) =>
-        `${page.title} ${page.summary} ${page.category}`.toLocaleLowerCase().includes(keyword.trim().toLocaleLowerCase()),
-      ).map((page) => ({ key: page.id, title: page.title, isLeaf: true })) : buildBranch()),
-    ] : []),
+    {
+      key: directoryTab === 'summary' ? WIKI_SUMMARY_PAGE_ID : WIKI_CATALOG_PAGE_ID,
+      title: t(directoryTab === 'summary' ? 'knowledgeBase.summaryCatalog' : 'knowledgeBase.wikiCatalog'),
+      isLeaf: true,
+    },
+    ...(hasWikiTreeData ? buildBranch() : []),
   ];
 
   useEffect(() => {
-    if (!wikiActive) return;
+    if (!wikiActive || keyword) return;
     const path = pages.find((item) => item.id === selectedPageId)?.folderPath ?? [];
     setExpandedKeys((keys) => [...new Set([...keys, ...path.map((folder) => `folder:${folder.id}`)])]);
     let active = true;
@@ -133,7 +148,7 @@ const PrivateDirectoryPanel: FC<PrivateDirectoryPanelProps> = ({
     };
     if (selectedPageId && selectedPageId !== WIKI_CATALOG_PAGE_ID && selectedPageId !== WIKI_SUMMARY_PAGE_ID) void reveal();
     return () => { active = false; };
-  }, [pages, selectedPageId, branches, load, wikiActive]);
+  }, [pages, selectedPageId, branches, load, wikiActive, keyword]);
   useEffect(() => {
     if (isFilesMode || loading || !selectedPageId) return;
     const container = directoryRef.current;
@@ -181,12 +196,12 @@ const PrivateDirectoryPanel: FC<PrivateDirectoryPanelProps> = ({
     <aside className="rb:flex rb:h-full rb:w-63 rb:p-3 rb:shrink-0 rb:flex-col rb:border-r rb:border-[#EAECEE] rb:bg-[#FBFCFD]">
       {!isFilesMode && (
         <SearchInput
-          defaultValue={keyword}
+          key={searchScope}
           debounceDelay={300}
           variant="outlined"
           className="rb:w-full!"
-          placeholder={t('knowledgeBase.wikiSearch')}
-          onSearch={setKeyword}
+          placeholder={t(isSummaryMode ? 'knowledgeBase.summarySearch' : 'knowledgeBase.wikiSearch')}
+          onSearch={(value) => setSearch({ scope: searchScope, keyword: value })}
         />
       )}
 
@@ -225,7 +240,7 @@ const PrivateDirectoryPanel: FC<PrivateDirectoryPanelProps> = ({
           ) : (
             <Empty
               size={88}
-              subTitle={t('knowledgeBase.wikiEmptyTitle')}
+              subTitle={t(isSummaryMode ? 'knowledgeBase.summaryEmptyTitle' : 'knowledgeBase.wikiEmptyTitle')}
               className="rb:h-full!"
             />
           ))}

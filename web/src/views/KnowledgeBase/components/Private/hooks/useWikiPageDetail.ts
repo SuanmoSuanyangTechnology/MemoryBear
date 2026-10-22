@@ -4,7 +4,7 @@ import type { WikiPageDetail } from '../Wiki/types';
 
 const POLLING_INTERVAL = 60000;
 
-export const useWikiPageDetail = (knowledgeBaseId: string, pageId?: string) => {
+export const useWikiPageDetail = (knowledgeBaseId: string, pageId?: string, initialDetail?: WikiPageDetail) => {
   const [detail, setDetail] = useState<WikiPageDetail | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(false);
@@ -47,13 +47,21 @@ export const useWikiPageDetail = (knowledgeBaseId: string, pageId?: string) => {
       }
     };
 
-    void load();
+    if (initialDetail && reload === 0 && (initialDetail.page_id || initialDetail.id) === pageId) {
+      setDetail(initialDetail);
+      setLoading(false);
+      if (['pending', 'updating', 'cleanup_pending'].includes(initialDetail.status)) {
+        timer = setTimeout(() => void load(), POLLING_INTERVAL);
+      }
+    } else {
+      void load();
+    }
 
     return () => {
       active = false;
       clearTimeout(timer);
     };
-  }, [knowledgeBaseId, pageId, reload]);
+  }, [knowledgeBaseId, pageId, reload, initialDetail]);
 
   return { detail, loading, error, refresh };
 };

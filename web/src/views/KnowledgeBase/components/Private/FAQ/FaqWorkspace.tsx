@@ -28,7 +28,7 @@ export default function FaqWorkspace({ knowledgeBaseId, onOpenWikiPage }: {
 }) {
   const { t } = useTranslation();
   const { message, modal } = App.useApp();
-  const [form] = Form.useForm<{ review_status: FaqItem['review_status']; keyword: string }>();
+  const [form] = Form.useForm<{ review_status: FaqItem['review_status']; keywords?: string; is_enabled?: boolean; }>();
   const values = Form.useWatch([], form) ?? {};
   
   const [totalAll, setTotalAll] = useState<number>(0);
@@ -119,7 +119,7 @@ export default function FaqWorkspace({ knowledgeBaseId, onOpenWikiPage }: {
       title: t('knowledgeBase.faq.question&answer'),
       dataIndex: 'standard_question',
       render: (value, row) => (
-        <Flex vertical className="rb:max-w-150! rb:overflow-hidden! rb:cursor-pointer rb:group" onClick={() => faqDetailDrawerRef.current?.handleOpen(row)}>
+        <Flex vertical className="rb:max-w-120! rb:overflow-hidden! rb:cursor-pointer rb:group" onClick={() => faqDetailDrawerRef.current?.handleOpen(row)}>
           <div
             className="rb:truncate rb:font-medium rb:text-gray-900 rb:group-hover:text-blue-500"
           >
@@ -132,7 +132,7 @@ export default function FaqWorkspace({ knowledgeBaseId, onOpenWikiPage }: {
     {
       title: t('knowledgeBase.faq.reviewStatus'),
       dataIndex: 'review_status',
-      width: 100,
+      width: '100px',
       render: (value: FaqStatus) => (
         value
           ? <StatusTag
@@ -145,7 +145,7 @@ export default function FaqWorkspace({ knowledgeBaseId, onOpenWikiPage }: {
     {
       title: t('knowledgeBase.faq.enable'),
       dataIndex: 'is_enabled',
-      width: 100,
+      width: '80px',
       render: (value, row) => (
         <Switch checked={value} onChange={() => handleSwitch(row)} />
       ),
@@ -153,12 +153,13 @@ export default function FaqWorkspace({ knowledgeBaseId, onOpenWikiPage }: {
     {
       title: t('knowledgeBase.faq.updatedAt'),
       dataIndex: 'updated_at_ms',
-      width: 180,
+      width: '180px',
       render: (value) => formatDateTime(value),
     },
     {
       title: t('knowledgeBase.faq.actions'),
-      width: 180,
+      width: '180px',
+      fixed: 'right',
       render: (_, row) => (
         <Space size={8}>
           {['pending', 'change_pending'].includes(row.review_status) &&
@@ -186,7 +187,7 @@ export default function FaqWorkspace({ knowledgeBaseId, onOpenWikiPage }: {
   console.log('selectedList', selectedList, busy)
 
   return (
-    <Flex vertical gap={12} className="rb:py-3! rb:pr-3! rb:h-full rb:overflow-auto">
+    <Flex vertical gap={12} className="rb:pt-3! rb:pr-3! rb:h-full rb:overflow-auto">
       <Flex justify="space-between" gap={16} wrap>
         <Form
           form={form}

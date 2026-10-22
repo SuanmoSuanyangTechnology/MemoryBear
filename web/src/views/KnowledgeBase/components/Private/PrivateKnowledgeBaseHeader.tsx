@@ -1,6 +1,7 @@
 import { useEffect, useState, type FC } from 'react';
 import { Flex, Tooltip, type MenuProps, Divider } from 'antd';
 import { useTranslation } from 'react-i18next';
+import { EditOutlined, PlayCircleOutlined, StopOutlined } from '@ant-design/icons';
 
 import MoreDropdown from '@/components/MoreDropdown';
 import Tag from '@/components/Tag';
@@ -14,7 +15,8 @@ interface PrivateKnowledgeBaseHeaderProps {
   onShareKnowledgeBase: () => void;
   onOpenRecallTest: () => void;
   onOpenMetadata: () => void;
-  onOpenKnowledgeBaseSettings: () => void;
+  onOpenKnowledgeBaseSettings: (step?: number) => void;
+  onEditKnowledgeBase: () => void;
   onBatchDownloadKnowledgeBase: () => void;
   onExportKnowledgeBaseQa: () => void;
 }
@@ -27,6 +29,7 @@ const PrivateKnowledgeBaseHeader: FC<PrivateKnowledgeBaseHeaderProps> = ({
   onOpenRecallTest,
   onOpenMetadata,
   onOpenKnowledgeBaseSettings,
+  onEditKnowledgeBase,
   onBatchDownloadKnowledgeBase,
   onExportKnowledgeBaseQa,
 }) => {
@@ -45,6 +48,18 @@ const PrivateKnowledgeBaseHeader: FC<PrivateKnowledgeBaseHeaderProps> = ({
 
   const operationItems: NonNullable<MenuProps['items']> = [
     {
+      key: 'edit',
+      icon: <EditOutlined className="rb:text-[16px]" />,
+      label: t('knowledgeBase.editKnowledgeBase'),
+      onClick: onEditKnowledgeBase,
+    },
+    {
+      key: 'settings',
+      icon: <div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/knowledgeBase/setting.svg')]" />,
+      label: `${t('knowledgeBase.knowledgeBase')}${t('knowledgeBase.setting')}`,
+      onClick: () => onOpenKnowledgeBaseSettings(0),
+    },
+    {
       key: 'share',
       icon: <div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/knowledgeBase/share.svg')]" />,
       label: t('knowledgeBase.share'),
@@ -62,12 +77,6 @@ const PrivateKnowledgeBaseHeader: FC<PrivateKnowledgeBaseHeaderProps> = ({
       label: t('knowledgeBase.metadata.label'),
       onClick: onOpenMetadata,
     },
-    {
-      key: 'settings',
-      icon: <div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/knowledgeBase/setting.svg')]" />,
-      label: `${t('knowledgeBase.knowledgeBase')} ${t('knowledgeBase.setting')}`,
-      onClick: onOpenKnowledgeBaseSettings,
-    },
     { type: 'divider' },
     {
       key: 'batchDownload',
@@ -84,7 +93,10 @@ const PrivateKnowledgeBaseHeader: FC<PrivateKnowledgeBaseHeaderProps> = ({
     { type: 'divider' },
     {
       key: 'toggleStatus',
-      label: t(enabled ? 'common.disable' : 'common.enable'),
+      icon: enabled
+        ? <StopOutlined className="rb:text-[16px]" />
+        : <PlayCircleOutlined className="rb:text-[16px]" />,
+      label: t(enabled ? 'knowledgeBase.disableKnowledgeBase' : 'knowledgeBase.enableKnowledgeBase'),
       onClick: handleStatusToggle,
     },
   ];

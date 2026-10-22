@@ -78,6 +78,7 @@ const Private: FC = () => {
         onOpenRecallTest={actions.openRecallTest}
         onOpenMetadata={actions.openMetadata}
         onOpenKnowledgeBaseSettings={actions.openKnowledgeBaseSettings}
+        onEditKnowledgeBase={() => fileWorkspaceRef.current?.openKnowledgeBaseEditor()}
         onBatchDownloadKnowledgeBase={actions.batchDownloadKnowledgeBase}
         onExportKnowledgeBaseQa={actions.exportKnowledgeBaseQa}
         fileDirectory={(

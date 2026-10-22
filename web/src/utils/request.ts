@@ -111,6 +111,7 @@ const tokenRefresh = async (): Promise<string> => {
     const response: any = await refreshToken();
     const newToken = response.access_token;
     cookieUtils.set('authToken', newToken);
+    cookieUtils.set('refreshToken', response.refresh_token);
     return newToken;
   } catch (error) {
     // If refresh API also returns 401, logout
