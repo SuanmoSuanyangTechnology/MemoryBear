@@ -32,6 +32,7 @@ class MemoryContext(BaseModel):
     model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
 
     end_user_id: str
+    app_id: uuid.UUID | None = None
     config_id: uuid.UUID | None = None
     memory_config: MemoryConfig | None = None
     storage_type: StorageType = StorageType.NEO4J

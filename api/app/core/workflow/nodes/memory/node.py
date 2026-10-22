@@ -55,6 +55,7 @@ class MemoryReadNode(BaseNode):
             end_user_id=end_user_id,
             user_rag_memory_id=state["user_rag_memory_id"],
             conversation_id=variable_pool.get_value("sys.conversation_id"),
+            app_id=uuid.UUID(str(self.workflow_config["app_id"])),
         )
         query = self._render_template(self.typed_config.message, variable_pool)
         self._process = {"query": query, "config_id": str(config_id)}

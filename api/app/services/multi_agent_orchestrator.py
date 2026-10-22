@@ -2692,6 +2692,7 @@ class MultiAgentOrchestrator:
                         workspace_id,
                         getattr(self, "_loop_storage_type", "") or "",
                         getattr(self, "_loop_user_rag_memory_id", "") or "",
+                        app_id=self._app_id,
                     )
                     tools.extend(memory_tools)
         except Exception as e:

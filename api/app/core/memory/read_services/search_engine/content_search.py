@@ -910,8 +910,11 @@ class Neo4jSearchService:
         return MemorySearchResult(memories=[], relations=relations)
 
     async def memory_l0(self) -> Memory:
+        from app.core.memory.read_services.metadata_scope import scoped_metadata
+
         end_user_id = self.ctx.end_user_id
         user_meta = await get_user_metadata(end_user_id)
+        user_meta = await scoped_metadata(self.ctx, user_meta)
         metadata = MetadataBuilder(user_meta)
         return Memory(
             score=1,
@@ -1251,11 +1254,14 @@ class MetaSearchService:
         self.ctx = ctx
 
     async def run(self) -> MemorySearchResult:
+        from app.core.memory.read_services.metadata_scope import scoped_metadata
+
         if self.ctx.storage_type == StorageType.RAG:
             return MemorySearchResult(memories=[])
         else:
             end_user_id = self.ctx.end_user_id
             user_meta = await get_user_metadata(end_user_id)
+            user_meta = await scoped_metadata(self.ctx, user_meta)
             metadata = MetadataBuilder(user_meta)
             memory = Memory(
                 score=1,
