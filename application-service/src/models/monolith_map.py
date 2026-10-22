@@ -99,6 +99,7 @@ CROSS_DOMAIN_MODULES: dict[str, tuple[str, ...]] = {
         "Modality",
     ),
     "document_model": ("Document",),
+    "file_model": ("File",),
     "knowledge_model": ("Knowledge",),
     "knowledgeshare_model": ("KnowledgeShare",),
     "knowledge_metadata_model": ("KnowledgeMetadata", "KnowledgeMetadataBinding"),

@@ -152,6 +152,7 @@ const McpServiceModal = forwardRef<McpServiceModalRef, McpServiceModalProps>(({
           // 在后台测试连接，不阻塞用户操作
           testConnection(res.tool_id || editVo?.id).catch((err) => {
             console.error('测试连接失败:', err);
+            refresh();
           });
         })
         .catch((error) => {

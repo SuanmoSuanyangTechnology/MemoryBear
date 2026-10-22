@@ -80,6 +80,56 @@ class ImplicitEmotionsStorageRepository:
         logger.info(f"更新隐性记忆画像成功: end_user_id={end_user_id}")
         return storage
 
+    async def get_habit_count_by_end_user_id_async(self, end_user_id: str) -> int:
+        """Return the number of habits in a user's cached implicit profile."""
+        result = await self.db.execute(
+            select(ImplicitEmotionsStorage.implicit_profile).where(
+                ImplicitEmotionsStorage.end_user_id == end_user_id
+            )
+        )
+        implicit_profile = result.scalar_one_or_none()
+        if not isinstance(implicit_profile, dict):
+            return 0
+
+        habits = implicit_profile.get("habits", [])
+        if not isinstance(habits, list):
+            return 0
+
+        return len(habits)
+
+    @staticmethod
+    def _count_profile_habits(profiles) -> int:
+        """Count cached habits in a batch of profiles."""
+        count = 0
+        for profile in profiles:
+            if isinstance(profile, dict):
+                habits = profile.get("habits", [])
+                if isinstance(habits, list):
+                    count += len(habits)
+        return count
+
+    def get_habit_count_by_end_user_ids(self, end_user_ids: list[str]) -> int:
+        """Count cached habits for a batch of end users."""
+        if not end_user_ids:
+            return 0
+        profiles = self.db.execute(
+            select(ImplicitEmotionsStorage.implicit_profile).where(
+                ImplicitEmotionsStorage.end_user_id.in_(end_user_ids)
+            )
+        ).scalars().all()
+        return self._count_profile_habits(profiles)
+
+    async def get_habit_count_by_end_user_ids_async(self, end_user_ids: list[str]) -> int:
+        """Count cached habits for a batch using an asynchronous session."""
+        if not end_user_ids:
+            return 0
+        result = await self.db.execute(
+            select(ImplicitEmotionsStorage.implicit_profile).where(
+                ImplicitEmotionsStorage.end_user_id.in_(end_user_ids)
+            )
+        )
+        return self._count_profile_habits(result.scalars().all())
+
     def update_emotion_suggestions(
         self,
         end_user_id: str,

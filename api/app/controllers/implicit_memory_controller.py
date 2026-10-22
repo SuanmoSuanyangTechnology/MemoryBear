@@ -157,7 +157,7 @@ async def check_user_data_exists(
                 data={"exists": False},
                 msg="画像数据不存在，请点击右上角刷新进行初始化"
             )
-        
+
         api_logger.info(f"用户 {end_user_id} 的画像数据存在")
         return success(data={"exists": True}, msg="画像数据已存在")
         

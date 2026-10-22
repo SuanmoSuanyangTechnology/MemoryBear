@@ -15,6 +15,7 @@ from .document_model import Document
 from .end_user_info_model import EndUserInfo
 from .end_user_model import EndUser, EndUserMerge
 from .file_metadata_model import FileMetadata
+from .file_model import File
 from .generic_file_model import GenericFile
 from .knowledge_model import Knowledge
 from .knowledgeshare_model import KnowledgeShare
@@ -102,6 +103,7 @@ __all__ = [
     "EndUserInfo",
     "EndUserMerge",
     "ExecutionStatus",
+    "File",
     "FileMetadata",
     "GenericFile",
     "HitLogSource",

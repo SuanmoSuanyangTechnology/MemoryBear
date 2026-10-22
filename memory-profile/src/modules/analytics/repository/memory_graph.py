@@ -90,21 +90,6 @@ RETURN sum(episodic_count) AS episodic_count,
        sum(emotional_count) AS emotional_count
 """
 
-# 隐性记忆按用户统计「有来源关系的情景摘要」，单个用户不足 5 条时贡献 0
-# （api ``MIN_MEMORY_SUMMARY_COUNT`` 同值同口径）。
-_WORKSPACE_IMPLICIT_MEMORY_QUERY = """
-UNWIND $end_user_ids AS end_user_id
-OPTIONAL MATCH (summary:MemorySummary {end_user_id: end_user_id})
-      -[:DERIVED_FROM_STATEMENT]->(:Statement)
-WHERE summary.delete_at IS NULL
-WITH end_user_id, count(DISTINCT summary) AS summary_count
-RETURN sum(
-    CASE WHEN summary_count >= $minimum_summary_count
-         THEN summary_count ELSE 0 END
-) AS implicit_count
-"""
-
-
 class MemoryGraphRepository:
     def __init__(self, neo4j: Neo4jManager) -> None:
         self.neo4j = neo4j
@@ -260,15 +245,6 @@ class MemoryGraphRepository:
             end_user_id=end_user_id,
         )
 
-    async def valid_summary_count(self, end_user_id: str) -> int:
-        rows = await self._query(
-            """MATCH (n:MemorySummary)-[:DERIVED_FROM_STATEMENT]->(:Statement)
-            WHERE n.end_user_id = $end_user_id AND n.delete_at IS NULL
-            RETURN count(DISTINCT n) AS count""",
-            end_user_id=end_user_id,
-        )
-        return int(rows[0]["count"] if rows else 0)
-
     async def episodic_count(self, end_user_id: str) -> int:
         rows = await self._query(
             """MATCH (n:MemorySummary)
@@ -318,22 +294,6 @@ class MemoryGraphRepository:
             emotion_types=list(EMOTION_TYPE_STORAGE_VALUES),
         )
         return int(rows[0]["count"] if rows else 0)
-
-    async def workspace_implicit_count(
-        self,
-        end_user_ids: list[str],
-        minimum_summary_count: int,
-    ) -> int:
-        """工作空间口径的隐性记忆：按用户统计，不足阈值该用户贡献 0。"""
-
-        if not end_user_ids:
-            return 0
-        rows = await self._query(
-            _WORKSPACE_IMPLICIT_MEMORY_QUERY,
-            end_user_ids=list(end_user_ids),
-            minimum_summary_count=minimum_summary_count,
-        )
-        return int(rows[0].get("implicit_count") or 0) if rows else 0
 
     async def workspace_fallback_statistics(
         self,
