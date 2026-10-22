@@ -339,7 +339,7 @@ def chunks_changed(session, kb_id, document_id, *, incomplete=False):
             for name, value in previous.items():
                 setattr(document, name, value)
         return None
-    if state is None and (document.run == 1 or document.progress != 1):
+    if state is None and document.run == 1:
         return None
     state = start_round(session, document, state, scope)
     error_code = "WIKI_SOURCE_INCOMPLETE" if incomplete else (
