@@ -202,8 +202,11 @@ class TaskBridge:
         deadline = self._deadline(timeout)
         interval = self._check_interval(interval)
 
-        watch = await self._transport.watch(task_id)
+        watch = None
         try:
+            # Acquire the handle inside the try: if the transport returns one
+            # and the caller is cancelled, the finally still releases it.
+            watch = await self._transport.watch(task_id)
             while True:
                 if watch is not None:
                     # Clear before reading: a state written from here on
@@ -356,6 +359,12 @@ class TaskBridge:
 
     @classmethod
     def _normalize_task_ids(cls, task_ids: Sequence[str]) -> list[str]:
+        # A single id is a str, and a str is a Sequence[str]: iterating it
+        # would look up one-character ids. Reject it explicitly.
+        if isinstance(task_ids, (str, bytes, bytearray)):
+            raise TypeError(
+                "task_ids must be a sequence of task ids, not a single string"
+            )
         return list(dict.fromkeys(cls._normalize_task_id(task_id) for task_id in task_ids))
 
     @staticmethod

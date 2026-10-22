@@ -49,6 +49,7 @@ class FakeReader:
         self.metas = dict(metas or {})
         self.reads: list[str] = []
         self.pings = 0
+        self.warmed = 0
         self.closed = False
 
     async def get_meta(self, task_id):
@@ -64,6 +65,9 @@ class FakeReader:
 
     async def ping(self):
         self.pings += 1
+
+    async def warm_connections(self, connections):
+        self.warmed += connections
 
     async def aclose(self):
         self.closed = True
@@ -87,6 +91,41 @@ class FakeAsyncClient:
 
     async def aclose(self):
         self.closed = True
+
+
+class FakeAsyncPool:
+    max_connections = None
+
+    def __init__(self):
+        self.acquired: list[object] = []
+        self.released: list[object] = []
+
+    async def get_connection(self, command_name=None):
+        connection = object()
+        self.acquired.append(connection)
+        return connection
+
+    async def release(self, connection):
+        self.released.append(connection)
+
+
+class PooledAsyncClient:
+    def __init__(self):
+        self.connection_pool = FakeAsyncPool()
+        self.closed = False
+
+    async def aclose(self):
+        self.closed = True
+
+
+class DummyBackend:
+    """The reader only needs Celery's key layout and decoder."""
+
+    def get_key_for_task(self, task_id):
+        return f"key-{task_id}"
+
+    def decode_result(self, raw):
+        return raw
 
 
 class BatchBackend(FakeBackend):
@@ -114,8 +153,11 @@ class FakePubSub:
         self.subscribed: list[str] = []
         self.unsubscribed: list[str] = []
         self.closed = False
+        self.fail_subscribe = False
 
     async def subscribe(self, *channels):
+        if self.fail_subscribe:
+            raise ConnectionError("subscribe failed")
         self.subscribed.extend(channels)
 
     async def unsubscribe(self, *channels):
@@ -137,6 +179,51 @@ class FakePubSubClient:
 
     def pubsub(self, ignore_subscribe_messages=False):
         pubsub = FakePubSub()
+        self.pubsubs.append(pubsub)
+        return pubsub
+
+
+class FlakyPubSubClient:
+    """First SUBSCRIBE fails, later attempts succeed."""
+
+    def __init__(self):
+        self.pubsubs: list[FakePubSub] = []
+        self.fail_next_subscribe = True
+
+    def pubsub(self, ignore_subscribe_messages=False):
+        pubsub = FakePubSub()
+        if self.fail_next_subscribe:
+            self.fail_next_subscribe = False
+            pubsub.fail_subscribe = True
+        self.pubsubs.append(pubsub)
+        return pubsub
+
+
+class BlockingPubSub(FakePubSub):
+    def __init__(self):
+        super().__init__()
+        self.block_next = False
+        self.started = asyncio.Event()
+        self.release = asyncio.Event()
+
+    async def subscribe(self, *channels):
+        if self.block_next:
+            self.block_next = False
+            self.started.set()
+            await self.release.wait()
+        await super().subscribe(*channels)
+
+
+class BlockingPubSubClient:
+    def __init__(self, block_first=False):
+        self.pubsubs: list[BlockingPubSub] = []
+        self._block_first = block_first
+
+    def pubsub(self, ignore_subscribe_messages=False):
+        pubsub = BlockingPubSub()
+        if self._block_first:
+            self._block_first = False
+            pubsub.block_next = True
         self.pubsubs.append(pubsub)
         return pubsub
 
@@ -171,6 +258,52 @@ class WakeReader(FakeReader):
         if self.calls == 1:
             return {"status": "PENDING", "result": None}
         return {"status": "SUCCESS", "result": 42}
+
+
+class ConcurrencyBackend(FakeBackend):
+    """Records peak concurrent backend reads."""
+
+    def __init__(self, delay=0.05):
+        super().__init__()
+        self.delay = delay
+        self.active = 0
+        self.peak = 0
+        self.lock = threading.Lock()
+
+    def get_task_meta(self, task_id, cache=True):
+        with self.lock:
+            self.active += 1
+            self.peak = max(self.peak, self.active)
+        try:
+            time.sleep(self.delay)
+            return {"status": "PENDING", "result": None}
+        finally:
+            with self.lock:
+                self.active -= 1
+
+
+class FakeConnectionPool:
+    max_connections = None
+
+    def __init__(self):
+        self.acquired: list[object] = []
+        self.released: list[object] = []
+
+    def get_connection(self, command_name=None):
+        connection = object()
+        self.acquired.append(connection)
+        return connection
+
+    def release(self, connection):
+        self.released.append(connection)
+
+
+class PoolBackend:
+    """Mimics Celery's Redis backend: a client owning a connection pool."""
+
+    def __init__(self):
+        self.pool = FakeConnectionPool()
+        self.client = SimpleNamespace(connection_pool=self.pool)
 
 
 class CountingApp:
@@ -530,6 +663,114 @@ def test_redis_reader_reuses_celery_key_layout_and_decoding():
         app.close()
 
 
+def test_pubsub_uses_a_dedicated_redis_client():
+    bridge = CeleryBridge(
+        BridgeConfig(
+            broker_url="memory://",
+            result_backend="redis://localhost:6379/4",
+            async_redis_max_connections=1,
+        )
+    )
+    reader = bridge.transport._get_result_reader()
+
+    assert reader is not None
+    assert reader._pubsub_client is not None
+    assert reader._pubsub_client is not reader._client
+    assert reader.notifier()._client is reader._pubsub_client
+
+    asyncio.run(reader.aclose())
+    bridge.close()
+
+
+def test_reader_can_take_an_explicit_pubsub_client():
+    shared = FakeAsyncClient({})
+    dedicated = FakeAsyncClient({})
+    reader = RedisResultReader(DummyBackend(), shared, pubsub_client=dedicated)
+
+    assert reader.notifier()._client is dedicated
+    asyncio.run(reader.aclose())
+    assert shared.closed is True
+    assert dedicated.closed is True
+
+
+def test_reader_warm_connections_holds_the_requested_count():
+    client = PooledAsyncClient()
+    reader = RedisResultReader(DummyBackend(), client)
+
+    asyncio.run(reader.warm_connections(4))
+
+    assert len(client.connection_pool.acquired) == 4
+    assert client.connection_pool.released == client.connection_pool.acquired
+
+
+def test_reader_warm_connections_respects_the_pool_cap():
+    client = PooledAsyncClient()
+    client.connection_pool.max_connections = 2
+    reader = RedisResultReader(DummyBackend(), client)
+
+    with pytest.raises(ValueError, match="max_connections"):
+        asyncio.run(reader.warm_connections(4))
+
+    assert client.connection_pool.acquired == []
+
+
+def test_async_reader_uses_celery_resolved_connection_params():
+    from redis.asyncio import Connection as AsyncConnection
+
+    bridge = CeleryBridge(
+        BridgeConfig(broker_url="memory://", result_backend="redis://127.0.0.1:6379/4")
+    )
+    reader = bridge.transport._get_result_reader()
+
+    assert reader is not None
+    pool = reader._client.connection_pool
+    assert pool.connection_class is AsyncConnection
+    assert pool.connection_kwargs["host"] == "127.0.0.1"
+    assert pool.connection_kwargs["port"] == 6379
+    assert pool.connection_kwargs["db"] == 4
+
+    asyncio.run(reader.aclose())
+    bridge.close()
+
+
+def test_async_reader_mirrors_celery_ssl_options():
+    from ssl import CERT_REQUIRED
+
+    from redis.asyncio import SSLConnection as AsyncSSLConnection
+
+    bridge = CeleryBridge(
+        BridgeConfig(
+            broker_url="memory://",
+            result_backend="rediss://127.0.0.1:6380/2",
+            app_options={
+                "redis_backend_use_ssl": {
+                    "ssl_cert_reqs": "required",
+                    "ssl_ca_certs": "/tmp/ca.pem",
+                    "ssl_certfile": "/tmp/client.crt",
+                    "ssl_keyfile": "/tmp/client.key",
+                }
+            },
+        )
+    )
+    reader = bridge.transport._get_result_reader()
+
+    assert reader is not None
+    read_pool = reader._client.connection_pool
+    assert read_pool.connection_class is AsyncSSLConnection
+    assert read_pool.connection_kwargs["ssl_cert_reqs"] == CERT_REQUIRED
+    assert read_pool.connection_kwargs["ssl_ca_certs"] == "/tmp/ca.pem"
+    assert read_pool.connection_kwargs["ssl_certfile"] == "/tmp/client.crt"
+    assert read_pool.connection_kwargs["ssl_keyfile"] == "/tmp/client.key"
+
+    pubsub_pool = reader._pubsub_client.connection_pool
+    assert pubsub_pool.connection_class is AsyncSSLConnection
+    assert pubsub_pool.max_connections == 1
+    assert pubsub_pool.connection_kwargs["ssl_ca_certs"] == "/tmp/ca.pem"
+
+    asyncio.run(reader.aclose())
+    bridge.close()
+
+
 def test_redis_reader_is_created_for_a_redis_backend():
     bridge = CeleryBridge(
         BridgeConfig(broker_url="memory://", result_backend="redis://localhost:6379/4")
@@ -562,7 +803,7 @@ async def test_warm_up_opens_result_connections():
 
     await bridge.awarm_up(connections=3)
 
-    assert reader.pings == 3
+    assert reader.warmed == 3
 
 
 async def test_warm_up_falls_back_to_status_reads():
@@ -572,6 +813,44 @@ async def test_warm_up_falls_back_to_status_reads():
     await bridge.awarm_up(connections=2)
 
     assert len(backend.reads) == 2
+
+
+def test_sync_warm_up_opens_connections_in_parallel():
+    """Sequential reads would reuse one pooled connection."""
+
+    backend = ConcurrencyBackend()
+    bridge = CeleryBridge(app=FakeApp(backend=backend))
+
+    bridge.warm_up(connections=4)
+
+    assert backend.peak == 4
+
+
+def test_sync_warm_up_rejects_zero_connections():
+    bridge = CeleryBridge(app=FakeApp())
+    with pytest.raises(ValueError):
+        bridge.warm_up(connections=0)
+
+
+def test_warm_up_holds_pooled_connections_simultaneously():
+    backend = PoolBackend()
+    bridge = CeleryBridge(app=FakeApp(backend=backend))
+
+    bridge.warm_up(connections=4)
+
+    assert len(backend.pool.acquired) == 4
+    assert backend.pool.released == backend.pool.acquired
+
+
+def test_warm_up_rejects_more_connections_than_the_pool_allows():
+    backend = PoolBackend()
+    backend.pool.max_connections = 2
+    bridge = CeleryBridge(app=FakeApp(backend=backend))
+
+    with pytest.raises(ValueError, match="max_connections"):
+        bridge.warm_up(connections=4)
+
+    assert backend.pool.acquired == []
 
 
 async def test_dedicated_executor_runs_publishes():
@@ -629,6 +908,105 @@ async def test_notifier_wakes_all_waiters_on_one_message():
 
     await notifier.aclose()
     assert pubsub.closed
+
+
+async def test_subscription_failure_does_not_poison_the_next_attempt():
+    client = FlakyPubSubClient()
+    notifier = RedisResultNotifier(client, lambda task_id: f"celery-task-meta-{task_id}")
+
+    # First attempt fails: no waiter, no half-initialized PubSub is kept.
+    assert await notifier.register("t1") is None
+    assert client.pubsubs[0].closed is True
+    assert notifier._pubsub is None
+    assert notifier._events == {}
+    assert notifier._channel_to_task == {}
+
+    # The retry must establish a real connection AND start the listener.
+    event = await notifier.register("t1")
+    assert event is not None
+    pubsub = client.pubsubs[1]
+    assert pubsub.subscribed == ["celery-task-meta-t1"]
+    assert notifier._listener is not None and not notifier._listener.done()
+
+    await pubsub.queue.put({"channel": b"celery-task-meta-t1", "data": b"x"})
+    await asyncio.wait_for(event.wait(), timeout=1)
+
+    await notifier.unregister("t1", event)
+    await notifier.aclose()
+
+
+async def test_cancelled_initial_subscribe_leaves_no_state():
+    client = BlockingPubSubClient(block_first=True)
+    notifier = RedisResultNotifier(client, lambda task_id: f"celery-task-meta-{task_id}")
+
+    task = asyncio.create_task(notifier.register("t1"))
+    while not client.pubsubs:
+        await asyncio.sleep(0)
+    pubsub = client.pubsubs[0]
+    await asyncio.wait_for(pubsub.started.wait(), timeout=1)
+
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    await asyncio.sleep(0.01)  # the shielded close runs in the background
+
+    assert notifier._events == {}
+    assert notifier._channel_to_task == {}
+    assert notifier._pubsub is None
+    assert pubsub.closed is True
+
+    await notifier.aclose()
+
+
+async def test_cancelled_later_subscribe_keeps_existing_waiters():
+    client = BlockingPubSubClient()
+    notifier = RedisResultNotifier(client, lambda task_id: f"celery-task-meta-{task_id}")
+    first = await notifier.register("t1")
+    assert first is not None
+    pubsub = client.pubsubs[0]
+
+    pubsub.block_next = True
+    task = asyncio.create_task(notifier.register("t2"))
+    await asyncio.wait_for(pubsub.started.wait(), timeout=1)
+
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert "t2" not in notifier._events
+    assert "celery-task-meta-t2" not in notifier._channel_to_task
+    assert first in notifier._events["t1"]
+
+    await notifier.unregister("t1", first)
+    await notifier.aclose()
+
+
+async def test_register_restarts_a_listener_that_exited():
+    client = FakePubSubClient()
+    notifier = RedisResultNotifier(client, lambda task_id: f"celery-task-meta-{task_id}")
+    first = await notifier.register("t1")
+    assert first is not None
+    listener = notifier._listener
+    assert listener is not None
+
+    listener.cancel()
+    try:
+        await listener
+    except asyncio.CancelledError:
+        pass
+
+    # _pubsub is still set; registering a new task must restart the reader.
+    event = await notifier.register("t2")
+    assert event is not None
+    assert notifier._listener is not None and not notifier._listener.done()
+
+    pubsub = client.pubsubs[0]
+    await pubsub.queue.put({"channel": b"celery-task-meta-t2", "data": b"x"})
+    await asyncio.wait_for(event.wait(), timeout=1)
+
+    await notifier.unregister("t1", first)
+    await notifier.unregister("t2", event)
+    await notifier.aclose()
 
 
 async def test_notifier_normalizes_bytes_channels():

@@ -332,11 +332,58 @@ class CeleryTransport(ThreadedTaskTransport):
         logger.debug("revoke requested id=%s terminate=%s", task_id, terminate)
 
     def warm_up(self, *, connections: int = 1) -> None:
+        """Open ``connections`` result-backend connections.
+
+        Sequential reads reuse one pooled connection, so they warm exactly
+        one. Backends with a redis-py style pool are warmed by holding
+        ``connections`` connections at once; others fall back to concurrent
+        reads in dedicated threads.
+        """
+
         if connections < 1:
             raise ValueError("connections must be at least 1")
+        if self._warm_pool(connections):
+            return
+
         probe_id = f"task-bridge-warmup:{uuid4()}"
-        for _ in range(connections):
+        if connections == 1:
             self.get_status(probe_id)
+            return
+        with ThreadPoolExecutor(
+            max_workers=connections, thread_name_prefix="task-bridge-warmup"
+        ) as pool:
+            # list() waits for every read and propagates the first failure.
+            list(pool.map(lambda _: self.get_status(probe_id), range(connections)))
+
+    def _warm_pool(self, connections: int) -> bool:
+        """Hold ``connections`` pooled connections simultaneously, if possible."""
+
+        try:
+            backend = self._resolve_backend()
+            pool = backend.client.connection_pool
+            get_connection = pool.get_connection
+            release = pool.release
+        except AttributeError:
+            return False
+
+        max_connections = getattr(pool, "max_connections", None)
+        if max_connections is not None and connections > max_connections:
+            raise ValueError(
+                f"cannot warm {connections} connections: the result backend "
+                f"pool's max_connections is {max_connections}"
+            )
+
+        held: list[Any] = []
+        try:
+            for _ in range(connections):
+                held.append(get_connection("GET"))
+        finally:
+            for connection in held:
+                try:
+                    release(connection)
+                except Exception:  # noqa: BLE001 - the connection is being dropped
+                    logger.debug("failed to release warm-up connection", exc_info=True)
+        return True
 
     async def awarm_up(self, *, connections: int = 1) -> None:
         if connections < 1:
@@ -345,12 +392,15 @@ class CeleryTransport(ThreadedTaskTransport):
         reader = self._get_result_reader()
         try:
             if reader is not None:
-                await asyncio.gather(*(reader.ping() for _ in range(connections)))
+                await reader.warm_connections(connections)
                 return
             probe_id = f"task-bridge-warmup:{uuid4()}"
             await asyncio.gather(
                 *(self.aget_status(probe_id) for _ in range(connections))
             )
+        except ValueError:
+            # Invalid request (e.g. more connections than the pool allows).
+            raise
         except Exception as exc:
             raise TaskResultUnavailableError(
                 f"result backend warm-up failed: {exc}"

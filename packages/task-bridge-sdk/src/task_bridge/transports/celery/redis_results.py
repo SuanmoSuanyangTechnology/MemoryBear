@@ -27,12 +27,90 @@ logger = logging.getLogger(__name__)
 _PENDING_META: dict[str, Any] = {"status": "PENDING", "result": None}
 
 
-class RedisResultReader:
-    """Reads Celery task metas with an async Redis client."""
+def _async_connection_class(url: str, sync_class: Any | None) -> Any:
+    """Map Celery's sync connection class to the redis.asyncio equivalent."""
 
-    def __init__(self, backend: Any, client: Any) -> None:
+    from redis.asyncio import (
+        Connection as AsyncConnection,
+        SSLConnection as AsyncSSLConnection,
+        UnixDomainSocketConnection as AsyncUnixConnection,
+    )
+
+    if isinstance(sync_class, type):
+        try:
+            import redis as sync_redis
+        except ImportError:  # pragma: no cover - redis is already imported
+            pass
+        else:
+            if issubclass(sync_class, sync_redis.SSLConnection):
+                return AsyncSSLConnection
+            if issubclass(sync_class, sync_redis.UnixDomainSocketConnection):
+                return AsyncUnixConnection
+            if issubclass(sync_class, sync_redis.Connection):
+                return AsyncConnection
+
+    scheme = urlsplit(str(url)).scheme
+    if scheme == "rediss":
+        return AsyncSSLConnection
+    if scheme == "socket":
+        return AsyncUnixConnection
+    return AsyncConnection
+
+
+def _async_pool_params(
+    backend: Any,
+    url: str,
+    *,
+    socket_timeout: float | None,
+    socket_connect_timeout: float | None,
+    max_connections: int | None,
+) -> dict[str, Any] | None:
+    """Mirror the Celery backend's resolved connection parameters.
+
+    ``Redis.from_url`` only sees the URL: TLS settings supplied through
+    ``redis_backend_use_ssl`` (certificate paths, ``ssl_cert_reqs``) or other
+    Celery options would be lost. Celery resolves all of them into
+    ``backend.connparams``, so reuse that and map the sync connection class
+    to its async counterpart. ``None`` means the backend exposes no params;
+    the caller then falls back to URL parsing.
+    """
+
+    connparams = getattr(backend, "connparams", None)
+    if not isinstance(connparams, Mapping):
+        return None
+
+    params = dict(connparams)
+    sync_class = params.pop("connection_class", None)
+    params.pop("connection_pool", None)
+    params["max_connections"] = max_connections
+    params["socket_timeout"] = socket_timeout
+    params["socket_connect_timeout"] = socket_connect_timeout
+    params["decode_responses"] = False
+    params["connection_class"] = _async_connection_class(url, sync_class)
+    return params
+
+
+class RedisResultReader:
+    """Reads Celery task metas with an async Redis client.
+
+    Status reads use ``client``; Pub/Sub uses a separate client of its own.
+    A subscription holds its connection for the whole subscription, so sharing
+    the read pool would starve reads when ``max_connections`` is small (at 1
+    the first SUBSCRIBE would take the only slot).
+    """
+
+    def __init__(
+        self,
+        backend: Any,
+        client: Any,
+        *,
+        pubsub_client: Any | None = None,
+    ) -> None:
         self._backend = backend
         self._client = client
+        # ``create`` always supplies a dedicated client; the fallback keeps
+        # direct construction (tests, custom wiring) working.
+        self._pubsub_client = pubsub_client
         self._notifier: RedisResultNotifier | None = None
 
     @classmethod
@@ -58,24 +136,77 @@ class RedisResultReader:
         if not isinstance(backend, RedisBackend):
             return None
         try:
-            from redis.asyncio import Redis
+            from redis.asyncio import ConnectionPool, Redis
         except ImportError:
             logger.debug(
                 "redis is not installed; task results stay on the thread-based path"
             )
             return None
 
-        client = Redis.from_url(
+        read_params = _async_pool_params(
+            backend,
             str(url),
             socket_timeout=socket_timeout,
             socket_connect_timeout=socket_connect_timeout,
             max_connections=max_connections,
-            decode_responses=False,
         )
-        return cls(backend, client)
+        pubsub_params = _async_pool_params(
+            backend,
+            str(url),
+            socket_timeout=None,
+            socket_connect_timeout=socket_connect_timeout,
+            max_connections=1,
+        )
+        if read_params is not None and pubsub_params is not None:
+            # Mirror Celery's resolved parameters (TLS certificates, auth,
+            # timeouts) instead of re-parsing the URL and losing app options.
+            client = Redis(connection_pool=ConnectionPool(**read_params))
+            pubsub_client = Redis(connection_pool=ConnectionPool(**pubsub_params))
+        else:
+            # A custom backend without connparams: URL parsing is all we have.
+            client = Redis.from_url(
+                str(url),
+                socket_timeout=socket_timeout,
+                socket_connect_timeout=socket_connect_timeout,
+                max_connections=max_connections,
+                decode_responses=False,
+            )
+            pubsub_client = Redis.from_url(
+                str(url),
+                socket_timeout=None,
+                socket_connect_timeout=socket_connect_timeout,
+                max_connections=1,
+                decode_responses=False,
+            )
+        return cls(backend, client, pubsub_client=pubsub_client)
 
     async def ping(self) -> None:
         await self._client.ping()
+
+    async def warm_connections(self, connections: int) -> None:
+        """Hold ``connections`` pooled status connections simultaneously.
+
+        Concurrent pings can finish before every coroutine acquires a
+        connection; taking them from the pool directly guarantees the count.
+        """
+
+        pool = self._client.connection_pool
+        max_connections = getattr(pool, "max_connections", None)
+        if max_connections is not None and connections > max_connections:
+            raise ValueError(
+                f"cannot warm {connections} connections: the result backend "
+                f"pool's max_connections is {max_connections}"
+            )
+        held: list[Any] = []
+        try:
+            for _ in range(connections):
+                held.append(await pool.get_connection("PING"))
+        finally:
+            for connection in held:
+                try:
+                    await pool.release(connection)
+                except Exception:  # noqa: BLE001 - the connection is being dropped
+                    logger.debug("failed to release warm-up connection", exc_info=True)
 
     async def get_meta(self, task_id: str) -> Mapping[str, Any]:
         raw = await self._client.get(self._backend.get_key_for_task(task_id))
@@ -98,7 +229,8 @@ class RedisResultReader:
 
         if self._notifier is None:
             self._notifier = RedisResultNotifier(
-                self._client, self._backend.get_key_for_task
+                self._pubsub_client or self._client,
+                self._backend.get_key_for_task,
             )
         return self._notifier
 
@@ -106,6 +238,9 @@ class RedisResultReader:
         if self._notifier is not None:
             await self._notifier.aclose()
             self._notifier = None
+        if self._pubsub_client is not None:
+            await self._pubsub_client.aclose()
+            self._pubsub_client = None
         await self._client.aclose()
 
     def _decode(self, raw: Any) -> Mapping[str, Any]:
@@ -155,32 +290,34 @@ class RedisResultNotifier:
         The subscription command is sent before this returns, so a result
         written afterwards wakes the waiter (a result written earlier is
         caught by the caller's first status read).
+
+        State is committed only after SUBSCRIBE returns. A cancellation while
+        connecting therefore leaves no event, channel mapping or subscription
+        behind; ``CancelledError`` propagates without needing a ``finally`` in
+        the caller.
         """
 
         event = asyncio.Event()
         if self._closed:
             return None
+        channel = self._channel(task_id)
         try:
             async with self._lock:
-                events = self._events.setdefault(task_id, set())
-                first = not events
-                events.add(event)
-                channel = self._channel(task_id)
-                self._channel_to_task[channel] = task_id
+                already = bool(self._events.get(task_id))
                 if self._pubsub is None:
-                    await self._connect_locked()
-                elif first:
+                    await self._connect_locked(extra_channel=channel)
+                elif not already:
                     await self._pubsub.subscribe(channel)
+                    # A previous listener may have exited without resetting
+                    # _pubsub; make sure something is reading the connection.
+                    self._ensure_listener_locked()
+                # Commit only after every await point above: nothing to roll
+                # back if the task is cancelled before this line.
+                self._events.setdefault(task_id, set()).add(event)
+                self._channel_to_task[channel] = task_id
             return event
         except Exception:  # noqa: BLE001 - polling fallback
             logger.debug("Redis pub/sub wake unavailable for %s", task_id, exc_info=True)
-            async with self._lock:
-                events = self._events.get(task_id)
-                if events is not None:
-                    events.discard(event)
-                    if not events:
-                        del self._events[task_id]
-                        self._channel_to_task.pop(self._channel(task_id), None)
             return None
 
     async def unregister(self, task_id: str, event: asyncio.Event) -> None:
@@ -222,13 +359,33 @@ class RedisResultNotifier:
         self._events.clear()
         self._channel_to_task.clear()
 
-    async def _connect_locked(self) -> None:
+    async def _connect_locked(self, *, extra_channel: str | None = None) -> None:
         if self._closed:
             return
         pubsub = self._client.pubsub(ignore_subscribe_messages=True)
+        channels = set(self._channel_to_task)
+        if extra_channel is not None:
+            channels.add(extra_channel)
+        try:
+            if channels:
+                await pubsub.subscribe(*channels)
+        except BaseException:
+            # Includes CancelledError: do not publish a half-initialized
+            # PubSub or leave its connection open. The close is shielded so a
+            # cancellation does not interrupt it; the original error is
+            # re-raised either way.
+            cleanup = asyncio.create_task(pubsub.aclose())
+            try:
+                await asyncio.shield(cleanup)
+            except BaseException:  # noqa: BLE001 - preserve the original error
+                pass
+            raise
         self._pubsub = pubsub
-        if self._channel_to_task:
-            await pubsub.subscribe(*self._channel_to_task)
+        self._ensure_listener_locked()
+
+    def _ensure_listener_locked(self) -> None:
+        if self._pubsub is None or self._closed:
+            return
         if self._listener is None or self._listener.done():
             self._listener = asyncio.create_task(self._listen())
 

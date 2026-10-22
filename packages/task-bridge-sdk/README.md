@@ -52,6 +52,8 @@ src/task_bridge/
 - **同步 + 异步**：`submit` / `wait_for_result` 与 `asubmit` / `await_result`。
 - **异步直读 Redis 结果**：result backend 是 Redis 时，`aget_status` / `await_result` 走
   `redis.asyncio`，**完全不占工作线程**，取消可真正取消 socket 操作；其他后端自动回退到线程路径。
+  异步客户端复用 Celery 解析后的 `connparams`（含 `redis_backend_use_ssl` 的证书/TLS 设置），
+  不是只按 URL 建连。
 - **完成即唤醒**：`await_result` 订阅 Celery Redis backend 的结果 pub/sub 通道，worker 写结果时
   立即唤醒；一个共享 PubSub 连接服务所有等待者，断线或不可用时退回轮询，正确性不依赖它。
 - **批量状态**：`aget_status_many` / `get_status_many` 用一次 `MGET` 读取一页任务，200 条约 7ms。
@@ -134,6 +136,7 @@ from task_bridge import CeleryBridge
 async def lifespan(app: FastAPI):
     app.state.task_bridge = CeleryBridge.from_env()
     # 可选：提前打开结果后端连接，避免首个并发请求承担建连成本
+    # （connections 不能超过 async_redis_max_connections，默认 50）
     await app.state.task_bridge.awarm_up(connections=8)
     try:
         yield
@@ -269,7 +272,7 @@ class AsyncHttpTaskTransport(TaskTransport):
 | `TASK_BRIDGE_VALIDATE_PAYLOAD` | `true`/`false`，默认 `true`，关闭 JSON 载荷前置校验 |
 | `TASK_BRIDGE_ASYNC_REDIS_RESULTS` | `true`/`false`，默认 `true`，Redis 结果走 `redis.asyncio` |
 | `TASK_BRIDGE_REDIS_PUBSUB` | `true`/`false`，默认 `true`，用结果 pub/sub 通道唤醒 `await_result` |
-| `TASK_BRIDGE_ASYNC_REDIS_MAX_CONNECTIONS` | 异步结果客户端连接池上限，默认 `50` |
+| `TASK_BRIDGE_ASYNC_REDIS_MAX_CONNECTIONS` | 异步**状态读取**连接池上限，默认 `50`；Pub/Sub 另有独立连接 |
 | `TASK_BRIDGE_EXECUTOR_WORKERS` | 专用线程池大小；不设则用事件循环默认线程池 |
 | `TASK_BRIDGE_BROKER_POOL_LIMIT` | Celery producer/连接池大小，默认 10；建议设为预期发布并发 |
 | `TASK_BRIDGE_POLL_JITTER` | 轮询抖动比例，默认 `0.1`（在 interval 上叠加 0–10% 随机）；`0` 关闭 |
@@ -291,7 +294,7 @@ class AsyncHttpTaskTransport(TaskTransport):
 | `aget_status_many(task_ids)` | 异步批量读取 |
 | `wait_for_result(task_id, *, timeout=None, interval=0.5, raise_on_error=False) -> TaskStatus` | 同步轮询到终态 |
 | `await_result(...)` | 异步等待；transport 支持推送时完成即唤醒，`interval` 仅作兜底与超时粒度 |
-| `warm_up(*, connections=1)` / `awarm_up(...)` | 预热结果后端连接（lifespan 用 `awarm_up`） |
+| `warm_up(*, connections=1)` / `awarm_up(...)` | 预热 N 条结果后端连接：直接从连接池同时占用，数量精确；超过池上限抛 `ValueError`（lifespan 用 `awarm_up`） |
 | `revoke(task_id, *, terminate=False, signal=None)` / `arevoke(...)` | 尽力取消（机制需支持） |
 | `close()` / `aclose()` | 释放 transport 资源 |
 | `transport` | 当前 transport（逃生舱） |
@@ -343,10 +346,11 @@ class AsyncHttpTaskTransport(TaskTransport):
    并用异步结果客户端跳过线程路径；剩余成本是建连。实测首轮 200 次读取 53ms、预热后 22ms，
    100 次发布首轮约 1s、预热后约 60ms。可在 lifespan 里调用 `warm_up(connections=N)` 预热。
 8. **pub/sub 唤醒是尽力而为**：`await_result` 订阅 Redis 结果通道，worker 写结果时立即唤醒；
-   一个连接服务所有等待者，通道只在有等待者时订阅。订阅失败、断线或服务端禁用 SUBSCRIBE 时
-   自动退回轮询，等待不会失败或挂死。启用后可以把 `interval` 放大到 1–10s（长任务轮询量下降），
-   完成检测仍接近即时；pub/sub 不可用时才会退化为该 `interval` 的检测延迟。
-   同步 `wait_for_result` 不做唤醒，仍是轮询。
+   一个连接服务所有等待者，通道只在有等待者时订阅。Pub/Sub 使用**独立连接**，
+   不占用 `async_redis_max_connections` 的状态读取池（该值设为 1 也不会饿死状态读取）。
+   订阅失败、断线或服务端禁用 SUBSCRIBE 时自动退回轮询，等待不会失败或挂死。
+   启用后可以把 `interval` 放大到 1–10s（长任务轮询量下降），完成检测仍接近即时；
+   pub/sub 不可用时才会退化为该 `interval` 的检测延迟。同步 `wait_for_result` 不做唤醒，仍是轮询。
 9. **只做桥接，不做状态机**：任务是否被消费、是否重试、结果是否可信，仍由 Celery 与 worker 决定；
    需要持久任务账本/取消语义时应使用独立的 task runtime。
 10. **不会污染 `current_app`**：裸 app 以 `set_as_current=False` 创建。

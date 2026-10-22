@@ -67,8 +67,9 @@ class CeleryConfig:
     #: of waiting for the next poll. Falls back to polling if SUBSCRIBE is
     #: unavailable; only used when the async Redis path is active.
     use_redis_pubsub: bool = True
-    #: Cap on the async result client's connection pool. ``None`` leaves
-    #: redis-py's unbounded default.
+    #: Cap on the async result client's **status-read** connection pool.
+    #: ``None`` leaves redis-py's unbounded default. Pub/Sub uses one
+    #: dedicated connection of its own and never takes a slot from this pool.
     async_redis_max_connections: int | None = 50
     #: Dedicated thread pool for broker publishes. ``None`` uses the event
     #: loop's shared default executor.

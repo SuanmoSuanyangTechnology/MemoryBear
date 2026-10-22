@@ -135,6 +135,29 @@ def test_status_many_deduplicates_ids():
     assert transport.status_reads == [task_id]
 
 
+def test_status_many_rejects_a_single_string_id():
+    transport = InMemoryTransport()
+    bridge = TaskBridge(transport)
+    task_id = bridge.submit("demo.task")
+
+    for bad in (task_id, task_id.encode()):
+        with pytest.raises(TypeError, match="single string"):
+            bridge.get_status_many(bad)
+
+    assert transport.status_reads == []
+
+
+async def test_async_status_many_rejects_a_single_string_id():
+    transport = InMemoryTransport()
+    bridge = TaskBridge(transport)
+    task_id = bridge.submit("demo.task")
+
+    with pytest.raises(TypeError, match="single string"):
+        await bridge.aget_status_many(task_id)
+
+    assert transport.status_reads == []
+
+
 async def test_a_transport_can_push_a_wake_up():
     transport = WatchingTransport()
     bridge = TaskBridge(transport)
