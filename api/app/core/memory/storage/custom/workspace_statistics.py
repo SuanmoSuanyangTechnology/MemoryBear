@@ -473,7 +473,6 @@ async def get_elasticsearch_short_term_memos(
     })
     opened = await client.client.open_point_in_time(
         index=get_index_name(MemoryNodeType.STATEMENT), keep_alive="1m",
-        allow_partial_search_results=False,
     )
     pit_id = opened.get("id")
     if not isinstance(pit_id, str) or not pit_id:
