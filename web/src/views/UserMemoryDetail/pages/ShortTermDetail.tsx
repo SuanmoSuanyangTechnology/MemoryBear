@@ -1,21 +1,23 @@
-/*
- * @Author: ZhaoYing 
- * @Date: 2026-01-08 19:46:02 
- * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-27 11:17:22
- */
 import { type FC, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import type { TFunction } from 'i18next'
 import { useParams } from 'react-router-dom'
-import { Space, Skeleton, Row, Col, Flex, Tooltip } from 'antd'
+import { Space, Skeleton, Row, Col, Flex, Tooltip, Typography } from 'antd'
+import { ClockCircleOutlined } from '@ant-design/icons'
 import clsx from 'clsx'
 
 import {
   getShortTerm,
+  getShortMemosUrl,
 } from '@/api/memory'
+import PageScrollList from '@/components/PageScrollList'
+import PageTabs from '@/components/PageTabs'
+import RadioGroupButton from '@/components/RadioGroupButton'
+import Tag from '@/components/Tag'
 import Empty from '@/components/Empty'
 import Markdown from '@/components/Markdown'
 import RbCard from '@/components/RbCard/Card'
+import { formatDateTime } from '@/utils/format'
 
 /** A single deep-retrieval entry: the original query and its retrieved passages. */
 interface ShortTermItem {
@@ -44,6 +46,91 @@ interface ShortData {
   /** Number of long-term memory candidates. */
   long_term_number: number;
 }
+interface ShortMemo {
+  id: string;
+  statement: string;
+  status: 'pending' | 'ongoing' | 'ended';
+  start_date: string | number | null;
+  end_date: string | number | null;
+  is_time_unspecified: boolean;
+  retain_until: string | number | null;
+  relative_days: number;
+}
+
+interface MemoCountGroup {
+  total: number;
+  dated: number;
+  undated: number;
+}
+
+interface MemoCounts {
+  total: number;
+  current: MemoCountGroup;
+  ended: MemoCountGroup;
+}
+
+type MemoScope = 'current' | 'ended'
+type MemoDateType = 'all' | 'dated' | 'undated'
+
+const getRelativeStartText = (days: number, t: TFunction) => days === 0
+  ? t('shortTermDetail.startsToday')
+  : days === 1
+    ? t('shortTermDetail.startsTomorrow')
+    : t('shortTermDetail.startsInDays', { count: days })
+
+const getRelativeEndText = (days: number, ended: boolean, t: TFunction) => {
+  if (days === 0) return t(ended ? 'shortTermDetail.endDatePassedToday' : 'shortTermDetail.endsToday')
+  return t(ended ? 'shortTermDetail.daysSinceEnd' : 'shortTermDetail.daysUntilEnd', { count: days })
+}
+
+const MemoCard: FC<{ memo: ShortMemo }> = ({ memo }) => {
+  const { t } = useTranslation()
+  const dateFormat = t('shortTermDetail.memoDateFormat')
+  const timing = memo.is_time_unspecified
+    ? t('shortTermDetail.timeUnspecified')
+    : memo.status === 'pending'
+    ? getRelativeStartText(memo.relative_days, t)
+    : memo.end_date || memo.status === 'ongoing'
+      ? getRelativeEndText(memo.relative_days, memo.status === 'ended', t)
+      : t('shortTermDetail.ongoing')
+  const dateParts = [
+    memo.start_date && formatDateTime(memo.start_date, dateFormat),
+    memo.end_date && formatDateTime(memo.end_date, dateFormat),
+  ].filter(Boolean)
+  const dateText = memo.is_time_unspecified
+    ? memo.start_date ? t('shortTermDetail.mentionedOn', { date: formatDateTime(memo.start_date, dateFormat) }) : t('shortTermDetail.timeUnspecified')
+    : dateParts.length === 2
+      ? t('shortTermDetail.dateRange', { start: dateParts[0], end: dateParts[1] })
+      : memo.start_date
+        ? t('shortTermDetail.startsOn', { date: dateParts[0] })
+        : memo.end_date
+          ? t('shortTermDetail.endsOn', { date: dateParts[0] })
+          : ''
+
+  return (
+    <article className={clsx('rb:rounded-lg rb:border rb:border-gray-200 rb:px-3 rb:py-3', memo.status === 'ended' ? 'rb:bg-gray-50' : 'rb:bg-white')}>
+      <Typography.Paragraph
+        className="rb:mb-2! rb:whitespace-pre-wrap rb:wrap-break-word rb:text-sm! rb:leading-6!"
+        ellipsis={{ rows: 3, expandable: 'collapsible', symbol: expanded => expanded ? t('shortTermDetail.collapseMemo') : t('shortTermDetail.expandMemo') }}
+      >
+        {memo.statement}
+      </Typography.Paragraph>
+      <Flex align="center" gap={8} wrap>
+        <span className="rb:flex rb:items-center rb:gap-1 rb:text-xs rb:text-gray-500">
+          <ClockCircleOutlined />
+          {dateText}
+        </span>
+        <Tag color={(memo.is_time_unspecified || memo.status === 'ended') ? 'default' : 'processing'} variant="borderless" className="rb:mr-0! rb:text-xs!">
+          {timing}
+        </Tag>
+      </Flex>
+      {!memo.end_date && memo.retain_until && (
+        <div className="rb:mt-2 rb:text-xs rb:text-gray-500">{t('shortTermDetail.retainedUntil', { date: formatDateTime(memo.retain_until, dateFormat), time: '00:00' })}</div>
+      )}
+    </article>
+  )
+}
+
 /**
  * ShortTermDetail – Displays the AI system's short-term "workbench" memory.
  *
@@ -51,8 +138,7 @@ interface ShortData {
  * - Top-left: three KPI cards (retrieval count, extracted entities, long-term candidates).
  * - Left column: deep-retrieval entries – each shows the user message, expandable
  *   sub-queries with retrieved passages, and the generated answer.
- * - Right column: long-term candidate pool – aggregated entries waiting to be
- *   promoted into persistent memory, with expand/collapse for long content.
+ * - Right column: short-term memos with scope/date filters and infinite scrolling.
  *
  * Route param `id` is the end-user ID.
  */
@@ -61,8 +147,14 @@ const ShortTermDetail: FC = () => {
   const { id } = useParams()
   const [loading, setLoading] = useState<boolean>(false)
   const [data, setData] = useState<ShortData>({} as ShortData)
-  /** Tracks expand/collapse state for each long-term candidate card by index. */
-  const [longTermExpandedMap, setLongTermExpandedMap] = useState<Record<number, boolean>>({})
+  const [memoScope, setMemoScope] = useState<MemoScope>('current')
+  const [memoDateTypes, setMemoDateTypes] = useState<Record<MemoScope, MemoDateType>>({ current: 'all', ended: 'all' })
+  const [memoCounts, setMemoCounts] = useState<MemoCounts>({
+    total: 0,
+    current: { total: 0, dated: 0, undated: 0 },
+    ended: { total: 0, dated: 0, undated: 0 },
+  })
+  const memoDateType = memoDateTypes[memoScope]
   /** Tracks expand/collapse state for short-term sub-queries and answers by composite key. */
   const [shortTermExpandedMap, setShortTermExpandedMap] = useState<Record<string, boolean>>({})
 
@@ -85,6 +177,22 @@ const ShortTermDetail: FC = () => {
       setLoading(false)
     })
   }
+
+  const getMemoCount = (res: { data?: { counts?: MemoCounts }; counts?: MemoCounts }) => {
+    const counts = res.data?.counts ?? res.counts
+    if (counts) setMemoCounts(counts)
+  }
+
+  const currentMemoCounts = memoCounts[memoScope]
+  const memoScopeOptions = [
+    { label: `${t('shortTermDetail.currentMemo')} (${memoCounts.current.total})`, value: 'current' },
+    { label: `${t('shortTermDetail.endedMemo')} (${memoCounts.ended.total})`, value: 'ended' },
+  ]
+  const memoDateOptions = [
+    { label: `${t('shortTermDetail.allDates')} (${currentMemoCounts.total})`, value: 'all' },
+    { label: `${t('shortTermDetail.dated')} (${currentMemoCounts.dated})`, value: 'dated' },
+    { label: `${t('shortTermDetail.undated')} (${currentMemoCounts.undated})`, value: 'undated' },
+  ]
 
   return (
     <Row gutter={12} className="rb:h-full!">
@@ -124,8 +232,8 @@ const ShortTermDetail: FC = () => {
               : !data.short_term || data.short_term.length === 0
                 ? <Empty />
                 : data.short_term?.map((vo, voIdx) => (
-                  <Flex key={voIdx} gap={12} vertical className="rb:leading-5 rb:bg-[#F6F6F6] rb:rounded-xl rb:p-3!">
-                    <div className="rb:font-medium rb:text-[#212332] rb:leading-5">{vo.message}</div>
+                  <Flex key={voIdx} gap={12} vertical className="rb:leading-5 rb:bg-gray-100 rb:rounded-xl rb:p-3!">
+                    <div className="rb:font-medium rb:text-gray-800 rb:leading-5">{vo.message}</div>
                     {vo.retrieval.map((item, index) => {
                       const key = `${voIdx}-${index}`
                       const expanded = shortTermExpandedMap[key]
@@ -146,17 +254,17 @@ const ShortTermDetail: FC = () => {
                           </Flex>
                           {expanded && (
                             <>
-                              <div className="rb:text-[#5B6167] rb:mb-4">
+                              <div className="rb:text-gray-600 rb:mb-4">
                                 <Markdown content={item.query} />
                               </div>
                               <div className="rb:font-medium rb:mb-2">{t('shortTermDetail.answer')}</div>
                               {item.retrieval.length > 0
-                                ? <ul className="rb:list-disc rb:ml-4 rb:text-[#5B6167]">
+                                ? <ul className="rb:list-disc rb:ml-4 rb:text-gray-600">
                                   {item.retrieval.map((retrieval, retrievalIdx) => (
-                                    <li key={retrievalIdx} className="rb:text-[#5B6167]">{retrieval}</li>
+                                    <li key={retrievalIdx} className="rb:text-gray-600">{retrieval}</li>
                                   ))}
                                 </ul>
-                                : <div className="rb:text-[#5B6167]">{t('shortTermDetail.noAnswer')}</div>
+                                : <div className="rb:text-gray-600">{t('shortTermDetail.noAnswer')}</div>
                               }
                             </>
                           )}
@@ -178,7 +286,7 @@ const ShortTermDetail: FC = () => {
                         })}></div>
                       </Flex>
                       {shortTermExpandedMap[`ans-${voIdx}`] && (
-                        <div className="rb:text-[#5B6167]">
+                        <div className="rb:text-gray-600">
                           <Markdown content={vo.answer} />
                         </div>
                       )}
@@ -191,47 +299,52 @@ const ShortTermDetail: FC = () => {
       </Col>
       <Col span={12} className="rb:h-full!">
         <RbCard
-          title={() => (<Space size={4}>
-            {t('shortTermDetail.longTermTitle')}
-            <Tooltip title={t('shortTermDetail.longTermTitleSubTitle')}>
-              <div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/userMemory/question.svg')]"></div>
-            </Tooltip>
-          </Space>)}
+          title={() => (
+            <Space size={4}>
+              {t('shortTermDetail.memoTitle')}
+              <span className="rb:text-sm rb:font-[-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,'Noto Sans',sans-serif,'Apple Color Emoji','Segoe UI Emoji','Segoe UI Symbol','Noto Color Emoji'] rb:font-normal rb:text-gray-600">({memoCounts.total})</span>
+              <Tooltip title={t('shortTermDetail.memoTip')}>
+                <div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/userMemory/question.svg')]"></div>
+              </Tooltip>
+            </Space>
+          )}
           headerType="borderless"
           headerClassName="rb:min-h-[54px]! rb:font-[MiSans-Bold] rb:font-bold"
-          bodyClassName="rb:p-3! rb:pt-0! rb:h-[calc(100%-54px)] rb:overflow-y-auto!"
+          bodyClassName="rb:p-3! rb:pt-0! rb:h-[calc(100%-54px)] rb:flex rb:flex-col rb:gap-3 rb:overflow-hidden"
           className="rb:h-full!"
         >
-          <Flex vertical gap={12}>
-            {loading
-              ? <Skeleton active />
-              : !data.long_term || data.long_term.length === 0
-              ? <Empty />
-              : data.long_term?.map((vo, voIdx) => {
-                const lines = vo.retrieval.split('\n')
-                const expanded = longTermExpandedMap[voIdx]
-                return (
-                  <div key={voIdx} className="rb:leading-5 rb:bg-[#F6F6F6] rb:rounded-xl rb:p-3">
-                    <div className="rb:mb-3 rb:text-[#212332] rb:font-medium rb:px-1">{vo.query}</div>
-                    <div className="rb:bg-white rb:rounded-xl rb:px-3 rb:py-2.5">
-                      <div className={expanded ? undefined : "rb:wrap-break-word rb:line-clamp-3"}>
-                        <Markdown content={vo.retrieval} />
-                      </div>
-
-                      {lines.length > 4 && (
-                        <div
-                          className="rb:text-[#155EEF] rb:cursor-pointer rb:mt-1"
-                          onClick={() => setLongTermExpandedMap(prev => ({ ...prev, [voIdx]: !prev[voIdx] }))}
-                        >
-                          {expanded ? t('common.foldUp') : t('common.expanded')}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                )
-              })
-            }
-          </Flex>
+          <PageTabs
+            block
+            aria-label={t('shortTermDetail.memoScopeLabel')}
+            value={memoScope}
+            onChange={value => {
+              const scope = value as MemoScope
+              setMemoScope(scope)
+              setMemoDateTypes(prev => ({ ...prev, [scope]: 'all' }))
+            }}
+            options={memoScopeOptions}
+          />
+          <RadioGroupButton
+            block
+            aria-label={t('shortTermDetail.memoDateLabel')}
+            value={memoDateType}
+            onChange={value => setMemoDateTypes(prev => ({ ...prev, [memoScope]: value as MemoDateType }))}
+            options={memoDateOptions}
+          />
+          {id && (
+            <PageScrollList<ShortMemo>
+              key={`${id}:${memoScope}:${memoDateType}`}
+              url={getShortMemosUrl}
+              query={{ end_user_id: id, scope: memoScope, date_type: memoDateType }}
+              column={1}
+              heightClass="rb:flex-1 rb:min-h-0"
+              className="rb:pr-1"
+              pageLoading={<Skeleton active paragraph={{ rows: 3 }} />}
+              empty={<Empty subTitle={memoDateType !== 'all' ? t('shortTermDetail.filteredMemoEmpty') : memoScope === 'current' ? t('shortTermDetail.currentMemoEmpty') : t('shortTermDetail.endedMemoEmpty')} />}
+              renderItem={memo => <MemoCard memo={memo} />}
+              onLoad={getMemoCount}
+            />
+          )}
         </RbCard>
       </Col>
     </Row>
