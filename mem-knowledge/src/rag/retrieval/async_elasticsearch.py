@@ -9,9 +9,10 @@ from contextlib import AbstractAsyncContextManager, nullcontext
 from dataclasses import replace
 from typing import Any, Protocol
 
-from elasticsearch.helpers import async_bulk
+from elasticsearch.helpers import async_bulk, async_streaming_bulk
 from redbear_model import TextEmbeddingContent
 
+from ..chunk.mutation import ChunkWriteResult
 from ..models.chunk import DocumentChunk, chunk_retrieval_content
 from ..models.embedding import collect_asset_file_ids
 from ..models.retrieval_unit import (
@@ -91,7 +92,9 @@ class AsyncChunkStore:
         embedding_dimension: int | None = None,
         vector_indexed: bool = True,
         multimodal: bool | None = None,
-        mutation_context: Callable[[], AbstractAsyncContextManager[None]] | None = None,
+        mutation_context: (
+            Callable[[], AbstractAsyncContextManager[ChunkWriteResult | None]] | None
+        ) = None,
         index_name: str | None = None,
         document_id_field: str | None = None,
     ):
@@ -326,10 +329,19 @@ class AsyncChunkStore:
             if self.document_id_field is not None:
                 action["_id"] = str(metadata[self.document_id_field])
             actions.append(action)
-        async with self._mutation_context():
+        async with self._mutation_context() as mutation:
             if not await self.client.indices.exists(index=self.index):
                 await self._create_index(embeddings)
-            await async_bulk(self.client, actions)
+            await self._write_bulk(actions, mutation)
+
+    async def _write_bulk(self, actions, mutation, **kwargs) -> None:
+        if mutation is None:
+            await async_bulk(self.client, actions, **kwargs)
+            return
+        # 与 async_bulk 一样遇到批次错误即抛出；先记录已成功的项，避免部分写入后漏撤旧 Wiki。
+        async for ok, _ in async_streaming_bulk(self.client, actions, **kwargs):
+            if ok:
+                mutation.record(1)
 
     async def update_chunk(self, chunk: DocumentChunk) -> int:
         metadata = chunk.metadata or {}
@@ -353,12 +365,14 @@ class AsyncChunkStore:
             )
             params["new_question"] = metadata.get("question", "")
             params["new_answer"] = metadata.get("answer", "")
-        async with self._mutation_context():
+        async with self._mutation_context() as mutation:
             response = await self.client.update_by_query(
                 index=self.index,
                 script={"source": source, "params": params},
                 query={"term": {Field.DOC_ID.value: metadata["doc_id"]}},
             )
+            if mutation is not None:
+                mutation.record(int(response.get("updated", 0)))
             self._raise_on_failed_response(response, "segment update")
         return int(response.get("updated", 0))
 
@@ -435,16 +449,16 @@ class AsyncChunkStore:
 
         # All external preparation has succeeded. Stable IDs replace documents
         # in place; failed writes never trigger removal of the previous unit set.
-        async with self._mutation_context():
-            await async_bulk(self.client, actions, refresh="wait_for")
+        async with self._mutation_context() as mutation:
+            await self._write_bulk(actions, mutation, refresh="wait_for")
             stale_ids = existing.keys() - retained_ids
             if stale_ids:
-                await async_bulk(
-                    self.client,
+                await self._write_bulk(
                     [
                         {"_op_type": "delete", "_index": self.index, "_id": unit_id}
                         for unit_id in stale_ids
                     ],
+                    mutation,
                     refresh="wait_for",
                 )
         return 1
@@ -452,12 +466,12 @@ class AsyncChunkStore:
     async def delete_by_ids(self, ids: list[str], *, refresh: bool = False) -> int:
         if not ids:
             return 0
-        async with self._mutation_context():
+        async with self._mutation_context() as mutation:
             if not await self.client.indices.exists(index=self.index):
                 return 0
             if self.multimodal:
                 # ids are chunk doc_ids; unit docs key off chunk_id.
-                deleted = await self.delete_units_by_chunk_ids(ids)
+                deleted = await self.delete_units_by_chunk_ids(ids, mutation=mutation)
                 if refresh:
                     await self.client.indices.refresh(index=self.index)
                 return deleted
@@ -468,6 +482,8 @@ class AsyncChunkStore:
                 conflicts="abort",
                 wait_for_completion=True,
             )
+            if mutation is not None:
+                mutation.record(int(response.get("deleted", 0)))
             self._raise_on_failed_response(response, "segment delete")
             if refresh:
                 await self.client.indices.refresh(index=self.index)
@@ -587,10 +603,10 @@ class AsyncChunkStore:
                     }
                 )
         if actions:
-            async with self._mutation_context():
+            async with self._mutation_context() as mutation:
                 if not await self.client.indices.exists(index=self.index):
                     await self._create_index([])
-                await async_bulk(self.client, actions)
+                await self._write_bulk(actions, mutation)
 
     @staticmethod
     def _unit_source(unit: RetrievalUnit, vector: list[float] | None) -> dict[str, Any]:
@@ -638,7 +654,9 @@ class AsyncChunkStore:
                 vectors[index] = list(result)
         return vectors
 
-    async def delete_units_by_chunk_ids(self, chunk_ids: list[str]) -> int:
+    async def delete_units_by_chunk_ids(
+        self, chunk_ids: list[str], *, mutation: ChunkWriteResult | None = None
+    ) -> int:
         """Cascade-delete every unit (and chunk_record) of the given chunks."""
 
         if not chunk_ids or not await self.client.indices.exists(index=self.index):
@@ -649,6 +667,8 @@ class AsyncChunkStore:
             conflicts="abort",
             wait_for_completion=True,
         )
+        if mutation is not None:
+            mutation.record(int(response.get("deleted", 0)))
         self._raise_on_failed_response(response, "unit delete")
         return int(response.get("deleted", 0))
 
