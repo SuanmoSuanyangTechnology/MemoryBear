@@ -61,7 +61,7 @@ def _deployment_allows() -> bool:
         from app.core.config import settings
 
         return bool(
-            settings.FAST_WRITE_EMOTION_URL
+            settings.BERT_URL
             and settings.FAST_WRITE_EMOTION_API_KEY
             and settings.FAST_WRITE_EMOTION_MODEL
         )

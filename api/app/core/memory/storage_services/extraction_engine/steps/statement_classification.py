@@ -57,7 +57,7 @@ class StatementClassifier:
 
     def __init__(self) -> None:
         self._client: httpx.AsyncClient | None = None
-        self._available = bool(settings.FAST_WRITE_EMOTION_URL)
+        self._available = bool(settings.BERT_URL)
 
     def _client_sync(self) -> httpx.AsyncClient:
         if self._client is None:
@@ -86,7 +86,7 @@ class StatementClassifier:
         payload = {"model": model, "query": statement_text, "top_n": 3}
         try:
             resp = await self._client_sync().post(
-                settings.FAST_WRITE_EMOTION_URL,
+                settings.BERT_URL,
                 headers={
                     "Authorization": f"Bearer {api_key}",
                     "Content-Type": "application/json",

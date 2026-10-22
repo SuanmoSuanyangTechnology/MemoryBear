@@ -20,6 +20,7 @@ class ReflectionModelType(StrEnum):
 
     LLM = "llm"
     EMBEDDING = "embedding"
+    BERT = "bert"
     UNKNOWN = "unknown"
 
 

@@ -714,7 +714,7 @@ def _build_reflection_event(
     details: Dict[str, Any] = {
         "scan_type": scan_type,
         "entity_merged_count": entity_merged,
-        "alias_merged_count": _pick(result.get("alias_merge"), "merge_count"),
+        "alias_merged_count": _pick(result.get("alias_merge"), "alias_nodes_deleted"),
         "description_merged_count": _pick(result.get("description_merge"), "merged_count"),
         "metadata_extracted_count": _pick(result.get("metadata_extraction"), "extracted"),
         "unresolved_resolved_count": _pick(
