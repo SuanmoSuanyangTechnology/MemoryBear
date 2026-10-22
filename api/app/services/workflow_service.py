@@ -9946,13 +9946,10 @@ class WorkflowService:
         if not workspace_id:
             raise BusinessException("应用不存在", BizCode.NOT_FOUND)
 
-        workflow_config_dict = {
-            "nodes": config.nodes,
-            "edges": config.edges,
-            "variables": config.variables,
-            "execution_config": config.execution_config,
-            "features": config.features or {},
-        }
+        workflow_config_dict = self._build_runtime_workflow_config_dict(
+            app_id=app_id,
+            workflow_config=config,
+        )
 
         execution_context = ExecutionContext(
             execution_id=execution_id,

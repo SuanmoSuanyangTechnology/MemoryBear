@@ -3,18 +3,9 @@
 from copy import deepcopy
 import logging
 
+from app.core.memory.models.metadata_models import split_metadata_entry
+
 logger = logging.getLogger(__name__)
-
-
-def _split_entry(item) -> tuple[str, str, str] | None:
-    if not isinstance(item, str):
-        return None
-    parts = [part.strip() for part in item.strip().split("|", 2)]
-    if len(parts) == 2:
-        parts = [parts[0], "", parts[1]]
-    if len(parts) != 3 or not parts[2]:
-        return None
-    return parts[0], parts[1], parts[2]
 
 
 def _filter_entries(value, allowed_keys: set[str] | None = None) -> list[str]:
@@ -22,7 +13,7 @@ def _filter_entries(value, allowed_keys: set[str] | None = None) -> list[str]:
         return []
     result = []
     for item in value:
-        parsed = _split_entry(item)
+        parsed = split_metadata_entry(item)
         if parsed is None:
             continue
         field_key, level3, _ = parsed
@@ -39,7 +30,8 @@ def project_metadata(record: dict, scope: dict | str | None) -> dict:
         result[key] = [item for item in value if isinstance(item, str) and item.strip()] if isinstance(value, list) else []
 
     scene_name = scope.get("scene_name") if isinstance(scope, dict) else scope
-    field_keys = set(scope.get("field_keys", ())) if isinstance(scope, dict) else None
+    raw_field_keys = scope.get("field_keys") if isinstance(scope, dict) else None
+    field_keys = set(raw_field_keys) if raw_field_keys is not None else None
     domains = result.get("domain_specific_info")
     value = domains.get(scene_name) if isinstance(domains, dict) and scene_name else None
     filtered = _filter_entries(value, field_keys) if field_keys is not None else (
