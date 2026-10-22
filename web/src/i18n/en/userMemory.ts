@@ -340,6 +340,7 @@ export const userMemory = {
       MEMORY_VALUE: 'Memory Value Dynamic Weight Engine',
       PREFERENCE: 'Preference Engine',
       SCENE_RECONSTRUCTION: 'Multimodal Episodic Memory Reconstruction Engine',
+      PREDICTION: 'Memory Prediction Workbench',
 
       memorySubject: 'Memory Subject',
       basicInfo: 'Basic Information',
