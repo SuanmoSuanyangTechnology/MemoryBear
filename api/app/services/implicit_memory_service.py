@@ -37,7 +37,8 @@ from app.schemas.implicit_memory_schema import (
     UserMemorySummary,
 )
 from app.schemas.memory_config_schema import MemoryConfig
-from app.services.memory_base_service import MIN_MEMORY_SUMMARY_COUNT
+
+MIN_SCENE_SUMMARY_COUNT = 5
 
 logger = logging.getLogger(__name__)
 
@@ -141,7 +142,7 @@ class ImplicitMemoryService:
         time_range: Optional[TimeRange] = None,
         limit: Optional[int] = None
     ) -> List[UserMemorySummary]:
-        """Extract user-specific memory summaries.
+        """Extract user-specific SceneSummary records.
         
         Args:
             user_id: Target user ID
@@ -151,7 +152,7 @@ class ImplicitMemoryService:
         Returns:
             List of user-specific memory summaries
         """
-        logger.info(f"Extracting user summaries for user {user_id}")
+        logger.info(f"Extracting user SceneSummary records for user {user_id}")
         
         try:
             summaries = await self.data_source.get_user_summaries(
@@ -160,7 +161,7 @@ class ImplicitMemoryService:
                 limit=limit or 1000
             )
             
-            logger.info(f"Extracted {len(summaries)} summaries for user {user_id}")
+            logger.info(f"Extracted {len(summaries)} SceneSummary records for user {user_id}")
             return summaries
             
         except Exception as e:
@@ -406,7 +407,7 @@ class ImplicitMemoryService:
     
 
     def _build_empty_profile(self) -> dict:
-        """构建 MemorySummary 不足时返回的固定空白画像数据"""
+        """Build the fixed empty profile returned for insufficient SceneSummary data."""
         now_ms = to_timestamp_ms(utcnow_naive())
         insufficient = "Insufficient data for analysis"
 
@@ -455,7 +456,7 @@ class ImplicitMemoryService:
     ) -> dict:
         """生成完整的用户画像（包含所有4个模块）
         
-        需要该用户的 MemorySummary 节点数量 >= 5 才会真正调用 LLM 生成画像，
+        需要该用户的 SceneSummary 数量 >= 5 才会真正调用 LLM 生成画像，
         否则返回固定的空白画像数据。
         
         Args:
@@ -467,25 +468,30 @@ class ImplicitMemoryService:
         logger.info(f"生成完整用户画像: user={user_id}")
         
         try:
-            # 前置检查：查询该用户有效的 MemorySummary 节点数量（排除孤立节点）
-            from app.services.memory_base_service import MemoryBaseService
-            base_service = MemoryBaseService(shared_driver=False)
-            try:
-                memory_summary_count = await base_service.get_valid_memory_summary_count(user_id)
-            finally:
-                await base_service.close()
-            logger.info(f"用户 MemorySummary 节点数量: {memory_summary_count} (user={user_id})")
+            scene_summary_count = await self.data_source.count_user_summaries(
+                user_id=user_id
+            )
+            logger.info(
+                "用户 SceneSummary 数量: %s (user=%s)",
+                scene_summary_count,
+                user_id,
+            )
 
-            if memory_summary_count < MIN_MEMORY_SUMMARY_COUNT:
-                logger.info(f"MemorySummary 数量不足 {MIN_MEMORY_SUMMARY_COUNT}（当前 {memory_summary_count}），返回空白画像: user={user_id}")
+            if scene_summary_count < MIN_SCENE_SUMMARY_COUNT:
+                logger.info(
+                    "SceneSummary 数量不足 %s（当前 %s），返回空白画像: user=%s",
+                    MIN_SCENE_SUMMARY_COUNT,
+                    scene_summary_count,
+                    user_id,
+                )
                 return self._build_empty_profile()
 
-            # 并行调用4个分析方法
+            # Run the four analysis methods in parallel.
             preferences, portrait, interest_areas, habits = await asyncio.gather(
                 self.get_preference_tags(user_id=user_id),
                 self.get_dimension_portrait(user_id=user_id),
                 self.get_interest_area_distribution(user_id=user_id),
-                self.get_behavior_habits(user_id=user_id)
+                self.get_behavior_habits(user_id=user_id),
             )
             
             # 转换为可序列化的格式

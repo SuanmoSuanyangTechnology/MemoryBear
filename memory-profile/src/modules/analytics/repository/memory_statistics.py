@@ -14,6 +14,7 @@ from src.models.references import (
     Conversation,
     EndUser,
     ForgetAudit,
+    ImplicitEmotionsStorage,
     MemoryMessage,
     MemoryPerceptual,
     ShortTermMemory,
@@ -239,3 +240,20 @@ class MemoryStatisticsRepository:
         async with self.postgres.session() as session:
             value = await session.scalar(statement)
         return int(value or 0)
+
+    async def habit_count_for_users(self, end_user_ids: list[str]) -> int:
+        """Count cached habits for one user or a workspace user batch."""
+        if not end_user_ids:
+            return 0
+        statement = select(ImplicitEmotionsStorage.implicit_profile).where(
+            ImplicitEmotionsStorage.end_user_id.in_(end_user_ids)
+        )
+        async with self.postgres.session() as session:
+            profiles = (await session.scalars(statement)).all()
+        count = 0
+        for profile in profiles:
+            if isinstance(profile, dict):
+                habits = profile.get("habits", [])
+                if isinstance(habits, list):
+                    count += len(habits)
+        return count

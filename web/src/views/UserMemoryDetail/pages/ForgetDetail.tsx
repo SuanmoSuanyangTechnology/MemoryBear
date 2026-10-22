@@ -60,7 +60,7 @@ const ForgetDetail = forwardRef((_props, ref) => {
   const [data, setData] = useState<ForgetData>({} as ForgetData)
   const [trendLoading, setTrendLoading] = useState<boolean>(false)
   const [trendData, setTrendData] = useState<ForgetTrendData[]>([])
-  const [activeTab, setActiveTab] = useState<'pending' | 'forgotten'>('pending')
+  const [activeTab, setActiveTab] = useState<'pending' | 'forgotten'>('forgotten')
   const forgetRefreshModalRef = useRef<ForgetRefreshModalRef>(null)
 
   /* Fetch stats and trend whenever the route user ID changes. */
@@ -99,7 +99,6 @@ const ForgetDetail = forwardRef((_props, ref) => {
     getForgetMemoryQuota(id).then((res) => {
       const response = res as ForgetData
       const { breakdown = {}, memory_limit = 0, target_count = 0 } = response || {}
-      setData(response || {})
 
       const activeCount = calcActiveCount(breakdown as ForgetData['breakdown'])
       const activePercent = calcPercent(activeCount, memory_limit)
@@ -109,7 +108,7 @@ const ForgetDetail = forwardRef((_props, ref) => {
       const quotaColorClassObj = quotaColorClass(quotaStatus)
 
       setData({
-        ...data,
+        ...response,
         activeCount,
         activePercent,
         overLimitCount,
@@ -189,8 +188,8 @@ const ForgetDetail = forwardRef((_props, ref) => {
 
   /** Tab items for the bottom table card. */
   const tabItems: { key: 'pending' | 'forgotten'; label: string }[] = [
-    { key: 'pending', label: t('forgetDetail.nextBatchForget') },
     { key: 'forgotten', label: t('forgetDetail.alreadyForgotten') },
+    { key: 'pending', label: t('forgetDetail.nextBatchForget') },
   ]
 
   return (
@@ -205,15 +204,15 @@ const ForgetDetail = forwardRef((_props, ref) => {
         >
           <div className="rb:grid rb:grid-cols-3 rb:gap-3">
             {/* Active quota memory total */}
-            <div className="rb:bg-[#F6F6F6] rb:rounded-xl rb:p-2 rb:pt-3">
-              <div className="rb:text-[#5B6167] rb:text-[12px] rb:leading-4.5 rb:mb-1">{t('forgetDetail.activeQuotaTotal')}</div>
+            <div className="rb:bg-gray-100 rb:rounded-xl rb:p-2 rb:pt-3">
+              <div className="rb:text-gray-600 rb:text-[12px] rb:leading-4.5 rb:mb-1">{t('forgetDetail.activeQuotaTotal')}</div>
               <div className="rb:text-[18px] rb:font-[MiSans-Bold] rb:font-bold rb:leading-6 rb:mb-2">{data.activeCount}</div>
-              <div className="rb:text-[#5B6167] rb:text-[12px] rb:leading-4.5 rb:mb-2">{t('forgetDetail.activeQuotaTotalTip')}</div>
+              <div className="rb:text-gray-600 rb:text-[12px] rb:leading-4.5 rb:mb-2">{t('forgetDetail.activeQuotaTotalTip')}</div>
               <div className="rb:bg-white rb:rounded-lg rb:p-3 rb:grid rb:grid-cols-2 rb:gap-x-2 rb:gap-y-3">
                 {['Statement', 'ExtractedEntity', 'MemorySummary', 'Chunk'].map((key, index) => (
                   <div key={index}>
                     <div className="rb:font-[MiSans-Bold] rb:font-bold rb:leading-4.75">{data?.breakdown?.[key as keyof typeof data.breakdown] ?? 0}</div>
-                    <div className="rb:text-[#5B6167] rb:text-[12px] rb:leading-4.5 rb:mt-1">
+                    <div className="rb:text-gray-600 rb:text-[12px] rb:leading-4.5 rb:mt-1">
                       {t(`userMemory.${key}`)}
                       {key === 'MemorySummary' &&
                         <Tag color="default" className="rb:text-[10px]! rb:leading-3!">{t('forgetDetail.not_contain')}</Tag>
@@ -224,9 +223,36 @@ const ForgetDetail = forwardRef((_props, ref) => {
               </div>
             </div>
 
+            {/* Pending forget count */}
+            <div className="rb:bg-gray-100 rb:rounded-xl rb:p-2 rb:pt-3">
+              <div className="rb:grid rb:grid-cols-2 rb:gap-2">
+                <Flex vertical justify="space-between">
+                  <div className="rb:text-gray-600 rb:text-[12px] rb:leading-4.5 rb:mb-1">{t('forgetDetail.forgottenCount')}</div>
+                  <div className="rb:text-[18px] rb:font-[MiSans-Bold] rb:font-bold rb:leading-6 rb:mb-1">{data.forgotten_count ?? 0}</div>
+                </Flex>
+                <Flex vertical justify="space-between">
+                  <div className="rb:text-gray-600 rb:text-[12px] rb:leading-4.5 rb:mb-1">{t('forgetDetail.pendingForgetCount')}</div>
+                  <div className="rb:text-[18px] rb:font-[MiSans-Bold] rb:font-bold rb:leading-6 rb:mb-1">{data.pendingForgetCount}</div>
+                </Flex>
+              </div>
+
+              <div className="rb:text-gray-600 rb:text-[12px] rb:leading-3.5 rb:mt-3">{t('forgetDetail.low_nodes')}</div>
+
+              <div className="rb:bg-white rb:rounded-lg rb:mt-2 rb:p-3 rb:space-y-3">
+                <div>
+                  <div className="rb:text-gray-600 rb:text-[12px] rb:leading-4.5 rb:mb-1">{t('forgetDetail.triggerLine')}</div>
+                  <div className="rb:text-[16px] rb:font-[MiSans-Bold] rb:font-bold rb:leading-6">{data.memory_limit}</div>
+                </div>
+                <div>
+                  <div className="rb:text-gray-600 rb:text-[12px] rb:leading-4.5 rb:mb-1">{t('forgetDetail.targetWaterLevel')}</div>
+                  <div className="rb:text-[16px] rb:font-[MiSans-Bold] rb:font-bold rb:leading-6">{data.target_count}</div>
+                </div>
+              </div>
+            </div>
+
             {/* Quota usage rate */}
-            <div className="rb:bg-[#F6F6F6] rb:rounded-xl rb:p-2 rb:pt-3">
-              <div className="rb:text-[#5B6167] rb:text-[12px] rb:leading-4.5 rb:mb-1">{t('forgetDetail.quotaUsageRate')}</div>
+            <div className="rb:bg-gray-100 rb:rounded-xl rb:p-2 rb:pt-3">
+              <div className="rb:text-gray-600 rb:text-[12px] rb:leading-4.5 rb:mb-1">{t('forgetDetail.quotaUsageRate')}</div>
               <Flex align="baseline" gap={6}>
                 <div className={clsx("rb:text-[18px] rb:font-[MiSans-Bold] rb:font-bold rb:leading-6", data.quotaColorClassObj)}>
                   {data.activePercent?.toFixed(2)}%
@@ -240,31 +266,13 @@ const ForgetDetail = forwardRef((_props, ref) => {
               </div>
 
               <div className="rb:bg-white rb:rounded-lg rb:p-3 rb:pt-2">
-                <div className="rb:text-[#5B6167] rb:text-[12px] rb:leading-4.5 rb:mb-1">{t('forgetDetail.currentStatus')}</div>
+                <div className="rb:text-gray-600 rb:text-[12px] rb:leading-4.5 rb:mb-1">{t('forgetDetail.currentStatus')}</div>
                 {data.quotaStatus && <>
                   <div className={clsx('rb:font-medium rb:text-[18px]', data.quotaColorClassObj)}>{t(`userMemory.${data.quotaStatus}`)}</div>
                   {data.quotaStatus !== 'normal' &&
-                    <div className="rb:text-[#5B6167] rb:text-[12px] rb:leading-4.5">{t(`forgetDetail.${data.quotaStatus}StatusTip`, { num: data.overLimitCount })}</div>
+                    <div className="rb:text-gray-600 rb:text-[12px] rb:leading-4.5">{t(`forgetDetail.${data.quotaStatus}StatusTip`, { num: data.overLimitCount })}</div>
                   }
                 </>}
-              </div>
-            </div>
-
-            {/* Pending forget count */}
-            <div className="rb:bg-[#F6F6F6] rb:rounded-xl rb:p-2 rb:pt-3">
-              <div className="rb:text-[#5B6167] rb:text-[12px] rb:leading-4.5 rb:mb-1">{t('forgetDetail.pendingForgetCount')}</div>
-              <div className="rb:text-[18px] rb:font-[MiSans-Bold] rb:font-bold rb:leading-6 rb:mb-1">{data.pendingForgetCount}</div>
-              <div className="rb:text-[#5B6167] rb:text-[12px] rb:leading-3.5">{t('forgetDetail.low_nodes')}</div>
-
-              <div className="rb:bg-white rb:rounded-lg rb:mt-2 rb:p-3 rb:space-y-3">
-                <div>
-                  <div className="rb:text-[#5B6167] rb:text-[12px] rb:leading-4.5 rb:mb-1">{t('forgetDetail.triggerLine')}</div>
-                  <div className="rb:text-[16px] rb:font-[MiSans-Bold] rb:font-bold rb:leading-6">{data.memory_limit}</div>
-                </div>
-                <div>
-                  <div className="rb:text-[#5B6167] rb:text-[12px] rb:leading-4.5 rb:mb-1">{t('forgetDetail.targetWaterLevel')}</div>
-                  <div className="rb:text-[16px] rb:font-[MiSans-Bold] rb:font-bold rb:leading-6">{data.target_count}</div>
-                </div>
               </div>
             </div>
           </div>
@@ -299,7 +307,7 @@ const ForgetDetail = forwardRef((_props, ref) => {
                   'rb:cursor-pointer rb:px-3 rb:py-1 rb:rounded-lg rb:text-[14px] rb:leading-5 rb:transition-colors',
                   activeTab === item.key
                     ? 'rb:bg-[#171719] rb:text-white rb:font-[MiSans-Bold] rb:font-bold'
-                    : 'rb:bg-[#F6F6F6] rb:text-[#5B6167]'
+                    : 'rb:bg-gray-100 rb:text-gray-600'
                 )}
               >
                 {item.label}
@@ -307,7 +315,7 @@ const ForgetDetail = forwardRef((_props, ref) => {
             ))}
           </Flex>
           {activeTab === 'pending' &&
-            <div className="rb:text-[#5B6167] rb:text-[12px] rb:leading-4.5 rb:px-1 rb:mb-3">
+            <div className="rb:text-gray-600 rb:text-[12px] rb:leading-4.5 rb:px-1 rb:mb-3">
               {t('forgetDetail.forgetRuleNote')}
             </div>
           }

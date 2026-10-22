@@ -1,49 +1,19 @@
-import { useMemo, useEffect, useState } from 'react';
-import type { FC } from 'react';
+import { Trans } from 'react-i18next';
+import { useMemo, useEffect, useState, type FC, useCallback } from 'react';
 import type { CSSProperties, Key, ReactNode } from 'react';
-import { Tree } from 'antd';
+import { Tree, Flex } from 'antd';
 import type { DataNode, TreeProps } from 'antd/es/tree';
-import folderIcon from '@/assets/images/knowledgeBase/folder.png';
-import textIcon from '@/assets/images/knowledgeBase/text.png';
-import imageIcon from '@/assets/images/knowledgeBase/image.png';
-import datasetsIcon from '@/assets/images/knowledgeBase/datasets.png';
+import clsx from 'clsx';
+
 import switcherIcon from '@/assets/images/knowledgeBase/switcher.png';
 import { getFolderList } from '@/api/knowledgeBase';
 
 const { DirectoryTree } = Tree;
-
-const TEXT_EXTENSIONS = new Set([
-  'txt',
-  'md',
-  'rtf',
-  'doc',
-  'docx',
-  'pdf',
-  'csv',
-  'json',
-  'xml',
-  'html',
-  'htm',
-  'log',
-]);
-
-const IMAGE_EXTENSIONS = new Set([
-  'jpg',
-  'jpeg',
-  'png',
-  'gif',
-  'bmp',
-  'webp',
-  'svg',
-  'tiff',
-  'ico',
-]);
-
+const ROOT_NODE_KEY = '__all_files__';
 export interface TreeNodeData {
   key: Key;
   title: ReactNode;
   icon?: string;
-  switcherIcon?: string;
   type?: string;
   isLeaf?: boolean;
   children?: TreeNodeData[];
@@ -62,11 +32,16 @@ interface FolderTreeProps {
   selectedKeys?: React.Key[];
   // New: Auto expand to specified path
   autoExpandPath?: Array<{ id: string; name: string }>;
+  embedded?: boolean;
+  rootTitle?: ReactNode;
+  rootSelected?: boolean;
+  onRootSelect?: () => void;
+  onCreateFolder?: (parentId: string, parentName?: string, parentPath?: string[]) => void;
 }
 
 const renderIcon = (icon?: string) => {
   if (!icon) return undefined;
-  return <img src={icon} alt="icon" className="rb:size-4" />;
+  return <img src={icon} alt="" className="rb:size-4" />;
 };
 
 const transformTreeData = (nodes: TreeNodeData[]): DataNode[] =>
@@ -76,8 +51,6 @@ const transformTreeData = (nodes: TreeNodeData[]): DataNode[] =>
       key: node.key,
       title: node.title ?? '',
       icon: renderIcon(node.icon),
-      switcherIcon: renderIcon(node.switcherIcon),
-      isLeaf: node.isLeaf,
       children,
     };
   });
@@ -100,24 +73,13 @@ const isFolderLike = (node: any): boolean => {
   return false;
 };
 
-const getNodeTitle = (node: any): string => (
+const getNodeTitle = (node: any): ReactNode => (
   node?.folder_name
   ?? node?.file_name
   ?? node?.name
   ?? node?.title
-  ?? '未命名节点'
+  ?? <Trans i18nKey="knowledgeBase.privateWiki.unnamed" />
 );
-
-const getNodeIcon = (node: any, isFolder: boolean): string => {
-  if (isFolder) return folderIcon;
-  const type = typeof node?.type === 'string' ? node.type.toLowerCase() : '';
-  if (type === 'image') return imageIcon;
-  if (type === 'text') return textIcon;
-  const ext = normalizeExt(node?.file_ext);
-  if (IMAGE_EXTENSIONS.has(ext)) return imageIcon;
-  if (TEXT_EXTENSIONS.has(ext)) return textIcon;
-  return datasetsIcon;
-};
 
 const extractItems = (resp: any): any[] => {
   if (!resp) return [];
@@ -162,8 +124,6 @@ const buildTreeNodes = async (
     nodes.push({
       key: nodeKey,
       title: getNodeTitle(raw),
-      icon: getNodeIcon(raw, isFolder),
-      switcherIcon: isFolder ? switcherIcon : undefined,
       type: isFolder ? 'folder' : (typeof raw?.type === 'string' ? raw.type : normalizeExt(raw?.file_ext) || 'file'),
       isLeaf: false, // Folder node initially set to false, indicating possible child nodes, load when expanded
       children: undefined, // Initially don't load child nodes
@@ -185,13 +145,20 @@ const FolderTree: FC<FolderTreeProps> = ({
   onFolderPathChange,
   selectedKeys,
   autoExpandPath,
+  embedded = false,
+  rootTitle,
+  rootSelected = false,
+  onRootSelect,
+  onCreateFolder,
 }) => {
   const [treeData, setTreeData] = useState<TreeNodeData[]>([]);
-  const [expandedKeys, setExpandedKeys] = useState<React.Key[]>([]);
+  const [expandedKeys, setExpandedKeys] = useState<React.Key[]>(() => (
+    rootTitle === undefined ? [] : [ROOT_NODE_KEY]
+  ));
   const [autoExpandInProgress, setAutoExpandInProgress] = useState(false);
 
   // Helper function to update tree node data
-  const updateTreeData = (nodes: TreeNodeData[], key: Key, children: TreeNodeData[]): TreeNodeData[] => {
+  const updateTreeData = useCallback((nodes: TreeNodeData[], key: Key, children: TreeNodeData[]): TreeNodeData[] => {
     return nodes.map((node) => {
       if (node.key === key) {
         return {
@@ -208,7 +175,7 @@ const FolderTree: FC<FolderTreeProps> = ({
       }
       return node;
     });
-  };
+  }, []);
 
   // Load root nodes
   useEffect(() => {
@@ -216,12 +183,12 @@ const FolderTree: FC<FolderTreeProps> = ({
     const load = async () => {
       if (!knowledgeBaseId) {
         setTreeData([]);
-        setExpandedKeys([]); // Reset expand state
+        setExpandedKeys(rootTitle === undefined ? [] : [ROOT_NODE_KEY]); // Reset expand state
         return;
       }
       try {
         // Reset expand state, ensure starting from root directory
-        setExpandedKeys([]);
+        setExpandedKeys(rootTitle === undefined ? [] : [ROOT_NODE_KEY]);
         
         const nodes = await buildTreeNodes(knowledgeBaseId, knowledgeBaseId);
         if (!cancelled) {
@@ -244,7 +211,7 @@ const FolderTree: FC<FolderTreeProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [knowledgeBaseId, refreshKey]);
+  }, [knowledgeBaseId, refreshKey, rootTitle, onRootLoad]);
 
   // Lazy load child nodes - only load when expanded
   const onLoadData = async (node: any) => {
@@ -286,7 +253,7 @@ const FolderTree: FC<FolderTreeProps> = ({
   };
 
   // Helper function to find node
-  const findNodeInTree = (nodes: TreeNodeData[], key: string): TreeNodeData | null => {
+  const findNodeInTree = useCallback((nodes: TreeNodeData[], key: string): TreeNodeData | null => {
     for (const node of nodes) {
       if (String(node.key) === key) {
         return node;
@@ -297,7 +264,7 @@ const FolderTree: FC<FolderTreeProps> = ({
       }
     }
     return null;
-  };
+  }, []);
 
   // Progressive auto expand to specified path
   useEffect(() => {
@@ -345,7 +312,7 @@ const FolderTree: FC<FolderTreeProps> = ({
         }
         
         // Set expanded nodes
-        setExpandedKeys(keysToExpand);
+        setExpandedKeys(rootTitle === undefined ? keysToExpand : [ROOT_NODE_KEY, ...keysToExpand]);
         
         // Select last node (target folder)
         const targetKey = autoExpandPath[autoExpandPath.length - 1]?.id;
@@ -378,7 +345,7 @@ const FolderTree: FC<FolderTreeProps> = ({
     // Delay execution to ensure tree data is loaded
     const timer = setTimeout(expandToPath, 300);
     return () => clearTimeout(timer);
-  }, [autoExpandPath, treeData.length, knowledgeBaseId, onSelect, autoExpandInProgress]);
+  }, [autoExpandPath, treeData, findNodeInTree, updateTreeData, knowledgeBaseId, onSelect, autoExpandInProgress, rootTitle]);
 
   // Handle expand event
   const handleExpand: TreeProps['onExpand'] = (expandedKeys, info) => {
@@ -389,31 +356,48 @@ const FolderTree: FC<FolderTreeProps> = ({
   };
 
   // Handle select event, calculate and pass path
-  const handleSelect: TreeProps['onSelect'] = (selectedKeys, info) => {
-    if (selectedKeys.length > 0) {
-      const path = findNodePath(treeData, selectedKeys[0]);
-      if (path && onFolderPathChange) {
-        onFolderPathChange(path);
-      }
-    } else if (onFolderPathChange) {
-      onFolderPathChange([]);
+  const handleSelect: TreeProps['onSelect'] = (nextSelectedKeys, info) => {
+    if (String(info.node.key) === ROOT_NODE_KEY) {
+      onFolderPathChange?.([]);
+      onRootSelect?.();
+      return;
     }
-    
-    // Call original onSelect callback
-    if (onSelect) {
-      onSelect(selectedKeys, info);
+
+    const folderSelectedKeys = nextSelectedKeys.filter((key) => String(key) !== ROOT_NODE_KEY);
+    if (folderSelectedKeys.length > 0) {
+      const path = findNodePath(treeData, folderSelectedKeys[0]);
+      if (path) onFolderPathChange?.(path);
+    } else {
+      onFolderPathChange?.([]);
     }
+
+    onSelect?.(folderSelectedKeys, info);
   };
-  const treeNodes = useMemo(() => transformTreeData(treeData), [treeData]);
+  const treeNodes = useMemo(() => {
+    const folderNodes = transformTreeData(treeData);
+    if (rootTitle === undefined) return folderNodes;
+    return [{
+      key: ROOT_NODE_KEY,
+      title: rootTitle,
+      isLeaf: folderNodes.length === 0,
+      children: folderNodes.length > 0 ? folderNodes : undefined,
+    }];
+  }, [rootTitle, treeData]);
 
 
   if (!treeNodes.length) {
     return null;
   }
 
+  console.log('treeNodes', treeNodes)
+  const selectedKeyList = rootSelected ? [ROOT_NODE_KEY] : selectedKeys
   return (
-    <div className="rb:w-64 rb:py-4 rb:shrink-0 rb:h-[calc(100%+40px)] rb:border-r rb:border-[#EAECEE] rb:p-4 rb:bg-transparent">
+    <div className={embedded
+      ? 'rb:w-full rb:bg-transparent rb:pt-1'
+      : 'rb:w-64 rb:py-4 rb:shrink-0 rb:h-[calc(100%+40px)] rb:border-r rb:border-[#EAECEE] rb:p-4 rb:bg-transparent'
+    }>
       <DirectoryTree
+        showIcon={false}
         key={refreshKey} // Add key to ensure component re-renders when refreshKey changes
         multiple={multiple}
         className={className}
@@ -423,7 +407,34 @@ const FolderTree: FC<FolderTreeProps> = ({
         expandedKeys={expandedKeys}
         loadData={onLoadData}
         treeData={treeNodes}
-        selectedKeys={selectedKeys}
+        titleRender={(node) => {
+          return (
+            <Flex align="center" justify="space-between" gap={8} className="rb:w-full! rb:group">
+              <span className="rb:min-w-0 rb:flex-1 rb:truncate">{node.title as ReactNode}</span>
+              {onCreateFolder && (
+                <span
+                  className={clsx("rb:hidden rb:size-4 rb:bg-cover rb:shrink-0 rb:group-hover:block", {
+                    "rb:bg-[url('@/assets/images/knowledgeBase/folder.svg')]": !selectedKeyList?.includes(node?.key),
+                    "rb:bg-[url('@/assets/images/knowledgeBase/folder_white.svg')]": selectedKeyList?.includes(node?.key)
+                  })}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    const path = node.key === ROOT_NODE_KEY
+                      ? [String(node.title)]
+                      : findNodePath(treeData, node.key)?.map((item) => item.name) ?? [];
+                    onCreateFolder(
+                      node.key === ROOT_NODE_KEY ? knowledgeBaseId : String(node.key),
+                      node.title as string,
+                      path,
+                    );
+                  }}
+                />
+              )}
+            </Flex>
+          )
+        }}
+        switcherIcon={renderIcon(switcherIcon)}
+        selectedKeys={selectedKeyList}
       />
     </div>
   );

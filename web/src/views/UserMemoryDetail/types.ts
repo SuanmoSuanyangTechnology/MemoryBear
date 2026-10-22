@@ -280,6 +280,15 @@ export interface ForgetData {
   pendingForgetCount: number;
   quotaStatus: string;
   quotaColorClassObj: Record<string, boolean>;
+
+  active_count: number;
+
+  auxiliary_active_count: number;
+  auxiliary_breakdown: {
+    MemorySummary: number;
+    Dialogue: number;
+  },
+  forgotten_count: number;
 }
 // 近7天遗忘趋势数据
 export interface ForgetTrendData {

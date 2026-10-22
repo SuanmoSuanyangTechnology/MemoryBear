@@ -241,6 +241,7 @@ export const applicationPart1 = {
       semantic: '语义检索',
       hybrid: '混合检索',
       graph: '图谱检索',
+      'wiki-FAQ': 'FAQ 检索',
 
       similarity_threshold: '相似度权重',
       similarity_threshold_desc: '仅返回BM25分数高于此阈值的结果',

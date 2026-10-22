@@ -152,18 +152,12 @@ const McpServiceModal = forwardRef<McpServiceModalRef, McpServiceModalProps>(({
           // 在后台测试连接，不阻塞用户操作
           testConnection(res.tool_id || editVo?.id).catch((err) => {
             console.error('测试连接失败:', err);
+            refresh();
           });
         })
-        .catch((error) => {
+        .catch(() => {
           // 清除 AbortController
           abortControllerRef.current = null;
-          
-          // 如果是用户主动取消，不显示错误提示
-          if (error.name === 'AbortError' || error.code === 'ERR_CANCELED') {
-            console.log('请求已取消');
-          } else {
-            message.error(t('common.saveFailed'));
-          }
           setLoading(false);
         })
       })

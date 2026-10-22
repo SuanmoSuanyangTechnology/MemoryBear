@@ -9,8 +9,8 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from app.core.utils.datetime_utils import utcnow_naive
-from app.repositories.neo4j.memory_summary_repository import MemorySummaryRepository
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
+from app.repositories.neo4j.scene_summary_repository import SceneSummaryRepository
 from app.schemas.implicit_memory_schema import TimeRange, UserMemorySummary
 from sqlalchemy.orm import Session
 
@@ -27,7 +27,7 @@ class MemoryDataSource:
     ):
         self.db = db
         self.neo4j_connector = neo4j_connector or Neo4jConnector()
-        self.memory_summary_repo = MemorySummaryRepository(self.neo4j_connector)
+        self.scene_summary_repo = SceneSummaryRepository(self.neo4j_connector)
     
     def _parse_timestamp(self, timestamp: Any) -> datetime:
         """Parse timestamp from various formats."""
@@ -53,19 +53,23 @@ class MemoryDataSource:
                 user_content=content,
                 timestamp=self._parse_timestamp(summary_dict.get("created_at")),
                 confidence_score=1.0,
-                summary_type="memory_summary"
+                summary_type="scene_summary"
             )
         except Exception as e:
             logger.warning(f"Failed to parse summary {summary_dict.get('id', 'unknown')}: {e}")
             return None
     
+    async def count_user_summaries(self, user_id: str) -> int:
+        """Count SceneSummary records for the profile generation threshold."""
+        return await self.scene_summary_repo.count_by_end_user_id(user_id)
+
     async def get_user_summaries(
         self,
         user_id: str,
         time_range: Optional[TimeRange] = None,
         limit: int = 1000
     ) -> List[UserMemorySummary]:
-        """Retrieve user memory summaries from Neo4j.
+        """Retrieve user SceneSummary records from Neo4j.
         
         Args:
             user_id: Target user ID
@@ -79,7 +83,7 @@ class MemoryDataSource:
             start_date = time_range.start_date if time_range else None
             end_date = time_range.end_date if time_range else None
             
-            summary_dicts = await self.memory_summary_repo.find_by_end_user_id(
+            summary_dicts = await self.scene_summary_repo.find_by_end_user_id(
                 end_user_id=user_id,
                 limit=limit,
                 start_date=start_date,
@@ -92,7 +96,7 @@ class MemoryDataSource:
                 if summary:
                     summaries.append(summary)
             
-            logger.info(f"Retrieved {len(summaries)} summaries for user {user_id}")
+            logger.info(f"Retrieved {len(summaries)} SceneSummary records for user {user_id}")
             return summaries
             
         except Exception as e:

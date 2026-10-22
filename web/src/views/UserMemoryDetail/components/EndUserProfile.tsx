@@ -55,12 +55,15 @@ const EndUserProfile = forwardRef<EndUserProfileRef, EndUserProfileProps>(({ cla
       const userData = res as EndUser
       setData(userData)
       setLoading(false) 
-      onDataLoaded?.(userData as EndUser)
     })
     .finally(() => {
       setLoading(false)
     })
-  }, [onDataLoaded, id])
+  }, [id])
+
+  useEffect(() => {
+    onDataLoaded?.(data as EndUser)
+  }, [onDataLoaded, data])
 
   useEffect(() => {
     if (!id) return
