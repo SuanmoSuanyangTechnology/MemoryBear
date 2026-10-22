@@ -1,0 +1,47 @@
+[build-system]
+requires = ["hatchling>=1.26"]
+build-backend = "hatchling.build"
+
+[project]
+name = "task-bridge-sdk"
+version = "0.1.0"
+description = "Transport-neutral task submission and status polling with a Celery implementation"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+# The core abstraction has no third-party dependencies.
+dependencies = []
+
+[project.optional-dependencies]
+# Celery transport plus the Redis client used by its broker/result backend.
+# (Do not use celery[redis]: kombu's redis extra caps redis<=5.2.1, while
+# this repository runs redis 6.x/8.x.)
+celery = [
+    "celery>=5.5,<6",
+    "redis>=6.0,<9",
+]
+
+[dependency-groups]
+dev = [
+    "celery>=5.5,<6",
+    "pytest>=8",
+    "pytest-asyncio>=0.23",
+    "redis>=6.0,<9",
+    "ruff>=0.16",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/task_bridge"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "ASYNC", "TID"]
+
+[tool.ruff.lint.flake8-tidy-imports]
+ban-relative-imports = "all"
