@@ -14,6 +14,7 @@ from app.models.end_user_model import EndUser
 from app.repositories.end_user_info_repository import EndUserInfoRepository
 from app.repositories.end_user_repository import EndUserRepository
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
+from app.repositories.ontology_scene_type_repository import OntologySceneTypeRepository
 from app.utils.redis_lock import RedisFairLock
 
 logger = get_memory_logger()
@@ -37,6 +38,21 @@ class EndUserService:
             return await self._merge_end_users_locked(source, target)
         finally:
             await self._release_memory_write_locks(locks)
+
+    async def _fetch_scene_name_to_id_map(
+        self, workspace_id: uuid.UUID, scene_names: list[str],
+    ) -> dict[str, str]:
+        """在用户所属租户内查询场景映射；查询失败不影响外层事务。"""
+        if not scene_names:
+            return {}
+        try:
+            async with self.db.begin_nested():
+                return await OntologySceneTypeRepository(self.db).get_ids_by_names_async(
+                    workspace_id, scene_names,
+                )
+        except Exception as e:
+            logger.warning(f"[merge_end_users] 查询 scene_name 映射失败: {e}")
+            return {}
 
     @staticmethod
     async def _acquire_memory_write_locks(
@@ -216,6 +232,16 @@ class EndUserService:
         seen_alias_lower = {a.lower() for a in final_aliases}
 
         merged_meta: dict = dict(target_meta_snapshot)
+        # 查询 scene_name -> scene_type_id 映射，用于归并时统一 domain_specific_info 键
+        scene_names = {
+            key
+            for metadata in [target_meta_snapshot, *(meta for _, meta in source_info_snapshots)]
+            if isinstance(metadata.get("domain_specific_info"), dict)
+            for key in metadata["domain_specific_info"]
+        }
+        name_to_id_map = await self._fetch_scene_name_to_id_map(workspace_id, sorted(scene_names))
+        # source 没有信息记录时，也需要统一 target 中已有的场景键。
+        merged_meta = merge_user_meta_data(merged_meta, {}, name_to_id_map)
 
         for aliases, meta_data in source_info_snapshots:
             for alias in aliases:
@@ -224,7 +250,7 @@ class EndUserService:
                     final_aliases.append(alias)
                     seen_alias_lower.add(alias.lower())
 
-            merged_meta = merge_user_meta_data(merged_meta, meta_data)
+            merged_meta = merge_user_meta_data(merged_meta, meta_data, name_to_id_map)
 
         target_user_info.aliases = final_aliases
         target_user_info.meta_data = merged_meta

@@ -26,6 +26,8 @@ from app.core.memory.models.metadata_models import (
     apply_metadata_operations,
     filter_valid_metadata,
     normalize_legacy_metadata_values,
+    normalize_domain_ids,
+    project_domain_names,
 )
 from app.core.memory.storage_services.reflection_engine.errors import (
     ReflectionBusinessError,
@@ -33,6 +35,7 @@ from app.core.memory.storage_services.reflection_engine.errors import (
     ReflectionModelType,
 )
 from app.core.memory.utils.prompt.prompt_utils import prompt_env
+from app.repositories.ontology_scene_type_repository import OntologySceneTypeRepository
 
 logger = logging.getLogger(__name__)
 
@@ -51,15 +54,8 @@ def _check_ontology_tables_available(db: Any) -> bool:
     if _ONTOLOGY_TABLES_AVAILABLE is not None:
         return _ONTOLOGY_TABLES_AVAILABLE
 
-    from sqlalchemy import text
     try:
-        sql = text("""
-            SELECT to_regclass('app_ontology_binding') IS NOT NULL
-               AND to_regclass('ontology') IS NOT NULL
-               AND to_regclass('ontology_scene_type') IS NOT NULL
-               AND to_regclass('ontology_profile_field') IS NOT NULL AS available;
-        """)
-        available = bool(db.execute(sql).scalar())
+        available = OntologySceneTypeRepository(db).extraction_tables_available()
         if available:
             _ONTOLOGY_TABLES_AVAILABLE = True
         return available
@@ -72,53 +68,22 @@ def _check_ontology_tables_available(db: Any) -> bool:
         return False
 
 
-def _fetch_special_domains(db: Any, end_user_id: str) -> Dict[str, Any]:
+def _fetch_special_domains(db: Any, end_user_id: str) -> Tuple[Dict[str, Any], Dict[str, str]]:
     """联查用户使用过的全部 App 所绑定的特殊场景及字段，组装 special_domains。
 
     - 以 scene_name 作为场景键（special_domains / domain_specific_info 的键），多个 App 绑定同一场景只组装一次；
     - 场景内按 field_key 去重。
     调用方负责异常处理（rollback 并按无特殊场景处理）。
-    本体表的 ORM 模型由企业版定义，此处使用原生 SQL 查询。
+    本体表的查询由 Repository 承接。
     """
-    from app.models import Conversation
-    from sqlalchemy import bindparam, select, text
-
     special_domains: Dict[str, Any] = {}
-
-    # 查关联的去重 app_ids
-    stmt_apps = (
-        select(Conversation.app_id)
-        .where(Conversation.user_id == end_user_id)
-        .distinct()
-    )
-    app_ids = [r[0] for r in db.execute(stmt_apps).all() if r[0]]
-    if not app_ids:
-        return special_domains
-
-    stmt_fields = text("""
-        SELECT st.scene_name,
-               st.scene_description,
-               pf.field_key,
-               pf.field_label,
-               pf.field_definition,
-               pf.value_format,
-               pf.include_examples,
-               pf.exclude_examples
-        FROM app_ontology_binding AS b
-        JOIN ontology AS o ON b.ontology_id = o.ontology_id
-        JOIN ontology_scene_type AS st ON o.scene_type_id = st.scene_type_id
-        JOIN ontology_profile_field AS pf ON st.scene_type_id = pf.scene_type_id
-        WHERE b.app_id IN :app_ids
-          AND b.is_deleted IS FALSE
-          AND st.is_system_default IS FALSE
-          AND pf.is_system_default IS FALSE
-        ORDER BY st.scene_name, pf.created_at, pf.field_key
-    """).bindparams(bindparam("app_ids", expanding=True))
-    rows = db.execute(stmt_fields, {"app_ids": app_ids}).all()
+    name_to_id_map: Dict[str, str] = {}
+    rows = OntologySceneTypeRepository(db).get_profile_fields_for_user(end_user_id)
 
     # 场景名在租户内唯一 (UniqueConstraint(tenant_id, scene_name))，同一场景只组装一次
     for r in rows:
         domain_key = r.scene_name
+        name_to_id_map[r.scene_name] = str(r.scene_type_id)
         if domain_key not in special_domains:
             special_domains[domain_key] = {
                 "description": r.scene_description or "",
@@ -138,16 +103,19 @@ def _fetch_special_domains(db: Any, end_user_id: str) -> Dict[str, Any]:
                 "exclude_examples": exc_ex,
             })
 
-    return special_domains
+    return special_domains, name_to_id_map
 
 
 def _fetch_user_context_pg(
     end_user_id: str,
-) -> Tuple[Dict[str, Any], Dict[str, Any], Dict[str, Any]]:
+) -> Tuple[Dict[str, Any], Dict[str, Any], Dict[str, Any], Dict[str, str]]:
     """独立短会话：读取已有元数据并动态加载关联应用的特殊领域 Schema。
 
+    已声明场景的存储 ID 转为本轮 Schema 中的名称，供模型增量更新；
+    未声明场景保留原键，继续交给 frozen_ds 保护。
+
     Returns:
-        (existing_new_meta, existing_legacy_meta, fields_schema)
+        (existing_new_meta, existing_legacy_meta, fields_schema, name_to_id_map)
     """
     from app.db import get_db_context
     from app.models import EndUserInfo
@@ -161,12 +129,13 @@ def _fetch_user_context_pg(
         field: [] for field in LEGACY_METADATA_FIELDS
     }
     special_domains: Dict[str, Any] = {}
+    name_to_id_map: Dict[str, str] = {}
 
     try:
         eu_uuid = uuid.UUID(end_user_id)
     except Exception:
         logger.warning(f"[Metadata] 非法 end_user_id 格式: {end_user_id}")
-        return existing_meta_model, existing_legacy_meta, {"special_domains": {}}
+        return existing_meta_model, existing_legacy_meta, {"special_domains": {}}, name_to_id_map
 
     with get_db_context() as db:
         # 1. 读取已有元数据：新三键和旧八字段都以 PG 当前值为增量基线
@@ -194,7 +163,7 @@ def _fetch_user_context_pg(
         # 2. 本体表存在时查询特殊场景，不存在时跳过
         if _check_ontology_tables_available(db):
             try:
-                special_domains = _fetch_special_domains(db, end_user_id)
+                special_domains, name_to_id_map = _fetch_special_domains(db, end_user_id)
             except Exception as e:
                 # 查询失败：回滚后按无特殊场景处理，只提取默认字段
                 logger.warning(
@@ -206,8 +175,14 @@ def _fetch_user_context_pg(
                     pass
                 special_domains = {}
 
+    # 使用与本轮 Schema 相同的映射快照，避免另查名称导致改名期间不一致。
+    id_to_name_map = {scene_id: name for name, scene_id in name_to_id_map.items()}
+    existing_meta_model["domain_specific_info"] = project_domain_names(
+        existing_meta_model["domain_specific_info"], id_to_name_map, preserve_unmapped=True,
+    )
+
     fields_schema = {"special_domains": special_domains}
-    return existing_meta_model, existing_legacy_meta, fields_schema
+    return existing_meta_model, existing_legacy_meta, fields_schema, name_to_id_map
 
 
 def _build_metadata_write_payload(model_metadata: Dict[str, Any]) -> Dict[str, Any]:
@@ -224,11 +199,12 @@ def _build_metadata_write_payload(model_metadata: Dict[str, Any]) -> Dict[str, A
     return payload
 
 
-def _save_metadata_to_pg(end_user_id: str, model_metadata: Dict[str, Any]) -> bool:
+def _save_metadata_to_pg(end_user_id: str, model_metadata: Dict[str, Any], name_to_id_map: Dict[str, str]) -> bool:
     """独立短会话：将新旧 metadata 通过 JSONB 键合并原子写回 PG。
 
     规则：
     1. 更新旧 8 字段与 identity_background, relationships, domain_specific_info。
+       domain_specific_info 的键在写入前由 scene_name 转换为 scene_type_id。
     2. 使用 JSONB 键合并写入 (meta_data = coalesce(meta_data, '{}'::jsonb) || :new_keys::jsonb)，
        meta_data 中的其他键保持不变。
     3. end_user_info 记录不存在时跳过写入，只记 warning，不视为失败。
@@ -242,6 +218,10 @@ def _save_metadata_to_pg(end_user_id: str, model_metadata: Dict[str, Any]) -> bo
 
         eu_uuid = uuid.UUID(end_user_id)
         new_keys = _build_metadata_write_payload(model_metadata)
+        new_keys["domain_specific_info"] = normalize_domain_ids(
+            new_keys.get("domain_specific_info") or {},
+            name_to_id_map, preserve_unmapped=True,
+        )
 
         with get_db_context() as db:
             info = db.query(EndUserInfo).filter_by(end_user_id=eu_uuid).first()
@@ -456,7 +436,7 @@ async def extract_metadata_for_user(
 
     try:
         # ── Step 3. 独立短会话读 PG ──
-        existing_meta_model, existing_legacy_meta, fields_schema = _fetch_user_context_pg(end_user_id)
+        existing_meta_model, existing_legacy_meta, fields_schema, name_to_id_map = _fetch_user_context_pg(end_user_id)
         active_domains = list(fields_schema.get("special_domains", {}).keys())
         logger.info(f"[Metadata] 加载已有元数据与特殊领域: special_domains={active_domains}")
 
@@ -547,7 +527,7 @@ async def extract_metadata_for_user(
 
         # 独立短会话写入 PG (无损合并)
         current_state = {**current_legacy_meta, **current_meta}
-        saved = _save_metadata_to_pg(end_user_id, current_state)
+        saved = _save_metadata_to_pg(end_user_id, current_state, name_to_id_map)
         if not saved:
             return {"status": "error", "extracted": 0, "failed": 1, "details": []}
 
