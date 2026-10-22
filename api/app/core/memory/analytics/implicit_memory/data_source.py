@@ -59,6 +59,10 @@ class MemoryDataSource:
             logger.warning(f"Failed to parse summary {summary_dict.get('id', 'unknown')}: {e}")
             return None
     
+    async def count_user_summaries(self, user_id: str) -> int:
+        """Count SceneSummary records for the profile generation threshold."""
+        return await self.scene_summary_repo.count_by_end_user_id(user_id)
+
     async def get_user_summaries(
         self,
         user_id: str,

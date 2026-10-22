@@ -12,6 +12,18 @@ class SceneSummaryRepository:
     def __init__(self, connector: Neo4jConnector):
         self.connector = connector
 
+    async def count_by_end_user_id(self, end_user_id: str) -> int:
+        """Count non-empty summaries without fetching their content."""
+        results = await self.connector.execute_query(
+            """
+            MATCH (scene:SceneSummary {end_user_id: $end_user_id})
+            WHERE trim(coalesce(scene.content, '')) <> ''
+            RETURN count(scene) AS count
+            """,
+            end_user_id=end_user_id,
+        )
+        return int(results[0]["count"]) if results else 0
+
     async def find_by_end_user_id(
         self,
         end_user_id: str,
