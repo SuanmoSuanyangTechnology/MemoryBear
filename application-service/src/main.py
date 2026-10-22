@@ -16,6 +16,10 @@ from .bootstrap import get_settings
 from .config import AppServiceSettings, configure_settings
 from .i18n import LanguageContextMiddleware, load_catalogs
 from .i18n import configure as configure_i18n
+from .integrations.knowledge.runtime import (
+    close_knowledge_integration,
+    initialize_knowledge_integration,
+)
 from .logging import setup_logging
 from .request_logging import RequestLoggingFastAPI
 from .runtime import ProcessRuntime, set_process_runtime
@@ -78,6 +82,9 @@ def create_app(settings: AppServiceSettings | None = None) -> FastAPI:
                 await gateway_auth.start()
             except Exception:
                 logger.exception("gateway auth refresh start failed")
+        # Knowledge retriever selection is process-level: the workflow node and
+        # draft runs resolve it lazily, so it must exist before serving traffic.
+        await initialize_knowledge_integration()
         # Post-stream persistence runs in the background; enqueue calls degrade
         # to sync writes while the queue is down, so this is not fail-closed.
         await BatchPersistQueue.start()
@@ -89,6 +96,7 @@ def create_app(settings: AppServiceSettings | None = None) -> FastAPI:
             # Drain queued persistence before the database engine is disposed.
             await BatchPersistQueue.flush()
             await BatchPersistQueue.stop()
+            await close_knowledge_integration()
             await application.state.runtime.aclose()
             logger.info("Application service stopped")
 

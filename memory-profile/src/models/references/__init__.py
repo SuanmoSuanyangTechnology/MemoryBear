@@ -8,6 +8,7 @@ from src.models.references.end_user_model import EndUser, EndUserMerge
 from src.models.references.memory_statistics_model import (
     Conversation,
     ForgetAudit,
+    ImplicitEmotionsStorage,
     MemoryMessage,
     MemoryPerceptual,
     ShortTermMemory,
@@ -19,6 +20,7 @@ __all__ = [
     "EndUser",
     "EndUserMerge",
     "ForgetAudit",
+    "ImplicitEmotionsStorage",
     "MemoryMessage",
     "MemoryPerceptual",
     "ShortTermMemory",

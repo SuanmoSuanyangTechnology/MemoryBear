@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 from app.models.memory_config_model import MemoryConfig
 from app.models.workspace_model import Workspace
 from app.core.logging_config import get_business_logger
+from app.utils.redis_cache import invalidate_cache
 
 logger = get_business_logger()
 
@@ -179,6 +180,15 @@ class EmotionConfigService:
 
             await self.db.commit()
             await self.db.refresh(config)
+            # 快写任务读取的 MemoryConfig 有 300 秒 Redis 缓存；更新后立即失效。
+            try:
+                await invalidate_cache(prefix=f"memory_config:{config.config_id}")
+            except Exception:
+                logger.warning(
+                    "情绪配置已保存，但运行时配置缓存失效失败: config_id=%s",
+                    config.config_id,
+                    exc_info=True,
+                )
 
             # 返回更新后的配置
             updated_config = await self.get_emotion_config_async(config_id)

@@ -361,7 +361,6 @@ _WORKSPACE_STATISTICS_BATCH_SIZE = 1000
 _WORKSPACE_STATISTICS_REFRESH_POLL_INTERVAL_SECONDS = 0.5
 _WORKSPACE_STATISTICS_REFRESH_WAIT_TIMEOUT_SECONDS = 30.0
 _WORKSPACE_STATISTICS_REFRESH_LOCK_RENEW_INTERVAL_SECONDS = 30
-_WORKSPACE_STATISTICS_MIN_MEMORY_SUMMARY_COUNT = 5
 _TODAY_SNAPSHOT_MAX_AGE = timedelta(hours=25)
 
 
@@ -557,14 +556,13 @@ class ProfileAnalyticsService:
             user_id, workspace_id
         ):
             return _zero_memory_statistics()
-        # PG 侧 6 个计数器合并为一条查询（每项真实 DB 工作 <1ms，开销在会话/连接上），
-        # Neo4j 侧 4 个计数各自约一次往返（RTT 支配）保持并发。两组互不依赖，一起发。
-        source_counts, neo_counts = await asyncio.gather(
+        # Fetch PG source counts, cached habits and three Neo4j counts concurrently.
+        source_counts, memory_counts = await asyncio.gather(
             self._memory_type_source_counts(user_id),
             asyncio.gather(
                 self._safe_count(
-                    "valid summaries",
-                    lambda: self.memory_graph.valid_summary_count(end_user_id),
+                    "implicit habits",
+                    lambda: self.memory_statistics.habit_count_for_users([end_user_id]),
                 ),
                 self._safe_count(
                     "episodic", lambda: self.memory_graph.episodic_count(end_user_id)
@@ -578,7 +576,7 @@ class ProfileAnalyticsService:
                 ),
             ),
         )
-        summaries, episodic, semantic, emotional = neo_counts
+        implicit_count, episodic, semantic, emotional = memory_counts
         counts = {
             "PERCEPTUAL_MEMORY": source_counts["perceptual"],
             "WORKING_MEMORY": (
@@ -588,7 +586,7 @@ class ProfileAnalyticsService:
                 source_counts["short_term"] + source_counts["pending_conversations"]
             ),
             "EXPLICIT_MEMORY": episodic + semantic,
-            "IMPLICIT_MEMORY": summaries if summaries >= 5 else 0,
+            "IMPLICIT_MEMORY": implicit_count,
             "EMOTIONAL_MEMORY": emotional,
             "EPISODIC_MEMORY": episodic,
             "FORGET_MEMORY": source_counts["forgotten"],
@@ -1113,10 +1111,9 @@ class ProfileAnalyticsService:
         return calculation_task.result()
 
     async def _calculate_workspace_statistics(self, workspace_id: UUID) -> dict[str, Any]:
-        """按批汇总 workspace 下全部活跃终端用户的八类记忆。
+        """Aggregate active users in batches using PG counts and cached habits.
 
-        每批的 PG 计数、ES 聚合与 Neo4j 隐性记忆并行执行；ES 中完全缺失的用户再
-        回退到 Neo4j 统计。批量大小固定为常量，协程数不随用户输入变化。
+        Query ES concurrently and fall back to Neo4j for users missing from ES.
         """
 
         totals = {memory_type: 0 for memory_type in MEMORY_TYPES}
@@ -1133,9 +1130,7 @@ class ProfileAnalyticsService:
             postgresql, search_result, implicit_count = await asyncio.gather(
                 self.memory_statistics.counts_for_users(end_user_ids),
                 self.memory_search.workspace_memory_counts(raw_ids),
-                self.memory_graph.workspace_implicit_count(
-                    raw_ids, _WORKSPACE_STATISTICS_MIN_MEMORY_SUMMARY_COUNT
-                ),
+                self.memory_statistics.habit_count_for_users(raw_ids),
             )
             elastic_statistics, present_ids = search_result
             episodic_count = sum(

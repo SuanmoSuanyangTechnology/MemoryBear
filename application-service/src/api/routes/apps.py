@@ -16,13 +16,18 @@ from urllib.parse import quote
 from uuid import UUID
 
 import yaml
-from fastapi import APIRouter, Depends, File, Form, Query, UploadFile
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, Depends, File, Form, Path, Query, UploadFile
+from fastapi.responses import Response, StreamingResponse
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
-from ...errors import BizCode
+from ...db import end_read_transaction
+from ...errors import BizCode, BusinessException
 from ...guards.workspace_access import require_workspace_access
 from ...models.app_model import App, AppType
+from ...models.document_model import Document
+from ...models.file_model import File as FileModel
 from ...quota.alerts import report_quota_change_sync
 from ...quota.usage import ensure_app_quota, require_app_quota
 from ...repositories import cross_domain_read
@@ -32,11 +37,20 @@ from ...services.app_dsl_service import AppDslService
 from ...services.app_service import AppService
 from ...services.app_share_service import AppShareService
 from ...services.app_statistics_service import AppStatisticsService
+from ...services.file_storage_service import FileStorageService, get_file_storage_service
 from ...services.tool_service import ToolService
 from ...services.workflow_import_service import WorkflowImportService
 from ...services.workflow_service import WorkflowService
 from ...services.workflow_tool_publish_service import WorkflowToolPublishService
-from ..dependencies import Principal, SyncRedis, get_principal, get_sync_db, get_sync_redis
+from ...storage.exceptions import StorageError
+from ..dependencies import (
+    Principal,
+    SyncRedis,
+    get_async_db,
+    get_principal,
+    get_sync_db,
+    get_sync_redis,
+)
 from ..schemas.common import fail, success
 from ..schemas.response_schema import ApiResponse, PageData, PageMeta
 
@@ -869,6 +883,48 @@ def import_app(
     return success(
         data={"app": app_schema.App.model_validate(result_app), "warnings": warnings},
         msg="应用导入成功" + ("，但部分资源需手动配置" if warnings else "")
+    )
+
+
+@router.get("/citations/{document_id}/download", summary="下载引用文档原始文件")
+async def download_citation_file(
+        document_id: Annotated[UUID, Path(description="引用文档ID")],
+        db: Annotated[AsyncSession, Depends(get_async_db)],
+        storage_service: Annotated[FileStorageService, Depends(get_file_storage_service)],
+):
+    """Stream the original file of a cited document.
+
+    Host parity: no permission check here — the document UUID is the capability,
+    and the console only renders the link when the app enables
+    ``citation.allow_download``.
+    """
+    doc = (
+        await db.execute(select(Document).where(Document.id == document_id))
+    ).scalar_one_or_none()
+    if doc is None:
+        raise BusinessException("文档不存在", BizCode.NOT_FOUND)
+
+    file_record = (
+        await db.execute(select(FileModel).where(FileModel.id == doc.file_id))
+    ).scalar_one_or_none()
+    if file_record is None:
+        raise BusinessException("原始文件不存在", BizCode.NOT_FOUND)
+
+    # Release the pooled connection before the storage read: a large download
+    # must not hold an idle-in-transaction connection.
+    await end_read_transaction(db, "apps.citation_download")
+
+    try:
+        content = await storage_service.download_file(file_record.file_key)
+    except (FileNotFoundError, StorageError) as exc:
+        logger.error(f"Storage download failed: {exc}")
+        raise BusinessException("文件未找到", BizCode.NOT_FOUND) from exc
+
+    encoded_name = quote(doc.file_name)
+    return Response(
+        content=content,
+        media_type="application/octet-stream",
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded_name}"},
     )
 
 
