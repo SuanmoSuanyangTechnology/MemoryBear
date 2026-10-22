@@ -93,6 +93,22 @@ RETURN sum(episodic_count) AS episodic_count,
 """
 
 
+# 隐性记忆按用户统计「有来源关系的情景摘要」，单个用户不足 5 条时贡献 0
+# （api ``MIN_MEMORY_SUMMARY_COUNT`` 同值同口径）。
+_WORKSPACE_IMPLICIT_MEMORY_QUERY = """
+UNWIND $end_user_ids AS end_user_id
+OPTIONAL MATCH (summary:MemorySummary {end_user_id: end_user_id})
+      -[:DERIVED_FROM_STATEMENT]->(:Statement)
+WHERE summary.delete_at IS NULL
+WITH end_user_id, count(DISTINCT summary) AS summary_count
+RETURN sum(
+    CASE WHEN summary_count >= $minimum_summary_count
+         THEN summary_count ELSE 0 END
+) AS implicit_count
+"""
+
+
+
 # Keep type validation before temporal comparisons: legacy strings are not dates.
 _ELIGIBLE_STATEMENTS = """
 MATCH (s:Statement)

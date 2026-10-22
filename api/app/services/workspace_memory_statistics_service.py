@@ -36,8 +36,8 @@ from app.repositories.end_user_repository import EndUserRepository
 from app.repositories.forget_log_repository import ForgetLogRepository
 from app.repositories.memory_message_repository import MemoryMessageRepository
 from app.repositories.memory_perceptual_repository import MemoryPerceptualRepository
+from app.services.memory_base_service import MIN_MEMORY_SUMMARY_COUNT
 from app.services.short_term_memo_service import count_short_term_memos_for_users
-from app.repositories.implicit_emotions_storage_repository import ImplicitEmotionsStorageRepository
 
 logger = logging.getLogger(__name__)
 

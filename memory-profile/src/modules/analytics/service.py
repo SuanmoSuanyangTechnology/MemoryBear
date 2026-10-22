@@ -557,9 +557,9 @@ class ProfileAnalyticsService:
             user_id, workspace_id
         ):
             return _zero_memory_statistics()
-        # Fetch PG source counts, cached habits and memory counts concurrently.
+        # Fetch PG source counts, Neo4j counts and short-term memo counts concurrently.
         evaluated_at = datetime.now(UTC)
-        source_counts, memory_counts, short_term_count = await asyncio.gather(
+        source_counts, neo_counts, short_term_count = await asyncio.gather(
             self._memory_type_source_counts(user_id),
             asyncio.gather(
                 self._safe_count(
@@ -1141,14 +1141,10 @@ class ProfileAnalyticsService:
             postgresql, search_result, implicit_count, short_term_count = await asyncio.gather(
                 self.memory_statistics.counts_for_users(end_user_ids),
                 self.memory_search.workspace_memory_counts(raw_ids),
-<<<<<<< HEAD
                 self.memory_graph.workspace_implicit_count(
                     raw_ids, _WORKSPACE_STATISTICS_MIN_MEMORY_SUMMARY_COUNT
                 ),
-=======
-                self.memory_statistics.habit_count_for_users(raw_ids),
                 self._short_term_count(raw_ids, evaluated_at),
->>>>>>> e5807cd35 (feat(memory):Implement Short Term Memo functionality)
             )
             elastic_statistics, present_ids = search_result
             episodic_count = sum(
