@@ -103,7 +103,8 @@ class EntityDedupConfig(BaseModel):
 
 
 class AliasMergeConfig(BaseModel):
-    """别名归并候选处理配置；分类边界由 BERT 服务给出。"""
+    """别名归并配置；置信度阈值仅用于 LLM 降级，BERT 使用 top1。"""
+    confidence_threshold: float = 0.9  # LLM confidence >= 此值才合并
     max_per_run: int = 20               # 单次反思最多判定/处理的候选别名数
 
 
@@ -352,7 +353,7 @@ class Layer2Inspector:
                     f"强制入库={unresolved.get('forced', 0)}, 失败={unresolved.get('failed', 0)}"
                 )
 
-            # 别名归并：BERT 判定后按 merge/drop 处理 "别名属于" 关系
+            # 别名归并：BERT 优先，技术失败降级 LLM 后按 merge/drop 处理
             # 放在 unresolved 之后、entity_dedup 之前：先清理别名节点
             alias = await self._run_step(
                 "别名归并", end_user_id,
@@ -429,9 +430,9 @@ class Layer2Inspector:
 
     async def _run_alias_merge(self, end_user_id: str, baseline: str = "HYBRID",
                                language: str = "zh") -> Dict[str, Any]:
-        """别名归并：BERT 判定后按 merge/drop 处理 "别名属于" 关系。
+        """别名归并：BERT 优先，技术失败降级 LLM 后按 merge/drop 处理。
 
-        S0 收集候选 → S1 BERT 并发判定（merge/drop/暂缓）→ S2 删 drop 边 →
+        S0 收集候选 → S1 BERT 并发判定、技术失败按目标分组降级 LLM → S2 删 drop 边 →
         S3-5 按 merge 集合归并 → S6 PG 同步（在 merge_alias_belongs_to 内）→ 写日志。
         未完成判定的候选保留关系供重试；只有模型明确给出 drop 才删边。
         """
@@ -439,6 +440,7 @@ class Layer2Inspector:
             merge_alias_belongs_to, collect_alias_candidates, drop_alias_edges,
         )
         from .bert.alias_belongs_judge import AliasRecognitionClient
+        from .llm.alias_belongs_judge import apply_llm_fallback
 
         cfg = self.config.alias_merge
         try:
@@ -492,12 +494,25 @@ class Layer2Inspector:
             ) as client:
                 decisions = await client.judge_all(to_judge)
             bert_ms = int((time.perf_counter() - bert_t0) * 1000)
+            bert_failure_count = sum(d["status"] == "failed" for d in decisions)
+            fallback_ms = 0
+            if bert_failure_count > 0:
+                fallback_t0 = time.perf_counter()
+                decisions = await apply_llm_fallback(
+                    self.llm_client, to_judge, decisions,
+                    language=language, threshold=cfg.confidence_threshold,
+                )
+                fallback_ms = int((time.perf_counter() - fallback_t0) * 1000)
             failures: List[Dict[str, Any]] = []
             for c, d in zip(to_judge, decisions):
                 if d["status"] != "decided":
                     snap_skipped.append({**c, "failure_reason": d["failure_reason"],
                                          "merge_score": d.get("merge_score"),
-                                         "drop_score": d.get("drop_score")})
+                                         "drop_score": d.get("drop_score"),
+                                         "decision_source": d.get("decision_source", "bert"),
+                                         "model_name": d.get("model_name"),
+                                         "fallback_reason": d.get("fallback_reason"),
+                                         "reason_code": d.get("reason_code")})
                     if d["status"] == "failed":
                         failures.append(d)
                     continue
@@ -527,8 +542,9 @@ class Layer2Inspector:
             )
             drop_write_verified = drop_edges_deleted == len(drop_ids)
 
-            # 写日志（含 BERT 判定与规则命中；未完成候选不写）
-            timing = {"recall_ms": recall_ms, "bert_batch_ms": bert_ms}
+            # 写日志（区分 BERT、LLM 降级及规则来源；未完成候选进入汇总）
+            timing = {"recall_ms": recall_ms, "bert_batch_ms": bert_ms,
+                      "llm_fallback_batch_ms": fallback_ms}
             for canonical, cand, d in decided_log:
                 verified = merge_write_verified if d["decision"] == "merge" else drop_write_verified
                 self._write_alias_log(end_user_id, canonical, cand, d, timing, baseline,
@@ -538,17 +554,25 @@ class Layer2Inspector:
             self._snap("alias_merge", "2_bert_result", {
                 "model_name": settings.ALIAS_RECOGNITION_MODEL,
                 "decision_ms": bert_ms,
+                "llm_fallback_ms": fallback_ms,
+                "llm_fallback_count": bert_failure_count,
                 "decided": [
                     {"alias_id": cand["alias_id"], "alias_name": cand["alias_name"],
+                     "target_id": cand["target_id"], "model_name": d.get("model_name"),
                      "decision": d["decision"], "confidence": d["confidence"],
-                     "merge_score": d.get("merge_score"), "drop_score": d.get("drop_score"),
                      "score_kind": d.get("score_kind"), "decision_source": d["decision_source"],
-                     "request_ms": d.get("request_ms"), "reason": d["reason"]}
+                     "reason": d["reason"],
+                     **{key: d[key] for key in ("merge_score", "drop_score", "request_ms",
+                        "llm_group_ms", "llm_threshold", "fallback_reason", "bert_reason_code") if key in d}}
                     for (_canon, cand, d) in decided_log
                 ],
                 "deferred": [{"alias_id": c["alias_id"], "target_id": c["target_id"],
                               "reason": c["failure_reason"], "merge_score": c.get("merge_score"),
-                              "drop_score": c.get("drop_score")} for c in snap_skipped],
+                              "drop_score": c.get("drop_score"),
+                              "decision_source": c["decision_source"],
+                              "model_name": c.get("model_name"),
+                              "fallback_reason": c.get("fallback_reason"),
+                              "reason_code": c.get("reason_code")} for c in snap_skipped],
             })
             snap_changes: list = []
             for _canon, cand, d in decided_log:
@@ -574,7 +598,8 @@ class Layer2Inspector:
                         target_name=cand["target_name"], field_changes=fc,
                         status="applied" if merge_write_verified else "skipped",
                         reason=None if merge_write_verified else "write_unverified",
-                        extra={"alias_id": cand["alias_id"], "merge_score": d.get("merge_score"),
+                        extra={"alias_id": cand["alias_id"], "confidence": d["confidence"],
+                               "score_kind": d.get("score_kind"), "merge_score": d.get("merge_score"),
                                "drop_score": d.get("drop_score"), "source": d["decision_source"]},
                     ))
                 else:  # drop：只删「别名属于」边、保留节点
@@ -583,8 +608,9 @@ class Layer2Inspector:
                         target_name=cand["alias_name"],
                         field_changes=[{"field": "别名属于边", "old": "存在", "new": None}],
                         status="applied" if drop_write_verified else "skipped",
-                        reason="bert_drop" if drop_write_verified else "write_unverified",
-                        extra={"merge_score": d.get("merge_score"),
+                        reason=f"{d['decision_source']}_drop" if drop_write_verified else "write_unverified",
+                        extra={"confidence": d["confidence"], "score_kind": d.get("score_kind"),
+                               "source": d["decision_source"], "merge_score": d.get("merge_score"),
                                "drop_score": d.get("drop_score"), "node_kept": True},
                     ))
             for c in snap_skipped:
@@ -614,9 +640,18 @@ class Layer2Inspector:
                 c["failure_reason"] for c in snap_skipped
             ))
             result["business_failure_count"] = len(failures)
-            result["reason_codes"] = list(dict.fromkeys(f["reason_code"] for f in failures))
-            result["model_types"] = [ReflectionModelType.BERT.value] * len(result["reason_codes"])
-            result["failed_operations"] = (["alias_merge_bert"] if failures else []) + (
+            result["bert_failure_count"] = bert_failure_count
+            # 降级次数按候选数计，LLM 实际按目标分组调用。
+            result["llm_fallback_count"] = bert_failure_count
+            result["llm_fallback_failed_count"] = len(failures)
+            failure_pairs = list(dict.fromkeys(
+                (f["reason_code"], f.get("model_type", ReflectionModelType.BERT.value)) for f in failures
+            ))
+            result["reason_codes"] = [code for code, _ in failure_pairs]
+            result["model_types"] = [model for _, model in failure_pairs]
+            result["failed_operations"] = list(dict.fromkeys(
+                f.get("failed_operation", "alias_merge_bert") for f in failures
+            )) + (
                 ["alias_merge_graph_write"] if not merge_write_verified or not drop_write_verified else []
             ) + [f"alias_merge_{key}" for key in write_errors]
             if failures or snap_skipped or result.get("errors") or not merge_write_verified or not drop_write_verified:
@@ -1314,6 +1349,8 @@ class Layer2Inspector:
         confidence = decided["confidence"]
         reason = decided["reason"]
         shortcut = decided.get("shortcut", False)
+        is_fallback = decided["decision_source"] == "llm_fallback"
+        judge_label = "LLM降级" if is_fallback else "BERT"
         alias_name = (cand.get("alias_name") or "").strip()
 
         tracker = ExecutionTracker(model=("rule" if shortcut else decided["model_name"]))
@@ -1325,6 +1362,17 @@ class Layer2Inspector:
             tracker.steps.append(ExecutionStep(
                 name="规则判定", type="decide", duration_ms=0,
                 output="候选名已是现有别名，直接归并", success=True,
+            ))
+        elif is_fallback:
+            tracker.steps.append(ExecutionStep(
+                name="BERT 判定", type="bert", duration_ms=decided.get("bert_request_ms", 0),
+                output=f"进入 LLM 降级：{decided['fallback_reason']}", success=False,
+            ))
+            tracker.steps.append(ExecutionStep(
+                name="LLM 降级判定（同目标候选组）", type="llm",
+                duration_ms=decided["llm_group_ms"],
+                output=(f"decision={decided['decision']}, LLM置信度={confidence:.6f}, "
+                        f"合并阈值={decided['llm_threshold']}"), success=True,
             ))
         else:
             tracker.steps.append(ExecutionStep(
@@ -1357,7 +1405,7 @@ class Layer2Inspector:
             already = alias_name.lower() in {a.strip().lower() for a in canon_aliases if a and a.strip()}
             summary = (f'"{alias_name}" → "{canonical["name"]}" 合并别名' if write_verified
                        else f'"{alias_name}" → "{canonical["name"]}" 判定合并，写入待核实')
-            title = "MERGE — 已是现有别名，直接归并" if shortcut else "MERGE — BERT判定别名归并"
+            title = "MERGE — 已是现有别名，直接归并" if shortcut else f"MERGE — {judge_label}判定别名归并"
             # 别名已存在（无实际新增）时不产出 diff，避免前端展示 old==new 的无意义对比
             changes = [] if already or not write_verified else [{
                 "field": "aliases",
@@ -1368,7 +1416,7 @@ class Layer2Inspector:
         else:
             summary = (f'"{alias_name}" ✗ 判定非别名 → 丢弃别名属于边' if write_verified
                        else f'"{alias_name}" ✗ 判定非别名，删边待核实')
-            title = "DROP — BERT判定非别名"
+            title = f"DROP — {judge_label}判定非别名"
             changes = [{
                 "field": "别名属于关系",
                 "old": f'{alias_name} →(别名属于) {canonical["name"]}',
@@ -1381,9 +1429,15 @@ class Layer2Inspector:
         trigger["write_verified"] = write_verified
         if not shortcut:
             trigger.update({
-                "merge_score": decided["merge_score"], "drop_score": decided["drop_score"],
-                "score_kind": decided["score_kind"], "request_ms": decided.get("request_ms"),
+                "score_kind": decided["score_kind"],
             })
+            if is_fallback:
+                trigger.update({key: decided[key] for key in (
+                    "llm_threshold", "llm_group_ms", "fallback_reason", "bert_reason_code", "bert_request_ms",
+                )})
+            else:
+                trigger.update({"merge_score": decided["merge_score"], "drop_score": decided["drop_score"],
+                                "request_ms": decided.get("request_ms")})
         log_repo = self.log_repo_factory()
         log_repo.create(
             end_user_id=end_user_id,
@@ -1397,7 +1451,8 @@ class Layer2Inspector:
             entity_ids=[cand["target_id"], cand["alias_id"]],
             trigger_detail=trigger,
             solution_detail={"title": title, "changes": changes},
-            execution_detail={**tracker.to_dict(), "bert_batch_ms": timing.get("bert_batch_ms", 0)},
+            execution_detail={**tracker.to_dict(), "bert_batch_ms": timing.get("bert_batch_ms", 0),
+                              "llm_fallback_batch_ms": timing.get("llm_fallback_batch_ms", 0)},
         )
 
     async def _apply_dedup_merge(self, pair, end_user_id: str, baseline: str,
