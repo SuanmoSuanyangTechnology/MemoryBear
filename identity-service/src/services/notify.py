@@ -7,7 +7,8 @@ import logging
 
 from auth_sdk.snapshot import SNAPSHOT_TTL, snapshot_to_json
 from redis.asyncio import Redis
-from redis.exceptions import RedisError, TimeoutError as RedisTimeoutError
+from redis.exceptions import RedisError
+from redis.exceptions import TimeoutError as RedisTimeoutError
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -70,7 +71,7 @@ async def subscribe(redis, channel: str | None = None) -> None:
                         pubsub.get_message(ignore_subscribe_messages=True, timeout=None),
                         timeout=_IDLE_RECONNECT_S,
                     )
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     raise RedisTimeoutError(
                         f"pubsub idle for {_IDLE_RECONNECT_S}s, reconnecting"
                     ) from None
