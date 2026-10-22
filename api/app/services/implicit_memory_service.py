@@ -468,8 +468,9 @@ class ImplicitMemoryService:
         logger.info(f"生成完整用户画像: user={user_id}")
         
         try:
-            user_summaries = await self.extract_user_summaries(user_id=user_id)
-            scene_summary_count = len(user_summaries)
+            scene_summary_count = await self.data_source.count_user_summaries(
+                user_id=user_id
+            )
             logger.info(
                 "用户 SceneSummary 数量: %s (user=%s)",
                 scene_summary_count,
