@@ -576,7 +576,10 @@ class ProfileAnalyticsService:
                     "emotional", lambda: self.memory_graph.emotional_count(end_user_id)
                 ),
             ),
-            self._short_term_count([str(user_id)], evaluated_at),
+            self._safe_count(
+                "short term",
+                lambda: self._short_term_count([str(user_id)], evaluated_at),
+            ),
         )
         implicit_count, episodic, semantic, emotional = memory_counts
         counts = {

@@ -1603,6 +1603,13 @@ async def analytics_memory_types_async(
             logger.warning(f"获取工作记忆数量失败，设为0: {e}")
             return 0
 
+    async def _short_term_task() -> int:
+        try:
+            return await _async_get_short_term_count(end_user_id)
+        except Exception as e:
+            logger.warning(f"获取短期记忆数量失败，设为0: {e}")
+            return 0
+
     (
         work_count,
         short_term_count,
@@ -1613,7 +1620,7 @@ async def analytics_memory_types_async(
         forget_count,
     ) = await asyncio.gather(
         _work_count_task(),
-        _async_get_short_term_count(end_user_id),
+        _short_term_task(),
         _async_get_implicit_habit_count(end_user_id),
         base_service.get_episodic_memory_count(end_user_id),
         base_service.get_explicit_memory_count(end_user_id),
