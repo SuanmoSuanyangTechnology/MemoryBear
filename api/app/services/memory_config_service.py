@@ -681,14 +681,12 @@ class MemoryConfigService:
         workspace_id = workspace.id if workspace else None
 
         all_models = [
-            ("llm", config.llm_id, "extracted"),
-            ("embedding", config.embedding_id, "extracted"),
-            ("rerank", config.rerank_id, "extracted"),
-            ("vision", config.vision_id, "extracted"),
-            ("video", config.video_id, "extracted"),
-            ("audio", config.audio_id, "extracted"),
-            ("reflection", config.reflection_model_id, "reflection"),
-            ("emotion", config.emotion_model_id, "emotion"),
+            ("llm", workspace.llm, "extracted"),
+            ("embedding", workspace.embedding, "extracted"),
+            ("rerank", workspace.rerank, "extracted"),
+            ("vision", workspace.vision, "extracted"),
+            ("video", workspace.video, "extracted"),
+            ("audio", workspace.audio, "extracted"),
         ]
 
         warnings: list[dict] = []
