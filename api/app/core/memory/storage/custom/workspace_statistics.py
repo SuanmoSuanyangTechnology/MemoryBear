@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 from numbers import Integral
@@ -120,18 +119,6 @@ if (start != null && end != null) {
 }
 """
 
-
-_IMPLICIT_MEMORY_QUERY = """
-UNWIND $end_user_ids AS end_user_id
-OPTIONAL MATCH (summary:MemorySummary {end_user_id: end_user_id})
-      -[:DERIVED_FROM_STATEMENT]->(:Statement)
-WHERE summary.delete_at IS NULL
-WITH end_user_id, count(DISTINCT summary) AS summary_count
-RETURN sum(
-    CASE WHEN summary_count >= $minimum_summary_count
-         THEN summary_count ELSE 0 END
-) AS implicit_count
-"""
 
 _FALLBACK_STATISTICS_QUERY = """
 UNWIND $end_user_ids AS end_user_id
@@ -332,21 +319,6 @@ async def get_elasticsearch_workspace_statistics(
         for end_user_id in end_user_ids
     }
     return statistics, present_ids
-
-
-async def get_neo4j_implicit_memory_count(
-    client: Neo4jClient,
-    end_user_ids: Sequence[str],
-    minimum_summary_count: int,
-) -> int:
-    if not end_user_ids:
-        return 0
-    rows = await client.execute_query(
-        _IMPLICIT_MEMORY_QUERY,
-        end_user_ids=list(end_user_ids),
-        minimum_summary_count=minimum_summary_count,
-    )
-    return int(rows[0].get("implicit_count") or 0) if rows else 0
 
 
 async def get_neo4j_fallback_statistics(
@@ -554,33 +526,19 @@ class WorkspaceStatisticsStorage:
     async def get_statistics(
         self,
         end_user_ids: Sequence[str],
-        minimum_summary_count: int,
     ) -> dict[str, int]:
-        """Aggregate episodic, explicit, emotional and implicit memories."""
+        """Aggregate episodic, explicit and emotional memories."""
         if not end_user_ids:
             return {
                 "episodic_count": 0,
                 "explicit_count": 0,
                 "emotional_count": 0,
-                "implicit_count": 0,
             }
 
-        async with asyncio.TaskGroup() as task_group:
-            elastic_task = task_group.create_task(
-                get_elasticsearch_workspace_statistics(
-                    self._elastic_client,
-                    end_user_ids,
-                )
-            )
-            implicit_task = task_group.create_task(
-                get_neo4j_implicit_memory_count(
-                    self._neo4j_client,
-                    end_user_ids,
-                    minimum_summary_count,
-                )
-            )
-        elastic_statistics, present_ids = elastic_task.result()
-        implicit_count = implicit_task.result()
+        elastic_statistics, present_ids = await get_elasticsearch_workspace_statistics(
+            self._elastic_client,
+            end_user_ids,
+        )
 
         episodic_count = sum(
             item["episodic_count"] for item in elastic_statistics.values()
@@ -611,5 +569,4 @@ class WorkspaceStatisticsStorage:
             "episodic_count": episodic_count,
             "explicit_count": episodic_count + explicit_entity_count,
             "emotional_count": emotional_count,
-            "implicit_count": implicit_count,
         }

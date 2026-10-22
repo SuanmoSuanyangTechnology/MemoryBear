@@ -316,15 +316,6 @@ class MemoryGraphRepository:
             end_user_id=end_user_id,
         )
 
-    async def valid_summary_count(self, end_user_id: str) -> int:
-        rows = await self._query(
-            """MATCH (n:MemorySummary)-[:DERIVED_FROM_STATEMENT]->(:Statement)
-            WHERE n.end_user_id = $end_user_id AND n.delete_at IS NULL
-            RETURN count(DISTINCT n) AS count""",
-            end_user_id=end_user_id,
-        )
-        return int(rows[0]["count"] if rows else 0)
-
     async def episodic_count(self, end_user_id: str) -> int:
         rows = await self._query(
             """MATCH (n:MemorySummary)
@@ -374,22 +365,6 @@ class MemoryGraphRepository:
             emotion_types=list(EMOTION_TYPE_STORAGE_VALUES),
         )
         return int(rows[0]["count"] if rows else 0)
-
-    async def workspace_implicit_count(
-        self,
-        end_user_ids: list[str],
-        minimum_summary_count: int,
-    ) -> int:
-        """工作空间口径的隐性记忆：按用户统计，不足阈值该用户贡献 0。"""
-
-        if not end_user_ids:
-            return 0
-        rows = await self._query(
-            _WORKSPACE_IMPLICIT_MEMORY_QUERY,
-            end_user_ids=list(end_user_ids),
-            minimum_summary_count=minimum_summary_count,
-        )
-        return int(rows[0].get("implicit_count") or 0) if rows else 0
 
     async def workspace_fallback_statistics(
         self,

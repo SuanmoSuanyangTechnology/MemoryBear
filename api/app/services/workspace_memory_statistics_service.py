@@ -38,6 +38,7 @@ from app.repositories.memory_message_repository import MemoryMessageRepository
 from app.repositories.memory_perceptual_repository import MemoryPerceptualRepository
 from app.services.memory_base_service import MIN_MEMORY_SUMMARY_COUNT
 from app.services.short_term_memo_service import count_short_term_memos_for_users
+from app.repositories.implicit_emotions_storage_repository import ImplicitEmotionsStorageRepository
 
 logger = logging.getLogger(__name__)
 
@@ -90,6 +91,10 @@ async def _get_postgresql_statistics(
             asyncio.to_thread(_get_forget_count_sync, end_user_ids)
             if use_sync_pg else _get_forget_count(end_user_ids)
         )
+        implicit_task = task_group.create_task(
+            asyncio.to_thread(_get_implicit_count_sync, end_user_ids)
+            if use_sync_pg else _get_implicit_count(end_user_ids)
+        )
 
     return {
         "perceptual_count": perceptual_task.result(),
@@ -97,7 +102,22 @@ async def _get_postgresql_statistics(
             active_conversation_task.result() + api_mcp_source_task.result()
         ),
         "forget_count": forget_task.result(),
+        "implicit_count": implicit_task.result(),
     }
+
+
+async def _get_implicit_count(end_user_ids: list[uuid.UUID]) -> int:
+    async with get_async_db_context() as db:
+        return await ImplicitEmotionsStorageRepository(db).get_habit_count_by_end_user_ids_async(
+            [str(user_id) for user_id in end_user_ids]
+        )
+
+
+def _get_implicit_count_sync(end_user_ids: list[uuid.UUID]) -> int:
+    with get_db_read() as db:
+        return ImplicitEmotionsStorageRepository(db).get_habit_count_by_end_user_ids(
+            [str(user_id) for user_id in end_user_ids]
+        )
 
 
 async def _get_perceptual_count(end_user_ids: list[uuid.UUID]) -> int:
@@ -235,7 +255,6 @@ async def get_workspace_statistics_async(
                 graph_task = task_group.create_task(
                     workspace_statistics_storage.get_statistics(
                         [str(end_user_id) for end_user_id in end_user_ids],
-                        MIN_MEMORY_SUMMARY_COUNT,
                     )
                 )
                 short_term_task = task_group.create_task(
@@ -255,7 +274,7 @@ async def get_workspace_statistics_async(
             totals["WORKING_MEMORY"] += postgresql_statistics["working_count"]
             totals["SHORT_TERM_MEMORY"] += short_term_task.result()
             totals["EXPLICIT_MEMORY"] += graph_statistics["explicit_count"]
-            totals["IMPLICIT_MEMORY"] += graph_statistics["implicit_count"]
+            totals["IMPLICIT_MEMORY"] += postgresql_statistics["implicit_count"]
             totals["EMOTIONAL_MEMORY"] += graph_statistics["emotional_count"]
             totals["EPISODIC_MEMORY"] += graph_statistics["episodic_count"]
             totals["FORGET_MEMORY"] += postgresql_statistics["forget_count"]

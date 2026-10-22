@@ -50,7 +50,7 @@ from app.services._graph_data_helpers import (
     _query_rel_count_batch,
     _query_total_count_by_type,
 )
-from app.services.memory_base_service import MemoryBaseService, MIN_MEMORY_SUMMARY_COUNT
+from app.services.memory_base_service import MemoryBaseService
 from app.services.memory_config_service import MemoryConfigService
 
 logger = get_logger(__name__)
@@ -1538,6 +1538,18 @@ async def _async_get_short_term_count(end_user_id: str) -> int:
     return await count_short_term_memos(end_user_id)
 
 
+async def _async_get_implicit_habit_count(end_user_id: str) -> int:
+    """Return the implicit-memory habit count from the cached profile."""
+    from app.db import get_async_db_context
+    from app.repositories.implicit_emotions_storage_repository import (
+        ImplicitEmotionsStorageRepository,
+    )
+
+    async with get_async_db_context() as db:
+        repository = ImplicitEmotionsStorageRepository(db)
+        return await repository.get_habit_count_by_end_user_id_async(end_user_id)
+
+
 async def _async_get_forgetting_threshold(end_user_id: str) -> float:
     """获取用户的遗忘阈值配置（通过 Repository 异步方法）。"""
     from app.db import get_async_db_context
@@ -1594,7 +1606,7 @@ async def analytics_memory_types_async(
     (
         work_count,
         short_term_count,
-        memory_summary_count,
+        implicit_count,
         episodic_count,
         explicit_count,
         emotion_count,
@@ -1602,14 +1614,12 @@ async def analytics_memory_types_async(
     ) = await asyncio.gather(
         _work_count_task(),
         _async_get_short_term_count(end_user_id),
-        base_service.get_valid_memory_summary_count(end_user_id),
+        _async_get_implicit_habit_count(end_user_id),
         base_service.get_episodic_memory_count(end_user_id),
         base_service.get_explicit_memory_count(end_user_id),
         base_service.get_emotional_memory_count(end_user_id, perceptual_count),
         base_service.get_forget_memory_count(end_user_id, forgetting_threshold),
     )
-
-    implicit_count = memory_summary_count if memory_summary_count >= MIN_MEMORY_SUMMARY_COUNT else 0
 
     memory_counts = {
         "PERCEPTUAL_MEMORY": perceptual_count,
