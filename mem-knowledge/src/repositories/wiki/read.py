@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from collections import Counter, defaultdict
 
-from sqlalchemy import and_, exists, func, or_, select
+from sqlalchemy import String, and_, cast, exists, func, literal, or_, select
+from sqlalchemy.dialects.postgresql import JSONB
 
 from ...models.owned import (
     Document,
@@ -36,6 +37,15 @@ PAGE_COLUMNS = (
 )
 
 
+def published_source(source, published_sources=WikiPage.published_sources):
+    """只关联正文实际使用的素材，未参与生成的旧任务不影响发布结果。"""
+    return published_sources.contains(func.jsonb_build_array(func.jsonb_build_object(
+        "document_id", cast(source.document_id, String),
+        "version", source.document_wiki_version,
+        "content_hash", source.content_hash,
+    )))
+
+
 def scoped_pages(scope, page_types=()):
     source = WikiPageSource
     invalid = exists(
@@ -44,6 +54,7 @@ def scoped_pages(scope, page_types=()):
         .join(WikiDocumentState, WikiDocumentState.document_id == source.document_id)
         .where(
             source.page_id == WikiPage.id,
+            published_source(source),
             or_(
                 Document.status != 1,
                 Document.kb_id != WikiPage.kb_id,
@@ -54,7 +65,10 @@ def scoped_pages(scope, page_types=()):
         )
     )
     has_source = exists(
-        select(source.id).where(source.page_id == WikiPage.id, source.kb_id == WikiPage.kb_id)
+        select(source.id).where(
+            source.page_id == WikiPage.id, source.kb_id == WikiPage.kb_id,
+            published_source(source),
+        )
     )
     visible = and_(
         WikiPage.status == "ready",
@@ -63,7 +77,10 @@ def scoped_pages(scope, page_types=()):
         func.jsonb_array_length(WikiPage.published_sources)
         == select(func.count())
         .select_from(source)
-        .where(source.page_id == WikiPage.id, source.kb_id == WikiPage.kb_id)
+        .where(
+            source.page_id == WikiPage.id, source.kb_id == WikiPage.kb_id,
+            published_source(source),
+        )
         .scalar_subquery(),
     )
     conditions = [getattr(WikiPage, key) == as_uuid(value) for key, value in scope.items()]
@@ -177,6 +194,7 @@ def detail(session, scope, page_id):
             "reason": page.error_code,
         }
     )
+    published = literal(page.published_sources, type_=JSONB)
     if not visible:
         if page.status == "unavailable":
             result.update(
@@ -191,6 +209,7 @@ def detail(session, scope, page_id):
             .where(
                 WikiPageSource.page_id == page.id,
                 WikiPageSource.kb_id == as_uuid(scope["kb_id"]),
+                published_source(WikiPageSource, published),
                 WikiDocumentState.status.in_(["failed", "cancelled"]),
                 or_(
                     WikiDocumentState.source_ready.is_(False),
@@ -212,7 +231,10 @@ def detail(session, scope, page_id):
     for source, document in session.execute(
         select(WikiPageSource, Document)
         .join(Document, Document.id == WikiPageSource.document_id)
-        .where(WikiPageSource.page_id == page.id, WikiPageSource.kb_id == as_uuid(scope["kb_id"]))
+        .where(
+            WikiPageSource.page_id == page.id, WikiPageSource.kb_id == as_uuid(scope["kb_id"]),
+            published_source(WikiPageSource, published),
+        )
         .order_by(WikiPageSource.document_id)
     ):
         sources.append(
