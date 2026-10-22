@@ -63,11 +63,18 @@ async def list_short_term_memos(
     """List authorized Statement memos with UTC timestamps and page pagination."""
     try:
         workspace_id = current_user.current_workspace_id
-        end_user = None
-        if workspace_id is not None:
-            end_user = await EndUserRepository(db).get_active_end_user_in_workspace_async(
-                end_user_id, workspace_id,
+        if workspace_id is None:
+            return JSONResponse(
+                status_code=400,
+                content=fail(
+                    BizCode.INVALID_PARAMETER,
+                    "请先切换到一个工作空间",
+                    "current_workspace_id is None",
+                ),
             )
+        end_user = await EndUserRepository(db).get_active_end_user_in_workspace_async(
+            end_user_id, workspace_id,
+        )
         if end_user is None:
             return JSONResponse(
                 status_code=404,
