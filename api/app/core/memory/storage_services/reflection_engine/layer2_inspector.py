@@ -540,7 +540,8 @@ class Layer2Inspector:
                 not any(k in write_errors for k in ("merge", "redirect", "delete"))
                 and result.get("alias_nodes_deleted", 0) == len(set(merge_ids))
             )
-            drop_write_verified = drop_edges_deleted == len(drop_ids)
+            # 按 alias_id 删除其所有目标的别名边，实际删边数可能超过本轮候选行数。
+            drop_write_verified = drop_edges_deleted >= len(set(drop_ids))
 
             # 写日志（区分 BERT、LLM 降级及规则来源；未完成候选进入汇总）
             timing = {"recall_ms": recall_ms, "bert_batch_ms": bert_ms,
