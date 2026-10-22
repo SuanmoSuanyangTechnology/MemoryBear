@@ -1,4 +1,5 @@
 {
+  "KB_FAQ_INDEX_FAILED": "FAQ 索引同步失败，问答已保存，可重试索引。",
   "KB_PRINCIPAL_INVALID": "知识库身份信息无效，请重新登录后重试",
   "KB_VALIDATION_ERROR": "请求参数无效，请检查配置后重试",
   "KB_RESOURCE_NOT_FOUND": "资源不存在或不可访问，请检查所选资源",
@@ -157,5 +158,14 @@
   "KB_MULTIMODAL_RERANK_CONNECTION_FAILED": "图片重排模型连接失败，请稍后重试",
   "KB_MULTIMODAL_RERANK_RATE_LIMITED": "图片重排模型请求过于频繁，请稍后重试",
   "KB_MULTIMODAL_RERANK_RESPONSE_INVALID": "图片重排模型返回了无效响应",
-  "KB_MULTIMODAL_RERANK_TIMEOUT": "图片重排模型请求超时，请稍后重试"
+  "KB_MULTIMODAL_RERANK_TIMEOUT": "图片重排模型请求超时，请稍后重试",
+  "KB_FAQ_CONFLICT": "FAQ 已更新，请刷新后重试。",
+  "KB_FAQ_CONTENT_INVALID": "标准问与已有相似问或反例存在冲突，或答案不符合要求。",
+  "KB_FAQ_REVIEW_REQUIRED": "请先审核通过，再启用该 FAQ。",
+  "KB_FAQ_SOURCE_UNAVAILABLE": "FAQ 的 Wiki 来源当前不可用，无法完成审核或生成。",
+  "KB_FAQ_SOURCE_CHANGED": "Wiki 来源已更新，请重新查看对照后审核。",
+  "KB_FAQ_JOB_BUSY": "FAQ 生成任务仍在运行，请稍后重试。",
+  "KB_FAQ_JOB_TERMINAL": "已完成或已取消的首次生成任务不能重新生成。",
+  "KB_FAQ_DISPATCH_FAILED": "FAQ 生成任务投递失败，请重试。",
+  "KB_FAQ_WORKER_LOST": "FAQ 生成 Worker 执行中断，请重试任务。"
 }
