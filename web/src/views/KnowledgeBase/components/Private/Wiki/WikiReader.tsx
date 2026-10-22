@@ -17,6 +17,7 @@ interface WikiReaderProps {
   page?: WikiPage;
   initialDetail?: WikiPageDetail;
   summaryMode?: boolean;
+  keyword?: string;
   pages: WikiPage[];
   onSummaryPagesLoaded: (pages: WikiPage[]) => void;
   knowledgeBaseId: string;
@@ -35,6 +36,7 @@ const WikiReader: FC<WikiReaderProps> = ({
   page,
   initialDetail,
   summaryMode = false,
+  keyword,
   onSummaryPagesLoaded,
   knowledgeBase,
   knowledgeBaseId,
@@ -203,6 +205,7 @@ const WikiReader: FC<WikiReaderProps> = ({
             <WikiCatalog
               knowledgeBaseId={knowledgeBaseId}
               summaryOnly={isSummary}
+              keyword={keyword}
               onPagesLoaded={onSummaryPagesLoaded}
               onPageSelect={onPageSelect}
             />

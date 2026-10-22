@@ -9,6 +9,7 @@ import Empty from '@/components/Empty';
 interface WikiCatalogProps {
   knowledgeBaseId: string;
   summaryOnly: boolean;
+  keyword?: string;
   onPagesLoaded: (pages: WikiPage[]) => void;
   onPageSelect: (id: string) => void;
 }
@@ -36,6 +37,7 @@ const toWikiPages = (items: WikiPageItem[]): WikiPage[] => {
 const WikiCatalog = ({
   knowledgeBaseId,
   summaryOnly,
+  keyword,
   onPagesLoaded,
   onPageSelect,
 }: WikiCatalogProps) => {
@@ -48,10 +50,11 @@ const WikiCatalog = ({
         {t(summaryOnly ? 'knowledgeBase.summaryCatalog' : 'knowledgeBase.wikiCatalog')}
       </h1>
       <PageScrollList<WikiPageItem, WikiPagesQuery>
-        key={`${knowledgeBaseId}:${summaryOnly}`}
+        key={JSON.stringify([knowledgeBaseId, summaryOnly, keyword])}
         url={getKnowledgeWikiPagesUrl(knowledgeBaseId)}
         query={{
           page_types: summaryOnly ? 'summary' : 'entity,concept',
+          keyword: keyword || undefined,
           pagesize: 50,
         }}
         heightClass="rb:flex-1!"
