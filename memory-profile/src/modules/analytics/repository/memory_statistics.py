@@ -17,7 +17,6 @@ from src.models.references import (
     ImplicitEmotionsStorage,
     MemoryMessage,
     MemoryPerceptual,
-    ShortTermMemory,
 )
 from src.modules.analytics.constants import COUNT_KEYS
 
@@ -73,26 +72,6 @@ class MemoryStatisticsRepository:
         return select(func.count()).select_from(grouped_sources)
 
     @staticmethod
-    def _short_term_statement(user_filter: ColumnElement[bool]) -> Select:
-        return (
-            select(func.count())
-            .select_from(ShortTermMemory)
-            .where(user_filter)
-        )
-
-    @staticmethod
-    def _pending_conversation_statement(user_filter: ColumnElement[bool]) -> Select:
-        return (
-            select(func.count(func.distinct(Conversation.id)))
-            .select_from(Conversation)
-            .join(MemoryMessage, MemoryMessage.conversation_id == Conversation.id)
-            .where(
-                user_filter,
-                MemoryMessage.message_seq > func.coalesce(Conversation.write_cursor, 0),
-            )
-        )
-
-    @staticmethod
     def _forgotten_statement(user_filter: ColumnElement[bool]) -> Select:
         return (
             select(func.count())
@@ -106,8 +85,6 @@ class MemoryStatisticsRepository:
             cls._perceptual_statement(MemoryPerceptual.end_user_id == end_user_id),
             cls._active_conversation_statement(Conversation.user_id == str(end_user_id)),
             cls._direct_source_statement(MemoryMessage.end_user_id == str(end_user_id)),
-            cls._short_term_statement(ShortTermMemory.end_user_id == str(end_user_id)),
-            cls._pending_conversation_statement(Conversation.user_id == str(end_user_id)),
             cls._forgotten_statement(ForgetAudit.end_user_id == end_user_id),
         )
 
@@ -117,8 +94,6 @@ class MemoryStatisticsRepository:
             cls._perceptual_statement(MemoryPerceptual.end_user_id == any_(uuid_ids)),
             cls._active_conversation_statement(Conversation.user_id == any_(str_ids)),
             cls._direct_source_statement(MemoryMessage.end_user_id == any_(str_ids)),
-            cls._short_term_statement(ShortTermMemory.end_user_id == any_(str_ids)),
-            cls._pending_conversation_statement(Conversation.user_id == any_(str_ids)),
             cls._forgotten_statement(ForgetAudit.end_user_id == any_(uuid_ids)),
         )
 
@@ -172,9 +147,9 @@ class MemoryStatisticsRepository:
         return [UUID(str(value)) for value in values]
 
     async def counts_for_users(self, end_user_ids: list[UUID]) -> dict[str, int]:
-        """一次查询取回一批终端用户的 6 个计数器（``{COUNT_KEYS: int}``）。
+        """Read the four PG counters for one end-user batch (``{COUNT_KEYS: int}``).
 
-        与 :meth:`memory_type_counts` 同款取舍：6 个数字来自同一快照、只占 1 条连接。
+        与 :meth:`memory_type_counts` 同款取舍：各计数来自同一快照、只占 1 条连接。
         """
         if not end_user_ids:
             return dict.fromkeys(COUNT_KEYS, 0)
@@ -219,16 +194,6 @@ class MemoryStatisticsRepository:
     async def direct_source_count(self, end_user_id: UUID) -> int:
         return await self._count(
             self._direct_source_statement(MemoryMessage.end_user_id == str(end_user_id))
-        )
-
-    async def short_term_count(self, end_user_id: UUID) -> int:
-        return await self._count(
-            self._short_term_statement(ShortTermMemory.end_user_id == str(end_user_id))
-        )
-
-    async def pending_conversation_count(self, end_user_id: UUID) -> int:
-        return await self._count(
-            self._pending_conversation_statement(Conversation.user_id == str(end_user_id))
         )
 
     async def forgotten_count(self, end_user_id: UUID) -> int:

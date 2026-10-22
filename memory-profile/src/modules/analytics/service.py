@@ -556,8 +556,9 @@ class ProfileAnalyticsService:
             user_id, workspace_id
         ):
             return _zero_memory_statistics()
-        # Fetch PG source counts, cached habits and three Neo4j counts concurrently.
-        source_counts, memory_counts = await asyncio.gather(
+        # Fetch PG source counts, Neo4j counts and short-term memo counts concurrently.
+        evaluated_at = datetime.now(UTC)
+        source_counts, memory_counts, short_term_count = await asyncio.gather(
             self._memory_type_source_counts(user_id),
             asyncio.gather(
                 self._safe_count(
@@ -575,6 +576,10 @@ class ProfileAnalyticsService:
                     "emotional", lambda: self.memory_graph.emotional_count(end_user_id)
                 ),
             ),
+            self._safe_count(
+                "short term",
+                lambda: self._short_term_count([str(user_id)], evaluated_at),
+            ),
         )
         implicit_count, episodic, semantic, emotional = memory_counts
         counts = {
@@ -582,9 +587,7 @@ class ProfileAnalyticsService:
             "WORKING_MEMORY": (
                 source_counts["active_conversations"] + source_counts["direct_sources"]
             ),
-            "SHORT_TERM_MEMORY": (
-                source_counts["short_term"] + source_counts["pending_conversations"]
-            ),
+            "SHORT_TERM_MEMORY": short_term_count,
             "EXPLICIT_MEMORY": episodic + semantic,
             "IMPLICIT_MEMORY": implicit_count,
             "EMOTIONAL_MEMORY": emotional,
@@ -601,11 +604,26 @@ class ProfileAnalyticsService:
             for key in MEMORY_TYPES
         ]
 
+    async def _short_term_count(self, end_user_ids: list[str], now: datetime) -> int:
+        """Use ES counts first, falling back for absent users or failed searches."""
+        if not end_user_ids:
+            return 0
+        try:
+            counts, present_ids = await self.memory_search.short_term_counts(end_user_ids, now)
+        except Exception:
+            logger.warning("Short-term ES count failed; falling back to Neo4j", exc_info=True)
+            return await self.memory_graph.short_term_count(end_user_ids, now)
+        missing_ids = [user_id for user_id in end_user_ids if user_id not in present_ids]
+        total = sum(counts[user_id] for user_id in present_ids)
+        if missing_ids:
+            total += await self.memory_graph.short_term_count(missing_ids, now)
+        return total
+
     async def _memory_type_source_counts(self, user_id: UUID) -> dict[str, int]:
-        """PG 侧的 6 个计数器：优先一条查询取回（单连接、单快照）。
+        """PG 侧的 4 个计数器：优先一条查询取回（单连接、单快照）。
 
         合并查询失败时回落到逐指标查询，从而保留原先「单个指标失败只把该项降级为 0」
-        的语义（见 :meth:`_safe_count`）；这也是仓储层保留那 6 个单指标方法的原因。
+        的语义（见 :meth:`_safe_count`）；这也是仓储层保留那 4 个单指标方法的原因。
         """
         try:
             return await self.memory_statistics.memory_type_counts(user_id)
@@ -624,13 +642,6 @@ class ProfileAnalyticsService:
             ),
             self._safe_count(
                 "direct sources", lambda: self.memory_statistics.direct_source_count(user_id)
-            ),
-            self._safe_count(
-                "short term", lambda: self.memory_statistics.short_term_count(user_id)
-            ),
-            self._safe_count(
-                "pending conversations",
-                lambda: self.memory_statistics.pending_conversation_count(user_id),
             ),
             self._safe_count(
                 "forgotten", lambda: self.memory_statistics.forgotten_count(user_id)
@@ -1119,6 +1130,7 @@ class ProfileAnalyticsService:
         totals = {memory_type: 0 for memory_type in MEMORY_TYPES}
         total_users = 0
         after_id: UUID | None = None
+        evaluated_at = datetime.now(UTC)
 
         while True:
             end_user_ids = await self.memory_statistics.active_end_user_ids_page(
@@ -1127,10 +1139,11 @@ class ProfileAnalyticsService:
             if not end_user_ids:
                 break
             raw_ids = [str(end_user_id) for end_user_id in end_user_ids]
-            postgresql, search_result, implicit_count = await asyncio.gather(
+            postgresql, search_result, implicit_count, short_term_count = await asyncio.gather(
                 self.memory_statistics.counts_for_users(end_user_ids),
                 self.memory_search.workspace_memory_counts(raw_ids),
                 self.memory_statistics.habit_count_for_users(raw_ids),
+                self._short_term_count(raw_ids, evaluated_at),
             )
             elastic_statistics, present_ids = search_result
             episodic_count = sum(
@@ -1159,9 +1172,7 @@ class ProfileAnalyticsService:
             totals["WORKING_MEMORY"] += (
                 postgresql["active_conversations"] + postgresql["direct_sources"]
             )
-            totals["SHORT_TERM_MEMORY"] += (
-                postgresql["short_term"] + postgresql["pending_conversations"]
-            )
+            totals["SHORT_TERM_MEMORY"] += short_term_count
             totals["EXPLICIT_MEMORY"] += episodic_count + explicit_entity_count
             totals["IMPLICIT_MEMORY"] += implicit_count
             totals["EMOTIONAL_MEMORY"] += emotional_count

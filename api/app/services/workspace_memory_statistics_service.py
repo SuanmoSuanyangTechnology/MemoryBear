@@ -27,6 +27,7 @@ from app.core.memory.storage.provider.neo4j.client import Neo4jClient
 from app.core.utils.datetime_utils import (
     parse_iso_to_utc_naive,
     parse_timestamp_to_utc_naive,
+    utcnow,
     utcnow_naive,
 )
 from app.db import get_async_db_context, get_db_read
@@ -35,7 +36,8 @@ from app.repositories.end_user_repository import EndUserRepository
 from app.repositories.forget_log_repository import ForgetLogRepository
 from app.repositories.memory_message_repository import MemoryMessageRepository
 from app.repositories.memory_perceptual_repository import MemoryPerceptualRepository
-from app.repositories.memory_short_repository import ShortTermMemoryRepository
+from app.services.memory_base_service import MIN_MEMORY_SUMMARY_COUNT
+from app.services.short_term_memo_service import count_short_term_memos_for_users
 from app.repositories.implicit_emotions_storage_repository import ImplicitEmotionsStorageRepository
 
 logger = logging.getLogger(__name__)
@@ -85,14 +87,6 @@ async def _get_postgresql_statistics(
             asyncio.to_thread(_get_api_mcp_source_count_sync, end_user_ids)
             if use_sync_pg else _get_api_mcp_source_count(end_user_ids)
         )
-        short_term_task = task_group.create_task(
-            asyncio.to_thread(_get_short_term_count_sync, end_user_ids)
-            if use_sync_pg else _get_short_term_count(end_user_ids)
-        )
-        pending_conversation_task = task_group.create_task(
-            asyncio.to_thread(_get_pending_conversation_count_sync, end_user_ids)
-            if use_sync_pg else _get_pending_conversation_count(end_user_ids)
-        )
         forget_task = task_group.create_task(
             asyncio.to_thread(_get_forget_count_sync, end_user_ids)
             if use_sync_pg else _get_forget_count(end_user_ids)
@@ -106,9 +100,6 @@ async def _get_postgresql_statistics(
         "perceptual_count": perceptual_task.result(),
         "working_count": (
             active_conversation_task.result() + api_mcp_source_task.result()
-        ),
-        "short_term_count": (
-            short_term_task.result() + pending_conversation_task.result()
         ),
         "forget_count": forget_task.result(),
         "implicit_count": implicit_task.result(),
@@ -150,22 +141,6 @@ async def _get_api_mcp_source_count(end_user_ids: list[uuid.UUID]) -> int:
         return await MemoryMessageRepository(
             db
         ).get_working_memory_source_count_by_user_ids_async(end_user_ids)
-
-
-async def _get_short_term_count(end_user_ids: list[uuid.UUID]) -> int:
-    async with get_async_db_context() as db:
-        return await ShortTermMemoryRepository(db).count_by_user_ids_async(
-            end_user_ids
-        )
-
-
-async def _get_pending_conversation_count(
-    end_user_ids: list[uuid.UUID],
-) -> int:
-    async with get_async_db_context() as db:
-        return await ConversationRepository(
-            db,
-        ).get_pending_write_conversation_count_by_user_ids_async(end_user_ids)
 
 
 async def _get_forget_count(end_user_ids: list[uuid.UUID]) -> int:
@@ -210,22 +185,6 @@ def _get_api_mcp_source_count_sync(end_user_ids: list[uuid.UUID]) -> int:
         ).get_working_memory_source_count_by_user_ids(end_user_ids)
 
 
-def _get_short_term_count_sync(end_user_ids: list[uuid.UUID]) -> int:
-    with get_db_read() as db:
-        return ShortTermMemoryRepository(db).count_by_user_ids(
-            end_user_ids
-        )
-
-
-def _get_pending_conversation_count_sync(
-    end_user_ids: list[uuid.UUID],
-) -> int:
-    with get_db_read() as db:
-        return ConversationRepository(
-            db,
-        ).get_pending_write_conversation_count_by_user_ids(end_user_ids)
-
-
 def _get_forget_count_sync(end_user_ids: list[uuid.UUID]) -> int:
     with get_db_read() as db:
         return ForgetLogRepository.get_total_by_user_ids_sync(
@@ -261,6 +220,7 @@ async def get_workspace_statistics_async(
     totals = {memory_type: 0 for memory_type in MEMORY_TYPE_ORDER}
     total_users = 0
     after_id: uuid.UUID | None = None
+    evaluated_at = utcnow()
 
     elastic_client: ElasticClient | None = None
     neo4j_client: Neo4jClient | None = None
@@ -297,6 +257,14 @@ async def get_workspace_statistics_async(
                         [str(end_user_id) for end_user_id in end_user_ids],
                     )
                 )
+                short_term_task = task_group.create_task(
+                    count_short_term_memos_for_users(
+                        [str(end_user_id) for end_user_id in end_user_ids],
+                        elastic_client=elastic_client,
+                        neo4j_executor=neo4j_client,
+                        now=evaluated_at,
+                    )
+                )
             postgresql_statistics = postgresql_task.result()
             graph_statistics = graph_task.result()
 
@@ -304,9 +272,7 @@ async def get_workspace_statistics_async(
                 "perceptual_count"
             ]
             totals["WORKING_MEMORY"] += postgresql_statistics["working_count"]
-            totals["SHORT_TERM_MEMORY"] += postgresql_statistics[
-                "short_term_count"
-            ]
+            totals["SHORT_TERM_MEMORY"] += short_term_task.result()
             totals["EXPLICIT_MEMORY"] += graph_statistics["explicit_count"]
             totals["IMPLICIT_MEMORY"] += postgresql_statistics["implicit_count"]
             totals["EMOTIONAL_MEMORY"] += graph_statistics["emotional_count"]
