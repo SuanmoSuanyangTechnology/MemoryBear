@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections import Counter, defaultdict
 
-from sqlalchemy import and_, case, exists, func, or_, select
+from sqlalchemy import and_, exists, func, or_, select
 
 from ...models.owned import (
     Document,
@@ -36,7 +36,7 @@ PAGE_COLUMNS = (
 )
 
 
-def scoped_pages(scope, page_types=(), *, include_unavailable=False):
+def scoped_pages(scope, page_types=()):
     source = WikiPageSource
     invalid = exists(
         select(source.id)
@@ -66,9 +66,6 @@ def scoped_pages(scope, page_types=(), *, include_unavailable=False):
         .where(source.page_id == WikiPage.id, source.kb_id == WikiPage.kb_id)
         .scalar_subquery(),
     )
-    if include_unavailable:
-        # 列表保留失去全部来源的页面；FAQ 来源校验仍只接受有效页面。
-        visible = or_(visible, and_(WikiPage.status == "unavailable", ~has_source))
     conditions = [getattr(WikiPage, key) == as_uuid(value) for key, value in scope.items()]
     conditions.append(visible)
     if page_types:
@@ -133,20 +130,13 @@ def list_pages(
     session, scope, *, page_types=(), keyword=None, page=1, pagesize=50, legacy=False
 ):
     begin_read(session, scope)
-    condition = scoped_pages(scope, page_types, include_unavailable=True)
+    condition = scoped_pages(scope, page_types)
     keyword = (keyword or "").strip()
     if keyword:
-        # 空页面仅搜索当前展示的占位内容，不能通过匹配结果暴露已隐藏的旧来源正文。
-        summary = case(
-            (WikiPage.status == "unavailable", EMPTY_PAGE_SUMMARY), else_=WikiPage.summary
-        )
-        content = case(
-            (WikiPage.status == "unavailable", EMPTY_PAGE_NOTICE), else_=WikiPage.content
-        )
         condition = and_(condition, or_(
             WikiPage.title.icontains(keyword, autoescape=True),
-            summary.icontains(keyword, autoescape=True),
-            content.icontains(keyword, autoescape=True),
+            WikiPage.summary.icontains(keyword, autoescape=True),
+            WikiPage.content.icontains(keyword, autoescape=True),
         ))
     total = session.scalar(select(func.count()).select_from(WikiPage).where(condition))
     rows = session.execute(
@@ -301,7 +291,7 @@ def tree(
     counts = Counter()
     direct = session.execute(
         select(WikiPage.folder_id, func.count())
-        .where(scoped_pages(scope, page_types, include_unavailable=True))
+        .where(scoped_pages(scope, page_types))
         .group_by(WikiPage.folder_id)
     ).all()
     for folder, count in direct:
@@ -324,14 +314,14 @@ def tree(
     ]
     items.sort(key=lambda item: item["id"])
     page_query = select(*PAGE_COLUMNS).where(
-        scoped_pages(scope, page_types, include_unavailable=True), WikiPage.folder_id == parent_id
+        scoped_pages(scope, page_types), WikiPage.folder_id == parent_id
     )
     if cursor or legacy:
         return _tree_cursor_page(session, items, page_query, folder_id, cursor or "", pagesize)
     folder_count = len(items)
     page_count = session.scalar(
         select(func.count()).select_from(WikiPage).where(
-            scoped_pages(scope, page_types, include_unavailable=True),
+            scoped_pages(scope, page_types),
             WikiPage.folder_id == parent_id,
         )
     )
@@ -366,7 +356,7 @@ def index(session, scope):
         kind: count
         for kind, count in session.execute(
             select(WikiPage.page_type, func.count())
-            .where(scoped_pages(scope, include_unavailable=True))
+            .where(scoped_pages(scope))
             .group_by(WikiPage.page_type)
         )
     }
@@ -374,7 +364,7 @@ def index(session, scope):
     folders = _folders(session, scope)
     for folder, count in session.execute(
         select(WikiPage.folder_id, func.count())
-        .where(scoped_pages(scope, include_unavailable=True))
+        .where(scoped_pages(scope))
         .group_by(WikiPage.folder_id)
     ):
         seen = set()
