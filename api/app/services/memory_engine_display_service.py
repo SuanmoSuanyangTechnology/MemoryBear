@@ -7,6 +7,7 @@
 - 从 SceneSummary、GDS 价值评估结果组装 SCENE_SUMMARY / MEMORY_VALUE 事件
 - 从偏好引擎结果组装 PREFERENCE 事件（原子项计数，源消息派生稳定 operation_id）
 - 从情景重构批次结果组装 SCENE_RECONSTRUCTION 事件（批次指纹派生稳定 operation_id）
+- 从预测推演运行结果组装 PREDICTION 事件（run_id 派生稳定 operation_id）
 - 查询时按用户时区日期聚合事件并生成卡片文案
 - 异常隔离（PG 写入失败不影响主流程）
 """
@@ -339,6 +340,37 @@ class MemoryEngineDisplayService:
         except Exception as e:
             logger.error(
                 f"[EngineDisplay] 情景重构事件组装失败: end_user_id={end_user_id}, error={e}",
+                exc_info=True,
+            )
+            return
+        if event is None:
+            return
+        await _persist_events(end_user_id, [event])
+
+    @staticmethod
+    async def save_prediction_event(
+        end_user_id: str,
+        result: Any,
+    ) -> None:
+        """预测推演完整成功后调用，best effort 写 PREDICTION 展示事件。
+
+        只有报告 ``evidence_sufficient=True`` 且 ``predictions`` 非空才写入；
+        证据闸门拒答、管线异常、SSE 中断取消都不产生。details 只保存四项
+        计数，不保存问题原文、预测正文、headline、置信度或 statement ID。
+
+        operation_id 由 run_id（本次运行实例的完整 UUID v4）派生：预测推演
+        不经 Celery、无自动重试，用户重新发起即新运行实例，新 run_id 产生
+        新事件；同一次运行内事件重复组装写入由唯一约束兜底。
+
+        Args:
+            end_user_id: 终端用户 ID（字符串形式 UUID）
+            result: PredictionPipeline.run() 返回的 RunResult
+        """
+        try:
+            event = _build_prediction_event(result)
+        except Exception as e:
+            logger.error(
+                f"[EngineDisplay] 预测推演事件组装失败: end_user_id={end_user_id}, error={e}",
                 exc_info=True,
             )
             return
@@ -880,6 +912,63 @@ def _build_scene_reconstruction_event(
     }
 
 
+def _build_prediction_event(
+    result: Any,
+) -> Optional[Dict[str, Any]]:
+    """组装预测推演（PREDICTION）事件。
+
+    只有报告 ``evidence_sufficient=True`` 且 ``predictions`` 非空才生成；
+    缺 run_id 时无法派生稳定 operation_id，直接返回 None，避免用随机值
+    造成重复累计。四项计数全部来自内存中的结果对象，不回读报告文件。
+    """
+    if result is None:
+        return None
+
+    run_id = _field(result, "run_id")
+    if not run_id:
+        logger.warning("[EngineDisplay] 预测推演事件组装跳过: run_id 为空")
+        return None
+
+    report = _field(result, "report")
+    if report is None:
+        return None
+    if _field(report, "evidence_sufficient") is not True:
+        return None
+
+    predictions = _field(report, "predictions") or []
+    if len(predictions) <= 0:
+        return None
+
+    grounded_ids = {
+        item
+        for prediction in predictions
+        for item in (_field(prediction, "grounded_on") or [])
+    }
+
+    round_count = 0
+    agent_count = 0
+    world = _field(result, "world")
+    if world is not None:
+        round_count = len(_field(world, "turns") or [])
+        all_agents = _field(world, "all_agents")
+        if callable(all_agents):
+            agent_count = len(all_agents())
+
+    return {
+        "engine_type": "PREDICTION",
+        "details": {
+            "prediction_count": len(predictions),
+            "round_count": round_count,
+            "agent_count": agent_count,
+            "grounded_memory_count": len(grounded_ids),
+        },
+        "operation_id": uuid.uuid5(
+            _ENGINE_EVENT_NAMESPACE,
+            f"prediction:{run_id}",
+        ),
+    }
+
+
 def _field(obj: Any, key: str, default: Any = None) -> Any:
     """兼容 pydantic 模型与 dict 的字段读取。"""
     if isinstance(obj, dict):
@@ -1137,6 +1226,36 @@ def _merge_event_details(
             "summary_refreshed_count": summary_refreshed,
         }
 
+    elif engine_type == "PREDICTION":
+        # 推演次数计数、预测条数求和；轮次/Agent 数/依据记忆数只取最近一次
+        # （事件按 occurred_at 倒序迭代，第一条即最近一次）——每次推演是
+        # 独立完整的模拟，覆盖面不能跨运行累加。
+        prediction_runs = 0
+        prediction_count = 0
+        round_count = 0
+        agent_count = 0
+        grounded_memory_count = 0
+        for e in sorted(
+            events,
+            key=lambda item: item.occurred_at or datetime.min,
+            reverse=True,
+        ):
+            prediction_runs += 1
+            d = e.details or {}
+            prediction_count += _as_count(d.get("prediction_count"))
+            if prediction_runs == 1:
+                round_count = _as_count(d.get("round_count"))
+                agent_count = _as_count(d.get("agent_count"))
+                grounded_memory_count = _as_count(d.get("grounded_memory_count"))
+
+        return {
+            "prediction_runs": prediction_runs,
+            "prediction_count": prediction_count,
+            "round_count": round_count,
+            "agent_count": agent_count,
+            "grounded_memory_count": grounded_memory_count,
+        }
+
     return {}
 
 
@@ -1351,6 +1470,29 @@ def _generate_card_text_zh(
                 f"这一天整理了 {processed} 段完整情景，"
                 f"形成 {new_communities} 个新事项脉络，"
                 f"并完成 {existing_updates} 次已有脉络更新。"
+            )
+        return name, content
+
+    elif engine_type == "PREDICTION":
+        runs = _as_count(merged.get("prediction_runs"))
+        predictions = _as_count(merged.get("prediction_count"))
+        rounds = _as_count(merged.get("round_count"))
+        grounded = _as_count(merged.get("grounded_memory_count"))
+        if runs <= 0 or predictions <= 0:
+            return ("", "")
+
+        name = "我基于记忆推演了未来可能的走向"
+        if runs == 1:
+            # 单次推演
+            content = (
+                f"这一天完成了 1 次预测推演，形成了 {predictions} 条预测，"
+                f"模拟了 {rounds} 轮情景演化。"
+            )
+        else:
+            # 多次推演：预测条数求和；轮次与依据记忆数只取最近一次
+            content = (
+                f"这一天完成了 {runs} 次预测推演，共形成 {predictions} 条预测；"
+                f"最近一次模拟了 {rounds} 轮情景、结合了 {grounded} 条历史记忆。"
             )
         return name, content
 
@@ -1615,6 +1757,33 @@ def _generate_card_text_en(
                 f"{_pluralize('topic thread', new_communities, 'topic threads')} "
                 f"and making {existing_updates} "
                 f"{_pluralize('update', existing_updates)} to existing ones."
+            )
+        return name, content
+
+    if engine_type == "PREDICTION":
+        runs = _as_count(merged.get("prediction_runs"))
+        predictions = _as_count(merged.get("prediction_count"))
+        rounds = _as_count(merged.get("round_count"))
+        grounded = _as_count(merged.get("grounded_memory_count"))
+        if runs <= 0 or predictions <= 0:
+            return ("", "")
+
+        name = "I explored where your memories might lead"
+        if runs == 1:
+            content = (
+                f"I completed 1 prediction run that day, forming "
+                f"{predictions} {_pluralize('prediction', predictions)} from "
+                f"{rounds} {_pluralize('round', rounds)} of simulated "
+                "scenarios."
+            )
+        else:
+            content = (
+                f"I completed {runs} prediction "
+                f"{_pluralize('run', runs)} that day, forming {predictions} "
+                f"{_pluralize('prediction', predictions)} in total; the most "
+                f"recent one simulated {rounds} "
+                f"{_pluralize('round', rounds)} and drew on {grounded} "
+                f"{_pluralize('memory', grounded, 'memories')}."
             )
         return name, content
 
