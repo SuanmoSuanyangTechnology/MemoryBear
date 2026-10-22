@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections import Counter, defaultdict
 
-from sqlalchemy import and_, exists, func, or_, select
+from sqlalchemy import and_, case, exists, func, or_, select
 
 from ...models.owned import (
     Document,
@@ -129,9 +129,25 @@ def page_data(row, folders):
     }
 
 
-def list_pages(session, scope, *, page_types=(), page=1, pagesize=50, legacy=False):
+def list_pages(
+    session, scope, *, page_types=(), keyword=None, page=1, pagesize=50, legacy=False
+):
     begin_read(session, scope)
     condition = scoped_pages(scope, page_types, include_unavailable=True)
+    keyword = (keyword or "").strip()
+    if keyword:
+        # 空页面仅搜索当前展示的占位内容，不能通过匹配结果暴露已隐藏的旧来源正文。
+        summary = case(
+            (WikiPage.status == "unavailable", EMPTY_PAGE_SUMMARY), else_=WikiPage.summary
+        )
+        content = case(
+            (WikiPage.status == "unavailable", EMPTY_PAGE_NOTICE), else_=WikiPage.content
+        )
+        condition = and_(condition, or_(
+            WikiPage.title.icontains(keyword, autoescape=True),
+            summary.icontains(keyword, autoescape=True),
+            content.icontains(keyword, autoescape=True),
+        ))
     total = session.scalar(select(func.count()).select_from(WikiPage).where(condition))
     rows = session.execute(
         select(*PAGE_COLUMNS)
@@ -145,7 +161,7 @@ def list_pages(session, scope, *, page_types=(), page=1, pagesize=50, legacy=Fal
         "page": page,
         "pagesize": pagesize,
         "total": total,
-        "has_next": page * pagesize < total,
+        "hasnext": page * pagesize < total,
     }
     items = [page_data(row, folders) for row in rows]
     if legacy:
@@ -339,7 +355,7 @@ def tree(
             "page": page,
             "pagesize": pagesize,
             "total": total,
-            "has_next": has_next,
+            "hasnext": has_next,
         },
     }
 
