@@ -78,9 +78,9 @@ async def _ensure_group(redis) -> None:
 
 async def _consume_stream(session, redis, batch_size: int) -> int:
     await _ensure_group(redis)
-    # block=300ms（< REDIS_CMD_TIMEOUT_MS 500ms）：无限阻塞（block=0）会被客户端
-    # socket 超时掐断抛 TimeoutError → audit_loop 误报失败无限重试；有限阻塞空转
-    # 由 Redis 返回 nil，轮询节奏 = 300ms 阻塞 + loop sleep 1s
+    # block=300ms, far below the 5s socket read timeout: block=0 would stall
+    # until the timeout fires and log a spurious TimeoutError every round.
+    # Bounded blocking returns nil and paces the loop at 300ms + 1s sleep.
     resp = await redis.xreadgroup(_GROUP, _CONSUMER, {settings.AUDIT_STREAM_KEY: ">"},
                                   count=batch_size, block=300)
     if not resp:
