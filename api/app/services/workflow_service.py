@@ -725,18 +725,22 @@ class WorkflowService:
             return None
 
         config = dict(release.config or {})
-        nodes = list(config.get("nodes") or [])
+        nodes = config.get("nodes") or []
         updated = False
+        new_nodes = []
         for node in nodes:
-            if node.get("type") == NodeType.TRIGGER and node.get("id") == trigger_id:
-                node["runtime"] = runtime
+            # Fresh node dict instead of in-place mutation: an equal
+            # assignment is skipped by SQLAlchemy and never persisted.
+            if not updated and node.get("type") == NodeType.TRIGGER and node.get("id") == trigger_id:
+                new_nodes.append({**node, "runtime": runtime})
                 updated = True
-                break
+            else:
+                new_nodes.append(node)
 
         if not updated:
             return None
 
-        config["nodes"] = nodes
+        config["nodes"] = new_nodes
         release.config = config
         self.db.commit()
         self.db.refresh(release)

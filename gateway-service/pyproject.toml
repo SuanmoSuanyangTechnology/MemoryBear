@@ -12,7 +12,7 @@ dependencies = ["auth-sdk>=0.1", "fastapi>=0.110", "uvicorn>=0.29", "redis>=6.0"
 auth-sdk = { path = "../packages/auth-sdk" }
 
 [dependency-groups]
-dev = ["pytest>=8", "pytest-asyncio>=0.23", "fakeredis>=2.23"]
+dev = ["pytest>=8", "pytest-asyncio>=0.23", "fakeredis>=2.23", "ruff>=0.16,<1"]
 
 # 包名即 src（src/__init__.py 在服务根下，代码平铺于 src 顶层）：显式声明，使
 # wheel/path 安装产出 package src（find where=["src"] 会找不到包 → 空 wheel）
@@ -25,3 +25,10 @@ packages = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "ASYNC"]

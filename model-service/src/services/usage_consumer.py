@@ -34,7 +34,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..config import current_settings
 from ..infrastructure.redis import get_async_client
 from ..models.model_usage_record import ModelUsageRecord
-from .usage_publisher import MODEL_USAGE_STREAM
+from .usage_publisher import model_usage_stream
 
 logger = logging.getLogger(__name__)
 
@@ -69,7 +69,7 @@ def _consumer_name() -> str:
 async def _ensure_group(client: Redis) -> None:
     try:
         await client.xgroup_create(
-            MODEL_USAGE_STREAM, MODEL_USAGE_CONSUMER_GROUP, id="$", mkstream=True
+            model_usage_stream(), MODEL_USAGE_CONSUMER_GROUP, id="$", mkstream=True
         )
     except ResponseError as exc:
         if "BUSYGROUP" not in str(exc):
@@ -205,7 +205,7 @@ async def _read_new(client: Redis, batch_size: int) -> list[tuple[str, dict[str,
     response = await client.xreadgroup(
         MODEL_USAGE_CONSUMER_GROUP,
         _consumer_name(),
-        {MODEL_USAGE_STREAM: ">"},
+        {model_usage_stream(): ">"},
         count=batch_size,
         block=_BLOCK_MS,
     )
@@ -223,7 +223,7 @@ async def _reclaim_stale(
     while True:
         try:
             claimed = await client.xautoclaim(
-                MODEL_USAGE_STREAM,
+                model_usage_stream(),
                 MODEL_USAGE_CONSUMER_GROUP,
                 _consumer_name(),
                 min_idle_time=_RECLAIM_MIN_IDLE_MS,
@@ -238,7 +238,7 @@ async def _reclaim_stale(
             stats["reclaimed"] += len(messages)
             ack_ids = await _handle_entries(messages, session_factory, stats)
             if ack_ids:
-                await client.xack(MODEL_USAGE_STREAM, MODEL_USAGE_CONSUMER_GROUP, *ack_ids)
+                await client.xack(model_usage_stream(), MODEL_USAGE_CONSUMER_GROUP, *ack_ids)
         if not messages or cursor in ("0-0", "0", None):
             return
 
@@ -254,7 +254,7 @@ async def _warn_on_backlog(client: Redis) -> None:
     """
     threshold = current_settings().model_usage_backlog_warn
     try:
-        groups = await client.xinfo_groups(MODEL_USAGE_STREAM)
+        groups = await client.xinfo_groups(model_usage_stream())
     except RedisError as exc:
         logger.warning("用量消费组查询失败: %s", exc)
         return
@@ -268,7 +268,7 @@ async def _warn_on_backlog(client: Redis) -> None:
         if lag and lag > threshold:
             logger.warning("用量消费组 lag 积压: lag=%d 超阈值 %d", lag, threshold)
     try:
-        pending = await client.xpending(MODEL_USAGE_STREAM, MODEL_USAGE_CONSUMER_GROUP)
+        pending = await client.xpending(model_usage_stream(), MODEL_USAGE_CONSUMER_GROUP)
     except ResponseError:
         return
     pending_count = pending.get("pending") if isinstance(pending, dict) else None
@@ -291,7 +291,7 @@ async def _consume_forever(client: Redis, session_factory: SessionFactory) -> No
             if entries:
                 ack_ids = await _handle_entries(entries, session_factory, stats)
                 if ack_ids:
-                    await client.xack(MODEL_USAGE_STREAM, MODEL_USAGE_CONSUMER_GROUP, *ack_ids)
+                    await client.xack(model_usage_stream(), MODEL_USAGE_CONSUMER_GROUP, *ack_ids)
         except RedisError:
             raise
         except Exception as exc:
@@ -321,7 +321,7 @@ async def run_usage_consumer(session_factory: SessionFactory) -> None:
             delay = _RECONNECT_BASE_DELAY_S
             logger.info(
                 "用量消费就绪: stream=%s group=%s consumer=%s",
-                MODEL_USAGE_STREAM,
+                model_usage_stream(),
                 MODEL_USAGE_CONSUMER_GROUP,
                 _consumer_name(),
             )

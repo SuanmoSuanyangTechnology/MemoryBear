@@ -995,6 +995,8 @@ class AppService:
 
         app = self._get_app_or_404(app_id)
         self._validate_workspace_access(app, workspace_id)
+        app_workspace = self.db.get(Workspace, app.workspace_id)
+        app_tenant_id = app_workspace.tenant_id if app_workspace else None
 
         # 逻辑删除应用
         app.is_active = False
@@ -1010,6 +1012,20 @@ class AppService:
         self.db.execute(stmt)
         
         self.db.commit()
+        # 应用删除：停用提交后失效其情绪策略缓存。
+        logger.info(
+            "[EmotionReply] completed event=app_delete_persist tenant_id=%s app_id=%s result=committed",
+            app_tenant_id, app_id,
+        )
+        policy_provider = get_plugin("memory.emotion_reply_policy")
+        if policy_provider is not None and app_tenant_id is not None:
+            policy_provider.invalidate_sync(app_id, app_tenant_id)
+        else:
+            logger.debug(
+                "[EmotionReply] skipped event=cache_invalidate_sync tenant_id=%s app_id=%s reason=%s",
+                app_tenant_id, app_id,
+                "provider_unavailable" if policy_provider is None else "tenant_missing",
+            )
 
         logger.info(
             "应用删除成功",
@@ -1173,6 +1189,14 @@ class AppService:
                 if source_config:
                     # multi_agent 的 model_config_id/sub_agents/routing_rules 均属于 tenant 级别直接保留
                     # 跨空间时 master_agent_id（AppRelease）属于源空间，需清空
+                    # supervisor_config 承载主管循环模式下的主管本体能力面
+                    # （对话功能/提示词/记忆/知识库/技能/变量/工具），漏拷会让副本退回"裸主管"。
+                    new_supervisor_config = self._clone_supervisor_config(
+                        source_config.supervisor_config,
+                        is_cross_workspace=is_cross_workspace,
+                        target_tenant_id=target_tenant_id,
+                        target_workspace_id=target_workspace_id,
+                    )
                     new_config = MultiAgentConfig(
                         id=uuid.uuid4(),
                         app_id=new_app.id,
@@ -1184,6 +1208,7 @@ class AppService:
                         sub_agents=copy.deepcopy(source_config.sub_agents) if source_config.sub_agents else [],
                         routing_rules=copy.deepcopy(source_config.routing_rules) if source_config.routing_rules else None,
                         execution_config=copy.deepcopy(source_config.execution_config) if source_config.execution_config else {},
+                        supervisor_config=new_supervisor_config,
                         aggregation_strategy=source_config.aggregation_strategy,
                         is_active=True,
                         created_at=now,
@@ -1266,6 +1291,51 @@ class AppService:
                     available_kb_ids.update(self.db.scalars(stmt).all())
 
         return available_model_ids, available_kb_ids
+
+    def _clone_supervisor_config(
+            self,
+            supervisor_config: Optional[dict],
+            *,
+            is_cross_workspace: bool,
+            target_tenant_id: Optional[uuid.UUID],
+            target_workspace_id: uuid.UUID,
+    ) -> Optional[dict]:
+        """复制集群 supervisor_config（主管本体能力面），跨空间时按 Agent 分支同口径清洗。
+
+        supervisor_config 是主管循环模式下主管的全部配置载体：
+        对话功能（features）/ 提示词（system_prompt）/ 记忆（memory）/
+        知识库（knowledge_retrieval）/ 技能（skills）/ 变量（variables）/ 工具（tools）。
+        漏拷整个字段 = 副本退回"裸主管"（硬编码 prompt + 仅 SubAgentTool），
+        用户配的七项能力面全部消失——这是集群复制最主要的配置丢失来源。
+
+        清洗口径对齐 AgentConfig 分支：
+        - knowledge_retrieval 属workspace 级，需按目标空间可用 KB 过滤；
+        - memory 属 workspace 级，memory_config_id 不属于目标空间时置空；
+        - model/tools/skills 属 tenant 级，直接保留。
+        """
+        if not supervisor_config:
+            return None
+
+        cleaned = copy.deepcopy(supervisor_config)
+        if not isinstance(cleaned, dict):
+            return None
+
+        if is_cross_workspace:
+            knowledge_retrieval = cleaned.get("knowledge_retrieval")
+            if knowledge_retrieval:
+                _, kb_ids = self._collect_resource_ids_from_config(None, knowledge_retrieval)
+                _, available_kb_ids = self._preload_cross_workspace_resources(
+                    target_tenant_id, target_workspace_id, set(), kb_ids
+                )
+                cleaned["knowledge_retrieval"] = self._clean_knowledge_retrieval(
+                    knowledge_retrieval, available_kb_ids
+                )
+            if cleaned.get("memory"):
+                cleaned["memory"] = self._clean_memory_cross_workspace(
+                    cleaned["memory"], target_workspace_id
+                )
+
+        return cleaned
 
     @staticmethod
     def _collect_resource_ids_from_config(

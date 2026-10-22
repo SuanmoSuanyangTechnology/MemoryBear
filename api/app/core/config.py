@@ -8,6 +8,24 @@ from pydantic import Field, TypeAdapter
 load_dotenv()
 
 
+def _resolve_usage_stream() -> str:
+    """Resolve the deployment-scoped usage stream name.
+
+    An explicit MODEL_USAGE_STREAM wins; otherwise the key is derived from
+    DB_NAME so deployments sharing one Redis but owning separate databases
+    consume only their own usage events.
+    """
+    explicit = os.getenv("MODEL_USAGE_STREAM", "").strip()
+    if explicit:
+        if any(ch.isspace() for ch in explicit):
+            raise RuntimeError("MODEL_USAGE_STREAM must not contain whitespace")
+        return explicit
+    db_name = os.getenv("DB_NAME", "redbear-mem").strip()
+    if not db_name or any(ch.isspace() for ch in db_name):
+        raise RuntimeError("DB_NAME must be non-empty without whitespace to derive MODEL_USAGE_STREAM")
+    return f"model:usage:{db_name}"
+
+
 class Settings:
     # ========================================================================
     # Deployment Mode Configuration
@@ -70,11 +88,21 @@ class Settings:
     DB_USER: str = os.getenv("DB_USER", "postgres")
     DB_PASSWORD: str = os.getenv("DB_PASSWORD", "password")
     DB_NAME: str = os.getenv("DB_NAME", "redbear-mem")
+    # Deployment-scoped usage stream shared by the local metering publisher and
+    # the alert consumer; derived from DB_NAME unless explicitly overridden.
+    MODEL_USAGE_STREAM: str = _resolve_usage_stream()
     DB_POOL_SIZE: int = int(os.getenv("DB_POOL_SIZE", "50"))
     DB_MAX_OVERFLOW: int = int(os.getenv("DB_MAX_OVERFLOW", "20"))
     DB_POOL_RECYCLE: int = int(os.getenv("DB_POOL_RECYCLE", "1800"))
     DB_POOL_TIMEOUT: int = int(os.getenv("DB_POOL_TIMEOUT", "30"))
     DB_POOL_PRE_PING: bool = os.getenv("DB_POOL_PRE_PING", "true").lower() == "true"
+
+    # 多 Agent 流式请求并发闸门（单进程）：超出上限的请求排队等待，避免同时占满 DB 连接池。
+    # 一个请求在准备阶段会同时持有共享 session 连接并另开独立连接，峰值远大于 1，
+    # 上限建议 <= (DB_POOL_SIZE + DB_MAX_OVERFLOW) / 4。0 表示不限制。
+    MULTI_AGENT_STREAM_MAX_CONCURRENCY: int = int(os.getenv("MULTI_AGENT_STREAM_MAX_CONCURRENCY", "16"))
+    # 排队等待上限（秒），超时下发 error 事件；0 表示一直等
+    MULTI_AGENT_STREAM_QUEUE_TIMEOUT: float = float(os.getenv("MULTI_AGENT_STREAM_QUEUE_TIMEOUT", "120"))
 
     # Batch persist queue for async message persistence
     BATCH_PERSIST_QUEUE_SIZE: int = int(os.getenv("BATCH_PERSIST_QUEUE_SIZE", "10000"))
@@ -184,6 +212,33 @@ class Settings:
         os.getenv("MEM_KNOWLEDGE_HEALTH_TIMEOUT_SECONDS", "3")
     )
 
+    # Independent memory profile service routing. Disabled keeps legacy analytics.
+    # Only endpoints carrying @memory_profile_proxy are forwarded; non-equivalent
+    # generation and workspace-refresh endpoints remain local during migration.
+    ENABLE_MEMORY_PROFILE: bool = os.getenv("ENABLE_MEMORY_PROFILE", "false").lower() == "true"
+    MEMORY_PROFILE_BASE_URL: str = os.getenv("MEMORY_PROFILE_BASE_URL", "")
+    MEMORY_PROFILE_CONNECT_TIMEOUT_SECONDS: float = float(
+        os.getenv("MEMORY_PROFILE_CONNECT_TIMEOUT_SECONDS", "5")
+    )
+    MEMORY_PROFILE_POOL_TIMEOUT_SECONDS: float = float(
+        os.getenv("MEMORY_PROFILE_POOL_TIMEOUT_SECONDS", "5")
+    )
+    MEMORY_PROFILE_READ_TIMEOUT_SECONDS: float = float(
+        os.getenv("MEMORY_PROFILE_READ_TIMEOUT_SECONDS", "120")
+    )
+    MEMORY_PROFILE_WRITE_TIMEOUT_SECONDS: float = float(
+        os.getenv("MEMORY_PROFILE_WRITE_TIMEOUT_SECONDS", "600")
+    )
+    MEMORY_PROFILE_HEALTH_TIMEOUT_SECONDS: float = float(
+        os.getenv("MEMORY_PROFILE_HEALTH_TIMEOUT_SECONDS", "3")
+    )
+    MEMORY_PROFILE_MAX_CONNECTIONS: int = int(
+        os.getenv("MEMORY_PROFILE_MAX_CONNECTIONS", "100")
+    )
+    MEMORY_PROFILE_MAX_KEEPALIVE_CONNECTIONS: int = int(
+        os.getenv("MEMORY_PROFILE_MAX_KEEPALIVE_CONNECTIONS", "100")
+    )
+
     # Independent model service routing（/api/models* 前缀代理；无开关：服务不可用即 fail-fast）
     MODEL_SERVICE_BASE_URL: str = os.getenv("MODEL_SERVICE_BASE_URL", "http://127.0.0.1:8080")
     MODEL_SERVICE_CONNECT_TIMEOUT_SECONDS: float = float(
@@ -258,8 +313,16 @@ class Settings:
     FAST_WRITE_EMOTION_URL: str = os.getenv("FAST_WRITE_EMOTION_URL", "")
     FAST_WRITE_EMOTION_MODEL: str = os.getenv("FAST_WRITE_EMOTION_MODEL", "")
     FAST_WRITE_EMOTION_API_KEY: str = os.getenv("FAST_WRITE_EMOTION_API_KEY", "")
+    # HTTPX 网络阶段超时；业务总耗时由调用方单独限制。
     FAST_WRITE_EMOTION_HTTP_TIMEOUT_SECONDS: float = max(
-        0.1, float(os.getenv("FAST_WRITE_EMOTION_HTTP_TIMEOUT_SECONDS", "2.0"))
+        0.1, float(os.getenv("FAST_WRITE_EMOTION_HTTP_TIMEOUT_SECONDS", "5.0"))
+    )
+    FAST_WRITE_EMOTION_TOTAL_TIMEOUT_SECONDS: float = max(
+        0.1, float(os.getenv("FAST_WRITE_EMOTION_TOTAL_TIMEOUT_SECONDS", "3.0"))
+    )
+    # 情绪回复在首个 LLM token 前的可选策略链路预算；超时降级为原提示词。
+    EMOTION_REPLY_INJECTION_TIMEOUT_SECONDS: float = max(
+        0.01, float(os.getenv("EMOTION_REPLY_INJECTION_TIMEOUT_SECONDS", "2.0"))
     )
 
     # Scene continuity BERT (/v1/rerank)

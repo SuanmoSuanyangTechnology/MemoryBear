@@ -1,0 +1,68 @@
+{
+  "msg": {
+    "query_success": "Query succeeded",
+    "data_not_ready": "Data has not been generated yet"
+  },
+  "empty": {
+    "user_not_found": "User not found",
+    "invalid_user_id": "Invalid end user ID format",
+    "invalid_insight_id": "Invalid end user or workspace ID format",
+    "invalid_center_node": "Virtual preference node cannot be used as the center node"
+  },
+  "error": {
+    "invalid_per_type_limits": "Invalid per_type_limits format",
+    "per_type_missing_colon": "Invalid per_type_limits entry '{entry}', expected format 'Type:Limit'",
+    "per_type_invalid_node_type": "Invalid Node_Type '{node_type}', must be a valid identifier",
+    "per_type_limit_not_integer": "limit for {node_type} in per_type_limits must be an integer: '{limit}'",
+    "per_type_limit_negative": "limit for {node_type} in per_type_limits must be a non-negative integer: '{limit}'"
+  },
+  "workspace_statistics": {
+    "unavailable": "Workspace memory statistics service is temporarily unavailable",
+    "corrupt": "Workspace memory statistics data is invalid",
+    "not_ready": "Workspace memory statistics are being generated, please try again later"
+  },
+  "enum": {
+    "entity_type": {
+      "Person": "Person entity node",
+      "Organization": "Organization entity node",
+      "ORG": "Organization entity node",
+      "Location": "Location entity node",
+      "LOC": "Location entity node",
+      "Event": "Event entity node",
+      "Concept": "Concept entity node",
+      "Time": "Time entity node",
+      "Position": "Position entity node",
+      "WorkRole": "Work role entity node",
+      "System": "System entity node",
+      "Policy": "Policy entity node",
+      "HistoricalPeriod": "Historical period entity node",
+      "HistoricalState": "Historical state entity node",
+      "HistoricalEvent": "Historical event entity node",
+      "EconomicFactor": "Economic factor entity node",
+      "Condition": "Condition entity node",
+      "Numeric": "Numeric entity node"
+    },
+    "emotion_type": {
+      "neutral": "Neutral",
+      "joy": "Joy",
+      "relief": "Relief",
+      "anxiety": "Anxiety",
+      "sadness": "Sadness",
+      "anger": "Anger",
+      "frustration": "Frustration",
+      "loneliness": "Loneliness",
+      "confusion": "Confusion",
+      "hope": "Hope",
+      "fear": "Anxiety",
+      "surprise": "Neutral"
+    },
+    "emotion_subject": {
+      "self": "Self",
+      "other": "Other",
+      "object": "Object"
+    }
+  },
+  "preference_group": {
+    "name": "Preferences"
+  }
+}

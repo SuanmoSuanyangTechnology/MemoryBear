@@ -168,19 +168,23 @@ class WorkflowConfigRepository:
         if not config:
             return None
 
-        nodes = list(config.nodes or [])
+        nodes = config.nodes or []
         updated = False
         from app.core.workflow.nodes.enums import NodeType
+        new_nodes = []
         for node in nodes:
-            if node.get("type") == NodeType.TRIGGER and node.get("id") == trigger_id:
-                node["runtime"] = runtime
+            # Fresh node dict instead of in-place mutation: an equal
+            # assignment is skipped by SQLAlchemy and never persisted.
+            if not updated and node.get("type") == NodeType.TRIGGER and node.get("id") == trigger_id:
+                new_nodes.append({**node, "runtime": runtime})
                 updated = True
-                break
+            else:
+                new_nodes.append(node)
 
         if not updated:
             return None
 
-        config.nodes = nodes
+        config.nodes = new_nodes
         self.db.commit()
         self.db.refresh(config)
         return config

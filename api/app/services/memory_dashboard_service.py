@@ -10,6 +10,9 @@ from sqlalchemy.orm import Session
 from app.core.logging_config import get_business_logger
 from app.core.utils.datetime_utils import utcnow_naive
 from app.db import get_async_db_context
+from app.integrations.profile.contracts import MemoryProfileAuthSource
+from app.integrations.profile.proxy import forward_memory_profile_request
+from app.integrations.profile.runtime import is_memory_profile_enabled
 from app.models.end_user_model import EndUser, EndUser as EndUserModel
 from app.models.memory_increment_model import MemoryIncrement
 from app.models.user_model import User
@@ -82,14 +85,34 @@ async def get_dashboard_memory_updates_async(
 
 async def get_dashboard_workspace_statistics_async(
     workspace_id: uuid.UUID,
+    *,
+    current_user: Any,
+    source: MemoryProfileAuthSource,
 ) -> dict[str, Any] | None:
-    """Return the independent workspace statistics fields, or None on failure."""
-    try:
-        from app.services.workspace_memory_statistics_service import (
-            get_cached_workspace_statistics_async,
-        )
+    """Return the independent workspace statistics fields, or None on failure.
 
-        statistics = await get_cached_workspace_statistics_async(workspace_id)
+    When the profile integration is enabled this block is forwarded to
+    memory-profile; the rest of the dashboard stays on its local implementation.
+    A profile failure degrades this block to ``None`` (the dashboard already
+    treats it as optional) instead of failing the whole aggregate.
+    """
+    try:
+        if is_memory_profile_enabled():
+            envelope = await forward_memory_profile_request(
+                method="GET",
+                path="/internal/v1/memory/analytics/workspace_statistics",
+                current_user=current_user,
+                source=source,
+            )
+            if not isinstance(envelope, dict) or envelope.get("code") != 0:
+                raise RuntimeError("memory profile returned a business failure")
+            statistics = envelope.get("data") or {}
+        else:
+            from app.services.workspace_memory_statistics_service import (
+                get_cached_workspace_statistics_async,
+            )
+
+            statistics = await get_cached_workspace_statistics_async(workspace_id)
         return {
             field: statistics[field]
             for field in (

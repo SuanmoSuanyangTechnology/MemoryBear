@@ -11,7 +11,6 @@ from app.core.memory.storage.outbox.producer import enqueue_events
 from app.core.memory.storage.outbox.repository import OutboxRepository
 from app.core.memory.storage.outbox.types import OutboxEventInput, OutboxOperation
 from app.core.memory.storage.provider.neo4j.client import Neo4jClient
-from app.repositories.neo4j.cypher_queries import CLEAR_GRAPH, G_SCORE
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +77,9 @@ async def compute_topology_score(
     Neo4j still commits the GDS result before PostgreSQL commits the Outbox
     events. An enqueue failure therefore has ``primary_committed=True``.
     """
+    # 延迟导入，避免 custom 包初始化与旧查询中的 metadata 合并片段形成循环依赖。
+    from app.repositories.neo4j.cypher_queries import CLEAR_GRAPH, G_SCORE
+
     owns_client = neo4j_client is None
     client = neo4j_client or await Neo4jClient.create()
     summary: dict[str, Any] | None = None

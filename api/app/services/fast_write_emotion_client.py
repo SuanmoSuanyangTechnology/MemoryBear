@@ -15,14 +15,12 @@ import httpx
 from pydantic import BaseModel
 
 from app.core.config import settings
+from app.core.memory.emotion.emotion_buckets import EMOTION_CODES
 
 logger = logging.getLogger(__name__)
 
-# BERT 原生 10 类情绪枚举（与已部署服务对齐）
-_VALID_EMOTIONS = frozenset({
-    "neutral", "joy", "relief", "anxiety", "sadness",
-    "anger", "frustration", "loneliness", "confusion", "hope",
-})
+# BERT 原生 10 类情绪枚举（与已部署服务对齐，统一定义见 emotion_buckets）
+VALID_EMOTIONS = frozenset(EMOTION_CODES)
 
 # 每线程一个 client：连接池绑定在创建它的 loop 上，threads pool 下每线程独立 loop，
 # 故用 thread-local 隔离，避免跨 loop 复用。
@@ -62,7 +60,7 @@ async def predict(text: str) -> FastWriteEmotionResult:
 
     emotion = data.get("top_emotion")
     raw_score = data.get("top_score")
-    if emotion not in _VALID_EMOTIONS or raw_score is None:
+    if emotion not in VALID_EMOTIONS or raw_score is None:
         raise ValueError(
             f"invalid emotion payload: top_emotion={emotion!r}, top_score={raw_score!r}"
         )

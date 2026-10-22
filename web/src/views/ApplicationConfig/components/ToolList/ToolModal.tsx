@@ -1,9 +1,3 @@
-/*
- * @Author: ZhaoYing 
- * @Date: 2026-02-03 16:26:06 
- * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-06-03 23:03:21
- */
 /**
  * Tool Selection Modal
  * Provides cascading selection of tools by type, tool, and method
@@ -92,7 +86,7 @@ const ToolModal = forwardRef<ToolModalRef, ToolModalProps>(({
   const loadData = (selectedOptions: ToolOption[]) => {
     const targetOption = selectedOptions[selectedOptions.length - 1];
     if (selectedOptions.length === 1) {
-      getTools({ tool_type: targetOption.value as ToolType })
+      getTools({ tool_type: targetOption.value as ToolType, status: 'available' })
         .then(res => {
           const response = res as ToolItem[]
           targetOption.children = response.map((vo: any) => {

@@ -10,6 +10,7 @@ Storage schema: identity_background / relationships 为 list[str]，
 domain_specific_info 为 dict[str, list[str]]。
 """
 
+import json
 import logging
 from typing import Any, Dict, List, Literal, Optional, Tuple
 
@@ -53,18 +54,6 @@ RELATION_TYPES: tuple[str, ...] = (
     "pet",
 )
 
-# 旧 8 字段白名单，供 sidecar_step_schema / MetadataExtractionStep 使用
-ALLOWED_METADATA_FIELDS: tuple[str, ...] = (
-    "core_facts",
-    "traits",
-    "relations",
-    "goals",
-    "interests",
-    "beliefs_or_stances",
-    "anchors",
-    "events",
-)
-
 # 显式过滤/禁止作为独立 operation 输出的字段
 FILTERED_METADATA_FIELDS: tuple[str, ...] = (
     "aliases",
@@ -73,7 +62,7 @@ FILTERED_METADATA_FIELDS: tuple[str, ...] = (
 
 OperationLiteral = Literal["add", "delete", "update"]
 
-# 读链路使用的历史旧 8 字段（PG meta_data 中原样保留，不再生成）
+# 历史旧 8 字段：停止生成，读取和合并继续保留，待迁移后统一删除
 LEGACY_METADATA_FIELDS: tuple[str, ...] = (
     "core_facts",
     "traits",
@@ -163,7 +152,7 @@ def _normalize_entry(item: str) -> str:
     return format_entry_triplet(*parts) if len(parts) == 3 else (item or "").strip()
 
 
-def _split_entry_quiet(item: Any) -> Optional[Tuple[str, str, str]]:
+def split_metadata_entry(item: Any) -> Optional[Tuple[str, str, str]]:
     """读链路条目解析：规则同 parse_entry_triplet，但不打日志，非字符串条目返回 None。"""
     if not isinstance(item, str):
         return None
@@ -196,7 +185,7 @@ def _iter_profile_entries(meta: Optional[Dict[str, Any]]):
     normalized = normalize_new_metadata(meta)
     for field in ("identity_background", "relationships"):
         for item in normalized[field]:
-            triplet = _split_entry_quiet(item)
+            triplet = split_metadata_entry(item)
             if triplet and triplet[0] in PROFILE_DISPLAY_KEYS:
                 yield triplet
 
@@ -241,6 +230,116 @@ def project_l0_profile(meta: Optional[Dict[str, Any]]) -> Dict[str, List[str]]:
     return {key: grouped[key] for key in PROFILE_DISPLAY_KEYS if key in grouped}
 
 
+def flatten_domain_specific_info(domain_specific_info: Any) -> List[Tuple[str, str, str]]:
+    """把 domain_specific_info 展平为 (scene_key, field_key, 正文) 列表，按存储顺序，跳过无法解析的条目。"""
+    if not isinstance(domain_specific_info, dict):
+        return []
+    result: List[Tuple[str, str, str]] = []
+    for scene_key, items in domain_specific_info.items():
+        if not isinstance(items, list):
+            continue
+        for item in items:
+            triplet = split_metadata_entry(item)
+            if triplet:
+                result.append((str(scene_key), triplet[0], triplet[2]))
+    return result
+
+
+def _union_entries(base: List[Any], extra: List[Any]) -> List[Any]:
+    """字符串按 _entry_key 去重；非字符串 JSON 条目按类型和值去重，原样保留。
+
+    保留 base 在前、首现顺序；重复归并不会追加相同的非字符串历史条目。
+    """
+    result = list(base)
+    seen = {_entry_key(x) for x in result if isinstance(x, str)}
+    seen_non_strings = {
+        _legacy_metadata_entry_key(x) for x in result if not isinstance(x, str)
+    }
+    for item in extra:
+        if not isinstance(item, str):
+            non_string_key = _legacy_metadata_entry_key(item)
+            if non_string_key not in seen_non_strings:
+                seen_non_strings.add(non_string_key)
+                result.append(item)
+            continue
+        key = _entry_key(item)
+        if key not in seen:
+            seen.add(key)
+            result.append(item)
+    return result
+
+
+def normalize_legacy_metadata_values(value: Any) -> list[Any]:
+    """历史字段按列表读取；单值整体保留，空值不生成条目。"""
+    values = value if isinstance(value, list) else [value]
+    return [item for item in values if item is not None and item != ""]
+
+
+def _legacy_metadata_entry_key(value: Any) -> tuple[str, str]:
+    # 字符串沿用忽略大小写去重；其他 JSON 值保留类型，避免 0 / False / "0" 混淆。
+    if isinstance(value, str):
+        return "str", value.lower()
+    return type(value).__name__, json.dumps(value, sort_keys=True, ensure_ascii=False)
+
+
+def merge_user_meta_data(target: Optional[Dict[str, Any]], source: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """用户归并时把 source 的 meta_data 合并进 target，返回新字典。
+
+    - identity_background / relationships：按 _entry_key 去重并集；
+    - domain_specific_info：按场景键合并，场景内按 _entry_key 去重并集；
+    - 旧 8 字段：列表或历史单值均保留，字符串忽略大小写去重，无内容时不新增键；
+    - 其他 list 字段：按 str(v).lower() 去重并集（历史行为）；
+    - 类型不符的一侧忽略并记 warning；source 中非 list / dict 的其他字段不合并。
+    """
+    merged: Dict[str, Any] = dict(target or {})
+    for key, values in (source or {}).items():
+        if key in LEGACY_METADATA_FIELDS:
+            items = normalize_legacy_metadata_values(merged.get(key))
+            items += normalize_legacy_metadata_values(values)
+            if items:
+                unique: dict[tuple[str, str], Any] = {}
+                for item in items:
+                    unique.setdefault(_legacy_metadata_entry_key(item), item)
+                merged[key] = list(unique.values())
+        elif key in ("identity_background", "relationships"):
+            if not isinstance(values, list):
+                logger.warning(f"[Metadata] 归并忽略 source 中类型不符的字段: {key}={type(values).__name__}")
+                continue
+            existing = merged.get(key)
+            if existing is not None and not isinstance(existing, list):
+                logger.warning(f"[Metadata] 归并忽略 target 中类型不符的字段: {key}={type(existing).__name__}")
+                existing = None
+            merged[key] = _union_entries(existing or [], values)
+        elif key == "domain_specific_info":
+            if not isinstance(values, dict):
+                logger.warning(f"[Metadata] 归并忽略 source 中类型不符的字段: {key}={type(values).__name__}")
+                continue
+            existing = merged.get(key)
+            if existing is not None and not isinstance(existing, dict):
+                logger.warning(f"[Metadata] 归并忽略 target 中类型不符的字段: {key}={type(existing).__name__}")
+                existing = None
+            scenes: Dict[str, Any] = dict(existing or {})
+            for scene_key, scene_items in values.items():
+                if not isinstance(scene_items, list):
+                    logger.warning(f"[Metadata] 归并忽略 source 场景中类型不符的数据: {scene_key}")
+                    continue
+                current = scenes.get(scene_key)
+                if current is not None and not isinstance(current, list):
+                    logger.warning(f"[Metadata] 归并忽略 target 场景中类型不符的数据: {scene_key}")
+                    current = None
+                scenes[scene_key] = _union_entries(current or [], scene_items)
+            merged[key] = scenes
+        elif isinstance(values, list):
+            existing_list = list(merged.get(key) or [])
+            existing_set = {str(v).lower() for v in existing_list}
+            for v in values:
+                if str(v).lower() not in existing_set:
+                    existing_list.append(v)
+                    existing_set.add(str(v).lower())
+            merged[key] = existing_list
+    return merged
+
+
 def _trace(
     sink: Optional[List[Dict[str, Any]]],
     action: str,
@@ -249,16 +348,19 @@ def _trace(
     new: Optional[str],
     status: str = "applied",
     reason: Optional[str] = None,
+    normalize_entries: bool = True,
 ) -> None:
     """向快照 sink 追加一条变更记录；sink 为 None（未开启快照）时不做任何事。"""
     if sink is None:
         return
+    old_value = _normalize_entry(old) if normalize_entries and old else old
+    new_value = _normalize_entry(new) if normalize_entries and new else new
     sink.append({
         "chunk_index": None,
         "action": action,
         "field": field,
-        "old": _normalize_entry(old) if old else None,
-        "new": _normalize_entry(new) if new else None,
+        "old": old_value or None,
+        "new": new_value or None,
         "status": status,
         "reason": reason,
     })
@@ -473,6 +575,110 @@ def apply_metadata_operations(
                 _trace(trace_sink, action, trace_field, None, val)
             else:
                 _trace(trace_sink, action, trace_field, None, val, status="skipped", reason="duplicate")
+
+    return updated
+
+
+def apply_legacy_metadata_operations(
+    current_meta: Dict[str, Any],
+    operations: List[MetadataOperation],
+    trace_sink: Optional[List[Dict[str, Any]]] = None,
+) -> Dict[str, Any]:
+    """将旧 8 字段的增量操作应用到 PG 当前快照。
+
+    仅处理 ``LEGACY_METADATA_FIELDS``，其他 field 的操作丢弃。字符串按忽略大小写
+    去重，非字符串历史值原样保留；未匹配到的 delete/update 不追加新值。
+    """
+    updated: Dict[str, List[Any]] = {
+        field: normalize_legacy_metadata_values(current_meta.get(field))
+        for field in LEGACY_METADATA_FIELDS
+    }
+    act_map = {"add": "add_field", "update": "update_field", "delete": "delete_field"}
+
+    for op in operations:
+        field = op.field
+        action = act_map.get(op.op, "update_field")
+        if field not in LEGACY_METADATA_FIELDS:
+            logger.warning(f"[Metadata] 旧元数据链路丢弃未知 field 的操作: op={op.op}, field={field}")
+            _trace(
+                trace_sink,
+                action,
+                field,
+                op.old_value,
+                op.new_value or op.value,
+                status="skipped",
+                reason="undeclared_field",
+                normalize_entries=False,
+            )
+            continue
+
+        target_list = updated[field]
+        if op.op == "delete":
+            target_val = op.old_value or op.value
+            if not target_val:
+                _trace(
+                    trace_sink, action, field, None, None,
+                    status="skipped", reason="missing_value", normalize_entries=False,
+                )
+                continue
+            target_key = _legacy_metadata_entry_key(target_val)
+            updated_list = [x for x in target_list if _legacy_metadata_entry_key(x) != target_key]
+            if len(updated_list) == len(target_list):
+                logger.warning(f"[Metadata] 旧元数据 delete 未匹配到已有条目，丢弃操作: {target_val}")
+                _trace(
+                    trace_sink, action, field, target_val, None,
+                    status="skipped", reason="old_value_not_found", normalize_entries=False,
+                )
+                continue
+            updated[field] = updated_list
+            _trace(trace_sink, action, field, target_val, None, normalize_entries=False)
+
+        elif op.op == "update":
+            old_val = op.old_value
+            new_val = op.new_value or op.value
+            if not old_val or not new_val:
+                _trace(
+                    trace_sink, action, field, old_val, new_val,
+                    status="skipped", reason="missing_value", normalize_entries=False,
+                )
+                continue
+            old_key = _legacy_metadata_entry_key(old_val)
+            replaced = False
+            new_list: List[Any] = []
+            for item in target_list:
+                if _legacy_metadata_entry_key(item) == old_key:
+                    if not replaced:
+                        new_list.append(new_val)
+                        replaced = True
+                else:
+                    new_list.append(item)
+            if not replaced:
+                logger.warning(f"[Metadata] 旧元数据 update.old_value 未匹配到已有条目，丢弃操作: old={old_val}")
+                _trace(
+                    trace_sink, action, field, old_val, new_val,
+                    status="skipped", reason="old_value_not_found", normalize_entries=False,
+                )
+                continue
+            updated[field] = new_list
+            _trace(trace_sink, action, field, old_val, new_val, normalize_entries=False)
+
+        elif op.op == "add":
+            val = op.value
+            if not val:
+                _trace(
+                    trace_sink, action, field, None, None,
+                    status="skipped", reason="missing_value", normalize_entries=False,
+                )
+                continue
+            val_key = _legacy_metadata_entry_key(val)
+            if all(_legacy_metadata_entry_key(x) != val_key for x in target_list):
+                target_list.append(val)
+                _trace(trace_sink, action, field, None, val, normalize_entries=False)
+            else:
+                _trace(
+                    trace_sink, action, field, None, val,
+                    status="skipped", reason="duplicate", normalize_entries=False,
+                )
 
     return updated
 

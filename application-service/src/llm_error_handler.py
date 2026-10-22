@@ -1,0 +1,177 @@
+"""Identify and safely surface common multimodal model input errors."""
+from __future__ import annotations
+
+import re
+import uuid
+from typing import Any
+
+from .errors import BizCode
+
+
+_INPUT_LIMIT_PATTERNS = (
+    re.compile(r"\btoo\s+many\s+(?:input\s+)?images?\b", re.IGNORECASE),
+    re.compile(
+        r"\bimages?\b.{0,100}\b(?:maximum\s+allowed\s+(?:count|number)|max(?:imum)?\s+(?:count|number))\b",
+        re.IGNORECASE | re.DOTALL,
+    ),
+    re.compile(
+        r"\b(?:count|number)\s+of\s+images?\b.{0,100}\b(?:exceed|limit|maximum)\b",
+        re.IGNORECASE | re.DOTALL,
+    ),
+    re.compile(r"(?:图片|图像).{0,30}(?:数量|个数).{0,30}(?:超过|超出|上限|限制)"),
+)
+
+_IMAGE_DOWNLOAD_RATE_LIMIT_PATTERNS = (
+    re.compile(
+        r"\b(?:error|failed)\s+while\s+downloading\b.{0,500}\bstatus\s+code:\s*429\b",
+        re.IGNORECASE | re.DOTALL,
+    ),
+)
+
+_IMAGE_DIMENSION_TOO_LARGE_PATTERNS = (
+    re.compile(
+        r"\bimage\s+(?:length\s+and\s+width|width\s+and\s+height|dimensions?)\b.{0,200}\b(?:maximum|max(?:imum)?|upper\s+limit|at\s+most|no\s+larger\s+than|(?:must|should)\s+be\s+(?:less|smaller)\s+than|(?:cannot|must\s+not|should\s+not)\s+(?:be\s+)?(?:larger|greater)\s+than|(?:cannot|must\s+not|should\s+not)\s+exceed|exceed(?:s|ed|ing)?)\b",
+        re.IGNORECASE | re.DOTALL,
+    ),
+    re.compile(r"(?:图片|图像).{0,30}(?:尺寸|宽度|高度).{0,50}(?:超过|超出|最大|上限|不得大于|不能大于|不大于)"),
+)
+
+_IMAGE_DIMENSION_TOO_SMALL_PATTERNS = (
+    re.compile(
+        r"\bimage\s+(?:length\s+and\s+width|width\s+and\s+height|dimensions?)\b.{0,200}\b(?:minimum|at\s+least|(?:must|should)\s+be\s+(?:larger|greater)\s+than|(?:cannot|must\s+not|should\s+not)\s+(?:be\s+)?(?:less|smaller)\s+than)\b",
+        re.IGNORECASE | re.DOTALL,
+    ),
+    re.compile(r"(?:图片|图像).{0,30}(?:尺寸|宽度|高度).{0,50}(?:最小|至少|不得小于|不能小于|不小于)"),
+)
+
+_IMAGE_DIMENSION_LIMIT_PATTERNS = (
+    re.compile(
+        r"\bimage\s+(?:length\s+and\s+width|width\s+and\s+height|dimensions?)\b.{0,200}\b(?:do\s+not\s+meet|restrictions?|must\s+be|larger\s+than|minimum)\b",
+        re.IGNORECASE | re.DOTALL,
+    ),
+    re.compile(r"(?:图片|图像).{0,30}(?:尺寸|宽度|高度).{0,50}(?:不符合|限制|最小|至少|大于|最大|上限|超过|超出)"),
+)
+
+_IMAGE_FILE_TOO_LARGE_PATTERNS = (
+    re.compile(
+        r"\bstring\s+value\s+length\s*\(\s*[\d,]+\s*\)\s+exceeds\s+the\s+maximum\s+allowed\b",
+        re.IGNORECASE,
+    ),
+    re.compile(r"\bgetmaxstringlength\b|\bstreamreadconstraints\b", re.IGNORECASE),
+    re.compile(
+        r"\bimage\s+file\s+size\b.{0,120}\b(?:exceed|larger|maximum|limit|too\s+large)\b",
+        re.IGNORECASE | re.DOTALL,
+    ),
+    re.compile(r"\bimage\b.{0,60}\b(?:file\s+)?size\b.{0,40}\b(?:exceed|too\s+large|maximum)\b", re.IGNORECASE | re.DOTALL),
+    re.compile(r"\b(?:image|picture|photo)\s+(?:is\s+)?too\s+large\b", re.IGNORECASE),
+    re.compile(r"(?:图片|图像|照片).{0,20}(?:文件)?(?:大小|体积|容量).{0,20}(?:超过|超出|过大|超限|上限|限制)"),
+    re.compile(r"(?:图片|图像|照片).{0,20}(?:过大|太大|超限)"),
+)
+
+# Some vendors (e.g. DashScope compatible mode) return a uniform "illegal format,
+# cannot open" message for oversized/undecodable images without distinguishing the real
+# cause, so this group covers both the format and the size possibility.
+_IMAGE_UNREADABLE_PATTERNS = (
+    re.compile(r"\bimage\s+format\s+is\s+illegal\b", re.IGNORECASE),
+    re.compile(r"\bimage\b.{0,60}\b(?:cannot|can'?t|could\s+not|failed\s+to)\s+be\s+opened\b", re.IGNORECASE | re.DOTALL),
+    re.compile(r"\b(?:invalid|illegal|unsupported|unrecognized)\s+image\b", re.IGNORECASE),
+    re.compile(r"\bimage\b.{0,40}\b(?:invalid|illegal|unsupported|corrupt)\b", re.IGNORECASE | re.DOTALL),
+    re.compile(r"(?:图片|图像).{0,20}(?:格式|文件).{0,20}(?:非法|不正确|不支持|无效|损坏|无法打开|打不开)"),
+)
+
+_DOWNLOAD_FAILED_PATTERNS = (
+    re.compile(r"\bfailed\s+to\s+download\s+multimodal\s+content\b", re.IGNORECASE),
+    re.compile(
+        r"\bfailed\s+to\s+(?:download|fetch|load|retrieve).{0,80}\b(?:multimodal|image|picture|media)\b",
+        re.IGNORECASE | re.DOTALL,
+    ),
+    re.compile(
+        r"\b(?:multimodal|image|picture|media)\b.{0,80}\b(?:download|fetch|load|retrieve)\s+(?:failed|failure|error)\b",
+        re.IGNORECASE | re.DOTALL,
+    ),
+    re.compile(r"(?:图片|图像|多媒体|多模态).{0,30}(?:下载失败|无法下载|无法访问|读取失败|无法读取)"),
+)
+
+
+def _append_text(value: Any, texts: list[str], depth: int = 0) -> None:
+    if depth > 4 or len(texts) >= 60:
+        return
+    if isinstance(value, dict):
+        for item in value.values():
+            _append_text(item, texts, depth + 1)
+    elif isinstance(value, (list, tuple, set)):
+        for item in value:
+            _append_text(item, texts, depth + 1)
+    elif value is not None:
+        texts.append(str(value)[:4000])
+
+
+def _extract_text(error: BaseException) -> str:
+    texts: list[str] = []
+    pending = [error]
+    seen: set[int] = set()
+    while pending and len(seen) < 8:
+        current = pending.pop(0)
+        if id(current) in seen:
+            continue
+        seen.add(id(current))
+        texts.append(str(current)[:12000])
+        for attr_name in ("message", "code", "type", "body"):
+            _append_text(getattr(current, attr_name, None), texts)
+        for linked in (getattr(current, "cause", None), current.__cause__, current.__context__):
+            if isinstance(linked, BaseException) and id(linked) not in seen:
+                pending.append(linked)
+    return " ".join(texts)
+
+
+def classify_multimodal_exception(
+    error: BaseException,
+    *,
+    debug_id: str | None = None,
+) -> dict[str, Any] | None:
+    """Return a safe object when a target error matches; return ``None`` for other exceptions and leave handling unchanged."""
+    text = _extract_text(error)
+    resolved_debug_id = debug_id or f"err_{uuid.uuid4().hex[:12]}"
+
+    if any(pattern.search(text) for pattern in _IMAGE_DOWNLOAD_RATE_LIMIT_PATTERNS):
+        kind = "multimodal_image_download_rate_limited"
+        message = "模型下载图片过于频繁，已被限流，请稍后重试；请检查上传文件是否包含过多图片，必要时可精简或拆分文件后再试。"
+        retryable = True
+    elif any(pattern.search(text) for pattern in _INPUT_LIMIT_PATTERNS):
+        kind = "multimodal_input_limit"
+        message = "当前上传文件中的图片数量超过模型单次处理上限，请减少图片数量、精简文档内容或拆分文档后重试。"
+        retryable = False
+    elif any(pattern.search(text) for pattern in _IMAGE_FILE_TOO_LARGE_PATTERNS):
+        kind = "multimodal_image_file_too_large"
+        message = "上传的图片文件过大，超出模型单张图片或请求内容的大小限制（图片经编码后体积会进一步增大）。请压缩图片或降低分辨率后重试。"
+        retryable = False
+    elif any(pattern.search(text) for pattern in _IMAGE_UNREADABLE_PATTERNS):
+        kind = "multimodal_image_unreadable"
+        message = "模型无法读取上传的图片，可能是图片体积过大（模型通常限制单张 10MB 以内）、格式不受支持或文件已损坏。请压缩图片或更换为 PNG/JPG 后重试。"
+        retryable = False
+    elif any(pattern.search(text) for pattern in _IMAGE_DIMENSION_TOO_LARGE_PATTERNS):
+        kind = "multimodal_image_dimension_limit"
+        message = "上传文件中包含尺寸过大的图片，模型对图片宽度或高度设有最大限制。请缩小或替换此类图片后重试。"
+        retryable = False
+    elif any(pattern.search(text) for pattern in _IMAGE_DIMENSION_TOO_SMALL_PATTERNS):
+        kind = "multimodal_image_dimension_limit"
+        message = "上传文件中包含尺寸过小的图片，模型要求图片宽度和高度均大于 10 像素。请删除或替换此类图片后重试。"
+        retryable = False
+    elif any(pattern.search(text) for pattern in _IMAGE_DIMENSION_LIMIT_PATTERNS):
+        kind = "multimodal_image_dimension_limit"
+        message = "上传文件中包含不符合模型要求的图片尺寸，请按模型的尺寸限制调整或替换此类图片后重试。"
+        retryable = False
+    elif any(pattern.search(text) for pattern in _DOWNLOAD_FAILED_PATTERNS):
+        kind = "multimodal_download_failed"
+        message = "部分多媒体文件无法读取，可能是图片数量过多或其他问题，请检查文件格式、大小和访问地址后重试。"
+        retryable = True
+    else:
+        return None
+
+    return {
+        "kind": kind,
+        "code": int(BizCode.INVALID_PARAMETER),
+        "message": message,
+        "retryable": retryable,
+        "debug_id": resolved_debug_id,
+    }

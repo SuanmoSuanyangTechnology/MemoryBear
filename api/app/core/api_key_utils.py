@@ -207,7 +207,8 @@ async def get_current_user_snapshot_from_api_key_async(
 ) -> "CurrentUserSnapshot":
     """通过 API Key 异步构造 CurrentUserSnapshot（detach-safe）。
 
-    使用 AsyncSession 查询 api_key → creator，提取快照后 session 可关闭。
+    优先使用 ``api_key_auth.created_by``（装饰器已经查过 api_keys），
+    只查一次 users；仅为未携带 created_by 的旧调用回退查询 api_keys。
     替代同步版本 get_current_user_from_api_key + make_snapshot 组合。
 
     NOTE: 此方法替代了各 V1 controller 中原有的同步 _get_current_user() 辅助函数，
@@ -226,16 +227,22 @@ async def get_current_user_snapshot_from_api_key_async(
     from app.models.user_model import User
     from app.dependencies import CurrentUserSnapshot
 
-    stmt = select(ApiKey).where(
-        ApiKey.id == api_key_auth.api_key_id,
-        ApiKey.workspace_id == api_key_auth.workspace_id,
-    )
-    result = await db.execute(stmt)
-    api_key = result.scalars().first()
-    if not api_key:
-        raise _BusinessException("API Key not found", _BizCode.API_KEY_NOT_FOUND)
+    # The auth decorator already loaded the api_keys row, so reuse its
+    # created_by. Only fall back to querying ApiKey for callers that build
+    # ApiKeyAuth without created_by (backward compatibility).
+    created_by = getattr(api_key_auth, "created_by", None)
+    if created_by is None:
+        stmt = select(ApiKey).where(
+            ApiKey.id == api_key_auth.api_key_id,
+            ApiKey.workspace_id == api_key_auth.workspace_id,
+        )
+        result = await db.execute(stmt)
+        api_key = result.scalars().first()
+        if not api_key:
+            raise _BusinessException("API Key not found", _BizCode.API_KEY_NOT_FOUND)
+        created_by = api_key.created_by
 
-    user_stmt = select(User).where(User.id == api_key.created_by)
+    user_stmt = select(User).where(User.id == created_by)
     user_result = await db.execute(user_stmt)
     user_orm = user_result.scalars().first()
     if not user_orm:

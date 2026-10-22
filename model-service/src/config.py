@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any, Literal
 from urllib.parse import quote_plus
 
-from pydantic import Field, SecretStr, field_validator
+from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
 
 
@@ -37,9 +37,23 @@ class ModelServiceSettings(BaseSettings):
     redis_host: str = Field(default="127.0.0.1", validation_alias="REDIS_HOST")
     redis_port: int = Field(default=6379, ge=1, le=65535, validation_alias="REDIS_PORT")
     redis_password: SecretStr = Field(default=SecretStr(""), validation_alias="REDIS_PASSWORD")
-    # Must match the host api's Redis DB: model:usage stream (host alert bridge),
-    # acl:rules (identity-written) and runtime_model_info invalidation keys are shared.
+    # Must match the host api's Redis DB: deployment-scoped usage stream
+    # (model:usage:<DB_NAME>, host alert bridge), acl:rules (identity-written)
+    # and runtime_model_info invalidation keys are shared.
     redis_db: int = Field(default=0, ge=0, validation_alias="REDIS_DB")
+    # Usage-event stream key. Leave empty to derive ``model:usage:<DB_NAME>`` so
+    # deployments that share one Redis but own separate databases consume only
+    # their own events; set explicitly only when those deployments share a
+    # database name as well.
+    model_usage_stream: str = Field(default="", validation_alias="MODEL_USAGE_STREAM")
+    # Cross-replica channel invalidation pub/sub channel. Leave empty to derive
+    # ``model:channel-invalidations:<DB_NAME>`` so deployments that share one
+    # Redis but own separate databases do not cross-invalidate each other's
+    # caches; set explicitly only when those deployments share a database name.
+    model_channel_invalidation_channel: str = Field(
+        default="",
+        validation_alias="MODEL_CHANNEL_INVALIDATION_CHANNEL",
+    )
 
     # 渠道凭据主密钥（base64 32B，与 core/api 同一把）：model_channels 凭据解密用，
     # AAD = provider:tenant_id
@@ -264,6 +278,15 @@ class ModelServiceSettings(BaseSettings):
         default=None,
         validation_alias="MODEL_SERVICE_JWKS_URL",
     )
+    # ACL rule key and hot-reload channel. Empty derives
+    # acl:rules:<DB_NAME> / acl:rules:changed:<DB_NAME> to match identity's
+    # write side; deployments sharing one Redis but owning separate databases
+    # stay isolated (pub/sub channels are global across logical DBs).
+    acl_rules_key: str = Field(default="", validation_alias="ACL_RULES_KEY")
+    acl_rules_changed_channel: str = Field(
+        default="",
+        validation_alias="ACL_RULES_CHANGED_CHANNEL",
+    )
 
     @classmethod
     def settings_customise_sources(
@@ -287,6 +310,16 @@ class ModelServiceSettings(BaseSettings):
             raise ValueError("MODEL_SERVICE_LOG_LEVEL is invalid")
         return normalized
 
+    @model_validator(mode="after")
+    def check_deployment_scoped_names(self) -> ModelServiceSettings:
+        """Fail fast on unusable deployment-scoped Redis names at startup."""
+
+        if not self.model_usage_stream_name:
+            raise ValueError("MODEL_USAGE_STREAM resolved to an empty key")
+        if not self.model_channel_invalidation_channel_name:
+            raise ValueError("MODEL_CHANNEL_INVALIDATION_CHANNEL resolved to an empty key")
+        return self
+
     @property
     def database_url_sync(self) -> str:
         return self._database_url("postgresql+psycopg")
@@ -309,6 +342,55 @@ class ModelServiceSettings(BaseSettings):
     @property
     def redis_url(self) -> str:
         return self.redis_url_for_db(self.redis_db)
+
+    def _deployment_scoped_name(self, explicit: str, base: str, env_name: str) -> str:
+        """Resolve a deployment-scoped Redis name from an override or DB_NAME."""
+
+        explicit = explicit.strip()
+        if explicit:
+            if any(ch.isspace() for ch in explicit):
+                raise ValueError(f"{env_name} must not contain whitespace")
+            return explicit
+        db_name = self.db_name.strip()
+        if not db_name or any(ch.isspace() for ch in db_name):
+            raise ValueError(
+                f"DB_NAME must be non-empty without whitespace to derive {env_name}"
+            )
+        return f"{base}:{db_name}"
+
+    @property
+    def model_usage_stream_name(self) -> str:
+        """Resolve the deployment-scoped usage stream key."""
+
+        return self._deployment_scoped_name(
+            self.model_usage_stream, "model:usage", "MODEL_USAGE_STREAM"
+        )
+
+    @property
+    def model_channel_invalidation_channel_name(self) -> str:
+        """Resolve the deployment-scoped channel invalidation pub/sub channel."""
+
+        return self._deployment_scoped_name(
+            self.model_channel_invalidation_channel,
+            "model:channel-invalidations",
+            "MODEL_CHANNEL_INVALIDATION_CHANNEL",
+        )
+
+    @property
+    def acl_rules_key_name(self) -> str:
+        """Resolve the deployment-scoped ACL rule blob key."""
+
+        return self._deployment_scoped_name(self.acl_rules_key, "acl:rules", "ACL_RULES_KEY")
+
+    @property
+    def acl_rules_changed_channel_name(self) -> str:
+        """Resolve the deployment-scoped ACL change pub/sub channel."""
+
+        return self._deployment_scoped_name(
+            self.acl_rules_changed_channel,
+            "acl:rules:changed",
+            "ACL_RULES_CHANGED_CHANNEL",
+        )
 
     def safe_summary(self) -> dict[str, Any]:
         """Return only non-sensitive startup metadata."""

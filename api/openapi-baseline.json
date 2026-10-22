@@ -3557,47 +3557,6 @@
         }
       }
     },
-    "/v1/chunks/retrieval-policy": {
-      "post": {
-        "tags": [
-          "V1 - RAG API"
-        ],
-        "summary": "Get Retrieval Policy",
-        "operationId": "get_retrieval_policy_v1_chunks_retrieval_policy_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/RetrievalPolicyRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RetrievalPolicyResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/v1/chunks/retrieval": {
       "post": {
         "tags": [
@@ -11296,7 +11255,7 @@
               }
             ],
             "title": "Emotion Type",
-            "description": "情绪类型过滤（joy/sadness/anger/fear/surprise/neutral）"
+            "description": "情绪类型过滤（neutral/joy/relief/anxiety/sadness/anger/frustration/loneliness/confusion/hope；旧值 fear/surprise 兼容）"
           },
           "start_date": {
             "anyOf": [
@@ -11355,7 +11314,7 @@
               }
             ],
             "title": "Emotion Type",
-            "description": "情绪类型过滤（joy/sadness/anger/fear/surprise/neutral）"
+            "description": "情绪类型过滤（neutral/joy/relief/anxiety/sadness/anger/frustration/loneliness/confusion/hope；旧值 fear/surprise 兼容）"
           },
           "limit": {
             "type": "integer",

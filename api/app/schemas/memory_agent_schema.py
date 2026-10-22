@@ -40,7 +40,6 @@ class UserInput(BaseModel):
     search_switch: str
     end_user_id: str
     session_id: uuid.UUID = Field(default_factory=uuid.uuid4)
-    config_id: Optional[str] = None
 
 
 class ReadSyncInput(BaseModel):
@@ -53,8 +52,6 @@ class ReadSyncInput(BaseModel):
     search_switch: str
     end_user_id: Optional[str] = None
     end_user_ids: Optional[List[str]] = None
-    session_id: uuid.UUID = Field(default_factory=uuid.uuid4)
-    config_id: Optional[str] = None
     enable_rerank: bool = Field(default=False)
 
     @model_validator(mode='after')
@@ -96,7 +93,6 @@ class WriteMessageItem(BaseModel):
 class Write_UserInput(BaseModel):
     messages: List[WriteMessageItem] = Field(..., description="消息列表")
     end_user_id: str
-    config_id: Optional[str] = None
     conversation_id: Optional[str] = Field(
         None,
         description="对话 ID（可选）。传入时使用该会话存储消息；"

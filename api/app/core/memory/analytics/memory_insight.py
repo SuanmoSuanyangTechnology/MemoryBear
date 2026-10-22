@@ -13,6 +13,10 @@ from pydantic import BaseModel, Field
 
 from app.core.config import settings
 from app.core.logging_config import get_logger
+from app.core.memory.models.metadata_models import (
+    split_metadata_entry,
+    flatten_domain_specific_info,
+)
 from app.core.memory.pipelines.base_pipeline import ModelClientMixin
 from app.core.memory.utils.prompt.template_render import prompt_env
 from app.core.utils.datetime_utils import as_utc_aware, utcnow_naive
@@ -29,6 +33,9 @@ from app.services.memory_config_service import MemoryConfigService
 logger = get_logger(__name__)
 
 MEMORY_INSIGHT_META_FIELDS = (
+    "identity_background",
+    "relationships",
+    "domain_specific_info",
     "core_facts",
     "traits",
     "relations",
@@ -39,6 +46,7 @@ MEMORY_INSIGHT_META_FIELDS = (
     "events",
 )
 MEMORY_INSIGHT_META_FIELD_LIMIT = 5
+MEMORY_INSIGHT_META_TOTAL_CHAR_LIMIT = 6000
 MEMORY_INSIGHT_STATEMENT_LIMIT = 12
 MEMORY_INSIGHT_INPUT_TEXT_LIMIT = 200
 MEMORY_INSIGHT_MIN_ENTRIES = 2
@@ -94,34 +102,65 @@ def _normalize_text(value: str, max_length: int | None = None) -> str:
     return normalized[:max_length] if max_length is not None else normalized
 
 
+def _memory_insight_metadata_groups(metadata: dict[str, object]) -> list[tuple[str, list[str]]]:
+    """按字段顺序列出 (分组键, 原始文本列表)。
+
+    identity_background / relationships 按二级键拆分，分组键为 ``<顶层键>.<二级键>``，
+    文本为 ``<三级键> | <正文>``（三级键为空时只有正文）；domain_specific_info 按场景字段拆分，
+    分组键为 ``domain_specific_info.<scene>.<field_key>``；旧 8 字段分组键即字段名。
+    """
+    groups: dict[str, list[str]] = {}
+    for field in MEMORY_INSIGHT_META_FIELDS:
+        raw_values = metadata.get(field)
+        if field in ("identity_background", "relationships"):
+            if not isinstance(raw_values, list):
+                continue
+            for value in cast(list[object], raw_values):
+                triplet = split_metadata_entry(value)
+                if not triplet:
+                    continue
+                l2, l3, content = triplet
+                text = f"{l3} | {content}" if l3 else content
+                groups.setdefault(f"{field}.{l2}", []).append(text)
+        elif field == "domain_specific_info":
+            for scene_key, field_key, content in flatten_domain_specific_info(raw_values):
+                groups.setdefault(f"{field}.{scene_key}.{field_key}", []).append(content)
+        elif isinstance(raw_values, list):
+            groups[field] = [v for v in cast(list[object], raw_values) if isinstance(v, str)]
+    return list(groups.items())
+
+
 def build_memory_insight_metadata_input(meta_data: object) -> dict[str, list[str]]:
-    """提取允许参与洞察生成的画像字段，并执行输入上限。"""
+    """提取参与洞察生成的全部画像字段，并执行输入上限。
+
+    每个分组最多 MEMORY_INSIGHT_META_FIELD_LIMIT 条，单条最多 MEMORY_INSIGHT_INPUT_TEXT_LIMIT 字，
+    全部条目合计最多 MEMORY_INSIGHT_META_TOTAL_CHAR_LIMIT 字，超出时按字段顺序截断。
+    """
     if not isinstance(meta_data, dict):
-        return {field: [] for field in MEMORY_INSIGHT_META_FIELDS}
+        return {}
     metadata = cast(dict[str, object], meta_data)
 
     result: dict[str, list[str]] = {}
-    for field in MEMORY_INSIGHT_META_FIELDS:
-        raw_values = metadata.get(field)
-        if not isinstance(raw_values, list):
-            result[field] = []
-            continue
-        values = cast(list[object], raw_values)
-
+    total_chars = 0
+    for group_key, values in _memory_insight_metadata_groups(metadata):
         cleaned: list[str] = []
         seen: set[str] = set()
         for value in values:
-            if not isinstance(value, str):
-                continue
             normalized = _normalize_text(value, MEMORY_INSIGHT_INPUT_TEXT_LIMIT)
             key = normalized.casefold()
             if not normalized or key in seen:
                 continue
+            if total_chars + len(normalized) > MEMORY_INSIGHT_META_TOTAL_CHAR_LIMIT:
+                if cleaned:
+                    result[group_key] = cleaned
+                return result
             seen.add(key)
             cleaned.append(normalized)
+            total_chars += len(normalized)
             if len(cleaned) >= MEMORY_INSIGHT_META_FIELD_LIMIT:
                 break
-        result[field] = cleaned
+        if cleaned:
+            result[group_key] = cleaned
     return result
 
 

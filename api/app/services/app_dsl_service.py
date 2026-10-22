@@ -25,6 +25,7 @@ from app.services.workflow_service import WorkflowService
 from app.core.workflow.adapters.memory_bear.memory_bear_adapter import MemoryBearAdapter
 from app.core.workflow.nodes.enums import NodeType
 from app.models.memory_config_model import MemoryConfig as MemoryConfigModel
+from app.utils.redis_cache import delete_json, workflow_config_key
 
 
 class AppDslService:
@@ -525,6 +526,8 @@ class AppDslService:
                     existing.features = raw_wf.get("features", {})
                     existing.triggers = raw_wf.get("triggers", [])
                     existing.updated_at = now
+                    # 直接属性赋值绕过了 create_workflow_config 的缓存失效，需手动补上
+                    delete_json(workflow_config_key(app_id))
                 else:
                     wf_service.create_workflow_config(
                         app_id=app_id,
@@ -728,6 +731,37 @@ class AppDslService:
             *type_filter,
         ).first()
 
+    def _locate_agent_app(self, agent_id, workspace_id: uuid.UUID) -> Optional[App]:
+        """按条目里的 agent_id 在目标工作空间定位子 Agent 应用。
+
+        兼容旧 DSL：历史 sub_agents[*].agent_id 存的是 AppRelease.id，先按 App.id
+        命中（新形态），再按 AppRelease.id 反查所属应用（旧形态）。仅接受目标工作空间
+        自有应用，跨环境的源空间 ID 查不到即返回 None（共享应用不允许作为集群子 Agent）。
+        """
+        if not agent_id:
+            return None
+        try:
+            agent_uuid = uuid.UUID(str(agent_id))
+        except (ValueError, AttributeError, TypeError):
+            return None
+        app = self.db.query(App).filter(
+            App.id == agent_uuid,
+            App.workspace_id == workspace_id,
+            App.type == AppType.AGENT,
+            App.is_active.is_(True),
+        ).first()
+        if app:
+            return app
+        r = self.db.query(AppRelease).filter(AppRelease.id == agent_uuid).first()
+        if r is not None:
+            return self.db.query(App).filter(
+                App.id == r.app_id,
+                App.workspace_id == workspace_id,
+                App.type == AppType.AGENT,
+                App.is_active.is_(True),
+            ).first()
+        return None
+
     def _resolve_sub_agents(self, sub_agents: list, warnings: list, workspace_id: uuid.UUID) -> list:
         result = []
         for s in (sub_agents or []):
@@ -735,14 +769,23 @@ class AppDslService:
             entry = {k: v for k, v in s.items() if k != "_ref"}
             if ref:
                 a = self._find_app_by_name(ref.get("name"), workspace_id, AppType.AGENT)
-                if not a:
-                    # 目标工作空间不存在同名子 Agent 时，直接清空该子 Agent 配置（整条剔除）
-                    warnings.append(f"子 Agent '{ref.get('name')}' 在目标工作空间不存在，已清空，请导入后手动添加")
-                    continue
-                entry["agent_id"] = str(a.id)
-                # agent_id 现为子 Agent 应用 ID。release_id 跨环境无效，导入后一律跟随最新发布版本
-                entry["release_policy"] = "current"
-                entry["release_id"] = None
+                label = ref.get("name")
+            else:
+                # 旧 DSL 无 _ref：agent_id 是源空间 App.id / 历史 AppRelease.id，
+                # 先在目标工作空间按 ID 定位（同环境导入），再按条目名重绑（跨环境导入），
+                # 不能原样保留（否则悬空 ID 被接口回读返回）
+                a = self._locate_agent_app(entry.get("agent_id"), workspace_id)
+                if not a and entry.get("name"):
+                    a = self._find_app_by_name(entry.get("name"), workspace_id, AppType.AGENT)
+                label = entry.get("name") or entry.get("agent_id")
+            if not a:
+                # 目标工作空间不存在对应子 Agent 时，直接清空该子 Agent 配置（整条剔除）
+                warnings.append(f"子 Agent '{label}' 在目标工作空间不存在，已清空，请导入后手动添加")
+                continue
+            entry["agent_id"] = str(a.id)
+            # agent_id 现为子 Agent 应用 ID。release_id 跨环境无效，导入后一律跟随最新发布版本
+            entry["release_policy"] = "current"
+            entry["release_id"] = None
             result.append(entry)
         return result
 
@@ -755,11 +798,17 @@ class AppDslService:
             entry = {k: v for k, v in r.items() if k != "_ref"}
             if ref:
                 a = self._find_app_by_name(ref.get("name"), workspace_id, AppType.AGENT)
-                if not a:
-                    # 目标 Agent 在目标工作空间不存在（可能对应子 Agent 已被清空），整条剔除避免悬空路由
-                    warnings.append(f"路由目标 Agent '{ref.get('name')}' 在目标工作空间不存在，已清空该路由规则")
-                    continue
-                entry["target_agent_id"] = str(a.id)
+                label = ref.get("name")
+            else:
+                # 旧 DSL 无 _ref：target_agent_id 是源空间 ID，需在目标工作空间重新定位，
+                # 匹配不到整条剔除，避免悬空路由
+                a = self._locate_agent_app(entry.get("target_agent_id"), workspace_id)
+                label = entry.get("target_agent_id")
+            if not a:
+                # 目标 Agent 在目标工作空间不存在（可能对应子 Agent 已被清空），整条剔除避免悬空路由
+                warnings.append(f"路由目标 Agent '{label}' 在目标工作空间不存在，已清空该路由规则")
+                continue
+            entry["target_agent_id"] = str(a.id)
             result.append(entry)
         return result
 

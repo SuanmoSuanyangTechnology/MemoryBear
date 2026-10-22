@@ -7158,7 +7158,7 @@ def scan_scene_summary_idle(
     soft_time_limit=50,
 )
 def consume_model_gateway_alerts_task() -> dict[str, Any]:
-    """定时任务：消费 model:usage 事件做网关健康告警评估（B9）。
+    """定时任务：消费部署域用量流（model:usage:<DB_NAME>）做网关健康告警评估（B9）。
 
     服务侧（model-service）的调用终态只进 stream，本任务用独立消费组
     `model-usage-alerts` 读该 stream 喂给宿主企业告警插件；beat 周期由

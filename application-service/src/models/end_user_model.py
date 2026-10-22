@@ -1,0 +1,175 @@
+import uuid
+
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Index, Integer, String, Text, text
+from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.orm import relationship
+
+from ..utils.datetime_utils import utcnow_naive
+from .base import ServiceBase as Base
+
+
+class EndUser(Base):
+    __tablename__ = "end_users"
+    __table_args__ = (
+        Index(
+            "ix_end_users_workspace_memory",
+            "workspace_id",
+            "memory_count",
+            postgresql_where="memory_count > 0",
+        ),
+        Index(
+            "ix_end_users_workspace_created_desc",
+            "workspace_id",
+            "created_at",
+            "id",
+            postgresql_where="memory_count > 0",
+        ),
+        Index(
+            "idx_end_users_ws_other",
+            "workspace_id",
+            "other_id",
+            postgresql_where=text("is_active = TRUE"),
+        ),
+        Index(
+            "idx_end_users_ws_active_id",
+            "workspace_id",
+            "id",
+            postgresql_where=text("is_active = TRUE"),
+        ),
+        Index(
+            "ix_end_users_workspace_write_time",
+            "workspace_id",
+            "write_time",
+            postgresql_where=text("is_active = TRUE"),
+        ),
+        Index(
+            "idx_end_users_ws_identity",
+            "workspace_id",
+            "identity_features",
+            postgresql_where=text("is_active = TRUE"),
+        ),
+        Index(
+            "idx_end_users_expiration_scan",
+            "workspace_id",
+            "write_time",
+            "id",
+            postgresql_where=text(
+                "is_active = TRUE "
+                "AND identity_status = 'temporary' "
+                "AND write_time IS NOT NULL"
+            ),
+        ),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, nullable=False, index=True)
+    app_id = Column(UUID(as_uuid=True), ForeignKey("apps.id"), nullable=True)
+    workspace_id = Column(UUID(as_uuid=True), ForeignKey("workspaces.id"), nullable=False)
+    # end_user_id = Column(String, nullable=False, index=True)
+    other_id = Column(String, nullable=True)  # Store original user_id
+    other_name = Column(String, default="", nullable=False)
+    other_address = Column(String, default="", nullable=False)
+    channel_source = Column(
+        String,
+        nullable=True,
+        comment="渠道来源（如 api / mcp / workflow / web 等）",
+    )
+    identity_features = Column(
+        String,
+        nullable=True,
+        comment="跨渠道身份标识（单个标识，带标识=长时，不带=临时）",
+    )
+    identity_status = Column(
+        String,
+        nullable=False,
+        default="temporary",
+        server_default="temporary",
+        comment="身份状态: temporary / confirmed / expired",
+    )
+    is_active = Column(Boolean, default=True, server_default="true", nullable=False, comment="是否有效，False 表示已删除")
+    reflection_time = Column(DateTime, nullable=True)
+    write_time = Column(DateTime, nullable=True, comment="最后一次记忆写入时间")
+    grace_period_until = Column(
+        DateTime,
+        nullable=True,
+        comment="宽限期截止时间，NULL 表示未触发宽限期",
+    )
+    created_at = Column(DateTime, default=utcnow_naive)
+    updated_at = Column(DateTime, default=utcnow_naive, onupdate=utcnow_naive)
+
+    # User profile fields
+    position = Column(String, nullable=True, comment="职位")
+    department = Column(String, nullable=True, comment="部门")
+    contact = Column(String, nullable=True, comment="联系方式")
+    phone = Column(String, nullable=True, comment="电话")
+    hire_date = Column(DateTime, nullable=True, comment="入职日期")
+    updatetime_profile = Column(DateTime, nullable=True, comment="核心档案信息最后更新时间")
+
+    memory_config_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("memory_config.config_id"),
+        nullable=True,
+        index=True,
+        comment="关联的记忆配置ID"
+    )
+
+    memory_count = Column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default="0",
+        index=True,
+        comment="记忆节点总数",
+    )
+
+    # User summary four dimensions
+    user_summary = Column(Text, nullable=True, comment="缓存的用户摘要（基本介绍）")
+    personality_traits = Column(Text, nullable=True, comment="性格特点")
+    core_values = Column(Text, nullable=True, comment="核心价值观")
+    one_sentence_summary = Column(Text, nullable=True, comment="一句话总结")
+    user_summary_updated_at = Column(DateTime, nullable=True, comment="用户摘要最后更新时间")
+    memory_tags = Column(JSONB, nullable=True, comment="用户名片Tag字符串数组")
+    memory_tags_updated_at = Column(
+        DateTime,
+        nullable=True,
+        comment="用户名片Tag最后成功生成或源指纹检查时间",
+    )
+    memory_tags_source_fingerprint = Column(
+        String(64),
+        nullable=True,
+        comment="用户名片Tag清洗后源数据SHA-256指纹",
+    )
+
+    # Memory insight four dimensions
+    memory_insight = Column(Text, nullable=True, comment="缓存的记忆洞察报告（总体概述）")
+    behavior_pattern = Column(Text, nullable=True, comment="行为模式")
+    key_findings = Column(Text, nullable=True, comment="关键发现")
+    growth_trajectory = Column(Text, nullable=True, comment="成长轨迹")
+    memory_insight_updated_at = Column(DateTime, nullable=True, comment="洞察报告最后更新时间")
+
+    # RAG storage mode fields
+    # storage_type = Column(String, nullable=True, default="neo4j", comment="存储模式类型: neo4j / rag")
+    rag_tags = Column(Text, nullable=True, comment="RAG模式下提取的标签列表（JSON格式）")
+    rag_personas = Column(Text, nullable=True, comment="RAG模式下提取的人物形象列表（JSON格式）")
+    rag_summary_updated_at = Column(DateTime, nullable=True, comment="RAG摘要/标签/人物形象最后更新时间")
+
+    # Reverse relationship with App
+    app = relationship(
+        "App",
+        back_populates="end_users"
+    )
+
+    # Reverse relationship with WorkSpace
+    # Cross-domain relationship omitted: target model is host-owned and not part of this service's model set (FK column retained).
+
+    # Reverse relationship with EndUserInfo
+    info = relationship("EndUserInfo", back_populates="end_user", cascade="all, delete-orphan")
+
+
+class EndUserMerge(Base):
+    __tablename__ = "end_user_merge"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, nullable=False, index=True)
+    workspace_id = Column(UUID(as_uuid=True), ForeignKey("workspaces.id"), nullable=False, index=True)
+    origin_id = Column(UUID(as_uuid=True), nullable=True, index=True, comment="原始end_user_id")
+    origin_other_id = Column(String, nullable=False, index=True, comment="原始end_user other_id")
+    target_id = Column(UUID(as_uuid=True), nullable=False, index=True)

@@ -14,8 +14,12 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+import time
 import uuid
+from collections.abc import Mapping
 from typing import TYPE_CHECKING, List, Optional, Tuple
+
+from app.core.config import settings
 
 if TYPE_CHECKING:
     from datetime import datetime
@@ -54,8 +58,8 @@ class FastWritePipeline:
     # Embedding 单步硬上限（秒）。底层 LangChain client 自带 max_retries * timeout，
     # 导致 worker 被 SIGKILL 而非降级。此处用 asyncio.wait_for 兜底，超时即降级为 None。
     EMBED_TIMEOUT_SEC = 15
-    # BERT 情绪单步硬上限（秒），超时即降级为 None，不重试。
-    EMOTION_TIMEOUT_SEC = 2
+    # 快写情绪分支的总耗时上限（秒），与 HTTPX 网络阶段超时分别配置。
+    EMOTION_TIMEOUT_SEC = settings.FAST_WRITE_EMOTION_TOTAL_TIMEOUT_SECONDS
     # Scene 边界判断分支硬上限（秒），超时按 BERT 失败继续当前 Scene。
     SCENE_BOUNDARY_TIMEOUT_SEC = 5
 
@@ -68,6 +72,8 @@ class FastWritePipeline:
         self._embedder = None
         self._storage_service = None
         self._neo4j_connector = None
+        # 最近一次 _persist 时 Dialogue 的写入前状态（DialogueWriteState），供握手补写判定
+        self._last_dialogue_write_state = None
 
     async def run(
         self,
@@ -161,11 +167,13 @@ class FastWritePipeline:
                         emotion_result=emotion_result,
                     )
                     dialog_id = await self._persist(node)
+                    emotion_backfilled = await self._backfill_statement_emotions_if_superseded(node)
                     activity_saved = await self._project_fast_dialogue_activity(
                         dialog_id
                     )
                     s.metadata(
                         dialog_id=dialog_id,
+                        emotion_backfilled=emotion_backfilled,
                         activity_saved=activity_saved,
                     )
 
@@ -315,16 +323,27 @@ class FastWritePipeline:
     async def _extract_emotion(self, text: str, message_id: str = ""):
         """Step 2 并行分支 — 复用回复链路缓存，未命中才调 BERT /v1/rerank。
 
+        - memory_config.emotion_enabled 关闭时跳过情绪判断，DialogueNode 情绪保持为空。
         - 先按 message_id（= memory_messages.original_message_id = 回复链路的
           user_message_id）读情绪缓存，**读后即删**（GETDEL）：快写是唯一消费者，
           命中即复用 emotion + score 并跳过 BERT。
         - text 为空、或未配置（URL/API_KEY/MODEL 任一缺失）→ 直接返回 None，不发请求、不空等超时。
-        - 已配置时才调用；总耗时受 EMOTION_TOTAL_TIMEOUT_SECONDS 硬限制，超时/异常一律降级为 None，不重试。
+        - 已配置时才调用；总耗时受 FAST_WRITE_EMOTION_TOTAL_TIMEOUT_SECONDS 限制，超时/异常一律降级为 None，不重试。
         - 未命中时自己算出的结果**不回写缓存**（唯一消费者，回写无意义）。
         - 关键约束：服务故障绝不伪造 neutral；真实中性(emotion='neutral')
           与服务失败(emotion=None)必须可区分。
         """
-        if not text:
+        skip_reason = (
+            "emotion_disabled" if not getattr(self.memory_config, "emotion_enabled", True)
+            else "empty_text" if not text else None
+        )
+        if skip_reason:
+            logger.debug(
+                "[FastWrite] emotion skipped: reason=%s, mid=%s, end_user_id=%s",
+                skip_reason,
+                message_id,
+                self.end_user_id,
+            )
             return None
         # 先读回复链路写入的缓存（读后即删）：命中则跳过 BERT
         if message_id:
@@ -339,7 +358,6 @@ class FastWritePipeline:
                 )
                 return cached
         # 未配置（URL / API_KEY / MODEL 任一缺失）直接跳过，不发请求、不空等超时
-        from app.core.config import settings
         if (
             not settings.FAST_WRITE_EMOTION_URL
             or not settings.FAST_WRITE_EMOTION_API_KEY
@@ -348,6 +366,7 @@ class FastWritePipeline:
             return None
         try:
             from app.services.fast_write_emotion_client import predict as _predict_emotion
+            started_at = time.perf_counter()
             return await asyncio.wait_for(
                 _predict_emotion(text),
                 timeout=self.EMOTION_TIMEOUT_SEC,
@@ -355,8 +374,9 @@ class FastWritePipeline:
         except asyncio.TimeoutError:
             logger.warning(
                 "[FastWrite] emotion timed out, degrading to None: text_len=%s, "
-                "timeout=%ss, end_user_id=%s",
+                "elapsed=%.3fs, timeout=%ss, end_user_id=%s",
                 len(text),
+                time.perf_counter() - started_at,
                 self.EMOTION_TIMEOUT_SEC,
                 self.end_user_id,
             )
@@ -426,7 +446,12 @@ class FastWritePipeline:
         - Neo4j 提交成功后自动 enqueue outbox Dialogue upsert 事件，
           由 Beat + memory_projection worker 自动投影到 ES。
         - 竞态守卫在 DIALOGUE_NODE_SAVE Cypher 层：normal 覆盖 fast，
-          迟到 fast 不降级 normal（write_mode="fast" 触发 canWrite=[] 跳过）。
+          迟到 fast 不降级 normal（write_mode="fast" 触发 canWrite=[] 跳过内容写入）；
+          但若 normal 节点尚无情绪，迟到 fast 仍会成对补写 emotion / emotion_score
+          （只补空、不覆盖），ES 由本次 outbox 事件回读 Neo4j 同步。
+        - 握手补写：Cypher 在节点写锁内返回写入前状态 prev_*，记录到
+          ``self._last_dialogue_write_state``；迟到 fast 遇到 normal 节点时，由
+          ``_backfill_statement_emotions_if_superseded`` 再补该 Dialogue 下的 user Statement 情绪。
         - 死锁重试：与 WritePipeline._is_deadlock 一致的宽松判定——异常消息中
           包含 "deadlock"（大小写不敏感）即视为死锁，最多重试
           NEO4J_MERGE_MAX_RETRY 次，退避 0.1*(attempt+1) 秒。
@@ -441,6 +466,7 @@ class FastWritePipeline:
 
         command = MemoryGraphWriteCommand(dialogue_nodes=[dialog_node])
 
+        self._last_dialogue_write_state = None
         for attempt in range(self.NEO4J_MERGE_MAX_RETRY):
             try:
                 result = await self._storage_service.save_memory_graph(command)
@@ -449,6 +475,9 @@ class FastWritePipeline:
                     raise RuntimeError(
                         "expected one dialogue UUID, got none"
                     )
+                states = getattr(result, "dialogue_states", None)
+                if isinstance(states, Mapping):
+                    self._last_dialogue_write_state = states.get(dialog_node.id)
                 logger.info(
                     "[FastWrite] persisted: dialog_id=%s, end_user_id=%s, "
                     "has_embedding=%s, attempt=%s",
@@ -472,6 +501,49 @@ class FastWritePipeline:
                     dialog_node.id,
                 )
                 await asyncio.sleep(0.1 * (attempt + 1))
+
+    async def _backfill_statement_emotions_if_superseded(self, node: DialogueNode) -> int:
+        """Step 3 — 握手补写（快写侧）：正写已先落库时，把本次 BERT 情绪补到该 Dialogue 下的 user Statement。
+
+        只在 ``memory_config.emotion_enabled`` 开启（与正写 Step 3.4 同一开关），且
+        ``should_backfill_on_fast_side`` 成立（写入前节点为 normal、当时无情绪、本次情绪成对非空）时执行。
+        补写失败只打 warning，不影响快写结果。
+
+        Args:
+            node: 本次写入的 DialogueNode。
+
+        Returns:
+            实际补写的 Statement 数。
+        """
+        if not getattr(self.memory_config, "emotion_enabled", False):
+            return 0
+        try:
+            from app.core.memory.emotion import emotion_inheritance
+
+            if not emotion_inheritance.should_backfill_on_fast_side(
+                self._last_dialogue_write_state, node.emotion, node.emotion_score
+            ):
+                return 0
+            from app.repositories.neo4j.neo4j_connector import Neo4jConnector
+
+            if self._neo4j_connector is None:
+                self._neo4j_connector = Neo4jConnector()
+            return await emotion_inheritance.backfill_statement_emotions(
+                self._neo4j_connector,
+                end_user_id=self.end_user_id,
+                dialogue_id=node.id,
+                emotion=node.emotion,
+                emotion_score=node.emotion_score,
+                source=emotion_inheritance.BACKFILL_SOURCE_FAST_SIDE,
+            )
+        except Exception as exc:
+            logger.warning(
+                "[FastWrite] statement emotion backfill failed: dialogue_id=%s, end_user_id=%s, error=%s",
+                node.id,
+                self.end_user_id,
+                type(exc).__name__,
+            )
+            return 0
 
     async def _project_fast_dialogue_activity(self, dialogue_id: str) -> bool:
         """回查一次 Neo4j 权威快照，并尽力投影 Fast 活动到 PG。"""

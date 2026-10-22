@@ -13,7 +13,7 @@ from fastapi import FastAPI
 from .api.error_handlers import register_error_handlers
 from .api.router import internal_v1_router
 from .api.schemas.response_schema import ApiResponse
-from .auth import ModelAuthConfig, ModelAuthMiddleware
+from .auth import ModelAuthConfig, ModelAuthMiddleware, _load_gateway_auth
 from .bootstrap import get_settings
 from .config import ModelServiceSettings, configure_settings
 from .i18n import LanguageContextMiddleware, load_catalogs
@@ -75,6 +75,26 @@ def create_app(settings: ModelServiceSettings | None = None) -> FastAPI:
     # 迁入模块（channel_service / usage_publisher / redis_cache）经进程 runtime 取连接
     infrastructure_redis.configure(runtime.redis)
 
+    model_auth_config = ModelAuthConfig(
+        auth_mode=service_settings.model_service_auth_mode,
+        service_name=service_settings.model_service_internal_name,
+        jwks_url=service_settings.model_service_jwks_url,
+        redis=runtime.redis.client,
+        acl_rules_key=service_settings.acl_rules_key_name,
+        acl_rules_changed_channel=service_settings.acl_rules_changed_channel_name,
+    )
+    gateway_auth = None
+    if model_auth_config.auth_mode == "gateway":
+        try:
+            # Built once here so the middleware and the lifespan share the same
+            # handler (the lifespan owns its rule-refresh task).
+            gateway_auth = _load_gateway_auth(model_auth_config)
+        except RuntimeError:
+            # Misconfiguration (private package missing): the forced
+            # build_middleware_stack() below re-raises through the middleware's
+            # lazy fallback, so app construction still fails loudly.
+            logger.exception("gateway auth handler unavailable")
+
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
         from .services.channel_registry import run_channel_invalidation_listener
@@ -82,6 +102,13 @@ def create_app(settings: ModelServiceSettings | None = None) -> FastAPI:
 
         logger.info("Model service started: %s", service_settings.safe_summary())
         _sync_seed_models(application.state.runtime, service_settings)
+        # A failed refresh start degrades hot reload only; channel-1 auth keeps
+        # the rules loaded so far, so startup must not be blocked by it.
+        if gateway_auth is not None and hasattr(gateway_auth, "start"):
+            try:
+                await gateway_auth.start()
+            except Exception:
+                logger.exception("gateway auth refresh start failed")
         # 多副本渠道缓存失效广播：Redis 不可用时自行退避重连，不阻断启动与请求
         invalidation_listener = asyncio.create_task(run_channel_invalidation_listener())
         # 用量事件消费（承接 G5 前的宿主 beat）：同上自行退避重连
@@ -96,6 +123,8 @@ def create_app(settings: ModelServiceSettings | None = None) -> FastAPI:
                 task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await task
+            if gateway_auth is not None and hasattr(gateway_auth, "aclose"):
+                await gateway_auth.aclose()
             await application.state.runtime.aclose()
             logger.info("Model service stopped")
 
@@ -113,12 +142,8 @@ def create_app(settings: ModelServiceSettings | None = None) -> FastAPI:
     # 鉴权在路由前（后注册者更外层）：无内部凭据请求即 401，不落业务处理
     application.add_middleware(
         ModelAuthMiddleware,
-        model_auth=ModelAuthConfig(
-            auth_mode=service_settings.model_service_auth_mode,
-            service_name=service_settings.model_service_internal_name,
-            jwks_url=service_settings.model_service_jwks_url,
-            redis=runtime.redis.client,
-        ),
+        model_auth=model_auth_config,
+        gateway=gateway_auth,
     )
     # 语言解析最外层：401 等鉴权期响应也带正确 Content-Language（鉴权内部自取 lang 头）
     application.add_middleware(LanguageContextMiddleware)

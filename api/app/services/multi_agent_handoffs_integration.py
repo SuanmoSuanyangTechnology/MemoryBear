@@ -11,7 +11,7 @@ from app.services.agent_handoff import get_handoff_manager
 from app.services.collaborative_orchestrator import CollaborativeOrchestrator
 from app.schemas.multi_agent_schema import MultiAgentRunRequest
 from app.core.logging_config import get_business_logger
-from app.core.exceptions import BusinessException
+from app.core.exceptions import BusinessException, ResourceNotFoundException
 from app.core.utils.datetime_utils import to_iso_z
 from app.core.error_codes import BizCode
 from app.services.multi_agent_service import MultiAgentService
@@ -220,10 +220,7 @@ class MultiAgentHandoffsService:
         # 1. 获取配置
         config = self.multi_agent_service.get_config(app_id)
         if not config:
-            raise BusinessException(
-                "多 Agent 配置不存在",
-                BizCode.RESOURCE_NOT_FOUND
-            )
+            raise ResourceNotFoundException("多 Agent 配置", str(app_id))
 
         # 2. 解析 sub agents
         sub_agents = {}
@@ -233,6 +230,12 @@ class MultiAgentHandoffsService:
                 sub_agents[str(agent_id)] = {
                     "info": agent_data
                 }
+
+        if not sub_agents:
+            raise BusinessException(
+                "多 Agent 配置无子 Agent，无法进行路由测试",
+                BizCode.AGENT_CONFIG_MISSING
+            )
 
         # 3. 测试路由
         test_conversation_id = f"test-{uuid.uuid4()}"

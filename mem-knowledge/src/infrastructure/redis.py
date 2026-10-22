@@ -42,6 +42,10 @@ class RedisManager:
                     self._settings.redis_url,
                     decode_responses=True,
                     max_connections=self._settings.kb_redis_pool_size,
+                    # Bound half-open connections so the ACL subscription
+                    # reconnects instead of silently missing rule updates.
+                    socket_connect_timeout=5,
+                    socket_timeout=5,
                     health_check_interval=30,
                 )
                 self._pid = os.getpid()

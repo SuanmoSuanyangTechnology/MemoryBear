@@ -253,7 +253,6 @@ class MemoryValidationService:
                     retrieve_info=search_result.content,
                     history=[],
                     query=user_input.message,
-                    config_id=user_input.config_id,
                 )
             )
             async for heartbeat in _stream_heartbeats(running_task):
