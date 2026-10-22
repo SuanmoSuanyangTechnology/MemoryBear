@@ -76,7 +76,7 @@ const WordCloudCard: FC = () => {
     // Convert avg_intensity to 1-100 range
     const radarData = wordCloud.tags.map(item => ({
       name: item.emotion_type,
-      value: Math.round(item.avg_intensity * 100),
+      value: item.percentage,
       count: item.count,
       percentage: item.percentage
     }))
@@ -117,7 +117,7 @@ const WordCloudCard: FC = () => {
         }]
       }]
     }
-  }, [wordCloud])
+  }, [wordCloud, t])
 
   return (
     <RbCard

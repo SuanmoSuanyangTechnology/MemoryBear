@@ -109,7 +109,8 @@ class ToolService:
         query = self.db.query(ToolConfig).filter(
             ToolConfig.name == name,
             ToolConfig.tool_type == tool_type,
-            ToolConfig.tenant_id == tenant_id
+            ToolConfig.tenant_id == tenant_id,
+            ToolConfig.is_active.is_(True),  # 逻辑删除的工具不参与查重
         )
         if exclude_id:
             query = query.filter(ToolConfig.id != exclude_id)
@@ -131,6 +132,7 @@ class ToolService:
                 .filter(
                     ToolConfig.tenant_id == tenant_id,
                     ToolConfig.tool_type == tool_type,
+                    ToolConfig.is_active.is_(True),
                     MCPToolConfig.source_channel == source_channel,
                     MCPToolConfig.market_id == config.get("market_id"),
                     MCPToolConfig.market_config_id == config.get("market_config_id"),
@@ -147,6 +149,7 @@ class ToolService:
                     ToolConfig.name == name,
                     ToolConfig.tool_type == tool_type,
                     ToolConfig.tenant_id == tenant_id,
+                    ToolConfig.is_active.is_(True),
                 )
                 .first()
             )

@@ -20,12 +20,29 @@ document.addEventListener('animationstart', (e) => {
   }
 })
 
-// After a new release, old dynamic chunk files are deleted, triggering a preload
-// error. Do NOT force a full-page reload here (it would wipe the sidebar menu).
-// Instead, let the error propagate to the route-level ErrorBoundary, which shows
-// an in-place fallback in the content area while keeping the menu visible.
+const vitePreloadReloadStorageKey = 'vite-preload-reload-entry'
+
+function getCurrentModuleEntry() {
+  return document.querySelector<HTMLScriptElement>('script[type="module"][src]')?.src ?? window.location.href
+}
+
+// A newly deployed build can remove chunks referenced by an already-open page.
+// Refresh once per entry module to load the current index.html, then let the
+// existing route error boundary handle a persistent failure without a reload loop.
 window.addEventListener('vite:preloadError', (event) => {
-  console.warn('Asset preload failed (possibly a new version was deployed).', event)
+  try {
+    const currentEntry = getCurrentModuleEntry()
+
+    if (sessionStorage.getItem(vitePreloadReloadStorageKey) === currentEntry) {
+      return
+    }
+
+    sessionStorage.setItem(vitePreloadReloadStorageKey, currentEntry)
+    event.preventDefault()
+    window.location.reload()
+  } catch {
+    // Keep Vite's default error flow when session storage is unavailable.
+  }
 })
 
 createRoot(document.getElementById('root')!)
