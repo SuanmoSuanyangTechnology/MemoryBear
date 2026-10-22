@@ -4,6 +4,7 @@ import hashlib
 import json
 import logging
 import math
+import uuid
 from dataclasses import dataclass
 from typing import Any
 
@@ -98,6 +99,26 @@ async def is_indexed(client, target, row):
             realtime=False,
         )
     )
+
+
+async def delete_projection(client, scope, faq_id):
+    """删除当前知识库已有 FAQ 索引中该 FAQ 的全部修订，不依赖模型配置、不创建索引。"""
+    knowledge_id = str(uuid.UUID(str(scope["kb_id"])))
+    identity = str(uuid.UUID(str(faq_id)))
+    index_pattern = f"wiki_faq_{knowledge_id}_*"
+    response = await client.indices.refresh(
+        index=index_pattern, allow_no_indices=True, ignore_unavailable=True
+    )
+    AsyncChunkStore._raise_on_failed_response(response, "FAQ deleted projection refresh")
+    response = await client.delete_by_query(
+        index=index_pattern,
+        query={"term": {"metadata.doc_id": identity}},
+        allow_no_indices=True,
+        ignore_unavailable=True,
+        conflicts="proceed",
+        refresh=True,
+    )
+    AsyncChunkStore._raise_on_failed_response(response, "FAQ deleted projection cleanup")
 
 
 async def write_projection(runtime, client, target, row):

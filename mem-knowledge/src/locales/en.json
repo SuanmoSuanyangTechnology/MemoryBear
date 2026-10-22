@@ -165,5 +165,7 @@
   "KB_FAQ_SOURCE_UNAVAILABLE": "The Wiki source is unavailable for review or generation.",
   "KB_FAQ_SOURCE_CHANGED": "The Wiki source changed. Review the latest comparison.",
   "KB_FAQ_JOB_BUSY": "FAQ generation is still running.",
-  "KB_FAQ_JOB_TERMINAL": "Completed or cancelled first-generation jobs cannot be regenerated."
+  "KB_FAQ_JOB_TERMINAL": "Completed or cancelled first-generation jobs cannot be regenerated.",
+  "KB_FAQ_DISPATCH_FAILED": "The FAQ generation task could not be dispatched. Please retry.",
+  "KB_FAQ_WORKER_LOST": "The FAQ generation worker stopped responding. Please retry the task."
 }

@@ -5,6 +5,7 @@ from sqlalchemy import String, cast, exists, func, or_, select
 from ...models.owned import Document, Knowledge, WikiPage
 from ...models.owned.wiki_faq import WikiFAQ
 from ...models.references import Workspace
+from ..wiki.common import as_uuid
 from .common import get_faq, scoped
 
 
@@ -73,6 +74,13 @@ def load_for_sync(session, scope, faq_id, expected_row_version=None):
         "eligible": bool(allowed and knowledge.is_active),
         "embedding_id": knowledge.embedding_id,
     }
+
+
+def was_deleted(session, scope, faq_id):
+    # 仅为已通过鉴权的写入做收尾；精确校验原作用域中的软删除墓碑，不扩大读取权限。
+    return session.scalar(select(WikiFAQ.id).where(
+        *scoped(WikiFAQ, scope), WikiFAQ.id == as_uuid(faq_id), WikiFAQ.deleted_at.is_not(None)
+    )) is not None
 
 
 async def eligible_versions(db, scope):

@@ -42,6 +42,8 @@ class ErrorDefinition:
 # for a missing API route. Keep numeric code 404 for existing consumers.
 _DEFINITIONS = {
     "KB_FAQ_INDEX_FAILED": ErrorDefinition(503, True, 503, "http"),
+    "KB_FAQ_DISPATCH_FAILED": ErrorDefinition(503, True, 503, "http"),
+    "KB_FAQ_WORKER_LOST": ErrorDefinition(503, True, 503, "http"),
     "KB_FAQ_CONFLICT": ErrorDefinition(409, False, 409, "http"),
     "KB_FAQ_CONTENT_INVALID": ErrorDefinition(409, False, 409, "http"),
     "KB_FAQ_REVIEW_REQUIRED": ErrorDefinition(409, False, 409, "http"),

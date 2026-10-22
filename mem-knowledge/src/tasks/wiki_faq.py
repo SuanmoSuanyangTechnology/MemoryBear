@@ -82,6 +82,9 @@ def generate_wiki_faq(self, kb_id, job_id, recovery=None):
             model = make_model(runtime, snapshot)
             result = generate(model, snapshot)
             committed = transaction(runtime, jobs.complete, snapshot, result)
+            if committed is None:
+                run.finish(BusinessOutcome.SKIPPED)
+                return {"job_id": job_id, "result": "superseded"}
             run.finish(BusinessOutcome.SUCCESS)
             return committed
         except WikiSuperseded as exc:

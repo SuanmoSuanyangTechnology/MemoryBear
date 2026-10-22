@@ -22,6 +22,6 @@ internal_v1_router.include_router(knowledge_metadata_router)
 internal_v1_router.include_router(knowledge_share_router)
 internal_v1_router.include_router(wiki_router)
 
-__all__ = ["internal_v1_router"]
-
 internal_v1_router.include_router(wiki_faq_router)
+
+__all__ = ["internal_v1_router"]

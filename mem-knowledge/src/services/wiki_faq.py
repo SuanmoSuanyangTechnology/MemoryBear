@@ -29,6 +29,10 @@ async def run(runtime, operation, scope, *args, **kwargs):
         from .wiki_faq_retrieval import synchronize_results
 
         await synchronize_results(runtime, scope, [result])
+    if synchronize_index and operation is write.delete:
+        from .wiki_faq_retrieval import cleanup_deleted_projection
+
+        await cleanup_deleted_projection(runtime, scope, result["id"])
     return result
 
 
@@ -78,8 +82,8 @@ def publish_pending(runtime, kb_id, page_id):
 
 async def retry_job(runtime, scope, job_id, expected_row_version):
     delivery = await run(runtime, jobs.retry, scope, job_id, expected_row_version)
-    published = await asyncio.to_thread(_publish, runtime, delivery)
-    return {**delivery, "publish_confirmed": published}
+    await asyncio.to_thread(_publish, runtime, delivery)
+    return await run(runtime, jobs.dispatch_result, scope, job_id)
 
 
 async def batch(runtime, scope, actor_id, items, *, action, is_enabled=None):

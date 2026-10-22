@@ -14,6 +14,7 @@ from ..rag.faq.index import (
     FAQ_ID_BATCH_SIZE,
     FAQ_SYNC_CONCURRENCY,
     FAQTarget,
+    delete_projection,
     embedding_for,
     is_indexed,
     projection_id,
@@ -58,37 +59,53 @@ async def _target_for_sync(runtime, scope, row):
     return FAQTarget(scope=scope, embedding=model, top_k=1, score_threshold=None)
 
 
-async def index_state(runtime, scope, faq_id, *, synchronize=False, expected_row_version=None):
-    # 身份/作用域/并发错误保留正常HTTP错误语义，只有外部索引故障转为明确同步结果。
+async def _load_sync_row(runtime, scope, faq_id, expected_row_version=None):
     try:
-        row = await asyncio.to_thread(
-            transaction,
-            runtime,
-            repository.load_for_sync,
-            scope,
-            faq_id,
-            expected_row_version,
+        return await asyncio.to_thread(
+            transaction, runtime, repository.load_for_sync, scope, faq_id, expected_row_version
         )
     except WikiError as exc:
         raise KnowledgeError.from_code("KB_RESOURCE_NOT_FOUND") from exc
+
+
+async def cleanup_deleted_projection(runtime, scope, faq_id):
+    try:
+        if not await asyncio.to_thread(transaction, runtime, repository.was_deleted, scope, faq_id):
+            return
+        await delete_projection(await runtime.elasticsearch.client(), scope, faq_id)
+    except Exception as exc:
+        # 软删除已阻止召回；清理失败保留真实诊断，不将已提交的删除/并发错误伪装成回滚。
+        logger.exception(
+            "FAQ 已删除投影清理失败 kb_id=%s faq_id=%s stage=deleted_projection_cleanup details=%s",
+            scope["kb_id"], faq_id, diagnostic_json(exception_details(exc)),
+        )
+
+
+async def index_state(runtime, scope, faq_id, *, synchronize=False, expected_row_version=None):
+    # 身份、权限、并发和模型配置错误均保留业务 HTTP 语义。
+    row = await _load_sync_row(runtime, scope, faq_id, expected_row_version)
     base = {"faq_id": str(faq_id), "content_revision": row["content_revision"]}
     if not row["eligible"]:
         return {**base, "status": "not_required", "error_code": None}
-    index_name = None
+    target = await _target_for_sync(runtime, scope, row)
     try:
-        target = await _target_for_sync(runtime, scope, row)
-        index_name = target.index_name
-        client = await runtime.elasticsearch.client()
-        if synchronize:
-            await write_projection(runtime, client, target, row)
-        ready = await is_indexed(client, target, row)
-        current = await asyncio.to_thread(
-            transaction,
-            runtime,
-            repository.load_for_sync,
-            scope,
-            faq_id,
-        )
+        try:
+            client = await runtime.elasticsearch.client()
+            if synchronize:
+                await write_projection(runtime, client, target, row)
+            ready = await is_indexed(client, target, row)
+        except Exception as exc:
+            logger.exception(
+                "FAQ 索引处理失败 kb_id=%s faq_id=%s revision=%s index=%s "
+                "stage=index_sync details=%s",
+                scope["kb_id"], faq_id, row["content_revision"], target.index_name,
+                diagnostic_json(exception_details(exc)),
+            )
+            return {
+                **base, "status": "failed",
+                "error_code": getattr(exc, "code", "KB_FAQ_INDEX_FAILED"),
+            }
+        current = await _load_sync_row(runtime, scope, faq_id)
         if not current["eligible"]:
             return {**base, "status": "not_required", "error_code": None}
         current_target = await _target_for_sync(runtime, scope, current)
@@ -100,20 +117,10 @@ async def index_state(runtime, scope, faq_id, *, synchronize=False, expected_row
         else:
             status = "ready" if ready else "pending"
         return {**base, "status": status, "error_code": None}
-    except Exception as exc:
-        logger.exception(
-            "FAQ 索引处理失败 kb_id=%s faq_id=%s revision=%s index=%s stage=index_sync details=%s",
-            scope["kb_id"],
-            faq_id,
-            row["content_revision"],
-            index_name,
-            diagnostic_json(exception_details(exc)),
-        )
-        return {
-            **base,
-            "status": "failed",
-            "error_code": getattr(exc, "code", "KB_FAQ_INDEX_FAILED"),
-        }
+    finally:
+        if synchronize:
+            # 删除清理可能先于在途向量写入完成；写入者完成或失败后再次按墓碑收尾。
+            await cleanup_deleted_projection(runtime, scope, faq_id)
 
 
 async def synchronize_results(runtime, scope, results):

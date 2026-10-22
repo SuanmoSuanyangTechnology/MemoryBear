@@ -165,5 +165,7 @@
   "KB_FAQ_SOURCE_UNAVAILABLE": "FAQ 的 Wiki 来源当前不可用，无法完成审核或生成。",
   "KB_FAQ_SOURCE_CHANGED": "Wiki 来源已更新，请重新查看对照后审核。",
   "KB_FAQ_JOB_BUSY": "FAQ 生成任务仍在运行，请稍后重试。",
-  "KB_FAQ_JOB_TERMINAL": "已完成或已取消的首次生成任务不能重新生成。"
+  "KB_FAQ_JOB_TERMINAL": "已完成或已取消的首次生成任务不能重新生成。",
+  "KB_FAQ_DISPATCH_FAILED": "FAQ 生成任务投递失败，请重试。",
+  "KB_FAQ_WORKER_LOST": "FAQ 生成 Worker 执行中断，请重试任务。"
 }

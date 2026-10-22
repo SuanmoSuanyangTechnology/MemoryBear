@@ -85,6 +85,12 @@ def _delivery(job):
     }
 
 
+def dispatch_result(session, scope, job_id):
+    """投递后重新读取同一任务快照，不能把投递前的 CAS 版本作为最新版本返回。"""
+    job, _ = _job(session, scope["kb_id"], job_id, scope)
+    return {**_delivery(job), "publish_confirmed": job.publish_confirmed}
+
+
 def pending_deliveries(session, kb_id, page_id):
     _, scope = lock_knowledge(session, kb_id)
     rows = session.scalars(
