@@ -20,7 +20,7 @@ interface KnowledgeConfigModalProps {
   refresh: (values: KnowledgeConfigForm, type: 'knowledgeConfig') => void;
 }
 
-const retrieveTypes: RetrieveType[] = ['participle', 'semantic', 'hybrid', 'graph']
+const retrieveTypes: RetrieveType[] = ['participle', 'semantic', 'hybrid', 'graph', 'wiki-FAQ']
 
 const KnowledgeConfigModal = forwardRef<KnowledgeConfigModalRef, KnowledgeConfigModalProps>(({
   refresh,
@@ -56,7 +56,17 @@ const KnowledgeConfigModal = forwardRef<KnowledgeConfigModalRef, KnowledgeConfig
     form
       .validateFields()
       .then(() => {
-        refresh(values, 'knowledgeConfig')
+        const config = values?.retrieve_type === 'wiki-FAQ'
+          ? {
+              ...values,
+              similarity_threshold: undefined,
+              rerank_mode: undefined,
+              reranker_id: undefined,
+              rerank_weights: undefined,
+              enable_graph_retrieval: undefined,
+            }
+          : values;
+        refresh(config, 'knowledgeConfig')
         handleClose()
       })
       .catch((err) => {
@@ -188,7 +198,7 @@ const KnowledgeConfigModal = forwardRef<KnowledgeConfigModalRef, KnowledgeConfig
             onChange={(value) => form.setFieldValue('top_k', value)}
           />
         </FormItem>
-        {!['participle', 'semantic', 'graph'].includes(values?.retrieve_type || '') && !(values?.retrieve_type === 'hybrid' && values?.rerank_mode === 'weighted_score') &&
+        {!['participle', 'semantic', 'graph', 'wiki-FAQ'].includes(values?.retrieve_type || '') && !(values?.retrieve_type === 'hybrid' && values?.rerank_mode === 'weighted_score') &&
           <FormItem
             name="similarity_threshold"
             label={t('application.similarity_threshold')}

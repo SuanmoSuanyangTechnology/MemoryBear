@@ -328,9 +328,11 @@ const RecallTestResult = ({
                 </span>
               )}
               <Flex align="end" justify="end" gap={16}>
-                <span className='rb:text-gray-800'>
-                  <FileOutlined /> {item.metadata?.file_name || '-'}
-                </span>
+                {item.metadata?.file_name &&
+                  <span className='rb:text-gray-800'>
+                    <FileOutlined /> {item.metadata?.file_name || '-'}
+                  </span>
+                }
                 <span className='rb:text-gray-500 rb:text-xs rb:bg-[#DFDFDF] rb:px-1 rb:py-0.5 rb:rounded'>
                   chunk_{item.metadata?.sort_id || index}
                 </span>
