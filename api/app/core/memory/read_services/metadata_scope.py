@@ -29,16 +29,17 @@ def project_metadata(record: dict, scope: dict | str | None) -> dict:
         value = result.get(key)
         result[key] = [item for item in value if isinstance(item, str) and item.strip()] if isinstance(value, list) else []
 
-    scene_name = scope.get("scene_name") if isinstance(scope, dict) else scope
+    raw_scene_type_id = scope.get("scene_type_id") if isinstance(scope, dict) else scope
+    scene_type_id = str(raw_scene_type_id) if raw_scene_type_id else None
     raw_field_keys = scope.get("field_keys") if isinstance(scope, dict) else None
     field_keys = set(raw_field_keys) if raw_field_keys is not None else None
     domains = result.get("domain_specific_info")
-    value = domains.get(scene_name) if isinstance(domains, dict) and scene_name else None
+    value = domains.get(scene_type_id) if isinstance(domains, dict) and scene_type_id else None
     filtered = _filter_entries(value, field_keys) if field_keys is not None else (
         [item for item in value if isinstance(item, str) and item.strip()]
         if isinstance(value, list) else []
     )
-    result["domain_specific_info"] = {scene_name: filtered} if scene_name and filtered else {} # TODO：PG的存储键从scene_name改为scene_type_id后，此处检索也需要改成scene_type_id
+    result["domain_specific_info"] = {scene_type_id: filtered} if scene_type_id and filtered else {}
     return result
 
 
