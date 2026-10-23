@@ -38,6 +38,19 @@ _LEGACY_ERROR_RESPONSES = {
 }
 
 
+def _register_enterprise_plugins(runtime: ProcessRuntime) -> None:
+    """Register enterprise plugins when the private package is installed.
+
+    Open-source builds cannot install enterprise-extensions, so the import
+    failure is expected and leaves the community plugin registry empty.
+    """
+    try:
+        from enterprise_ext.app import register_app_plugins
+    except ImportError:
+        return
+    register_app_plugins(runtime.upstream)
+
+
 def create_app(settings: AppServiceSettings | None = None) -> FastAPI:
     """Construct the internal API without connecting to dependencies."""
 
@@ -51,6 +64,7 @@ def create_app(settings: AppServiceSettings | None = None) -> FastAPI:
     # Deep workflow-runtime code (carried over from the monolith) resolves
     # process resources through this module-level registration.
     set_process_runtime(runtime)
+    _register_enterprise_plugins(runtime)
 
     app_auth_config = AppAuthConfig(
         auth_mode=service_settings.application_service_auth_mode,

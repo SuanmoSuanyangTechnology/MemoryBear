@@ -22,6 +22,8 @@ APPLICATION_SERVICE_CALLBACK_SECRET，两端配置同一值）。记忆类与终
     GET  /memory/workspace-config                       工作空间启用中的记忆配置
     POST /end-user/info-update                          终端用户信息更新（alias 变更记忆侧效应）
     POST /end-user/identity-update                      终端用户身份确认 / 归并
+    POST /apps/ontology-batch                           应用 ontology 子对象批量聚合
+    POST /apps/ontology-filter                          应用列表本体筛选（返回命中的 app_ids）
 """
 from __future__ import annotations
 
@@ -32,19 +34,22 @@ from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, Header
 from pydantic import BaseModel, Field
+from sqlalchemy import select
 
 from app.controllers import end_user_controller
-from app.core.app_service_callback_auth import require_app_service_callback_secret
 from app.core.api_key_utils import validate_end_user_in_workspace_async
+from app.core.app_service_callback_auth import require_app_service_callback_secret
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
 from app.core.logging_config import get_business_logger
 from app.core.memory.enums import Neo4jNodeType, SearchStrategy
 from app.core.memory.memory_service import MemoryService
 from app.core.response_utils import success
-from app.db import get_async_db_context
+from app.db import get_async_db_context, get_db_context
 from app.dependencies import CurrentUserSnapshot
+from app.models.app_model import App
 from app.models.workspace_model import Workspace
+from app.plugins import get_plugin
 from app.schemas.end_user_info_schema import EndUserInfoUpdate
 from app.schemas.end_user_schema import EndUserIdentityUpdate
 from app.services.context_engine_manager import ContextEngineManager
@@ -52,6 +57,9 @@ from app.services.memory_config_service import MemoryConfigService
 
 router = APIRouter(prefix="/internal/app-service", tags=["internal-app-service"])
 logger = get_business_logger()
+
+# 本体绑定门面由 premium.memory 注册；社区版无此插件，回调返回 available=false
+ONTOLOGY_BINDING_PLUGIN = "memory.ontology_binding"
 
 
 def _parse_workspace_id(raw: Optional[str]) -> uuid.UUID:
@@ -174,6 +182,15 @@ class MemoryIngestAgentRequest(BaseModel):
     language: str = "zh"
     storage_type: str = "neo4j"
     user_rag_memory_id: str = ""
+
+
+class AppOntologyBatchRequest(BaseModel):
+    app_ids: list[uuid.UUID] = Field(default_factory=list)
+
+
+class AppOntologyFilterRequest(AppOntologyBatchRequest):
+    ontology_status: Optional[str] = None
+    field_search: Optional[str] = None
 
 
 # ──────────────────────────────────────────────────────────────
@@ -486,3 +503,66 @@ async def internal_end_user_identity_update(
         identity_update=payload,
         current_user=current_user,
     )
+
+
+# ──────────────────────────────────────────────────────────────
+# App ontology
+# ──────────────────────────────────────────────────────────────
+#
+# 本体表归记忆域所有，应用服务不得直读；本体绑定门面由 premium.memory 在
+# 单体进程内注册。以下端点用同步 Session（门面为同步实现），以 sync def
+# 声明让 FastAPI 走线程池，避免阻塞事件循环。
+
+@router.post("/apps/ontology-batch")
+def internal_app_ontology_batch(
+        payload: AppOntologyBatchRequest,
+        _guard: None = Depends(require_app_service_callback_secret),
+):
+    """批量聚合应用的 ontology 子对象。
+
+    available=false 表示本体插件未加载（社区版 / License 未启用 memory），
+    应用服务据此跳过 ontology 字段，而不是把空结果当成"无绑定"。
+    """
+    binder = get_plugin(ONTOLOGY_BINDING_PLUGIN)
+    if binder is None:
+        return success(data={"available": False, "ontology": {}})
+    logger.info(f"Internal app ontology batch - apps: {len(payload.app_ids)}")
+    if not payload.app_ids:
+        return success(data={"available": True, "ontology": {}})
+    with get_db_context() as db:
+        ontology = binder.load_app_ontology_batch(db, payload.app_ids)
+    return success(data={
+        "available": True,
+        "ontology": {str(app_id): info for app_id, info in ontology.items()},
+    })
+
+
+@router.post("/apps/ontology-filter")
+def internal_app_ontology_filter(
+        payload: AppOntologyFilterRequest,
+        _guard: None = Depends(require_app_service_callback_secret),
+):
+    """按本体状态 / 字段关键字筛选候选应用，返回命中的 app_ids。
+
+    无筛选条件时原样返回候选集；available=false 时应用服务忽略该筛选并告警。
+    """
+    binder = get_plugin(ONTOLOGY_BINDING_PLUGIN)
+    if binder is None:
+        return success(data={"available": False, "app_ids": None})
+    filters = binder.build_list_filters(payload.ontology_status, payload.field_search)
+    if not filters:
+        return success(data={
+            "available": True,
+            "app_ids": [str(app_id) for app_id in payload.app_ids],
+        })
+    if not payload.app_ids:
+        return success(data={"available": True, "app_ids": []})
+    logger.info(
+        f"Internal app ontology filter - apps: {len(payload.app_ids)}, "
+        f"status: {payload.ontology_status}, field_search: {bool(payload.field_search)}"
+    )
+    with get_db_context() as db:
+        matched = db.scalars(
+            select(App.id).where(App.id.in_(payload.app_ids), *filters)
+        ).all()
+    return success(data={"available": True, "app_ids": [str(app_id) for app_id in matched]})

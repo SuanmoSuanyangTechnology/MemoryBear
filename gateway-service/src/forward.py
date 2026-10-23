@@ -21,6 +21,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
+from collections.abc import Callable
 from typing import Protocol
 
 import httpx
@@ -88,12 +89,15 @@ class StaticTargetResolver:
 
 class Forwarder:
     def __init__(self, client: httpx.AsyncClient,
-                 circuit: CircuitBreaker | None = None,
+                 circuit_factory: Callable[[], CircuitBreaker] | None = None,
                  streaming_max_connections: int = 100,
                  sse_idle_timeout: float = 300.0,
                  read_timeout: float = 30.0) -> None:
         self._client = client
-        self._circuit = circuit or CircuitBreaker()
+        # One breaker per target service: a dead dependency must not short-circuit
+        # requests to healthy ones (a single shared breaker would open globally).
+        self._circuit_factory = circuit_factory or CircuitBreaker
+        self._circuits: dict[str, CircuitBreaker] = {}
         self._streaming_max = streaming_max_connections
         self._active_streams = 0
         self._stream_lock = asyncio.Lock()
@@ -102,6 +106,12 @@ class Forwarder:
         # 缓冲分支体读取超时（对齐老 forward() 的 read=30s）：响应头已到、体迟迟
         # 不来/读断时快速失败，不占满看门狗时长
         self._read_timeout = read_timeout
+
+    def _circuit_for(self, service: str) -> CircuitBreaker:
+        circuit = self._circuits.get(service)
+        if circuit is None:
+            circuit = self._circuits[service] = self._circuit_factory()
+        return circuit
 
     def internal_path(self, external_path: str) -> str:
         if external_path.startswith("/internal/v1/"):
@@ -145,8 +155,9 @@ class Forwarder:
         return headers
 
     async def forward(self, request: Request, route: TargetRoute) -> Response:
+        circuit = self._circuit_for(route.service)
         # 熔断门只约束新连接：开路期间新请求直接 502，已建立的流不受影响（评审稿 4.1.4）
-        if self._circuit.is_open():
+        if circuit.is_open():
             gateway_circuit_breaker_state.labels(target=route.service).set(1)
             return JSONResponse(status_code=502, content={"detail": "circuit open"})
         gateway_circuit_breaker_state.labels(target=route.service).set(0)
@@ -177,7 +188,7 @@ class Forwarder:
                 gateway_upstream_errors_total.labels(
                     target=route.service, error_type="timeout").inc()
                 if not retriable or attempt == 1:
-                    self._circuit.record_failure()
+                    circuit.record_failure()
                     return JSONResponse(status_code=504, content={"detail": "upstream timeout"})
                 # 重试间隔 200ms 抖动：避免多个连接同时重试造成惊群
                 await asyncio.sleep(random.uniform(0.15, 0.25))
@@ -186,7 +197,7 @@ class Forwarder:
                 gateway_upstream_errors_total.labels(
                     target=route.service, error_type="connect").inc()
                 if not retriable or attempt == 1:
-                    self._circuit.record_failure()
+                    circuit.record_failure()
                     return JSONResponse(status_code=502, content={"detail": "upstream unavailable"})
                 # 重试间隔 200ms 抖动：避免多个连接同时重试造成惊群
                 await asyncio.sleep(random.uniform(0.15, 0.25))
@@ -203,7 +214,7 @@ class Forwarder:
             # 已建立流的中断不代表上游整体不健康）
             gateway_forward_requests_total.labels(
                 target=route.service, status_class=f"{upstream.status_code // 100}xx").inc()
-            self._circuit.record_success()
+            circuit.record_success()
             # 响应头驱动分流：流式类型（下载/导出）逐块透传，其余缓冲交付
             if is_streaming_response(upstream.headers):
                 return await self._stream_response(request, route, upstream, url)
@@ -274,13 +285,13 @@ class Forwarder:
         except TimeoutError:
             gateway_upstream_errors_total.labels(
                 target=route.service, error_type="timeout").inc()
-            self._circuit.record_failure()
+            self._circuit_for(route.service).record_failure()
             await upstream.aclose()
             return JSONResponse(status_code=504, content={"detail": "upstream timeout"})
         except httpx.HTTPError:
             gateway_upstream_errors_total.labels(
                 target=route.service, error_type="connect").inc()
-            self._circuit.record_failure()
+            self._circuit_for(route.service).record_failure()
             await upstream.aclose()
             return JSONResponse(status_code=502, content={"detail": "upstream unavailable"})
         return Response(

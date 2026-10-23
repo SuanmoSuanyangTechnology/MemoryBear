@@ -14,10 +14,17 @@ from auth_sdk.schema import AuditEvent
 
 
 class AuditLogger:
-    def __init__(self, redis, stream_key: str = "audit:stream", timeout_ms: int = 100):
+    # Long-term retention lives in audit_logs (identity consumer); the stream is
+    # only a transit buffer. A hard cap bounds Redis memory when the consumer
+    # lags or is down, at the cost of dropping oldest events past the cap.
+    DEFAULT_MAXLEN = 500_000
+
+    def __init__(self, redis, stream_key: str = "audit:stream", timeout_ms: int = 100,
+                 maxlen: int = DEFAULT_MAXLEN):
         self._redis = redis
         self._stream_key = stream_key
         self._timeout_s = timeout_ms / 1000
+        self._maxlen = maxlen
 
     async def audit(self, event: AuditEvent) -> None:
         event_id = event.event_id or uuid.uuid4().hex
@@ -31,7 +38,8 @@ class AuditLogger:
         try:
             # 超时保护：Redis 半开/慢时 xadd 最多等 timeout_ms，绝不阻塞业务请求
             await asyncio.wait_for(
-                self._redis.xadd(self._stream_key, payload),
+                self._redis.xadd(self._stream_key, payload,
+                                 maxlen=self._maxlen, approximate=True),
                 timeout=self._timeout_s)
         except (TimeoutError, RedisError):
             pass  # 审计失败/超时不阻塞业务（后续增强：本地缓冲重试）
