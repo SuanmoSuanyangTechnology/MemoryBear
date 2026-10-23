@@ -124,10 +124,12 @@ class MemoryService:
             conversation_id: str | None,
             language: str,
             draft: bool,
+            app_id: Any | None = None,
     ) -> None:
         self._config_id = str(config_id) if config_id else None
         self._end_user_id = end_user_id
         self._workspace_id = str(workspace_id) if workspace_id else None
+        self._app_id = str(app_id) if app_id else None
         self._storage_type = storage_type
         self._user_rag_memory_id = user_rag_memory_id
         self._conversation_id = conversation_id
@@ -145,6 +147,7 @@ class MemoryService:
             conversation_id: str | None = None,
             language: str = "zh",
             draft: bool = False,
+            app_id: Any | None = None,
     ) -> MemoryService:
         """Build the delegation handle; no upstream call happens here."""
 
@@ -157,6 +160,7 @@ class MemoryService:
             conversation_id=conversation_id,
             language=language,
             draft=draft,
+            app_id=app_id,
         )
 
     async def read(
@@ -189,6 +193,7 @@ class MemoryService:
                 "conversation_id": self._conversation_id,
                 "language": self._language,
                 "draft": self._draft,
+                "app_id": self._app_id,
             },
         )
         return _MemorySearchResult(
@@ -278,6 +283,7 @@ def create_long_term_memory_tool(
         memory_name: str | None = None,
         config_id=None,
         db=None,
+        app_id=None,
 ) -> Any | None:
     """Host-parity long-term memory tool factory; disabled memory yields no tool."""
 
@@ -309,6 +315,7 @@ def create_long_term_memory_tool(
                 workspace_id=workspace_id,
                 storage_type=storage_type or "neo4j",
                 user_rag_memory_id=user_rag_memory_id,
+                app_id=app_id,
             )
             search_result = await memory_service.read(
                 question,

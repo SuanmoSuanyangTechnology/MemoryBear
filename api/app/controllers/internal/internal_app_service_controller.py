@@ -143,6 +143,7 @@ class MemoryReadRequest(BaseModel):
     conversation_id: Optional[str] = None
     language: str = "zh"
     draft: bool = False
+    app_id: Optional[str] = None
 
 
 class MemoryIngestWorkflowRequest(BaseModel):
@@ -300,6 +301,7 @@ async def internal_memory_read(
         )
 
     includes = [Neo4jNodeType(t) for t in payload.includes] if payload.includes else None
+    app_id = _parse_uuid(payload.app_id, "app_id") if payload.app_id else None
     service = await MemoryService.create(
         config_id,
         end_user_id=end_user_id,
@@ -309,6 +311,7 @@ async def internal_memory_read(
         conversation_id=payload.conversation_id,
         language=payload.language,
         draft=payload.draft,
+        app_id=app_id,
     )
     memory = await service.read(
         payload.query,
