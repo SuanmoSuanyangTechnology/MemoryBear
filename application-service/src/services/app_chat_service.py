@@ -851,7 +851,10 @@ class AppChatService:
         ]
         if memory:
             coros.append(
-                self.agent_service.load_memory_config(config.memory, user_id, _ws_id, storage_type, user_rag_memory_id)
+                self.agent_service.load_memory_config(
+                    config.memory, user_id, _ws_id, storage_type, user_rag_memory_id,
+                    app_id=config.app_id,
+                )
             )
         parallel_results = await asyncio.gather(*coros, return_exceptions=True)
 
@@ -1445,7 +1448,10 @@ class AppChatService:
             ]
             if memory:
                 coros.append(
-                    self.agent_service.load_memory_config(config.memory, user_id, _ws_id, storage_type, user_rag_memory_id)
+                    self.agent_service.load_memory_config(
+                        config.memory, user_id, _ws_id, storage_type,
+                        user_rag_memory_id, app_id=config.app_id,
+                    )
                 )
             parallel_results = await asyncio.gather(*coros, return_exceptions=True)
 
