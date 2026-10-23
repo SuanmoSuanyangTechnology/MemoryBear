@@ -175,8 +175,8 @@ class ChunkRetrieve(BaseModel):
     ex_ids: list[str] | None = None
     knowledge_bases: list[KnowledgeBaseConfig] = Field(default_factory=list)
     file_names_filter: list[str] | None = None
-    similarity_threshold: float | None = None
-    vector_similarity_weight: float | None = None
+    similarity_threshold: float | None = Field(None, ge=0, le=1)
+    vector_similarity_weight: float | None = Field(None, ge=0, le=1)
     top_k: int | None = Field(20, ge=1, le=100)
     top_n: int | None = Field(20, ge=1, le=100)
     retrieve_type: RetrieveType | None = None
