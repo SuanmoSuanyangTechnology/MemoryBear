@@ -1,10 +1,4 @@
-/*
- * @Author: ZhaoYing 
- * @Date: 2026-02-03 16:34:12 
- * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-16 11:19:20
- */
-import React, { useState, useEffect, useMemo, type MouseEvent } from 'react';
+import { forwardRef, useImperativeHandle, useState, useEffect, useMemo, type MouseEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { App, Flex, Row, Col, Space } from 'antd';
 import clsx from 'clsx';
@@ -18,7 +12,13 @@ import Tag from '@/components/Tag'
 import PrivateWrap from '@/components/PrivateWrap';
 import { AppOntology } from '@redbear/memory-brick';
 
-const MySharing: React.FC = () => {
+export interface MySharingRef {
+  refresh: () => void;
+}
+
+const MySharing = forwardRef<MySharingRef, { switchOntology: (item: Application) => void; }>(({
+  switchOntology,
+}, ref) => {
   const { t } = useTranslation();
   const { modal } = App.useApp();
   const [loading, setLoading] = useState(false)
@@ -32,6 +32,8 @@ const MySharing: React.FC = () => {
       .then(res => setData(res as MySharedOutItem[]))
       .finally(() => setLoading(false))
   }
+
+  useImperativeHandle(ref, () => ({ refresh: getList }))
 
   /** Group items by target_workspace_id */
   const grouped = useMemo(() => {
@@ -190,7 +192,11 @@ const MySharing: React.FC = () => {
                 />
                 {item.ontology &&
                   <PrivateWrap>
-                    {() => <AppOntology app={item as unknown as Application} className="rb:mt-3!" />}
+                    {() => (
+                      <div onClick={e => e.stopPropagation()}>
+                        <AppOntology app={item as unknown as Application} className="rb:mt-3!" onClick={() => switchOntology(item as unknown as Application)} />
+                      </div>
+                    )}
                   </PrivateWrap>
                 }
               </RbCard>
@@ -200,6 +206,6 @@ const MySharing: React.FC = () => {
       </Row>
     </BodyWrapper>
   )
-};
+});
 
 export default MySharing;
