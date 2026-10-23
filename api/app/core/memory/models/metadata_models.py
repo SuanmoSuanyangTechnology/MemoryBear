@@ -13,6 +13,7 @@ domain_specific_info 为 dict[str, list[str]]。
 import json
 import logging
 from typing import Any, Dict, List, Literal, Optional, Tuple
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -269,6 +270,82 @@ def _union_entries(base: List[Any], extra: List[Any]) -> List[Any]:
     return result
 
 
+def is_scene_type_id(key: object) -> bool:
+    """判断 domain_specific_info 的键是否为 scene_type_id（uuid 字符串）。
+
+    历史数据可能以场景名作为键，这类键返回 False。
+    """
+    if not isinstance(key, str):
+        return False
+    try:
+        UUID(key)
+    except (ValueError, TypeError, AttributeError):
+        return False
+    return True
+
+
+def drop_deleted_scene_entries(
+    domain_specific_info: Any, scene_names_by_id: Optional[Dict[str, str]] = None,
+) -> Any:
+    """丢弃场景类型已删除的条目：uuid 键在名称映射中缺席即视为已删除。
+
+    非 uuid 键（历史 name 键）原样保留，非 dict 输入原样返回；不修改入参。
+    """
+    if not isinstance(domain_specific_info, dict):
+        return domain_specific_info
+    names = scene_names_by_id or {}
+    return {
+        key: items
+        for key, items in domain_specific_info.items()
+        if not (is_scene_type_id(key) and key not in names)
+    }
+
+
+def _remap_domain_keys(
+    domains: Any, key_map: Dict[str, str], *, preserve_unmapped: bool,
+) -> Dict[str, List[Any]]:
+    """按映射换键并合并碰撞条目；不查询数据库、不修改入参。"""
+    if not isinstance(domains, dict):
+        return {}
+    destinations = set(key_map.values())
+    remapped: Dict[str, List[Any]] = {}
+    for key, items in domains.items():
+        if not isinstance(items, list):
+            logger.warning(f"[Metadata] 场景换键忽略非列表数据: {key}")
+            continue
+        destination = key_map.get(key, key)
+        if preserve_unmapped and key not in key_map and key not in destinations:
+            # 未声明的冻结场景不参与去重或清洗。
+            remapped[destination] = list(items)
+        else:
+            remapped[destination] = _union_entries(remapped.get(destination, []), items)
+    return remapped
+
+
+def project_domain_names(
+    domain_specific_info: Any, scene_names_by_id: Optional[Dict[str, str]] = None,
+    *, preserve_unmapped: bool = False,
+) -> Dict[str, List[Any]]:
+    """模型侧 ID 转名称；未知键保留，提取侧可保留冻结条目的原有重复。"""
+    return _remap_domain_keys(
+        domain_specific_info, scene_names_by_id or {}, preserve_unmapped=preserve_unmapped,
+    )
+
+
+def normalize_domain_ids(
+    domain_specific_info: Any, name_to_id_map: Optional[Dict[str, str]] = None,
+    *, preserve_unmapped: bool = False,
+) -> Dict[str, List[Any]]:
+    """存储侧名称转 ID；已知 ID 优先保留，同一 ID 下条目合并去重。"""
+    mapping = name_to_id_map or {}
+    known_ids = set(mapping.values())
+    return _remap_domain_keys(
+        domain_specific_info,
+        {name: scene_id for name, scene_id in mapping.items() if name not in known_ids},
+        preserve_unmapped=preserve_unmapped,
+    )
+
+
 def normalize_legacy_metadata_values(value: Any) -> list[Any]:
     """历史字段按列表读取；单值整体保留，空值不生成条目。"""
     values = value if isinstance(value, list) else [value]
@@ -282,17 +359,30 @@ def _legacy_metadata_entry_key(value: Any) -> tuple[str, str]:
     return type(value).__name__, json.dumps(value, sort_keys=True, ensure_ascii=False)
 
 
-def merge_user_meta_data(target: Optional[Dict[str, Any]], source: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+def merge_user_meta_data(
+    target: Optional[Dict[str, Any]],
+    source: Optional[Dict[str, Any]],
+    name_to_id_map: Optional[Dict[str, str]] = None,
+) -> Dict[str, Any]:
     """用户归并时把 source 的 meta_data 合并进 target，返回新字典。
 
     - identity_background / relationships：按 _entry_key 去重并集；
     - domain_specific_info：按场景键合并，场景内按 _entry_key 去重并集；
+      提供 name_to_id_map 时，两侧的 scene_name 键先转换为 scene_type_id，碰撞条目取并集；
     - 旧 8 字段：列表或历史单值均保留，字符串忽略大小写去重，无内容时不新增键；
     - 其他 list 字段：按 str(v).lower() 去重并集（历史行为）；
     - 类型不符的一侧忽略并记 warning；source 中非 list / dict 的其他字段不合并。
     """
     merged: Dict[str, Any] = dict(target or {})
-    for key, values in (source or {}).items():
+    source_meta: Dict[str, Any] = dict(source or {})
+    if name_to_id_map:
+        for metadata in (merged, source_meta):
+            domains = metadata.get("domain_specific_info")
+            if isinstance(domains, dict):
+                metadata["domain_specific_info"] = normalize_domain_ids(
+                    domains, name_to_id_map,
+                )
+    for key, values in source_meta.items():
         if key in LEGACY_METADATA_FIELDS:
             items = normalize_legacy_metadata_values(merged.get(key))
             items += normalize_legacy_metadata_values(values)

@@ -2,7 +2,9 @@ from abc import ABC, abstractmethod
 from typing import TypeVar
 
 from app.core.memory.enums import Neo4jNodeType
-from app.core.memory.models.metadata_models import normalize_new_metadata, project_l0_profile
+from app.core.memory.models.metadata_models import (
+    drop_deleted_scene_entries, normalize_new_metadata, project_domain_names, project_l0_profile,
+)
 from app.core.memory.models.service_models import RelationMemory
 
 
@@ -224,6 +226,10 @@ class DialogueBuilder(BaseBuilder):
 
 
 class MetadataBuilder(BaseBuilder):
+    def __init__(self, records: dict, scene_names_by_id: dict[str, str] | None = None):
+        super().__init__(records)
+        self.scene_names_by_id = scene_names_by_id
+
     @property
     def data(self) -> dict:
         new_meta = normalize_new_metadata(self.record)
@@ -241,7 +247,12 @@ class MetadataBuilder(BaseBuilder):
             "traits": self.record.get("traits", []) or [],
             "identity_background": new_meta["identity_background"],
             "relationships": new_meta["relationships"],
-            "domain_specific_info": new_meta["domain_specific_info"],
+            "domain_specific_info": project_domain_names(
+                drop_deleted_scene_entries(
+                    new_meta["domain_specific_info"], self.scene_names_by_id,
+                ),
+                self.scene_names_by_id,
+            ),
         }
 
     @property
@@ -266,7 +277,12 @@ class MetadataBuilder(BaseBuilder):
         )
         domain_specific_info = {
             scene: items
-            for scene, items in normalize_new_metadata(self.record)["domain_specific_info"].items()
+            for scene, items in project_domain_names(
+                drop_deleted_scene_entries(
+                    self.record.get("domain_specific_info"), self.scene_names_by_id,
+                ),
+                self.scene_names_by_id,
+            ).items()
             if items
         }
         fields.append(("domain-specific-info", domain_specific_info))
