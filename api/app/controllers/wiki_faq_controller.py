@@ -17,7 +17,6 @@ from app.schemas.wiki_faq_schema import (
     FAQCreate,
     FAQEdit,
     FAQEnabled,
-    FAQExpected,
 )
 
 router = APIRouter(
@@ -96,34 +95,6 @@ async def batch_enabled(
     raise HTTPException(status_code=503, detail="FAQ requires mem-knowledge")
 
 
-@router.get("/generation-jobs")
-@cur_workspace_access_guard_async()
-@route_through_knowledge_service(source=KnowledgeRetrievalSource.MANAGER_API)
-async def list_generation_jobs(
-    request: Request,
-    kb_id: UUID,
-    current_user: Annotated[User, Depends(get_current_user_async)],
-    wiki_page_id: UUID | None = None,
-    page: int = Query(1, ge=1),
-    pagesize: int = Query(20, ge=1, le=100),
-    limit: int | None = Query(None, ge=1, le=100, include_in_schema=False),
-):
-    raise HTTPException(status_code=503, detail="FAQ requires mem-knowledge")
-
-
-@router.post("/generation-jobs/{job_id}/retry")
-@cur_workspace_access_guard_async()
-@route_through_knowledge_service(source=KnowledgeRetrievalSource.MANAGER_API)
-async def retry_generation(
-    request: Request,
-    kb_id: UUID,
-    job_id: UUID,
-    payload: FAQExpected,
-    current_user: Annotated[User, Depends(get_current_user_async)],
-):
-    raise HTTPException(status_code=503, detail="FAQ requires mem-knowledge")
-
-
 @router.get("/{faq_id}")
 @cur_workspace_access_guard_async()
 @route_through_knowledge_service(source=KnowledgeRetrievalSource.MANAGER_API)
@@ -131,26 +102,6 @@ async def get_faq(
     request: Request,
     kb_id: UUID,
     faq_id: UUID,
-    current_user: Annotated[User, Depends(get_current_user_async)],
-):
-    raise HTTPException(status_code=503, detail="FAQ requires mem-knowledge")
-
-
-@router.get("/{faq_id}/index-status")
-@cur_workspace_access_guard_async()
-@route_through_knowledge_service(source=KnowledgeRetrievalSource.MANAGER_API)
-async def get_index_status(
-    request: Request, kb_id: UUID, faq_id: UUID,
-    current_user: Annotated[User, Depends(get_current_user_async)],
-):
-    raise HTTPException(status_code=503, detail="FAQ requires mem-knowledge")
-
-
-@router.post("/{faq_id}/index/retry")
-@cur_workspace_access_guard_async()
-@route_through_knowledge_service(source=KnowledgeRetrievalSource.MANAGER_API)
-async def retry_index(
-    request: Request, kb_id: UUID, faq_id: UUID, payload: FAQExpected,
     current_user: Annotated[User, Depends(get_current_user_async)],
 ):
     raise HTTPException(status_code=503, detail="FAQ requires mem-knowledge")

@@ -8,7 +8,6 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from ...repositories.wiki_faq import read, write
 from ...runtime import ProcessRuntime
 from ...services import wiki_faq as service
-from ...services.wiki_faq_retrieval import index_state
 from ..dependencies import Principal, get_principal, get_runtime, get_source
 from ..schemas.chunk import KnowledgeRetrievalSource
 from ..schemas.common import SuccessEnvelope, success
@@ -20,7 +19,6 @@ from ..schemas.wiki_faq import (
     FAQCreate,
     FAQEdit,
     FAQEnabled,
-    FAQExpected,
 )
 
 
@@ -144,40 +142,6 @@ async def batch_enabled(
     )
 
 
-@router.get("/generation-jobs", response_model=SuccessEnvelope[dict])
-async def list_generation_jobs(
-    request: Request,
-    kb_id: UUID,
-    principal: PrincipalDep,
-    runtime: RuntimeDep,
-    wiki_page_id: UUID | None = None,
-    page: int = Query(1, ge=1),
-    pagesize: int = Query(20, ge=1, le=100),
-    limit: int | None = Query(None, ge=1, le=100, include_in_schema=False),
-):
-    scope = scope_for(kb_id, principal)
-    pagesize = pagesize if "pagesize" in request.query_params else limit or pagesize
-    return success(
-        data=await service.run(
-            runtime, read.list_jobs, scope, wiki_page_id=wiki_page_id, page=page, limit=pagesize
-        )
-    )
-
-
-@router.post("/generation-jobs/{job_id}/retry", response_model=SuccessEnvelope[dict])
-async def retry_generation(
-    kb_id: UUID,
-    job_id: UUID,
-    payload: FAQExpected,
-    principal: PrincipalDep,
-    runtime: RuntimeDep,
-):
-    scope = scope_for(kb_id, principal)
-    return success(
-        data=await service.retry_job(runtime, scope, job_id, payload.expected_row_version)
-    )
-
-
 @router.get("/{faq_id}", response_model=SuccessEnvelope[dict])
 async def get_faq(
     kb_id: UUID,
@@ -187,30 +151,6 @@ async def get_faq(
 ):
     scope = scope_for(kb_id, principal)
     return success(data=await service.run(runtime, read.detail, scope, faq_id))
-
-
-@router.get("/{faq_id}/index-status", response_model=SuccessEnvelope[dict])
-async def get_index_status(kb_id: UUID, faq_id: UUID, principal: PrincipalDep, runtime: RuntimeDep):
-    return success(data=await index_state(runtime, scope_for(kb_id, principal), faq_id))
-
-
-@router.post("/{faq_id}/index/retry", response_model=SuccessEnvelope[dict])
-async def retry_index(
-    kb_id: UUID,
-    faq_id: UUID,
-    payload: FAQExpected,
-    principal: PrincipalDep,
-    runtime: RuntimeDep,
-):
-    return success(
-        data=await index_state(
-            runtime,
-            scope_for(kb_id, principal),
-            faq_id,
-            synchronize=True,
-            expected_row_version=payload.expected_row_version,
-        )
-    )
 
 
 @router.patch("/{faq_id}", response_model=SuccessEnvelope[dict])
