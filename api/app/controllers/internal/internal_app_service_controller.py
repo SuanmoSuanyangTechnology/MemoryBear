@@ -24,6 +24,8 @@ APPLICATION_SERVICE_CALLBACK_SECRET，两端配置同一值）。记忆类与终
     POST /end-user/identity-update                      终端用户身份确认 / 归并
     POST /apps/ontology-batch                           应用 ontology 子对象批量聚合
     POST /apps/ontology-filter                          应用列表本体筛选（返回命中的 app_ids）
+    POST /apps/ontology-bind                            应用创建后的首次本体绑定
+    POST /memory/emotion-policy                         按应用解析情绪回复策略
 """
 from __future__ import annotations
 
@@ -60,6 +62,8 @@ logger = get_business_logger()
 
 # 本体绑定门面由 premium.memory 注册；社区版无此插件，回调返回 available=false
 ONTOLOGY_BINDING_PLUGIN = "memory.ontology_binding"
+# 情绪策略 provider 同样由 premium.memory 注册；社区版回调返回 available=false
+EMOTION_POLICY_PLUGIN = "memory.emotion_reply_policy"
 
 
 def _parse_workspace_id(raw: Optional[str]) -> uuid.UUID:
@@ -191,6 +195,18 @@ class AppOntologyBatchRequest(BaseModel):
 class AppOntologyFilterRequest(AppOntologyBatchRequest):
     ontology_status: Optional[str] = None
     field_search: Optional[str] = None
+
+
+class AppOntologyBindRequest(BaseModel):
+    app_id: uuid.UUID
+    tenant_id: uuid.UUID
+    ontology_id: uuid.UUID
+
+
+class AppEmotionPolicyRequest(BaseModel):
+    app_id: uuid.UUID
+    tenant_id: uuid.UUID
+    emotion_code: str
 
 
 # ──────────────────────────────────────────────────────────────
@@ -566,3 +582,52 @@ def internal_app_ontology_filter(
             select(App.id).where(App.id.in_(payload.app_ids), *filters)
         ).all()
     return success(data={"available": True, "app_ids": [str(app_id) for app_id in matched]})
+
+
+@router.post("/apps/ontology-bind")
+def internal_app_ontology_bind(
+        payload: AppOntologyBindRequest,
+        _guard: None = Depends(require_app_service_callback_secret),
+):
+    """应用创建后的首次本体绑定。
+
+    仅供刚创建的应用使用：写路径是插入一条有效绑定，换绑仍走管理面
+    /memory/ontology/app-bindings 接口。提交后失效应用的情绪策略缓存，
+    与老单体应用创建后的失效时机保持一致。
+    """
+    binder = get_plugin(ONTOLOGY_BINDING_PLUGIN)
+    if binder is None:
+        return success(data={"available": False, "bound": False})
+    logger.info(
+        f"Internal app ontology bind - app: {payload.app_id}, "
+        f"tenant: {payload.tenant_id}, ontology: {payload.ontology_id}"
+    )
+    with get_db_context() as db:
+        binder.bind_in_session(db, payload.app_id, payload.tenant_id, payload.ontology_id)
+        db.commit()
+    policy_provider = get_plugin(EMOTION_POLICY_PLUGIN)
+    if policy_provider is not None:
+        policy_provider.invalidate_sync(payload.app_id, payload.tenant_id)
+    return success(data={"available": True, "bound": True})
+
+
+# ──────────────────────────────────────────────────────────────
+# App emotion policy
+# ──────────────────────────────────────────────────────────────
+#
+# 情绪策略与本体同属记忆域；provider 自带 PG/Redis 缓存与降级，本端点只做
+# 身份透传。available=false 时应用服务退回基础提示词（与单体无插件行为一致）。
+
+@router.post("/memory/emotion-policy")
+async def internal_app_emotion_policy(
+        payload: AppEmotionPolicyRequest,
+        _guard: None = Depends(require_app_service_callback_secret),
+):
+    """按应用解析本轮情绪回复策略。"""
+    provider = get_plugin(EMOTION_POLICY_PLUGIN)
+    if provider is None:
+        return success(data={"available": False, "strategy": None})
+    strategy = await provider.get_strategy(
+        payload.app_id, payload.tenant_id, payload.emotion_code
+    )
+    return success(data={"available": True, "strategy": strategy})

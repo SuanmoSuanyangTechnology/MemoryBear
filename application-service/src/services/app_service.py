@@ -27,7 +27,7 @@ from sqlalchemy.orm import Session
 
 from ..cache.workflow_cache import delete_workflow_config
 from ..errors import BizCode, BusinessException, ResourceNotFoundException
-from ..memory.ontology_binding import ONTOLOGY_BINDING_PLUGIN
+from ..memory.ontology_binding import ONTOLOGY_BINDING_PLUGIN, OntologyUpstreamError
 from ..models import (
     AgentConfig,
     App,
@@ -678,13 +678,24 @@ class AppService:
                 )
                 self._create_workflow_config(app.id, wf_data, now)
 
-            # Optional ontology binding: committed in the same transaction as the
-            # app and its config; any step failing rolls back the whole transaction
-            if data.ontology_id:
+            # Optional ontology binding: the in-process binder writes it in the
+            # same transaction as the app and its config; the remote binder can
+            # only run after the local commit (no remote call inside a
+            # transaction) and is compensated when it fails.
+            binder = get_plugin(ONTOLOGY_BINDING_PLUGIN)
+            remote_bind = bool(data.ontology_id) and binder is not None and not getattr(
+                binder, "uses_local_db", True
+            )
+            if remote_bind and tenant_id is None:
+                raise BusinessException("缺少租户信息，无法绑定本体", BizCode.INVALID_PARAMETER)
+            if data.ontology_id and not remote_bind:
                 self._bind_ontology_in_session(app.id, tenant_id, data.ontology_id)
 
             self.db.commit()
             self.db.refresh(app)
+
+            if remote_bind:
+                self._bind_ontology_remote(binder, app, tenant_id, data.ontology_id)
 
             logger.info("应用创建成功", extra={"app_id": str(app.id), "app_name": app.name})
             return app
@@ -709,10 +720,10 @@ class AppService:
     ) -> None:
         """Write the app-ontology binding within the current transaction (no commit).
 
-        In the community edition without the ontology module, or when only the
-        remote (callback) binder is registered, ignore the input and log a
-        warning: the remote binder exposes read-only aggregation and writing a
-        binding remotely would need its own callback endpoint.
+        Only the in-process binder writes here; the remote (callback) binder is
+        invoked after the local commit by ``_bind_ontology_remote``. In the
+        community edition without any binder the input is ignored with a
+        warning (ontology module unavailable).
         """
         binder = get_plugin(ONTOLOGY_BINDING_PLUGIN)
         if binder is None or not getattr(binder, "uses_local_db", True):
@@ -724,6 +735,44 @@ class AppService:
         if tenant_id is None:
             raise BusinessException("缺少租户信息，无法绑定本体", BizCode.INVALID_PARAMETER)
         binder.bind_in_session(self.db, app_id, tenant_id, ontology_id)
+
+    def _bind_ontology_remote(
+            self,
+            binder: Any,
+            app: App,
+            tenant_id: uuid.UUID | None,
+            ontology_id: uuid.UUID,
+    ) -> None:
+        """Bind after the local commit; soft-delete the app when the callback fails.
+
+        The monolith business code is passed through to the client (validation
+        codes like 4000/3001); transport failures surface as 10003.
+        """
+        try:
+            binder.bind_app(app.id, tenant_id, ontology_id)
+        except OntologyUpstreamError as exc:
+            self._compensate_failed_create(app)
+            raise BusinessException(
+                str(exc),
+                exc.code if exc.code is not None else BizCode.SERVICE_UNAVAILABLE,
+                cause=exc,
+            ) from exc
+
+    def _compensate_failed_create(self, app: App) -> None:
+        try:
+            app.is_active = False
+            app.updated_at = utcnow_naive()
+            self.db.commit()
+            logger.warning(
+                "本体绑定失败，已软删除刚创建的应用",
+                extra={"app_id": str(app.id), "app_name": app.name},
+            )
+        except Exception as e:
+            self.db.rollback()
+            logger.error(
+                "本体绑定失败后的补偿删除也失败",
+                extra={"app_id": str(app.id), "error": str(e)},
+            )
 
     def update_app(
             self,

@@ -1855,7 +1855,9 @@ class AgentRunService:
             system_prompt = append_external_context_rule(system_prompt)
             # Emotion-aware reply: must complete before ToolOrchestrator / LangChainAgent.
             system_prompt = await apply_emotion_detection(
-                system_prompt, emotion_detection, user_message_id, write_cache=False
+                system_prompt, emotion_detection, user_message_id,
+                app_id=agent_config.app_id, tenant_id=tenant_id, db=self.db,
+                write_cache=False,
             )
             use_agent_mode = ModelFeature.FUNCTION_CALL in features
             orchestrator_node_executions = []
@@ -2432,7 +2434,9 @@ class AgentRunService:
             system_prompt = append_external_context_rule(system_prompt)
             # Emotion-aware reply: must complete before ToolOrchestrator / LangChainAgent.
             system_prompt = await apply_emotion_detection(
-                system_prompt, emotion_detection, user_message_id, write_cache=False
+                system_prompt, emotion_detection, user_message_id,
+                app_id=agent_config.app_id, tenant_id=tenant_id, db=self.db,
+                write_cache=False,
             )
             use_agent_mode = ModelFeature.FUNCTION_CALL in features
             orchestrator_node_executions = []

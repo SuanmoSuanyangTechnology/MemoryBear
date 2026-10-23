@@ -2802,6 +2802,9 @@ class MultiAgentOrchestrator:
                     _supervisor_prompt,
                     self._turn_emotion_detection,
                     self._turn_user_message_id,
+                    app_id=self._app_id,
+                    tenant_id=self.tenant_id,
+                    db=self.db,
                     write_cache=self.cluster_memory_enabled(),
                 )
             except Exception as e:  # noqa: BLE001 - emotion sensing failure must not block the conversation

@@ -4,6 +4,9 @@ Responsibilities:
 - Calls BERT (``fast_write_emotion_client.predict``) on the current user message with a
   hard 1s timeout; timeout/exception/missing config all degrade to None and never
   affect the normal reply.
+- Reply strategies come from the enterprise ``memory.emotion_reply_policy`` provider
+  (app-bound ontology via the monolith callback) when registered, otherwise from the
+  bundled community JSON policy file.
 - This module **never raises**; the return value is always at least base_prompt.
 """
 
@@ -16,6 +19,7 @@ import os
 from typing import Any, Dict, Optional
 
 from ...services.fast_write_emotion_client import FastWriteEmotionResult
+from ..emotion_policy import EMOTION_POLICY_PLUGIN
 
 logger = logging.getLogger(__name__)
 
@@ -177,7 +181,65 @@ def _render_items(items: Any) -> str:
     return str(items or "")
 
 
-def build_prompt(base_prompt: str, emotion_result: Optional[FastWriteEmotionResult]) -> str:
+def _json_policy(emotion: str) -> Optional[dict]:
+    """Community default policy from the bundled JSON (keys: tone/do/avoid)."""
+    policy = load_policies().get(emotion)
+    if not isinstance(policy, dict) or not policy:
+        return None
+    return {
+        "tone": policy.get("tone"),
+        "do_list": policy.get("do"),
+        "avoid_list": policy.get("avoid"),
+    }
+
+
+async def resolve_policy(
+    emotion_result: Optional[FastWriteEmotionResult],
+    app_id: Any = None,
+    tenant_id: Any = None,
+    *,
+    db: Any = None,
+) -> Optional[dict]:
+    """Resolve this turn's reply policy as ``{tone, do_list, avoid_list}``.
+
+    With the enterprise provider registered the strategy comes from the app's
+    bound ontology through the monolith callback; there is no JSON fallback on
+    provider errors because the bundled JSON is the community default, not the
+    enterprise system-default ontology. Without the provider the bundled JSON
+    remains the source.
+    """
+    emotion = getattr(emotion_result, "emotion", None) if emotion_result else None
+    if not emotion:
+        return None
+
+    from ...plugins import get_plugin
+
+    provider = get_plugin(EMOTION_POLICY_PLUGIN)
+    if provider is None:
+        return _json_policy(emotion)
+    if not app_id or not tenant_id:
+        logger.warning(
+            "[EmotionReply] policy lookup skipped: has_app_id=%s has_tenant_id=%s",
+            bool(app_id), bool(tenant_id),
+        )
+        return None
+    if db is not None:
+        from ...db import end_read_transaction
+
+        # End the preparation read transaction so the callback does not hold a
+        # pooled connection while the monolith re-reads the shared database.
+        await end_read_transaction(db, "emotion_policy")
+    try:
+        strategy = await provider.get_strategy(app_id, tenant_id, emotion)
+    except Exception as e:
+        logger.warning(
+            "[EmotionReply] policy lookup failed, keeping base prompt: err=%s", e
+        )
+        return None
+    return strategy if isinstance(strategy, dict) else None
+
+
+def build_prompt(base_prompt: str, policy: Optional[dict]) -> str:
     """
     On a valid policy hit, inject "fixed execution principles + current-round reply
     strategy" (they always appear as a pair).
@@ -185,14 +247,12 @@ def build_prompt(base_prompt: str, emotion_result: Optional[FastWriteEmotionResu
     """
     base = base_prompt or ""
     try:
-        emotion = getattr(emotion_result, "emotion", None) if emotion_result else None
-        policy = load_policies().get(emotion) if emotion else None
         if not isinstance(policy, dict) or not policy:
             return base
 
         tone = str(policy.get("tone") or "").strip()
-        do_items = _render_items(policy.get("do"))
-        avoid_items = _render_items(policy.get("avoid"))
+        do_items = _render_items(policy.get("do_list"))
+        avoid_items = _render_items(policy.get("avoid_list"))
         strategy = ["## 本轮回复策略"]
         if tone:
             strategy.append(f"语气：{tone}")
@@ -232,6 +292,9 @@ async def apply_detection(
     detection: Optional["asyncio.Task"],
     message_id: Any,
     *,
+    app_id: Any = None,
+    tenant_id: Any = None,
+    db: Any = None,
     write_cache: bool = True,
 ) -> str:
     """Await the emotion-detection result -> (optionally) write the cache -> inject the prompt."""
@@ -250,7 +313,8 @@ async def apply_detection(
         # UUID -> str, strictly matching the str form of original_message_id on the fast-write side
         await set_cached_emotion(str(message_id), result)
 
-    return build_prompt(base_prompt, result)
+    policy = await resolve_policy(result, app_id, tenant_id, db=db)
+    return build_prompt(base_prompt, policy)
 
 
 def cancel_detection(detection: Optional["asyncio.Task"]) -> None:
@@ -268,6 +332,9 @@ async def resolve_and_inject(
     message: str,
     message_id: Any,
     *,
+    app_id: Any = None,
+    tenant_id: Any = None,
+    db: Any = None,
     write_cache: bool = True,
 ) -> str:
     """Serial orchestration (for callers that cannot run tasks concurrently, and for
@@ -280,4 +347,5 @@ async def resolve_and_inject(
         from .emotion_cache import set_cached_emotion
 
         await set_cached_emotion(str(message_id), result)
-    return build_prompt(base_prompt, result)
+    policy = await resolve_policy(result, app_id, tenant_id, db=db)
+    return build_prompt(base_prompt, policy)
