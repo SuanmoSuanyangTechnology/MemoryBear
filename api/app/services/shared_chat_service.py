@@ -349,6 +349,9 @@ class SharedChatService:
                 memory_config,
                 user_id,
                 release.app.workspace_id if release.app else None,
+                storage_type,
+                user_rag_memory_id,
+                app_id=release.app_id,
             )
             if memory_tool:
                 tools.append(memory_tool)
@@ -562,6 +565,9 @@ class SharedChatService:
                     memory_config,
                     user_id,
                     release.app.workspace_id if release.app else None,
+                    storage_type,
+                    user_rag_memory_id,
+                    app_id=release.app_id,
                 )
                 if memory_tool:
                     tools.append(memory_tool)

@@ -27,6 +27,7 @@ from app.core.memory.models.service_models import (
 )
 from app.core.memory.models.service_models import MemoryContext
 from app.core.memory.prompt import prompt_manager
+from app.core.memory.read_services.metadata_scope import scoped_metadata
 from app.core.memory.read_services.search_engine.quick_retrieval_dedup import (
     filter_quick_retrieval_memories,
 )
@@ -912,6 +913,7 @@ class Neo4jSearchService:
     async def memory_l0(self) -> Memory:
         end_user_id = self.ctx.end_user_id
         user_meta = await get_user_metadata(end_user_id)
+        user_meta = await scoped_metadata(self.ctx, user_meta)
         metadata = MetadataBuilder(user_meta)
         return Memory(
             score=1,
@@ -1256,6 +1258,7 @@ class MetaSearchService:
         else:
             end_user_id = self.ctx.end_user_id
             user_meta = await get_user_metadata(end_user_id)
+            user_meta = await scoped_metadata(self.ctx, user_meta)
             metadata = MetadataBuilder(user_meta)
             memory = Memory(
                 score=1,

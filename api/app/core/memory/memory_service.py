@@ -54,7 +54,8 @@ class MemoryService:
             user_rag_memory_id: str | None = None,
             conversation_id: str | None = None,
             language: str = "zh",
-            draft=False
+            draft=False,
+            app_id: uuid.UUID | None = None,
     ):
         with get_db_read() as db:
             config_service = MemoryConfigService(db)
@@ -69,6 +70,7 @@ class MemoryService:
                 "write/read/pilot_write 方法将不可用"
             )
         self.ctx = MemoryContext(
+            app_id=app_id,
             end_user_id=end_user_id,
             config_id=config_id,
             memory_config=memory_config,
@@ -90,6 +92,7 @@ class MemoryService:
             conversation_id: str | None = None,
             language: str = "zh",
             draft=False,
+            app_id: uuid.UUID | None = None,
     ) -> "MemoryService":
         """Async factory — loads MemoryConfig with true async DB calls.
 
@@ -114,6 +117,7 @@ class MemoryService:
             )
 
         instance.ctx = MemoryContext(
+            app_id=app_id,
             end_user_id=end_user_id,
             config_id=config_id,
             memory_config=memory_config,
@@ -563,6 +567,7 @@ def create_long_term_memory_tool(
         user_rag_memory_id: Optional[str] = None,
         memory_name: Optional[str] = None,
         config_id: uuid.UUID | None = None,
+        app_id: uuid.UUID | None = None,
         db: Optional[Session] = None,
 ):
     """创建长期记忆检索工具。
@@ -624,6 +629,7 @@ def create_long_term_memory_tool(
                 workspace_id=workspace_id,
                 storage_type=storage_type or "neo4j",
                 user_rag_memory_id=user_rag_memory_id,
+                app_id=app_id,
             )
             search_result = await memory_service.read(
                 question,
