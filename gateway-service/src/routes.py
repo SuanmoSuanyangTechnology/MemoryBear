@@ -10,13 +10,21 @@ API_KEY_PATH_PREFIXES; these handlers only echo the injected identity.
 import logging
 
 from auth_sdk.schema import ApiKeyContext, UserContext
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 
+from src import config
 from src.forward import Forwarder
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+
+async def _stub_endpoints_enabled() -> None:
+    """Stubs echo identity headers and the internal token — an e2e/test-only
+    surface that must not be exposed in production."""
+    if not config.settings.ENABLE_STUB_ENDPOINTS:
+        raise HTTPException(status_code=404, detail="not found")
 
 
 @router.get("/healthz")
@@ -43,7 +51,7 @@ def _echo_headers(request: Request) -> dict[str, str]:
             if k.lower().startswith("x-")}
 
 
-@router.get("/stub")
+@router.get("/stub", dependencies=[Depends(_stub_endpoints_enabled)])
 async def stub(request: Request):
     identity = _stub_identity(request, UserContext)
     if identity is None:
@@ -60,7 +68,7 @@ async def stub(request: Request):
     }
 
 
-@router.get("/v1/stub")
+@router.get("/v1/stub", dependencies=[Depends(_stub_endpoints_enabled)])
 async def api_key_stub(request: Request):
     identity = _stub_identity(request, ApiKeyContext)
     if identity is None:
