@@ -82,21 +82,20 @@ async def detect_emotion(
         logger.debug("[EmotionReply] skipped event=detect reason=service_unconfigured")
         return None
     effective_timeout = DETECT_TIMEOUT_SEC if timeout is None else timeout
-    started = perf_counter()
     try:
         from app.services.fast_write_emotion_client import predict as _predict_emotion
 
         return await asyncio.wait_for(_predict_emotion(text), timeout=effective_timeout)
     except asyncio.TimeoutError:
         logger.warning(
-            "[EmotionReply] failed event=detect reason=timeout text_len=%s timeout_s=%s elapsed_ms=%.1f",
-            len(text), effective_timeout, (perf_counter() - started) * 1000,
+            "[EmotionReply] emotion detect timed out, degrading: text_len=%s, timeout=%ss",
+            len(text), effective_timeout,
         )
         return None
     except Exception as e:
         logger.warning(
-            "[EmotionReply] failed event=detect reason=service_error text_len=%s error_type=%s elapsed_ms=%.1f",
-            len(text), type(e).__name__, (perf_counter() - started) * 1000,
+            "[EmotionReply] emotion detect failed, degrading: text_len=%s, err=%s",
+            len(text), e,
         )
         return None
 
