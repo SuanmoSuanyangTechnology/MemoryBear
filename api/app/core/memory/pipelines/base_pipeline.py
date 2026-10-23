@@ -59,9 +59,15 @@ class ModelClientMixin(ABC):
         return ref
 
     @staticmethod
-    async def get_llm_client_async(db: AsyncSession, model_id: uuid.UUID, tenant_id: uuid.UUID) -> RedBearChatModel:
+    async def get_llm_client_async(
+        db: AsyncSession,
+        model_id: uuid.UUID,
+        tenant_id: uuid.UUID,
+        extra_params: Optional[Dict[str, Any]] = None,
+    ) -> RedBearChatModel:
         return RedBearChatModel.for_invoke_ref(
-            await ModelClientMixin._invoke_ref_async(db, model_id, tenant_id)
+            await ModelClientMixin._invoke_ref_async(db, model_id, tenant_id),
+            params=extra_params or {},
         )
 
     @staticmethod
