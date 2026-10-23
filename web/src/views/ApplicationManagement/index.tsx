@@ -33,7 +33,9 @@ import OverflowTags from '@/components/OverflowTags'
 import Tag from '@/components/Tag'
 import { types } from './constants'
 import PrivateWrap from '@/components/PrivateWrap';
-import { AppOntology } from '@redbear/memory-brick';
+import { AppOntology, GET_DEFAULT_ONTOLOGY_COMPOSITION, OntologyConfigModal, type OntologyConfigModalRef, type DefaultOntologyComposition } from '@redbear/memory-brick';
+import { request } from '@/utils/request'
+import { isPrivateAvailable } from '@/utils/private'
 
 const tabKeys = ['apps', 'sharing', 'myShare']
 /**
@@ -141,6 +143,23 @@ const ApplicationManagement: React.FC = () => {
       [search_type || 'search']: search
     } as Query
   }
+
+  const [defaultOntology, setDefaultOntology] = useState<DefaultOntologyComposition>({} as DefaultOntologyComposition)
+  const ontologyConfigModalRef = useRef<OntologyConfigModalRef>(null)
+  const getDefaultOntology = () => {
+    console.log('GET_DEFAULT_ONTOLOGY_COMPOSITION', GET_DEFAULT_ONTOLOGY_COMPOSITION)
+    if (typeof GET_DEFAULT_ONTOLOGY_COMPOSITION !== 'string') return;
+    request.get(GET_DEFAULT_ONTOLOGY_COMPOSITION)
+      .then((res) => {
+        setDefaultOntology(res as DefaultOntologyComposition)
+      })
+  }
+
+  useEffect(() => {
+    if (isPrivateAvailable) {
+      getDefaultOntology()
+    }
+  }, [])
   return (
     <Flex vertical gap={16} className="rb:h-full">
       <Flex justify="space-between">
@@ -298,7 +317,7 @@ const ApplicationManagement: React.FC = () => {
 
               {item.ontology &&
                 <PrivateWrap>
-                  {() => <AppOntology app={item} className="rb:mt-3!" />}
+                  {() => <AppOntology app={item} className="rb:mt-3!" onClick={(item) => ontologyConfigModalRef.current?.open(item)} />}
                 </PrivateWrap>
               }
             </RbCard>
@@ -321,6 +340,16 @@ const ApplicationManagement: React.FC = () => {
         ref={uploadModalRef}
         refresh={refresh}
       />
+      <PrivateWrap>
+        {() => (
+          <OntologyConfigModal
+            ref={ontologyConfigModalRef}
+            request={request}
+            defaultOntology={defaultOntology}
+            refresh={refresh}
+          />
+        )}
+      </PrivateWrap>
     </Flex>
   );
 };
