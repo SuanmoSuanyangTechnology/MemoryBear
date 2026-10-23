@@ -222,6 +222,7 @@ class _HttpChunkRetrieve(_ChunkRetrieveBase):
 
     similarity_threshold: float | None = Field(None, ge=0, le=1)
     vector_similarity_weight: float | None = Field(None, ge=0, le=1)
+    top_k: int = Field(20, ge=1, le=100)
 
     @model_validator(mode="after")
     def validate_knowledge_ids(self) -> "_HttpChunkRetrieve":
