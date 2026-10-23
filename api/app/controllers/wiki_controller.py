@@ -95,15 +95,3 @@ async def graph(
     limit: Annotated[int, Query(ge=1, le=5000)] = 500,
 ):
     return _requires_service()
-
-
-@router.post("/documents/{document_id}/generate", status_code=202)
-@cur_workspace_access_guard_async()
-@route_through_knowledge_service(source=KnowledgeRetrievalSource.MANAGER_API)
-async def generate(
-    request: Request,
-    kb_id: uuid.UUID,
-    document_id: uuid.UUID,
-    current_user: Annotated[User, Depends(get_current_user_async)],
-):
-    return _requires_service()

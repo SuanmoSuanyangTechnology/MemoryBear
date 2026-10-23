@@ -1,4 +1,4 @@
-"""Management Wiki endpoints; generation only admits work and returns immediately."""
+"""Management Wiki endpoints for reading published pages and their relationships."""
 
 from __future__ import annotations
 
@@ -12,8 +12,6 @@ from ...errors import KnowledgeError
 from ...rag.wiki.config import WikiError
 from ...repositories.wiki import read
 from ...runtime import ProcessRuntime
-from ...services.wiki.execution import publish_map
-from ...services.wiki.generation import admit_generation
 from ...services.wiki.runtime import transaction
 from ..dependencies import Principal, get_principal, get_runtime
 from ..schemas.common import SuccessEnvelope, success
@@ -181,25 +179,3 @@ async def graph(
             edge_limit=runtime.settings.kb_wiki_graph_edge_limit,
         ),
     )
-
-
-@router.post(
-    "/documents/{document_id}/generate",
-    status_code=202,
-    response_model=SuccessEnvelope[dict[str, Any]],
-)
-async def generate(
-    request: Request,
-    kb_id: uuid.UUID,
-    document_id: uuid.UUID,
-    principal: PrincipalDep,
-    runtime: RuntimeDep,
-):
-    try:
-        delivery = await admit_generation(runtime, kb_id, document_id, _scope(kb_id, principal))
-        if delivery is None:
-            raise KnowledgeError.from_code("KB_WIKI_NOT_FOUND")
-        await asyncio.to_thread(publish_map, runtime, delivery, terminal_on_failure=True)
-    except WikiError as exc:
-        raise _business_error(exc) from None
-    return _response(request, {"document_id": str(document_id), "task_id": delivery["task_id"]})
