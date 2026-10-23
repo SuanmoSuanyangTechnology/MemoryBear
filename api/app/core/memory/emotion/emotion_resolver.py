@@ -170,6 +170,23 @@ def _render_items(items: Any) -> str:
     return str(items or "")
 
 
+def build_emotion_prompt_fragment(tone: Any, do_list: Any, avoid_list: Any) -> Optional[str]:
+    """Agent 和对外接口共用的固定原则与策略片段；无有效策略时不注入。"""
+    tone_text = str(tone or "").strip()
+    do_items = _render_items(do_list)
+    avoid_items = _render_items(avoid_list)
+    strategy = ["## 本轮回复策略"]
+    if tone_text:
+        strategy.append(f"语气：{tone_text}")
+    if do_items:
+        strategy.append(f"应当：{do_items}")
+    if avoid_items:
+        strategy.append(f"避免：{avoid_items}")
+    if len(strategy) == 1:
+        return None
+    return "\n\n".join([_FIXED_PRINCIPLES, "\n".join(strategy)])
+
+
 # 提示词渲染：仅把命中的策略字段渲染进系统提示词。
 def build_prompt(base_prompt: str, policy: Optional[dict], *, app_id: Any = None, tenant_id: Any = None) -> str:
     """
@@ -181,21 +198,11 @@ def build_prompt(base_prompt: str, policy: Optional[dict], *, app_id: Any = None
         if not isinstance(policy, dict) or not policy:
             return base
 
-        tone = str(policy.get("tone") or "").strip()
-        do_items = _render_items(policy.get("do_list"))
-        avoid_items = _render_items(policy.get("avoid_list"))
-        strategy = ["## 本轮回复策略"]
-        if tone:
-            strategy.append(f"语气：{tone}")
-        if do_items:
-            strategy.append(f"应当：{do_items}")
-        if avoid_items:
-            strategy.append(f"避免：{avoid_items}")
-        # policy 存在但三项均为空 → 无可注入内容，等同未命中
-        if len(strategy) == 1:
+        appended = build_emotion_prompt_fragment(
+            policy.get("tone"), policy.get("do_list"), policy.get("avoid_list"),
+        )
+        if appended is None:
             return base
-
-        appended = "\n\n".join([_FIXED_PRINCIPLES, "\n".join(strategy)])
         return f"{base}\n\n{appended}" if base else appended
     except Exception as e:
         logger.warning(
