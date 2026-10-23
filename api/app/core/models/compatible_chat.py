@@ -16,10 +16,10 @@ from langchain_openai import ChatOpenAI
 class CompatibleChatOpenAI(ChatOpenAI):
     """火山和千问的omni兼容模型，支持深度思考内容（reasoning_content）的流式和非流式透传。
 
-    同时修复 json_output 开启后 langchain_openai 强制走 .parse()/.stream() 的问题
-    （该路径要求所有工具 strict=True，动态工具不满足会报错）：字典形式的
-    response_format 一律改经 extra_body 透传，与是否带工具无关，父类始终走普通
-    .create()/.astream() 路径。pydantic 类仍留顶层，保证结构化输出可用。
+    同时修复 json_output + tools 同时使用时 langchain_openai 强制走 .parse()/.stream()
+    的问题（该路径要求所有工具 strict=True，动态工具不满足会报错）：仅当请求同时带工具
+    和字典形式的 response_format 时，改经 extra_body 透传，父类走普通 .create()/.astream()
+    路径；不带工具时保持原状（response_format 留在顶层）。pydantic 类始终留顶层。
     """
 
     def _get_request_payload(
@@ -30,16 +30,16 @@ class CompatibleChatOpenAI(ChatOpenAI):
         **kwargs: Any,
     ) -> dict:
         payload = super()._get_request_payload(input_, stop=stop, **kwargs)
-        # json_output 开启时 response_format 是字典（json_object 等）。留在顶层会让
+        # 工具 + json_output 同时存在时，response_format（json_object 等字典）留在顶层会让
         # langchain_openai 切到 .parse()/.stream()，而该路径要求所有工具 strict=True，
-        # 动态生成的工具不满足会直接报错。所以字典形式一律改经 extra_body 透传（SDK 合并
-        # 进请求体顶层），上游 API 仍能收到 JSON 约束——与是否带工具无关：只要 json_output
-        # 开着就走 extra_body，没开时 payload 里没有该键，行为完全不变。
+        # 动态生成的工具不满足会直接报错。此时改经 extra_body 透传（SDK 合并进请求体顶层），
+        # 上游 API 仍能收到 JSON 约束。
+        # 没有工具时不做处理，response_format 保持在顶层，行为与此前一致。
         # pydantic 类（with_structured_output(json_schema)）必须留在顶层：它依赖 .parse()
         # 的 parsed 解析与截断报错，且无法序列化进 extra_body。system prompt 里的 JSON
         # 指令继续作兜底。
         response_format = payload.get("response_format")
-        if isinstance(response_format, dict):
+        if payload.get("tools") and isinstance(response_format, dict):
             payload.pop("response_format")
             payload["extra_body"] = {
                 **(payload.get("extra_body") or {}),

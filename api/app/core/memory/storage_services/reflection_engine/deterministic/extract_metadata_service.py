@@ -109,6 +109,7 @@ def _fetch_special_domains(db: Any, end_user_id: str) -> Dict[str, Any]:
         JOIN ontology_scene_type AS st ON o.scene_type_id = st.scene_type_id
         JOIN ontology_profile_field AS pf ON st.scene_type_id = pf.scene_type_id
         WHERE b.app_id IN :app_ids
+          AND b.is_deleted IS FALSE
           AND st.is_system_default IS FALSE
           AND pf.is_system_default IS FALSE
         ORDER BY st.scene_name, pf.created_at, pf.field_key
