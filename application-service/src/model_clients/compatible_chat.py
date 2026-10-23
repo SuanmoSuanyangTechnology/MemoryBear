@@ -32,11 +32,20 @@ class CompatibleChatOpenAI(ChatOpenAI):
         payload = super()._get_request_payload(input_, stop=stop, **kwargs)
         # With tools present, langchain_openai switches to the .parse()/.stream() path on
         # seeing response_format, and the OpenAI SDK then requires every tool to be
-        # strict=True, which dynamically generated tools are not. Remove response_format
-        # so the parent uses the plain path; JSON output is guaranteed by system prompt
-        # instructions.
-        if payload.get("tools") and "response_format" in payload:
+        # strict=True, which dynamically generated tools are not. So only when tools AND a
+        # dict response_format (json_object etc.) are both present, move response_format
+        # into extra_body (the SDK merges it into the top level of the request body), so the
+        # upstream API still receives the JSON constraint. Without tools nothing changes.
+        # Pydantic classes (with_structured_output) must stay at the top level: they rely on
+        # .parse() and cannot be serialized into extra_body. JSON instructions in the system
+        # prompt remain as a fallback.
+        response_format = payload.get("response_format")
+        if payload.get("tools") and isinstance(response_format, dict):
             payload.pop("response_format")
+            payload["extra_body"] = {
+                **(payload.get("extra_body") or {}),
+                "response_format": response_format,
+            }
         return payload
 
     def _create_chat_result(self, response: Union[dict, Any], generation_info: Optional[dict] = None) -> ChatResult:
