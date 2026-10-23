@@ -220,6 +220,9 @@ class _ChunkRetrieveBase(BaseModel):
 class _HttpChunkRetrieve(_ChunkRetrieveBase):
     """Supported request parameters for HTTP retrieval routes."""
 
+    similarity_threshold: float | None = Field(None, ge=0, le=1)
+    vector_similarity_weight: float | None = Field(None, ge=0, le=1)
+
     @model_validator(mode="after")
     def validate_knowledge_ids(self) -> "_HttpChunkRetrieve":
         if not self.kb_ids and not self.ex_ids:
