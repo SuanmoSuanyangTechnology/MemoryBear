@@ -69,6 +69,10 @@ async def list_pages(
     principal: PrincipalDep,
     runtime: RuntimeDep,
     page_types: str | None = None,
+    keyword: str | None = Query(
+        None, description="搜索 Wiki 标题、摘要和正文，不区分大小写的字面包含匹配；"
+        "忽略首尾空白，空白不过滤，% 和 _ 按普通字符匹配。",
+    ),
     page: int = Query(1, ge=1),
     pagesize: int = Query(50, ge=1, le=200),
     limit: int | None = Query(None, ge=1, le=200, include_in_schema=False),
@@ -80,6 +84,7 @@ async def list_pages(
             runtime,
             read.list_pages,
             _scope(kb_id, principal),
+            keyword=keyword,
             page_types=_types(page_types),
             page=page,
             pagesize=pagesize,

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+from datetime import datetime, timedelta
 from typing import Any
 
 from src.infrastructure.neo4j import Neo4jManager
@@ -89,6 +91,59 @@ RETURN sum(episodic_count) AS episodic_count,
        sum(explicit_entity_count) AS explicit_entity_count,
        sum(emotional_count) AS emotional_count
 """
+
+
+# Keep type validation before temporal comparisons: legacy strings are not dates.
+_ELIGIBLE_STATEMENTS = """
+MATCH (s:Statement)
+WHERE s.end_user_id IN $end_user_ids
+  AND s.delete_at IS NULL
+  AND s.speaker = 'user'
+  AND s.is_permanent = false
+  AND s.id IS NOT NULL
+  AND CASE WHEN valueType(s.statement) = 'STRING NOT NULL'
+           THEN trim(s.statement) <> '' ELSE false END
+WITH s,
+     CASE WHEN s.valid_at IS NULL THEN true
+          WHEN valueType(s.valid_at) = 'STRING NOT NULL' THEN trim(s.valid_at) = ''
+          ELSE false END AS start_missing,
+     CASE WHEN s.invalid_at IS NULL THEN true
+          WHEN valueType(s.invalid_at) = 'STRING NOT NULL' THEN trim(s.invalid_at) = ''
+          ELSE false END AS end_missing,
+     CASE WHEN valueType(s.valid_at) = 'ZONED DATETIME NOT NULL'
+          THEN datetime({datetime: s.valid_at, timezone: 'UTC'}) END AS original_start,
+     CASE WHEN valueType(s.invalid_at) = 'ZONED DATETIME NOT NULL'
+          THEN datetime({datetime: s.invalid_at, timezone: 'UTC'}) END AS end_at,
+     CASE WHEN valueType(s.dialog_at) = 'ZONED DATETIME NOT NULL'
+          THEN datetime({datetime: s.dialog_at, timezone: 'UTC'})
+          WHEN valueType(s.created_at) = 'ZONED DATETIME NOT NULL'
+          THEN datetime({datetime: s.created_at, timezone: 'UTC'})
+          END AS mentioned_at
+WHERE (start_missing OR original_start IS NOT NULL)
+  AND (end_missing OR end_at IS NOT NULL)
+WITH s, end_at, mentioned_at, start_missing AND end_missing AS is_time_unspecified,
+     CASE WHEN start_missing AND end_missing THEN mentioned_at
+          ELSE original_start END AS start_at
+WHERE CASE
+    WHEN start_at IS NOT NULL AND end_at IS NOT NULL THEN
+        start_at <= end_at AND (
+            (start_at >= $window_start AND start_at <= $window_end)
+            OR (end_at >= $window_start AND end_at <= $window_end)
+            OR (start_at <= $now AND $now <= end_at
+                AND end_at <= start_at + duration({hours: 168}))
+        )
+    WHEN start_at IS NOT NULL THEN
+        start_at >= $window_start AND start_at <= $window_end
+    WHEN end_at IS NOT NULL THEN
+        end_at >= $window_start AND end_at <= $window_end
+    ELSE false
+END
+"""
+
+_SHORT_TERM_COUNT_QUERY = _ELIGIBLE_STATEMENTS + """
+RETURN count(DISTINCT s.id) AS total
+"""
+
 
 class MemoryGraphRepository:
     def __init__(self, neo4j: Neo4jManager) -> None:
@@ -322,3 +377,16 @@ class MemoryGraphRepository:
             "explicit_entity_count": int(row.get("explicit_entity_count") or 0),
             "emotional_count": int(row.get("emotional_count") or 0),
         }
+
+    async def short_term_count(self, end_user_ids: Sequence[str], now: datetime) -> int:
+        """Count eligible Statements for users absent from ES or after an ES failure."""
+        if not end_user_ids:
+            return 0
+        rows = await self._query(
+            _SHORT_TERM_COUNT_QUERY,
+            end_user_ids=list(end_user_ids),
+            now=now,
+            window_start=now - timedelta(hours=72),
+            window_end=now + timedelta(hours=72),
+        )
+        return int(rows[0]["total"]) if rows else 0

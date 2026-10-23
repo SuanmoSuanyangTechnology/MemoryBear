@@ -13,20 +13,29 @@ Key Features:
 - Memory system analytics and reporting
 """
 
+import uuid
 from typing import Optional
 
 from dotenv import load_dotenv
-from fastapi import APIRouter, Depends, Header, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
+from fastapi.responses import JSONResponse
+from neo4j.exceptions import ServiceUnavailable, SessionExpired, TransientError
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from app.core.language_utils import get_language_from_header
 from app.core.logging_config import get_api_logger
-from app.core.response_utils import success
-from app.db import get_db
-from app.dependencies import get_current_user
+from app.core.error_codes import BizCode
+from app.core.response_utils import fail, success
+from app.db import get_async_db, get_db
+from app.dependencies import CurrentUserSnapshot, get_current_user, get_current_user_async
 from app.models.user_model import User
 from app.services.memory_short_service import LongService, ShortService
 from app.services.memory_storage_service import search_entity
+from app.repositories.end_user_repository import EndUserRepository
+from app.schemas.short_term_memo_schema import MemoDateType, MemoScope, ShortTermMemoResponse
+from app.services.short_term_memo_service import ShortTermMemoService
 
 # Load environment variables for configuration
 load_dotenv()
@@ -39,6 +48,56 @@ router = APIRouter(
     prefix="/memory/short",
     tags=["Memory"],
 )
+
+
+@router.get("/memos", response_model=ShortTermMemoResponse)
+async def list_short_term_memos(
+    end_user_id: uuid.UUID,
+    scope: MemoScope = Query("current"),
+    date_type: MemoDateType = Query("all"),
+    page: int = Query(1, ge=1),
+    pagesize: int = Query(20, ge=1, le=100),
+    current_user: CurrentUserSnapshot = Depends(get_current_user_async),
+    db: AsyncSession = Depends(get_async_db),
+) -> dict | JSONResponse:
+    """List authorized Statement memos with UTC timestamps and page pagination."""
+    try:
+        workspace_id = current_user.current_workspace_id
+        if workspace_id is None:
+            return JSONResponse(
+                status_code=400,
+                content=fail(
+                    BizCode.INVALID_PARAMETER,
+                    "请先切换到一个工作空间",
+                    "current_workspace_id is None",
+                ),
+            )
+        end_user = await EndUserRepository(db).get_active_end_user_in_workspace_async(
+            end_user_id, workspace_id,
+        )
+        if end_user is None:
+            return JSONResponse(
+                status_code=404,
+                content=fail(BizCode.NOT_FOUND, "终端用户不存在或不可访问", "resource not found"),
+            )
+        result = await ShortTermMemoService().list_memos(
+            str(end_user.id), scope, date_type, page, pagesize,
+        )
+        return success(data=result.model_dump())
+    except (ServiceUnavailable, SessionExpired, TransientError, SQLAlchemyError):
+        api_logger.exception("Short-term memo database unavailable")
+        return JSONResponse(
+            status_code=503,
+            content=fail(BizCode.INTERNAL_ERROR, "短期记忆服务暂时不可用", "database unavailable"),
+        )
+    except Exception:
+        api_logger.exception("Failed to list short-term memos")
+        return JSONResponse(
+            status_code=500,
+            content=fail(BizCode.INTERNAL_ERROR, "短期记忆查询失败", "internal error"),
+        )
+
+
 @router.get("/short_term")
 async def short_term_configs(
         end_user_id: str,

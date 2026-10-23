@@ -18,6 +18,7 @@ class RetrieveType(StrEnum):
     SEMANTIC = "semantic"
     Graph = "graph"
     HYBRID = "hybrid"
+    WIKI_FAQ = "wiki-FAQ"
 
 
 class KnowledgeRetrievalSource(StrEnum):
@@ -62,6 +63,7 @@ class RetrievalPolicy(BaseModel):
     semantic: tuple[Literal["text", "image"], ...] = ("text",)
     hybrid: tuple[Literal["text", "image"], ...] = ("text",)
     graph: tuple[Literal["text", "image"], ...] = ("text",)
+    wiki_faq: tuple[Literal["text"], ...] = Field(default=("text",), alias="wiki-FAQ")
 
 
 class TextRetrievalQuery(BaseModel):

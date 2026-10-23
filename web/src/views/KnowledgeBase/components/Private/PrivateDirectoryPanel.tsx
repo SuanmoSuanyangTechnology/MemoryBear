@@ -18,6 +18,8 @@ import {
 interface PrivateDirectoryPanelProps {
   directoryTab: 'files' | 'wiki' | 'summary';
   wikiActive: boolean;
+  keyword?: string;
+  onSearch: (keyword: string) => void;
   pages: WikiPage[];
   knowledgeBaseId: string;
   selectedPageId?: string;
@@ -49,6 +51,8 @@ const BranchLoader = ({ folderId, load, label, failed }: {
 const PrivateDirectoryPanel: FC<PrivateDirectoryPanelProps> = ({
   directoryTab,
   wikiActive,
+  keyword,
+  onSearch,
   pages,
   knowledgeBaseId,
   selectedPageId,
@@ -59,8 +63,6 @@ const PrivateDirectoryPanel: FC<PrivateDirectoryPanelProps> = ({
   const { t } = useTranslation();
   const isSummaryMode = directoryTab === 'summary';
   const searchScope = `${knowledgeBaseId}:${directoryTab}:${wikiActive}`;
-  const [search, setSearch] = useState<{ scope?: string; keyword?: string; }>({ scope: searchScope, keyword: undefined });
-  const keyword = search.scope === searchScope ? search.keyword : undefined;
   const directoryRef = useRef<HTMLDivElement>(null);
   const [expandedKeys, setExpandedKeys] = useState<Key[]>([]);
   const { branches, load } = useWikiTree(
@@ -77,7 +79,6 @@ const PrivateDirectoryPanel: FC<PrivateDirectoryPanelProps> = ({
 
   useEffect(() => {
     setExpandedKeys([]);
-    setSearch({ scope: searchScope, keyword: undefined });
   }, [searchScope]);
   const loading = !branches[''] || (branches[''].loading && !branches[''].items.length);
   const isFilesMode = directoryTab === 'files';
@@ -201,7 +202,7 @@ const PrivateDirectoryPanel: FC<PrivateDirectoryPanelProps> = ({
           variant="outlined"
           className="rb:w-full!"
           placeholder={t(isSummaryMode ? 'knowledgeBase.summarySearch' : 'knowledgeBase.wikiSearch')}
-          onSearch={(value) => setSearch({ scope: searchScope, keyword: value })}
+          onSearch={onSearch}
         />
       )}
 

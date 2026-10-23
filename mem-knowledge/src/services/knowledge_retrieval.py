@@ -231,6 +231,14 @@ class KnowledgeRetrievalService:
         request: KnowledgeRetrievalRequest,
         principal: Principal,
     ) -> KnowledgeRetrievalResult:
+        if request.retrieve_type == RetrieveType.WIKI_FAQ:
+            from .wiki_faq_retrieval import retrieve
+
+            return await retrieve(runtime, request, principal)
+        if any(config.retrieve_type == RetrieveType.WIKI_FAQ for config in request.knowledge_bases):
+            raise KnowledgeError.from_code(
+                "KB_VALIDATION_ERROR", "wiki-FAQ must be a separate retrieval request"
+            )
         image_query = cls._validated_image_query(request)
         log_id = cls._new_retrieval_log_id()
         started_at = time.perf_counter()

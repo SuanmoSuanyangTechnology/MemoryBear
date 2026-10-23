@@ -7,7 +7,8 @@ import logging
 
 from auth_sdk.snapshot import SNAPSHOT_TTL, snapshot_to_json
 from redis.asyncio import Redis
-from redis.exceptions import RedisError, TimeoutError
+from redis.exceptions import RedisError
+from redis.exceptions import TimeoutError as RedisTimeoutError
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -18,6 +19,10 @@ from src.services import snapshot as snap
 from src.services.api_keys import build_api_key_snapshot, write_api_key_snapshot
 
 logger = logging.getLogger(__name__)
+
+# An idle pub/sub read blocks without a socket timeout, so a half-open
+# connection would hang the subscription silently; bound it and reconnect.
+_IDLE_RECONNECT_S = 300.0
 
 
 async def handle_invalidation(redis: Redis, session: AsyncSession, payload: dict) -> None:
@@ -60,8 +65,17 @@ async def subscribe(redis, channel: str | None = None) -> None:
         pubsub = redis.pubsub()
         try:
             await pubsub.subscribe(channel)
-            async for message in pubsub.listen():
-                if message["type"] != "message":
+            while True:
+                try:
+                    message = await asyncio.wait_for(
+                        pubsub.get_message(ignore_subscribe_messages=True, timeout=None),
+                        timeout=_IDLE_RECONNECT_S,
+                    )
+                except TimeoutError:
+                    raise RedisTimeoutError(
+                        f"pubsub idle for {_IDLE_RECONNECT_S}s, reconnecting"
+                    ) from None
+                if message is None:
                     continue
                 try:
                     payload = json.loads(message["data"])
@@ -75,10 +89,10 @@ async def subscribe(redis, channel: str | None = None) -> None:
                 except (KeyError, RedisError, SQLAlchemyError) as exc:  # 单条消息失败不影响订阅循环
                     logger.warning("invalidation handling failed: %s", exc)
         except RedisError as exc:
-            # 连接断开/重连；CancelledError 是 BaseException 不受此捕获影响，
-            # 取消可正常传播（lifespan 关闭时订阅任务能退出）
-            # socket_timeout（2s，与 gateway 对齐）下订阅无消息即超时属常态，降噪为 debug
-            if isinstance(exc, TimeoutError):
+            # Connection errors and idle-watchdog timeouts both reconnect;
+            # CancelledError is a BaseException and is not caught here, so
+            # lifespan shutdown can still cancel the task.
+            if isinstance(exc, RedisTimeoutError):
                 logger.debug("pubsub idle timeout, reconnecting: %s", exc)
             else:
                 logger.warning("pubsub subscription error, reconnecting: %s", exc)

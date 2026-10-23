@@ -459,19 +459,51 @@ def load_reduce(session, kb_id, page_id, *, redelivered=False, failure_limit=Non
     )
     if page is None or (not tasks and page.status != "cleanup_pending"):
         return None
+    config_hash = generation_config_hash(knowledge.llm_id, knowledge.parser_config)
+    participants = []
+    for task in tasks:
+        state = states[task.document_id]
+        document = documents[task.document_id]
+        if not state or task.requested_version != state.requested_version:
+            task.status = "superseded"
+            continue
+        if state.status == "cancelled" or document.run == 2:
+            task.status = "cancelled"
+            continue
+        if state.status == "failed":
+            continue
+        if not state.plan_ready or state.mapped_version != state.requested_version:
+            # 其他文件尚未交付素材；它自己的 Map 完成后会重新唤醒本页。
+            continue
+        if state.operation == "upsert" and (document.status != 1 or not state.source_ready):
+            continue
+        participants.append(
+            {
+                "document_id": str(task.document_id),
+                "requested_version": task.requested_version,
+                "subtask_id": str(task.subtask_id),
+            }
+        )
+    if not participants and page.status != "cleanup_pending":
+        return None
+
+    def load_failure(code):
+        error = WikiError(code, retryable=False)
+        error.wiki_snapshot = {"row_version": page.row_version, "participants": participants}
+        return error
+
     if redelivered:
         page.failure_attempt += 1
         if failure_limit is not None and page.failure_attempt >= failure_limit:
-            error = WikiError("WIKI_WORKER_LOSS_EXHAUSTED", retryable=False)
-            error.wiki_snapshot = {"row_version": page.row_version}
-            raise error
-    config_hash = generation_config_hash(knowledge.llm_id, knowledge.parser_config)
+            raise load_failure("WIKI_WORKER_LOSS_EXHAUSTED")
+    for participant in participants:
+        state = states[as_uuid(participant["document_id"])]
+        if state.operation == "upsert" and state.config_hash != config_hash:
+            raise load_failure("WIKI_CONFIG_CHANGED")
 
-    def invalid_source(code):
-        error = WikiError(code, retryable=False)
-        error.wiki_snapshot = {"row_version": page.row_version}
-        return error
-
+    published_materials = {
+        (s["document_id"], s["content_hash"]) for s in page.published_sources
+    }
     valid_sources = []
     summary_contexts = {row.document_id: row.source_context for row in session.execute(
         select(WikiPageSource.document_id, WikiPageSource.source_context)
@@ -488,9 +520,13 @@ def load_reduce(session, kb_id, page_id, *, redelivered=False, failure_limit=Non
             or state.mapped_version != state.requested_version
             or source.document_wiki_version != state.requested_version
         ):
-            if state and state.status in {"failed", "cancelled"}:
-                raise invalid_source("WIKI_SOURCE_FAILED")
-            raise WikiDeferred("WIKI_SOURCE_UPDATING")
+            # 未交付当前素材的来源不参与本次生成，也不能使其他文件的任务失败。
+            continue
+        if (state.status == "cancelled" or document.run == 2) and (
+            str(source.document_id), source.content_hash
+        ) not in published_materials:
+            # 取消任务不能借其他文件的 Reduce 发布尚未发布过的素材。
+            continue
         valid_sources.append(
             {
                 "document_id": str(document.id),
@@ -504,38 +540,14 @@ def load_reduce(session, kb_id, page_id, *, redelivered=False, failure_limit=Non
                                        "summary", source.source_context.get("summary", {}))},
             }
         )
-    participants = []
-    known_sources = {row.document_id for row in sources}
-    known_sources.update(as_uuid(row["document_id"]) for row in page.published_sources)
-    for task in tasks:
-        state = states[task.document_id]
-        document = documents[task.document_id]
-        if not state or task.requested_version != state.requested_version:
-            task.status = "superseded"
-            continue
-        if state.status == "cancelled" or document.run == 2:
-            task.status = "cancelled"
-            continue
-        if not state.plan_ready or state.mapped_version != state.requested_version:
-            if task.document_id not in known_sources:
-                continue
-            if state.status == "failed":
-                raise invalid_source("WIKI_SOURCE_FAILED")
-            raise WikiDeferred("WIKI_SOURCE_UPDATING")
-        if state.operation == "upsert" and state.config_hash != config_hash:
-            raise invalid_source("WIKI_CONFIG_CHANGED")
-        participants.append(
-            {
-                "document_id": str(task.document_id),
-                "requested_version": task.requested_version,
-                "subtask_id": str(task.subtask_id),
-            }
-        )
+    current_materials = {(s["document_id"], s["content_hash"]) for s in valid_sources}
+    if not participants and not valid_sources and any(
+        states[s.document_id] and states[s.document_id].status == "cancelled" for s in sources
+    ):
+        page.status, page.error_code = "failed", "WIKI_CANCELLED"
+        page.row_version += 1
+        return None
     if not participants and valid_sources:
-        current_materials = {(s["document_id"], s["content_hash"]) for s in valid_sources}
-        published_materials = {
-            (s["document_id"], s["content_hash"]) for s in page.published_sources
-        }
         if page.version > 0 and current_materials == published_materials:
             # Cancellation may leave an unchanged, already published page fully supported.
             page.status, page.error_code = "ready", None
@@ -581,11 +593,18 @@ def load_reduce(session, kb_id, page_id, *, redelivered=False, failure_limit=Non
         "page_type": page.page_type,
         "aliases": page.aliases,
         "row_version": page.row_version,
-        "content": page.content,
+        # 被排除的旧来源可能仍在旧正文中，不能把它作为本次模型输入带回。
+        "content": page.content if published_materials <= current_materials else "",
         "llm_id": str(knowledge.llm_id),
         "language": config.language,
         "config_hash": generation_config_hash(knowledge.llm_id, knowledge.parser_config),
         "sources": valid_sources,
+        # 包含未参与生成的来源：其素材在生成期间增删或替换，也必须触发 CAS 冲突。
+        "source_stamps": [
+            {"document_id": str(s.document_id), "version": s.document_wiki_version,
+             "content_hash": s.content_hash}
+            for s in sources
+        ],
         "participants": participants,
         "allowed_links": links,
     }
@@ -595,6 +614,7 @@ def commit_reduce(session, snapshot, result):
     kb_id, page_id = snapshot["kb_id"], as_uuid(snapshot["page_id"])
     knowledge, scope = lock_knowledge(session, kb_id)
     ids = {p["document_id"] for p in snapshot["participants"]}
+    source_stamps = snapshot.get("source_stamps", snapshot["sources"])
     ids.update(s["document_id"] for s in snapshot["sources"])
     locked_documents, locked_states = lock_documents(session, kb_id, ids)
     documents = {str(key): value for key, value in locked_documents.items()}
@@ -619,7 +639,7 @@ def commit_reduce(session, snapshot, result):
         )
     )
     stamps = {(str(s.document_id), s.document_wiki_version, s.content_hash) for s in actual}
-    if stamps != {(s["document_id"], s["version"], s["content_hash"]) for s in snapshot["sources"]}:
+    if stamps != {(s["document_id"], s["version"], s["content_hash"]) for s in source_stamps}:
         raise WikiDeferred("WIKI_CAS_CONFLICT")
     for source in snapshot["sources"]:
         doc, state = documents[source["document_id"]], states[source["document_id"]]
@@ -662,12 +682,14 @@ def commit_reduce(session, snapshot, result):
             "aliases": sorted({normalize_name(alias) for alias in page.aliases}),
         }
     )
+    previous_version = page.version
     changed = page.published_content_hash != content_hash
     page.content, page.summary = result["content"], result["summary"]
-    page.status = "ready" if actual else "unavailable"
-    if actual and (page.version == 0 or changed):
+    has_sources = bool(snapshot["sources"])
+    page.status = "ready" if has_sources else "unavailable"
+    if has_sources and (page.version == 0 or changed):
         page.version += 1
-    if actual:
+    if has_sources:
         page.published_content_hash = content_hash
     page.row_version = snapshot["row_version"] + 1
     page.failure_attempt, page.defer_count, page.error_code = 0, 0, None
@@ -680,6 +702,10 @@ def commit_reduce(session, snapshot, result):
         }
         for s in snapshot["sources"]
     ]
+    if has_sources and page.version != previous_version:
+        from ..wiki_faq.jobs import record_publication
+
+        record_publication(session, scope, page, previous_version, snapshot)
     session.execute(delete(WikiPageLink).where(WikiPageLink.source_page_id == page.id))
     for target in sorted(set(result["links"])):
         session.add(WikiPageLink(**scope, source_page_id=page.id, target_page_id=as_uuid(target)))

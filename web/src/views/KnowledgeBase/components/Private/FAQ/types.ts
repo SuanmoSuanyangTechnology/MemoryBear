@@ -29,6 +29,15 @@ export interface FaqItem {
 
 export type FaqStatus = 'pending' | 'approved' | 'change_pending'
 export type AllFaqStatus = FaqStatus | 'all';
+
+export interface FaqQuery {
+  review_status?: FaqStatus;
+  is_enabled?: boolean;
+  keyword?: string;
+  page?: number;
+  pagesize?: number;
+}
+
 export interface FaqListResponse {
     items: FaqItem[]
     total_all: number;

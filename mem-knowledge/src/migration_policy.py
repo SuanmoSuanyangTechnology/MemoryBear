@@ -2,6 +2,9 @@
 
 WIKI_TABLE_NAMES = frozenset(
     {
+        "wiki_page_versions",
+        "wiki_faqs",
+        "wiki_faq_generation_jobs",
         "wiki_folders",
         "wiki_pages",
         "wiki_page_sources",

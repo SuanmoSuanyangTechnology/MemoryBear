@@ -31,6 +31,7 @@ class ModelRuntimeSnapshot:
     model_name: str
     provider: str
     profile: ModelProfile = field(repr=False)
+    config_fingerprint: str | None = None
 
     @classmethod
     def from_view(cls, view: Any, tenant_id: uuid.UUID) -> ModelRuntimeSnapshot:
@@ -108,6 +109,7 @@ class RetrievalSearchOptions:
     file_names_filter: tuple[str, ...]
     document_ids_include: tuple[str, ...] | None
     knn_num_candidates: int | None = None
+    extra_filters: tuple[dict[str, Any], ...] = ()
 
 
 @dataclass
