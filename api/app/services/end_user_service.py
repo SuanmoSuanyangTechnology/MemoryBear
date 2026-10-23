@@ -14,7 +14,7 @@ from app.models.end_user_model import EndUser
 from app.repositories.end_user_info_repository import EndUserInfoRepository
 from app.repositories.end_user_repository import EndUserRepository
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
-from app.repositories.ontology_scene_type_repository import OntologySceneTypeRepository
+from app.plugins import get_plugin
 from app.utils.redis_lock import RedisFairLock
 
 logger = get_memory_logger()
@@ -45,10 +45,13 @@ class EndUserService:
         """在用户所属租户内查询场景映射；查询失败不影响外层事务。"""
         if not scene_names:
             return {}
+        plugin = get_plugin("memory.ontology_query")
+        if plugin is None:
+            return {}
         try:
             async with self.db.begin_nested():
-                return await OntologySceneTypeRepository(self.db).get_ids_by_names_async(
-                    workspace_id, scene_names,
+                return await plugin.get_ids_by_names_async(
+                    self.db, workspace_id, scene_names,
                 )
         except Exception as e:
             logger.warning(f"[merge_end_users] 查询 scene_name 映射失败: {e}")

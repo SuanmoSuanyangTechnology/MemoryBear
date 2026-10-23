@@ -1,4 +1,4 @@
-"""Resolve stored domain IDs for model-facing metadata without changing storage."""
+"""把存储的 scene_type_id 解析为场景名，供模型侧使用，不修改存储。"""
 
 import asyncio
 import logging
@@ -6,7 +6,7 @@ from uuid import UUID
 
 from app.core.memory.models.metadata_models import is_scene_type_id
 from app.db import get_db_context
-from app.repositories.ontology_scene_type_repository import OntologySceneTypeRepository
+from app.plugins import get_plugin
 
 logger = logging.getLogger(__name__)
 
@@ -21,15 +21,18 @@ def load_scene_names(metadata: object) -> dict[str, str]:
             ids[key] = UUID(key)
     if not ids:
         return {}
+    plugin = get_plugin("memory.ontology_query")
+    if plugin is None:
+        return {}
     try:
         with get_db_context() as db:
-            names = OntologySceneTypeRepository(db).get_names_by_ids(list(set(ids.values())))
+            names = plugin.get_names_by_ids(db, list(set(ids.values())))
         return {key: names[str(value)] for key, value in ids.items() if str(value) in names}
     except Exception:
-        logger.warning("[Metadata] Scene name lookup failed; retaining stored keys", exc_info=True)
+        logger.warning("[Metadata] 场景名查询失败，保留存储原键", exc_info=True)
         return {}
 
 
 async def load_scene_names_async(metadata: object) -> dict[str, str]:
-    # Create and close the sync session inside the worker thread, not the event loop.
+    # 在 worker 线程内创建并关闭同步 Session，避免在事件循环里持有同步连接。
     return await asyncio.to_thread(load_scene_names, metadata)

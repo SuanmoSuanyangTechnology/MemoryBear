@@ -64,6 +64,20 @@ except ImportError:
     pass  # 社区版无 premium 模块，静默跳过
 
 
+# Worker 不经过 Web 的 memory 模块加载，独立注册无连接状态的查询插件。
+try:
+    from premium.memory.ontology.query_plugin import register_ontology_query_plugin
+except ModuleNotFoundError as exc:
+    # 社区版或尚未提供该插件的企业版可跳过，插件内部依赖缺失则正常报错。
+    if exc.name not in {
+        "premium", "premium.memory", "premium.memory.ontology",
+        "premium.memory.ontology.query_plugin",
+    }:
+        raise
+else:
+    register_ontology_query_plugin()
+
+
 @worker_process_init.connect
 def _reinit_db_pool(**kwargs):
     """

@@ -35,7 +35,7 @@ from app.core.memory.storage_services.reflection_engine.errors import (
     ReflectionModelType,
 )
 from app.core.memory.utils.prompt.prompt_utils import prompt_env
-from app.repositories.ontology_scene_type_repository import OntologySceneTypeRepository
+from app.plugins import get_plugin
 
 logger = logging.getLogger(__name__)
 
@@ -45,40 +45,20 @@ METADATA_CHUNK_SIZE: int = 10
 
 # ── 1. 数据库短会话辅助函数 ──
 
-_ONTOLOGY_TABLES_AVAILABLE: Optional[bool] = None
-
-
-def _check_ontology_tables_available(db: Any) -> bool:
-    """检测本体工程 4 张表是否存在。仅在检测到表存在时进程级缓存；表不存在或检测异常时本次按不可用处理，不写缓存，下次调用重新检测。"""
-    global _ONTOLOGY_TABLES_AVAILABLE
-    if _ONTOLOGY_TABLES_AVAILABLE is not None:
-        return _ONTOLOGY_TABLES_AVAILABLE
-
-    try:
-        available = OntologySceneTypeRepository(db).extraction_tables_available()
-        if available:
-            _ONTOLOGY_TABLES_AVAILABLE = True
-        return available
-    except Exception as e:
-        logger.warning(f"[Metadata] 检测本体表可用性异常，本次按不可用处理: {e}")
-        try:
-            db.rollback()
-        except Exception:
-            pass
-        return False
-
-
 def _fetch_special_domains(db: Any, end_user_id: str) -> Tuple[Dict[str, Any], Dict[str, str]]:
     """联查用户使用过的全部 App 所绑定的特殊场景及字段，组装 special_domains。
 
     - 以 scene_name 作为场景键（special_domains / domain_specific_info 的键），多个 App 绑定同一场景只组装一次；
     - 场景内按 field_key 去重。
     调用方负责异常处理（rollback 并按无特殊场景处理）。
-    本体表的查询由 Repository 承接。
+    本体表的查询由企业版插件承接；未注册插件时返回空配置。
     """
     special_domains: Dict[str, Any] = {}
     name_to_id_map: Dict[str, str] = {}
-    rows = OntologySceneTypeRepository(db).get_profile_fields_for_user(end_user_id)
+    plugin = get_plugin("memory.ontology_query")
+    if plugin is None:
+        return special_domains, name_to_id_map
+    rows = plugin.get_profile_fields_for_user(db, end_user_id)
 
     # 场景名在租户内唯一 (UniqueConstraint(tenant_id, scene_name))，同一场景只组装一次
     for r in rows:
@@ -160,20 +140,19 @@ def _fetch_user_context_pg(
                     raw_meta.get(field)
                 )
 
-        # 2. 本体表存在时查询特殊场景，不存在时跳过
-        if _check_ontology_tables_available(db):
+        # 2. 通过企业版插件加载特殊场景；社区版未注册插件时返回空配置。
+        try:
+            special_domains, name_to_id_map = _fetch_special_domains(db, end_user_id)
+        except Exception as e:
+            # 查询失败：回滚后按无特殊场景处理，只提取默认字段
+            logger.warning(
+                f"[Metadata] 特殊场景联查异常，按无特殊场景处理 end_user_id={end_user_id}: {e}"
+            )
             try:
-                special_domains, name_to_id_map = _fetch_special_domains(db, end_user_id)
-            except Exception as e:
-                # 查询失败：回滚后按无特殊场景处理，只提取默认字段
-                logger.warning(
-                    f"[Metadata] 特殊场景联查异常，按无特殊场景处理 end_user_id={end_user_id}: {e}"
-                )
-                try:
-                    db.rollback()
-                except Exception:
-                    pass
-                special_domains = {}
+                db.rollback()
+            except Exception:
+                pass
+            special_domains = {}
 
     # 使用与本轮 Schema 相同的映射快照，避免另查名称导致改名期间不一致。
     id_to_name_map = {scene_id: name for name, scene_id in name_to_id_map.items()}
