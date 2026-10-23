@@ -932,6 +932,16 @@ class AppService:
             raise BusinessException("缺少租户信息，无法绑定本体", BizCode.INVALID_PARAMETER)
         binder.bind_in_session(self.db, app_id, tenant_id, ontology_id)
 
+    def _unbind_ontology_in_session(self, app_id: uuid.UUID) -> Optional[int]:
+        """在当前事务内删除应用-本体绑定（不 commit），返回删除行数。
+
+        社区版无本体模块时返回 None；插件存在但调用失败时向上抛出，由调用方整体回滚。
+        """
+        binder = get_plugin(self.ONTOLOGY_BINDING_PLUGIN)
+        if binder is None:
+            return None
+        return binder.unbind_in_session(self.db, app_id)
+
     def update_app(
             self,
             *,
@@ -1010,7 +1020,8 @@ class AppService:
             updated_at=utcnow_naive()
         )
         self.db.execute(stmt)
-        
+        self._unbind_ontology_in_session(app_id)
+
         self.db.commit()
         # 应用删除：停用提交后失效其情绪策略缓存。
         logger.info(
