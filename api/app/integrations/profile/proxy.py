@@ -106,9 +106,13 @@ async def forward_memory_profile_request(
 def memory_profile_proxy(
     *,
     query_fields: tuple[str, ...] = (),
+    body_arg: str | None = None,
+    body_fields: tuple[str, ...] = (),
     language_field: str | None = None,
     upper_bounds: dict[str, int] | None = None,
     source: MemoryProfileAuthSource | None = None,
+    timeout_seconds: float | None = None,
+    target_path: str | None = None,
 ):
     """Forward one route to memory-profile when its integration is enabled.
     The wrapped function remains the complete legacy implementation. The API-key
@@ -119,6 +123,18 @@ def memory_profile_proxy(
     source is read off that same path. Pass ``source`` to pin it for a caller that
     has no such path (a task or script invoking the handler directly); an explicit
     ``source`` wins over the path.
+
+    A POST endpoint forwards a body rebuilt from ``body_fields``: each name is read
+    off the argument named by ``body_arg`` (a Pydantic request model), or off the
+    handler arguments when ``body_arg`` is omitted. Rebuilding rather than
+    forwarding the raw body keeps merge routing intact — the API-key face may have
+    rewritten ``end_user_id`` before this wrapper runs. The FastAPI-validated body
+    model stays the single source of truth for what may cross the wire.
+
+    ``target_path`` exists for the few legacy routes whose externally visible path
+    differs from the one internal route that serves the capability (the admin hot-tags
+    alias under ``/memory-storage``). Only the forwarded path moves; the caller's own
+    path still decides the face (``x-source``) and the acting id.
     """
 
     bounds = dict(upper_bounds or {})
@@ -163,7 +179,22 @@ def memory_profile_proxy(
                 if value is not None and value > maximum:
                     query[field] = maximum
 
-            path = request.scope["path"]
+            payload = None
+            if body_fields:
+                source_arguments = (
+                    arguments.get(body_arg) if body_arg else arguments
+                )
+                if source_arguments is None:
+                    raise MemoryProfileConfigurationError(
+                        f"memory_profile_proxy body argument {body_arg!r} is missing"
+                    )
+                payload = {
+                    field: getattr(source_arguments, field, None)
+                    for field in body_fields
+                }
+
+            caller_path = request.scope["path"]
+            path = target_path or caller_path
             # Language is presentation-only, so every proxied route forwards it
             # even when the handler does not declare the header. An explicit
             # ``language_field`` still wins for callers that carry it elsewhere.
@@ -175,7 +206,9 @@ def memory_profile_proxy(
             if language_type is None:
                 language_type = request.headers.get("Accept-Language")
             trace_id = get_trace_id() or uuid4().hex
-            caller_source = _caller_source(path) if source is None else source
+            caller_source = (
+                _caller_source(caller_path) if source is None else source
+            )
             try:
                 result = await get_memory_profile_client().request(
                     method=request.method,
@@ -187,7 +220,9 @@ def memory_profile_proxy(
                     trace_id=trace_id,
                     language_type=language_type,
                     query=query,
+                    payload=payload,
                     raw=True,
+                    timeout=timeout_seconds,
                 )
                 if isinstance(result, MemoryProfileRawResponse):
                     # The upstream body is already a serialized ApiResponse;
