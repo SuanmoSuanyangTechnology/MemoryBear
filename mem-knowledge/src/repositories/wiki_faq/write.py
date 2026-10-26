@@ -5,10 +5,11 @@ import uuid
 
 from pydantic import ValidationError
 from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 from ...errors import KnowledgeError
 from ...models.owned.wiki import WikiPage
-from ...models.owned.wiki_faq import WikiFAQ
+from ...models.owned.wiki_faq import WikiFAQ, WikiPageVersion
 from ...rag.faq.contracts import FAQContent, edit_content
 from ...utils.datetime_utils import utcnow_naive
 from ..wiki.common import lock_knowledge
@@ -145,16 +146,45 @@ def approve(session, scope, faq_id, actor_id, payload):
         or target.page_version != info["latest_wiki_version"]
     ):
         conflict("KB_FAQ_SOURCE_CHANGED")
+    return _record_approval(session, scope, row, actor_id, target)
+
+
+def approve_latest(session: Session, scope: dict, faq_id: uuid.UUID, actor_id: uuid.UUID) -> dict:
+    """批量审核在锁内接受当前问答，推进至来源最新快照；重复调用不重复写入。"""
+    row = _lock(session, scope, faq_id)
+    if row.review_state == "approved" and row.wiki_page_id is None:
+        return {"changed": False, "faq": serialize(session, scope, row)}
+    info = source(session, scope, row)
+    if info["source_status"] != "available":
+        conflict("KB_FAQ_SOURCE_UNAVAILABLE")
+    target = session.scalar(
+        select(WikiPageVersion).where(
+            *scoped(WikiPageVersion, scope),
+            WikiPageVersion.wiki_page_id == row.wiki_page_id,
+            WikiPageVersion.page_version == info["latest_wiki_version"],
+        )
+    )
+    if target is None:
+        conflict("KB_FAQ_SOURCE_CHANGED")
+    if row.review_state == "approved" and row.approved_wiki_snapshot_id == target.id:
+        return {"changed": False, "faq": serialize(session, scope, row)}
+    return _record_approval(session, scope, row, actor_id, target)
+
+
+def _record_approval(
+    session: Session, scope: dict, row: WikiFAQ, actor_id: uuid.UUID, target: WikiPageVersion
+) -> dict:
     row.review_state = "approved"
-    row.approved_wiki_snapshot_id = target_id
+    row.approved_wiki_snapshot_id = target.id
     row.reviewed_by, row.reviewed_at = actor_id, utcnow_naive()
     _touch(row, actor_id)
     session.flush()
     logger.info(
-        "FAQ 审核通过 faq_id=%s wiki_page_id=%s wiki_version=%s actor_id=%s",
+        "FAQ 审核通过 faq_id=%s wiki_page_id=%s wiki_version=%s content_revision=%s actor_id=%s",
         row.id,
         row.wiki_page_id,
         target.page_version,
+        row.content_revision,
         actor_id,
     )
     return {"changed": True, "faq": serialize(session, scope, row)}

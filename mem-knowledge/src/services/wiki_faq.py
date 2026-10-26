@@ -25,6 +25,7 @@ async def run(runtime, operation, scope, *args, **kwargs):
         write.edit,
         write.set_enabled,
         write.approve,
+        write.approve_latest,
     }:
         from .wiki_faq_retrieval import synchronize_results
 
@@ -93,7 +94,8 @@ async def batch(runtime, scope, actor_id, items, *, action, is_enabled=None):
         payload = {key: value for key, value in item.items() if key != "faq_id"}
         if action == "enabled":
             payload["is_enabled"] = is_enabled
-        operation = write.approve if action == "approve" else write.set_enabled
+        operation = write.approve_latest if action == "approve" else write.set_enabled
+        operation_args = () if action == "approve" else (payload,)
         try:
             value = await run(
                 runtime,
@@ -101,7 +103,7 @@ async def batch(runtime, scope, actor_id, items, *, action, is_enabled=None):
                 scope,
                 item["faq_id"],
                 actor_id,
-                payload,
+                *operation_args,
                 _synchronize_index=False,
             )
             results.append(
