@@ -42,6 +42,8 @@ class _Instance:
     instance_id: str
     metadata: dict[str, str]
     created_at_ms: int
+    allow_internet_access: bool | None = None
+    network: dict[str, object] | None = None
     state: str = STATE_RUNNING
     contexts: dict[str, str] = field(default_factory=dict)  # context_id -> language
     files: dict[str, tuple[bytes, int]] = field(default_factory=dict)  # path -> (data, mtime)
@@ -93,6 +95,10 @@ class FakeBackend:
         inst = self._instances.get(instance_id)
         return inst.state if inst else None
 
+    def network_of(self, instance_id: str) -> tuple[bool | None, dict[str, object] | None]:
+        inst = self._get(instance_id)
+        return inst.allow_internet_access, inst.network
+
     def lose_instance(self, instance_id: str) -> None:
         self._instances.pop(instance_id, None)
 
@@ -114,7 +120,13 @@ class FakeBackend:
             await asyncio.sleep(0)
         instance_id = f"fake-{next(self._seq)}"
         now = self._clock.now_ms()
-        self._instances[instance_id] = _Instance(instance_id, dict(spec.metadata), now)
+        self._instances[instance_id] = _Instance(
+            instance_id,
+            dict(spec.metadata),
+            now,
+            spec.allow_internet_access,
+            dict(spec.network) if spec.network is not None else None,
+        )
         self.created_total += 1
         return InstanceHandle(instance_id, now)
 
@@ -260,7 +272,13 @@ class FakeBackend:
 
     # -- test helper ------------------------------------------------------------
 
-    def put_file(self, instance_id: str, path: str, data: bytes, mtime_ms: int | None = None) -> None:
+    def put_file(
+        self,
+        instance_id: str,
+        path: str,
+        data: bytes,
+        mtime_ms: int | None = None,
+    ) -> None:
         inst = self._get(instance_id)
         now = self._clock.now_ms() if mtime_ms is None else mtime_ms
         for parent in _ancestors(path):

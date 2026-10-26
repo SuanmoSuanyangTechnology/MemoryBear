@@ -9,7 +9,7 @@
 
 成员（模型看到的工具名固定）：
 ``code_interpreter_tool`` / ``terminal_tool`` / ``sandbox_read_file`` /
-``sandbox_write_file`` / ``sandbox_import_file`` / ``sandbox_publish_file``。
+``sandbox_write_file`` / ``sandbox_publish_file``。
 """
 from __future__ import annotations
 
@@ -19,7 +19,6 @@ from typing import Any, Iterable, List
 from .base import BuiltinTool
 from .code_interpreter_tool import CodeInterpreterTool
 from .sandbox_file_tools import (
-    SandboxImportFileTool,
     SandboxPublishFileTool,
     SandboxReadFileTool,
     SandboxWriteFileTool,
@@ -28,13 +27,12 @@ from .terminal_tool import TerminalTool
 
 logger = logging.getLogger(__name__)
 
-# 展示/注入顺序：先执行，再读写文件，最后带入带出
+# 展示/注入顺序：先执行，再读写文件，最后带出产物
 SANDBOX_TOOL_CLASSES: tuple[type[BuiltinTool], ...] = (
     CodeInterpreterTool,
     TerminalTool,
     SandboxReadFileTool,
     SandboxWriteFileTool,
-    SandboxImportFileTool,
     SandboxPublishFileTool,
 )
 
@@ -43,7 +41,6 @@ SANDBOX_TOOL_NAMES: frozenset[str] = frozenset({
     "terminal_tool",
     "sandbox_read_file",
     "sandbox_write_file",
-    "sandbox_import_file",
     "sandbox_publish_file",
 })
 

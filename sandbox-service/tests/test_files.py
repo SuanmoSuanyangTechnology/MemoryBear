@@ -145,7 +145,8 @@ async def test_reads_never_create_an_instance():
 async def test_upload_allocates_and_download_returns_the_bytes():
     mgr, backend, _ = make_manager()
     data = bytes(range(256)) * 3
-    assert await mgr.files_upload(sbx(), "/workspace/sessions/c1/in/d.bin", chunks(data)) == len(data)
+    uploaded = await mgr.files_upload(sbx(), "/workspace/sessions/c1/in/d.bin", chunks(data))
+    assert uploaded == len(data)
     assert backend.created_total == 1
     assert await read(mgr, "/workspace/sessions/c1/in/d.bin") == data
     assert busy(mgr) == 0

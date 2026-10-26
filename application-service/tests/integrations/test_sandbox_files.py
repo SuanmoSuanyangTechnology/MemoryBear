@@ -1,4 +1,4 @@
-"""Tests for sandbox file egress/ingress: client file methods, validation, publish/import, tools."""
+"""Tests for sandbox file publishing, session text I/O, and shared client file methods."""
 
 from __future__ import annotations
 
@@ -212,14 +212,6 @@ def test_check_extension(name, expected):
         assert reason is None
     else:
         assert reason is not None and expected in reason
-
-
-def test_safe_file_name_strips_paths_and_odd_characters():
-    assert svc.safe_file_name("../../etc/passwd") == "passwd"
-    assert svc.safe_file_name("a b$c.txt") == "a_b_c.txt"
-    assert svc.safe_file_name("季度报告.pptx") == "季度报告.pptx"
-    assert svc.safe_file_name("") == "file"
-    assert len(svc.safe_file_name("x" * 300)) == 100
 
 
 async def _collect(gen) -> bytes:
@@ -476,64 +468,6 @@ async def test_publish_invalid_identity_is_a_failure_not_a_crash(fake_env):
     assert report.published == [] and "标识无效" in report.failed[0].reason
 
 
-def _meta(name="data.csv", size=8, key="t/w/f.csv"):
-    return SimpleNamespace(file_key=key, file_name=name, file_size=size)
-
-
-async def test_import_pushes_stream_into_session_in_dir(monkeypatch, fake_env):
-    fid = uuid.uuid4()
-    fake_env.db._found = _meta(name="my data.csv", size=9)
-    fake_env.storage.source = b"a,b\n1,2\n"
-    client = _FakeClient()
-
-    out = await svc.import_uploaded_file(
-        client, PRINCIPAL, conversation_id="conv-1", file_id=str(fid)
-    )
-
-    [(path, data, overwrite)] = client.uploaded
-    assert path == f"/workspace/sessions/conv-1/in/{fid}_my_data.csv"
-    assert data == b"a,b\n1,2\n" and overwrite is True
-    assert out.sandbox_path == path and out.size == len(data)
-
-
-async def test_import_refuses_unknown_foreign_or_oversized_files(fake_env, monkeypatch):
-    client = _FakeClient()
-    with pytest.raises(svc.SandboxFileError):  # not found / other workspace
-        await svc.import_uploaded_file(
-            client, PRINCIPAL, conversation_id="c", file_id=str(uuid.uuid4())
-        )
-    with pytest.raises(svc.SandboxFileError):  # not a uuid
-        await svc.import_uploaded_file(client, PRINCIPAL, conversation_id="c", file_id="nope")
-
-    fake_env.db._found = _meta(size=svc.current_settings().sandbox_file_max_bytes + 1)
-    with pytest.raises(svc.SandboxFileError):
-        await svc.import_uploaded_file(
-            client, PRINCIPAL, conversation_id="c", file_id=str(uuid.uuid4())
-        )
-    assert client.uploaded == []
-
-
-async def test_import_maps_missing_object_in_storage(fake_env):
-    fake_env.db._found = _meta()
-
-    async def gone(_key):
-        raise FileNotFoundError("x")
-        yield b""  # pragma: no cover
-
-    fake_env.storage.storage = SimpleNamespace(download_stream=gone)
-
-    class Client(_FakeClient):
-        async def upload_file(self, _p, path, chunks, *, overwrite=True):
-            async for _ in chunks:
-                pass
-            return 0
-
-    with pytest.raises(svc.SandboxFileError, match="存储中找不到"):
-        await svc.import_uploaded_file(
-            Client(), PRINCIPAL, conversation_id="c", file_id=str(uuid.uuid4())
-        )
-
-
 # ------------------------------------------------------------------------------ tools
 
 
@@ -632,7 +566,6 @@ async def test_publish_tool_reports_publish_failure(monkeypatch):
 async def test_file_tools_refuse_missing_identity(monkeypatch):
     client = _FakeClient()
     for cls, args in (("SandboxPublishFileTool", {"path": "/workspace/a.txt"}),
-                      ("SandboxImportFileTool", {"file_id": str(uuid.uuid4())}),
                       ("SandboxWriteFileTool", {"path": "a.py", "content": "x"}),
                       ("SandboxReadFileTool", {"path": "a.py"})):
         tool = _file_tool(monkeypatch, cls, client)
@@ -640,124 +573,6 @@ async def test_file_tools_refuse_missing_identity(monkeypatch):
         res = await tool.safe_execute(**args)
         assert not res.success and res.error_code == "SANDBOX_CONTEXT_MISSING"
     assert client.commands == [] and client.uploaded == []
-
-
-async def test_import_tool_returns_sandbox_path_and_maps_errors(monkeypatch):
-    async def fake_import(_c, _p, *, conversation_id, file_id):
-        assert conversation_id == "conv-1"
-        return svc.ImportedFile(file_id, "d.csv", f"/workspace/sessions/conv-1/in/{file_id}_d.csv", 5)
-
-    monkeypatch.setattr(svc, "import_uploaded_file", fake_import)
-    tool = _file_tool(monkeypatch, "SandboxImportFileTool", _FakeClient())
-    fid = str(uuid.uuid4())
-    res = await tool.safe_execute(file_id=fid)
-    assert res.success and res.data["sandbox_path"].endswith(f"{fid}_d.csv")
-
-    async def refuse(*_a, **_k):
-        raise svc.SandboxFileError("文件不存在，或不属于当前工作空间")
-
-    monkeypatch.setattr(svc, "import_uploaded_file", refuse)
-    res = await tool.safe_execute(file_id=fid)
-    assert not res.success and res.error_code == "SANDBOX_IMPORT_FAILED"
-
-    async def down(*_a, **_k):
-        raise SandboxUnavailableError("http://10.1.1.1 refused")
-
-    monkeypatch.setattr(svc, "import_uploaded_file", down)
-    res = await tool.safe_execute(file_id=fid)
-    assert not res.success and res.error_code == "SANDBOX_UNAVAILABLE" and "10.1.1.1" not in res.error
-
-
-def test_collect_file_ids_accepts_strings_lists_and_file_objects():
-    from src.tools.builtin.sandbox_file_tools import _collect_file_ids
-
-    assert _collect_file_ids(" a ") == (["a"], False)
-    assert _collect_file_ids(["a", "b", "a", "", None]) == (["a", "b"], True)  # dedup, drop blanks
-    objs = [
-        {"file_id": "x", "transfer_method": "local_file"},
-        {"upload_file_id": "y"},  # no transfer_method: treated as local
-        {"file_id": "rand", "transfer_method": "remote_url"},  # random id of a remote file
-    ]
-    assert _collect_file_ids(objs) == (["x", "y"], True)
-    assert _collect_file_ids([]) == ([], True)
-    assert _collect_file_ids(None) == ([], False)
-
-
-def _fake_import_by_id(failing=()):
-    async def fake_import(_c, _p, *, conversation_id, file_id):
-        if file_id in failing:
-            raise svc.SandboxFileError(f"{file_id} 不存在")
-        return svc.ImportedFile(file_id, f"{file_id}.csv", f"/workspace/sessions/{conversation_id}/in/{file_id}.csv", 3)
-
-    return fake_import
-
-
-async def test_import_tool_batch_returns_fixed_structure(monkeypatch):
-    monkeypatch.setattr(svc, "import_uploaded_file", _fake_import_by_id())
-    tool = _file_tool(monkeypatch, "SandboxImportFileTool", _FakeClient())
-
-    # a list input always gets the batch shape, even with one element
-    res = await tool.safe_execute(file_id=["f1"])
-    assert res.success and res.data["count"] == 1 and res.data["failed"] == []
-    assert [i["file_id"] for i in res.data["imported"]] == ["f1"]
-
-    res = await tool.safe_execute(file_id=["f1", "f2", "f1"])
-    assert res.success and res.data["count"] == 2
-    assert [i["sandbox_path"].rsplit("/", 1)[-1] for i in res.data["imported"]] == ["f1.csv", "f2.csv"]
-
-    # a plain string keeps the single-file shape
-    res = await tool.safe_execute(file_id="f1")
-    assert res.success and "imported" not in res.data and res.data["file_id"] == "f1"
-
-
-async def test_import_tool_batch_partial_failure_is_not_overall_failure(monkeypatch):
-    monkeypatch.setattr(svc, "import_uploaded_file", _fake_import_by_id(failing={"bad"}))
-    tool = _file_tool(monkeypatch, "SandboxImportFileTool", _FakeClient())
-
-    res = await tool.safe_execute(file_id=["ok", "bad"])
-    assert res.success and res.data["count"] == 1
-    assert [f["file_id"] for f in res.data["failed"]] == ["bad"]
-    assert res.data["failed"][0]["error_code"] == "SANDBOX_IMPORT_FAILED"
-
-    # every file failed -> an error result
-    res = await tool.safe_execute(file_id=["bad"])
-    assert not res.success and res.error_code == "SANDBOX_IMPORT_FAILED"
-
-
-async def test_import_tool_batch_stops_when_service_is_down(monkeypatch):
-    calls = []
-
-    async def down(_c, _p, *, conversation_id, file_id):
-        calls.append(file_id)
-        raise SandboxUnavailableError("http://10.1.1.1 refused")
-
-    monkeypatch.setattr(svc, "import_uploaded_file", down)
-    tool = _file_tool(monkeypatch, "SandboxImportFileTool", _FakeClient())
-
-    res = await tool.safe_execute(file_id=["a", "b", "c"])
-    assert not res.success and res.error_code == "SANDBOX_UNAVAILABLE"
-    assert calls == ["a"]  # b and c are not tried
-    assert "10.1.1.1" not in res.error
-
-
-async def test_import_tool_batch_limits_and_remote_only_files(monkeypatch):
-    from src.tools.builtin.sandbox_file_tools import _MAX_IMPORT_FILES
-
-    monkeypatch.setattr(svc, "import_uploaded_file", _fake_import_by_id())
-    tool = _file_tool(monkeypatch, "SandboxImportFileTool", _FakeClient())
-
-    too_many = [f"f{i}" for i in range(_MAX_IMPORT_FILES + 1)]
-    res = await tool.safe_execute(file_id=too_many)
-    assert not res.success and res.error_code == "INVALID_ARGUMENT"
-
-    # {{sys.files}} style objects: a remote URL file has no usable id
-    res = await tool.safe_execute(file_id=[{"file_id": "rand", "transfer_method": "remote_url"}])
-    assert not res.success and res.error_code == "INVALID_ARGUMENT" and "远程" in res.error
-
-    res = await tool.safe_execute(
-        file_id=[{"file_id": "x", "transfer_method": "local_file"}, {"file_id": "rand", "transfer_method": "remote_url"}]
-    )
-    assert res.success and [i["file_id"] for i in res.data["imported"]] == ["x"]
 
 
 # --------------------------------------------------------------------- local storage
@@ -779,89 +594,6 @@ async def test_local_storage_download_stream_roundtrip_and_missing(tmp_path):
 
     with pytest.raises(FileNotFoundError):
         [c async for c in storage.download_stream("nope.bin")]
-
-
-# ------------------------------------------------------------ import manifest in the prompt
-
-
-def _manifest(files, tool_names):
-    from src.services.draft_run_service import build_sandbox_import_manifest
-
-    tools = [SimpleNamespace(name=n) for n in tool_names]
-    return build_sandbox_import_manifest(files, tools)
-
-
-def test_import_manifest_lists_local_files_only_when_tool_mounted():
-    fid = str(uuid.uuid4())
-    files = [
-        {"type": "document", "transfer_method": "local_file", "upload_file_id": fid, "name": "data.xlsx"},
-        {"type": "image", "transfer_method": "remote_url", "url": "http://x/a.png", "name": "a.png"},
-    ]
-    text = _manifest(files, ["sandbox_import_file", "terminal"])
-    assert f"data.xlsx  file_id={fid}" in text
-    assert "a.png" not in text  # a remote URL has no file_id
-
-    # without the import tool the model gets no manifest at all
-    assert _manifest(files, ["terminal"]) == ""
-    assert _manifest(files, []) == ""
-
-
-def test_import_manifest_empty_cases_and_cap():
-    assert _manifest(None, ["sandbox_import_file"]) == ""
-    assert _manifest([], ["sandbox_import_file"]) == ""
-    remote_only = [{"type": "image", "transfer_method": "remote_url", "url": "http://x/a.png"}]
-    assert _manifest(remote_only, ["sandbox_import_file"]) == ""
-
-    many = [
-        {"type": "document", "transfer_method": "local_file", "upload_file_id": str(uuid.uuid4()), "name": f"f{i}.csv"}
-        for i in range(30)
-    ]
-    text = _manifest(many, ["sandbox_import_file"])
-    assert text.count("file_id=") == 20
-
-
-def test_import_manifest_includes_history_files_deduped():
-    from src.services.draft_run_service import build_sandbox_import_manifest
-
-    tools = [SimpleNamespace(name="sandbox_import_file")]
-    old, cur = str(uuid.uuid4()), str(uuid.uuid4())
-    current = [{"type": "image", "transfer_method": "local_file", "upload_file_id": cur, "name": "now.png"}]
-    # history refs are the shape persisted in messages.meta_data["files"]; the current file repeats
-    history = [
-        {"type": "image", "transfer_method": "local_file", "upload_file_id": cur, "name": "now.png"},
-        {"type": "image", "transfer_method": "local_file", "upload_file_id": old, "name": "cat.jpg"},
-        {"type": "image", "transfer_method": "remote_url", "upload_file_id": None, "url": "http://x/a.png"},
-    ]
-    text = build_sandbox_import_manifest(current, tools, history)
-    assert f"cat.jpg  file_id={old}" in text
-    assert text.count(f"file_id={cur}") == 1
-    assert "a.png" not in text
-
-    # a later turn with no new attachment still gets the earlier file
-    assert f"file_id={old}" in build_sandbox_import_manifest(None, tools, history)
-    assert build_sandbox_import_manifest(None, [], history) == ""
-
-
-async def test_manifest_for_turn_skips_db_without_tool_and_survives_lookup_failure(monkeypatch):
-    from src.services import draft_run_service as drs
-
-    calls = []
-
-    async def fake_refs(conv_id):
-        calls.append(conv_id)
-        return [{"type": "image", "transfer_method": "local_file", "upload_file_id": "f-1", "name": "cat.jpg"}]
-
-    monkeypatch.setattr(drs, "load_conversation_file_refs", fake_refs)
-
-    assert await drs.build_sandbox_import_manifest_for_turn(None, [SimpleNamespace(name="terminal")], "c1") == ""
-    assert calls == []  # no import tool mounted -> no DB read
-
-    text = await drs.build_sandbox_import_manifest_for_turn(None, [SimpleNamespace(name="sandbox_import_file")], "c1")
-    assert "file_id=f-1" in text and calls == ["c1"]
-
-    # no conversation / a failing lookup degrade to "no history", never raise
-    monkeypatch.undo()
-    assert await drs.load_conversation_file_refs(None) == []
 
 
 # ------------------------------------------------------------ write text file into the session dir
@@ -933,16 +665,6 @@ async def test_write_tool_refuses_escape_mixed_args_and_missing_half(monkeypatch
     # a missing required `path` is rejected by the tool base class before execute() runs
     res = await tool.safe_execute(content="x")
     assert not res.success and res.error_code == "VALIDATION_ERROR"
-    assert client.uploaded == []
-
-
-async def test_import_tool_no_longer_writes_text(monkeypatch):
-    client = _FakeClient()
-    tool = _file_tool(monkeypatch, "SandboxImportFileTool", client)
-
-    res = await tool.safe_execute(path="a.py", content="x")
-
-    assert not res.success  # file_id is required now; path/content are not parameters
     assert client.uploaded == []
 
 
@@ -1175,7 +897,6 @@ SANDBOX_TOOLS = [
     "terminal_tool",
     "sandbox_read_file",
     "sandbox_write_file",
-    "sandbox_import_file",
     "sandbox_publish_file",
 ]
 

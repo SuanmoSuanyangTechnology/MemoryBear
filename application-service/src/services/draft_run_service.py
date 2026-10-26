@@ -186,108 +186,6 @@ def build_uploaded_images_manifest(
     return "\n".join(lines), image_references
 
 
-_SANDBOX_IMPORT_TOOL_NAME = "sandbox_import_file"
-_SANDBOX_MANIFEST_MAX_FILES = 20
-_SANDBOX_HISTORY_SCAN_MESSAGES = 30
-
-
-def _has_sandbox_import_tool(tools: Any) -> bool:
-    return any(getattr(t, "name", None) == _SANDBOX_IMPORT_TOOL_NAME for t in tools or [])
-
-
-def build_sandbox_import_manifest(
-    files: list[FileInput] | list[dict[str, Any]] | None,
-    tools: Any,
-    history_files: list[dict[str, Any]] | None = None,
-) -> str:
-    """file_id manifest of the user's uploads; only built when sandbox_import_file is
-    mounted.
-
-    By default the model only sees the attachment content (images inlined, documents
-    extracted to text) and has no file_id; to hand a file to the sandbox (pandas,
-    rewriting docx/xlsx, ...) it must know the id. ``files`` is this turn's attachment
-    set and ``history_files`` the references from earlier turns of the same
-    conversation (newest first): history only keeps text, so without this a later turn
-    cannot import a file sent earlier. Only local uploads are listed — a remote URL has
-    no file_id and the import tool does not fetch external addresses. Each file_id is
-    listed once. Returns an empty string with no tool or nothing to list.
-    """
-    if not _has_sandbox_import_tool(tools):
-        return ""
-    entries: list[str] = []
-    seen: set[str] = set()
-    for file in [*(files or []), *(history_files or [])]:
-        reference = FileReference.from_payload(file)
-        if reference is None or not reference.file_id or reference.file_id in seen:
-            continue
-        if reference.transfer_method not in (None, "local_file"):
-            continue
-        seen.add(reference.file_id)
-        entries.append(f"- {reference.name or '未命名文件'}  file_id={reference.file_id}")
-        if len(entries) >= _SANDBOX_MANIFEST_MAX_FILES:
-            break
-    if not entries:
-        return ""
-    return "\n".join(
-        [
-            f"本会话用户上传过的文件如下（含之前几轮）。需要在沙箱里处理其中某个文件时，调用 {_SANDBOX_IMPORT_TOOL_NAME} 并传入对应 file_id：",
-            *entries,
-        ]
-    )
-
-
-async def load_conversation_file_refs(conversation_id: Any) -> list[dict[str, Any]]:
-    """Read the user attachment references already persisted for this conversation
-    (messages.meta_data['files']), newest first.
-
-    Returns an empty list when there is no conversation or the read fails: this only
-    adds context for the model and must never break the turn.
-    """
-    if not conversation_id:
-        return []
-    try:
-        conv_uuid = (
-            conversation_id
-            if isinstance(conversation_id, uuid.UUID)
-            else uuid.UUID(str(conversation_id))
-        )
-        async with get_async_db_context() as db:
-            result = await db.execute(
-                select(Message.meta_data)
-                .where(
-                    Message.conversation_id == conv_uuid,
-                    Message.role == "user",
-                    Message.is_deleted.is_not(True),
-                )
-                .order_by(Message.created_at.desc())
-                .limit(_SANDBOX_HISTORY_SCAN_MESSAGES)
-            )
-            rows = [dict(meta or {}) for meta in result.scalars().all()]
-    except Exception as exc:  # noqa: BLE001 - history lookup must never break the turn
-        logger.warning(
-            f"[沙箱附件清单] 读取会话历史附件失败 | 会话={conversation_id} | 异常={type(exc).__name__}"
-        )
-        return []
-    refs: list[dict[str, Any]] = []
-    for meta in rows:
-        for ref in meta.get("files") or []:
-            if isinstance(ref, dict):
-                refs.append(ref)
-    return refs
-
-
-async def build_sandbox_import_manifest_for_turn(
-    files: list[FileInput] | list[dict[str, Any]] | None,
-    tools: Any,
-    conversation_id: Any,
-) -> str:
-    """Import manifest for this turn plus the conversation history; no DB read unless
-    the import tool is mounted."""
-    if not _has_sandbox_import_tool(tools):
-        return ""
-    history_files = await load_conversation_file_refs(conversation_id)
-    return build_sandbox_import_manifest(files, tools, history_files)
-
 
 class WebSearchInput(BaseModel):
     """Input parameters for the web search tool."""
@@ -1941,10 +1839,6 @@ class AgentRunService:
                     and Modality.IMAGE in input_modalities
                     and any(f.type == FileType.DOCUMENT for f in files)
                 )
-            # 挂载了沙箱导入工具时，列出本轮及本会话历史文件的 file_id（后续轮次不带附件也要能导入）
-            sandbox_manifest = await build_sandbox_import_manifest_for_turn(files, tools, conversation_id)
-            if sandbox_manifest:
-                llm_message = f"{llm_message}\n\n{sandbox_manifest}"
             if has_doc_with_images:
                 system_prompt += (
                     "\n\n文档文字中可能包含图片位置标记如 [图片 第2页 第1张]。"

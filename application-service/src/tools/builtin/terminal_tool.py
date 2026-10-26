@@ -20,7 +20,7 @@ from typing import Any, List, Optional
 
 from ...schemas.tool_schema import ParameterType, ToolParameter, ToolResult
 from .base import BuiltinTool
-from .sandbox_output import clean_terminal_output
+from .sandbox_output import sanitize_sandbox_output
 
 logger = logging.getLogger(__name__)
 
@@ -161,9 +161,9 @@ class TerminalTool(BuiltinTool):
         data: dict[str, Any] = {
             "status": result.status,
             "exit_code": result.exit_code,
-            "stdout": clean_terminal_output(result.stdout),
-            "stderr": clean_terminal_output(result.stderr),
-            "error": result.error,
+            "stdout": sanitize_sandbox_output(result.stdout),
+            "stderr": sanitize_sandbox_output(result.stderr),
+            "error": sanitize_sandbox_output(result.error),
             "duration_ms": result.duration_ms,
         }
         if result.stdout_truncated or result.stderr_truncated:

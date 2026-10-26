@@ -1,7 +1,6 @@
-"""沙箱文件内置工具 - 把沙箱里的文件交给用户（带出），把用户上传的文件放进沙箱（带入）
+"""沙箱文件内置工具：读写会话文件，并将沙箱产物交付给用户。
 
 - ``sandbox_publish_file``：沙箱 ``/workspace`` 下的文件 → 主应用文件存储 → 永久下载链接。
-- ``sandbox_import_file``：已上传到平台的文件（file_id）→ 沙箱 ``in/`` 目录。
 - ``sandbox_write_file``：把模型给出的文本写成会话目录内的文件（path + content），或精确替换其中一段（path + old_string + new_string）。
 - ``sandbox_read_file``：只读，按行范围读取会话目录内的文本文件。
 
@@ -24,27 +23,6 @@ logger = logging.getLogger(__name__)
 
 _ANONYMOUS_USER_IDS = {"", "anonymous"}
 _WORKSPACE = "/workspace"
-_MAX_IMPORT_FILES = 20
-
-
-def _collect_file_ids(raw: Any) -> tuple[list[str], bool]:
-    """把 file_id 参数归一成去重后的 id 列表。
-
-    接受字符串、字符串列表、文件对象（含 file_id / upload_file_id 的 dict）及其列表。
-    文件对象若明确是远程 URL（transfer_method 不是 local_file），它的 file_id 是临时随机值，跳过。
-    返回 (ids, 是否列表输入)；列表输入时调用方用固定的批量返回结构。
-    """
-    is_batch = isinstance(raw, (list, tuple))
-    items = list(raw) if is_batch else [raw]
-    ids: list[str] = []
-    for item in items:
-        if isinstance(item, dict):
-            if item.get("transfer_method") not in (None, "local_file"):
-                continue
-            item = item.get("file_id") or item.get("upload_file_id")
-        if isinstance(item, str) and item.strip() and item.strip() not in ids:
-            ids.append(item.strip())
-    return ids, is_batch
 
 
 class _SandboxFileToolBase(BuiltinTool):
@@ -213,115 +191,6 @@ class SandboxPublishFileTool(_SandboxFileToolBase):
         return ToolResult.success_result(data=data, execution_time=elapsed())
 
 
-class SandboxImportFileTool(_SandboxFileToolBase):
-    """把用户已上传到平台的文件（file_id）放进沙箱 in/ 目录"""
-
-    # 一次最多 20 个文件、单个最大 100MB
-    execution_timeout_s: float = 600.0
-
-    @property
-    def name(self) -> str:
-        return "sandbox_import_file"
-
-    @property
-    def description(self) -> str:
-        return (
-            "把用户已上传到平台的文件放进沙箱：文件放在当前会话的 in/ 目录，返回沙箱内路径。"
-            f"单个文件不超过 100MB，只能放入当前工作空间的文件，file_id 可以是一个，也可以是多个组成的列表（一次最多 {_MAX_IMPORT_FILES} 个）。"
-            "本工具只做导入；把你写的文本存成沙箱文件请用 sandbox_write_file，查看文件内容请用 sandbox_read_file。"
-        )
-
-    @property
-    def parameters(self) -> List[ToolParameter]:
-        return [
-            # FILE 类型同时放行字符串、列表和对象：工作流里 {{sys.files.file_id}} 渲染出来是列表，
-            # {{sys.files}} 是文件对象列表；Agent 侧仍按字符串声明（langchain 适配器对 FILE 退化为 string）
-            ToolParameter(
-                name="file_id",
-                type=ParameterType.FILE,
-                description="用户上传文件的 file_id（UUID）；也可传 file_id 列表或文件对象列表一次导入多个",
-                required=True,
-            ),
-        ]
-
-    async def execute(self, **kwargs) -> ToolResult:
-        started = time.time()
-
-        def elapsed() -> float:
-            return time.time() - started
-
-        from ...integrations.sandbox.errors import SandboxClientError
-        from ...services import sandbox_file_service as svc
-
-        file_ids, is_batch = _collect_file_ids(kwargs.get("file_id"))
-        if not file_ids:
-            return ToolResult.error_result(
-                error="file_id 不能为空（远程 URL 的文件没有 file_id，无法导入）",
-                error_code="INVALID_ARGUMENT",
-                execution_time=elapsed(),
-            )
-        if len(file_ids) > _MAX_IMPORT_FILES:
-            return ToolResult.error_result(
-                error=f"一次最多导入 {_MAX_IMPORT_FILES} 个文件，本次传入 {len(file_ids)} 个",
-                error_code="INVALID_ARGUMENT",
-                execution_time=elapsed(),
-            )
-
-        client, principal, conversation_id, failure = await self._prepare(started)
-        if failure is not None:
-            return failure
-
-        imported_items: list[dict[str, Any]] = []
-        failed_items: list[dict[str, Any]] = []
-        unavailable = False
-        for file_id in file_ids:
-            try:
-                imported = await svc.import_uploaded_file(
-                    client, principal, conversation_id=conversation_id, file_id=file_id
-                )
-            except svc.SandboxFileError as exc:
-                failed_items.append({"file_id": file_id, "error": str(exc), "error_code": "SANDBOX_IMPORT_FAILED"})
-                continue
-            except SandboxClientError as exc:
-                logger.warning("sandbox_import_failed error=%s", type(exc).__name__)
-                failed_items.append(
-                    {"file_id": file_id, "error": svc.describe_error(exc), "error_code": "SANDBOX_UNAVAILABLE"}
-                )
-                unavailable = True  # 服务不可用时后面的文件也会失败，不再逐个尝试
-                break
-            imported_items.append(
-                {
-                    "file_id": imported.file_id,
-                    "name": imported.name,
-                    "sandbox_path": imported.sandbox_path,
-                    "size": imported.size,
-                }
-            )
-
-        if unavailable:
-            skipped = file_ids[len(imported_items) + len(failed_items):]
-            failed_items.extend(
-                {"file_id": fid, "error": "沙箱服务不可用，未尝试", "error_code": "SANDBOX_UNAVAILABLE"}
-                for fid in skipped
-            )
-
-        if not imported_items:  # 全部失败：按错误返回，错误码取第一个失败项
-            first = failed_items[0]
-            return ToolResult.error_result(
-                error=first["error"] if len(failed_items) == 1 else "; ".join(
-                    f"{f['file_id']}: {f['error']}" for f in failed_items
-                ),
-                error_code=first["error_code"],
-                execution_time=elapsed(),
-            )
-
-        if not is_batch:  # 单个 file_id：保持原来的返回结构
-            return ToolResult.success_result(data=imported_items[0], execution_time=elapsed())
-        # 列表输入：固定结构，下游按 imported[*].sandbox_path 取路径；部分失败不当作整体失败
-        data = {"imported": imported_items, "failed": failed_items, "count": len(imported_items)}
-        return ToolResult.success_result(data=data, execution_time=elapsed())
-
-
 def _as_int(value: Any, default: int) -> Any:
     """Tool arguments may arrive as strings; empty means 'use the default'."""
 
@@ -448,8 +317,7 @@ class SandboxWriteFileTool(_SandboxFileToolBase):
             "脚本报错后只改出错的几行，不用整份重发。old_string 必须在文件中恰好出现一次（带上前后几行上下文以保证唯一），"
             "缩进和换行要完全一致；new_string 为空串表示删除。文件需是 UTF-8 文本且不超过 2MB。"
             "path 是相对会话目录的路径（如 gen_ppt.py、data/input.json），不能越出会话目录。"
-            "本工具不读取、不搜索：查看内容用 sandbox_read_file，按关键字查找（grep -n）用终端；"
-            "把用户上传的文件放进沙箱用 sandbox_import_file。"
+            "本工具不读取、不搜索：查看内容用 sandbox_read_file，按关键字查找（grep -n）用终端。"
         )
 
     @property

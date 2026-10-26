@@ -10,7 +10,6 @@ from .database_tool import DatabaseTool
 from .code_interpreter_tool import CodeInterpreterTool
 from .terminal_tool import TerminalTool
 from .sandbox_file_tools import (
-    SandboxImportFileTool,
     SandboxPublishFileTool,
     SandboxReadFileTool,
     SandboxWriteFileTool,
@@ -27,7 +26,6 @@ __all__ = [
     "CodeInterpreterTool",
     "TerminalTool",
     "SandboxPublishFileTool",
-    "SandboxImportFileTool",
     "SandboxReadFileTool",
     "SandboxWriteFileTool",
 ]

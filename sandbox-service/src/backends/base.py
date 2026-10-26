@@ -57,6 +57,8 @@ class InstanceSpec:
     tenant_id: str
     template: str
     metadata: dict[str, str] = field(default_factory=dict)
+    allow_internet_access: bool | None = None
+    network: dict[str, object] | None = None
 
 
 @dataclass(frozen=True)

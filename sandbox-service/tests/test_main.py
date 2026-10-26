@@ -26,6 +26,21 @@ def test_bad_scheduler_number_fails_at_startup():
         create_app_from_env({**FAKE_ENV, "SANDBOX_CAPACITY": "lots"})
 
 
+def test_enabled_egress_policy_is_loaded_during_startup(tmp_path):
+    policy = tmp_path / "egress.json"
+    policy.write_text('{"version":1,"allow_domains":["pypi.org"]}', encoding="utf-8")
+
+    app = create_app_from_env(
+        {
+            **FAKE_ENV,
+            "SANDBOX_EGRESS_ENABLED": "true",
+            "SANDBOX_EGRESS_POLICY_PATH": str(policy),
+        }
+    )
+
+    assert app is not None
+
+
 def test_substrate_timer_shorter_than_the_scheduler_lifetime_is_refused(monkeypatch):
     class ShortLived:
         name = "short"

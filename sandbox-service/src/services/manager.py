@@ -41,10 +41,16 @@ from ..backends.base import (
     SandboxBackend,
 )
 from ..clock import Clock
+from ..egress.policy import StrictEgressPolicy
 from ..errors import SandboxError, invalid_request
 from ..files.artifact import ArtifactSigner
 from ..files.config import FilesConfig
 from ..keys import CHANNEL_CODE, CHANNEL_SHELL, KernelKey, SandboxKey
+from ..observability import (
+    NullOperationAuditSink,
+    OperationAuditEvent,
+    OperationAuditSink,
+)
 from .eviction import is_candidate, select_victims
 from .file_ops import FileOpsMixin
 from .keyed_lock import KeyedLocks
@@ -116,6 +122,8 @@ class SandboxManager(FileOpsMixin):
         registry: Registry | None = None,
         budget: OutputBudget | None = None,
         files: FilesConfig | None = None,
+        audit_sink: OperationAuditSink | None = None,
+        egress_policy: StrictEgressPolicy | None = None,
     ) -> None:
         self._backend = backend
         self._budget = budget or OutputBudget()
@@ -131,6 +139,8 @@ class SandboxManager(FileOpsMixin):
         self._create_log: dict[str, deque[float]] = {}
         self._waiting = 0
         self.metrics: Counter[str] = Counter()
+        self._audit_sink = audit_sink or NullOperationAuditSink()
+        self._egress_policy = egress_policy
 
     # ------------------------------------------------------------------ public
 
@@ -146,6 +156,82 @@ class SandboxManager(FileOpsMixin):
             "metrics": dict(self.metrics),
         }
 
+    def record_operation(
+        self,
+        operation: str,
+        outcome: str,
+        sandbox: SandboxKey | None = None,
+        *,
+        instance_id: str | None = None,
+        conversation_id: str | None = None,
+        channel: str | None = None,
+        reason: str | None = None,
+        details: dict[str, object] | None = None,
+        tenant_id: str | None = None,
+        sandbox_digest: str | None = None,
+    ) -> None:
+        """Record one bounded metric and one identity-rich durable audit event."""
+
+        self.metrics[f"operation.{operation}.{outcome}"] += 1
+        event = OperationAuditEvent(
+            ts_ms=self._clock.now_ms(),
+            operation=operation,
+            outcome=outcome,
+            tenant_id=sandbox.tenant_id if sandbox else tenant_id,
+            workspace_id=sandbox.workspace_id if sandbox else None,
+            end_user_id=sandbox.end_user_id if sandbox else None,
+            sandbox_digest=sandbox.digest if sandbox else sandbox_digest,
+            instance_id=instance_id,
+            conversation_id=conversation_id,
+            channel=channel,
+            reason=reason,
+            details=details,
+        )
+        try:
+            self._audit_sink.record(event)
+        except Exception:  # noqa: BLE001 - audit failure must not hide the operation result
+            self.metrics["audit_write_failures"] += 1
+            logger.exception("operation audit write failed: operation=%s", operation)
+
+    def _record_backend_error(
+        self, operation: str, exc: BackendError, rec: InstanceRecord | None = None
+    ) -> None:
+        # The same backend exception may cross several manager layers. Count it once,
+        # at the most specific layer that first observes it.
+        if getattr(exc, "_sandbox_observed", False):
+            return
+        exc._sandbox_observed = True
+        kind = type(exc).__name__
+        self.metrics[f"backend_error.{operation}.{kind}"] += 1
+        self.record_operation(
+            f"backend_{operation}",
+            "error",
+            instance_id=rec.instance_id if rec else None,
+            reason=kind,
+            tenant_id=rec.tenant_id if rec else None,
+            sandbox_digest=rec.digest if rec else None,
+        )
+
+    def _record_lifecycle(
+        self,
+        action: str,
+        rec: InstanceRecord,
+        *,
+        sandbox: SandboxKey | None = None,
+        reason: str | None = None,
+    ) -> None:
+        self.metrics[f"lifecycle.{action}"] += 1
+        self.record_operation(
+            "lifecycle",
+            "success",
+            sandbox,
+            instance_id=rec.instance_id,
+            reason=reason or action,
+            details={"action": action},
+            tenant_id=rec.tenant_id,
+            sandbox_digest=rec.digest,
+        )
+
     async def execute(
         self, key: KernelKey, code: str, timeout_s: float | None = None
     ) -> ExecOutcome:
@@ -153,7 +239,9 @@ class SandboxManager(FileOpsMixin):
 
         if not isinstance(code, str):
             raise invalid_request("code must be a string", field="code")
-        return await self._guarded(key, code, self._resolve_timeout(timeout_s))
+        return await self._guarded(
+            key, code, self._resolve_timeout(timeout_s), operation="execute"
+        )
 
     async def run_command(
         self,
@@ -178,7 +266,13 @@ class SandboxManager(FileOpsMixin):
         timeout = self._resolve_timeout(timeout_s)
         key = KernelKey(sandbox, conversation_id, "python3", CHANNEL_SHELL)
         code, marker = build_wrapper(cmd, workdir, extra_env, timeout, conversation_id)
-        return await self._guarded(key, code, timeout, lambda raw: fold_result(raw, marker))
+        return await self._guarded(
+            key,
+            code,
+            timeout,
+            lambda raw: fold_result(raw, marker),
+            operation="commands",
+        )
 
     def _resolve_timeout(self, timeout_s: float | None) -> float:
         timeout = self._cfg.exec_timeout_default_s if timeout_s is None else timeout_s
@@ -193,16 +287,20 @@ class SandboxManager(FileOpsMixin):
         code: str,
         timeout: float,
         fold: Callable[[RunResult], tuple[RunResult, int | None]] | None = None,
+        *,
+        operation: str,
     ) -> ExecOutcome:
         try:
-            return await self._execute(key, code, timeout, fold)
+            return await self._execute(key, code, timeout, fold, operation=operation)
         except SandboxError:
             raise
         except BackendUnavailable as exc:
+            self._record_backend_error(operation, exc)
             raise SandboxError(
                 "backend_unavailable", str(exc) or "backend unavailable", retryable=True
             ) from exc
         except BackendError as exc:
+            self._record_backend_error(operation, exc)
             raise SandboxError("internal_error", f"backend error: {exc}") from exc
 
     async def close_conversation(self, sandbox: SandboxKey, conversation_id: str) -> int:
@@ -227,12 +325,14 @@ class SandboxManager(FileOpsMixin):
             async with self._kernel_locks.hold(lock_key):
                 try:
                     await self._retire_kernel(rec, kr)
-                except ContextGone:
-                    pass
-                except InstanceGone:
+                except ContextGone as exc:
+                    self._record_backend_error("close_conversation", exc, rec)
+                except InstanceGone as exc:
+                    self._record_backend_error("close_conversation", exc, rec)
                     self._drop_lost(rec)
                     break
-                except BackendError:
+                except BackendError as exc:
+                    self._record_backend_error("close_conversation", exc, rec)
                     rec.stale_contexts.append(kr.context_id)
         return len(popped)
 
@@ -245,7 +345,18 @@ class SandboxManager(FileOpsMixin):
             if rec is None:
                 return False
             if rec.instance_id is not None:
-                await self._destroy_locked(rec, tombstone=False)
+                try:
+                    await self._destroy_locked(rec, tombstone=False, reason="destroy_user")
+                except BackendUnavailable as exc:
+                    self._record_backend_error("destroy_user", exc, rec)
+                    raise SandboxError(
+                        "backend_unavailable",
+                        str(exc) or "backend unavailable",
+                        retryable=True,
+                    ) from exc
+                except BackendError as exc:
+                    self._record_backend_error("destroy_user", exc, rec)
+                    raise SandboxError("internal_error", f"backend error: {exc}") from exc
             else:
                 self._registry.remove(rec)
             return True
@@ -259,10 +370,12 @@ class SandboxManager(FileOpsMixin):
                 continue
             try:
                 await self._tick_one(rec, rep)
-            except InstanceGone:
+            except InstanceGone as exc:
+                self._record_backend_error("tick", exc, rec)
                 self._drop_lost(rec)
             except BackendError as exc:
                 rep.errors += 1
+                self._record_backend_error("tick", exc, rec)
                 logger.warning("tick failed for %s: %s", rec.digest, exc)
         if self._registry.count() >= self._cfg.high_water * self._cfg.capacity:
             rep.evicted += await self._relieve_pressure()
@@ -294,10 +407,19 @@ class SandboxManager(FileOpsMixin):
             try:
                 await self._backend.destroy(info.instance_id)
                 rep.orphans_destroyed += 1
-            except InstanceGone:
-                pass
+                self.metrics["lifecycle.orphan_destroyed"] += 1
+                self.record_operation(
+                    "lifecycle",
+                    "success",
+                    instance_id=info.instance_id,
+                    reason="orphan_destroyed",
+                    details={"action": "orphan_destroyed"},
+                )
+            except InstanceGone as exc:
+                self._record_backend_error("reconcile_destroy", exc)
             except BackendError as exc:
                 rep.errors += 1
+                self._record_backend_error("reconcile_destroy", exc)
                 logger.warning("orphan %s not destroyed: %s", info.instance_id, exc)
         for rec in self._registry.all():
             if rec.state == STATE_CREATING or rec.instance_id is None:
@@ -318,6 +440,8 @@ class SandboxManager(FileOpsMixin):
         code: str,
         timeout: float,
         fold: Callable[[RunResult], tuple[RunResult, int | None]] | None = None,
+        *,
+        operation: str,
     ) -> ExecOutcome:
         digest = key.sandbox.digest
         rec, kr, path = await self._acquire(key)
@@ -334,6 +458,7 @@ class SandboxManager(FileOpsMixin):
                     # A shell kernel holds no user variables, so a rebuild is not news.
                     kernel_reset = False
             except InstanceGone as exc:
+                self._record_backend_error(operation, exc, rec)
                 self._drop_lost(rec)
                 raise SandboxError(
                     "instance_lost", "the sandbox instance disappeared", retryable=True
@@ -399,7 +524,8 @@ class SandboxManager(FileOpsMixin):
         instance_id = rec.instance_id
         try:
             await self._with_capacity_retry(lambda: self._backend.resume(instance_id))
-        except InstanceGone:
+        except InstanceGone as exc:
+            self._record_backend_error("resume", exc, rec)
             self._drop_lost(rec)
             return False
         rec.state = STATE_RUNNING
@@ -409,6 +535,7 @@ class SandboxManager(FileOpsMixin):
         # resume would delete every kernel.
         for kernel in rec.kernels.values():
             kernel.last_used_ms = rec.last_active_ms
+        self._record_lifecycle("resumed", rec)
         return True
 
     async def _create_kernel(self, rec: InstanceRecord, key: KernelKey) -> KernelRecord:
@@ -476,11 +603,13 @@ class SandboxManager(FileOpsMixin):
             context_id = rec.stale_contexts.pop()
             try:
                 await self._backend.delete_context(rec.instance_id, context_id)
-            except ContextGone:
-                pass
-            except InstanceGone:
+            except ContextGone as exc:
+                self._record_backend_error("stale_context_cleanup", exc, rec)
+            except InstanceGone as exc:
+                self._record_backend_error("stale_context_cleanup", exc, rec)
                 raise
             except BackendError as exc:
+                self._record_backend_error("stale_context_cleanup", exc, rec)
                 logger.warning("stale context %s not deleted: %s", context_id, exc)
 
     async def _retire_kernel(self, rec: InstanceRecord, kr: KernelRecord) -> None:
@@ -517,7 +646,12 @@ class SandboxManager(FileOpsMixin):
 
         idle_ms = _ms(self._cfg.kernel_idle_s)
         now = self._clock.now_ms()
-        for token, kr in [(t, k) for t, k in rec.kernels.items() if now - k.last_used_ms >= idle_ms]:
+        idle = [
+            (token, kernel)
+            for token, kernel in rec.kernels.items()
+            if now - kernel.last_used_ms >= idle_ms
+        ]
+        for token, kr in idle:
             async with self._kernel_locks.try_hold(f"{rec.digest}:{token}") as got:
                 if not got or rec.kernels.get(token) is not kr:
                     continue
@@ -526,11 +660,13 @@ class SandboxManager(FileOpsMixin):
                     rec.reaped_tokens.add(token)
                 try:
                     await self._retire_kernel(rec, kr)
-                except ContextGone:
-                    pass
-                except InstanceGone:
+                except ContextGone as exc:
+                    self._record_backend_error("kernel_reap", exc, rec)
+                except InstanceGone as exc:
+                    self._record_backend_error("kernel_reap", exc, rec)
                     raise
-                except BackendError:
+                except BackendError as exc:
+                    self._record_backend_error("kernel_reap", exc, rec)
                     rec.stale_contexts.append(kr.context_id)
                 rep.kernels_reaped += 1
                 self.metrics["kernels_reaped"] += 1
@@ -551,6 +687,7 @@ class SandboxManager(FileOpsMixin):
                     )
                     return result, kr, kernel_reset
                 except ContextGone as exc:
+                    self._record_backend_error("run_code", exc, rec)
                     # The context did not exist, so the code never ran: safe to retry.
                     if attempt == 1:
                         raise SandboxError(
@@ -581,16 +718,21 @@ class SandboxManager(FileOpsMixin):
         assert rec.instance_id is not None
         try:
             await self._backend.restart_context(rec.instance_id, kr.context_id)
-            kr.needs_init = key.channel == CHANNEL_CODE  # a restarted kernel is back in its default dir
-        except InstanceGone:
+            # A restarted kernel is back in its default directory.
+            kr.needs_init = key.channel == CHANNEL_CODE
+        except InstanceGone as exc:
+            self._record_backend_error("timeout_recovery", exc, rec)
             raise
-        except BackendError:
+        except BackendError as exc:
+            self._record_backend_error("timeout_recovery", exc, rec)
             rec.kernels.pop(key.token, None)
             try:
                 await self._backend.delete_context(rec.instance_id, kr.context_id)
-            except InstanceGone:
+            except InstanceGone as cleanup_exc:
+                self._record_backend_error("timeout_cleanup", cleanup_exc, rec)
                 raise
-            except BackendError:
+            except BackendError as cleanup_exc:
+                self._record_backend_error("timeout_cleanup", cleanup_exc, rec)
                 rec.stale_contexts.append(kr.context_id)
 
     # -------------------------------------------------------- creation / admission
@@ -620,6 +762,12 @@ class SandboxManager(FileOpsMixin):
             tenant_id=sandbox.tenant_id,
             template=self._cfg.default_template,
             metadata={META_KEY: digest, META_TENANT: sandbox.tenant_id},
+            allow_internet_access=False if self._egress_policy is not None else None,
+            network=(
+                self._egress_policy.network_config()
+                if self._egress_policy is not None
+                else None
+            ),
         )
 
         async def op():
@@ -628,6 +776,10 @@ class SandboxManager(FileOpsMixin):
 
         try:
             handle = await self._with_capacity_retry(op)
+        except BackendError as exc:
+            self._record_backend_error("create", exc, rec)
+            self._registry.remove(rec)
+            raise
         except BaseException:
             self._registry.remove(rec)
             raise
@@ -635,6 +787,20 @@ class SandboxManager(FileOpsMixin):
         rec.created_ms = handle.created_at_ms
         rec.state = STATE_RUNNING
         rec.last_active_ms = self._clock.now_ms()
+        if self._egress_policy is not None:
+            self.metrics["egress_policy.applied"] += 1
+            self.record_operation(
+                "egress_policy",
+                "applied",
+                sandbox,
+                instance_id=rec.instance_id,
+                details={
+                    "mode": "strict",
+                    "fingerprint": self._egress_policy.fingerprint,
+                    "rule_count": self._egress_policy.rule_count,
+                },
+            )
+        self._record_lifecycle("created", rec, sandbox=sandbox)
         return rec
 
     async def _reserve(self, digest: str, tenant_id: str) -> InstanceRecord:
@@ -743,10 +909,13 @@ class SandboxManager(FileOpsMixin):
                 if not is_candidate(rec, self._clock.now_ms(), _ms(cfg.p_min_s)):
                     continue
                 try:
-                    await self._destroy_locked(rec, tombstone=True)
-                except InstanceGone:
+                    await self._destroy_locked(rec, tombstone=True, reason="evicted")
+                except InstanceGone as exc:
+                    self._record_backend_error("evict", exc, rec)
+                    self._drop_lost(rec)
                     continue
                 except BackendError as exc:
+                    self._record_backend_error("evict", exc, rec)
                     logger.warning("eviction of %s failed: %s", rec.digest, exc)
                     continue
             done += 1
@@ -762,13 +931,13 @@ class SandboxManager(FileOpsMixin):
                 return
             now = self._clock.now_ms()
             if now - rec.created_ms >= _ms(cfg.absolute_lifetime_s):
-                await self._destroy_locked(rec, tombstone=True)
+                await self._destroy_locked(rec, tombstone=True, reason="absolute_lifetime")
                 rep.lifetime_expired += 1
             elif rec.state == STATE_PAUSED:
                 if rec.paused_at_ms is not None and now - rec.paused_at_ms >= _ms(
                     cfg.max_retention_s
                 ):
-                    await self._destroy_locked(rec, tombstone=True)
+                    await self._destroy_locked(rec, tombstone=True, reason="retention_expired")
                     rep.expired += 1
             elif rec.state == STATE_RUNNING and now - rec.last_active_ms >= _ms(
                 cfg.idle_pause_s
@@ -778,20 +947,24 @@ class SandboxManager(FileOpsMixin):
                 rec.paused_at_ms = now
                 rep.paused += 1
                 self.metrics["paused"] += 1
+                self._record_lifecycle("paused", rec, reason="idle")
             elif rec.state == STATE_RUNNING and cfg.kernel_idle_s > 0:
                 await self._reap_idle_kernels(rec, rep)
 
-    async def _destroy_locked(self, rec: InstanceRecord, *, tombstone: bool) -> None:
+    async def _destroy_locked(
+        self, rec: InstanceRecord, *, tombstone: bool, reason: str
+    ) -> None:
         """Destroy on the backend and forget; the caller holds the instance lock."""
 
         assert rec.instance_id is not None
         try:
             await self._backend.destroy(rec.instance_id)
-        except InstanceGone:
-            pass
+        except InstanceGone as exc:
+            self._record_backend_error("destroy", exc, rec)
         self._registry.remove(rec)
         if tombstone:
             self._registry.set_tombstone(rec.digest, self._clock.now_ms())
+        self._record_lifecycle("destroyed", rec, reason=reason)
 
     def _drop_lost(self, rec: InstanceRecord) -> None:
         """The backend lost the instance: forget it and remember to report a reset."""
@@ -799,3 +972,4 @@ class SandboxManager(FileOpsMixin):
         if self._registry.remove(rec):
             self._registry.set_tombstone(rec.digest, self._clock.now_ms())
             self.metrics["lost"] += 1
+            self._record_lifecycle("lost", rec)

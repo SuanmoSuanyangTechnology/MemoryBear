@@ -11,7 +11,6 @@ from collections.abc import Mapping
 from pathlib import Path
 
 from dotenv import load_dotenv
-
 from fastapi import FastAPI
 
 from .api.app import create_app
@@ -19,7 +18,9 @@ from .api.auth import load_api_token
 from .backends.factory import build_backend
 from .clock import Clock
 from .config import load_config
+from .egress.policy import load_strict_egress_policy
 from .envconf import ConfigError
+from .observability import JsonlOperationAuditSink
 from .services.manager import SandboxManager
 from .services.runner import BackgroundRunner
 
@@ -34,6 +35,7 @@ def create_app_from_env(env: Mapping[str, str] | None = None) -> FastAPI:
     source = os.environ if env is None else env
     cfg = load_config(source)
     token = load_api_token(source)
+    egress_policy = load_strict_egress_policy(cfg.egress, base_dir=_ENV_FILE.parent)
     clock = Clock()
     backend = build_backend(source, clock)
 
@@ -45,14 +47,24 @@ def create_app_from_env(env: Mapping[str, str] | None = None) -> FastAPI:
             f"SANDBOX_ABSOLUTE_LIFETIME_S={cfg.scheduler.absolute_lifetime_s}"
         )
 
+    audit_sink = JsonlOperationAuditSink(cfg.audit.audit_log_path)
     manager = SandboxManager(
-        backend, cfg.scheduler, clock=clock, budget=cfg.budget, files=cfg.files
+        backend,
+        cfg.scheduler,
+        clock=clock,
+        budget=cfg.budget,
+        files=cfg.files,
+        audit_sink=audit_sink,
+        egress_policy=egress_policy,
     )
     runner = BackgroundRunner(manager, cfg.scheduler, clock=clock)
 
-    async def close_backend() -> None:
-        aclose = getattr(backend, "aclose", None)
-        if aclose is not None:
-            await aclose()
+    async def close_resources() -> None:
+        try:
+            aclose = getattr(backend, "aclose", None)
+            if aclose is not None:
+                await aclose()
+        finally:
+            audit_sink.close()
 
-    return create_app(manager, api_token=token, runner=runner, on_close=close_backend)
+    return create_app(manager, api_token=token, runner=runner, on_close=close_resources)

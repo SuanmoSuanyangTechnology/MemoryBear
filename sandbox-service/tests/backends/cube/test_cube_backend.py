@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from dataclasses import replace
 
 import httpx
 import pytest
@@ -91,7 +92,37 @@ async def test_create_sends_template_never_timeout_and_metadata(make_backend, cu
     assert body["templateID"] == "workspace"
     assert body["timeout"] == -1
     assert body["metadata"][META_KEY] == "d9"
+    assert "allow_internet_access" not in body
+    assert "network" not in body
     assert handle.instance_id in cube.sandboxes
+
+
+async def test_create_sends_complete_strict_egress_policy(make_backend, cube):
+    backend = make_backend()
+    network = {
+        "allowOut": [],
+        "denyOut": [],
+        "rules": [
+            {
+                "name": "platform-https-1",
+                "match": {"sni": "pypi.org", "scheme": "https", "port": 443},
+                "action": {"allow": True, "audit": "metadata"},
+            }
+        ],
+    }
+
+    await backend.create(
+        replace(
+            spec("strict", "tenant"),
+            allow_internet_access=False,
+            network=network,
+        )
+    )
+
+    (request,) = cube.requests_to("POST", r"^/sandboxes$")
+    body = json.loads(request.content)
+    assert body["allow_internet_access"] is False
+    assert body["network"] == network
 
 
 async def test_create_conflict_means_capacity_exhausted(make_backend, cube):

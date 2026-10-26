@@ -76,11 +76,7 @@ from .context_assembler import (
 )
 from .context_engine_manager import ContextEngineManager
 from .conversation_service import ConversationService
-from .draft_run_service import (
-    AgentRunService,
-    build_sandbox_import_manifest_for_turn,
-    build_uploaded_images_manifest,
-)
+from .draft_run_service import AgentRunService, build_uploaded_images_manifest
 from .model_service import ModelApiKeyService, ModelConfigService
 from .multi_agent_orchestrator import MultiAgentOrchestrator
 from .multimodal_service import (
@@ -976,10 +972,6 @@ class AppChatService:
                     "对应图片已作为独立视觉输入提供，请结合位置标记和视觉内容理解文档；"
                     "不要在回答中输出任何文件地址、存储路径或内部标识。"
                 )
-        # 挂载了沙箱导入工具时，列出本轮及本会话历史文件的 file_id（后续轮次不带附件也要能导入）
-        sandbox_manifest = await build_sandbox_import_manifest_for_turn(files, tools, conversation_id)
-        if sandbox_manifest:
-            llm_message = f"{llm_message}\n\n{sandbox_manifest}"
 
         # Emotion-aware reply: await the detection result → on success write
         # the cache and inject "fixed principles + current-turn strategy";
@@ -1477,10 +1469,6 @@ class AppChatService:
                         "对应图片已作为独立视觉输入提供，请结合位置标记和视觉内容理解文档；"
                         "不要在回答中输出任何文件地址、存储路径或内部标识。"
                     )
-            # 挂载了沙箱导入工具时，列出本轮及本会话历史文件的 file_id（后续轮次不带附件也要能导入）
-            sandbox_manifest = await build_sandbox_import_manifest_for_turn(files, tools, conversation_id)
-            if sandbox_manifest:
-                llm_message = f"{llm_message}\n\n{sandbox_manifest}"
 
             # Emotion-aware reply: wait for the detection result → on success
             # write cache and inject "fixed principles + this turn's strategy";

@@ -4,9 +4,8 @@ Rule of thumb: how ONE tool is used belongs in that tool's ``description``; only
 cross-tool procedure (which tools to combine, in which order, where files go) lives here,
 and each block is injected only when the tool combination it talks about is present.
 
-Not injected on purpose: ``sandbox_import_file`` / ``sandbox_read_file`` usage. The
-import tool's description and the per-turn attachment manifest (appended to the user
-message) already tell the model when and how to use it.
+``sandbox_read_file`` usage is intentionally not repeated here because its tool
+description already contains the complete single-tool contract.
 """
 
 from __future__ import annotations

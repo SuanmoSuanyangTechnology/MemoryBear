@@ -216,15 +216,21 @@ class CubeBackend:
     # -- instance lifecycle ---------------------------------------------------------
 
     async def create(self, spec: InstanceSpec) -> InstanceHandle:
+        body: dict[str, Any] = {
+            "templateID": spec.template,
+            "timeout": NEVER_TIMEOUT,
+            "metadata": dict(spec.metadata),
+        }
+        if spec.allow_internet_access is not None:
+            # Cube's create contract deliberately uses this snake_case field.
+            body["allow_internet_access"] = spec.allow_internet_access
+        if spec.network is not None:
+            body["network"] = spec.network
         payload = await self._control(
             "POST",
             "/sandboxes",
             conflict=CapacityExhausted,
-            json_body={
-                "templateID": spec.template,
-                "timeout": NEVER_TIMEOUT,
-                "metadata": dict(spec.metadata),
-            },
+            json_body=body,
             timeout=self._cfg.create_timeout_s,
         )
         instance_id = payload.get("sandboxID") if isinstance(payload, dict) else None

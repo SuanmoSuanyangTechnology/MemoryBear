@@ -20,6 +20,9 @@ def test_defaults_match_decided_values():
     assert cfg.scheduler.exec_timeout_default_s == 120.0
     assert cfg.scheduler.exec_timeout_max_s == 300.0
     assert cfg.budget.stdout_max_bytes == 1024 * 1024
+    assert cfg.audit.audit_log_path == "logs/sandbox-audit.jsonl"
+    assert cfg.egress.egress_enabled is False
+    assert cfg.egress.egress_policy_path is None
 
 
 def test_values_are_parsed_by_field_type():
@@ -32,6 +35,9 @@ def test_values_are_parsed_by_field_type():
             "SANDBOX_DEFAULT_TEMPLATE": "py312",
             "SANDBOX_STDOUT_MAX_BYTES": "2048",
             "SANDBOX_HEAD_RATIO": "0.25",
+            "SANDBOX_AUDIT_LOG_PATH": "var/audit.jsonl",
+            "SANDBOX_EGRESS_ENABLED": "true",
+            "SANDBOX_EGRESS_POLICY_PATH": "/etc/sandbox/egress.json",
         }
     )
     assert cfg.scheduler.capacity == 200
@@ -41,6 +47,9 @@ def test_values_are_parsed_by_field_type():
     assert cfg.scheduler.default_template == "py312"
     assert cfg.budget.stdout_max_bytes == 2048
     assert cfg.budget.head_ratio == 0.25
+    assert cfg.audit.audit_log_path == "var/audit.jsonl"
+    assert cfg.egress.egress_enabled is True
+    assert cfg.egress.egress_policy_path == "/etc/sandbox/egress.json"
 
 
 def test_optional_fields_accept_value_and_empty():
@@ -68,6 +77,7 @@ def test_unrelated_variables_are_ignored():
         ("SANDBOX_P_MIN_S", "inf"),
         ("SANDBOX_DEFAULT_TEMPLATE", "  "),
         ("SANDBOX_TENANT_CAPACITY", "x"),
+        ("SANDBOX_EGRESS_ENABLED", "sometimes"),
     ],
 )
 def test_malformed_values_name_the_variable(name, value):
@@ -84,6 +94,7 @@ def test_malformed_values_name_the_variable(name, value):
         {"SANDBOX_P_MIN_S": "-1"},
         {"SANDBOX_STDOUT_MAX_BYTES": "0"},
         {"SANDBOX_HEAD_RATIO": "1.5"},
+        {"SANDBOX_EGRESS_ENABLED": "true"},
     ],
 )
 def test_out_of_range_values_raise_config_error(env):
@@ -103,3 +114,6 @@ def test_known_variables_cover_every_field():
     assert "SANDBOX_P_MIN_S" in names
     assert "SANDBOX_STDOUT_MAX_BYTES" in names
     assert "SANDBOX_EXEC_TIMEOUT_MAX_S" in names
+    assert "SANDBOX_AUDIT_LOG_PATH" in names
+    assert "SANDBOX_EGRESS_ENABLED" in names
+    assert "SANDBOX_EGRESS_POLICY_PATH" in names

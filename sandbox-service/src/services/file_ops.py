@@ -112,6 +112,7 @@ class FileOpsMixin:
         if isinstance(exc, SandboxError):
             return exc
         if isinstance(exc, InstanceGone):
+            self._record_backend_error("files", exc, rec)  # type: ignore[attr-defined]
             if rec is not None:
                 self._drop_lost(rec)  # type: ignore[attr-defined]
             return SandboxError(
@@ -122,9 +123,12 @@ class FileOpsMixin:
         if isinstance(exc, IsADirectory):
             return invalid_request("the path is a directory", field="path")
         if isinstance(exc, BackendUnavailable):
+            self._record_backend_error("files", exc, rec)  # type: ignore[attr-defined]
             return SandboxError(
                 "backend_unavailable", str(exc) or "backend unavailable", retryable=True
             )
+        if isinstance(exc, BackendError):
+            self._record_backend_error("files", exc, rec)  # type: ignore[attr-defined]
         return SandboxError("internal_error", f"backend error: {exc}")
 
     async def _acquire_files(self, sandbox: SandboxKey, *, create: bool) -> InstanceRecord:
@@ -191,7 +195,11 @@ class FileOpsMixin:
         self, sandbox: SandboxKey, path: str, depth: int = 1
     ) -> tuple[list[FileEntry], bool]:
         path = normalize(path)
-        if isinstance(depth, bool) or not isinstance(depth, int) or not 1 <= depth <= LIST_DEPTH_MAX:
+        if (
+            isinstance(depth, bool)
+            or not isinstance(depth, int)
+            or not 1 <= depth <= LIST_DEPTH_MAX
+        ):
             raise invalid_request(f"depth must be 1..{LIST_DEPTH_MAX}", field="depth")
         async with self._file_session(sandbox, create=False) as rec:
             entries = await self._backend.list_dir(rec.instance_id, path, depth)  # type: ignore[attr-defined]
@@ -253,8 +261,10 @@ class FileOpsMixin:
             except Exception:
                 try:  # do not leave a half-written file behind
                     await self._backend.remove(instance_id, path)  # type: ignore[attr-defined]
-                except BackendError:
-                    pass
+                except BackendError as cleanup_exc:
+                    self._record_backend_error(  # type: ignore[attr-defined]
+                        "files_cleanup", cleanup_exc, rec
+                    )
                 raise
         self.metrics["files_uploaded"] += 1  # type: ignore[attr-defined]
         return size
@@ -373,7 +383,9 @@ class FileOpsMixin:
             )
         return listed, len(files) > cfg.max_artifacts
 
-    async def open_artifact(self, sandbox: SandboxKey, aid: str) -> tuple[ArtifactClaims, FileDownload]:
+    async def open_artifact(
+        self, sandbox: SandboxKey, aid: str
+    ) -> tuple[ArtifactClaims, FileDownload]:
         claims = self._signer.verify(aid, now_s=self._clock.time())  # type: ignore[attr-defined]
         if claims.digest != sandbox.digest:
             raise SandboxError("unauthorized", "the artifact belongs to another end user")

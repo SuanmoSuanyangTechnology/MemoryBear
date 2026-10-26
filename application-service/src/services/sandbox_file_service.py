@@ -1,21 +1,17 @@
-"""沙箱文件带出（产物发布）与带入（用户文件推送）
+"""沙箱产物发布与会话文本文件读写。
 
-数据流（设计文档 7.5 / 7.6）
-----------------------------
-- 带出：sandbox-service 的 ``/internal/artifacts/{aid}`` 流式下载 → ``FileStorageService.upload_stream``
-  → ``FileMetadata`` 置 completed → 永久下载 URL。沙箱服务本身不碰对象存储。
-- 带入：``FileMetadata`` 校验归属 → 存储后端 ``download_stream`` → sandbox-service
-  ``PUT /internal/files/upload`` 写入 ``/workspace/sessions/<会话>/in/``。
+产物从 sandbox-service 的 ``/internal/artifacts/{aid}`` 流式下载，经
+``FileStorageService.upload_stream`` 写入主应用文件存储，并将 ``FileMetadata``
+置为 completed 后返回永久下载 URL。沙箱服务本身不接触对象存储。
 
-校验规则放在主应用：扩展名白名单（配置项 ``SANDBOX_FILE_ALLOWED_EXTENSIONS``）、
-单文件与单次累计大小、文件头魔数抽查；不信任沙箱给出的 content_type 做放行判断。
+产物发布的扩展名白名单、单文件与单次累计大小、文件头魔数抽查均由主应用执行；
+不信任沙箱给出的 content_type 做放行判断。
 """
 from __future__ import annotations
 
 import logging
 import os
 import posixpath
-import re
 import uuid
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
@@ -69,14 +65,6 @@ class PublishReport:
     failed: list[PublishFailure] = field(default_factory=list)
 
 
-@dataclass(frozen=True)
-class ImportedFile:
-    file_id: str
-    name: str
-    sandbox_path: str
-    size: int
-
-
 # ------------------------------------------------------------------ path helpers
 
 
@@ -86,10 +74,6 @@ def session_dir(conversation_id: str) -> str:
 
 def out_dir(conversation_id: str) -> str:
     return f"{session_dir(conversation_id)}/out"
-
-
-def in_dir(conversation_id: str) -> str:
-    return f"{session_dir(conversation_id)}/in"
 
 
 # --------------------------------------------------------------------- validation
@@ -111,12 +95,6 @@ def check_extension(name: str) -> str | None:
     if ext not in allowed_extensions():
         return "不支持的文件类型"
     return None
-
-
-def safe_file_name(name: str) -> str:
-    base = os.path.basename((name or "").replace("\\", "/")) or "file"
-    cleaned = re.sub(r"[^\w.\-\u4e00-\u9fff]+", "_", base).strip("._") or "file"
-    return cleaned[:100]
 
 
 def describe_error(exc: BaseException) -> str:
@@ -287,65 +265,6 @@ async def _discard(storage_service, file_key: str) -> None:
         await storage_service.delete_file(file_key)
     except Exception:  # noqa: BLE001 - cleanup is best effort
         logger.debug("discarding a partial upload failed", exc_info=True)
-
-
-# ------------------------------------------------------------------------- import
-
-
-async def import_uploaded_file(
-    client: SandboxServiceClient,
-    principal: SandboxPrincipal,
-    *,
-    conversation_id: str,
-    file_id: str,
-) -> ImportedFile:
-    """把已上传的文件推进沙箱的 ``in/``；失败抛 SandboxFileError / 沙箱客户端异常。"""
-
-    from sqlalchemy import select
-
-    from ..db import get_async_db_context
-    from ..models.file_metadata_model import FileMetadata
-    from .file_storage_service import get_file_storage_service
-
-    try:
-        file_uuid = uuid.UUID(str(file_id))
-        tenant_uuid = uuid.UUID(principal.tenant_id)
-        workspace_uuid = uuid.UUID(principal.workspace_id)
-    except ValueError as exc:
-        raise SandboxFileError("file_id 不是有效的文件标识") from exc
-
-    async with get_async_db_context() as db:
-        meta = (
-            await db.execute(
-                select(FileMetadata).where(
-                    FileMetadata.id == file_uuid,
-                    FileMetadata.tenant_id == tenant_uuid,
-                    FileMetadata.workspace_id == workspace_uuid,
-                    FileMetadata.status == "completed",
-                )
-            )
-        ).scalar_one_or_none()
-        if meta is None:
-            raise SandboxFileError("文件不存在，或不属于当前工作空间")
-        file_key, name, size = meta.file_key, meta.file_name, int(meta.file_size or 0)
-
-    max_bytes = current_settings().sandbox_file_max_bytes
-    if size > max_bytes:
-        raise SandboxFileError(
-            f"文件超过 {max_bytes // (1024 * 1024)}MB 上限，无法放入沙箱"
-        )
-
-    target = f"{in_dir(conversation_id)}/{file_uuid}_{safe_file_name(name)}"
-    storage = get_file_storage_service().storage
-    try:
-        stored = await client.upload_file(
-            principal, target, storage.download_stream(file_key), overwrite=True
-        )
-    except FileNotFoundError as exc:
-        raise SandboxFileError("存储中找不到该文件") from exc
-    except StorageError as exc:
-        raise SandboxFileError("读取存储中的文件失败") from exc
-    return ImportedFile(file_id=str(file_uuid), name=name, sandbox_path=target, size=stored)
 
 
 # ------------------------------------------------------------------------- write

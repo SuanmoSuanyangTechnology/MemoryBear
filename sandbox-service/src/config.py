@@ -18,8 +18,10 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 
 from . import envconf
+from .egress.policy import EgressConfig
 from .envconf import ConfigError
 from .files.config import FilesConfig
+from .observability import AuditConfig
 from .services.scheduler_config import SchedulerConfig
 from .services.verdict import OutputBudget
 
@@ -33,12 +35,16 @@ class ServiceConfig:
     scheduler: SchedulerConfig
     budget: OutputBudget
     files: FilesConfig
+    audit: AuditConfig
+    egress: EgressConfig
 
 
 def known_variables() -> list[str]:
     """Every environment variable this module reads, sorted."""
 
-    return envconf.known_variables((SchedulerConfig, OutputBudget, FilesConfig), ENV_PREFIX)
+    return envconf.known_variables(
+        (SchedulerConfig, OutputBudget, FilesConfig, AuditConfig, EgressConfig), ENV_PREFIX
+    )
 
 
 def load_config(env: Mapping[str, str] | None = None) -> ServiceConfig:
@@ -49,4 +55,6 @@ def load_config(env: Mapping[str, str] | None = None) -> ServiceConfig:
         scheduler=envconf.build(SchedulerConfig, source, ENV_PREFIX),
         budget=envconf.build(OutputBudget, source, ENV_PREFIX),
         files=envconf.build(FilesConfig, source, ENV_PREFIX),
+        audit=envconf.build(AuditConfig, source, ENV_PREFIX),
+        egress=envconf.build(EgressConfig, source, ENV_PREFIX),
     )

@@ -21,7 +21,6 @@ SANDBOX_ALL = [
     "terminal_tool",
     "sandbox_read_file",
     "sandbox_write_file",
-    "sandbox_import_file",
     "sandbox_publish_file",
 ]
 SEARCH = "baidu_search_tool"
@@ -35,7 +34,6 @@ COMBOS = {
     "terminal": ["terminal_tool"],
     "ci+terminal": ["code_interpreter_tool", "terminal_tool"],
     "publish_only": ["sandbox_publish_file"],
-    "import_only": ["sandbox_import_file"],
     "full": SANDBOX_ALL + [SEARCH],
 }
 
@@ -141,13 +139,12 @@ def test_script_workflow_variants_follow_the_write_tool():
     assert "sandbox_read_file" in with_read
 
 
-def test_import_and_read_tools_add_no_system_prompt_text():
-    # their descriptions and the per-turn attachment manifest carry the usage
+def test_read_tool_adds_no_system_prompt_text():
+    # Its tool description carries the usage details.
     base = build_agent_methodology(["terminal_tool"], tool_call_limit=5)
-    for extra in ("sandbox_import_file", "sandbox_read_file"):
-        text = build_agent_methodology(["terminal_tool", extra], tool_call_limit=5)
-        assert "file_id" not in text
-        assert text.count("\n") == base.count("\n")
+    text = build_agent_methodology(["terminal_tool", "sandbox_read_file"], tool_call_limit=5)
+    assert "file_id" not in text
+    assert text.count("\n") == base.count("\n")
 
 
 def test_delivery_instruction_depends_on_a_way_to_create_files():
@@ -189,7 +186,6 @@ _BUDGET = {
     "terminal": 1300,
     "ci+terminal": 1400,
     "publish_only": 900,
-    "import_only": 700,
     "full": 1700,
 }
 

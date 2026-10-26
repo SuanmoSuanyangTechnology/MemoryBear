@@ -1,14 +1,12 @@
-"""Live check of the main-app side of sandbox file flow against a real sandbox-service and MinIO.
+"""Live check of sandbox artifact publishing against a real sandbox-service and MinIO.
 
 Run from ``core/application-service`` (needs the DB from ``.env``, a running sandbox-service and MinIO):
 
     python scripts/verify_sandbox_file_flow.py [--minio http://127.0.0.1:19000]
 
-Out (publish): files written to ``out/`` by a command -> ``publish_artifacts`` -> MinIO object
-(sha256 identical) + ``FileMetadata`` completed; a disallowed type and a magic-number
-mismatch are refused without leaving a metadata row in a non-failed state.
-In (import): a file stored in MinIO -> ``import_uploaded_file`` -> ``in/`` in the sandbox
-(sha256 identical there).
+Files written to ``out/`` by a command are published through ``publish_artifacts`` to
+MinIO with identical bytes and completed ``FileMetadata``. Disallowed types and files
+with mismatched magic bytes are refused without leaving pending metadata rows.
 
 It creates random tenant/workspace ids and an end user, and removes the MinIO objects,
 the ``FileMetadata`` rows and the sandbox at the end. Exit code 0 when every check passes.
@@ -41,7 +39,7 @@ from src.db import get_async_db_context  # noqa: E402
 from src.integrations.sandbox.client import SandboxPrincipal, SandboxServiceClient  # noqa: E402
 from src.models.file_metadata_model import FileMetadata  # noqa: E402
 from src.services import sandbox_file_service as svc  # noqa: E402
-from src.services.file_storage_service import generate_file_key, get_file_storage_service  # noqa: E402
+from src.services.file_storage_service import get_file_storage_service  # noqa: E402
 
 failed = 0
 
@@ -64,7 +62,7 @@ async def main() -> None:
     tenant, workspace = uuid.uuid4(), uuid.uuid4()
     principal = SandboxPrincipal(str(tenant), str(workspace), f"u-{uuid.uuid4().hex[:12]}")
     conv = f"conv-{uuid.uuid4().hex[:8]}"
-    out, inn = svc.out_dir(conv), svc.in_dir(conv)
+    out = svc.out_dir(conv)
     keys: list[str] = []
     file_ids: list[uuid.UUID] = []
 
@@ -131,44 +129,6 @@ async def main() -> None:
                 str([(r.file_name, r.status) for r in rows]),
             )
         check(by_name.get("report.pdf") is not None, "report.pdf was in the artifact list")
-
-        print("2. main app storage -> sandbox in/ (import)")
-        payload = os.urandom(6 * 1024 * 1024 + 3)
-        up_id = uuid.uuid4()
-        key = generate_file_key(tenant, workspace, up_id, ".bin")
-        keys.append(key)
-        file_ids.append(up_id)
-        await storage.storage.upload(key, payload, "application/octet-stream")
-        async with get_async_db_context() as db:
-            db.add(
-                FileMetadata(
-                    id=up_id, tenant_id=tenant, workspace_id=workspace, file_key=key,
-                    file_name="data set.bin", file_ext=".bin", file_size=len(payload),
-                    content_type="application/octet-stream", status="completed",
-                )
-            )
-            await db.commit()
-        imported = await svc.import_uploaded_file(
-            client, principal, conversation_id=conv, file_id=str(up_id)
-        )
-        check(imported.size == len(payload), "import reports the stored size", f"{imported.size}")
-        check(imported.sandbox_path.startswith(inn + "/"), "file landed under in/", imported.sandbox_path)
-        r = await cmd(f"sha256sum '{imported.sandbox_path}'")
-        got = (r.stdout.split() or [""])[0]
-        check(got == sha(payload), "file inside the sandbox is byte-identical", f"{got} vs {sha(payload)}")
-
-        other = uuid.uuid4()
-        try:
-            await svc.import_uploaded_file(client, principal, conversation_id=conv, file_id=str(other))
-            check(False, "unknown file_id is refused")
-        except svc.SandboxFileError:
-            check(True, "unknown file_id is refused")
-        foreign = SandboxPrincipal(str(uuid.uuid4()), str(uuid.uuid4()), principal.end_user_id)
-        try:
-            await svc.import_uploaded_file(client, foreign, conversation_id=conv, file_id=str(up_id))
-            check(False, "a file of another workspace cannot be imported")
-        except svc.SandboxFileError:
-            check(True, "a file of another workspace cannot be imported")
     finally:
         for key in keys:
             try:

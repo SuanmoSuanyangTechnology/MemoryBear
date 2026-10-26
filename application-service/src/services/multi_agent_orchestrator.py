@@ -821,25 +821,13 @@ class MultiAgentOrchestrator:
         self._turn_processed_files = None
         self._turn_files_provider = None
         if not files:
-            # A turn without attachments still gets the earlier uploads' file_ids fed
-            # to the model (the conversation is only queried when the import tool is
-            # mounted).
-            from .draft_run_service import build_sandbox_import_manifest_for_turn
-
-            history_manifest = await build_sandbox_import_manifest_for_turn(
-                None, getattr(supervisor, "tools", None), conversation_id
-            )
-            return (f"{message}\n\n{history_manifest}" if history_manifest else message), None
+            return message, None
 
         fu = self._features.get("file_upload") if isinstance(self._features, dict) else None
         if not (isinstance(fu, dict) and fu.get("enabled")):
             raise BusinessException("该集群未开启文件上传功能", BizCode.BAD_REQUEST)
 
-        from .draft_run_service import (
-            AgentRunService,
-            build_sandbox_import_manifest_for_turn,
-            build_uploaded_images_manifest,
-        )
+        from .draft_run_service import AgentRunService, build_uploaded_images_manifest
         from .multimodal_service import MultimodalService
 
         AgentRunService._validate_file_upload(self._features, files)
@@ -865,13 +853,6 @@ class MultiAgentOrchestrator:
         image_manifest, _ = build_uploaded_images_manifest(files)
         if image_manifest:
             llm_message = f"{message}\n\n{image_manifest}"
-        # With the sandbox import tool mounted, list this turn's and the conversation's
-        # earlier file_ids (a later turn without attachments must still be able to import).
-        sandbox_manifest = await build_sandbox_import_manifest_for_turn(
-            files, getattr(supervisor, "tools", None), conversation_id
-        )
-        if sandbox_manifest:
-            llm_message = f"{llm_message}\n\n{sandbox_manifest}"
 
         self._turn_processed_files = processed_files
         self._turn_files_provider = provider
