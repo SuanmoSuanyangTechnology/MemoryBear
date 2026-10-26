@@ -4173,33 +4173,40 @@ class AgentRunService:
             try:
                 start_time = time.time()
 
+                # Use the model's own conversation_id; fall back to the global one
+                model_conversation_id = model_info.get("conversation_id") or conversation_id
+
+                # Each model task owns its AsyncSession: a session is not safe for
+                # concurrent use, and parallel compare runs models simultaneously.
+                async def run_with_own_session():
+                    async with get_async_db_context() as model_db:
+                        return await asyncio.wait_for(
+                            AgentRunService(model_db).run(
+                                agent_config=agent_config,
+                                model_config=model_info["model_config"],
+                                message=message,
+                                workspace_id=workspace_id,
+                                conversation_id=model_conversation_id,
+                                user_id=user_id,
+                                variables=variables,
+                                storage_type=storage_type,
+                                user_rag_memory_id=user_rag_memory_id,
+                                web_search=web_search,
+                                memory=memory,
+                                files=files,
+                                source=source,
+                                execution_mode=execution_mode,
+                            ),
+                            timeout=timeout
+                        )
+
                 # Temporarily override parameters (no deepcopy, to avoid SQLAlchemy
                 # session issues)
                 original_params = agent_config.model_parameters
                 agent_config.model_parameters = model_info["parameters"]
 
-                # Use the model's own conversation_id; fall back to the global one
-                model_conversation_id = model_info.get("conversation_id") or conversation_id
                 try:
-                    result = await asyncio.wait_for(
-                        self.run(
-                            agent_config=agent_config,
-                            model_config=model_info["model_config"],
-                            message=message,
-                            workspace_id=workspace_id,
-                            conversation_id=model_conversation_id,
-                            user_id=user_id,
-                            variables=variables,
-                            storage_type=storage_type,
-                            user_rag_memory_id=user_rag_memory_id,
-                            web_search=web_search,
-                            memory=memory,
-                            files=files,
-                            source=source,
-                            execution_mode=execution_mode,
-                        ),
-                        timeout=timeout
-                    )
+                    result = await run_with_own_session()
                 finally:
                     # Restore the original parameters
                     agent_config.model_parameters = original_params
@@ -4433,6 +4440,30 @@ class AgentRunService:
             # backend consistent
             model_user_message_id = uuid.uuid4()
 
+            # Each model task owns its AsyncSession: streaming runs concurrently in
+            # parallel compare, and one session is not safe for concurrent use.
+            async def stream_with_own_session():
+                async with get_async_db_context() as model_db:
+                    async for event_str in AgentRunService(model_db).run_stream(
+                            agent_config=agent_config,
+                            model_config=model_info["model_config"],
+                            message=message,
+                            workspace_id=workspace_id,
+                            conversation_id=model_conversation_id,
+                            user_id=user_id,
+                            variables=variables,
+                            storage_type=storage_type,
+                            user_rag_memory_id=user_rag_memory_id,
+                            web_search=web_search,
+                            memory=memory,
+                            files=files,
+                            source=source,
+                            user_message_id=model_user_message_id,
+                            execution_mode=execution_mode,
+                            skip_save=skip_save,
+                    ):
+                        yield event_str
+
             try:
                 # Send the model start event
                 await event_queue.put(self._format_sse_event("model_start", {
@@ -4463,24 +4494,7 @@ class AgentRunService:
 
                 try:
                     # Stream a single model
-                    async for event_str in self.run_stream(
-                            agent_config=agent_config,
-                            model_config=model_info["model_config"],
-                            message=message,
-                            workspace_id=workspace_id,
-                            conversation_id=model_conversation_id,
-                            user_id=user_id,
-                            variables=variables,
-                            storage_type=storage_type,
-                            user_rag_memory_id=user_rag_memory_id,
-                            web_search=web_search,
-                            memory=memory,
-                            files=files,
-                            source=source,
-                            user_message_id=model_user_message_id,
-                            execution_mode=execution_mode,
-                            skip_save=skip_save,
-                    ):
+                    async for event_str in stream_with_own_session():
                         # Parse the raw event
                         try:
                             lines = event_str.strip().split('\n')
