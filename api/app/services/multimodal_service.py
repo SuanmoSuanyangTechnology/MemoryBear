@@ -481,11 +481,11 @@ class OpenAIFormatStrategy(MultimodalFormatStrategy):
             }
 
     async def format_video(self, url: str | None, content: bytes | None = None) -> tuple[bool, Dict[str, Any]]:
-        """OpenAI 视频格式；本地视频需后续接入 provider Files API。"""
+        """OpenAI 视频格式，视频以 video_url 方式出站。"""
         if content is not None:
             return False, {
                 "type": "text",
-                "text": _VIDEO_UNAVAILABLE_HINT,
+                "text": "[视频处理失败：当前接口仅支持以 URL 方式发送视频]",
             }
         if not url:
             return False, {"type": "text", "text": "[视频文件缺少可用 URL]"}
@@ -605,48 +605,6 @@ class MultimodalService:
             raise BusinessException("文件不存在、未完成或无权访问", BizCode.FILE_NOT_FOUND)
         return metadata
 
-    async def _resolve_video_public_url(
-            self,
-            file: FileInput,
-            workspace_id: uuid.UUID | str | None,
-    ) -> str | None:
-        """为已上传视频铸一个模型侧可达的直达 URL。
-
-        视频没有通用的内联（base64）协议，因此远程存储后端（OSS/S3/MinIO）直接铸
-        长有效期的对象预签名 URL，而不是走本服务代理地址。铸出的 URL 仍需通过与内联
-        判断一致的模型侧可达性校验：内网 MinIO 端点、阿里云 VPC 内网端点同样在此被拦。
-        本地磁盘后端或不可达后端返回 None，由调用方保留原有错误占位。
-        """
-        if not file.upload_file_id:
-            return None
-
-        storage = FileStorageService().storage
-        if isinstance(storage, LocalStorage):
-            logger.info(
-                "视频无法出站：当前为本地磁盘存储，无模型侧可达地址",
-                extra={"file_id": str(file.upload_file_id)},
-            )
-            return None
-
-        # 铸预签名 URL 前先做归属/租户校验。
-        metadata = await self._get_local_file_metadata(file.upload_file_id, workspace_id)
-        try:
-            # 不传 file_name：避免强制 Content-Disposition: attachment，部分模型侧
-            # 视频抓取会拒绝下载头。
-            url = await storage.get_url(metadata.file_key, expires=86400)
-        except Exception as exc:
-            logger.warning(f"视频预签名 URL 生成失败，已降级: {exc}")
-            return None
-
-        host = (urlparse(url).hostname or "").strip("[]").lower()
-        if _model_cannot_reach_url(url) or "-internal." in host:
-            logger.warning(
-                "视频存储地址模型侧不可达，已拦截",
-                extra={"file_id": str(metadata.id), "host": host},
-            )
-            return None
-        return url
-
     async def _hydrate_local_file(
             self,
             file: FileInput,
@@ -758,24 +716,18 @@ class MultimodalService:
             # URL 保持原样直传，不额外搬运字节。
             if _requires_inline_bearer(file):
                 if file.type == FileType.VIDEO:
-                    # 视频没有通用内联协议：远程存储（OSS/S3/MinIO）改为把模型侧可达的
-                    # 直达预签名 URL 交给模型；本地磁盘或不可达的内网端点仍明确报错。
-                    video_public_url = None
+                    # 视频没有通用内联协议：远程存储直达对象地址后交给模型自行判断能否
+                    # 拉取；本地磁盘无对象 URL，给出管理员可操作的提示。
                     if Modality.VIDEO in self.input_modalities:
-                        # 内部归属/租户校验失败时与原逻辑一致，直接抛出。
-                        video_public_url = await self._resolve_video_public_url(file, workspace_id)
-
-                    if video_public_url is not None:
-                        file.url = video_public_url
-                        is_support, content = await self._process_video(file, strategy_class(file))
-                        if is_support or include_processing_errors:
-                            result.append(content)
-                    elif Modality.VIDEO in self.input_modalities and include_processing_errors:
-                        result.append({
-                            "type": "text",
-                            "text": _VIDEO_UNAVAILABLE_HINT,
-                        })
-                    elif Modality.VIDEO not in self.input_modalities:
+                        if not file.url and file.upload_file_id:
+                            file.url = await self._get_video_url(file, workspace_id)
+                        if file.url:
+                            is_support, content = await self._process_video(file, strategy_class(file))
+                            if is_support or include_processing_errors:
+                                result.append(content)
+                        elif include_processing_errors:
+                            result.append({"type": "text", "text": _VIDEO_UNAVAILABLE_HINT})
+                    else:
                         logger.warning(f"不支持的文件类型: {file.type}")
                     continue
 
@@ -947,6 +899,26 @@ class MultimodalService:
                 "type": "text",
                 "text": f"[视频处理失败: {str(e)}]",
             }
+
+    async def _get_video_url(
+            self,
+            file: FileInput,
+            workspace_id: uuid.UUID | str | None,
+    ) -> str | None:
+        """解析发给模型的视频 URL。
+
+        远程后端（OSS/S3/MinIO）返回直达的对象预签名 URL；平台自身的代理地址
+        （localhost/内网）会被云端模型的参数校验判为非法。本地磁盘没有对象 URL，
+        返回 None，由调用方给出管理员提示。远程 URL 不做可达性判断，模型能否实际
+        拉取交由模型侧处理。
+        """
+        storage = FileStorageService().storage
+        if isinstance(storage, LocalStorage):
+            return None
+        # 铸预签名 URL 前先做归属/租户范围校验。
+        metadata = await self._get_local_file_metadata(file.upload_file_id, workspace_id)
+        # 不传 file_name：避免强制 Content-Disposition: attachment。
+        return await storage.get_url(metadata.file_key, expires=86400)
 
     async def get_file_url(self, file: FileInput) -> str:
         """
