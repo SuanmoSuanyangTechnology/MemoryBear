@@ -947,7 +947,6 @@ async def v1_chat(
 
     web_search = True
     memory = True
-    execution_mode = "in_process"
 
     if app_type == AppType.AGENT:
         agent_config = runtime_config
@@ -973,7 +972,6 @@ async def v1_chat(
                             user_rag_memory_id=user_rag_memory_id,
                             workspace_id=workspace_id,
                             files=payload.files,
-                            execution_mode=execution_mode,
                     ):
                         yield event
 
@@ -992,7 +990,6 @@ async def v1_chat(
                 user_rag_memory_id=user_rag_memory_id,
                 workspace_id=str(workspace_id),
                 files=payload.files,
-                execution_mode=execution_mode,
             )
         return success(data=ChatResponse(**result).model_dump(mode="json"))
 
@@ -1014,7 +1011,6 @@ async def v1_chat(
                             storage_type=storage_type,
                             user_rag_memory_id=user_rag_memory_id,
                             thinking=bool(payload.thinking),
-                            execution_mode=execution_mode,
                             files=payload.files,
                     ):
                         yield event
@@ -1033,7 +1029,6 @@ async def v1_chat(
                 storage_type=storage_type,
                 user_rag_memory_id=user_rag_memory_id,
                 thinking=bool(payload.thinking),
-                execution_mode=execution_mode,
                 files=payload.files,
             )
         return success(data=ChatResponse(**result).model_dump(mode="json"))

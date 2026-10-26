@@ -7326,6 +7326,46 @@
           }
         }
       }
+    },
+    "/v1/memory/preference/recall": {
+      "post": {
+        "tags": [
+          "V1 - Preference Recall API"
+        ],
+        "summary": "Recall Coding Preferences Http",
+        "description": "Recall task-relevant preferences using API-key and end-user headers.",
+        "operationId": "recall_coding_preferences_http_v1_memory_preference_recall_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/memory/preference/recall/full": {
+      "get": {
+        "tags": [
+          "V1 - Preference Recall API"
+        ],
+        "summary": "Recall All Coding Preferences Http",
+        "description": "Return all visible active Coding Agent preferences and their prompt block.",
+        "operationId": "recall_all_coding_preferences_http_v1_memory_preference_recall_full_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -7358,6 +7398,56 @@
         ],
         "title": "AdminChangePasswordRequest",
         "description": "管理员修改用户密码请求"
+      },
+      "AfterAppTurnRequest": {
+        "properties": {
+          "features": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Features"
+          },
+          "conversation_id": {
+            "type": "string",
+            "title": "Conversation Id"
+          },
+          "current_provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Provider"
+          },
+          "legacy_max_history": {
+            "type": "integer",
+            "title": "Legacy Max History",
+            "default": 10
+          },
+          "scope_key": {
+            "type": "string",
+            "title": "Scope Key",
+            "default": "conversation"
+          },
+          "model_config_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Config Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "conversation_id"
+        ],
+        "title": "AfterAppTurnRequest"
       },
       "AgentConfigCreate": {
         "properties": {
@@ -7875,6 +7965,18 @@
               }
             ],
             "title": "Resource Id"
+          },
+          "created_by": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created By"
           }
         },
         "type": "object",
@@ -11554,43 +11656,6 @@
         "title": "EpisodicMemoryOverviewRequest",
         "description": "情景记忆总览查询请求"
       },
-      "ExecutionResultRequest": {
-        "properties": {
-          "status": {
-            "type": "string",
-            "title": "Status",
-            "default": "completed"
-          },
-          "output": {
-            "additionalProperties": true,
-            "type": "object",
-            "title": "Output"
-          },
-          "error": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Error"
-          },
-          "elapsed_time": {
-            "type": "number",
-            "title": "Elapsed Time",
-            "default": 0
-          },
-          "token_usage": {
-            "additionalProperties": true,
-            "type": "object",
-            "title": "Token Usage"
-          }
-        },
-        "type": "object",
-        "title": "ExecutionResultRequest"
-      },
       "ExplicitMemoryDetailsRequest": {
         "properties": {
           "end_user_id": {
@@ -11715,6 +11780,241 @@
         ],
         "title": "ExtractionRequest",
         "description": "本体提取请求模型\n\n用于POST /api/ontology/extract端点的请求体。\n\nAttributes:\n    scenario: 场景描述文本,不能为空\n    domain: 可选的领域提示(如Healthcare, Education等)\n    llm_id: LLM模型ID,必须提供\n    scene_id: 场景ID,必须提供,用于将提取的类保存到指定场景\n\nExamples:\n    >>> request = ExtractionRequest(\n    ...     scenario=\"医院管理患者记录...\",\n    ...     domain=\"Healthcare\",\n    ...     llm_id=\"550e8400-e29b-41d4-a716-446655440000\",\n    ...     scene_id=\"660e8400-e29b-41d4-a716-446655440000\"\n    ... )"
+      },
+      "FAQApprove": {
+        "properties": {
+          "expected_row_version": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Expected Row Version"
+          },
+          "content_revision": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Content Revision"
+          },
+          "reviewed_wiki_snapshot_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Reviewed Wiki Snapshot Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "expected_row_version",
+          "content_revision",
+          "reviewed_wiki_snapshot_id"
+        ],
+        "title": "FAQApprove"
+      },
+      "FAQBatchApproval": {
+        "properties": {
+          "expected_row_version": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Expected Row Version"
+          },
+          "content_revision": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Content Revision"
+          },
+          "reviewed_wiki_snapshot_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reviewed Wiki Snapshot Id"
+          },
+          "faq_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Faq Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "expected_row_version",
+          "content_revision",
+          "faq_id"
+        ],
+        "title": "FAQBatchApproval"
+      },
+      "FAQBatchApprove": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/FAQBatchApproval"
+            },
+            "type": "array",
+            "maxItems": 100,
+            "minItems": 1,
+            "title": "Items"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "FAQBatchApprove"
+      },
+      "FAQBatchContext": {
+        "properties": {
+          "faq_ids": {
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "type": "array",
+            "maxItems": 100,
+            "minItems": 1,
+            "title": "Faq Ids"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "faq_ids"
+        ],
+        "title": "FAQBatchContext"
+      },
+      "FAQBatchEnabled": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/FAQBatchExpected"
+            },
+            "type": "array",
+            "maxItems": 100,
+            "minItems": 1,
+            "title": "Items"
+          },
+          "is_enabled": {
+            "type": "boolean",
+            "title": "Is Enabled"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "items",
+          "is_enabled"
+        ],
+        "title": "FAQBatchEnabled"
+      },
+      "FAQBatchExpected": {
+        "properties": {
+          "expected_row_version": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Expected Row Version"
+          },
+          "faq_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Faq Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "expected_row_version",
+          "faq_id"
+        ],
+        "title": "FAQBatchExpected"
+      },
+      "FAQCreate": {
+        "properties": {
+          "standard_question": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Standard Question"
+          },
+          "standard_answer": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Standard Answer"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "standard_question",
+          "standard_answer"
+        ],
+        "title": "FAQCreate"
+      },
+      "FAQEdit": {
+        "properties": {
+          "standard_question": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Standard Question"
+          },
+          "standard_answer": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Standard Answer"
+          },
+          "expected_row_version": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Expected Row Version"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "standard_question",
+          "standard_answer",
+          "expected_row_version"
+        ],
+        "title": "FAQEdit"
+      },
+      "FAQEnabled": {
+        "properties": {
+          "expected_row_version": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Expected Row Version"
+          },
+          "is_enabled": {
+            "type": "boolean",
+            "title": "Is Enabled"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "expected_row_version",
+          "is_enabled"
+        ],
+        "title": "FAQEnabled"
+      },
+      "FAQExpected": {
+        "properties": {
+          "expected_row_version": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Expected Row Version"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "expected_row_version"
+        ],
+        "title": "FAQExpected"
       },
       "FileInput": {
         "properties": {
@@ -12967,36 +13267,6 @@
         "title": "KnowledgeRetrievalConfig",
         "description": "知识库检索配置（支持多个知识库，每个有独立配置）"
       },
-      "KnowledgeRetrieveRequest": {
-        "properties": {
-          "query": {
-            "type": "string",
-            "title": "Query"
-          },
-          "knowledge_base_ids": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array",
-            "title": "Knowledge Base Ids"
-          },
-          "top_k": {
-            "type": "integer",
-            "title": "Top K",
-            "default": 5
-          },
-          "score_threshold": {
-            "type": "number",
-            "title": "Score Threshold",
-            "default": 0.5
-          }
-        },
-        "type": "object",
-        "required": [
-          "query"
-        ],
-        "title": "KnowledgeRetrieveRequest"
-      },
       "KnowledgeShareCreate": {
         "properties": {
           "source_kb_id": {
@@ -13595,18 +13865,9 @@
         "title": "MemoryConfig",
         "description": "记忆配置"
       },
-      "MemoryReadRequest": {
+      "MemoryIngestAgentMessage": {
         "properties": {
-          "query": {
-            "type": "string",
-            "title": "Query"
-          },
-          "memory_type": {
-            "type": "string",
-            "title": "Memory Type",
-            "default": "long_term"
-          },
-          "config_id": {
+          "id": {
             "anyOf": [
               {
                 "type": "string"
@@ -13615,30 +13876,163 @@
                 "type": "null"
               }
             ],
-            "title": "Config Id"
-          }
-        },
-        "type": "object",
-        "required": [
-          "query"
-        ],
-        "title": "MemoryReadRequest"
-      },
-      "MemoryWriteRequest": {
-        "properties": {
+            "title": "Id"
+          },
+          "role": {
+            "type": "string",
+            "title": "Role"
+          },
           "content": {
             "type": "string",
             "title": "Content"
           },
-          "memory_type": {
-            "type": "string",
-            "title": "Memory Type",
-            "default": "long_term"
+          "meta_data": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Meta Data"
           },
-          "metadata": {
-            "additionalProperties": true,
-            "type": "object",
-            "title": "Metadata"
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "should_memorize": {
+            "type": "boolean",
+            "title": "Should Memorize",
+            "default": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "role",
+          "content"
+        ],
+        "title": "MemoryIngestAgentMessage"
+      },
+      "MemoryIngestAgentRequest": {
+        "properties": {
+          "messages": {
+            "items": {
+              "$ref": "#/components/schemas/MemoryIngestAgentMessage"
+            },
+            "type": "array",
+            "title": "Messages"
+          },
+          "conversation_id": {
+            "type": "string",
+            "title": "Conversation Id"
+          },
+          "app_id": {
+            "type": "string",
+            "title": "App Id"
+          },
+          "end_user_id": {
+            "type": "string",
+            "title": "End User Id",
+            "default": ""
+          },
+          "config_id": {
+            "type": "string",
+            "title": "Config Id",
+            "default": ""
+          },
+          "language": {
+            "type": "string",
+            "title": "Language",
+            "default": "zh"
+          },
+          "storage_type": {
+            "type": "string",
+            "title": "Storage Type",
+            "default": "neo4j"
+          },
+          "user_rag_memory_id": {
+            "type": "string",
+            "title": "User Rag Memory Id",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "messages",
+          "conversation_id",
+          "app_id"
+        ],
+        "title": "MemoryIngestAgentRequest"
+      },
+      "MemoryIngestWorkflowRequest": {
+        "properties": {
+          "messages": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Messages"
+          },
+          "conversation_id": {
+            "type": "string",
+            "title": "Conversation Id"
+          },
+          "end_user_id": {
+            "type": "string",
+            "title": "End User Id"
+          },
+          "config_id": {
+            "type": "string",
+            "title": "Config Id"
+          },
+          "language": {
+            "type": "string",
+            "title": "Language",
+            "default": "zh"
+          },
+          "storage_type": {
+            "type": "string",
+            "title": "Storage Type",
+            "default": "neo4j"
+          },
+          "user_rag_memory_id": {
+            "type": "string",
+            "title": "User Rag Memory Id",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "messages",
+          "conversation_id",
+          "end_user_id",
+          "config_id"
+        ],
+        "title": "MemoryIngestWorkflowRequest"
+      },
+      "MemoryReadRequest": {
+        "properties": {
+          "end_user_id": {
+            "type": "string",
+            "title": "End User Id"
+          },
+          "query": {
+            "type": "string",
+            "title": "Query"
+          },
+          "search_switch": {
+            "type": "string",
+            "title": "Search Switch"
           },
           "config_id": {
             "anyOf": [
@@ -13650,13 +14044,94 @@
               }
             ],
             "title": "Config Id"
+          },
+          "history": {
+            "anyOf": [
+              {
+                "items": {},
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "History"
+          },
+          "limit": {
+            "type": "integer",
+            "maximum": 100.0,
+            "minimum": 1.0,
+            "title": "Limit",
+            "default": 10
+          },
+          "includes": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Includes"
+          },
+          "skip_summary": {
+            "type": "boolean",
+            "title": "Skip Summary",
+            "default": false
+          },
+          "enable_rerank": {
+            "type": "boolean",
+            "title": "Enable Rerank",
+            "default": false
+          },
+          "record_display": {
+            "type": "boolean",
+            "title": "Record Display",
+            "default": false
+          },
+          "storage_type": {
+            "type": "string",
+            "title": "Storage Type",
+            "default": "neo4j"
+          },
+          "user_rag_memory_id": {
+            "type": "string",
+            "title": "User Rag Memory Id",
+            "default": ""
+          },
+          "conversation_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Conversation Id"
+          },
+          "language": {
+            "type": "string",
+            "title": "Language",
+            "default": "zh"
+          },
+          "draft": {
+            "type": "boolean",
+            "title": "Draft",
+            "default": false
           }
         },
         "type": "object",
         "required": [
-          "content"
+          "end_user_id",
+          "query",
+          "search_switch"
         ],
-        "title": "MemoryWriteRequest"
+        "title": "MemoryReadRequest"
       },
       "Memory_Reflection": {
         "properties": {
@@ -14702,31 +15177,7 @@
         ],
         "title": "PermanentMemoryItem"
       },
-      "PermanentMemoryList-Input": {
-        "properties": {
-          "page": {
-            "$ref": "#/components/schemas/PageMeta"
-          },
-          "quota": {
-            "$ref": "#/components/schemas/PermanentMemoryQuota"
-          },
-          "items": {
-            "items": {
-              "$ref": "#/components/schemas/PermanentMemoryItem"
-            },
-            "type": "array",
-            "title": "Items"
-          }
-        },
-        "type": "object",
-        "required": [
-          "page",
-          "quota",
-          "items"
-        ],
-        "title": "PermanentMemoryList"
-      },
-      "PermanentMemoryList-Output": {
+      "PermanentMemoryList": {
         "properties": {
           "page": {
             "$ref": "#/components/schemas/PageMeta"
@@ -14765,7 +15216,7 @@
             "default": "OK"
           },
           "data": {
-            "$ref": "#/components/schemas/PermanentMemoryList-Output"
+            "$ref": "#/components/schemas/PermanentMemoryList"
           },
           "error": {
             "type": "string",
@@ -15108,6 +15559,129 @@
         ],
         "title": "PreferenceConfigUpdate",
         "description": "Update one workspace-owned preference configuration."
+      },
+      "PrepareAppInputRequest": {
+        "properties": {
+          "features": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Features"
+          },
+          "conversation_id": {
+            "type": "string",
+            "title": "Conversation Id"
+          },
+          "system_prompt": {
+            "type": "string",
+            "title": "System Prompt"
+          },
+          "current_input": {
+            "type": "string",
+            "title": "Current Input"
+          },
+          "current_provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Provider"
+          },
+          "legacy_max_history": {
+            "type": "integer",
+            "title": "Legacy Max History",
+            "default": 10
+          },
+          "scope_key": {
+            "type": "string",
+            "title": "Scope Key",
+            "default": "conversation"
+          },
+          "model_config_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Config Id"
+          },
+          "include_cross_session": {
+            "type": "boolean",
+            "title": "Include Cross Session",
+            "default": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "conversation_id",
+          "system_prompt",
+          "current_input"
+        ],
+        "title": "PrepareAppInputRequest"
+      },
+      "PrepareWorkflowHistoryPrefixRequest": {
+        "properties": {
+          "features": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Features"
+          },
+          "conversation_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Conversation Id"
+          },
+          "scope_key": {
+            "type": "string",
+            "title": "Scope Key"
+          },
+          "workflow_messages": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Workflow Messages"
+          },
+          "window_size": {
+            "type": "integer",
+            "title": "Window Size",
+            "default": 20
+          },
+          "model_config_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Config Id"
+          },
+          "current_input": {
+            "type": "string",
+            "title": "Current Input"
+          }
+        },
+        "type": "object",
+        "required": [
+          "scope_key",
+          "current_input"
+        ],
+        "title": "PrepareWorkflowHistoryPrefixRequest"
       },
       "PromptOptMessage": {
         "properties": {
@@ -15529,6 +16103,17 @@
             "default": [
               "text"
             ]
+          },
+          "wiki-FAQ": {
+            "items": {
+              "type": "string",
+              "const": "text"
+            },
+            "type": "array",
+            "title": "Wiki-Faq",
+            "default": [
+              "text"
+            ]
           }
         },
         "additionalProperties": false,
@@ -15618,7 +16203,8 @@
           "participle",
           "semantic",
           "graph",
-          "hybrid"
+          "hybrid",
+          "wiki-FAQ"
         ],
         "title": "RetrieveType",
         "description": "Retrieval type enumeration"
@@ -16547,6 +17133,39 @@
         "title": "ToolCreateRequest",
         "description": "创建工具请求"
       },
+      "ToolExecuteRequest": {
+        "properties": {
+          "tool_id": {
+            "type": "string",
+            "title": "Tool Id"
+          },
+          "parameters": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Parameters"
+          },
+          "timeout": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 300.0,
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timeout",
+            "default": 60.0
+          }
+        },
+        "type": "object",
+        "required": [
+          "tool_id"
+        ],
+        "title": "ToolExecuteRequest",
+        "description": "执行工具请求"
+      },
       "ToolType": {
         "type": "string",
         "enum": [
@@ -16921,17 +17540,6 @@
             "type": "string",
             "format": "uuid",
             "title": "Session Id"
-          },
-          "config_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Config Id"
           }
         },
         "type": "object",
@@ -17022,12 +17630,19 @@
           "retrieve_type": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/RetrieveType"
+                "type": "string",
+                "enum": [
+                  "participle",
+                  "semantic",
+                  "graph",
+                  "hybrid"
+                ]
               },
               {
                 "type": "null"
               }
-            ]
+            ],
+            "title": "Retrieve Type"
           },
           "rerank_mode": {
             "anyOf": [
@@ -17466,6 +18081,59 @@
         ],
         "title": "WorkflowToolCreateRequest",
         "description": "创建工作流工具请求"
+      },
+      "WorkflowTurnRequest": {
+        "properties": {
+          "features": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Features"
+          },
+          "conversation_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Conversation Id"
+          },
+          "scope_key": {
+            "type": "string",
+            "title": "Scope Key"
+          },
+          "workflow_messages": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Workflow Messages"
+          },
+          "window_size": {
+            "type": "integer",
+            "title": "Window Size",
+            "default": 20
+          },
+          "model_config_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Config Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "scope_key"
+        ],
+        "title": "WorkflowTurnRequest"
       },
       "WorkspaceCreate": {
         "properties": {
@@ -17922,17 +18590,6 @@
             "type": "string",
             "title": "End User Id"
           },
-          "config_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Config Id"
-          },
           "conversation_id": {
             "anyOf": [
               {
@@ -17964,41 +18621,6 @@
           "end_user_id"
         ],
         "title": "Write_UserInput"
-      },
-      "app__controllers__internal__internal_sandbox_controller__ToolExecuteRequest": {
-        "properties": {
-          "tool_name": {
-            "type": "string",
-            "title": "Tool Name"
-          },
-          "tool_type": {
-            "type": "string",
-            "title": "Tool Type"
-          },
-          "tool_input": {
-            "additionalProperties": true,
-            "type": "object",
-            "title": "Tool Input"
-          },
-          "tool_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Tool Id"
-          }
-        },
-        "type": "object",
-        "required": [
-          "tool_name",
-          "tool_type",
-          "tool_input"
-        ],
-        "title": "ToolExecuteRequest"
       },
       "app__schemas__app_schema__VariableDefinition": {
         "properties": {
@@ -18223,39 +18845,6 @@
           "password"
         ],
         "title": "TokenRequest"
-      },
-      "app__schemas__tool_schema__ToolExecuteRequest": {
-        "properties": {
-          "tool_id": {
-            "type": "string",
-            "title": "Tool Id"
-          },
-          "parameters": {
-            "additionalProperties": true,
-            "type": "object",
-            "title": "Parameters"
-          },
-          "timeout": {
-            "anyOf": [
-              {
-                "type": "number",
-                "maximum": 300.0,
-                "exclusiveMinimum": 0.0
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Timeout",
-            "default": 60.0
-          }
-        },
-        "type": "object",
-        "required": [
-          "tool_id"
-        ],
-        "title": "ToolExecuteRequest",
-        "description": "执行工具请求"
       },
       "app__schemas__workflow_schema__ExecutionConfig": {
         "properties": {

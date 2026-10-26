@@ -956,9 +956,8 @@ class ModelApiKeyService:
         """ResolvedModelConfig → transient ModelApiKey compatibility shell (never persisted; id=channel_id).
 
         Capabilities live in the three profile columns (.input_modalities/.output_modalities/.features);
-        the legacy .capability/.is_omni columns are a derived view (read only by frozen consumer
-        surfaces such as the e2b sandbox payload; internal consumers always read the three columns,
-        and the legacy columns are removed along with the cleanup).
+        the legacy .capability/.is_omni columns are a derived compatibility view while internal
+        consumers always read the three profile columns.
 
         When the channel api_base is empty (provider-level channels), the provider's public base
         address is materialized (the native dashscope SDK composition strips it back to /api/v1 at

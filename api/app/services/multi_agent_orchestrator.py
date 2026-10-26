@@ -473,9 +473,6 @@ class MultiAgentOrchestrator:
         self._loop_deep_thinking: bool = False
         # 新会话开场白（入口解析后传入，拼到主管历史末尾；None = 不注入）
         self._loop_opening_statement: Optional[str] = None
-        # 执行模式：集群主管目前只有 in_process 实现，sandbox 请求会回退并在 end 事件显式标注
-        self._execution_mode_requested: Optional[str] = None
-        self._execution_mode_actual: str = "in_process"
         # F5-F8 本轮运行态（建议问题/引用/TTS/情绪）；每轮在 _prepare_turn_chat_features 重置
         self._loop_citations: list = []
         self._turn_extras: Dict[str, Any] = {}
@@ -495,16 +492,14 @@ class MultiAgentOrchestrator:
         web_search: bool,
         thinking: bool,
         opening_statement: Optional[str],
-        execution_mode: Optional[str],
         user_message_id: Optional[uuid.UUID] = None,
     ) -> None:
         """每轮开始时解析"对话能力"运行态（对齐 Agent 应用）。
 
-        向后兼容：存量集群无 features、请求不带 thinking/opening/execution_mode 时，
+        向后兼容：存量集群无 features、请求不带 thinking/opening_statement 时，
         结果全部为关闭/None，主管行为与改动前完全一致。
         """
         from app.services.cluster_chat_features import (
-            effective_execution_mode,
             is_deep_thinking_on,
             is_supervisor_web_search_on,
         )
@@ -512,11 +507,6 @@ class MultiAgentOrchestrator:
         self._loop_supervisor_web_search = is_supervisor_web_search_on(self._features, web_search)
         self._loop_deep_thinking = is_deep_thinking_on(self.model_parameters, thinking)
         self._loop_opening_statement = opening_statement or None
-        self._execution_mode_requested = execution_mode
-        actual, fell_back = effective_execution_mode(execution_mode)
-        self._execution_mode_actual = actual
-        if fell_back:
-            logger.warning("集群主管暂不支持 sandbox 执行模式，已回退 in_process")
         # F5-F8：每轮重置，避免多轮复用同一 orchestrator 时串轮
         self._loop_citations = []
         self._turn_extras = {}
@@ -598,8 +588,6 @@ class MultiAgentOrchestrator:
     def _turn_end_extras(self) -> Dict[str, Any]:
         """end 事件的对话能力附加字段；无任何新能力生效时为空 dict（旧前端/旧契约不变）。"""
         extras: Dict[str, Any] = {}
-        if self._execution_mode_requested:
-            extras["execution_mode_actual"] = self._execution_mode_actual
         # suggested_questions / citations / audio_url / audio_status：仅对应 features 开启时才有键
         extras.update(self._turn_extras or {})
         return extras
@@ -1248,7 +1236,6 @@ class MultiAgentOrchestrator:
         message_id: Optional[uuid.UUID] = None,
         thinking: bool = False,
         opening_statement: Optional[str] = None,
-        execution_mode: Optional[str] = None,
         files: Optional[List[Any]] = None,
         user_message_id: Optional[uuid.UUID] = None,
         regenerate_before: Any = None,
@@ -1285,9 +1272,9 @@ class MultiAgentOrchestrator:
         self._turn_merge_tokens = 0
         # S8/S9：每轮重置主管循环运行态（护栏判定不跨轮）
         self._loop_stop_reason = None
-        # 对话能力运行态（联网/深度思考/开场白/执行模式）；全部缺省 = 旧行为
+        # 对话能力运行态（联网/深度思考/开场白）；全部缺省 = 旧行为
         self._prepare_turn_chat_features(
-            web_search, thinking, opening_statement, execution_mode, user_message_id
+            web_search, thinking, opening_statement, user_message_id
         )
 
         # S5：入口变量契约 —— 一次校验 + 默认值兜底 + 渲染本轮消息。
@@ -1429,7 +1416,7 @@ class MultiAgentOrchestrator:
                 # direct_answer=主管自答（零 dispatch）；final_after_dispatch=派发后收尾；
                 # tool_call_limit/max_iterations=护栏触发；error=异常。
                 "loop_stop_reason": self._loop_stop_reason,
-                # 对话能力附加字段（execution_mode_actual 等）；无新能力生效时为空，契约不变
+                # 对话能力附加字段；无新能力生效时为空，契约不变
                 **self._turn_end_extras(),
                 "usage": {
                     "routing_tokens": self._turn_routing_tokens,
@@ -1473,7 +1460,6 @@ class MultiAgentOrchestrator:
         user_rag_memory_id: str = '',
         thinking: bool = False,
         opening_statement: Optional[str] = None,
-        execution_mode: Optional[str] = None,
         files: Optional[List[Any]] = None,
         user_message_id: Optional[uuid.UUID] = None,
         regenerate_before: Any = None,
@@ -1514,9 +1500,9 @@ class MultiAgentOrchestrator:
 
         await self._ensure_master_execution(conversation_id, message_id)
 
-        # 对话能力运行态（联网/深度思考/开场白/执行模式）；全部缺省 = 旧行为
+        # 对话能力运行态（联网/深度思考/开场白）；全部缺省 = 旧行为
         self._prepare_turn_chat_features(
-            web_search, thinking, opening_statement, execution_mode, user_message_id
+            web_search, thinking, opening_statement, user_message_id
         )
 
         # S4：每轮重置 token 账本（与流式同口径）
@@ -1953,15 +1939,15 @@ class MultiAgentOrchestrator:
         # 2. 流式执行所有子 Agent
         results = []
 
-        # 获取执行模式配置
-        execution_mode = self._execution_config.get("sub_agent_execution_mode", "parallel")
+        # 获取子 Agent 调度模式配置
+        sub_agent_execution_mode = self._execution_config.get("sub_agent_execution_mode", "parallel")
 
         if collaboration_strategy == "decomposition":
             # 问题拆分模式
             # 检查是否有依赖关系
             has_dependencies = self._check_dependencies(collaboration_agents)
 
-            if has_dependencies or execution_mode == "sequential":
+            if has_dependencies or sub_agent_execution_mode == "sequential":
                 # 有依赖或配置为串行：串行流式执行
                 logger.info("使用串行流式执行（问题拆分）")
                 for sub_q in sorted(collaboration_agents, key=lambda x: x.get("order", 0)):
@@ -2111,7 +2097,7 @@ class MultiAgentOrchestrator:
                             )
         else:
             # 其他协作模式（sequential/parallel/hierarchical）
-            if collaboration_strategy == "parallel" and execution_mode == "parallel":
+            if collaboration_strategy == "parallel" and sub_agent_execution_mode == "parallel":
                 # 并行协作 + 并行流式执行
                 logger.info(f"使用并行流式执行（并行协作），共 {len(collaboration_agents)} 个 Agent")
 
@@ -4611,15 +4597,15 @@ class MultiAgentOrchestrator:
         # 检测是否有依赖关系
         has_dependencies = self._check_dependencies(sub_questions)
 
-        # 获取执行模式配置
-        execution_mode = self._execution_config.get("sub_agent_execution_mode", "parallel")
+        # 获取子 Agent 调度模式配置
+        sub_agent_execution_mode = self._execution_config.get("sub_agent_execution_mode", "parallel")
 
         # 如果有依赖关系，强制使用串行模式
         if has_dependencies:
             logger.info("检测到子问题有依赖关系，强制使用串行执行")
-            execution_mode = "sequential"
+            sub_agent_execution_mode = "sequential"
 
-        if execution_mode == "sequential":
+        if sub_agent_execution_mode == "sequential":
             # 串行执行模式
             logger.info(f"串行执行 {len(sub_questions)} 个子问题")
 

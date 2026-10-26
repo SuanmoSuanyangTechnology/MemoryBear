@@ -459,9 +459,6 @@ async def chat(
             agent_config.model_parameters["deep_thinking"] = False
 
         source = HitLogSource.EXTERNAL
-        # In-process execution only; sandbox execution is not part of this
-        # service (the flag is kept for parity with the host signature).
-        execution_mode = "in_process"
 
         if payload.stream:
             async def event_generator():
@@ -480,7 +477,6 @@ async def chat(
                             workspace_id=workspace_id,
                             files=payload.files,
                             source=source,
-                            execution_mode=execution_mode,
                     ):
                         yield event
 
@@ -501,7 +497,6 @@ async def chat(
                 workspace_id=workspace_id,
                 files=payload.files,
                 source=source,
-                execution_mode=execution_mode,
             )
         return success(data=conversation_schema.ChatResponse(**result).model_dump(mode="json"))
 
@@ -523,7 +518,6 @@ async def chat(
                             storage_type=storage_type,
                             user_rag_memory_id=user_rag_memory_id,
                             thinking=bool(getattr(payload, "thinking", False)),
-                            execution_mode="in_process",
                             files=payload.files,
                     ):
                         yield event
@@ -543,7 +537,6 @@ async def chat(
                 storage_type=storage_type,
                 user_rag_memory_id=user_rag_memory_id,
                 thinking=bool(getattr(payload, "thinking", False)),
-                execution_mode="in_process",
                 files=payload.files,
             )
 

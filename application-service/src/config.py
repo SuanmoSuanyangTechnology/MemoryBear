@@ -66,7 +66,7 @@ class AppServiceSettings(BaseSettings):
         default=SecretStr("redbear-sandbox"), validation_alias="SANDBOX_API_KEY"
     )
     # Independent sandbox service (core/sandbox-service), unrelated to
-    # `sandbox_url` above (legacy code-node sandbox) and E2B_*. Consumed by the
+    # `sandbox_url` above (legacy code-node sandbox). Consumed by the
     # code-interpreter / terminal / sandbox-file builtin tools; disabling it
     # makes those tools return an explicit "not enabled" error.
     enable_sandbox_service: bool = Field(
@@ -409,14 +409,6 @@ class AppServiceSettings(BaseSettings):
     )
     fast_write_emotion_http_timeout_seconds: float = Field(
         default=2.0, gt=0, validation_alias="FAST_WRITE_EMOTION_HTTP_TIMEOUT_SECONDS"
-    )
-    # E2B sandbox callback settings (host `settings.E2B_CALLBACK_*`); kept for
-    # config-shape parity, the sandbox execution path itself is fail-closed.
-    e2b_callback_url: str = Field(
-        default="http://host.docker.internal:8000", validation_alias="E2B_CALLBACK_URL"
-    )
-    e2b_callback_secret: SecretStr = Field(
-        default=SecretStr("sandbox-callback-secret"), validation_alias="E2B_CALLBACK_SECRET"
     )
     llm_network_retry_attempts: int = Field(
         default=3, ge=1, validation_alias="LLM_NETWORK_RETRY_ATTEMPTS"

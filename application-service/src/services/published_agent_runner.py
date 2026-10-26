@@ -199,7 +199,6 @@ class PublishedAgentRunner:
                         history=history,
                         skip_save=True,
                         stateless=True,
-                        execution_mode="in_process",
                     )
                 result["reference_meta"] = runtime.reference_meta
                 return result
@@ -261,7 +260,6 @@ class PublishedAgentRunner:
                         history=history,
                         skip_save=True,
                         stateless=True,
-                        execution_mode="in_process",
                     )
                 async for raw_event in stream:
                     event = raw_event if isinstance(raw_event, dict) else self._parse_sse_event(raw_event)

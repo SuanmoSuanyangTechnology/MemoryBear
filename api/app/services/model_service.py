@@ -946,8 +946,7 @@ class ModelApiKeyService:
         """ResolvedModelConfig → 瞬时 ModelApiKey 兼容壳（不落库；id=channel_id）。
 
         能力载体为 profile 三列（.input_modalities/.output_modalities/.features）；
-        旧列 .capability/.is_omni 为派生视图（仅 e2b 沙箱 payload 等冻结消费面读取，
-        内部消费方一律读三列，M10 随旧列删）。
+        旧列 .capability/.is_omni 仅作为兼容派生视图，内部消费方统一读取三列。
 
         渠道 api_base 为空（provider 级渠道）时物化 provider 公共基地址（dashscope
         原生 SDK 组合在运行期再剥离为 /api/v1），与 RedBearModelConfig 的补默认

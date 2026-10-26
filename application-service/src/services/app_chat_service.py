@@ -19,10 +19,10 @@ import json
 import logging
 import time
 import uuid
-from contextlib import aclosing, nullcontext
+from contextlib import aclosing
 from datetime import datetime
 from types import SimpleNamespace
-from typing import Annotated, Any, AsyncGenerator, Dict, List, Literal, Optional
+from typing import Annotated, Any, AsyncGenerator, Dict, List, Optional
 
 from fastapi import Depends
 from sqlalchemy import select
@@ -65,7 +65,7 @@ from ..models.file_metadata_model import FileMetadata
 from ..repositories.agent_execution_repository import AgentExecutionRepository
 from ..repositories.tool_repository import ToolRepository
 from ..schemas import DraftRunRequest
-from ..schemas.app_schema import Citation, FileInput, FileType
+from ..schemas.app_schema import FileInput, FileType
 from ..schemas.prompt_schema import PromptMessageRole, render_prompt_message
 from ..usage_context import bind_usage
 from ..utils.datetime_utils import parse_timestamp_to_utc_naive
@@ -738,7 +738,6 @@ class AppChatService:
             skip_save: bool = False,
             parent_message_id: Optional[uuid.UUID] = None,
             version: int = 1,
-            execution_mode: Literal["in_process", "sandbox"] = "in_process",
     ) -> Dict[str, Any]:
         """Agent chat (non-streaming)."""
         start_time = time.time()
@@ -996,22 +995,6 @@ class AppChatService:
         # inject the trace into system_prompt
         features = [str(item) for item in (api_key_obj.features or [])]
         orchestrator_node_executions = []
-        _api_key_config = {
-            "model_name": api_key_obj.model_name,
-            "api_key": api_key_obj.api_key,
-            "provider": api_key_obj.provider,
-            "api_base": api_key_obj.api_base,
-            "input_modalities": [str(item) for item in (api_key_obj.input_modalities or [])],
-            "output_modalities": [str(item) for item in (api_key_obj.output_modalities or [])],
-            "features": features,
-            # Legacy fields frozen at the sandbox payload shape (until the
-            # e2b infra retires in the same batch)
-            "is_omni": api_key_obj.is_omni,
-            "capability": [str(item) for item in (api_key_obj.capability or [])],
-            "tenant_id": api_key_obj.tenant_id,
-            "model_config_id": api_key_obj.model_config_id,
-            "channel_id": api_key_obj.channel_id,
-        }
         use_agent_mode = ModelFeature.FUNCTION_CALL in features
         executed_tool_names: list[str] = []
         if not use_agent_mode and tools:
@@ -1030,139 +1013,73 @@ class AppChatService:
             executed_tool_names = [n for n in (getattr(t, "name", None) for t in tools) if n]
             tools = []
 
-        # Branch: sandbox vs in-process execution
-        _sandbox_adapter = None
-        if execution_mode == "sandbox":
-            from .e2b_agent_adapter import E2BAgentAdapter
+        agent = LangChainAgent(
+            model_name=api_key_obj.model_name,
+            model_view=model_view,
+            provider=api_key_obj.provider,
+            temperature=model_parameters.get("temperature", 0.7),
+            max_tokens=model_parameters.get("max_tokens", 2000),
+            system_prompt=system_prompt,
+            tools=tools,
+            executed_tool_names=executed_tool_names,
+            deep_thinking=model_parameters.get("deep_thinking", False),
+            thinking_budget_tokens=model_parameters.get("thinking_budget_tokens"),
+            json_output=model_parameters.get("json_output", False),
+            context_query=message,
+            context_base_text=system_prompt + "\n" + str(history) + "\n" + message,
+            context_evidence_loader=load_annotation_context,
+        )
 
-            _ws_id = uuid.UUID(workspace_id) if isinstance(workspace_id, str) else workspace_id
-            sandbox_payload = await self.agent_service._build_sandbox_payload(
-                agent_config=config,
-                model_config=None,
-                api_key_config=_api_key_config,
-                effective_params=model_parameters,
-                message=message,
-                system_prompt=system_prompt,
-                workspace_id=_ws_id,
-                user_id=user_id,
-                conversation_id=str(conversation_id),
-                tools=tools,
+        # Inject runtime context into tools that need it
+        for t in tools:
+            if hasattr(t, 'tool_instance') and hasattr(t.tool_instance, 'set_runtime_context'):
+                t.tool_instance.set_runtime_context(
+                    user_id=user_id or "anonymous",
+                    conversation_id=str(conversation_id) if conversation_id else None,
+                    uploaded_files=processed_files or []
+                )
+
+        # Create the agent execution record (pending state, aligned with
+        # workflow behavior)
+        agent_exec_repo = AgentExecutionRepository(self.db)
+        app_obj = await self._db_get(App, config.app_id)
+        agent_execution = AgentExecution(
+            app_id=config.app_id,
+            conversation_id=conversation_id,
+            message_id=None,
+            agent_config_id=config.id,
+            release_id=app_obj.current_release_id if app_obj else None,
+            triggered_by=None,
+            steps=[],
+            status="running",
+            started_at=parse_timestamp_to_utc_naive(start_time),
+            meta_data={
+                "model": api_key_obj.model_name,
+                "provider": api_key_obj.provider,
+            },
+        )
+        agent_execution_id = await self._create_agent_execution(agent_exec_repo, agent_execution)
+
+        try:
+            # Run the agent (multimodal supported)
+            result = await agent.chat(
+                message=llm_message,
                 history=history,
                 context=None,
-                variables=variables,
-                files_config=features_config.get("file_upload", {}),
+                files=processed_files
             )
-            _sandbox_adapter = E2BAgentAdapter(self.db)
-
-            # Create agent execution record
-            agent_exec_repo = AgentExecutionRepository(self.db)
-            app_obj = await self._db_get(App, config.app_id)
-            agent_execution = AgentExecution(
-                app_id=config.app_id,
-                conversation_id=conversation_id,
-                message_id=None,
-                agent_config_id=config.id,
-                release_id=app_obj.current_release_id if app_obj else None,
-                triggered_by=None,
+        except Exception as e:
+            # Agent failed: mark the execution record failed
+            elapsed_time = time.time() - start_time
+            await self._update_agent_execution(
+                agent_exec_repo,
+                execution_id=agent_execution_id,
                 steps=[],
-                status="running",
-                started_at=parse_timestamp_to_utc_naive(start_time),
-                meta_data={
-                    "model": api_key_obj.model_name,
-                    "provider": api_key_obj.provider,
-                },
+                status="failed",
+                elapsed_time=elapsed_time,
+                error_message=str(e)[:2000],
             )
-            agent_execution_id = await self._create_agent_execution(agent_exec_repo, agent_execution)
-
-            try:
-                raw_result = await _sandbox_adapter.run(sandbox_payload=sandbox_payload)
-                result = {
-                    "content": raw_result.get("content", ""),
-                    "reasoning_content": "",
-                    "usage": raw_result.get("usage", {}),
-                    "node_executions": raw_result.get("node_executions", []),
-                }
-            except Exception as e:
-                elapsed_time = time.time() - start_time
-                await self._update_agent_execution(
-                    agent_exec_repo,
-                    execution_id=agent_execution_id,
-                    steps=[],
-                    status="failed",
-                    elapsed_time=elapsed_time,
-                    error_message=str(e)[:2000],
-                )
-                raise
-        else:
-            # Create the LangChain Agent (remote mode: identity/capability
-            # facts from the non-decrypted view, credentials stay server side)
-            agent = LangChainAgent(
-                model_name=api_key_obj.model_name,
-                model_view=model_view,
-                provider=api_key_obj.provider,
-                temperature=model_parameters.get("temperature", 0.7),
-                max_tokens=model_parameters.get("max_tokens", 2000),
-                system_prompt=system_prompt,
-                tools=tools,
-                executed_tool_names=executed_tool_names,
-                deep_thinking=model_parameters.get("deep_thinking", False),
-                thinking_budget_tokens=model_parameters.get("thinking_budget_tokens"),
-                json_output=model_parameters.get("json_output", False),
-                context_query=message,
-                context_base_text=system_prompt + "\n" + str(history) + "\n" + message,
-                context_evidence_loader=load_annotation_context,
-            )
-
-            # Inject runtime context into tools that need it
-            for t in tools:
-                if hasattr(t, 'tool_instance') and hasattr(t.tool_instance, 'set_runtime_context'):
-                    t.tool_instance.set_runtime_context(
-                        user_id=user_id or "anonymous",
-                        conversation_id=str(conversation_id) if conversation_id else None,
-                        uploaded_files=processed_files or []
-                    )
-
-            # Create the agent execution record (pending state, aligned with
-            # workflow behavior)
-            agent_exec_repo = AgentExecutionRepository(self.db)
-            app_obj = await self._db_get(App, config.app_id)
-            agent_execution = AgentExecution(
-                app_id=config.app_id,
-                conversation_id=conversation_id,
-                message_id=None,
-                agent_config_id=config.id,
-                release_id=app_obj.current_release_id if app_obj else None,
-                triggered_by=None,
-                steps=[],
-                status="running",
-                started_at=parse_timestamp_to_utc_naive(start_time),
-                meta_data={
-                    "model": api_key_obj.model_name,
-                    "provider": api_key_obj.provider,
-                },
-            )
-            agent_execution_id = await self._create_agent_execution(agent_exec_repo, agent_execution)
-
-            try:
-                # Run the agent (multimodal supported)
-                result = await agent.chat(
-                    message=llm_message,
-                    history=history,
-                    context=None,
-                    files=processed_files
-                )
-            except Exception as e:
-                # Agent failed: mark the execution record failed
-                elapsed_time = time.time() - start_time
-                await self._update_agent_execution(
-                    agent_exec_repo,
-                    execution_id=agent_execution_id,
-                    steps=[],
-                    status="failed",
-                    elapsed_time=elapsed_time,
-                    error_message=str(e)[:2000],
-                )
-                raise
+            raise
 
         await self._record_api_key_usage(api_key_obj.id)
 
@@ -1183,23 +1100,6 @@ class AppChatService:
              "api_base": api_key_obj.api_base, "provider": api_key_obj.provider},
             tenant_id=tenant_id, workspace_id=workspace_id
         )
-
-        # Merge sandbox citations into the collector
-        if _sandbox_adapter is not None:
-            sandbox_cits = getattr(_sandbox_adapter, "_sandbox_citations", [])
-            if sandbox_cits:
-                seen_ids = {c.get("document_id") for c in citations_collector}
-                for cit in sandbox_cits:
-                    doc_id = cit.get("document_id")
-                    if doc_id and doc_id not in seen_ids:
-                        seen_ids.add(doc_id)
-                        citations_collector.append(Citation(
-                            document_id=str(doc_id),
-                            doc_id=cit.get("doc_id", ""),
-                            file_name=cit.get("file_name", ""),
-                            knowledge_id=str(cit.get("knowledge_id", "")),
-                            score=cit.get("score", 0),
-                        ))
 
         # Filter citations (called once)
         filtered_citations = self.agent_service._filter_citations(features_config, citations_collector)
@@ -1347,7 +1247,6 @@ class AppChatService:
             skip_save: bool = False,
             parent_message_id: Optional[uuid.UUID] = None,
             version: int = 1,
-            execution_mode: Literal["in_process", "sandbox"] = "in_process",
     ) -> AsyncGenerator[str, None]:
         """Chat (streaming)."""
 
@@ -1597,27 +1496,10 @@ class AppChatService:
             # inject the trace into the system prompt.
             features = [str(item) for item in (api_key_obj.features or [])]
             orchestrator_node_executions = []
-            _api_key_config = {
-                "model_name": api_key_obj.model_name,
-                "api_key": api_key_obj.api_key,
-                "provider": api_key_obj.provider,
-                "api_base": api_key_obj.api_base,
-                "input_modalities": [str(item) for item in (api_key_obj.input_modalities or [])],
-                "output_modalities": [str(item) for item in (api_key_obj.output_modalities or [])],
-                "features": features,
-                # Legacy fields kept for the sandbox payload contract only
-                # (frozen until e2b-infra retires in the same batch)
-                "is_omni": api_key_obj.is_omni,
-                "capability": [str(item) for item in (api_key_obj.capability or [])],
-                "tenant_id": api_key_obj.tenant_id,
-                "model_config_id": api_key_obj.model_config_id,
-                "channel_id": api_key_obj.channel_id,
-            }
             use_agent_mode = ModelFeature.FUNCTION_CALL in features
             executed_tool_names: list[str] = []
             if not use_agent_mode and tools:
-                stage_context = memory_stage_capture() if execution_mode == "in_process" else nullcontext()
-                with stage_context:
+                with memory_stage_capture():
                     system_prompt, orchestrator_node_executions = await ToolOrchestrator.create_and_run(
                         tools=tools,
                         system_prompt=system_prompt,
@@ -1632,7 +1514,7 @@ class AppChatService:
                 for step in orchestrator_node_executions:
                     event_type = "tool_error" if step.get("status") == "failed" else "tool_end"
                     memory_stages = []
-                    if execution_mode == "in_process" and step.get("node_name") == "long_term_memory":
+                    if step.get("node_name") == "long_term_memory":
                         memory_stages = memory_trace.record_weak_tool(step)
                     yield f"event: tool_start\ndata: {json.dumps({'step_id': step.get('step_id'), 'name': step.get('node_name'), 'input': step.get('input'), 'meta': step.get('meta')}, cls=CustomJsonEncoder, ensure_ascii=False)}\n\n"
                     for stage in memory_stages:
@@ -1646,73 +1528,39 @@ class AppChatService:
                     yield f"event: {event_type}\ndata: {json.dumps({'step_id': step.get('step_id'), 'name': step.get('node_name'), 'output': step.get('output'), 'error': step.get('error'), 'meta': step.get('meta')}, cls=CustomJsonEncoder, ensure_ascii=False)}\n\n"
                 tools = []
 
-            # Branch: sandbox vs in-process execution
-            _sandbox_adapter = None
-            if execution_mode == "sandbox":
-                from .e2b_agent_adapter import E2BAgentAdapter
+            agent = LangChainAgent(
+                model_name=api_key_obj.model_name,
+                model_view=model_view,
+                provider=api_key_obj.provider,
+                temperature=model_parameters.get("temperature", 0.7),
+                max_tokens=model_parameters.get("max_tokens", 2000),
+                system_prompt=system_prompt,
+                tools=tools,
+                executed_tool_names=executed_tool_names,
+                streaming=True,
+                deep_thinking=model_parameters.get("deep_thinking", False),
+                thinking_budget_tokens=model_parameters.get("thinking_budget_tokens"),
+                json_output=model_parameters.get("json_output", False),
+                context_query=message,
+                context_base_text=system_prompt + "\n" + str(history) + "\n" + message,
+                context_evidence_loader=load_annotation_context,
+            )
 
-                _ws_id = uuid.UUID(workspace_id) if isinstance(workspace_id, str) else workspace_id
-                sandbox_payload = await self.agent_service._build_sandbox_payload(
-                    agent_config=config,
-                    model_config=None,
-                    api_key_config=_api_key_config,
-                    effective_params=model_parameters,
-                    message=message,
-                    system_prompt=system_prompt,
-                    workspace_id=_ws_id,
-                    user_id=user_id,
-                    conversation_id=str(conversation_id),
-                    tools=tools,
-                    history=history,
-                    context=None,
-                    variables=variables,
-                    files_config=features_config.get("file_upload", {}),
-                )
-                _sandbox_adapter = E2BAgentAdapter(self.db)
-                _chunk_stream = self.agent_service._sandbox_event_stream(
-                    payload=sandbox_payload,
-                    workspace_id=str(_ws_id),
-                    user_id=user_id or "",
-                    conversation_id=str(conversation_id),
-                    adapter=_sandbox_adapter,
-                )
-            else:
-                # Create the LangChain Agent (remote mode: identity/capability
-                # facts come from the non-decrypted view; credentials are never
-                # sent upstream)
-                agent = LangChainAgent(
-                    model_name=api_key_obj.model_name,
-                    model_view=model_view,
-                    provider=api_key_obj.provider,
-                    temperature=model_parameters.get("temperature", 0.7),
-                    max_tokens=model_parameters.get("max_tokens", 2000),
-                    system_prompt=system_prompt,
-                    tools=tools,
-                    executed_tool_names=executed_tool_names,
-                    streaming=True,
-                    deep_thinking=model_parameters.get("deep_thinking", False),
-                    thinking_budget_tokens=model_parameters.get("thinking_budget_tokens"),
-                    json_output=model_parameters.get("json_output", False),
-                    context_query=message,
-                    context_base_text=system_prompt + "\n" + str(history) + "\n" + message,
-                    context_evidence_loader=load_annotation_context,
-                )
+            # Inject runtime context into tools that need it
+            for t in tools:
+                if hasattr(t, 'tool_instance') and hasattr(t.tool_instance, 'set_runtime_context'):
+                    t.tool_instance.set_runtime_context(
+                        user_id=user_id or "anonymous",
+                        conversation_id=str(conversation_id) if conversation_id else None,
+                        uploaded_files=processed_files or []
+                    )
 
-                # Inject runtime context into tools that need it
-                for t in tools:
-                    if hasattr(t, 'tool_instance') and hasattr(t.tool_instance, 'set_runtime_context'):
-                        t.tool_instance.set_runtime_context(
-                            user_id=user_id or "anonymous",
-                            conversation_id=str(conversation_id) if conversation_id else None,
-                            uploaded_files=processed_files or []
-                        )
-
-                _chunk_stream = agent.chat_stream(
-                    message=llm_message,
-                    history=history,
-                    context=None,
-                    files=processed_files,
-                )
+            _chunk_stream = agent.chat_stream(
+                message=llm_message,
+                history=history,
+                context=None,
+                files=processed_files,
+            )
 
             # Pre-read ORM attributes before close() to avoid
             # DetachedInstanceError afterwards
@@ -1747,7 +1595,7 @@ class AppChatService:
                 tenant_id=tenant_id, workspace_id=workspace_id
             )
 
-            capture_memory_stages = execution_mode == "in_process"
+            capture_memory_stages = True
             if capture_memory_stages:
                 _chunk_stream = capture_memory_stage_stream(_chunk_stream)
             async for chunk in _chunk_stream:
@@ -1803,23 +1651,6 @@ class AppChatService:
 
             if tts_task is not None:
                 await text_queue.put(None)
-
-            # Merge sandbox citations into collector
-            if _sandbox_adapter is not None:
-                sandbox_cits = getattr(_sandbox_adapter, "_sandbox_citations", [])
-                if sandbox_cits:
-                    seen_ids = {c.get("document_id") for c in citations_collector}
-                    for cit in sandbox_cits:
-                        doc_id = cit.get("document_id")
-                        if doc_id and doc_id not in seen_ids:
-                            seen_ids.add(doc_id)
-                            citations_collector.append(Citation(
-                                document_id=str(doc_id),
-                                doc_id=cit.get("doc_id", ""),
-                                file_name=cit.get("file_name", ""),
-                                knowledge_id=str(cit.get("knowledge_id", "")),
-                                score=cit.get("score", 0),
-                            ))
 
             elapsed_time = time.time() - start_time
             await self._record_api_key_usage(_api_key_id)
@@ -2130,16 +1961,13 @@ class AppChatService:
             storage_type: Optional[str] = None,
             user_rag_memory_id: Optional[str] = None,
             thinking: bool = False,
-            execution_mode: Optional[str] = None,
             files: Optional[List[FileInput]] = None,
             source: str = "",
     ) -> Dict[str, Any]:
         """Multi-agent chat (non-streaming).
 
-        thinking / execution_mode / files are optional additions aligned with
-        Agent apps; absent = the previous behavior. ``source`` identifies the
-        entry face for annotation hit logs (console vs external); empty keeps
-        the external default.
+        ``source`` identifies the entry face for annotation hit logs (console
+        vs external); empty keeps the external default.
         """
 
         start_time = time.time()
@@ -2199,7 +2027,6 @@ class AppChatService:
             message_id=message_id,
             thinking=thinking,
             opening_statement=opening_statement,
-            execution_mode=execution_mode,
             files=files or None,  # attachments (absent/empty = previous behavior)
             user_message_id=user_message_id,  # emotion cache key (features.emotion_reply only)
         )
@@ -2331,7 +2158,6 @@ class AppChatService:
             storage_type: Optional[str] = None,
             user_rag_memory_id: Optional[str] = None,
             thinking: bool = False,
-            execution_mode: Optional[str] = None,
             files: Optional[List[FileInput]] = None,
             source: str = "",
     ) -> AsyncGenerator[str, None]:
@@ -2360,7 +2186,6 @@ class AppChatService:
                     storage_type=storage_type,
                     user_rag_memory_id=user_rag_memory_id,
                     thinking=thinking,
-                    execution_mode=execution_mode,
                     files=files,
                     source=source,
             )) as stream:
@@ -2381,15 +2206,10 @@ class AppChatService:
             storage_type: Optional[str] = None,
             user_rag_memory_id: Optional[str] = None,
             thinking: bool = False,
-            execution_mode: Optional[str] = None,
             files: Optional[List[FileInput]] = None,
             source: str = "",
     ) -> AsyncGenerator[str, None]:
-        """Multi-agent chat (streaming) implementation.
-
-        thinking / execution_mode are optional additions aligned with Agent
-        apps; absent = the previous behavior.
-        """
+        """Multi-agent chat (streaming) implementation."""
 
         start_time = time.time()
 
@@ -2461,7 +2281,6 @@ class AppChatService:
                     message_id=message_id,
                     thinking=thinking,
                     opening_statement=opening_statement,
-                    execution_mode=execution_mode,
                     files=files or None,
                     user_message_id=user_message_id,  # emotion cache key (features.emotion_reply only)
             ):

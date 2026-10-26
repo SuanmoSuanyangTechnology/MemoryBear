@@ -12,7 +12,7 @@ import json
 import time
 import uuid
 from types import SimpleNamespace
-from typing import Any, AsyncGenerator, Dict, List, Literal, Optional
+from typing import Any, AsyncGenerator, Dict, List, Optional
 
 from langchain.tools import tool
 from pydantic import BaseModel, Field
@@ -23,7 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..utils.datetime_utils import to_iso_z, utcnow_naive
 from ..workflow.node_cache import sanitize_json_text
 from ..agent.agent_middleware import AgentMiddleware
-from ..agent.langchain_agent import DEFAULT_AGENT_ROLE_PROMPT, LangChainAgent, default_tool_call_limit
+from ..agent.langchain_agent import DEFAULT_AGENT_ROLE_PROMPT, LangChainAgent
 from ..config import current_settings
 from ..errors import BizCode
 from ..errors import BusinessException
@@ -1662,7 +1662,6 @@ class AgentRunService:
             history: Optional[List[Dict[str, str]]] = None,
             skip_save: bool = False,
             stateless: bool = False,
-            execution_mode: Literal["in_process", "sandbox"] = "in_process",
             parent_execution_id: Optional[uuid.UUID] = None,
             orchestration_mode: Optional[str] = None,
             execution_owner: Optional[Dict[str, Any]] = None,
@@ -1686,7 +1685,6 @@ class AgentRunService:
             history: Externally supplied history messages (optional, for regeneration).
             skip_save: Whether to skip saving messages (for regeneration).
             stateless: Whether to run the sub Agent without conversation or message persistence.
-            execution_mode: Execution mode (in_process / sandbox).
             parent_execution_id: Execution ID of the parent (master) Agent in cluster orchestration; passed through by the orchestrator when sub_agent=True.
             orchestration_mode: Orchestration mode supervisor / supervisor_loop / collaboration (cluster scenarios only).
             execution_owner: {"release_id": UUID, "agent_name": str}, avoids the AgentConfigProxy.id foreign-key pitfall.
@@ -1727,8 +1725,8 @@ class AgentRunService:
         try:
             # 1. Fetch the API Key configuration
             api_key_config = await self._get_api_key(model_config.id, tenant_id=tenant_id)
-            # Remote mode: the undecrypted view serves the invoke seam and multimodal
-            # formatting; credentials still serve existing consumers like sandbox/usage
+            # The undecrypted view serves the invoke seam and multimodal formatting;
+            # plaintext credentials remain local for model invocation, TTS, and usage.
             model_view = await ModelConfigService.get_runtime_model_view_bridge_async(
                 self.db, model_config.id, tenant_id=tenant_id
             )
@@ -2246,7 +2244,6 @@ class AgentRunService:
             skip_save: bool = False,
             stateless: bool = False,
             user_message_id: Optional[uuid.UUID] = None,
-            execution_mode: Literal["in_process", "sandbox"] = "in_process",
             parent_execution_id: Optional[uuid.UUID] = None,
             orchestration_mode: Optional[str] = None,
             execution_owner: Optional[Dict[str, Any]] = None,
@@ -2313,8 +2310,8 @@ class AgentRunService:
         try:
             # 1. Fetch the API Key configuration
             api_key_config = await self._get_api_key(model_config.id, tenant_id=tenant_id)
-            # Remote mode: the undecrypted view serves the invoke seam and multimodal
-            # formatting; credentials still serve existing consumers like sandbox/usage
+            # The undecrypted view serves the invoke seam and multimodal formatting;
+            # plaintext credentials remain local for model invocation, TTS, and usage.
             model_view = await ModelConfigService.get_runtime_model_view_bridge_async(
                 self.db, model_config.id, tenant_id=tenant_id
             )
@@ -2559,60 +2556,30 @@ class AgentRunService:
                 )
                 tools = []
 
-            # Create the LangChain Agent (in-process) or route to sandbox
-            if execution_mode == "sandbox":
-                from .e2b_agent_adapter import E2BAgentAdapter
-                sandbox_payload = await self._build_sandbox_payload(
-                    agent_config=agent_config,
-                    model_config=model_config,
-                    api_key_config=api_key_config,
-                    effective_params=effective_params,
-                    message=message,
-                    system_prompt=system_prompt,
-                    workspace_id=workspace_id,
-                    user_id=user_id,
-                    conversation_id=conversation_id,
-                    tools=tools,
-                    history=history,
-                    context=None,
-                    variables=variables,
-                    files_config=features_config.get("file_upload", {}),
-                )
-                _sandbox_adapter = E2BAgentAdapter(self.db)
-                _sandbox_stream = self._sandbox_event_stream(
-                    payload=sandbox_payload,
-                    workspace_id=str(workspace_id),
-                    user_id=user_id or "",
-                    conversation_id=str(conversation_id),
-                    adapter=_sandbox_adapter,
-                )
-            else:
-                agent = LangChainAgent(
-                    model_name=api_key_config["model_name"],
-                    model_view=model_view,
-                    provider=api_key_config.get("provider", "openai"),
-                    temperature=effective_params.get("temperature", 0.7),
-                    max_tokens=effective_params.get("max_tokens", 2000),
-                    system_prompt=system_prompt,
-                    tools=tools,
-                    streaming=True,
-                    deep_thinking=effective_params.get("deep_thinking", False),
-                    thinking_budget_tokens=effective_params.get("thinking_budget_tokens"),
-                    json_output=effective_params.get("json_output", False),
-                    context_query=message,
-                    context_base_text=system_prompt + "\n" + str(history) + "\n" + message,
-                    context_evidence_loader=load_annotation_context,
-                )
+            agent = LangChainAgent(
+                model_name=api_key_config["model_name"],
+                model_view=model_view,
+                provider=api_key_config.get("provider", "openai"),
+                temperature=effective_params.get("temperature", 0.7),
+                max_tokens=effective_params.get("max_tokens", 2000),
+                system_prompt=system_prompt,
+                tools=tools,
+                streaming=True,
+                deep_thinking=effective_params.get("deep_thinking", False),
+                thinking_budget_tokens=effective_params.get("thinking_budget_tokens"),
+                json_output=effective_params.get("json_output", False),
+                context_query=message,
+                context_base_text=system_prompt + "\n" + str(history) + "\n" + message,
+                context_evidence_loader=load_annotation_context,
+            )
 
-                for t in tools:
-                    if hasattr(t, 'tool_instance') and hasattr(t.tool_instance, 'set_runtime_context'):
-                        t.tool_instance.set_runtime_context(
-                            user_id=user_id or "anonymous",
-                            conversation_id=str(conversation_id) if conversation_id else None,
-                            uploaded_files=processed_files or []
-                        )
-                _sandbox_adapter = None
-                _sandbox_stream = None
+            for t in tools:
+                if hasattr(t, 'tool_instance') and hasattr(t.tool_instance, 'set_runtime_context'):
+                    t.tool_instance.set_runtime_context(
+                        user_id=user_id or "anonymous",
+                        conversation_id=str(conversation_id) if conversation_id else None,
+                        uploaded_files=processed_files or []
+                    )
 
             context = None
 
@@ -2696,7 +2663,6 @@ class AgentRunService:
             full_reasoning = ""
             total_tokens = 0
             node_executions = []
-            sandbox_citations = []
 
             # Start streaming TTS (synthesizes while text is being output)
             text_queue: asyncio.Queue = asyncio.Queue()
@@ -2706,15 +2672,12 @@ class AgentRunService:
                 tenant_id=tenant_id, workspace_id=workspace_id
             ) if not sub_agent else (None, None)
 
-            if execution_mode == "sandbox":
-                _chunk_stream = _sandbox_stream
-            else:
-                _chunk_stream = agent.chat_stream(
-                    message=llm_message,
-                    history=history,
-                    context=context,
-                    files=processed_files
-                )
+            _chunk_stream = agent.chat_stream(
+                message=llm_message,
+                history=history,
+                context=context,
+                files=processed_files
+            )
 
             async for chunk in _chunk_stream:
                 if isinstance(chunk, int):
@@ -2754,23 +2717,6 @@ class AgentRunService:
             # Text finished; notify TTS
             if tts_task is not None:
                 await text_queue.put(None)
-
-            # Merge sandbox citations into collector
-            if _sandbox_adapter is not None:
-                sandbox_citations = getattr(_sandbox_adapter, "_sandbox_citations", [])
-                if sandbox_citations:
-                    seen_ids = {c.get("document_id") for c in citations_collector}
-                    for cit in sandbox_citations:
-                        doc_id = cit.get("document_id")
-                        if doc_id and doc_id not in seen_ids:
-                            seen_ids.add(doc_id)
-                            citations_collector.append(Citation(
-                                document_id=str(doc_id),
-                                doc_id=cit.get("doc_id", ""),
-                                file_name=cit.get("file_name", ""),
-                                knowledge_id=str(cit.get("knowledge_id", "")),
-                                score=cit.get("score", 0),
-                            ))
 
             elapsed_time = time.time() - start_time
             await self._record_api_key_usage_async(api_key_config.get("api_key_id"))
@@ -3037,263 +2983,7 @@ class AgentRunService:
         """
         return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
-    # ──────────────────────────────────────────────────────────────
-    # Sandbox Execution Helpers
-    # ──────────────────────────────────────────────────────────────
 
-    async def _build_sandbox_payload(
-        self,
-        *,
-        agent_config: AgentConfig,
-        model_config: ModelConfig,
-        api_key_config: dict,
-        effective_params: dict,
-        message: str,
-        system_prompt: str,
-        workspace_id: uuid.UUID,
-        user_id: Optional[str],
-        conversation_id: Optional[str],
-        tools: list,
-        history: list | None,
-        context: str | None,
-        variables: dict | None,
-        files_config: dict | None,
-    ) -> dict:
-        """Build a rich snapshot payload for E2B sandbox execution.
-
-        Serializes the already-loaded tool instances directly from ``tools``
-        so names / descriptions / parameters match the in-process path exactly.
-        """
-        serialized_tools = self._serialize_tools_for_sandbox(tools=tools)
-
-        sandbox_agent_config = {
-            "system_prompt": system_prompt,
-            "tools": serialized_tools,
-            "max_iterations": getattr(agent_config, "max_iterations", None),
-            "strategy": getattr(agent_config, "strategy", "react"),
-            "tool_call_limit": default_tool_call_limit(),
-        }
-
-        sandbox_model_config = {
-            "model_name": api_key_config.get("model_name", ""),
-            "api_key": api_key_config.get("api_key", ""),
-            "api_base": api_key_config.get("api_base", ""),
-            "provider": api_key_config.get("provider", "openai"),
-            "temperature": effective_params.get("temperature", 0.7),
-            "max_tokens": effective_params.get("max_tokens", 2000),
-            "top_p": effective_params.get("top_p"),
-            "top_k": effective_params.get("top_k"),
-            "seed": effective_params.get("seed"),
-            "stop": effective_params.get("stop"),
-            "repetition_penalty": effective_params.get("repetition_penalty"),
-            "frequency_penalty": effective_params.get("frequency_penalty"),
-            "presence_penalty": effective_params.get("presence_penalty"),
-            "deep_thinking": effective_params.get("deep_thinking", False),
-            "thinking_budget_tokens": effective_params.get("thinking_budget_tokens"),
-            "json_output": effective_params.get("json_output", False),
-            "enable_search": effective_params.get("enable_search", False),
-            "is_omni": api_key_config.get("is_omni", False),
-            "capability": api_key_config.get("capability") or [],
-            "extra_headers": getattr(model_config, "extra_headers", None),
-            "concurrency": getattr(model_config, "concurrency", 5),
-        }
-
-        sandbox_context = {
-            "history": history or [],
-            "knowledge": context or "",
-            "variables": variables or {},
-        }
-
-        return {
-            "type": "agent_stream",
-            "agent_config": sandbox_agent_config,
-            "model_config": sandbox_model_config,
-            "message": message,
-            "context": sandbox_context,
-            "runtime_env": {
-                "callback_url": current_settings().e2b_callback_url,
-                "callback_secret": current_settings().e2b_callback_secret.get_secret_value(),
-                "workspace_id": str(workspace_id),
-                "user_id": user_id or "",
-                "execution_id": str(uuid.uuid4()),
-                "conversation_id": str(conversation_id or ""),
-            },
-        }
-
-    @staticmethod
-    def _serialize_tools_for_sandbox(*, tools: list) -> list[dict]:
-        """Serialize already-loaded tool instances for sandbox consumption.
-
-        Iterates the in-process tool list and produces a flat list of tool
-        descriptors that the sandbox's tool loader (runtime.tools.loader)
-        understands.  Uses the same names / descriptions / parameters as the
-        in-process path, so tool_start events and LLM behaviour are identical.
-        """
-        from ..tools.langchain_adapter import LangchainToolWrapper
-
-        serialized: list[dict] = []
-
-        for tool in tools:
-            meta = getattr(tool, "_tool_meta", None) or {}
-            meta_type = meta.get("tool_type", "")
-
-            # ── Knowledge retrieval ──────────────────────────
-            if meta_type == "knowledge_retrieval":
-                sources = meta.get("sources", [])
-                kb_ids = [s["id"] for s in sources if s.get("id")]
-                serialized.append({
-                    "name": tool.name,
-                    "description": tool.description or "",
-                    "type": "knowledge_retrieval",
-                    "tool_id": None,
-                    "kb_ids": kb_ids,
-                    "config": {
-                        "kb_ids": kb_ids,
-                        "top_k": getattr(tool, "top_k", 3),
-                        "score_threshold": getattr(tool, "score_threshold", 0.7),
-                    },
-                })
-                continue
-
-            # ── Memory (long-term) ────────────────────────────
-            if meta_type == "long_term_memory":
-                sources = meta.get("sources", [])
-                config_id = sources[0]["id"] if sources else None
-                serialized.append({
-                    "name": "memory_read",
-                    "description": "Read user's long-term memories",
-                    "type": "memory_read",
-                    "tool_id": None,
-                    "config": {"config_id": config_id},
-                })
-                serialized.append({
-                    "name": "memory_write",
-                    "description": "Save information to user's long-term memory",
-                    "type": "memory_write",
-                    "tool_id": None,
-                    "config": {"config_id": config_id},
-                })
-                continue
-
-            # ── Web search (via callback, same as in-process Search()) ─
-            if meta_type == "web_search":
-                serialized.append({
-                    "name": tool.name,
-                    "description": tool.description or "",
-                    "type": "builtin",
-                    "tool_id": None,
-                    "config": {},
-                })
-                continue
-
-            # ── Skill ─────────────────────────────────────────
-            if meta_type == "skill":
-                sources = meta.get("sources", [])
-                skill_id = sources[0]["id"] if sources else None
-                serialized.append({
-                    "name": tool.name,
-                    "description": tool.description or "",
-                    "type": "skill",
-                    "tool_id": skill_id,
-                    "config": {
-                        "skill_id": skill_id,
-                    },
-                })
-                continue
-
-            # ── Builtin / Custom / MCP (LangchainToolWrapper) ─
-            if isinstance(tool, LangchainToolWrapper):
-                ti = tool.tool_instance
-                tool_type = ti.tool_type.value if hasattr(ti.tool_type, "value") else str(ti.tool_type)
-                config_data = dict(ti.config) if hasattr(ti, "config") and ti.config else {}
-
-                # Include parameters so sandbox can rebuild the args_schema
-                if hasattr(ti, "parameters") and ti.parameters:
-                    props = {}
-                    required: list[str] = []
-                    for p in ti.parameters:
-                        if hasattr(p, "model_dump"):
-                            pd = p.model_dump()
-                        elif isinstance(p, dict):
-                            pd = p
-                        else:
-                            continue
-                        pname = pd.get("name", "")
-                        if not pname:
-                            continue
-                        props[pname] = {
-                            "type": pd.get("type", "string"),
-                            "description": pd.get("description", ""),
-                        }
-                        if pd.get("required"):
-                            required.append(pname)
-                        if pd.get("default") is not None:
-                            props[pname]["default"] = pd.get("default")
-                        if pd.get("enum"):
-                            props[pname]["enum"] = pd.get("enum")
-                    config_data["parameters"] = {"properties": props, "required": required}
-
-                # Operation may be on the wrapper (custom tools) or baked into
-                # the inner instance (builtin tools via OperationTool).
-                operation = tool.operation
-                if operation is None and hasattr(ti, "operation"):
-                    operation = ti.operation
-
-                serialized.append({
-                    "name": tool.name,
-                    "description": tool.description or "",
-                    "type": tool_type,
-                    "tool_id": ti.tool_id if hasattr(ti, "tool_id") else None,
-                    "config": config_data,
-                    "operation": operation,
-                })
-                continue
-
-            # ── Fallback (plain LangChain tool) ───────────────
-            serialized.append({
-                "name": tool.name,
-                "description": tool.description or "",
-                "type": meta_type or "builtin",
-                "tool_id": None,
-                "config": {},
-            })
-
-        return serialized
-
-    async def _sandbox_event_stream(
-        self,
-        *,
-        payload: dict,
-        workspace_id: str,
-        user_id: str,
-        conversation_id: str,
-        adapter: Any = None,
-    ) -> AsyncGenerator[Any, None]:
-        """Stream execution events from E2B sandbox.
-
-        Translates sandbox protocol events into chunks compatible with
-        agent.chat_stream() output format (str|int|dict).
-        """
-        from .e2b_sandbox_service import get_sandbox_service
-
-        sandbox_service = get_sandbox_service()
-
-        async for event in sandbox_service.run_agent(
-            agent_config=payload["agent_config"],
-            model_config=payload["model_config"],
-            message=payload["message"],
-            context=payload["context"],
-            workspace_id=workspace_id,
-            user_id=user_id,
-            conversation_id=conversation_id,
-            execution_id=payload["runtime_env"]["execution_id"],
-        ):
-            if adapter is not None:
-                chunk = adapter._translate_event_to_chunk(event)
-            else:
-                chunk = event
-            if chunk is not None:
-                yield chunk
 
     async def _get_api_key(self, model_config_id: uuid.UUID, tenant_id: uuid.UUID | None = None) -> Dict:
         """Fetch the model's API Key.
@@ -3328,9 +3018,6 @@ class AgentRunService:
                 "input_modalities": list(getattr(api_key, "input_modalities", None) or []),
                 "output_modalities": list(getattr(api_key, "output_modalities", None) or []),
                 "features": list(getattr(api_key, "features", None) or []),
-                # Legacy fields exist only in the sandbox payload scope
-                "is_omni": api_key.is_omni,
-                "capability": api_key.capability,
                 "tenant_id": api_key.tenant_id,
                 "model_config_id": api_key.model_config_id,
                 "channel_id": api_key.channel_id,
@@ -4239,7 +3926,6 @@ class AgentRunService:
             memory: bool = True,
             files: list[FileInput] | None = None,
             source: str = "",
-            execution_mode: Literal["in_process", "sandbox"] = "in_process",
     ) -> Dict[str, Any]:
         """Multi-model compare draft run.
 
@@ -4253,7 +3939,6 @@ class AgentRunService:
             variables: Variable parameters.
             parallel: Whether to execute in parallel.
             timeout: Timeout in seconds.
-            execution_mode: Execution mode (in_process / sandbox).
 
         Returns:
             Dict: Compare results.
@@ -4300,7 +3985,6 @@ class AgentRunService:
                             memory=memory,
                             files=files,
                             source=source,
-                            execution_mode=execution_mode,
                         ),
                         timeout=timeout
                     )
@@ -4470,7 +4154,6 @@ class AgentRunService:
             timeout: int = 60,
             files: list[FileInput] | None = None,
             source: str = "",
-            execution_mode: Literal["in_process", "sandbox"] = "in_process",
             skip_save: bool = False,
     ) -> AsyncGenerator[str, None]:
         """Multi-model compare draft run with streaming output.
@@ -4492,7 +4175,6 @@ class AgentRunService:
             parallel: Whether to execute in parallel.
             timeout: Timeout in seconds.
             files: Multimodal files.
-            execution_mode: Execution mode (in_process / sandbox).
 
         Yields:
             str: SSE-formatted event data.
@@ -4582,7 +4264,6 @@ class AgentRunService:
                             files=files,
                             source=source,
                             user_message_id=model_user_message_id,
-                            execution_mode=execution_mode,
                             skip_save=skip_save,
                     ):
                         # Parse the raw event
