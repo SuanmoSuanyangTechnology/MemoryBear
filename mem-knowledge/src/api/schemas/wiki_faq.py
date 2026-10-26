@@ -6,6 +6,9 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 MAX_FAQ_BATCH_ITEMS = 100
+LEGACY_BATCH_APPROVAL_FIELDS = frozenset(
+    {"expected_row_version", "content_revision", "reviewed_wiki_snapshot_id", "idempotency_key"}
+)
 
 
 class FAQRequest(BaseModel):
@@ -53,10 +56,20 @@ class FAQBatchExpected(FAQExpected):
     faq_id: UUID
 
 
-class FAQBatchApproval(FAQApprove):
-    faq_id: UUID
-    # 混合选择中已通过、无来源的手工 FAQ 无需审核；其余项仍须提交真实快照。
-    reviewed_wiki_snapshot_id: UUID | None = None
+class FAQBatchApproval(FAQRequest):
+    """批量审核以执行时的 FAQ 内容和最新已发布 Wiki 快照为准。"""
+
+    faq_id: UUID = Field(description="待审核 FAQ ID；由服务端在事务内读取最新状态")
+
+    @model_validator(mode="before")
+    @classmethod
+    def ignore_legacy_review_target(cls, value: Any) -> Any:
+        # 兼容旧调用的审核目标；不校验、不传入业务层，其他未知字段仍拒绝。
+        if isinstance(value, dict):
+            return {
+                key: item for key, item in value.items() if key not in LEGACY_BATCH_APPROVAL_FIELDS
+            }
+        return value
 
 
 class FAQBatchContext(FAQRequest):
@@ -69,7 +82,11 @@ class FAQBatchContext(FAQRequest):
 
 
 class FAQBatchApprove(FAQRequest):
-    items: list[FAQBatchApproval] = Field(min_length=1, max_length=MAX_FAQ_BATCH_ITEMS)
+    items: list[FAQBatchApproval] = Field(
+        min_length=1,
+        max_length=MAX_FAQ_BATCH_ITEMS,
+        description="按 FAQ ID 去重；审核当前内容并推进至最新已发布 Wiki 基线，已达目标则跳过",
+    )
 
     @model_validator(mode="after")
     def deduplicate(self):

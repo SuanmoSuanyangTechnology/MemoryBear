@@ -80,6 +80,11 @@ async def batch_approve(
     payload: FAQBatchApprove,
     current_user: Annotated[User, Depends(get_current_user_async)],
 ):
+    """审核当前 FAQ 内容并将来源基线推进至最新已发布 Wiki 快照。
+
+    每项只需 faq_id；旧版本和快照字段兼容接收但忽略。已通过且基线最新的条目跳过，
+    保留逐条处理结果。不会自动改写问答或启用 FAQ；单条审核仍校验客户端审核目标。
+    """
     raise HTTPException(status_code=503, detail="FAQ requires mem-knowledge")
 
 
