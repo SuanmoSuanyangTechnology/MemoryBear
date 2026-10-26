@@ -2962,6 +2962,7 @@ class AgentRunService:
                     "agent_name": (execution_owner or {}).get("agent_name"),
                     "status": "failed",
                     "output": full_content,
+                    "error": compact_error,
                     "elapsed_time": time.time() - start_time,
                     "token_usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": total_tokens},
                 })

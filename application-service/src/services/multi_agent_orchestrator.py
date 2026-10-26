@@ -4542,6 +4542,7 @@ class MultiAgentOrchestrator:
                         "agent_name": final_info.get("name"),
                         "status": final_status,
                         "output": active_text,
+                        "error": event_data.get("error") if event_name == "error" else None,
                         "elapsed_time": time.time() - active_started_at,
                         "token_usage": {"total_tokens": active_tokens},
                     })
@@ -4567,6 +4568,7 @@ class MultiAgentOrchestrator:
                         "agent_name": (agent_configs.get(active_agent_key or "", {}) or {}).get("name"),
                         "status": "failed",
                         "output": active_text,
+                        "error": str(e),
                         "elapsed_time": time.time() - active_started_at,
                         "token_usage": {"total_tokens": active_tokens},
                     })

@@ -33,7 +33,6 @@ class SubAgentConfig(BaseModel):
     agent_id: uuid.UUID = Field(..., description="Agent ID")
     name: str = Field(..., description="Agent 名称")
     role: Optional[str] = Field(None, description="角色描述")
-    priority: int = Field(default=1, ge=1, le=100, description="优先级（1-100）")
     capabilities: List[str] = Field(default_factory=list, description="能力列表")
     release_policy: Literal["current", "pinned"] = Field(
         default="current",
