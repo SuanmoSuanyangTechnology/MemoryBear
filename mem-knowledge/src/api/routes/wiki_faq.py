@@ -166,6 +166,11 @@ async def edit_faq(
     principal: PrincipalDep,
     runtime: RuntimeDep,
 ):
+    """保存问答；已变更 FAQ 同时确认当前 Wiki 基线并恢复为已通过。
+
+    来源不可用或问答原文未改变也可确认基线。待审核 FAQ 保持待审核，启用状态不变；
+    仍须提交 expected_row_version，保留原并发校验。缺少当前版本快照时整次保存失败。
+    """
     scope = scope_for(kb_id, principal)
     return success(
         data=await service.run(

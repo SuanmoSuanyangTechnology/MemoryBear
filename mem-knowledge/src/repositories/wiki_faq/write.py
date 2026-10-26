@@ -1,4 +1,4 @@
-"""FAQ 写入统一锁知识库、页面、FAQ；编辑与审核/启停互不联动。"""
+"""FAQ 写入统一锁知识库、页面、FAQ；编辑可确认已变更来源，启停保持独立。"""
 
 import logging
 import uuid
@@ -13,7 +13,7 @@ from ...models.owned.wiki_faq import WikiFAQ, WikiPageVersion
 from ...rag.faq.contracts import FAQContent, edit_content
 from ...utils.datetime_utils import utcnow_naive
 from ..wiki.common import lock_knowledge
-from .common import conflict, get_faq, get_version, scoped, serialize, source
+from .common import conflict, get_faq, get_version, review_status, scoped, serialize, source
 
 logger = logging.getLogger(__name__)
 
@@ -88,9 +88,19 @@ def edit(session, scope, faq_id, actor_id, payload):
             exc.errors(include_input=False, include_url=False, include_context=False),
         )
         raise KnowledgeError.from_code("KB_FAQ_CONTENT_INVALID") from exc
-    if merged != current:
+    target = None
+    if row.review_state == "approved" and row.wiki_page_id is not None:
+        info = source(session, scope, row)
+        if review_status(row, info) == "change_pending":
+            # 保存即确认当前来源基线；来源不可用也允许确认，不影响待审核条目。
+            target = _latest_snapshot(session, scope, row, info["latest_wiki_version"])
+    content_changed = merged != current
+    if content_changed:
         row.standard_question, row.answers = merged.standard_question, merged.answers
         row.content_revision += 1
+    if target is not None:
+        return _record_approval(session, scope, row, actor_id, target)["faq"]
+    if content_changed:
         _touch(row, actor_id)
         session.flush()
     return serialize(session, scope, row)
@@ -157,18 +167,32 @@ def approve_latest(session: Session, scope: dict, faq_id: uuid.UUID, actor_id: u
     info = source(session, scope, row)
     if info["source_status"] != "available":
         conflict("KB_FAQ_SOURCE_UNAVAILABLE")
+    target = _latest_snapshot(session, scope, row, info["latest_wiki_version"])
+    if row.review_state == "approved" and row.approved_wiki_snapshot_id == target.id:
+        return {"changed": False, "faq": serialize(session, scope, row)}
+    return _record_approval(session, scope, row, actor_id, target)
+
+
+def _latest_snapshot(
+    session: Session, scope: dict, row: WikiFAQ, wiki_version: int
+) -> WikiPageVersion:
     target = session.scalar(
         select(WikiPageVersion).where(
             *scoped(WikiPageVersion, scope),
             WikiPageVersion.wiki_page_id == row.wiki_page_id,
-            WikiPageVersion.page_version == info["latest_wiki_version"],
+            WikiPageVersion.page_version == wiki_version,
         )
     )
     if target is None:
+        logger.warning(
+            "FAQ 当前 Wiki 快照缺失 faq_id=%s wiki_page_id=%s wiki_version=%s "
+            "stage=load_latest_snapshot error_type=KnowledgeError error_code=KB_FAQ_SOURCE_CHANGED",
+            row.id,
+            row.wiki_page_id,
+            wiki_version,
+        )
         conflict("KB_FAQ_SOURCE_CHANGED")
-    if row.review_state == "approved" and row.approved_wiki_snapshot_id == target.id:
-        return {"changed": False, "faq": serialize(session, scope, row)}
-    return _record_approval(session, scope, row, actor_id, target)
+    return target
 
 
 def _record_approval(
