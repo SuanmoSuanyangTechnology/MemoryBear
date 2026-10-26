@@ -1,0 +1,19 @@
+**
+!memory-jobs/
+!memory-jobs/pyproject.toml
+!memory-jobs/uv.lock
+!memory-jobs/README.md
+!memory-jobs/src/**
+!packages/
+# Only the local path dependencies this service builds; the rest of packages/
+# stays out of the build context.
+packages/auth-sdk/
+packages/scripts/
+packages/storage-core/
+packages/task-bridge-sdk/
+!packages/redbear-model/
+!packages/redbear-model/pyproject.toml
+!packages/redbear-model/src/**
+# Never ship local bytecode
+memory-jobs/src/**/__pycache__/
+memory-jobs/src/**/__pycache__/**
