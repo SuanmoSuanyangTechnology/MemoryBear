@@ -565,6 +565,14 @@ class MultiAgentOrchestrator:
         # (= the created_at of the original user message) so the re-run context matches
         # the round being regenerated. None = no truncation (normal new turn).
         self._regenerate_before: Any = None
+        # Session-less callers (workflow Agent node referencing a cluster) have no
+        # conversation_id to load history from; they pass the history in directly.
+        # None = load from the conversation as usual.
+        self._external_history: Optional[List[Dict[str, Any]]] = None
+        # Workflow Agent node referencing a cluster shows the supervisor's own
+        # iteration trace, so it asks for the supervisor agent_log snapshots.
+        # Cluster apps keep the old contract (supervisor traces are not emitted).
+        self._emit_supervisor_trace: bool = False
 
     def _prepare_turn_chat_features(
         self,
@@ -669,6 +677,8 @@ class MultiAgentOrchestrator:
 
     async def _resolve_loop_history(self, conversation_id: Optional[uuid.UUID]) -> List[Dict[str, Any]]:
         """Supervisor history: use context_engine results when active this turn, otherwise the cluster's 20-turn history; then append the opening statement."""
+        if self._external_history is not None:
+            return self._with_opening(list(self._external_history))
         if self._turn_used_context_engine and self._turn_ctx_history is not None:
             return self._with_opening(list(self._turn_ctx_history))
         return self._with_opening(await self._load_cluster_history(conversation_id))
@@ -805,6 +815,7 @@ class MultiAgentOrchestrator:
         model_view: "ModelInfo",
         message: str,
         supervisor: Any,
+        conversation_id: Any = None,
     ) -> tuple:
         """Process the supervisor's attachments for this turn (aligned with Agent apps: validate -> MultimodalService -> image manifest).
 
@@ -823,13 +834,25 @@ class MultiAgentOrchestrator:
         self._turn_processed_files = None
         self._turn_files_provider = None
         if not files:
-            return message, None
+            # A turn without attachments still gets the earlier uploads' file_ids fed
+            # to the model (the conversation is only queried when the import tool is
+            # mounted).
+            from .draft_run_service import build_sandbox_import_manifest_for_turn
+
+            history_manifest = await build_sandbox_import_manifest_for_turn(
+                None, getattr(supervisor, "tools", None), conversation_id
+            )
+            return (f"{message}\n\n{history_manifest}" if history_manifest else message), None
 
         fu = self._features.get("file_upload") if isinstance(self._features, dict) else None
         if not (isinstance(fu, dict) and fu.get("enabled")):
             raise BusinessException("该集群未开启文件上传功能", BizCode.BAD_REQUEST)
 
-        from .draft_run_service import AgentRunService, build_uploaded_images_manifest
+        from .draft_run_service import (
+            AgentRunService,
+            build_sandbox_import_manifest_for_turn,
+            build_uploaded_images_manifest,
+        )
         from .multimodal_service import MultimodalService
 
         AgentRunService._validate_file_upload(self._features, files)
@@ -855,6 +878,13 @@ class MultiAgentOrchestrator:
         image_manifest, _ = build_uploaded_images_manifest(files)
         if image_manifest:
             llm_message = f"{message}\n\n{image_manifest}"
+        # With the sandbox import tool mounted, list this turn's and the conversation's
+        # earlier file_ids (a later turn without attachments must still be able to import).
+        sandbox_manifest = await build_sandbox_import_manifest_for_turn(
+            files, getattr(supervisor, "tools", None), conversation_id
+        )
+        if sandbox_manifest:
+            llm_message = f"{llm_message}\n\n{sandbox_manifest}"
 
         self._turn_processed_files = processed_files
         self._turn_files_provider = provider
@@ -2704,7 +2734,7 @@ class MultiAgentOrchestrator:
         create_supervisor(agents, tools=[...])).
 
         All guards use existing engine parameters (nothing custom):
-        - tool_call_limit: execution_config.supervisor_max_tool_calls (default 3)
+        - tool_call_limit: the AGENT_TOOL_CALL_LIMIT setting (default 5)
           — the N+1th call of the same sub-agent is rejected and the model is
           told to give a final answer (no-progress detection);
         - max_iterations: execution_config.max_iterations — the supervisor loop
@@ -2716,7 +2746,7 @@ class MultiAgentOrchestrator:
         - GraphRecursionError: handled by the engine's internal graceful
           degradation.
         """
-        from ..agent.langchain_agent import LangChainAgent
+        from ..agent.langchain_agent import LangChainAgent, default_tool_call_limit
 
         mp = self.model_parameters
 
@@ -2726,12 +2756,10 @@ class MultiAgentOrchestrator:
             val = mp.get(key, default) if isinstance(mp, dict) else getattr(mp, key, default)
             return default if val is None else val
 
-        try:
-            tool_call_limit = int(
-                self._execution_config.get("supervisor_max_tool_calls", 3)
-            )
-        except (TypeError, ValueError, AttributeError):
-            tool_call_limit = 3
+        # One knob for every Agent kind: the AGENT_TOOL_CALL_LIMIT setting.
+        # execution_config.supervisor_max_tool_calls is kept for config
+        # compatibility but no longer read.
+        tool_call_limit = default_tool_call_limit()
 
         # max_iterations semantics = supervisor loop round limit (one round = the
         # batch of sub-agent calls issued by one supervisor decision; concurrent
@@ -2886,15 +2914,16 @@ class MultiAgentOrchestrator:
         try:
             tools_config = supervisor_config.get("tools") or []
             _sup_web = bool(getattr(self, "_loop_supervisor_web_search", False))
-            if tools_config or _sup_web:
-                own = await run_svc.load_tools_config(
-                    tools_config,
-                    _sup_web,
-                    self.tenant_id,
-                    user_id=user_id,
-                    workspace_id=await self._cluster_workspace_id(),
-                )
-                tools.extend(own)
+            # Always called: load_tools_config also appends the default sandbox tools
+            # (ENABLE_SANDBOX_SERVICE) even when nothing is configured.
+            own = await run_svc.load_tools_config(
+                tools_config,
+                _sup_web,
+                self.tenant_id,
+                user_id=user_id,
+                workspace_id=await self._cluster_workspace_id(),
+            )
+            tools.extend(own)
         except Exception as e:
             logger.warning(f"主管工具加载失败（已跳过普通工具段）: {e}")
 
@@ -2995,6 +3024,22 @@ class MultiAgentOrchestrator:
             except Exception as e:
                 logger.warning(f"主管工具：读取集群 workspace 失败（忽略）: {e}")
         return None
+
+    async def _agent_workspace_id(self, agent_config) -> Optional[uuid.UUID]:
+        """Workspace of a sub-agent's app, safe on async sessions.
+
+        ``agent_config.app.workspace_id`` can hit an expired ORM row (the session
+        committed earlier), and the implicit lazy refresh raises MissingGreenlet
+        on an AsyncSession. Re-fetch through _db_get, which awaits when needed.
+        """
+        app_id = getattr(agent_config, "app_id", None)
+        if app_id is not None and self.db is not None:
+            from ..models import App
+
+            app = await self._db_get(App, app_id)
+            if app is not None:
+                return app.workspace_id
+        return agent_config.app.workspace_id
 
     def cluster_memory_enabled(self) -> bool:
         """Cluster memory switch (long-term memory) — the single source of truth: supervisor_config.memory.enabled.
@@ -3169,7 +3214,7 @@ class MultiAgentOrchestrator:
         # File upload (features.file_upload): with no files, llm_message=message and
         # processed_files=None, unchanged from before
         llm_message, processed_files = await self._prepare_loop_files(
-            files, model_view, message, supervisor
+            files, model_view, message, supervisor, conversation_id
         )
 
         # Sub-agent observability event queue: SubAgentTool execution body -> supervisor
@@ -3261,6 +3306,8 @@ class MultiAgentOrchestrator:
                         _reasoning_chunk = item.get("content")
                         if _reasoning_chunk:
                             yield self._format_sse_event("reasoning", {"content": _reasoning_chunk})
+                    if _item_type == "agent_log" and self._emit_supervisor_trace:
+                        yield self._format_sse_event("agent_log", item)
                     if _item_type in ("tool_start", "tool_end", "tool_error"):
                         _tool_name = str(item.get("name") or "")
                         _sub_agent_tool_names = {
@@ -3351,7 +3398,7 @@ class MultiAgentOrchestrator:
             self._set_merge_mode_actual("loop", "loop 无正文产出")
             raise BusinessException(
                 "主管循环未产出任何回答（可能已达分派/轮数护栏仍未收尾），请重试或调整"
-                " supervisor_max_tool_calls；需要确定性编排可改用主管模式（三段式）",
+                " AGENT_TOOL_CALL_LIMIT；需要确定性编排可改用主管模式（三段式）",
                 BizCode.LLM_ERROR,
             )
 
@@ -3360,7 +3407,7 @@ class MultiAgentOrchestrator:
 
         - direct_answer: the supervisor answered directly (zero dispatch) — a core gain of loop mode;
         - final_after_dispatch: normal wrap-up after dispatching;
-        - tool_call_limit: a sub-agent hit the supervisor_max_tool_calls cap and was rejected (no-progress detection);
+        - tool_call_limit: a tool hit the AGENT_TOOL_CALL_LIMIT cap and was rejected (no-progress detection);
         - max_iterations: the supervisor loop hit max_iterations (round gate, see SubAgentTool._execute),
           or the engine raised GraphRecursionError (hard-truncation fallback);
         - error: any other exception.
@@ -3374,10 +3421,9 @@ class MultiAgentOrchestrator:
         total_calls = sum(int(getattr(w, "calls", 0) or 0) for w in wrappers)
         if total_calls == 0:
             return "direct_answer"
-        try:
-            limit = int(self._execution_config.get("supervisor_max_tool_calls", 3))
-        except (TypeError, ValueError, AttributeError):
-            limit = 3
+        from ..agent.langchain_agent import default_tool_call_limit
+
+        limit = default_tool_call_limit()
         if any(int(getattr(w, "calls", 0) or 0) >= max(1, limit) for w in wrappers):
             return "tool_call_limit"
         return "final_after_dispatch"
@@ -3428,7 +3474,7 @@ class MultiAgentOrchestrator:
         # File upload (features.file_upload): with no files, llm_message=message and
         # processed_files=None, unchanged from before
         llm_message, processed_files = await self._prepare_loop_files(
-            files, model_view, message, supervisor
+            files, model_view, message, supervisor, conversation_id
         )
 
         # Non-streaming loop: the sink is not attached (no SSE outlet), so sub-agent
@@ -3459,7 +3505,7 @@ class MultiAgentOrchestrator:
                 self._set_merge_mode_actual("loop", "loop 无正文产出")
                 raise BusinessException(
                     "主管循环未产出任何回答（可能已达分派/轮数护栏仍未收尾），请重试或调整"
-                    " supervisor_max_tool_calls；需要确定性编排可改用主管模式（三段式）",
+                    " AGENT_TOOL_CALL_LIMIT；需要确定性编排可改用主管模式（三段式）",
                     BizCode.LLM_ERROR,
                 )
             # Suggested questions / citations / TTS are produced only when the
@@ -4089,11 +4135,12 @@ class MultiAgentOrchestrator:
         # is absorbed into the ledger at this point and no longer passed through, so the
         # outer layer no longer parses SSE strings to accumulate).
         draft_service = AgentRunService(self.db)
+        sub_workspace_id = await self._agent_workspace_id(agent_config)
         async for event in draft_service.run_stream(
             agent_config=agent_config,
             model_config=model_config,
             message=message,
-            workspace_id=agent_config.app.workspace_id,
+            workspace_id=sub_workspace_id,
             conversation_id=str(conversation_id) if conversation_id else None,
             user_id=user_id,
             variables=context,
@@ -4163,11 +4210,12 @@ class MultiAgentOrchestrator:
         # Sub-layer tokens are accounted uniformly here (usage.total_tokens from the
         # non-streaming result goes into the ledger).
         draft_service = AgentRunService(self.db)
+        sub_workspace_id = await self._agent_workspace_id(agent_config)
         result = await draft_service.run(
             agent_config=agent_config,
             model_config=model_config,
             message=message,
-            workspace_id=agent_config.app.workspace_id,
+            workspace_id=sub_workspace_id,
             conversation_id=str(conversation_id) if conversation_id else None,
             user_id=user_id,
             variables=context,

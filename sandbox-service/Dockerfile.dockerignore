@@ -1,0 +1,12 @@
+**
+
+!sandbox-service/
+!sandbox-service/pyproject.toml
+!sandbox-service/uv.lock
+!sandbox-service/src/
+!sandbox-service/src/**
+
+**/__pycache__/**
+**/__pycache__
+**/*.pyc
+**/*.pyo

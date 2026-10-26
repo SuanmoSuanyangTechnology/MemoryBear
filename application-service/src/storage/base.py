@@ -118,6 +118,23 @@ class StorageBackend(ABC):
         """Get an access URL for the file."""
         pass
 
+    async def download_stream(self, file_key: str) -> AsyncIterator[bytes]:
+        """
+        Stream a file in chunks.
+
+        Default implementation reads the whole object through ``download`` and
+        slices it, so it works on every backend but holds the file in memory.
+        Backends that can read incrementally (MinIO, local) override it.
+
+        Raises:
+            FileNotFoundError: If the file does not exist.
+            StorageDownloadError: If the download operation fails.
+        """
+        content = await self.download(file_key)
+        chunk_size = 64 * 1024
+        for start in range(0, len(content), chunk_size):
+            yield content[start:start + chunk_size]
+
     async def get_permanent_url(self, file_key: str) -> Optional[str]:
         """
         Get a permanent public URL for the file (no expiration).

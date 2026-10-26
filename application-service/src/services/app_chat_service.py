@@ -76,7 +76,11 @@ from .context_assembler import (
 )
 from .context_engine_manager import ContextEngineManager
 from .conversation_service import ConversationService
-from .draft_run_service import AgentRunService, build_uploaded_images_manifest
+from .draft_run_service import (
+    AgentRunService,
+    build_sandbox_import_manifest_for_turn,
+    build_uploaded_images_manifest,
+)
 from .model_service import ModelApiKeyService, ModelConfigService
 from .multi_agent_orchestrator import MultiAgentOrchestrator
 from .multimodal_service import (
@@ -208,10 +212,13 @@ def assert_not_opening_statement(db, message_id: uuid.UUID) -> None:
     """
     from sqlalchemy import select
     msg = db.get(Message, message_id)
-    # Only assistant messages are relevant; non-assistant / missing rows are
-    # left to the validation inside regenerate.
+    # A missing / non-assistant / deleted target is rejected here as well: the
+    # same checks inside regenerate_stream run after the SSE response started,
+    # where they surface as "response already started" instead of a clean 400.
     if not msg or msg.role != "assistant":
-        return
+        raise BusinessException("只能重新生成 AI 回复", BizCode.BAD_REQUEST)
+    if msg.is_deleted:
+        raise BusinessException("消息已被删除", BizCode.BAD_REQUEST)
     # A parent user message means it is not an opening statement.
     if msg.parent_message_id:
         return
@@ -970,6 +977,10 @@ class AppChatService:
                     "对应图片已作为独立视觉输入提供，请结合位置标记和视觉内容理解文档；"
                     "不要在回答中输出任何文件地址、存储路径或内部标识。"
                 )
+        # 挂载了沙箱导入工具时，列出本轮及本会话历史文件的 file_id（后续轮次不带附件也要能导入）
+        sandbox_manifest = await build_sandbox_import_manifest_for_turn(files, tools, conversation_id)
+        if sandbox_manifest:
+            llm_message = f"{llm_message}\n\n{sandbox_manifest}"
 
         # Emotion-aware reply: await the detection result → on success write
         # the cache and inject "fixed principles + current-turn strategy";
@@ -1002,6 +1013,7 @@ class AppChatService:
             "channel_id": api_key_obj.channel_id,
         }
         use_agent_mode = ModelFeature.FUNCTION_CALL in features
+        executed_tool_names: list[str] = []
         if not use_agent_mode and tools:
             system_prompt, orchestrator_node_executions = await ToolOrchestrator.create_and_run(
                 tools=tools,
@@ -1013,6 +1025,9 @@ class AppChatService:
                 processed_files=processed_files,
                 context_evidence_loader=load_annotation_context,
             )
+            # Tools already executed by the ToolOrchestrator; record their names so
+            # the Agent's execution requirements describe them truthfully.
+            executed_tool_names = [n for n in (getattr(t, "name", None) for t in tools) if n]
             tools = []
 
         # Branch: sandbox vs in-process execution
@@ -1089,6 +1104,7 @@ class AppChatService:
                 max_tokens=model_parameters.get("max_tokens", 2000),
                 system_prompt=system_prompt,
                 tools=tools,
+                executed_tool_names=executed_tool_names,
                 deep_thinking=model_parameters.get("deep_thinking", False),
                 thinking_budget_tokens=model_parameters.get("thinking_budget_tokens"),
                 json_output=model_parameters.get("json_output", False),
@@ -1562,6 +1578,10 @@ class AppChatService:
                         "对应图片已作为独立视觉输入提供，请结合位置标记和视觉内容理解文档；"
                         "不要在回答中输出任何文件地址、存储路径或内部标识。"
                     )
+            # 挂载了沙箱导入工具时，列出本轮及本会话历史文件的 file_id（后续轮次不带附件也要能导入）
+            sandbox_manifest = await build_sandbox_import_manifest_for_turn(files, tools, conversation_id)
+            if sandbox_manifest:
+                llm_message = f"{llm_message}\n\n{sandbox_manifest}"
 
             # Emotion-aware reply: wait for the detection result → on success
             # write cache and inject "fixed principles + this turn's strategy";
@@ -1594,6 +1614,7 @@ class AppChatService:
                 "channel_id": api_key_obj.channel_id,
             }
             use_agent_mode = ModelFeature.FUNCTION_CALL in features
+            executed_tool_names: list[str] = []
             if not use_agent_mode and tools:
                 stage_context = memory_stage_capture() if execution_mode == "in_process" else nullcontext()
                 with stage_context:
@@ -1667,6 +1688,7 @@ class AppChatService:
                     max_tokens=model_parameters.get("max_tokens", 2000),
                     system_prompt=system_prompt,
                     tools=tools,
+                    executed_tool_names=executed_tool_names,
                     streaming=True,
                     deep_thinking=model_parameters.get("deep_thinking", False),
                     thinking_budget_tokens=model_parameters.get("thinking_budget_tokens"),

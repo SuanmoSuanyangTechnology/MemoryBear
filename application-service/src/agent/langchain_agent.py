@@ -23,14 +23,63 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMe
 from langchain_core.tools import BaseTool
 from langgraph.errors import GraphRecursionError
 
+from ..config import current_settings
 from ..memory.retrieval_trace.stage_events import is_memory_stage_capture_enabled
 from ..model_clients import RedBearChatModel
 from ..utils.datetime_utils import to_iso_z, utcnow
+from .prompt_blocks import build_execution_requirements
 
 if TYPE_CHECKING:
     from ..schemas.model_schema import ModelInfo
 
 logger = logging.getLogger(__name__)
+
+
+def default_tool_call_limit() -> int:
+    """Max calls per tool within one Agent run (prevents an endless loop while
+    still leaving room for multi-round tasks). Single knob for every Agent kind,
+    configured by the AGENT_TOOL_CALL_LIMIT environment variable (default 5)."""
+
+    return current_settings().agent_tool_call_limit
+
+
+# Upper bound for the optional evidence-assembly step that runs after a tool returns.
+EVIDENCE_ASSEMBLY_TIMEOUT_S = 60.0
+
+# How many consecutive over-limit rejections are tolerated after the limit is hit;
+# beyond this the loop is aborted instead of burning the remaining steps.
+TOOL_LIMIT_GRACE_REJECTIONS = 2
+
+
+class ToolCallLoopError(GraphRecursionError):
+    """The model ignored the over-limit hint and keeps repeating the same tool.
+
+    Reuses the recursion-limit handling path to end the turn early.
+    """
+
+
+# Default role used when the user configured no system prompt. It declares no tool
+# capability; the 【执行要求】 section is rendered by ``prompt_blocks`` from the tools
+# actually assigned (see prompt_blocks/__init__.py for how to add rules).
+DEFAULT_AGENT_ROLE_PROMPT = "你是一个专业的 AI 助手，帮助用户可靠地完成任务。"
+
+
+def build_agent_methodology(
+    tool_names: Sequence[str],
+    executed_tool_names: Sequence[str] = (),
+    tool_call_limit: Optional[int] = None,
+) -> str:
+    """Render 【执行要求】 for the tools actually assigned to this Agent.
+
+    Thin wrapper over ``prompt_blocks.build_execution_requirements``; this module holds
+    no tool-specific prompt text.
+
+    tool_names: tools the Agent can invoke live in this run.
+    executed_tool_names: tools already executed upstream on the Agent's behalf (by the
+        ToolOrchestrator for weak models); their results are already in the system prompt.
+    tool_call_limit: per-tool call budget for one run, told to the model when set.
+    """
+    return build_execution_requirements(tool_names, executed_tool_names, tool_call_limit)
 
 
 class AgentTraceRecorder:
@@ -242,12 +291,13 @@ class LangChainAgent:
             deep_thinking: bool = False,  # Whether deep-thinking mode is enabled
             thinking_budget_tokens: Optional[int] = None,  # Deep-thinking token budget
             json_output: bool = False,  # Whether to force JSON output
-            tool_call_limit: int = 1,  # Max calls per tool (prevents the model from looping on tools)
+            tool_call_limit: Optional[int] = None,  # Max calls per tool; None = AGENT_TOOL_CALL_LIMIT
             context_evidence: Optional[List[Any]] = None,
             context_query: str = "",
             context_base_text: str = "",
             context_evidence_loader: Optional[Any] = None,
             model_view: Optional["ModelInfo"] = None,  # Remote mode: undecrypted runtime model view
+            executed_tool_names: Optional[Sequence[str]] = None,  # Tools already executed upstream (ToolOrchestrator)
     ):
         """Initialize the LangChain Agent
 
@@ -263,14 +313,19 @@ class LangChainAgent:
             strategy: Agent execution strategy ('react' uses the ReAct reasoning loop,
                 'function_calling' uses native tool calling)
             tool_call_limit: Max calls per tool; call N+1 is rejected with a hint telling
-                the model to answer directly
+                the model to answer directly. None uses the AGENT_TOOL_CALL_LIMIT setting
+            executed_tool_names: tools already executed upstream on the Agent's behalf
+                (weak-model ToolOrchestrator); they are declared in the methodology as
+                already-executed instead of as invocable tools
         """
         self.model_name = model_name
         self.provider = provider
         self.tools = tools or []
         self.streaming = streaming
         self.strategy = strategy
-        self.tool_call_limit = tool_call_limit
+        self.tool_call_limit = (
+            tool_call_limit if tool_call_limit is not None else default_tool_call_limit()
+        )
         self._initial_context_evidence = list(context_evidence or [])
         self._context_query = context_query
         self._context_base_text = context_base_text
@@ -289,6 +344,7 @@ class LangChainAgent:
         # Wrap each tool with a call-count limit (cap each tool at N calls before the recursion limit hits)
         # Call N+1 returns a rejection message that steers the LLM to a final answer instead of looping
         self._tool_call_counts: Dict[str, int] = {}
+        self._loop_abort_reason: Optional[str] = None
         self._wrap_tools_with_call_limit(self.tool_call_limit)
 
         # Adjust the max iteration count dynamically based on the tool count
@@ -306,7 +362,16 @@ class LangChainAgent:
         else:
             self.max_iterations = max_iterations
 
-        self.system_prompt = system_prompt or "你是一个专业的AI助手"
+        # The user-configured role / system prompt is kept verbatim, followed by an
+        # 【执行要求】 section generated dynamically from the tools actually assigned
+        # (no code-interpreter assignment means no code-execution capability claimed);
+        # with no user prompt, a default role that declares no capability is used.
+        raw_system_prompt = (system_prompt or "").strip() or DEFAULT_AGENT_ROLE_PROMPT
+        tool_names = [n for n in (getattr(t, "name", None) for t in self.tools) if n]
+        methodology = build_agent_methodology(
+            tool_names, executed_tool_names or (), tool_call_limit=self.tool_call_limit
+        )
+        self.system_prompt = f"{raw_system_prompt}\n\n{methodology}"
 
         # Inject a JSON prompt fallback for all providers so JSON output is still guided
         # even when the API-level response_format has no effect
@@ -443,17 +508,38 @@ class LangChainAgent:
                                 evidence_for_message.extend(pending_shared_evidence)
                                 pending_shared_evidence.clear()
                             if not loaded_annotations and self._context_evidence_loader:
-                                extra = self._context_evidence_loader()
-                                if inspect.isawaitable(extra):
-                                    extra = await extra
+                                try:
+                                    extra = self._context_evidence_loader()
+                                    if inspect.isawaitable(extra):
+                                        extra = await asyncio.wait_for(
+                                            extra, timeout=EVIDENCE_ASSEMBLY_TIMEOUT_S
+                                        )
+                                except Exception as exc:  # noqa: BLE001 - never lose the tool result
+                                    logger.warning(
+                                        "[上下文组装] 证据加载失败，忽略 | 工具=%s | %s",
+                                        current_tool.name, type(exc).__name__,
+                                    )
+                                    extra = []
                                 evidence_for_message.extend(extra or [])
                                 loaded_annotations = True
-                            assembled = await assembler.assemble(
-                                evidence_for_message,
-                                query=self._context_query,
-                                base_text=self._context_base_text,
-                                triggered_by=[current_tool.name],
-                            )
+                            try:
+                                assembled = await asyncio.wait_for(
+                                    assembler.assemble(
+                                        evidence_for_message,
+                                        query=self._context_query,
+                                        base_text=self._context_base_text,
+                                        triggered_by=[current_tool.name],
+                                    ),
+                                    timeout=EVIDENCE_ASSEMBLY_TIMEOUT_S,
+                                )
+                            except Exception as exc:  # noqa: BLE001 - never lose the tool result
+                                # Assembly is an enhancement; if it fails or hangs the model
+                                # must still receive the raw tool result.
+                                logger.warning(
+                                    "[上下文组装] 组装失败或超时，回退原始工具结果 | 工具=%s | %s",
+                                    current_tool.name, type(exc).__name__,
+                                )
+                                return result
                         current_tool._context_assembly_stats = {
                             "triggered_by": assembled.triggered_by,
                             "evidence_count": len(assembled.evidence),
@@ -479,6 +565,63 @@ class LangChainAgent:
                     return result
                 return wrapped
             object.__setattr__(tool, "ainvoke", make_ainvoke(tool, original_ainvoke))
+
+    @staticmethod
+    def _close_running_tool_steps(node_executions, trace, reason: str) -> List[Dict[str, Any]]:
+        """Settle every tool step still 'running' as failed and build the matching tool_error events.
+
+        A tool_start without a tool_end/tool_error leaves the frontend spinning forever;
+        callers yield the returned events so each started step always gets a terminal one.
+        """
+        events: List[Dict[str, Any]] = []
+        for node in node_executions:
+            if node.get("status") != "running":
+                continue
+            node["status"] = "failed"
+            node["error"] = reason[:500]
+            node["elapsed_time"] = round(
+                (time.time() - node.get("started_at", time.time())) * 1000, 2
+            )
+            try:
+                trace.finish_tool(
+                    step_id=node.get("step_id"),
+                    tool_name=node.get("node_name", "unknown"),
+                    status="error",
+                    error=node["error"],
+                    meta=node.get("meta"),
+                )
+            except Exception as exc:  # noqa: BLE001 - trace bookkeeping must not block settling
+                logger.warning("收尾工具步骤时 trace 更新失败: %s", type(exc).__name__)
+            events.append(
+                {
+                    "type": "tool_error",
+                    "step_id": node.get("step_id"),
+                    "name": node.get("node_name", "unknown"),
+                    "error": node["error"],
+                }
+            )
+        return events
+
+    def _over_limit_reply(self, t_name: str, max_calls: int, count: int) -> str:
+        """Rejection reply once a tool exceeds its call limit; abort the loop outright
+        when the model ignores the hint and keeps being rejected past the grace count.
+        """
+        rejected = count - max_calls
+        logger.warning(
+            f"工具 {t_name} 已达到最大调用次数限制 ({max_calls})，"
+            f"拒绝第 {count} 次调用（已连续拒绝 {rejected} 次）"
+        )
+        if rejected > TOOL_LIMIT_GRACE_REJECTIONS:
+            self._loop_abort_reason = (
+                f"工具 {t_name} 多次调用未成功，已停止重试。请根据上面工具返回的错误信息排查原因"
+                "（例如沙箱缺少依赖且无法联网安装），或换一种方式描述需求。"
+            )
+            raise ToolCallLoopError(self._loop_abort_reason)
+        return (
+            f"[工具调用限制] 工具 '{t_name}' 已被调用 {max_calls} 次，"
+            f"达到最大调用次数限制。请勿再调用此工具，"
+            f"直接基于已有信息给出最终答案，并如实说明失败原因。"
+        )
 
     def _wrap_tools_with_call_limit(self, max_calls: int) -> None:
         """Wrap each tool with a call-count limit
@@ -516,15 +659,7 @@ class LangChainAgent:
                         f"工具调用计数: tool={t_name}, count={count}/{max_calls}"
                     )
                     if count > max_calls:
-                        logger.warning(
-                            f"工具 {t_name} 已达到最大调用次数限制 ({max_calls})，"
-                            f"拒绝第 {count} 次调用，引导 LLM 输出最终答案"
-                        )
-                        return (
-                            f"[工具调用限制] 工具 '{t_name}' 已被调用 {max_calls} 次，"
-                            f"达到最大调用次数限制。请勿再调用此工具，"
-                            f"直接基于已有信息给出最终答案。"
-                        )
+                        return self._over_limit_reply(t_name, max_calls, count)
                     return orig(*args, **kwargs)
 
                 return wrapped_run
@@ -544,15 +679,7 @@ class LangChainAgent:
                         f"工具调用计数: tool={t_name}, count={count}/{max_calls}"
                     )
                     if count > max_calls:
-                        logger.warning(
-                            f"工具 {t_name} 已达到最大调用次数限制 ({max_calls})，"
-                            f"拒绝第 {count} 次调用，引导 LLM 输出最终答案"
-                        )
-                        return (
-                            f"[工具调用限制] 工具 '{t_name}' 已被调用 {max_calls} 次，"
-                            f"达到最大调用次数限制。请勿再调用此工具，"
-                            f"直接基于已有信息给出最终答案。"
-                        )
+                        return self._over_limit_reply(t_name, max_calls, count)
                     return await orig(*args, **kwargs)
 
                 return wrapped_arun
@@ -953,7 +1080,8 @@ class LangChainAgent:
                     node.pop("started_at", None)
 
                 return {
-                    "content": f"抱歉，我在处理您的请求时遇到了问题。已达到最大处理步骤限制（{self.max_iterations}次）。请尝试简化您的问题或稍后再试。",
+                    "content": self._loop_abort_reason
+                    or f"抱歉，我在处理您的请求时遇到了问题。已达到最大处理步骤限制（{self.max_iterations}次）。请尝试简化您的问题或稍后再试。",
                     "model": self.model_name,
                     "elapsed_time": time.time() - start_time,
                     "usage": {
@@ -1322,6 +1450,12 @@ class LangChainAgent:
                         yield {"type": "tool_error", "step_id": matched_step_id, "name": tool_name, "error": error_msg[:500]}
 
                 logger.debug(f"Agent 流式完成，共 {chunk_count} 个事件")
+                # A step still running here lost its tool_end; settle it so the UI stops spinning
+                for closing_event in self._close_running_tool_steps(
+                    node_executions, trace, "工具调用未正常结束，未收到结果"
+                ):
+                    yield closing_event
+                _tool_stack.clear()
                 # Aggregate token usage
                 output_messages = last_event.get("data", {}).get("output", {}).get("messages", [])
                 stream_total_tokens = 0
@@ -1350,21 +1484,12 @@ class LangChainAgent:
                     f"Agent 达到最大迭代次数限制 ({self.max_iterations})，模型可能不支持正确的工具调用停止判断"
                 )
                 if not full_content:
-                    yield "抱歉，我在处理您的请求时遇到了问题（已达最大处理步骤限制）。请尝试简化问题或更换模型后重试。"
-                # Mark unfinished tools as failed
-                for node in _tool_stack:
-                    node["status"] = "failed"
-                    node["error"] = "达到最大迭代次数限制"
-                    node["elapsed_time"] = round(
-                        (time.time() - node.get("started_at", time.time())) * 1000, 2
-                    )
-                    trace.finish_tool(
-                        step_id=node.get("step_id"),
-                        tool_name=node.get("node_name", "unknown"),
-                        status="error",
-                        error=node["error"],
-                        meta=node.get("meta"),
-                    )
+                    yield self._loop_abort_reason or "抱歉，我在处理您的请求时遇到了问题（已达最大处理步骤限制）。请尝试简化问题或更换模型后重试。"
+                # Mark unfinished tools as failed and tell the frontend, otherwise they spin forever
+                for closing_event in self._close_running_tool_steps(
+                    node_executions, trace, "达到最大迭代次数限制，工具调用被中止"
+                ):
+                    yield closing_event
                 _tool_stack.clear()
                 for node in node_executions:
                     node.pop("started_at", None)
@@ -1380,6 +1505,12 @@ class LangChainAgent:
                 # The caller converts this into a safe SSE-facing hint; the server keeps
                 # the full exception for troubleshooting via model request_id and context.
                 logger.error(f"Agent astream_events 失败: {str(e)}", exc_info=True)
+                # Give every started tool step a terminal event before the error propagates
+                for closing_event in self._close_running_tool_steps(
+                    node_executions, trace, f"Agent 执行中断：{type(e).__name__}"
+                ):
+                    yield closing_event
+                _tool_stack.clear()
                 raise
 
         except Exception as e:

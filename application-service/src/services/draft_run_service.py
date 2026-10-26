@@ -23,7 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..utils.datetime_utils import to_iso_z, utcnow_naive
 from ..workflow.node_cache import sanitize_json_text
 from ..agent.agent_middleware import AgentMiddleware
-from ..agent.langchain_agent import LangChainAgent
+from ..agent.langchain_agent import DEFAULT_AGENT_ROLE_PROMPT, LangChainAgent, default_tool_call_limit
 from ..config import current_settings
 from ..errors import BizCode
 from ..errors import BusinessException
@@ -184,6 +184,109 @@ def build_uploaded_images_manifest(
     for index, reference in enumerate(image_references, start=1):
         lines.append(f"[图片{index}] {reference.name or reference.url or '本地图片'}")
     return "\n".join(lines), image_references
+
+
+_SANDBOX_IMPORT_TOOL_NAME = "sandbox_import_file"
+_SANDBOX_MANIFEST_MAX_FILES = 20
+_SANDBOX_HISTORY_SCAN_MESSAGES = 30
+
+
+def _has_sandbox_import_tool(tools: Any) -> bool:
+    return any(getattr(t, "name", None) == _SANDBOX_IMPORT_TOOL_NAME for t in tools or [])
+
+
+def build_sandbox_import_manifest(
+    files: list[FileInput] | list[dict[str, Any]] | None,
+    tools: Any,
+    history_files: list[dict[str, Any]] | None = None,
+) -> str:
+    """file_id manifest of the user's uploads; only built when sandbox_import_file is
+    mounted.
+
+    By default the model only sees the attachment content (images inlined, documents
+    extracted to text) and has no file_id; to hand a file to the sandbox (pandas,
+    rewriting docx/xlsx, ...) it must know the id. ``files`` is this turn's attachment
+    set and ``history_files`` the references from earlier turns of the same
+    conversation (newest first): history only keeps text, so without this a later turn
+    cannot import a file sent earlier. Only local uploads are listed — a remote URL has
+    no file_id and the import tool does not fetch external addresses. Each file_id is
+    listed once. Returns an empty string with no tool or nothing to list.
+    """
+    if not _has_sandbox_import_tool(tools):
+        return ""
+    entries: list[str] = []
+    seen: set[str] = set()
+    for file in [*(files or []), *(history_files or [])]:
+        reference = FileReference.from_payload(file)
+        if reference is None or not reference.file_id or reference.file_id in seen:
+            continue
+        if reference.transfer_method not in (None, "local_file"):
+            continue
+        seen.add(reference.file_id)
+        entries.append(f"- {reference.name or '未命名文件'}  file_id={reference.file_id}")
+        if len(entries) >= _SANDBOX_MANIFEST_MAX_FILES:
+            break
+    if not entries:
+        return ""
+    return "\n".join(
+        [
+            f"本会话用户上传过的文件如下（含之前几轮）。需要在沙箱里处理其中某个文件时，调用 {_SANDBOX_IMPORT_TOOL_NAME} 并传入对应 file_id：",
+            *entries,
+        ]
+    )
+
+
+async def load_conversation_file_refs(conversation_id: Any) -> list[dict[str, Any]]:
+    """Read the user attachment references already persisted for this conversation
+    (messages.meta_data['files']), newest first.
+
+    Returns an empty list when there is no conversation or the read fails: this only
+    adds context for the model and must never break the turn.
+    """
+    if not conversation_id:
+        return []
+    try:
+        conv_uuid = (
+            conversation_id
+            if isinstance(conversation_id, uuid.UUID)
+            else uuid.UUID(str(conversation_id))
+        )
+        async with get_async_db_context() as db:
+            result = await db.execute(
+                select(Message.meta_data)
+                .where(
+                    Message.conversation_id == conv_uuid,
+                    Message.role == "user",
+                    Message.is_deleted.is_not(True),
+                )
+                .order_by(Message.created_at.desc())
+                .limit(_SANDBOX_HISTORY_SCAN_MESSAGES)
+            )
+            rows = [dict(meta or {}) for meta in result.scalars().all()]
+    except Exception as exc:  # noqa: BLE001 - history lookup must never break the turn
+        logger.warning(
+            f"[沙箱附件清单] 读取会话历史附件失败 | 会话={conversation_id} | 异常={type(exc).__name__}"
+        )
+        return []
+    refs: list[dict[str, Any]] = []
+    for meta in rows:
+        for ref in meta.get("files") or []:
+            if isinstance(ref, dict):
+                refs.append(ref)
+    return refs
+
+
+async def build_sandbox_import_manifest_for_turn(
+    files: list[FileInput] | list[dict[str, Any]] | None,
+    tools: Any,
+    conversation_id: Any,
+) -> str:
+    """Import manifest for this turn plus the conversation history; no DB read unless
+    the import tool is mounted."""
+    if not _has_sandbox_import_tool(tools):
+        return ""
+    history_files = await load_conversation_file_refs(conversation_id)
+    return build_sandbox_import_manifest(files, tools, history_files)
 
 
 class WebSearchInput(BaseModel):
@@ -1247,16 +1350,16 @@ class AgentRunService:
 
     async def load_tools_config(self, tools_config, web_search, tenant_id, user_id=None, workspace_id=None) -> list:
         """Load tool configuration."""
+        from ..tools.builtin.sandbox_default import build_sandbox_tools, drop_sandbox_tools
+
         tools = []
         if web_search:
             search_tool = create_web_search_tool({})
             tools.append(search_tool)
-        if not tools_config:
-            return tools
-        async with get_async_db_context() as db:
-            tool_service = ToolService(db)
+        if tools_config and isinstance(tools_config, list):
+            async with get_async_db_context() as db:
+                tool_service = ToolService(db)
 
-            if tools_config and isinstance(tools_config, list):
                 for tool_config in tools_config:
                     if tool_config.get("enabled", False):
                         # Look up the tool instance by tool name
@@ -1269,6 +1372,10 @@ class AgentRunService:
                             # Convert to a LangChain tool
                             langchain_tool = tool_instance.to_langchain_tool(tool_config.get("operation", None))
                             tools.append(langchain_tool)
+        # Sandbox tools are not configurable: with ENABLE_SANDBOX_SERVICE on, every Agent run
+        # carries the full set. Drop stale configured copies first so names never collide.
+        tools = drop_sandbox_tools(tools)
+        tools.extend(build_sandbox_tools(user_id=user_id, workspace_id=workspace_id))
         logger.debug(
             "已添加网络搜索工具",
             extra={
@@ -1653,7 +1760,7 @@ class AgentRunService:
             )
 
             # 3. Process the system prompt (with variable substitution)
-            system_prompt = system_prompt.get_text_content() or "你是一个专业的AI助手"
+            system_prompt = system_prompt.get_text_content() or DEFAULT_AGENT_ROLE_PROMPT
 
             # 4. Load tool/skill/knowledge/memory configuration in parallel (each uses
             # its own DB session; no interdependencies)
@@ -1836,6 +1943,10 @@ class AgentRunService:
                     and Modality.IMAGE in input_modalities
                     and any(f.type == FileType.DOCUMENT for f in files)
                 )
+            # 挂载了沙箱导入工具时，列出本轮及本会话历史文件的 file_id（后续轮次不带附件也要能导入）
+            sandbox_manifest = await build_sandbox_import_manifest_for_turn(files, tools, conversation_id)
+            if sandbox_manifest:
+                llm_message = f"{llm_message}\n\n{sandbox_manifest}"
             if has_doc_with_images:
                 system_prompt += (
                     "\n\n文档文字中可能包含图片位置标记如 [图片 第2页 第1张]。"
@@ -1854,6 +1965,7 @@ class AgentRunService:
             )
             use_agent_mode = ModelFeature.FUNCTION_CALL in features
             orchestrator_node_executions = []
+            executed_tool_names: list[str] = []
             if not use_agent_mode and tools:
                 # Weak models: drive multi-turn tool calls with a ReAct prompt and
                 # inject the trace into system_prompt
@@ -1867,6 +1979,9 @@ class AgentRunService:
                     processed_files=processed_files,
                     context_evidence_loader=load_annotation_context,
                 )
+                # Tools already executed by the ToolOrchestrator; record their names so
+                # the Agent's execution requirements describe them truthfully.
+                executed_tool_names = [n for n in (getattr(t, "name", None) for t in tools) if n]
                 tools = []
 
             agent = LangChainAgent(
@@ -1877,6 +1992,7 @@ class AgentRunService:
                 max_tokens=effective_params.get("max_tokens", 2000),
                 system_prompt=system_prompt,
                 tools=tools,
+                executed_tool_names=executed_tool_names,
                 deep_thinking=effective_params.get("deep_thinking", False),
                 thinking_budget_tokens=effective_params.get("thinking_budget_tokens"),
                 json_output=effective_params.get("json_output", False),
@@ -2224,7 +2340,7 @@ class AgentRunService:
             )
 
             # 3. Process the system prompt (with variable substitution)
-            system_prompt = system_prompt.get_text_content() or "你是一个专业的AI助手"
+            system_prompt = system_prompt.get_text_content() or DEFAULT_AGENT_ROLE_PROMPT
 
             # 4. Load tool/skill/knowledge/memory configuration in parallel (each uses
             # its own DB session; no interdependencies)
@@ -2955,7 +3071,7 @@ class AgentRunService:
             "tools": serialized_tools,
             "max_iterations": getattr(agent_config, "max_iterations", None),
             "strategy": getattr(agent_config, "strategy", "react"),
-            "tool_call_limit": getattr(agent_config, "tool_call_limit", 1),
+            "tool_call_limit": default_tool_call_limit(),
         }
 
         sandbox_model_config = {

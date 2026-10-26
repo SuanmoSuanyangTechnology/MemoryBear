@@ -65,6 +65,61 @@ class AppServiceSettings(BaseSettings):
     sandbox_api_key: SecretStr = Field(
         default=SecretStr("redbear-sandbox"), validation_alias="SANDBOX_API_KEY"
     )
+    # Independent sandbox service (core/sandbox-service), unrelated to
+    # `sandbox_url` above (legacy code-node sandbox) and E2B_*. Consumed by the
+    # code-interpreter / terminal / sandbox-file builtin tools; disabling it
+    # makes those tools return an explicit "not enabled" error.
+    enable_sandbox_service: bool = Field(
+        default=False, validation_alias="ENABLE_SANDBOX_SERVICE"
+    )
+    sandbox_service_base_url: str = Field(
+        default="", validation_alias="SANDBOX_SERVICE_BASE_URL"
+    )
+    # Must match sandbox-service `SANDBOX_API_TOKEN` (at least 16 characters).
+    sandbox_service_api_token: SecretStr = Field(
+        default=SecretStr(""), validation_alias="SANDBOX_SERVICE_API_TOKEN"
+    )
+    sandbox_service_connect_timeout_seconds: float = Field(
+        default=5.0, gt=0, validation_alias="SANDBOX_SERVICE_CONNECT_TIMEOUT_SECONDS"
+    )
+    sandbox_service_pool_timeout_seconds: float = Field(
+        default=5.0, gt=0, validation_alias="SANDBOX_SERVICE_POOL_TIMEOUT_SECONDS"
+    )
+    # Server-side hard cap is 300s per execution, plus queuing / first-instance
+    # creation headroom.
+    sandbox_service_read_timeout_seconds: float = Field(
+        default=330.0, gt=0, validation_alias="SANDBOX_SERVICE_READ_TIMEOUT_SECONDS"
+    )
+    sandbox_service_write_timeout_seconds: float = Field(
+        default=30.0, gt=0, validation_alias="SANDBOX_SERVICE_WRITE_TIMEOUT_SECONDS"
+    )
+    sandbox_service_max_connections: int = Field(
+        default=100, ge=1, validation_alias="SANDBOX_SERVICE_MAX_CONNECTIONS"
+    )
+    sandbox_service_health_timeout_seconds: float = Field(
+        default=3.0, gt=0, validation_alias="SANDBOX_SERVICE_HEALTH_TIMEOUT_SECONDS"
+    )
+    # Artifact egress / user-file ingress limits, enforced here (never by the
+    # sandbox): per-file cap, per-call cumulative cap, extension allow-list
+    # (comma separated, case-insensitive, leading dot).
+    sandbox_file_max_bytes: int = Field(
+        default=100 * 1024 * 1024, ge=1, validation_alias="SANDBOX_FILE_MAX_BYTES"
+    )
+    sandbox_file_max_total_bytes: int = Field(
+        default=200 * 1024 * 1024, ge=1, validation_alias="SANDBOX_FILE_MAX_TOTAL_BYTES"
+    )
+    sandbox_file_allowed_extensions: str = Field(
+        default=(
+            ".pptx,.docx,.xlsx,.pdf,.csv,.txt,.md,.json,"
+            ".png,.jpg,.jpeg,.gif,.webp,.svg,.zip,.ppt,.doc,.xls"
+        ),
+        validation_alias="SANDBOX_FILE_ALLOWED_EXTENSIONS",
+    )
+    # Max calls of each single tool within one Agent run. One knob for every
+    # Agent kind (agent app, sub-agent, cluster supervisor, workflow agent node).
+    agent_tool_call_limit: int = Field(
+        default=5, ge=1, le=100, validation_alias="AGENT_TOOL_CALL_LIMIT"
+    )
     db_host: str = Field(default="127.0.0.1", validation_alias="DB_HOST")
     db_port: int = Field(default=5432, ge=1, le=65535, validation_alias="DB_PORT")
     db_user: str = Field(default="postgres", validation_alias="DB_USER")

@@ -20,7 +20,7 @@ from langchain_core.messages import AIMessage
 from langgraph.config import get_stream_writer
 from sqlalchemy import select
 
-from ....agent.langchain_agent import LangChainAgent
+from ....agent.langchain_agent import DEFAULT_AGENT_ROLE_PROMPT, LangChainAgent
 from ....errors import BizCode
 from ....errors import BusinessException
 from ...engine.state_manager import WorkflowState
@@ -129,6 +129,16 @@ class AgentNode(BaseNode):
         selectors = [s for s in (self.typed_config.tools or []) if s.enabled]
         user_id = self.get_variable("sys.user_id", variable_pool, strict=False)
         workspace_id = self.get_variable("sys.workspace_id", variable_pool, strict=False)
+        # Only conversational workflows carry a conversation id; a pure workflow (no
+        # conversation) leaves it None and the sandbox tools refuse to execute.
+        conversation_id = self.get_variable("sys.conversation_id", variable_pool, strict=False)
+        if not conversation_id:
+            # Single-node dry run / conversation-less workflow: fixed sandbox directory ID
+            # derived by WorkflowService (only partitions the sandbox directory).
+            conversation_id = (
+                state.get("__debug_conversation_id")
+                or self.get_variable("sys.sandbox_session_id", variable_pool, strict=False)
+            )
         langchain_tools = []
 
         # Regular tools need tenant context; the built-in knowledge/memory tools must not
@@ -146,7 +156,11 @@ class AgentNode(BaseNode):
                             if not tool_instance:
                                 logger.warning(f"节点 {self.node_id}: 工具 {selector.tool_id} 不存在或未激活，已跳过")
                                 continue
-                            tool_instance.set_runtime_context(user_id=user_id, workspace_id=workspace_id)
+                            tool_instance.set_runtime_context(
+                                user_id=user_id,
+                                workspace_id=workspace_id,
+                                conversation_id=conversation_id,
+                            )
                             langchain_tool = tool_instance.to_langchain_tool(selector.operation)
 
                             if langchain_tool:
@@ -212,6 +226,22 @@ class AgentNode(BaseNode):
                         logger.debug(f"节点 {self.node_id}: 已添加长期记忆工具")
                 except Exception as e:
                     logger.error(f"节点 {self.node_id}: 加载长期记忆工具失败: {e}", exc_info=True)
+
+        # Sandbox tools are not configurable: with ENABLE_SANDBOX_SERVICE on, every Agent node
+        # run carries the full set. Drop stale configured copies first so names never collide.
+        try:
+            from ....tools.builtin.sandbox_default import build_sandbox_tools, drop_sandbox_tools
+
+            langchain_tools = drop_sandbox_tools(langchain_tools)
+            langchain_tools.extend(
+                build_sandbox_tools(
+                    user_id=user_id,
+                    workspace_id=workspace_id,
+                    conversation_id=conversation_id,
+                )
+            )
+        except Exception as e:
+            logger.error(f"节点 {self.node_id}: 加载沙箱工具失败: {e}", exc_info=True)
 
         logger.debug(f"节点 {self.node_id} 加载了 {len(langchain_tools)} 个工具")
         return langchain_tools
@@ -465,7 +495,7 @@ class AgentNode(BaseNode):
             provider=model_info.provider or "openai",
             temperature=params.temperature if params.temperature is not None else 0.7,
             max_tokens=params.max_tokens if params.max_tokens is not None else 2000,
-            system_prompt=system_prompt or "你是一个专业的AI助手",
+            system_prompt=system_prompt or DEFAULT_AGENT_ROLE_PROMPT,
             tools=langchain_tools,
             streaming=stream,
             max_iterations=self.typed_config.max_iterations,
@@ -567,6 +597,12 @@ class AgentNode(BaseNode):
         state: WorkflowState,
         current_message: str,
     ) -> list[dict[str, str]]:
+        # Same switch as inline mode: memory off means the referenced agent gets no
+        # workflow history. enable_window/window_size cap the history; without a
+        # window the most recent 20 messages are passed.
+        memory = self.typed_config.memory
+        if not memory.enable:
+            return []
         history: list[dict[str, str]] = []
         for item in deepcopy(state.get("messages", [])):
             if not isinstance(item, dict):
@@ -583,7 +619,8 @@ class AgentNode(BaseNode):
             history.pop()
         while history and history[-1]["role"] != "assistant":
             history.pop()
-        return history[-20:]
+        window_size = (memory.window_size or 20) if memory.enable_window else 20
+        return history[-window_size:]
 
     def _prepare_reference_inputs(
         self,

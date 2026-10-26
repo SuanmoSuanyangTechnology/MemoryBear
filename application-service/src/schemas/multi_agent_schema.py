@@ -141,7 +141,7 @@ class ExecutionConfig(BaseModel):
         default=3,
         ge=1,
         le=10,
-        description="主管循环单轮内最多分派子 Agent 次数（tool_call_limit），仅 orchestration_mode=supervisor_loop 生效"
+        description="已废弃，不再生效：所有 Agent 的单工具调用上限统一由环境变量 AGENT_TOOL_CALL_LIMIT 控制（默认 5）"
     )
 
     # Sub-agent execution mode config

@@ -79,6 +79,19 @@ BUILTIN_TOOLS = {
     "DatabaseTool": "src.tools.builtin.database_tool",
 }
 
+# Sandbox tools are no longer a tool-library entry: with ENABLE_SANDBOX_SERVICE on every Agent
+# run carries them (see tools/builtin/sandbox_default.py). Rows created by earlier versions may
+# still sit in the database; they are hidden from the tool list and can no longer be instantiated.
+_LEGACY_SANDBOX_TOOL_CLASSES = frozenset({
+    "SandboxToolkit",
+    "CodeInterpreterTool",
+    "TerminalTool",
+    "SandboxPublishFileTool",
+    "SandboxImportFileTool",
+    "SandboxReadFileTool",
+    "SandboxWriteFileTool",
+})
+
 
 class ToolService:
     """Unified tool service managing the full tool lifecycle."""
@@ -115,10 +128,20 @@ class ToolService:
                 tool_type=tool_type,
                 status=status
             )
-            return [self._config_to_info(config) for config in configs]
+            return [
+                self._config_to_info(config)
+                for config in configs
+                if not self._is_legacy_sandbox_row(config)
+            ]
         except Exception as e:
             logger.error(f"获取工具列表失败: {e}")
             return []
+
+    @staticmethod
+    def _is_legacy_sandbox_row(config: ToolConfig) -> bool:
+        if config.tool_type != ToolType.BUILTIN.value:
+            return False
+        return (config.config_data or {}).get("tool_class") in _LEGACY_SANDBOX_TOOL_CLASSES
 
     def get_tool_summary(self, tool_id: str, tenant_id: uuid.UUID) -> ToolInfo | None:
         """Get basic tool info."""
@@ -351,6 +374,7 @@ class ToolService:
             tenant_id: uuid.UUID,
             user_id: uuid.UUID | None = None,
             workspace_id: uuid.UUID | None = None,
+            conversation_id: uuid.UUID | None = None,
             timeout: float = 60.0  # noqa: ASYNC109 - API parity; not enforced (host semantics)
     ) -> ToolResult:
         """Execute a tool."""
@@ -371,8 +395,13 @@ class ToolService:
                 execution_id, tool_id, parameters, user_id, workspace_id
             )
 
-            # Execute the tool
-            tool.set_runtime_context(user_id=user_id, workspace_id=workspace_id)
+            # Execute the tool (conversation_id is forwarded to builtin tools that
+            # need session context, e.g. the code interpreter)
+            tool.set_runtime_context(
+                user_id=user_id,
+                workspace_id=workspace_id,
+                conversation_id=conversation_id,
+            )
             result = await tool.safe_execute(**parameters)
 
             # Record the execution completion

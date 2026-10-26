@@ -171,6 +171,7 @@ class PublishedAgentRunner:
                 if runtime.is_cluster:
                     result = await self._run_cluster_reference(
                         db, runtime,
+                        history=history,
                         message=message,
                         user_id=user_id,
                         variables=variables,
@@ -232,6 +233,7 @@ class PublishedAgentRunner:
                 if runtime.is_cluster:
                     stream = self._run_cluster_reference_stream(
                         db, runtime,
+                        history=history,
                         message=message,
                         user_id=user_id,
                         variables=variables,
@@ -266,11 +268,26 @@ class PublishedAgentRunner:
                     if event is None:
                         continue
                     # Cluster streaming emits sub-agent dispatch/process events
-                    # (agent_dispatch/sub_agent_message, etc.); the reference
-                    # scenario only forwards the main bubble content and terminal
-                    # state, dropping process events (workflow nodes only consume
-                    # message/end)
-                    if runtime.is_cluster and event["type"] not in ("message", "end", "error"):
+                    # (agent_dispatch/sub_agent_message, etc.) that the workflow
+                    # node does not consume, so they are dropped. The supervisor's
+                    # own tool calls (tool_start/tool_end/tool_error) and its
+                    # iteration trace (agent_log) use the same payload shape as a
+                    # single Agent and are forwarded so the workflow panel can
+                    # render them.
+                    if runtime.is_cluster and event["type"] not in (
+                        "message", "end", "error", "tool_start", "tool_end", "tool_error",
+                        "agent_log",
+                    ):
+                        continue
+                    # Sub-agent traces carry attribution fields; only the supervisor's
+                    # own trace may reach the node, otherwise a sub-agent snapshot
+                    # would replace the supervisor's iteration info.
+                    if (
+                        runtime.is_cluster
+                        and event["type"] == "agent_log"
+                        and isinstance(event["data"], dict)
+                        and ("agent_id" in event["data"] or "agent_name" in event["data"])
+                    ):
                         continue
                     if event["type"] == "error":
                         error = event["data"].get("error")
@@ -302,6 +319,7 @@ class PublishedAgentRunner:
         files: list[FileInput],
         storage_type: str | None,
         user_rag_memory_id: str | None,
+        history: list[dict[str, str]] | None = None,
     ) -> dict[str, Any]:
         """Run a published cluster (supervisor_loop) in a session-less way.
 
@@ -315,6 +333,9 @@ class PublishedAgentRunner:
 
         config = multi_agent_config_4_app_release(runtime.release)
         orchestrator = await MultiAgentOrchestrator.create(db, config)
+        # No conversation_id here, so the supervisor cannot load history itself;
+        # hand it the history the calling workflow already assembled.
+        orchestrator._external_history = list(history or [])
         result = await orchestrator.execute(
             message=message,
             conversation_id=None,
@@ -343,6 +364,7 @@ class PublishedAgentRunner:
         files: list[FileInput],
         storage_type: str | None,
         user_rag_memory_id: str | None,
+        history: list[dict[str, str]] | None = None,
     ) -> AsyncGenerator[dict[str, Any], None]:
         """Session-less streaming run of a published cluster (supervisor_loop);
         events are converted to unified dicts for the caller's filtering."""
@@ -350,6 +372,8 @@ class PublishedAgentRunner:
 
         config = multi_agent_config_4_app_release(runtime.release)
         orchestrator = await MultiAgentOrchestrator.create(db, config)
+        orchestrator._external_history = list(history or [])
+        orchestrator._emit_supervisor_trace = True
         async for raw_event in orchestrator.execute_stream(
             message=message,
             conversation_id=None,

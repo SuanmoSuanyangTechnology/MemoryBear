@@ -2485,6 +2485,75 @@ class WorkflowService:
         )
 
     @staticmethod
+    def _derive_sandbox_session_id(app_id: uuid.UUID | str, user_id: Any) -> str:
+        """Stable session ID for the sandbox tools when there is no real conversation
+        (single-node dry runs, conversation-less whole-workflow runs).
+
+        Derived deterministically from app_id + user_id: repeated runs of the same
+        application by the same user share one sandbox directory and kernel, so the
+        per-user kernel quota is not exhausted as each run mints a fresh ID. It only
+        partitions the sandbox directory and is never treated as a real conversation.
+        """
+        return str(
+            uuid.uuid5(
+                uuid.NAMESPACE_URL,
+                f"memorybear:workflow-node-debug:{app_id}:{user_id or ''}",
+            )
+        )
+
+    @staticmethod
+    def _has_tool_node(nodes: Any) -> bool:
+        """Whether the node list contains a node that can reach the sandbox without a
+        real conversation (tool nodes, and Agent nodes which carry the default sandbox tools)."""
+        return any(
+            isinstance(node, dict) and node.get("type") in (NodeType.TOOL, NodeType.AGENT)
+            for node in (nodes or [])
+        )
+
+    @staticmethod
+    async def _release_sandbox_session(
+            workspace_id: uuid.UUID | str | None,
+            user_id: Any,
+            session_id: str | None,
+    ) -> None:
+        """Release the sandbox kernels a conversation-less run left behind.
+
+        Single-node dry runs and pure workflows have no conversation, so nobody will
+        come back to that session; closing it frees the per-user kernel slots right
+        away instead of waiting for the idle reaper. Files in the session directory
+        are kept. Best effort: any failure is only logged and never reaches the run.
+        """
+        user_text = str(user_id or "")
+        if not session_id or not workspace_id or user_text in ("", "anonymous"):
+            return
+        try:
+            from ..integrations.sandbox.client import SandboxPrincipal
+            from ..integrations.sandbox.runtime import (
+                get_sandbox_service_client,
+                is_sandbox_integration_enabled,
+            )
+            from ..repositories.tool_repository import ToolRepository
+
+            if not is_sandbox_integration_enabled():
+                return
+            async with get_async_db_context() as db:
+                tenant_id = await ToolRepository.get_tenant_id_by_workspace_id_async(
+                    db, str(workspace_id)
+                )
+            if not tenant_id:
+                return
+            await get_sandbox_service_client().close_conversation(
+                SandboxPrincipal(
+                    tenant_id=str(tenant_id),
+                    workspace_id=str(workspace_id),
+                    end_user_id=user_text,
+                ),
+                str(session_id),
+            )
+        except (Exception, asyncio.CancelledError) as exc:  # noqa: BLE001 - best effort
+            logger.warning("sandbox_release_session_failed error=%s", type(exc).__name__)
+
+    @staticmethod
     def _build_single_node_execution_id() -> str:
         return f"node_{uuid.uuid4().hex[:16]}"
 
@@ -6662,6 +6731,10 @@ class WorkflowService:
         if conversation_id_uuid:
             payload.conversation_id = str(conversation_id_uuid)
             input_data["conversation_id"] = str(conversation_id_uuid)
+        else:
+            # No conversation (pure workflow): give the sandbox tools a fixed directory
+            # ID derived from app_id + user_id; it is not a real conversation.
+            input_data["sandbox_session_id"] = self._derive_sandbox_session_id(app_id, payload.user_id)
 
         # Check annotation hit — before creating the workflow execution; on a
         # hit, return immediately and skip the whole workflow.
@@ -7105,6 +7178,12 @@ class WorkflowService:
                 code=BizCode.INTERNAL_ERROR,
                 message=f"工作流执行失败: {str(e)}"
             )
+        finally:
+            # Pure workflow (no conversation): free the sandbox kernels the run opened.
+            if input_data.get("sandbox_session_id") and self._has_tool_node(config.nodes):
+                await self._release_sandbox_session(
+                    workspace_id, payload.user_id, input_data.get("sandbox_session_id")
+                )
 
     @bind_usage("app", "app_id")
     async def run_stream(
@@ -7258,6 +7337,10 @@ class WorkflowService:
         if conversation_id_uuid:
             payload.conversation_id = str(conversation_id_uuid)
             input_data["conversation_id"] = str(conversation_id_uuid)
+        else:
+            # No conversation (pure workflow): give the sandbox tools a fixed directory
+            # ID derived from app_id + user_id; it is not a real conversation.
+            input_data["sandbox_session_id"] = self._derive_sandbox_session_id(app_id, payload.user_id)
         _log_before_execute_step(
             "before_execute_conversation_ready",
             conversation_id=str(conversation_id_uuid) if conversation_id_uuid else None,
@@ -9132,6 +9215,12 @@ class WorkflowService:
                     execution.execution_id, cleanup_err,
                 )
 
+            # Pure workflow (no conversation): free the sandbox kernels the run opened.
+            if input_data.get("sandbox_session_id") and self._has_tool_node(config.nodes):
+                await self._release_sandbox_session(
+                    workspace_id, payload.user_id, input_data.get("sandbox_session_id")
+                )
+
     @staticmethod
     def _is_snapshot_complete(data: dict | None) -> bool:
         """Whether SSE event data contains a complete variable snapshot
@@ -9736,6 +9825,17 @@ class WorkflowService:
                 state["__single_node_action_id"] = hi_action_id
                 state["__single_node_form_data"] = hi_form_data
 
+        # A single-node dry run has no conversation ID, so sandbox tools (code
+        # interpreter, terminal, file import/export) would refuse to run. Provide a
+        # stable debug session ID used only to partition the sandbox directory; it is
+        # deliberately not written into sys.conversation_id so it is never mistaken
+        # for a real conversation. Repeated single-node runs of the same application
+        # by the same user share it.
+        if not input_data.get("conversation_id"):
+            state["__debug_conversation_id"] = self._derive_sandbox_session_id(
+                app_id, input_data.get("user_id", "")
+            )
+
         node = NodeFactory.create_node(node_config, workflow_config_dict, [])
         return node_config, node, state, variable_pool
 
@@ -9847,6 +9947,12 @@ class WorkflowService:
                 debug_input_data=input_data,
             )
             return self._mask_runtime_secrets(payload, variable_pool)
+        finally:
+            # A single-node dry run has no conversation: free its sandbox kernels now.
+            if node_config.get("type") in (NodeType.TOOL, NodeType.AGENT) and state.get("__debug_conversation_id"):
+                await self._release_sandbox_session(
+                    workspace_id, input_data.get("user_id"), state.get("__debug_conversation_id")
+                )
 
     async def run_single_node_stream(
             self,
@@ -10016,6 +10122,12 @@ class WorkflowService:
                 debug_input_data=input_data,
             )
             yield self._mask_runtime_secrets(event_payload, variable_pool)
+        finally:
+            # A single-node dry run has no conversation: free its sandbox kernels now.
+            if node_type in (NodeType.TOOL, NodeType.AGENT) and state.get("__debug_conversation_id"):
+                await self._release_sandbox_session(
+                    workspace_id, input_data.get("user_id"), state.get("__debug_conversation_id")
+                )
 
     @staticmethod
     def get_start_node_variables(config: dict) -> list:
