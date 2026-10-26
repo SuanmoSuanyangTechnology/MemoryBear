@@ -8,9 +8,19 @@
 !memory-profile/migrations/
 !memory-profile/migrations/**
 !packages/
+# Only the local path dependencies this service builds; the rest of packages/
+# stays out of the build context.
+packages/scripts/
+packages/storage-core/
 !packages/auth-sdk/
 !packages/auth-sdk/pyproject.toml
 !packages/auth-sdk/src/**
+!packages/redbear-model/
+!packages/redbear-model/pyproject.toml
+!packages/redbear-model/src/**
+!packages/task-bridge-sdk/
+!packages/task-bridge-sdk/pyproject.toml
+!packages/task-bridge-sdk/src/**
 # Never ship local bytecode
 memory-profile/src/**/__pycache__/
 memory-profile/src/**/__pycache__/**
