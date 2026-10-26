@@ -1,4 +1,4 @@
-"""管理端 FAQ 接口：作用域隔离，内容编辑与审核/启停独立。"""
+"""管理端 FAQ 接口：作用域隔离，已变更内容保存时确认审核，启停保持独立。"""
 
 from typing import Annotated, Literal
 from uuid import UUID
