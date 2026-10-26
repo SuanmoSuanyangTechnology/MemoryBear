@@ -1,0 +1,12 @@
+.directoryDropdown :global(.ant-cascader-menu) {
+  max-width: 240px;
+}
+
+.directoryDropdown :global(.ant-cascader-menu-item) {
+  white-space: normal;
+}
+
+.directoryDropdown :global(.ant-cascader-menu-item-content) {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
