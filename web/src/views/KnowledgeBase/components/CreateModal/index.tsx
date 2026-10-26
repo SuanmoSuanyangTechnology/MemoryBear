@@ -377,7 +377,7 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({ refreshTa
       footer={[
         <Button
           key="cancel"
-          onClick={currentStep === 0 ? handleClose : () => setCurrentStep(0)}
+          onClick={currentStep === 0 ? handleClose : () => setCurrentStep((step) => step - 1)}
         >
           {t(currentStep === 0 ? 'common.cancel' : 'common.prevStep')}
         </Button>,

@@ -168,7 +168,7 @@ const Cluster = forwardRef<ClusterRef, { onFeaturesLoad?: (features: FeaturesCon
     .finally(() => {
       setLoading(false)
     })
-  }, [onFeaturesLoad, form, id])
+  }, [onFeaturesLoad, form, id, t])
   useEffect(() => {
     getData()
   }, [id, getData])
@@ -232,7 +232,9 @@ const Cluster = forwardRef<ClusterRef, { onFeaturesLoad?: (features: FeaturesCon
       }
     })
     form.setFieldValue(['supervisor_config', 'features', 'file_upload'], fileUpload)
-    message.warning(t('application.resetFeaturesTip'))
+    if (values?.orchestration_mode === 'supervisor_loop') {
+      message.warning(t('application.resetFeaturesTip'))
+    }
   }
 
   /**

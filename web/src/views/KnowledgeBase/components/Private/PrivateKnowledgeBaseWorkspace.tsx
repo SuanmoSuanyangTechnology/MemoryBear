@@ -30,6 +30,7 @@ interface PrivateKnowledgeBaseWorkspaceProps {
   onToggleDirectory: () => void;
   fileDirectory: ReactNode;
   fileContent: ReactNode;
+  onRefreshFiles: () => void;
   onCopyKnowledgeBaseId: () => void;
   onKnowledgeBaseStatusChange: (checked: boolean) => void;
   onShareKnowledgeBase: () => void;
@@ -66,6 +67,7 @@ const PrivateKnowledgeBaseWorkspace: FC<PrivateKnowledgeBaseWorkspaceProps> = ({
   onToggleDirectory,
   fileDirectory,
   fileContent,
+  onRefreshFiles,
   onCopyKnowledgeBaseId,
   onKnowledgeBaseStatusChange,
   onShareKnowledgeBase,
@@ -165,6 +167,7 @@ const PrivateKnowledgeBaseWorkspace: FC<PrivateKnowledgeBaseWorkspaceProps> = ({
 
   const handleModeChange = (nextMode: WikiWorkspaceMode, fromTabs = false) => {
     navigationRequest.current += 1;
+    if (nextMode === 'files' && mode !== 'files') onRefreshFiles();
     if (nextMode === 'wikiGraph') {
       setShowGraphBack(!fromTabs);
       setGraphInitialPageId(
