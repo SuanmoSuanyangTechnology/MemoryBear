@@ -1,6 +1,7 @@
 """Generate Markdown summaries while keeping source provenance program-owned."""
 
 import json
+import re
 
 from .batching import optional_items, parallel
 from .config import WikiError
@@ -85,7 +86,8 @@ def summarize_document(model, snapshot, topics, segments, catalog):
         summary_line = lines[0].split(":", 1)[1].strip()
         body = "\n".join(lines[1:]).strip()
     else:
-        summary_line = lines[0].lstrip("# ").strip()
+        summary_line = next((line.lstrip("# ").strip() for line in lines
+                             if re.search(r"\w", line)), snapshot["title"])
         body = outputs[0].strip()
     if not body:
         raise WikiError("WIKI_MODEL_OUTPUT_INVALID", diagnostics={

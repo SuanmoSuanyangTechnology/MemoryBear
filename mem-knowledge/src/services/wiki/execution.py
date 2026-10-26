@@ -152,6 +152,7 @@ def execute_map(runtime, delivery, *, ensure_owned):
                 input_hash=input_hash,
                 materials=materials,
                 document_title=snapshot["title"],
+                source_catalog=catalog,
             )
     for page_id in pending:
         ensure_owned()

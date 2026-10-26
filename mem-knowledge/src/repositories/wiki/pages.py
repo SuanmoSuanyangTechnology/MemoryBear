@@ -342,7 +342,9 @@ def _planning_context(session, kb_id):
     return {"pages": pages, "folders": sorted(paths), "revision": revision}
 
 
-def commit_map(session, delivery, *, config_hash, input_hash, materials, document_title):
+def commit_map(
+    session, delivery, *, config_hash, input_hash, materials, document_title, source_catalog=None,
+):
     knowledge, scope = lock_knowledge(session, delivery["kb_id"])
     document, state = lock_document(session, delivery["kb_id"], delivery["document_id"])
     require_round(document, state, delivery["requested_version"])
@@ -364,7 +366,9 @@ def commit_map(session, delivery, *, config_hash, input_hash, materials, documen
         raise WikiSuperseded("WIKI_MATERIAL_PLAN_MISMATCH", retryable=False)
     preserved = {as_uuid(item["page_id"]) for item in materials if item.get("preserve_existing")}
     if preserved:
-        _settle_uncited_pages(session, document, tasks, preserved)
+        preserved = _settle_uncited_pages(
+            session, document, state, tasks, preserved, source_catalog or {}
+        )
     materials = [item for item in materials if not item.get("preserve_existing")]
     session.execute(delete(WikiPageSource).where(
         WikiPageSource.document_id == document.id, WikiPageSource.page_id.not_in(preserved)
@@ -401,20 +405,84 @@ def commit_map(session, delivery, *, config_hash, input_hash, materials, documen
     return pending_page_ids(session, state)
 
 
-def _settle_uncited_pages(session, document, tasks, page_ids):
-    """引用降级只结束当前主题任务，保留此前正文与来源，避免空素材清空页面。"""
-    for task in tasks:
-        if task.page_id in page_ids:
-            task.status, task.error_code, task.error_stage = (
-                "skipped", "WIKI_TOPIC_WITHOUT_EVIDENCE", "citations"
-            )
-    session.flush()
+def _verified_previous_chunks(source, catalog):
+    """只复用仍存在于当前文档的完整旧证据，保留旧引用句柄供 facts 使用。"""
+    if not source.chunk_refs:
+        return None
+    by_id = {item["chunk_id"]: item for item in catalog.values()}
+    verified = []
+    for old in source.chunk_refs:
+        current = by_id.get(old["chunk_id"])
+        if current is None or (current["text"], current["heading"]) != (
+            old["text"], old.get("heading", "")
+        ):
+            matches = [item for item in catalog.values()
+                       if (item["text"], item["heading"]) == (old["text"], old.get("heading", ""))]
+            if len(matches) != 1:
+                return None
+            current = matches[0]
+        verified.append({**current, "ref": old["ref"]})
+    return verified
+
+
+def _settle_uncited_pages(session, document, state, tasks, page_ids, catalog):
+    """引用降级保留经过当前原文验证的历史素材；已失效的旧证据仍走正常撤回。"""
+    retained = set()
+    skipped_count = 0
+    by_page = {task.page_id: task for task in tasks}
     for page_id in sorted(page_ids, key=str):
         page = session.scalar(select(WikiPage).where(
             WikiPage.id == page_id, WikiPage.kb_id == document.kb_id
         ).with_for_update())
         if page is None or page.page_type == "summary":
             raise WikiError("WIKI_MATERIAL_PLAN_MISMATCH", retryable=False)
+        source = session.scalar(select(WikiPageSource).where(
+            WikiPageSource.document_id == document.id, WikiPageSource.page_id == page_id
+        ))
+        published = any(entry["document_id"] == str(document.id)
+                        for entry in page.published_sources)
+        if source is None and published:
+            by_page[page_id].operation = "retract"
+            continue
+        if source is not None:
+            verified = _verified_previous_chunks(source, catalog)
+            if verified is None:
+                by_page[page_id].operation = "retract"
+                append_log(document,
+                           f"Wiki 引用降级：主题 {page_id} 的旧证据已变化，按原流程撤回。")
+                continue
+            old_version, old_hash = source.document_wiki_version, source.content_hash
+            already_published = any(
+                (entry["document_id"], entry["version"], entry["content_hash"]) == (
+                    str(document.id), old_version, old_hash
+                ) for entry in page.published_sources
+            )
+            source.chunk_refs = verified
+            source.document_wiki_version = state.requested_version
+            source.content_hash = fingerprint({
+                "page_id": str(page_id), "facts": source.facts, "chunk_refs": verified,
+                "source_context": source.source_context,
+            })
+            page.published_sources = [
+                {**entry, "version": source.document_wiki_version,
+                 "content_hash": source.content_hash}
+                if (entry["document_id"], entry["version"], entry["content_hash"]) == (
+                    str(document.id), old_version, old_hash
+                ) else entry
+                for entry in page.published_sources
+            ]
+        retained.add(page_id)
+        if source is not None and not already_published:
+            # 上轮只提交了素材而未发布，必须真正 Reduce，不能将旧正文标成已完成。
+            page.status = "updating"
+            page.row_version += 1
+            continue
+        skipped_count += 1
+        task = by_page[page_id]
+        task.status, task.error_code, task.error_stage = (
+            "skipped", "WIKI_TOPIC_WITHOUT_EVIDENCE", "citations"
+        )
+        session.flush()
         pending = session.scalar(select(WikiDocumentPageTask.subtask_id).where(
             WikiDocumentPageTask.page_id == page_id,
             WikiDocumentPageTask.status.not_in(TERMINAL_TASK_STATUSES),
@@ -422,9 +490,10 @@ def _settle_uncited_pages(session, document, tasks, page_ids):
         if pending is None:
             page.status = "ready" if page.version > 0 else "unavailable"
             page.error_code = "WIKI_TOPIC_WITHOUT_EVIDENCE"
-            page.row_version += 1
+        page.row_version += 1
     append_log(document,
-               f"Wiki 引用降级：跳过 {len(page_ids)} 个无有效证据的已计划主题，保留历史正文。")
+               f"Wiki 引用降级：跳过 {skipped_count} 个已计划主题，保留已验证的历史正文。")
+    return retained
 
 
 def pending_page_ids(session, state):

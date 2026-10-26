@@ -32,7 +32,7 @@ def _citation_log(snapshot, event, **details):
     }))
 
 
-def _filter_citations(value, handles, refs, new_allowed, snapshot):
+def _filter_citations(value, handles, refs, new_allowed, snapshot, *, batch_index, model_id):
     cited = defaultdict(set)
     unknown_topics, unknown_sources = set(), set()
     for topic in value["topics"]:
@@ -54,8 +54,11 @@ def _filter_citations(value, handles, refs, new_allowed, snapshot):
         _citation_log(snapshot, "wiki_citation_handles_filtered",
                       unknown_topics=sorted(unknown_topics),
                       unknown_sources=sorted(unknown_sources),
-                      new_candidates_allowed=new_allowed)
-    return {"topics": [{"topic_ref": key, "source_refs": sorted(ids, key=source_reference_key)}
+                      new_candidates_allowed=new_allowed, batch_index=batch_index,
+                      model_id=model_id)
+    return {"failed": False, "dropped_handles": len(unknown_topics) + len(unknown_sources),
+            "dropped_candidates": len(value["new_candidates"]) - len(candidates),
+            "topics": [{"topic_ref": key, "source_refs": sorted(ids, key=source_reference_key)}
                        for key, ids in cited.items()], "new_candidates": candidates}
 
 
@@ -115,9 +118,14 @@ def _classify_slice(model, snapshot, topics, segment, allow_new):
                 raise
             _citation_log(snapshot, "wiki_citation_batch_failed", batch_index=index,
                           topic_handles=sorted(handles), source_handles=sorted(refs),
-                          error_code=exc.code, failure_details=exception_details(exc))
+                          model_id=model.model_id, error_code=exc.code,
+                          failure_details=exception_details(exc))
+            results.append({"topics": [], "new_candidates": [], "failed": True,
+                            "dropped_handles": 0, "dropped_candidates": 0})
             continue
-        results.append(_filter_citations(value, handles, refs, new_allowed, snapshot))
+        results.append(_filter_citations(
+            value, handles, refs, new_allowed, snapshot, batch_index=index, model_id=model.model_id
+        ))
     return results
 
 
@@ -150,23 +158,32 @@ def prepare_document(model, snapshot, candidates, segments, catalog, *, fixed_pl
     if limit and len(topics) > limit:
         raise WikiError("WIKI_TOPIC_BUDGET_EXCEEDED", retryable=False)
     retained, skipped_pages = [], []
+    fallback_count = 0
     for topic in topics:
         refs = cited[topic["topic_ref"]]
         if not refs:
             refs = set(topic.get("source_refs", [])) & catalog.keys()
+            fallback_count += bool(refs)
             _citation_log(snapshot, "wiki_citation_fallback", topic_ref=topic["topic_ref"],
-                          fallback_count=len(refs), page_id=topic.get("page_id"))
+                          fallback_count=len(refs), page_id=topic.get("page_id"),
+                          model_id=model.model_id)
         if not refs:
             if fixed_plan and topic.get("page_id"):
                 skipped_pages.append(topic["page_id"])
             continue
         retained.append({**topic, "source_refs": sorted(refs, key=source_reference_key)})
-    logger.info(
-        "Wiki 引用汇总 document_id=%s citation_batches_succeeded=%s topics_retained=%s "
-        "planned_topics_skipped=%s",
-        snapshot.get("document_id"), sum(len(result) for result in results[1:]),
-        len(retained), len(skipped_pages),
-    )
+    batches_done = [batch for result in results[1:] for batch in result]
+    logger.info("Wiki 引用汇总 %s", diagnostic_json({
+        "event": "wiki_citation_summary", "task_id": current_parent_task_id(),
+        "document_id": snapshot.get("document_id"), "model_id": model.model_id,
+        "batches_succeeded": sum(not batch["failed"] for batch in batches_done),
+        "batches_failed": sum(batch["failed"] for batch in batches_done),
+        "dropped_handles": sum(batch["dropped_handles"] for batch in batches_done),
+        "topics_retained": len(retained), "topics_fallback": fallback_count,
+        "topics_skipped": len(topics) - len(retained) + sum(
+            batch["dropped_candidates"] for batch in batches_done
+        ),
+    }))
     return {"topics": retained, "summary": results[0], "skipped_pages": skipped_pages}
 
 
