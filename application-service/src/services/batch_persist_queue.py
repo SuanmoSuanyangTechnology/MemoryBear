@@ -60,7 +60,7 @@ class PersistTask:
 
     task_type: str
     """One of: save_messages, save_agent_execution, save_node_executions,
-    link_agent_execution_message, record_usage, after_turn, save_failed_message."""
+    link_agent_execution_message, after_turn, save_failed_message."""
 
     args: dict[str, Any]
     """Keyword arguments for the handler that executes this task."""
@@ -555,25 +555,6 @@ async def _handle_save_agent_execution(
     db.add(execution)
 
 
-async def _handle_record_usage(
-    db: Any,
-    **kwargs: Any,
-) -> None:
-    """Record API key usage count."""
-    api_key_id = kwargs.get("api_key_id")
-    if api_key_id is None:
-        return
-    from ..models.models_model import ModelApiKey
-
-    result = await db.execute(
-        sa_select(ModelApiKey).where(ModelApiKey.id == api_key_id)
-    )
-    api_key = result.scalars().first()
-    if api_key is not None:
-        api_key.usage_count = (api_key.usage_count or 0) + 1
-        db.add(api_key)
-
-
 async def _handle_after_turn(
     db: Any,
     **kwargs: Any,
@@ -672,6 +653,5 @@ _TASK_HANDLERS: dict[str, Any] = {
     "save_agent_execution": _handle_save_agent_execution,
     "save_node_executions": _handle_save_node_executions,
     "link_agent_execution_message": _handle_link_agent_execution_message,
-    "record_usage": _handle_record_usage,
     "after_turn": _handle_after_turn,
 }

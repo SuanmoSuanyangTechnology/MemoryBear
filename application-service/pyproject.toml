@@ -169,8 +169,6 @@ select = ["E", "F", "I", "UP", "B", "ASYNC"]
 # helper): kept verbatim for line-by-line comparison; only import paths, the
 # logger helper and settings access were rewritten mechanically.
 "src/repositories/model_repository.py" = ["E501", "E721", "E722", "F401", "F541", "I001", "UP006", "UP007", "UP035", "UP037", "UP041", "UP045", "B007", "B904"]
-"src/repositories/model_channel_repository.py" = ["E501", "E721", "E722", "F401", "F541", "I001", "UP006", "UP007", "UP035", "UP037", "UP041", "UP045", "B007", "B904"]
-"src/services/channel_service.py" = ["E501", "E721", "E722", "F401", "F541", "I001", "UP006", "UP007", "UP035", "UP037", "UP041", "UP045", "B007", "B904"]
 "src/services/channel_registry.py" = ["E501", "E721", "E722", "F401", "F541", "I001", "UP006", "UP007", "UP035", "UP037", "UP041", "UP045", "B007", "B904"]
 "src/services/usage_load.py" = ["E501", "E721", "E722", "F401", "F541", "I001", "UP006", "UP007", "UP035", "UP037", "UP041", "UP045", "B007", "B904"]
 "src/services/model_profile_view.py" = ["E501", "E721", "E722", "F401", "F541", "I001", "UP006", "UP007", "UP035", "UP037", "UP041", "UP045", "B007", "B904"]

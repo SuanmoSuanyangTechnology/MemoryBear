@@ -429,84 +429,6 @@ class ModelConfigRepository:
             raise
 
     @staticmethod
-    def create(db: Session, model_data: dict) -> ModelConfig:
-        """Create a model config."""
-        db_logger.debug(f"创建模型配置: {model_data.get('name')}")
-        
-        try:
-            db_model = ModelConfig(**model_data)
-            db.add(db_model)
-            
-            db_logger.info(f"模型配置已添加到会话: {db_model.name}")
-            return db_model
-            
-        except Exception as e:
-            db.rollback()
-            db_logger.error(f"创建模型配置失败: {model_data.get('name')} - {str(e)}")
-            raise
-
-    @staticmethod
-    def update(db: Session, model_id: uuid.UUID, update_data: dict, tenant_id: uuid.UUID | None = None) -> Optional[ModelConfig]:
-        """Update a model config (update_data is built by the write side, including the three new columns; the host write-service methods were removed)."""
-        db_logger.debug(f"更新模型配置: model_id={model_id}, tenant_id={tenant_id}")
-
-        try:
-            query = db.query(ModelConfig).filter(ModelConfig.id == model_id)
-
-            # Add tenant filter (only this tenant's models can be updated)
-            if tenant_id:
-                query = query.filter(ModelConfig.tenant_id == tenant_id)
-
-            db_model = query.first()
-            if not db_model:
-                db_logger.warning(f"模型配置不存在或无权限: model_id={model_id}")
-                return None
-
-            # Update fields
-            for field, value in update_data.items():
-                setattr(db_model, field, value)
-            
-            db.commit()
-            db.refresh(db_model)
-            
-            db_logger.info(f"模型配置更新成功: {db_model.name} (ID: {model_id})")
-            return db_model
-            
-        except Exception as e:
-            db.rollback()
-            db_logger.error(f"更新模型配置失败: model_id={model_id} - {str(e)}")
-            raise
-
-    @staticmethod
-    def delete(db: Session, model_id: uuid.UUID, tenant_id: uuid.UUID | None = None) -> bool:
-        """Delete a model config."""
-        db_logger.debug(f"删除模型配置: model_id={model_id}, tenant_id={tenant_id}")
-        
-        try:
-            query = db.query(ModelConfig).filter(ModelConfig.id == model_id)
-            
-            # Add tenant filter (only this tenant's models can be deleted)
-            if tenant_id:
-                query = query.filter(ModelConfig.tenant_id == tenant_id)
-            
-            db_model = query.first()
-            if not db_model:
-                db_logger.warning(f"模型配置不存在或无权限: model_id={model_id}")
-                return False
-            
-            # Soft-delete the model config
-            db_model.is_active = False
-            db.commit()
-            
-            db_logger.info(f"模型配置删除成功（逻辑删除）: model_id={model_id}")
-            return True
-            
-        except Exception as e:
-            db.rollback()
-            db_logger.error(f"删除模型配置失败: model_id={model_id} - {str(e)}")
-            raise
-
-    @staticmethod
     def get_model_config_ids_by_provider(
         db: Session,
         tenant_id: uuid.UUID,
@@ -602,12 +524,6 @@ class ModelBaseRepository:
         ).all()
 
     @staticmethod
-    def create(db: Session, data: dict) -> 'ModelBase':
-        model_base = ModelBase(**data)
-        db.add(model_base)
-        return model_base
-
-    @staticmethod
     def get_by_name_and_provider(db: Session, name: str, provider: str) -> Optional['ModelBase']:
         return db.query(ModelBase).filter(
             ModelBase.name == name,
@@ -622,42 +538,6 @@ class ModelBaseRepository:
             ModelBase.provider == provider,
             ModelBase.type == model_type
         ).first()
-
-    @staticmethod
-    def update(db: Session, model_base_id: uuid.UUID, data: dict) -> Optional['ModelBase']:
-        model_base = db.query(ModelBase).filter(ModelBase.id == model_base_id).first()
-        if not model_base:
-            return None
-        for key, value in data.items():
-            setattr(model_base, key, value)
-        
-        # Sync updates to bound non-composite model configs
-        if any(k in data for k in ['name', 'description', 'logo']):
-            db.query(ModelConfig).filter(
-                ModelConfig.model_id == model_base_id,
-                ModelConfig.provider != ModelProvider.COMPOSITE
-            ).update({
-                k: v for k, v in data.items() 
-                if k in ['name', 'description', 'logo']
-            }, synchronize_session=False)
-        
-        return model_base
-
-    @staticmethod
-    def delete(db: Session, model_base_id: uuid.UUID) -> bool:
-        model_base = db.query(ModelBase).filter(ModelBase.id == model_base_id).first()
-        if not model_base:
-            return False
-        db.delete(model_base)
-        return True
-
-    @staticmethod
-    def increment_add_count(db: Session, model_base_id: uuid.UUID) -> bool:
-        model_base = db.query(ModelBase).filter(ModelBase.id == model_base_id).first()
-        if not model_base:
-            return False
-        model_base.add_count += 1
-        return True
 
     @staticmethod
     def check_added_by_tenant(db: Session, model_base_id: uuid.UUID, tenant_id: uuid.UUID) -> bool:

@@ -35,6 +35,27 @@ from .message_feedback_service import FeedbackService
 
 logger = logging.getLogger(__name__)
 
+# Strong references to in-flight memory-ingest dispatches: the event loop keeps
+# only weak references to tasks, so without this set a pending ingest could be
+# garbage-collected mid-flight.
+_memory_dispatch_tasks: set[asyncio.Task] = set()
+
+
+def _log_memory_dispatch_outcome(task: asyncio.Task) -> None:
+    """Retrieve the outcome of a fire-and-forget memory ingest.
+
+    Retrieving the exception also silences the loop's "Task exception was
+    never retrieved" warning and turns it into a searchable error log.
+    """
+
+    _memory_dispatch_tasks.discard(task)
+    if task.cancelled():
+        logger.warning("Memory ingest dispatch cancelled")
+        return
+    error = task.exception()
+    if error is not None:
+        logger.error("Memory ingest dispatch failed: %s", error, exc_info=error)
+
 
 class ConversationService:
     """Conversation service (v1 reads, message versions, soft delete, chat kernel)."""
@@ -854,7 +875,9 @@ class ConversationService:
         consecutive sequence numbers with the user message strictly before
         the assistant one. Message dicts accept: ``id``, ``content``,
         ``meta_data`` and ``should_memorize`` (default True). Best-effort:
-        failures are logged and never fail the chat turn.
+        failures are logged and never fail the chat turn. No retry is issued
+        here — the ingest call has no idempotency key, so a retry belongs to
+        the memory pipeline / monolith callback side.
         """
 
         from ..db import get_async_db_context
@@ -909,7 +932,7 @@ class ConversationService:
                 )
                 for role, m in (("user", user_message), ("assistant", assistant_message))
             ]
-            asyncio.create_task(
+            task = asyncio.create_task(
                 MemoryService.ingest_agent_messages(
                     conversation_id=conv_id_str,
                     messages=messages,
@@ -921,6 +944,8 @@ class ConversationService:
                     user_rag_memory_id=user_rag_memory_id,
                 )
             )
+            _memory_dispatch_tasks.add(task)
+            task.add_done_callback(_log_memory_dispatch_outcome)
         except Exception as exc:
             logger.warning(
                 "dispatch_memory_pair failed: conv=%s, err=%s",
