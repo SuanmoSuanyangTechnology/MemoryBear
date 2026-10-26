@@ -8,6 +8,7 @@ export const faq = {
   wikiSourceComparison: 'Wiki 原文对照',
   sourceWiki: '来源 Wiki',
   sourceWikiLabel: '来源 Wiki：',
+  sourceLabel: '来源：{{name}}',
   reviewStatus: '审核状态',
   questionExample: '例如：如何向知识库中添加文件？',
   enabledHint: '已启用 · 可检索和消费',
