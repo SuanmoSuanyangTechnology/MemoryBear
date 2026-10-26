@@ -9,27 +9,39 @@ description = "Independent MemoryBear profile analytics service"
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
 dependencies = [
-    "alembic==1.17.0",
+    "alembic==1.20.0",
     "asyncpg==0.32.0",
     "auth-sdk",
     "elasticsearch[async]==8.16.0",
-    "fastapi==0.143.0",
+    "fastapi==0.156.4",
+    # Pinned to the API host versions so prompt/tool-call behavior matches
+    # what the migrated generation pipelines were validated against.
+    "json-repair==0.64.1",
+    "langchain-core==1.6.12",
+    "langchain-openai==1.7.2",
+    "jinja2==3.1.6",
     "neo4j==6.4.0",
     "psutil==7.2.2",
     "pydantic==2.14.1",
-    "pydantic-settings==2.15.0",
+    "pydantic-settings==2.16.1",
     "python-dotenv==1.2.4",
+    "redbear-model[runtime]",
     "redis==8.1.0",
-    "sqlalchemy[asyncio]==2.1.4",
+    "sqlalchemy[asyncio]==2.1.5",
     # Explicit transitive security pin; FastAPI 0.143.0 allows Starlette >=0.46.0.
-    "starlette==1.7.0",
+    "starlette==1.9.0",
+    # Cache generation is executed by the memory-jobs Celery workers; this
+    # service only publishes the task by name and waits for its result.
+    "task-bridge-sdk[celery]",
     "uvicorn[standard]==0.54.0",
-    "xxhash==4.0.1",
+    "xxhash==4.0.2",
     "zttp==0.0.34",
 ]
 
 [tool.uv.sources]
 auth-sdk = { path = "../packages/auth-sdk" }
+redbear-model = { path = "../packages/redbear-model" }
+task-bridge-sdk = { path = "../packages/task-bridge-sdk" }
 
 [dependency-groups]
 dev = [

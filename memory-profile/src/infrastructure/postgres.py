@@ -91,7 +91,13 @@ def _install_pool_guards(engine: AsyncEngine) -> None:
 
 
 class PostgresManager:
-    """Lazily own one async engine and short-lived read-only ORM sessions."""
+    """Lazily own one async engine and short-lived sessions.
+
+    Reads and the few generation writes share one pool. Read-only behaviour is a
+    static property of the read repositories (enforced by the boundary script),
+    not a connection-level setting, because the same engine also updates the two
+    ``end_users`` cache columns.
+    """
 
     def __init__(self, settings: ProfileSettings) -> None:
         self._settings = settings
@@ -118,12 +124,7 @@ class PostgresManager:
                     max_overflow=self._settings.database_max_overflow,
                     pool_timeout=self._settings.database_pool_timeout_seconds,
                     pool_recycle=self._settings.database_pool_recycle_seconds,
-                    connect_args={
-                        "server_settings": {
-                            "timezone": "UTC",
-                            "default_transaction_read_only": "on",
-                        }
-                    },
+                    connect_args={"server_settings": {"timezone": "UTC"}},
                 )
                 _install_pool_guards(engine)
                 self._engine = engine

@@ -1,7 +1,11 @@
 {
   "msg": {
     "query_success": "Query succeeded",
-    "data_not_ready": "Data has not been generated yet"
+    "data_not_ready": "Data has not been generated yet",
+    "interest_distribution_success": "Interest distribution retrieved",
+    "generate_completed": "Generation completed",
+    "generate_partial": "Partially generated",
+    "generate_batch_completed": "Batch generation completed"
   },
   "empty": {
     "user_not_found": "User not found",
@@ -14,7 +18,8 @@
     "per_type_missing_colon": "Invalid per_type_limits entry '{entry}', expected format 'Type:Limit'",
     "per_type_invalid_node_type": "Invalid Node_Type '{node_type}', must be a valid identifier",
     "per_type_limit_not_integer": "limit for {node_type} in per_type_limits must be an integer: '{limit}'",
-    "per_type_limit_negative": "limit for {node_type} in per_type_limits must be a non-negative integer: '{limit}'"
+    "per_type_limit_negative": "limit for {node_type} in per_type_limits must be a non-negative integer: '{limit}'",
+    "hot_memory_tags_failed": "Failed to query hot memory tags"
   },
   "workspace_statistics": {
     "unavailable": "Workspace memory statistics service is temporarily unavailable",
@@ -64,5 +69,14 @@
   },
   "preference_group": {
     "name": "Preferences"
+  },
+  "generate": {
+    "unsupported_storage_type": "This endpoint only supports Neo4j workspaces; use the RAG profile entry for RAG workspaces",
+    "workspace_unavailable": "The current workspace is unavailable",
+    "failed": "Cache generation failed",
+    "unavailable": "Cache generation service is unavailable, please try again later",
+    "in_progress": "This user's cache is being generated, please try again later",
+    "interest_unavailable": "Interest generation service is unavailable, please try again later",
+    "interest_timeout": "Interest generation timed out, please try again later"
   }
 }

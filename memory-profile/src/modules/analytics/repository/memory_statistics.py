@@ -19,6 +19,7 @@ from src.models.references import (
     MemoryPerceptual,
 )
 from src.modules.analytics.constants import COUNT_KEYS
+from src.modules.shared.end_user_scope import active_users_in_workspace
 
 _EXCLUDED_APP_ID = UUID("00000000-0000-0000-0000-000000000001")
 
@@ -136,8 +137,7 @@ class MemoryStatisticsRepository:
         以 ``id`` 升序作为游标，保证同一轮快照计算不会因并发新增/删除用户而漏算或重算。
         """
         statement = select(EndUser.id).where(
-            EndUser.workspace_id == workspace_id,
-            EndUser.is_active.is_(True),
+            *active_users_in_workspace(workspace_id)
         )
         if after_id is not None:
             statement = statement.where(EndUser.id > after_id)

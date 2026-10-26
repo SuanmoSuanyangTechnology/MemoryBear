@@ -6,6 +6,9 @@ layer, so API-contract drift stays visible in one place.
 
 from __future__ import annotations
 
+#: 用户名片 Tag 的字符长度上限（api ``user_card_tags.USER_CARD_TAG_MAX_LENGTH`` 同值）。
+USER_CARD_TAG_MAX_LENGTH = 12
+
 #: ``node_statistics`` 的固定返回顺序。
 MEMORY_TYPES: tuple[str, ...] = (
     "PERCEPTUAL_MEMORY",

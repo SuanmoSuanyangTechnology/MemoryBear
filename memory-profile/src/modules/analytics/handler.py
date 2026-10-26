@@ -199,3 +199,68 @@ class AnalyticsHandler:
             data=data,
             msg=data.get("message", message("analytics.msg.query_success", language)),
         )
+
+    async def hot_memory_tags(
+        self, context: MemoryPrincipal, limit: int, language: str
+    ) -> ApiResponse[list[dict[str, Any]]]:
+        data = await self.service.workspace_hot_memory_tags(context.workspace_id, limit)
+        return ListApiResponse(data=data, msg=message("analytics.msg.query_success", language))
+
+    async def user_profile(
+        self, context: MemoryPrincipal, end_user_id: str | None, language: str
+    ) -> ApiResponse[dict[str, Any]]:
+        data = await self.service.user_profile(end_user_id, context.workspace_id)
+        return ObjectApiResponse(data=data, msg=message("analytics.msg.query_success", language))
+
+    async def interest_distribution(
+        self,
+        context: MemoryPrincipal,
+        end_user_id: str,
+        limit: int,
+        language: str,
+    ) -> ApiResponse[list[dict[str, Any]]]:
+        data = await self.service.interest_distribution(
+            end_user_id, context.workspace_id, limit, language
+        )
+        return ListApiResponse(
+            data=data,
+            msg=message("analytics.msg.interest_distribution_success", language),
+        )
+
+    async def generate_cache(
+        self,
+        context: MemoryPrincipal,
+        end_user_id: str | None,
+        language: str,
+    ) -> ApiResponse[dict[str, Any]]:
+        data = await self.service.generate_cache(
+            context.workspace_id, end_user_id, language
+        )
+        if not end_user_id:
+            return ObjectApiResponse(
+                data=data,
+                msg=message("analytics.msg.generate_batch_completed", language),
+            )
+        if data["insight_success"] and data["summary_success"]:
+            return ObjectApiResponse(
+                data=data, msg=message("analytics.msg.generate_completed", language)
+            )
+        if data["insight_success"] or data["summary_success"]:
+            return ObjectApiResponse(
+                data=data, msg=message("analytics.msg.generate_partial", language)
+            )
+        error_msg = (
+            "; ".join(
+                f"{item.get('type')}: {item.get('error')}" for item in data["errors"]
+            )
+            or "unknown error"
+        )
+        # The legacy contract answers business failures with HTTP 200 and a
+        # non-zero code; the API's ``fail()`` never changed the status code.
+        raise LocalizedProfileError(
+            BizCode.INTERNAL_ERROR,
+            "analytics.generate.failed",
+            detail=error_msg,
+            data=data,
+            status_code=200,
+        )

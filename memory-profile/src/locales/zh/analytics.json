@@ -1,7 +1,11 @@
 {
   "msg": {
     "query_success": "查询成功",
-    "data_not_ready": "数据尚未生成"
+    "data_not_ready": "数据尚未生成",
+    "interest_distribution_success": "获取兴趣分布标签成功",
+    "generate_completed": "生成完成",
+    "generate_partial": "部分生成成功",
+    "generate_batch_completed": "批量生成完成"
   },
   "empty": {
     "user_not_found": "用户不存在",
@@ -14,7 +18,8 @@
     "per_type_missing_colon": "非法 per_type_limits 条目 '{entry}'，期望格式 'Type:Limit'",
     "per_type_invalid_node_type": "非法 Node_Type '{node_type}'，必须为合法标识符",
     "per_type_limit_not_integer": "per_type_limits 中 {node_type} 的 limit 必须为整数: '{limit}'",
-    "per_type_limit_negative": "per_type_limits 中 {node_type} 的 limit 必须为非负整数: '{limit}'"
+    "per_type_limit_negative": "per_type_limits 中 {node_type} 的 limit 必须为非负整数: '{limit}'",
+    "hot_memory_tags_failed": "热门标签查询失败"
   },
   "workspace_statistics": {
     "unavailable": "工作空间记忆统计服务暂不可用",
@@ -64,5 +69,14 @@
   },
   "preference_group": {
     "name": "偏好"
+  },
+  "generate": {
+    "unsupported_storage_type": "当前接口仅支持 Neo4j 工作空间；RAG 工作空间请使用 RAG 专用画像生成入口",
+    "workspace_unavailable": "当前工作空间不可用",
+    "failed": "缓存生成失败",
+    "unavailable": "缓存生成服务暂不可用，请稍后重试",
+    "in_progress": "该用户的缓存正在生成，请稍后重试",
+    "interest_unavailable": "兴趣标签生成服务暂不可用，请稍后重试",
+    "interest_timeout": "兴趣标签生成超时，请稍后重试"
   }
 }

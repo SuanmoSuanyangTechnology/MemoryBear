@@ -25,6 +25,19 @@ def parse_uuid(value: object) -> UUID | None:
         return None
 
 
+def parse_int(value: object) -> int | None:
+    """Return ``value`` as an int, or ``None`` when it cannot be converted.
+
+    ``int()`` semantics are preserved (numeric strings convert, bools become
+    0/1, floats truncate); unlike ``int``, a malformed value is not an error.
+    """
+
+    try:
+        return int(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+
+
 def as_utc(value: datetime) -> datetime:
     """Treat naive datetimes as UTC and convert aware ones to UTC."""
 
@@ -43,6 +56,17 @@ def collapse_whitespace(value: str) -> str:
     """Collapse all whitespace runs to single spaces and trim the ends."""
 
     return " ".join(value.split())
+
+
+def compact_text(value: str, max_length: int | None = None) -> str:
+    """Collapse whitespace runs, trim, and optionally truncate to ``max_length``.
+
+    Model output arrives with arbitrary newlines and padding; callers that also
+    need a hard cap pass ``max_length`` instead of re-slicing afterwards.
+    """
+
+    text = collapse_whitespace(value)
+    return text[:max_length] if max_length is not None else text
 
 
 def is_blank(value: object) -> bool:

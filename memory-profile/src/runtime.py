@@ -10,6 +10,7 @@ from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from typing import Any
 
+from src.common.normalization import parse_int
 from src.common.observability.http_metrics import HttpMetrics
 from src.common.observability.runtime_metrics import (
     collect_process_metrics,
@@ -20,18 +21,13 @@ from src.common.observability.runtime_metrics import (
 )
 from src.config import ProfileSettings
 from src.infrastructure.elasticsearch import ElasticsearchManager
+from src.infrastructure.model_service import ModelServiceManager
 from src.infrastructure.neo4j import Neo4jManager
 from src.infrastructure.postgres import PostgresManager
 from src.infrastructure.redis import RedisManager
+from src.infrastructure.task_bridge import TaskBridgeManager
 
 HealthCheck = Callable[[], Awaitable[bool]]
-
-
-def _as_int(value: Any) -> int | None:
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return None
 
 
 class ProfileRuntime:
@@ -43,6 +39,10 @@ class ProfileRuntime:
         self.neo4j = Neo4jManager(settings)
         self.redis = RedisManager(settings)
         self.elasticsearch = ElasticsearchManager(settings)
+        # 生成类用例专用；只读端点不会触碰它，因此它不参与 readiness 探测。
+        self.model_service = ModelServiceManager(settings)
+        # 缓存生成投递到 memory-jobs 的 worker；本进程只做 producer + 结果等待。
+        self.task_bridge = TaskBridgeManager(settings)
         self.http_metrics = HttpMetrics()
         self.started_at_monotonic = time.monotonic()
         self.started_at = datetime.now(UTC)
@@ -97,29 +97,29 @@ class ProfileRuntime:
 
         postgres = dependencies.get("postgres", {}).get("pool")
         if isinstance(postgres, dict):
-            capacity = _as_int(postgres.get("capacity"))
-            checked_out = _as_int(postgres.get("checked_out"))
+            capacity = parse_int(postgres.get("capacity"))
+            checked_out = parse_int(postgres.get("checked_out"))
             if capacity and checked_out is not None and checked_out >= capacity:
                 warnings.append("postgres_pool_saturated")
 
         neo4j = dependencies.get("neo4j", {}).get("pool")
         if isinstance(neo4j, dict):
-            max_size = _as_int(neo4j.get("max_size"))
-            in_use = _as_int(neo4j.get("in_use"))
+            max_size = parse_int(neo4j.get("max_size"))
+            in_use = parse_int(neo4j.get("in_use"))
             if max_size and in_use is not None and in_use >= max_size:
                 warnings.append("neo4j_pool_saturated")
 
         redis = dependencies.get("redis", {}).get("pool")
         if isinstance(redis, dict):
-            max_connections = _as_int(redis.get("max_connections"))
-            in_use = _as_int(redis.get("in_use"))
+            max_connections = parse_int(redis.get("max_connections"))
+            in_use = parse_int(redis.get("in_use"))
             if max_connections and in_use is not None and in_use >= max_connections:
                 warnings.append("redis_pool_saturated")
 
         elasticsearch = dependencies.get("elasticsearch", {}).get("pool")
         if isinstance(elasticsearch, dict):
-            nodes = _as_int(elasticsearch.get("nodes"))
-            alive = _as_int(elasticsearch.get("alive"))
+            nodes = parse_int(elasticsearch.get("nodes"))
+            alive = parse_int(elasticsearch.get("alive"))
             if nodes and alive == 0:
                 warnings.append("elasticsearch_no_alive_nodes")
 
@@ -176,4 +176,6 @@ class ProfileRuntime:
             self.neo4j.aclose(),
             self.redis.aclose(),
             self.elasticsearch.aclose(),
+            self.model_service.aclose(),
+            self.task_bridge.aclose(),
         )
