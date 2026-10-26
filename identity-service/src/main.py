@@ -16,7 +16,14 @@ from fastapi import FastAPI
 from src import db
 from src import redis as iredis
 from src.controllers import acl, jwks, user_snapshot
-from src.services import audit_consumer, notify, reconcile, retention, schema_check
+from src.services import (
+    acl_publisher,
+    audit_consumer,
+    notify,
+    reconcile,
+    retention,
+    schema_check,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +35,9 @@ async def lifespan(app: FastAPI):
     async with db.get_async_db_context() as session:
         await schema_check.assert_readonly_schema(session)
     await iredis.init_redis()
+    # Redis 重建/换实例后若无人走过 ACL CRUD，acl:rules:<DB_NAME> 会持续缺失，
+    # 消费端停在 deny-all；启动时全量下发一次（失败只记日志，不阻塞启动）
+    await acl_publisher.publish_rules_on_startup()
     # 自有表（acl_rules/audit_logs）由 alembic 迁移链管理（migrations/），部署时 upgrade head
     # 密钥为注入模式（决策 #15，K8s Secret 管理、不轮换）；
     # key_loader 在 controllers/jwks.py 模块级就位
