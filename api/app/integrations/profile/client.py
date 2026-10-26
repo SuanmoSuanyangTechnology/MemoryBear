@@ -103,6 +103,7 @@ class MemoryProfileServiceClient:
         query: Mapping[str, Any] | None = None,
         payload: Any | None = None,
         raw: bool = False,
+        timeout: float | None = None,
     ) -> dict[str, Any] | MemoryProfileRawResponse:
         """Forward one caller route and return its ApiResponse object.
 
@@ -146,12 +147,17 @@ class MemoryProfileServiceClient:
 
         started_at = time.perf_counter()
         try:
+            # ``timeout=None`` means "use the pool default"; httpx would read a
+            # literal None as "no timeout", so the kwarg is only sent when a
+            # caller explicitly needs a longer budget (batch generation).
+            extra = {} if timeout is None else {"timeout": timeout}
             response = await self._client.request(
                 http_method,
                 self._url(path),
                 headers=headers,
                 params=params,
                 json=payload,
+                **extra,
             )
         except httpx.TimeoutException as exc:
             logger.warning(

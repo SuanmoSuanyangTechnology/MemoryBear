@@ -3,7 +3,7 @@ import uuid
 from typing import List, Optional
 
 from dotenv import load_dotenv
-from fastapi import APIRouter, Depends, File, Form, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Query, Request, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 from starlette.responses import StreamingResponse
@@ -15,6 +15,7 @@ from app.core.response_utils import fail, success
 from app.db import get_async_db, get_db
 from app.dependencies import get_current_user
 from app.integrations.model.invoke_backend import ref_from_model_info
+from app.integrations.profile.proxy import memory_profile_proxy
 from app.models.user_model import User
 from app.repositories.end_user_repository import get_end_user_by_id
 from app.schemas.memory_agent_schema import Write_UserInput
@@ -242,10 +243,12 @@ async def get_knowledge_type_stats_api(
 
 
 @router.get("/analytics/user_profile", response_model=ApiResponse)
+@memory_profile_proxy(query_fields=("end_user_id",))
 async def get_user_profile_api(
         end_user_id: Optional[str] = Query(None, description="用户ID（可选）"),
         db: Session = Depends(get_db),
-        current_user: User = Depends(get_current_user)
+        current_user: User = Depends(get_current_user),
+        request: Request = None,
 ):
     """
     获取用户详情，包含：

@@ -220,6 +220,7 @@ async def get_interest_distribution(
         limit=limit,
         language_type=language_type,
         current_user=current_user,
+        request=request,
     )
 
 
@@ -289,7 +290,8 @@ async def generate_cache(
 
 
     return await memory_analytics_controller.generate_cache_api(
-        request=cache_request,
+        request=request,
+        payload=cache_request,
         language_type=language_type,
         current_user=current_user,
     )
