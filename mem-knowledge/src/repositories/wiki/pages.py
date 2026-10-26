@@ -362,11 +362,18 @@ def commit_map(session, delivery, *, config_hash, input_hash, materials, documen
     expected = {str(t.page_id) for t in tasks if t.operation == "upsert"}
     if {item["page_id"] for item in materials} != expected:
         raise WikiSuperseded("WIKI_MATERIAL_PLAN_MISMATCH", retryable=False)
-    session.execute(delete(WikiPageSource).where(WikiPageSource.document_id == document.id))
+    preserved = {as_uuid(item["page_id"]) for item in materials if item.get("preserve_existing")}
+    if preserved:
+        _settle_uncited_pages(session, document, tasks, preserved)
+    materials = [item for item in materials if not item.get("preserve_existing")]
+    session.execute(delete(WikiPageSource).where(
+        WikiPageSource.document_id == document.id, WikiPageSource.page_id.not_in(preserved)
+    ))
     metadata_by_page = {item["page_id"]: item.get("source_context", {}).get("page_metadata", {})
                         for item in materials}
     for page in session.scalars(select(WikiPage).where(
-        WikiPage.kb_id == knowledge.id, WikiPage.id.in_([as_uuid(p) for p in expected]),
+        WikiPage.kb_id == knowledge.id,
+        WikiPage.id.in_([as_uuid(item["page_id"]) for item in materials]),
     ).order_by(WikiPage.id).with_for_update()):
         metadata = metadata_by_page[str(page.id)]
         page.aliases = sorted(set([*page.aliases, *metadata.get("aliases", [])]))
@@ -385,13 +392,39 @@ def commit_map(session, delivery, *, config_hash, input_hash, materials, documen
                 source_context=item["source_context"],
             )
         )
-    dirty_pages(session, {t.page_id for t in tasks})
+    dirty_pages(session, {t.page_id for t in tasks} - preserved)
     state.mapped_version = state.requested_version
     state.stage = "reducing"
     append_log(document, "Wiki Map committed; page generation pending.")
     session.flush()
     settle_progress(session, document, state)
     return pending_page_ids(session, state)
+
+
+def _settle_uncited_pages(session, document, tasks, page_ids):
+    """引用降级只结束当前主题任务，保留此前正文与来源，避免空素材清空页面。"""
+    for task in tasks:
+        if task.page_id in page_ids:
+            task.status, task.error_code, task.error_stage = (
+                "skipped", "WIKI_TOPIC_WITHOUT_EVIDENCE", "citations"
+            )
+    session.flush()
+    for page_id in sorted(page_ids, key=str):
+        page = session.scalar(select(WikiPage).where(
+            WikiPage.id == page_id, WikiPage.kb_id == document.kb_id
+        ).with_for_update())
+        if page is None or page.page_type == "summary":
+            raise WikiError("WIKI_MATERIAL_PLAN_MISMATCH", retryable=False)
+        pending = session.scalar(select(WikiDocumentPageTask.subtask_id).where(
+            WikiDocumentPageTask.page_id == page_id,
+            WikiDocumentPageTask.status.not_in(TERMINAL_TASK_STATUSES),
+        ).limit(1))
+        if pending is None:
+            page.status = "ready" if page.version > 0 else "unavailable"
+            page.error_code = "WIKI_TOPIC_WITHOUT_EVIDENCE"
+            page.row_version += 1
+    append_log(document,
+               f"Wiki 引用降级：跳过 {len(page_ids)} 个无有效证据的已计划主题，保留历史正文。")
 
 
 def pending_page_ids(session, state):
