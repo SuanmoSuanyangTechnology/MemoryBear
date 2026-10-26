@@ -8,6 +8,7 @@ export const faq = {
   wikiSourceComparison: 'Wiki Source Comparison',
   sourceWiki: 'Source Wiki',
   sourceWikiLabel: 'Source Wiki:',
+  sourceLabel: 'Source: {{name}}',
   reviewStatus: 'Review status',
   questionExample: 'Example: How do I add files to the knowledge base?',
   enabledHint: 'Enabled · Available for retrieval and use',

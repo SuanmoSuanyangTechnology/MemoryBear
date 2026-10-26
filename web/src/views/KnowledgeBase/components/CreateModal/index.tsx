@@ -278,7 +278,7 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({ refreshTa
   };
 
   const handleSave = () => {
-    const currentFormValues = form.getFieldsValue();
+    const currentFormValues = form.getFieldsValue(true);
     const isGraphragEnabled = currentFormValues?.parser_config?.graphrag?.use_graphrag || false;
 
     if (originalType === 'rebuild' && isGraphragEnabled) {
