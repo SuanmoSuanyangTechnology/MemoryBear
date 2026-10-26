@@ -44,6 +44,7 @@ from ..models.file_metadata_model import FileMetadata
 from ..models.models_model import Modality
 from ..schemas.app_schema import FileInput, FileType, FileUploadConfig, TransferMethod
 from ..schemas.model_schema import ModelInfo
+from ..storage import LocalStorage
 from .file_content_service import extract_permanent_file_id
 from .file_storage_service import FileStorageService
 
@@ -121,6 +122,14 @@ _FILE_TYPE_LABELS = {
     FileType.VIDEO: "视频",
     FileType.DOCUMENT: "文档",
 }
+
+# Placeholder shown when video cannot egress: aimed at admins of private deployments,
+# keeping the actionable technical clue (unreachable local/intranet storage).
+_VIDEO_UNAVAILABLE_HINT = (
+    "[视频发送失败：存储地址模型侧不可达（本地存储或内网地址）。"
+    "管理员请将对象存储（OSS/S3/MinIO）配置为公网可达后重试，"
+    "或接入 provider Files API 支持本地存储视频。]"
+)
 
 
 def _resolve_inline_limits(config: Optional[Dict[str, Any]]) -> Dict[str, int]:
@@ -489,7 +498,7 @@ class OpenAIFormatStrategy(MultimodalFormatStrategy):
         if content is not None:
             return False, {
                 "type": "text",
-                "text": "[视频文件无法通过当前模型接口安全传输，请配置 provider Files API 后重试]",
+                "text": _VIDEO_UNAVAILABLE_HINT,
             }
         if not url:
             return False, {"type": "text", "text": "[视频文件缺少可用 URL]"}
@@ -609,6 +618,50 @@ class MultimodalService:
             # not leaked.
             raise BusinessException("文件不存在、未完成或无权访问", BizCode.FILE_NOT_FOUND)
         return metadata
+
+    async def _resolve_video_public_url(
+            self,
+            file: FileInput,
+            workspace_id: uuid.UUID | str | None,
+    ) -> str | None:
+        """Mint a model-reachable direct URL for an uploaded video.
+
+        Video has no universal inline (base64) protocol, so remote storage backends
+        (OSS/S3/MinIO) issue a long-lived presigned object URL instead of this service's
+        own proxy address. The minted URL still has to pass the same model-side
+        reachability check; intranet MinIO endpoints and Aliyun VPC-internal endpoints
+        are rejected here as well. Returns None for local disk storage or unreachable
+        backends, leaving the caller to emit the existing error placeholder.
+        """
+        if not file.upload_file_id:
+            return None
+
+        storage = FileStorageService().storage
+        if isinstance(storage, LocalStorage):
+            logger.info(
+                "视频无法出站：当前为本地磁盘存储，无模型侧可达地址",
+                extra={"file_id": str(file.upload_file_id)},
+            )
+            return None
+
+        # Ownership/tenant check before minting a signed URL.
+        metadata = await self._get_local_file_metadata(file.upload_file_id, workspace_id)
+        try:
+            # No file_name: do not force Content-Disposition: attachment, which some
+            # model-side video fetchers reject.
+            url = await storage.get_url(metadata.file_key, expires=86400)
+        except Exception as exc:
+            logger.warning(f"视频预签名 URL 生成失败，已降级: {exc}")
+            return None
+
+        host = (urlparse(url).hostname or "").strip("[]").lower()
+        if _model_cannot_reach_url(url) or "-internal." in host:
+            logger.warning(
+                "视频存储地址模型侧不可达，已拦截",
+                extra={"file_id": str(metadata.id), "host": host},
+            )
+            return None
+        return url
 
     async def _hydrate_local_file(
             self,
@@ -731,16 +784,24 @@ class MultimodalService:
             # handed to the model to pull back. Publicly reachable URLs are passed through
             # as-is, with no extra byte shuttling.
             if _requires_inline_bearer(file):
-                # URL-based video has no universal safe inline protocol yet; run the
-                # ownership check first, then reject explicitly before downloading a large
-                # object, pending provider Files API support.
                 if file.type == FileType.VIDEO:
-                    if file.upload_file_id:
-                        await self._get_local_file_metadata(file.upload_file_id, workspace_id)
-                    if Modality.VIDEO in self.input_modalities and include_processing_errors:
+                    # Video has no universal inline protocol: remote storage (OSS/S3/MinIO)
+                    # hands the model a direct, model-reachable presigned URL. Only local
+                    # disk storage or unreachable intranet endpoints keep the explicit error.
+                    video_public_url = None
+                    if Modality.VIDEO in self.input_modalities:
+                        # Ownership/tenant failure inside still aborts the request as before.
+                        video_public_url = await self._resolve_video_public_url(file, workspace_id)
+
+                    if video_public_url is not None:
+                        file.url = video_public_url
+                        is_support, content = await self._process_video(file, strategy_class(file))
+                        if is_support or include_processing_errors:
+                            result.append(content)
+                    elif Modality.VIDEO in self.input_modalities and include_processing_errors:
                         result.append({
                             "type": "text",
-                            "text": "[视频文件无法通过当前模型接口安全传输，请配置 provider Files API 后重试]",
+                            "text": _VIDEO_UNAVAILABLE_HINT,
                         })
                     elif Modality.VIDEO not in self.input_modalities:
                         logger.warning(f"不支持的文件类型: {file.type}")
