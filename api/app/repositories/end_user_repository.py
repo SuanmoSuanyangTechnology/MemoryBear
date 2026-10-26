@@ -1692,6 +1692,7 @@ class EndUserRepository:
         """按主键游标分页获取需要刷新名片 Tag 的有效用户。
 
         Tag 缓存字段不完整，或 metadata 的更新时间晚于 Tag 更新时间时，用户会进入候选集。
+        仅取 ``memory_count > 0`` 的用户
         查询只返回派发任务所需的轻量字段，避免扫描阶段占用过多数据库连接和内存。
         """
         query = (
@@ -1704,6 +1705,7 @@ class EndUserRepository:
             .join(Workspace, Workspace.id == EndUser.workspace_id)
             .filter(
                 EndUser.is_active.is_(True),
+                EndUser.memory_count > 0,
                 Workspace.is_active.is_(True),
                 or_(
                     EndUser.memory_tags.is_(None),
@@ -1994,7 +1996,9 @@ class EndUserRepository:
             self,
             workspace_id: uuid.UUID,
     ) -> List[MemoryCacheRefreshFields]:
-        """返回指定 Neo4j Workspace 下的缓存刷新原始字段。"""
+        """返回指定 Neo4j Workspace 下的缓存刷新原始字段。
+        仅返回 ``memory_count > 0`` 的用户：0 记忆宿主没有可洞察/可摘要的内容，
+        """
         rows = (
             self.db.query(
                 EndUser.id,
@@ -2009,6 +2013,7 @@ class EndUserRepository:
             .filter(
                 EndUser.workspace_id == workspace_id,
                 EndUser.is_active.is_(True),
+                EndUser.memory_count > 0,
                 Workspace.is_active.is_(True),
                 sa.or_(Workspace.storage_type.is_(None), Workspace.storage_type == "neo4j"),  # NULL 视为 neo4j
             )

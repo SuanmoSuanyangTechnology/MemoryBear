@@ -9,7 +9,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Generator, Optional
 
 import redis
-from sqlalchemy import exists, not_, select
+from sqlalchemy import String as SAString, cast, exists, not_, select
 from sqlalchemy.orm import Session
 
 from app.core.utils.datetime_utils import utcnow_naive
@@ -150,7 +150,9 @@ class ImplicitEmotionsStorageRepository:
         return storage
 
     def get_all_user_ids(self, batch_size: int = 100) -> Generator[str, None, None]:
-        """分批次获取所有已存储数据的用户ID（避免大数据量内存溢出）
+        """分批次获取有记忆且已存储数据的用户ID
+
+        只返回 end_users 中有效且 memory_count > 0 的用户：0 记忆宿主的画像/建议没有意义。
 
         Args:
             batch_size: 每批次加载的数量，默认100
@@ -163,6 +165,14 @@ class ImplicitEmotionsStorageRepository:
             try:
                 stmt = (
                     select(ImplicitEmotionsStorage.end_user_id)
+                    .join(
+                        EndUser,
+                        cast(EndUser.id, SAString) == ImplicitEmotionsStorage.end_user_id,
+                    )
+                    .where(
+                        EndUser.is_active == True,
+                        EndUser.memory_count > 0,
+                    )
                     .order_by(ImplicitEmotionsStorage.end_user_id)
                     .limit(batch_size)
                     .offset(offset)
@@ -181,6 +191,7 @@ class ImplicitEmotionsStorageRepository:
 
         筛选逻辑：
         - 查询 implicit_emotions_storage 中所有用户的 end_user_id 和 updated_at
+        - 只取 end_users 中有效且 memory_count > 0 的用户
         - 从 Redis 读取 write_message:last_done:{end_user_id} 的时间戳
         - 若 Redis 中无记录（该用户从未写入过记忆），跳过
         - 若 last_done > updated_at，说明上次刷新后又有新记忆写入，需要刷新
@@ -206,6 +217,14 @@ class ImplicitEmotionsStorageRepository:
             try:
                 stmt = (
                     select(ImplicitEmotionsStorage.end_user_id, ImplicitEmotionsStorage.updated_at)
+                    .join(
+                        EndUser,
+                        cast(EndUser.id, SAString) == ImplicitEmotionsStorage.end_user_id,
+                    )
+                    .where(
+                        EndUser.is_active == True,
+                        EndUser.memory_count > 0,
+                    )
                     .order_by(ImplicitEmotionsStorage.end_user_id)
                     .limit(batch_size)
                     .offset(offset)
@@ -281,6 +300,7 @@ class ImplicitEmotionsStorageRepository:
                     select(EndUser.id)
                     .where(
                         EndUser.is_active == True,
+                        EndUser.memory_count > 0,
                         EndUser.created_at >= today_start,
                         EndUser.created_at < tomorrow_start,
                         not_(
