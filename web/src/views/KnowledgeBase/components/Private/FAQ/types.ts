@@ -88,7 +88,7 @@ export interface ApproveFaqItem {
     reviewed_wiki_snapshot_id: string;
 }
 export interface BatchApproveFaqData {
-    items: ApproveFaqItem[]
+    items: { faq_id: string; }[]
 }
 
 export interface EnabledFaqItem {
