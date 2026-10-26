@@ -143,11 +143,15 @@ export const usePrivateKnowledgeBasePage = () => {
     setSelectedKeys(keys);
   }, [knowledgeBaseId]);
 
+  const refreshFolderTree = useCallback(() => {
+    setFolderTreeRefreshKey((value) => value + 1);
+  }, []);
+
   const refreshDirectoryTree = useCallback(async () => {
     await fetchKnowledgeBaseDetail();
     await new Promise((resolve) => setTimeout(resolve, 300));
-    setFolderTreeRefreshKey((value) => value + 1);
-  }, [fetchKnowledgeBaseDetail]);
+    refreshFolderTree();
+  }, [fetchKnowledgeBaseDetail, refreshFolderTree]);
 
   const onToggleDirectory = () => {
     setDirectoryCollapsed((collapsed) => !collapsed)
@@ -170,6 +174,7 @@ export const usePrivateKnowledgeBasePage = () => {
     handleFolderPathChange: setFolderPath,
     handleFolderSelect,
     refreshDirectoryTree,
+    refreshFolderTree,
     setQuery,
     directoryCollapsed,
     onToggleDirectory,
