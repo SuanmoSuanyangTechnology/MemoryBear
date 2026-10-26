@@ -138,8 +138,9 @@ Merge duplicate statements while retaining their sources. document_context expla
 and tone only, never factual evidence. previous_content helps structure and formatting only: retain
 information solely when current evidence supports it, remove withdrawn contributions.
 Use supplied [[L1|title]] links directly on relevant words in the prose, no self links.
-Track every evidence source, including duplicates, in source_refs without visible citations.
-Return summary, full content_markdown, and source_refs containing the union of evidence.source_refs.
+Return summary, full content_markdown, and a nonempty source_refs list identifying the supplied
+evidence actually used by this page, without visible citations. A subset of evidence.source_refs
+is valid: do not enumerate unused sources merely to cover the catalog. Never invent source handles.
 Do not repeat the top-level page title. Never output a patch or drop evidence to fit the budget.""",
     "wiki_candidates_v1": CANDIDATE_RULES + """Extract candidates from the supplied sources.
 Return kind, name, aliases, scope, description and source_refs for each qualifying subject.
