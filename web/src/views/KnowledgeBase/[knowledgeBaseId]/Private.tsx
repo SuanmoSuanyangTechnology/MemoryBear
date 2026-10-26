@@ -34,6 +34,7 @@ const Private: FC = () => {
     handleFolderPathChange,
     handleFolderSelect,
     refreshDirectoryTree,
+    refreshFolderTree,
     setQuery,
     directoryCollapsed,
     onToggleDirectory,
@@ -81,6 +82,10 @@ const Private: FC = () => {
         onEditKnowledgeBase={() => fileWorkspaceRef.current?.openKnowledgeBaseEditor()}
         onBatchDownloadKnowledgeBase={actions.batchDownloadKnowledgeBase}
         onExportKnowledgeBaseQa={actions.exportKnowledgeBaseQa}
+        onRefreshFiles={() => {
+          fileWorkspaceRef.current?.refreshTable();
+          refreshFolderTree();
+        }}
         fileDirectory={(
           <FolderTree
             embedded
