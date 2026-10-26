@@ -1,0 +1,56 @@
+[build-system]
+requires = ["hatchling>=1.26"]
+build-backend = "hatchling.build"
+
+[project]
+name = "memory-jobs"
+version = "0.1.0"
+description = "MemoryBear Celery worker service on synchronous infrastructure clients"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "celery==5.6.3",
+    "elasticsearch==8.17.0",
+    # Greenlet pool for the I/O-bound generation worker (see src/gevent_entry.py).
+    "gevent==26.9.0",
+    # ``redbear_model.__init__`` eagerly imports its SQL registry module, which
+    # imports ``sqlalchemy.ext.asyncio`` at module scope. Nothing here creates an
+    # async engine, but the import needs greenlet to complete.
+    "greenlet>=3.1,<4",
+    "jinja2==3.1.6",
+    "neo4j==6.4.0",
+    "psycopg[binary]==3.3.6",
+    "pydantic==2.14.1",
+    "pydantic-settings==2.15.0",
+    "python-dotenv==1.2.4",
+    # Generation talks to the model service through the shared invoke seam; the
+    # runtime extra carries httpx / json-repair / langchain-core it needs.
+    "redbear-model[runtime]",
+    "redis==6.4.0",
+    "sqlalchemy==2.1.4",
+]
+
+[tool.uv.sources]
+redbear-model = { path = "../packages/redbear-model" }
+
+[dependency-groups]
+dev = [
+    "pytest==9.0.3",
+    "ruff==0.16.7",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "ASYNC", "TID"]
+
+[tool.ruff.lint.flake8-tidy-imports]
+ban-relative-imports = "all"
