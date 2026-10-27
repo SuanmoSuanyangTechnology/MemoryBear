@@ -16,9 +16,9 @@ from celery import shared_task
 from task_bridge.mem_router import TaskName, TaskPriority
 
 from src.common.normalization import parse_uuid
-from src.modules.memory_insight.generation import validate_workspace_row
 from src.modules.shared.repositories.end_user import EndUserRepository
 from src.modules.shared.repositories.workspace import WorkspaceRepository
+from src.modules.shared.workspace_validation import validate_workspace_row
 from src.runtime import get_runtime
 from src.tasks.base import JobTask
 from src.tasks.profile_cache.dispatch import dispatch_generate

@@ -35,7 +35,6 @@ for _legacy_env in ("BROKER_URL", "RESULT_BACKEND", "CELERY_BROKER", "CELERY_BAC
 
 settings = get_settings()
 setup_logging(settings)
-
 logger = get_logger(__name__)
 
 def _broker_transport_options(settings: JobsSettings) -> dict[str, object]:

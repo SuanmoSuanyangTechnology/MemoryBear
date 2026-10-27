@@ -10,6 +10,7 @@ from typing import Any
 from src.bootstrap import get_settings
 from src.config import JobsSettings
 from src.infrastructure.elasticsearch import ElasticsearchManager
+from src.infrastructure.memory_enterprise import MemoryEnterpriseManager
 from src.infrastructure.model_service import ModelServiceManager
 from src.infrastructure.neo4j import Neo4jManager
 from src.infrastructure.postgres import PostgresManager
@@ -36,6 +37,8 @@ class JobsRuntime:
         self.neo4j = Neo4jManager(self.settings)
         #: 仅生成类任务使用；纯读/写任务不会触碰它，所以不参与依赖探测。
         self.model_service = ModelServiceManager(self.settings)
+        #: 可选的企业版服务（开源构建里没有配置，调用直接返回空）。
+        self.memory_enterprise = MemoryEnterpriseManager(self.settings)
 
     def dependency_health(self) -> dict[str, str]:
         """Ping every dependency; never raises, reports ``up``/``down``."""
@@ -98,6 +101,7 @@ class JobsRuntime:
         self.elasticsearch.reset_after_fork()
         self.neo4j.reset_after_fork()
         self.model_service.reset_after_fork()
+        self.memory_enterprise.reset_after_fork()
 
     def close(self) -> None:
         for name, manager in (
@@ -106,6 +110,7 @@ class JobsRuntime:
             ("elasticsearch", self.elasticsearch),
             ("neo4j", self.neo4j),
             ("model_service", self.model_service),
+            ("memory_enterprise", self.memory_enterprise),
         ):
             try:
                 manager.close()

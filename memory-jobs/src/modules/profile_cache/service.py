@@ -18,16 +18,14 @@ from src.common.normalization import normalize_language, parse_uuid
 from src.infrastructure.model_service import ModelServiceManager, SyncChatModel
 from src.infrastructure.neo4j import Neo4jManager
 from src.infrastructure.postgres import PostgresManager
-from src.modules.memory_insight.generation import (
-    refresh_memory_insight,
-    validate_workspace_row,
-)
+from src.modules.memory_insight.generation import refresh_memory_insight
 from src.modules.shared.model_config import ModelConfigurationError, resolve_chat_model
 from src.modules.shared.repositories.end_user import EndUserRepository
 from src.modules.shared.repositories.generation_graph import GenerationGraphRepository
 from src.modules.shared.repositories.memory_generation import MemoryGenerationRepository
 from src.modules.shared.repositories.model_config import ModelConfigRepository
 from src.modules.shared.repositories.workspace import WorkspaceRepository
+from src.modules.shared.workspace_validation import validate_workspace_row
 from src.modules.user_summary.generation import generate_user_summary
 
 logger = logging.getLogger(__name__)
