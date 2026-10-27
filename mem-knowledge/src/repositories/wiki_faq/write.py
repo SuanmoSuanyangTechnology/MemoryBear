@@ -13,7 +13,7 @@ from ...models.owned.wiki_faq import WikiFAQ, WikiPageVersion
 from ...rag.faq.contracts import FAQContent, edit_content
 from ...utils.datetime_utils import utcnow_naive
 from ..wiki.common import lock_knowledge
-from .common import conflict, get_faq, get_version, review_status, scoped, serialize, source
+from .common import conflict, get_faq, review_status, scoped, serialize, source
 
 logger = logging.getLogger(__name__)
 
@@ -130,43 +130,17 @@ def delete(session, scope, faq_id, actor_id, payload):
 
 
 def approve(session, scope, faq_id, actor_id, payload):
-    row = _lock(session, scope, faq_id)
-    target_id = payload["reviewed_wiki_snapshot_id"]
-    # 相同内容与Wiki快照已通过时直接返回；不能推进后来Wiki版本的审核基线。
-    if (
-        target_id is not None
-        and row.review_state == "approved"
-        and row.approved_wiki_snapshot_id == target_id
-        and row.content_revision == payload["content_revision"]
-    ):
-        return {"changed": False, "faq": serialize(session, scope, row)}
-    _expected(row, payload["expected_row_version"])
-    if row.content_revision != payload["content_revision"]:
-        conflict()
-    if row.review_state == "approved" and row.wiki_page_id is None and target_id is None:
-        # 只跳过已通过的无来源条目，不能将缺失快照解释成“审核当前最新版”。
-        return {"changed": False, "faq": serialize(session, scope, row)}
-    info = source(session, scope, row)
-    if info["source_status"] != "available":
-        conflict("KB_FAQ_SOURCE_UNAVAILABLE")
-    target = get_version(session, scope, target_id)
-    if (
-        not target
-        or target.wiki_page_id != row.wiki_page_id
-        or target.page_version != info["latest_wiki_version"]
-    ):
-        conflict("KB_FAQ_SOURCE_CHANGED")
-    return _record_approval(session, scope, row, actor_id, target)
+    """兼容旧调用签名，忽略客户端审核目标并确认当前内容与来源基线。"""
+    return approve_latest(session, scope, faq_id, actor_id)
 
 
 def approve_latest(session: Session, scope: dict, faq_id: uuid.UUID, actor_id: uuid.UUID) -> dict:
-    """批量审核在锁内接受当前问答，推进至来源最新快照；重复调用不重复写入。"""
+    """审核在锁内接受当前问答，推进至来源最新快照；重复调用不重复写入。"""
     row = _lock(session, scope, faq_id)
     if row.review_state == "approved" and row.wiki_page_id is None:
         return {"changed": False, "faq": serialize(session, scope, row)}
     info = source(session, scope, row)
-    if info["source_status"] != "available":
-        conflict("KB_FAQ_SOURCE_UNAVAILABLE")
+    # 批量审核与单条审核一致，允许确认不可用来源的当前已发布快照。
     target = _latest_snapshot(session, scope, row, info["latest_wiki_version"])
     if row.review_state == "approved" and row.approved_wiki_snapshot_id == target.id:
         return {"changed": False, "faq": serialize(session, scope, row)}

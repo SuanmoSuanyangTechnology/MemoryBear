@@ -1,5 +1,10 @@
 {
   "KB_FAQ_INDEX_FAILED": "FAQ 索引同步失败，问答已保存，可重试索引。",
+  "KB_FAQ_IMAGE_QUERY_UNSUPPORTED": "FAQ 检索暂不支持图片检索，请使用文本查询。",
+  "KB_FAQ_FILE_FILTER_UNSUPPORTED": "FAQ 检索暂不支持文件名过滤，请移除文件名过滤条件。",
+  "KB_FAQ_AUTO_METADATA_UNSUPPORTED": "FAQ 检索暂不支持自动元数据过滤，请关闭自动过滤后重试。",
+  "KB_FAQ_METADATA_FILTER_UNSUPPORTED": "FAQ 检索暂不支持生效的元数据过滤表达式，请禁用元数据过滤或清空过滤条件。",
+  "KB_FAQ_MIXED_RETRIEVAL_UNSUPPORTED": "FAQ 检索暂不支持与分词、语义、混合或图谱检索混用，请在同一次请求中统一使用 FAQ 检索。",
   "KB_PRINCIPAL_INVALID": "知识库身份信息无效，请重新登录后重试",
   "KB_VALIDATION_ERROR": "请求参数无效，请检查配置后重试",
   "KB_RESOURCE_NOT_FOUND": "资源不存在或不可访问，请检查所选资源",
