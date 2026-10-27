@@ -66,10 +66,13 @@ def periodic_tasks(settings: JobsSettings | None = None) -> tuple[PeriodicTask, 
 
     settings = settings or get_settings()
     return (
-        # Nightly sweep for stale insight/summary caches. Migrated from the
-        # API's ``regenerate-memory-cache`` entry, which has been removed: this
-        # service is now the only scanner. Same hour/minute and freshness window
-        # env names (UTC, matching ``celery_app``'s timezone).
+        # Nightly sweep for stale insight/summary caches, taken over from the
+        # API's ``regenerate-memory-cache`` entry. That entry is still live on
+        # this branch, so both scanners fire at the same hour until its removal
+        # lands; they share the ``insight_summary_cache:inflight:*`` lock, and
+        # ``JOBS_PROFILE_CACHE_SCAN_ENABLED=false`` leaves the API as the only
+        # scanner meanwhile. Same hour/minute and freshness window env names
+        # (UTC, matching ``celery_app``'s timezone).
         PeriodicTask(
             key="profile-cache-scan",
             task=TaskName.PROFILE_CACHE_SCAN.value,
