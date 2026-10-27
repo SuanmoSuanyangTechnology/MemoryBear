@@ -2,7 +2,9 @@ import uuid
 from enum import StrEnum
 from typing import Annotated, Literal, Union
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, GetJsonSchemaHandler, field_validator, model_validator
+from pydantic.json_schema import JsonSchemaValue
+from pydantic_core import CoreSchema
 
 from app.core.rag.models.chunk import QAChunk
 from app.integrations.knowledge.contracts import (
@@ -32,6 +34,16 @@ class RetrieveType(StrEnum):
     def public_value(self) -> str:
         """类型发现接口保留历史标识，输入和内部处理统一使用小写。"""
         return "wiki-FAQ" if self is RetrieveType.WIKI_FAQ else self.value
+
+    @classmethod
+    def __get_pydantic_json_schema__(
+        cls, schema: CoreSchema, handler: GetJsonSchemaHandler
+    ) -> JsonSchemaValue:
+        json_schema = handler(schema)
+        # 旧调用方仍可发送该值，OpenAPI 也保留其声明，避免被识别为枚举移除。
+        if cls.WIKI_FAQ.public_value not in json_schema["enum"]:
+            json_schema["enum"].append(cls.WIKI_FAQ.public_value)
+        return json_schema
 
 
 class KnowledgeBaseConfig(BaseModel):
