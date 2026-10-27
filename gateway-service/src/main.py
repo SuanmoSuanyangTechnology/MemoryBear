@@ -18,6 +18,7 @@ from fastapi import FastAPI
 from src import config
 from src import redis as gredis
 from src.forward import Forwarder, StaticTargetResolver
+from src.identity_backfill import IdentityApiKeyBackfill
 from src.middleware import GatewayDeps, GatewayMiddleware
 from src.routes import router
 
@@ -28,11 +29,21 @@ def build_gateway_deps() -> GatewayDeps:
     timeout = httpx.Timeout(connect=5.0, read=30.0, write=30.0, pool=5.0)
     forwarder = Forwarder(client=httpx.AsyncClient(timeout=timeout))
     app.state.forwarder = forwarder
+    # Keys issued before the snapshot pipeline have no Redis entry; lazily
+    # rebuild them from identity. Without a verify URL, a miss stays a 401.
+    backfill = None
+    if config.settings.IDENTITY_API_KEY_VERIFY_URL:
+        backfill = IdentityApiKeyBackfill(
+            config.settings.IDENTITY_API_KEY_VERIFY_URL,
+            timeout_ms=config.settings.IDENTITY_API_KEY_VERIFY_TIMEOUT_MS)
+    app.state.identity_api_key_backfill = backfill
     return GatewayDeps(
         verifier=TokenVerifier(secret=config.settings.SECRET_KEY),
-        # backfill=None：快照 miss 直接 401，不穿透回源 DB（决策 #14 fail-closed）；
+        # backfill=None：用户快照 miss 直接 401，不穿透回源 DB（决策 #14 fail-closed）；
         # 回源能力由未来版本接 identity 的 /internal/user-snapshot 接口补齐
         reader=SnapshotReader(gredis.redis, backfill=None,
+                              api_key_backfill=backfill,
+                              api_key_miss_ttl=config.settings.API_KEY_MISS_CACHE_TTL_SECONDS,
                               timeout_ms=config.settings.REDIS_CMD_TIMEOUT_MS),
         issuer=LocalTokenIssuer(private_key=config.settings.INTERNAL_ISSUER_PRIVATE_KEY,
                                 kid=config.settings.INTERNAL_ISSUER_KID,
@@ -54,6 +65,9 @@ async def lifespan(app: FastAPI):
     await gredis.init_redis()
     app.state.gateway_deps = build_gateway_deps()
     yield
+    backfill = app.state.identity_api_key_backfill
+    if backfill is not None:
+        await backfill.aclose()
     await gredis.close_redis()
 
 app = FastAPI(title="gateway-service", lifespan=lifespan)

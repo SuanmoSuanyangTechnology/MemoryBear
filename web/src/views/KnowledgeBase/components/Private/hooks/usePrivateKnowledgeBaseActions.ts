@@ -80,8 +80,8 @@ export const usePrivateKnowledgeBaseActions = (
     openMetadata: () => {
       if (knowledgeBase) metadataDrawerRef.current?.handleOpen(knowledgeBase.id);
     },
-    openKnowledgeBaseSettings: (step?: number) => {
-      if (knowledgeBase) createModalRef.current?.handleOpen(knowledgeBase, '', step);
+    openKnowledgeBaseSettings: (step?: number, type?: string) => {
+      if (knowledgeBase) createModalRef.current?.handleOpen(knowledgeBase, type, step);
     },
     batchDownloadKnowledgeBase: () => {
       if (!knowledgeBase) return;

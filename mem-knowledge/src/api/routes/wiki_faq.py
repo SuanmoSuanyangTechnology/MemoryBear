@@ -1,4 +1,4 @@
-"""管理端 FAQ 接口：作用域隔离，内容编辑与审核/启停独立。"""
+"""管理端 FAQ 接口：作用域隔离，已变更内容保存时确认审核，启停保持独立。"""
 
 from typing import Annotated, Literal
 from uuid import UUID
@@ -110,6 +110,11 @@ async def batch_approve(
     principal: PrincipalDep,
     runtime: RuntimeDep,
 ):
+    """审核当前 FAQ 内容并将来源基线推进至最新已发布 Wiki 快照。
+
+    每项只需 faq_id；旧版本和快照字段兼容接收但忽略。已通过且基线最新的条目跳过，
+    保留逐条处理结果。不会自动改写问答或启用 FAQ；单条审核仍校验客户端审核目标。
+    """
     scope = scope_for(kb_id, principal)
     return success(
         data=await service.batch(
@@ -161,6 +166,11 @@ async def edit_faq(
     principal: PrincipalDep,
     runtime: RuntimeDep,
 ):
+    """保存问答；已变更 FAQ 同时确认当前 Wiki 基线并恢复为已通过。
+
+    来源不可用或问答原文未改变也可确认基线。待审核 FAQ 保持待审核，启用状态不变；
+    仍须提交 expected_row_version，保留原并发校验。缺少当前版本快照时整次保存失败。
+    """
     scope = scope_for(kb_id, principal)
     return success(
         data=await service.run(
