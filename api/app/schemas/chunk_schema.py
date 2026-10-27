@@ -2,9 +2,7 @@ import uuid
 from enum import StrEnum
 from typing import Annotated, Literal, Union
 
-from pydantic import BaseModel, ConfigDict, Field, GetJsonSchemaHandler, field_validator, model_validator
-from pydantic.json_schema import JsonSchemaValue
-from pydantic_core import CoreSchema
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.core.rag.models.chunk import QAChunk
 from app.integrations.knowledge.contracts import (
@@ -35,15 +33,10 @@ class RetrieveType(StrEnum):
         """类型发现接口保留历史标识，输入和内部处理统一使用小写。"""
         return "wiki-FAQ" if self is RetrieveType.WIKI_FAQ else self.value
 
-    @classmethod
-    def __get_pydantic_json_schema__(
-        cls, schema: CoreSchema, handler: GetJsonSchemaHandler
-    ) -> JsonSchemaValue:
-        json_schema = handler(schema)
-        # 旧调用方仍可发送该值，OpenAPI 也保留其声明，避免被识别为枚举移除。
-        if cls.WIKI_FAQ.public_value not in json_schema["enum"]:
-            json_schema["enum"].append(cls.WIKI_FAQ.public_value)
-        return json_schema
+
+_RETRIEVE_TYPE_DESCRIPTION = (
+    "检索方式，忽略大小写及首尾空格；FAQ 使用 wiki-faq，兼容历史 wiki-FAQ。"
+)
 
 
 class KnowledgeBaseConfig(BaseModel):
@@ -215,7 +208,7 @@ class _ChunkRetrieveBase(BaseModel):
     top_k: int | None = Field(20, ge=1, le=100)
     retrieve_type: RetrieveType | None = Field(
         None,
-        description="检索方式，忽略大小写及首尾空格；FAQ 使用 wiki-faq，兼容历史 wiki-FAQ。",
+        description=_RETRIEVE_TYPE_DESCRIPTION,
     )
     rerank_mode: RerankMode | None = None
     rerank_weights: RerankWeights | None = None
@@ -264,6 +257,22 @@ class ApiChunkRetrieve(_HttpChunkRetrieve):
 
 class V1ChunkRetrieve(_HttpChunkRetrieve):
     """Supported request parameters for API Key retrieval."""
+
+    retrieve_type: RetrieveType | None = Field(
+        None,
+        description=_RETRIEVE_TYPE_DESCRIPTION,
+        # 保留 V1 已发布的内联枚举结构，运行时仍复用统一的类型归一化。
+        json_schema_extra={
+            "anyOf": [
+                {
+                    "type": "string",
+                    "enum": [kind.value for kind in RetrieveType],
+                },
+                {"type": "null"},
+            ],
+            "title": "Retrieve Type",
+        },
+    )
 
 
 class ChunkRetrieve(_ChunkRetrieveBase):
