@@ -6165,6 +6165,7 @@ class WorkflowService:
                             error=n.error_message,
                             input=n.input_data,
                             process=(n.meta_data or {}).get("process_data") if isinstance(n.meta_data, dict) else None,
+                            agent_log=(n.meta_data or {}).get("agent_log") if isinstance(n.meta_data, dict) else None,
                             output=n.output_data,
                             elapsed_time=n.elapsed_time,
                             token_usage=n.token_usage,

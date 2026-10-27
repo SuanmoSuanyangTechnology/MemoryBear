@@ -1005,6 +1005,7 @@ class MultiAgentOrchestrator:
                 elapsed_time=elapsed_time,
                 token_usage=token_usage,
                 error_message=error_message,
+                agent_log=getattr(self, "_master_agent_log", None),
                 meta_patch=meta_patch,
             )
         except Exception as e:
@@ -3141,6 +3142,9 @@ class MultiAgentOrchestrator:
         """
         # Sub-agent execution parameters (read by the SubAgentTool execution body)
         self._loop_user_id = user_id
+        # Final snapshot of the supervisor's own trace (LLM/tool calls), persisted
+        # to the master execution record on finalize.
+        self._master_agent_log: Optional[Dict[str, Any]] = None
         # Sub-agent web search: pure request-level passthrough (session-level switch on
         # the experience-sharing entry). The supervisor itself offers no search config
         # (SupervisorConfig has no web_search)
@@ -3284,6 +3288,13 @@ class MultiAgentOrchestrator:
                     _trace_tokens = _trace_total_tokens(item)
                     if _trace_tokens:
                         supervisor_tokens = max(supervisor_tokens, _trace_tokens)
+                    # Persist the supervisor's own trace (LLM turns + own tools):
+                    # previously it was only streamed via SSE, so version-switch /
+                    # log-detail views rebuilt from agent_executions lost the panel.
+                    if _item_type in ("agent_log", "agent_log_final"):
+                        _trace_data = item.get("data")
+                        if isinstance(_trace_data, dict):
+                            self._master_agent_log = _trace_data
                 # list (node_executions) is ignored: step attribution lives in the
                 # execution records
         finally:

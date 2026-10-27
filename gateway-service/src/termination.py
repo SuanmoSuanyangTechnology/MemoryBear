@@ -18,6 +18,7 @@ from, so both shapes reject identically.
 from __future__ import annotations
 
 import logging
+import time
 from datetime import UTC
 from typing import TYPE_CHECKING
 
@@ -53,6 +54,12 @@ _PROFILE_HEADERS: dict[str, tuple[str, str, str]] = {
 # target, so both variants below set it without consulting the route table.
 SOURCE_EXTERNAL = "ex_api"
 SOURCE_INTERNAL = "in_api"
+
+
+def _v1_fail(code: int, msg: str) -> dict:
+    """构造 /v1 外部集成统一失败信封（对齐宿主 app.core.response_utils.fail）。"""
+    return {"code": code, "msg": msg, "data": {}, "error": msg,
+            "time": int(time.time() * 1000)}
 
 
 def _extract_api_key(request: Request) -> str | None:
@@ -175,18 +182,23 @@ async def terminate_api_key(request: Request, deps: GatewayDeps) -> AuthResult:
     """
     api_key = _extract_api_key(request)
     if api_key is None:
-        return AuthResult(status_code=401, detail="missing api key")
+        # /v1 契约：未携带 Key → 400 / code 3007（API_KEY_NOT_FOUND）
+        body = _v1_fail(3007, "请求未携带 API Key")
+        return AuthResult(status_code=400, detail="missing api key", body=body)
     try:
         ctx = await deps.reader.get_api_key_snapshot(api_key)
     except SnapshotUnavailable:
-        # Snapshot state unobtainable → reject (fail-closed)
-        return AuthResult(status_code=401, detail="auth unavailable")
+        # Snapshot state unobtainable → reject (fail-closed). 按无效 Key 契约返回。
+        body = _v1_fail(3009, "API Key 无效")
+        return AuthResult(status_code=401, detail="auth unavailable", body=body)
     if ctx is None:
-        return AuthResult(status_code=401, detail="invalid api key")
+        body = _v1_fail(3009, "API Key 无效")
+        return AuthResult(status_code=401, detail="invalid api key", body=body)
     if ctx.user_id is None:
         # No creator subject (deleted creator / stale snapshot): reject fast —
         # an ak:* placeholder must never reach downstream services.
-        return AuthResult(status_code=401, detail="invalid api key")
+        body = _v1_fail(3009, "API Key 无效")
+        return AuthResult(status_code=401, detail="invalid api key", body=body)
     if not ctx.rate_limit_disabled:
         for check, limit in (
             (deps.limiter.check_qps, ctx.rate_limit),
@@ -200,7 +212,11 @@ async def terminate_api_key(request: Request, deps: GatewayDeps) -> AuthResult:
                 # Quota state unobtainable → reject (fail-closed): the SDK
                 # limiter contract is "gateway converts to 401", never an
                 # unhandled 500.
-                return AuthResult(status_code=401, detail="auth unavailable")
+                return AuthResult(
+                    status_code=401,
+                    detail="auth unavailable",
+                    body=_v1_fail(3009, "API Key 无效"),
+                )
             if not allowed:
                 return AuthResult(
                     status_code=429, detail="rate limit exceeded", headers=headers
