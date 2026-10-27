@@ -2,14 +2,19 @@
 import asyncio
 import hashlib
 import json
+from collections.abc import Awaitable, Callable
 from dataclasses import asdict
-from datetime import datetime
+from datetime import UTC, datetime
 
 from redis.exceptions import RedisError
 
 from auth_sdk.schema import ApiKeyContext, UserSnapshot
 
 SNAPSHOT_TTL = 86400  # 24h 兜底（决策 #11 修订：通知是主要失效手段，TTL 只兜底丢失）
+
+# Returns the snapshot context plus its expiry (TTL source) for a valid key,
+# or None when identity confirms the credential is invalid.
+ApiKeyBackfill = Callable[[str], Awaitable[tuple[ApiKeyContext, datetime | None] | None]]
 
 
 class SnapshotUnavailable(Exception):
@@ -18,6 +23,14 @@ class SnapshotUnavailable(Exception):
 
 def api_key_hash(api_key: str) -> str:
     return hashlib.sha256(api_key.encode()).hexdigest()
+
+
+def api_key_miss_key_from_hash(api_key_digest: str) -> str:
+    return f"api_key_miss:{api_key_digest}"
+
+
+def api_key_miss_key(api_key: str) -> str:
+    return api_key_miss_key_from_hash(api_key_hash(api_key))
 
 
 def snapshot_to_json(snap: UserSnapshot) -> bytes:
@@ -37,11 +50,18 @@ def snapshot_from_json(raw: bytes) -> UserSnapshot:
 
 
 class SnapshotReader:
-    def __init__(self, redis, backfill=None, timeout_ms: int = 100):
+    def __init__(self, redis, backfill=None, timeout_ms: int = 100, *,
+                 api_key_backfill: ApiKeyBackfill | None = None,
+                 api_key_miss_ttl: int = 30):
         self._redis = redis
         self._backfill = backfill          # async (user_id) -> UserSnapshot | None
         self._timeout = timeout_ms / 1000
         self._inflight: dict[str, asyncio.Future] = {}
+        # The API-key backfill is a separate trust boundary (identity owns key
+        # validation); it is wired only by the gateway.
+        self._api_key_backfill = api_key_backfill
+        self._api_key_miss_ttl = api_key_miss_ttl
+        self._api_key_inflight: dict[str, asyncio.Future] = {}
 
     async def get_user_snapshot(self, user_id: str) -> UserSnapshot:
         raw = await self._get(f"user:{user_id}", renew=True)   # 命中即续期，快照随会话滑动
@@ -59,12 +79,18 @@ class SnapshotReader:
         # API key 是长期静态凭证，无"访问续期"动作——续期为 24h 会让仍在有效期的 key
         # 在 24h 无访问后 miss（老单体里该 key 依然有效），且永不过期 key 会被续成 24h 错误缩短。
         raw = await self._get(f"api_key:{api_key_hash(api_key)}")
-        if raw is None:
+        if raw is not None:
+            try:
+                return ApiKeyContext(**json.loads(raw))
+            except (TypeError, ValueError) as exc:
+                raise SnapshotUnavailable(f"corrupt api_key snapshot: {exc}") from exc
+        if self._api_key_backfill is None:
             return None
-        try:
-            return ApiKeyContext(**json.loads(raw))
-        except (TypeError, ValueError) as exc:
-            raise SnapshotUnavailable(f"corrupt api_key snapshot: {exc}") from exc
+        # Check the positive snapshot first (above) so a freshly rebuilt key is
+        # never shadowed by a negative entry left over from an earlier rejection.
+        if self._api_key_miss_ttl > 0 and await self._get(api_key_miss_key(api_key)) is not None:
+            return None
+        return await self._singleflight_api_key(api_key)
 
     async def is_token_blacklisted(self, jti: str) -> bool:
         """登出/单点踢人/刷新换新拉黑的 token（老单体写 token_blacklist:{jti}）→ 命中 True。
@@ -87,6 +113,69 @@ class SnapshotReader:
         try:
             await asyncio.wait_for(self._redis.set(key, value, ex=SNAPSHOT_TTL),
                                    timeout=self._timeout)
+        except (TimeoutError, RedisError):
+            pass
+
+    async def _singleflight_api_key(self, api_key: str) -> ApiKeyContext | None:
+        """One identity lookup per key hash across concurrent misses.
+
+        Invalid keys are remembered in a short negative-cache entry so repeated
+        bogus credentials stop reaching identity; only an explicit rejection
+        (backfill returns None) is cached — an unavailable identity must stay
+        retryable.
+        """
+        digest = api_key_hash(api_key)
+        loop = asyncio.get_running_loop()
+        future = self._api_key_inflight.get(digest)
+        if future is None:
+            future = loop.create_future()
+            self._api_key_inflight[digest] = future
+            try:
+                result = await self._api_key_backfill(api_key)
+                if result is None:
+                    await self._set_api_key_miss(api_key)
+                    future.set_result(None)
+                else:
+                    ctx, expires_at = result
+                    await self._set_api_key_snapshot(digest, ctx, expires_at)
+                    future.set_result(ctx)
+            except asyncio.CancelledError:
+                future.set_exception(
+                    SnapshotUnavailable("api_key backfill cancelled"))
+                future.exception()
+                raise
+            except Exception as exc:
+                # Backfill is a remote call (identity HTTP): any failure means
+                # the snapshot is unobtainable → fail closed.
+                future.set_exception(
+                    SnapshotUnavailable(f"api_key backfill failed: {exc}"))
+            finally:
+                self._api_key_inflight.pop(digest, None)
+        return await future
+
+    async def _set_api_key_snapshot(self, digest: str, ctx: ApiKeyContext,
+                                    expires_at: datetime | None) -> None:
+        payload = json.dumps(asdict(ctx)).encode()
+        ttl = None
+        if expires_at is not None:
+            now = datetime.now(UTC).replace(tzinfo=None)
+            remaining = (expires_at.replace(tzinfo=None) - now).total_seconds()
+            ttl = max(1, int(remaining))
+        # Write failures must not fail the request (same rule as user snapshots).
+        try:
+            await asyncio.wait_for(self._redis.set(f"api_key:{digest}", payload, ex=ttl),
+                                   timeout=self._timeout)
+        except (TimeoutError, RedisError):
+            pass
+
+    async def _set_api_key_miss(self, api_key: str) -> None:
+        if self._api_key_miss_ttl <= 0:
+            return
+        try:
+            await asyncio.wait_for(
+                self._redis.set(api_key_miss_key(api_key), b"1",
+                                ex=self._api_key_miss_ttl),
+                timeout=self._timeout)
         except (TimeoutError, RedisError):
             pass
 

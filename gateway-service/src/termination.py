@@ -21,7 +21,7 @@ import logging
 from datetime import UTC
 from typing import TYPE_CHECKING
 
-from auth_sdk.schema import UserContext
+from auth_sdk.schema import ApiKeyContext, UserContext
 from auth_sdk.snapshot import SnapshotUnavailable
 from fastapi import Request
 from jose.exceptions import JWTError
@@ -65,6 +65,27 @@ def _extract_api_key(request: Request) -> str | None:
         if key:
             return key
     return request.headers.get("x-api-key") or None
+
+
+def _api_key_scope_denied(request: Request, ctx: ApiKeyContext) -> bool:
+    """Route-declared scope gate (all-of, matching the monolith
+    @require_api_key semantics): a key may only use routes whose required scopes
+    it carries. No target route means the request is never forwarded (stub /
+    unrouted), so nothing downstream is reachable; a resolved route with an empty
+    required_scopes is a misconfiguration and denies — never let a missing
+    declaration widen every key's reach."""
+    route = getattr(request.state, "target_route", None)
+    if route is None:
+        return False
+    if not route.required_scopes:
+        logger.warning(
+            "api key denied: route declares no required_scopes: %s",
+            request.url.path,
+        )
+        return True
+    # Snapshot values come from Redis (external boundary): a null/absent scopes
+    # field must deny, not raise.
+    return not set(route.required_scopes).issubset(ctx.scopes or ())
 
 
 def _profile_headers(
@@ -166,8 +187,8 @@ async def terminate_user(request: Request, deps: GatewayDeps) -> AuthResult:
 
 
 async def terminate_api_key(request: Request, deps: GatewayDeps) -> AuthResult:
-    """API-key path (/v1/): snapshot (fail-closed) → QPS + daily quota →
-    identity context + injected headers + audit event.
+    """API-key path (/v1/): snapshot (fail-closed) → route scope gate →
+    QPS + daily quota → identity context + injected headers + audit event.
 
     The key acts on behalf of its creator: the actor everywhere (headers,
     audit) is the creator user_id, the same subject the enterprise internal
@@ -187,6 +208,10 @@ async def terminate_api_key(request: Request, deps: GatewayDeps) -> AuthResult:
         # No creator subject (deleted creator / stale snapshot): reject fast —
         # an ak:* placeholder must never reach downstream services.
         return AuthResult(status_code=401, detail="invalid api key")
+    # Authorization before quota: an out-of-scope call must not consume the
+    # key's QPS/daily budget (monolith order: scope check before rate limits).
+    if _api_key_scope_denied(request, ctx):
+        return AuthResult(status_code=403, detail="insufficient scope")
     if not ctx.rate_limit_disabled:
         for check, limit in (
             (deps.limiter.check_qps, ctx.rate_limit),

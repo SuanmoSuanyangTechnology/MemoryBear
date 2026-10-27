@@ -25,6 +25,7 @@ APPLICATION_SERVICE_CALLBACK_SECRET，两端配置同一值）。记忆类与终
     POST /apps/ontology-batch                           应用 ontology 子对象批量聚合
     POST /apps/ontology-filter                          应用列表本体筛选（返回命中的 app_ids）
     POST /apps/ontology-bind                            应用创建后的首次本体绑定
+    POST /apps/ontology-unbind                          应用删除后的本体绑定软删除
     POST /memory/emotion-policy                         按应用解析情绪回复策略
 """
 from __future__ import annotations
@@ -201,6 +202,10 @@ class AppOntologyBindRequest(BaseModel):
     app_id: uuid.UUID
     tenant_id: uuid.UUID
     ontology_id: uuid.UUID
+
+
+class AppOntologyUnbindRequest(BaseModel):
+    app_id: uuid.UUID
 
 
 class AppEmotionPolicyRequest(BaseModel):
@@ -609,6 +614,30 @@ def internal_app_ontology_bind(
     if policy_provider is not None:
         policy_provider.invalidate_sync(payload.app_id, payload.tenant_id)
     return success(data={"available": True, "bound": True})
+
+
+@router.post("/apps/ontology-unbind")
+def internal_app_ontology_unbind(
+        payload: AppOntologyUnbindRequest,
+        _guard: None = Depends(require_app_service_callback_secret),
+):
+    """Soft-delete the app's active ontology binding after the app was deleted.
+
+    The application service commits its local soft delete first, then calls this
+    endpoint (no remote call inside a transaction); a failure here is compensated
+    on the caller side by restoring the app. The update is idempotent: repeated
+    calls only touch rows that are still active. Without the memory plugin
+    (community edition / License without memory) there is no binding to remove,
+    reported as available=false so the caller proceeds.
+    """
+    binder = get_plugin(ONTOLOGY_BINDING_PLUGIN)
+    if binder is None:
+        return success(data={"available": False, "unbound": False})
+    logger.info(f"Internal app ontology unbind - app: {payload.app_id}")
+    with get_db_context() as db:
+        binder.unbind_in_session(db, payload.app_id)
+        db.commit()
+    return success(data={"available": True, "unbound": True})
 
 
 # ──────────────────────────────────────────────────────────────
