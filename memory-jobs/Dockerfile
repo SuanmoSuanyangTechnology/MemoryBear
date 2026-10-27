@@ -24,4 +24,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
   CMD ["python", "-m", "src.healthcheck"]
 # Queue/pool/concurrency are per-deployment choices; override CMD in the
 # orchestrator (see deploy/k8s/worker.yaml).
-CMD ["celery", "-A", "src.gevent_entry:celery_app", "worker", "--loglevel=INFO", "--pool=gevent", "--concurrency=32", "--queues=memory_tasks", "--hostname=memory-jobs@%h"]
+CMD ["celery", "-A", "src.entry:celery_app", "worker", "--loglevel=INFO", "--pool=threads", "--concurrency=100", "--queues=memory_jobs_tasks", "--hostname=memory-jobs@%h"]

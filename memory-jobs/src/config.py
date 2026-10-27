@@ -8,6 +8,7 @@ from urllib.parse import quote_plus, urlparse, urlsplit, urlunsplit
 from pydantic import AliasChoices, ConfigDict, Field, field_validator
 from pydantic_settings import BaseSettings
 from sqlalchemy.engine import make_url
+from task_bridge.mem_router import MAX_PRIORITY, QueueName
 
 
 def _as_sync_postgres_url(value: str) -> str:
@@ -123,7 +124,18 @@ class JobsSettings(BaseSettings):
     #: API's values (defaults 3 and 4) so both services talk to the same queues.
     redis_db_celery_broker: int = Field(3, ge=0, validation_alias="REDIS_DB_CELERY_BROKER")
     redis_db_celery_backend: int = Field(4, ge=0, validation_alias="REDIS_DB_CELERY_BACKEND")
-    task_default_queue: str = Field("memory_tasks", validation_alias="JOBS_TASK_DEFAULT_QUEUE")
+    #: AMQP ``x-max-priority`` for the queues this service declares. On RabbitMQ
+    #: the message priority only orders anything when the queue carries this
+    #: argument, and every app declaring the queue must pass the same value —
+    #: a mismatch makes the declaration fail with ``PRECONDITION_FAILED``.
+    task_queue_max_priority: int = Field(
+        MAX_PRIORITY, ge=0, le=255, validation_alias="JOBS_TASK_QUEUE_MAX_PRIORITY"
+    )
+    #: This service's own queue. It is not one of the API's queue names: an
+    #: unrouted task must never land where an API worker would receive it.
+    task_default_queue: str = Field(
+        QueueName.MEMORY_JOBS.value, validation_alias="JOBS_TASK_DEFAULT_QUEUE"
+    )
     task_time_limit_seconds: int = Field(3600, ge=1, validation_alias="JOBS_TASK_TIME_LIMIT")
     task_soft_time_limit_seconds: int = Field(
         3000, ge=1, validation_alias="JOBS_TASK_SOFT_TIME_LIMIT"
@@ -135,9 +147,49 @@ class JobsSettings(BaseSettings):
     worker_prefetch_multiplier: int = Field(
         1, ge=0, validation_alias="JOBS_WORKER_PREFETCH_MULTIPLIER"
     )
+    #: Share one result backend across all worker threads. Celery's default
+    #: keeps a thread-local backend, which under --pool=threads means one Redis
+    #: client plus one connection pool *per thread*. RedisBackend is safe to
+    #: share: redis-py clients/pools are thread-safe and the backend's own
+    #: result cache (kombu LRUCache) holds an RLock. Not a Celery default key,
+    #: so it only takes effect through ``conf.update`` in ``celery_app``.
+    result_backend_thread_safe: bool = Field(
+        True, validation_alias="JOBS_RESULT_BACKEND_THREAD_SAFE"
+    )
     worker_send_task_events: bool = Field(True, validation_alias="JOBS_WORKER_SEND_TASK_EVENTS")
     task_send_sent_event: bool = Field(True, validation_alias="JOBS_TASK_SEND_SENT_EVENT")
     result_expires_seconds: int = Field(3600, ge=0, validation_alias="JOBS_RESULT_EXPIRES")
+
+    # ------------------------------------------------- profile cache periodic scan
+    #: The scanner dispatches ``memory_jobs.profile_cache.generate`` for users
+    #: whose insight/summary cache is stale. Hour/minute and the freshness window
+    #: reuse the API's names and defaults, so cutting the API's
+    #: ``regenerate-memory-cache`` beat entry over needs no new config.
+    #: Times are UTC (the app pins ``timezone="UTC"``).
+    profile_cache_scan_enabled: bool = Field(
+        True, validation_alias="JOBS_PROFILE_CACHE_SCAN_ENABLED"
+    )
+    memory_cache_regeneration_hour: int = Field(
+        18, ge=0, le=23, validation_alias="MEMORY_CACHE_REGENERATION_HOUR"
+    )
+    memory_cache_regeneration_minute: int = Field(
+        0, ge=0, le=59, validation_alias="MEMORY_CACHE_REGENERATION_MINUTE"
+    )
+    memory_cache_fresh_hours: int = Field(
+        72, ge=1, validation_alias="MEMORY_CACHE_FRESH_HOURS"
+    )
+
+    # ------------------------------------------------ interest distribution cache
+    #: TTL of the interest-distribution cache the pre-warm units write. Shares
+    #: its env name with memory-profile, which writes the same key from the
+    #: online path, so both writers expire entries at the same moment.
+    interest_cache_expire_seconds: int = Field(
+        24 * 60 * 60,
+        ge=1,
+        validation_alias=AliasChoices(
+            "JOBS_INTEREST_CACHE_EXPIRE_SECONDS", "PROFILE_INTEREST_CACHE_EXPIRE_SECONDS"
+        ),
+    )
 
     # ------------------------------------------------------------ model service
     #: 生成类任务走模型服务 invoke 接缝；凭据、渠道选路与 failover 都在模型服务侧。

@@ -2,8 +2,8 @@
 
 The entry point mirrors ``ProfileAnalyticsService.generate_cache``: validate the
 workspace once, resolve the workspace LLM once, then generate the insight and the
-summary for one user or for every active user of the workspace. Failures are
-reported per part instead of aborting the batch.
+summary for one user. A whole-workspace batch is fanned out by the task layer
+into these per-user units. Failures are reported per part.
 """
 
 from __future__ import annotations
@@ -133,15 +133,16 @@ class ProfileCacheGenerationService:
     def generate_cache(
         self,
         workspace_id: UUID,
-        end_user_id: str | None,
+        end_user_id: str,
         language: str | None,
         refresh_insight: bool = True,
         refresh_summary: bool = True,
     ) -> dict[str, Any]:
-        """Generate for one user (``end_user_id`` given) or the whole workspace.
+        """Generate one user's cache columns.
 
         ``refresh_insight`` / ``refresh_summary`` let the periodic scanner ask for
         only the part its freshness rules allow; a manual trigger sends both.
+        Workspace-wide runs are dispatched per user by the task layer.
         """
 
         language = normalize_language(language)
@@ -156,88 +157,32 @@ class ProfileCacheGenerationService:
         resolver = ChatModelMemo(self.model_config, self.model_service, workspace_row)
         callable_workspace_row = dict(workspace_row or {})
 
-        if end_user_id:
-            insight_result = (
-                self._generate_and_cache_insight(
-                    end_user_id, workspace_id, language, resolver, callable_workspace_row
-                )
-                if refresh_insight
-                else _skipped_insight_result()
+        insight_result = (
+            self._generate_and_cache_insight(
+                end_user_id, workspace_id, language, resolver, callable_workspace_row
             )
-            summary_result = (
-                self._generate_and_cache_summary(
-                    end_user_id, workspace_id, language, resolver
-                )
-                if refresh_summary
-                else _skipped_summary_result()
+            if refresh_insight
+            else _skipped_insight_result()
+        )
+        summary_result = (
+            self._generate_and_cache_summary(
+                end_user_id, workspace_id, language, resolver
             )
-            errors: list[dict[str, Any]] = []
-            if refresh_insight and not insight_result["success"]:
-                errors.append({"type": "insight", "error": insight_result.get("error")})
-            if refresh_summary and not summary_result["success"]:
-                errors.append({"type": "summary", "error": summary_result.get("error")})
-            # Exactly the API's per-user result shape; the part-level details
-            # stay in the logs, not in the payload the caller sees.
-            return {
-                "end_user_id": end_user_id,
-                "insight_success": insight_result["success"] if refresh_insight else None,
-                "summary_success": summary_result["success"] if refresh_summary else None,
-                "errors": errors,
-            }
-
-        user_ids = self.end_users.active_ids_in_workspace(workspace_id)
-        successful = 0
-        failed = 0
-        batch_errors: list[dict[str, Any]] = []
-        for user_id in user_ids:
-            current_id = str(user_id)
-            try:
-                insight_result = (
-                    self._generate_and_cache_insight(
-                        current_id, workspace_id, language, resolver, callable_workspace_row
-                    )
-                    if refresh_insight
-                    else _skipped_insight_result()
-                )
-                summary_result = (
-                    self._generate_and_cache_summary(
-                        current_id, workspace_id, language, resolver
-                    )
-                    if refresh_summary
-                    else _skipped_summary_result()
-                )
-                requested = [
-                    bool(result["success"])
-                    for result, wanted in (
-                        (insight_result, refresh_insight),
-                        (summary_result, refresh_summary),
-                    )
-                    if wanted
-                ]
-                if requested and all(requested):
-                    successful += 1
-                else:
-                    failed += 1
-                    batch_errors.append(
-                        {
-                            "end_user_id": current_id,
-                            "insight_error": insight_result.get("error"),
-                            "summary_error": summary_result.get("error"),
-                        }
-                    )
-            except Exception as exc:
-                failed += 1
-                batch_errors.append({"end_user_id": current_id, "error": str(exc)})
-                logger.error(
-                    "batch cache generation failed for user: %s",
-                    current_id,
-                    exc_info=True,
-                )
+            if refresh_summary
+            else _skipped_summary_result()
+        )
+        errors: list[dict[str, Any]] = []
+        if refresh_insight and not insight_result["success"]:
+            errors.append({"type": "insight", "error": insight_result.get("error")})
+        if refresh_summary and not summary_result["success"]:
+            errors.append({"type": "summary", "error": summary_result.get("error")})
+        # Exactly the API's per-user result shape; the part-level details
+        # stay in the logs, not in the payload the caller sees.
         return {
-            "total_users": len(user_ids),
-            "successful": successful,
-            "failed": failed,
-            "errors": batch_errors,
+            "end_user_id": end_user_id,
+            "insight_success": insight_result["success"] if refresh_insight else None,
+            "summary_success": summary_result["success"] if refresh_summary else None,
+            "errors": errors,
         }
 
     # ------------------------------------------------------------- internals

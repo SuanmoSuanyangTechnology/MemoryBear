@@ -2,7 +2,7 @@
 
 Point the CLI at this module::
 
-    celery -A src.entry:celery_app worker --pool=threads --queues=memory_tasks
+    celery -A src.entry:celery_app worker --pool=threads --queues=memory_jobs_tasks
     celery -A src.entry:celery_app beat
 """
 

@@ -10,7 +10,10 @@
 packages/auth-sdk/
 packages/scripts/
 packages/storage-core/
-packages/task-bridge-sdk/
+!packages/task-bridge-sdk/
+!packages/task-bridge-sdk/pyproject.toml
+!packages/task-bridge-sdk/README.md
+!packages/task-bridge-sdk/src/**
 !packages/redbear-model/
 !packages/redbear-model/pyproject.toml
 !packages/redbear-model/src/**
