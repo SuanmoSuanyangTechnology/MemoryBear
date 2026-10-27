@@ -175,27 +175,44 @@ Generation is a later, explicitly scoped extension over the read service:
   `task-bridge-sdk` (a bare Celery producer — no task registration, no worker)
   and waits on the result backend, then returns the API's response shape. The
   wait is bounded by a fixed 960s budget (above the worker's 900s hard limit).
-  Task name and queue are bridge constants, and each flow declares its own wait
-  budget next to the submit call — none of them is a setting. Broker and
-  result backend default to Redis DB 3/4, matching the API and memory-jobs. The task result is the API's
+  Task name, queue and routing table come from `task_bridge.mem_router` (the
+  `mem-router` extra of `task-bridge-sdk`) — the same contract memory-jobs
+  registers from — and each flow declares its own wait budget next to the submit
+  call; none of them is a setting. The adapter itself is generic:
+  `TaskBridgeManager.submit(task_name, kwargs=...)` names the task; queue and
+  priority default to memory-jobs' queue at the interactive level and can be
+  overridden per publish. Broker and result backend default to Redis DB 3/4,
+  matching the API and memory-jobs. The task result is the API's
   `data` shape verbatim (`end_user_id` / `insight_success` / `summary_success` /
-  `errors`; the batch uses `total_users` / `successful` / `failed` / `errors`),
-  and this service returns it unchanged. `interest_distribution` follows
-  the same pattern with a fixed 120s budget.
+  `errors`), and this service returns it unchanged. `interest_distribution`
+  follows the same pattern with a fixed 120s budget.
 - `generate_cache` without an `end_user_id` dispatches
-  `memory_jobs.profile_cache.generate_workspace`: the worker runs the API's
-  serial per-user loop and returns `{total_users, successful, failed, errors}`.
-  The wait is bounded by a fixed 3600s budget, matching the API proxy's
-  `MEMORY_PROFILE_GENERATE_CACHE_TIMEOUT_SECONDS` for its own outer request.
+  `memory_jobs.profile_cache.generate_workspace`: the worker enumerates the
+  workspace's active users and queues one `memory_jobs.profile_cache.generate`
+  unit per user. The response keeps the API's batch shape
+  (`total_users` / `successful` / `failed` / `errors`); with the fan-out,
+  `successful` counts the units that were queued and `failed` the ones the
+  broker refused, while each unit reports its own generation outcome. The wait
+  is bounded by a 3600s budget; a normal dispatch answers in seconds, and the
+  budget only tolerates a rolling upgrade still running the old serial
+  implementation.
 - Workspace-level facts — the workspace row and the LLM configuration — are
-  resolved once per request by `WorkspaceModelMemo` and shared by both parts of
-  a user and by every user in a batch. Resolution stays lazy (only when there is
-  something to generate), and a failed resolution is not retried per user.
+  resolved lazily by `WorkspaceModelMemo`, once per request for a single user
+  and once per unit for a fanned-out batch. A failed resolution is not retried
+  inside the same request.
 - Deployments that enable `generate_cache` or `interest_distribution` need a
-  reachable broker/result backend and a running `memory_heavy_tasks` worker
-  (memory-jobs). Without a worker these endpoints keep the legacy envelope:
+  reachable broker/result backend and a running `memory_jobs_tasks` worker
+  (memory-jobs). Without one these endpoints keep the legacy envelope:
   HTTP 200 with `code=10003` (`SERVICE_UNAVAILABLE`) and a localized `msg` —
   the API's `fail()` never changed the HTTP status either.
+- Every submission carries `TaskPriority.INTERACTIVE` — 9 on AMQP, the highest
+  level — and the producer declares `memory_jobs_tasks` with the same
+  `x-max-priority` as the worker, so a request someone is waiting on is dequeued
+  before memory-jobs' nightly sweep (0) and any bulk fan-out (5). Task name,
+  queue, routing table and the priority levels all come from
+  `task_bridge.mem_router`, which memory-jobs configures its worker from.
+  Changing one side alone leaves submissions unread, unprioritised, or rejected
+  with `PRECONDITION_FAILED`.
 - Deployments that enable `generate_cache` must grant `UPDATE` on `end_users`
   to the **memory-jobs** PostgreSQL role (all generation now runs there). This
   service's role can stay read-only; without the grant only the generation

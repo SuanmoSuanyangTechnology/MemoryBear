@@ -20,6 +20,7 @@ packages/storage-core/
 !packages/redbear-model/src/**
 !packages/task-bridge-sdk/
 !packages/task-bridge-sdk/pyproject.toml
+!packages/task-bridge-sdk/README.md
 !packages/task-bridge-sdk/src/**
 # Never ship local bytecode
 memory-profile/src/**/__pycache__/

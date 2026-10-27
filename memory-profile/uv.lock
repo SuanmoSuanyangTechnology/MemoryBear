@@ -915,7 +915,7 @@ requires-dist = [
     { name = "redis", specifier = "==8.1.0" },
     { name = "sqlalchemy", extras = ["asyncio"], specifier = "==2.1.5" },
     { name = "starlette", specifier = "==1.9.0" },
-    { name = "task-bridge-sdk", extras = ["celery"], directory = "../packages/task-bridge-sdk" },
+    { name = "task-bridge-sdk", extras = ["celery", "mem-router"], directory = "../packages/task-bridge-sdk" },
     { name = "uvicorn", extras = ["standard"], specifier = "==0.54.0" },
     { name = "xxhash", specifier = "==4.0.2" },
     { name = "zttp", specifier = "==0.0.34" },
@@ -1505,7 +1505,7 @@ requires-dist = [
     { name = "celery", marker = "extra == 'celery'", specifier = ">=5.5,<6" },
     { name = "redis", marker = "extra == 'celery'", specifier = ">=6.0,<9" },
 ]
-provides-extras = ["celery"]
+provides-extras = ["celery", "mem-router"]
 
 [package.metadata.requires-dev]
 dev = [
