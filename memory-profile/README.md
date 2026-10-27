@@ -5,7 +5,7 @@ Independent, internal-only service hosting Memory domain modules. Routes are com
 ## Boundary and ownership
 
 - This service reads shared PostgreSQL tables through read-only mappings, plus Neo4j, Redis, and Elasticsearch. It does not import `api` or `app` code.
-- The generation endpoints (memory insight, user summary, cache generation) write two cached text groups on `end_users`. Reads and those writes share one PostgreSQL pool; the read repositories stay select-only through the boundary script's AST checks rather than a connection-level read-only setting.
+- The generation endpoints submit their work to memory-jobs, which performs the only writes to `end_users` (the two cached text groups). This service therefore reads shared PostgreSQL through read-only mappings only; the boundary script's AST checks enforce that, not a connection-level read-only setting.
 - LLM calls go to the model service over its invoke face. This process never holds provider credentials: it names a `model_configs` row and its tenant, and the model service resolves channels and failover (`src/infrastructure/model_service.py`).
 - PostgreSQL, Neo4j, Redis, Elasticsearch, and the model-service client each have a dedicated lifecycle manager under `src/infrastructure/`; `src/runtime.py` only composes, probes, and closes them. The model service is not part of readiness: only generation endpoints need it.
 - `src/common/redis_cache.py` provides shared JSON helpers, zset JSON reads, exact/prefix/pattern invalidation, and the async `@redis_cache` cache-aside decorator. It reuses the existing `ProfileRuntime.redis` provider and does not add cache state to runtime.
@@ -158,8 +158,9 @@ Generation is a later, explicitly scoped extension over the read service:
   → `model_configs` tenant/active check (`src/modules/shared/model_config_service.py`).
   Only the LLM is validated; generation needs no embedding/rerank model, unlike
   the API's full memory-config load;
-- prompts: byte-identical copies of the API templates under
-  `src/prompts/templates/`, loaded through `src/prompts/`;
+- prompts: the generation pipelines run in memory-jobs, so the prompt templates
+  live there (`memory-jobs/src/prompts/templates/`); this service sends only the
+  task name and its parameters;
 - writes: only `end_users.memory_insight*` and `end_users.user_summary*`, with the
   API's optimistic concurrency conditions for insight; for the migrated endpoints
   those writes happen in memory-jobs, so this service no longer writes
@@ -230,12 +231,10 @@ src/entry.py
   -> src/modules/<domain>/repository/
   -> src/modules/shared/               # 跨模块服务：end_user_service / model_config_service / workspace_service
   -> src/modules/shared/repository/    # 这些服务的只读数据访问
-  -> src/modules/<domain>/generation/   # 仅 analytics：LLM 生成流水线
-  -> src/prompts/                       # 全部 prompt 模板与命名渲染器
   -> src/infrastructure/               # 客户端与 producer；task_bridge.py 只投递任务，不注册任务
 ```
 
-`src/modules/__init__.py` composes every domain router into the single router `src/app.py` mounts, so a new module is registered there and nowhere else. Routes only bind HTTP parameters. Handlers translate transport contracts and response envelopes. Services own use-case orchestration. Repositories are named by domain capability and depend on shared infrastructure managers. Prompt text lives only in `src/prompts/templates/`; pipelines render it through the named functions exported by `src/prompts/`, never by composing strings inline.
+`src/modules/__init__.py` composes every domain router into the single router `src/app.py` mounts, so a new module is registered there and nowhere else. Routes only bind HTTP parameters. Handlers translate transport contracts and response envelopes. Services own use-case orchestration. Repositories are named by domain capability and depend on shared infrastructure managers. LLM prompts, pipelines and their templates live in memory-jobs, which executes the generation tasks.
 
 API-owned PostgreSQL tables are mapped under `src/models/references/` with a separate `ReadOnlyBase.metadata`, no foreign keys, and no relationships. Profile-owned tables belong under `src/models/owned/`, inherit `ProfileBase`, and are the only tables exposed to Alembic. PostgreSQL read repositories use SQLAlchemy ORM/select expressions only; native `text()` SQL and ORM write methods are rejected by the boundary script. The runtime pool explicitly uses rollback-on-return and invalidates any asyncpg connection still in a transaction at checkin or checkout; Alembic uses a separate short-lived migration engine without pooling.
 

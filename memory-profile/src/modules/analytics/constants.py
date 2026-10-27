@@ -6,6 +6,9 @@ layer, so API-contract drift stays visible in one place.
 
 from __future__ import annotations
 
+#: 兴趣分布接口返回的标签数量上限（与 api 的展示上限一致）。
+INTEREST_DISPLAY_LIMIT = 5
+
 #: 用户名片 Tag 的字符长度上限（api ``user_card_tags.USER_CARD_TAG_MAX_LENGTH`` 同值）。
 USER_CARD_TAG_MAX_LENGTH = 12
 
