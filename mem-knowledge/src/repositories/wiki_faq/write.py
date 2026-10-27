@@ -147,8 +147,7 @@ def approve(session, scope, faq_id, actor_id, payload):
         # 只跳过已通过的无来源条目，不能将缺失快照解释成“审核当前最新版”。
         return {"changed": False, "faq": serialize(session, scope, row)}
     info = source(session, scope, row)
-    if info["source_status"] != "available":
-        conflict("KB_FAQ_SOURCE_UNAVAILABLE")
+    # Wiki 不可展示时仍可审核已发布快照；继续校验快照归属与当前版本。
     target = get_version(session, scope, target_id)
     if (
         not target
@@ -165,8 +164,7 @@ def approve_latest(session: Session, scope: dict, faq_id: uuid.UUID, actor_id: u
     if row.review_state == "approved" and row.wiki_page_id is None:
         return {"changed": False, "faq": serialize(session, scope, row)}
     info = source(session, scope, row)
-    if info["source_status"] != "available":
-        conflict("KB_FAQ_SOURCE_UNAVAILABLE")
+    # 批量审核与单条审核一致，允许确认不可用来源的当前已发布快照。
     target = _latest_snapshot(session, scope, row, info["latest_wiki_version"])
     if row.review_state == "approved" and row.approved_wiki_snapshot_id == target.id:
         return {"changed": False, "faq": serialize(session, scope, row)}
