@@ -10,12 +10,13 @@ from __future__ import annotations
 from typing import Any
 
 from celery import shared_task
+from task_bridge.mem_router import TaskName
 
 from src.runtime import get_runtime
 from src.tasks.base import JobTask
 
 
-@shared_task(bind=True, base=JobTask, name="memory_jobs.health.ping")
+@shared_task(bind=True, base=JobTask, name=TaskName.HEALTH_PING.value)
 def ping(self) -> dict[str, Any]:
     """Probe every infrastructure dependency from inside a worker process."""
 

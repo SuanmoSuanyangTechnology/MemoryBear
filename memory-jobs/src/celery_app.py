@@ -19,11 +19,13 @@ from celery.signals import (
     worker_process_shutdown,
     worker_shutdown,
 )
+from task_bridge.mem_router import PRIORITY_STEPS, TaskPriority
 
 from src import tasks as task_registry
 from src.bootstrap import get_settings
 from src.common import get_logger, setup_logging
 from src.common.context import clear_task_id, set_task_id
+from src.config import JobsSettings
 from src.runtime import get_runtime
 
 # Bare names are parsed by Celery's Click CLI and would silently override the
@@ -35,6 +37,23 @@ settings = get_settings()
 setup_logging(settings)
 
 logger = get_logger(__name__)
+
+def _broker_transport_options(settings: JobsSettings) -> dict[str, object]:
+    """Transport options the configured broker actually understands.
+
+    ``visibility_timeout`` and ``priority_steps`` are Redis-transport knobs:
+    AMQP redelivers on channel close instead of after a window, and it orders
+    by the message's ``priority`` property rather than by bucket lists. Keeping
+    them in the config on a RabbitMQ deployment would only mislead.
+    """
+
+    if not settings.resolved_celery_broker_url.startswith(("redis://", "rediss://")):
+        return {}
+    return {
+        "visibility_timeout": settings.task_time_limit_seconds + 600,
+        "priority_steps": list(PRIORITY_STEPS),
+    }
+
 
 celery_app = Celery(
     "memory_jobs",
@@ -65,13 +84,21 @@ celery_app.conf.update(
     worker_disable_rate_limits=True,
     worker_redirect_stdouts_level="INFO",
     broker_connection_retry_on_startup=True,
-    # Redis broker redelivers unacknowledged messages after this window. It
-    # must stay above the hard time limit, otherwise a still-running task is
-    # handed to a second worker.
-    broker_transport_options={
-        "visibility_timeout": settings.task_time_limit_seconds + 600,
-    },
+    # Priority. On AMQP the level is the message's ``priority`` property, and
+    # the queue must carry ``x-max-priority`` for RabbitMQ to order by it — that
+    # argument is what ``task_queue_max_priority`` injects. The worker,
+    # memory-profile and the API all declare this queue, so all three must pass
+    # the same number or the declaration is rejected with
+    # PRECONDITION_FAILED. ``task_default_priority`` keeps an internal
+    # ``apply_async`` that forgot to name a level out of the interactive bucket.
+    task_queue_max_priority=settings.task_queue_max_priority,
+    task_default_priority=int(TaskPriority.NORMAL),
+    broker_transport_options=_broker_transport_options(settings),
     result_expires=settings.result_expires_seconds,
+    # One backend instance for the whole process instead of one per thread.
+    # With --pool=threads the default (thread-local) would build a Redis client
+    # and connection pool for every worker thread.
+    result_backend_thread_safe=settings.result_backend_thread_safe,
     # Queues and schedules are declared by task modules through the registry.
     task_default_queue=settings.task_default_queue,
     task_routes=dict(task_registry.TASK_ROUTES),
