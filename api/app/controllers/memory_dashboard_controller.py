@@ -64,6 +64,7 @@ def _dispatch_dashboard_async_jobs(workspace_id: uuid.UUID, end_user_ids: List[s
             )
             # Interest pre-warm runs in memory-jobs, on its own queue: the
             # API's workers no longer register that task.
+            # FIXME: job not ready
             _celery_app.send_task(
                 TaskName.INTEREST_DISTRIBUTION_INIT_FOR_USERS.value,
                 kwargs={
