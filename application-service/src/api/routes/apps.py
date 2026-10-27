@@ -17,6 +17,7 @@ from uuid import UUID
 
 import yaml
 from fastapi import APIRouter, Depends, File, Form, Path, Query, UploadFile
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import Response, StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -97,8 +98,8 @@ def list_apps(
         tag_search: str | None = None,
         include_shared: bool = True,
         shared_only: bool = False,
-        page: int = 1,
-        pagesize: int = 10,
+        page: int = Query(1, ge=1, description="页码，从 1 开始"),
+        pagesize: int = Query(10, ge=1, le=100, description="每页数量，最大 100"),
         ids: str | None = None,
         orchestration_mode: str | None = Query(
             None, description="编排模式过滤（仅 multi_agent 生效），如 supervisor_loop"
@@ -123,6 +124,20 @@ def list_apps(
       to ids / exact API Key lookups)
     - Each app carries an ontology sub-object (current ontology; null in community)
     """
+    # type accepts comma-separated values, but each must be a valid app type enum
+    if type:
+        valid_types = {t.value for t in AppType}
+        invalid_types = [
+            t.strip() for t in type.split(",")
+            if t.strip() and t.strip() not in valid_types
+        ]
+        if invalid_types:
+            raise RequestValidationError(
+                [{"loc": ("query", "type"),
+                  "msg": f"非法的应用类型: {','.join(invalid_types)}",
+                  "type": "enum"}]
+            )
+
     service = AppService(db)
 
     # Search via the search param: fuzzy app-name match and exact API Key match

@@ -176,6 +176,12 @@ async def create_folder(
     folder_name: str,
     principal: Principal,
 ) -> File:
+    # 文件夹名称去除首尾空白后不允许为空（缺参占位符 '/' 不能作为真实名称落库）
+    folder_name = (folder_name or "").strip()
+    if not folder_name or folder_name == "/":
+        raise KnowledgeError.from_code(
+            "KB_VALIDATION_ERROR", message="文件夹名称不能为空"
+        )
     if await knowledge_service.get_knowledge(db, kb_id, principal) is None:
         raise KnowledgeError.from_code("KB_KNOWLEDGE_NOT_FOUND")
     await require_parent_folder(db, kb_id, parent_id, principal)
