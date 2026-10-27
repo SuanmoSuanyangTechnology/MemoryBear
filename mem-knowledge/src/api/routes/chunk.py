@@ -395,7 +395,7 @@ async def get_retrieve_types(
     return _success(
         request,
         [
-            kind.public_value
+            kind.value if source is KnowledgeRetrievalSource.EXTERNAL_API else kind.public_value
             for kind in RetrieveType
             if kind != RetrieveType.WIKI_FAQ
             or source in {

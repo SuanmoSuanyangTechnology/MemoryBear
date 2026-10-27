@@ -239,7 +239,7 @@ async def delete_chunk(
 )
 def get_retrieve_types(request: Request = None):
     return success(msg="Successfully obtained the retrieval type", data=[
-        kind.public_value for kind in chunk_schema.RetrieveType
+        kind.value for kind in chunk_schema.RetrieveType
     ])
 
 
