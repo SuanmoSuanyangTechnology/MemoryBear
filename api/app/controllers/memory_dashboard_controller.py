@@ -2,9 +2,11 @@ import uuid
 from typing import List, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
+from kombu import Queue
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
+from task_bridge.mem_router import MAX_PRIORITY, QueueName, TaskName, TaskPriority
 
 from app.core.logging_config import get_api_logger
 from app.core.memory.analytics.user_card_tags import normalize_stored_user_card_tags
@@ -22,6 +24,15 @@ from app.services import memory_dashboard_service, workspace_service
 
 # 获取API专用日志器
 api_logger = get_api_logger()
+
+#: The queue is declared by memory-jobs with ``x-max-priority``; a producer that
+#: declares it differently gets ``PRECONDITION_FAILED`` from RabbitMQ, and one
+#: that does not declare it at all leaves the message priority unread. Declaring
+#: it explicitly here keeps this publish path identical to the worker's.
+_MEMORY_JOBS_QUEUE = Queue(
+    QueueName.MEMORY_JOBS.value,
+    queue_arguments={"x-max-priority": MAX_PRIORITY},
+)
 
 
 def _dispatch_dashboard_async_jobs(workspace_id: uuid.UUID, end_user_ids: List[str]) -> None:
@@ -51,9 +62,17 @@ def _dispatch_dashboard_async_jobs(workspace_id: uuid.UUID, end_user_ids: List[s
                 "app.tasks.init_implicit_emotions_for_users",
                 kwargs={"end_user_ids": end_user_ids},
             )
+            # Interest pre-warm runs in memory-jobs, on its own queue: the
+            # API's workers no longer register that task.
             _celery_app.send_task(
-                "app.tasks.init_interest_distribution_for_users",
-                kwargs={"end_user_ids": end_user_ids},
+                TaskName.INTEREST_DISTRIBUTION_INIT_FOR_USERS.value,
+                kwargs={
+                    "workspace_id": str(workspace_id),
+                    "end_user_ids": end_user_ids,
+                },
+                queue=QueueName.MEMORY_JOBS.value,
+                priority=int(TaskPriority.NORMAL),
+                declare=[_MEMORY_JOBS_QUEUE],
             )
 
         # 社区聚类补全任务（节流 60s）
