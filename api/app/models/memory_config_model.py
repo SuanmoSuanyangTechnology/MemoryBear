@@ -1,6 +1,6 @@
 import datetime
 
-from sqlalchemy import Boolean, Column, DateTime, Float, Integer, String, text
+from sqlalchemy import Boolean, CheckConstraint, Column, DateTime, Float, Integer, String, Text, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 
 from app.db import Base
@@ -10,6 +10,17 @@ from app.core.utils.datetime_utils import utcnow_naive
 class MemoryConfig(Base):
     """记忆配置表 - 用于存储记忆系统的配置参数"""
     __tablename__ = "memory_config"
+    __table_args__ = (
+        CheckConstraint(
+            "personality_anchor_sync_cycle IN ('daily', 'weekly', 'manual')",
+            name="ck_memory_config_personality_anchor_cycle",
+        ),
+        CheckConstraint(
+            "char_length(btrim(personality_anchor_base_principles)) BETWEEN 1 AND 4000 "
+            "AND personality_anchor_base_principles ~ '[^[:space:]]'",
+            name="ck_memory_config_personality_anchor_principles",
+        ),
+    )
 
     # 主键
     config_id = Column(UUID(as_uuid=True), primary_key=True,  comment="配置ID")
@@ -164,6 +175,34 @@ class MemoryConfig(Base):
         comment="用户自定义偏好门禁关键词",
     )
     
+    # 人格锚定引擎配置
+    personality_anchor_enabled = Column(
+        Boolean, nullable=False, default=True, server_default=text("true"),
+        comment="是否启用人格锚定引擎",
+    )
+    personality_anchor_auto_solidify = Column(
+        Boolean, nullable=False, default=True, server_default=text("true"),
+        comment="是否自动固化低风险相处策略",
+    )
+    personality_anchor_read_metadata = Column(
+        Boolean, nullable=False, default=True, server_default=text("true"),
+        comment="是否允许读取用户metadata",
+    )
+    personality_anchor_read_preferences = Column(
+        Boolean, nullable=False, default=True, server_default=text("true"),
+        comment="是否允许读取用户偏好",
+    )
+    personality_anchor_sync_cycle = Column(
+        String(16), nullable=False, default="daily", server_default="daily",
+        comment="人格来源同步周期：daily/weekly/manual",
+    )
+    personality_anchor_base_principles = Column(
+        Text, nullable=False,
+        default="你是用户的长期 AI 伙伴。保持坦诚、温和与独立判断，尊重用户自主选择及隐私，不编造事实或未执行的行动。",
+        server_default="你是用户的长期 AI 伙伴。保持坦诚、温和与独立判断，尊重用户自主选择及隐私，不编造事实或未执行的行动。",
+        comment="人格基础身份与原则，1～4000字符",
+    )
+
     # 时间戳
     created_at = Column(DateTime, default=utcnow_naive, comment="创建时间")
     updated_at = Column(DateTime, default=utcnow_naive, onupdate=utcnow_naive, comment="更新时间")
