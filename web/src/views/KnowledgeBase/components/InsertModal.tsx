@@ -128,10 +128,7 @@ const InsertModal = forwardRef<InsertModalRef, InsertModalProps>(({ onInsert, on
             : (t('knowledgeBase.insertSuccess') || '插入成功');
           message.success(successMsg);
           handleClose();
-          // 只有插入模式才调用 onSuccess（编辑模式已在 handleInsertContent 中直接更新列表）
-          if (!isEditMode) {
-            onSuccess?.();
-          }
+          onSuccess?.();
         } else {
           const errorMsg = isEditMode
             ? (t('knowledgeBase.updateFailed') || '更新失败')
