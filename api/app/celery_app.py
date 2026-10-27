@@ -167,7 +167,6 @@ celery_app.conf.update(
         'app.tasks.sync_emotion_stats_for_user': {'queue': 'memory_heavy_tasks'},  # NOTE：单用户情绪明细增量同步（按 PG 判断 24h/48h 窗口）
         # 'app.tasks.update_implicit_emotions_storage': {'queue': 'memory_heavy_tasks'},  # NOTE：已废弃，保留路由防 unregistered
         'app.tasks.init_implicit_emotions_for_users': {'queue': 'memory_heavy_tasks'},
-        'app.tasks.init_interest_distribution_for_users': {'queue': 'memory_heavy_tasks'},
         'app.tasks.init_community_clustering_for_users': {'queue': 'memory_heavy_tasks'},
         'app.tasks.run_incremental_clustering': {'queue': 'memory_heavy_tasks'},
         # 存量记忆向量重算：驱动+单用户子任务都在 memory_heavy，对账扫描在 periodic
