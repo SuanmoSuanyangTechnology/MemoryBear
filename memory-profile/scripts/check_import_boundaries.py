@@ -11,6 +11,10 @@ FORBIDDEN_IMPORT_ROOTS = {"api", "app"}
 READ_ONLY_PG_REPOSITORIES = {
     SERVICE_ROOT / "src/modules/analytics/repository/end_user_profile.py",
     SERVICE_ROOT / "src/modules/analytics/repository/memory_statistics.py",
+    SERVICE_ROOT / "src/modules/analytics/repository/workspace_profile.py",
+    SERVICE_ROOT / "src/modules/shared/repository/end_user.py",
+    SERVICE_ROOT / "src/modules/shared/repository/model_config.py",
+    SERVICE_ROOT / "src/modules/shared/repository/workspace.py",
 }
 FORBIDDEN_SQL_BUILDERS = {"text", "insert", "update", "delete"}
 FORBIDDEN_SESSION_METHODS = {"add", "add_all", "commit", "delete", "flush", "merge"}
@@ -162,6 +166,7 @@ def check_docker_assets() -> list[str]:
         "!memory-profile/alembic.ini",
         "!memory-profile/migrations/**",
         "!packages/auth-sdk/src/**",
+        "!packages/redbear-model/src/**",
     ):
         if rule not in ignore_source:
             failures.append(f"{dockerignore}: missing allow rule {rule}")

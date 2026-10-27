@@ -97,16 +97,23 @@ class ProfileSettings(BaseSettings):
     model_service_max_keepalive_connections: int = Field(
         20, validation_alias="MODEL_SERVICE_MAX_KEEPALIVE_CONNECTIONS"
     )
+
+    # 缓存生成由 memory-jobs 的 Celery worker 执行：本进程只按任务名投递并等待结果，
+    # 不注册任务、不启动 worker、不 import worker 的 Celery 应用（task-bridge-sdk 的接缝）。
+    # 任务名、队列名与等待预算都是与 worker 注册表/路由、以及 api 侧调用预算绑定的契约，
+    # 不做环境变量配置，见 src/infrastructure/task_bridge.py 的常量。
+    #: 留空时由 task-bridge 从 CELERY_* / REDIS_* 派生（broker DB 3、backend DB 4）。
+    task_bridge_broker_url: str | None = Field(
+        None, validation_alias=AliasChoices("TASK_BRIDGE_BROKER_URL", "CELERY_BROKER_URL")
+    )
+    task_bridge_result_backend: str | None = Field(
+        None,
+        validation_alias=AliasChoices("TASK_BRIDGE_RESULT_BACKEND", "CELERY_RESULT_BACKEND"),
+    )
     #: 兴趣分布缓存 TTL（api ``INTEREST_CACHE_EXPIRE`` 同值）。
     interest_cache_expire_seconds: int = Field(
         24 * 60 * 60, validation_alias="PROFILE_INTEREST_CACHE_EXPIRE_SECONDS"
     )
-    #: 生成类接口的写路径连接池（写引擎与只读引擎分离）。
-    database_write_pool_size: int = Field(2, validation_alias="PROFILE_DATABASE_WRITE_POOL_SIZE")
-    database_write_max_overflow: int = Field(
-        3, validation_alias="PROFILE_DATABASE_WRITE_MAX_OVERFLOW"
-    )
-
     migration_database_url: str | None = Field(
         None,
         validation_alias="PROFILE_MIGRATION_DATABASE_URL",
