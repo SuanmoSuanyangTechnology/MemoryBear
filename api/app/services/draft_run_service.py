@@ -1512,6 +1512,7 @@ class AgentRunService:
             parent_execution_id: Optional[uuid.UUID] = None,
             orchestration_mode: Optional[str] = None,
             execution_owner: Optional[Dict[str, Any]] = None,
+            model_parameters_override: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """执行试运行（使用 LangChain Agent）
 
@@ -1587,7 +1588,8 @@ class AgentRunService:
             # 2. 合并模型参数
             effective_params = ModelParameterMerger.get_effective_parameters(
                 model_config=model_config,
-                agent_config=agent_config
+                agent_config=agent_config,
+                model_parameters_override=model_parameters_override,
             )
 
             if sub_agent:
@@ -1920,7 +1922,12 @@ class AgentRunService:
                             "total_tokens": 0
                         }),
                         "reasoning_content": result.get("reasoning_content"),
-                        "suggested_questions": suggested_questions
+                        "suggested_questions": suggested_questions,
+                        # 记录实际使用的模型与逐次运行参数覆写（多模型对比试运行时
+                        # 每个模型各不相同），重新生成时据此还原，保证同列结果一致。
+                        "model_config_id": str(model_config.id),
+                        **({"model_parameters_override": model_parameters_override}
+                           if model_parameters_override else {}),
                     },
                     files=files,
                     processed_files=processed_files,
@@ -2068,6 +2075,7 @@ class AgentRunService:
             parent_execution_id: Optional[uuid.UUID] = None,
             orchestration_mode: Optional[str] = None,
             execution_owner: Optional[Dict[str, Any]] = None,
+            model_parameters_override: Optional[Dict[str, Any]] = None,
 
     ) -> AsyncGenerator[str, None]:
         """执行试运行（流式返回，使用 LangChain Agent）
@@ -2140,7 +2148,8 @@ class AgentRunService:
             # 2. 合并模型参数
             effective_params = ModelParameterMerger.get_effective_parameters(
                 model_config=model_config,
-                agent_config=agent_config
+                agent_config=agent_config,
+                model_parameters_override=model_parameters_override,
             )
 
             items_params = variables
@@ -2602,7 +2611,12 @@ class AgentRunService:
                     meta_data={
                         "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": total_tokens},
                         "reasoning_content": full_reasoning or None,
-                        "suggested_questions": suggested_questions
+                        "suggested_questions": suggested_questions,
+                        # 记录实际使用的模型与逐次运行参数覆写（多模型对比试运行时
+                        # 每个模型各不相同），重新生成时据此还原，保证同列结果一致。
+                        "model_config_id": str(model_config.id),
+                        **({"model_parameters_override": model_parameters_override}
+                           if model_parameters_override else {}),
                     },
                     files=files,
                     processed_files=processed_files,
@@ -4053,35 +4067,31 @@ class AgentRunService:
             try:
                 start_time = time.time()
 
-                # 临时修改参数（不使用 deepcopy 避免 SQLAlchemy 会话问题）
-                original_params = agent_config.model_parameters
-                agent_config.model_parameters = model_info["parameters"]
-
                 # 使用模型自己的 conversation_id，如果没有则使用全局的
                 model_conversation_id = model_info.get("conversation_id") or conversation_id
-                try:
-                    result = await asyncio.wait_for(
-                        self.run(
-                            agent_config=agent_config,
-                            model_config=model_info["model_config"],
-                            message=message,
-                            workspace_id=workspace_id,
-                            conversation_id=model_conversation_id,
-                            user_id=user_id,
-                            variables=variables,
-                            storage_type=storage_type,
-                            user_rag_memory_id=user_rag_memory_id,
-                            web_search=web_search,
-                            memory=memory,
-                            files=files,
-                            source=source,
-                            execution_mode=execution_mode,
-                        ),
-                        timeout=timeout
-                    )
-                finally:
-                    # 恢复原始参数
-                    agent_config.model_parameters = original_params
+                # 注意：绝不能在此临时改写共享的 agent_config.model_parameters——
+                # 并行执行时多个协程会互相覆盖（一个模型开 json_output、另一个不开，
+                # 最终读到的是最后写入的参数）。每个模型的参数通过显式 override 传入。
+                result = await asyncio.wait_for(
+                    self.run(
+                        agent_config=agent_config,
+                        model_config=model_info["model_config"],
+                        message=message,
+                        workspace_id=workspace_id,
+                        conversation_id=model_conversation_id,
+                        user_id=user_id,
+                        variables=variables,
+                        storage_type=storage_type,
+                        user_rag_memory_id=user_rag_memory_id,
+                        web_search=web_search,
+                        memory=memory,
+                        files=files,
+                        source=source,
+                        execution_mode=execution_mode,
+                        model_parameters_override=model_info["parameters"],
+                    ),
+                    timeout=timeout
+                )
 
                 elapsed = time.time() - start_time
                 usage = result.get("usage", {})
@@ -4333,130 +4343,126 @@ class AgentRunService:
                 stream_error = None
                 message_id = None
 
-                # 临时修改参数
-                original_params = agent_config.model_parameters
-                agent_config.model_parameters = model_info["parameters"]
+                # 每个模型各自的参数通过显式 override 传入。不能改写共享的
+                # agent_config.model_parameters：并行任务会互相覆盖，导致不同模型
+                # 最终使用同一份参数（如 json_output 开关被最后一个模型覆盖）。
+                # 流式调用单个模型
+                async for event_str in self.run_stream(
+                        agent_config=agent_config,
+                        model_config=model_info["model_config"],
+                        message=message,
+                        workspace_id=workspace_id,
+                        conversation_id=model_conversation_id,
+                        user_id=user_id,
+                        variables=variables,
+                        storage_type=storage_type,
+                        user_rag_memory_id=user_rag_memory_id,
+                        web_search=web_search,
+                        memory=memory,
+                        files=files,
+                        source=source,
+                        user_message_id=model_user_message_id,
+                        execution_mode=execution_mode,
+                        skip_save=skip_save,
+                        model_parameters_override=model_info["parameters"],
+                ):
+                    # 解析原始事件
+                    try:
+                        lines = event_str.strip().split('\n')
+                        event_type = None
+                        event_data = None
 
-                try:
-                    # 流式调用单个模型
-                    async for event_str in self.run_stream(
-                            agent_config=agent_config,
-                            model_config=model_info["model_config"],
-                            message=message,
-                            workspace_id=workspace_id,
-                            conversation_id=model_conversation_id,
-                            user_id=user_id,
-                            variables=variables,
-                            storage_type=storage_type,
-                            user_rag_memory_id=user_rag_memory_id,
-                            web_search=web_search,
-                            memory=memory,
-                            files=files,
-                            source=source,
-                            user_message_id=model_user_message_id,
-                            execution_mode=execution_mode,
-                            skip_save=skip_save,
-                    ):
-                        # 解析原始事件
-                        try:
-                            lines = event_str.strip().split('\n')
-                            event_type = None
-                            event_data = None
+                        for line in lines:
+                            if line.startswith('event: '):
+                                event_type = line[7:].strip()
+                            elif line.startswith('data: '):
+                                event_data = json.loads(line[6:])
 
-                            for line in lines:
-                                if line.startswith('event: '):
-                                    event_type = line[7:].strip()
-                                elif line.startswith('data: '):
-                                    event_data = json.loads(line[6:])
+                        # 从 start 事件中获取实际的 conversation_id
+                        if event_type == "start" and event_data:
+                            conv_id = event_data.get("conversation_id")
+                            if conv_id:
+                                returned_conversation_id = conv_id
 
-                            # 从 start 事件中获取实际的 conversation_id
-                            if event_type == "start" and event_data:
-                                conv_id = event_data.get("conversation_id")
-                                if conv_id:
-                                    returned_conversation_id = conv_id
+                        # 累积消息内容
+                        if event_type == "message" and event_data:
+                            chunk = event_data.get("content", "")
+                            full_content += chunk
 
-                            # 累积消息内容
-                            if event_type == "message" and event_data:
-                                chunk = event_data.get("content", "")
-                                full_content += chunk
+                            # 转发消息块事件（带模型标识）
+                            await event_queue.put(self._format_sse_event("model_message", {
+                                "model_index": idx,
+                                "model_config_id": model_config_id,
+                                "label": model_label,
+                                "conversation_id": returned_conversation_id,
+                                "content": chunk
+                            }))
 
-                                # 转发消息块事件（带模型标识）
-                                await event_queue.put(self._format_sse_event("model_message", {
-                                    "model_index": idx,
-                                    "model_config_id": model_config_id,
-                                    "label": model_label,
-                                    "conversation_id": returned_conversation_id,
-                                    "content": chunk
-                                }))
+                        # 转发深度思考事件（带模型标识）
+                        if event_type == "reasoning" and event_data:
+                            reasoning_chunk = event_data.get("content", "")
+                            full_reasoning += reasoning_chunk
+                            await event_queue.put(self._format_sse_event("model_reasoning", {
+                                "model_index": idx,
+                                "model_config_id": model_config_id,
+                                "label": model_label,
+                                "conversation_id": returned_conversation_id,
+                                "content": event_data.get("content", "")
+                            }))
 
-                            # 转发深度思考事件（带模型标识）
-                            if event_type == "reasoning" and event_data:
-                                reasoning_chunk = event_data.get("content", "")
-                                full_reasoning += reasoning_chunk
-                                await event_queue.put(self._format_sse_event("model_reasoning", {
-                                    "model_index": idx,
-                                    "model_config_id": model_config_id,
-                                    "label": model_label,
-                                    "conversation_id": returned_conversation_id,
-                                    "content": event_data.get("content", "")
-                                }))
+                        # 转发工具调用事件（带模型标识）
+                        if event_type == "tool_start" and event_data:
+                            await event_queue.put(self._format_sse_event("model_tool_start", {
+                                "model_index": idx,
+                                "model_config_id": model_config_id,
+                                "step_id": event_data.get("step_id"),
+                                "name": event_data.get("name", ""),
+                                "input": event_data.get("input"),
+                            }))
 
-                            # 转发工具调用事件（带模型标识）
-                            if event_type == "tool_start" and event_data:
-                                await event_queue.put(self._format_sse_event("model_tool_start", {
-                                    "model_index": idx,
-                                    "model_config_id": model_config_id,
-                                    "step_id": event_data.get("step_id"),
-                                    "name": event_data.get("name", ""),
-                                    "input": event_data.get("input"),
-                                }))
+                        if event_type == "tool_end" and event_data:
+                            await event_queue.put(self._format_sse_event("model_tool_end", {
+                                "model_index": idx,
+                                "model_config_id": model_config_id,
+                                "step_id": event_data.get("step_id"),
+                                "name": event_data.get("name", ""),
+                                "output": event_data.get("output"),
+                                "meta": event_data.get("meta"),
+                            }))
 
-                            if event_type == "tool_end" and event_data:
-                                await event_queue.put(self._format_sse_event("model_tool_end", {
-                                    "model_index": idx,
-                                    "model_config_id": model_config_id,
-                                    "step_id": event_data.get("step_id"),
-                                    "name": event_data.get("name", ""),
-                                    "output": event_data.get("output"),
-                                    "meta": event_data.get("meta"),
-                                }))
+                        if event_type == "tool_error" and event_data:
+                            await event_queue.put(self._format_sse_event("model_tool_error", {
+                                "model_index": idx,
+                                "model_config_id": model_config_id,
+                                "step_id": event_data.get("step_id"),
+                                "name": event_data.get("name", ""),
+                                "error": event_data.get("error"),
+                            }))
 
-                            if event_type == "tool_error" and event_data:
-                                await event_queue.put(self._format_sse_event("model_tool_error", {
-                                    "model_index": idx,
-                                    "model_config_id": model_config_id,
-                                    "step_id": event_data.get("step_id"),
-                                    "name": event_data.get("name", ""),
-                                    "error": event_data.get("error"),
-                                }))
+                        # 从 end 事件中提取 features 输出字段
+                        if event_type == "end" and event_data:
+                            audio_url = event_data.get("audio_url")
+                            audio_status = event_data.get("audio_status")
+                            citations = event_data.get("citations", [])
+                            suggested_questions = event_data.get("suggested_questions", [])
+                            message_id = event_data.get("message_id")
+                            total_tokens = event_data.get("total_tokens", 0) or 0
 
-                            # 从 end 事件中提取 features 输出字段
-                            if event_type == "end" and event_data:
-                                audio_url = event_data.get("audio_url")
-                                audio_status = event_data.get("audio_status")
-                                citations = event_data.get("citations", [])
-                                suggested_questions = event_data.get("suggested_questions", [])
-                                message_id = event_data.get("message_id")
-                                total_tokens = event_data.get("total_tokens", 0) or 0
-
-                            if event_type == "error" and event_data:
-                                stream_error = event_data.get("error") or {"message": "未知错误"}
-                                await event_queue.put(self._format_sse_event(
-                                    "model_error",
-                                    self._build_model_error_event_data(
-                                        model_index=idx,
-                                        model_config_id=model_config_id,
-                                        label=model_label,
-                                        conversation_id=returned_conversation_id,
-                                        error=stream_error,
-                                        timestamp=event_data.get("timestamp")
-                                    )
-                                ))
-                        except Exception as e:
-                            logger.warning(f"解析流式事件失败: {e}")
-                finally:
-                    # 恢复原始参数
-                    agent_config.model_parameters = original_params
+                        if event_type == "error" and event_data:
+                            stream_error = event_data.get("error") or {"message": "未知错误"}
+                            await event_queue.put(self._format_sse_event(
+                                "model_error",
+                                self._build_model_error_event_data(
+                                    model_index=idx,
+                                    model_config_id=model_config_id,
+                                    label=model_label,
+                                    conversation_id=returned_conversation_id,
+                                    error=stream_error,
+                                    timestamp=event_data.get("timestamp")
+                                )
+                            ))
+                    except Exception as e:
+                        logger.warning(f"解析流式事件失败: {e}")
 
                 elapsed = time.time() - start_time
 
@@ -4875,6 +4881,7 @@ class AgentRunService:
             user_id: str,
             storage_type: Optional[str] = None,
             user_rag_memory_id: Optional[str] = None,
+            model_parameters_override: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """重新生成回复（多版本支持）
 
@@ -4957,6 +4964,7 @@ class AgentRunService:
             skip_save=True,  # 跳过保存，由 regenerate 自己保存
             history=filtered_history,  # 传入过滤后的历史
             files=files,  # 传入父消息的文件
+            model_parameters_override=model_parameters_override,
         )
 
         # 6. 保存新版本消息
@@ -4971,6 +4979,10 @@ class AgentRunService:
                 "regenerated_from": str(message_id),
                 "suggested_questions": result.get("suggested_questions", []),
                 "citations": result.get("citations", []),
+                # 延续原消息的模型/参数，保证多次重新生成结果口径一致
+                "model_config_id": str(model_config.id),
+                **({"model_parameters_override": model_parameters_override}
+                   if model_parameters_override else {}),
             },
         )
 
@@ -5004,6 +5016,7 @@ class AgentRunService:
             user_id: str,
             storage_type: Optional[str] = None,
             user_rag_memory_id: Optional[str] = None,
+            model_parameters_override: Optional[Dict[str, Any]] = None,
     ) -> AsyncGenerator[str, None]:
         """重新生成回复（流式输出，多版本支持）
 
@@ -5096,6 +5109,7 @@ class AgentRunService:
                 skip_save=True,
                 history=filtered_history,
                 files=files,
+                model_parameters_override=model_parameters_override,
         ):
             # 解析事件
             lines = event_str.strip().split('\n')
@@ -5139,6 +5153,10 @@ class AgentRunService:
                 "suggested_questions": suggested_questions,
                 "citations": citations,
                 "audio_url": audio_url,
+                # 延续原消息的模型/参数，保证多次重新生成结果口径一致
+                "model_config_id": str(model_config.id),
+                **({"model_parameters_override": model_parameters_override}
+                   if model_parameters_override else {}),
             },
         )
 

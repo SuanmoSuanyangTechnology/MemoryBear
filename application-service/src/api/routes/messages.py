@@ -222,8 +222,23 @@ async def regenerate_message(
     # ---- agent branch (the host routes every non-workflow type here; shared
     # config resolution rejects non-agent types with APP_TYPE_NOT_SUPPORTED) ----
     agent_cfg = app_service.get_agent_config(app_id=app_id, workspace_id=workspace_id)
+
+    # In a multi-model compare trial run each column may use a different model
+    # with different model_parameters; those are persisted on the original
+    # assistant message's meta_data. Regenerate must restore the model/parameters
+    # that actually produced the message instead of the app default/global ones.
+    target_msg = db.get(Message, message_id)
+    msg_meta = dict(getattr(target_msg, "meta_data", None) or {})
+    meta_model_config_id = msg_meta.get("model_config_id")
+    model_parameters_override = msg_meta.get("model_parameters_override")
+
     model_config = None
-    if agent_cfg.default_model_config_id:
+    if meta_model_config_id:
+        try:
+            model_config = db.get(ModelConfig, UUID(str(meta_model_config_id)))
+        except (ValueError, TypeError):
+            model_config = None
+    if not model_config and agent_cfg.default_model_config_id:
         model_config = db.get(ModelConfig, agent_cfg.default_model_config_id)
 
     if not model_config:
@@ -239,6 +254,7 @@ async def regenerate_message(
                         model_config=model_config,
                         workspace_id=workspace_id,
                         user_id=str(principal.actor_id),
+                        model_parameters_override=model_parameters_override,
                 ):
                     yield event
 
@@ -250,6 +266,7 @@ async def regenerate_message(
         model_config=model_config,
         workspace_id=workspace_id,
         user_id=str(principal.actor_id),
+        model_parameters_override=model_parameters_override,
     )
     return success(data=RegenerateResponse(**result))
 
