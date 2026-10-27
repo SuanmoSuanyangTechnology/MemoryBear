@@ -45,3 +45,9 @@ select = ["E", "F", "I", "UP", "B", "ASYNC", "TID"]
 
 [tool.ruff.lint.flake8-tidy-imports]
 ban-relative-imports = "all"
+
+# Resolve through the mirror so re-locks keep every lock URL on it.
+[[tool.uv.index]]
+name = "tencent"
+url = "https://mirrors.cloud.tencent.com/pypi/simple"
+default = true

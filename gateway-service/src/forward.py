@@ -22,7 +22,7 @@ import asyncio
 import logging
 import random
 from collections.abc import Callable
-from typing import Protocol
+from typing import Literal, Protocol
 
 import httpx
 from fastapi import Request
@@ -34,9 +34,9 @@ from .metrics import (
     gateway_circuit_breaker_state,
     gateway_forward_requests_total,
     gateway_forward_retries_total,
-    gateway_streaming_active_connections,
     gateway_upstream_errors_total,
 )
+from .stream_gate import StreamGate
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +67,11 @@ class TargetRoute(BaseModel):
     service: str
     base_url: str      # K8s Service DNS 名，如 http://mem-knowledge:8080
     aud: str           # 内部 token 受众 = 目标服务名
+    # Optional gRPC dispatch: base_url stays the HTTP fallback so one route
+    # entry flips transports without a second config surface.
+    protocol: Literal["http", "grpc"] = "http"
+    grpc_target: str | None = None
+    grpc_method: str = ""
 
 
 class TargetResolver(Protocol):
@@ -92,26 +97,36 @@ class Forwarder:
                  circuit_factory: Callable[[], CircuitBreaker] | None = None,
                  streaming_max_connections: int = 100,
                  sse_idle_timeout: float = 300.0,
-                 read_timeout: float = 30.0) -> None:
+                 read_timeout: float = 30.0,
+                 gate: StreamGate | None = None) -> None:
         self._client = client
         # One breaker per target service: a dead dependency must not short-circuit
         # requests to healthy ones (a single shared breaker would open globally).
         self._circuit_factory = circuit_factory or CircuitBreaker
         self._circuits: dict[str, CircuitBreaker] = {}
-        self._streaming_max = streaming_max_connections
-        self._active_streams = 0
-        self._stream_lock = asyncio.Lock()
+        # HTTP and gRPC share one concurrency budget and one active-streams gauge
+        # when the gateway injects the same gate into both forwarders.
+        self._gate = gate or StreamGate(streaming_max_connections)
         # 流式空闲看门狗：读无超时上限，但上游超过该时长不发数据即视为挂死，回收流
         self._sse_idle_timeout = sse_idle_timeout
         # 缓冲分支体读取超时（对齐老 forward() 的 read=30s）：响应头已到、体迟迟
         # 不来/读断时快速失败，不占满看门狗时长
         self._read_timeout = read_timeout
 
+    @property
+    def _active_streams(self) -> int:
+        """Active streaming responses; the gate is shared with the gRPC path."""
+        return self._gate.active
+
     def _circuit_for(self, service: str) -> CircuitBreaker:
         circuit = self._circuits.get(service)
         if circuit is None:
             circuit = self._circuits[service] = self._circuit_factory()
         return circuit
+
+    def circuit_for(self, service: str) -> CircuitBreaker:
+        """The breaker for one target; the gRPC path shares it with HTTP."""
+        return self._circuit_for(service)
 
     def internal_path(self, external_path: str) -> str:
         if external_path.startswith("/internal/v1/"):
@@ -222,30 +237,29 @@ class Forwarder:
 
     async def _stream_response(self, request: Request, route: TargetRoute,
                                upstream: httpx.Response, url: str) -> Response:
-        # 并发槽在确认是流式响应后才申请：缓冲请求不受 _streaming_max 约束（判型
-        # 前无法预知流式/缓冲，缓冲请求若也先占槽，JSON 并发会被误限到 100）
-        async with self._stream_lock:
-            if self._active_streams >= self._streaming_max:
-                # 并发槽满：丢弃已建连响应（aclose 中断上游生成），拒收不计失败
-                await upstream.aclose()
-                return JSONResponse(status_code=503, content={"detail": "too many streams"})
-            self._active_streams += 1
-        gateway_streaming_active_connections.inc()
-        active = True
+        # Slots are claimed only after the response is known to be streaming:
+        # buffered requests never consume the streaming budget.
+        if not await self._gate.acquire():
+            # Budget exhausted: drop the connected response so the upstream
+            # generator is cancelled; a rejection is not a failure.
+            await upstream.aclose()
+            return JSONResponse(status_code=503, content={"detail": "too many streams"})
+        released = False
 
-        def release_stream() -> None:
-            # 槽位在流真正结束时释放：_stream_response 返回时流尚未开始，若在
-            # finally 里释放，并发上限与活跃连接 gauge 将恒为 0
-            nonlocal active
-            if active:
-                active = False
-                self._active_streams -= 1
-                gateway_streaming_active_connections.dec()
+        async def release_stream() -> None:
+            # The slot is held for the whole stream, not just until the response
+            # object is built, otherwise the limit and gauge read zero while
+            # streams are still running.
+            nonlocal released
+            if not released:
+                released = True
+                await self._gate.release()
 
         async def body_iter():
             try:
-                # 读无超时上限，但空闲超过 sse_idle_timeout（默认 300s）即视为
-                # 上游挂死：看门狗回收，finally 释放并发槽位并关闭上游连接
+                # Reads have no total timeout, but silence longer than
+                # sse_idle_timeout means the upstream is hung: reap the stream,
+                # release the slot and close the connection in finally.
                 it = upstream.aiter_raw()
                 while True:
                     try:
@@ -263,13 +277,15 @@ class Forwarder:
                         break
                     yield chunk
             finally:
-                # 客户端断连/空闲超时会取消本生成器 → finally 关闭上游（双向取消）
-                release_stream()
+                # Client disconnect/idle timeout cancels this generator ->
+                # finally closes the upstream (bidirectional cancellation).
+                await release_stream()
                 await upstream.aclose()
-        # 响应头对齐缓冲分支全透传语义：复制上游头并剥逐跳头（content-length 由
-        # 分块传输重建）；Cache-Control 不补写（端到端缓存语义权威在源，大文件
-        # 下载的缓存策略不应被网关改写）；X-Accel-Buffering 强写 no（发给入口
-        # nginx 的本跳指令，防响应被缓冲导致下载/导出无进展）
+        # Response headers keep the buffered branch's full pass-through
+        # semantics: copy upstream headers, drop hop-by-hop ones (content-length
+        # is rebuilt by chunked transfer). Cache-Control is never rewritten (the
+        # origin owns end-to-end caching); X-Accel-Buffering is forced to no as
+        # a hop-local instruction to the entry nginx.
         passthrough = {k.lower(): v for k, v in upstream.headers.items()
                        if k.lower() not in _DROP_HEADERS}
         passthrough["x-accel-buffering"] = "no"

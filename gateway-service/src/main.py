@@ -14,20 +14,46 @@ from auth_sdk.ratelimit import ApiKeyRateLimiter
 from auth_sdk.snapshot import SnapshotReader
 from auth_sdk.token import LocalTokenIssuer, TokenVerifier
 from fastapi import FastAPI
+from memorybear_grpc.client import ChannelPool
 
 from src import config
 from src import redis as gredis
 from src.forward import Forwarder, StaticTargetResolver
+from src.grpc_forward import GrpcForwarder
 from src.middleware import GatewayDeps, GatewayMiddleware
 from src.routes import router
+from src.stream_gate import StreamGate
 
 
 def build_gateway_deps() -> GatewayDeps:
-    # 目标路由 + 转发器只建一次（lifespan 内调用，此时模块级 app 已就绪）
+    # Target routes and forwarders are built once per process. HTTP and gRPC
+    # share the stream gate and the application-service circuit breaker: one
+    # concurrency budget and one health signal cover the same upstream service.
     resolver = StaticTargetResolver(routes=config.settings.target_routes)
     timeout = httpx.Timeout(connect=5.0, read=30.0, write=30.0, pool=5.0)
-    forwarder = Forwarder(client=httpx.AsyncClient(timeout=timeout))
+    gate = StreamGate(config.settings.gateway_stream_max_connections)
+    forwarder = Forwarder(
+        client=httpx.AsyncClient(timeout=timeout),
+        sse_idle_timeout=config.settings.gateway_stream_idle_timeout_s,
+        gate=gate,
+    )
+    pool = ChannelPool(
+        max_message_bytes=config.settings.grpc_max_message_bytes,
+        keepalive_time_ms=config.settings.grpc_keepalive_time_ms,
+        keepalive_timeout_ms=config.settings.grpc_keepalive_timeout_ms,
+    )
     app.state.forwarder = forwarder
+    app.state.grpc_pool = pool
+    app.state.grpc_forwarder = GrpcForwarder(
+        pool=pool,
+        gate=gate,
+        circuit=forwarder.circuit_for("application-service"),
+        protocol_override=config.settings.app_chat_protocol,
+        default_target=config.settings.application_service_grpc_target,
+        deadline_s=config.settings.gateway_grpc_deadline_s,
+        heartbeat_s=config.settings.gateway_stream_heartbeat_s,
+        idle_timeout_s=config.settings.gateway_stream_idle_timeout_s,
+    )
     return GatewayDeps(
         verifier=TokenVerifier(secret=config.settings.SECRET_KEY),
         # backfill=None：快照 miss 直接 401，不穿透回源 DB（决策 #14 fail-closed）；
@@ -52,9 +78,14 @@ def get_deps():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await gredis.init_redis()
-    app.state.gateway_deps = build_gateway_deps()
-    yield
-    await gredis.close_redis()
+    try:
+        app.state.gateway_deps = build_gateway_deps()
+        yield
+    finally:
+        pool = getattr(app.state, "grpc_pool", None)
+        if pool is not None:
+            await pool.aclose(grace_s=config.settings.grpc_shutdown_grace_s)
+        await gredis.close_redis()
 
 app = FastAPI(title="gateway-service", lifespan=lifespan)
 app.include_router(router)

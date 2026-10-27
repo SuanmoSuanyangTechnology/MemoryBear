@@ -164,3 +164,9 @@ python_classes = ["Test*"]
 python_functions = ["test_*"]
 # 使用 asyncio 作为异步测试后端
 asyncio_mode = "auto"
+
+# Resolve through the mirror so re-locks keep every lock URL on it.
+[[tool.uv.index]]
+name = "tencent"
+url = "https://mirrors.cloud.tencent.com/pypi/simple"
+default = true

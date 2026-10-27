@@ -224,6 +224,27 @@ class AppServiceSettings(BaseSettings):
         default=None,
         validation_alias="MODEL_SERVICE_BASE_URL",
     )
+    # gRPC server (same process as FastAPI; --loop asyncio is mandatory because
+    # grpc.aio cannot run on uvloop). Port 0 binds an ephemeral port in tests.
+    grpc_server_enabled: bool = Field(
+        default=False, validation_alias="GRPC_SERVER_ENABLED"
+    )
+    grpc_port: int = Field(default=9090, ge=0, le=65535, validation_alias="GRPC_PORT")
+    grpc_max_message_bytes: int = Field(
+        default=67108864, gt=0, validation_alias="GRPC_MAX_MESSAGE_BYTES"
+    )
+    grpc_keepalive_time_ms: int = Field(
+        default=30000, gt=0, validation_alias="GRPC_KEEPALIVE_TIME_MS"
+    )
+    grpc_keepalive_timeout_ms: int = Field(
+        default=10000, gt=0, validation_alias="GRPC_KEEPALIVE_TIMEOUT_MS"
+    )
+    grpc_max_concurrent_rpcs: int = Field(
+        default=512, gt=0, validation_alias="GRPC_MAX_CONCURRENT_RPCS"
+    )
+    grpc_shutdown_grace_s: int = Field(
+        default=20, ge=0, validation_alias="GRPC_SHUTDOWN_GRACE_S"
+    )
 
     # East-west clients to mem-knowledge (KB retrieval face) and model-service
     # (runtime invocation face); same env names and defaults as the monolith
@@ -285,6 +306,32 @@ class AppServiceSettings(BaseSettings):
     )
     model_service_invoke_media_idle_timeout_seconds: float = Field(
         default=720.0, gt=0, validation_alias="MODEL_SERVICE_INVOKE_MEDIA_IDLE_TIMEOUT_SECONDS"
+    )
+    # East-west runtime invoke protocol: http keeps the SSE frame contract,
+    # grpc uses ModelInvokeService with the same frame semantics.
+    app_model_protocol: Literal["http", "grpc"] = Field(
+        default="http", validation_alias="APP_MODEL_PROTOCOL"
+    )
+    model_service_grpc_target: str = Field(
+        default="dns:///model-service-grpc:9090",
+        validation_alias="MODEL_SERVICE_GRPC_TARGET",
+    )
+    model_service_invoke_call_budget_seconds: float = Field(
+        default=180.0,
+        gt=0,
+        validation_alias="MODEL_SERVICE_INVOKE_CALL_BUDGET_SECONDS",
+    )
+    model_service_invoke_media_call_budget_seconds: float = Field(
+        default=720.0,
+        gt=0,
+        validation_alias="MODEL_SERVICE_INVOKE_MEDIA_CALL_BUDGET_SECONDS",
+    )
+    # Deadline margin kept for the response trip and orchestration after the
+    # model call returns; must stay below both call budgets.
+    model_service_invoke_grpc_margin_seconds: float = Field(
+        default=30.0,
+        gt=0,
+        validation_alias="MODEL_SERVICE_INVOKE_GRPC_MARGIN_SECONDS",
     )
     # Model-channel credential master key (host `settings.MODEL_CREDENTIALS_KEY`);
     # base64 32-byte key backing the envelope cipher for channel secrets. An
@@ -458,6 +505,29 @@ class AppServiceSettings(BaseSettings):
             raise ValueError(
                 "APPLICATION_SERVICE_SSE_IDLE_TIMEOUT_SECONDS must stay below the "
                 "gateway's 300s idle timeout"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def check_grpc_invoke_settings(self) -> AppServiceSettings:
+        """gRPC invoke needs a target and a margin that cannot starve the call."""
+
+        if self.app_model_protocol != "grpc":
+            return self
+        if not self.model_service_grpc_target.strip():
+            raise ValueError(
+                "MODEL_SERVICE_GRPC_TARGET must be set when APP_MODEL_PROTOCOL=grpc"
+            )
+        margin = self.model_service_invoke_grpc_margin_seconds
+        if margin >= self.model_service_invoke_call_budget_seconds:
+            raise ValueError(
+                "MODEL_SERVICE_INVOKE_GRPC_MARGIN_SECONDS must be smaller than "
+                "MODEL_SERVICE_INVOKE_CALL_BUDGET_SECONDS"
+            )
+        if margin >= self.model_service_invoke_media_call_budget_seconds:
+            raise ValueError(
+                "MODEL_SERVICE_INVOKE_GRPC_MARGIN_SECONDS must be smaller than "
+                "MODEL_SERVICE_INVOKE_MEDIA_CALL_BUDGET_SECONDS"
             )
         return self
 

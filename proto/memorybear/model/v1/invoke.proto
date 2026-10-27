@@ -1,0 +1,43 @@
+syntax = "proto3";
+
+package memorybear.model.v1;
+
+import "memorybear/common/v1/common.proto";
+
+message InvokeRequest {
+  string config_id = 1;
+  string type = 2;
+  bool stream = 3;
+  bytes params_json = 4;
+}
+
+message ChunkFrame {
+  bytes message_json = 1;
+}
+
+message ResultFrame {
+  bytes data_json = 1;
+}
+
+message UsageFrame {
+  bytes event_json = 1;
+}
+
+message DoneFrame {
+  string status = 1;
+}
+
+message InvokeFrame {
+  oneof payload {
+    ChunkFrame chunk = 1;
+    ResultFrame result = 2;
+    UsageFrame usage = 3;
+    memorybear.common.v1.ErrorInfo error = 4;
+    DoneFrame done = 5;
+  }
+  uint64 seq = 6;
+}
+
+service ModelInvokeService {
+  rpc Invoke(InvokeRequest) returns (stream InvokeFrame);
+}
