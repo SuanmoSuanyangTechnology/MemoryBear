@@ -59,6 +59,10 @@ class GateTests(unittest.TestCase):
         result = self.run_gate(approved=True, oas_exit=1, oas_json='[{"level":3}]')
         self.assertNotEqual(result.returncode, 0)
 
+    def test_metadata_only_change_accepted(self):
+        result = self.run_gate(state="metadata")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
     def test_malformed_json_rejected(self):
         self.assertNotEqual(self.run_gate(approved=True, oas_json="oops").returncode, 0)
 
