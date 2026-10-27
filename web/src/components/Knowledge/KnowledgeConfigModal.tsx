@@ -20,7 +20,7 @@ interface KnowledgeConfigModalProps {
   refresh: (values: KnowledgeConfigForm, type: 'knowledgeConfig') => void;
 }
 
-const retrieveTypes: RetrieveType[] = ['participle', 'semantic', 'hybrid', 'graph', 'wiki-FAQ']
+const retrieveTypes: RetrieveType[] = ['participle', 'semantic', 'hybrid', 'graph']
 
 const KnowledgeConfigModal = forwardRef<KnowledgeConfigModalRef, KnowledgeConfigModalProps>(({
   refresh,
