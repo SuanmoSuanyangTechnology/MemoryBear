@@ -151,9 +151,11 @@ class KnowledgeServiceClient:
                         retrieval_request = schema.model_validate(await request.json())
                     except ValidationError as exc:
                         raise RequestValidationError(exc.errors()) from exc
-                    body = retrieval_request.model_dump_json(
-                        exclude_unset=True,
-                    ).encode("utf-8")
+                    payload = retrieval_request.model_dump(mode="json", exclude_unset=True)
+                    if retrieval_request.retrieve_type is not None:
+                        # 滚动升级期间，旧知识库服务仍使用已发布的 wiki-FAQ 标识。
+                        payload["retrieve_type"] = retrieval_request.retrieve_type.public_value
+                    body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
                 send_kwargs["content"] = body
         upstream = await self._transport.send(
             method=request.method,

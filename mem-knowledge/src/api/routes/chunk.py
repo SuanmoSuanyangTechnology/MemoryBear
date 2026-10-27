@@ -394,8 +394,15 @@ async def get_retrieve_types(
 ) -> SuccessEnvelope[list[str]]:
     return _success(
         request,
-        [kind for kind in RetrieveType if kind != RetrieveType.WIKI_FAQ
-         or source == KnowledgeRetrievalSource.MANAGER_API],
+        [
+            kind.public_value
+            for kind in RetrieveType
+            if kind != RetrieveType.WIKI_FAQ
+            or source in {
+                KnowledgeRetrievalSource.MANAGER_API,
+                KnowledgeRetrievalSource.EXTERNAL_API,
+            }
+        ],
         "Successfully obtained the retrieval type",
     )
 

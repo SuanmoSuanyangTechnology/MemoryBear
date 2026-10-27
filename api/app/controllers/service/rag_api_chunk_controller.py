@@ -239,7 +239,7 @@ async def delete_chunk(
 )
 def get_retrieve_types(request: Request = None):
     return success(msg="Successfully obtained the retrieval type", data=[
-        kind for kind in chunk_schema.RetrieveType if kind != chunk_schema.RetrieveType.WIKI_FAQ
+        kind.public_value for kind in chunk_schema.RetrieveType
     ])
 
 

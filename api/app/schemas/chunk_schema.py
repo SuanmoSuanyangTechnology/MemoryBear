@@ -19,7 +19,19 @@ class RetrieveType(StrEnum):
     SEMANTIC = "semantic"
     Graph = "graph"
     HYBRID = "hybrid"
-    WIKI_FAQ = "wiki-FAQ"
+    WIKI_FAQ = "wiki-faq"
+
+    @classmethod
+    def _missing_(cls, value: object) -> "RetrieveType | None":
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            return next((kind for kind in cls if kind.value == normalized), None)
+        return None
+
+    @property
+    def public_value(self) -> str:
+        """类型发现接口保留历史标识，输入和内部处理统一使用小写。"""
+        return "wiki-FAQ" if self is RetrieveType.WIKI_FAQ else self.value
 
 
 class KnowledgeBaseConfig(BaseModel):
@@ -189,7 +201,10 @@ class _ChunkRetrieveBase(BaseModel):
     similarity_threshold: float | None = Field(None)
     vector_similarity_weight: float | None = Field(None)
     top_k: int | None = Field(20, ge=1, le=100)
-    retrieve_type: RetrieveType | None = Field(None)
+    retrieve_type: RetrieveType | None = Field(
+        None,
+        description="检索方式，忽略大小写及首尾空格；FAQ 使用 wiki-faq，兼容历史 wiki-FAQ。",
+    )
     rerank_mode: RerankMode | None = None
     rerank_weights: RerankWeights | None = None
     enable_graph_retrieval: int = Field(
@@ -237,8 +252,6 @@ class ApiChunkRetrieve(_HttpChunkRetrieve):
 
 class V1ChunkRetrieve(_HttpChunkRetrieve):
     """Supported request parameters for API Key retrieval."""
-
-    retrieve_type: Literal["participle", "semantic", "graph", "hybrid"] | None = None
 
 
 class ChunkRetrieve(_ChunkRetrieveBase):
