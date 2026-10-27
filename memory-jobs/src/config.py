@@ -242,6 +242,21 @@ class JobsSettings(BaseSettings):
         20, ge=1, validation_alias="JOBS_ELASTICSEARCH_CONNECTIONS_PER_NODE"
     )
 
+    # ------------------------------------------------------- enterprise service
+    #: Optional memory-enterprise service. Empty means the open build: enterprise
+    #: tables (ontology scene names, ...) are simply unavailable and the fields
+    #: that depend on them are skipped. The service owns those tables and their
+    #: migrations, so this worker never touches an enterprise schema directly.
+    memory_enterprise_base_url: str = Field(
+        "", validation_alias="MEMORY_ENTERPRISE_BASE_URL"
+    )
+    memory_enterprise_timeout_seconds: float = Field(
+        3.0, gt=0, validation_alias="MEMORY_ENTERPRISE_TIMEOUT_SECONDS"
+    )
+    memory_enterprise_token: str = Field(
+        "", validation_alias="MEMORY_ENTERPRISE_TOKEN"
+    )
+
     # --------------------------------------------------------------------- Neo4j
     neo4j_uri: str = Field("bolt://localhost:7687", validation_alias="NEO4J_URI")
     neo4j_username: str = Field(
@@ -271,6 +286,16 @@ class JobsSettings(BaseSettings):
         parsed = urlparse(value)
         if parsed.scheme not in {"http", "https"} or not parsed.hostname:
             raise ValueError("ELASTICSEARCH_HOST must be an absolute HTTP(S) URL")
+        return value
+
+    @field_validator("memory_enterprise_base_url")
+    @classmethod
+    def validate_memory_enterprise_base_url(cls, value: str) -> str:
+        if not value:
+            return value
+        parsed = urlparse(value)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            raise ValueError("MEMORY_ENTERPRISE_BASE_URL must be an absolute HTTP(S) URL")
         return value
 
     @field_validator("model_service_base_url")

@@ -1,7 +1,7 @@
 """Per-user in-flight lock shared by the cache tasks and the sweep.
 
-The key namespace is shared with the API's scanner: the same user must not be
-generated twice at once, whichever service triggered it.
+The API's scanner that used to share this namespace has been removed, so the
+lock now only serialises this service's own units against each other.
 
 Ownership rule: only the per-user unit (``generate``) writes this key, and it
 writes its own task id. The sweep (``scan``) reads it and never takes it — a

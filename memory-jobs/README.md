@@ -43,7 +43,7 @@ memory-jobs/
 │   ├── healthcheck.py          # 容器探针：python -m src.healthcheck
 │   ├── common/                 # 日志、任务上下文、归一化
 │   ├── prompts/                # 全部生成类提示词（单一入口 + templates/）
-│   ├── infrastructure/         # 同步 DB / Redis / ES / Neo4j 管理器
+│   ├── infrastructure/         # 同步 DB / Redis / ES / Neo4j / model-service / 企业版服务客户端
 │   ├── models/                 # 宿主表的 SQLAlchemy 映射
 │   ├── modules/                # 业务功能，按功能分包
 │   │   ├── memory_insight/     #   记忆洞察生成（算法 + 提示词）
@@ -52,6 +52,7 @@ memory-jobs/
 │   │   ├── profile_cache/      #   洞察 + 摘要的缓存编排
 │   │   └── shared/             #   跨域共享
 │   │       ├── model_config.py #     工作空间 LLM 解析与阻塞模型构建
+│   │       ├── scene_names.py  #     洞察输入的场景名投影（可选企业插件）
 │   │       └── repositories/   #     数据访问：每个聚合一个模块
 │   └── tasks/                  # Celery 适配层：每个任务一个模块
 │       ├── __init__.py         # 任务注册表：import 各任务包 + 路由
@@ -68,7 +69,7 @@ memory-jobs/
 │           ├── generate_workspace.py  # memory_jobs.profile_cache.generate_workspace
 │           ├── scan.py         # memory_jobs.profile_cache.scan（beat 定时扫描）
 │           ├── dispatch.py     # 错峰投递（工作空间 fan-out 与 scan 共用）
-│           └── inflight.py     # 每用户并发锁（与 API 扫描器共享 key）
+│           └── inflight.py     # 每用户并发锁
 ├── tests/
 ├── scripts/check_sync_only.py
 ├── deploy/k8s/                 # worker / beat 部署清单
@@ -284,6 +285,12 @@ PeriodicTask(
 - `JOBS_STARTUP_DEPENDENCY_CHECK=true` 可让 worker 在依赖不可用时启动失败（默认关闭，
   避免瞬时故障导致 worker 无法就绪）。
 - `JOBS_HEALTHCHECK_TIMEOUT_SECONDS` 只约束探针请求（默认 3s），不影响任务的正常超时与重试。
+- **企业版服务（可选）**：企业版表（本体场景名等）由闭源 `memory-enterprise` 服务持有，
+  包含表定义与迁移；本服务只通过 HTTP 读取，不接触企业 schema。
+  `MEMORY_ENTERPRISE_BASE_URL` 指向该服务（例：`http://memory-enterprise:8083`），
+  `MEMORY_ENTERPRISE_TIMEOUT_SECONDS` 默认 3s，`MEMORY_ENTERPRISE_TOKEN` 设置后以
+  `X-Internal-Token` 发送。未配置时与「未装插件的 API」一致：洞察输入里 uuid 场景键
+  视为已删除、整组丢弃。该服务**不参与**依赖探测，挂了只会丢场景名，不会让任务失败。
 - `JOBS_INTEREST_CACHE_EXPIRE_SECONDS`（默认 24h）：预热单元写入兴趣分布缓存的 TTL。
   与 memory-profile 的 `PROFILE_INTEREST_CACHE_EXPIRE_SECONDS` 是同一个键（重启后者的
   环境变量即可同时生效），两个写入方用同一个过期时间。

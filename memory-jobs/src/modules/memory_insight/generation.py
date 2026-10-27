@@ -1,7 +1,7 @@
 """Memory-insight generation, ported to blocking clients.
 
-A faithful port of ``memory-profile/src/modules/analytics/generation/memory_insight.py``:
-the profile metadata is bounded and deduplicated, recent statements fill the gap
+A faithful port of the API's ``refresh_memory_insight``: the profile metadata is
+projected to scene names, bounded and deduplicated, recent statements fill the gap
 when metadata is thin, one structured LLM call produces the insight, and the write
 is guarded by the same optimistic concurrency conditions the monolith used.
 """
@@ -26,7 +26,14 @@ from src.modules.memory_insight.metadata import (
 )
 from src.modules.shared.repositories.generation_graph import GenerationGraphRepository
 from src.modules.shared.repositories.memory_generation import MemoryGenerationRepository
+from src.modules.shared.scene_names import (
+    drop_deleted_scene_entries,
+    load_scene_names,
+    project_domain_names,
+)
+from src.modules.shared.workspace_validation import validate_workspace_row
 from src.prompts import render_memory_insight_prompt
+from src.runtime import get_runtime
 
 logger = logging.getLogger(__name__)
 
@@ -86,12 +93,23 @@ def _metadata_groups(metadata: dict[str, object]) -> list[tuple[str, list[str]]]
     return list(groups.items())
 
 
-def build_memory_insight_metadata_input(meta_data: object) -> dict[str, list[str]]:
-    """Bounded metadata projection (api limits, same order and truncation)."""
+def build_memory_insight_metadata_input(
+    meta_data: object, scene_names_by_id: Mapping[str, str] | None = None
+) -> dict[str, list[str]]:
+    """Bounded metadata projection (api limits, same order and truncation).
+
+    ``domain_specific_info`` is projected to scene names first: uuid keys whose
+    scene no longer exists are dropped, the rest are renamed. Legacy name-keyed
+    entries pass through, matching the API.
+    """
 
     if not isinstance(meta_data, dict):
         return {}
-    metadata = cast(dict[str, object], meta_data)
+    metadata = dict(cast(dict[str, object], meta_data))
+    metadata["domain_specific_info"] = project_domain_names(
+        drop_deleted_scene_entries(metadata.get("domain_specific_info"), scene_names_by_id),
+        scene_names_by_id,
+    )
 
     result: dict[str, list[str]] = {}
     total_chars = 0
@@ -199,22 +217,6 @@ def _result(
     }
 
 
-def validate_workspace_row(
-    workspace: Mapping[str, Any] | None,
-) -> tuple[bool, str, str | None]:
-    """Return ``(valid, reason, storage_type)`` for an already-loaded workspace."""
-
-    if workspace is None:
-        return False, "workspace_not_found", None
-    raw_storage_type = workspace["storage_type"]
-    if not workspace["is_active"]:
-        return False, "workspace_inactive", raw_storage_type
-    storage_type = "neo4j" if raw_storage_type is None else str(raw_storage_type).lower()
-    if storage_type != "neo4j":
-        return False, "unsupported_storage_type", storage_type or None
-    return True, "valid", storage_type
-
-
 def refresh_memory_insight(
     repository: MemoryGenerationRepository,
     graph: GenerationGraphRepository,
@@ -253,7 +255,13 @@ def refresh_memory_insight(
             error="用户不存在、已停用或不属于当前工作空间",
         )
 
-    metadata_input = build_memory_insight_metadata_input(source["meta_data"])
+    # Scene names make the prompt readable and drop deleted scenes. The lookup
+    # lives in the enterprise service; without it the API behaves the same way
+    # (uuid scenes count as unknown).
+    scene_names = load_scene_names(
+        source["meta_data"], get_runtime().memory_enterprise.scene_names
+    )
+    metadata_input = build_memory_insight_metadata_input(source["meta_data"], scene_names)
     fallback_statements: list[str] = []
     if count_memory_insight_entries(metadata_input) < MEMORY_INSIGHT_MIN_ENTRIES:
         raw_statements = graph.recent_user_statements(
