@@ -355,10 +355,6 @@ async def test_aclose_is_safe(make_backend):
     await backend.aclose()
 
 
-def test_native_ttl_is_unset_because_the_scheduler_owns_the_lifetime(make_backend):
-    assert make_backend().native_ttl_s is None
-
-
 # -- configuration --------------------------------------------------------------------------
 
 ENV = {"SANDBOX_CUBE_API_URL": API_URL, "SANDBOX_CUBE_PROXY_ADDR": PROXY_ADDR}

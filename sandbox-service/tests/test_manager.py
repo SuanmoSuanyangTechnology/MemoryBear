@@ -171,7 +171,7 @@ async def test_recent_activity_prevents_pause(make_env):
 
 
 async def test_retention_expiry_destroys_and_reports_workspace_reset(make_env):
-    env = make_env(max_retention_s=HOUR, absolute_lifetime_s=10 * HOUR)
+    env = make_env(max_retention_s=HOUR)
     o1 = await env.mgr.execute(K(), "a")
     env.clock.advance(IDLE)
     await env.mgr.tick()  # paused
@@ -186,18 +186,19 @@ async def test_retention_expiry_destroys_and_reports_workspace_reset(make_env):
     assert not (await env.mgr.execute(K(), "c")).workspace_reset
 
 
-async def test_absolute_lifetime_forces_recreate(make_env):
-    env = make_env(absolute_lifetime_s=HOUR, idle_pause_s=10 * HOUR)
+async def test_a_running_instance_is_never_expired_by_age(make_env):
+    # No absolute lifetime: an instance that keeps being used outlives any age check.
+    env = make_env(idle_pause_s=10 * HOUR)
     o1 = await env.mgr.execute(K(), "a")
-    env.clock.advance(HOUR + 1)
+    env.clock.advance(48 * HOUR)
+    await env.mgr.execute(K(), "b")  # keeps it active
     rep = await env.mgr.tick()
-    assert rep.lifetime_expired == 1
-    o2 = await env.mgr.execute(K(), "b")
-    assert o2.path == "create" and o2.instance_id != o1.instance_id and o2.workspace_reset
+    assert rep.expired == 0 and rep.paused == 0
+    assert env.backend.state_of(o1.instance_id) == "running"
 
 
 async def test_tombstones_expire(make_env):
-    env = make_env(absolute_lifetime_s=100, tombstone_ttl_s=1000, idle_pause_s=10 * HOUR)
+    env = make_env(max_retention_s=100, tombstone_ttl_s=1000)
     await env.mgr.execute(K(), "a")
     env.clock.advance(101)
     await env.mgr.tick()  # destroyed, tombstone written
@@ -236,8 +237,7 @@ async def test_pressure_evicts_longest_paused_first_and_marks_reset(make_env):
     await env.mgr.tick()  # u1 paused first
     await env.mgr.execute(K(user="u2"), "a")
     env.clock.advance(IDLE)
-    await env.mgr.tick()  # u2 paused second
-    env.clock.advance(2 * HOUR + 5 * MIN)  # both past P_min
+    await env.mgr.tick()  # u2 paused second; no minimum pause age is required
 
     o3 = await env.mgr.execute(K(user="u3"), "a")
     assert not o3.workspace_reset
@@ -278,19 +278,15 @@ async def test_queue_waits_about_queue_wait_s_before_busy(make_env):
     assert 3.0 <= waited < 3.5
 
 
-async def test_paused_instance_inside_p_min_is_protected(make_env):
+async def test_paused_instance_is_immediately_evictable(make_env):
+    # No P_min: the moment an instance is paused it stops blocking a new user.
     env = make_env(capacity=1)
     await env.mgr.execute(K(user="u1"), "a")
     env.clock.advance(IDLE)
-    await env.mgr.tick()
-    with pytest.raises(SandboxError) as ei:
-        await env.mgr.execute(K(user="u2"), "a")
-    assert ei.value.kind == "sandbox_busy"
-    assert env.mgr.registry.get(sbx("u1").digest) is not None
-
-    env.clock.advance(2 * HOUR + MIN)  # now past P_min
+    await env.mgr.tick()  # u1 paused
     assert (await env.mgr.execute(K(user="u2"), "a")).path == "create"
     assert env.mgr.registry.get(sbx("u1").digest) is None
+    assert env.mgr.metrics["evicted"] == 1
 
 
 async def test_last_slot_goes_to_exactly_one_of_two_concurrent_creators(make_env):
@@ -316,12 +312,11 @@ async def test_tenant_capacity_is_enforced_per_tenant(make_env):
     assert (await env.mgr.execute(K(user="u3", tenant="B"), "x")).path == "create"
 
 
-async def test_tenant_over_capacity_evicts_its_own_long_paused_instance(make_env):
+async def test_tenant_over_capacity_evicts_its_own_paused_instance(make_env):
     env = make_env(capacity=10, tenant_capacity=1)
     await env.mgr.execute(K(user="u1", tenant="A"), "x")
     env.clock.advance(IDLE)
     await env.mgr.tick()
-    env.clock.advance(2 * HOUR + MIN)
     out = await env.mgr.execute(K(user="u2", tenant="A"), "x")
     assert out.path == "create"
     assert env.mgr.registry.get(sbx("u1", "A").digest) is None

@@ -141,8 +141,8 @@ def fold_events(events: list[dict[str, Any]], duration_ms: int) -> RunResult:
 
 class CubeBackend:
     name = "cube"
-    # Sandboxes are created without a substrate timeout, so nothing expires underneath us.
-    native_ttl_s: float | None = None
+    # Sandboxes are created without a substrate timeout, so nothing expires underneath us;
+    # the scheduler owns the whole lifetime (idle pause + retention).
 
     def __init__(self, cfg: CubeConfig, clock: Clock, client: CubeClient | None = None) -> None:
         self._cfg = cfg

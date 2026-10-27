@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -12,6 +13,8 @@ from typing import Any
 
 from ..envconf import ConfigError
 
+logger = logging.getLogger(__name__)
+
 _POLICY_VERSION = 1
 _MAX_DOMAINS = 1024
 _LABEL = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
@@ -19,14 +22,16 @@ _LABEL = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
 
 @dataclass(frozen=True)
 class EgressConfig:
-    """Deployment-level strict egress switch and mounted policy path."""
+    """Deployment-level strict egress switch and mounted policy path.
 
-    egress_enabled: bool = False
+    Strict egress is **on by default**: a deployment must opt out explicitly
+    (``SANDBOX_EGRESS_ENABLED=false``). While it is on, a missing policy path or a
+    missing policy file is a start-up failure - never a silent fallback to open
+    networking (see :func:`load_strict_egress_policy`).
+    """
+
+    egress_enabled: bool = True
     egress_policy_path: str | None = None
-
-    def __post_init__(self) -> None:
-        if self.egress_enabled and not self.egress_policy_path:
-            raise ValueError("egress_policy_path is required when egress_enabled=true")
 
 
 @dataclass(frozen=True)
@@ -104,14 +109,33 @@ def _parse_document(document: object) -> tuple[str, ...]:
 def load_strict_egress_policy(
     config: EgressConfig, *, base_dir: str | Path | None = None
 ) -> StrictEgressPolicy | None:
-    """Load once at startup; disabled means preserving the backend's current behavior."""
+    """Load once at startup and fail closed on anything that is not a usable policy.
+
+    - disabled by explicit configuration (``SANDBOX_EGRESS_ENABLED=false``): return
+      ``None``; the operator has accepted that this deployment has no outbound
+      protection.
+    - enabled (the default) with no configured path, or with a path that does not
+      exist: raise ``ConfigError`` so the process refuses to start.
+    - enabled with a file that exists but cannot be read, or that is not valid JSON or
+      not a valid policy document: raise ``ConfigError``.
+
+    A policy that cannot be applied is never silently downgraded to open networking.
+    """
 
     if not config.egress_enabled:
+        logger.info("strict egress disabled by SANDBOX_EGRESS_ENABLED=false")
         return None
-    assert config.egress_policy_path is not None
+    if not config.egress_policy_path:
+        raise ConfigError(
+            "strict egress is enabled by default and requires SANDBOX_EGRESS_POLICY_PATH; "
+            "point it at a policy file, or set SANDBOX_EGRESS_ENABLED=false to accept a "
+            "deployment without outbound protection"
+        )
     path = Path(config.egress_policy_path).expanduser()
     if not path.is_absolute() and base_dir is not None:
         path = Path(base_dir) / path
+    if not path.exists():
+        raise ConfigError(f"SANDBOX_EGRESS_POLICY_PATH does not exist: {path}")
     try:
         raw = path.read_text(encoding="utf-8")
     except OSError as exc:

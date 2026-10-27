@@ -2,7 +2,7 @@
 
 Each tunable of ``SchedulerConfig`` and ``OutputBudget`` maps to one variable named
 ``SANDBOX_<FIELD_NAME_UPPERCASE>`` (for example ``SANDBOX_CAPACITY`` or
-``SANDBOX_P_MIN_S``). Unset variables keep the dataclass default. Parsing follows
+``SANDBOX_MAX_RETENTION_S``). Unset variables keep the dataclass default. Parsing follows
 the field type, so adding a field to either dataclass needs no change here.
 
 Output budget variables use the ``SANDBOX_`` prefix as well:

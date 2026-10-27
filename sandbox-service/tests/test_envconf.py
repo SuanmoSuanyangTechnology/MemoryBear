@@ -76,7 +76,7 @@ def test_validation_error_from_the_dataclass_becomes_config_error():
 
 
 def test_variable_names_and_known_variables():
-    assert envconf.variable_name("SANDBOX_", "p_min_s") == "SANDBOX_P_MIN_S"
+    assert envconf.variable_name("SANDBOX_", "max_retention_s") == "SANDBOX_MAX_RETENTION_S"
     assert envconf.known_variables((Sample,), P) == [
         "T_COUNT",
         "T_FLAG",

@@ -39,14 +39,6 @@ def create_app_from_env(env: Mapping[str, str] | None = None) -> FastAPI:
     clock = Clock()
     backend = build_backend(source, clock)
 
-    # The substrate's own expiry timer must not fire before the scheduler decides.
-    native_ttl_s = getattr(backend, "native_ttl_s", None)
-    if native_ttl_s is not None and native_ttl_s < cfg.scheduler.absolute_lifetime_s:
-        raise ConfigError(
-            f"backend native_ttl_s={native_ttl_s} is below "
-            f"SANDBOX_ABSOLUTE_LIFETIME_S={cfg.scheduler.absolute_lifetime_s}"
-        )
-
     audit_sink = JsonlOperationAuditSink(cfg.audit.audit_log_path)
     manager = SandboxManager(
         backend,

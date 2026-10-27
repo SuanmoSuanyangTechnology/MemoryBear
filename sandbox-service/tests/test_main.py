@@ -8,17 +8,23 @@ from src.envconf import ConfigError
 from src.main import create_app_from_env
 
 TOKEN = "unit-test-token-0123456789"
-FAKE_ENV = {"SANDBOX_BACKEND": "fake", "SANDBOX_API_TOKEN": TOKEN}
+# These tests are about app wiring, not egress: opt out explicitly so the default
+# fail-closed egress policy does not require a policy file here.
+FAKE_ENV = {
+    "SANDBOX_BACKEND": "fake",
+    "SANDBOX_API_TOKEN": TOKEN,
+    "SANDBOX_EGRESS_ENABLED": "false",
+}
 
 
 def test_missing_backend_fails_at_startup():
     with pytest.raises(ConfigError, match="SANDBOX_BACKEND"):
-        create_app_from_env({"SANDBOX_API_TOKEN": TOKEN})
+        create_app_from_env({"SANDBOX_API_TOKEN": TOKEN, "SANDBOX_EGRESS_ENABLED": "false"})
 
 
 def test_missing_token_fails_at_startup():
     with pytest.raises(ConfigError, match="SANDBOX_API_TOKEN"):
-        create_app_from_env({"SANDBOX_BACKEND": "fake"})
+        create_app_from_env({"SANDBOX_BACKEND": "fake", "SANDBOX_EGRESS_ENABLED": "false"})
 
 
 def test_bad_scheduler_number_fails_at_startup():
@@ -41,14 +47,20 @@ def test_enabled_egress_policy_is_loaded_during_startup(tmp_path):
     assert app is not None
 
 
-def test_substrate_timer_shorter_than_the_scheduler_lifetime_is_refused(monkeypatch):
-    class ShortLived:
-        name = "short"
-        native_ttl_s = 60.0
+def test_default_egress_without_a_policy_path_fails_at_startup():
+    with pytest.raises(ConfigError, match="SANDBOX_EGRESS_POLICY_PATH"):
+        create_app_from_env({**FAKE_ENV, "SANDBOX_EGRESS_ENABLED": "true"})
 
-    monkeypatch.setattr(main, "build_backend", lambda env, clock: ShortLived())
-    with pytest.raises(ConfigError, match="native_ttl_s"):
-        create_app_from_env(FAKE_ENV)
+
+def test_default_egress_with_a_missing_policy_file_fails_at_startup(tmp_path):
+    with pytest.raises(ConfigError, match="SANDBOX_EGRESS_POLICY_PATH"):
+        create_app_from_env(
+            {
+                **FAKE_ENV,
+                "SANDBOX_EGRESS_ENABLED": "true",
+                "SANDBOX_EGRESS_POLICY_PATH": str(tmp_path / "missing.json"),
+            }
+        )
 
 
 async def test_app_serves_and_runs_its_lifespan_with_the_fake_backend():

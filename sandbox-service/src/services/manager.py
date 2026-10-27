@@ -99,7 +99,6 @@ class ExecOutcome:
 class TickReport:
     paused: int = 0
     expired: int = 0  # paused longer than B
-    lifetime_expired: int = 0  # older than C
     evicted: int = 0
     kernels_reaped: int = 0  # idle kernels deleted (kernel_idle_s)
     errors: int = 0
@@ -362,7 +361,7 @@ class SandboxManager(FileOpsMixin):
             return True
 
     async def tick(self) -> TickReport:
-        """Periodic housekeeping: idle pause (A), retention (B), lifetime (C), watermark."""
+        """Periodic housekeeping: idle pause (A), retention (B), watermark."""
 
         rep = TickReport()
         for rec in self._registry.all():
@@ -885,15 +884,13 @@ class SandboxManager(FileOpsMixin):
         return await self._evict(need)
 
     async def _evict(self, need: int, *, only_tenant: str | None = None) -> int:
-        """Destroy up to ``need`` long-paused instances; returns how many went."""
+        """Destroy up to ``need`` paused instances; returns how many went."""
 
         if need <= 0:
             return 0
         cfg = self._cfg
         victims = select_victims(
             self._registry.all(),
-            now_ms=self._clock.now_ms(),
-            p_min_ms=_ms(cfg.p_min_s),
             need=self._registry.count(),
             soft_quota=cfg.tenant_soft_quota,
             only_tenant=only_tenant,
@@ -906,7 +903,7 @@ class SandboxManager(FileOpsMixin):
                 if not got or self._registry.get(rec.digest) is not rec:
                     continue
                 # Re-check under the lock: state may have changed while we waited.
-                if not is_candidate(rec, self._clock.now_ms(), _ms(cfg.p_min_s)):
+                if not is_candidate(rec):
                     continue
                 try:
                     await self._destroy_locked(rec, tombstone=True, reason="evicted")
@@ -930,10 +927,7 @@ class SandboxManager(FileOpsMixin):
             if rec.state == STATE_CREATING or rec.busy or rec.instance_id is None:
                 return
             now = self._clock.now_ms()
-            if now - rec.created_ms >= _ms(cfg.absolute_lifetime_s):
-                await self._destroy_locked(rec, tombstone=True, reason="absolute_lifetime")
-                rep.lifetime_expired += 1
-            elif rec.state == STATE_PAUSED:
+            if rec.state == STATE_PAUSED:
                 if rec.paused_at_ms is not None and now - rec.paused_at_ms >= _ms(
                     cfg.max_retention_s
                 ):

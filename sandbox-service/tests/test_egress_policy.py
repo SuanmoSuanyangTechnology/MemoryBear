@@ -14,13 +14,17 @@ def write_policy(tmp_path, document: object):
     return path
 
 
-def test_disabled_policy_needs_no_file():
-    assert load_strict_egress_policy(EgressConfig()) is None
+def test_strict_egress_is_on_by_default():
+    assert EgressConfig().egress_enabled is True
 
 
-def test_enabled_policy_requires_a_path():
-    with pytest.raises(ValueError, match="egress_policy_path"):
-        EgressConfig(egress_enabled=True)
+def test_explicitly_disabled_policy_needs_no_file():
+    assert load_strict_egress_policy(EgressConfig(egress_enabled=False)) is None
+
+
+def test_enabled_policy_without_a_path_fails_closed():
+    with pytest.raises(ConfigError, match="SANDBOX_EGRESS_POLICY_PATH"):
+        load_strict_egress_policy(EgressConfig(egress_enabled=True))
 
 
 def test_load_normalizes_domains_and_compiles_standard_http_https_rules(tmp_path):
@@ -92,11 +96,12 @@ def test_invalid_documents_fail_closed_at_load(tmp_path, document):
         load_strict_egress_policy(EgressConfig(True, str(path)))
 
 
-def test_missing_or_malformed_file_names_the_config(tmp_path):
-    missing = tmp_path / "missing.json"
+def test_enabled_policy_with_a_missing_file_fails_closed(tmp_path):
     with pytest.raises(ConfigError, match="SANDBOX_EGRESS_POLICY_PATH"):
-        load_strict_egress_policy(EgressConfig(True, str(missing)))
+        load_strict_egress_policy(EgressConfig(True, str(tmp_path / "missing.json")))
 
+
+def test_a_present_but_malformed_file_still_fails_closed(tmp_path):
     malformed = tmp_path / "bad.json"
     malformed.write_text("{", encoding="utf-8")
     with pytest.raises(ConfigError, match="SANDBOX_EGRESS_POLICY_PATH"):

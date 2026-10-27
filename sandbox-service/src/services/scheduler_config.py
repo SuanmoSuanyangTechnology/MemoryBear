@@ -19,9 +19,9 @@ class SchedulerConfig:
 
     # --- lifecycle (doc 3, Q2) ---
     idle_pause_s: float = 20 * 60  # A: idle -> pause
-    max_retention_s: float = 24 * 3600  # B: paused this long -> destroy
-    absolute_lifetime_s: float = 24 * 3600  # C: forced recreate
-    p_min_s: float = 2 * 3600  # paused this long before it may be evicted (decided)
+    max_retention_s: float = 2 * 3600  # B: paused this long -> destroy
+    # No absolute lifetime: an instance lives as long as it keeps being used.
+    # No minimum pause age either: any paused, non-busy instance may be evicted.
     # A conversation's kernel unused this long is deleted (a terminal kernel first kills
     # the process groups its commands started). 0 disables. Keep it below idle_pause_s.
     kernel_idle_s: float = 15 * 60
@@ -64,7 +64,7 @@ class SchedulerConfig:
             raise ValueError("evict_batch_max must be >= 1")
         if self.create_concurrency < 1 or self.create_max_per_window < 1:
             raise ValueError("create limits must be >= 1")
-        for name in ("idle_pause_s", "max_retention_s", "absolute_lifetime_s", "p_min_s", "kernel_idle_s"):
+        for name in ("idle_pause_s", "max_retention_s", "kernel_idle_s"):
             if getattr(self, name) < 0:
                 raise ValueError(f"{name} must be >= 0")
         if self.queue_wait_s < 0 or self.queue_poll_s <= 0:
