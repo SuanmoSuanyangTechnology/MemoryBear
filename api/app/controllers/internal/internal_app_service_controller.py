@@ -472,8 +472,11 @@ async def _callback_user_snapshot(workspace_id: uuid.UUID) -> CurrentUserSnapsho
     """
     async with get_async_db_context() as db:
         workspace = await db.get(Workspace, workspace_id)
-    if workspace is None:
-        raise BusinessException("工作空间不存在", BizCode.WORKSPACE_NOT_FOUND)
+        if workspace is None:
+            raise BusinessException("工作空间不存在", BizCode.WORKSPACE_NOT_FOUND)
+        # Plain values only: the context exit rolls back and closes the session,
+        # which expires and detaches the ORM instance.
+        tenant_id = workspace.tenant_id
     return CurrentUserSnapshot(
         id=uuid.uuid5(uuid.NAMESPACE_URL, "application-service"),
         username="application-service",
@@ -481,7 +484,7 @@ async def _callback_user_snapshot(workspace_id: uuid.UUID) -> CurrentUserSnapsho
         is_active=True,
         is_superuser=False,
         current_workspace_id=workspace_id,
-        tenant_id=workspace.tenant_id,
+        tenant_id=tenant_id,
     )
 
 
