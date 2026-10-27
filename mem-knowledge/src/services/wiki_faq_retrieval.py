@@ -46,12 +46,11 @@ def validate_request(request: KnowledgeRetrievalRequest) -> None:
     ):
         error_code = "KB_FAQ_MIXED_RETRIEVAL_UNSUPPORTED"
     elif request.metadata_filter_mode is not MetadataFilterMode.DISABLED:
-        # 与普通召回一致：禁用时忽略历史表达式，空条件组不产生过滤。
+        # FAQ 不支持元数据过滤；禁用时忽略历史配置，空组不能绕过未解析 AUTO 的拒绝。
         if any(group.conditions for group in request.metadata_filters):
             error_code = "KB_FAQ_METADATA_FILTER_UNSUPPORTED"
         elif (
             request.metadata_filter_mode is MetadataFilterMode.AUTO
-            and not request.metadata_filters
             and not request.metadata_filters_resolved
         ):
             error_code = "KB_FAQ_AUTO_METADATA_UNSUPPORTED"
