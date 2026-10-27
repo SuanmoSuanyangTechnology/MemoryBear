@@ -21,6 +21,7 @@ from task_bridge import (
     TaskResultUnavailableError,
     TaskTimeoutError,
 )
+from task_bridge.mem_router import TaskName
 
 from src.common.errors import BizCode, LocalizedProfileError
 from src.common.normalization import (
@@ -87,6 +88,8 @@ INTEREST_CACHE_PREFIX = "cache:memory:interest_distribution"
 #: 被观察到；单用户 960s 还要越过 worker 的 900s time_limit，保证终态先到。
 _INTEREST_WAIT_TIMEOUT_SECONDS = 120.0
 _GENERATE_CACHE_WAIT_TIMEOUT_SECONDS = 960.0
+#: 整工作空间现在只做枚举+派发，正常几秒内返回；保留 3600s 上限是为了让滚动
+#: 升级期间仍在跑旧串行实现的 worker 不被提前判超时。
 _GENERATE_CACHE_WORKSPACE_WAIT_TIMEOUT_SECONDS = 3600.0
 
 
@@ -1355,11 +1358,14 @@ class ProfileAnalyticsService:
         """
 
         try:
-            task_id = await self.task_bridge.submit_interest_distribution(
-                end_user_id=end_user_id,
-                workspace_id=workspace_id,
-                language=language,
-                limit=INTEREST_DISPLAY_LIMIT,
+            task_id = await self.task_bridge.submit(
+                TaskName.INTEREST_DISTRIBUTION_GENERATE,
+                kwargs={
+                    "end_user_id": end_user_id,
+                    "workspace_id": str(workspace_id),
+                    "language": language,
+                    "limit": INTEREST_DISPLAY_LIMIT,
+                },
             )
         except (BridgeConfigurationError, InvalidTaskPayloadError, TaskPublishError) as exc:
             logger.error(
@@ -1500,8 +1506,9 @@ class ProfileAnalyticsService:
                 end_user_id, workspace_id, language
             )
 
-        # A whole workspace is one worker unit too: the serial per-user loop
-        # lives in the worker, and this process only waits for the summary.
+        # A whole workspace is fanned out by the worker: it enumerates the
+        # active users, queues one per-user unit for each and returns at once,
+        # so this process waits only for the dispatch summary.
         return await self._generate_cache_batch_via_worker(workspace_id, language)
 
     async def _generate_cache_via_worker(
@@ -1520,10 +1527,13 @@ class ProfileAnalyticsService:
         """
 
         try:
-            task_id = await self.task_bridge.submit_generate_cache(
-                end_user_id=end_user_id,
-                workspace_id=workspace_id,
-                language=language,
+            task_id = await self.task_bridge.submit(
+                TaskName.PROFILE_CACHE_GENERATE,
+                kwargs={
+                    "end_user_id": end_user_id,
+                    "workspace_id": str(workspace_id),
+                    "language": language,
+                },
             )
         except (BridgeConfigurationError, InvalidTaskPayloadError, TaskPublishError) as exc:
             logger.error(
@@ -1603,18 +1613,20 @@ class ProfileAnalyticsService:
     async def _generate_cache_batch_via_worker(
         self, workspace_id: UUID, language: str
     ) -> dict[str, Any]:
-        """Run the workspace batch in memory-jobs and wait for its summary.
+        """Ask memory-jobs to fan the workspace out and wait for its summary.
 
-        The summary keeps the API's shape (``total_users`` / ``successful`` /
-        ``failed`` / ``errors``). A crashed worker keeps that shape with the
-        failure recorded in ``errors`` — the batch never failed as a whole in
-        the API either. Only transport problems become 503.
+        The worker queues one ``memory_jobs.profile_cache.generate`` unit per
+        active user and answers in the API's batch shape (``total_users`` /
+        ``successful`` / ``failed`` / ``errors``): ``successful`` counts queued
+        units and ``failed`` the ones the broker refused, while each unit
+        reports its own generation outcome. Transport problems become 503; a
+        failed task returns zero counts plus the error.
         """
 
         try:
-            task_id = await self.task_bridge.submit_generate_cache_workspace(
-                workspace_id=workspace_id,
-                language=language,
+            task_id = await self.task_bridge.submit(
+                TaskName.PROFILE_CACHE_GENERATE_WORKSPACE,
+                kwargs={"workspace_id": str(workspace_id), "language": language},
             )
         except (BridgeConfigurationError, InvalidTaskPayloadError, TaskPublishError) as exc:
             logger.error(

@@ -15,28 +15,14 @@ import logging
 from collections.abc import Mapping
 from dataclasses import replace
 from typing import Any
-from uuid import UUID
 
 from task_bridge import CeleryBridge, TaskStatus
+from task_bridge.mem_router import MAX_PRIORITY, PRIORITY_STEPS, QueueName, TaskPriority
 from task_bridge.transports.celery.config import CeleryConfig
 
 from src.config import ProfileSettings
 
 logger = logging.getLogger(__name__)
-
-# Task names are the contract with the worker registry in ``memory-jobs``
-# (``src/tasks/__init__.py``); renaming one here without renaming it there
-# only makes submissions sit in the queue until the wait timeout. They are
-# deliberately not settings: no deployment should point a producer at a
-# different task.
-GENERATE_CACHE_TASK_NAME = "memory_jobs.profile_cache.generate"
-GENERATE_CACHE_WORKSPACE_TASK_NAME = "memory_jobs.profile_cache.generate_workspace"
-INTEREST_DISTRIBUTION_TASK_NAME = "memory_jobs.interest_distribution.generate"
-
-#: All three tasks route to the worker's "heavy" queue, matching
-#: ``TASK_ROUTES`` in ``memory-jobs/src/tasks/__init__.py``.
-MEMORY_HEAVY_QUEUE = "memory_heavy_tasks"
-
 
 class TaskBridgeManager:
     """Own the process-wide bridge, created lazily on the running event loop."""
@@ -51,27 +37,42 @@ class TaskBridgeManager:
         return self._bridge is not None
 
     def _config(self) -> CeleryConfig:
-        """Env-derived broker/backend, with this service's task routing applied.
+        """Env-derived broker/backend, with this service's queue policy applied.
 
         ``from_env`` does the URL resolution (TASK_BRIDGE_* → CELERY_* → Redis
-        DB 3/4) so producers and workers agree; only the task names and queue
-        *this* service produces into are added here.
+        DB 3/4) so producers and workers agree; this service only adds the queue
+        it publishes into and the priority buckets the worker reads. Task name,
+        queue and routing table come from ``task_bridge.mem_router``, the contract
+        memory-jobs installs too.
         """
 
         base = CeleryConfig.from_env()
+        broker_url = self._settings.task_bridge_broker_url or base.broker_url
+        app_options: dict[str, Any] = {
+            **base.app_options,
+            # The producer declares the queue when it first publishes, so it has
+            # to declare it exactly like the worker does: RabbitMQ rejects a
+            # declaration whose ``x-max-priority`` differs (PRECONDITION_FAILED),
+            # and without the argument it drops the priority entirely.
+            "task_queue_max_priority": MAX_PRIORITY,
+        }
+        if broker_url.startswith(("redis://", "rediss://")):
+            # Redis-only: kombu keeps one list per priority step there, so a
+            # producer using different steps writes where the worker's BRPOP
+            # never looks. AMQP orders by the message property instead.
+            app_options["broker_transport_options"] = {
+                **dict(base.app_options.get("broker_transport_options") or {}),
+                "priority_steps": list(PRIORITY_STEPS),
+            }
         return replace(
             base,
-            broker_url=self._settings.task_bridge_broker_url or base.broker_url,
+            broker_url=broker_url,
             result_backend=(
                 self._settings.task_bridge_result_backend or base.result_backend
             ),
-            default_queue=MEMORY_HEAVY_QUEUE,
-            task_routes={
-                **base.task_routes,
-                GENERATE_CACHE_TASK_NAME: MEMORY_HEAVY_QUEUE,
-                GENERATE_CACHE_WORKSPACE_TASK_NAME: MEMORY_HEAVY_QUEUE,
-                INTEREST_DISTRIBUTION_TASK_NAME: MEMORY_HEAVY_QUEUE,
-            },
+            # Safety net only: ``submit`` always names the queue explicitly.
+            default_queue=QueueName.MEMORY_JOBS.value,
+            app_options=app_options,
         )
 
     async def bridge(self) -> CeleryBridge:
@@ -87,65 +88,30 @@ class TaskBridgeManager:
                 self._bridge = configured
             return self._bridge
 
-    async def _submit(self, task_name: str, kwargs: Mapping[str, Any], queue: str) -> str:
+    async def submit(
+        self,
+        task_name: str,
+        *,
+        kwargs: Mapping[str, Any],
+        queue: str = QueueName.MEMORY_JOBS.value,
+        priority: int = TaskPriority.INTERACTIVE,
+    ) -> str:
+        """Publish one task to memory-jobs and return its task id.
+
+        Deliberately generic: this adapter knows the transport, not the business
+        tasks. Callers pass a name from ``task_bridge.mem_router.TaskName`` and
+        the worker's parameter names as ``kwargs``. ``queue`` and ``priority``
+        default to memory-jobs' queue at the interactive level — what a request
+        someone is waiting on needs — and a caller with a different urgency or
+        destination states it explicitly.
+        """
+
         bridge = await self.bridge()
-        return await bridge.asubmit(task_name, kwargs=dict(kwargs), queue=queue)
-
-    async def submit_generate_cache(
-        self,
-        *,
-        end_user_id: str,
-        workspace_id: UUID,
-        language: str,
-    ) -> str:
-        """Publish one cache-generation unit and return its task id."""
-
-        return await self._submit(
-            GENERATE_CACHE_TASK_NAME,
-            {
-                "end_user_id": end_user_id,
-                "workspace_id": str(workspace_id),
-                "language": language,
-            },
-            MEMORY_HEAVY_QUEUE,
-        )
-
-    async def submit_generate_cache_workspace(
-        self,
-        *,
-        workspace_id: UUID,
-        language: str,
-    ) -> str:
-        """Publish the whole-workspace batch and return its task id."""
-
-        return await self._submit(
-            GENERATE_CACHE_WORKSPACE_TASK_NAME,
-            {
-                "workspace_id": str(workspace_id),
-                "language": language,
-            },
-            MEMORY_HEAVY_QUEUE,
-        )
-
-    async def submit_interest_distribution(
-        self,
-        *,
-        end_user_id: str,
-        workspace_id: UUID,
-        language: str,
-        limit: int,
-    ) -> str:
-        """Publish one interest-distribution unit and return its task id."""
-
-        return await self._submit(
-            INTEREST_DISTRIBUTION_TASK_NAME,
-            {
-                "end_user_id": end_user_id,
-                "workspace_id": str(workspace_id),
-                "language": language,
-                "limit": limit,
-            },
-            MEMORY_HEAVY_QUEUE,
+        return await bridge.asubmit(
+            task_name,
+            kwargs=dict(kwargs),
+            queue=queue,
+            priority=priority,
         )
 
     async def await_result(self, task_id: str, *, wait_seconds: float) -> TaskStatus:

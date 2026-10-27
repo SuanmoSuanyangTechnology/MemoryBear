@@ -32,7 +32,7 @@ dependencies = [
     "starlette==1.9.0",
     # Cache generation is executed by the memory-jobs Celery workers; this
     # service only publishes the task by name and waits for its result.
-    "task-bridge-sdk[celery]",
+    "task-bridge-sdk[celery,mem-router]",
     "uvicorn[standard]==0.54.0",
     "xxhash==4.0.2",
     "zttp==0.0.34",
