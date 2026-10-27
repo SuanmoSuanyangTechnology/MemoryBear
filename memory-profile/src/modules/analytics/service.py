@@ -39,6 +39,7 @@ from src.modules.analytics.constants import (
     COUNT_KEYS,
     DEFAULT_PER_TYPE_LIMITS,
     ENTITY_CONTENT_GATED_FIELDS,
+    INTEREST_DISPLAY_LIMIT,
     MEMORY_TYPES,
     NODE_PROPERTY_WHITELIST,
     PREFERENCE_GROUP_EDGE_TYPE,
@@ -50,8 +51,6 @@ from src.modules.analytics.constants import (
     USER_CARD_TAG_MAX_LENGTH,
     WHITELIST_DEFAULT_FIELDS,
 )
-from src.modules.analytics.generation.interest_distribution import INTEREST_DISPLAY_LIMIT
-from src.modules.analytics.generation.memory_insight import validate_workspace_row
 from src.modules.analytics.repository.end_user_profile import EndUserProfileRepository
 from src.modules.analytics.repository.generation_graph import (
     GenerationGraphRepository,
@@ -74,6 +73,7 @@ from src.modules.shared import (
     EndUserService,
     ModelConfigService,
     WorkspaceService,
+    validate_workspace_row,
 )
 from src.runtime import ProfileRuntime
 

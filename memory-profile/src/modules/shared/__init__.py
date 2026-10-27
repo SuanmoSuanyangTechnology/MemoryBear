@@ -2,10 +2,11 @@
 
 Other modules obtain the services exported here; the repositories stay internal.
 ``EndUserService`` owns end-user rules (currently the workspace boundary),
-``ModelConfigService`` answers "which model serves this workspace slot?", and
-``WorkspaceService`` owns the shared workspace row. Keeping these here means no
-module re-implements them, so a boundary check, a model lookup or the workspace
-facts cannot drift between endpoints.
+``ModelConfigService`` answers "which model serves this workspace slot?",
+``WorkspaceService`` owns the shared workspace row, and
+``validate_workspace_row`` turns that row into the eligibility verdict. Keeping
+these here means no module re-implements them, so a boundary check, a model
+lookup or the workspace facts cannot drift between endpoints.
 """
 
 from __future__ import annotations
@@ -21,6 +22,7 @@ from src.modules.shared.model_config_service import (
     WorkspaceModelMemo,
 )
 from src.modules.shared.workspace_service import WorkspaceService
+from src.modules.shared.workspace_validation import validate_workspace_row
 
 __all__ = [
     "ChatModelProvider",
@@ -33,4 +35,5 @@ __all__ = [
     "ResolvedModel",
     "WorkspaceModelMemo",
     "WorkspaceService",
+    "validate_workspace_row",
 ]
