@@ -148,8 +148,10 @@ jobs:
             --state 2> openapi-gate-error.log)
           OPENAPI_VALIDATION_EXIT=$?
           OPENAPI_DIFF_EXIT=0
+          # `metadata` 是 openapi-diff 的第四个状态（只有 description/title 之类的
+          # 元数据变化，--help 未列出）：它不是工具错误，也不是破坏性变更。
           case "$OPENAPI_DIFF_OUTPUT" in
-            no_changes|compatible) ;;
+            no_changes|metadata|compatible) ;;
             incompatible) OPENAPI_DIFF_EXIT=1 ;;
             *) OPENAPI_VALIDATION_EXIT=1 ;;
           esac
