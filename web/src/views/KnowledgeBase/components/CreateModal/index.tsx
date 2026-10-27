@@ -278,7 +278,7 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({ refreshTa
   };
 
   const handleSave = () => {
-    const currentFormValues = form.getFieldsValue();
+    const currentFormValues = form.getFieldsValue(true);
     const isGraphragEnabled = currentFormValues?.parser_config?.graphrag?.use_graphrag || false;
 
     if (originalType === 'rebuild' && isGraphragEnabled) {
@@ -377,7 +377,7 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({ refreshTa
       footer={[
         <Button
           key="cancel"
-          onClick={currentStep === 0 ? handleClose : () => setCurrentStep(0)}
+          onClick={currentStep === 0 ? handleClose : () => setCurrentStep((step) => step - 1)}
         >
           {t(currentStep === 0 ? 'common.cancel' : 'common.prevStep')}
         </Button>,

@@ -20,7 +20,6 @@ import { baseModelFields, multimodalModelFields, getTypeIcon, menuItems } from '
 import ModelStatusTag from '@/components/ModelSelect/ModelStatusTag'
 import type { ModelDisplayItem, ModelMenuInfo, KnowledgeBaseNavigationState } from './types'
 import { useBreadcrumbManager, type BreadcrumbItem } from '@/hooks/useBreadcrumbManager';
-import { getFolderPathAfterEntering } from './folderPath';
 
 const KnowledgeBaseManagement: FC = () => {
   const { t } = useTranslation();
@@ -47,9 +46,6 @@ const KnowledgeBaseManagement: FC = () => {
   const modalRef = useRef<CreateModalRef>(null)
   const processedStateRef = useRef<any>(null);
   const copyModalRef = useRef<CopyModalRef>(null)
-  const loadingRef = useRef(false);
-  const latestRequestIdRef = useRef(0);
-  const autoLoadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   
   // 使用面包屑管理 Hook
   const { updateBreadcrumbs } = useBreadcrumbManager({
@@ -79,8 +75,8 @@ const KnowledgeBaseManagement: FC = () => {
     const isShared = permissionId === 'share';
     const isFolder = item.type === 'Folder';
     return menuItems.filter(menu =>
-      menu.key === 'delete' || (menu.key === 'edit' && isShared)
-      || (menu.key === 'copy' && (isShared || isFolder))
+      menu.key === 'delete' || (menu.key === 'edit' && !isShared)
+      || (menu.key === 'copy' && !(isShared || isFolder))
     ).map(menu => {
       return {
         ...menu,

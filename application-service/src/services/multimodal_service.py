@@ -44,6 +44,7 @@ from ..models.file_metadata_model import FileMetadata
 from ..models.models_model import Modality
 from ..schemas.app_schema import FileInput, FileType, FileUploadConfig, TransferMethod
 from ..schemas.model_schema import ModelInfo
+from ..storage import LocalStorage
 from .file_content_service import extract_permanent_file_id
 from .file_storage_service import FileStorageService
 
@@ -121,6 +122,14 @@ _FILE_TYPE_LABELS = {
     FileType.VIDEO: "视频",
     FileType.DOCUMENT: "文档",
 }
+
+# Placeholder shown when video cannot egress: aimed at admins of private deployments,
+# keeping the actionable technical clue (unreachable local/intranet storage).
+_VIDEO_UNAVAILABLE_HINT = (
+    "[视频发送失败：存储地址模型侧不可达（本地存储或内网地址）。"
+    "管理员请将对象存储（OSS/S3/MinIO）配置为公网可达后重试，"
+    "或接入 provider Files API 支持本地存储视频。]"
+)
 
 
 def _resolve_inline_limits(config: Optional[Dict[str, Any]]) -> Dict[str, int]:
@@ -485,11 +494,11 @@ class OpenAIFormatStrategy(MultimodalFormatStrategy):
             }
 
     async def format_video(self, url: str | None, content: bytes | None = None) -> tuple[bool, Dict[str, Any]]:
-        """OpenAI video format; local videos need the provider Files API to be wired up later."""
+        """OpenAI video format; videos egress via video_url."""
         if content is not None:
             return False, {
                 "type": "text",
-                "text": "[视频文件无法通过当前模型接口安全传输，请配置 provider Files API 后重试]",
+                "text": "[视频处理失败：当前接口仅支持以 URL 方式发送视频]",
             }
         if not url:
             return False, {"type": "text", "text": "[视频文件缺少可用 URL]"}
@@ -731,18 +740,19 @@ class MultimodalService:
             # handed to the model to pull back. Publicly reachable URLs are passed through
             # as-is, with no extra byte shuttling.
             if _requires_inline_bearer(file):
-                # URL-based video has no universal safe inline protocol yet; run the
-                # ownership check first, then reject explicitly before downloading a large
-                # object, pending provider Files API support.
                 if file.type == FileType.VIDEO:
-                    if file.upload_file_id:
-                        await self._get_local_file_metadata(file.upload_file_id, workspace_id)
-                    if Modality.VIDEO in self.input_modalities and include_processing_errors:
-                        result.append({
-                            "type": "text",
-                            "text": "[视频文件无法通过当前模型接口安全传输，请配置 provider Files API 后重试]",
-                        })
-                    elif Modality.VIDEO not in self.input_modalities:
+                    # 视频没有通用内联协议：远程存储直达对象地址后交给模型自行判断能否
+                    # 拉取；本地磁盘无对象 URL，给出管理员可操作的提示。
+                    if Modality.VIDEO in self.input_modalities:
+                        if not file.url and file.upload_file_id:
+                            file.url = await self._get_video_url(file, workspace_id)
+                        if file.url:
+                            is_support, content = await self._process_video(file, strategy_class(file))
+                            if is_support or include_processing_errors:
+                                result.append(content)
+                        elif include_processing_errors:
+                            result.append({"type": "text", "text": _VIDEO_UNAVAILABLE_HINT})
+                    else:
                         logger.warning(f"不支持的文件类型: {file.type}")
                     continue
 
@@ -923,6 +933,28 @@ class MultimodalService:
                 "type": "text",
                 "text": f"[视频处理失败: {str(e)}]",
             }
+
+    async def _get_video_url(
+            self,
+            file: FileInput,
+            workspace_id: uuid.UUID | str | None,
+    ) -> str | None:
+        """Resolve the URL handed to the model for an uploaded video.
+
+        Remote backends (OSS/S3/MinIO) return a direct presigned object URL; the
+        platform's own proxy address (localhost/intranet) is rejected by cloud model
+        parameter validation. Local disk storage has no object URL, so None is returned
+        and the caller emits the admin-facing hint. Reachability of remote URLs is not
+        judged here — whether the model can actually fetch the file is left to the
+        model side.
+        """
+        storage = FileStorageService().storage
+        if isinstance(storage, LocalStorage):
+            return None
+        # Ownership/tenant scoping before minting a signed URL.
+        metadata = await self._get_local_file_metadata(file.upload_file_id, workspace_id)
+        # No file_name: avoid forcing Content-Disposition: attachment.
+        return await storage.get_url(metadata.file_key, expires=86400)
 
     async def get_file_url(self, file: FileInput) -> str:
         """

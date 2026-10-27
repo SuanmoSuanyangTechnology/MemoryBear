@@ -29,6 +29,8 @@ from ..models.file_metadata_model import FileMetadata
 logger = logging.getLogger(__name__)
 api_logger = logging.getLogger(__name__)
 
+_UPLOAD_CHUNK_SIZE = 1024 * 1024
+
 
 def generate_file_key(
     tenant_id: uuid.UUID,
@@ -371,6 +373,43 @@ def get_file_storage_service() -> FileStorageService:
     return _default_service
 
 
+class _UploadTooLarge(Exception):
+    """Raised inside the upload stream when the configured size limit is exceeded."""
+
+
+class _MeteredUploadStream:
+    """Async chunk iterator that enforces the size limit while streaming."""
+
+    def __init__(self, file: UploadFile, max_size: int):
+        self._file = file
+        self._max_size = max_size
+        self.total = 0
+
+    async def iter_chunks(self) -> AsyncIterator[bytes]:
+        while True:
+            chunk = await self._file.read(_UPLOAD_CHUNK_SIZE)
+            if not chunk:
+                return
+            self.total += len(chunk)
+            if self.total > self._max_size:
+                raise _UploadTooLarge
+            yield chunk
+
+
+async def _remove_partial_upload(
+    db: Session,
+    file_metadata: FileMetadata,
+    storage_service: FileStorageService,
+    file_key: str,
+) -> None:
+    file_metadata.status = "failed"
+    db.commit()
+    try:
+        await storage_service.delete_file(file_key)
+    except StorageDeleteError as exc:
+        api_logger.warning(f"Failed to remove partial upload {file_key}: {exc}")
+
+
 async def upload_workspace_file(
     *,
     db: Session,
@@ -379,23 +418,29 @@ async def upload_workspace_file(
     file: UploadFile,
     storage_service: FileStorageService,
 ) -> dict[str, str]:
-    """Upload a workspace file (shared by `/api/storage/files` and `/v1/app/files`)."""
-    contents = await file.read()
-    file_size = len(contents)
+    """Upload a chat attachment (the `/v1/app/files` surface).
 
-    if file_size == 0:
+    The body is streamed in chunks and never held in memory as a whole: the
+    configured size limit aborts the stream as soon as it is exceeded, and a
+    failed or partial upload is removed from storage. Generic platform uploads
+    (`/api/storage`, `/api/upload`) stay on the monolith.
+    """
+    max_file_size = current_settings().max_file_size
+    declared_size = getattr(file, "size", None)
+
+    if declared_size == 0:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="The file is empty.",
         )
 
-    if file_size > current_settings().max_file_size:
+    if declared_size is not None and declared_size > max_file_size:
         raise HTTPException(
             status_code=status.HTTP_413_CONTENT_TOO_LARGE,
-            detail=f"The file size exceeds the {current_settings().max_file_size} byte limit",
+            detail=f"The file size exceeds the {max_file_size} byte limit",
         )
 
-    _, file_extension = os.path.splitext(file.filename)
+    _, file_extension = os.path.splitext(file.filename or "")
     file_ext = file_extension.lower()
 
     file_id = uuid.uuid4()
@@ -413,7 +458,7 @@ async def upload_workspace_file(
         file_key=file_key,
         file_name=file.filename,
         file_ext=file_ext,
-        file_size=file_size,
+        file_size=declared_size or 0,
         content_type=file.content_type,
         status="pending",
     )
@@ -421,25 +466,47 @@ async def upload_workspace_file(
     db.commit()
     db.refresh(file_metadata)
 
+    stream = _MeteredUploadStream(file, max_file_size)
     try:
-        await storage_service.upload_file(
+        total = await storage_service.upload_stream(
             tenant_id=tenant_id,
             workspace_id=workspace_id,
             file_id=file_id,
             file_ext=file_ext,
-            content=contents,
+            stream=stream.iter_chunks(),
             content_type=file.content_type,
         )
-        file_metadata.status = "completed"
-        db.commit()
-        api_logger.info(f"File uploaded to storage: file_key={file_key}")
+        if total == 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="The file is empty.",
+            )
+    except HTTPException:
+        await _remove_partial_upload(db, file_metadata, storage_service, file_key)
+        raise
     except StorageUploadError as e:
-        file_metadata.status = "failed"
-        db.commit()
+        await _remove_partial_upload(db, file_metadata, storage_service, file_key)
         api_logger.error(f"Storage upload failed: {e}")
+        # A known non-zero size means the failure happened before the first
+        # chunk was read, not that the client sent an empty body.
+        if stream.total == 0 and declared_size is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="The file is empty.",
+            )
+        if isinstance(e.cause, _UploadTooLarge):
+            raise HTTPException(
+                status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+                detail=f"The file size exceeds the {max_file_size} byte limit",
+            )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"File storage failed: {str(e)}",
         )
+
+    file_metadata.file_size = total
+    file_metadata.status = "completed"
+    db.commit()
+    api_logger.info(f"File uploaded to storage: file_key={file_key}, size={total} bytes")
 
     return {"file_id": str(file_id), "file_key": file_key}

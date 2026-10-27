@@ -30,12 +30,13 @@ interface PrivateKnowledgeBaseWorkspaceProps {
   onToggleDirectory: () => void;
   fileDirectory: ReactNode;
   fileContent: ReactNode;
+  onRefreshFiles: () => void;
   onCopyKnowledgeBaseId: () => void;
   onKnowledgeBaseStatusChange: (checked: boolean) => void;
   onShareKnowledgeBase: () => void;
   onOpenRecallTest: () => void;
   onOpenMetadata: () => void;
-  onOpenKnowledgeBaseSettings: (step?: number) => void;
+  onOpenKnowledgeBaseSettings: (step?: number, type?: string) => void;
   onEditKnowledgeBase: () => void;
   onBatchDownloadKnowledgeBase: () => void;
   onExportKnowledgeBaseQa: () => void;
@@ -66,6 +67,7 @@ const PrivateKnowledgeBaseWorkspace: FC<PrivateKnowledgeBaseWorkspaceProps> = ({
   onToggleDirectory,
   fileDirectory,
   fileContent,
+  onRefreshFiles,
   onCopyKnowledgeBaseId,
   onKnowledgeBaseStatusChange,
   onShareKnowledgeBase,
@@ -165,6 +167,7 @@ const PrivateKnowledgeBaseWorkspace: FC<PrivateKnowledgeBaseWorkspaceProps> = ({
 
   const handleModeChange = (nextMode: WikiWorkspaceMode, fromTabs = false) => {
     navigationRequest.current += 1;
+    if (nextMode === 'files' && mode !== 'files') onRefreshFiles();
     if (nextMode === 'wikiGraph') {
       setShowGraphBack(!fromTabs);
       setGraphInitialPageId(
@@ -256,7 +259,7 @@ const PrivateKnowledgeBaseWorkspace: FC<PrivateKnowledgeBaseWorkspaceProps> = ({
           {mode === 'faq'
             ? <FaqWorkspace key={knowledgeBaseId} knowledgeBaseId={knowledgeBaseId} onOpenWikiPage={openWikiPage} />
             : mode === 'knowledgeGraph'
-            ? <KnowledgeGraphCard knowledgeBase={knowledgeBase} onRebuildGraph={() => onOpenKnowledgeBaseSettings(1)} />
+            ? <KnowledgeGraphCard knowledgeBase={knowledgeBase} onRebuildGraph={() => onOpenKnowledgeBaseSettings(1, 'rebuild')} />
             : mode === 'wiki' || mode === 'summary'
             ? (
               <WikiReader

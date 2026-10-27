@@ -9,14 +9,14 @@ from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from typing import Any
 
-TEMPLATE_VERSION = "wiki_coherent_taxonomy_v6"
+TEMPLATE_VERSION = "wiki_tolerant_page_references_v8"
 MAP_TASK = "mem_knowledge.tasks.sync_wiki_document"
 REDUCE_TASK = "mem_knowledge.tasks.reduce_wiki_page"
 BACKFILL_TASK = "mem_knowledge.tasks.enqueue_unprocessed_wiki_documents"
 BACKFILL_REGISTERED_HEADER = "kb_wiki_backfill_registered"
 WIKI_QUEUE = "wiki_tasks"
 ACTIVE_STATUSES = frozenset({"pending", "running", "retry_wait"})
-TERMINAL_TASK_STATUSES = frozenset({"succeeded", "failed", "cancelled", "superseded"})
+TERMINAL_TASK_STATUSES = frozenset({"succeeded", "failed", "cancelled", "superseded", "skipped"})
 MAX_LANGUAGE_LENGTH = 64
 MAX_EXTRACT_PROMPT_LENGTH = 12000
 TYPE_GROUP_NAMES = frozenset({"知识", "摘要", "knowledge", "summary", "summaries"})

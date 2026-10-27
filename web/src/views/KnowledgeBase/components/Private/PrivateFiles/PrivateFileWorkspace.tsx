@@ -20,6 +20,7 @@ import {
   createSync,
   deleteDocument,
   downloadFile,
+  getDocumentListUrl,
 } from '@/api/knowledgeBase';
 import SearchInput from '@/components/SearchInput';
 import StatusTag from '@/components/StatusTag';
@@ -84,7 +85,7 @@ const PrivateFileWorkspace = forwardRef<PrivateFileWorkspaceRef, PrivateFileWork
   const syncTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const syncStartTimeRef = useRef<number | null>(null);
   const [isSyncing, setIsSyncing] = useState(false);
-  const apiUrl = `/documents/${knowledgeBaseId}/documents`;
+  const apiUrl = getDocumentListUrl(knowledgeBaseId);
 
   const refreshTable = useCallback(() => tableRef.current?.loadData(), []);
 
