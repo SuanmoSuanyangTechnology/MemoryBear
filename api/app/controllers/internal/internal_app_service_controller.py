@@ -20,6 +20,7 @@ APPLICATION_SERVICE_CALLBACK_SECRET，两端配置同一值）。记忆类与终
     POST /memory/ingest-workflow                        工作流消息摄入（workflow 语义）
     POST /memory/ingest-agent                           Agent 回合消息摄入（user+assistant 成对）
     GET  /memory/workspace-config                       工作空间启用中的记忆配置
+    POST /end-user/domain-info                         终端用户领域信息展示查询
     POST /end-user/info-update                          终端用户信息更新（alias 变更记忆侧效应）
     POST /end-user/identity-update                      终端用户身份确认 / 归并
     POST /apps/ontology-batch                           应用 ontology 子对象批量聚合
@@ -186,6 +187,10 @@ class MemoryIngestAgentRequest(BaseModel):
     language: str = "zh"
     storage_type: str = "neo4j"
     user_rag_memory_id: str = ""
+
+
+class EndUserDomainInfoRequest(BaseModel):
+    end_user_id: str
 
 
 class AppOntologyBatchRequest(BaseModel):
@@ -467,6 +472,8 @@ async def _callback_user_snapshot(workspace_id: uuid.UUID) -> CurrentUserSnapsho
     """
     async with get_async_db_context() as db:
         workspace = await db.get(Workspace, workspace_id)
+        # 会话退出时会回滚并过期 ORM 字段，先取出服务身份需要的租户 ID。
+        tenant_id = workspace.tenant_id if workspace is not None else None
     if workspace is None:
         raise BusinessException("工作空间不存在", BizCode.WORKSPACE_NOT_FOUND)
     return CurrentUserSnapshot(
@@ -476,7 +483,28 @@ async def _callback_user_snapshot(workspace_id: uuid.UUID) -> CurrentUserSnapsho
         is_active=True,
         is_superuser=False,
         current_workspace_id=workspace_id,
-        tenant_id=workspace.tenant_id,
+        tenant_id=tenant_id,
+    )
+
+
+@router.post("/end-user/domain-info")
+async def internal_end_user_domain_info(
+        payload: EndUserDomainInfoRequest,
+        x_workspace_id: Optional[str] = Header(None, alias="X-Workspace-Id"),
+        _guard: None = Depends(require_app_service_callback_secret),
+) -> dict:
+    """复用单体用户信息查询，供应用服务获取组装完成的领域信息。"""
+    workspace_id = _parse_workspace_id(x_workspace_id)
+    current_user = await _callback_user_snapshot(workspace_id)
+    response = await end_user_controller.get_end_user_info(
+        end_user_id=payload.end_user_id,
+        current_user=current_user,
+    )
+    if response["code"] != BizCode.OK:
+        return response
+    return success(
+        data={"domain_specific_info": response["data"]["meta_data"]["domain_specific_info"]},
+        msg=response["msg"],
     )
 
 

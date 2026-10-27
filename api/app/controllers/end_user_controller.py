@@ -17,6 +17,7 @@ from app.core.memory.models.metadata_models import (
     LEGACY_METADATA_FIELDS,
     project_display_profile,
 )
+from app.core.memory.ontology_services.scene_name_resolver import project_end_user_domains_async
 from app.core.response_utils import fail, success
 from app.db import get_async_db_context
 from app.dependencies import get_current_user_async, CurrentUserSnapshot
@@ -106,6 +107,10 @@ async def get_end_user_info(
         }
         filtered_meta.update(
             project_display_profile(raw_meta, limit_per_key=END_USER_INFO_PROFILE_KEY_LIMIT)
+        )
+
+        filtered_meta["domain_specific_info"] = await project_end_user_domains_async(
+            raw_meta, db, end_user.workspace_id,
         )
 
         response_data = {
