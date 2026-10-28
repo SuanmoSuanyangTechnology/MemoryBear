@@ -16,11 +16,16 @@ class ImplicitMemorySummaryRepository:
         """Count non-empty summaries without fetching their content."""
         results = await self.connector.execute_query(
             """
-            MATCH (scene)
-            WHERE (scene:SceneSummary OR scene:MemorySummary)
-              AND scene.end_user_id = $end_user_id
-              AND trim(coalesce(scene.content, '')) <> ''
-            RETURN count(scene) AS count
+            CALL {
+                MATCH (scene:SceneSummary {end_user_id: $end_user_id})
+                WHERE trim(coalesce(scene.content, '')) <> ''
+                RETURN count(scene) AS summary_count
+                UNION ALL
+                MATCH (scene:MemorySummary {end_user_id: $end_user_id})
+                WHERE trim(coalesce(scene.content, '')) <> ''
+                RETURN count(scene) AS summary_count
+            }
+            RETURN sum(summary_count) AS count
             """,
             end_user_id=end_user_id,
         )
@@ -35,10 +40,15 @@ class ImplicitMemorySummaryRepository:
     ) -> List[Dict[str, Any]]:
         """Return both non-empty summary types in a single limited result set."""
         query = """
-        MATCH (scene)
-        WHERE (scene:SceneSummary OR scene:MemorySummary)
-          AND scene.end_user_id = $end_user_id
-          AND trim(coalesce(scene.content, '')) <> ''
+        CALL {
+            MATCH (scene:SceneSummary {end_user_id: $end_user_id})
+            RETURN scene
+            UNION ALL
+            MATCH (scene:MemorySummary {end_user_id: $end_user_id})
+            RETURN scene
+        }
+        WITH scene
+        WHERE trim(coalesce(scene.content, '')) <> ''
         """
         params: Dict[str, Any] = {"end_user_id": end_user_id, "limit": limit}
 
