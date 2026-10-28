@@ -1845,7 +1845,6 @@ models:
   features:
     - thinking
     - function_call
-    - json_output
   tags:
     - 视频理解
     - 大语言模型
