@@ -1,4 +1,4 @@
-"""SceneSummary data access for implicit-memory profile generation."""
+"""SceneSummary and MemorySummary access for implicit-memory generation."""
 
 from datetime import datetime
 from typing import Any, Dict, List, Optional
@@ -6,8 +6,8 @@ from typing import Any, Dict, List, Optional
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 
 
-class SceneSummaryRepository:
-    """Reads valid SceneSummary nodes for a single end user."""
+class ImplicitMemorySummaryRepository:
+    """Reads both summary types used to build an end user's implicit profile."""
 
     def __init__(self, connector: Neo4jConnector):
         self.connector = connector
@@ -16,9 +16,17 @@ class SceneSummaryRepository:
         """Count non-empty summaries without fetching their content."""
         results = await self.connector.execute_query(
             """
-            MATCH (scene:SceneSummary {end_user_id: $end_user_id})
-            WHERE trim(coalesce(scene.content, '')) <> ''
-            RETURN count(scene) AS count
+            CALL {
+                MATCH (scene:SceneSummary {end_user_id: $end_user_id})
+                WHERE trim(coalesce(scene.content, '')) <> ''
+                RETURN count(scene) AS summary_count
+                UNION ALL
+                MATCH (scene:MemorySummary {end_user_id: $end_user_id})
+                WHERE scene.delete_at IS NULL
+                  AND trim(coalesce(scene.content, '')) <> ''
+                RETURN count(scene) AS summary_count
+            }
+            RETURN sum(summary_count) AS count
             """,
             end_user_id=end_user_id,
         )
@@ -31,9 +39,17 @@ class SceneSummaryRepository:
         start_date: Optional[datetime] = None,
         end_date: Optional[datetime] = None,
     ) -> List[Dict[str, Any]]:
-        """Return non-empty SceneSummary nodes ordered by scene completion time."""
+        """Return both non-empty summary types in a single limited result set."""
         query = """
-        MATCH (scene:SceneSummary {end_user_id: $end_user_id})
+        CALL {
+            MATCH (scene:SceneSummary {end_user_id: $end_user_id})
+            RETURN scene
+            UNION ALL
+            MATCH (scene:MemorySummary {end_user_id: $end_user_id})
+            WHERE scene.delete_at IS NULL
+            RETURN scene
+        }
+        WITH scene
         WHERE trim(coalesce(scene.content, '')) <> ''
         """
         params: Dict[str, Any] = {"end_user_id": end_user_id, "limit": limit}
@@ -47,9 +63,14 @@ class SceneSummaryRepository:
             params["end_date"] = end_date
 
         query += """
-        RETURN properties(scene) AS scene
+        RETURN properties(scene) AS scene,
+               CASE WHEN scene:SceneSummary THEN 'scene_summary'
+                    ELSE 'memory_summary' END AS summary_type
         ORDER BY coalesce(scene.ended_at, scene.created_at) DESC, scene.id ASC
         LIMIT $limit
         """
         results = await self.connector.execute_query(query, **params)
-        return [dict(result["scene"]) for result in results]
+        return [
+            {**dict(result["scene"]), "summary_type": result["summary_type"]}
+            for result in results
+        ]

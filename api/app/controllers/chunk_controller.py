@@ -1012,7 +1012,10 @@ def get_retrieve_types(
         current_user: User = Depends(get_current_user_async),
         request: Request = None,
 ):
-    return success(msg="Successfully obtained the retrieval type", data=list(chunk_schema.RetrieveType))
+    return success(
+        msg="Successfully obtained the retrieval type",
+        data=[kind.public_value for kind in chunk_schema.RetrieveType],
+    )
 
 
 @router.post(

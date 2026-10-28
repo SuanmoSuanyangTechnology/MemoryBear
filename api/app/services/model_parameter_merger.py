@@ -16,12 +16,13 @@ class ModelParameterMerger:
     @staticmethod
     def merge_parameters(
         model_config_params: Optional[Dict[str, Any]],
-        agent_config_params: Optional[Dict[str, Any]]
+        agent_config_params: Optional[Dict[str, Any]],
+        override_params: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """
         合并模型配置参数和 Agent 配置参数
-        
-        优先级：agent_config_params > model_config_params > 默认值
+
+        优先级：override_params > agent_config_params > model_config_params > 默认值
         
         Args:
             model_config_params: ModelConfig.config 中的参数
@@ -66,12 +67,22 @@ class ModelParameterMerger:
                 if key in model_config_params:
                     merged[key] = model_config_params[key]
         
-        # 应用 Agent 配置参数（优先级最高）
+        # 应用 Agent 配置参数
         if agent_config_params:
             for key in default_params:
                 if key in agent_config_params and agent_config_params[key] is not None:
                     merged[key] = agent_config_params[key]
-        
+
+        # Pydantic 对象转为 dict
+        if override_params and hasattr(override_params, 'model_dump'):
+            override_params = override_params.model_dump()
+
+        # 应用逐次运行的覆盖参数（优先级最高，如多模型对比试运行每个模型各自的参数）
+        if override_params:
+            for key in default_params:
+                if key in override_params and override_params[key] is not None:
+                    merged[key] = override_params[key]
+
         # 移除 None 值
         merged = {k: v for k, v in merged.items() if v is not None}
         
@@ -89,15 +100,18 @@ class ModelParameterMerger:
     @staticmethod
     def get_effective_parameters(
         model_config: Optional[Any],
-        agent_config: Optional[Any]
+        agent_config: Optional[Any],
+        model_parameters_override: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """
         获取有效的模型参数（从 ORM 对象中提取并合并）
-        
+
         Args:
             model_config: ModelConfig ORM 对象
             agent_config: AgentConfig ORM 对象
-            
+            model_parameters_override: 逐次运行的覆盖参数（如对比试运行中
+                每个模型各自的 model_parameters），优先级最高
+
         Returns:
             合并后的参数字典
         """
@@ -105,13 +119,15 @@ class ModelParameterMerger:
         model_params = None
         if model_config and hasattr(model_config, 'config'):
             model_params = model_config.config
-        
+
         # 提取 Agent 配置参数
         agent_params = None
         if agent_config and hasattr(agent_config, 'model_parameters'):
             agent_params = agent_config.model_parameters
-        
-        return ModelParameterMerger.merge_parameters(model_params, agent_params)
+
+        return ModelParameterMerger.merge_parameters(
+            model_params, agent_params, model_parameters_override
+        )
     
     @staticmethod
     def format_for_llm_call(parameters: Dict[str, Any]) -> Dict[str, Any]:

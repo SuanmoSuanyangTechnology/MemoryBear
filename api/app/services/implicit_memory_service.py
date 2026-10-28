@@ -38,7 +38,7 @@ from app.schemas.implicit_memory_schema import (
 )
 from app.schemas.memory_config_schema import MemoryConfig
 
-MIN_SCENE_SUMMARY_COUNT = 5
+MIN_SUMMARY_COUNT = 5
 
 logger = logging.getLogger(__name__)
 
@@ -142,7 +142,7 @@ class ImplicitMemoryService:
         time_range: Optional[TimeRange] = None,
         limit: Optional[int] = None
     ) -> List[UserMemorySummary]:
-        """Extract user-specific SceneSummary records.
+        """Extract user-specific SceneSummary and MemorySummary records.
         
         Args:
             user_id: Target user ID
@@ -152,7 +152,7 @@ class ImplicitMemoryService:
         Returns:
             List of user-specific memory summaries
         """
-        logger.info(f"Extracting user SceneSummary records for user {user_id}")
+        logger.info(f"Extracting user summary records for user {user_id}")
         
         try:
             summaries = await self.data_source.get_user_summaries(
@@ -161,7 +161,7 @@ class ImplicitMemoryService:
                 limit=limit or 1000
             )
             
-            logger.info(f"Extracted {len(summaries)} SceneSummary records for user {user_id}")
+            logger.info(f"Extracted {len(summaries)} summary records for user {user_id}")
             return summaries
             
         except Exception as e:
@@ -407,7 +407,7 @@ class ImplicitMemoryService:
     
 
     def _build_empty_profile(self) -> dict:
-        """Build the fixed empty profile returned for insufficient SceneSummary data."""
+        """Build the empty profile when the combined summary count is insufficient."""
         now_ms = to_timestamp_ms(utcnow_naive())
         insufficient = "Insufficient data for analysis"
 
@@ -456,7 +456,7 @@ class ImplicitMemoryService:
     ) -> dict:
         """生成完整的用户画像（包含所有4个模块）
         
-        需要该用户的 SceneSummary 数量 >= 5 才会真正调用 LLM 生成画像，
+        The combined SceneSummary and MemorySummary count must be at least 5.
         否则返回固定的空白画像数据。
         
         Args:
@@ -468,20 +468,20 @@ class ImplicitMemoryService:
         logger.info(f"生成完整用户画像: user={user_id}")
         
         try:
-            scene_summary_count = await self.data_source.count_user_summaries(
+            summary_count = await self.data_source.count_user_summaries(
                 user_id=user_id
             )
             logger.info(
-                "用户 SceneSummary 数量: %s (user=%s)",
-                scene_summary_count,
+                "用户 SceneSummary 和 MemorySummary 总数量: %s (user=%s)",
+                summary_count,
                 user_id,
             )
 
-            if scene_summary_count < MIN_SCENE_SUMMARY_COUNT:
+            if summary_count < MIN_SUMMARY_COUNT:
                 logger.info(
-                    "SceneSummary 数量不足 %s（当前 %s），返回空白画像: user=%s",
-                    MIN_SCENE_SUMMARY_COUNT,
-                    scene_summary_count,
+                    "摘要总数量不足 %s（当前 %s），返回空白画像: user=%s",
+                    MIN_SUMMARY_COUNT,
+                    summary_count,
                     user_id,
                 )
                 return self._build_empty_profile()

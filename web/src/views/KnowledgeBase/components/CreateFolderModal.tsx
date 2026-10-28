@@ -96,7 +96,7 @@ const CreateFolderModal = forwardRef<CreateFolderModalRef,CreateFolderModalRefPr
   // Save form data and submit
   const handleSave =  () => {
     form
-      .validateFields({ validateOnly: true })
+      .validateFields()
       .then(async () => {
         setLoading(true)
         const formValues = form.getFieldsValue();
@@ -180,7 +180,10 @@ const CreateFolderModal = forwardRef<CreateFolderModalRef,CreateFolderModalRefPr
         <Form.Item
           name="folder_name"
           label={t('knowledgeBase.name')}
-          rules={[{ max: 255 }]}
+          rules={[
+            { required: true, message: t('common.pleaseEnter') },
+            { max: 255 }
+          ]}
         >
           <Input placeholder={t('knowledgeBase.name')} maxLength={255} />
         </Form.Item>

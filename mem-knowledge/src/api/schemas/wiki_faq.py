@@ -6,7 +6,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 MAX_FAQ_BATCH_ITEMS = 100
-LEGACY_BATCH_APPROVAL_FIELDS = frozenset(
+LEGACY_APPROVAL_FIELDS = frozenset(
     {"expected_row_version", "content_revision", "reviewed_wiki_snapshot_id", "idempotency_key"}
 )
 
@@ -39,16 +39,15 @@ class FAQEnabled(FAQExpected):
     is_enabled: bool
 
 
-class FAQApprove(FAQExpected):
-    content_revision: int = Field(ge=1)
-    reviewed_wiki_snapshot_id: UUID
+class FAQApprove(FAQRequest):
+    """审核执行时的当前内容；旧版本与快照参数兼容接收但忽略。"""
 
     @model_validator(mode="before")
     @classmethod
-    def ignore_legacy_request_key(cls, value: Any) -> Any:
-        # 历史调用可继续携带此字段，但不声明、不传入业务层，也不放宽其他额外字段。
-        if isinstance(value, dict) and "idempotency_key" in value:
-            return {key: item for key, item in value.items() if key != "idempotency_key"}
+    def ignore_legacy_review_target(cls, value: Any) -> Any:
+        # 单条和批量均由服务端选择当前基线，旧字段不做类型或版本校验。
+        if isinstance(value, dict):
+            return {key: item for key, item in value.items() if key not in LEGACY_APPROVAL_FIELDS}
         return value
 
 
@@ -56,20 +55,10 @@ class FAQBatchExpected(FAQExpected):
     faq_id: UUID
 
 
-class FAQBatchApproval(FAQRequest):
+class FAQBatchApproval(FAQApprove):
     """批量审核以执行时的 FAQ 内容和最新已发布 Wiki 快照为准。"""
 
     faq_id: UUID = Field(description="待审核 FAQ ID；由服务端在事务内读取最新状态")
-
-    @model_validator(mode="before")
-    @classmethod
-    def ignore_legacy_review_target(cls, value: Any) -> Any:
-        # 兼容旧调用的审核目标；不校验、不传入业务层，其他未知字段仍拒绝。
-        if isinstance(value, dict):
-            return {
-                key: item for key, item in value.items() if key not in LEGACY_BATCH_APPROVAL_FIELDS
-            }
-        return value
 
 
 class FAQBatchContext(FAQRequest):

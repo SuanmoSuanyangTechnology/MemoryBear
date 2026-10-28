@@ -236,9 +236,12 @@ class KnowledgeRetrievalService:
 
             return await retrieve(runtime, request, principal)
         if any(config.retrieve_type == RetrieveType.WIKI_FAQ for config in request.knowledge_bases):
-            raise KnowledgeError.from_code(
-                "KB_VALIDATION_ERROR", "wiki-FAQ must be a separate retrieval request"
+            logger.warning(
+                "FAQ 召回类型不能混用 stage=validate_request source=%s kb_ids=%s",
+                request.source.value,
+                [str(config.kb_id) for config in request.knowledge_bases],
             )
+            raise KnowledgeError.from_code("KB_FAQ_MIXED_RETRIEVAL_UNSUPPORTED")
         image_query = cls._validated_image_query(request)
         log_id = cls._new_retrieval_log_id()
         started_at = time.perf_counter()

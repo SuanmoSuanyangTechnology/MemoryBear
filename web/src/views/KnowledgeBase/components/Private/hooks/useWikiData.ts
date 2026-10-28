@@ -76,17 +76,17 @@ const parseWikiData = async (knowledgeBaseId: string, t: TFunction): Promise<Wik
   return { pages, relations: [] };
 };
 
-export const useWikiData = (knowledgeBaseId: string) => {
+export const useWikiData = (knowledgeBaseId: string, enabled = true) => {
   const { t } = useTranslation();
   const [data, setData] = useState<WikiData>(EMPTY_WIKI_DATA);
-  const [loading, setLoading] = useState(Boolean(knowledgeBaseId));
+  const [loading, setLoading] = useState(enabled && Boolean(knowledgeBaseId));
   const [error, setError] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
 
     const loadWikiData = async () => {
-      if (!knowledgeBaseId) {
+      if (!enabled || !knowledgeBaseId) {
         setData(EMPTY_WIKI_DATA);
         setLoading(false);
         setError(false);
@@ -114,7 +114,7 @@ export const useWikiData = (knowledgeBaseId: string) => {
     return () => {
       cancelled = true;
     };
-  }, [knowledgeBaseId, t]);
+  }, [knowledgeBaseId, enabled, t]);
 
   return { ...data, loading, error };
 };

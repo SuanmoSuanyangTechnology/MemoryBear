@@ -1561,6 +1561,7 @@ class AgentRunService:
             parent_execution_id: Optional[uuid.UUID] = None,
             orchestration_mode: Optional[str] = None,
             execution_owner: Optional[Dict[str, Any]] = None,
+            model_parameters_override: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Run a draft run (using the LangChain Agent).
 
@@ -1639,7 +1640,8 @@ class AgentRunService:
             # 2. Merge model parameters
             effective_params = ModelParameterMerger.get_effective_parameters(
                 model_config=model_config,
-                agent_config=agent_config
+                agent_config=agent_config,
+                model_parameters_override=model_parameters_override,
             )
 
             if sub_agent:
@@ -1987,7 +1989,13 @@ class AgentRunService:
                             "total_tokens": 0
                         }),
                         "reasoning_content": result.get("reasoning_content"),
-                        "suggested_questions": suggested_questions
+                        "suggested_questions": suggested_questions,
+                        # Record the model actually used and any per-run parameter
+                        # overrides (each compared model may differ). Regenerate
+                        # restores from these fields to keep a column consistent.
+                        "model_config_id": str(model_config.id),
+                        **({"model_parameters_override": model_parameters_override}
+                           if model_parameters_override else {}),
                     },
                     files=files,
                     processed_files=processed_files,
@@ -2141,6 +2149,7 @@ class AgentRunService:
             parent_execution_id: Optional[uuid.UUID] = None,
             orchestration_mode: Optional[str] = None,
             execution_owner: Optional[Dict[str, Any]] = None,
+            model_parameters_override: Optional[Dict[str, Any]] = None,
 
     ) -> AsyncGenerator[str, None]:
         """Run a draft run with streaming output (using the LangChain Agent).
@@ -2219,7 +2228,8 @@ class AgentRunService:
             # 2. Merge model parameters
             effective_params = ModelParameterMerger.get_effective_parameters(
                 model_config=model_config,
-                agent_config=agent_config
+                agent_config=agent_config,
+                model_parameters_override=model_parameters_override,
             )
 
             items_params = variables
@@ -2701,7 +2711,13 @@ class AgentRunService:
                     meta_data={
                         "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": total_tokens},
                         "reasoning_content": full_reasoning or None,
-                        "suggested_questions": suggested_questions
+                        "suggested_questions": suggested_questions,
+                        # Record the model actually used and any per-run parameter
+                        # overrides (each compared model may differ). Regenerate
+                        # restores from these fields to keep a column consistent.
+                        "model_config_id": str(model_config.id),
+                        **({"model_parameters_override": model_parameters_override}
+                           if model_parameters_override else {}),
                     },
                     files=files,
                     processed_files=processed_files,
@@ -4196,20 +4212,17 @@ class AgentRunService:
                                 files=files,
                                 source=source,
                                 execution_mode=execution_mode,
+                                model_parameters_override=model_info["parameters"],
                             ),
                             timeout=timeout
                         )
 
-                # Temporarily override parameters (no deepcopy, to avoid SQLAlchemy
-                # session issues)
-                original_params = agent_config.model_parameters
-                agent_config.model_parameters = model_info["parameters"]
-
-                try:
-                    result = await run_with_own_session()
-                finally:
-                    # Restore the original parameters
-                    agent_config.model_parameters = original_params
+                # Never mutate the shared agent_config.model_parameters here:
+                # parallel tasks would overwrite each other (e.g. one model enables
+                # json_output while another leaves it off, and both end up using
+                # the last-written parameters). Each model's parameters are passed
+                # in via the explicit model_parameters_override argument.
+                result = await run_with_own_session()
 
                 elapsed = time.time() - start_time
                 usage = result.get("usage", {})
@@ -4461,6 +4474,7 @@ class AgentRunService:
                             user_message_id=model_user_message_id,
                             execution_mode=execution_mode,
                             skip_save=skip_save,
+                            model_parameters_override=model_info["parameters"],
                     ):
                         yield event_str
 
@@ -4488,113 +4502,109 @@ class AgentRunService:
                 stream_error = None
                 message_id = None
 
-                # Temporarily override parameters
-                original_params = agent_config.model_parameters
-                agent_config.model_parameters = model_info["parameters"]
+                # Each model's parameters are passed via the explicit override.
+                # Never mutate the shared agent_config.model_parameters: parallel
+                # tasks would overwrite each other (e.g. json_output toggled for one
+                # model would leak to every model).
+                # Stream a single model
+                async for event_str in stream_with_own_session():
+                    # Parse the raw event
+                    try:
+                        lines = event_str.strip().split('\n')
+                        event_type = None
+                        event_data = None
 
-                try:
-                    # Stream a single model
-                    async for event_str in stream_with_own_session():
-                        # Parse the raw event
-                        try:
-                            lines = event_str.strip().split('\n')
-                            event_type = None
-                            event_data = None
+                        for line in lines:
+                            if line.startswith('event: '):
+                                event_type = line[7:].strip()
+                            elif line.startswith('data: '):
+                                event_data = json.loads(line[6:])
 
-                            for line in lines:
-                                if line.startswith('event: '):
-                                    event_type = line[7:].strip()
-                                elif line.startswith('data: '):
-                                    event_data = json.loads(line[6:])
+                        # Get the actual conversation_id from the start event
+                        if event_type == "start" and event_data:
+                            conv_id = event_data.get("conversation_id")
+                            if conv_id:
+                                returned_conversation_id = conv_id
 
-                            # Get the actual conversation_id from the start event
-                            if event_type == "start" and event_data:
-                                conv_id = event_data.get("conversation_id")
-                                if conv_id:
-                                    returned_conversation_id = conv_id
+                        # Accumulate message content
+                        if event_type == "message" and event_data:
+                            chunk = event_data.get("content", "")
+                            full_content += chunk
 
-                            # Accumulate message content
-                            if event_type == "message" and event_data:
-                                chunk = event_data.get("content", "")
-                                full_content += chunk
+                            # Forward the message chunk event (with the model identifier)
+                            await event_queue.put(self._format_sse_event("model_message", {
+                                "model_index": idx,
+                                "model_config_id": model_config_id,
+                                "label": model_label,
+                                "conversation_id": returned_conversation_id,
+                                "content": chunk
+                            }))
 
-                                # Forward the message chunk event (with the model identifier)
-                                await event_queue.put(self._format_sse_event("model_message", {
-                                    "model_index": idx,
-                                    "model_config_id": model_config_id,
-                                    "label": model_label,
-                                    "conversation_id": returned_conversation_id,
-                                    "content": chunk
-                                }))
+                        # Forward the deep-thinking event (with the model identifier)
+                        if event_type == "reasoning" and event_data:
+                            reasoning_chunk = event_data.get("content", "")
+                            full_reasoning += reasoning_chunk
+                            await event_queue.put(self._format_sse_event("model_reasoning", {
+                                "model_index": idx,
+                                "model_config_id": model_config_id,
+                                "label": model_label,
+                                "conversation_id": returned_conversation_id,
+                                "content": event_data.get("content", "")
+                            }))
 
-                            # Forward the deep-thinking event (with the model identifier)
-                            if event_type == "reasoning" and event_data:
-                                reasoning_chunk = event_data.get("content", "")
-                                full_reasoning += reasoning_chunk
-                                await event_queue.put(self._format_sse_event("model_reasoning", {
-                                    "model_index": idx,
-                                    "model_config_id": model_config_id,
-                                    "label": model_label,
-                                    "conversation_id": returned_conversation_id,
-                                    "content": event_data.get("content", "")
-                                }))
+                        # Forward tool call events (with the model identifier)
+                        if event_type == "tool_start" and event_data:
+                            await event_queue.put(self._format_sse_event("model_tool_start", {
+                                "model_index": idx,
+                                "model_config_id": model_config_id,
+                                "step_id": event_data.get("step_id"),
+                                "name": event_data.get("name", ""),
+                                "input": event_data.get("input"),
+                            }))
 
-                            # Forward tool call events (with the model identifier)
-                            if event_type == "tool_start" and event_data:
-                                await event_queue.put(self._format_sse_event("model_tool_start", {
-                                    "model_index": idx,
-                                    "model_config_id": model_config_id,
-                                    "step_id": event_data.get("step_id"),
-                                    "name": event_data.get("name", ""),
-                                    "input": event_data.get("input"),
-                                }))
+                        if event_type == "tool_end" and event_data:
+                            await event_queue.put(self._format_sse_event("model_tool_end", {
+                                "model_index": idx,
+                                "model_config_id": model_config_id,
+                                "step_id": event_data.get("step_id"),
+                                "name": event_data.get("name", ""),
+                                "output": event_data.get("output"),
+                                "meta": event_data.get("meta"),
+                            }))
 
-                            if event_type == "tool_end" and event_data:
-                                await event_queue.put(self._format_sse_event("model_tool_end", {
-                                    "model_index": idx,
-                                    "model_config_id": model_config_id,
-                                    "step_id": event_data.get("step_id"),
-                                    "name": event_data.get("name", ""),
-                                    "output": event_data.get("output"),
-                                    "meta": event_data.get("meta"),
-                                }))
+                        if event_type == "tool_error" and event_data:
+                            await event_queue.put(self._format_sse_event("model_tool_error", {
+                                "model_index": idx,
+                                "model_config_id": model_config_id,
+                                "step_id": event_data.get("step_id"),
+                                "name": event_data.get("name", ""),
+                                "error": event_data.get("error"),
+                            }))
 
-                            if event_type == "tool_error" and event_data:
-                                await event_queue.put(self._format_sse_event("model_tool_error", {
-                                    "model_index": idx,
-                                    "model_config_id": model_config_id,
-                                    "step_id": event_data.get("step_id"),
-                                    "name": event_data.get("name", ""),
-                                    "error": event_data.get("error"),
-                                }))
+                        # Extract feature output fields from the end event
+                        if event_type == "end" and event_data:
+                            audio_url = event_data.get("audio_url")
+                            audio_status = event_data.get("audio_status")
+                            citations = event_data.get("citations", [])
+                            suggested_questions = event_data.get("suggested_questions", [])
+                            message_id = event_data.get("message_id")
+                            total_tokens = event_data.get("total_tokens", 0) or 0
 
-                            # Extract feature output fields from the end event
-                            if event_type == "end" and event_data:
-                                audio_url = event_data.get("audio_url")
-                                audio_status = event_data.get("audio_status")
-                                citations = event_data.get("citations", [])
-                                suggested_questions = event_data.get("suggested_questions", [])
-                                message_id = event_data.get("message_id")
-                                total_tokens = event_data.get("total_tokens", 0) or 0
-
-                            if event_type == "error" and event_data:
-                                stream_error = event_data.get("error") or {"message": "未知错误"}
-                                await event_queue.put(self._format_sse_event(
-                                    "model_error",
-                                    self._build_model_error_event_data(
-                                        model_index=idx,
-                                        model_config_id=model_config_id,
-                                        label=model_label,
-                                        conversation_id=returned_conversation_id,
-                                        error=stream_error,
-                                        timestamp=event_data.get("timestamp")
-                                    )
-                                ))
-                        except Exception as e:
-                            logger.warning(f"解析流式事件失败: {e}")
-                finally:
-                    # Restore the original parameters
-                    agent_config.model_parameters = original_params
+                        if event_type == "error" and event_data:
+                            stream_error = event_data.get("error") or {"message": "未知错误"}
+                            await event_queue.put(self._format_sse_event(
+                                "model_error",
+                                self._build_model_error_event_data(
+                                    model_index=idx,
+                                    model_config_id=model_config_id,
+                                    label=model_label,
+                                    conversation_id=returned_conversation_id,
+                                    error=stream_error,
+                                    timestamp=event_data.get("timestamp")
+                                )
+                            ))
+                    except Exception as e:
+                        logger.warning(f"解析流式事件失败: {e}")
 
                 elapsed = time.time() - start_time
 
@@ -5021,6 +5031,7 @@ class AgentRunService:
             user_id: str,
             storage_type: Optional[str] = None,
             user_rag_memory_id: Optional[str] = None,
+            model_parameters_override: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Regenerate a reply (multi-version support).
 
@@ -5106,6 +5117,7 @@ class AgentRunService:
             skip_save=True,  # skip saving; regenerate saves itself
             history=filtered_history,  # pass the filtered history
             files=files,  # pass the parent message's files
+            model_parameters_override=model_parameters_override,
         )
 
         # 6. Save the new version message
@@ -5120,6 +5132,11 @@ class AgentRunService:
                 "regenerated_from": str(message_id),
                 "suggested_questions": result.get("suggested_questions", []),
                 "citations": result.get("citations", []),
+                # Carry forward the original model/parameters so repeated
+                # regenerations stay consistent.
+                "model_config_id": str(model_config.id),
+                **({"model_parameters_override": model_parameters_override}
+                   if model_parameters_override else {}),
             },
         )
 
@@ -5153,6 +5170,7 @@ class AgentRunService:
             user_id: str,
             storage_type: Optional[str] = None,
             user_rag_memory_id: Optional[str] = None,
+            model_parameters_override: Optional[Dict[str, Any]] = None,
     ) -> AsyncGenerator[str, None]:
         """Regenerate a reply with streaming output (multi-version support).
 
@@ -5246,6 +5264,7 @@ class AgentRunService:
                 skip_save=True,
                 history=filtered_history,
                 files=files,
+                model_parameters_override=model_parameters_override,
         ):
             # Parse the event
             lines = event_str.strip().split('\n')
@@ -5290,6 +5309,11 @@ class AgentRunService:
                 "suggested_questions": suggested_questions,
                 "citations": citations,
                 "audio_url": audio_url,
+                # Carry forward the original model/parameters so repeated
+                # regenerations stay consistent.
+                "model_config_id": str(model_config.id),
+                **({"model_parameters_override": model_parameters_override}
+                   if model_parameters_override else {}),
             },
         )
 

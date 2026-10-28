@@ -1,5 +1,5 @@
 import { Trans } from 'react-i18next';
-import { useMemo, useEffect, useState, type FC, useCallback } from 'react';
+import { useMemo, useEffect, useState, useRef, type FC, useCallback } from 'react';
 import type { CSSProperties, Key, ReactNode } from 'react';
 import { Tree, Flex } from 'antd';
 import type { DataNode, TreeProps } from 'antd/es/tree';
@@ -156,6 +156,7 @@ const FolderTree: FC<FolderTreeProps> = ({
     rootTitle === undefined ? [] : [ROOT_NODE_KEY]
   ));
   const [autoExpandInProgress, setAutoExpandInProgress] = useState(false);
+  const autoExpandRequestRef = useRef<string | null>(null);
 
   // Helper function to update tree node data
   const updateTreeData = useCallback((nodes: TreeNodeData[], key: Key, children: TreeNodeData[]): TreeNodeData[] => {
@@ -268,11 +269,18 @@ const FolderTree: FC<FolderTreeProps> = ({
 
   // Progressive auto expand to specified path
   useEffect(() => {
-    if (!autoExpandPath || autoExpandPath.length === 0 || autoExpandInProgress || treeData.length === 0) {
+    if (!autoExpandPath || autoExpandPath.length === 0) {
+      autoExpandRequestRef.current = null;
+      return;
+    }
+    const requestKey = JSON.stringify([knowledgeBaseId, autoExpandPath.map(node => node.id)]);
+    if (autoExpandInProgress || treeData.length === 0 || autoExpandRequestRef.current === requestKey) {
       return;
     }
 
     const expandToPath = async () => {
+      // Consume only when execution starts, so effect cleanup can safely cancel the timer.
+      autoExpandRequestRef.current = requestKey;
       setAutoExpandInProgress(true);
       
       try {
