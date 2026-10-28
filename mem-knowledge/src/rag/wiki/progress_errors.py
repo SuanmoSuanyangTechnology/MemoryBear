@@ -73,7 +73,7 @@ def _failure_reason(error: WikiError) -> str:
     detail = error.diagnostics
     if error.code == "WIKI_MODEL_OUTPUT_INVALID":
         message = detail.get("error_message", "")
-        if message == "Invalid navigation category":
+        if "Invalid navigation category" in message:
             return "模型生成的目录名称不符合分类规则"
         if message.startswith("Unknown or missing evidence handles:"):
             return "模型生成的来源引用或页面链接无效，或缺少必需引用"
