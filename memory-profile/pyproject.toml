@@ -16,7 +16,7 @@ dependencies = [
     "fastapi==0.156.4",
     # Pinned to the API host versions so prompt/tool-call behavior matches
     # what the migrated generation pipelines were validated against.
-    "json-repair==0.64.1",
+    "json-repair==0.64.2",
     "langchain-core==1.6.12",
     "langchain-openai==1.7.2",
     "jinja2==3.1.6",
@@ -29,13 +29,13 @@ dependencies = [
     "redis==8.1.0",
     "sqlalchemy[asyncio]==2.1.5",
     # Explicit transitive security pin; FastAPI 0.143.0 allows Starlette >=0.46.0.
-    "starlette==1.9.0",
+    "starlette==1.10.0",
     # Cache generation is executed by the memory-jobs Celery workers; this
     # service only publishes the task by name and waits for its result.
     "task-bridge-sdk[celery,mem-router]",
     "uvicorn[standard]==0.54.0",
     "xxhash==4.0.2",
-    "zttp==0.0.34",
+    "zttp==0.0.35",
 ]
 
 [tool.uv.sources]

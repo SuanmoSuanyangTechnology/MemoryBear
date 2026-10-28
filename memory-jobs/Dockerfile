@@ -20,7 +20,12 @@ WORKDIR /app
 COPY --from=builder --chown=10001:10001 /app/.venv ./.venv
 COPY --from=builder --chown=10001:10001 /build/memory-jobs/src ./src
 USER 10001:10001
-HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+# ``dependency_health()`` probes PostgreSQL, Redis, Elasticsearch and Neo4j one
+# after another, each bounded by its own client connect timeout (10s + 5s +
+# 3s[+retries] + 30s by default). The deadline has to cover that sum, or a
+# black-holed dependency gets the probe killed mid-flight instead of reported
+# as down.
+HEALTHCHECK --interval=60s --timeout=60s --start-period=30s --retries=3 \
   CMD ["python", "-m", "src.healthcheck"]
 # Queue/pool/concurrency are per-deployment choices; override CMD in the
 # orchestrator (see deploy/k8s/worker.yaml).

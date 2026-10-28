@@ -69,9 +69,13 @@ class Neo4jManager:
             yield session
 
     def execute_query(self, query: str, **parameters: Any) -> list[dict[str, Any]]:
-        """Run one auto-commit query and return its records as dictionaries."""
+        """Run one auto-commit read query and return its records as dictionaries.
 
-        with self.session(access_mode="WRITE") as session:
+        Every caller is a read (the generation inputs); on a cluster a WRITE
+        session would route them to the leader for nothing.
+        """
+
+        with self.session(access_mode="READ") as session:
             return session.run(query, **parameters).data()
 
     def ping(self) -> bool:

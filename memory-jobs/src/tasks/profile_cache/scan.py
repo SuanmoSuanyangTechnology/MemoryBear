@@ -68,42 +68,58 @@ def scan(self: JobTask) -> dict[str, Any]:
     skip_no_change = 0
     skip_fresh = 0
     skip_inflight = 0
+    failed = 0
 
     for workspace_id in repository.active_workspace_ids():
         # One query per workspace keeps memory flat on large tenants.
         for row in repository.cache_refresh_rows(workspace_id):
             end_user_id = str(row.end_user_id)
-            decisions = classify_cache_refresh(
-                insight_at=row.memory_insight_updated_at,
-                summary_at=row.user_summary_updated_at,
-                write_at=row.write_time,
-                metadata_updated_at=row.metadata_updated_at,
-                now=now,
-                fresh_hours=fresh_hours,
-            )
-            refresh_insight = decisions.insight == "dispatch"
-            refresh_summary = decisions.summary == "dispatch"
-            if not refresh_insight and not refresh_summary:
-                if "skip_fresh" in (decisions.insight, decisions.summary):
-                    skip_fresh += 1
-                else:
-                    skip_no_change += 1
-                continue
-            if is_inflight(end_user_id):
-                skip_inflight += 1
-                continue
+            try:
+                decisions = classify_cache_refresh(
+                    insight_at=row.memory_insight_updated_at,
+                    summary_at=row.user_summary_updated_at,
+                    write_at=row.write_time,
+                    metadata_updated_at=row.metadata_updated_at,
+                    now=now,
+                    fresh_hours=fresh_hours,
+                )
+                refresh_insight = decisions.insight == "dispatch"
+                refresh_summary = decisions.summary == "dispatch"
+                if not refresh_insight and not refresh_summary:
+                    if "skip_fresh" in (decisions.insight, decisions.summary):
+                        skip_fresh += 1
+                    else:
+                        skip_no_change += 1
+                    continue
+                if is_inflight(end_user_id):
+                    skip_inflight += 1
+                    continue
 
-            dispatch_generate(
-                end_user_id=end_user_id,
-                workspace_id=str(row.workspace_id),
-                language=SCAN_LANGUAGE,
-                refresh_insight=refresh_insight,
-                refresh_summary=refresh_summary,
-                # The sweep yields to every user-triggered unit; the beat entry
-                # that starts the sweep itself carries the same level.
-                priority=TaskPriority.BACKGROUND,
-                index=dispatched,
-            )
+                dispatch_generate(
+                    end_user_id=end_user_id,
+                    workspace_id=str(row.workspace_id),
+                    language=SCAN_LANGUAGE,
+                    refresh_insight=refresh_insight,
+                    refresh_summary=refresh_summary,
+                    # The sweep yields to every user-triggered unit; the beat
+                    # entry that starts the sweep carries the same level.
+                    priority=TaskPriority.BACKGROUND,
+                    index=dispatched,
+                )
+            except Exception:
+                # One refused publish must not strand the rest of the sweep: the
+                # API's scanner isolated every row the same way. A broker error
+                # from ``apply_async`` is the common case, but classification and
+                # the inflight probe are per-user too.
+                failed += 1
+                logger.error(
+                    "profile cache scan dispatch failed user=%s workspace=%s",
+                    end_user_id,
+                    workspace_id,
+                    exc_info=True,
+                    extra={"event": "profile_cache_scan_user_failed"},
+                )
+                continue
             dispatched += 1
             if dispatched % 50 == 0:
                 logger.info(
@@ -115,11 +131,12 @@ def scan(self: JobTask) -> dict[str, Any]:
     elapsed_seconds = time.monotonic() - started_at
     logger.info(
         "profile cache scan completed dispatched=%s skip_no_change=%s skip_fresh=%s "
-        "skip_inflight=%s elapsed=%.3fs",
+        "skip_inflight=%s failed=%s elapsed=%.3fs",
         dispatched,
         skip_no_change,
         skip_fresh,
         skip_inflight,
+        failed,
         elapsed_seconds,
         extra={"event": "profile_cache_scan_completed"},
     )
@@ -129,6 +146,7 @@ def scan(self: JobTask) -> dict[str, Any]:
         "skip_no_change": skip_no_change,
         "skip_fresh": skip_fresh,
         "skip_inflight": skip_inflight,
+        "failed": failed,
         "elapsed_seconds": elapsed_seconds,
         "task_id": self.request.id,
     }

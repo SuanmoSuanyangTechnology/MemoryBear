@@ -17,6 +17,7 @@ from celery.signals import (
     task_prerun,
     worker_process_init,
     worker_process_shutdown,
+    worker_ready,
     worker_shutdown,
 )
 from task_bridge.mem_router import PRIORITY_STEPS, TaskPriority
@@ -122,16 +123,29 @@ def _configure_celery_logging(**_: object) -> None:
 def _configure_worker_process(**_: object) -> None:
     """Give every forked child fresh clients before it serves a task."""
 
-    runtime = get_runtime()
     # Never reuse sockets or pooled connections that were opened in the parent.
-    runtime.reset_after_fork()
-    if settings.startup_dependency_check:
-        health = runtime.verify_dependencies()
-        logger.info(
-            "Worker process dependencies verified dependencies=%s",
-            health,
-            extra={"event": "worker_dependencies_verified"},
-        )
+    get_runtime().reset_after_fork()
+
+
+@worker_ready.connect
+def _verify_startup_dependencies(**_: object) -> None:
+    """Probe dependencies once per worker, whatever pool it runs.
+
+    ``worker_process_init`` is only dispatched by fork-based pools, so the
+    startup probe cannot live there: with ``--pool=threads`` (the image and k8s
+    default) the worker itself is the only process and the probe would never
+    run. ``worker_ready`` fires in the process that owns the worker; raising
+    here aborts startup, which is the fail-fast this switch promises.
+    """
+
+    if not settings.startup_dependency_check:
+        return
+    health = get_runtime().verify_dependencies()
+    logger.info(
+        "Worker dependencies verified dependencies=%s",
+        health,
+        extra={"event": "worker_dependencies_verified"},
+    )
 
 
 @task_prerun.connect

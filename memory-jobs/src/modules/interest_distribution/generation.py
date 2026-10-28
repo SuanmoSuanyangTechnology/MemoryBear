@@ -175,6 +175,29 @@ def validate_interest_groups(
     return list(validated_groups.values())
 
 
+def _without_claimed_entities(
+    groups: list[InterestGroup], claimed_entity_ids: set[str]
+) -> list[InterestGroup]:
+    """Drop entity ids another round already counted, then empty groups.
+
+    ``validate_interest_groups`` keeps its own claim set, so a supplementary
+    round validated on its own would count an entity the primary round already
+    claimed twice. Filtering here keeps ``aggregate_interest_groups`` frequency
+    accounting intact.
+    """
+
+    kept: list[InterestGroup] = []
+    for group in groups:
+        entity_ids = [
+            entity_id
+            for entity_id in group.entity_ids
+            if entity_id not in claimed_entity_ids
+        ]
+        if entity_ids:
+            kept.append(InterestGroup(name=group.name, entity_ids=entity_ids))
+    return kept
+
+
 def aggregate_interest_groups(
     candidates: list[InterestEntityCandidate],
     groups: list[InterestGroup],
@@ -491,7 +514,18 @@ def generate_interest_distribution(
                                     items=primary_items[:limit],
                                     cacheable=False,
                                 )
-                            combined_groups.extend(supplemental_interests.interests)
+                            # The supplementary round only knows its own
+                            # candidates; validate against them and drop ids the
+                            # primary round already counted.
+                            combined_groups.extend(
+                                _without_claimed_entities(
+                                    validate_interest_groups(
+                                        fallback_candidates,
+                                        supplemental_interests.interests,
+                                    ),
+                                    claimed_entity_ids,
+                                )
+                            )
                 except Exception as exc:
                     _log_interest_budget(
                         end_user_id=end_user_id,

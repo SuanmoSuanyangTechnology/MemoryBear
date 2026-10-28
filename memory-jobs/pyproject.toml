@@ -19,13 +19,13 @@ dependencies = [
     "neo4j==6.4.0",
     "psycopg[binary]==3.3.6",
     "pydantic==2.14.1",
-    "pydantic-settings==2.15.0",
+    "pydantic-settings==2.16.1",
     "python-dotenv==1.2.4",
     # Generation talks to the model service through the shared invoke seam; the
     # runtime extra carries httpx / json-repair / langchain-core it needs.
     "redbear-model[runtime]",
     "redis==6.4.0",
-    "sqlalchemy==2.1.4",
+    "sqlalchemy==2.1.6",
     # Task names, the owned queue and the task->queue table shared with the
     # producer (memory-profile). Contract only: no transport, no extra deps.
     "task-bridge-sdk[mem-router]",

@@ -13,7 +13,8 @@ def normalize_language(value: str | None) -> str:
     if not value:
         return "zh"
     first = value.split(",", 1)[0].split(";", 1)[0].strip().lower()
-    primary = first.split("-", 1)[0]
+    # Accept both BCP-47 (``en-US``) and the POSIX/misconfigured form (``en_US``).
+    primary = first.replace("_", "-").split("-", 1)[0]
     return primary if primary in SUPPORTED_LANGUAGES else "zh"
 
 

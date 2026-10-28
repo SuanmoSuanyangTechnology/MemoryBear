@@ -47,15 +47,21 @@ def acquire_inflight(end_user_id: str, task_id: str | None) -> bool:
         return True
 
 
+#: Compare-and-delete: a read-then-delete pair can delete a lock that expired
+#: and was retaken by another attempt between the two calls.
+_RELEASE_SCRIPT = (
+    "if redis.call('get', KEYS[1]) == ARGV[1] then "
+    "return redis.call('del', KEYS[1]) else return 0 end"
+)
+
+
 def release_inflight(end_user_id: str, task_id: str | None) -> None:
-    """Release the lock only when this attempt still owns it."""
+    """Release the lock only when this attempt still owns it (atomically)."""
 
     value = task_id or "1"
     try:
         client = get_runtime().redis.client()
-        key = inflight_key(end_user_id)
-        if client.get(key) == value:
-            client.delete(key)
+        client.eval(_RELEASE_SCRIPT, 1, inflight_key(end_user_id), value)
     except Exception:  # pragma: no cover - TTL is the backstop
         logger.warning("inflight lock release failed user=%s", end_user_id, exc_info=True)
 
