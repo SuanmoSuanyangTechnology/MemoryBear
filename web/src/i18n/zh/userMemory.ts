@@ -342,6 +342,7 @@ export const userMemory = {
       PREFERENCE: '偏好引擎',
       SCENE_RECONSTRUCTION: '多模态情景记忆重构引擎',
       PREDICTION: '预测推演引擎',
+      PERSONALITY_ANCHOR: '人格锚定引擎',
 
       memorySubject: '记忆主体',
       basicInfo: '基础信息',
