@@ -3,7 +3,7 @@ import logging
 import uuid
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
-from sqlalchemy import and_, delete, select, update, func
+from sqlalchemy import and_, func, select
 from ..models.knowledge_metadata_model import KnowledgeMetadata, KnowledgeMetadataBinding
 
 db_logger = logging.getLogger(__name__)
@@ -11,20 +11,6 @@ db_logger = logging.getLogger(__name__)
 
 class KnowledgeMetadataRepository:
     """Knowledge base metadata repository."""
-
-    @staticmethod
-    def create(db: Session, obj: KnowledgeMetadata) -> KnowledgeMetadata:
-        db.add(obj)
-        db.commit()
-        db.refresh(obj)
-        return obj
-
-    @staticmethod
-    async def create_async(db: AsyncSession, obj: KnowledgeMetadata) -> KnowledgeMetadata:
-        db.add(obj)
-        await db.commit()
-        await db.refresh(obj)
-        return obj
 
     @staticmethod
     def get_by_id(db: Session, metadata_id: uuid.UUID) -> KnowledgeMetadata | None:
@@ -84,65 +70,7 @@ class KnowledgeMetadataRepository:
         )
         return result.scalars().first()
 
-    @staticmethod
-    def update(db: Session, metadata_id: uuid.UUID, update_data: dict) -> int:
-        result = db.query(KnowledgeMetadata).filter(
-            KnowledgeMetadata.id == metadata_id
-        ).update(update_data)
-        db.commit()
-        return result
-
-    @staticmethod
-    async def update_async(db: AsyncSession, metadata_id: uuid.UUID, update_data: dict) -> int:
-        result = await db.execute(
-            update(KnowledgeMetadata).where(KnowledgeMetadata.id == metadata_id).values(update_data)
-        )
-        await db.commit()
-        return result.rowcount or 0
-
-    @staticmethod
-    def delete(db: Session, metadata_id: uuid.UUID) -> int:
-        result = db.query(KnowledgeMetadata).filter(
-            KnowledgeMetadata.id == metadata_id
-        ).delete()
-        db.commit()
-        return result
-
-    @staticmethod
-    async def delete_async(db: AsyncSession, metadata_id: uuid.UUID) -> int:
-        result = await db.execute(delete(KnowledgeMetadata).where(KnowledgeMetadata.id == metadata_id))
-        await db.commit()
-        return result.rowcount or 0
-
-    @staticmethod
-    def delete_by_knowledge_id(db: Session, knowledge_id: uuid.UUID) -> int:
-        result = db.query(KnowledgeMetadata).filter(
-            KnowledgeMetadata.knowledge_id == knowledge_id
-        ).delete()
-        db.commit()
-        return result
-
-    @staticmethod
-    async def delete_by_knowledge_id_async(db: AsyncSession, knowledge_id: uuid.UUID) -> int:
-        result = await db.execute(delete(KnowledgeMetadata).where(KnowledgeMetadata.knowledge_id == knowledge_id))
-        await db.commit()
-        return result.rowcount or 0
-
     # === Binding Operations ===
-
-    @staticmethod
-    def create_binding(db: Session, obj: KnowledgeMetadataBinding) -> KnowledgeMetadataBinding:
-        db.add(obj)
-        db.commit()
-        db.refresh(obj)
-        return obj
-
-    @staticmethod
-    async def create_binding_async(db: AsyncSession, obj: KnowledgeMetadataBinding) -> KnowledgeMetadataBinding:
-        db.add(obj)
-        await db.commit()
-        await db.refresh(obj)
-        return obj
 
     @staticmethod
     def get_bindings_by_metadata_id(db: Session, metadata_id: uuid.UUID) -> list[KnowledgeMetadataBinding]:
@@ -175,38 +103,6 @@ class KnowledgeMetadataRepository:
             select(KnowledgeMetadataBinding).where(KnowledgeMetadataBinding.document_id == document_id)
         )
         return list(result.scalars().all())
-
-    @staticmethod
-    def delete_bindings_by_metadata_id(db: Session, metadata_id: uuid.UUID) -> int:
-        result = db.query(KnowledgeMetadataBinding).filter(
-            KnowledgeMetadataBinding.metadata_id == metadata_id
-        ).delete()
-        db.commit()
-        return result
-
-    @staticmethod
-    async def delete_bindings_by_metadata_id_async(db: AsyncSession, metadata_id: uuid.UUID) -> int:
-        result = await db.execute(
-            delete(KnowledgeMetadataBinding).where(KnowledgeMetadataBinding.metadata_id == metadata_id)
-        )
-        await db.commit()
-        return result.rowcount or 0
-
-    @staticmethod
-    def delete_bindings_by_document_id(db: Session, document_id: uuid.UUID) -> int:
-        result = db.query(KnowledgeMetadataBinding).filter(
-            KnowledgeMetadataBinding.document_id == document_id
-        ).delete()
-        db.commit()
-        return result
-
-    @staticmethod
-    async def delete_bindings_by_document_id_async(db: AsyncSession, document_id: uuid.UUID) -> int:
-        result = await db.execute(
-            delete(KnowledgeMetadataBinding).where(KnowledgeMetadataBinding.document_id == document_id)
-        )
-        await db.commit()
-        return result.rowcount or 0
 
     @staticmethod
     def binding_exists(db: Session, knowledge_id: uuid.UUID, metadata_id: uuid.UUID, document_id: uuid.UUID) -> bool:

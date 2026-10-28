@@ -306,7 +306,7 @@ def completion_of_layer2(results: Dict[str, Any]) -> str:
         return "partial"
     for k in _LAYER2_STEPS:
         step = results.get(k) or {}
-        if step.get("status") in ("timeout", "skipped", "error"):
+        if step.get("status") in ("timeout", "skipped", "error", "partial"):
             return "partial"
         if int(step.get("business_failure_count", 0) or 0) > 0:
             return "partial"
@@ -332,7 +332,7 @@ def progressed_layer2(results: Dict[str, Any]) -> bool:
     未识别实体解析/强制入库、别名归并合并/丢弃边、实体去重合并、
     元数据提取写入、描述合并。任一 > 0 视为本轮收缩了后续工作量，用于重置 retry_count。
 
-    字段名以各 _run_* 返回为准：alias_merge 用 merge_count/drop_count（非 merged_count），
+    字段名以各 _run_* 返回为准：alias_merge 使用属性、边、节点的实际写入数，
     metadata_extraction 用 extracted（仅统计真正写入 patch 的实体，静态数据不会虚报）。"""
     unresolved = results.get("unresolved_entity") or {}
     alias = results.get("alias_merge") or {}
@@ -340,7 +340,8 @@ def progressed_layer2(results: Dict[str, Any]) -> bool:
     meta = results.get("metadata_extraction") or {}
     desc = results.get("description_merge") or {}
     return bool(unresolved.get("resolved", 0) or unresolved.get("forced", 0)
-                or alias.get("merge_count", 0) or alias.get("drop_count", 0)
+                or alias.get("alias_merged", 0) or alias.get("edges_redirected", 0)
+                or alias.get("alias_nodes_deleted", 0) or alias.get("drop_edges_deleted", 0)
                 or dedup.get("merged_count", 0)
                 or meta.get("extracted", 0)
                 or desc.get("merged_count", 0))
@@ -356,7 +357,7 @@ def skipped_steps_of_layer2(results: Dict[str, Any]) -> List[str]:
     skipped: List[str] = list(results.get("failed_operations") or [])
     for key in _LAYER2_STEPS:
         step = results.get(key) or {}
-        if step.get("status") in ("timeout", "skipped", "error"):
+        if step.get("status") in ("timeout", "skipped", "error", "partial"):
             skipped.append(key)
         if int(step.get("business_failure_count", 0) or 0) > 0:
             skipped.extend(step.get("failed_operations") or [key])

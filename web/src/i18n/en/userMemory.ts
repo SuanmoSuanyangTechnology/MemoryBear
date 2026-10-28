@@ -166,8 +166,8 @@ export const userMemory = {
       Chunk: 'Chunk',
       Dialogue: 'Dialogue',
       Conversation: 'Conversation',
-      ExtractedEntity: 'ExtractedEntity',
-      MemorySummary: 'MemorySummary',
+      ExtractedEntity: 'Extracted Entity',
+      MemorySummary: 'Memory Summary',
       Perceptual: 'Perceptual',
       Statement: 'Statement',
       PreferenceGroup: 'Preference Summary',
@@ -340,6 +340,7 @@ export const userMemory = {
       MEMORY_VALUE: 'Memory Value Dynamic Weight Engine',
       PREFERENCE: 'Preference Engine',
       SCENE_RECONSTRUCTION: 'Multimodal Episodic Memory Reconstruction Engine',
+      PREDICTION: 'Memory Prediction Workbench',
 
       memorySubject: 'Memory Subject',
       basicInfo: 'Basic Information',

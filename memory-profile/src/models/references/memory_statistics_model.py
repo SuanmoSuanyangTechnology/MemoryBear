@@ -1,7 +1,7 @@
 """Read-only mappings for API-owned memory statistics tables."""
 
 from sqlalchemy import Boolean, Column, Integer, String
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 
 from src.models.base import ReadOnlyBase
 
@@ -45,3 +45,13 @@ class ForgetAudit(ReadOnlyBase):
 
     id = Column(UUID(as_uuid=True), primary_key=True)
     end_user_id = Column(UUID(as_uuid=True), nullable=False)
+
+
+class ImplicitEmotionsStorage(ReadOnlyBase):
+    """Read-only access to API-owned cached implicit profiles."""
+
+    __tablename__ = "implicit_emotions_storage"
+
+    id = Column(UUID(as_uuid=True), primary_key=True)
+    end_user_id = Column(String(255), nullable=False)
+    implicit_profile = Column(JSONB, nullable=True)

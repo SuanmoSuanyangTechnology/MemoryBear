@@ -22,6 +22,11 @@ APPLICATION_SERVICE_CALLBACK_SECRET，两端配置同一值）。记忆类与终
     GET  /memory/workspace-config                       工作空间启用中的记忆配置
     POST /end-user/info-update                          终端用户信息更新（alias 变更记忆侧效应）
     POST /end-user/identity-update                      终端用户身份确认 / 归并
+    POST /apps/ontology-batch                           应用 ontology 子对象批量聚合
+    POST /apps/ontology-filter                          应用列表本体筛选（返回命中的 app_ids）
+    POST /apps/ontology-bind                            应用创建后的首次本体绑定
+    POST /apps/ontology-unbind                          应用删除后的本体绑定软删除
+    POST /memory/emotion-policy                         按应用解析情绪回复策略
 """
 from __future__ import annotations
 
@@ -32,19 +37,22 @@ from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, Header
 from pydantic import BaseModel, Field
+from sqlalchemy import select
 
 from app.controllers import end_user_controller
-from app.core.app_service_callback_auth import require_app_service_callback_secret
 from app.core.api_key_utils import validate_end_user_in_workspace_async
+from app.core.app_service_callback_auth import require_app_service_callback_secret
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
 from app.core.logging_config import get_business_logger
 from app.core.memory.enums import Neo4jNodeType, SearchStrategy
 from app.core.memory.memory_service import MemoryService
 from app.core.response_utils import success
-from app.db import get_async_db_context
+from app.db import get_async_db_context, get_db_context
 from app.dependencies import CurrentUserSnapshot
+from app.models.app_model import App
 from app.models.workspace_model import Workspace
+from app.plugins import get_plugin
 from app.schemas.end_user_info_schema import EndUserInfoUpdate
 from app.schemas.end_user_schema import EndUserIdentityUpdate
 from app.services.context_engine_manager import ContextEngineManager
@@ -52,6 +60,11 @@ from app.services.memory_config_service import MemoryConfigService
 
 router = APIRouter(prefix="/internal/app-service", tags=["internal-app-service"])
 logger = get_business_logger()
+
+# 本体绑定门面由 premium.memory 注册；社区版无此插件，回调返回 available=false
+ONTOLOGY_BINDING_PLUGIN = "memory.ontology_binding"
+# 情绪策略 provider 同样由 premium.memory 注册；社区版回调返回 available=false
+EMOTION_POLICY_PLUGIN = "memory.emotion_reply_policy"
 
 
 def _parse_workspace_id(raw: Optional[str]) -> uuid.UUID:
@@ -143,6 +156,7 @@ class MemoryReadRequest(BaseModel):
     conversation_id: Optional[str] = None
     language: str = "zh"
     draft: bool = False
+    app_id: Optional[str] = None
 
 
 class MemoryIngestWorkflowRequest(BaseModel):
@@ -173,6 +187,31 @@ class MemoryIngestAgentRequest(BaseModel):
     language: str = "zh"
     storage_type: str = "neo4j"
     user_rag_memory_id: str = ""
+
+
+class AppOntologyBatchRequest(BaseModel):
+    app_ids: list[uuid.UUID] = Field(default_factory=list)
+
+
+class AppOntologyFilterRequest(AppOntologyBatchRequest):
+    ontology_status: Optional[str] = None
+    field_search: Optional[str] = None
+
+
+class AppOntologyBindRequest(BaseModel):
+    app_id: uuid.UUID
+    tenant_id: uuid.UUID
+    ontology_id: uuid.UUID
+
+
+class AppOntologyUnbindRequest(BaseModel):
+    app_id: uuid.UUID
+
+
+class AppEmotionPolicyRequest(BaseModel):
+    app_id: uuid.UUID
+    tenant_id: uuid.UUID
+    emotion_code: str
 
 
 # ──────────────────────────────────────────────────────────────
@@ -300,6 +339,7 @@ async def internal_memory_read(
         )
 
     includes = [Neo4jNodeType(t) for t in payload.includes] if payload.includes else None
+    app_id = _parse_uuid(payload.app_id, "app_id") if payload.app_id else None
     service = await MemoryService.create(
         config_id,
         end_user_id=end_user_id,
@@ -309,6 +349,7 @@ async def internal_memory_read(
         conversation_id=payload.conversation_id,
         language=payload.language,
         draft=payload.draft,
+        app_id=app_id,
     )
     memory = await service.read(
         payload.query,
@@ -431,8 +472,11 @@ async def _callback_user_snapshot(workspace_id: uuid.UUID) -> CurrentUserSnapsho
     """
     async with get_async_db_context() as db:
         workspace = await db.get(Workspace, workspace_id)
-    if workspace is None:
-        raise BusinessException("工作空间不存在", BizCode.WORKSPACE_NOT_FOUND)
+        if workspace is None:
+            raise BusinessException("工作空间不存在", BizCode.WORKSPACE_NOT_FOUND)
+        # Plain values only: the context exit rolls back and closes the session,
+        # which expires and detaches the ORM instance.
+        tenant_id = workspace.tenant_id
     return CurrentUserSnapshot(
         id=uuid.uuid5(uuid.NAMESPACE_URL, "application-service"),
         username="application-service",
@@ -440,7 +484,7 @@ async def _callback_user_snapshot(workspace_id: uuid.UUID) -> CurrentUserSnapsho
         is_active=True,
         is_superuser=False,
         current_workspace_id=workspace_id,
-        tenant_id=workspace.tenant_id,
+        tenant_id=tenant_id,
     )
 
 
@@ -483,3 +527,139 @@ async def internal_end_user_identity_update(
         identity_update=payload,
         current_user=current_user,
     )
+
+
+# ──────────────────────────────────────────────────────────────
+# App ontology
+# ──────────────────────────────────────────────────────────────
+#
+# 本体表归记忆域所有，应用服务不得直读；本体绑定门面由 premium.memory 在
+# 单体进程内注册。以下端点用同步 Session（门面为同步实现），以 sync def
+# 声明让 FastAPI 走线程池，避免阻塞事件循环。
+
+@router.post("/apps/ontology-batch")
+def internal_app_ontology_batch(
+        payload: AppOntologyBatchRequest,
+        _guard: None = Depends(require_app_service_callback_secret),
+):
+    """批量聚合应用的 ontology 子对象。
+
+    available=false 表示本体插件未加载（社区版 / License 未启用 memory），
+    应用服务据此跳过 ontology 字段，而不是把空结果当成"无绑定"。
+    """
+    binder = get_plugin(ONTOLOGY_BINDING_PLUGIN)
+    if binder is None:
+        return success(data={"available": False, "ontology": {}})
+    logger.info(f"Internal app ontology batch - apps: {len(payload.app_ids)}")
+    if not payload.app_ids:
+        return success(data={"available": True, "ontology": {}})
+    with get_db_context() as db:
+        ontology = binder.load_app_ontology_batch(db, payload.app_ids)
+    return success(data={
+        "available": True,
+        "ontology": {str(app_id): info for app_id, info in ontology.items()},
+    })
+
+
+@router.post("/apps/ontology-filter")
+def internal_app_ontology_filter(
+        payload: AppOntologyFilterRequest,
+        _guard: None = Depends(require_app_service_callback_secret),
+):
+    """按本体状态 / 字段关键字筛选候选应用，返回命中的 app_ids。
+
+    无筛选条件时原样返回候选集；available=false 时应用服务忽略该筛选并告警。
+    """
+    binder = get_plugin(ONTOLOGY_BINDING_PLUGIN)
+    if binder is None:
+        return success(data={"available": False, "app_ids": None})
+    filters = binder.build_list_filters(payload.ontology_status, payload.field_search)
+    if not filters:
+        return success(data={
+            "available": True,
+            "app_ids": [str(app_id) for app_id in payload.app_ids],
+        })
+    if not payload.app_ids:
+        return success(data={"available": True, "app_ids": []})
+    logger.info(
+        f"Internal app ontology filter - apps: {len(payload.app_ids)}, "
+        f"status: {payload.ontology_status}, field_search: {bool(payload.field_search)}"
+    )
+    with get_db_context() as db:
+        matched = db.scalars(
+            select(App.id).where(App.id.in_(payload.app_ids), *filters)
+        ).all()
+    return success(data={"available": True, "app_ids": [str(app_id) for app_id in matched]})
+
+
+@router.post("/apps/ontology-bind")
+def internal_app_ontology_bind(
+        payload: AppOntologyBindRequest,
+        _guard: None = Depends(require_app_service_callback_secret),
+):
+    """应用创建后的首次本体绑定。
+
+    仅供刚创建的应用使用：写路径是插入一条有效绑定，换绑仍走管理面
+    /memory/ontology/app-bindings 接口。提交后失效应用的情绪策略缓存，
+    与老单体应用创建后的失效时机保持一致。
+    """
+    binder = get_plugin(ONTOLOGY_BINDING_PLUGIN)
+    if binder is None:
+        return success(data={"available": False, "bound": False})
+    logger.info(
+        f"Internal app ontology bind - app: {payload.app_id}, "
+        f"tenant: {payload.tenant_id}, ontology: {payload.ontology_id}"
+    )
+    with get_db_context() as db:
+        binder.bind_in_session(db, payload.app_id, payload.tenant_id, payload.ontology_id)
+        db.commit()
+    policy_provider = get_plugin(EMOTION_POLICY_PLUGIN)
+    if policy_provider is not None:
+        policy_provider.invalidate_sync(payload.app_id, payload.tenant_id)
+    return success(data={"available": True, "bound": True})
+
+
+@router.post("/apps/ontology-unbind")
+def internal_app_ontology_unbind(
+        payload: AppOntologyUnbindRequest,
+        _guard: None = Depends(require_app_service_callback_secret),
+):
+    """Soft-delete the app's active ontology binding after the app was deleted.
+
+    The application service commits its local soft delete first, then calls this
+    endpoint (no remote call inside a transaction); a failure here is compensated
+    on the caller side by restoring the app. The update is idempotent: repeated
+    calls only touch rows that are still active. Without the memory plugin
+    (community edition / License without memory) there is no binding to remove,
+    reported as available=false so the caller proceeds.
+    """
+    binder = get_plugin(ONTOLOGY_BINDING_PLUGIN)
+    if binder is None:
+        return success(data={"available": False, "unbound": False})
+    logger.info(f"Internal app ontology unbind - app: {payload.app_id}")
+    with get_db_context() as db:
+        binder.unbind_in_session(db, payload.app_id)
+        db.commit()
+    return success(data={"available": True, "unbound": True})
+
+
+# ──────────────────────────────────────────────────────────────
+# App emotion policy
+# ──────────────────────────────────────────────────────────────
+#
+# 情绪策略与本体同属记忆域；provider 自带 PG/Redis 缓存与降级，本端点只做
+# 身份透传。available=false 时应用服务退回基础提示词（与单体无插件行为一致）。
+
+@router.post("/memory/emotion-policy")
+async def internal_app_emotion_policy(
+        payload: AppEmotionPolicyRequest,
+        _guard: None = Depends(require_app_service_callback_secret),
+):
+    """按应用解析本轮情绪回复策略。"""
+    provider = get_plugin(EMOTION_POLICY_PLUGIN)
+    if provider is None:
+        return success(data={"available": False, "strategy": None})
+    strategy = await provider.get_strategy(
+        payload.app_id, payload.tenant_id, payload.emotion_code
+    )
+    return success(data={"available": True, "strategy": strategy})

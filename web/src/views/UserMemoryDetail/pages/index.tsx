@@ -1,9 +1,3 @@
-/*
- * @Author: ZhaoYing 
- * @Date: 2026-01-07 20:37:34 
- * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-19 18:31:20
- */
 import { type FC, useState, useMemo, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
@@ -23,6 +17,13 @@ import { MemoryEvolutionEvent } from '@redbear/memory-brick'
 import { request } from '@/utils/request';
 import PrivateWrap from '@/components/PrivateWrap'
 
+
+const MENU_LIST = ['PERCEPTUAL_MEMORY', 'WORKING_MEMORY', 'EMOTIONAL_MEMORY', 'SHORT_TERM_MEMORY', 'IMPLICIT_MEMORY', 'EPISODIC_MEMORY', 'EXPLICIT_MEMORY', 'FORGET_MEMORY']
+const MENU_DESC_OBJ = {
+  SHORT_TERM_MEMORY: 'memoryDetail.shortTermDescription',
+  FORGET_MEMORY: 'memoryDetail.forgetDescription',
+  IMPLICIT_MEMORY: 'memoryDetail.implicitDescription'
+}
 /**
  * Detail page for user memory - renders different memory type views
  * based on the `type` route param
@@ -38,8 +39,7 @@ const Detail: FC = () => {
 
   // Build dropdown menu items for switching between memory types
   const items = useMemo(() => {
-    return ['PERCEPTUAL_MEMORY', 'WORKING_MEMORY', 'EMOTIONAL_MEMORY', 'SHORT_TERM_MEMORY', 'IMPLICIT_MEMORY', 'EPISODIC_MEMORY', 'EXPLICIT_MEMORY', 'FORGET_MEMORY']
-      .map(key => ({ key, label: t(`userMemory.${key}`) }))
+    return MENU_LIST.map(key => ({ key, label: t(`userMemory.${key}`) }))
   }, [t])
 
   // Navigate to the selected memory type detail page
@@ -93,14 +93,17 @@ const Detail: FC = () => {
     <Flex vertical className="rb:h-full rb:w-full">
       <PageHeader
         title={
-          <Dropdown menu={{ items, onClick, selectedKeys: type ? [type] : [] }}>
-            <Flex align="center" gap={8} className="rb:font-[MiSans-Bold] rb:font-bold rb:text-[16px] rb:leading-6 rb:cursor-pointer rb:group">
-              {type ? t(`userMemory.${type}`) : ''}
-              <div
-                className="rb:size-4 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/userMemory/up_border.svg')] rb:group-hover:transform-[rotate(180deg)]"
-              ></div>
-            </Flex>
-          </Dropdown>
+          <div>
+            <Dropdown menu={{ items, onClick, selectedKeys: type ? [type] : [] }}>
+              <Flex align="center" gap={8} className="rb:font-[MiSans-Bold] rb:font-bold rb:text-[16px] rb:leading-6 rb:cursor-pointer rb:group rb:w-fit">
+                {type ? t(`userMemory.${type}`) : ''}
+                <div
+                  className="rb:size-4 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/userMemory/up_border.svg')] rb:group-hover:transform-[rotate(180deg)]"
+                ></div>
+              </Flex>
+            </Dropdown>
+            {MENU_DESC_OBJ[type as keyof typeof MENU_DESC_OBJ] && <div className="rb:text-[12px] rb:font-normal rb:text-gray-600">{t(MENU_DESC_OBJ[type as keyof typeof MENU_DESC_OBJ])}</div>}
+          </div>
         }
         extra={
           <Space size={12}>

@@ -727,6 +727,11 @@ class AppLogService:
                 subs_by_parent.get(str(execution.id), [])
             )
             execution_nodes = _steps_to_node_executions(steps) if steps else []
+            # Supervisor's own trace (direct_answer has no steps/sub rows, but
+            # agent_log carries its LLM turns and tools)
+            master_node = self._master_execution_to_node(execution)
+            if master_node is not None:
+                execution_nodes.append(master_node)
 
             if not execution_nodes and not child_nodes:
                 continue
@@ -884,6 +889,54 @@ class AppLogService:
             orchestration_mode=sub.orchestration_mode,
         )
 
+    @staticmethod
+    def _master_execution_to_node(execution) -> AppLogNodeExecution | None:
+        """Project the cluster master (orchestrator) execution itself into one
+        node_type='agent' node.
+
+        In supervisor_loop the supervisor may answer directly with zero
+        dispatches (direct_answer): there are no sub-agent rows, and the
+        supervisor's own LLM turns / tool calls live only in its agent_log.
+        Without this node, version-switch / log-detail views rebuilt from
+        agent_executions lose the supervisor tool-call panel. Returns None when
+        there is no usable trace (no iterations).
+        """
+        meta = execution.meta_data if isinstance(execution.meta_data, dict) else {}
+        trace = getattr(execution, "agent_log", None)
+        if not (isinstance(trace, dict) and trace.get("iterations")):
+            legacy = meta.get("agent_log")
+            if isinstance(legacy, dict) and legacy.get("iterations"):
+                trace = legacy
+        if not (isinstance(trace, dict) and trace.get("iterations")):
+            return None
+        agent_name = meta.get("agent_name") or "主编排"
+        return AppLogNodeExecution(
+            node_id=str(execution.id),
+            node_type="agent",
+            node_name=agent_name,
+            status=execution.status or "completed",
+            error=execution.error_message,
+            input=meta.get("task"),
+            output=_trace_final_output(trace),
+            agent_log=trace,
+            elapsed_time=execution.elapsed_time,
+            token_usage=execution.token_usage,
+            meta={
+                "agent_id": meta.get("agent_id"),
+                "agent_name": agent_name,
+                "execution_id": str(execution.id),
+                "parent_execution_id": None,
+                "depth": 0,
+                "orchestration_mode": getattr(execution, "orchestration_mode", None),
+            },
+            agent_id=meta.get("agent_id"),
+            agent_name=agent_name,
+            execution_id=str(execution.id),
+            parent_execution_id=None,
+            depth=0,
+            orchestration_mode=getattr(execution, "orchestration_mode", None),
+        )
+
     def build_agent_execution_summary(
         self,
         node_executions_map: dict[str, list[AppLogNodeExecution]],
@@ -990,6 +1043,11 @@ class AppLogService:
 
         nodes = _steps_to_node_executions(execution.steps) if execution.steps else []
         child_nodes = self._build_child_nodes(agent_exec_repo.list_by_parent(execution.id))
+        # Supervisor's own trace (direct_answer has no steps/sub rows, but
+        # agent_log carries its LLM turns and tools)
+        master_node = self._master_execution_to_node(execution)
+        if master_node is not None:
+            nodes = nodes + [master_node]
         if not nodes and not child_nodes:
             return []
         return [n.model_dump() for n in (nodes + child_nodes)]

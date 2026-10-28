@@ -6,7 +6,7 @@
  * @LastEditors: yujiangping
  * @LastEditTime: 2025-12-19 20:19:59
  */
-import { useEffect, useState, useRef, type FC } from 'react';
+import { useEffect, useMemo, useState, useRef, type FC } from 'react';
 import { useNavigate, useParams, useLocation, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useBreadcrumbManager, type BreadcrumbPath } from '@/hooks/useBreadcrumbManager';
@@ -32,6 +32,28 @@ const DocumentDetails: FC = () => {
     breadcrumbType: 'detail'
   });
   const [searchParams] = useSearchParams();
+  const queryBreadcrumbPath = useMemo(() => {
+    const value = searchParams.get('breadcrumbPath');
+    if (!value) return undefined;
+    try {
+      const path = JSON.parse(value);
+      const isItem = (item: unknown) => {
+        if (!item || typeof item !== 'object') return false;
+        const entry = item as Record<string, unknown>;
+        return typeof entry.id === 'string' && typeof entry.name === 'string'
+          && (entry.type === undefined || ['knowledgeBase', 'folder', 'document'].includes(entry.type as string));
+      };
+      if (!path || !Array.isArray(path.knowledgeBaseFolderPath)
+        || !path.knowledgeBaseFolderPath.every(isItem)
+        || !Array.isArray(path.documentFolderPath)
+        || !path.documentFolderPath.every(isItem)
+        || (path.knowledgeBase !== undefined && !isItem(path.knowledgeBase))
+        || (path.document !== undefined && !isItem(path.document))) return undefined;
+      return path as BreadcrumbPath;
+    } catch {
+      return undefined;
+    }
+  }, [searchParams]);
   const { 
     documentId, 
     parentId: locationParentId, 
@@ -39,6 +61,7 @@ const DocumentDetails: FC = () => {
   } = ({
     documentId: searchParams.get('documentId') ?? undefined,
     parentId: searchParams.get('parentId') ?? undefined,
+    breadcrumbPath: queryBreadcrumbPath,
     ...(location.state || {})
   }) as { 
     documentId?: string; 

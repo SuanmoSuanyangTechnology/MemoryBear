@@ -142,6 +142,13 @@ async def create_folder(
 ):
     """Create a new folder"""
     api_logger.info(f"Create folder request: kb_id={kb_id}, parent_id={parent_id}, folder_name={folder_name}")
+    # 文件夹名称去除首尾空白后不允许为空（默认值 '/' 仅用于缺参占位，不能作为真实名称落库）
+    folder_name = (folder_name or "").strip()
+    if not folder_name or folder_name == "/":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="文件夹名称不能为空",
+        )
     try:
         _require_workspace_knowledge(db, kb_id, current_user)
         _require_parent_folder(db, kb_id, parent_id, current_user)

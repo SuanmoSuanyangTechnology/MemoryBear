@@ -46,7 +46,7 @@ const KnowledgeListModal = forwardRef<KnowledgeModalRef, KnowledgeModalProps>(({
   // Load root list (first page)
   const loadRootList = useCallback(() => {
     setLoading(true)
-    getKnowledgeBaseList(undefined, {
+    getKnowledgeBaseList({
       keywords,
       page: 1,
       pagesize: 50,

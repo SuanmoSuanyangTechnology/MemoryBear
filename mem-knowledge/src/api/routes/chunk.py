@@ -388,10 +388,14 @@ async def delete_chunk(
 
 
 @router.get("/retrieve_type", response_model=SuccessEnvelope[list[str]])
-async def get_retrieve_types(request: Request) -> SuccessEnvelope[list[str]]:
+async def get_retrieve_types(
+    request: Request,
+    source: Annotated[KnowledgeRetrievalSource, Depends(get_source)],
+) -> SuccessEnvelope[list[str]]:
     return _success(
         request,
-        list(RetrieveType),
+        [kind for kind in RetrieveType if kind != RetrieveType.WIKI_FAQ
+         or source == KnowledgeRetrievalSource.MANAGER_API],
         "Successfully obtained the retrieval type",
     )
 
@@ -414,7 +418,7 @@ async def get_retrieval_policy(
         )
     return _success(
         request,
-        policy.model_dump(mode="json"),
+        policy.model_dump(mode="json", by_alias=True),
         "retrieval policy resolved",
     )
 

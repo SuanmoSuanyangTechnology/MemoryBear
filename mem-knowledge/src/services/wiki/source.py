@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
+import asyncio
+import logging
+
 from ...models.owned import Document, Knowledge, WikiDocumentState
-from ...rag.wiki.config import WikiSuperseded, read_wiki_config
+from ...rag.wiki.config import WikiError, WikiSuperseded, read_wiki_config
 from ...repositories.wiki import state as repository
 from ...repositories.wiki.common import append_log, as_uuid, lock_document, lock_knowledge
 from ...tasks.observability import current_parent_task_id
 from .runtime import transaction
+
+logger = logging.getLogger(__name__)
 
 
 class WikiHandoffPending(RuntimeError):
@@ -82,12 +87,14 @@ def finish_source(
         from ..document import delete_document_search_data
         from ..document_mutation_guard import sync_document_mutation_guard
 
-        if replace_source and expected_chunk_ids == []:
+        if replace_source and expected_chunk_ids == [] and not info["manual_chunks_changed"]:
             # A legitimate zero-chunk reparse must retire the previous ES source first.
             with sync_document_mutation_guard(
                 runtime.redis.sync_client(), as_uuid(document_id)
             ) as guard:
-                transaction(runtime, _source_verification, document_id, source_task_id)
+                latest = transaction(runtime, _source_verification, document_id, source_task_id)
+                if latest:
+                    info = latest
 
                 async def remove_old_chunks():
                     await delete_document_search_data(
@@ -96,18 +103,29 @@ def finish_source(
                         as_uuid(document_id),
                     )
 
-                runtime.run_async(remove_old_chunks)
+                if latest and not latest["manual_chunks_changed"]:
+                    runtime.run_async(remove_old_chunks)
                 guard.ensure_owned()
-        runtime.run_async(
-            lambda: read_sources(
-                runtime,
-                info["kb_id"],
-                document_id,
-                expected_ids=expected_chunk_ids,
-                exact=replace_source,
-                expect_index=bool(info["chunk_count"]),
+        manual_change = info["manual_chunks_changed"]
+        try:
+            runtime.run_async(
+                lambda: read_sources(
+                    runtime, info["kb_id"], document_id,
+                    expected_ids=None if manual_change else expected_chunk_ids,
+                    exact=replace_source and not manual_change,
+                    expect_index=bool(info["chunk_count"]),
+                )
             )
-        )
+        except WikiError as exc:
+            # 人工写入可能发生在快照读取与 ES 校验之间，再核对一次持久化标记。
+            latest = transaction(runtime, _source_verification, document_id, source_task_id)
+            if exc.code != "WIKI_SOURCE_INCOMPLETE" or not latest or not latest[
+                "manual_chunks_changed"
+            ]:
+                raise
+            runtime.run_async(lambda: read_sources(
+                runtime, latest["kb_id"], document_id, expect_index=bool(latest["chunk_count"])
+            ))
     from .execution import publish_map
 
     # Persist source readiness before attempting the broker handoff.
@@ -132,7 +150,12 @@ def _source_verification(session, document_id, source_task_id):
     knowledge = session.get(Knowledge, document.kb_id)
     if state is None and not read_wiki_config(knowledge.parser_config).enabled:
         return None
-    return {"kb_id": str(document.kb_id), "chunk_count": document.chunk_num}
+    return {
+        "kb_id": str(document.kb_id), "chunk_count": document.chunk_num,
+        "manual_chunks_changed": (
+            state is not None and "chunk_mutation" in (state.map_progress or {})
+        ),
+    }
 
 
 def _handoff_failed(session, document_id, task_id):
@@ -212,3 +235,36 @@ def handle_source_event(session, document, event, messages):
     for message in messages:
         append_log(document, message.rstrip("\n"))
     return True
+
+
+async def register_chunk_change(runtime, kb_id, document_id, *, incomplete=False):
+    """ES 已发生变更；独立记录派生状态失败，不能诱导客户端重复新增分块。"""
+    try:
+        return await asyncio.to_thread(
+            transaction, runtime, repository.chunks_changed, kb_id, document_id,
+            incomplete=incomplete,
+        )
+    except WikiSuperseded:
+        # 文档/知识库同时撤回时，由其生命周期负责清理，不能重新生成。
+        return None
+    except Exception as exc:
+        logger.exception(
+            "分块变更后 Wiki 登记失败 stage=chunk_wiki_register kb_id=%s document_id=%s "
+            "error_type=%s reason=%s", kb_id, document_id, type(exc).__name__, exc,
+        )
+        return None
+
+
+async def publish_chunk_change(runtime, delivery):
+    if delivery is None:
+        return
+    from .execution import publish_map
+
+    try:
+        await asyncio.to_thread(publish_map, runtime, delivery, terminal_on_failure=True)
+    except Exception as exc:
+        logger.exception(
+            "分块变更已登记，Wiki 投递失败 stage=chunk_wiki_publish kb_id=%s document_id=%s "
+            "task_id=%s error_type=%s reason=%s", delivery["kb_id"], delivery["document_id"],
+            delivery["task_id"], type(exc).__name__, exc,
+        )

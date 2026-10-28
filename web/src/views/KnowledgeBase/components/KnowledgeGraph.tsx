@@ -1,8 +1,8 @@
 import React, { type FC, useEffect, useState, useRef, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Col, Flex, Spin } from 'antd'
-import RbCard from '@/components/RbCard'
+import { Flex, Spin } from 'antd'
 import ReactEcharts from 'echarts-for-react'
+
 import zoom from '@/assets/images/userMemory/zoom.svg'
 import drag from '@/assets/images/userMemory/drag.svg'
 import pointer from '@/assets/images/userMemory/pointer.svg'
@@ -54,7 +54,6 @@ export interface KnowledgeGraphResponse {
 }
 
 interface KnowledgeGraphProps {
-  title?: string;
   data?: KnowledgeGraphResponse
   loading?: boolean
 }
@@ -82,7 +81,7 @@ const generateEntityTypeColors = (entityTypes: string[]): Record<string, string>
   return colorMap
 }
 
-const KnowledgeGraph: FC<KnowledgeGraphProps> = ({ data, loading = false, title }) => {
+const KnowledgeGraph: FC<KnowledgeGraphProps> = ({ data, loading = false }) => {
   const { t } = useTranslation()
   const chartRef = useRef<ReactEcharts>(null)
   const resizeScheduledRef = useRef(false)
@@ -270,188 +269,180 @@ const KnowledgeGraph: FC<KnowledgeGraphProps> = ({ data, loading = false, title 
   }, [nodes])
 
   return (
-    <Col span={24}>
-      <RbCard 
-        title={[title, t('knowledgeBase.knowledgeGraph')].filter(Boolean).join(' - ')}
-        variant="outlined"
-        headerClassName="rb:text-sm! rb:leading-11 rb:bg-[#FAFAFA]! rb:w-full rb:py-0! rb:px-3!"
-      >
-        <div className="rb:h-124 rb:relative">
-          {loading ? (
-            <Flex align="center" justify="center" className="rb:h-full">
-              <Spin tip={t('common.loading')}><div className="rb:size-32" /></Spin>
-            </Flex>
-          ) : nodes.length === 0 ? (
-            <Empty className="rb:h-full" />
-          ) : (
-            <>
-              <ReactEcharts
-                ref={chartRef}
-                option={{
-                  color: Object.values(entityTypeColors),
-                  tooltip: {
-                    show: true,
-                    formatter: (params: any) => {
-                      if (params.dataType === 'node') {
-                        const node = params.data as KnowledgeNode
-                        return `
-                          <div class="rb:max-w-140">
-                            <div><strong>${node.entity_name}</strong></div>
-                            <div>类型: ${node.entity_type}</div>
-                            <div>重要度: ${(node.pagerank * 100).toFixed(2)}%</div>
-                          </div>
-                        `
-                      } else if (params.dataType === 'edge') {
-                        const edge = params.data as KnowledgeEdge
-                        return `
-                          <div class="rb:max-w-140">
-                            <div><strong>关系</strong></div>
-                            <div>权重: ${edge.weight}</div>
-                            <div class="rb:wrap-break-word rb:whitespace-pre-wrap">${edge.description}</div>
-                          </div>
-                        `
-                      }
-                      return ''
-                    }
-                  },
-                  legend: {
-                    data: categories.map(cat => cat.name),
-                    orient: 'vertical',
-                    left: 'right',
-                    top: 'center'
-                  },
-                  series: [
-                    {
-                      type: 'graph',
-                      layout: 'force',
-                      data: nodes,
-                      links: links,
-                      categories: categories,
-                      roam: true,
-                      label: {
-                        show: true,
-                        position: 'right',
-                        formatter: (params: { data: KnowledgeNode }) => params.data.entity_name,
-                        fontSize: 12
-                      },
-                      lineStyle: {
-                        color: '#5B6167',
-                        curveness: 0.3,
-                        width: 2, // Fixed line width to avoid function issues
-                        opacity: 0.8
-                      },
-                      force: {
-                        repulsion: 300,
-                        edgeLength: 150,
-                        gravity: 0.1,
-                        layoutAnimation: true,
-                        preventOverlap: true
-                      },
-                      selectedMode: 'single',
-                      draggable: true,
-                      animationDurationUpdate: 0,
-                      select: {
-                        itemStyle: {
-                          borderWidth: 2,
-                          borderColor: '#ffffff',
-                          shadowBlur: 10,
-                        }
-                      },
-                      emphasis: {
-                        focus: 'adjacency',
-                        lineStyle: {
-                          width: 3
-                        }
-                      }
-                    }
-                  ]
-                }}
-                style={{ height: '496px', width: '100%' }}
-                notMerge={false}
-                lazyUpdate={true}
-                onEvents={{
-                  click: (params: { dataType: string; data: KnowledgeNode }) => {
+    <Flex vertical className="rb:h-full! rb:overflow-hidden">
+      <>
+        {loading ? (
+          <Flex align="center" justify="center" className="rb:flex-1!">
+            <Spin tip={t('common.loading')}><div className="rb:size-32" /></Spin>
+          </Flex>
+        ) : nodes.length === 0 ? (
+          <Empty className="rb:flex-1!" size={88} />
+        ) : (
+          <div className="rb:flex-1! rb:relative rb:overflow-auto">
+            <ReactEcharts
+              ref={chartRef}
+              option={{
+                color: Object.values(entityTypeColors),
+                tooltip: {
+                  show: true,
+                  formatter: (params: any) => {
                     if (params.dataType === 'node') {
-                      console.log('Knowledge node clicked:', params.data)
-                      setSelectedNode(params.data)
+                      const node = params.data as KnowledgeNode
+                      return `
+                        <div class="rb:max-w-140">
+                          <div><strong>${node.entity_name}</strong></div>
+                          <div>${t('knowledgeBase.graphEntityType')}: ${node.entity_type}</div>
+                          <div>${t('knowledgeBase.graphImportance')}: ${(node.pagerank * 100).toFixed(2)}%</div>
+                        </div>
+                      `
+                    } else if (params.dataType === 'edge') {
+                      const edge = params.data as KnowledgeEdge
+                      return `
+                        <div class="rb:max-w-140">
+                          <div><strong>${t('knowledgeBase.graphRelationship')}</strong></div>
+                          <div>${t('knowledgeBase.graphWeight')}: ${edge.weight}</div>
+                          <div class="rb:wrap-break-word rb:whitespace-pre-wrap">${edge.description}</div>
+                        </div>
+                      `
+                    }
+                    return ''
+                  }
+                },
+                legend: {
+                  data: categories.map(cat => cat.name),
+                  orient: 'vertical',
+                  left: 'right',
+                  top: 'center'
+                },
+                series: [
+                  {
+                    type: 'graph',
+                    layout: 'force',
+                    data: nodes,
+                    links: links,
+                    categories: categories,
+                    roam: true,
+                    label: {
+                      show: true,
+                      position: 'right',
+                      formatter: (params: { data: KnowledgeNode }) => params.data.entity_name,
+                      fontSize: 12
+                    },
+                    lineStyle: {
+                      color: '#5B6167',
+                      curveness: 0.3,
+                      width: 2, // Fixed line width to avoid function issues
+                      opacity: 0.8
+                    },
+                    force: {
+                      repulsion: 300,
+                      edgeLength: 150,
+                      gravity: 0.1,
+                      layoutAnimation: true,
+                      preventOverlap: true
+                    },
+                    selectedMode: 'single',
+                    draggable: true,
+                    animationDurationUpdate: 0,
+                    select: {
+                      itemStyle: {
+                        borderWidth: 2,
+                        borderColor: '#ffffff',
+                        shadowBlur: 10,
+                      }
+                    },
+                    emphasis: {
+                      focus: 'adjacency',
+                      lineStyle: {
+                        width: 3
+                      }
                     }
                   }
+                ]
+              }}
+              style={{ height: '100%', width: '100%' }}
+              notMerge={false}
+              lazyUpdate={true}
+              onEvents={{
+                click: (params: { dataType: string; data: KnowledgeNode }) => {
+                  if (params.dataType === 'node') {
+                    console.log('Knowledge node clicked:', params.data)
+                    setSelectedNode(params.data)
+                  }
+                }
+              }}
+            />
+            
+            {/* Entity details modal */}
+            {selectedNode && (
+              <Flex
+                ref={modalRef}
+                vertical
+                gap={12}
+                className="rb:absolute rb:bg-white rb:border rb:border-[#EBEBEB] rb:rounded-xl rb:shadow-lg rb:p-4! rb:w-80 rb:z-10 rb:max-h-[calc(100%-16px)]! rb:overflow-hidden"
+                style={{
+                  left: modalPosition.x,
+                  top: 0,
+                  cursor: isDragging ? 'grabbing' : 'grab'
                 }}
-              />
-              
-              {/* Entity details modal */}
-              {selectedNode && (
-                <div
-                  ref={modalRef}
-                  className="rb:absolute rb:bg-white rb:border rb:border-[#EBEBEB] rb:rounded-xl rb:shadow-lg rb:p-4 rb:w-80 rb:z-10"
-                  style={{
-                    left: modalPosition.x,
-                    top: modalPosition.y,
-                    cursor: isDragging ? 'grabbing' : 'grab'
-                  }}
+              >
+                {/* Modal header - draggable area */}
+                <Flex
+                  align="center"
+                  justify="space-between"
+                  className="rb:pb-2! rb:border-b rb:border-[#EBEBEB] rb:cursor-grab rb:shrink-0"
+                  onMouseDown={handleMouseDown}
+                  style={{ cursor: isDragging ? 'grabbing' : 'grab' }}
                 >
-                  {/* Modal header - draggable area */}
-                  <Flex
-                    align="center"
-                    justify="space-between"
-                    className="rb:mb-3! rb:pb-2! rb:border-b rb:border-[#EBEBEB] rb:cursor-grab"
-                    onMouseDown={handleMouseDown}
-                    style={{ cursor: isDragging ? 'grabbing' : 'grab' }}
-                  >
-                    <div className="rb:text-[16px] rb:font-medium rb:text-[#1A1A1A]">
-                      {t('knowledgeBase.entityDetails')}
-                    </div>
-                    <Flex
-                      align="center"
-                      justify="center"
-                      onClick={handleCloseModal}
-                      className="rb:size-6 rb:text-[#5B6167] hover:rb:text-[#1A1A1A] hover:rb:bg-[#F0F3F8] rb:rounded rb:transition-colors"
-                    >
-                      ×
-                    </Flex>
-                  </Flex>
-                  
-                  {/* Modal content */}
-                  <div>
-                    <div className="rb:font-medium rb:mb-4">
-                      <div className="rb:text-[16px] rb:mb-2">{selectedNode.entity_name}</div>
-                      <div className="rb:text-[12px] rb:text-[#5B6167] rb:mb-2">
-                        <span className="rb:inline-block rb:px-2 rb:py-1 rb:bg-[#F0F3F8] rb:rounded rb:mr-2">
-                          {selectedNode.entity_type}
-                        </span>
-                        <span>重要度: {(selectedNode.pagerank * 100).toFixed(2)}%</span>
-                      </div>
-                    </div>
-                    
-                    <div className="rb:font-medium rb:mb-4">
-                      {t('knowledgeBase.entityDescription')}
-                      <div className="rb:text-[12px] rb:text-[#5B6167] rb:mt-2 rb:leading-5">
-                        {selectedNode.description}
-                      </div>
-                    </div>
-                    
-                    <div className="rb:font-medium rb:mb-2">
-                      {t('knowledgeBase.sourceDocuments')}
-                      <div className="rb:text-[12px] rb:text-[#5B6167] rb:mt-2">
-                        {selectedNode.source_id.length} 个文档
-                      </div>
+                  <div className="rb:text-[16px] rb:font-medium rb:text-[#1A1A1A]">
+                    {t('knowledgeBase.entityDetails')}
+                  </div>
+                  <div
+                    className="rb:size-4 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/common/close_grey.svg')]"
+                    onClick={handleCloseModal}
+                  />
+                </Flex>
+                
+                {/* Modal content */}
+                <Flex vertical gap={16} className="rb:overflow-auto rb:flex-1">
+                  <div className="rb:font-medium">
+                    <div className="rb:text-[16px]rb:font-medium rb:mb-2">{selectedNode.entity_name}</div>
+                    <div className="rb:text-[12px] rb:text-gray-600 rb:font-normal rb:mb-2">
+                      <span className="rb:inline-block rb:px-2 rb:py-1 rb:bg-[#F0F3F8] rb:rounded rb:mr-2">
+                        {selectedNode.entity_type}
+                      </span>
+                      <span>{t('knowledgeBase.graphImportance')}: {(selectedNode.pagerank * 100).toFixed(2)}%</span>
                     </div>
                   </div>
-                </div>
-              )}
-            </>
-          )}
-        </div>
-        <Flex align="center" justify="space-between" gap={24} className="rb:bg-[#FAFAFA] rb:border-box rb:border-t rb:border-gray-200 rb:rounded-[0px_0px_12px_12px] rb:p-[14px_40px]! rb:m-[0_-16px_-16px_-16px]!">
-          {operations.map((item) => (
-            <Flex key={item.name} align="center" className="rb:text-[#5B6167] rb:leading-5">
-              <img src={item.icon} className="rb:size-5 rb:mr-1" />
-              {t(`userMemory.${item.name}`)}
-            </Flex>
-          ))}
-        </Flex>
-      </RbCard>
-    </Col>
+                  
+                  <div className="rb:font-medium">
+                    {t('knowledgeBase.entityDescription')}
+                    <div className="rb:text-[12px] rb:text-gray-600 rb:font-normal rb:mt-2 rb:leading-5">
+                      {selectedNode.description}
+                    </div>
+                  </div>
+                  
+                  <div className="rb:font-medium">
+                    {t('knowledgeBase.sourceDocuments')}
+                    <div className="rb:text-[12px] rb:text-gray-600 rb:font-normal rb:mt-2">
+                      {t('knowledgeBase.graphDocumentCount', { count: selectedNode.source_id.length })}
+                    </div>
+                  </div>
+                </Flex>
+              </Flex>
+            )}
+          </div>
+        )}
+      </>
+      <Flex align="center" justify="space-between" gap={24} className="rb:bg-gray-50 rb:shrink-0 rb:border-box rb:border-t rb:border-gray-200 rb:p-[14px_40px]!">
+        {operations.map((item) => (
+          <Flex key={item.name} align="center" className="rb:text-gray-600 rb:leading-5">
+            <img src={item.icon} className="rb:size-5 rb:mr-1" />
+            {t(`userMemory.${item.name}`)}
+          </Flex>
+        ))}
+      </Flex>
+    </Flex>
   )
 }
 

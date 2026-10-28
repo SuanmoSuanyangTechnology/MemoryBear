@@ -7,9 +7,10 @@ import uuid
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Body, Depends, Request, Query, File, UploadFile, HTTPException
+from pydantic import ValidationError as PydanticValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
-from starlette.responses import StreamingResponse
+from starlette.responses import JSONResponse, StreamingResponse
 
 from app.services.file_storage_service import (
     FileStorageService,
@@ -241,6 +242,51 @@ async def _read_json_body(request: Request) -> dict:
     return body
 
 
+class ChatRequestValidationError(Exception):
+    """/v1/app/chat 请求体框架校验失败：携带对外展示的 detail。"""
+
+    def __init__(self, detail: str):
+        self.detail = detail
+        super().__init__(detail)
+
+
+def _validation_failed_response(detail: str) -> "JSONResponse":
+    """V1 chat 框架请求校验失败统一信封：HTTP 422 / code 1001。
+
+    与文档 1.2 错误码表一致：非法 JSON、JSON 顶层不是 object、message 类型
+    错误等，在进入业务前以标准 fail 信封返回。
+    """
+    from app.core.response_utils import fail
+    return JSONResponse(
+        status_code=422,
+        content=fail(code=BizCode.VALIDATION_FAILED.value, msg=detail, error=detail),
+    )
+
+
+async def _parse_chat_payload(request: Request) -> AppChatRequest:
+    """解析 /v1/app/chat 请求体为 AppChatRequest。
+
+    - 非法 JSON（含仅空白）、顶层不是 object（数组/字符串/数字/布尔）：422 / 1001；
+    - 字段类型错误（如 message 不是字符串）：422 / 1001；
+    统一抛 ChatRequestValidationError，由 chat 端点转标准 fail 信封（文档 1.2）。
+    """
+    try:
+        body = await request.json()
+    except (json.JSONDecodeError, UnicodeDecodeError, ValueError):
+        raise ChatRequestValidationError("请求体不是合法的 JSON")
+    if not isinstance(body, dict):
+        raise ChatRequestValidationError("请求体必须是 JSON 对象")
+    try:
+        return AppChatRequest(**body)
+    except PydanticValidationError as exc:
+        # 文档 1.2：仅 message 类型错误走标准 fail 信封（422/1001）；
+        # conversation_id 非法 UUID 等其余字段校验失败保持全局
+        # PydanticValidationError 处理器的 VALIDATION_FAILED 信封
+        if any("message" in err.get("loc", ()) for err in exc.errors()):
+            raise ChatRequestValidationError("数据验证失败")
+        raise
+
+
 def _get_standard_variables(variables: list, app_type: AppType) -> list:
     """统一 Agent / Workflow 变量输出格式。"""
     is_agent = app_type in (AppType.AGENT, AppType.MULTI_AGENT)
@@ -320,8 +366,10 @@ async def chat(
     - 不传 version：使用当前生效版本（current_release，回滚后为回滚目标版本）
     - 传 version=release_id：使用指定版本uuid的历史快照，例如 {"version": "{{release_id}}"}
     """
-    body = await _read_json_body(request)
-    payload = AppChatRequest(**body)
+    try:
+        payload = await _parse_chat_payload(request)
+    except ChatRequestValidationError as exc:
+        return _validation_failed_response(exc.detail)
     request_started_at = time.perf_counter()
     request_wall_clock = datetime.datetime.now(datetime.timezone.utc)
 

@@ -155,16 +155,9 @@ const McpServiceModal = forwardRef<McpServiceModalRef, McpServiceModalProps>(({
             refresh();
           });
         })
-        .catch((error) => {
+        .catch(() => {
           // 清除 AbortController
           abortControllerRef.current = null;
-          
-          // 如果是用户主动取消，不显示错误提示
-          if (error.name === 'AbortError' || error.code === 'ERR_CANCELED') {
-            console.log('请求已取消');
-          } else {
-            message.error(t('common.saveFailed'));
-          }
           setLoading(false);
         })
       })

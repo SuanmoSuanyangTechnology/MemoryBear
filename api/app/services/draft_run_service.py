@@ -1368,7 +1368,8 @@ class AgentRunService:
             user_id,
             workspace_id: uuid.UUID,
             storage_type,
-            user_rag_memory_id
+            user_rag_memory_id,
+            app_id: uuid.UUID | None = None,
     ) -> tuple[list, bool]:
         """加载长期记忆配置"""
         from app.core.memory.memory_service import create_long_term_memory_tool
@@ -1382,6 +1383,7 @@ class AgentRunService:
         tool = create_long_term_memory_tool(
             memory_config, user_id, workspace_id, storage_type, user_rag_memory_id,
             config_id=config_id,
+            app_id=app_id,
         )
         tools = [tool] if tool else []
         if tools:
@@ -1617,7 +1619,10 @@ class AgentRunService:
             ]
             if memory:
                 parallel_coros.append(
-                    self.load_memory_config(memory_config, user_id, workspace_id, storage_type, user_rag_memory_id)
+                    self.load_memory_config(
+                        memory_config, user_id, workspace_id, storage_type, user_rag_memory_id,
+                        app_id=agent_config.app_id,
+                    )
                 )
             parallel_results = await asyncio.gather(*parallel_coros, return_exceptions=True)
 
@@ -2163,7 +2168,10 @@ class AgentRunService:
             ]
             if memory:
                 parallel_coros.append(
-                    self.load_memory_config(memory_config, user_id, workspace_id, storage_type, user_rag_memory_id)
+                    self.load_memory_config(
+                        memory_config, user_id, workspace_id, storage_type, user_rag_memory_id,
+                        app_id=agent_config.app_id,
+                    )
                 )
             parallel_results = await asyncio.gather(*parallel_coros, return_exceptions=True)
 

@@ -360,7 +360,7 @@ class FastWritePipeline:
         # 开关已启用但服务参数不全时，说明无法判断情绪；只记录缺失的字段名。
         missing_settings = [
             name for name in (
-                "FAST_WRITE_EMOTION_URL",
+                "BERT_URL",
                 "FAST_WRITE_EMOTION_API_KEY",
                 "FAST_WRITE_EMOTION_MODEL",
             ) if not getattr(settings, name)

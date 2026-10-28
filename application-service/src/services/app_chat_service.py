@@ -853,7 +853,10 @@ class AppChatService:
         ]
         if memory:
             coros.append(
-                self.agent_service.load_memory_config(config.memory, user_id, _ws_id, storage_type, user_rag_memory_id)
+                self.agent_service.load_memory_config(
+                    config.memory, user_id, _ws_id, storage_type, user_rag_memory_id,
+                    app_id=config.app_id,
+                )
             )
         parallel_results = await asyncio.gather(*coros, return_exceptions=True)
 
@@ -980,7 +983,8 @@ class AppChatService:
         # write_cache=memory: with memory off the dispatcher fires no fast
         # write, the cache has no consumer, and skipping avoids orphan keys.
         system_prompt = await apply_emotion_detection(
-            system_prompt, emotion_detection, user_message_id, write_cache=memory
+            system_prompt, emotion_detection, user_message_id,
+            app_id=config.app_id, tenant_id=tenant_id, db=self.db, write_cache=memory,
         )
 
         # Weak models: drive multi-round tool calls with the ReAct prompt and
@@ -1352,7 +1356,10 @@ class AppChatService:
             ]
             if memory:
                 coros.append(
-                    self.agent_service.load_memory_config(config.memory, user_id, _ws_id, storage_type, user_rag_memory_id)
+                    self.agent_service.load_memory_config(
+                        config.memory, user_id, _ws_id, storage_type,
+                        user_rag_memory_id, app_id=config.app_id,
+                    )
                 )
             parallel_results = await asyncio.gather(*coros, return_exceptions=True)
 
@@ -1477,7 +1484,8 @@ class AppChatService:
             # write_cache=memory: when memory is off the dispatcher fans out no
             # fast write, the cache has no consumer — skip to avoid orphan keys.
             system_prompt = await apply_emotion_detection(
-                system_prompt, emotion_detection, user_message_id, write_cache=memory
+                system_prompt, emotion_detection, user_message_id,
+                app_id=config.app_id, tenant_id=tenant_id, db=self.db, write_cache=memory,
             )
 
             # Weak model: drive multi-round tool calls with a ReAct prompt and

@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-02 15:29:57 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-22 13:48:09
+ * @Last Modified time: 2026-10-26 15:28:58
  */
 /**
  * Tag Component
@@ -13,7 +13,7 @@
  * @component
  */
 
-import { type FC, type ReactNode } from 'react'
+import { type FC, type MouseEventHandler, type ReactNode } from 'react'
 
 /** Props interface for Tag component */
 export interface TagProps {
@@ -24,7 +24,7 @@ export interface TagProps {
   /** Additional CSS classes */
   className?: string;
   variant?: 'outline' | 'borderless'
-  onClick?: () => void;
+  onClick?: MouseEventHandler<HTMLSpanElement>;
   circle?: boolean;
   size?: 'small' | 'default';
 }

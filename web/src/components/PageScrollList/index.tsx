@@ -35,6 +35,7 @@ interface ApiResponse<T> {
     pagesize: number;
     total: number;
     hasnext: boolean;
+    has_next?: boolean;
   };
 }
 
@@ -49,7 +50,7 @@ interface PageScrollListProps<T, Q = Record<string, unknown>> {
   /** API endpoint URL */
   url: string;
   /** Function to render each list item */
-  renderItem: (item: T, index: number) => React.ReactNode;
+  renderItem?: (item: T, index: number) => React.ReactNode;
   /** Optional renderer that receives all currently loaded items */
   renderItems?: (items: T[]) => React.ReactNode;
   /** Query parameters for API request */
@@ -64,6 +65,7 @@ interface PageScrollListProps<T, Q = Record<string, unknown>> {
   gutter?: [number, number] | number;
   onTotalChange?: (total: number) => void;
   empty?: React.ReactNode;
+  onLoad?: (res: any) => void;
 }
 
 const defaultHeightClass = 'rb:h-[calc(100vh-118px)]!';
@@ -82,6 +84,7 @@ const PageScrollList = forwardRef(<T, Q = Record<string, unknown>>({
   gutter = [12, 12],
   onTotalChange,
   empty,
+  onLoad,
 }: PageScrollListProps<T, Q>, ref: React.Ref<PageScrollListRef>) => {
   const scrollableTargetId = `page-scroll-list-${useId().replace(/:/g, '')}`;
   /** Expose refresh method to parent component */
@@ -104,6 +107,10 @@ const PageScrollList = forwardRef(<T, Q = Record<string, unknown>>({
   const loadingRef = useRef(false);
   const hasMoreRef = useRef(true);
   const [total, setTotal] = useState(0);
+  const onLoadRef = useRef(onLoad);
+  useEffect(() => {
+    onLoadRef.current = onLoad;
+  }, [onLoad]);
 
   /** Load more data from API with pagination */
   const loadMoreData = (reset?: boolean) => {
@@ -121,11 +128,12 @@ const PageScrollList = forwardRef(<T, Q = Record<string, unknown>>({
         const results = Array.isArray(response.items) ? response.items : Array.isArray(response) ? response as T[] : [];
         pageRef.current = response.page.page + 1;
         setData(prev => reset ? results : [...prev, ...results]);
-        hasMoreRef.current = response.page?.hasnext;
-        setHasMore(response.page?.hasnext);
+        hasMoreRef.current = response.page?.has_next || response.page?.hasnext;
+        setHasMore(response.page?.has_next || response.page?.hasnext);
         const newTotal = response.page?.total || 0;
         setTotal(newTotal);
         onTotalChange?.(newTotal);
+        onLoadRef.current?.(res)
       })
       .catch(() => {
         hasMoreRef.current = false;
@@ -179,7 +187,7 @@ const PageScrollList = forwardRef(<T, Q = Record<string, unknown>>({
             <Row gutter={gutter}>
               {data.map((item, index) => (
                 <Col key={(item as any).id || index} span={24/column}>
-                  {renderItem(item, index)}
+                  {renderItem?.(item, index)}
                 </Col>
               ))}
             </Row>

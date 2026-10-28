@@ -245,7 +245,10 @@ class GatewayMiddleware(BaseHTTPMiddleware):
             # the rejection response (api-key semantics preserved).
             return JSONResponse(
                 status_code=result.status_code,
-                content={"detail": result.detail},
+                # /v1 外部集成携带标准 fail 信封（3007/3009 等）；
+                # /api 用户 JWT 等其余路径保持 {"detail": ...} 契约
+                content=result.body if result.body is not None
+                else {"detail": result.detail},
                 headers=result.headers or None,
             )
         # Termination path: the identity context (UserContext/ApiKeyContext) was

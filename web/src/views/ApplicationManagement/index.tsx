@@ -1,9 +1,3 @@
-/*
- * @Author: ZhaoYing 
- * @Date: 2026-02-03 16:34:12 
- * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-08-14 18:42:08
- */
 /**
  * Application Management Page
  * Displays and manages all applications in the workspace
@@ -25,7 +19,7 @@ import { formatDateTime } from '@/utils/format';
 import UploadWorkflowModal from './components/UploadWorkflowModal'
 import UploadModal from './components/UploadModal'
 import PageTabs from '@/components/PageTabs'
-import MySharing from './MySharing'
+import MySharing, { type MySharingRef } from './MySharing'
 import RbCard from '@/components/RbCard'
 import RbButton from '@/components/RbButton'
 import RbDescriptions from '@/components/RbDescriptions'
@@ -33,7 +27,9 @@ import OverflowTags from '@/components/OverflowTags'
 import Tag from '@/components/Tag'
 import { types } from './constants'
 import PrivateWrap from '@/components/PrivateWrap';
-import { AppOntology } from '@redbear/memory-brick';
+import { AppOntology, GET_DEFAULT_ONTOLOGY_COMPOSITION, OntologyConfigModal, type OntologyConfigModalRef, type DefaultOntologyComposition } from '@redbear/memory-brick';
+import { request } from '@/utils/request'
+import { isPrivateAvailable } from '@/utils/private'
 
 const tabKeys = ['apps', 'sharing', 'myShare']
 /**
@@ -45,6 +41,7 @@ const ApplicationManagement: React.FC = () => {
   const [searchParams] = useSearchParams()
   const applicationModalRef = useRef<ApplicationModalRef>(null);
   const scrollListRef = useRef<PageScrollListRef>(null)
+  const mySharingRef = useRef<MySharingRef>(null)
   const uploadWorkflowModalRef = useRef<UploadWorkflowModalRef>(null);
   const uploadModalRef = useRef<UploadWorkflowModalRef>(null);
   const [form] = Form.useForm<Query>()
@@ -61,6 +58,13 @@ const ApplicationManagement: React.FC = () => {
   /** Refresh application list */
   const refresh = () => {
     scrollListRef.current?.refresh();
+  }
+  const refreshOntology = () => {
+    if (activeTab === 'myShare') {
+      mySharingRef.current?.refresh();
+    } else {
+      refresh();
+    }
   }
   
   /** Open create application modal */
@@ -141,6 +145,23 @@ const ApplicationManagement: React.FC = () => {
       [search_type || 'search']: search
     } as Query
   }
+
+  const [defaultOntology, setDefaultOntology] = useState<DefaultOntologyComposition>({} as DefaultOntologyComposition)
+  const ontologyConfigModalRef = useRef<OntologyConfigModalRef>(null)
+  const getDefaultOntology = () => {
+    console.log('GET_DEFAULT_ONTOLOGY_COMPOSITION', GET_DEFAULT_ONTOLOGY_COMPOSITION)
+    if (typeof GET_DEFAULT_ONTOLOGY_COMPOSITION !== 'string') return;
+    request.get(GET_DEFAULT_ONTOLOGY_COMPOSITION)
+      .then((res) => {
+        setDefaultOntology(res as DefaultOntologyComposition)
+      })
+  }
+
+  useEffect(() => {
+    if (isPrivateAvailable) {
+      getDefaultOntology()
+    }
+  }, [])
   return (
     <Flex vertical gap={16} className="rb:h-full">
       <Flex justify="space-between">
@@ -298,14 +319,14 @@ const ApplicationManagement: React.FC = () => {
 
               {item.ontology &&
                 <PrivateWrap>
-                  {() => <AppOntology app={item} className="rb:mt-3!" />}
+                  {() => <AppOntology app={item} className="rb:mt-3!" onClick={(item) => ontologyConfigModalRef.current?.open(item)} />}
                 </PrivateWrap>
               }
             </RbCard>
           )}
         />
       }
-      {activeTab === 'myShare' && <MySharing />}
+      {activeTab === 'myShare' && <MySharing ref={mySharingRef} switchOntology={(item) => ontologyConfigModalRef.current?.open(item)} />}
       
 
       <ApplicationModal
@@ -321,6 +342,16 @@ const ApplicationManagement: React.FC = () => {
         ref={uploadModalRef}
         refresh={refresh}
       />
+      <PrivateWrap>
+        {() => (
+          <OntologyConfigModal
+            ref={ontologyConfigModalRef}
+            request={request}
+            defaultOntology={defaultOntology}
+            refresh={refreshOntology}
+          />
+        )}
+      </PrivateWrap>
     </Flex>
   );
 };

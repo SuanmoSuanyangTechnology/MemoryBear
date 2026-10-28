@@ -17,7 +17,6 @@ from app.schemas.wiki_faq_schema import (
     FAQCreate,
     FAQEdit,
     FAQEnabled,
-    FAQExpected,
 )
 
 router = APIRouter(
@@ -36,6 +35,11 @@ async def list_faqs(
     current_user: Annotated[User, Depends(get_current_user_async)],
     review_status: Literal["pending", "approved", "change_pending"] | None = None,
     is_enabled: bool | None = None,
+    keyword: str | None = Query(
+        None,
+        description="搜索标准问和标准答（answers[0]），不区分大小写的包含匹配；"
+        "忽略首尾空白，空白不过滤，% 和 _ 按普通字符匹配。",
+    ),
     page: int = Query(1, ge=1),
     pagesize: int = Query(20, ge=1, le=100),
     limit: int | None = Query(None, ge=1, le=100, include_in_schema=False),
@@ -76,6 +80,11 @@ async def batch_approve(
     payload: FAQBatchApprove,
     current_user: Annotated[User, Depends(get_current_user_async)],
 ):
+    """审核当前 FAQ 内容并将来源基线推进至最新已发布 Wiki 快照。
+
+    每项只需 faq_id；旧版本和快照字段兼容接收但忽略。已通过且基线最新的条目跳过，
+    保留逐条处理结果。不会自动改写问答或启用 FAQ；单条审核仍校验客户端审核目标。
+    """
     raise HTTPException(status_code=503, detail="FAQ requires mem-knowledge")
 
 
@@ -86,34 +95,6 @@ async def batch_enabled(
     request: Request,
     kb_id: UUID,
     payload: FAQBatchEnabled,
-    current_user: Annotated[User, Depends(get_current_user_async)],
-):
-    raise HTTPException(status_code=503, detail="FAQ requires mem-knowledge")
-
-
-@router.get("/generation-jobs")
-@cur_workspace_access_guard_async()
-@route_through_knowledge_service(source=KnowledgeRetrievalSource.MANAGER_API)
-async def list_generation_jobs(
-    request: Request,
-    kb_id: UUID,
-    current_user: Annotated[User, Depends(get_current_user_async)],
-    wiki_page_id: UUID | None = None,
-    page: int = Query(1, ge=1),
-    pagesize: int = Query(20, ge=1, le=100),
-    limit: int | None = Query(None, ge=1, le=100, include_in_schema=False),
-):
-    raise HTTPException(status_code=503, detail="FAQ requires mem-knowledge")
-
-
-@router.post("/generation-jobs/{job_id}/retry")
-@cur_workspace_access_guard_async()
-@route_through_knowledge_service(source=KnowledgeRetrievalSource.MANAGER_API)
-async def retry_generation(
-    request: Request,
-    kb_id: UUID,
-    job_id: UUID,
-    payload: FAQExpected,
     current_user: Annotated[User, Depends(get_current_user_async)],
 ):
     raise HTTPException(status_code=503, detail="FAQ requires mem-knowledge")
@@ -131,26 +112,6 @@ async def get_faq(
     raise HTTPException(status_code=503, detail="FAQ requires mem-knowledge")
 
 
-@router.get("/{faq_id}/index-status")
-@cur_workspace_access_guard_async()
-@route_through_knowledge_service(source=KnowledgeRetrievalSource.MANAGER_API)
-async def get_index_status(
-    request: Request, kb_id: UUID, faq_id: UUID,
-    current_user: Annotated[User, Depends(get_current_user_async)],
-):
-    raise HTTPException(status_code=503, detail="FAQ requires mem-knowledge")
-
-
-@router.post("/{faq_id}/index/retry")
-@cur_workspace_access_guard_async()
-@route_through_knowledge_service(source=KnowledgeRetrievalSource.MANAGER_API)
-async def retry_index(
-    request: Request, kb_id: UUID, faq_id: UUID, payload: FAQExpected,
-    current_user: Annotated[User, Depends(get_current_user_async)],
-):
-    raise HTTPException(status_code=503, detail="FAQ requires mem-knowledge")
-
-
 @router.patch("/{faq_id}")
 @cur_workspace_access_guard_async()
 @route_through_knowledge_service(source=KnowledgeRetrievalSource.MANAGER_API)
@@ -161,6 +122,11 @@ async def edit_faq(
     payload: FAQEdit,
     current_user: Annotated[User, Depends(get_current_user_async)],
 ):
+    """保存问答；已变更 FAQ 同时确认当前 Wiki 基线并恢复为已通过。
+
+    来源不可用或问答原文未改变也可确认基线。待审核 FAQ 保持待审核，启用状态不变；
+    仍须提交 expected_row_version，保留原并发校验。缺少当前版本快照时整次保存失败。
+    """
     raise HTTPException(status_code=503, detail="FAQ requires mem-knowledge")
 
 

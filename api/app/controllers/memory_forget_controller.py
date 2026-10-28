@@ -354,7 +354,7 @@ async def get_end_user_memory_quota(
     end_user_id: str,
     current_user: CurrentUserSnapshot = Depends(get_current_user_async),
 ):
-    """获取宿主活跃配额详情。"""
+    """Return active memory quota details and the cumulative forgotten audit count."""
     workspace_id = current_user.current_workspace_id
     if workspace_id is None:
         return fail(BizCode.INVALID_PARAMETER, "请先切换到一个工作空间", "current_workspace_id is None")
@@ -369,6 +369,12 @@ async def get_end_user_memory_quota(
     memory_limit = 300
 
     async with get_async_db_context() as db:
+        try:
+            forgotten_count = await ForgetLogRepository.get_total(db, uuid.UUID(end_user_id))
+        except Exception as e:
+            api_logger.error(f"查询遗忘日志总数失败: {str(e)}")
+            return fail(BizCode.INTERNAL_ERROR, "查询遗忘日志总数失败", str(e))
+
         try:
             tenant_id = await get_tenant_id_by_end_user_id_async(db, uuid.UUID(end_user_id))
             if tenant_id:
@@ -397,6 +403,7 @@ async def get_end_user_memory_quota(
         "active_count": stats["active_count"],
         "auxiliary_active_count": stats["auxiliary_active_count"],
         "auxiliary_breakdown": stats["auxiliary_breakdown"],
+        "forgotten_count": forgotten_count,
     })
 
 

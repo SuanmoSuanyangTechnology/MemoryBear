@@ -32,7 +32,7 @@ This is a pre-merge safety gate in the reflection stage, not a triplet extractio
    - 类型: "{{ c.alias_entity_type | default(c.entity_type | default(c.type | default(''))) }}"
    - 描述: "{{ c.alias_description | default(c.description | default('')) }}"
    - 描述摘要: "{{ c.alias_description_summary | default(c.description_summary | default('')) }}"
-   - 已有别名: {{ c.aliases | default([]) }}
+   - 已有别名: {{ c.alias_aliases | default(c.aliases | default([])) }}
    - 关系表面词: "{{ c.predicate_surface | default('别名属于') }}"
 {% endfor %}
 {% else %}
@@ -53,7 +53,7 @@ Fixed direction: candidate alias entity -> 别名属于 -> canonical entity
    - Type: "{{ c.alias_entity_type | default(c.entity_type | default(c.type | default(''))) }}"
    - Description: "{{ c.alias_description | default(c.description | default('')) }}"
    - Description Summary: "{{ c.alias_description_summary | default(c.description_summary | default('')) }}"
-   - Existing Aliases: {{ c.aliases | default([]) }}
+   - Existing Aliases: {{ c.alias_aliases | default(c.aliases | default([])) }}
    - Predicate Surface: "{{ c.predicate_surface | default('别名属于') }}"
 {% endfor %}
 {% endif %}

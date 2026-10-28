@@ -1,7 +1,8 @@
 """回复侧情绪识别 + 情绪→回复策略映射 + 提示词注入。
 职责边界：
 - 只在 App 开关 ``features.emotion_reply.enabled`` 打开时工作。
-- 对当前 user 消息调 BERT（``fast_write_emotion_client.predict``），硬超时 1s；
+- 对当前 user 消息调 BERT（``fast_write_emotion_client.predict``），默认总超时读取
+  ``FAST_WRITE_EMOTION_TOTAL_TIMEOUT_SECONDS``；
   超时/异常/未配置一律降级为 None，绝不影响正常回复。
 - 本模块**永不抛异常**，返回值始终 ≥ base_prompt。
 """
@@ -18,9 +19,6 @@ from app.core.config import settings
 from app.services.fast_write_emotion_client import FastWriteEmotionResult, VALID_EMOTIONS
 
 logger = logging.getLogger(__name__)
-
-# 回复侧硬超时（秒）：比快写的 2s 更紧，回复链路在请求内，不能拖首字延迟
-DETECT_TIMEOUT_SEC = 1.0
 
 _FIXED_PRINCIPLES = """## 固定执行原则
 1. 优先完成用户当前请求。
@@ -61,7 +59,7 @@ def _deployment_allows() -> bool:
         from app.core.config import settings
 
         return bool(
-            settings.FAST_WRITE_EMOTION_URL
+            settings.BERT_URL
             and settings.FAST_WRITE_EMOTION_API_KEY
             and settings.FAST_WRITE_EMOTION_MODEL
         )
@@ -74,29 +72,30 @@ async def detect_emotion(
     text: str,
     timeout: Optional[float] = None,
 ) -> Optional[FastWriteEmotionResult]:
-    """调 BERT 情绪服务，硬超时 ``timeout``（默认 1s）；失败/超时/未配置一律返回 None。"""
+    """调 BERT 情绪服务，默认总超时读取配置，可由 timeout 覆盖；失败/超时/未配置返回 None。"""
     if not text or not text.strip():
         logger.debug("[EmotionReply] skipped event=detect reason=empty_message")
         return None
     if not _deployment_allows():
         logger.debug("[EmotionReply] skipped event=detect reason=service_unconfigured")
         return None
-    effective_timeout = DETECT_TIMEOUT_SEC if timeout is None else timeout
-    started = perf_counter()
+    effective_timeout = (
+        settings.FAST_WRITE_EMOTION_TOTAL_TIMEOUT_SECONDS if timeout is None else timeout
+    )
     try:
         from app.services.fast_write_emotion_client import predict as _predict_emotion
 
         return await asyncio.wait_for(_predict_emotion(text), timeout=effective_timeout)
     except asyncio.TimeoutError:
         logger.warning(
-            "[EmotionReply] failed event=detect reason=timeout text_len=%s timeout_s=%s elapsed_ms=%.1f",
-            len(text), effective_timeout, (perf_counter() - started) * 1000,
+            "[EmotionReply] emotion detect timed out, degrading: text_len=%s, timeout=%ss",
+            len(text), effective_timeout,
         )
         return None
     except Exception as e:
         logger.warning(
-            "[EmotionReply] failed event=detect reason=service_error text_len=%s error_type=%s elapsed_ms=%.1f",
-            len(text), type(e).__name__, (perf_counter() - started) * 1000,
+            "[EmotionReply] emotion detect failed, degrading: text_len=%s, err=%s",
+            len(text), e,
         )
         return None
 
@@ -170,6 +169,23 @@ def _render_items(items: Any) -> str:
     return str(items or "")
 
 
+def build_emotion_prompt_fragment(tone: Any, do_list: Any, avoid_list: Any) -> Optional[str]:
+    """Agent 和对外接口共用的固定原则与策略片段；无有效策略时不注入。"""
+    tone_text = str(tone or "").strip()
+    do_items = _render_items(do_list)
+    avoid_items = _render_items(avoid_list)
+    strategy = ["## 本轮回复策略"]
+    if tone_text:
+        strategy.append(f"语气：{tone_text}")
+    if do_items:
+        strategy.append(f"应当：{do_items}")
+    if avoid_items:
+        strategy.append(f"避免：{avoid_items}")
+    if len(strategy) == 1:
+        return None
+    return "\n\n".join([_FIXED_PRINCIPLES, "\n".join(strategy)])
+
+
 # 提示词渲染：仅把命中的策略字段渲染进系统提示词。
 def build_prompt(base_prompt: str, policy: Optional[dict], *, app_id: Any = None, tenant_id: Any = None) -> str:
     """
@@ -181,21 +197,11 @@ def build_prompt(base_prompt: str, policy: Optional[dict], *, app_id: Any = None
         if not isinstance(policy, dict) or not policy:
             return base
 
-        tone = str(policy.get("tone") or "").strip()
-        do_items = _render_items(policy.get("do_list"))
-        avoid_items = _render_items(policy.get("avoid_list"))
-        strategy = ["## 本轮回复策略"]
-        if tone:
-            strategy.append(f"语气：{tone}")
-        if do_items:
-            strategy.append(f"应当：{do_items}")
-        if avoid_items:
-            strategy.append(f"避免：{avoid_items}")
-        # policy 存在但三项均为空 → 无可注入内容，等同未命中
-        if len(strategy) == 1:
+        appended = build_emotion_prompt_fragment(
+            policy.get("tone"), policy.get("do_list"), policy.get("avoid_list"),
+        )
+        if appended is None:
             return base
-
-        appended = "\n\n".join([_FIXED_PRINCIPLES, "\n".join(strategy)])
         return f"{base}\n\n{appended}" if base else appended
     except Exception as e:
         logger.warning(

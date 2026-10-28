@@ -4,7 +4,7 @@ ARG UV_VERSION=0.10.11
 ENV UV_PROJECT_ENVIRONMENT=/app/.venv
 RUN pip install --no-cache-dir "uv==${UV_VERSION}"
 WORKDIR /build/memory-profile
-COPY packages/auth-sdk /build/packages/auth-sdk
+COPY packages /build/packages
 COPY memory-profile/pyproject.toml memory-profile/uv.lock memory-profile/README.md ./
 COPY memory-profile/alembic.ini ./alembic.ini
 COPY memory-profile/migrations ./migrations

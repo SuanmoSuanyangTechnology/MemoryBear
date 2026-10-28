@@ -56,10 +56,10 @@ const Knowledge: FC<KnowledgeProps> = ({
 
       const basesWithoutName = knowledge_bases.filter(base => !base.name)
       if (basesWithoutName.length > 0) {
-        getKnowledgeBaseList(undefined, { kb_ids: basesWithoutName.map(vo => vo.kb_id).join(',') }).then(res => {
+        getKnowledgeBaseList({ kb_ids: basesWithoutName.map(vo => vo.kb_id).join(',') }).then(res => {
           const fullBases = knowledge_bases.map(base => {
             if (!base.name) {
-              const fullBase = res.items.find((item: any) => item.id === base.kb_id)
+              const fullBase = (res as { items:  KnowledgeBase[]}).items.find((item: any) => item.id === base.kb_id)
               return fullBase ? { ...fullBase, ...base, config: base } : base
             }
             return base
@@ -72,7 +72,7 @@ const Knowledge: FC<KnowledgeProps> = ({
         setKnowledgeList(knowledge_bases)
       }
     }
-  }, [value])
+  }, [value, editConfig])
 
   const handleKnowledgeConfig = () => {
     knowledgeGlobalConfigModalRef.current?.handleOpen()
@@ -172,7 +172,7 @@ const Knowledge: FC<KnowledgeProps> = ({
                       <Tag color={item.status === 1 ? 'success' : item.status === 0 ? 'default' : 'error'} className="rb:ml-2">
                         {item.status === 1 ? t('common.enable') : item.status === 0 ? t('common.disabled') : t('common.deleted')}
                       </Tag>
-                      <div className="rb:mt-1 rb:text-[12px] rb:text-[#5B6167] rb:font-regular rb:leading-4">{t('application.contains', { include_count: item.doc_num })}</div>
+                      <div className="rb:mt-1 rb:text-[12px] rb:text-gray-600 rb:font-regular rb:leading-4">{t('application.contains', { include_count: item.doc_num })}</div>
                     </div>
                     <Space size={12}>
                       <div
@@ -212,7 +212,7 @@ const Knowledge: FC<KnowledgeProps> = ({
     <div>
       <Flex align="center" justify="space-between" className="rb:mb-2!">
         <div className="rb:text-[12px] rb:font-medium rb:leading-4.5">
-          {required && <span className="rb:text-[#ff5d34] rb:text-[14px] rb:font-[SimSun,sans-serif] rb:mr-1">*</span>}{t('application.knowledgeBaseAssociation')}
+          {required && <span className="rb:text-red-500 rb:text-[14px] rb:font-[SimSun,sans-serif] rb:mr-1">*</span>}{t('application.knowledgeBaseAssociation')}
         </div>
 
         <Button
@@ -251,7 +251,7 @@ const Knowledge: FC<KnowledgeProps> = ({
                 >
                   {item.status === 1 ? t('common.enable') : item.status === 0 ? t('common.disabled') : t('common.deleted')}
                 </Tag>
-                <div className="rb:mt-1 rb:text-[12px] rb:text-[#5B6167] rb:font-regular rb:leading-4.25">{t('application.contains', { include_count: item.doc_num })}</div>
+                <div className="rb:mt-1 rb:text-[12px] rb:text-gray-600 rb:font-regular rb:leading-4.25">{t('application.contains', { include_count: item.doc_num })}</div>
               </div>
               <Space size={12}>
                 <div

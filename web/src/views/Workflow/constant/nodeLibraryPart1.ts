@@ -251,8 +251,6 @@ export const nodeLibraryPart1: NodeLibrary[] = [
           },
           memory: {
             type: 'memoryConfig',
-            dependsOn: 'mode',
-            dependsOnValue: 'inline',
             needMsg: false,
             defaultValue: {
               enable: false,

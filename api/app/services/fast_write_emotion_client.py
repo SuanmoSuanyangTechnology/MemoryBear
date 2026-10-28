@@ -51,7 +51,7 @@ def _get_client() -> httpx.AsyncClient:
 async def predict(text: str) -> FastWriteEmotionResult:
     """调用 BERT /v1/rerank，返回 top 情绪；任何异常向上抛出（由调用方降级）。"""
     resp = await _get_client().post(
-        settings.FAST_WRITE_EMOTION_URL,
+        settings.BERT_URL,
         headers={"Authorization": f"Bearer {settings.FAST_WRITE_EMOTION_API_KEY}"},
         json={"model": settings.FAST_WRITE_EMOTION_MODEL, "query": text},
     )

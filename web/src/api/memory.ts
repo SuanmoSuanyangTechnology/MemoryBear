@@ -202,6 +202,8 @@ export const implicitCheckData = (end_user_id: string) => {
 export const getShortTerm = (end_user_id: string) => {
   return request.get(`/memory/short/short_term`, { end_user_id })
 }
+// Short-term Memory - Memo query
+export const getShortMemosUrl = '/memory/short/memos'
 // Perceptual Memory - Visual memory
 export const getPerceptualLastVisual = (end_user_id: string) => {
   return request.get(`/memory/perceptual/${end_user_id}/last_visual`)

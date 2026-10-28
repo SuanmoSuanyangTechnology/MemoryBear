@@ -309,8 +309,10 @@ class Settings:
         100, int(os.getenv("PREFERENCE_RECALL_TIMEOUT_MS", "3000"))
     )
 
-    # Fast Write BERT 
-    FAST_WRITE_EMOTION_URL: str = os.getenv("FAST_WRITE_EMOTION_URL", "")
+    # BERT 共用服务地址（完整 /v1/rerank 路径）
+    BERT_URL: str = os.getenv("BERT_URL", "")
+
+    # Fast Write emotion BERT
     FAST_WRITE_EMOTION_MODEL: str = os.getenv("FAST_WRITE_EMOTION_MODEL", "")
     FAST_WRITE_EMOTION_API_KEY: str = os.getenv("FAST_WRITE_EMOTION_API_KEY", "")
     # HTTPX 网络阶段超时；业务总耗时由调用方单独限制。
@@ -332,7 +334,16 @@ class Settings:
     SCENE_CONTINUITY_TIMEOUT_SECONDS: float = max(
         0.1, float(os.getenv("SCENE_CONTINUITY_TIMEOUT_SECONDS", "2.0"))
     )
-    # Statement 三分类小模型（statement 拆分阶段 2，/v1/rerank 打分，复用 FAST_WRITE_EMOTION_URL；Key/Model 留空则全量走备用 LLM 兜底）
+    # 反思别名归并分类模型；复用 BERT_URL。
+    ALIAS_RECOGNITION_API_KEY: str = os.getenv("ALIAS_RECOGNITION_API_KEY", "")
+    ALIAS_RECOGNITION_MODEL: str = os.getenv("ALIAS_RECOGNITION_MODEL", "alias-recognition")
+    ALIAS_RECOGNITION_TIMEOUT_SECONDS: float = max(
+        0.1, float(os.getenv("ALIAS_RECOGNITION_TIMEOUT_SECONDS", "10"))
+    )
+    ALIAS_RECOGNITION_CONCURRENCY: int = max(
+        1, int(os.getenv("ALIAS_RECOGNITION_CONCURRENCY", "4"))
+    )
+    # Statement 三分类小模型（statement 拆分阶段 2，/v1/rerank 打分，复用 BERT_URL；Key/Model 留空则全量走备用 LLM 兜底）
     STATEMENT_CLASSIFIER_TIMEOUT_SECONDS: float = max(
         0.1, float(os.getenv("STATEMENT_CLASSIFIER_TIMEOUT_SECONDS", "10.0"))
     )

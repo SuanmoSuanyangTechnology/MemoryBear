@@ -11,7 +11,9 @@ class EndUser(ReadOnlyBase):
 
     id = Column(UUID(as_uuid=True), primary_key=True)
     workspace_id = Column(UUID(as_uuid=True), nullable=False)
+    other_name = Column(Text, nullable=True)
     is_active = Column(Boolean, nullable=False)
+    write_time = Column(DateTime, nullable=True)
     memory_insight = Column(Text, nullable=True)
     behavior_pattern = Column(Text, nullable=True)
     key_findings = Column(Text, nullable=True)

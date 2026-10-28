@@ -24,7 +24,7 @@
 
 import { useState, useRef, useEffect, type FC, createContext, useContext, useCallback, useMemo } from 'react'
 import { Image, Input, Select, Form, Checkbox, Radio, ColorPicker, DatePicker, TimePicker, InputNumber, Slider } from 'antd'
-import ReactMarkdown from 'react-markdown'
+import ReactMarkdown, { type Options } from 'react-markdown'
 import RemarkGfm from 'remark-gfm'
 import RemarkMath from 'remark-math'
 import RemarkBreaks from 'remark-breaks'
@@ -66,6 +66,10 @@ interface RbMarkdownProps {
   onFormSubmit?: (values: Record<string, any>) => void;
   /** Whether to show copy button (default: true) */
   isNeedCopy?: boolean;
+  /** Optional renderers and plugins for specialized Markdown content. */
+  components?: Options['components'];
+  remarkPlugins?: Options['remarkPlugins'];
+  skipHtml?: boolean;
 }
 
 /** Image renderer with a text fallback when the source cannot be loaded. */
@@ -201,11 +205,14 @@ const RbMarkdown: FC<RbMarkdownProps> = ({
   className,
   onFormSubmit,
   isNeedCopy = true,
+  components: customComponents,
+  remarkPlugins = [],
+  skipHtml = false,
 }) => {
   const [formValues, setFormValues] = useState<Record<string, any>>({})
   const setValue = useCallback((name: string, value: any) => setFormValues(prev => ({ ...prev, [name]: value })), [])
   const formCtx = useMemo(() => ({ values: formValues, setValue, onSubmit: onFormSubmit }), [formValues, setValue, onFormSubmit])
-  const components = useMemo(() => buildComponents(isNeedCopy), [isNeedCopy])
+  const components = useMemo(() => ({ ...buildComponents(isNeedCopy), ...customComponents }), [isNeedCopy, customComponents])
   const [editContent, setEditContent] = useState(content)
   const textareaRef = useRef<any>(null)
 
@@ -468,10 +475,11 @@ const RbMarkdown: FC<RbMarkdownProps> = ({
 
       <ReactMarkdown
         components={components as any}
+        skipHtml={skipHtml}
         disallowedElements={['script', 'iframe', 'head', 'html', 'meta', 'link', 'style', 'body']}
         rehypePlugins={[
           RehypeKatex,
-          RehypeRaw,
+          ...(skipHtml ? [] : [RehypeRaw]),
           // The Rehype plug-in is used to remove the ref attribute of an element
           // () => {
           //   return (tree) => {
@@ -486,7 +494,7 @@ const RbMarkdown: FC<RbMarkdownProps> = ({
           //   }
           // },
         ]}
-        remarkPlugins={[[RemarkGfm, { singleTilde: false }], RemarkMath, RemarkBreaks, RemarkRescueImages]}
+        remarkPlugins={[[RemarkGfm, { singleTilde: false }], RemarkMath, RemarkBreaks, RemarkRescueImages, ...remarkPlugins]}
         remarkRehypeOptions={{
           allowDangerousHtml: true,
         }}

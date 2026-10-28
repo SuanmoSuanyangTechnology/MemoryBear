@@ -481,12 +481,6 @@ class AppShareService:
             self.db, {s.target_workspace_id for s in shares}
         )
 
-        ontology_map = (
-            self.app_service._load_ontology_map(list(app_ids))
-            if with_ontology
-            else None
-        )
-
         items: list[app_schema.AppShare] = []
         for s in shares:
             source_app = apps_by_id.get(s.source_app_id)
@@ -510,10 +504,18 @@ class AppShareService:
                 target_workspace_name=target_workspace.name if target_workspace else None,
                 target_workspace_icon=target_workspace.icon if target_workspace else None,
             )
-            if ontology_map is not None:
-                ontology = ontology_map.get(s.source_app_id)
-                item.ontology = app_schema.AppOntologyInfo(**ontology) if ontology else None
             items.append(item)
+
+        # Load the ontology after the rows are serialized: a remote binder ends
+        # the transaction before its callback, which expires ORM objects.
+        if with_ontology:
+            ontology_map = self.app_service._load_ontology_map(list(app_ids))
+            if ontology_map is not None:
+                for item in items:
+                    ontology = ontology_map.get(item.source_app_id)
+                    item.ontology = (
+                        app_schema.AppOntologyInfo(**ontology) if ontology else None
+                    )
         return items
 
     def share_schemas(self, shares: list[AppShare]) -> list[app_schema.AppShare]:

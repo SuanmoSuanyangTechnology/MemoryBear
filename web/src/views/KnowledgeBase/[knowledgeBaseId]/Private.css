@@ -1,12 +1,6 @@
 /* 去掉所有默认白色背景 */
 .customTree,
-.customTree *,
-.customTree .ant-tree,
-.customTree .ant-tree-list,
-.customTree .ant-tree-list-holder,
-.customTree .ant-tree-list-holder-inner,
-.customTree .ant-tree-list-holder-inner > div,
-.customTree .ant-tree-list-holder-inner > div > div {
+.customTree .ant-tree {
   background: transparent !important;
   background-color: transparent !important;
 }

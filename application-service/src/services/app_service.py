@@ -27,6 +27,7 @@ from sqlalchemy.orm import Session
 
 from ..cache.workflow_cache import delete_workflow_config
 from ..errors import BizCode, BusinessException, ResourceNotFoundException
+from ..memory.ontology_binding import ONTOLOGY_BINDING_PLUGIN, OntologyUpstreamError
 from ..models import (
     AgentConfig,
     App,
@@ -394,9 +395,6 @@ class AppService:
             extra={"app_id": str(app_id), "mode": config.orchestration_mode},
         )
 
-    # Sync facade registered by the enterprise ontology module (absent in community)
-    ONTOLOGY_BINDING_PLUGIN = "memory.ontology_binding"
-
     def _load_ontology_map(
             self,
             app_ids: list[uuid.UUID]
@@ -411,17 +409,23 @@ class AppService:
         On aggregation failure, log an error and degrade to None without
         affecting the main list flow.
         """
-        binder = get_plugin(self.ONTOLOGY_BINDING_PLUGIN)
+        binder = get_plugin(ONTOLOGY_BINDING_PLUGIN)
         if binder is None:
             return None
         if not app_ids:
             return {}
         try:
-            # Wrap in a SAVEPOINT: if the aggregation SQL fails, only the savepoint
-            # rolls back and the outer transaction stays usable; otherwise the PG
-            # transaction enters aborted state and later serialization queries fail.
-            with self.db.begin_nested():
-                return binder.load_app_ontology_batch(self.db, app_ids)
+            if getattr(binder, "uses_local_db", True):
+                # Wrap in a SAVEPOINT: if the aggregation SQL fails, only the
+                # savepoint rolls back and the outer transaction stays usable;
+                # otherwise the PG transaction enters aborted state and later
+                # serialization queries fail.
+                with self.db.begin_nested():
+                    return binder.load_app_ontology_batch(self.db, app_ids)
+            # Remote binder (memory-domain callback): never hold a transaction
+            # across the HTTP call. Callers serialize rows before reaching here.
+            self.db.rollback()
+            return binder.load_app_ontology_batch(self.db, app_ids)
         except Exception as e:
             logger.error("应用本体聚合失败", extra={"error": str(e)}, exc_info=True)
             return None
@@ -474,19 +478,22 @@ class AppService:
         """Batch-convert apps to schemas and fill the effective ontology.
 
         Aggregates once per batch to avoid N+1. ontology is None in the
-        community edition or when ontology aggregation fails.
+        community edition or when ontology aggregation fails. Rows are
+        serialized before the aggregation so a remote binder may end the
+        transaction without expiring the ORM objects mid-serialization.
         """
-        ontology_map = self._load_ontology_map([a.id for a in apps])
         context = self._build_serialization_context(apps, current_workspace_id)
-        return [
-            self._convert_to_schema(
-                a,
-                current_workspace_id,
-                ontology_map.get(a.id) if ontology_map is not None else None,
-                context
-            )
+        schemas = [
+            self._convert_to_schema(a, current_workspace_id, None, context)
             for a in apps
         ]
+        ontology_map = self._load_ontology_map([a.id for a in apps])
+        if ontology_map is not None:
+            for app, schema in zip(apps, schemas, strict=True):
+                ontology = ontology_map.get(app.id)
+                if ontology is not None:
+                    schema.ontology = app_schema.AppOntologyInfo(**ontology)
+        return schemas
 
     def to_schema_with_ontology(
             self,
@@ -671,13 +678,24 @@ class AppService:
                 )
                 self._create_workflow_config(app.id, wf_data, now)
 
-            # Optional ontology binding: committed in the same transaction as the
-            # app and its config; any step failing rolls back the whole transaction
-            if data.ontology_id:
+            # Optional ontology binding: the in-process binder writes it in the
+            # same transaction as the app and its config; the remote binder can
+            # only run after the local commit (no remote call inside a
+            # transaction) and is compensated when it fails.
+            binder = get_plugin(ONTOLOGY_BINDING_PLUGIN)
+            remote_bind = bool(data.ontology_id) and binder is not None and not getattr(
+                binder, "uses_local_db", True
+            )
+            if remote_bind and tenant_id is None:
+                raise BusinessException("缺少租户信息，无法绑定本体", BizCode.INVALID_PARAMETER)
+            if data.ontology_id and not remote_bind:
                 self._bind_ontology_in_session(app.id, tenant_id, data.ontology_id)
 
             self.db.commit()
             self.db.refresh(app)
+
+            if remote_bind:
+                self._bind_ontology_remote(binder, app, tenant_id, data.ontology_id)
 
             logger.info("应用创建成功", extra={"app_id": str(app.id), "app_name": app.name})
             return app
@@ -702,19 +720,59 @@ class AppService:
     ) -> None:
         """Write the app-ontology binding within the current transaction (no commit).
 
-        In the community edition without the ontology module, ignore the input
-        and log a warning.
+        Only the in-process binder writes here; the remote (callback) binder is
+        invoked after the local commit by ``_bind_ontology_remote``. In the
+        community edition without any binder the input is ignored with a
+        warning (ontology module unavailable).
         """
-        binder = get_plugin(self.ONTOLOGY_BINDING_PLUGIN)
-        if binder is None:
+        binder = get_plugin(ONTOLOGY_BINDING_PLUGIN)
+        if binder is None or not getattr(binder, "uses_local_db", True):
             logger.warning(
-                "未加载本体模块，忽略 ontology_id",
+                "未加载本地本体模块，忽略 ontology_id",
                 extra={"app_id": str(app_id), "ontology_id": str(ontology_id)}
             )
             return
         if tenant_id is None:
             raise BusinessException("缺少租户信息，无法绑定本体", BizCode.INVALID_PARAMETER)
         binder.bind_in_session(self.db, app_id, tenant_id, ontology_id)
+
+    def _bind_ontology_remote(
+            self,
+            binder: Any,
+            app: App,
+            tenant_id: uuid.UUID | None,
+            ontology_id: uuid.UUID,
+    ) -> None:
+        """Bind after the local commit; soft-delete the app when the callback fails.
+
+        The monolith business code is passed through to the client (validation
+        codes like 4000/3001); transport failures surface as 10003.
+        """
+        try:
+            binder.bind_app(app.id, tenant_id, ontology_id)
+        except OntologyUpstreamError as exc:
+            self._compensate_failed_create(app)
+            raise BusinessException(
+                str(exc),
+                exc.code if exc.code is not None else BizCode.SERVICE_UNAVAILABLE,
+                cause=exc,
+            ) from exc
+
+    def _compensate_failed_create(self, app: App) -> None:
+        try:
+            app.is_active = False
+            app.updated_at = utcnow_naive()
+            self.db.commit()
+            logger.warning(
+                "本体绑定失败，已软删除刚创建的应用",
+                extra={"app_id": str(app.id), "app_name": app.name},
+            )
+        except Exception as e:
+            self.db.rollback()
+            logger.error(
+                "本体绑定失败后的补偿删除也失败",
+                extra={"app_id": str(app.id), "error": str(e)},
+            )
 
     def update_app(
             self,
@@ -775,7 +833,9 @@ class AppService:
 
         Raises:
             ResourceNotFoundException: When the app does not exist
-            BusinessException: When the app is not in the given workspace
+            BusinessException: When the app is not in the given workspace, or the
+                ontology unbind callback fails (the app and its shares are
+                restored before the error is raised, so the delete can be retried)
         """
         logger.info("删除应用", extra={"app_id": str(app_id)})
 
@@ -785,7 +845,14 @@ class AppService:
         # Soft-delete the app
         app.is_active = False
 
-        # Deactivate all share rows of this app in app_shares and bump updated_at
+        # Deactivate all share rows of this app in app_shares and bump updated_at;
+        # keep their ids so a failed ontology unbind can restore them.
+        share_ids = list(self.db.scalars(
+            select(AppShare.id).where(
+                AppShare.source_app_id == app_id,
+                AppShare.is_active.is_(True)
+            )
+        ).all())
         stmt = sa_update(AppShare).where(
             AppShare.source_app_id == app_id,
             AppShare.is_active.is_(True)
@@ -795,7 +862,17 @@ class AppService:
         )
         self.db.execute(stmt)
 
+        # Bindings belong to the memory domain: only the remote callback binder
+        # can unbind them, after the local commit (no remote call inside a
+        # transaction). The in-process binder lives in the monolith and runs its
+        # own delete path, so this service never sees one.
+        binder = get_plugin(ONTOLOGY_BINDING_PLUGIN)
+        remote_unbind = binder is not None and not getattr(binder, "uses_local_db", True)
+
         self.db.commit()
+
+        if remote_unbind:
+            self._unbind_ontology_remote(binder, app, share_ids)
 
         logger.info(
             "应用删除成功",
@@ -805,6 +882,51 @@ class AppService:
                 "app_type": app.type
             }
         )
+
+    def _unbind_ontology_remote(
+            self,
+            binder: Any,
+            app: App,
+            share_ids: list[uuid.UUID],
+    ) -> None:
+        """Unbind after the local commit; restore the app when the callback fails.
+
+        A soft-deleted app can no longer be looked up (the repository filters on
+        is_active), so the delete cannot be retried once the local commit lands:
+        the compensation restores the app and its shares first, then the failure
+        is surfaced to the caller as a whole-delete failure it can retry.
+        """
+        try:
+            binder.unbind_app(app.id)
+        except OntologyUpstreamError as exc:
+            self._compensate_failed_delete(app, share_ids)
+            raise BusinessException(
+                str(exc),
+                exc.code if exc.code is not None else BizCode.SERVICE_UNAVAILABLE,
+                cause=exc,
+            ) from exc
+
+    def _compensate_failed_delete(self, app: App, share_ids: list[uuid.UUID]) -> None:
+        try:
+            app.is_active = True
+            app.updated_at = utcnow_naive()
+            if share_ids:
+                self.db.execute(
+                    sa_update(AppShare)
+                    .where(AppShare.id.in_(share_ids))
+                    .values(is_active=True, updated_at=utcnow_naive())
+                )
+            self.db.commit()
+            logger.warning(
+                "本体解绑失败，已恢复应用与共享记录",
+                extra={"app_id": str(app.id), "share_count": len(share_ids)},
+            )
+        except Exception as e:
+            self.db.rollback()
+            logger.error(
+                "本体解绑失败后的补偿恢复也失败",
+                extra={"app_id": str(app.id), "error": str(e)},
+            )
 
     def copy_app(
             self,
@@ -1333,50 +1455,79 @@ class AppService:
                     )
                 )
             )
-        # Ontology filter: predicates come from the enterprise ontology module
-        # (involves premium tables); ignored in the community edition -- without
-        # the plugin, ontology-related parameters have no effect
+        # Ontology filter: the local binder supplies SQL predicates (premium
+        # tables); the remote binder filters candidate ids over the monolith
+        # callback channel after the scope query. Without a plugin the
+        # ontology parameters have no effect (community behavior).
         field_search = field_search.strip() if field_search else None
-        if (ontology_status and ontology_status != "all") or field_search:
-            binder = get_plugin(self.ONTOLOGY_BINDING_PLUGIN)
-            if binder is None:
+        ontology_filter = (ontology_status and ontology_status != "all") or field_search
+        ontology_binder = None
+        if ontology_filter:
+            ontology_binder = get_plugin(ONTOLOGY_BINDING_PLUGIN)
+            if ontology_binder is None:
                 logger.warning(
                     "未加载本体模块，忽略本体筛选参数",
                     extra={"ontology_status": ontology_status, "field_search": field_search}
                 )
-            else:
-                filters.extend(binder.build_list_filters(ontology_status, field_search))
+                ontology_filter = None
+            elif getattr(ontology_binder, "uses_local_db", True):
+                filters.extend(ontology_binder.build_list_filters(ontology_status, field_search))
+                ontology_filter = None
         # shared_only implies include_shared; enforce to avoid confusing API usage
         if shared_only:
             include_shared = True
 
-        # Base query: apps of this workspace
+        # Base scope: apps of this workspace (plus apps shared to it)
         if shared_only:
             # Return only apps shared to this workspace, excluding own apps
             shared_app_ids_stmt = (
                 select(AppShare.source_app_id)
                 .where(AppShare.target_workspace_id == workspace_id, AppShare.is_active.is_(True))
             )
-            stmt = select(App).where(App.id.in_(shared_app_ids_stmt))
+            scope = App.id.in_(shared_app_ids_stmt)
         elif include_shared:
             # Query apps of this workspace plus those shared to it
             shared_app_ids_stmt = (
                 select(AppShare.source_app_id)
                 .where(AppShare.target_workspace_id == workspace_id, AppShare.is_active.is_(True))
             )
-            stmt = select(App).where(
-                or_(
-                    App.workspace_id == workspace_id,
-                    App.id.in_(shared_app_ids_stmt)
-                )
+            scope = or_(
+                App.workspace_id == workspace_id,
+                App.id.in_(shared_app_ids_stmt)
             )
         else:
             # Query only apps of this workspace
-            stmt = select(App).where(App.workspace_id == workspace_id)
+            scope = App.workspace_id == workspace_id
 
-        # Apply filters
         if filters:
-            stmt = stmt.where(and_(*filters))
+            scope = and_(scope, *filters)
+
+        if ontology_filter:
+            # Candidate ids under the non-ontology scope; the monolith returns
+            # the subset matching the ontology filter. End the transaction
+            # before the HTTP call (no remote calls inside a transaction).
+            candidates = list(
+                self.db.scalars(select(App.id).where(scope)).all()
+            )
+            self.db.rollback()
+            try:
+                matched = ontology_binder.filter_app_ids(
+                    candidates, ontology_status, field_search
+                )
+            except Exception as e:
+                logger.error("本体筛选回调失败", extra={"error": str(e)}, exc_info=True)
+                raise BusinessException(
+                    "本体筛选服务不可用", BizCode.SERVICE_UNAVAILABLE, cause=e
+                ) from e
+            if matched is None:
+                logger.warning(
+                    "本体模块未启用，忽略本体筛选参数",
+                    extra={"ontology_status": ontology_status, "field_search": field_search}
+                )
+            else:
+                scope = and_(scope, App.id.in_(matched))
+
+        stmt = select(App).where(scope)
 
         # Count total
         total_stmt = select(func.count()).select_from(stmt.subquery())

@@ -94,9 +94,9 @@ const RadioGroupButton: FC<RadioCardProps> = ({
           key={String(option.value)}
           className={clsx('rb:px-2 rb:leading-4.5 rb:cursor-pointer', {
             'rb:rounded-full': circle,
-            'rb:rounded-[8px]': !circle,
+            'rb:rounded-lg': !circle,
             'rb:bg-[#171719] rb:font-medium rb:text-white': value === option.value && variant === 'filled',
-            'rb:bg-[#F6F6F6]': value !== option.value && variant === 'filled',
+            'rb:bg-gray-100': value !== option.value && variant === 'filled',
             'rb:border rb:border-[#171719] rb:font-medium': value === option.value && variant === 'outlined',
             'rb-border rb:text-[#171719]': value !== option.value && variant === 'outlined',
             'rb:py-1 rb:text-[12px]': size === 'small',

@@ -1,4 +1,5 @@
 {
+  "KB_FAQ_INDEX_FAILED": "FAQ indexing failed. The saved FAQ can be indexed again.",
   "KB_PRINCIPAL_INVALID": "Knowledge identity is invalid. Sign in again and retry.",
   "KB_VALIDATION_ERROR": "Request parameters are invalid. Check the configuration and retry.",
   "KB_RESOURCE_NOT_FOUND": "The resource does not exist or is not accessible. Check the selected resource.",
@@ -157,5 +158,14 @@
   "KB_MULTIMODAL_RERANK_CONNECTION_FAILED": "The image rerank model connection failed; retry later",
   "KB_MULTIMODAL_RERANK_RATE_LIMITED": "The image rerank model rate limit was reached; retry later",
   "KB_MULTIMODAL_RERANK_RESPONSE_INVALID": "The image rerank model returned an invalid response",
-  "KB_MULTIMODAL_RERANK_TIMEOUT": "The image rerank model request timed out; retry later"
+  "KB_MULTIMODAL_RERANK_TIMEOUT": "The image rerank model request timed out; retry later",
+  "KB_FAQ_CONFLICT": "The FAQ changed. Refresh and retry.",
+  "KB_FAQ_CONTENT_INVALID": "The FAQ content contains conflicting questions or invalid answers.",
+  "KB_FAQ_REVIEW_REQUIRED": "Review this FAQ before enabling it.",
+  "KB_FAQ_SOURCE_UNAVAILABLE": "The Wiki source is unavailable for review or generation.",
+  "KB_FAQ_SOURCE_CHANGED": "The Wiki source changed. Review the latest comparison.",
+  "KB_FAQ_JOB_BUSY": "FAQ generation is still running.",
+  "KB_FAQ_JOB_TERMINAL": "Completed or cancelled first-generation jobs cannot be regenerated.",
+  "KB_FAQ_DISPATCH_FAILED": "The FAQ generation task could not be dispatched. Please retry.",
+  "KB_FAQ_WORKER_LOST": "The FAQ generation worker stopped responding. Please retry the task."
 }

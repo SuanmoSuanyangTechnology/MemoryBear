@@ -228,6 +228,7 @@ export const applicationPart1 = {
       semantic: 'Semantic retrieval',
       hybrid: 'Hybrid Retrieval',
       graph: 'Graph Retrieval',
+      'wiki-FAQ': 'FAQ 检索',
 
       vector_similarity_weight: 'Semantic similarity threshold',
       vector_similarity_weight_desc: 'Only return results with semantic similarity higher than this threshold',

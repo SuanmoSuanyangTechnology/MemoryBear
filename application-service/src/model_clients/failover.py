@@ -121,7 +121,7 @@ def run_plan(
     When stats is non-null the facade keeps the accounting (attempts/last/switched); the
     callback only invokes.
     """
-    from ..services.channel_service import cipher_from_env
+    from ..utils.cipher import cipher_from_env
 
     def _attempt(resolved: ResolvedModelConfig) -> R:
         if stats is not None:
@@ -142,7 +142,7 @@ async def run_plan_async(
     stats: FailoverStats | None = None,
 ) -> FallbackOutcome[Any]:
     """Async counterpart of run_plan (async facades use this entry; calling the sync orchestration from async code is forbidden)."""
-    from ..services.channel_service import cipher_from_env
+    from ..utils.cipher import cipher_from_env
 
     async def _attempt(resolved: ResolvedModelConfig) -> Any:
         if stats is not None:

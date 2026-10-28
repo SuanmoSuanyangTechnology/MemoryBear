@@ -12,7 +12,7 @@ import json
 import time
 import uuid
 from types import SimpleNamespace
-from typing import Any, AsyncGenerator, Dict, List, Optional
+from typing import Any, AsyncGenerator, Dict, List, Literal, Optional
 
 from langchain.tools import tool
 from pydantic import BaseModel, Field
@@ -1422,7 +1422,8 @@ class AgentRunService:
             user_id,
             workspace_id: uuid.UUID,
             storage_type,
-            user_rag_memory_id
+            user_rag_memory_id,
+            app_id: uuid.UUID | None = None,
     ) -> tuple[list, bool]:
         """Load long-term memory configuration."""
         from ..memory.memory_service import create_long_term_memory_tool
@@ -1436,6 +1437,7 @@ class AgentRunService:
         tool = create_long_term_memory_tool(
             memory_config, user_id, workspace_id, storage_type, user_rag_memory_id,
             config_id=config_id,
+            app_id=app_id,
         )
         tools = [tool] if tool else []
         if tools:
@@ -1674,7 +1676,10 @@ class AgentRunService:
             ]
             if memory:
                 parallel_coros.append(
-                    self.load_memory_config(memory_config, user_id, workspace_id, storage_type, user_rag_memory_id)
+                    self.load_memory_config(
+                        memory_config, user_id, workspace_id, storage_type,
+                        user_rag_memory_id, app_id=agent_config.app_id,
+                    )
                 )
             parallel_results = await asyncio.gather(*parallel_coros, return_exceptions=True)
 
@@ -1853,7 +1858,9 @@ class AgentRunService:
             system_prompt = append_external_context_rule(system_prompt)
             # Emotion-aware reply: must complete before ToolOrchestrator / LangChainAgent.
             system_prompt = await apply_emotion_detection(
-                system_prompt, emotion_detection, user_message_id, write_cache=False
+                system_prompt, emotion_detection, user_message_id,
+                app_id=agent_config.app_id, tenant_id=tenant_id, db=self.db,
+                write_cache=False,
             )
             use_agent_mode = ModelFeature.FUNCTION_CALL in features
             orchestrator_node_executions = []
@@ -2249,7 +2256,10 @@ class AgentRunService:
             ]
             if memory:
                 parallel_coros.append(
-                    self.load_memory_config(memory_config, user_id, workspace_id, storage_type, user_rag_memory_id)
+                    self.load_memory_config(
+                        memory_config, user_id, workspace_id, storage_type,
+                        user_rag_memory_id, app_id=agent_config.app_id,
+                    )
                 )
             parallel_results = await asyncio.gather(*parallel_coros, return_exceptions=True)
 
@@ -2431,7 +2441,9 @@ class AgentRunService:
             system_prompt = append_external_context_rule(system_prompt)
             # Emotion-aware reply: must complete before ToolOrchestrator / LangChainAgent.
             system_prompt = await apply_emotion_detection(
-                system_prompt, emotion_detection, user_message_id, write_cache=False
+                system_prompt, emotion_detection, user_message_id,
+                app_id=agent_config.app_id, tenant_id=tenant_id, db=self.db,
+                write_cache=False,
             )
             use_agent_mode = ModelFeature.FUNCTION_CALL in features
             orchestrator_node_executions = []
@@ -3821,6 +3833,7 @@ class AgentRunService:
             memory: bool = True,
             files: list[FileInput] | None = None,
             source: str = "",
+            execution_mode: Literal["in_process", "sandbox"] = "in_process",
     ) -> Dict[str, Any]:
         """Multi-model compare draft run.
 
@@ -3834,6 +3847,7 @@ class AgentRunService:
             variables: Variable parameters.
             parallel: Whether to execute in parallel.
             timeout: Timeout in seconds.
+            execution_mode: Execution mode (in_process / sandbox).
 
         Returns:
             Dict: Compare results.
@@ -3857,32 +3871,40 @@ class AgentRunService:
             try:
                 start_time = time.time()
 
+                # Use the model's own conversation_id; fall back to the global one
+                model_conversation_id = model_info.get("conversation_id") or conversation_id
+
+                # Each model task owns its AsyncSession: a session is not safe for
+                # concurrent use, and parallel compare runs models simultaneously.
+                async def run_with_own_session():
+                    async with get_async_db_context() as model_db:
+                        return await asyncio.wait_for(
+                            AgentRunService(model_db).run(
+                                agent_config=agent_config,
+                                model_config=model_info["model_config"],
+                                message=message,
+                                workspace_id=workspace_id,
+                                conversation_id=model_conversation_id,
+                                user_id=user_id,
+                                variables=variables,
+                                storage_type=storage_type,
+                                user_rag_memory_id=user_rag_memory_id,
+                                web_search=web_search,
+                                memory=memory,
+                                files=files,
+                                source=source,
+                                execution_mode=execution_mode,
+                            ),
+                            timeout=timeout
+                        )
+
                 # Temporarily override parameters (no deepcopy, to avoid SQLAlchemy
                 # session issues)
                 original_params = agent_config.model_parameters
                 agent_config.model_parameters = model_info["parameters"]
 
-                # Use the model's own conversation_id; fall back to the global one
-                model_conversation_id = model_info.get("conversation_id") or conversation_id
                 try:
-                    result = await asyncio.wait_for(
-                        self.run(
-                            agent_config=agent_config,
-                            model_config=model_info["model_config"],
-                            message=message,
-                            workspace_id=workspace_id,
-                            conversation_id=model_conversation_id,
-                            user_id=user_id,
-                            variables=variables,
-                            storage_type=storage_type,
-                            user_rag_memory_id=user_rag_memory_id,
-                            web_search=web_search,
-                            memory=memory,
-                            files=files,
-                            source=source,
-                        ),
-                        timeout=timeout
-                    )
+                    result = await run_with_own_session()
                 finally:
                     # Restore the original parameters
                     agent_config.model_parameters = original_params
@@ -4049,6 +4071,7 @@ class AgentRunService:
             timeout: int = 60,
             files: list[FileInput] | None = None,
             source: str = "",
+            execution_mode: Literal["in_process", "sandbox"] = "in_process",
             skip_save: bool = False,
     ) -> AsyncGenerator[str, None]:
         """Multi-model compare draft run with streaming output.
@@ -4070,6 +4093,7 @@ class AgentRunService:
             parallel: Whether to execute in parallel.
             timeout: Timeout in seconds.
             files: Multimodal files.
+            execution_mode: Execution mode (in_process / sandbox).
 
         Yields:
             str: SSE-formatted event data.
@@ -4114,6 +4138,30 @@ class AgentRunService:
             # backend consistent
             model_user_message_id = uuid.uuid4()
 
+            # Each model task owns its AsyncSession: streaming runs concurrently in
+            # parallel compare, and one session is not safe for concurrent use.
+            async def stream_with_own_session():
+                async with get_async_db_context() as model_db:
+                    async for event_str in AgentRunService(model_db).run_stream(
+                            agent_config=agent_config,
+                            model_config=model_info["model_config"],
+                            message=message,
+                            workspace_id=workspace_id,
+                            conversation_id=model_conversation_id,
+                            user_id=user_id,
+                            variables=variables,
+                            storage_type=storage_type,
+                            user_rag_memory_id=user_rag_memory_id,
+                            web_search=web_search,
+                            memory=memory,
+                            files=files,
+                            source=source,
+                            user_message_id=model_user_message_id,
+                            execution_mode=execution_mode,
+                            skip_save=skip_save,
+                    ):
+                        yield event_str
+
             try:
                 # Send the model start event
                 await event_queue.put(self._format_sse_event("model_start", {
@@ -4144,23 +4192,7 @@ class AgentRunService:
 
                 try:
                     # Stream a single model
-                    async for event_str in self.run_stream(
-                            agent_config=agent_config,
-                            model_config=model_info["model_config"],
-                            message=message,
-                            workspace_id=workspace_id,
-                            conversation_id=model_conversation_id,
-                            user_id=user_id,
-                            variables=variables,
-                            storage_type=storage_type,
-                            user_rag_memory_id=user_rag_memory_id,
-                            web_search=web_search,
-                            memory=memory,
-                            files=files,
-                            source=source,
-                            user_message_id=model_user_message_id,
-                            skip_save=skip_save,
-                    ):
+                    async for event_str in stream_with_own_session():
                         # Parse the raw event
                         try:
                             lines = event_str.strip().split('\n')

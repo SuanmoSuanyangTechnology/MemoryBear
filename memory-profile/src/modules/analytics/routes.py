@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Body, Depends, Query, Request
 
 from src.common.external_api import external_api
 from src.common.responses import ApiResponse
@@ -12,6 +12,7 @@ from src.i18n import get_request_language
 from src.middleware.auth import MemoryPrincipal
 from src.middleware.identity import require_memory_context
 from src.modules.analytics.handler import AnalyticsHandler
+from src.modules.analytics.schemas import GenerateCacheBody
 
 router = APIRouter(prefix="/memory/analytics", tags=["Profile Analytics"])
 Context = Annotated[MemoryPrincipal, Depends(require_memory_context)]
@@ -96,4 +97,55 @@ async def community_graph(
 ) -> ObjectApiResponse:
     return await _handler(request).community_graph(
         context, end_user_id, get_request_language(request)
+    )
+
+
+@router.get("/hot_memory_tags", response_model=ListApiResponse)
+@external_api
+async def hot_memory_tags(
+    request: Request,
+    context: Context,
+    limit: int = 10,
+) -> ListApiResponse:
+    """工作空间热门记忆标签（api 侧参数无上下界；``limit <= 0`` 回落 10）。"""
+
+    return await _handler(request).hot_memory_tags(
+        context, limit, get_request_language(request)
+    )
+
+
+@router.get("/user_profile", response_model=ObjectApiResponse)
+async def user_profile(
+    request: Request,
+    context: Context,
+    end_user_id: str | None = None,
+) -> ObjectApiResponse:
+    """legacy 管理端用户画像；仅 JWT 面使用，不在 API-Key 契约内。"""
+
+    return await _handler(request).user_profile(
+        context, end_user_id, get_request_language(request)
+    )
+
+@router.get("/interest_distribution", response_model=ListApiResponse)
+@external_api
+async def interest_distribution(
+    request: Request,
+    context: Context,
+    end_user_id: str = Query(...),
+    limit: int = Query(5, ge=1, le=5),
+) -> ListApiResponse:
+    return await _handler(request).interest_distribution(
+        context, end_user_id, limit, get_request_language(request)
+    )
+
+
+@router.post("/generate_cache", response_model=ObjectApiResponse)
+@external_api
+async def generate_cache(
+    request: Request,
+    context: Context,
+    body: GenerateCacheBody = Body(default_factory=GenerateCacheBody),  # noqa: B008
+) -> ObjectApiResponse:
+    return await _handler(request).generate_cache(
+        context, body.end_user_id, get_request_language(request)
     )

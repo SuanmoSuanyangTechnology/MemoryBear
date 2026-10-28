@@ -73,7 +73,6 @@ dependencies = [
     "langchain-community>=0.3.31",
     "dashscope>=1.25.0",
     "neo4j>=6.0.3",
-    "chonkie>=1.1.2",
     "pandas>=2.3.3",
     "jinja2>=3.1.6",
     "mcp>=1.21.1",
@@ -91,7 +90,6 @@ dependencies = [
     "opencv-python==4.10.0.84",
     "numpy>=1.26.0,<2.0.0",
     "huggingface-hub==0.25.2",
-    "torch==2.2.2",
     "onnxruntime==1.20.1",
     "shapely==2.1.2",
     "pyclipper==1.3.0.post6",
@@ -151,11 +149,17 @@ dependencies = [
     "pymupdf>=1.27.2.2",
     "langid>=1.1.6",
     "asyncpg==0.31.0",
-    "redbear-model"
+    "redbear-model",
+    # Shared task/queue/priority contract with memory-jobs (contract only: no
+    # transport, no extra dependencies).
+    "task-bridge-sdk[mem-router]",
+    "celery-types>=0.26.0",
+    "chonkie>=1.3.1",
 ]
 
 [tool.uv.sources]
 redbear-model = { path = "../packages/redbear-model" }
+task-bridge-sdk = { path = "../packages/task-bridge-sdk" }
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

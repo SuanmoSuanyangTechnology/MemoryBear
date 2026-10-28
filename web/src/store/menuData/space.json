@@ -239,10 +239,10 @@
           {
             "id": 219,
             "parent": 21,
-            "code": "predictionProgress",
+            "code": "predictionEngine",
             "label": "预测推演流程",
-            "i18nKey": "menu.predictionProgress",
-            "path": "/memory-engine/prediction-progress/:id",
+            "i18nKey": "menu.predictionEngine",
+            "path": "/memory-engine/prediction-engine/:id",
             "enable": true,
             "display": false,
             "level": 1,
@@ -250,7 +250,7 @@
             "subs": null
           },
           {
-            "id": 219,
+            "id": 220,
             "parent": 21,
             "code": "predictionProgress",
             "label": "预测推演流程",
@@ -263,7 +263,7 @@
             "subs": null
           },
           {
-            "id": 219,
+            "id": 221,
             "parent": 21,
             "code": "sceneCommunityEngine",
             "label": "多模态情景记忆重构引擎",

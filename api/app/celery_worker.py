@@ -64,6 +64,17 @@ except ImportError:
     pass  # 社区版无 premium 模块，静默跳过
 
 
+# Worker 不经过 Web 的 memory 模块加载，直接注册无连接状态的查询插件。
+try:
+    from app.plugins import register_plugin
+    from premium.memory.ontology.services.scene_query import OntologySceneQuery
+
+    register_plugin("memory.ontology_query", OntologySceneQuery())
+    logger.info("Ontology query plugin registered for Celery worker")
+except ImportError:
+    pass  # 社区版无 premium 模块，静默跳过
+
+
 @worker_process_init.connect
 def _reinit_db_pool(**kwargs):
     """

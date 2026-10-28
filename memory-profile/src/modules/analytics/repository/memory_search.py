@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from datetime import datetime
 from numbers import Integral
 from typing import Any
 
+from src.common.normalization import datetime_to_epoch_ms
 from src.infrastructure.elasticsearch import ElasticsearchManager
 
 #: ES 别名由写侧 ``get_index_name()`` 生成（``{name}_current``）。本服务不 import
@@ -13,6 +15,46 @@ from src.infrastructure.elasticsearch import ElasticsearchManager
 _INDEX_MEMORY_SUMMARY = "memory_summary_current"
 _INDEX_EXTRACTED_ENTITY = "extracted_entity_current"
 _INDEX_STATEMENT = "statement_current"
+
+# Date doc values are already normalized by ES. Source text is needed because
+# statement is a text field without doc values, and blank statements are excluded.
+_SHORT_TERM_ELIGIBLE_SCRIPT = """
+def text = params._source.statement;
+if (!(text instanceof String) || text.trim().length() == 0) {
+    emit(false);
+    return;
+}
+def start = null;
+def end = null;
+if (doc.containsKey('valid_at') && doc['valid_at'].size() > 0) {
+    start = doc['valid_at'].value.toInstant().toEpochMilli();
+}
+if (doc.containsKey('invalid_at') && doc['invalid_at'].size() > 0) {
+    end = doc['invalid_at'].value.toInstant().toEpochMilli();
+}
+if (start == null && end == null) {
+    if (doc.containsKey('dialog_at') && doc['dialog_at'].size() > 0) {
+        start = doc['dialog_at'].value.toInstant().toEpochMilli();
+    } else if (doc.containsKey('created_at') && doc['created_at'].size() > 0) {
+        start = doc['created_at'].value.toInstant().toEpochMilli();
+    }
+}
+long now = params.now;
+long proximity = params.proximity;
+if (start != null && end != null) {
+    boolean nearStart = start >= now - proximity && start <= now + proximity;
+    boolean nearEnd = end >= now - proximity && end <= now + proximity;
+    boolean withinShortEvent = start <= now && now <= end
+        && end - start <= params.max_span;
+    emit(start <= end && (nearStart || nearEnd || withinShortEvent));
+} else if (start != null) {
+    emit(start >= now - proximity && start <= now + proximity);
+} else if (end != null) {
+    emit(end >= now - proximity && end <= now + proximity);
+} else {
+    emit(false);
+}
+"""
 
 
 def _search_header(index: str) -> dict[str, Any]:
@@ -105,10 +147,52 @@ def _parse_buckets(
 
 
 class MemorySearchRepository:
-    """Aggregate episodic, explicit and emotional counts from Elasticsearch."""
+    """Aggregate episodic, explicit, emotional and short-term counts from ES."""
 
     def __init__(self, elasticsearch: ElasticsearchManager) -> None:
         self.elasticsearch = elasticsearch
+
+    async def short_term_counts(
+        self, end_user_ids: Sequence[str], now: datetime,
+    ) -> tuple[dict[str, int], set[str]]:
+        """Return eligible counts and users with active Statement documents.
+
+        Presence is measured before eligibility filtering, so a valid zero does
+        not cause Neo4j fallback. Statement IDs are ES document IDs on the writer.
+        """
+        if not end_user_ids:
+            return {}, set()
+        eligible_filter = {
+            "bool": {
+                "filter": [
+                    {"term": {"speaker": "user"}},
+                    {"term": {"is_permanent": False}},
+                    {"exists": {"field": "id"}},
+                    {"term": {"memo_eligible": True}},
+                ],
+            },
+        }
+        body = _search_body(end_user_ids, ("short_term", {"filter": eligible_filter}))
+        body["runtime_mappings"] = {
+            "memo_eligible": {
+                "type": "boolean",
+                "script": {
+                    "source": _SHORT_TERM_ELIGIBLE_SCRIPT,
+                    "params": {
+                        "now": datetime_to_epoch_ms(now),
+                        "proximity": 72 * 60 * 60 * 1000,
+                        "max_span": 168 * 60 * 60 * 1000,
+                    },
+                },
+            },
+        }
+        client = await self.elasticsearch.client()
+        response = await client.search(
+            index=_INDEX_STATEMENT, body=body, allow_partial_search_results=False,
+        )
+        buckets = _parse_buckets(response, "short-term memos", "short_term")
+        present = set(buckets) & set(end_user_ids)
+        return {user_id: buckets[user_id][1] for user_id in present}, present
 
     async def workspace_memory_counts(
         self,

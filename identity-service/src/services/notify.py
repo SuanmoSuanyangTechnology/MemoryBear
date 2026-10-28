@@ -1,13 +1,15 @@
-"""变更通知订阅（决策 #11 修订）：老单体 pub/sub 发消息，identity 重建用户快照
-（删旧 key + 直连 DB 组装写回）；API key 快照保持删除（网关首期不消费，重建待
-API key 路径接入网关后实现）。"""
+"""变更通知订阅（决策 #11 修订）：老单体 pub/sub 发消息，identity 重建快照。
+
+用户消息：删旧 key + 直连 DB 组装写回。API key 消息：先删快照与网关负缓存，
+带明文（创建/重建/更新）时再组装写回，仅 hash（吊销）时由网关按需回源。"""
 import asyncio
 import json
 import logging
 
-from auth_sdk.snapshot import SNAPSHOT_TTL, snapshot_to_json
+from auth_sdk.snapshot import SNAPSHOT_TTL, api_key_miss_key_from_hash, snapshot_to_json
 from redis.asyncio import Redis
-from redis.exceptions import RedisError, TimeoutError
+from redis.exceptions import RedisError
+from redis.exceptions import TimeoutError as RedisTimeoutError
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -18,6 +20,10 @@ from src.services import snapshot as snap
 from src.services.api_keys import build_api_key_snapshot, write_api_key_snapshot
 
 logger = logging.getLogger(__name__)
+
+# An idle pub/sub read blocks without a socket timeout, so a half-open
+# connection would hang the subscription silently; bound it and reconnect.
+_IDLE_RECONNECT_S = 300.0
 
 
 async def handle_invalidation(redis: Redis, session: AsyncSession, payload: dict) -> None:
@@ -37,9 +43,12 @@ async def handle_invalidation(redis: Redis, session: AsyncSession, payload: dict
             await redis.delete(f"user:{user_id}")
             raise
     elif kind == "api_key":
-        await redis.delete(f"api_key:{payload['hash']}")
-        # 创建/重建消息带明文 key（老单体 notify_api_key_created）：删旧 + 直连 DB 组装写回，
-        # 使新 key 首次访问即可用（网关路径 B miss 即 401，无回源自愈）；吊销消息仅 hash → 只删
+        key_hash = payload["hash"]
+        # Drop the gateway negative-cache entry too: a key re-enabled or whose
+        # limits changed must not stay rejected for the negative-cache TTL.
+        await redis.delete(f"api_key:{key_hash}", api_key_miss_key_from_hash(key_hash))
+        # 创建/重建/快照字段更新消息带明文 key（老单体 notify_api_key_created）：删旧 + 直连
+        # DB 组装写回，首次访问即可用（不依赖网关回源）；吊销消息仅 hash → 只删，网关按需回源
         plain = payload.get("key")
         if plain:
             rebuilt = await build_api_key_snapshot(session, plain)
@@ -60,8 +69,17 @@ async def subscribe(redis, channel: str | None = None) -> None:
         pubsub = redis.pubsub()
         try:
             await pubsub.subscribe(channel)
-            async for message in pubsub.listen():
-                if message["type"] != "message":
+            while True:
+                try:
+                    message = await asyncio.wait_for(
+                        pubsub.get_message(ignore_subscribe_messages=True, timeout=None),
+                        timeout=_IDLE_RECONNECT_S,
+                    )
+                except TimeoutError:
+                    raise RedisTimeoutError(
+                        f"pubsub idle for {_IDLE_RECONNECT_S}s, reconnecting"
+                    ) from None
+                if message is None:
                     continue
                 try:
                     payload = json.loads(message["data"])
@@ -75,10 +93,10 @@ async def subscribe(redis, channel: str | None = None) -> None:
                 except (KeyError, RedisError, SQLAlchemyError) as exc:  # 单条消息失败不影响订阅循环
                     logger.warning("invalidation handling failed: %s", exc)
         except RedisError as exc:
-            # 连接断开/重连；CancelledError 是 BaseException 不受此捕获影响，
-            # 取消可正常传播（lifespan 关闭时订阅任务能退出）
-            # socket_timeout（2s，与 gateway 对齐）下订阅无消息即超时属常态，降噪为 debug
-            if isinstance(exc, TimeoutError):
+            # Connection errors and idle-watchdog timeouts both reconnect;
+            # CancelledError is a BaseException and is not caught here, so
+            # lifespan shutdown can still cancel the task.
+            if isinstance(exc, RedisTimeoutError):
                 logger.debug("pubsub idle timeout, reconnecting: %s", exc)
             else:
                 logger.warning("pubsub subscription error, reconnecting: %s", exc)

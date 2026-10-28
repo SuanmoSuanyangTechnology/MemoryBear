@@ -342,7 +342,9 @@ def _planning_context(session, kb_id):
     return {"pages": pages, "folders": sorted(paths), "revision": revision}
 
 
-def commit_map(session, delivery, *, config_hash, input_hash, materials, document_title):
+def commit_map(
+    session, delivery, *, config_hash, input_hash, materials, document_title, source_catalog=None,
+):
     knowledge, scope = lock_knowledge(session, delivery["kb_id"])
     document, state = lock_document(session, delivery["kb_id"], delivery["document_id"])
     require_round(document, state, delivery["requested_version"])
@@ -362,11 +364,20 @@ def commit_map(session, delivery, *, config_hash, input_hash, materials, documen
     expected = {str(t.page_id) for t in tasks if t.operation == "upsert"}
     if {item["page_id"] for item in materials} != expected:
         raise WikiSuperseded("WIKI_MATERIAL_PLAN_MISMATCH", retryable=False)
-    session.execute(delete(WikiPageSource).where(WikiPageSource.document_id == document.id))
+    preserved = {as_uuid(item["page_id"]) for item in materials if item.get("preserve_existing")}
+    if preserved:
+        preserved = _settle_uncited_pages(
+            session, document, state, tasks, preserved, source_catalog or {}
+        )
+    materials = [item for item in materials if not item.get("preserve_existing")]
+    session.execute(delete(WikiPageSource).where(
+        WikiPageSource.document_id == document.id, WikiPageSource.page_id.not_in(preserved)
+    ))
     metadata_by_page = {item["page_id"]: item.get("source_context", {}).get("page_metadata", {})
                         for item in materials}
     for page in session.scalars(select(WikiPage).where(
-        WikiPage.kb_id == knowledge.id, WikiPage.id.in_([as_uuid(p) for p in expected]),
+        WikiPage.kb_id == knowledge.id,
+        WikiPage.id.in_([as_uuid(item["page_id"]) for item in materials]),
     ).order_by(WikiPage.id).with_for_update()):
         metadata = metadata_by_page[str(page.id)]
         page.aliases = sorted(set([*page.aliases, *metadata.get("aliases", [])]))
@@ -385,13 +396,104 @@ def commit_map(session, delivery, *, config_hash, input_hash, materials, documen
                 source_context=item["source_context"],
             )
         )
-    dirty_pages(session, {t.page_id for t in tasks})
+    dirty_pages(session, {t.page_id for t in tasks} - preserved)
     state.mapped_version = state.requested_version
     state.stage = "reducing"
     append_log(document, "Wiki Map committed; page generation pending.")
     session.flush()
     settle_progress(session, document, state)
     return pending_page_ids(session, state)
+
+
+def _verified_previous_chunks(source, catalog):
+    """只复用仍存在于当前文档的完整旧证据，保留旧引用句柄供 facts 使用。"""
+    if not source.chunk_refs:
+        return None
+    by_id = {item["chunk_id"]: item for item in catalog.values()}
+    verified = []
+    for old in source.chunk_refs:
+        current = by_id.get(old["chunk_id"])
+        if current is None or (current["text"], current["heading"]) != (
+            old["text"], old.get("heading", "")
+        ):
+            matches = [item for item in catalog.values()
+                       if (item["text"], item["heading"]) == (old["text"], old.get("heading", ""))]
+            if len(matches) != 1:
+                return None
+            current = matches[0]
+        verified.append({**current, "ref": old["ref"]})
+    return verified
+
+
+def _settle_uncited_pages(session, document, state, tasks, page_ids, catalog):
+    """引用降级保留经过当前原文验证的历史素材；已失效的旧证据仍走正常撤回。"""
+    retained = set()
+    skipped_count = 0
+    by_page = {task.page_id: task for task in tasks}
+    for page_id in sorted(page_ids, key=str):
+        page = session.scalar(select(WikiPage).where(
+            WikiPage.id == page_id, WikiPage.kb_id == document.kb_id
+        ).with_for_update())
+        if page is None or page.page_type == "summary":
+            raise WikiError("WIKI_MATERIAL_PLAN_MISMATCH", retryable=False)
+        source = session.scalar(select(WikiPageSource).where(
+            WikiPageSource.document_id == document.id, WikiPageSource.page_id == page_id
+        ))
+        published = any(entry["document_id"] == str(document.id)
+                        for entry in page.published_sources)
+        if source is None and published:
+            by_page[page_id].operation = "retract"
+            continue
+        if source is not None:
+            verified = _verified_previous_chunks(source, catalog)
+            if verified is None:
+                by_page[page_id].operation = "retract"
+                append_log(document,
+                           f"Wiki 引用降级：主题 {page_id} 的旧证据已变化，按原流程撤回。")
+                continue
+            old_version, old_hash = source.document_wiki_version, source.content_hash
+            already_published = any(
+                (entry["document_id"], entry["version"], entry["content_hash"]) == (
+                    str(document.id), old_version, old_hash
+                ) for entry in page.published_sources
+            )
+            source.chunk_refs = verified
+            source.document_wiki_version = state.requested_version
+            source.content_hash = fingerprint({
+                "page_id": str(page_id), "facts": source.facts, "chunk_refs": verified,
+                "source_context": source.source_context,
+            })
+            page.published_sources = [
+                {**entry, "version": source.document_wiki_version,
+                 "content_hash": source.content_hash}
+                if (entry["document_id"], entry["version"], entry["content_hash"]) == (
+                    str(document.id), old_version, old_hash
+                ) else entry
+                for entry in page.published_sources
+            ]
+        retained.add(page_id)
+        if source is not None and not already_published:
+            # 上轮只提交了素材而未发布，必须真正 Reduce，不能将旧正文标成已完成。
+            page.status = "updating"
+            page.row_version += 1
+            continue
+        skipped_count += 1
+        task = by_page[page_id]
+        task.status, task.error_code, task.error_stage = (
+            "skipped", "WIKI_TOPIC_WITHOUT_EVIDENCE", "citations"
+        )
+        session.flush()
+        pending = session.scalar(select(WikiDocumentPageTask.subtask_id).where(
+            WikiDocumentPageTask.page_id == page_id,
+            WikiDocumentPageTask.status.not_in(TERMINAL_TASK_STATUSES),
+        ).limit(1))
+        if pending is None:
+            page.status = "ready" if page.version > 0 else "unavailable"
+            page.error_code = "WIKI_TOPIC_WITHOUT_EVIDENCE"
+        page.row_version += 1
+    append_log(document,
+               f"Wiki 引用降级：跳过 {skipped_count} 个已计划主题，保留已验证的历史正文。")
+    return retained
 
 
 def pending_page_ids(session, state):
@@ -459,19 +561,51 @@ def load_reduce(session, kb_id, page_id, *, redelivered=False, failure_limit=Non
     )
     if page is None or (not tasks and page.status != "cleanup_pending"):
         return None
+    config_hash = generation_config_hash(knowledge.llm_id, knowledge.parser_config)
+    participants = []
+    for task in tasks:
+        state = states[task.document_id]
+        document = documents[task.document_id]
+        if not state or task.requested_version != state.requested_version:
+            task.status = "superseded"
+            continue
+        if state.status == "cancelled" or document.run == 2:
+            task.status = "cancelled"
+            continue
+        if state.status == "failed":
+            continue
+        if not state.plan_ready or state.mapped_version != state.requested_version:
+            # 其他文件尚未交付素材；它自己的 Map 完成后会重新唤醒本页。
+            continue
+        if state.operation == "upsert" and (document.status != 1 or not state.source_ready):
+            continue
+        participants.append(
+            {
+                "document_id": str(task.document_id),
+                "requested_version": task.requested_version,
+                "subtask_id": str(task.subtask_id),
+            }
+        )
+    if not participants and page.status != "cleanup_pending":
+        return None
+
+    def load_failure(code):
+        error = WikiError(code, retryable=False)
+        error.wiki_snapshot = {"row_version": page.row_version, "participants": participants}
+        return error
+
     if redelivered:
         page.failure_attempt += 1
         if failure_limit is not None and page.failure_attempt >= failure_limit:
-            error = WikiError("WIKI_WORKER_LOSS_EXHAUSTED", retryable=False)
-            error.wiki_snapshot = {"row_version": page.row_version}
-            raise error
-    config_hash = generation_config_hash(knowledge.llm_id, knowledge.parser_config)
+            raise load_failure("WIKI_WORKER_LOSS_EXHAUSTED")
+    for participant in participants:
+        state = states[as_uuid(participant["document_id"])]
+        if state.operation == "upsert" and state.config_hash != config_hash:
+            raise load_failure("WIKI_CONFIG_CHANGED")
 
-    def invalid_source(code):
-        error = WikiError(code, retryable=False)
-        error.wiki_snapshot = {"row_version": page.row_version}
-        return error
-
+    published_materials = {
+        (s["document_id"], s["content_hash"]) for s in page.published_sources
+    }
     valid_sources = []
     summary_contexts = {row.document_id: row.source_context for row in session.execute(
         select(WikiPageSource.document_id, WikiPageSource.source_context)
@@ -488,9 +622,13 @@ def load_reduce(session, kb_id, page_id, *, redelivered=False, failure_limit=Non
             or state.mapped_version != state.requested_version
             or source.document_wiki_version != state.requested_version
         ):
-            if state and state.status in {"failed", "cancelled"}:
-                raise invalid_source("WIKI_SOURCE_FAILED")
-            raise WikiDeferred("WIKI_SOURCE_UPDATING")
+            # 未交付当前素材的来源不参与本次生成，也不能使其他文件的任务失败。
+            continue
+        if (state.status == "cancelled" or document.run == 2) and (
+            str(source.document_id), source.content_hash
+        ) not in published_materials:
+            # 取消任务不能借其他文件的 Reduce 发布尚未发布过的素材。
+            continue
         valid_sources.append(
             {
                 "document_id": str(document.id),
@@ -504,38 +642,14 @@ def load_reduce(session, kb_id, page_id, *, redelivered=False, failure_limit=Non
                                        "summary", source.source_context.get("summary", {}))},
             }
         )
-    participants = []
-    known_sources = {row.document_id for row in sources}
-    known_sources.update(as_uuid(row["document_id"]) for row in page.published_sources)
-    for task in tasks:
-        state = states[task.document_id]
-        document = documents[task.document_id]
-        if not state or task.requested_version != state.requested_version:
-            task.status = "superseded"
-            continue
-        if state.status == "cancelled" or document.run == 2:
-            task.status = "cancelled"
-            continue
-        if not state.plan_ready or state.mapped_version != state.requested_version:
-            if task.document_id not in known_sources:
-                continue
-            if state.status == "failed":
-                raise invalid_source("WIKI_SOURCE_FAILED")
-            raise WikiDeferred("WIKI_SOURCE_UPDATING")
-        if state.operation == "upsert" and state.config_hash != config_hash:
-            raise invalid_source("WIKI_CONFIG_CHANGED")
-        participants.append(
-            {
-                "document_id": str(task.document_id),
-                "requested_version": task.requested_version,
-                "subtask_id": str(task.subtask_id),
-            }
-        )
+    current_materials = {(s["document_id"], s["content_hash"]) for s in valid_sources}
+    if not participants and not valid_sources and any(
+        states[s.document_id] and states[s.document_id].status == "cancelled" for s in sources
+    ):
+        page.status, page.error_code = "failed", "WIKI_CANCELLED"
+        page.row_version += 1
+        return None
     if not participants and valid_sources:
-        current_materials = {(s["document_id"], s["content_hash"]) for s in valid_sources}
-        published_materials = {
-            (s["document_id"], s["content_hash"]) for s in page.published_sources
-        }
         if page.version > 0 and current_materials == published_materials:
             # Cancellation may leave an unchanged, already published page fully supported.
             page.status, page.error_code = "ready", None
@@ -581,11 +695,18 @@ def load_reduce(session, kb_id, page_id, *, redelivered=False, failure_limit=Non
         "page_type": page.page_type,
         "aliases": page.aliases,
         "row_version": page.row_version,
-        "content": page.content,
+        # 被排除的旧来源可能仍在旧正文中，不能把它作为本次模型输入带回。
+        "content": page.content if published_materials <= current_materials else "",
         "llm_id": str(knowledge.llm_id),
         "language": config.language,
         "config_hash": generation_config_hash(knowledge.llm_id, knowledge.parser_config),
         "sources": valid_sources,
+        # 包含未参与生成的来源：其素材在生成期间增删或替换，也必须触发 CAS 冲突。
+        "source_stamps": [
+            {"document_id": str(s.document_id), "version": s.document_wiki_version,
+             "content_hash": s.content_hash}
+            for s in sources
+        ],
         "participants": participants,
         "allowed_links": links,
     }
@@ -595,6 +716,7 @@ def commit_reduce(session, snapshot, result):
     kb_id, page_id = snapshot["kb_id"], as_uuid(snapshot["page_id"])
     knowledge, scope = lock_knowledge(session, kb_id)
     ids = {p["document_id"] for p in snapshot["participants"]}
+    source_stamps = snapshot.get("source_stamps", snapshot["sources"])
     ids.update(s["document_id"] for s in snapshot["sources"])
     locked_documents, locked_states = lock_documents(session, kb_id, ids)
     documents = {str(key): value for key, value in locked_documents.items()}
@@ -619,7 +741,7 @@ def commit_reduce(session, snapshot, result):
         )
     )
     stamps = {(str(s.document_id), s.document_wiki_version, s.content_hash) for s in actual}
-    if stamps != {(s["document_id"], s["version"], s["content_hash"]) for s in snapshot["sources"]}:
+    if stamps != {(s["document_id"], s["version"], s["content_hash"]) for s in source_stamps}:
         raise WikiDeferred("WIKI_CAS_CONFLICT")
     for source in snapshot["sources"]:
         doc, state = documents[source["document_id"]], states[source["document_id"]]
@@ -662,12 +784,14 @@ def commit_reduce(session, snapshot, result):
             "aliases": sorted({normalize_name(alias) for alias in page.aliases}),
         }
     )
+    previous_version = page.version
     changed = page.published_content_hash != content_hash
     page.content, page.summary = result["content"], result["summary"]
-    page.status = "ready" if actual else "unavailable"
-    if actual and (page.version == 0 or changed):
+    has_sources = bool(snapshot["sources"])
+    page.status = "ready" if has_sources else "unavailable"
+    if has_sources and (page.version == 0 or changed):
         page.version += 1
-    if actual:
+    if has_sources:
         page.published_content_hash = content_hash
     page.row_version = snapshot["row_version"] + 1
     page.failure_attempt, page.defer_count, page.error_code = 0, 0, None
@@ -680,6 +804,10 @@ def commit_reduce(session, snapshot, result):
         }
         for s in snapshot["sources"]
     ]
+    if has_sources and page.version != previous_version:
+        from ..wiki_faq.jobs import record_publication
+
+        record_publication(session, scope, page, previous_version, snapshot)
     session.execute(delete(WikiPageLink).where(WikiPageLink.source_page_id == page.id))
     for target in sorted(set(result["links"])):
         session.add(WikiPageLink(**scope, source_page_id=page.id, target_page_id=as_uuid(target)))

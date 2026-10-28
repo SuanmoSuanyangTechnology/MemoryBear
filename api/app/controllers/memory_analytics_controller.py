@@ -9,7 +9,7 @@
 """
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Header, Query, Request
+from fastapi import APIRouter, Body, Depends, Header, Query, Request
 
 from app.cache.memory.interest_memory import InterestMemoryCache
 from app.core.error_codes import BizCode
@@ -102,8 +102,15 @@ async def get_user_summary_api(
 
 
 @router.post("/generate_cache", response_model=ApiResponse)
+@memory_profile_proxy(
+    body_arg="payload",
+    body_fields=("end_user_id",),
+    language_field="language_type",
+    timeout_seconds=300,
+)
 async def generate_cache_api(
-        request: GenerateCacheRequest,
+        request: Request = None,
+        payload: GenerateCacheRequest = Body(...),
         language_type: str = Header(default=None, alias="X-Language-Type"),
         current_user: CurrentUserSnapshot = Depends(get_current_user_async),
 ) -> dict:
@@ -125,7 +132,7 @@ async def generate_cache_api(
         api_logger.warning(f"用户 {current_user.username} 尝试生成缓存但未选择工作空间")
         return fail(BizCode.INVALID_PARAMETER, "请先切换到一个工作空间", "current_workspace_id is None")
 
-    end_user_id = request.end_user_id
+    end_user_id = payload.end_user_id
 
     api_logger.info(
         f"缓存生成请求: user={current_user.username}, workspace={workspace_id}, "
@@ -393,11 +400,16 @@ async def get_community_graph_data_api(
 
 
 @router.get("/interest_distribution", response_model=ApiResponse)
+@memory_profile_proxy(
+    query_fields=("end_user_id", "limit"),
+    language_field="language_type",
+)
 async def get_interest_distribution_by_user_api(
         end_user_id: str = Query(..., description="用户ID（必填）"),
         limit: int = Query(5, ge=1, le=5, description="返回兴趣标签数量限制，1到5个"),
         language_type: str = Header(default=None, alias="X-Language-Type"),
         current_user: CurrentUserSnapshot = Depends(get_current_user_async),
+        request: Request = None,
 ):
     """
     获取指定用户的兴趣分布标签

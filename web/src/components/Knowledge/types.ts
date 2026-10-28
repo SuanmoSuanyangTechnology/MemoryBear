@@ -27,7 +27,7 @@ export interface RerankerConfig {
 /**
  * Knowledge retrieval type
  */
-export type RetrieveType = 'participle' | 'semantic' | 'hybrid' | 'graph'
+export type RetrieveType = 'participle' | 'semantic' | 'hybrid' | 'graph' | 'wiki-FAQ'
 
 /**
  * Knowledge base configuration form data

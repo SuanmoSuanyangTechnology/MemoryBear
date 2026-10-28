@@ -712,49 +712,6 @@ class WorkflowService:
         merged["trigger_payload"] = trigger_payload
         return merged
 
-    def update_trigger_runtime_state(
-        self,
-        app_id: uuid.UUID,
-        trigger_id: str,
-        runtime: dict[str, Any],
-    ) -> WorkflowConfig | None:
-        config = self.config_repo.update_trigger_runtime(app_id, trigger_id, runtime)
-        if config is not None:
-            delete_json(workflow_config_key(app_id))
-        return config
-
-    def update_release_trigger_runtime_state(
-        self,
-        release_id: uuid.UUID,
-        trigger_id: str,
-        runtime: dict[str, Any],
-    ) -> AppRelease | None:
-        release = self.db.get(AppRelease, release_id)
-        if not release or not isinstance(release.config, dict):
-            return None
-
-        config = dict(release.config or {})
-        nodes = config.get("nodes") or []
-        updated = False
-        new_nodes = []
-        for node in nodes:
-            # Fresh node dict instead of in-place mutation: an equal
-            # assignment is skipped by SQLAlchemy and never persisted.
-            if not updated and node.get("type") == NodeType.TRIGGER and node.get("id") == trigger_id:
-                new_nodes.append({**node, "runtime": runtime})
-                updated = True
-            else:
-                new_nodes.append(node)
-
-        if not updated:
-            return None
-
-        config["nodes"] = new_nodes
-        release.config = config
-        self.db.commit()
-        self.db.refresh(release)
-        return release
-
     @staticmethod
     def _find_trigger_node(
         nodes: list[dict[str, Any]] | None,
@@ -6277,6 +6234,7 @@ class WorkflowService:
                             error=n.error_message,
                             input=n.input_data,
                             process=(n.meta_data or {}).get("process_data") if isinstance(n.meta_data, dict) else None,
+                            agent_log=(n.meta_data or {}).get("agent_log") if isinstance(n.meta_data, dict) else None,
                             output=n.output_data,
                             elapsed_time=n.elapsed_time,
                             token_usage=n.token_usage,

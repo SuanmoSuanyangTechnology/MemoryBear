@@ -317,6 +317,45 @@ def record_publish_failure(session, delivery, *, terminal=False):
         append_log(document, "Wiki dispatch failed; retry is available.")
 
 
+def chunks_changed(session, kb_id, document_id, *, incomplete=False):
+    """调用者持有文档写入互斥；每次实际变更推进轮次，在途源处理仍由原任务交接。"""
+    knowledge, scope = lock_knowledge(session, kb_id)
+    document, state = lock_document(session, kb_id, document_id)
+    if document.status != 1 or document.run == 2:
+        return None
+    if state is not None and not state.source_ready:
+        # 保留源任务身份；完成交接时应读取人工变更后的最终分块，而非解析器最初的 ID 集合。
+        progress = dict(state.map_progress or {})
+        previous = progress.get("chunk_mutation", {})
+        progress["chunk_mutation"] = {"incomplete": incomplete or previous.get("incomplete", False)}
+        state.map_progress = progress
+        return None
+    if not read_wiki_config(knowledge.parser_config).enabled:
+        # 已有素材仍须失效；开启 Wiki 时可从 waiting_wiki 继续，不再读取旧页面。
+        if state is not None and state.source_ready:
+            fields = ("run", "progress", "process_begin_at", "process_duration", "progress_msg")
+            previous = {name: getattr(document, name) for name in fields}
+            start_round(session, document, state, scope)
+            for name, value in previous.items():
+                setattr(document, name, value)
+        return None
+    if state is None and document.run == 1:
+        return None
+    state = start_round(session, document, state, scope)
+    error_code = "WIKI_SOURCE_INCOMPLETE" if incomplete else (
+        "WIKI_MODEL_REQUIRED" if knowledge.llm_id is None else None
+    )
+    if error_code:
+        state.status, state.error_code, state.error_stage = "failed", error_code, "chunk_mutation"
+        document.run, document.progress = 0, -1.0
+        for task in current_tasks(session, state):
+            task.status, task.error_code, task.error_stage = "failed", error_code, "chunk_mutation"
+        append_log(document, f"分块写入后 Wiki 等待显式重试：{error_code}")
+        return None
+    session.flush()
+    return admit(session, kb_id, document_id)
+
+
 def source_started(session, kb_id, document_id, source_task_id, *, replace=False):
     knowledge, scope = lock_knowledge(session, kb_id)
     document, state = lock_document(session, kb_id, document_id)
@@ -349,6 +388,20 @@ def source_completed(session, kb_id, document_id, source_task_id):
         state = start_round(session, document, None, scope, source=not already_complete)
         state.source_task_id = source_task_id
     if state.source_task_id != source_task_id:
+        return None
+    if not state.source_ready and (state.map_progress or {}).get("chunk_mutation", {}).get(
+        "incomplete", False
+    ):
+        state.status, state.error_code, state.error_stage = (
+            "failed", "WIKI_SOURCE_INCOMPLETE", "chunk_mutation"
+        )
+        document.run, document.progress = 0, -1.0 if enabled else 1.0
+        state.last_progress = document.progress
+        for task in current_tasks(session, state):
+            task.status, task.error_code, task.error_stage = (
+                "failed", state.error_code, "chunk_mutation"
+            )
+        append_log(document, "解析期间分块部分写入失败，Wiki 来源需重新确认。")
         return None
     if state.source_ready and state.stage not in {"waiting_source", "waiting_wiki"}:
         return {**state_delivery(state), "publish": not state.publish_confirmed, "accepted": False}

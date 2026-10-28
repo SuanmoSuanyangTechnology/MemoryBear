@@ -32,7 +32,7 @@ const CreateModalBasicConfig = ({
 
   return (
     <>
-      {!isEditing && (
+      {!isEditing &&
         <Form.Item
           name="name"
           label={t('knowledgeBase.createForm.name')}
@@ -44,7 +44,7 @@ const CreateModalBasicConfig = ({
         >
           <Input placeholder={t('knowledgeBase.createForm.name')} />
         </Form.Item>
-      )}
+      }
       <Form.Item name="description" label={t('knowledgeBase.createForm.description')} rules={[{ max: 500 }]}>
         <TextArea rows={2} placeholder={t('knowledgeBase.createForm.description')} />
       </Form.Item>

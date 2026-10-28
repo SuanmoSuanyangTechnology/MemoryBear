@@ -54,7 +54,7 @@ const StatusTag: FC<StatusTagProps> = ({
       'rb:rounded-full!': circle,
       'rb:text-[12px]!': size === 'small' && !className?.includes('rb:text-['),
     })}>
-      <Flex align="center" gap={4} className='rb:text-[#5B6167] rb:py-px rb:px-2'>
+      <Flex align="center" gap={4} className='rb:text-gray-600 rb:py-px rb:px-2'>
         <span className={clsx('rb:size-1.25 rb:rounded-full', strokeColor || Colors[status])}></span>
         { text }
       </Flex>

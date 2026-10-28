@@ -59,6 +59,9 @@ async def pages(
     kb_id: uuid.UUID,
     current_user: Annotated[User, Depends(get_current_user_async)],
     page_types: str | None = None,
+    keyword: Annotated[str | None, Query(
+        description="搜索 Wiki 标题、摘要和正文，忽略首尾空白，不区分大小写；% 和 _ 为普通字符。"
+    )] = None,
     page: Annotated[int, Query(ge=1)] = 1,
     pagesize: Annotated[int, Query(ge=1, le=200)] = 50,
     limit: Annotated[int | None, Query(ge=1, le=200, include_in_schema=False)] = None,
@@ -90,17 +93,5 @@ async def graph(
     types: str | None = None,
     depth: Annotated[int, Query(ge=1, le=2)] = 1,
     limit: Annotated[int, Query(ge=1, le=5000)] = 500,
-):
-    return _requires_service()
-
-
-@router.post("/documents/{document_id}/generate", status_code=202)
-@cur_workspace_access_guard_async()
-@route_through_knowledge_service(source=KnowledgeRetrievalSource.MANAGER_API)
-async def generate(
-    request: Request,
-    kb_id: uuid.UUID,
-    document_id: uuid.UUID,
-    current_user: Annotated[User, Depends(get_current_user_async)],
 ):
     return _requires_service()

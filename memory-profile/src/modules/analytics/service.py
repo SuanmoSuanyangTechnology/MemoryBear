@@ -13,7 +13,16 @@ from datetime import UTC, datetime, timedelta
 from typing import Any, TypeVar
 from uuid import UUID, uuid4
 
-from src.common import redis_cache
+from task_bridge import (
+    BridgeConfigurationError,
+    BridgeError,
+    InvalidTaskPayloadError,
+    TaskPublishError,
+    TaskResultUnavailableError,
+    TaskTimeoutError,
+)
+from task_bridge.mem_router import TaskName
+
 from src.common.errors import BizCode, LocalizedProfileError
 from src.common.normalization import (
     collapse_whitespace,
@@ -22,6 +31,7 @@ from src.common.normalization import (
     parse_uuid,
     to_jsonable,
 )
+from src.common.redis_cache import CACHE_MISS, get_json, redis_cache, set_json
 from src.i18n import EnumLabels, enum_labels
 from src.modules.analytics.constants import (
     COMMUNITY_GRAPH_ENTITY_FIELDS,
@@ -29,6 +39,7 @@ from src.modules.analytics.constants import (
     COUNT_KEYS,
     DEFAULT_PER_TYPE_LIMITS,
     ENTITY_CONTENT_GATED_FIELDS,
+    INTEREST_DISPLAY_LIMIT,
     MEMORY_TYPES,
     NODE_PROPERTY_WHITELIST,
     PREFERENCE_GROUP_EDGE_TYPE,
@@ -37,22 +48,49 @@ from src.modules.analytics.constants import (
     SINGLE_TYPE_LIMIT_HARD_MAX,
     SUPPORTED_NODE_TYPES,
     TOTAL_NODES_CAP,
+    USER_CARD_TAG_MAX_LENGTH,
     WHITELIST_DEFAULT_FIELDS,
 )
 from src.modules.analytics.repository.end_user_profile import EndUserProfileRepository
+from src.modules.analytics.repository.generation_graph import (
+    GenerationGraphRepository,
+)
+from src.modules.analytics.repository.memory_generation import (
+    MemoryGenerationRepository,
+)
 from src.modules.analytics.repository.memory_graph import MemoryGraphRepository
 from src.modules.analytics.repository.memory_search import MemorySearchRepository
 from src.modules.analytics.repository.memory_statistics import MemoryStatisticsRepository
+from src.modules.analytics.repository.user_profile import UserProfileRepository
+from src.modules.analytics.repository.workspace_profile import WorkspaceProfileRepository
 from src.modules.analytics.repository.workspace_statistics import (
     WorkspaceStatisticsCorruptError,
     WorkspaceStatisticsRefreshLockLostError,
     WorkspaceStatisticsRepository,
     WorkspaceStatisticsUnavailableError,
 )
+from src.modules.shared import (
+    EndUserService,
+    ModelConfigService,
+    WorkspaceService,
+    validate_workspace_row,
+)
 from src.runtime import ProfileRuntime
 
 logger = logging.getLogger(__name__)
 T = TypeVar("T")
+
+#: 与 api InterestMemoryCache.PREFIX 同 key，两侧实现可互读缓存。
+INTEREST_CACHE_PREFIX = "cache:memory:interest_distribution"
+
+#: 各生成用例等待 memory-jobs 终态的预算（秒），在投递处与提交动作成对出现。
+#: 与 api 的客户端预算（读 120s、generate_cache 3600s）对齐：更长的等待不会
+#: 被观察到；单用户 960s 还要越过 worker 的 900s time_limit，保证终态先到。
+_INTEREST_WAIT_TIMEOUT_SECONDS = 120.0
+_GENERATE_CACHE_WAIT_TIMEOUT_SECONDS = 960.0
+#: 整工作空间现在只做枚举+派发，正常几秒内返回；保留 3600s 上限是为了让滚动
+#: 升级期间仍在跑旧串行实现的 worker 不被提前判超时。
+_GENERATE_CACHE_WORKSPACE_WAIT_TIMEOUT_SECONDS = 3600.0
 
 
 def _empty_memory_insight(message_key: str) -> dict[str, Any]:
@@ -361,7 +399,6 @@ _WORKSPACE_STATISTICS_BATCH_SIZE = 1000
 _WORKSPACE_STATISTICS_REFRESH_POLL_INTERVAL_SECONDS = 0.5
 _WORKSPACE_STATISTICS_REFRESH_WAIT_TIMEOUT_SECONDS = 30.0
 _WORKSPACE_STATISTICS_REFRESH_LOCK_RENEW_INTERVAL_SECONDS = 30
-_WORKSPACE_STATISTICS_MIN_MEMORY_SUMMARY_COUNT = 5
 _TODAY_SNAPSHOT_MAX_AGE = timedelta(hours=25)
 
 
@@ -487,12 +524,25 @@ def _with_workspace_statistics_changes(response: dict[str, Any]) -> dict[str, An
 class ProfileAnalyticsService:
     def __init__(self, runtime: ProfileRuntime) -> None:
         self.end_user_profile = EndUserProfileRepository(runtime.postgres)
+        self.end_user = EndUserService.from_postgres(
+            runtime.postgres
+        )
         self.memory_statistics = MemoryStatisticsRepository(runtime.postgres)
         self.memory_graph = MemoryGraphRepository(runtime.neo4j)
         self.memory_search = MemorySearchRepository(runtime.elasticsearch)
         self.workspace_statistics_repository = WorkspaceStatisticsRepository(
             runtime.redis
         )
+        self.workspace_profile = WorkspaceProfileRepository(runtime.postgres)
+        self.user_profile_graph = UserProfileRepository(runtime.neo4j)
+        self.memory_generation = MemoryGenerationRepository(runtime.postgres)
+        self.workspace = WorkspaceService.from_postgres(runtime.postgres)
+        self.generation_graph = GenerationGraphRepository(runtime.neo4j)
+        self.model_config = ModelConfigService.from_postgres(
+            runtime.postgres, runtime.model_service
+        )
+        self.task_bridge = runtime.task_bridge
+        self.interest_cache_expire = runtime.settings.interest_cache_expire_seconds
 
     async def memory_insight(self, end_user_id: str, workspace_id: UUID) -> dict[str, Any]:
         """读缓存的记忆洞察；用户维度的问题一律走空态（文档 3.4 的 B 类响应）。"""
@@ -550,21 +600,21 @@ class ProfileAnalyticsService:
             return 0
 
     async def node_statistics(self, end_user_id: str, workspace_id: UUID) -> list[dict[str, Any]]:
-        # 只做存在性判定，不把画像长文本列载入后丢掉（api ``end_user_exists_async``
-        # 同款取舍）；非法 ID 与用户不存在一律空态全零（文档 3.4 的 B 类响应）。
+        # 只做严格存在性判定（access.exists），不把画像长文本列载入后丢掉；
+        # 非法 ID 与用户不存在一律空态全零（文档 3.4 的 B 类响应）。
         user_id = parse_uuid(end_user_id)
-        if user_id is None or not await self.end_user_profile.end_user_exists(
+        if user_id is None or not await self.end_user.exists_in_workspace(
             user_id, workspace_id
         ):
             return _zero_memory_statistics()
-        # PG 侧 6 个计数器合并为一条查询（每项真实 DB 工作 <1ms，开销在会话/连接上），
-        # Neo4j 侧 4 个计数各自约一次往返（RTT 支配）保持并发。两组互不依赖，一起发。
-        source_counts, neo_counts = await asyncio.gather(
+        # Fetch PG source counts, Neo4j counts and short-term memo counts concurrently.
+        evaluated_at = datetime.now(UTC)
+        source_counts, memory_counts, short_term_count = await asyncio.gather(
             self._memory_type_source_counts(user_id),
             asyncio.gather(
                 self._safe_count(
-                    "valid summaries",
-                    lambda: self.memory_graph.valid_summary_count(end_user_id),
+                    "implicit habits",
+                    lambda: self.memory_statistics.habit_count_for_users([end_user_id]),
                 ),
                 self._safe_count(
                     "episodic", lambda: self.memory_graph.episodic_count(end_user_id)
@@ -577,18 +627,20 @@ class ProfileAnalyticsService:
                     "emotional", lambda: self.memory_graph.emotional_count(end_user_id)
                 ),
             ),
+            self._safe_count(
+                "short term",
+                lambda: self._short_term_count([str(user_id)], evaluated_at),
+            ),
         )
-        summaries, episodic, semantic, emotional = neo_counts
+        implicit_count, episodic, semantic, emotional = memory_counts
         counts = {
             "PERCEPTUAL_MEMORY": source_counts["perceptual"],
             "WORKING_MEMORY": (
                 source_counts["active_conversations"] + source_counts["direct_sources"]
             ),
-            "SHORT_TERM_MEMORY": (
-                source_counts["short_term"] + source_counts["pending_conversations"]
-            ),
+            "SHORT_TERM_MEMORY": short_term_count,
             "EXPLICIT_MEMORY": episodic + semantic,
-            "IMPLICIT_MEMORY": summaries if summaries >= 5 else 0,
+            "IMPLICIT_MEMORY": implicit_count,
             "EMOTIONAL_MEMORY": emotional,
             "EPISODIC_MEMORY": episodic,
             "FORGET_MEMORY": source_counts["forgotten"],
@@ -603,11 +655,26 @@ class ProfileAnalyticsService:
             for key in MEMORY_TYPES
         ]
 
+    async def _short_term_count(self, end_user_ids: list[str], now: datetime) -> int:
+        """Use ES counts first, falling back for absent users or failed searches."""
+        if not end_user_ids:
+            return 0
+        try:
+            counts, present_ids = await self.memory_search.short_term_counts(end_user_ids, now)
+        except Exception:
+            logger.warning("Short-term ES count failed; falling back to Neo4j", exc_info=True)
+            return await self.memory_graph.short_term_count(end_user_ids, now)
+        missing_ids = [user_id for user_id in end_user_ids if user_id not in present_ids]
+        total = sum(counts[user_id] for user_id in present_ids)
+        if missing_ids:
+            total += await self.memory_graph.short_term_count(missing_ids, now)
+        return total
+
     async def _memory_type_source_counts(self, user_id: UUID) -> dict[str, int]:
-        """PG 侧的 6 个计数器：优先一条查询取回（单连接、单快照）。
+        """PG 侧的 4 个计数器：优先一条查询取回（单连接、单快照）。
 
         合并查询失败时回落到逐指标查询，从而保留原先「单个指标失败只把该项降级为 0」
-        的语义（见 :meth:`_safe_count`）；这也是仓储层保留那 6 个单指标方法的原因。
+        的语义（见 :meth:`_safe_count`）；这也是仓储层保留那 4 个单指标方法的原因。
         """
         try:
             return await self.memory_statistics.memory_type_counts(user_id)
@@ -626,13 +693,6 @@ class ProfileAnalyticsService:
             ),
             self._safe_count(
                 "direct sources", lambda: self.memory_statistics.direct_source_count(user_id)
-            ),
-            self._safe_count(
-                "short term", lambda: self.memory_statistics.short_term_count(user_id)
-            ),
-            self._safe_count(
-                "pending conversations",
-                lambda: self.memory_statistics.pending_conversation_count(user_id),
             ),
             self._safe_count(
                 "forgotten", lambda: self.memory_statistics.forgotten_count(user_id)
@@ -659,10 +719,10 @@ class ProfileAnalyticsService:
         user_id = parse_uuid(end_user_id)
         if user_id is None:
             return _empty_graph("analytics.empty.invalid_user_id")
-        resolved = await self.end_user_profile.resolve_graph_end_user(user_id, workspace_id)
+        resolved = await self.end_user.resolve_in_workspace(user_id, workspace_id)
         if resolved is None:
             return _empty_graph("analytics.empty.user_not_found")
-        graph_end_user_id = str(resolved)
+        graph_end_user_id = str(resolved.id)
         if center_node_id and center_node_id.startswith(PREFERENCE_GROUP_NODE_ID_PREFIX):
             return _empty_graph("analytics.empty.invalid_center_node")
         # Filter_Mode 收敛到与 SUPPORTED_NODE_TYPES 的交集并去重排序（api
@@ -819,10 +879,10 @@ class ProfileAnalyticsService:
         user_id = parse_uuid(end_user_id)
         if user_id is None:
             return _empty_community_graph("analytics.empty.invalid_user_id")
-        resolved = await self.end_user_profile.resolve_graph_end_user(user_id, workspace_id)
+        resolved = await self.end_user.resolve_in_workspace(user_id, workspace_id)
         if resolved is None:
             return _empty_community_graph("analytics.empty.user_not_found")
-        graph_end_user_id = str(resolved)
+        graph_end_user_id = str(resolved.id)
 
         rows = await self.memory_graph.community_graph_rows(graph_end_user_id)
         nodes: dict[str, dict[str, Any]] = {}
@@ -1113,15 +1173,15 @@ class ProfileAnalyticsService:
         return calculation_task.result()
 
     async def _calculate_workspace_statistics(self, workspace_id: UUID) -> dict[str, Any]:
-        """按批汇总 workspace 下全部活跃终端用户的八类记忆。
+        """Aggregate active users in batches using PG counts and cached habits.
 
-        每批的 PG 计数、ES 聚合与 Neo4j 隐性记忆并行执行；ES 中完全缺失的用户再
-        回退到 Neo4j 统计。批量大小固定为常量，协程数不随用户输入变化。
+        Query ES concurrently and fall back to Neo4j for users missing from ES.
         """
 
         totals = {memory_type: 0 for memory_type in MEMORY_TYPES}
         total_users = 0
         after_id: UUID | None = None
+        evaluated_at = datetime.now(UTC)
 
         while True:
             end_user_ids = await self.memory_statistics.active_end_user_ids_page(
@@ -1130,12 +1190,11 @@ class ProfileAnalyticsService:
             if not end_user_ids:
                 break
             raw_ids = [str(end_user_id) for end_user_id in end_user_ids]
-            postgresql, search_result, implicit_count = await asyncio.gather(
+            postgresql, search_result, implicit_count, short_term_count = await asyncio.gather(
                 self.memory_statistics.counts_for_users(end_user_ids),
                 self.memory_search.workspace_memory_counts(raw_ids),
-                self.memory_graph.workspace_implicit_count(
-                    raw_ids, _WORKSPACE_STATISTICS_MIN_MEMORY_SUMMARY_COUNT
-                ),
+                self.memory_statistics.habit_count_for_users(raw_ids),
+                self._short_term_count(raw_ids, evaluated_at),
             )
             elastic_statistics, present_ids = search_result
             episodic_count = sum(
@@ -1164,9 +1223,7 @@ class ProfileAnalyticsService:
             totals["WORKING_MEMORY"] += (
                 postgresql["active_conversations"] + postgresql["direct_sources"]
             )
-            totals["SHORT_TERM_MEMORY"] += (
-                postgresql["short_term"] + postgresql["pending_conversations"]
-            )
+            totals["SHORT_TERM_MEMORY"] += short_term_count
             totals["EXPLICIT_MEMORY"] += episodic_count + explicit_entity_count
             totals["IMPLICIT_MEMORY"] += implicit_count
             totals["EMOTIONAL_MEMORY"] += emotional_count
@@ -1195,4 +1252,445 @@ class ProfileAnalyticsService:
             "statistics": statistics,
             "total_count": total_count,
             "total_users": total_users,
+        }
+
+    # ── 工作空间热门标签 / legacy 终端用户画像 ──────────────────────────
+
+    async def workspace_hot_memory_tags(
+        self, workspace_id: UUID, limit: int
+    ) -> list[dict[str, Any]]:
+        """工作空间热门记忆标签：``end_users.memory_tags`` 跨用户精确匹配合并。
+
+        ``limit <= 0`` 时按 api 语义回落 10（api 的请求参数没有上下界校验）。
+        """
+
+        effective_limit = limit if limit > 0 else 10
+        try:
+            tags = await self.workspace_profile.hot_memory_tags(
+                workspace_id, effective_limit, USER_CARD_TAG_MAX_LENGTH
+            )
+        except Exception as exc:
+            logger.error(
+                "hot memory tags failed: workspace_id=%s error=%s",
+                workspace_id,
+                type(exc).__name__,
+                exc_info=True,
+            )
+            raise LocalizedProfileError(
+                BizCode.INTERNAL_ERROR,
+                "analytics.error.hot_memory_tags_failed",
+                detail=str(exc),
+                status_code=500,
+            ) from exc
+        return [{"name": name, "frequency": frequency} for name, frequency in tags]
+
+    async def user_profile(
+        self, end_user_id: str | None, workspace_id: UUID
+    ) -> dict[str, Any]:
+        """legacy 管理端用户画像（名字 + 高频实体），只读。
+
+        api 的调用点不传 ``llm_id``，因此 ``tags`` 恒为空列表；这里保持同一结果，
+        不在本服务引入额外的 LLM 调用。``end_user_id`` 为空时保留 api 的全局查询
+        语义（管理端前端始终会传该参数）。
+        """
+
+        default_name = "默认用户"
+        if end_user_id is not None:
+            end_user = await self.end_user.resolve_in_workspace(end_user_id, workspace_id)
+            if end_user is None:
+                return {"name": default_name, "tags": [], "hot_tags": []}
+            # api 在用户存在时直接使用 other_name（空串也原样返回），只在用户
+            # 不存在时回落「默认用户」。
+            display_name = end_user.other_name
+        else:
+            display_name = default_name
+
+        try:
+            hot_tags = await self.user_profile_graph.top_entities(end_user_id, 4)
+        except Exception as exc:
+            # api 的 get_user_profile 对每个分区单独兜底：热门标签查询失败只丢
+            # 这一块，不影响名字返回。
+            logger.error(
+                "user profile hot tags failed: end_user_id=%s error=%s",
+                end_user_id,
+                type(exc).__name__,
+                exc_info=True,
+            )
+            hot_tags = []
+        return {"name": display_name, "tags": [], "hot_tags": hot_tags}
+
+    # ── 生成类：兴趣分布 ──────────────────────────────────────────
+
+    async def interest_distribution(
+        self, end_user_id: str, workspace_id: UUID, limit: int, language: str
+    ) -> list[dict[str, Any]]:
+        """读缓存或生成兴趣分布。
+
+        与 api 同 key、同 payload 形状（data/generated_at/cached），两种实现可
+        互相命中对方写下的缓存。生成失败按 api 口径降级为空列表并缓存，
+        避免持续击穿模型服务。
+        """
+
+        if not await self.end_user.exists_in_workspace(end_user_id, workspace_id):
+            return []
+
+        cache_key = f"{INTEREST_CACHE_PREFIX}:by_user:{end_user_id}:{language}"
+        cached = await self._interest_cache_get(cache_key)
+        if cached is not None:
+            return cached[:limit]
+
+        generation = await self._generate_interest_via_worker(
+            end_user_id, workspace_id, language
+        )
+        items = generation["items"]
+        if generation["cacheable"]:
+            await self._interest_cache_set(cache_key, items)
+        return items[:limit]
+
+    async def _generate_interest_via_worker(
+        self, end_user_id: str, workspace_id: UUID, language: str
+    ) -> dict[str, Any]:
+        """Generate one interest distribution in memory-jobs; cache stays here.
+
+        The worker returns the items plus its own cacheability decision; this
+        service owns the key, the TTL and the "cache the empty result too" rule
+        the API used.
+        """
+
+        try:
+            task_id = await self.task_bridge.submit(
+                TaskName.INTEREST_DISTRIBUTION_GENERATE,
+                kwargs={
+                    "end_user_id": end_user_id,
+                    "workspace_id": str(workspace_id),
+                    "language": language,
+                    "limit": INTEREST_DISPLAY_LIMIT,
+                },
+            )
+        except (BridgeConfigurationError, InvalidTaskPayloadError, TaskPublishError) as exc:
+            logger.error(
+                "interest distribution submit failed user=%s workspace=%s error=%s",
+                end_user_id,
+                workspace_id,
+                type(exc).__name__,
+            )
+            raise LocalizedProfileError(
+                BizCode.SERVICE_UNAVAILABLE,
+                "analytics.generate.interest_unavailable",
+                detail=f"{type(exc).__name__}: {exc}",
+                status_code=200,
+            ) from exc
+
+        try:
+            status = await self.task_bridge.await_result(
+                task_id, wait_seconds=_INTEREST_WAIT_TIMEOUT_SECONDS
+            )
+        except TaskTimeoutError as exc:
+            logger.warning(
+                "interest distribution still running after wait timeout user=%s task=%s",
+                end_user_id,
+                task_id,
+            )
+            raise LocalizedProfileError(
+                BizCode.SERVICE_UNAVAILABLE,
+                "analytics.generate.interest_timeout",
+                detail=str(exc),
+                status_code=200,
+            ) from exc
+        except (TaskResultUnavailableError, BridgeError) as exc:
+            logger.error(
+                "interest distribution result unavailable user=%s task=%s error=%s",
+                end_user_id,
+                task_id,
+                type(exc).__name__,
+            )
+            raise LocalizedProfileError(
+                BizCode.SERVICE_UNAVAILABLE,
+                "analytics.generate.interest_unavailable",
+                detail=f"{type(exc).__name__}: {exc}",
+                status_code=200,
+            ) from exc
+
+        payload = status.result if isinstance(status.result, dict) else None
+        if status.successful and payload is not None:
+            raw_items = payload.get("items")
+            items = (
+                [item for item in raw_items if isinstance(item, dict)]
+                if isinstance(raw_items, list)
+                else []
+            )
+            return {
+                "items": items,
+                "cacheable": bool(payload.get("cacheable", True)),
+            }
+
+        # The API degraded any generation failure to an empty, cacheable result;
+        # keep that for a crashed worker, but never for a transport problem.
+        logger.error(
+            "interest distribution task failed user=%s task=%s state=%s error=%s",
+            end_user_id,
+            task_id,
+            status.state,
+            status.error,
+        )
+        return {"items": [], "cacheable": True}
+
+    async def _interest_cache_get(self, key: str) -> list[dict[str, Any]] | None:
+        try:
+            payload = await get_json(key)
+        except Exception as exc:
+            logger.warning(
+                "interest cache read unavailable: key=%s error=%s",
+                key,
+                type(exc).__name__,
+            )
+            return None
+        if payload is CACHE_MISS or not isinstance(payload, dict):
+            return None
+        data = payload.get("data")
+        if not isinstance(data, list):
+            return None
+        return [item for item in data if isinstance(item, dict)]
+
+    async def _interest_cache_set(self, key: str, items: list[dict[str, Any]]) -> None:
+        payload = {
+            "data": items,
+            "generated_at": datetime.now(UTC).isoformat(timespec="milliseconds").replace(
+                "+00:00", "Z"
+            ),
+            "cached": True,
+        }
+        try:
+            await set_json(key, payload, self.interest_cache_expire)
+        except Exception as exc:
+            logger.warning(
+                "interest cache write unavailable: key=%s error=%s",
+                key,
+                type(exc).__name__,
+            )
+
+    # ── 生成类：缓存生成（洞察 + 摘要） ──────────────────────────
+
+    async def generate_cache(
+        self,
+        workspace_id: UUID,
+        end_user_id: str | None,
+        language: str,
+    ) -> dict[str, Any]:
+        """为单个终端用户或整个工作空间生成洞察与摘要缓存。
+
+        工作空间与存储类型校验在入口完成；单用户失败会如实反映在结果里，
+        批量生成按 api 语义串行执行且单个用户失败不影响其他用户。
+        """
+
+        workspace_row = await self.workspace.row(workspace_id)
+        valid, reason, storage_type = validate_workspace_row(workspace_row)
+        if not valid:
+            if reason == "unsupported_storage_type":
+                raise LocalizedProfileError(
+                    BizCode.INVALID_PARAMETER,
+                    "analytics.generate.unsupported_storage_type",
+                    detail=f"unsupported storage_type: {storage_type or 'unknown'}",
+                )
+            raise LocalizedProfileError(
+                BizCode.INVALID_PARAMETER,
+                "analytics.generate.workspace_unavailable",
+                detail=reason,
+            )
+
+        if end_user_id:
+            # One user = one worker unit. The response shape is the API's: the
+            # request still blocks until generation finishes, only the CPU/LLM
+            # work now happens in memory-jobs.
+            return await self._generate_cache_via_worker(
+                end_user_id, workspace_id, language
+            )
+
+        # A whole workspace is fanned out by the worker: it enumerates the
+        # active users, queues one per-user unit for each and returns at once,
+        # so this process waits only for the dispatch summary.
+        return await self._generate_cache_batch_via_worker(workspace_id, language)
+
+    async def _generate_cache_via_worker(
+        self,
+        end_user_id: str,
+        workspace_id: UUID,
+        language: str,
+    ) -> dict[str, Any]:
+        """Submit one generation unit to memory-jobs and wait for its outcome.
+
+        The response keeps the API's shape (``end_user_id`` / ``insight_success``
+        / ``summary_success`` / ``errors``). Transport problems surface as
+        ``SERVICE_UNAVAILABLE``; a unit another run already holds is answered the
+        same way the statistics path answers "正在生成" instead of duplicating
+        LLM work.
+        """
+
+        try:
+            task_id = await self.task_bridge.submit(
+                TaskName.PROFILE_CACHE_GENERATE,
+                kwargs={
+                    "end_user_id": end_user_id,
+                    "workspace_id": str(workspace_id),
+                    "language": language,
+                },
+            )
+        except (BridgeConfigurationError, InvalidTaskPayloadError, TaskPublishError) as exc:
+            logger.error(
+                "generate_cache submit failed user=%s workspace=%s error=%s",
+                end_user_id,
+                workspace_id,
+                type(exc).__name__,
+            )
+            raise LocalizedProfileError(
+                BizCode.SERVICE_UNAVAILABLE,
+                "analytics.generate.unavailable",
+                detail=f"{type(exc).__name__}: {exc}",
+                status_code=200,
+            ) from exc
+
+        try:
+            status = await self.task_bridge.await_result(
+                task_id, wait_seconds=_GENERATE_CACHE_WAIT_TIMEOUT_SECONDS
+            )
+        except TaskTimeoutError as exc:
+            logger.warning(
+                "generate_cache still running after wait timeout user=%s task=%s",
+                end_user_id,
+                task_id,
+            )
+            raise LocalizedProfileError(
+                BizCode.SERVICE_UNAVAILABLE,
+                "analytics.generate.in_progress",
+                detail=str(exc),
+                status_code=200,
+            ) from exc
+        except (TaskResultUnavailableError, BridgeError) as exc:
+            logger.error(
+                "generate_cache result unavailable user=%s task=%s error=%s",
+                end_user_id,
+                task_id,
+                type(exc).__name__,
+            )
+            raise LocalizedProfileError(
+                BizCode.SERVICE_UNAVAILABLE,
+                "analytics.generate.unavailable",
+                detail=f"{type(exc).__name__}: {exc}",
+                status_code=200,
+            ) from exc
+
+        payload = status.result if isinstance(status.result, dict) else None
+        if status.successful and payload is not None:
+            if payload.get("status") == "skipped":
+                raise LocalizedProfileError(
+                    BizCode.SERVICE_UNAVAILABLE,
+                    "analytics.generate.in_progress",
+                    detail="task skipped: another refresh holds the lock",
+                    status_code=200,
+                )
+            return {
+                "end_user_id": payload.get("end_user_id", end_user_id),
+                "insight_success": payload.get("insight_success"),
+                "summary_success": payload.get("summary_success"),
+                "errors": payload.get("errors") or [],
+            }
+
+        error = status.error or "unknown error"
+        logger.error(
+            "generate_cache task failed user=%s task=%s state=%s error=%s",
+            end_user_id,
+            task_id,
+            status.state,
+            error,
+        )
+        return {
+            "end_user_id": end_user_id,
+            "insight_success": False,
+            "summary_success": False,
+            "errors": [{"type": "task", "error": error}],
+        }
+
+    async def _generate_cache_batch_via_worker(
+        self, workspace_id: UUID, language: str
+    ) -> dict[str, Any]:
+        """Ask memory-jobs to fan the workspace out and wait for its summary.
+
+        The worker queues one ``memory_jobs.profile_cache.generate`` unit per
+        active user and answers in the API's batch shape (``total_users`` /
+        ``successful`` / ``failed`` / ``errors``): ``successful`` counts queued
+        units and ``failed`` the ones the broker refused, while each unit
+        reports its own generation outcome. Transport problems become 503; a
+        failed task returns zero counts plus the error.
+        """
+
+        try:
+            task_id = await self.task_bridge.submit(
+                TaskName.PROFILE_CACHE_GENERATE_WORKSPACE,
+                kwargs={"workspace_id": str(workspace_id), "language": language},
+            )
+        except (BridgeConfigurationError, InvalidTaskPayloadError, TaskPublishError) as exc:
+            logger.error(
+                "generate_cache batch submit failed workspace=%s error=%s",
+                workspace_id,
+                type(exc).__name__,
+            )
+            raise LocalizedProfileError(
+                BizCode.SERVICE_UNAVAILABLE,
+                "analytics.generate.unavailable",
+                detail=f"{type(exc).__name__}: {exc}",
+                status_code=200,
+            ) from exc
+
+        try:
+            status = await self.task_bridge.await_result(
+                task_id, wait_seconds=_GENERATE_CACHE_WORKSPACE_WAIT_TIMEOUT_SECONDS
+            )
+        except TaskTimeoutError as exc:
+            logger.warning(
+                "generate_cache batch still running after wait timeout workspace=%s task=%s",
+                workspace_id,
+                task_id,
+            )
+            raise LocalizedProfileError(
+                BizCode.SERVICE_UNAVAILABLE,
+                "analytics.generate.in_progress",
+                detail=str(exc),
+                status_code=200,
+            ) from exc
+        except (TaskResultUnavailableError, BridgeError) as exc:
+            logger.error(
+                "generate_cache batch result unavailable workspace=%s task=%s error=%s",
+                workspace_id,
+                task_id,
+                type(exc).__name__,
+            )
+            raise LocalizedProfileError(
+                BizCode.SERVICE_UNAVAILABLE,
+                "analytics.generate.unavailable",
+                detail=f"{type(exc).__name__}: {exc}",
+                status_code=200,
+            ) from exc
+
+        payload = status.result if isinstance(status.result, dict) else None
+        if status.successful and payload is not None:
+            return {
+                "total_users": payload.get("total_users", 0),
+                "successful": payload.get("successful", 0),
+                "failed": payload.get("failed", 0),
+                "errors": payload.get("errors") or [],
+            }
+
+        error = status.error or "unknown error"
+        logger.error(
+            "generate_cache batch task failed workspace=%s task=%s state=%s error=%s",
+            workspace_id,
+            task_id,
+            status.state,
+            error,
+        )
+        return {
+            "total_users": 0,
+            "successful": 0,
+            "failed": 0,
+            "errors": [{"error": f"task {task_id} failed: {error}"}],
         }

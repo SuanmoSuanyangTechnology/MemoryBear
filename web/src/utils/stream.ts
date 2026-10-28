@@ -44,6 +44,7 @@ const refreshTokenForSSE = async (): Promise<string> => {
         throw new Error(i18n.t('common.refreshTokenNotExist'));
       }
       const response: any = await refreshToken();
+      cookieUtils.set('refreshToken', response.refresh_token);
       const newToken = response.access_token;
       cookieUtils.set('authToken', newToken);
       return newToken;

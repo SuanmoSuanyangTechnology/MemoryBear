@@ -13,8 +13,12 @@ from .wiki import (
     WikiPageLink,
     WikiPageSource,
 )
+from .wiki_faq import WikiFAQ, WikiFAQGenerationJob, WikiPageVersion
 
 __all__ = [
+    "WikiFAQ",
+    "WikiFAQGenerationJob",
+    "WikiPageVersion",
     "WikiFolder",
     "WikiPage",
     "WikiPageSource",

@@ -37,7 +37,7 @@ const MoreDropdown: FC<MoreDropdownProps> = ({ items, placement = 'bottomRight',
         : 
           <div
             onClick={(e) => { e.stopPropagation(); onClick?.(e); }}
-            className={`rb:cursor-pointer rb:size-5.5 rb:bg-cover rb:bg-[url('@/assets/images/common/more.svg')] rb:hover:bg-[url('@/assets/images/common/more_hover.svg')] ${iconClassName}`}
+            className={`rb:cursor-pointer rb:size-5.5 rb:bg-cover rb:bg-[url('@/assets/images/common/more.svg')] rb:hover:bg-[url('@/assets/images/common/more_hover.svg')] rb:shrink-0 ${iconClassName}`}
           />
       }
     </Dropdown>

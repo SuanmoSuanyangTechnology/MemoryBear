@@ -10,6 +10,7 @@ from ..chunk.token_utils import split_by_token_limit
 from .batching import optional_items, parallel
 from .config import WikiError, fingerprint, normalize_name, source_reference_key
 from .contracts import Candidates, Compacted, EvidencePage
+from .diagnostics import diagnostic_json
 from .model import request_tokens, tokens
 
 logger = logging.getLogger(__name__)
@@ -349,7 +350,25 @@ def generate_page(model, snapshot):
     allowed_refs = {item["ref"] for item in catalog}
 
     def validate(value):
-        require_refs(value["source_refs"], allowed_refs, complete=True)
+        from ...tasks.observability import current_parent_task_id
+
+        # 页面引用只需指向实际采用的合法证据，不要求模型枚举全部输入编号。
+        unknown = sorted(set(value["source_refs"]) - allowed_refs)
+        value["source_refs"] = list(dict.fromkeys(
+            ref for ref in value["source_refs"] if ref in allowed_refs
+        ))
+        if unknown:
+            logger.warning("Wiki 页面引用降级 %s", diagnostic_json({
+                "event": "wiki_page_source_refs_filtered", "stage": "wiki_page_original_v2",
+                "task_id": current_parent_task_id(), "knowledge_id": snapshot.get("kb_id"),
+                "page_id": snapshot.get("page_id"), "model_id": model.model_id,
+                "unknown_sources": unknown, "valid_sources": len(value["source_refs"]),
+                "input_sources": len(allowed_refs),
+            }))
+        if not value["source_refs"]:
+            raise ValueError("Wiki page has no valid evidence handles after filtering")
+        if not value["content_markdown"].strip() or not value["summary"].strip():
+            raise ValueError("Wiki page content and summary must not be blank")
         validate_markdown(value["content_markdown"], value["source_refs"], links)
 
     contexts = []

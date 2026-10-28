@@ -5,10 +5,12 @@ import json
 import asyncio
 import inspect
 import logging
+from contextlib import asynccontextmanager
 from typing import Dict, Any, List, Optional, AsyncIterator, Tuple, TYPE_CHECKING
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
+from ..db import get_async_db_context
 from ..models import MultiAgentConfig, AgentConfig, ModelConfig
 from ..models.multi_agent_model import AggregationStrategy, OrchestrationMode
 from .agent_registry import AgentRegistry
@@ -894,10 +896,27 @@ class MultiAgentOrchestrator:
             return await value
         return value
 
-    async def _db_get(self, model, identity):
-        if self.db is None:
+    async def _db_get(self, model, identity, db=None):
+        session = self.db if db is None else db
+        if session is None:
             return None
-        return await self._maybe_await(self.db.get(model, identity))
+        return await self._maybe_await(session.get(model, identity))
+
+    @asynccontextmanager
+    async def _sub_agent_db(self):
+        """DB session owned by a single sub-agent execution.
+
+        ``self.db`` is the orchestrator's request-scoped session. Sub-agents can
+        run concurrently (parallel delegation / collaboration / supervisor tool
+        batches) and an AsyncSession must not be used concurrently, so each
+        execution opens its own session. Sync sessions (tests, sync hosts) and
+        None fall back to ``self.db`` unchanged.
+        """
+        if isinstance(self.db, AsyncSession):
+            async with get_async_db_context() as db:
+                yield db
+        else:
+            yield self.db
 
     # ──────────────────────────────────────────────────────────────────
     # Multi-agent logging: lifecycle of the master execution record
@@ -1003,6 +1022,7 @@ class MultiAgentOrchestrator:
                 elapsed_time=elapsed_time,
                 token_usage=token_usage,
                 error_message=error_message,
+                agent_log=getattr(self, "_master_agent_log", None),
                 meta_patch=meta_patch,
             )
         except Exception as e:
@@ -2796,6 +2816,9 @@ class MultiAgentOrchestrator:
                     _supervisor_prompt,
                     self._turn_emotion_detection,
                     self._turn_user_message_id,
+                    app_id=self._app_id,
+                    tenant_id=self.tenant_id,
+                    db=self.db,
                     write_cache=self.cluster_memory_enabled(),
                 )
             except Exception as e:  # noqa: BLE001 - emotion sensing failure must not block the conversation
@@ -2950,6 +2973,7 @@ class MultiAgentOrchestrator:
                         workspace_id,
                         getattr(self, "_loop_storage_type", "") or "",
                         getattr(self, "_loop_user_rag_memory_id", "") or "",
+                        app_id=self._app_id,
                     )
                     tools.extend(memory_tools)
         except Exception as e:
@@ -2991,18 +3015,19 @@ class MultiAgentOrchestrator:
                 logger.warning(f"主管工具：读取集群 workspace 失败（忽略）: {e}")
         return None
 
-    async def _agent_workspace_id(self, agent_config) -> Optional[uuid.UUID]:
+    async def _agent_workspace_id(self, agent_config, db=None) -> Optional[uuid.UUID]:
         """Workspace of a sub-agent's app, safe on async sessions.
 
         ``agent_config.app.workspace_id`` can hit an expired ORM row (the session
         committed earlier), and the implicit lazy refresh raises MissingGreenlet
         on an AsyncSession. Re-fetch through _db_get, which awaits when needed.
         """
+        session = self.db if db is None else db
         app_id = getattr(agent_config, "app_id", None)
-        if app_id is not None and self.db is not None:
+        if app_id is not None and session is not None:
             from ..models import App
 
-            app = await self._db_get(App, app_id)
+            app = await self._db_get(App, app_id, db=db)
             if app is not None:
                 return app.workspace_id
         return agent_config.app.workspace_id
@@ -3027,6 +3052,7 @@ class MultiAgentOrchestrator:
     async def _load_cluster_history(
         self,
         conversation_id: Optional[uuid.UUID],
+        db=None,
     ) -> List[Dict[str, Any]]:
         """Cluster conversation history (supervisor multi-turn memory).
 
@@ -3036,7 +3062,8 @@ class MultiAgentOrchestrator:
         landed yet). Read failures degrade to an empty list (the conversation is
         not interrupted).
         """
-        if not conversation_id or self.db is None:
+        db = self.db if db is None else db
+        if not conversation_id or db is None:
             return []
         try:
             # Regeneration scenario (when _regenerate_before is set): truncate by the
@@ -3059,10 +3086,10 @@ class MultiAgentOrchestrator:
                     )
                     .order_by(Message.created_at.asc())
                 )
-                if isinstance(self.db, AsyncSession):
-                    rows = (await self.db.execute(stmt)).scalars().all()
+                if isinstance(db, AsyncSession):
+                    rows = (await db.execute(stmt)).scalars().all()
                 else:
-                    rows = self.db.scalars(stmt).all()
+                    rows = db.scalars(stmt).all()
                 return [
                     {"role": m.role, "content": m.content}
                     for m in (rows or [])
@@ -3071,7 +3098,7 @@ class MultiAgentOrchestrator:
 
             from .conversation_service import ConversationService
 
-            conv_service = ConversationService(self.db)
+            conv_service = ConversationService(db)
             history = await conv_service.get_conversation_history(
                 conversation_id, max_history=20,
             )
@@ -3088,6 +3115,7 @@ class MultiAgentOrchestrator:
     async def _sub_agent_history(
         self,
         conversation_id: Optional[uuid.UUID],
+        db=None,
     ) -> List[Dict[str, Any]]:
         """History a sub-agent runtime carries.
 
@@ -3105,7 +3133,7 @@ class MultiAgentOrchestrator:
         - Other modes keep the previous behavior (empty history).
         """
         if self._normalized_mode == OrchestrationMode.SUPERVISOR:
-            return await self._load_cluster_history(conversation_id)
+            return await self._load_cluster_history(conversation_id, db=db)
         return []
 
     async def _execute_supervisor_loop_stream(
@@ -3148,6 +3176,9 @@ class MultiAgentOrchestrator:
         """
         # Sub-agent execution parameters (read by the SubAgentTool execution body)
         self._loop_user_id = user_id
+        # Final snapshot of the supervisor's own trace (LLM/tool calls), persisted
+        # to the master execution record on finalize.
+        self._master_agent_log: Optional[Dict[str, Any]] = None
         # Sub-agent web search: pure request-level passthrough (session-level switch on
         # the experience-sharing entry). The supervisor itself offers no search config
         # (SupervisorConfig has no web_search)
@@ -3293,6 +3324,13 @@ class MultiAgentOrchestrator:
                     _trace_tokens = _trace_total_tokens(item)
                     if _trace_tokens:
                         supervisor_tokens = max(supervisor_tokens, _trace_tokens)
+                    # Persist the supervisor's own trace (LLM turns + own tools):
+                    # previously it was only streamed via SSE, so version-switch /
+                    # log-detail views rebuilt from agent_executions lost the panel.
+                    if _item_type in ("agent_log", "agent_log_final"):
+                        _trace_data = item.get("data")
+                        if isinstance(_trace_data, dict):
+                            self._master_agent_log = _trace_data
                 # list (node_executions) is ignored: step attribution lives in the
                 # execution records
         finally:
@@ -4085,57 +4123,62 @@ class MultiAgentOrchestrator:
         """
         from .draft_run_service import AgentRunService
 
-        # Load the model config
-        model_config = await self._db_get(ModelConfig, agent_config.default_model_config_id)
-        if not model_config:
-            raise BusinessException(
-                "Agent 模型配置不存在",
-                BizCode.AGENT_CONFIG_MISSING
+        async with self._sub_agent_db() as agent_db:
+            # Load the model config
+            model_config = await self._db_get(
+                ModelConfig, agent_config.default_model_config_id, db=agent_db
             )
+            if not model_config:
+                raise BusinessException(
+                    "Agent 模型配置不存在",
+                    BizCode.AGENT_CONFIG_MISSING
+                )
 
-        # Stream the agent execution
-        # Attribution comes from instance state (current_execution_id) + a local lookup
-        # rather than adding parameters at all 10 call sites — that would inevitably miss
-        # some (the streaming path once blew up on a foreign key because of this).
-        # Sub-layer tokens are accounted uniformly here (the sub-agent's sub_usage event
-        # is absorbed into the ledger at this point and no longer passed through, so the
-        # outer layer no longer parses SSE strings to accumulate).
-        draft_service = AgentRunService(self.db)
-        sub_workspace_id = await self._agent_workspace_id(agent_config)
-        async for event in draft_service.run_stream(
-            agent_config=agent_config,
-            model_config=model_config,
-            message=message,
-            workspace_id=sub_workspace_id,
-            conversation_id=str(conversation_id) if conversation_id else None,
-            user_id=user_id,
-            variables=context,
-            storage_type=storage_type,
-            user_rag_memory_id=user_rag_memory_id,
-            web_search=web_search,
-            # The memory switch's single source of truth = cluster config (all
-            # orchestration modes and call paths converge here); the memory parameter
-            # exists only for signature compatibility and no longer drives decisions
-            memory=self.cluster_memory_enabled(),
-            sub_agent=True,
             # History convention, see _sub_agent_history: supervisor_loop sees
             # only the task brief (empty history); three-stage supervisor
             # sub-agents answer the user directly and carry the cluster history.
-            history=await self._sub_agent_history(conversation_id),
-            parent_execution_id=self.current_execution_id,
-            orchestration_mode=self._normalized_mode,
-            execution_owner=self._resolve_agent_identity(agent_config),
-        ):
-            _name = _sse_event_name(event)
-            if _name == "sub_usage":
-                try:
-                    data_line = event.split("data: ", 1)[1].strip()
-                    data = json.loads(data_line)
-                    self._turn_sub_tokens += int(data.get("total_tokens") or 0)
-                except Exception:
-                    pass
-                continue
-            yield event
+            history = await self._sub_agent_history(conversation_id, db=agent_db)
+            sub_workspace_id = await self._agent_workspace_id(agent_config, db=agent_db)
+
+            # Stream the agent execution
+            # Attribution comes from instance state (current_execution_id) + a local lookup
+            # rather than adding parameters at all 10 call sites — that would inevitably miss
+            # some (the streaming path once blew up on a foreign key because of this).
+            # Sub-layer tokens are accounted uniformly here (the sub-agent's sub_usage event
+            # is absorbed into the ledger at this point and no longer passed through, so the
+            # outer layer no longer parses SSE strings to accumulate).
+            draft_service = AgentRunService(agent_db)
+            async for event in draft_service.run_stream(
+                agent_config=agent_config,
+                model_config=model_config,
+                message=message,
+                workspace_id=sub_workspace_id,
+                conversation_id=str(conversation_id) if conversation_id else None,
+                user_id=user_id,
+                variables=context,
+                storage_type=storage_type,
+                user_rag_memory_id=user_rag_memory_id,
+                web_search=web_search,
+                # The memory switch's single source of truth = cluster config (all
+                # orchestration modes and call paths converge here); the memory parameter
+                # exists only for signature compatibility and no longer drives decisions
+                memory=self.cluster_memory_enabled(),
+                sub_agent=True,
+                history=history,
+                parent_execution_id=self.current_execution_id,
+                orchestration_mode=self._normalized_mode,
+                execution_owner=self._resolve_agent_identity(agent_config),
+            ):
+                _name = _sse_event_name(event)
+                if _name == "sub_usage":
+                    try:
+                        data_line = event.split("data: ", 1)[1].strip()
+                        data = json.loads(data_line)
+                        self._turn_sub_tokens += int(data.get("total_tokens") or 0)
+                    except Exception:
+                        pass
+                    continue
+                yield event
 
     async def _execute_sub_agent_once(
         self,
@@ -4164,45 +4207,49 @@ class MultiAgentOrchestrator:
         """
         from .draft_run_service import AgentRunService
 
-        # Load the model config
-        model_config = await self._db_get(ModelConfig, agent_config.default_model_config_id)
-        if not model_config:
-            raise BusinessException(
-                "Agent 模型配置不存在",
-                BizCode.AGENT_CONFIG_MISSING
+        async with self._sub_agent_db() as agent_db:
+            # Load the model config
+            model_config = await self._db_get(
+                ModelConfig, agent_config.default_model_config_id, db=agent_db
+            )
+            if not model_config:
+                raise BusinessException(
+                    "Agent 模型配置不存在",
+                    BizCode.AGENT_CONFIG_MISSING
+                )
+            # Same as the streaming path (see _sub_agent_history)
+            history = await self._sub_agent_history(conversation_id, db=agent_db)
+            sub_workspace_id = await self._agent_workspace_id(agent_config, db=agent_db)
+
+            # Execute the agent
+            # Sub-layer tokens are accounted uniformly here (usage.total_tokens from the
+            # non-streaming result goes into the ledger).
+            draft_service = AgentRunService(agent_db)
+            result = await draft_service.run(
+                agent_config=agent_config,
+                model_config=model_config,
+                message=message,
+                workspace_id=sub_workspace_id,
+                conversation_id=str(conversation_id) if conversation_id else None,
+                user_id=user_id,
+                variables=context,
+                web_search=web_search,
+                # The memory switch's single source of truth = cluster config (same as the
+                # streaming path)
+                memory=self.cluster_memory_enabled(),
+                storage_type=storage_type,
+                user_rag_memory_id=user_rag_memory_id,
+                sub_agent=True,
+                history=history,
+                parent_execution_id=self.current_execution_id,
+                orchestration_mode=self._normalized_mode,
+                execution_owner=self._resolve_agent_identity(agent_config),
             )
 
-        # Execute the agent
-        # Sub-layer tokens are accounted uniformly here (usage.total_tokens from the
-        # non-streaming result goes into the ledger).
-        draft_service = AgentRunService(self.db)
-        sub_workspace_id = await self._agent_workspace_id(agent_config)
-        result = await draft_service.run(
-            agent_config=agent_config,
-            model_config=model_config,
-            message=message,
-            workspace_id=sub_workspace_id,
-            conversation_id=str(conversation_id) if conversation_id else None,
-            user_id=user_id,
-            variables=context,
-            web_search=web_search,
-            # The memory switch's single source of truth = cluster config (same as the
-            # streaming path)
-            memory=self.cluster_memory_enabled(),
-            storage_type=storage_type,
-            user_rag_memory_id=user_rag_memory_id,
-            sub_agent=True,
-            # Same as the streaming path (see _sub_agent_history)
-            history=await self._sub_agent_history(conversation_id),
-            parent_execution_id=self.current_execution_id,
-            orchestration_mode=self._normalized_mode,
-            execution_owner=self._resolve_agent_identity(agent_config),
-        )
+            _usage = (result or {}).get("usage") or {}
+            self._turn_sub_tokens += int(_usage.get("total_tokens") or 0)
 
-        _usage = (result or {}).get("usage") or {}
-        self._turn_sub_tokens += int(_usage.get("total_tokens") or 0)
-
-        return result
+            return result
 
     async def _aggregate_results(
         self,

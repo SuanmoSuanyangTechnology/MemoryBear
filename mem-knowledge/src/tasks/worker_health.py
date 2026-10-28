@@ -23,6 +23,7 @@ WORKER_ROLES = frozenset(
         "graphrag_worker",
         "qa_import_worker",
         "wiki_worker",
+        "faq_worker",
     }
 )
 STATE_FIELDS = frozenset(
