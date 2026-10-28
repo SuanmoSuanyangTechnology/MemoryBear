@@ -3,13 +3,11 @@
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator
+from pydantic import BaseModel, Field, StrictBool, field_validator
 
 
 class PersonalityAnchorConfig(BaseModel):
     """The complete set of editable personality-anchor settings."""
-
-    model_config = ConfigDict(extra="forbid", from_attributes=True)
 
     personality_anchor_enabled: StrictBool
     personality_anchor_auto_solidify: StrictBool
