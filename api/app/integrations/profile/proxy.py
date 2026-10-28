@@ -181,17 +181,22 @@ def memory_profile_proxy(
 
             payload = None
             if body_fields:
-                source_arguments = (
-                    arguments.get(body_arg) if body_arg else arguments
-                )
-                if source_arguments is None:
-                    raise MemoryProfileConfigurationError(
-                        f"memory_profile_proxy body argument {body_arg!r} is missing"
-                    )
-                payload = {
-                    field: getattr(source_arguments, field, None)
-                    for field in body_fields
-                }
+                if body_arg:
+                    source_model = arguments.get(body_arg)
+                    if source_model is None:
+                        raise MemoryProfileConfigurationError(
+                            f"memory_profile_proxy body argument {body_arg!r} is missing"
+                        )
+                    payload = {
+                        field: getattr(source_model, field, None)
+                        for field in body_fields
+                    }
+                else:
+                    # ``arguments`` is a Mapping (``kwargs`` or
+                    # ``bind_partial(...).arguments``), never an object with
+                    # attributes: read the declared handler arguments by key, or
+                    # every field would silently forward ``None``.
+                    payload = {field: arguments.get(field) for field in body_fields}
 
             caller_path = request.scope["path"]
             path = target_path or caller_path
