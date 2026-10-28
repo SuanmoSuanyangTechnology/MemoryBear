@@ -15,6 +15,7 @@ REDUCE_TASK = "mem_knowledge.tasks.reduce_wiki_page"
 BACKFILL_TASK = "mem_knowledge.tasks.enqueue_unprocessed_wiki_documents"
 BACKFILL_REGISTERED_HEADER = "kb_wiki_backfill_registered"
 WIKI_QUEUE = "wiki_tasks"
+UNAVAILABLE_PAGE_CONTENT = "该 Wiki 页面已不可用，当前无有效正文。"
 ACTIVE_STATUSES = frozenset({"pending", "running", "retry_wait"})
 TERMINAL_TASK_STATUSES = frozenset({"succeeded", "failed", "cancelled", "superseded", "skipped"})
 MAX_LANGUAGE_LENGTH = 64
