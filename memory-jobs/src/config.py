@@ -50,17 +50,28 @@ class JobsSettings(BaseSettings):
         "INFO", validation_alias="JOBS_LOG_LEVEL"
     )
     log_format: Literal["text", "json"] = Field("text", validation_alias="JOBS_LOG_FORMAT")
-    #: Probe PostgreSQL/Redis/Elasticsearch/Neo4j once per worker process at
-    #: startup. Opt-in: a transient dependency outage should not keep workers
-    #: from booting and picking up work once the dependency recovers.
+    #: Probe PostgreSQL/Redis/Elasticsearch/Neo4j once per worker at startup
+    #: (``worker_ready``, so it runs for every pool including ``threads``).
+    #: Opt-in: a transient dependency outage should not keep workers from
+    #: booting and picking up work once the dependency recovers.
     startup_dependency_check: bool = Field(
         False, validation_alias="JOBS_STARTUP_DEPENDENCY_CHECK"
     )
     #: Per-request timeout for dependency probes. Probes must stay far below
     #: task timeouts and container probe deadlines even when a dependency is
     #: unreachable (the shared client may retry for minutes on real traffic).
+    #: Only the Elasticsearch ping uses this value; the other clients carry
+    #: their own production timeouts, so ``dependency_health()`` can exceed a
+    #: container probe deadline on a black-holed dependency.
     healthcheck_timeout_seconds: float = Field(
         3.0, gt=0, validation_alias="JOBS_HEALTHCHECK_TIMEOUT_SECONDS"
+    )
+    #: Hard wall-clock budget for the whole ``python -m src.healthcheck`` probe
+    #: (all four checks, sequentially). On expiry the CLI exits 1 by itself, so
+    #: the container deadline only has to cover this budget plus interpreter
+    #: start-up.
+    healthcheck_deadline_seconds: float = Field(
+        30.0, gt=0, validation_alias="JOBS_HEALTHCHECK_DEADLINE_SECONDS"
     )
 
     # ---------------------------------------------------------------- PostgreSQL

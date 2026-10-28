@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from sqlalchemy import Boolean, Column, DateTime, String
+from sqlalchemy import Boolean, Column, DateTime, String, Text
 from sqlalchemy.dialects.postgresql import UUID
 
 from src.models.base import Base
@@ -16,15 +16,15 @@ class EndUser(Base):
     other_name = Column(String, nullable=True)
     is_active = Column(Boolean, nullable=False)
     write_time = Column(DateTime, nullable=True)
-    memory_insight = Column(String, nullable=True)
-    behavior_pattern = Column(String, nullable=True)
-    key_findings = Column(String, nullable=True)
-    growth_trajectory = Column(String, nullable=True)
+    memory_insight = Column(Text, nullable=True)
+    behavior_pattern = Column(Text, nullable=True)
+    key_findings = Column(Text, nullable=True)
+    growth_trajectory = Column(Text, nullable=True)
     memory_insight_updated_at = Column(DateTime, nullable=True)
-    user_summary = Column(String, nullable=True)
-    personality_traits = Column(String, nullable=True)
-    core_values = Column(String, nullable=True)
-    one_sentence_summary = Column(String, nullable=True)
+    user_summary = Column(Text, nullable=True)
+    personality_traits = Column(Text, nullable=True)
+    core_values = Column(Text, nullable=True)
+    one_sentence_summary = Column(Text, nullable=True)
     user_summary_updated_at = Column(DateTime, nullable=True)
 
 

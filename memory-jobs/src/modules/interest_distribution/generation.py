@@ -491,6 +491,11 @@ def generate_interest_distribution(
                                     items=primary_items[:limit],
                                     cacheable=False,
                                 )
+                            # Merged raw, exactly like the API: the final
+                            # ``aggregate_interest_groups`` re-validates the
+                            # combined list with a fresh claim set, so primary
+                            # entities are claimed first and supplementary
+                            # duplicates (or hallucinated ids) are dropped there.
                             combined_groups.extend(supplemental_interests.interests)
                 except Exception as exc:
                     _log_interest_budget(

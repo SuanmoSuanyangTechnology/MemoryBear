@@ -121,6 +121,7 @@ class GenerationGraphRepository:
         query = (
             "MATCH (s:Statement) "
             "WHERE s.end_user_id = $end_user_id AND s.statement IS NOT NULL "
+            "AND s.delete_at IS NULL "
             "RETURN s.statement AS statement, s.created_at AS created_at "
             "ORDER BY created_at DESC LIMIT $limit"
         )

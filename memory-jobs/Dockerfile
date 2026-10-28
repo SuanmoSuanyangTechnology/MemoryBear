@@ -20,7 +20,10 @@ WORKDIR /app
 COPY --from=builder --chown=10001:10001 /app/.venv ./.venv
 COPY --from=builder --chown=10001:10001 /build/memory-jobs/src ./src
 USER 10001:10001
-HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+# ``src.healthcheck`` bounds its own run with JOBS_HEALTHCHECK_DEADLINE_SECONDS
+# (30s by default) and exits 1 when it expires; the container deadline only
+# needs headroom over that budget for interpreter start-up.
+HEALTHCHECK --interval=60s --timeout=40s --start-period=30s --retries=3 \
   CMD ["python", "-m", "src.healthcheck"]
 # Queue/pool/concurrency are per-deployment choices; override CMD in the
 # orchestrator (see deploy/k8s/worker.yaml).

@@ -148,9 +148,20 @@ class MemoryProfileServiceClient:
         started_at = time.perf_counter()
         try:
             # ``timeout=None`` means "use the pool default"; httpx would read a
-            # literal None as "no timeout", so the kwarg is only sent when a
-            # caller explicitly needs a longer budget (batch generation).
-            extra = {} if timeout is None else {"timeout": timeout}
+            # literal None as "no timeout". A bare float, on the other hand,
+            # replaces every phase — including the short connect/pool budgets
+            # configured for the pool — so only the read/write budget grows.
+            if timeout is None:
+                extra: dict[str, Any] = {}
+            else:
+                current = self._client.timeout
+                extra = {
+                    "timeout": httpx.Timeout(
+                        timeout,
+                        connect=current.connect,
+                        pool=current.pool,
+                    )
+                }
             response = await self._client.request(
                 http_method,
                 self._url(path),

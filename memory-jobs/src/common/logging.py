@@ -39,6 +39,11 @@ class TaskContextFilter(logging.Filter):
         return True
 
 
+#: Fields the text format string renders itself; appending them again would
+#: print ``event=``/``task_id=`` twice on every line.
+_TEXT_FORMAT_FIELDS = frozenset({"event", "task_id"})
+
+
 class TextFormatter(logging.Formatter):
     converter = staticmethod(lambda timestamp: datetime.fromtimestamp(timestamp, UTC).timetuple())
 
@@ -47,7 +52,8 @@ class TextFormatter(logging.Formatter):
         fields = " ".join(
             f"{name}={getattr(record, name)}"
             for name in _STRUCTURED_FIELDS
-            if getattr(record, name, None) not in (None, "")
+            if name not in _TEXT_FORMAT_FIELDS
+            and getattr(record, name, None) not in (None, "")
         )
         return f"{rendered} {fields}" if fields else rendered
 
@@ -71,6 +77,8 @@ class JsonFormatter(logging.Formatter):
             "message": record.getMessage(),
         }
         for name in _STRUCTURED_FIELDS:
+            if name in payload:  # ``event`` already carries the canonical value
+                continue
             value = getattr(record, name, None)
             if value not in (None, ""):
                 payload[name] = value

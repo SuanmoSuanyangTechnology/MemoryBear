@@ -238,7 +238,6 @@ class ProfileCacheGenerationService:
                 return {**empty, "error": "用户不存在"}
             llm = resolver.chat_model()
             sections = generate_user_summary(
-                self.generation,
                 self.graph,
                 llm,
                 str(end_user["id"]),

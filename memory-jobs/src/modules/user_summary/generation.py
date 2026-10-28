@@ -10,13 +10,11 @@ from __future__ import annotations
 
 import logging
 import re
-from uuid import UUID
 
 from pydantic import BaseModel, Field
 
 from src.infrastructure.model_service import SyncChatModel
 from src.modules.shared.repositories.generation_graph import GenerationGraphRepository
-from src.modules.shared.repositories.memory_generation import MemoryGenerationRepository
 from src.prompts import (
     render_tag_filter_system_prompt,
     render_tag_filter_user_prompt,
@@ -129,7 +127,6 @@ def parse_summary_sections(full_response: str) -> dict[str, str]:
 
 
 def generate_user_summary(
-    repository: MemoryGenerationRepository,
     graph: GenerationGraphRepository,
     llm: SyncChatModel,
     end_user_id: str,
@@ -137,13 +134,15 @@ def generate_user_summary(
     *,
     display_name: str | None = None,
 ) -> dict[str, str]:
-    """Generate (do not persist) the four summary sections."""
+    """Generate (do not persist) the four summary sections.
 
-    if display_name is None:
+    ``display_name`` is resolved by the caller (it owns the access domain and
+    already reads ``end_users.other_name``); a missing name falls back to a
+    generic one instead of re-reading the row here.
+    """
+
+    if not display_name:
         display_name = "该用户" if language == "zh" else "the user"
-        other_name = repository.other_name(UUID(end_user_id))
-        if other_name:
-            display_name = other_name
 
     entities = get_hot_memory_tags(graph, llm, end_user_id, limit=SUMMARY_ENTITY_LIMIT)
     statements = graph.recent_statements(end_user_id, SUMMARY_STATEMENT_LIMIT)
