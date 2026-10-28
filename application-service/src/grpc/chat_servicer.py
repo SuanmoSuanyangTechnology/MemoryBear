@@ -20,6 +20,11 @@ from memorybear_grpc.request import MetadataRequest
 from pydantic import ValidationError
 
 from ..api.error_handlers import validation_error_content
+from ..api.routes.messages import (
+    ChatRequestValidationError,
+    chat_validation_content,
+    validate_chat_body,
+)
 from ..api.schemas.common import fail
 from ..errors import BizCode, BusinessException, as_biz_code, http_status_for
 from ..i18n import resolve_locale, translate
@@ -54,24 +59,12 @@ def _decode_body(body_json: bytes, *, language: str) -> AppChatRequest:
         body = json.loads(body_json)
     except (UnicodeDecodeError, ValueError) as exc:
         raise _RequestRejected(
-            400,
-            fail(
-                BizCode.INVALID_PARAMETER.value,
-                "请求体不是合法的 JSON",
-                error="请求体不是合法的 JSON",
-            ),
+            422, chat_validation_content("请求体不是合法的 JSON")
         ) from exc
-    if not isinstance(body, dict):
-        raise _RequestRejected(
-            400,
-            fail(
-                BizCode.INVALID_PARAMETER.value,
-                "请求体必须是 JSON 对象",
-                error="请求体必须是 JSON 对象",
-            ),
-        )
     try:
-        return AppChatRequest(**body)
+        return validate_chat_body(body)
+    except ChatRequestValidationError as exc:
+        raise _RequestRejected(422, chat_validation_content(exc.detail)) from exc
     except ValidationError as exc:
         raise _RequestRejected(422, validation_error_content(exc, language)) from exc
 

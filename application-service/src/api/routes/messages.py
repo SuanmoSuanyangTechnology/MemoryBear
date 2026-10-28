@@ -28,8 +28,6 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
 from pydantic import ValidationError as PydanticValidationError
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from ...db import get_db_context
@@ -545,20 +543,18 @@ class ChatRequestValidationError(Exception):
         super().__init__(detail)
 
 
+def chat_validation_content(detail: str) -> dict:
+    """V1 chat 框架请求校验失败统一信封内容：HTTP 422 / code 1001（文档 1.2）。"""
+    return fail(code=BizCode.VALIDATION_FAILED.value, msg=detail, error=detail)
+
+
 def _validation_failed_response(detail: str) -> JSONResponse:
     """V1 chat 框架请求校验失败统一信封：HTTP 422 / code 1001（文档 1.2）。"""
-    return JSONResponse(
-        status_code=422,
-        content=fail(code=BizCode.VALIDATION_FAILED.value, msg=detail, error=detail),
-    )
+    return JSONResponse(status_code=422, content=chat_validation_content(detail))
 
 
-async def _parse_chat_payload(request: Request) -> AppChatRequest:
-    """解析 /v1/app/chat 请求体，非法 JSON / 非 object / 字段类型错误统一为 422/1001。"""
-    try:
-        body = await request.json()
-    except (json.JSONDecodeError, UnicodeDecodeError, ValueError):
-        raise ChatRequestValidationError("请求体不是合法的 JSON")
+def validate_chat_body(body: object) -> AppChatRequest:
+    """已解码 JSON body → AppChatRequest；非法结构统一 422/1001（HTTP 与 gRPC 共用）。"""
     if not isinstance(body, dict):
         raise ChatRequestValidationError("请求体必须是 JSON 对象")
     try:
@@ -570,6 +566,15 @@ async def _parse_chat_payload(request: Request) -> AppChatRequest:
         if any("message" in err.get("loc", ()) for err in exc.errors()):
             raise ChatRequestValidationError("数据验证失败")
         raise
+
+
+async def _parse_chat_payload(request: Request) -> AppChatRequest:
+    """解析 /v1/app/chat 请求体，非法 JSON / 非 object / 字段类型错误统一为 422/1001。"""
+    try:
+        body = await request.json()
+    except (json.JSONDecodeError, UnicodeDecodeError, ValueError):
+        raise ChatRequestValidationError("请求体不是合法的 JSON")
+    return validate_chat_body(body)
 
 
 def _parse_release_config(release: AppRelease) -> dict:
@@ -836,8 +841,10 @@ async def v1_chat(
     app_id = _require_app_id(_resolve_v1_app(request, db, principal))
     workspace_id = principal.workspace_id
 
-    body = await _read_json_body(request)
-    payload = AppChatRequest(**body)
+    try:
+        payload = await _parse_chat_payload(request)
+    except ChatRequestValidationError as exc:
+        return _validation_failed_response(exc.detail)
     prep = await prepare_chat(app_id=app_id, workspace_id=workspace_id, payload=payload)
     if payload.stream:
         return sse_response(chat_stream(prep))

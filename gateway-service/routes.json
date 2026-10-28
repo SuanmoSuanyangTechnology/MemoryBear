@@ -12,7 +12,7 @@
     {"path_prefix": "/api/models", "service": "model-service", "base_url": "http://model-service:8080", "aud": "model-service"},
     {"path_prefix": "/api/apps", "service": "application-service", "base_url": "http://application-service:8080", "aud": "application-service"},
     {"path_prefix": "/v1/app", "service": "application-service", "base_url": "http://application-service:8080", "aud": "application-service", "required_scopes": ["app"]},
-    {"path_prefix": "/v1/app/chat", "service": "application-service", "base_url": "http://application-service:8080", "aud": "application-service", "grpc_target": "dns:///application-service-grpc:9090", "grpc_method": "memorybear.application.v1.AppChatService/Chat"},
+    {"path_prefix": "/v1/app/chat", "service": "application-service", "base_url": "http://application-service:8080", "aud": "application-service", "required_scopes": ["app"], "grpc_target": "dns:///application-service-grpc:9090", "grpc_method": "memorybear.application.v1.AppChatService/Chat"},
     {"path_prefix": "/api/end_user", "service": "application-service", "base_url": "http://application-service:8080", "aud": "application-service"},
     {"path_prefix": "/v1/end_user", "service": "application-service", "base_url": "http://application-service:8080", "aud": "application-service", "required_scopes": ["memory"]},
     {"path_prefix": "/api/tools", "service": "application-service", "base_url": "http://application-service:8080", "aud": "application-service"},

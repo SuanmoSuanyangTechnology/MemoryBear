@@ -93,7 +93,7 @@ async def lifespan(app: FastAPI):
         app.state.gateway_deps = build_gateway_deps()
         yield
     finally:
-        backfill = app.state.identity_api_key_backfill
+        backfill = getattr(app.state, "identity_api_key_backfill", None)
         if backfill is not None:
             await backfill.aclose()
         pool = getattr(app.state, "grpc_pool", None)
