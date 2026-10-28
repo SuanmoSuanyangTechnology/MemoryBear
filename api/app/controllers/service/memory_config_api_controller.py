@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.controllers import memory_config_controller
 from app.controllers import ontology_controller
 from app.controllers.emotion_config_controller import EmotionConfigUpdate
-from app.core.api_key_auth import require_api_key_self_db
+from app.core.api_key_auth import get_current_api_key_auth, require_api_key_self_db
 from app.core.api_key_utils import get_current_user_snapshot_from_api_key_async
 from app.core.error_codes import BizCode
 from app.core.logging_config import get_business_logger
@@ -34,11 +34,47 @@ from app.schemas.memory_storage_schema import (
 )
 from app.schemas.memory_storage_schema import ForgettingConfigUpdateRequest
 from app.schemas.memory_preference_config_schema import PreferenceConfigUpdate
+from app.schemas.personality_anchor_config_schema import PersonalityAnchorConfigUpdate
+from app.schemas.response_schema import ApiResponse
 from app.schemas.scene_memory_schema import SceneConfigUpdate
 from app.utils.config_utils import resolve_config_id_async
 
 router = APIRouter(prefix="/memory_config", tags=["V1 - Memory Config API"])
 logger = get_business_logger()
+
+
+@router.get("/read_config_personality_anchor", response_model=ApiResponse)
+@require_api_key_self_db(scopes=["memory"])
+async def read_config_personality_anchor(
+    request: Request,
+    config_id: uuid.UUID = Query(..., description="记忆配置ID"),
+):
+    """Read personality-anchor settings within the API Key workspace."""
+    api_key_auth = get_current_api_key_auth()
+    async with get_async_db_context() as auth_db:
+        current_user = await get_current_user_snapshot_from_api_key_async(
+            auth_db, api_key_auth,
+        )
+    return await memory_config_controller.read_personality_anchor_config(
+        config_id=config_id, current_user=current_user,
+    )
+
+
+@router.post("/update_config_personality_anchor", response_model=ApiResponse)
+@require_api_key_self_db(scopes=["memory"])
+async def update_config_personality_anchor(
+    request: Request,
+    payload: PersonalityAnchorConfigUpdate,
+):
+    """Replace all six settings within the API Key workspace."""
+    api_key_auth = get_current_api_key_auth()
+    async with get_async_db_context() as auth_db:
+        current_user = await get_current_user_snapshot_from_api_key_async(
+            auth_db, api_key_auth,
+        )
+    return await memory_config_controller.update_personality_anchor_config(
+        payload=payload, current_user=current_user,
+    )
 
 
 async def _verify_config_ownership_async(config_id: str, workspace_id: uuid.UUID, db: AsyncSession):
