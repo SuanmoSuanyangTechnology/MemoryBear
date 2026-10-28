@@ -9,17 +9,19 @@ from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from typing import Any
 
-TEMPLATE_VERSION = "wiki_tolerant_page_references_v8"
+TEMPLATE_VERSION = "wiki_output_constraints_v9"
 MAP_TASK = "mem_knowledge.tasks.sync_wiki_document"
 REDUCE_TASK = "mem_knowledge.tasks.reduce_wiki_page"
 BACKFILL_TASK = "mem_knowledge.tasks.enqueue_unprocessed_wiki_documents"
 BACKFILL_REGISTERED_HEADER = "kb_wiki_backfill_registered"
 WIKI_QUEUE = "wiki_tasks"
+UNAVAILABLE_PAGE_CONTENT = "该 Wiki 页面已不可用，当前无有效正文。"
 ACTIVE_STATUSES = frozenset({"pending", "running", "retry_wait"})
 TERMINAL_TASK_STATUSES = frozenset({"succeeded", "failed", "cancelled", "superseded", "skipped"})
 MAX_LANGUAGE_LENGTH = 64
 MAX_EXTRACT_PROMPT_LENGTH = 12000
 TYPE_GROUP_NAMES = frozenset({"知识", "摘要", "knowledge", "summary", "summaries"})
+TAXONOMY_TYPE_LABELS = TYPE_GROUP_NAMES | {"entity", "concept", "实体", "概念"}
 # Opportunistic cleanup bounds diagnostic history without a periodic scheduler.
 TASK_RETENTION_DAYS = 30
 TASK_CLEANUP_BATCH_SIZE = 1000

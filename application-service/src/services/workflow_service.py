@@ -3495,6 +3495,7 @@ class WorkflowService:
             node_id: str,
             config: WorkflowConfig,
             workspace_id: uuid.UUID,
+            user_id: str | None = None,
             invalidate_cache: bool = False,
             bypass_cache: bool = False,
     ) -> dict[str, Any]:
@@ -3524,6 +3525,8 @@ class WorkflowService:
             debug_input_data=debug_input_data,
         )
         rerun_input["bypass_cache"] = bypass_cache
+        if user_id:
+            rerun_input["user_id"] = user_id
         return await self.run_single_node(
             app_id=app_id,
             node_id=node_id,

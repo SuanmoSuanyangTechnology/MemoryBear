@@ -4072,26 +4072,33 @@ class AgentRunService:
                 # 注意：绝不能在此临时改写共享的 agent_config.model_parameters——
                 # 并行执行时多个协程会互相覆盖（一个模型开 json_output、另一个不开，
                 # 最终读到的是最后写入的参数）。每个模型的参数通过显式 override 传入。
-                result = await asyncio.wait_for(
-                    self.run(
-                        agent_config=agent_config,
-                        model_config=model_info["model_config"],
-                        message=message,
-                        workspace_id=workspace_id,
-                        conversation_id=model_conversation_id,
-                        user_id=user_id,
-                        variables=variables,
-                        storage_type=storage_type,
-                        user_rag_memory_id=user_rag_memory_id,
-                        web_search=web_search,
-                        memory=memory,
-                        files=files,
-                        source=source,
-                        execution_mode=execution_mode,
-                        model_parameters_override=model_info["parameters"],
-                    ),
-                    timeout=timeout
-                )
+                # 每个模型任务独占 AsyncSession：Session 不支持并发使用，并行对比
+                # 会同时跑多个模型，共享 self.db 会触发
+                # "This session is provisioning a new connection" 报错。
+                async def run_with_own_session():
+                    async with get_async_db_context() as model_db:
+                        return await asyncio.wait_for(
+                            AgentRunService(model_db).run(
+                                agent_config=agent_config,
+                                model_config=model_info["model_config"],
+                                message=message,
+                                workspace_id=workspace_id,
+                                conversation_id=model_conversation_id,
+                                user_id=user_id,
+                                variables=variables,
+                                storage_type=storage_type,
+                                user_rag_memory_id=user_rag_memory_id,
+                                web_search=web_search,
+                                memory=memory,
+                                files=files,
+                                source=source,
+                                execution_mode=execution_mode,
+                                model_parameters_override=model_info["parameters"],
+                            ),
+                            timeout=timeout
+                        )
+
+                result = await run_with_own_session()
 
                 elapsed = time.time() - start_time
                 usage = result.get("usage", {})
@@ -4346,26 +4353,35 @@ class AgentRunService:
                 # 每个模型各自的参数通过显式 override 传入。不能改写共享的
                 # agent_config.model_parameters：并行任务会互相覆盖，导致不同模型
                 # 最终使用同一份参数（如 json_output 开关被最后一个模型覆盖）。
+                #
+                # 每个模型任务独占 AsyncSession：Session 不支持并发使用，并行对比
+                # 会同时跑多个模型，共享 self.db 会触发
+                # "This session is provisioning a new connection" 报错。
+                async def stream_with_own_session():
+                    async with get_async_db_context() as model_db:
+                        async for event_str in AgentRunService(model_db).run_stream(
+                                agent_config=agent_config,
+                                model_config=model_info["model_config"],
+                                message=message,
+                                workspace_id=workspace_id,
+                                conversation_id=model_conversation_id,
+                                user_id=user_id,
+                                variables=variables,
+                                storage_type=storage_type,
+                                user_rag_memory_id=user_rag_memory_id,
+                                web_search=web_search,
+                                memory=memory,
+                                files=files,
+                                source=source,
+                                user_message_id=model_user_message_id,
+                                execution_mode=execution_mode,
+                                skip_save=skip_save,
+                                model_parameters_override=model_info["parameters"],
+                        ):
+                            yield event_str
+
                 # 流式调用单个模型
-                async for event_str in self.run_stream(
-                        agent_config=agent_config,
-                        model_config=model_info["model_config"],
-                        message=message,
-                        workspace_id=workspace_id,
-                        conversation_id=model_conversation_id,
-                        user_id=user_id,
-                        variables=variables,
-                        storage_type=storage_type,
-                        user_rag_memory_id=user_rag_memory_id,
-                        web_search=web_search,
-                        memory=memory,
-                        files=files,
-                        source=source,
-                        user_message_id=model_user_message_id,
-                        execution_mode=execution_mode,
-                        skip_save=skip_save,
-                        model_parameters_override=model_info["parameters"],
-                ):
+                async for event_str in stream_with_own_session():
                     # 解析原始事件
                     try:
                         lines = event_str.strip().split('\n')
