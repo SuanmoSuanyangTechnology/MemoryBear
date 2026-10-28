@@ -23,6 +23,7 @@ class EngineDisplayCardItem(BaseModel):
         "PREFERENCE",
         "SCENE_RECONSTRUCTION",
         "PREDICTION",
+        "PERSONALITY_ANCHOR",
     ] = Field(
         ...,
         description="稳定英文引擎枚举，由前端负责文案映射",
