@@ -83,6 +83,14 @@ class Settings:
     API_KEY_PATH_PREFIXES: tuple[str, ...] = tuple(
         p for p in os.getenv("API_KEY_PATH_PREFIXES", "/v1/").split(",") if p)
 
+    # ---- API key 快照回源（identity 是凭据权威；空 URL = 关闭回源，miss 即 401）----
+    IDENTITY_API_KEY_VERIFY_URL: str = os.getenv("IDENTITY_API_KEY_VERIFY_URL", "").strip()
+    IDENTITY_API_KEY_VERIFY_TIMEOUT_MS: int = int(
+        os.getenv("IDENTITY_API_KEY_VERIFY_TIMEOUT_MS", "500"))
+    # 负缓存 TTL：identity 明确 401 后短期不再回源；0 = 关闭负缓存
+    API_KEY_MISS_CACHE_TTL_SECONDS: int = int(
+        os.getenv("API_KEY_MISS_CACHE_TTL_SECONDS", "30"))
+
     @property
     def audit_stream_key_name(self) -> str:
         """Resolve the deployment-scoped audit stream key (fail-fast).

@@ -17,12 +17,13 @@ class ModelParameterMerger:
     @staticmethod
     def merge_parameters(
         model_config_params: Optional[Dict[str, Any]],
-        agent_config_params: Optional[Dict[str, Any]]
+        agent_config_params: Optional[Dict[str, Any]],
+        override_params: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """
         Merge model config parameters with Agent config parameters.
-        
-        Precedence: agent_config_params > model_config_params > defaults.
+
+        Precedence: override_params > agent_config_params > model_config_params > defaults.
         
         Args:
             model_config_params: Parameters from ModelConfig.config
@@ -67,12 +68,23 @@ class ModelParameterMerger:
                 if key in model_config_params:
                     merged[key] = model_config_params[key]
         
-        # Apply Agent config parameters (highest precedence)
+        # Apply Agent config parameters
         if agent_config_params:
             for key in default_params:
                 if key in agent_config_params and agent_config_params[key] is not None:
                     merged[key] = agent_config_params[key]
-        
+
+        # Convert Pydantic objects to dicts
+        if override_params and hasattr(override_params, 'model_dump'):
+            override_params = override_params.model_dump()
+
+        # Apply per-run overrides (highest precedence), e.g. each compared model's
+        # own model_parameters in a multi-model compare trial run.
+        if override_params:
+            for key in default_params:
+                if key in override_params and override_params[key] is not None:
+                    merged[key] = override_params[key]
+
         # Drop None values
         merged = {k: v for k, v in merged.items() if v is not None}
         
@@ -90,15 +102,18 @@ class ModelParameterMerger:
     @staticmethod
     def get_effective_parameters(
         model_config: Optional[Any],
-        agent_config: Optional[Any]
+        agent_config: Optional[Any],
+        model_parameters_override: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """
         Get the effective model parameters (extract from ORM objects and merge).
-        
+
         Args:
             model_config: ModelConfig ORM object
             agent_config: AgentConfig ORM object
-            
+            model_parameters_override: Per-run overrides (e.g. each compared
+                model's own model_parameters), highest precedence.
+
         Returns:
             The merged parameter dictionary.
         """
@@ -106,13 +121,15 @@ class ModelParameterMerger:
         model_params = None
         if model_config and hasattr(model_config, 'config'):
             model_params = model_config.config
-        
+
         # Extract Agent config parameters
         agent_params = None
         if agent_config and hasattr(agent_config, 'model_parameters'):
             agent_params = agent_config.model_parameters
-        
-        return ModelParameterMerger.merge_parameters(model_params, agent_params)
+
+        return ModelParameterMerger.merge_parameters(
+            model_params, agent_params, model_parameters_override
+        )
     
     @staticmethod
     def format_for_llm_call(parameters: Dict[str, Any]) -> Dict[str, Any]:

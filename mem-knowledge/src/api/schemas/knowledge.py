@@ -2,11 +2,20 @@
 
 import datetime
 import uuid
+from collections.abc import Mapping
 
-from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    field_serializer,
+    field_validator,
+)
 
 from ...models.owned import KnowledgeType, PermissionType
 from ...models.references import LoadBalanceStrategy, ModelType
+from ...rag.wiki.config import MAX_EXTRACT_PROMPT_LENGTH, MAX_LANGUAGE_LENGTH
 from ...utils.datetime_utils import to_timestamp_ms
 
 
@@ -90,6 +99,44 @@ class KnowledgeBase(BaseModel):
 
 
 class KnowledgeCreate(KnowledgeBase):
+    @field_validator("parser_config")
+    @classmethod
+    def _validate_wiki_config(cls, value: dict | None) -> dict | None:
+        wiki = value.get("wiki") if value is not None else None
+        # 创建时省略或传 null 仍沿用默认配置；只校验，不改写原始配置。
+        if wiki is None:
+            return value
+        errors = []
+        if not isinstance(wiki, Mapping):
+            errors.append({"type": "dict_type", "loc": ("wiki",), "input": wiki})
+        else:
+            if "enabled" in wiki and not isinstance(wiki["enabled"], bool):
+                errors.append(
+                    {"type": "bool_type", "loc": ("wiki", "enabled"), "input": wiki["enabled"]}
+                )
+            for field, max_length in (
+                ("language", MAX_LANGUAGE_LENGTH),
+                ("extract_prompt", MAX_EXTRACT_PROMPT_LENGTH),
+            ):
+                if field not in wiki:
+                    continue
+                item = wiki[field]
+                error = {"loc": ("wiki", field), "input": item}
+                if not isinstance(item, str):
+                    errors.append({**error, "type": "string_type"})
+                    continue
+                # 与内部解析一致：语言按去空白后长度校验，提示词按原始长度校验。
+                length = len(item.strip()) if field == "language" else len(item)
+                if field == "language" and length == 0:
+                    errors.append({**error, "type": "string_too_short", "ctx": {"min_length": 1}})
+                elif length > max_length:
+                    errors.append(
+                        {**error, "type": "string_too_long", "ctx": {"max_length": max_length}}
+                    )
+        if errors:
+            raise ValidationError.from_exception_data(cls.__name__, errors)
+        return value
+
     image2text_id: uuid.UUID | None = Field(
         None,
         description=(

@@ -5912,6 +5912,11 @@ def init_implicit_emotions_for_users(self, end_user_ids: List[str]) -> Dict[str,
 def init_interest_distribution_for_users(self, end_user_ids: List[str]) -> Dict[str, Any]:
     """事件触发任务：检查指定用户列表的兴趣分布缓存，无缓存则生成并写入 Redis。
 
+    Legacy：dashboard 现在改为向 memory-jobs 队列发布
+    ``memory_jobs.interest_distribution.init_for_users``。本任务与其
+    ``task_routes`` 路由要等所有部署都跑起 memory-jobs worker 之后一起下线，
+    不要只删其中一边。
+
     由 /dashboard/end_users 接口触发，已有缓存的用户直接跳过。
     默认生成中文（zh）兴趣分布数据。
 

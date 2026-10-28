@@ -19,6 +19,10 @@ celery = [
     "celery>=5.5,<6",
     "redis>=6.0,<9",
 ]
+# MemoryBear's task/queue contract (``task_bridge.mem_router``). Deliberately
+# dependency-free: the extra marks the memory-specific surface of an otherwise
+# transport-neutral SDK, so the base install stays free of it by intent.
+mem-router = []
 
 [dependency-groups]
 dev = [

@@ -110,7 +110,6 @@ def review_context(session, scope, faq_id, *, begin=True):
         if row.wiki_page_id
         else None
     )
-    available = data["source"]["source_status"] == "available" and after is not None
     return {
         "faq": data,
         "source": data["source"],
@@ -120,7 +119,8 @@ def review_context(session, scope, faq_id, *, begin=True):
         "before": snapshot_data(before),
         "after": snapshot_data(after),
         "source_changed": data["source_changed"],
-        "can_approve": available and data["review_status"] != "approved",
+        # 来源展示状态不阻止人工审核，但必须有当前版本的持久化快照。
+        "can_approve": after is not None and data["review_status"] != "approved",
         "expected_row_version": row.row_version,
         "reviewed_wiki_snapshot_id": str(after.id) if after else None,
     }

@@ -36,7 +36,7 @@ interface PrivateKnowledgeBaseWorkspaceProps {
   onShareKnowledgeBase: () => void;
   onOpenRecallTest: () => void;
   onOpenMetadata: () => void;
-  onOpenKnowledgeBaseSettings: (step?: number) => void;
+  onOpenKnowledgeBaseSettings: (step?: number, type?: string) => void;
   onEditKnowledgeBase: () => void;
   onBatchDownloadKnowledgeBase: () => void;
   onExportKnowledgeBaseQa: () => void;
@@ -98,7 +98,7 @@ const PrivateKnowledgeBaseWorkspace: FC<PrivateKnowledgeBaseWorkspaceProps> = ({
   const [catalogRefreshKey, setCatalogRefreshKey] = useState(0);
   const [graphInitialPageId, setGraphInitialPageId] = useState<string>();
   const [showGraphBack, setShowGraphBack] = useState(false);
-  const { pages, loading, error } = useWikiData(knowledgeBaseId);
+  const { pages, loading, error } = useWikiData(knowledgeBaseId, wikiActive || mode === 'wikiGraph');
   const [summaryPages, setSummaryPages] = useState<WikiPage[]>([]);
   useEffect(() => {
     setSummaryPages([]);
@@ -259,7 +259,7 @@ const PrivateKnowledgeBaseWorkspace: FC<PrivateKnowledgeBaseWorkspaceProps> = ({
           {mode === 'faq'
             ? <FaqWorkspace key={knowledgeBaseId} knowledgeBaseId={knowledgeBaseId} onOpenWikiPage={openWikiPage} />
             : mode === 'knowledgeGraph'
-            ? <KnowledgeGraphCard knowledgeBase={knowledgeBase} onRebuildGraph={() => onOpenKnowledgeBaseSettings(1)} />
+            ? <KnowledgeGraphCard knowledgeBase={knowledgeBase} onRebuildGraph={() => onOpenKnowledgeBaseSettings(1, 'rebuild')} />
             : mode === 'wiki' || mode === 'summary'
             ? (
               <WikiReader

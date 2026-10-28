@@ -5,9 +5,9 @@ import logging
 import random
 import uuid
 
-from ..api.schemas.chunk import ImageRetrievalQuery, KnowledgeRetrievalSource, RetrieveType
+from ..api.schemas.chunk import ImageRetrievalQuery, RetrieveType
 from ..api.schemas.knowledge_metadata import MetadataFilterMode
-from ..api.schemas.knowledge_retrieval import KnowledgeRetrievalResult
+from ..api.schemas.knowledge_retrieval import KnowledgeRetrievalRequest, KnowledgeRetrievalResult
 from ..error_mapping import map_text_embedding_error
 from ..errors import KnowledgeError
 from ..rag.faq.index import (
@@ -33,22 +33,40 @@ from .wiki.runtime import transaction
 logger = logging.getLogger(__name__)
 
 
-def validate_request(request):
-    if request.source == KnowledgeRetrievalSource.EXTERNAL_API:
-        raise KnowledgeError.from_code("KB_HTTP_FORBIDDEN")
-    if (
-        isinstance(request.normalized_query, ImageRetrievalQuery)
-        or request.file_names_filter
-        or request.metadata_filters
-        or request.metadata_filter_mode != MetadataFilterMode.MANUAL
-        or any(
-            "retrieve_type" in config.model_fields_set
-            and config.retrieve_type != RetrieveType.WIKI_FAQ
-            for config in request.knowledge_bases
-        )
+def validate_request(request: KnowledgeRetrievalRequest) -> None:
+    error_code = None
+    if isinstance(request.normalized_query, ImageRetrievalQuery):
+        error_code = "KB_FAQ_IMAGE_QUERY_UNSUPPORTED"
+    elif request.file_names_filter:
+        error_code = "KB_FAQ_FILE_FILTER_UNSUPPORTED"
+    elif any(
+        "retrieve_type" in config.model_fields_set
+        and config.retrieve_type != RetrieveType.WIKI_FAQ
+        for config in request.knowledge_bases
     ):
-        logger.warning("wiki-FAQ 请求不支持图片、文档过滤或混合召回类型 stage=validate_request")
-        raise KnowledgeError.from_code("KB_VALIDATION_ERROR")
+        error_code = "KB_FAQ_MIXED_RETRIEVAL_UNSUPPORTED"
+    elif request.metadata_filter_mode is not MetadataFilterMode.DISABLED:
+        # FAQ 不支持元数据过滤；禁用时忽略历史配置，空组不能绕过未解析 AUTO 的拒绝。
+        if any(group.conditions for group in request.metadata_filters):
+            error_code = "KB_FAQ_METADATA_FILTER_UNSUPPORTED"
+        elif (
+            request.metadata_filter_mode is MetadataFilterMode.AUTO
+            and not request.metadata_filters_resolved
+        ):
+            error_code = "KB_FAQ_AUTO_METADATA_UNSUPPORTED"
+
+    if error_code is not None:
+        logger.warning(
+            "FAQ 召回参数不支持 stage=validate_request code=%s source=%s "
+            "kb_ids=%s ex_ids=%s metadata_mode=%s metadata_filter_groups=%s",
+            error_code,
+            request.source.value,
+            [str(kb_id) for kb_id in request.kb_ids],
+            request.ex_ids,
+            request.metadata_filter_mode.value,
+            len(request.metadata_filters),
+        )
+        raise KnowledgeError.from_code(error_code)
 
 
 async def _target_for_sync(runtime, scope, row):

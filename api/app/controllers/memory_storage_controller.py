@@ -2,7 +2,7 @@ import asyncio
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Header
+from fastapi import APIRouter, Depends, Header, Request
 from fastapi.responses import StreamingResponse
 
 from app.aioRedis import get_thread_safe_sync_redis
@@ -12,6 +12,7 @@ from app.core.logging_config import get_api_logger
 from app.core.response_utils import fail, success
 from app.db import get_async_db_context
 from app.dependencies import cur_workspace_access_guard_async, get_current_user_async, CurrentUserSnapshot
+from app.integrations.profile.proxy import memory_profile_proxy
 from app.schemas.memory_storage_schema import (
     TrialRunChatInput,
     PilotRunInput,
@@ -260,9 +261,16 @@ async def search_entity_edges(
         return fail(BizCode.INTERNAL_ERROR, "边查询失败", str(e))
 
 @router.get("/analytics/hot_memory_tags", response_model=ApiResponse)
+@memory_profile_proxy(
+    query_fields=("limit",),
+    # 管理端沿用 /memory-storage/analytics/... 的历史路径，转发目标仍是分析域的
+    # 同一内部路由；路径映射只影响转发，不影响身份面判定。
+    target_path="/internal/v1/memory/analytics/hot_memory_tags",
+)
 async def get_hot_memory_tags_api(
         limit: int = 10,
         current_user: CurrentUserSnapshot = Depends(get_current_user_async),
+        request: Request = None,
 ) -> dict:
     """获取热门记忆标签（实时聚合，无缓存）。
 

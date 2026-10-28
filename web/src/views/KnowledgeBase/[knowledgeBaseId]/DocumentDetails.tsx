@@ -56,7 +56,7 @@ const DocumentDetails: FC = () => {
   }, [searchParams]);
   const { 
     documentId, 
-    parentId: locationParentId, 
+    parentId: locationParentId,
     breadcrumbPath 
   } = ({
     documentId: searchParams.get('documentId') ?? undefined,
@@ -65,7 +65,7 @@ const DocumentDetails: FC = () => {
     ...(location.state || {})
   }) as { 
     documentId?: string; 
-    parentId?: string; 
+    parentId?: string;
     breadcrumbPath?: BreadcrumbPath;
   };
   const [loading, setLoading] = useState(false);
@@ -80,7 +80,6 @@ const DocumentDetails: FC = () => {
   const [fileUrl, setFileUrl] = useState('');
   const [parserMode, setParserMode] = useState(0);
   const insertModalRef = useRef<InsertModalRef>(null);
-  const isManualRefreshRef = useRef(false);
   const [isParentChildMode, setIsParentChildMode] = useState<undefined | boolean>(false);
   
   useEffect(() => {
@@ -99,11 +98,9 @@ const DocumentDetails: FC = () => {
   // Load chunk list when document is loaded and progress === 1
   useEffect(() => {
     if (!documentId) return
-    if (document && document.progress === 1 && !isManualRefreshRef.current) {
+    if (document && document.progress === 1) {
       ChunkList();
     }
-    // Reset flag
-    isManualRefreshRef.current = false;
   }, [document, documentId]);
 
   // Listen to keywords changes and re-search
@@ -261,11 +258,6 @@ const DocumentDetails: FC = () => {
     }
   };
 
-  const refreshChunks = () => {
-    const nextPage = 1;
-    setPage(nextPage);
-    ChunkList(nextPage);
-  }
   const loadMoreChunks = () => {
     const nextPage = page + 1;
     setPage(nextPage);
@@ -274,12 +266,11 @@ const DocumentDetails: FC = () => {
 
   const handleBack = () => {
     if (knowledgeBaseId && breadcrumbPath) {
-      // Return to knowledge base detail page and pass breadcrumb info to restore state
+      // Return to all files while preserving the knowledge base's folder location.
       const navigationState = {
         fromKnowledgeBaseList: true,
         knowledgeBaseFolderPath: breadcrumbPath.knowledgeBaseFolderPath,
-        navigateToDocumentFolder: locationParentId,
-        documentFolderPath: breadcrumbPath.documentFolderPath,
+        resetToRoot: true,
         timestamp: Date.now(), // Add timestamp to ensure state change
       };
       navigate(`/knowledge-base/${knowledgeBaseId}/private`, { state: navigationState });
@@ -342,7 +333,6 @@ const DocumentDetails: FC = () => {
           return item;
         }));
         
-        // Edit mode returns special flag to tell InsertModal not to call onSuccess
         return true;
       } else {
         // Insert mode: Create new chunk
@@ -378,23 +368,6 @@ const DocumentDetails: FC = () => {
     }
   };
 
-  // Callback after successful insert (only for inserting new chunks, edit operations are already updated synchronously in handleInsertContent)
-  const handleInsertSuccess = () => {
-    // Set manual refresh flag to prevent useEffect from calling repeatedly
-    isManualRefreshRef.current = true;
-    
-    // Reset page number
-    setPage(1);
-    
-    // Wait for backend processing to complete, then reload data (only for inserting new chunks)
-    setTimeout(() => {
-      ChunkList(1, false, true).then(() => {
-        return fetchDocumentDetail();
-      }).catch(err => {
-        console.error('Refresh failed:', err);
-      });
-    }, 1000);
-  };
   const handleAdjustmentParameter = () =>{
     if (!knowledgeBaseId || !document) return;
     const targetFileId = document.id;
@@ -513,7 +486,7 @@ const DocumentDetails: FC = () => {
             {t('knowledgeBase.chunkList')}
           </h2>
           <RecallTestResult 
-            refresh={refreshChunks}
+            refresh={handleBack}
             data={chunkList} 
             total={total}
             showEmpty={false}
@@ -536,7 +509,7 @@ const DocumentDetails: FC = () => {
         ref={insertModalRef}
         isParentChildMode={isParentChildMode}
         onInsert={handleInsertContent}
-        onSuccess={handleInsertSuccess}
+        onSuccess={handleBack}
       />
     </Flex>
   );

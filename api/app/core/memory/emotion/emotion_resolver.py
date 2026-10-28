@@ -1,7 +1,8 @@
 """回复侧情绪识别 + 情绪→回复策略映射 + 提示词注入。
 职责边界：
 - 只在 App 开关 ``features.emotion_reply.enabled`` 打开时工作。
-- 对当前 user 消息调 BERT（``fast_write_emotion_client.predict``），硬超时 1s；
+- 对当前 user 消息调 BERT（``fast_write_emotion_client.predict``），默认总超时读取
+  ``FAST_WRITE_EMOTION_TOTAL_TIMEOUT_SECONDS``；
   超时/异常/未配置一律降级为 None，绝不影响正常回复。
 - 本模块**永不抛异常**，返回值始终 ≥ base_prompt。
 """
@@ -18,9 +19,6 @@ from app.core.config import settings
 from app.services.fast_write_emotion_client import FastWriteEmotionResult, VALID_EMOTIONS
 
 logger = logging.getLogger(__name__)
-
-# 回复侧硬超时（秒）：比快写的 2s 更紧，回复链路在请求内，不能拖首字延迟
-DETECT_TIMEOUT_SEC = 1.0
 
 _FIXED_PRINCIPLES = """## 固定执行原则
 1. 优先完成用户当前请求。
@@ -74,14 +72,16 @@ async def detect_emotion(
     text: str,
     timeout: Optional[float] = None,
 ) -> Optional[FastWriteEmotionResult]:
-    """调 BERT 情绪服务，硬超时 ``timeout``（默认 1s）；失败/超时/未配置一律返回 None。"""
+    """调 BERT 情绪服务，默认总超时读取配置，可由 timeout 覆盖；失败/超时/未配置返回 None。"""
     if not text or not text.strip():
         logger.debug("[EmotionReply] skipped event=detect reason=empty_message")
         return None
     if not _deployment_allows():
         logger.debug("[EmotionReply] skipped event=detect reason=service_unconfigured")
         return None
-    effective_timeout = DETECT_TIMEOUT_SEC if timeout is None else timeout
+    effective_timeout = (
+        settings.FAST_WRITE_EMOTION_TOTAL_TIMEOUT_SECONDS if timeout is None else timeout
+    )
     try:
         from app.services.fast_write_emotion_client import predict as _predict_emotion
 

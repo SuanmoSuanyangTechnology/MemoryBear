@@ -29,6 +29,7 @@ ONTOLOGY_BINDING_PLUGIN = "memory.ontology_binding"
 _BATCH_PATH = "/api/internal/app-service/apps/ontology-batch"
 _FILTER_PATH = "/api/internal/app-service/apps/ontology-filter"
 _BIND_PATH = "/api/internal/app-service/apps/ontology-bind"
+_UNBIND_PATH = "/api/internal/app-service/apps/ontology-unbind"
 
 
 class OntologyUpstreamError(RuntimeError):
@@ -145,6 +146,20 @@ class RemoteOntologyBinder:
         })
         if not data.get("available"):
             raise OntologyUpstreamError("ontology binding is unavailable on the monolith")
+
+    def unbind_app(self, app_id: uuid.UUID) -> None:
+        """Soft-delete the app's active binding after the local delete commit.
+
+        Unlike ``bind_app``, unavailable is not an error: it means the monolith
+        did not load the memory module, so there is no binding to remove and the
+        delete may proceed. The callback is idempotent.
+        """
+        data = self._call(_UNBIND_PATH, {"app_id": str(app_id)})
+        if not data.get("available"):
+            logger.warning(
+                "ontology module unavailable on the monolith; skipping unbind",
+                extra={"app_id": str(app_id)},
+            )
 
     def _call(self, path: str, json_body: dict[str, Any]) -> dict[str, Any]:
         if not self._upstream.configured:

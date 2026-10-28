@@ -54,8 +54,8 @@ async def notify_api_key_async(api_key_hash_: str) -> None:
 
 
 async def notify_api_key_created_async(plain: str) -> None:
-    """API key 创建/重建通知：必须带明文，identity 才能删旧 + 直连 DB 组装新快照写回
-    （网关快照 miss 即 401 无回源，不带明文的新 key 首次访问必然失败）。"""
+    """API key 创建/重建/快照字段更新通知：必须带明文，identity 才能删旧 + 直连 DB
+    组装新快照写回（避免依赖网关回源；回源未配置时首访必然 401）。"""
     await _publish_async({"kind": "api_key", "hash": api_key_hash(plain), "key": plain})
 
 
@@ -72,7 +72,7 @@ def notify_api_key_sync(api_key_hash_: str) -> None:
 
 
 def notify_api_key_created_sync(plain: str) -> None:
-    """API key 创建/重建通知（见 notify_api_key_created_async：必须带明文）。"""
+    """API key 创建/重建/快照字段更新通知（见 notify_api_key_created_async：必须带明文）。"""
     _publish_sync({"kind": "api_key", "hash": api_key_hash(plain), "key": plain})
 
 

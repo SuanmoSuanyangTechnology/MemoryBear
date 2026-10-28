@@ -833,7 +833,9 @@ class AppService:
 
         Raises:
             ResourceNotFoundException: When the app does not exist
-            BusinessException: When the app is not in the given workspace
+            BusinessException: When the app is not in the given workspace, or the
+                ontology unbind callback fails (the app and its shares are
+                restored before the error is raised, so the delete can be retried)
         """
         logger.info("删除应用", extra={"app_id": str(app_id)})
 
@@ -843,7 +845,14 @@ class AppService:
         # Soft-delete the app
         app.is_active = False
 
-        # Deactivate all share rows of this app in app_shares and bump updated_at
+        # Deactivate all share rows of this app in app_shares and bump updated_at;
+        # keep their ids so a failed ontology unbind can restore them.
+        share_ids = list(self.db.scalars(
+            select(AppShare.id).where(
+                AppShare.source_app_id == app_id,
+                AppShare.is_active.is_(True)
+            )
+        ).all())
         stmt = sa_update(AppShare).where(
             AppShare.source_app_id == app_id,
             AppShare.is_active.is_(True)
@@ -853,7 +862,17 @@ class AppService:
         )
         self.db.execute(stmt)
 
+        # Bindings belong to the memory domain: only the remote callback binder
+        # can unbind them, after the local commit (no remote call inside a
+        # transaction). The in-process binder lives in the monolith and runs its
+        # own delete path, so this service never sees one.
+        binder = get_plugin(ONTOLOGY_BINDING_PLUGIN)
+        remote_unbind = binder is not None and not getattr(binder, "uses_local_db", True)
+
         self.db.commit()
+
+        if remote_unbind:
+            self._unbind_ontology_remote(binder, app, share_ids)
 
         logger.info(
             "应用删除成功",
@@ -863,6 +882,51 @@ class AppService:
                 "app_type": app.type
             }
         )
+
+    def _unbind_ontology_remote(
+            self,
+            binder: Any,
+            app: App,
+            share_ids: list[uuid.UUID],
+    ) -> None:
+        """Unbind after the local commit; restore the app when the callback fails.
+
+        A soft-deleted app can no longer be looked up (the repository filters on
+        is_active), so the delete cannot be retried once the local commit lands:
+        the compensation restores the app and its shares first, then the failure
+        is surfaced to the caller as a whole-delete failure it can retry.
+        """
+        try:
+            binder.unbind_app(app.id)
+        except OntologyUpstreamError as exc:
+            self._compensate_failed_delete(app, share_ids)
+            raise BusinessException(
+                str(exc),
+                exc.code if exc.code is not None else BizCode.SERVICE_UNAVAILABLE,
+                cause=exc,
+            ) from exc
+
+    def _compensate_failed_delete(self, app: App, share_ids: list[uuid.UUID]) -> None:
+        try:
+            app.is_active = True
+            app.updated_at = utcnow_naive()
+            if share_ids:
+                self.db.execute(
+                    sa_update(AppShare)
+                    .where(AppShare.id.in_(share_ids))
+                    .values(is_active=True, updated_at=utcnow_naive())
+                )
+            self.db.commit()
+            logger.warning(
+                "本体解绑失败，已恢复应用与共享记录",
+                extra={"app_id": str(app.id), "share_count": len(share_ids)},
+            )
+        except Exception as e:
+            self.db.rollback()
+            logger.error(
+                "本体解绑失败后的补偿恢复也失败",
+                extra={"app_id": str(app.id), "error": str(e)},
+            )
 
     def copy_app(
             self,

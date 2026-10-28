@@ -31,6 +31,9 @@ class AuthResult:
     identity_headers: dict[str, str] = field(default_factory=dict)
     status_code: int | None = None          # 非 None = 拒绝响应
     detail: str | None = None
+    # 非 None 时作为拒绝响应体（用于 /v1 外部集成的标准 fail 信封）；
+    # None 时中间件回退为 {"detail": detail}（/api 用户 JWT 契约）
+    body: dict | None = None
     audit_event: dict | None = None         # {event_type, actor_id, tenant_id, target, result}
     headers: dict[str, str] = field(default_factory=dict)  # 拒绝响应附加头（429 限流头）
 

@@ -1,5 +1,10 @@
 {
   "KB_FAQ_INDEX_FAILED": "FAQ indexing failed. The saved FAQ can be indexed again.",
+  "KB_FAQ_IMAGE_QUERY_UNSUPPORTED": "FAQ retrieval does not support image queries. Use a text query.",
+  "KB_FAQ_FILE_FILTER_UNSUPPORTED": "FAQ retrieval does not support file-name filters. Remove the file-name filters.",
+  "KB_FAQ_AUTO_METADATA_UNSUPPORTED": "FAQ retrieval does not support automatic metadata filtering. Disable automatic filtering and retry.",
+  "KB_FAQ_METADATA_FILTER_UNSUPPORTED": "FAQ retrieval does not support active metadata filter expressions. Disable metadata filtering or clear its conditions.",
+  "KB_FAQ_MIXED_RETRIEVAL_UNSUPPORTED": "FAQ retrieval cannot be mixed with participle, semantic, hybrid, or graph retrieval. Use FAQ retrieval for all knowledge bases in the same request.",
   "KB_PRINCIPAL_INVALID": "Knowledge identity is invalid. Sign in again and retry.",
   "KB_VALIDATION_ERROR": "Request parameters are invalid. Check the configuration and retry.",
   "KB_RESOURCE_NOT_FOUND": "The resource does not exist or is not accessible. Check the selected resource.",

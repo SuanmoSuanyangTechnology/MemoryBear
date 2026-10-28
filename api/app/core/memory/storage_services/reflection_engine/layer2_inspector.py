@@ -361,11 +361,13 @@ class Layer2Inspector:
             )
             results["alias_merge"] = alias
             if alias.get("status") not in ("timeout", "skipped"):
+                sources = alias.get("decision_source_counts") or {}
                 logger.info(
                     f"[Layer2 高频] 别名归并完成 end_user_id={end_user_id}, "
                     f"判定合并={alias.get('merge_count', 0)}, 实际删节点={alias.get('alias_nodes_deleted', 0)}, "
                     f"判定丢弃={alias.get('drop_count', 0)}, 实际删边={alias.get('drop_edges_deleted', 0)}, "
                     f"暂缓={alias.get('deferred_count', 0)}, "
+                    f"判定来源=BERT:{sources.get('bert', 0)}/LLM降级:{sources.get('llm_fallback', 0)}/规则:{sources.get('rule', 0)}, "
                     f"边重定向={alias.get('edges_redirected', 0)}, 节点删除={alias.get('alias_nodes_deleted', 0)}, "
                     f"PG同步={alias.get('pg_synced', False)}"
                 )
@@ -633,6 +635,11 @@ class Layer2Inspector:
 
             result["merge_count"] = len(merge_ids)
             result["drop_count"] = len(drop_ids)
+            # 统计最终有效判定，LLM 降级成功的候选不再算作 BERT 判定。
+            result["decision_source_counts"] = {
+                source: sum(d["decision_source"] == source for _, _, d in decided_log)
+                for source in ("bert", "llm_fallback", "rule")
+            }
             result["drop_edges_deleted"] = drop_edges_deleted
             result["merge_writes_verified"] = merge_write_verified
             result["drop_writes_verified"] = drop_write_verified
@@ -1351,7 +1358,7 @@ class Layer2Inspector:
         reason = decided["reason"]
         shortcut = decided.get("shortcut", False)
         is_fallback = decided["decision_source"] == "llm_fallback"
-        judge_label = "LLM降级" if is_fallback else "BERT"
+        judge_label = "规则" if shortcut else ("LLM降级" if is_fallback else "BERT")
         alias_name = (cand.get("alias_name") or "").strip()
 
         tracker = ExecutionTracker(model=("rule" if shortcut else decided["model_name"]))
@@ -1425,6 +1432,7 @@ class Layer2Inspector:
             }] if write_verified else []
             strategy = "DROP"
 
+        summary = f"{summary}（{judge_label}）"
         trigger["decision_source"] = decided["decision_source"]
         trigger["model_name"] = "rule" if shortcut else decided["model_name"]
         trigger["write_verified"] = write_verified

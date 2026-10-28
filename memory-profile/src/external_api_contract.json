@@ -139,6 +139,114 @@
         "status_code": 200
       }
     },
+    "GET /internal/v1/memory/analytics/hot_memory_tags": {
+      "endpoint": "hot_memory_tags",
+      "parameters": {
+        "query:limit": {
+          "annotation": "int",
+          "constraints": [],
+          "default": 10,
+          "in": "query",
+          "required": false
+        }
+      },
+      "response": {
+        "declared": [],
+        "fields": {
+          "code": {
+            "annotation": "int",
+            "constraints": [],
+            "default": 0,
+            "required": false
+          },
+          "data": {
+            "annotation": "list[dict[str, Any]]",
+            "constraints": [],
+            "default": null,
+            "required": true
+          },
+          "error": {
+            "annotation": "str",
+            "constraints": [],
+            "default": "",
+            "required": false
+          },
+          "msg": {
+            "annotation": "str",
+            "constraints": [],
+            "default": "OK",
+            "required": false
+          },
+          "time": {
+            "annotation": "int",
+            "constraints": [],
+            "default": "<factory:ApiResponse.<lambda>#7d53a03e3081>",
+            "required": false
+          }
+        },
+        "model": "src.common.responses.ApiResponse[list[dict[str, Any]]]",
+        "status_code": 200
+      }
+    },
+    "GET /internal/v1/memory/analytics/interest_distribution": {
+      "endpoint": "interest_distribution",
+      "parameters": {
+        "query:end_user_id": {
+          "annotation": "str",
+          "constraints": [],
+          "default": null,
+          "in": "query",
+          "required": true
+        },
+        "query:limit": {
+          "annotation": "int",
+          "constraints": [
+            "Ge(ge=1)",
+            "Le(le=5)"
+          ],
+          "default": 5,
+          "in": "query",
+          "required": false
+        }
+      },
+      "response": {
+        "declared": [],
+        "fields": {
+          "code": {
+            "annotation": "int",
+            "constraints": [],
+            "default": 0,
+            "required": false
+          },
+          "data": {
+            "annotation": "list[dict[str, Any]]",
+            "constraints": [],
+            "default": null,
+            "required": true
+          },
+          "error": {
+            "annotation": "str",
+            "constraints": [],
+            "default": "",
+            "required": false
+          },
+          "msg": {
+            "annotation": "str",
+            "constraints": [],
+            "default": "OK",
+            "required": false
+          },
+          "time": {
+            "annotation": "int",
+            "constraints": [],
+            "default": "<factory:ApiResponse.<lambda>#7d53a03e3081>",
+            "required": false
+          }
+        },
+        "model": "src.common.responses.ApiResponse[list[dict[str, Any]]]",
+        "status_code": 200
+      }
+    },
     "GET /internal/v1/memory/analytics/memory_insight": {
       "endpoint": "memory_insight",
       "parameters": {
@@ -289,6 +397,67 @@
     "GET /internal/v1/memory/analytics/workspace_statistics": {
       "endpoint": "workspace_statistics",
       "parameters": {},
+      "response": {
+        "declared": [],
+        "fields": {
+          "code": {
+            "annotation": "int",
+            "constraints": [],
+            "default": 0,
+            "required": false
+          },
+          "data": {
+            "annotation": "dict[str, Any]",
+            "constraints": [],
+            "default": null,
+            "required": true
+          },
+          "error": {
+            "annotation": "str",
+            "constraints": [],
+            "default": "",
+            "required": false
+          },
+          "msg": {
+            "annotation": "str",
+            "constraints": [],
+            "default": "OK",
+            "required": false
+          },
+          "time": {
+            "annotation": "int",
+            "constraints": [],
+            "default": "<factory:ApiResponse.<lambda>#7d53a03e3081>",
+            "required": false
+          }
+        },
+        "model": "src.common.responses.ApiResponse[dict[str, Any]]",
+        "status_code": 200
+      }
+    },
+    "POST /internal/v1/memory/analytics/generate_cache": {
+      "endpoint": "generate_cache",
+      "parameters": {
+        "body:body": {
+          "annotation": "src.modules.analytics.schemas.GenerateCacheBody",
+          "config": {
+            "extra": "forbid",
+            "populate_by_name": true
+          },
+          "constraints": [],
+          "default": "<factory:GenerateCacheBody>",
+          "fields": {
+            "end_user_id": {
+              "annotation": "str | None",
+              "constraints": [],
+              "default": null,
+              "required": false
+            }
+          },
+          "in": "body",
+          "required": false
+        }
+      },
       "response": {
         "declared": [],
         "fields": {

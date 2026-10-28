@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any, Literal
 from urllib.parse import quote_plus
 
-from pydantic import Field, SecretStr, field_validator, model_validator
+from pydantic import AliasChoices, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
 
 
@@ -387,11 +387,10 @@ class AppServiceSettings(BaseSettings):
     workflow_node_execution_retention_enabled: bool = Field(
         default=True, validation_alias="WORKFLOW_NODE_EXECUTION_RETENTION_ENABLED"
     )
-    # Reply-side emotion detection (host `settings.FAST_WRITE_EMOTION_*`); an
-    # empty URL/API key/model disables the feature and degrades to no-op, same
-    # as the monolith.
+    # Use the monolith's BERT_URL; keep the former service-specific URL as an
+    # alias for existing deployments. An empty URL/API key/model disables detection.
     fast_write_emotion_url: str = Field(
-        default="", validation_alias="FAST_WRITE_EMOTION_URL"
+        default="", validation_alias=AliasChoices("BERT_URL", "FAST_WRITE_EMOTION_URL")
     )
     fast_write_emotion_model: str = Field(
         default="", validation_alias="FAST_WRITE_EMOTION_MODEL"

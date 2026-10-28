@@ -67,6 +67,11 @@ class TargetRoute(BaseModel):
     service: str
     base_url: str      # K8s Service DNS 名，如 http://mem-knowledge:8080
     aud: str           # 内部 token 受众 = 目标服务名
+    # API-key scope gate: scopes an API key must carry to use this route (all-of,
+    # matching the monolith's @require_api_key semantics). Empty = no API-key
+    # usage declared; the pipeline denies those requests (fail-closed) instead of
+    # letting a missing declaration silently widen a key's reach.
+    required_scopes: tuple[str, ...] = ()
     # Optional gRPC dispatch: base_url stays the HTTP fallback so one route
     # entry flips transports without a second config surface.
     protocol: Literal["http", "grpc"] = "http"

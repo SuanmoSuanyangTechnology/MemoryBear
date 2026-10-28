@@ -41,6 +41,7 @@ from app.models.file_metadata_model import FileMetadata
 from app.models.models_model import Modality
 from app.schemas.app_schema import FileInput, FileType, FileUploadConfig, TransferMethod
 from app.schemas.model_schema import ModelInfo
+from app.core.storage import LocalStorage
 from app.services.file_content_service import extract_permanent_file_id
 from app.services.file_storage_service import FileStorageService
 
@@ -115,6 +116,14 @@ _FILE_TYPE_LABELS = {
     FileType.VIDEO: "视频",
     FileType.DOCUMENT: "文档",
 }
+
+# 视频出站失败占位文案：面向私有化部署的管理员，保留可操作的技术线索；
+# 普通用户看到后也应能联系到管理员处理。
+_VIDEO_UNAVAILABLE_HINT = (
+    "[视频发送失败：存储地址模型侧不可达（本地存储或内网地址）。"
+    "管理员请将对象存储（OSS/S3/MinIO）配置为公网可达后重试，"
+    "或接入 provider Files API 支持本地存储视频。]"
+)
 
 
 def _resolve_inline_limits(config: Optional[Dict[str, Any]]) -> Dict[str, int]:
@@ -472,11 +481,11 @@ class OpenAIFormatStrategy(MultimodalFormatStrategy):
             }
 
     async def format_video(self, url: str | None, content: bytes | None = None) -> tuple[bool, Dict[str, Any]]:
-        """OpenAI 视频格式；本地视频需后续接入 provider Files API。"""
+        """OpenAI 视频格式，视频以 video_url 方式出站。"""
         if content is not None:
             return False, {
                 "type": "text",
-                "text": "[视频文件无法通过当前模型接口安全传输，请配置 provider Files API 后重试]",
+                "text": "[视频处理失败：当前接口仅支持以 URL 方式发送视频]",
             }
         if not url:
             return False, {"type": "text", "text": "[视频文件缺少可用 URL]"}
@@ -706,17 +715,19 @@ class MultimodalService:
             # FILE_LOCAL_SERVER_URL 或私有 OSS URL 交给模型回拉；公网可达的
             # URL 保持原样直传，不额外搬运字节。
             if _requires_inline_bearer(file):
-                # 当前 URL 型视频 provider 没有通用安全内联协议；先完成归属校验，
-                # 再在下载大对象前明确拒绝，等待 provider Files API 适配。
                 if file.type == FileType.VIDEO:
-                    if file.upload_file_id:
-                        await self._get_local_file_metadata(file.upload_file_id, workspace_id)
-                    if Modality.VIDEO in self.input_modalities and include_processing_errors:
-                        result.append({
-                            "type": "text",
-                            "text": "[视频文件无法通过当前模型接口安全传输，请配置 provider Files API 后重试]",
-                        })
-                    elif Modality.VIDEO not in self.input_modalities:
+                    # 视频没有通用内联协议：远程存储直达对象地址后交给模型自行判断能否
+                    # 拉取；本地磁盘无对象 URL，给出管理员可操作的提示。
+                    if Modality.VIDEO in self.input_modalities:
+                        if not file.url and file.upload_file_id:
+                            file.url = await self._get_video_url(file, workspace_id)
+                        if file.url:
+                            is_support, content = await self._process_video(file, strategy_class(file))
+                            if is_support or include_processing_errors:
+                                result.append(content)
+                        elif include_processing_errors:
+                            result.append({"type": "text", "text": _VIDEO_UNAVAILABLE_HINT})
+                    else:
                         logger.warning(f"不支持的文件类型: {file.type}")
                     continue
 
@@ -888,6 +899,26 @@ class MultimodalService:
                 "type": "text",
                 "text": f"[视频处理失败: {str(e)}]",
             }
+
+    async def _get_video_url(
+            self,
+            file: FileInput,
+            workspace_id: uuid.UUID | str | None,
+    ) -> str | None:
+        """解析发给模型的视频 URL。
+
+        远程后端（OSS/S3/MinIO）返回直达的对象预签名 URL；平台自身的代理地址
+        （localhost/内网）会被云端模型的参数校验判为非法。本地磁盘没有对象 URL，
+        返回 None，由调用方给出管理员提示。远程 URL 不做可达性判断，模型能否实际
+        拉取交由模型侧处理。
+        """
+        storage = FileStorageService().storage
+        if isinstance(storage, LocalStorage):
+            return None
+        # 铸预签名 URL 前先做归属/租户范围校验。
+        metadata = await self._get_local_file_metadata(file.upload_file_id, workspace_id)
+        # 不传 file_name：避免强制 Content-Disposition: attachment。
+        return await storage.get_url(metadata.file_key, expires=86400)
 
     async def get_file_url(self, file: FileInput) -> str:
         """

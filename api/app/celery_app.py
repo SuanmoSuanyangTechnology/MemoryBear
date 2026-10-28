@@ -167,6 +167,11 @@ celery_app.conf.update(
         'app.tasks.sync_emotion_stats_for_user': {'queue': 'memory_heavy_tasks'},  # NOTE：单用户情绪明细增量同步（按 PG 判断 24h/48h 窗口）
         # 'app.tasks.update_implicit_emotions_storage': {'queue': 'memory_heavy_tasks'},  # NOTE：已废弃，保留路由防 unregistered
         'app.tasks.init_implicit_emotions_for_users': {'queue': 'memory_heavy_tasks'},
+        # Legacy task: the dashboard pre-warm now publishes
+        # ``memory_jobs.interest_distribution.init_for_users`` straight to the
+        # memory-jobs queue. Retire this route *and* the task in
+        # ``app.tasks`` together, only after every deployment runs the
+        # memory-jobs worker — removing the route alone would strand the task.
         'app.tasks.init_interest_distribution_for_users': {'queue': 'memory_heavy_tasks'},
         'app.tasks.init_community_clustering_for_users': {'queue': 'memory_heavy_tasks'},
         'app.tasks.run_incremental_clustering': {'queue': 'memory_heavy_tasks'},
