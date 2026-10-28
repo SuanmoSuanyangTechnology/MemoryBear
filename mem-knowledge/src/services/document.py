@@ -99,7 +99,7 @@ async def list_documents(
     if await knowledge_service.get_knowledge(db, kb_id, principal) is None:
         raise KnowledgeError.from_code("KB_KNOWLEDGE_NOT_FOUND")
 
-    filters = [Document.kb_id == kb_id, Document.status == 1]
+    filters = [Document.kb_id == kb_id]
     if parent_id is not None:
         await file_service.require_parent_folder(db, kb_id, parent_id, principal)
         result = await db.execute(
