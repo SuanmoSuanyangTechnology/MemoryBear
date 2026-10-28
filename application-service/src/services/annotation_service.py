@@ -2,14 +2,10 @@
 
 Embedding generation is the one implementation change: the host called the
 monolith's model transport chain, this service calls model-service directly
-(the east-west dependency of the split design). Reference resolution keeps the
-host semantics — no model configured or the reference not invokable yields no
+(the east-west dependency of the split design) through the shared
+``RedBearEmbeddings`` invoke shell. Reference resolution keeps the host
+semantics — no model configured or the reference not invokable yields no
 vector, and callers keep the host's degrade-and-continue posture.
-
-Two invoke transports coexist by face: the management face embeds through
-``ModelInvokeClient`` (config-id calls), while similarity matching on the
-runtime face embeds through ``RedBearEmbeddings`` (resolved invoke refs),
-mirroring the host's runtime chain.
 """
 
 from __future__ import annotations
@@ -21,7 +17,6 @@ from uuid import UUID
 from sqlalchemy.orm import Session
 
 from ..integrations.model.invoke_backend import RemoteInvokeRef
-from ..integrations.model_invoke import ModelInvokeClient
 from ..model_clients.embedding import RedBearEmbeddings
 from ..models.annotation_model import AppAnnotation, AppAnnotationSetting
 from ..repositories.annotation_repository import AnnotationRepository
@@ -115,7 +110,9 @@ class AnnotationService:
 
     # ==================== Embedding ====================
 
-    def resolve_embedding_ref(self, model_config_id: UUID | None, tenant_id: UUID):
+    def resolve_embedding_ref(
+        self, model_config_id: UUID | None, tenant_id: UUID
+    ) -> RemoteInvokeRef | None:
         """Resolve the embedding model reference once per request.
 
         Split from the invoke itself so batch import performs a single
@@ -126,17 +123,18 @@ class AnnotationService:
 
         if model_config_id is None:
             return None
-        return resolve_invoke_ref(self.db, model_config_id, tenant_id)
+        row = resolve_invoke_ref(self.db, model_config_id, tenant_id)
+        if row is None:
+            return None
+        return RemoteInvokeRef(config_id=row.id, tenant_id=tenant_id)
 
     def generate_embedding(
         self,
         question: str,
         *,
-        ref,
-        tenant_id: UUID,
+        ref: RemoteInvokeRef | None,
         workspace_id: UUID | None,
         actor_id: UUID | None,
-        client: ModelInvokeClient,
     ) -> list[float] | None:
         """Generate one question embedding through model-service.
 
@@ -147,14 +145,13 @@ class AnnotationService:
 
         if ref is None:
             return None
-        vectors = client.embed_texts(
-            ref.id,
-            [question],
-            tenant_id=tenant_id,
+        invoke_ref = RemoteInvokeRef(
+            config_id=ref.config_id,
+            tenant_id=ref.tenant_id,
             workspace_id=workspace_id,
             actor_id=actor_id,
         )
-        return vectors[0] if vectors else None
+        return RedBearEmbeddings.for_invoke(invoke_ref).embed_query(question) or None
 
     # ==================== Similarity Matching ====================
 
