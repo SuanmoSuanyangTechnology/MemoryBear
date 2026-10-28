@@ -5,5 +5,6 @@ Never import host-owned reference models into this package.
 """
 
 from src.models.base import ProfileBase
+from src.models.owned.ai_personality_model import AiPersonality
 
-__all__ = ["ProfileBase"]
+__all__ = ["AiPersonality", "ProfileBase"]
