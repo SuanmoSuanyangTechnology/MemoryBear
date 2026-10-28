@@ -9,7 +9,7 @@ from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from typing import Any
 
-TEMPLATE_VERSION = "wiki_tolerant_page_references_v8"
+TEMPLATE_VERSION = "wiki_output_constraints_v9"
 MAP_TASK = "mem_knowledge.tasks.sync_wiki_document"
 REDUCE_TASK = "mem_knowledge.tasks.reduce_wiki_page"
 BACKFILL_TASK = "mem_knowledge.tasks.enqueue_unprocessed_wiki_documents"
@@ -20,6 +20,7 @@ TERMINAL_TASK_STATUSES = frozenset({"succeeded", "failed", "cancelled", "superse
 MAX_LANGUAGE_LENGTH = 64
 MAX_EXTRACT_PROMPT_LENGTH = 12000
 TYPE_GROUP_NAMES = frozenset({"知识", "摘要", "knowledge", "summary", "summaries"})
+TAXONOMY_TYPE_LABELS = TYPE_GROUP_NAMES | {"entity", "concept", "实体", "概念"}
 # Opportunistic cleanup bounds diagnostic history without a periodic scheduler.
 TASK_RETENTION_DAYS = 30
 TASK_CLEANUP_BATCH_SIZE = 1000

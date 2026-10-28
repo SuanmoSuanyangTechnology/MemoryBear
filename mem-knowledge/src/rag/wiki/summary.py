@@ -46,16 +46,14 @@ def summarize_document(model, snapshot, topics, segments, catalog):
         base["confirmed_topics"] = []
     allowed_topics = {topic["topic_ref"] for topic in base["confirmed_topics"]}
 
+    def validate(content):
+        validate_markdown(content, catalog, allowed_topics)
+        lines = content.splitlines()
+        if lines[0].upper().startswith("SUMMARY:") and not "\n".join(lines[1:]).strip():
+            raise ValueError("模型摘要正文为空")
+
     def generate(data):
-        content = model.text(SUMMARY_STAGE, data)
-        # 文本安全和链接校验独立于编号覆盖；坏链接或空内容不能被当成正常摘要。
-        try:
-            validate_markdown(content, catalog, allowed_topics)
-        except ValueError as exc:
-            raise WikiError("WIKI_MODEL_OUTPUT_INVALID", diagnostics={
-                "stage": SUMMARY_STAGE, "error_message": str(exc), "raw_output": content,
-            }) from exc
-        return content
+        return model.text(SUMMARY_STAGE, data, validate=validate)
 
     def build(values):
         return {**base, "sources": values}

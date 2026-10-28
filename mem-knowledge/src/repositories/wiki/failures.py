@@ -4,7 +4,7 @@ from sqlalchemy import select
 
 from ...models.owned import WikiDocumentPageTask, WikiPage
 from ...rag.wiki.config import TERMINAL_TASK_STATUSES
-from ...rag.wiki.diagnostics import progress_details
+from ...rag.wiki.progress_errors import failure_message
 from ...utils.datetime_utils import utcnow_naive
 from .common import (
     append_log,
@@ -45,8 +45,7 @@ def map_failure(session, delivery, error, settings, *, deferred=False):
     retry = _attempt(state, error, settings, deferred=deferred)
     state.error_code, state.error_stage = error.code, state.stage
     state.status = "retry_wait" if retry else "failed"
-    append_log(document, f"Wiki {state.stage}: {error.code}; retry={str(retry).lower()}; "
-               f"失败详情={progress_details(error)}；完整诊断见 Wiki Worker 日志。")
+    append_log(document, failure_message(error, retry=retry, stage=state.stage))
     if not retry:
         failed_pages = set()
         for task in current_tasks(session, state):
@@ -166,8 +165,9 @@ def page_failure(session, kb_id, page_id, error, settings, *, deferred=False, sn
         setattr(task, field, getattr(task, field) + 1)
         if changed or not deferred:
             # 同一错误码的不同失败也必须记录，避免后续尝试的真实原因被覆盖。
-            append_log(document, f"Wiki page {page.id}: {error.code}; retry={str(retry).lower()}; "
-                       f"失败详情={progress_details(error)}；完整诊断见 Wiki Worker 日志。")
+            append_log(document, failure_message(
+                error, retry=retry, stage="reducing", page_id=page.id,
+            ))
     session.flush()
     for doc_id in {task.document_id for task in eligible}:
         document = documents[doc_id]

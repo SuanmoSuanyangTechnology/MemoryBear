@@ -5,6 +5,7 @@ from sqlalchemy import String, cast, exists, func, or_, select
 from ...models.owned import Document, Knowledge, WikiPage
 from ...models.owned.wiki_faq import WikiFAQ
 from ...models.references import Workspace
+from ...rag.faq.contracts import readable_faq_text
 from ..wiki.common import as_uuid
 from .common import get_faq, scoped
 
@@ -50,10 +51,10 @@ def data(row):
         "id": str(row.id),
         "content_revision": row.content_revision,
         "row_version": row.row_version,
-        "standard_question": row.standard_question,
+        "standard_question": readable_faq_text(row.standard_question),
         "similar_questions": list(row.similar_questions),
         "negative_questions": list(row.negative_questions),
-        "answers": list(row.answers),
+        "answers": [readable_faq_text(answer) for answer in row.answers],
         "answer_strategy": row.answer_strategy,
         "wiki_page_id": str(row.wiki_page_id) if row.wiki_page_id else None,
     }
