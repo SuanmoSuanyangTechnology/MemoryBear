@@ -91,7 +91,7 @@ const PrivateFileWorkspace = forwardRef<PrivateFileWorkspaceRef, PrivateFileWork
 
   useEffect(() => {
     refreshTable();
-  }, [apiUrl, query._timestamp, refreshTable]);
+  }, [apiUrl, refreshTable]);
 
   const stopSyncing = useCallback(() => {
     if (syncIntervalRef.current) clearInterval(syncIntervalRef.current);
