@@ -18,17 +18,17 @@ class PersonalityAnchorConfig(BaseModel):
         ..., strict=True, max_length=4000,
     )
 
-    @field_validator("personality_anchor_base_principles", mode="before")
-    @classmethod
-    def trim_base_principles(cls, value: object) -> object:
-        """Validate the length after removing surrounding whitespace."""
-        return value.strip() if isinstance(value, str) else value
-
 
 class PersonalityAnchorConfigUpdate(PersonalityAnchorConfig):
     """Replace all six settings of a workspace-owned configuration."""
 
     config_id: UUID
+
+    @field_validator("personality_anchor_base_principles", mode="before")
+    @classmethod
+    def trim_base_principles(cls, value: object) -> object:
+        """Remove surrounding whitespace before validating update input."""
+        return value.strip() if isinstance(value, str) else value
 
 
 class PersonalityAnchorConfigResponse(PersonalityAnchorConfig):
