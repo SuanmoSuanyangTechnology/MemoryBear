@@ -3,7 +3,7 @@
 from difflib import SequenceMatcher
 
 from .batching import batches, optional_items
-from .config import TYPE_GROUP_NAMES, normalize_name
+from .config import TAXONOMY_TYPE_LABELS, normalize_name
 from .contracts import FolderAssignments, IdentityMatches
 from .model import request_tokens, tokens
 from .pipeline import require_refs
@@ -73,7 +73,6 @@ def reconcile(model, snapshot, topics, context):
 
 TAXONOMY_DESCRIPTION_CHARS = 400
 TAXONOMY_CONTEXT_MARGIN_TOKENS = 128
-TAXONOMY_TYPE_LABELS = TYPE_GROUP_NAMES | {"entity", "concept", "实体", "概念"}
 
 
 def _taxonomy_subject(topic):
@@ -85,9 +84,15 @@ def _taxonomy_subject(topic):
 
 
 def validate_category_path(path):
-    if any(not name.strip() or len(name) > 200 or "/" in name or "\n" in name or "\r" in name
-           or normalize_name(name) in TAXONOMY_TYPE_LABELS for name in path):
-        raise ValueError("Invalid navigation category")
+    for index, name in enumerate(path):
+        if (not name.strip() or len(name) > 200 or "/" in name or "\n" in name
+                or "\r" in name or normalize_name(name) in TAXONOMY_TYPE_LABELS):
+            raise ValueError(
+                f"Invalid navigation category at category_path[{index}]: {name!r}. "
+                "Each level must be nonblank, at most 200 characters, without '/', CR or LF; "
+                f"forbidden labels after normalization: {sorted(TAXONOMY_TYPE_LABELS)}. "
+                "Choose a subject-based category, not an entity/concept type label."
+            )
 
 
 def taxonomy(model, snapshot, topics, context):
@@ -137,7 +142,10 @@ def taxonomy(model, snapshot, topics, context):
             if len(actual) != len(set(actual)):
                 raise ValueError("Duplicate category decisions")
             for item in value["assignments"]:
-                validate_category_path(item["category_path"])
+                try:
+                    validate_category_path(item["category_path"])
+                except ValueError as exc:
+                    raise ValueError(f"topic_ref={item['topic_ref']}: {exc}") from exc
 
         result = model.call("wiki_taxonomy_v2", build(group), FolderAssignments, validate)
         for item in result["assignments"]:
