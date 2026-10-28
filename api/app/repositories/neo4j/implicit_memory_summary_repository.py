@@ -22,7 +22,8 @@ class ImplicitMemorySummaryRepository:
                 RETURN count(scene) AS summary_count
                 UNION ALL
                 MATCH (scene:MemorySummary {end_user_id: $end_user_id})
-                WHERE trim(coalesce(scene.content, '')) <> ''
+                WHERE scene.delete_at IS NULL
+                  AND trim(coalesce(scene.content, '')) <> ''
                 RETURN count(scene) AS summary_count
             }
             RETURN sum(summary_count) AS count
@@ -45,6 +46,7 @@ class ImplicitMemorySummaryRepository:
             RETURN scene
             UNION ALL
             MATCH (scene:MemorySummary {end_user_id: $end_user_id})
+            WHERE scene.delete_at IS NULL
             RETURN scene
         }
         WITH scene
