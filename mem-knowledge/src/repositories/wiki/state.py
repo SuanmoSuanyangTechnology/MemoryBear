@@ -314,7 +314,7 @@ def record_publish_failure(session, delivery, *, terminal=False):
         state.error_code = "WIKI_DISPATCH_FAILED"
         if terminal:
             document.run, document.progress = 0, -1.0
-        append_log(document, "Wiki dispatch failed; retry is available.")
+        append_log(document, "Wiki 任务未能加入处理队列，本次处理未完成，可重新发起 Wiki 处理。")
 
 
 def chunks_changed(session, kb_id, document_id, *, incomplete=False):
@@ -350,7 +350,9 @@ def chunks_changed(session, kb_id, document_id, *, incomplete=False):
         document.run, document.progress = 0, -1.0
         for task in current_tasks(session, state):
             task.status, task.error_code, task.error_stage = "failed", error_code, "chunk_mutation"
-        append_log(document, f"分块写入后 Wiki 等待显式重试：{error_code}")
+        append_log(document, ("文档内容未完整写入，Wiki 缺少完整来源。" if incomplete else
+                              "未配置 Wiki 生成所需的语言模型。")
+                   + f"请处理原因后重新发起 Wiki 处理。（错误码：{error_code}）")
         return None
     session.flush()
     return admit(session, kb_id, document_id)
@@ -401,7 +403,7 @@ def source_completed(session, kb_id, document_id, source_task_id):
             task.status, task.error_code, task.error_stage = (
                 "failed", state.error_code, "chunk_mutation"
             )
-        append_log(document, "解析期间分块部分写入失败，Wiki 来源需重新确认。")
+        append_log(document, "文档分块未完整写入，Wiki 生成已停止；请重新处理文档以恢复完整来源。")
         return None
     if state.source_ready and state.stage not in {"waiting_source", "waiting_wiki"}:
         return {**state_delivery(state), "publish": not state.publish_confirmed, "accepted": False}
