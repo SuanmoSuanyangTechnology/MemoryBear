@@ -5,6 +5,7 @@ from sqlalchemy import select
 from ...errors import KnowledgeError
 from ...models.owned.wiki import WikiPage
 from ...models.owned.wiki_faq import WikiFAQ, WikiPageVersion
+from ...rag.faq.contracts import readable_faq_text
 from ...utils.datetime_utils import to_timestamp_ms
 from ..wiki.common import as_uuid
 from ..wiki.read import scoped_pages
@@ -198,11 +199,12 @@ def review_status(row, source_info):
 def serialize(session, scope, row):
     info = source(session, scope, row)
     baseline = info["approved_wiki_version"] or info["generated_wiki_version"]
+    answer = readable_faq_text(row.answers[0])
     return {
         "id": str(row.id),
-        "standard_question": row.standard_question,
-        "standard_answer": row.answers[0],
-        "answer_preview": row.answers[0][:200],
+        "standard_question": readable_faq_text(row.standard_question),
+        "standard_answer": answer,
+        "answer_preview": answer[:200],
         "review_status": review_status(row, info),
         "is_enabled": row.is_enabled,
         "can_enable": row.review_state != "pending",

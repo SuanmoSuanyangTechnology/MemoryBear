@@ -1,5 +1,6 @@
 """标准问及其问法共用答案集合；首项编辑不能丢失隐藏字段。"""
 
+import re
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -7,6 +8,12 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 FAQ_GENERATE_TASK = "mem_knowledge.tasks.generate_wiki_faq"
 FAQ_QUEUE = "faq_tasks"
 FAQ_PROMPT_VERSION = "wiki_faq_v1"
+WIKI_PAGE_LINK = re.compile(r"\[\[([^\]|\n]+)\|([^\]\n]+)\]\]")
+
+
+def readable_faq_text(value: str) -> str:
+    """FAQ 不具备 Wiki 跳转上下文，仅保留内链的可读名称。"""
+    return WIKI_PAGE_LINK.sub(lambda match: match[2], value)
 
 
 class FAQContent(BaseModel):
@@ -44,9 +51,10 @@ class GeneratedFAQ(BaseModel):
     @field_validator("standard_question", "standard_answer")
     @classmethod
     def strip_required(cls, value: str) -> str:
-        if not value.strip():
+        value = readable_faq_text(value).strip()
+        if not value:
             raise ValueError("标准问和标准答不能为空")
-        return value.strip()
+        return value
 
 
 class GeneratedFAQs(BaseModel):
