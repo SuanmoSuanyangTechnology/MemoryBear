@@ -99,6 +99,11 @@
   white-space: nowrap !important;
 }
 
+/* Wiki 目录的标题是 Flex 容器，允许其收缩，由内层文字显示省略号。 */
+.wiki-directory-tree .ant-tree-title {
+  min-width: 0;
+}
+
 .customTree .ant-tree-child-tree {
   margin: 0 !important;
 }
