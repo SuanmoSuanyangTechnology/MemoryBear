@@ -149,6 +149,11 @@ def settle_progress(session, document, state):
         state.status, state.stage = "running", "reducing"
     state.last_progress = document.progress
     if previous != (state.status, document.run, document.progress):
+        if counts["failed"]:
+            outcome = "本次 Wiki 处理未完成。" if finished == total else "其余页面仍在处理中。"
+            append_log(document, f"Wiki 页面处理已结束 {finished}/{total} 个，其中 "
+                       f"{counts['failed']} 个失败。{outcome}")
+            return
         append_log(
             document,
             f"Wiki pages: finished={finished}/{total}, "

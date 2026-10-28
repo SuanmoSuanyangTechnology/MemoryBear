@@ -63,7 +63,13 @@ def validate_markdown(text, source_refs, links):
     cited = set(CITATION.findall(text))
     # Structured source_refs owns coverage; visible footnotes are optional legacy input.
     require_refs(cited, source_refs)
-    require_refs([match[0] for match in PAGE_LINK.findall(text)], links)
+    unknown_links = sorted({match[0] for match in PAGE_LINK.findall(text)} - set(links))
+    if unknown_links:
+        raise ValueError(
+            f"Invalid Wiki page links: unknown targets={unknown_links}; "
+            f"allowed targets={sorted(links)}. Use [[provided_handle|display name]]; "
+            "never use names as handles. If no supplied target matches, use plain text."
+        )
 
 
 def readable_markdown(text, source_refs):

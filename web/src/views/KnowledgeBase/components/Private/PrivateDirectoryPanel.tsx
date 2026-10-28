@@ -213,7 +213,7 @@ const PrivateDirectoryPanel: FC<PrivateDirectoryPanelProps> = ({
 
         {!isFilesMode &&
           (loading ? (
-            <Skeleton active />
+            <Skeleton active className="rb:mt-3!" />
           ) : treeData.length ? (
             <Tree.DirectoryTree
               virtual={false}
@@ -227,7 +227,11 @@ const PrivateDirectoryPanel: FC<PrivateDirectoryPanelProps> = ({
               selectedKeys={selectedPageId ? [selectedPageId] : []}
               treeData={treeData}
               titleRender={(node) => (
-                <span data-wiki-page-id={node.isLeaf ? String(node.key) : undefined}>
+                <span
+                  className="rb:block rb:min-w-0 rb:flex-1 rb:truncate"
+                  title={typeof node.title === 'string' ? node.title : undefined}
+                  data-wiki-page-id={node.isLeaf ? String(node.key) : undefined}
+                >
                   {node.title as ReactNode}
                 </span>
               )}

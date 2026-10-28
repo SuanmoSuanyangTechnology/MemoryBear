@@ -3,7 +3,6 @@ import type { TFunction } from 'i18next';
 import { useEffect, useState } from 'react';
 
 import {
-  getKnowledgeWikiPageDetail,
   getKnowledgeWikiPages,
 } from '@/api/knowledgeBase';
 
@@ -11,24 +10,12 @@ import type {
   WikiData,
   WikiPage,
   PageTypesQuery,
-  WikiPageDetail,
   WikiPageItem,
 } from '../Wiki/types';
 
 const EMPTY_WIKI_DATA: WikiData = { pages: [], relations: [] };
 
 const PAGE_TYPES: PageTypesQuery = 'entity,concept'
-
-const toMarkdown = (detail: WikiPageDetail, t: TFunction): string => {
-  const sourceSection = detail.sources.length
-    ? detail.sources.map((source) => `- ${source.quote || source.document_title}`).join('\n')
-    : `- ${t('knowledgeBase.privateWiki.noSources')}`;
-  const outlinkSection = detail.outlinks.length
-    ? detail.outlinks.map((link) => `- [${link.title}](#wiki-page=${encodeURIComponent(link.page_id)})`).join('\n')
-    : `- ${t('knowledgeBase.privateWiki.noRelated')}`;
-
-  return `# ${detail.title}\n\n> ${detail.summary || t('knowledgeBase.privateWiki.noDescription')}\n\n## ${t('knowledgeBase.privateWiki.relatedWiki')}\n\n${outlinkSection}\n\n## ${t('knowledgeBase.privateWiki.sourceDocuments')}\n\n${sourceSection}\n`;
-};
 
 const parseWikiData = async (knowledgeBaseId: string, t: TFunction): Promise<WikiData> => {
   const pageItems: WikiPageItem[] = [];
@@ -44,32 +31,19 @@ const parseWikiData = async (knowledgeBaseId: string, t: TFunction): Promise<Wik
     hasNext = response.page.hasnext;
     page += 1;
   }
-  const details = await Promise.all(
-    pageItems.map(async (item) => {
-      try {
-        return await getKnowledgeWikiPageDetail(knowledgeBaseId, item.page_id || item.id);
-      } catch {
-        return undefined;
-      }
-    }),
-  );
-  const detailMap = new Map(
-    details.filter((detail): detail is WikiPageDetail => Boolean(detail)).map((detail) => [detail.page_id || detail.id, detail]),
-  );
+  // List metadata is sufficient here; article readers load the selected detail on demand.
   const pages: WikiPage[] = pageItems.map((item) => {
     const id = item.page_id || item.id;
-    const detail = detailMap.get(id);
-    const relatedIds = detail?.outlinks.map((link) => link.page_id) ?? [];
     return {
       id,
-      title: detail?.title || item.title,
+      title: item.title,
       category: item.folder_path.map((folder) => folder.name).join(' / '),
       folderId: item.folder_id,
       folderPath: item.folder_path,
-      summary: detail?.summary || item.summary,
-      markdown: detail ? toMarkdown(detail, t) : `# ${item.title}\n\n> ${item.summary || t('knowledgeBase.privateWiki.noDescription')}\n`,
-      sourceIds: detail?.sources.map((source) => source.document_id) ?? [],
-      relatedIds,
+      summary: item.summary,
+      markdown: `# ${item.title}\n\n> ${item.summary || t('knowledgeBase.privateWiki.noDescription')}\n`,
+      sourceIds: [],
+      relatedIds: [],
       importance: 0,
     };
   });

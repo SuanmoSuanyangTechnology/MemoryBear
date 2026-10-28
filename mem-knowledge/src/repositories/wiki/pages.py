@@ -14,6 +14,7 @@ from ...models.owned import (
 from ...rag.wiki.config import (
     TERMINAL_TASK_STATUSES,
     TYPE_GROUP_NAMES,
+    UNAVAILABLE_PAGE_CONTENT,
     WikiDeferred,
     WikiError,
     WikiSuperseded,
@@ -765,6 +766,9 @@ def commit_reduce(session, snapshot, result):
         task = session.get(WikiDocumentPageTask, as_uuid(participant["subtask_id"]))
         if not task or task.status in TERMINAL_TASK_STATUSES:
             raise WikiDeferred("WIKI_PARTICIPANT_CHANGED")
+    has_sources = bool(snapshot["sources"])
+    if not has_sources:
+        result = {**result, "content": UNAVAILABLE_PAGE_CONTENT, "summary": "", "links": []}
     result["content"] = result["content"].replace("\r\n", "\n").replace("\r", "\n").strip()
     result["summary"] = result["summary"].strip()
     updated = session.execute(
@@ -787,12 +791,14 @@ def commit_reduce(session, snapshot, result):
     previous_version = page.version
     changed = page.published_content_hash != content_hash
     page.content, page.summary = result["content"], result["summary"]
-    has_sources = bool(snapshot["sources"])
+    availability_changed = has_sources != bool(page.published_sources)
     page.status = "ready" if has_sources else "unavailable"
-    if has_sources and (page.version == 0 or changed):
+    # 可用性按上次发布来源判断，不能使用已被调度改成 pending/updating 的状态。
+    if (has_sources and page.version == 0) or (
+        page.version > 0 and (changed or availability_changed)
+    ):
         page.version += 1
-    if has_sources:
-        page.published_content_hash = content_hash
+    page.published_content_hash = content_hash
     page.row_version = snapshot["row_version"] + 1
     page.failure_attempt, page.defer_count, page.error_code = 0, 0, None
     page.defer_started_at = None
@@ -804,7 +810,7 @@ def commit_reduce(session, snapshot, result):
         }
         for s in snapshot["sources"]
     ]
-    if has_sources and page.version != previous_version:
+    if page.version != previous_version:
         from ..wiki_faq.jobs import record_publication
 
         record_publication(session, scope, page, previous_version, snapshot)

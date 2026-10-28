@@ -27,6 +27,7 @@ from .runtime import ProcessRuntime, set_process_runtime
 from .sensitive import SensitiveDataFilter
 from .services.batch_persist_queue import BatchPersistQueue
 from .trace import TraceIdMiddleware
+from .workflow.nodes.http_client import close_http_client, init_http_client
 
 logger = logging.getLogger(__name__)
 
@@ -104,6 +105,9 @@ def create_app(settings: AppServiceSettings | None = None) -> FastAPI:
                 await gateway_auth.start()
             except Exception:
                 logger.exception("gateway auth refresh start failed")
+        # Workflow nodes (code / http_request) resolve this client lazily, so it
+        # must exist before serving traffic.
+        await init_http_client()
         # Knowledge retriever selection is process-level: the workflow node and
         # draft runs resolve it lazily, so it must exist before serving traffic.
         await initialize_knowledge_integration()
@@ -122,6 +126,7 @@ def create_app(settings: AppServiceSettings | None = None) -> FastAPI:
             # Drain queued persistence before the database engine is disposed.
             await BatchPersistQueue.flush()
             await BatchPersistQueue.stop()
+            await close_http_client()
             await close_knowledge_integration()
             await application.state.runtime.aclose()
             logger.info("Application service stopped")
