@@ -16,8 +16,7 @@ class MemoryConfig(Base):
             name="ck_memory_config_personality_anchor_cycle",
         ),
         CheckConstraint(
-            "char_length(btrim(personality_anchor_base_principles)) BETWEEN 1 AND 4000 "
-            "AND personality_anchor_base_principles ~ '[^[:space:]]'",
+            "char_length(personality_anchor_base_principles) <= 4000",
             name="ck_memory_config_personality_anchor_principles",
         ),
     )
@@ -177,19 +176,19 @@ class MemoryConfig(Base):
     
     # 人格锚定引擎配置
     personality_anchor_enabled = Column(
-        Boolean, nullable=False, default=True, server_default=text("true"),
+        Boolean, nullable=False, default=False, server_default=text("false"),
         comment="是否启用人格锚定引擎",
     )
     personality_anchor_auto_solidify = Column(
-        Boolean, nullable=False, default=True, server_default=text("true"),
+        Boolean, nullable=False, default=False, server_default=text("false"),
         comment="是否自动固化低风险相处策略",
     )
     personality_anchor_read_metadata = Column(
-        Boolean, nullable=False, default=True, server_default=text("true"),
+        Boolean, nullable=False, default=False, server_default=text("false"),
         comment="是否允许读取用户metadata",
     )
     personality_anchor_read_preferences = Column(
-        Boolean, nullable=False, default=True, server_default=text("true"),
+        Boolean, nullable=False, default=False, server_default=text("false"),
         comment="是否允许读取用户偏好",
     )
     personality_anchor_sync_cycle = Column(
@@ -198,9 +197,8 @@ class MemoryConfig(Base):
     )
     personality_anchor_base_principles = Column(
         Text, nullable=False,
-        default="你是用户的长期 AI 伙伴。保持坦诚、温和与独立判断，尊重用户自主选择及隐私，不编造事实或未执行的行动。",
-        server_default="你是用户的长期 AI 伙伴。保持坦诚、温和与独立判断，尊重用户自主选择及隐私，不编造事实或未执行的行动。",
-        comment="人格基础身份与原则，1～4000字符",
+        default="", server_default="",
+        comment="人格基础身份与原则，最多4000字符，允许为空字符串",
     )
 
     # 时间戳

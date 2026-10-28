@@ -15,7 +15,7 @@ class PersonalityAnchorConfig(BaseModel):
     personality_anchor_read_preferences: StrictBool
     personality_anchor_sync_cycle: Literal["daily", "weekly", "manual"]
     personality_anchor_base_principles: str = Field(
-        ..., strict=True, min_length=1, max_length=4000,
+        ..., strict=True, max_length=4000,
     )
 
     @field_validator("personality_anchor_base_principles", mode="before")

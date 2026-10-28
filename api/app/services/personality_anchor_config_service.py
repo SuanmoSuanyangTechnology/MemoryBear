@@ -21,14 +21,17 @@ class PersonalityAnchorConfigService:
 
     @staticmethod
     def serialize(config: MemoryConfig) -> dict[str, Any]:
-        """Build the response from explicitly selected ORM attributes."""
+        """Use model defaults for NULL settings without modifying stored values."""
+        values = {}
+        for field in PersonalityAnchorConfig.model_fields:
+            value = getattr(config, field)
+            if value is None:
+                value = MemoryConfig.__table__.columns[field].default.arg
+            values[field] = value
         return PersonalityAnchorConfigResponse(
             config_id=config.config_id,
             is_default=bool(config.is_default),
-            **{
-                field: getattr(config, field)
-                for field in PersonalityAnchorConfig.model_fields
-            },
+            **values,
         ).model_dump(mode="json")
 
     async def get(self, config_id: UUID, workspace_id: UUID) -> dict[str, Any] | None:
