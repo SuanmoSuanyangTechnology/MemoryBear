@@ -3,7 +3,14 @@
 import datetime
 import uuid
 
-from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    field_serializer,
+    field_validator,
+)
 
 from ...models.owned import KnowledgeType, PermissionType
 from ...models.references import LoadBalanceStrategy, ModelType
@@ -90,6 +97,18 @@ class KnowledgeBase(BaseModel):
 
 
 class KnowledgeCreate(KnowledgeBase):
+    @field_validator("parser_config")
+    @classmethod
+    def _reject_string_wiki_enabled(cls, value: dict | None) -> dict | None:
+        wiki = value.get("wiki") if value is not None else None
+        if isinstance(wiki, dict) and isinstance(wiki.get("enabled"), str):
+            # 仅修正创建时字符串开关的校验响应，其他存量配置校验保持原行为。
+            raise ValidationError.from_exception_data(
+                cls.__name__,
+                [{"type": "bool_type", "loc": ("wiki", "enabled"), "input": wiki["enabled"]}],
+            )
+        return value
+
     image2text_id: uuid.UUID | None = Field(
         None,
         description=(
