@@ -8,6 +8,7 @@ event loop. That removes Celery's asyncio/fork interaction problems entirely.
 from __future__ import annotations
 
 import os
+import sys
 
 from celery import Celery
 from celery.signals import (
@@ -140,7 +141,18 @@ def _verify_startup_dependencies(**_: object) -> None:
 
     if not settings.startup_dependency_check:
         return
-    health = get_runtime().verify_dependencies()
+    try:
+        health = get_runtime().verify_dependencies()
+    except Exception:
+        # ``Signal.send`` catches receiver exceptions and merely logs them, so
+        # raising here would let an unhealthy worker boot and consume tasks.
+        # ``SystemExit`` is a BaseException, so it escapes that handler.
+        logger.error(
+            "Worker dependencies unavailable, aborting startup",
+            exc_info=True,
+            extra={"event": "worker_dependencies_unavailable"},
+        )
+        sys.exit(1)
     logger.info(
         "Worker dependencies verified dependencies=%s",
         health,

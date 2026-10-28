@@ -77,6 +77,8 @@ class JsonFormatter(logging.Formatter):
             "message": record.getMessage(),
         }
         for name in _STRUCTURED_FIELDS:
+            if name in payload:  # ``event`` already carries the canonical value
+                continue
             value = getattr(record, name, None)
             if value not in (None, ""):
                 payload[name] = value

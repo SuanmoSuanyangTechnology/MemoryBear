@@ -15,8 +15,10 @@ dependencies = [
     "certifi==2026.10.23",
     "elasticsearch[async]==8.16.0",
     "fastapi==0.156.4",
-    # Pinned to the API host versions so prompt/tool-call behavior matches
-    # what the migrated generation pipelines were validated against.
+    # Pins are explicit per service: this one runs the migrated generation
+    # pipelines on its own FastAPI line and may lead the API host's versions,
+    # so do not "align" them with api/pyproject.toml without re-validating the
+    # prompt/tool-call behavior they were tested with.
     "json-repair==0.64.2",
     "langchain-core==1.6.12",
     "langchain-openai==1.7.2",
@@ -29,7 +31,8 @@ dependencies = [
     "redbear-model[runtime]",
     "redis==8.1.0",
     "sqlalchemy[asyncio]==2.1.5",
-    # Explicit transitive security pin; FastAPI 0.143.0 allows Starlette >=0.46.0.
+    # Explicit transitive security pin; keep it in step with the FastAPI pin
+    # above rather than with the API host's starlette.
     "starlette==1.10.0",
     # Cache generation is executed by the memory-jobs Celery workers; this
     # service only publishes the task by name and waits for its result.

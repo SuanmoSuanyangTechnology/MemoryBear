@@ -60,12 +60,18 @@ class JobsSettings(BaseSettings):
     #: Per-request timeout for dependency probes. Probes must stay far below
     #: task timeouts and container probe deadlines even when a dependency is
     #: unreachable (the shared client may retry for minutes on real traffic).
-    #: Only the Elasticsearch ping uses this value; PostgreSQL, Redis and Neo4j
-    #: are bounded by their own connect timeouts, and ``dependency_health()``
-    #: runs them serially — the container deadline covers the sum (see the
-    #: Dockerfile HEALTHCHECK and the k8s readiness probe).
+    #: Only the Elasticsearch ping uses this value; the other clients carry
+    #: their own production timeouts, so ``dependency_health()`` can exceed a
+    #: container probe deadline on a black-holed dependency.
     healthcheck_timeout_seconds: float = Field(
         3.0, gt=0, validation_alias="JOBS_HEALTHCHECK_TIMEOUT_SECONDS"
+    )
+    #: Hard wall-clock budget for the whole ``python -m src.healthcheck`` probe
+    #: (all four checks, sequentially). On expiry the CLI exits 1 by itself, so
+    #: the container deadline only has to cover this budget plus interpreter
+    #: start-up.
+    healthcheck_deadline_seconds: float = Field(
+        30.0, gt=0, validation_alias="JOBS_HEALTHCHECK_DEADLINE_SECONDS"
     )
 
     # ---------------------------------------------------------------- PostgreSQL
