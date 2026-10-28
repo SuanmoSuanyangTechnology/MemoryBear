@@ -23,7 +23,7 @@ class EngineDisplayCardItem(BaseModel):
         "PREFERENCE",
         "SCENE_RECONSTRUCTION",
         "PREDICTION",
-        "PERSONALITY_ANCHOR",
+        # "PERSONALITY_ANCHOR",  # Reserved until event aggregation and card text are implemented.
     ] = Field(
         ...,
         description="稳定英文引擎枚举，由前端负责文案映射",
