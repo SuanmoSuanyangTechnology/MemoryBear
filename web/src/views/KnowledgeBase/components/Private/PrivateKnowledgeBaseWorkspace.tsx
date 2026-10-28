@@ -98,7 +98,7 @@ const PrivateKnowledgeBaseWorkspace: FC<PrivateKnowledgeBaseWorkspaceProps> = ({
   const [catalogRefreshKey, setCatalogRefreshKey] = useState(0);
   const [graphInitialPageId, setGraphInitialPageId] = useState<string>();
   const [showGraphBack, setShowGraphBack] = useState(false);
-  const { pages, loading, error } = useWikiData(knowledgeBaseId);
+  const { pages, loading, error } = useWikiData(knowledgeBaseId, wikiActive || mode === 'wikiGraph');
   const [summaryPages, setSummaryPages] = useState<WikiPage[]>([]);
   useEffect(() => {
     setSummaryPages([]);
