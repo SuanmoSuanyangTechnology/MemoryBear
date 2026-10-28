@@ -76,6 +76,7 @@ class ModelInvokeClient:
                     connect=_CONNECT_TIMEOUT_SECONDS,
                     read=_READ_TIMEOUT_SECONDS,
                     write=_WRITE_TIMEOUT_SECONDS,
+                    pool=_CONNECT_TIMEOUT_SECONDS,
                 ),
                 transport=self._transport,
                 # Internal east-west calls must not pick up ambient proxy env.
