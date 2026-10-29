@@ -472,10 +472,11 @@ async def _callback_user_snapshot(workspace_id: uuid.UUID) -> CurrentUserSnapsho
     """
     async with get_async_db_context() as db:
         workspace = await db.get(Workspace, workspace_id)
-        # 会话退出时会回滚并过期 ORM 字段，先取出服务身份需要的租户 ID。
-        tenant_id = workspace.tenant_id if workspace is not None else None
-    if workspace is None:
-        raise BusinessException("工作空间不存在", BizCode.WORKSPACE_NOT_FOUND)
+        if workspace is None:
+            raise BusinessException("工作空间不存在", BizCode.WORKSPACE_NOT_FOUND)
+        # Plain values only: the context exit rolls back and closes the session,
+        # which expires and detaches the ORM instance.
+        tenant_id = workspace.tenant_id
     return CurrentUserSnapshot(
         id=uuid.uuid5(uuid.NAMESPACE_URL, "application-service"),
         username="application-service",
@@ -484,27 +485,6 @@ async def _callback_user_snapshot(workspace_id: uuid.UUID) -> CurrentUserSnapsho
         is_superuser=False,
         current_workspace_id=workspace_id,
         tenant_id=tenant_id,
-    )
-
-
-@router.post("/end-user/domain-info")
-async def internal_end_user_domain_info(
-        payload: EndUserDomainInfoRequest,
-        x_workspace_id: Optional[str] = Header(None, alias="X-Workspace-Id"),
-        _guard: None = Depends(require_app_service_callback_secret),
-) -> dict:
-    """复用单体用户信息查询，供应用服务获取组装完成的领域信息。"""
-    workspace_id = _parse_workspace_id(x_workspace_id)
-    current_user = await _callback_user_snapshot(workspace_id)
-    response = await end_user_controller.get_end_user_info(
-        end_user_id=payload.end_user_id,
-        current_user=current_user,
-    )
-    if response["code"] != BizCode.OK:
-        return response
-    return success(
-        data={"domain_specific_info": response["data"]["meta_data"]["domain_specific_info"]},
-        msg=response["msg"],
     )
 
 
@@ -546,6 +526,27 @@ async def internal_end_user_identity_update(
     return await end_user_controller.update_end_user_identity(
         identity_update=payload,
         current_user=current_user,
+    )
+
+
+@router.post("/end-user/domain-info")
+async def internal_end_user_domain_info(
+        payload: EndUserDomainInfoRequest,
+        x_workspace_id: Optional[str] = Header(None, alias="X-Workspace-Id"),
+        _guard: None = Depends(require_app_service_callback_secret),
+) -> dict:
+    """复用单体用户信息查询，供应用服务获取组装完成的领域信息。"""
+    workspace_id = _parse_workspace_id(x_workspace_id)
+    current_user = await _callback_user_snapshot(workspace_id)
+    response = await end_user_controller.get_end_user_info(
+        end_user_id=payload.end_user_id,
+        current_user=current_user,
+    )
+    if response["code"] != BizCode.OK:
+        return response
+    return success(
+        data={"domain_specific_info": response["data"]["meta_data"]["domain_specific_info"]},
+        msg=response["msg"],
     )
 
 
