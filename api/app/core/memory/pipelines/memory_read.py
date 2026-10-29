@@ -25,6 +25,7 @@ from app.core.memory.read_services.search_engine.quick_retrieval_dedup import (
     QUICK_SEARCH_ENTITY_LIMIT,
     log_quick_retrieval_dedup_safely,
 )
+from app.core.memory.read_services.search_engine.community_search import COMMUNITY_DEFAULTS
 from app.core.memory.retrieval_trace.models import RetrievalExecutionTrace
 from app.core.memory.retrieval_trace.stage_events import emit_memory_stage
 from app.core.memory.retrieval_trace.stage_projection import (
@@ -187,7 +188,7 @@ class ReadPipeLine(ModelClientMixin, BasePipeline):
         self._retrieval_operation_id = retrieval_operation_id or uuid.uuid4().hex
         self._notification_error = None
         original_query = query
-        query = QueryPreprocessor.process(query)
+        query = query.strip() if search_switch == SearchStrategy.COMMUNITY else QueryPreprocessor.process(query)
         if search_switch in {
             SearchStrategy.DEEP,
             SearchStrategy.NORMAL,
@@ -204,6 +205,8 @@ class ReadPipeLine(ModelClientMixin, BasePipeline):
 
         try:
             match search_switch:
+                case SearchStrategy.COMMUNITY:
+                    res = await self._community_read(query, limit, includes, skip_summary, enable_rerank, history)
                 case SearchStrategy.DEEP:
                     res = await self._deep_read(query, history, limit,
                                                 includes=includes, skip_summary=skip_summary,
@@ -246,7 +249,7 @@ class ReadPipeLine(ModelClientMixin, BasePipeline):
         if search_switch in [SearchStrategy.DEEP, SearchStrategy.NORMAL] and not self.ctx.draft:
             await self._save_short_term(query, search_switch, res)
 
-        if record_display:
+        if record_display and search_switch != SearchStrategy.COMMUNITY:
             self._dispatch_display_record(display_query, search_switch, res)
 
         if self._notification_error is not None:
@@ -258,9 +261,82 @@ class ReadPipeLine(ModelClientMixin, BasePipeline):
         res.execution_trace.processed_query = query
         res.execution_trace.search_switch = search_switch.value
         res.execution_trace.backend = self.ctx.storage_type.value
-        res.execution_trace.limit = limit
+        res.execution_trace.limit = COMMUNITY_DEFAULTS.evidence_top_k if search_switch == SearchStrategy.COMMUNITY else limit
 
         return res
+
+    async def _community_read(
+            self, query: str, limit: int, includes: list | None,
+            skip_summary: bool, enable_rerank: bool, history: list,
+    ) -> MemorySearchResult:
+        from app.core.error_codes import BizCode
+        from app.core.exceptions import BusinessException
+        from app.core.memory.exceptions import CommunityRetrievalError
+        from app.core.memory.read_services.search_engine.community_search import CommunitySearchService
+        from app.core.memory.retrieval_trace.community_trace import log_community_trace, timed_stage
+        from app.core.memory.models.community_retrieval_models import CommunityRetrievalTrace
+        from app.services.memory_reembed_service import should_degrade_semantic
+
+        cfg = self.ctx.memory_config
+        trace = CommunityRetrievalTrace(
+            parameters=COMMUNITY_DEFAULTS.as_dict(),
+            model_config_id=str(getattr(cfg, "embedding_model_id", "") or ""),
+            ignored_compatibility_parameters={
+                "limit": limit, "includes": [str(item) for item in includes] if includes else None,
+                "skip_summary": skip_summary, "enable_rerank": enable_rerank, "history_count": len(history),
+            },
+        )
+        service = None
+        try:
+            with timed_stage(trace, "initialization"):
+                if self.ctx.storage_type != StorageType.NEO4J:
+                    raise CommunityRetrievalError("unsupported_storage")
+                if not query:
+                    raise CommunityRetrievalError("empty_query")
+                if cfg is None or not cfg.workspace_id or not cfg.embedding_model_id:
+                    raise CommunityRetrievalError("missing_model_configuration")
+                # Unlike legacy modes, a failed readiness lookup must stop this read.
+                async with get_async_db_context() as db:
+                    not_ready = await should_degrade_semantic(
+                        db, workspace_id=cfg.workspace_id, end_user_id=self.ctx.end_user_id,
+                        embedding_model_id=cfg.embedding_model_id,
+                    )
+                    trace.semantic_degraded = not_ready
+                    if not not_ready:
+                        model = await ModelConfigService.get_model_by_id_async(
+                            db, cfg.embedding_model_id, tenant_id=cfg.tenant_id,
+                        )
+                        trace.model_name = model.name
+                embedder = None if not_ready else await self._get_embedding_client()
+                recall_service = Neo4jSearchService(
+                    self.ctx, embedder=embedder,
+                    includes=[MemoryNodeType.SCENE_COMMUNITY, MemoryNodeType.SCENE_SUMMARY],
+                    semantic_degraded=not_ready,
+                    cosine_score_threshold=COMMUNITY_DEFAULTS.community_min_cosine,
+                )
+            service = CommunitySearchService(
+                recall_candidates=recall_service.recall_candidates,
+                end_user_id=self.ctx.end_user_id, embedder=embedder,
+                model_config_id=trace.model_config_id, model_name=trace.model_name,
+                operation_id=self._retrieval_operation_id,
+                semantic_degraded=not_ready,
+            )
+            service.trace = trace
+            return await service.search(query, compatibility_parameters=trace.ignored_compatibility_parameters)
+        except Exception as exc:
+            reason = (
+                str(exc) if isinstance(exc, CommunityRetrievalError)
+                else "scan_timeout" if isinstance(exc, TimeoutError)
+                else "dependency_failed" if service is not None
+                else "initialization_failed"
+            )
+            if service is None:
+                trace.status = "failed"
+                trace.error_reason = reason
+                log_community_trace(trace, operation_id=self._retrieval_operation_id, end_user_id=self.ctx.end_user_id)
+            code = BizCode.BAD_REQUEST if reason in {"empty_query", "unsupported_storage"} else BizCode.MEMORY_READ_FAILED
+            message = f"Invalid memory read request: {reason}" if code == BizCode.BAD_REQUEST else "Memory read failed"
+            raise BusinessException(message, code, context={"reason": reason}) from exc
 
     async def _emit_stage(self, stage: str, data: dict) -> None:
         await emit_memory_stage(stage, data)
