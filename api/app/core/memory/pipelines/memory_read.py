@@ -382,6 +382,33 @@ class ReadPipeLine(ModelClientMixin, BasePipeline):
             )
             return False
 
+    async def _build_retrieval_deps(
+            self,
+            need_embedder: bool,
+            enable_rerank: bool,
+            embedder=None,
+    ):
+        """构建 embedder / 降级标记 / reranker 三件套；RAG 与图分支共用。
+
+        ``embedder`` 允许传入已获取的客户端（如图分支与 LLM 并发获取的场景），
+        未传入且需要时在此获取。
+        """
+        if need_embedder and embedder is None:
+            embedder = await self._get_embedding_client()
+        # 切换 embedding 模型后、该用户向量重建完成前，跳过向量检索。
+        semantic_degraded = (
+            await self._should_degrade_semantic() if need_embedder else False
+        )
+        reranker = None
+        if enable_rerank:
+            reranker = await self._get_rerank_client()
+            if reranker is None:
+                logger.warning(
+                    "[ReadPipeLine] enable_rerank=True but rerank_model_id not configured, "
+                    "falling back to score fusion"
+                )
+        return embedder, semantic_degraded, reranker
+
     async def _get_search_service(
             self,
             includes=None,
@@ -390,28 +417,18 @@ class ReadPipeLine(ModelClientMixin, BasePipeline):
             enable_rerank: bool = False
     ):
         if self.ctx.storage_type == StorageType.NEO4J:
+            embedder = None
             if need_embedder and need_llm:
                 embedder, llm = await asyncio.gather(
                     self._get_embedding_client(),
                     self._get_llm_client(),
                 )
             else:
-                embedder = (await self._get_embedding_client()) if need_embedder else None
                 llm = (await self._get_llm_client()) if need_llm else None
 
-            # 切换 embedding 模型后、该用户向量重建完成前，跳过向量检索。
-            semantic_degraded = (
-                await self._should_degrade_semantic() if need_embedder else False
+            embedder, semantic_degraded, reranker = await self._build_retrieval_deps(
+                need_embedder, enable_rerank, embedder=embedder
             )
-
-            reranker = None
-            if enable_rerank:
-                reranker = await self._get_rerank_client()
-                if reranker is None:
-                    logger.warning(
-                        "[ReadPipeLine] enable_rerank=True but rerank_model_id not configured, "
-                        "falling back to score fusion"
-                    )
 
             return Neo4jSearchService(
                 self.ctx,
@@ -423,10 +440,8 @@ class ReadPipeLine(ModelClientMixin, BasePipeline):
                 semantic_degraded=semantic_degraded,
             )
         else:
-            embedder = (await self._get_embedding_client()) if need_embedder else None
-            # 切换 embedding 模型后、该用户向量重建完成前，跳过向量检索。
-            semantic_degraded = (
-                await self._should_degrade_semantic() if need_embedder else False
+            embedder, semantic_degraded, reranker = await self._build_retrieval_deps(
+                need_embedder, enable_rerank
             )
             if need_embedder and embedder is None:
                 # embedding_model_id 未配置/查询失败：向量路不可用，显式标记降级，
@@ -436,14 +451,6 @@ class ReadPipeLine(ModelClientMixin, BasePipeline):
                     "vector search disabled for this query"
                 )
                 semantic_degraded = True
-            reranker = None
-            if enable_rerank:
-                reranker = await self._get_rerank_client()
-                if reranker is None:
-                    logger.warning(
-                        "[ReadPipeLine] enable_rerank=True but rerank_model_id not configured, "
-                        "falling back to score fusion"
-                    )
             return RAGSearchService(
                 self.ctx,
                 embedder=embedder,

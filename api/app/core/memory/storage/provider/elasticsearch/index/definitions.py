@@ -146,6 +146,9 @@ INDEX_DEFINITIONS: dict[MemoryNodeLabel, IndexDefinition] = {
         MemoryNodeType.RAG_MEMORY,
         schema_version=1,
         generation=1,
+        # 有意不设 created_at：RAG 记忆以业务时间 dialog_at 为准（索引与
+        # DEFAULT_PROJECTION 投影字段保持一致）；下游 stats/list/retrieval
+        # 均只消费 dialog_at，不读 created_at。
         prop={
             "id": {"type": "keyword"},
             "role": {"type": "keyword"},

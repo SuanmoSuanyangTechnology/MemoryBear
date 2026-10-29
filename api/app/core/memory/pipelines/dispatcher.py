@@ -515,6 +515,10 @@ async def push_rag_messages(
 ) -> List[str]:
     """逐条派发 RAG 记忆任务；返回调度层消息 id 列表（不对外暴露）。
 
+    返回值与 ``payloads`` 顺序一一对应（``push_task`` 的任务 id 按派发顺序追加）。
+    仅 ``dispatch_mcp_write`` 取用首条 id 作为工具返回值；其余调用方
+    （api_service_async / agent / workflow）忽略返回值即可。
+
     串行派发：一条消息一次排队准入。若中途某条抛 ``RateLimitException``，
     此前已派发的 payload 已入队生效，本批构成「部分提交」——抛出的
     ``RagDispatchRateLimited`` 会带上已入队条数，调用方据此判断真实写入范围。
@@ -715,7 +719,7 @@ async def ingest_agent_messages(
                 messages=rag_messages,
                 end_user_id=end_user_id,
                 config_id=str(config_id),
-                source="agent",
+                source=MemoryMessageSource.AGENT.value,
             )
         except RateLimitException as exc:
             # 对话型入口：限流只跳过本条记忆，不影响对话响应。
@@ -857,7 +861,7 @@ async def ingest_workflow_messages(
                     messages=rag_messages,
                     end_user_id=end_user_id,
                     config_id=str(config_id),
-                    source="workflow",
+                    source=MemoryMessageSource.WORKFLOW.value,
                 )
             except RateLimitException as exc:
                 # 对话型入口：限流只跳过本条记忆，不影响工作流响应；
@@ -1350,7 +1354,7 @@ async def dispatch_mcp_write(
                     messages=[rag_message],
                     end_user_id=end_user_id,
                     config_id=str(config_id),
-                    source="mcp",
+                    source=MemoryMessageSource.MCP.value,
                 )
             except RateLimitException as exc:
                 # 限流按跳过处理，避免 MCP 工具把限流报成写入失败；

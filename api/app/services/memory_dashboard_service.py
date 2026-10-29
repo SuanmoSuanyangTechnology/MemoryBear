@@ -91,14 +91,24 @@ async def get_dashboard_memory_updates_async(
             elif storage_type == "rag":
                 users = EndUserRepository(db)
                 user_ids = await users.get_ids_by_app_workspace_async(workspace_id)
-                yesterday = await rag_stats.count_messages(
-                    user_ids,
-                    end=today_start - timedelta(microseconds=1),
-                )
-                day_before = await rag_stats.count_messages(
-                    user_ids,
-                    end=yesterday_start - timedelta(microseconds=1),
-                )
+
+                async def _query_rag_counts(client):
+                    # 两个窗口共用一个 ES 客户端，避免各建一次连接；
+                    # 边界取毫秒精度，与 ES date 类型对齐
+                    return (
+                        await rag_stats.count_messages(
+                            user_ids,
+                            end=today_start - timedelta(milliseconds=1),
+                            client=client,
+                        ),
+                        await rag_stats.count_messages(
+                            user_ids,
+                            end=yesterday_start - timedelta(milliseconds=1),
+                            client=client,
+                        ),
+                    )
+
+                yesterday, day_before = await rag_stats.with_client(_query_rag_counts)
             else:
                 return result
 
@@ -1121,7 +1131,7 @@ def get_dashboard_yesterday_changes(
             else:
                 yesterday_total = rag_stats.count_messages_sync(
                     end_user_ids,
-                    end=today_start - timedelta(microseconds=1),
+                    end=today_start - timedelta(milliseconds=1),
                 )
                 if yesterday_total == 0:
                     changes["total_memory_change"] = None
@@ -1295,7 +1305,7 @@ async def get_dashboard_yesterday_changes_async(
             else:
                 yesterday_total = await rag_stats.count_messages(
                     end_user_ids,
-                    end=today_start - timedelta(microseconds=1),
+                    end=today_start - timedelta(milliseconds=1),
                 )
                 if yesterday_total == 0:
                     changes["total_memory_change"] = None

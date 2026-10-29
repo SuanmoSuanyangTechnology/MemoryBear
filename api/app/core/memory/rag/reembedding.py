@@ -76,11 +76,19 @@ async def scan_rag_messages(
         _source=list(_SOURCE_FIELDS),
     )
     hits = (result.get("hits") or {}).get("hits", [])
-    nodes = [
-        {"id": (hit.get("_source") or {}).get("id") or hit.get("_id"),
-         "content": (hit.get("_source") or {}).get(_TEXT_FIELD)}
-        for hit in hits
-    ]
+    nodes = []
+    for hit in hits:
+        # _source 异常返回（缺失/非 dict，如代理故障时的 list）时按空处理：
+        # 该条因缺 content 会被后续 _pending_pairs 自然跳过，避免单条脏数据
+        # 抛 AttributeError 被归为「scan 失败」而阻塞游标重试整个页面
+        source = hit.get("_source")
+        source = source if isinstance(source, dict) else {}
+        nodes.append(
+            {
+                "id": source.get("id") or hit.get("_id"),
+                "content": source.get(_TEXT_FIELD),
+            }
+        )
     last_sort = hits[-1].get("sort") if hits else None
     next_cursor = json.dumps(last_sort) if (len(hits) >= limit and last_sort) else None
     return nodes, next_cursor

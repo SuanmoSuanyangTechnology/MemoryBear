@@ -345,7 +345,6 @@ class MemoryService:
 
         from sqlalchemy import select
 
-        end_user_uuid: uuid.UUID | None = None
         try:
             end_user_uuid = uuid.UUID(str(end_user_id))
         except (ValueError, TypeError, AttributeError):
@@ -357,17 +356,15 @@ class MemoryService:
             )
             return 0
 
-        storage_type = None
-        if end_user_uuid is not None:
-            async with get_async_db_context() as db:
-                from app.models.end_user_model import EndUser
-                from app.models.workspace_model import Workspace
+        async with get_async_db_context() as db:
+            from app.models.end_user_model import EndUser
+            from app.models.workspace_model import Workspace
 
-                storage_type = await db.scalar(
-                    select(Workspace.storage_type)
-                    .join(EndUser, EndUser.workspace_id == Workspace.id)
-                    .where(EndUser.id == end_user_uuid)
-                )
+            storage_type = await db.scalar(
+                select(Workspace.storage_type)
+                .join(EndUser, EndUser.workspace_id == Workspace.id)
+                .where(EndUser.id == end_user_uuid)
+            )
 
         normalized_type = str(storage_type or "").strip().lower()
         if normalized_type not in ("rag", "neo4j"):

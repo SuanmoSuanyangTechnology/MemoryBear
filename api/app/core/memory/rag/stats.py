@@ -71,6 +71,8 @@ def _build_query(
         # 此处是列表筛选，精度优先。
         must.append({"match_phrase": {"content": keyword.strip()}})
     if start is not None or end is not None:
+        # dialog_at 为 ES 默认 date 类型（毫秒精度），边界统一取毫秒精度，
+        # 避免微秒尾巴在索引/过滤两侧截断行为不一致
         bounds: dict[str, str] = {}
         if start is not None:
             bounds["gte"] = to_iso_z(start)
@@ -98,6 +100,11 @@ def _run_sync(coro):
         return pool.submit(asyncio.run, coro).result()
 
 
+async def with_client(fn: Callable[[AsyncElasticsearch], Any]) -> Any:
+    """新建临时 ES 客户端执行回调；供调用方在同一客户端内合并多次查询。"""
+    return await _with_client(fn)
+
+
 async def count_messages(
         end_user_ids: Sequence[str] | None,
         *,
@@ -106,8 +113,9 @@ async def count_messages(
         keyword: str | None = None,
         start: datetime | None = None,
         end: datetime | None = None,
+        client: AsyncElasticsearch | None = None,
 ) -> int:
-    """按条件统计消息条数。"""
+    """按条件统计消息条数；传入 ``client`` 时复用调用方连接。"""
     query = _build_query(
         end_user_ids,
         sources=sources,
@@ -119,10 +127,12 @@ async def count_messages(
     if query is None:
         return 0
 
-    async def _count(client: AsyncElasticsearch) -> int:
-        result = await client.count(index=INDEX_NAME, query=query)
+    async def _count(c: AsyncElasticsearch) -> int:
+        result = await c.count(index=INDEX_NAME, query=query)
         return int(result.get("count", 0))
 
+    if client is not None:
+        return await _count(client)
     return await _with_client(_count)
 
 
@@ -135,7 +145,11 @@ async def count_messages_by_end_user(
         *,
         exclude_legacy: bool = False,
 ) -> dict[str, int]:
-    """按宿主统计消息条数；未命中的宿主补 0。"""
+    """按宿主统计消息条数；未命中的宿主补 0。
+
+    语义上要求传入非空宿主列表（按宿主聚合）；空列表或 ``None``
+    在入口直接返回 ``{}``。
+    """
     if not end_user_ids:
         return {}
 
@@ -281,7 +295,15 @@ async def list_messages(
             _source=["id", "role", "content", "dialog_at", "source"],
             track_total_hits=True,
         )
-        total = int((result.get("hits") or {}).get("total", {}).get("value", 0))
+        # track_total_hits=True 时 total 是 {"value": N, "relation": ...}；
+        # 兼容客户端/代理异常返回的纯数值结构
+        hits_body = result.get("hits") or {}
+        total_raw = hits_body.get("total", 0)
+        total = (
+            int(total_raw.get("value", 0))
+            if isinstance(total_raw, dict)
+            else int(total_raw or 0)
+        )
         items = []
         for hit in (result.get("hits") or {}).get("hits", []):
             source = hit.get("_source") or {}
@@ -323,8 +345,8 @@ async def daily_totals(
     """返回区间内逐日累计总量（用于记忆增长趋势），按日期升序。
 
     入参按「UTC 自然日」对齐：即使传入带时分秒的 ``datetime``，也只取日期部分，
-    即区间为 ``[start 当天 00:00, end 当天 23:59:59.999999]``。趋势曲线以天为粒度，
-    调用方不应依赖更细的时间边界。
+    即区间为 ``[start 当天 00:00, end 当天 23:59:59.999]``（dialog_at 为 ES 默认
+    date 类型，毫秒精度）。趋势曲线以天为粒度，调用方不应依赖更细的时间边界。
 
     ``end_user_ids`` 为 ``None`` 时表示「不限宿主」（与 ``_build_query`` 一致），
     只有空列表才代表「范围为空、必然无结果」。
@@ -347,7 +369,7 @@ async def daily_totals(
             23,
             59,
             59,
-            999999,
+            999000,
             tzinfo=timezone.utc,
         ),
         exclude_legacy=exclude_legacy,
@@ -357,7 +379,7 @@ async def daily_totals(
         end_user_ids,
         end=datetime(
             start_day.year, start_day.month, start_day.day, tzinfo=timezone.utc
-        ) - timedelta(microseconds=1),
+        ) - timedelta(milliseconds=1),
         exclude_legacy=exclude_legacy,
     )
 

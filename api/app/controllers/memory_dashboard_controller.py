@@ -545,13 +545,17 @@ async def get_rag_content(
             f"start={start_time}, end={end_time}",
         )
     if source:
-        unknown = [s for s in source if s not in _RAG_SOURCES]
+        # 兼容前端 ?source=（空字符串）：过滤空串后再校验，空串按「未传」处理，
+        # 与改造前静默忽略的行为保持一致
+        cleaned = [s for s in source if s and s.strip()]
+        unknown = [s for s in cleaned if s not in _RAG_SOURCES]
         if unknown:
             return fail(
                 BizCode.INVALID_PARAMETER,
                 "source 取值非法",
                 f"unknown={unknown}, allowed={sorted(_RAG_SOURCES)}",
             )
+        source = cleaned or None
     offset = (page - 1) * pagesize
     # ES 的约束是 from_ + size <= max_result_window，只校验 offset 会让
     # offset 接近上限、size 越界时仍触发 illegal_argument_exception

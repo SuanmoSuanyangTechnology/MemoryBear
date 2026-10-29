@@ -283,7 +283,12 @@ class RagRetrieval:
             # 全文失败且语义通道不可用（降级/未配置 embedder）时，两路都是空，
             # 静默返回会让调用方误判「确实没有记忆」。此时按既有策略上抛，
             # 其余情况只降级并记录 error 级日志。
-            logger.error("[RAGSearch] keyword search error: %s", keyword_results)
+            # exc_info 传原始异常对象，保留 traceback，便于排查全文通道失败原因
+            logger.error(
+                "[RAGSearch] keyword search error: %s",
+                keyword_results,
+                exc_info=keyword_results,
+            )
             self._report_error(
                 MemoryRetrievalBusinessError.model_call_failed(
                     MemoryRetrievalStage.KEYWORD_SEARCH,
@@ -298,7 +303,11 @@ class RagRetrieval:
                 raise keyword_results
             keyword_results = StorageReadResult()
         if semantic_failed:
-            logger.warning("[RAGSearch] embedding search error: %s", embedding_results)
+            logger.warning(
+                "[RAGSearch] embedding search error: %s",
+                embedding_results,
+                exc_info=embedding_results,
+            )
             self._report_error(
                 MemoryRetrievalBusinessError.model_call_failed(
                     MemoryRetrievalStage.VECTOR_SEARCH,
