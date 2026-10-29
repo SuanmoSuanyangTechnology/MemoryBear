@@ -30,6 +30,7 @@ from app.core.memory.models.service_models import (
 from app.core.memory.retrieval_trace.models import (
     RetrievalExecutionTrace,
     build_score_trace,
+    diagnostic_fusion_score,
     finite_or_none,
     normalized_keyword_score,
 )
@@ -113,6 +114,12 @@ class RagRetrieval:
                 "callers must skip the vector path when embedder is None"
             )
         embed = await self.embedder.aembed_query(query)
+        if not embed:
+            # 空白/无内容查询时 embedder 会返回空向量，直接交给 search_by_embedding
+            # 会抛 ValueError，被 gather(return_exceptions=True) 兜住后记成
+            # semantic_search_failed，产生假的降级信号；此处直接返回空结果。
+            logger.info("[RAGRetrieval] skip embedding path: empty query vector")
+            return StorageReadResult()
         return await self.storage.search_by_embedding(
             node_filters=node_filters,
             embed=embed,
@@ -160,8 +167,8 @@ class RagRetrieval:
         for node_id, data in documents.items():
             kw = kw_scores.get(node_id, 0.0)
             emb = emb_scores.get(node_id, 0.0)
-            base = self.alpha * emb + (1 - self.alpha) * kw
-            data["content_score"] = base + min(1 - base, 0.1 * kw * emb)
+            # 复用 retrieval_trace 的单一实现，避免两处公式漂移
+            data["content_score"] = diagnostic_fusion_score(kw, emb, self.alpha)
             data["kw_score"] = kw
             data["embedding_score"] = emb
 
@@ -209,6 +216,14 @@ class RagRetrieval:
                         )
                         memory.retrieval_trace.final_score = float(memory.score)
                         memory.retrieval_trace.rank_basis = "rerank_score"
+                else:
+                    # top_n 截断后未进入重排结果的候选：重排分与融合分不同量纲，
+                    # 混用后按 score 排序会让未精排的高融合分文档排到精排结果之前，
+                    # 导致重排实际失效。统一置 0，明确后置。
+                    memory.score = 0.0
+                    if memory.retrieval_trace is not None:
+                        memory.retrieval_trace.final_score = 0.0
+                        memory.retrieval_trace.rank_basis = "rerank_truncated"
             return True, []
         except Exception as exc:
             logger.warning("[RAGSearch] rerank failed, falling back to fusion: %s", exc)
@@ -250,6 +265,14 @@ class RagRetrieval:
         semantic_failed = isinstance(embedding_results, BaseException)
         if keyword_failed:
             logger.warning("[RAGSearch] keyword search error: %s", keyword_results)
+            if self.on_error is not None:
+                self.on_error(
+                    MemoryRetrievalBusinessError.model_call_failed(
+                        MemoryRetrievalStage.KEYWORD_SEARCH,
+                        keyword_results,
+                        impact=MemoryRetrievalImpact.INCOMPLETE,
+                    )
+                )
             keyword_results = StorageReadResult()
         if semantic_failed:
             logger.warning("[RAGSearch] embedding search error: %s", embedding_results)

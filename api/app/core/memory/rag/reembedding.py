@@ -81,7 +81,8 @@ async def scan_rag_messages(
          "content": (hit.get("_source") or {}).get(_TEXT_FIELD)}
         for hit in hits
     ]
-    next_cursor = json.dumps(hits[-1]["sort"]) if len(hits) >= limit else None
+    last_sort = hits[-1].get("sort") if hits else None
+    next_cursor = json.dumps(last_sort) if (len(hits) >= limit and last_sort) else None
     return nodes, next_cursor
 
 
@@ -137,11 +138,15 @@ async def _embed_texts(embedder, texts: list[str]) -> tuple[list[list[float]], i
                 f"embedder returned {len(batch_vectors)} vectors for {len(batch)} texts"
             )
         for vector in batch_vectors:
+            if not vector:
+                raise ValueError("embedder returned an empty vector")
             if dimension == 0:
                 dimension = len(vector)
             elif len(vector) != dimension:
                 raise ValueError("embedder returned inconsistent vector dimensions")
         vectors.extend(batch_vectors)
+    if texts and dimension == 0:
+        raise ValueError("embedder returned zero-dimension vectors for all texts")
     return vectors, dimension
 
 
