@@ -60,7 +60,6 @@ class MCPAuthMiddleware(BaseHTTPMiddleware):
       - end_user_id:  looked up from (workspace_id, other_id)
       - config_id:    end_user.memory_config_id, or workspace default
       - storage_type: from workspace configuration (defaults to "neo4j")
-      - user_rag_memory_id: workspace RAG memory knowledge ID, when applicable
     """
 
     async def dispatch(self, request: Request, call_next):

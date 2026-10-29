@@ -45,13 +45,6 @@ async def _workspace_end_user_ids_async(
     return await EndUserRepository(db).get_ids_by_app_workspace_async(workspace_id)
 
 
-def _is_rag_workspace(db: Session, workspace_id: uuid.UUID) -> bool:
-    from app.models.workspace_model import Workspace
-
-    row = db.query(Workspace.storage_type).filter(Workspace.id == workspace_id).first()
-    return bool(row and row[0] == "rag")
-
-
 async def _is_rag_workspace_async(
     db: AsyncSession,
     workspace_id: uuid.UUID,

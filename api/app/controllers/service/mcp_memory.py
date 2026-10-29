@@ -161,7 +161,7 @@ async def recall_coding_preferences(
         context_messages: 当前消息之前按时间正序排列的近期 user/assistant 消息。
     """
     try:
-        workspace_id, end_user_id, config_id, _, _ = _resolve_context()
+        workspace_id, end_user_id, config_id, _ = _resolve_context()
     except RuntimeError:
         return {"success": False, "error": "偏好召回服务暂时不可用"}
 

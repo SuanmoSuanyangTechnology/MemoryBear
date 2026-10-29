@@ -60,7 +60,7 @@ def _build_query(
     if exclude_legacy:
         filters.append({"bool": {"must_not": [{"term": {"source": LEGACY_SOURCE}}]}})
     if keyword and keyword.strip():
-        must.append({"match": {"content": keyword.strip()}})
+        must.append({"match_phrase": {"content": keyword.strip()}})
     if start is not None or end is not None:
         bounds: dict[str, str] = {}
         if start is not None:

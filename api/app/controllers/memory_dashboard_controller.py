@@ -511,7 +511,7 @@ def get_rag_content(
         keyword=keyword,
         order=order,
     )
-    return success(data=data, msg="宿主RAGchunk数据获取成功")
+    return success(data=data, msg="宿主RAG记忆消息获取成功")
 
 
 @router.get("/chunk_summary_tag", response_model=ApiResponse)
