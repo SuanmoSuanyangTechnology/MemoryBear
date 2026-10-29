@@ -4359,7 +4359,268 @@ def do_refresh_insight_summary_cache(
     return result
 
 
-# 用户名片 Tag 定时刷新任务
+# ==================== AI 人格：Redis key / 任务参数 ====================
+# 社区侧只保存带所有权的短期 inflight token；pending 与 checkpoint 均由企业端持有。
+
+AI_PERSONALITY_INFLIGHT_KEY_FMT = "ai_personality:inflight:{end_user_id}"
+AI_PERSONALITY_INFLIGHT_TTL_SEC = 600  # 仅防止短时间重复派发，不充当执行锁
+AI_PERSONALITY_RUNNING_KEY_FMT = "ai_personality:running:{end_user_id}"
+AI_PERSONALITY_RUNNING_TTL_SEC = 240  # 大于 do 任务的 180 秒硬超时
+AI_PERSONALITY_BATCH_TTL_SEC = 86400
+AI_PERSONALITY_SCAN_PAGE_SIZE = 500
+
+
+def _enterprise_ai_personality_plugin():
+    from app.plugins import get_plugin
+
+    plugin = get_plugin("memory.ai_personality")
+    if plugin is None:
+        raise RuntimeError("AI personality plugin 'memory.ai_personality' is not registered")
+    return plugin
+
+
+# ==================== AI 人格：Scan 轻量扫描 ====================
+
+@celery_app.task(
+    name="app.tasks.scan_extract_ai_personality",
+    bind=True,
+    ignore_result=False,
+    max_retries=0,
+    acks_late=False,
+    time_limit=600,
+    soft_time_limit=540,
+)
+def scan_extract_ai_personality(self) -> Dict[str, Any]:
+    """从企业端分页读取候选用户，并派发单用户 AI 人格提取任务。"""
+    started_at = time.time()
+    redis_client = get_sync_redis_client()
+    if redis_client is None:
+        raise RuntimeError("Redis unavailable: AI personality scan requires inflight locks")
+    try:
+        redis_client.ping()
+    except Exception as exc:
+        raise RuntimeError("Redis unavailable: AI personality scan stopped") from exc
+
+    counts = {
+        "candidates": 0,
+        "dispatched": 0,
+        "skip_inflight": 0,
+        "failed": 0,
+    }
+    after_id: str | None = None
+    plugin = _enterprise_ai_personality_plugin()
+    loop = set_asyncio_event_loop()
+    try:
+        while True:
+            page = loop.run_until_complete(plugin.list_candidates(
+                after_id=after_id,
+                limit=AI_PERSONALITY_SCAN_PAGE_SIZE,
+            ))
+            counts["candidates"] += len(page.items)
+            for candidate in page.items:
+                end_user_id = candidate.end_user_id
+                inflight_key = AI_PERSONALITY_INFLIGHT_KEY_FMT.format(end_user_id=end_user_id)
+                lock_token = uuid.uuid4().hex
+                try:
+                    acquired = bool(redis_client.set(
+                        inflight_key,
+                        lock_token,
+                        nx=True,
+                        ex=AI_PERSONALITY_INFLIGHT_TTL_SEC,
+                    ))
+                except Exception as exc:
+                    raise RuntimeError("Redis unavailable while locking AI personality task") from exc
+                if not acquired:
+                    counts["skip_inflight"] += 1
+                    continue
+                try:
+                    # 任务直接入队；排队时间不可控，执行所有权由 do 任务启动时获取。
+                    do_extract_ai_personality_for_user.apply_async(
+                        kwargs={
+                            "end_user_id": end_user_id,
+                            "workspace_id": candidate.workspace_id,
+                            "expected_source_version": candidate.source_version,
+                            "lock_token": lock_token,
+                        },
+                        queue="memory_heavy_tasks",
+                    )
+                    counts["dispatched"] += 1
+                except Exception:
+                    counts["failed"] += 1
+                    redis_client.eval(UNLOCK_SCRIPT, 1, inflight_key, lock_token)
+                    logger.error("AI人格scan派发失败 user=%s", end_user_id, exc_info=True)
+
+            after_id = page.next_after_id
+            if after_id is None:
+                break
+    finally:
+        _shutdown_loop_gracefully(loop)
+
+    return {
+        "status": "SUCCESS",
+        **counts,
+        "elapsed_time": time.time() - started_at,
+        "task_id": self.request.id,
+    }
+
+
+# ==================== AI 人格：Do 单用户提取 ====================
+
+@celery_app.task(
+    name="app.tasks.do_extract_ai_personality_for_user",
+    bind=True,
+    ignore_result=False,
+    max_retries=0,
+    acks_late=False,
+    time_limit=180,
+    soft_time_limit=150,
+)
+def do_extract_ai_personality_for_user(
+        self,
+        end_user_id: str,
+        workspace_id: str,
+        expected_source_version: str,
+        lock_token: str,
+) -> Dict[str, Any]:
+    """通过企业插件读取证据，提取人格条目并发布企业 pending 批次。"""
+    from app.core.memory.analytics.ai_personality import (
+        build_atomic_evidence,
+        build_evidence_fingerprint,
+        extract_ai_personality,
+        normalize_metadata_evidence,
+        normalize_preference_evidence,
+    )
+    from app.core.memory.pipelines.base_pipeline import ModelClientMixin
+
+    started_at = time.time()
+    redis_client = get_sync_redis_client()
+    inflight_key = AI_PERSONALITY_INFLIGHT_KEY_FMT.format(end_user_id=end_user_id)
+    running_key = AI_PERSONALITY_RUNNING_KEY_FMT.format(end_user_id=end_user_id)
+    if redis_client is None:
+        raise RuntimeError("Redis unavailable: AI personality task requires execution lock")
+
+    # 排队超过派发去重窗口也可执行；运行锁在启动时获取并覆盖任务硬超时。
+    acquired = redis_client.set(running_key, lock_token, nx=True, ex=AI_PERSONALITY_RUNNING_TTL_SEC)
+    if not acquired:
+        redis_client.eval(UNLOCK_SCRIPT, 1, inflight_key, lock_token)
+        return {"status": "skipped_inflight", "entry_count": 0}
+
+    async def _run() -> Dict[str, Any]:
+        from premium.memory.ai_personality.errors import SourceChangedError
+        from premium.memory.ai_personality.schemas import PendingPublishRequest
+
+        plugin = _enterprise_ai_personality_plugin()
+        try:
+            snapshot = await plugin.get_evidence(
+                end_user_id=end_user_id,
+                workspace_id=workspace_id,
+                expected_source_version=expected_source_version,
+            )
+        except SourceChangedError:
+            return {"status": "skipped_source_changed", "entry_count": 0}
+        if (
+            snapshot.end_user_id != end_user_id
+            or snapshot.workspace_id != workspace_id
+            or snapshot.source_version != expected_source_version
+        ):
+            raise RuntimeError("Enterprise evidence snapshot identity or source version mismatch")
+
+        preference_nodes = [item.model_dump() for item in snapshot.preferences]
+        metadata_evidence = normalize_metadata_evidence(snapshot.metadata)
+        preference_evidence = normalize_preference_evidence(preference_nodes)
+        evidence = build_atomic_evidence(snapshot.metadata, preference_nodes)
+        source_fingerprint = build_evidence_fingerprint(evidence)
+        generated_at = utcnow()
+        batch_id = str(uuid.uuid4())
+
+        async def publish(outcome: str, entries: list, expires_at=None):
+            return await plugin.publish(PendingPublishRequest(
+                batch_id=batch_id,
+                end_user_id=end_user_id,
+                workspace_id=workspace_id,
+                source_version=snapshot.source_version,
+                source_fingerprint=source_fingerprint,
+                generated_at=generated_at,
+                expires_at=expires_at,
+                outcome=outcome,
+                entries=entries,
+            ))
+
+        if not metadata_evidence and not preference_evidence:
+            try:
+                await publish("skipped_empty", [])
+            except SourceChangedError:
+                return {"status": "skipped_source_changed", "entry_count": 0}
+            return {"status": "skipped_empty", "entry_count": 0, "batch_id": batch_id}
+
+        workspace_uuid = uuid.UUID(workspace_id)
+        with get_db_context() as db:
+            config_service = MemoryConfigService(db)
+            config_id = config_service.get_workspace_active_config_id(workspace_uuid)
+            memory_config = config_service.load_memory_config(config_id)
+            llm_client = ModelClientMixin.get_llm_client(
+                db,
+                memory_config.llm_model_id,
+                memory_config.tenant_id,
+            )
+        entries = await extract_ai_personality(llm_client, evidence)
+        if not entries:
+            try:
+                await publish("skipped_no_grounded_entries", [])
+            except SourceChangedError:
+                return {"status": "skipped_source_changed", "entry_count": 0}
+            return {
+                "status": "skipped_no_grounded_entries",
+                "entry_count": 0,
+                "batch_id": batch_id,
+            }
+
+        expires_at = generated_at + timedelta(seconds=AI_PERSONALITY_BATCH_TTL_SEC)
+        try:
+            await publish("published", entries, expires_at)
+        except SourceChangedError:
+            return {"status": "skipped_source_changed", "entry_count": 0}
+
+        dimension_counts: dict[str, int] = {}
+        for entry in entries:
+            dimension = entry["dimension"]
+            dimension_counts[dimension] = dimension_counts.get(dimension, 0) + 1
+        return {
+            "status": "success",
+            "batch_id": batch_id,
+            "source_fingerprint": source_fingerprint,
+            "entry_count": len(entries),
+            "dimension_counts": dimension_counts,
+            "expires_at": to_iso_z(expires_at),
+        }
+
+    loop = set_asyncio_event_loop()
+    try:
+        result = loop.run_until_complete(_run())
+    except Exception as exc:
+        logger.error(
+            "AI人格提取失败 user=%s workspace=%s error_type=%s",
+            end_user_id,
+            workspace_id,
+            type(exc).__name__,
+            exc_info=True,
+        )
+        raise
+    finally:
+        _shutdown_loop_gracefully(loop)
+        for key in (running_key, inflight_key):
+            try:
+                redis_client.eval(UNLOCK_SCRIPT, 1, key, lock_token)
+            except Exception:
+                logger.warning("AI人格do释放锁失败 user=%s key=%s", end_user_id, key, exc_info=True)
+
+    result.update(
+        elapsed_time=time.time() - started_at,
+        task_id=self.request.id,
+        end_user_id=end_user_id,
+    )
+    return result
+
 
 USER_TAG_INFLIGHT_KEY_FMT = "user_tags:inflight:{end_user_id}"
 USER_TAG_INFLIGHT_TTL_SEC = 600
