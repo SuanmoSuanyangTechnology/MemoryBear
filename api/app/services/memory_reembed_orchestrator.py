@@ -22,6 +22,7 @@ _REEMBED_PENDING_REDISPATCH_SECONDS = 5 * 60
 def _reembed_job_snapshot(job_id: str) -> Optional[Dict[str, Any]]:
     """把 job 行读成普通 dict，避免 ORM 实例逃出 session。"""
     from app.models.memory_reembed_job_model import MemoryReembedJob
+    from app.models.workspace_model import Workspace
 
     try:
         job_uuid = uuid.UUID(str(job_id))
@@ -35,6 +36,11 @@ def _reembed_job_snapshot(job_id: str) -> Optional[Dict[str, Any]]:
         )
         if job is None:
             return None
+        storage_type = (
+            db.query(Workspace.storage_type)
+            .filter(Workspace.id == job.workspace_id)
+            .scalar()
+        ) or "neo4j"
         return {
             "id": str(job.id),
             "workspace_id": job.workspace_id,
@@ -42,6 +48,7 @@ def _reembed_job_snapshot(job_id: str) -> Optional[Dict[str, Any]]:
             "status": job.status,
             "new_embedding_config_id": job.new_embedding_config_id,
             "created_at": job.created_at,
+            "storage_type": storage_type,
         }
 
 
@@ -245,7 +252,13 @@ async def run_job(job_id: str, owner: str) -> Dict[str, Any]:
             )
             db.commit()
 
-        node_counts = await inventory_end_users(active_end_user_ids)
+        if snapshot["storage_type"] == "rag":
+            from app.core.memory.rag.stats import count_messages_by_end_user
+
+            counts = await count_messages_by_end_user(active_end_user_ids)
+            node_counts = {user_id: total for user_id, total in counts.items() if total > 0}
+        else:
+            node_counts = await inventory_end_users(active_end_user_ids)
 
         if not node_counts:
             memory_reembed_service.refresh_job_counters(job_id)
@@ -431,6 +444,7 @@ async def process_end_user(
                     embedder=embedder,
                     job_id=job_id,
                     end_user_id=end_user_id,
+                    storage_type=snapshot["storage_type"],
                     should_continue=should_continue,
                 )
             except JobSupersededError:

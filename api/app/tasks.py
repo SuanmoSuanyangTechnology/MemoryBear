@@ -2580,6 +2580,152 @@ def sync_knowledge_for_kb(kb_id: uuid.UUID):
         return f"sync knowledge '{kb_name}' failed: {e}"
 
 
+@celery_app.task(
+    bind=True,
+    name="app.tasks.process_rag_memory",
+    queue="memory_rag_tasks",
+    max_retries=3,
+    retry_backoff=True,
+)
+def process_rag_memory(
+        self,
+        id: str,
+        end_user_id: str,
+        config_id: str,
+        role: str,
+        content: str,
+        source: str = "",
+        dialog_at: str = "",
+) -> Dict[str, Any]:
+    """RAG 记忆独立写入任务：身份归并 → 加载配置 → 向量化 → ES 覆盖写。
+
+    payload 的每个 key 即本函数形参；id 由入口按内容派生 uuid5，
+    重试/重放时覆盖写同一文档，天然幂等。
+    """
+    loop = set_asyncio_event_loop()
+
+    # 1. 身份归并重定向：排队期间用户可能已被跨渠道归并
+    resolved_end_user_id = end_user_id
+    try:
+        with get_db_context() as db:
+            from app.repositories.end_user_repository import EndUserRepository
+
+            resolved = EndUserRepository(db).resolve_merge_by_origin_id(
+                uuid.UUID(end_user_id)
+            )
+            if resolved:
+                logger.info(
+                    "[CELERY RAG] end_user_id merged, redirecting: %s → %s",
+                    end_user_id,
+                    resolved.id,
+                )
+                resolved_end_user_id = str(resolved.id)
+    except ValueError:
+        # 非法 end_user_id 属确定性错误，重试无意义；按原始 id 继续写入
+        logger.warning(
+            "[CELERY RAG] invalid end_user_id, using original id: %s",
+            end_user_id,
+        )
+    except Exception as e:
+        # 归属解析失败时不静默按旧 id 写入：该用户可能已被跨渠道归并，
+        # 落到旧 id 的文档在读取路径（按新 id 过滤）里查不到，等于丢记忆
+        logger.error(
+            "[CELERY RAG] merge resolution failed for %s: %s",
+            end_user_id,
+            e,
+            exc_info=True,
+        )
+        raise self.retry(exc=e)
+
+    async def _run():
+        from app.core.memory.pipelines.base_pipeline import ModelClientMixin
+        from app.core.memory.storage.enums import MemoryNodeType
+        from app.core.memory.storage.provider.elasticsearch.client import ElasticClient
+
+        # 2. 加载用户记忆配置，构造 embedding 客户端
+        with get_db_context() as db:
+            memory_config = MemoryConfigService(db).load_memory_config(
+                config_id=uuid.UUID(config_id)
+            )
+            embedder = ModelClientMixin.get_embedding_client(
+                db,
+                memory_config.embedding_model_id,
+                memory_config.tenant_id,
+            )
+
+        # 3. 向量化（本任务唯一一次模型调用）
+        vector = await embedder.aembed_query(content)
+
+        # 4. 独立 ES 索引覆盖写（id 即 ES _id）
+        client = await ElasticClient.create()
+        try:
+            return await client.save_node(
+                MemoryNodeType.RAG_MEMORY,
+                {
+                    "id": id,
+                    "content": content,
+                    "role": role,
+                    "end_user_id": resolved_end_user_id,
+                    "config_id": config_id,
+                    "dialog_at": dialog_at,
+                    "source": source,
+                    "delete_at": None,
+                    "text_embedding": vector,
+                },
+            )
+        finally:
+            await client.close()
+
+    try:
+        result = loop.run_until_complete(_run())
+        logger.info(
+            "[CELERY RAG] 写入完成: id=%s, end_user=%s, backend=%s",
+            id,
+            resolved_end_user_id,
+            getattr(result, "backend", None),
+        )
+        return {"status": "ok", "id": id}
+    except Exception as exc:
+        from app.schemas.memory_config_schema import (
+            InvalidConfigError,
+            ModelInactiveError,
+            ModelNotFoundError,
+        )
+
+        # 配置类确定性错误直接 raise，让 Celery 标记 FAILURE，不做无意义重试
+        if isinstance(
+            exc, (ValueError, ModelNotFoundError, ModelInactiveError, InvalidConfigError)
+        ):
+            logger.error(
+                "[CELERY RAG] 写入失败(no retry): id=%s, error_type=%s, err=%s",
+                id,
+                type(exc).__name__,
+                exc,
+                exc_info=True,
+            )
+            raise
+        if self.request.retries >= self.max_retries:
+            # 重试耗尽：当前没有死信/补偿链路，至少留下明确告警，便于人工补数
+            logger.error(
+                "[CELERY RAG] 重试耗尽，记忆写入最终失败: id=%s, end_user=%s, err=%s",
+                id,
+                resolved_end_user_id,
+                exc,
+                exc_info=True,
+            )
+        else:
+            logger.error(
+                "[CELERY RAG] 写入失败: id=%s, end_user=%s, err=%s",
+                id,
+                resolved_end_user_id,
+                exc,
+                exc_info=True,
+            )
+        raise self.retry(exc=exc)
+    finally:
+        _shutdown_loop_gracefully(loop)
+
+
 @celery_app.task(name="app.core.memory.agent.write_message", bind=True, acks_late=False, max_retries=0)
 def write_message_task(
         self,
@@ -3987,12 +4133,36 @@ def write_total_memory_task(workspace_id: str) -> Dict[str, Any]:
 
         # --- 单 session：聚合活跃宿主记忆量 → 写入统计结果 ---
         with get_db_context() as db:
-            # 无活跃宿主时不在返回中，按 (0, 0) 处理
-            total_num, end_user_count = (
-                EndUserRepository(db)
-                .get_memory_count_stats_by_workspace_ids([workspace_uuid])
-                .get(workspace_uuid, (0, 0))
+            from app.models.workspace_model import Workspace
+
+            storage_type = (
+                db.query(Workspace.storage_type)
+                .filter(Workspace.id == workspace_uuid)
+                .scalar()
             )
+
+            if str(storage_type or "").strip().lower() == "rag":
+                # RAG 空间：总量取独立索引的消息条数。
+                # 宿主集合按 (App.workspace_id, is_active) 过滤，与 dashboard 的
+                # _workspace_end_user_ids 同一口径；图侧分支走
+                # get_memory_count_stats_by_workspace_ids（按 EndUser.workspace_id 过滤）。
+                # 历史数据中 EndUser.workspace_id 与 App 归属不一致时，两者宿主集合会有
+                # 差异，属统计口径差异而非缺陷，对账时以 App 关联为准。
+                from app.core.memory.rag import stats as rag_stats
+
+                end_user_ids = EndUserRepository(db).get_ids_by_app_workspace(workspace_uuid)
+                counts = rag_stats.count_messages_by_end_user_sync(end_user_ids)
+                total_num = sum(counts.values())
+                # 与图侧「活跃宿主数」口径对齐：只计有消息的宿主，
+                # 否则无消息用户会拉低前端的人均记忆量
+                end_user_count = sum(1 for count in counts.values() if count > 0)
+            else:
+                # 无活跃宿主时不在返回中，按 (0, 0) 处理
+                total_num, end_user_count = (
+                    EndUserRepository(db)
+                    .get_memory_count_stats_by_workspace_ids([workspace_uuid])
+                    .get(workspace_uuid, (0, 0))
+                )
 
             # 返回值即客户端生成的内存增量主键与时间戳，无需再访问已过期的 ORM 属性
             increment_id, increment_created_at = MemoryIncrementRepository(db).write_memory_increment(

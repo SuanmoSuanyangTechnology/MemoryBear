@@ -22,7 +22,9 @@ from datetime import datetime, timezone
 from itertools import groupby
 from typing import Any, List, Optional
 
+from app.core.exceptions import RateLimitException
 from app.core.memory.enums import MemoryMessageSource
+from app.core.utils.datetime_utils import ensure_dialog_at
 from app.db import get_db_context, get_db_read
 from app.repositories.memory_message_repository import MemoryMessageRepository
 
@@ -366,24 +368,98 @@ async def safe_push_fast_write(
 
 
 # ──────────────────────────────────────────────
-# RAG 写入
+# RAG 记忆派发（独立索引，逐条入队）
 # ──────────────────────────────────────────────
 
+# 内容派生 uuid5 的固定命名空间：同一用户 + 同一 dialog_at + 同一内容恒得同一 id，
+# 配合 ES 覆盖写实现幂等去重。
+_RAG_MEMORY_NAMESPACE = uuid.UUID("8f3f1a52-6c1e-5b7a-9d4e-2a7c6b1f0e93")
 
-async def write_messages_to_rag(
-    messages: List[dict],
+
+def _rag_memory_id(end_user_id: str, dialog_at: str, content: str) -> str:
+    return str(
+        uuid.uuid5(
+            _RAG_MEMORY_NAMESPACE,
+            f"{end_user_id}:{dialog_at}:{content}",
+        )
+    )
+
+
+def build_rag_payloads(
+    messages: List[Any],
     end_user_id: str,
-    user_rag_memory_id: str,
-) -> None:
-    """将 messages 拼接为文本并写入 RAG 存储。"""
-    from app.services.memory_konwledges_server import write_rag
+    config_id: str,
+    source: str,
+) -> List[dict]:
+    """把消息逐条组装为 RAG 索引字段（与索引字段同名，worker 只补向量）。"""
+    payloads: List[dict] = []
+    for message in messages:
+        if isinstance(message, dict):
+            role = message.get("role")
+            content = message.get("content")
+            raw_dialog_at = message.get("dialog_at") or message.get("created_at")
+        else:
+            role = getattr(message, "role", None)
+            content = getattr(message, "content", None)
+            raw_dialog_at = (
+                getattr(message, "dialog_at", None)
+                or getattr(message, "created_at", None)
+            )
 
-    message_text = "\n".join([
-        f"{(msg['role'] if isinstance(msg, dict) else msg.role)}: "
-        f"{(msg['content'] if isinstance(msg, dict) else msg.content)}"
-        for msg in messages
-    ])
-    await write_rag(end_user_id, message_text, user_rag_memory_id)
+        text = str(content or "").strip()
+        if not text:
+            continue
+
+        dialog_at = ensure_dialog_at(raw_dialog_at)
+        payloads.append(
+            {
+                "id": _rag_memory_id(end_user_id, dialog_at, text),
+                "end_user_id": end_user_id,
+                "config_id": config_id,
+                "role": str(role or "user"),
+                "content": text,
+                "source": source,
+                "dialog_at": dialog_at,
+            }
+        )
+    return payloads
+
+
+async def push_rag_task(payload: dict) -> str:
+    """派发单条 RAG 记忆写入任务（走调度泵的准入限流与状态跟踪）。"""
+    from app.celery_task_scheduler import scheduler as celery_scheduler
+
+    msg_id = await celery_scheduler.push_task(
+        "app.tasks.process_rag_memory",
+        payload["end_user_id"],
+        payload,
+    )
+    logger.info(
+        "[RAGDispatcher] RAG 记忆任务已推送: end_user=%s, source=%s, msg_id=%s",
+        payload["end_user_id"],
+        payload.get("source"),
+        msg_id,
+    )
+    return msg_id
+
+
+async def push_rag_messages(
+    messages: List[Any],
+    end_user_id: str,
+    config_id: str,
+    source: str,
+) -> List[str]:
+    """逐条派发 RAG 记忆任务；返回调度层消息 id 列表（不对外暴露）。
+
+    串行派发：一条消息一次排队准入。若中途某条抛 ``RateLimitException``，
+    此前已派发的 payload 已入队生效，本批构成「部分提交」——上层拿到异常时
+    无法据此判断哪些消息已受理。RAG 记忆以内容派生 uuid5 作 ES 主键，
+    同一消息重复派发是幂等覆盖写，因此调用方直接整批重试即可收敛。
+    """
+    msg_ids: List[str] = []
+    for payload in build_rag_payloads(messages, end_user_id, config_id, source):
+        msg_ids.append(await push_rag_task(payload))
+    return msg_ids
 
 
 # ──────────────────────────────────────────────
@@ -397,9 +473,8 @@ async def dispatch_api_service_async(
     workspace_id: str,
     language: str = "zh",
     storage_type: str = "neo4j",
-    user_rag_memory_id: str = "",
 ) -> List[str]:
-    """API Service 异步写入入口；RAG 直写知识库，Neo4j 进入任务流水线。
+    """API Service 异步写入入口；RAG 直写 ES 索引，Neo4j 进入任务流水线。
 
     Neo4j 流程（对应设计文档 §3.5）：
     1. 批量写入 memory_messages 表（conversation_id=NULL, source=service_api）
@@ -419,11 +494,20 @@ async def dispatch_api_service_async(
             and str(message.get("content", "") or "").strip()
         ]
         if rag_messages:
-            await write_messages_to_rag(
-                messages=rag_messages,
-                end_user_id=end_user_id,
-                user_rag_memory_id=user_rag_memory_id,
-            )
+            try:
+                await push_rag_messages(
+                    messages=rag_messages,
+                    end_user_id=end_user_id,
+                    config_id=str(config_id),
+                    source="api",
+                )
+            except RateLimitException:
+                # 与 agent/workflow 口径一致：限流视为跳过本条记忆，
+                # 不能让 OpenAPI 写入接口整体失败（调用方可按原请求重试）
+                logger.warning(
+                    "[RAGDispatcher] api 写入限流，跳过本条记忆: end_user=%s",
+                    end_user_id,
+                )
         return []
 
     with get_db_context() as db:
@@ -513,7 +597,7 @@ async def ingest_agent_messages(
     storage_type: str = "neo4j",
     user_rag_memory_id: str = "",
 ) -> bool:
-    """批量 Agent 消息摄入；RAG 直写知识库，Neo4j 进入消息/任务流水线。
+    """批量 Agent 消息摄入；RAG 派发独立索引写入任务，Neo4j 进入消息/任务流水线。
 
     专用于同一回合的多条消息（典型场景：user + assistant 一起入队），确保：
     1. 一次 pg_advisory_xact_lock，seq 按 messages 顺序连续递增（消除并发派发的
@@ -540,11 +624,20 @@ async def ingest_agent_messages(
         ]
         if not rag_messages:
             return False
-        await write_messages_to_rag(
-            messages=rag_messages,
-            end_user_id=end_user_id,
-            user_rag_memory_id=user_rag_memory_id,
-        )
+        try:
+            await push_rag_messages(
+                messages=rag_messages,
+                end_user_id=end_user_id,
+                config_id=str(config_id),
+                source="agent",
+            )
+        except RateLimitException:
+            # 对话型入口：限流只跳过本条记忆，不影响对话响应
+            logger.warning(
+                "[RAGDispatcher] agent 写入限流，跳过本条记忆: end_user=%s",
+                end_user_id,
+            )
+            return False
         return True
 
     # 构建 write_batch 输入 + 记录原始 role/should_memorize（用于后续 Fast Write）。
@@ -668,11 +761,19 @@ async def ingest_workflow_messages(
             and str(message.get("content", "") or "").strip()
         ]
         if rag_messages:
-            await write_messages_to_rag(
-                messages=rag_messages,
-                end_user_id=end_user_id,
-                user_rag_memory_id=user_rag_memory_id,
-            )
+            try:
+                await push_rag_messages(
+                    messages=rag_messages,
+                    end_user_id=end_user_id,
+                    config_id=str(config_id),
+                    source="workflow",
+                )
+            except RateLimitException:
+                # 对话型入口：限流只跳过本条记忆，不影响工作流响应
+                logger.warning(
+                    "[RAGDispatcher] workflow 写入限流，跳过本条记忆: end_user=%s",
+                    end_user_id,
+                )
         return
 
     # 按 write_batch 的空内容过滤规则构造原始消息列表，保证与返回值一一对齐
@@ -1103,10 +1204,9 @@ async def dispatch_mcp_write(
     config_id: uuid.UUID,
     workspace_id: str,
     storage_type: str = "neo4j",
-    user_rag_memory_id: str = "",
     dialog_at: str = "",
 ) -> str:
-    """MCP 写入入口；RAG 直写知识库，Neo4j 进入任务流水线。
+    """MCP 写入入口；RAG 直写 ES 索引，Neo4j 进入任务流水线。
 
     MCP 每次仅写入单条 user message，不需要上下文窗口。
     Neo4j 流程（对应设计文档 §3.5）：
@@ -1119,7 +1219,6 @@ async def dispatch_mcp_write(
         config_id: 记忆配置 ID
         workspace_id: 工作空间 ID
         storage_type: 记忆空间存储类型
-        user_rag_memory_id: RAG 记忆知识库 ID
         dialog_at: 对话发生时间（ISO 8601）
 
     Returns:
@@ -1127,11 +1226,21 @@ async def dispatch_mcp_write(
     """
     if _is_rag_storage(storage_type):
         if str(message or "").strip():
-            await write_messages_to_rag(
-                messages=[{"role": "user", "content": message, "dialog_at": dialog_at}],
-                end_user_id=end_user_id,
-                user_rag_memory_id=user_rag_memory_id,
-            )
+            try:
+                msg_ids = await push_rag_messages(
+                    messages=[{"role": "user", "content": message, "dialog_at": dialog_at}],
+                    end_user_id=end_user_id,
+                    config_id=str(config_id),
+                    source="mcp",
+                )
+            except RateLimitException:
+                # 限流按跳过处理，避免 MCP 工具把限流报成写入失败
+                logger.warning(
+                    "[RAGDispatcher] mcp 写入限流，跳过本条记忆: end_user=%s",
+                    end_user_id,
+                )
+                return ""
+            return msg_ids[0] if msg_ids else ""
         return ""
 
     with get_db_context() as db:

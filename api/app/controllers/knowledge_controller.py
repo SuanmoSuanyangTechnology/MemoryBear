@@ -50,7 +50,6 @@ from app.models.document_model import Document
 from app.models.user_model import User
 from app.schemas import knowledge_schema
 from app.schemas import file_schema
-from app.utils.redis_cache import invalidate_cache
 from app.schemas.response_schema import ApiResponse
 from app.repositories import knowledge_repository, knowledgeshare_repository
 from app.services import knowledge_service, document_service
@@ -334,7 +333,8 @@ async def get_knowledges(
             filters.append(knowledge_model.Knowledge.parent_id == parent_id)
         else:
             filters.append(knowledge_model.Knowledge.parent_id == current_user.current_workspace_id)
-    filters.append(knowledge_model.Knowledge.permission_id != knowledge_model.PermissionType.Memory)
+    # RAG 独立迁移过渡期：不按 PermissionType.Memory 过滤，存量 USER_RAG_MERORY
+    # 暂时可见；全量迁移到 rag_memory_current 并验证后，统一删除这些系统记忆库。
     # 3. Execute paged query
     try:
         api_logger.debug("Start executing knowledge base paging query")
@@ -744,12 +744,6 @@ async def _update_knowledge(
         await db.refresh(db_knowledge)
         api_logger.info(f"The knowledge base has been successfully updated: {db_knowledge.name} (ID: {db_knowledge.id})")
 
-        if db_knowledge.name == "USER_RAG_MERORY":
-            try:
-                await invalidate_cache(prefix=f"storage_type:{db_knowledge.workspace_id}")
-            except Exception:
-                pass
-
         if graph_enabled_before is not None:
             try:
                 graph_task = dispatch_graph_enabled_transition(
@@ -842,12 +836,6 @@ async def delete_knowledge(
         db_knowledge.updated_at = utcnow_naive()
         await db.commit()
         api_logger.info(f"The knowledge base has been successfully deleted: {db_knowledge.name} (ID: {knowledge_id})")
-
-        if db_knowledge.name == "USER_RAG_MERORY":
-            try:
-                await invalidate_cache(prefix=f"storage_type:{db_knowledge.workspace_id}")
-            except Exception:
-                pass
 
         return success(msg="The knowledge base has been successfully deleted")
     except Exception as e:

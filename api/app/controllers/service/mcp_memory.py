@@ -19,7 +19,6 @@ from app.controllers.service.mcp_auth_middleware import (
     mcp_config_id,
     mcp_end_user_id,
     mcp_storage_type,
-    mcp_user_rag_memory_id,
     mcp_workspace_id,
 )
 from app.core.logging_config import get_logger
@@ -39,16 +38,15 @@ logger = get_logger(__name__)
 mcp = FastMCP("记忆服务")
 
 
-def _resolve_context() -> tuple[uuid.UUID, str, uuid.UUID, str, str]:
+def _resolve_context() -> tuple[uuid.UUID, str, uuid.UUID, str]:
     """Return the memory context resolved by the middleware."""
     ws_id = mcp_workspace_id.get()
     eu_id = mcp_end_user_id.get()
     cfg_id = mcp_config_id.get()
     st = mcp_storage_type.get()
-    rag_id = mcp_user_rag_memory_id.get()
     if ws_id is None or eu_id is None or cfg_id is None or st is None:
         raise RuntimeError("未提供有效的 API Key、X-End-User-Other-Id 或记忆配置")
-    return ws_id, eu_id, cfg_id, st, rag_id
+    return ws_id, eu_id, cfg_id, st
 
 
 @mcp.tool
@@ -69,7 +67,7 @@ async def write_memory(
         message: 需要存储的记忆内容，用自然语言描述即可。
     """
     try:
-        workspace_id, end_user_id, config_id, storage_type, user_rag_memory_id = _resolve_context()
+        workspace_id, end_user_id, config_id, storage_type = _resolve_context()
     except RuntimeError as e:
         return {"success": False, "error": str(e)}
 
@@ -83,7 +81,6 @@ async def write_memory(
             config_id=config_id,
             workspace_id=str(workspace_id),
             storage_type=storage_type,
-            user_rag_memory_id=user_rag_memory_id,
             dialog_at=dialog_at,
         )
 
@@ -118,7 +115,7 @@ async def read_memory(
                        - "meta"=元数据检索（仅返回用户画像、偏好、习惯，适合用户档案类问题）
     """
     try:
-        workspace_id, end_user_id, config_id, storage_type, user_rag_memory_id = _resolve_context()
+        workspace_id, end_user_id, config_id, storage_type = _resolve_context()
     except RuntimeError as e:
         return {"success": False, "error": str(e)}
 
@@ -130,7 +127,6 @@ async def read_memory(
             end_user_id=end_user_id,
             workspace_id=str(workspace_id),
             storage_type=storage_type,
-            user_rag_memory_id=user_rag_memory_id,
         )
         result = await service.read(
             query=message,
@@ -165,7 +161,7 @@ async def recall_coding_preferences(
         context_messages: 当前消息之前按时间正序排列的近期 user/assistant 消息。
     """
     try:
-        workspace_id, end_user_id, config_id, _, _ = _resolve_context()
+        workspace_id, end_user_id, config_id, _ = _resolve_context()
     except RuntimeError:
         return {"success": False, "error": "偏好召回服务暂时不可用"}
 
