@@ -3,6 +3,7 @@ import json
 import logging
 import math
 import uuid
+from collections.abc import Mapping
 from typing import Callable
 
 from langchain_core.documents import Document
@@ -54,7 +55,7 @@ from app.core.memory.storage.custom import (
     get_user_sources_for_entities,
 )
 from app.core.memory.storage.enums import MemoryNodeType, MemoryNodeLabel
-from app.core.memory.storage.models import StorageReadResult
+from app.core.memory.storage.models import NodeFilter, StorageReadResult
 from app.core.memory.storage.models.dto import StorageItem
 from app.core.memory.storage.service import get_storage_service
 from app.core.models import RedBearChatModel, RedBearEmbeddings, RedBearRerank
@@ -194,6 +195,26 @@ class Neo4jSearchService:
             ),
             embed=query_embed,
             pre_limit=limit,
+        )
+
+    async def recall_candidates(
+            self,
+            value: list[float] | str,
+            *,
+            node_filters: Mapping[MemoryNodeLabel, NodeFilter],
+            limit: int,
+    ) -> StorageReadResult:
+        """Recall scoped candidates using the storage provider's default fields and behavior."""
+        base = build_content_search_filters(self.includes, self.ctx.end_user_id)
+        if any(label not in base for label in node_filters):
+            raise ValueError("search filters must use included node types")
+        scoped_filters = {label: NodeFilter.all_of(base[label], extra) for label, extra in node_filters.items()}
+        if isinstance(value, str):
+            return await self.service.search_by_fulltext(
+                node_filters=scoped_filters, text=value, pre_limit=limit,
+            )
+        return await self.service.search_by_embedding(
+            node_filters=scoped_filters, embed=value, pre_limit=limit,
         )
 
     @staticmethod

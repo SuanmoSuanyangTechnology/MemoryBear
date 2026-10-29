@@ -274,8 +274,6 @@ class ReadPipeLine(ModelClientMixin, BasePipeline):
         from app.core.memory.exceptions import CommunityRetrievalError
         from app.core.memory.read_services.search_engine.community_search import CommunitySearchService
         from app.core.memory.retrieval_trace.community_trace import log_community_trace, timed_stage
-        from app.core.memory.storage.custom.community_retrieval import CommunityRetrievalRepository
-        from app.core.memory.storage.provider.elasticsearch.client import ElasticClient
         from app.core.memory.models.community_retrieval_models import CommunityRetrievalTrace
         from app.services.memory_reembed_service import should_degrade_semantic
 
@@ -288,7 +286,6 @@ class ReadPipeLine(ModelClientMixin, BasePipeline):
                 "skip_summary": skip_summary, "enable_rerank": enable_rerank, "history_count": len(history),
             },
         )
-        client = None
         service = None
         try:
             with timed_stage(trace, "initialization"):
@@ -311,11 +308,15 @@ class ReadPipeLine(ModelClientMixin, BasePipeline):
                         )
                         trace.model_name = model.name
                 embedder = None if not_ready else await self._get_embedding_client()
-                client = await ElasticClient.create()
+                recall_service = Neo4jSearchService(
+                    self.ctx, embedder=embedder,
+                    includes=[MemoryNodeType.SCENE_COMMUNITY, MemoryNodeType.SCENE_SUMMARY],
+                    semantic_degraded=not_ready,
+                    cosine_score_threshold=COMMUNITY_DEFAULTS.community_min_cosine,
+                )
             service = CommunitySearchService(
-                repository=CommunityRetrievalRepository(
-                    client.client, self.ctx.end_user_id, policy=COMMUNITY_DEFAULTS,
-                ), embedder=embedder,
+                recall_candidates=recall_service.recall_candidates,
+                end_user_id=self.ctx.end_user_id, embedder=embedder,
                 model_config_id=trace.model_config_id, model_name=trace.model_name,
                 operation_id=self._retrieval_operation_id,
                 semantic_degraded=not_ready,
@@ -336,9 +337,6 @@ class ReadPipeLine(ModelClientMixin, BasePipeline):
             code = BizCode.BAD_REQUEST if reason in {"empty_query", "unsupported_storage"} else BizCode.MEMORY_READ_FAILED
             message = f"Invalid memory read request: {reason}" if code == BizCode.BAD_REQUEST else "Memory read failed"
             raise BusinessException(message, code, context={"reason": reason}) from exc
-        finally:
-            if client is not None:
-                await client.close()
 
     async def _emit_stage(self, stage: str, data: dict) -> None:
         await emit_memory_stage(stage, data)

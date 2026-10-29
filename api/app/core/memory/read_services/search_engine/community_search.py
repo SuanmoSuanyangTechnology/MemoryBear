@@ -1,6 +1,7 @@
 """Community and Scene retrieval, using full text while embeddings are rebuilding."""
 
 import asyncio
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import asdict, dataclass
 from numbers import Real
 
@@ -13,6 +14,7 @@ from app.core.memory.models.service_models import Memory, MemorySearchResult
 from app.core.memory.retrieval_trace.community_trace import log_community_trace, timed_stage
 from app.core.memory.retrieval_trace.models import RetrievalExecutionTrace
 from app.core.memory.storage.enums import MemoryNodeType
+from app.core.memory.storage.models import FilterCondition, FilterOperator, NodeFilter, StorageReadResult
 
 
 @dataclass(frozen=True)
@@ -82,9 +84,13 @@ def _pack_evidence(ranked: list[tuple[float, dict]]) -> tuple[list[CommunityEvid
 
 
 class CommunitySearchService:
-    def __init__(self, *, repository, embedder, model_config_id: str, model_name: str, operation_id: str,
+    def __init__(self, *, recall_candidates: Callable[..., Awaitable[StorageReadResult]], end_user_id: str,
+                 embedder, model_config_id: str, model_name: str, operation_id: str,
                  semantic_degraded: bool = False):
-        self.repository = repository
+        if not end_user_id:
+            raise CommunityRetrievalError("invalid_ownership")
+        self.recall_candidates = recall_candidates
+        self.end_user_id = end_user_id
         self.embedder = embedder
         self.operation_id = operation_id
         self.semantic_degraded = semantic_degraded
@@ -114,9 +120,70 @@ class CommunitySearchService:
             )
             raise
         finally:
-            self.trace.database_requests = self.repository.database_requests
-            self.trace.skipped_hits = list(self.repository.skipped_hits)
-            log_community_trace(self.trace, operation_id=self.operation_id, end_user_id=self.repository.end_user_id)
+            log_community_trace(self.trace, operation_id=self.operation_id, end_user_id=self.end_user_id)
+
+    def _validate_node(self, node: dict, *, scene: bool, community_id: str | None = None) -> None:
+        if not isinstance(node, Mapping) or not isinstance(node.get("id"), str) or not node["id"]:
+            raise CommunityRetrievalError("invalid_node_id")
+        if node.get("end_user_id") != self.end_user_id:
+            raise CommunityRetrievalError("invalid_ownership")
+        if node.get("delete_at") is not None:
+            raise CommunityRetrievalError("data_changed")
+        if not isinstance(node.get("content" if scene else "summary"), str):
+            raise CommunityRetrievalError("invalid_node_data")
+        if scene and (
+            node.get("community_status") != "ACTIVE"
+            or node.get("community_eligibility") != "ELIGIBLE"
+            or node.get("scene_community_id") != community_id
+        ):
+            raise CommunityRetrievalError("invalid_ownership")
+
+    async def _recall(self, query: str, *, community_id: str | None = None) -> tuple[list[tuple[float, dict]], int]:
+        fulltext = self.semantic_degraded
+        scene = community_id is not None
+        label = MemoryNodeType.SCENE_SUMMARY if scene else MemoryNodeType.SCENE_COMMUNITY
+        policy = COMMUNITY_DEFAULTS
+        limit = policy.member_top_k if scene else policy.community_top_k
+        threshold = policy.scene_min_cosine if scene else policy.community_min_cosine
+        filters = [
+            FilterCondition(field="end_user_id", value=self.end_user_id),
+            FilterCondition(field="delete_at", operator=FilterOperator.EXISTS, value=False),
+        ]
+        if scene:
+            filters.extend([
+                FilterCondition(field="scene_community_id", value=community_id),
+                FilterCondition(field="community_status", value="ACTIVE"),
+                FilterCondition(field="community_eligibility", value="ELIGIBLE"),
+            ])
+        value: list[float] | str = query
+        if not fulltext:
+            previous_embedding_ms = self.trace.stage_duration_ms.get("embedding", 0)
+            try:
+                with timed_stage(self.trace, "embedding"):
+                    self.trace.embedding_calls += 1
+                    value = _validate_query_vector(await self.embedder.aembed_query(query))
+                    self.trace.vector_dimension = len(value)
+            finally:
+                self.trace.stage_duration_ms["embedding"] += previous_embedding_ms
+        self.trace.database_requests += 1
+        result = await self.recall_candidates(
+            value,
+            node_filters={label: NodeFilter.all_of(*filters)},
+            limit=limit,
+        )
+        self.trace.backend = result.backend
+        candidates = []
+        for item in result.items:
+            node, score = item.data, item.data.get("score")
+            self._validate_node(node, scene=scene, community_id=community_id)
+            if item.label != label:
+                raise CommunityRetrievalError("invalid_node_id")
+            # Score parsing and dependency failures use the provider's default behavior.
+            if not fulltext and score < threshold - 1e-6:
+                continue
+            candidates.append((float(score), node))
+        # Shared providers expose a bounded candidate pool, not an exact match total.
+        return sorted(candidates, key=lambda item: (-item[0], item[1]["id"])), len(result.items)
 
     def _result(self, *, memories=None, content="", reason=None) -> MemorySearchResult:
         self.trace.empty_reason = reason
@@ -136,18 +203,9 @@ class CommunitySearchService:
         )
 
     async def _search(self, query: str) -> MemorySearchResult:
-        query_vector = None
-        if not self.semantic_degraded:
-            with timed_stage(self.trace, "embedding"):
-                self.trace.embedding_calls += 1
-                query_vector = _validate_query_vector(await self.embedder.aembed_query(query))
-                self.trace.vector_dimension = len(query_vector)
         with timed_stage(self.trace, "community_selection"):
-            selected, matched_community_count = (
-                await self.repository.communities_fulltext(query) if self.semantic_degraded
-                else await self.repository.communities(query_vector)
-            )
-            self.trace.matched_community_count = matched_community_count
+            selected, recalled_community_count = await self._recall(query)
+            self.trace.recalled_community_count = recalled_community_count
         self.trace.selected_communities = [
             {"id": n["id"], "score": s, "summary": n["summary"]} for s, n in selected
         ]
@@ -156,12 +214,10 @@ class CommunitySearchService:
         merged: dict[str, tuple[float, dict]] = {}
         with timed_stage(self.trace, "scene_selection"):
             for _, community in selected:
-                candidates, matched_scene_count = (
-                    await self.repository.members_fulltext(community, query) if self.semantic_degraded
-                    else await self.repository.members(community, query_vector)
-                )
+                candidates, recalled_scene_count = await self._recall(query, community_id=community["id"])
                 self.trace.members.append({
-                    "community_id": community["id"], "matched_scene_count": matched_scene_count,
+                    "community_id": community["id"], "matched_scene_count": None,
+                    "recalled_scene_count": recalled_scene_count,
                     "candidates": [{"id": n["id"], "score": s} for s, n in candidates],
                 })
                 for score, node in candidates:
