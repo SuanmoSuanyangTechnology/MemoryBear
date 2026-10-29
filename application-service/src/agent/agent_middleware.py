@@ -164,10 +164,11 @@ class AgentMiddleware:
 
         skill_configs = {}
         skill_ids_to_load = []
+        skill_repository = SkillRepository(db)
+        skill_service = SkillService(db)
 
         if self.enabled and self.all_skills:
-            skills, _ = await SkillService.list_skills_async(
-                db,
+            skills, _ = await skill_service.list_skills_async(
                 tenant_id,
                 is_active=True,
                 page=1,
@@ -180,7 +181,9 @@ class AgentMiddleware:
         if skill_ids_to_load:
             for skill_id in skill_ids_to_load:
                 try:
-                    skill = await SkillRepository.get_by_id_async(db, uuid.UUID(skill_id), tenant_id)
+                    skill = await skill_repository.get_by_id_async(
+                        uuid.UUID(skill_id), tenant_id
+                    )
                     if skill and skill.is_active:
                         config = skill.config or {}
                         config['prompt'] = skill.prompt
@@ -189,8 +192,7 @@ class AgentMiddleware:
                 except Exception:
                     continue
 
-            skill_tools, skill_tool_map = await SkillService.load_skill_tools_async(
-                db,
+            skill_tools, skill_tool_map = await skill_service.load_skill_tools_async(
                 skill_ids_to_load,
                 tenant_id,
                 runtime_context=runtime_context,

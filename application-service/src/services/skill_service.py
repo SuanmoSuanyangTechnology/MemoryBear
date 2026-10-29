@@ -1,17 +1,19 @@
-"""Skill definition-plane service (frozen port of the monolith
-``SkillService`` create/get/list/update/delete paths).
+"""Skill service (frozen port of the monolith ``SkillService``).
 
 Split adaptation: the host's static methods become instance methods over the
 request session, and tool enrichment goes through the port ``ToolService``.
-The execution-plane helpers (``load_skill_tools*``) stay in the host — the
-monolith remains the only runtime consumer.
+Both planes are ported: management CRUD (sync) and runtime skill loading
+(``list_skills_async`` / ``load_skill_tools_async``) used by
+``AgentMiddleware`` during chat runs.
 """
 
 from __future__ import annotations
 
+import logging
 import uuid
 
 from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from ..errors import BizCode, BusinessException
@@ -20,11 +22,13 @@ from ..repositories.skill_repository import SkillRepository
 from ..schemas.skill_schema import SkillCreate, SkillUpdate
 from .tool_service import ToolService
 
+logger = logging.getLogger(__name__)
+
 
 class SkillService:
     """Skill business logic layer."""
 
-    def __init__(self, db: Session):
+    def __init__(self, db: Session | AsyncSession):
         self.db = db
         self.repository = SkillRepository(db)
 
@@ -85,6 +89,63 @@ class SkillService:
         return self.repository.list_skills(
             tenant_id, search, is_active, is_public, page, pagesize
         )
+
+    async def list_skills_async(
+        self,
+        tenant_id: uuid.UUID,
+        search: str | None = None,
+        is_active: bool | None = None,
+        is_public: bool | None = None,
+        page: int = 1,
+        pagesize: int = 10
+    ) -> tuple[list[type[Skill]], int]:
+        """List skills."""
+        return await self.repository.list_skills_async(
+            tenant_id, search, is_active, is_public, page, pagesize
+        )
+
+    async def load_skill_tools_async(
+        self,
+        skill_ids: list[str],
+        tenant_id: uuid.UUID,
+        runtime_context: dict | None = None,
+    ) -> tuple[list, dict[str, str]]:
+        """Load the tools attached to the given skills.
+
+        Returns:
+            (tools, tool_to_skill_map)
+        """
+        tools = []
+        tool_to_skill_map = {}
+        tool_service = ToolService(self.db)
+
+        for skill_id in skill_ids:
+            try:
+                skill = await self.repository.get_by_id_async(
+                    uuid.UUID(skill_id), tenant_id
+                )
+                if skill and skill.is_active:
+                    for tool_config in skill.tools:
+                        tool = await tool_service.get_tool_instance_async(
+                            tool_config.get("tool_id", ""),
+                            tenant_id,
+                        )
+                        if tool:
+                            if runtime_context:
+                                tool.set_runtime_context(**runtime_context)
+                            langchain_tool = tool.to_langchain_tool(
+                                tool_config.get("operation", None)
+                            )
+                            tools.append(langchain_tool)
+                            tool_name = getattr(
+                                langchain_tool, "name", str(id(langchain_tool))
+                            )
+                            tool_to_skill_map[tool_name] = skill_id
+            except Exception as e:
+                logger.error(f"加载技能 {skill_id} 的工具时出错: {e}")
+                continue
+
+        return tools, tool_to_skill_map
 
     def update_skill(self, skill_id: uuid.UUID, data: SkillUpdate, tenant_id: uuid.UUID) -> Skill:
         """Update a skill."""

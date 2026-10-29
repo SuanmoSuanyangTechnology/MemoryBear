@@ -358,8 +358,11 @@ class ToolService:
         start_time = time.time()
 
         try:
-            # Tool instance (the host's async-session branch is not ported)
-            tool = self.get_tool_instance(tool_id, tenant_id)
+            # Tool instance
+            if self._uses_async_session():
+                tool = await self.get_tool_instance_async(tool_id, tenant_id)
+            else:
+                tool = self.get_tool_instance(tool_id, tenant_id)
             if not tool:
                 return ToolResult.error_result(
                     error=f"工具不存在: {tool_id}",
@@ -367,16 +370,24 @@ class ToolService:
                 )
 
             # Record the execution start
-            self._record_execution_start(
-                execution_id, tool_id, parameters, user_id, workspace_id
-            )
+            if self._uses_async_session():
+                await self._record_execution_start_async(
+                    execution_id, tool_id, parameters, user_id, workspace_id
+                )
+            else:
+                self._record_execution_start(
+                    execution_id, tool_id, parameters, user_id, workspace_id
+                )
 
             # Execute the tool
             tool.set_runtime_context(user_id=user_id, workspace_id=workspace_id)
             result = await tool.safe_execute(**parameters)
 
             # Record the execution completion
-            self._record_execution_complete(execution_id, result)
+            if self._uses_async_session():
+                await self._record_execution_complete_async(execution_id, result)
+            else:
+                self._record_execution_complete(execution_id, result)
 
             return result
 
@@ -386,7 +397,10 @@ class ToolService:
                 error=str(e),
                 execution_time=execution_time
             )
-            self._record_execution_complete(execution_id, error_result)
+            if self._uses_async_session():
+                await self._record_execution_complete_async(execution_id, error_result)
+            else:
+                self._record_execution_complete(execution_id, error_result)
             return error_result
 
     async def test_connection(self, tool_id: str, tenant_id: uuid.UUID) -> dict[str, Any]:
@@ -952,7 +966,10 @@ class ToolService:
                                 }
                             })
                     mcp_config.available_tools = tool_list
-                    self.db.commit()
+                    if self._uses_async_session():
+                        await self.db.commit()
+                    else:
+                        self.db.commit()
                     available_tools = tool_list
             except Exception as e:
                 logger.error(f"同步MCP工具列表失败: {e}")
@@ -1690,6 +1707,56 @@ class ToolService:
                 self.db.commit()
         except Exception as e:
             logger.error(f"记录执行完成失败: {execution_id}, {e}")
+
+    async def _record_execution_start_async(
+            self,
+            execution_id: str,
+            tool_id: str,
+            parameters: dict[str, Any],
+            user_id: uuid.UUID | None,
+            workspace_id: uuid.UUID | None
+    ) -> None:
+        """Record the execution start through the async session."""
+        try:
+            execution = ToolExecution(
+                execution_id=execution_id,
+                tool_config_id=uuid.UUID(tool_id),
+                status=ExecutionStatus.RUNNING.value,
+                input_data=parameters,
+                started_at=utcnow_naive(),
+                user_id=user_id,
+                workspace_id=workspace_id
+            )
+            self.db.add(execution)
+            await self.db.commit()
+        except Exception as e:
+            logger.error(f"异步记录执行开始失败: {execution_id}, {e}")
+
+    async def _record_execution_complete_async(
+            self, execution_id: str, result: ToolResult
+    ) -> None:
+        """Record the execution completion through the async session."""
+        try:
+            execution = (
+                await self.db.execute(
+                    select(ToolExecution).where(ToolExecution.execution_id == execution_id)
+                )
+            ).scalar_one_or_none()
+
+            if execution:
+                execution.status = (
+                    ExecutionStatus.COMPLETED.value
+                    if result.success
+                    else ExecutionStatus.FAILED.value
+                )
+                execution.output_data = result.data if result.success else None
+                execution.error_message = result.error if not result.success else None
+                execution.completed_at = utcnow_naive()
+                execution.execution_time = result.execution_time
+                execution.token_usage = result.token_usage
+                await self.db.commit()
+        except Exception as e:
+            logger.error(f"异步记录执行完成失败: {execution_id}, {e}")
 
     async def _test_mcp_connection(self, config: ToolConfig) -> dict[str, Any]:
         """Test the MCP connection and auto-sync the tool list."""

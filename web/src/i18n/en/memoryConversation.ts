@@ -26,6 +26,7 @@ export const memoryConversation = {
       normalReply: 'Normal Reply',
       quickReply: 'Quick Reply',
       quickReplyPlus: 'Quick Reply Plus',
+      community: '社区检索',
       web_search: 'Online search',
       memory: 'Memory',
       memoryRecallToggle: 'Show memory recall',

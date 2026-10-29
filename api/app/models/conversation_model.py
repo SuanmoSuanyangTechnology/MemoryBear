@@ -102,6 +102,13 @@ class Message(Base):
             "parent_message_id",
             postgresql_where=text("parent_message_id IS NOT NULL AND is_deleted = FALSE"),
         ),
+        # 日志按内容关键词搜索（ILIKE '%kw%'）用：需 pg_trgm 扩展；关键词 <3 字符时索引不生效
+        Index(
+            "ix_messages_content_trgm",
+            "content",
+            postgresql_using="gin",
+            postgresql_ops={"content": "gin_trgm_ops"},
+        ),
     )
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
