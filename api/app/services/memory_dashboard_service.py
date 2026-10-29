@@ -3,11 +3,12 @@ from datetime import timedelta
 from typing import List, Optional, Dict, Any
 
 from fastapi import HTTPException
-from sqlalchemy import desc, nullslast
+from sqlalchemy import desc
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from app.core.logging_config import get_business_logger
+from app.core.memory.rag import stats as rag_stats
 from app.core.utils.datetime_utils import utcnow_naive
 from app.db import get_async_db_context
 from app.integrations.profile.contracts import MemoryProfileAuthSource
@@ -17,7 +18,6 @@ from app.models.end_user_model import EndUser, EndUser as EndUserModel
 from app.models.memory_increment_model import MemoryIncrement
 from app.models.user_model import User
 from app.repositories import (
-    document_repository,
     memory_increment_repository,
     knowledge_repository
 )
@@ -27,6 +27,36 @@ from app.utils.redis_cache import redis_cache
 
 # 获取业务逻辑专用日志器
 business_logger = get_business_logger()
+
+
+def _workspace_end_user_ids(db: Session, workspace_id: uuid.UUID) -> List[str]:
+    """工作空间下所有活跃宿主 ID（与 RAG 统计口径一致）。"""
+    from app.repositories.end_user_repository import EndUserRepository
+
+    return EndUserRepository(db).get_ids_by_app_workspace(workspace_id)
+
+
+async def _workspace_end_user_ids_async(
+    db: AsyncSession,
+    workspace_id: uuid.UUID,
+) -> List[str]:
+    from app.repositories.end_user_repository import EndUserRepository
+
+    return await EndUserRepository(db).get_ids_by_app_workspace_async(workspace_id)
+
+
+async def _is_rag_workspace_async(
+    db: AsyncSession,
+    workspace_id: uuid.UUID,
+) -> bool:
+    from sqlalchemy import select
+
+    from app.models.workspace_model import Workspace
+
+    result = await db.execute(
+        select(Workspace.storage_type).where(Workspace.id == workspace_id)
+    )
+    return result.scalar_one_or_none() == "rag"
 
 
 async def get_dashboard_memory_updates_async(
@@ -61,8 +91,13 @@ async def get_dashboard_memory_updates_async(
             elif storage_type == "rag":
                 users = EndUserRepository(db)
                 user_ids = await users.get_ids_by_app_workspace_async(workspace_id)
-                yesterday, day_before = await document_repository.get_rag_memory_baselines_async(
-                    db, user_ids, today_start, yesterday_start
+                yesterday = await rag_stats.count_messages(
+                    user_ids,
+                    end=today_start - timedelta(microseconds=1),
+                )
+                day_before = await rag_stats.count_messages(
+                    user_ids,
+                    end=yesterday_start - timedelta(microseconds=1),
                 )
             else:
                 return result
@@ -239,10 +274,9 @@ def get_workspace_end_users_paginated_rag(
 ) -> Dict[str, Any]:
     """RAG 模式宿主列表分页。
 
-    RAG 记忆数量以 documents.chunk_num 为准：
-    - file_name = end_user_id + ".txt"
-    - 只统计当前 workspace 下 permission_id="Memory" 的用户记忆知识库
-    - 在 SQL 层过滤 chunk 总数为 0 的宿主，保证分页准确
+    RAG 记忆数量以独立索引 `rag_memory_current` 为准：
+    - 通过 App 关联取当前 workspace 下所有活跃宿主，按宿主聚合消息条数
+    - 只保留消息条数 > 0 的宿主，保证分页准确
     """
     business_logger.info(
         f"获取 RAG 宿主列表（分页）: workspace_id={workspace_id}, "
@@ -253,10 +287,14 @@ def get_workspace_end_users_paginated_rag(
         from app.repositories.end_user_repository import EndUserRepository
 
         repo = EndUserRepository(db)
+        memory_counts = rag_stats.count_messages_by_end_user_sync(
+            _workspace_end_user_ids(db, workspace_id)
+        )
         items, total = repo.get_paginated_with_memory_rag(
             workspace_id=workspace_id,
             page=page,
             pagesize=pagesize,
+            memory_counts=memory_counts,
             keyword=keyword,
             label=label,
         )
@@ -293,6 +331,42 @@ async def get_workspace_api_increment_async(
         raise
 
 
+async def _get_rag_memory_increment_async(
+    db: AsyncSession,
+    workspace_id: uuid.UUID,
+    limit: int,
+) -> List[MemoryIncrementSchema]:
+    """RAG 记忆增量：独立索引按 UTC 自然日聚合累计总量。
+
+    与图侧 `memory_increments.total_num` 的语义一致（当日累计总量），
+    迁移数据（source=legacy）不计入趋势，避免一次性尖峰。
+    """
+    from datetime import datetime, time
+
+    if int(limit) <= 0:
+        # 契约是「返回最近 limit 天」；limit<=0 时不再退化成返回 1 天
+        return []
+
+    end_user_ids = await _workspace_end_user_ids_async(db, workspace_id)
+    today = utcnow_naive().replace(hour=0, minute=0, second=0, microsecond=0)
+    start_day = today - timedelta(days=max(int(limit) - 1, 0))
+    totals = await rag_stats.daily_totals(
+        end_user_ids,
+        start_day,
+        today,
+        exclude_legacy=True,
+    )
+    return [
+        MemoryIncrementSchema(
+            workspace_id=workspace_id,
+            total_num=total,
+            created_at=datetime.combine(day, time.min),
+            updated_at=datetime.combine(day, time.min),
+        )
+        for day, total in totals
+    ]
+
+
 async def get_workspace_memory_increment_async(
     db,
     workspace_id: uuid.UUID,
@@ -302,6 +376,9 @@ async def get_workspace_memory_increment_async(
     """获取工作空间的记忆增量（异步版本）"""
     business_logger.info(f"获取记忆增量(异步): workspace_id={workspace_id}, limit={limit}, 操作者: {current_user.username}")
     from sqlalchemy import select, func
+
+    if await _is_rag_workspace_async(db, workspace_id):
+        return await _get_rag_memory_increment_async(db, workspace_id, limit)
 
     # 每天只保留一条（取当天最新），再取最新的 limit 天：
     # DISTINCT ON (date(created_at)) + ORDER BY date DESC, created_at DESC 保证
@@ -339,9 +416,14 @@ async def get_workspace_memory_list_async(
     try:
         # 1. 获取记忆总量
         try:
-            total_memory_record = await memory_increment_repository.write_memory_increment(db, workspace_id, 0)
-            result["total_memory"] = total_memory_record.total_num
-            business_logger.info(f"成功获取记忆总量: {total_memory_record.total_num}")
+            if await _is_rag_workspace_async(db, workspace_id):
+                result["total_memory"] = await rag_stats.count_messages(
+                    await _workspace_end_user_ids_async(db, workspace_id)
+                )
+            else:
+                total_memory_record = await memory_increment_repository.write_memory_increment(db, workspace_id, 0)
+                result["total_memory"] = total_memory_record.total_num
+            business_logger.info(f"成功获取记忆总量: {result['total_memory']}")
         except Exception as e:
             business_logger.warning(f"获取记忆总量失败: {str(e)}")
             result["total_memory"] = 0.0
@@ -398,7 +480,6 @@ async def get_workspace_total_end_users_async(
         raise
 
 
-@redis_cache(prefix="memory_count_total", id_arg="workspace_id", skip_args=["current_user"])
 async def get_workspace_total_memory_count_only_async(
     db,
     workspace_id: uuid.UUID,
@@ -415,6 +496,8 @@ async def get_workspace_total_memory_count_only_async(
     是否返回 details，故共用同一份 end_users.memory_count 数据源。缓存 prefix 独立，
     避免与返回 dict 的版本互相覆盖。
 
+    RAG 空间改读独立索引（消息条数），且不经过缓存，保证写入后立即可见。
+
     Returns:
         int: 记忆总量；未找到指定宿主或无活跃宿主时为 0
     """
@@ -423,30 +506,63 @@ async def get_workspace_total_memory_count_only_async(
     )
 
     try:
-        from app.repositories.end_user_repository import EndUserRepository
+        if await _is_rag_workspace_async(db, workspace_id):
+            if end_user_id:
+                # RAG 索引只按 end_user_id 过滤，没有 workspace 维度；
+                # 不校验归属会让任意合法 UUID 读到其它空间的记忆总量
+                if not await _end_user_in_workspace_async(
+                    db, workspace_id, end_user_id
+                ):
+                    business_logger.warning(
+                        f"拒绝跨空间读取 RAG 记忆总量: end_user_id={end_user_id}, "
+                        f"workspace_id={workspace_id}"
+                    )
+                    return 0
+                end_user_ids = [end_user_id]
+            else:
+                end_user_ids = await _workspace_end_user_ids_async(db, workspace_id)
+            return await rag_stats.count_messages(end_user_ids)
 
-        repo = EndUserRepository(db)
-
-        # 指定宿主：沿用单条查询，保住 get_end_user_by_id_async 的合并路由语义
-        if end_user_id:
-            end_user = await repo.get_end_user_by_id_async(uuid.UUID(end_user_id))
-            if not end_user:
-                business_logger.warning(f"未找到宿主 {end_user_id}，返回0")
-                return 0
-            total_count = int(end_user.memory_count or 0)
-        else:
-            # 全工作空间：聚合在 PG 内完成，只回传一行
-            raw_total, _ = await repo.get_memory_count_total_by_workspace_async(workspace_id)
-            total_count = int(raw_total or 0)
-
-        business_logger.info(f"成功获取工作空间记忆总量(仅总量): {total_count}")
-        return total_count
+        return await _get_workspace_total_memory_count_only_cached_async(
+            db=db,
+            workspace_id=workspace_id,
+            current_user=current_user,
+            end_user_id=end_user_id,
+        )
 
     except HTTPException:
         raise
     except Exception as e:
         business_logger.error(f"获取工作空间记忆总量(仅总量)失败: workspace_id={workspace_id} - {str(e)}")
         raise
+
+
+@redis_cache(prefix="memory_count_total", id_arg="workspace_id", skip_args=["current_user", "db"])
+async def _get_workspace_total_memory_count_only_cached_async(
+    db,
+    workspace_id: uuid.UUID,
+    current_user,
+    end_user_id: str = None
+) -> int:
+    """图侧记忆总量（读 end_users.memory_count，带缓存）。"""
+    from app.repositories.end_user_repository import EndUserRepository
+
+    repo = EndUserRepository(db)
+
+    # 指定宿主：沿用单条查询，保住 get_end_user_by_id_async 的合并路由语义
+    if end_user_id:
+        end_user = await repo.get_end_user_by_id_async(uuid.UUID(end_user_id))
+        if not end_user:
+            business_logger.warning(f"未找到宿主 {end_user_id}，返回0")
+            return 0
+        total_count = int(end_user.memory_count or 0)
+    else:
+        # 全工作空间：聚合在 PG 内完成，只回传一行
+        raw_total, _ = await repo.get_memory_count_total_by_workspace_async(workspace_id)
+        total_count = int(raw_total or 0)
+
+    business_logger.info(f"成功获取工作空间记忆总量(仅总量): {total_count}")
+    return total_count
 
 
 async def get_workspace_total_memory_count(
@@ -469,7 +585,6 @@ async def get_workspace_total_memory_count(
     )
 
 
-@redis_cache(prefix="memory_count", id_arg="workspace_id", skip_args=["current_user"])
 async def get_workspace_total_memory_count_async(
     db,
     workspace_id: uuid.UUID,
@@ -478,67 +593,23 @@ async def get_workspace_total_memory_count_async(
 ) -> dict:
     """获取工作空间的记忆总量（异步版本，使用 AsyncSession）。
 
-    数据来源：直接读取 end_users.memory_count 字段聚合，不再实时扫描 Neo4j。
-    memory_count 由写入/遗忘等流程维护，可能相对 Neo4j 实时计数有极小滞后，
-    但换取的是数量级的耗时下降（全库扫描 -> 单条索引聚合）。
+    - RAG 空间：独立索引按消息条数统计（不经过缓存，写入后立即可见）。
+    - 图空间：直接读取 end_users.memory_count 字段聚合，不再实时扫描 Neo4j；
+      memory_count 由写入/遗忘等流程维护，可能相对 Neo4j 实时计数有极小滞后，
+      但换取的是数量级的耗时下降（全库扫描 -> 单条索引聚合）。
     """
     business_logger.info(f"获取工作空间记忆总量(异步): workspace_id={workspace_id}, 操作者: {current_user.username}")
 
     try:
-        from app.repositories.end_user_repository import EndUserRepository
+        if await _is_rag_workspace_async(db, workspace_id):
+            return await _get_rag_total_memory_count_async(db, workspace_id, end_user_id)
 
-        repo = EndUserRepository(db)
-
-        # 指定宿主：只查该宿主的 memory_count（保留合并路由语义）
-        if end_user_id:
-            end_user = await repo.get_end_user_by_id_async(uuid.UUID(end_user_id))
-            if not end_user:
-                business_logger.warning(f"未找到宿主 {end_user_id}，返回0")
-                return {
-                    "total_memory_count": 0,
-                    "host_count": 0,
-                    "details": []
-                }
-
-            count = int(end_user.memory_count or 0)
-            return {
-                "total_memory_count": count,
-                "host_count": 1,
-                "details": [{
-                    "end_user_id": end_user_id,
-                    "count": count,
-                    "name": end_user.other_name or None
-                }]
-            }
-
-        # 全工作空间：一次轻量查询取所有活跃宿主的 (id, other_name, memory_count)
-        rows = await repo.get_memory_counts_by_workspace_async(workspace_id)
-        if not rows:
-            business_logger.warning("未找到任何宿主，返回0")
-            return {
-                "total_memory_count": 0,
-                "host_count": 0,
-                "details": []
-            }
-
-        details = [
-            {
-                "end_user_id": str(row.id),
-                "count": int(row.memory_count or 0),
-                "name": row.other_name or None
-            }
-            for row in rows
-        ]
-        total_count = sum(item["count"] for item in details)
-
-        result = {
-            "total_memory_count": total_count,
-            "host_count": len(rows),
-            "details": details
-        }
-
-        business_logger.info(f"成功获取工作空间记忆总量: {total_count} (来自 {len(rows)} 个宿主)")
-        return result
+        return await _get_workspace_total_memory_count_cached_async(
+            db=db,
+            workspace_id=workspace_id,
+            current_user=current_user,
+            end_user_id=end_user_id,
+        )
 
     except HTTPException:
         raise
@@ -547,12 +618,149 @@ async def get_workspace_total_memory_count_async(
         raise
 
 
+async def _get_rag_total_memory_count_async(
+    db,
+    workspace_id: uuid.UUID,
+    end_user_id: str = None,
+) -> dict:
+    """RAG 空间记忆总量（含宿主明细），计数口径为消息条数。"""
+    from app.repositories.end_user_repository import EndUserRepository
+
+    repo = EndUserRepository(db)
+
+    if end_user_id:
+        end_user = await repo.get_end_user_by_id_async(uuid.UUID(end_user_id))
+        # get_end_user_by_id_async 只按 id + is_active 查询，不带 workspace 过滤；
+        # RAG 索引计数也只按 end_user_id，必须显式校验归属，否则可跨空间读取
+        if not end_user or str(end_user.workspace_id) != str(workspace_id):
+            business_logger.warning(
+                f"未找到宿主或宿主不属于当前空间 {workspace_id}: {end_user_id}，返回0"
+            )
+            return {
+                "total_memory_count": 0,
+                "host_count": 0,
+                "details": []
+            }
+
+        count = await rag_stats.count_messages([end_user_id])
+        return {
+            "total_memory_count": count,
+            "host_count": 1,
+            "details": [{
+                "end_user_id": end_user_id,
+                "count": count,
+                "name": end_user.other_name or None
+            }]
+        }
+
+    # 「全部宿主」与其它 RAG 分支共用同一份宿主集合（App 关联 + 活跃），
+    # 否则 /dashboard_data 与只返回总量的接口会得到不同数值
+    end_user_ids = await _workspace_end_user_ids_async(db, workspace_id)
+    if not end_user_ids:
+        business_logger.warning("未找到任何宿主，返回0")
+        return {
+            "total_memory_count": 0,
+            "host_count": 0,
+            "details": []
+        }
+
+    rows = await repo.get_memory_counts_by_ids_async(
+        workspace_id,
+        [uuid.UUID(uid) for uid in end_user_ids],
+    )
+    name_by_id = {str(row.id): row.other_name for row in rows}
+    counts = await rag_stats.count_messages_by_end_user(end_user_ids)
+    details = [
+        {
+            "end_user_id": end_user_id,
+            "count": counts.get(end_user_id, 0),
+            "name": name_by_id.get(end_user_id) or None
+        }
+        for end_user_id in end_user_ids
+    ]
+    total_count = sum(item["count"] for item in details)
+
+    business_logger.info(f"成功获取 RAG 记忆总量: {total_count} (来自 {len(details)} 个宿主)")
+    return {
+        "total_memory_count": total_count,
+        "host_count": len(details),
+        "details": details
+    }
+
+
+@redis_cache(prefix="memory_count", id_arg="workspace_id", skip_args=["current_user", "db"])
+async def _get_workspace_total_memory_count_cached_async(
+    db,
+    workspace_id: uuid.UUID,
+    current_user,
+    end_user_id: str = None
+) -> dict:
+    """图侧记忆总量（读 end_users.memory_count，带缓存）。"""
+    from app.repositories.end_user_repository import EndUserRepository
+
+    repo = EndUserRepository(db)
+
+    # 指定宿主：只查该宿主的 memory_count（保留合并路由语义）
+    if end_user_id:
+        end_user = await repo.get_end_user_by_id_async(uuid.UUID(end_user_id))
+        if not end_user:
+            business_logger.warning(f"未找到宿主 {end_user_id}，返回0")
+            return {
+                "total_memory_count": 0,
+                "host_count": 0,
+                "details": []
+            }
+
+        count = int(end_user.memory_count or 0)
+        return {
+            "total_memory_count": count,
+            "host_count": 1,
+            "details": [{
+                "end_user_id": end_user_id,
+                "count": count,
+                "name": end_user.other_name or None
+            }]
+        }
+
+    # 全工作空间：一次轻量查询取所有活跃宿主的 (id, other_name, memory_count)
+    rows = await repo.get_memory_counts_by_workspace_async(workspace_id)
+    if not rows:
+        business_logger.warning("未找到任何宿主，返回0")
+        return {
+            "total_memory_count": 0,
+            "host_count": 0,
+            "details": []
+        }
+
+    details = [
+        {
+            "end_user_id": str(row.id),
+            "count": int(row.memory_count or 0),
+            "name": row.other_name or None
+        }
+        for row in rows
+    ]
+    total_count = sum(item["count"] for item in details)
+
+    result = {
+        "total_memory_count": total_count,
+        "host_count": len(rows),
+        "details": details
+    }
+
+    business_logger.info(f"成功获取工作空间记忆总量: {total_count} (来自 {len(rows)} 个宿主)")
+    return result
+
+
 async def get_end_user_memory_counts_async(
     db,
     workspace_id: uuid.UUID,
     end_user_ids: List[uuid.UUID],
 ) -> Dict[str, Any]:
-    """批量查询终端用户记忆量（读 end_users.memory_count 字段）。
+    """批量查询终端用户记忆量。
+
+    - RAG 空间：按独立索引聚合消息条数。
+    - 图空间：读 end_users.memory_count 字段。
 
     仅统计「属于目标空间且 is_active=True」的用户；不属于空间/已删除的 id 不返回
     （不报错）。id 的合法性与数量上限由 controller 层校验。
@@ -568,11 +776,24 @@ async def get_end_user_memory_counts_async(
     repo = EndUserRepository(db)
     rows = await repo.get_memory_counts_by_ids_async(workspace_id, end_user_ids)
 
+    if await _is_rag_workspace_async(db, workspace_id):
+        is_rag = True
+        counts = await rag_stats.count_messages_by_end_user(
+            [str(row.id) for row in rows]
+        )
+    else:
+        is_rag = False
+        counts = {}
+
     items = [
         {
             "end_user_id": str(row.id),
             "other_name": row.other_name or None,
-            "memory_count": int(row.memory_count or 0),
+            "memory_count": (
+                counts.get(str(row.id), 0)
+                if is_rag
+                else int(row.memory_count or 0)
+            ),
         }
         for row in rows
     ]
@@ -588,10 +809,12 @@ async def get_memory_increment_daily_async(
     start_ms: int,
     end_ms: int,
 ) -> Dict[str, Any]:
-    """按时间段逐日返回记忆增量总量（同日取当日最新一条）。
+    """按时间段逐日返回记忆总量（同日取当日最新一条）。
 
-    过滤 memory_increments.created_at（闭区间）；start_ms/end_ms 为毫秒 UTC 时间戳。
-    返回的 date 为代表日期的 UTC 当日 00:00:00.000 毫秒时间戳。
+    - 图空间：过滤 memory_increments.created_at（闭区间），同日取最新记录。
+    - RAG 空间：独立索引按 UTC 自然日聚合累计总量，排除迁移数据（source=legacy）。
+    start_ms/end_ms 为毫秒 UTC 时间戳；返回的 date 为代表日期的 UTC 当日
+    00:00:00.000 毫秒时间戳。
 
     Returns:
         {"items": [{"date": int(ms), "total_num": int}]}
@@ -609,16 +832,33 @@ async def get_memory_increment_daily_async(
         f"按日查询记忆增量: workspace_id={workspace_id}, start={start_dt}, end={end_dt}"
     )
 
+    def _to_day_ms(day) -> int:
+        return int(
+            datetime(day.year, day.month, day.day, tzinfo=timezone.utc).timestamp() * 1000
+        )
+
+    if await _is_rag_workspace_async(db, workspace_id):
+        end_user_ids = await _workspace_end_user_ids_async(db, workspace_id)
+        totals = await rag_stats.daily_totals(
+            end_user_ids,
+            start_dt,
+            end_dt,
+            exclude_legacy=True,
+        )
+        items = [
+            {"date": _to_day_ms(day), "total_num": int(total)}
+            for day, total in totals
+        ]
+        business_logger.info(f"按日查询 RAG 记忆增量完成: days={len(items)}")
+        return {"items": items}
+
     repo = MemoryIncrementRepository(db)
     rows = await repo.get_daily_latest_by_workspace_async(workspace_id, start_dt, end_dt)
 
     items = []
     for day, total_num in rows:
         # day 为 date；转为该 UTC 日期 00:00:00.000 的毫秒时间戳
-        day_ms = int(
-            datetime(day.year, day.month, day.day, tzinfo=timezone.utc).timestamp() * 1000
-        )
-        items.append({"date": day_ms, "total_num": int(total_num or 0)})
+        items.append({"date": _to_day_ms(day), "total_num": int(total_num or 0)})
 
     business_logger.info(f"按日查询记忆增量完成: days={len(items)}")
     return {"items": items}
@@ -649,17 +889,21 @@ def get_rag_total_chunk(
     current_user: User
 ) -> int:
     """
-    根据当前用户所在的workspace_id查询konwledges表所有chunk_num的总和
+    RAG 记忆片段数：独立索引中当前空间全部宿主的消息条数。
+
+    字段名沿用 chunk（对外契约不变），口径已由知识库分段改为消息条数。
     """
     workspace_id = current_user.current_workspace_id
-    business_logger.info(f"获取RAG总chunk数: workspace_id={workspace_id}, 操作者: {current_user.username}")
+    business_logger.info(f"获取RAG记忆片段数: workspace_id={workspace_id}, 操作者: {current_user.username}")
 
     try:
-        total_chunk = knowledge_repository.get_total_chunk_num_by_workspace(db, workspace_id)
-        business_logger.info(f"成功获取RAG总chunk数: {total_chunk}")
+        total_chunk = rag_stats.count_messages_sync(
+            _workspace_end_user_ids(db, workspace_id)
+        )
+        business_logger.info(f"成功获取RAG记忆片段数: {total_chunk}")
         return total_chunk
     except Exception as e:
-        business_logger.error(f"获取RAG总chunk数失败: workspace_id={workspace_id} - {str(e)}")
+        business_logger.error(f"获取RAG记忆片段数失败: workspace_id={workspace_id} - {str(e)}")
         raise
 
 
@@ -687,33 +931,19 @@ def get_rag_user_kb_total_chunk(
     current_user: User
 ) -> int:
     """
-    根据当前用户所在的workspace_id，从documents表统计所有用户知识库的chunk总数。
-    与 /end_users 接口保持同源：查询 file_name 匹配 end_user_id.txt 的文档 chunk_num 之和。
+    RAG 用户记忆总量：独立索引中当前空间全部宿主的消息条数。
     """
     workspace_id = current_user.current_workspace_id
-    business_logger.info(f"获取用户知识库总chunk数(documents表): workspace_id={workspace_id}, 操作者: {current_user.username}")
+    business_logger.info(f"获取RAG用户记忆总量: workspace_id={workspace_id}, 操作者: {current_user.username}")
 
     try:
-        from app.models.document_model import Document
-        from app.repositories.end_user_repository import EndUserRepository
-        from sqlalchemy import func
+        end_user_ids = _workspace_end_user_ids(db, workspace_id)
+        total_chunk = rag_stats.count_messages_sync(end_user_ids)
 
-        # 通过 App 关联取该 workspace 下所有活跃 end_user_id
-        end_user_ids = EndUserRepository(db).get_ids_by_app_workspace(workspace_id)
-        if not end_user_ids:
-            return 0
-
-        file_names = [f"{uid}.txt" for uid in end_user_ids]
-        result = db.query(func.sum(Document.chunk_num)).filter(
-            Document.file_name.in_(file_names)
-        ).scalar()
-
-        total_chunk = int(result or 0)
-        business_logger.info(f"成功获取用户知识库总chunk数: {total_chunk}")
+        business_logger.info(f"成功获取RAG用户记忆总量: {total_chunk}")
         return total_chunk
     except Exception as e:
-        db.rollback()
-        business_logger.error(f"获取用户知识库总chunk数失败: workspace_id={workspace_id} - {str(e)}")
+        business_logger.error(f"获取RAG用户记忆总量失败: workspace_id={workspace_id} - {str(e)}")
         raise
 
 
@@ -723,34 +953,19 @@ async def get_rag_user_kb_total_chunk_async(
 ) -> int:
     """get_rag_user_kb_total_chunk 的异步版本，统计口径一致。
 
-    与 /end_users 接口同源：查询 file_name 匹配 end_user_id.txt 的文档 chunk_num 之和。
+    RAG 用户记忆总量 = 独立索引中当前空间全部宿主的消息条数。
     """
     workspace_id = current_user.current_workspace_id
-    business_logger.info(f"获取用户知识库总chunk数(documents表,异步): workspace_id={workspace_id}, 操作者: {current_user.username}")
+    business_logger.info(f"获取RAG用户记忆总量(异步): workspace_id={workspace_id}, 操作者: {current_user.username}")
 
     try:
-        from app.models.document_model import Document
-        from app.repositories.end_user_repository import EndUserRepository
-        from sqlalchemy import func, select
+        end_user_ids = await _workspace_end_user_ids_async(db, workspace_id)
+        total_chunk = await rag_stats.count_messages(end_user_ids)
 
-        # 通过 App 关联取该 workspace 下所有活跃 end_user_id
-        end_user_ids = await EndUserRepository(db).get_ids_by_app_workspace_async(workspace_id)
-        if not end_user_ids:
-            return 0
-
-        file_names = [f"{uid}.txt" for uid in end_user_ids]
-        result = (await db.execute(
-            select(func.sum(Document.chunk_num)).where(
-                Document.file_name.in_(file_names)
-            )
-        )).scalar()
-
-        total_chunk = int(result or 0)
-        business_logger.info(f"成功获取用户知识库总chunk数(异步): {total_chunk}")
+        business_logger.info(f"成功获取RAG用户记忆总量(异步): {total_chunk}")
         return total_chunk
     except Exception as e:
-        await db.rollback()
-        business_logger.error(f"获取用户知识库总chunk数失败(异步): workspace_id={workspace_id} - {str(e)}")
+        business_logger.error(f"获取RAG用户记忆总量失败(异步): workspace_id={workspace_id} - {str(e)}")
         raise
 
 
@@ -898,22 +1113,20 @@ def get_dashboard_yesterday_changes(
             else:
                 changes["total_memory_change"] = _calc_percentage(today_memory, last_record.total_num)
         elif storage_type == "rag":
-            from app.models.document_model import Document
             from app.repositories.end_user_repository import EndUserRepository
 
             end_user_ids = EndUserRepository(db).get_ids_by_app_workspace(workspace_id)
             if not end_user_ids:
                 changes["total_memory_change"] = None
             else:
-                file_names = [f"{uid}.txt" for uid in end_user_ids]
-                yesterday_chunk = int(db.query(func.sum(Document.chunk_num)).filter(
-                    Document.file_name.in_(file_names),
-                    Document.created_at < today_start
-                ).scalar() or 0)
-                if yesterday_chunk == 0:
+                yesterday_total = rag_stats.count_messages_sync(
+                    end_user_ids,
+                    end=today_start - timedelta(microseconds=1),
+                )
+                if yesterday_total == 0:
                     changes["total_memory_change"] = None
                 else:
-                    changes["total_memory_change"] = _calc_percentage(today_memory, yesterday_chunk)
+                    changes["total_memory_change"] = _calc_percentage(today_memory, yesterday_total)
     except Exception as e:
         business_logger.warning(f"计算记忆总量昨日对比失败: {str(e)}")
 
@@ -1074,24 +1287,20 @@ async def get_dashboard_yesterday_changes_async(
             else:
                 changes["total_memory_change"] = _calc_percentage(today_memory, last_record.total_num)
         elif storage_type == "rag":
-            from app.models.document_model import Document
             from app.repositories.end_user_repository import EndUserRepository
 
             end_user_ids = await EndUserRepository(db).get_ids_by_app_workspace_async(workspace_id)
             if not end_user_ids:
                 changes["total_memory_change"] = None
             else:
-                file_names = [f"{uid}.txt" for uid in end_user_ids]
-                yesterday_chunk = int((await db.execute(
-                    select(func.sum(Document.chunk_num)).where(
-                        Document.file_name.in_(file_names),
-                        Document.created_at < today_start,
-                    )
-                )).scalar() or 0)
-                if yesterday_chunk == 0:
+                yesterday_total = await rag_stats.count_messages(
+                    end_user_ids,
+                    end=today_start - timedelta(microseconds=1),
+                )
+                if yesterday_total == 0:
                     changes["total_memory_change"] = None
                 else:
-                    changes["total_memory_change"] = _calc_percentage(today_memory, yesterday_chunk)
+                    changes["total_memory_change"] = _calc_percentage(today_memory, yesterday_total)
     except Exception as e:
         business_logger.warning(f"计算记忆总量昨日对比失败: {str(e)}")
 
@@ -1105,227 +1314,205 @@ def get_current_user_total_chunk(
     current_user: User
 ) -> int:
     """
-    计算documents表中file_name=='end_user_id'+'.txt'的所有记录chunk_num的总和
+    RAG 宿主记忆总量：独立索引中该宿主的消息条数。
+
+    RAG 索引只按 ``end_user_id`` 过滤、没有 workspace 维度，查询前必须校验
+    该宿主属于当前工作空间，否则任意合法 UUID 都能读到其它空间的记忆总量。
     """
-    business_logger.info(f"获取用户总chunk数: end_user_id={end_user_id}, 操作者: {current_user.username}")
+    business_logger.info(f"获取宿主记忆总量: end_user_id={end_user_id}, 操作者: {current_user.username}")
 
     try:
-        from app.models.document_model import Document
-        from sqlalchemy import func
-
-        # 构造文件名
-        file_name = f"{end_user_id}.txt"
-
-        # 查询并求和
-        total_chunk = db.query(func.sum(Document.chunk_num)).filter(
-            Document.file_name == file_name
-        ).scalar() or 0
-
-        business_logger.info(f"成功获取用户总chunk数: {total_chunk} (file_name={file_name})")
+        if not _end_user_in_workspace(
+            db, current_user.current_workspace_id, end_user_id
+        ):
+            business_logger.warning(
+                f"拒绝跨空间读取 RAG 记忆总量: end_user_id={end_user_id}, "
+                f"workspace_id={current_user.current_workspace_id}"
+            )
+            return 0
+        total_chunk = rag_stats.count_messages_sync([end_user_id])
+        business_logger.info(f"成功获取宿主记忆总量: {total_chunk}")
         return int(total_chunk)
 
     except Exception as e:
-        business_logger.error(f"获取用户总chunk数失败: end_user_id={end_user_id} - {str(e)}")
+        business_logger.error(f"获取宿主记忆总量失败: end_user_id={end_user_id} - {str(e)}")
         raise
 
 
-def get_users_total_chunk_batch(
-    end_user_ids: List[str],
+def _end_user_in_workspace(
     db: Session,
-    current_user: User
-) -> dict:
-    """
-    批量获取多个用户的总chunk数（性能优化版本）
-    
-    Args:
-        end_user_ids: 用户ID列表
-        db: 数据库会话
-        current_user: 当前用户
-        
-    Returns:
-        字典，key为end_user_id，value为chunk总数
-        格式: {"user_id_1": 100, "user_id_2": 50, ...}
-    """
-    business_logger.info(f"批量获取 {len(end_user_ids)} 个用户的总chunk数, 操作者: {current_user.username}")
+    workspace_id: uuid.UUID | None,
+    end_user_id: str,
+) -> bool:
+    """校验宿主归属当前工作空间。
 
+    RAG 索引只按 ``end_user_id`` 过滤、没有 workspace 维度，若不校验归属，
+    任意合法 UUID 都能读到其它空间的记忆。
+    """
+    from app.models.end_user_model import EndUser
+
+    if workspace_id is None:
+        return False
     try:
-        from app.models.document_model import Document
-        from sqlalchemy import func, case
+        euid = uuid.UUID(str(end_user_id))
+    except (ValueError, TypeError, AttributeError):
+        return False
+    row = (
+        db.query(EndUser.id)
+        .filter(
+            EndUser.id == euid,
+            EndUser.workspace_id == workspace_id,
+            EndUser.is_active.is_(True),
+        )
+        .first()
+    )
+    return row is not None
 
-        if not end_user_ids:
-            return {}
 
-        # 构造所有文件名
-        file_names = [f"{user_id}.txt" for user_id in end_user_ids]
+async def _end_user_in_workspace_async(
+    db: AsyncSession,
+    workspace_id: uuid.UUID | None,
+    end_user_id: str,
+) -> bool:
+    from sqlalchemy import select
 
-        # 一次查询获取所有用户的chunk总数
-        # 使用 GROUP BY file_name 来分组统计
-        results = db.query(
-            Document.file_name,
-            func.sum(Document.chunk_num).label('total_chunk')
-        ).filter(
-            Document.file_name.in_(file_names)
-        ).group_by(
-            Document.file_name
-        ).all()
+    from app.models.end_user_model import EndUser
 
-        # 构建结果字典
-        chunk_map = {}
-        for file_name, total_chunk in results:
-            # 从文件名中提取 end_user_id (去掉 .txt 后缀)
-            user_id = file_name.replace('.txt', '')
-            chunk_map[user_id] = int(total_chunk or 0)
+    if workspace_id is None:
+        return False
+    try:
+        euid = uuid.UUID(str(end_user_id))
+    except (ValueError, TypeError, AttributeError):
+        return False
+    row = await db.execute(
+        select(EndUser.id).where(
+            EndUser.id == euid,
+            EndUser.workspace_id == workspace_id,
+            EndUser.is_active.is_(True),
+        )
+    )
+    return row.first() is not None
 
-        # 对于没有记录的用户，设置为0
-        for user_id in end_user_ids:
-            if user_id not in chunk_map:
-                chunk_map[user_id] = 0
 
-        business_logger.info(f"成功批量获取 {len(chunk_map)} 个用户的总chunk数")
-        return chunk_map
+def _resolve_rag_scope_ids(
+    db: Session,
+    current_user: User,
+    end_user_id: Optional[str],
+) -> List[str]:
+    """RAG 记忆查询范围：传宿主=单宿主（须属于当前空间），不传=当前空间全部宿主。"""
+    workspace_id = current_user.current_workspace_id
+    if end_user_id:
+        if not _end_user_in_workspace(db, workspace_id, end_user_id):
+            business_logger.warning(
+                f"拒绝跨空间读取 RAG 记忆: end_user_id={end_user_id}, "
+                f"workspace_id={workspace_id}"
+            )
+            return []
+        return [end_user_id]
+    return _workspace_end_user_ids(db, workspace_id)
 
-    except Exception as e:
-        business_logger.error(f"批量获取用户总chunk数失败: {str(e)}")
-        raise
+
+async def _resolve_rag_scope_ids_async(
+    db: AsyncSession,
+    current_user: User,
+    end_user_id: Optional[str],
+) -> List[str]:
+    workspace_id = current_user.current_workspace_id
+    if end_user_id:
+        if not await _end_user_in_workspace_async(db, workspace_id, end_user_id):
+            business_logger.warning(
+                f"拒绝跨空间读取 RAG 记忆: end_user_id={end_user_id}, "
+                f"workspace_id={workspace_id}"
+            )
+            return []
+        return [end_user_id]
+    return await _workspace_end_user_ids_async(db, workspace_id)
 
 
 def get_rag_content(
-    end_user_id: str,
+    end_user_id: Optional[str],
     page: int,
     pagesize: int,
     db: Session,
-    current_user: User
+    current_user: User,
+    *,
+    start_time: Optional[int] = None,
+    end_time: Optional[int] = None,
+    source: Optional[List[str]] = None,
+    keyword: Optional[str] = None,
+    order: str = "desc",
 ) -> dict:
+    """读取 RAG 记忆消息（分页，默认最新在前），供同步调用方使用。
+
+    数据源为独立索引 `rag_memory_current`：
+    - end_user_id 传值时只查该宿主；本模块内的画像生成等调用恒传值，
+      「不传即当前空间全部宿主」仅为服务层防御分支，/rag_content 接口要求必填
+    - start_time/end_time 为毫秒 UTC 闭区间
+    - source 支持多值过滤，keyword 走 content 的 match_phrase 匹配
     """
-    先在documents表中查询file_name=='end_user_id'+'.txt'的id和kb_id,
-    然后调用/chunks/{kb_id}/{document_id}/chunks接口的相关代码获取所有内容，
-    接着对获取的内容进行提取，只要page_content的内容，
-    最后返回分页数据
-    """
-    business_logger.info(f"获取RAG内容: end_user_id={end_user_id}, page={page}, pagesize={pagesize}, 操作者: {current_user.username}")
+    business_logger.info(
+        f"获取RAG内容: end_user_id={end_user_id}, page={page}, pagesize={pagesize}, "
+        f"source={source}, keyword={keyword}, 操作者: {current_user.username}"
+    )
 
     try:
-        from app.models.document_model import Document
-        from app.core.rag.vdb.elasticsearch.elasticsearch_vector import ElasticSearchVectorFactory
+        from app.core.utils.datetime_utils import parse_timestamp_to_utc_naive
 
-        # 1. 构造文件名
-        file_name = f"{end_user_id}.txt"
-
-        # 2. 查询documents表获取id和kb_id
-        documents = db.query(Document).filter(
-            Document.file_name == file_name
-        ).all()
-
-        if not documents:
-            business_logger.warning(f"未找到文件: {file_name}")
-            return {
-                "page": {
-                    "page": page,
-                    "pagesize": pagesize,
-                    "hasnext": False,
-                },
-                "items": []
-            }
-
-        business_logger.info(f"找到 {len(documents)} 个文档记录")
-
-        # 3. 按全局偏移量计算当前页数据
-        # 全局偏移范围：[offset_start, offset_end)
-        offset_start = (page - 1) * pagesize
-        offset_end = offset_start + pagesize
-
-        global_total = 0    # 所有文档的 chunk 总数
-        page_contents = []  # 当前页的内容
-
-        for document in documents:
-            try:
-                kb = knowledge_repository.get_knowledge_by_id(db, document.kb_id)
-                if not (kb and kb.status == 1):
-                    business_logger.warning(f"知识库不存在: kb_id={document.kb_id}")
-                    continue
-
-                vector_service = ElasticSearchVectorFactory().init_vector(knowledge=kb)
-
-                # 先用 pagesize=1 获取该文档的 chunk 总数
-                doc_total, _ = vector_service.search_by_segment(
-                    document_id=str(document.id),
-                    query=None,
-                    pagesize=1,
-                    page=1,
-                    asc=True
-                )
-
-                doc_offset_start = global_total            # 该文档在全局中的起始偏移
-                doc_offset_end = global_total + doc_total  # 该文档在全局中的结束偏移
-                global_total += doc_total
-
-                # 当前页与该文档无交集，跳过
-                if doc_offset_end <= offset_start or doc_offset_start >= offset_end:
-                    continue
-
-                # 计算需要从该文档取的局部范围
-                local_start = max(offset_start - doc_offset_start, 0)
-                local_end = min(offset_end - doc_offset_start, doc_total)
-                need_count = local_end - local_start
-
-                # 换算成 ES 分页参数（ES page 从1开始）
-                es_page = (local_start // pagesize) + 1
-                es_offset_in_page = local_start % pagesize
-
-                fetched = []
-                while len(fetched) < es_offset_in_page + need_count:
-                    _, items = vector_service.search_by_segment(
-                        document_id=str(document.id),
-                        query=None,
-                        pagesize=pagesize,
-                        page=es_page,
-                        asc=True
-                    )
-                    if not items:
-                        break
-                    fetched.extend(items)
-                    es_page += 1
-
-                slice_items = fetched[es_offset_in_page: es_offset_in_page + need_count]
-                page_contents.extend([item.page_content for item in slice_items])
-
-            except Exception as e:
-                business_logger.error(f"获取文档 {document.id} 的chunks失败: {str(e)}")
-                continue
-
-        # 4. 将所有 page_content 拼接后按角色分割为对话列表
-        merged_text = "\n".join(page_contents)
-        conversations = []
-        if merged_text.strip():
-            import re
-            # 在任意位置匹配 "user:" 或 "assistant:"，不限于行首
-            parts = re.split(r'(user|assistant):', merged_text)
-            # parts 结构: ['', 'user', ' content...', 'assistant', ' content...', ...]
-            i = 1
-            while i < len(parts) - 1:
-                role = parts[i].strip()
-                content = parts[i + 1].strip()
-                # 将 content 中的 \n 还原为真实换行
-                content = content.replace("\\n", "\n")
-                if role in ("user", "assistant") and content:
-                    conversations.append({"role": role, "content": content})
-                i += 2
-
-        result = {
-            "page": {
-                "page": page,
-                "pagesize": pagesize,
-                "hasnext": offset_end < global_total,
-            },
-            "items": conversations
-        }
-
-        business_logger.info(f"成功获取RAG内容: page={page}, 返回={len(conversations)} 条对话")
+        end_user_ids = _resolve_rag_scope_ids(db, current_user, end_user_id)
+        result = rag_stats.list_messages_sync(
+            end_user_ids,
+            page=page,
+            pagesize=pagesize,
+            sources=source,
+            keyword=keyword,
+            start=parse_timestamp_to_utc_naive(start_time),
+            end=parse_timestamp_to_utc_naive(end_time),
+            order=order,
+        )
+        business_logger.info(
+            f"成功获取RAG内容: page={page}, 返回={len(result.get('items', []))} 条消息"
+        )
         return result
 
     except Exception as e:
         business_logger.error(f"获取RAG内容失败: end_user_id={end_user_id} - {str(e)}")
         raise
+
+
+async def get_rag_content_async(
+    end_user_id: Optional[str],
+    page: int,
+    pagesize: int,
+    db: AsyncSession,
+    current_user: User,
+    *,
+    start_time: Optional[int] = None,
+    end_time: Optional[int] = None,
+    source: Optional[List[str]] = None,
+    keyword: Optional[str] = None,
+    order: str = "desc",
+) -> dict:
+    """读取 RAG 记忆消息（分页，默认最新在前）。
+
+    数据源为独立索引 `rag_memory_current`：
+    - end_user_id 为空时回退为当前空间全部宿主；对外的 /rag_content 接口要求必填，
+      该回退仅作为服务层防御分支保留
+    - start_time/end_time 为毫秒 UTC 闭区间
+    - source 支持多值过滤，keyword 走 content 的 match_phrase 匹配
+    """
+    from app.core.utils.datetime_utils import parse_timestamp_to_utc_naive
+
+    end_user_ids = await _resolve_rag_scope_ids_async(db, current_user, end_user_id)
+    return await rag_stats.list_messages(
+        end_user_ids,
+        page=page,
+        pagesize=pagesize,
+        sources=source,
+        keyword=keyword,
+        start=parse_timestamp_to_utc_naive(start_time),
+        end=parse_timestamp_to_utc_naive(end_time),
+        order=order,
+    )
 
 
 async def get_chunk_summary_and_tags(
@@ -1420,8 +1607,22 @@ async def generate_rag_profile(
     if not end_user:
         raise ValueError(f"end_user {end_user_id} 不存在")
 
-    rag_content = get_rag_content(end_user_id, page=1, pagesize=limit, db=db, current_user=current_user)
-    chunks = rag_content.get("items", [])
+    # get_rag_content 返回的是消息字典（id/role/content/dialog_at/source），
+    # 而 chunk 生成函数签名是 List[str]，这里显式取正文，避免把 dict 的 repr
+    # 拼进提示词。画像覆盖取 dialog_at 升序，保证与页面倒序展示的数据一致。
+    rag_content = get_rag_content(
+        end_user_id,
+        page=1,
+        pagesize=limit,
+        db=db,
+        current_user=current_user,
+        order="asc",
+    )
+    chunks = [
+        item.get("content", "")
+        for item in rag_content.get("items", [])
+        if str(item.get("content", "") or "").strip()
+    ]
 
     if not chunks:
         business_logger.warning(f"未找到chunk内容，无法生产RAG画像: end_user_id={end_user_id}")

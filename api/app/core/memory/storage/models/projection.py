@@ -196,5 +196,11 @@ DEFAULT_PROJECTION = {
     ),
     MemoryNodeType.DIALOGUE: NodeProjection(
         fields=("id", "content", "created_at", "score")
+    ),
+    MemoryNodeType.RAG_MEMORY: NodeProjection(
+        fields=(
+            "id", "content", "role", "end_user_id", "dialog_at",
+            "source", "delete_at", "score",
+        )
     )
 }
