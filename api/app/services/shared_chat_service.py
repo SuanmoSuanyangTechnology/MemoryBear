@@ -16,7 +16,6 @@ from app.core.exceptions import BusinessException, ResourceNotFoundException
 from app.core.logging_config import get_business_logger
 from app.models import MultiAgentConfig
 from app.models import ReleaseShare, AppRelease, Conversation
-from app.repositories import knowledge_repository
 from app.integrations.knowledge.contracts import KnowledgeRetrievalSource
 from app.repositories.tool_repository import ToolRepository
 from app.services.conversation_service import ConversationService
@@ -854,10 +853,9 @@ class SharedChatService:
             if not multi_agent_config:
                 raise BusinessException("多 Agent 配置不存在", BizCode.AGENT_CONFIG_MISSING)
 
-            # 获取 storage_type 和 user_rag_memory_id
+            # 获取 storage_type（RAG 记忆已改用独立 ES 索引，不再需要知识库 ID）
             workspace_id = release.app.workspace_id
             storage_type = 'neo4j'  # 默认值
-            user_rag_memory_id = ''
 
             try:
                 # 获取工作空间的存储类型（不需要用户权限检查，因为是公开分享）
@@ -865,17 +863,8 @@ class SharedChatService:
                 workspace = self.db.get(Workspace, workspace_id)
                 if workspace and workspace.storage_type:
                     storage_type = workspace.storage_type
-
-                # 获取 USER_RAG_MERORY 知识库 ID
-                knowledge = knowledge_repository.get_knowledge_by_name(
-                    db=self.db,
-                    name="USER_RAG_MERORY",
-                    workspace_id=workspace_id
-                )
-                if knowledge:
-                    user_rag_memory_id = str(knowledge.id)
             except Exception as e:
-                logger.warning(f"获取 storage_type 或 user_rag_memory_id 失败，使用默认值: {str(e)}")
+                logger.warning(f"获取 storage_type 失败，使用默认值: {str(e)}")
 
             # 发送开始事件
             yield f"event: start\ndata: {json.dumps({'conversation_id': str(conversation.id)}, ensure_ascii=False)}\n\n"
@@ -900,8 +889,7 @@ class SharedChatService:
             async for event in multi_agent_service.run_stream(
                     app_id=release.app_id,
                     request=multi_agent_request,
-                    storage_type=storage_type,
-                    user_rag_memory_id=user_rag_memory_id
+                    storage_type=storage_type
             ):
                 # 直接转发事件
                 yield event

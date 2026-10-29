@@ -2988,20 +2988,25 @@ class EndUserRepository:
         ]
         return items, total
 
+    # IN 列表直接展开为 PG 绑定参数（协议上限约 65535，留余量取 3 万）：
+    # 接近上限时与其抛出隐晦的数据库异常，不如显式报错留一条可观测信号
+    _RAG_HOSTS_BIND_PARAM_LIMIT = 30_000
+
     def get_paginated_with_memory_rag(
             self,
             workspace_id: uuid.UUID,
             page: int,
             pagesize: int,
+            *,
+            memory_counts: dict[str, int],
             keyword: Optional[str] = None,
             label: Optional[str] = None,
     ) -> tuple[list, int]:
         """Dashboard RAG 模式：分页查询有记忆的宿主
 
-        RAG 记忆数量以 documents.chunk_num 为准：
-        - file_name = end_user_id + ".txt"
-        - 只统计当前 workspace 下 permission_id="Memory" 的用户记忆知识库
-        - 在 SQL 层过滤 chunk 总数为 0 的宿主
+        RAG 记忆数量由调用方从独立索引按宿主聚合后传入（消息条数）：
+        - 只保留 memory_count > 0 的宿主
+        - memory_count 为空或无命中时视为 0，不参与列表
 
         长时/短时记忆以 identity_status 为准：
         - confirmed：长时记忆
@@ -3012,35 +3017,58 @@ class EndUserRepository:
             workspace_id: 工作空间ID
             page: 页码（从1开始）
             pagesize: 每页数量
+            memory_counts: 宿主 ID → 消息条数（独立索引聚合结果）
             keyword: 搜索关键词（可选，同时模糊匹配 other_name 和 id）
             label: 标签过滤（可选，"long" 表示长时记忆(confirmed)，"short" 表示短时记忆(temporary)）
 
         Returns:
             tuple[list, int]: (items列表[{"end_user": ORM, "memory_count": int, "expire_time": datetime|None}], 总数)
         """
-        from sqlalchemy import desc, String, cast, func
+        from sqlalchemy import desc, String, cast
         from sqlalchemy.orm import load_only
         from sqlalchemy.sql.expression import nullslast
-        from app.models.document_model import Document
-        from app.models.knowledge_model import Knowledge
 
+        memory_counts_normalized: dict[str, int] = {}
+        for user_id, count in (memory_counts or {}).items():
+            try:
+                if int(count or 0) <= 0:
+                    continue
+                # 统一用 uuid 的规范小写带连字符形式作键，保证与 EndUser.id 的
+                # str() 结果一致；非规范键（大写/无连字符）会被归一化而不是查不到
+                memory_counts_normalized[str(uuid.UUID(str(user_id)))] = int(count)
+            except (ValueError, AttributeError, TypeError):
+                db_logger.warning(
+                    "get_paginated_with_memory_rag: invalid end_user_id key "
+                    "skipped: %r",
+                    user_id,
+                )
+                continue
+        memory_ids = [
+            uuid.UUID(user_id) for user_id in memory_counts_normalized
+        ]
+        if not memory_ids:
+            # 契约：走到这里仅表示「该 workspace 没有消息数 > 0 的宿主」。
+            # ES 聚合失败由调用方（get_workspace_end_users_paginated_rag）
+            # 直接上抛，不会以空 dict 形式到达本层，两种情况不混淆
+            return [], 0
+
+        # memory_ids 规模 = 该 workspace 有记忆宿主数（dashboard 场景通常为
+        # 百级）。超量时显式报错而非抛出隐晦的数据库异常
+        if len(memory_ids) > self._RAG_HOSTS_BIND_PARAM_LIMIT:
+            db_logger.error(
+                "get_paginated_with_memory_rag: end_user IN list too large: "
+                "workspace=%s hosts=%d limit=%d",
+                workspace_id,
+                len(memory_ids),
+                self._RAG_HOSTS_BIND_PARAM_LIMIT,
+            )
+            raise ValueError(
+                f"workspace {workspace_id} has {len(memory_ids)} hosts with "
+                "memory, exceeding the IN-list bind-param guard "
+                f"({self._RAG_HOSTS_BIND_PARAM_LIMIT}); chunked or temp-table "
+                "query required at this scale"
+            )
         expires_at = self._temporary_expires_at_expr()
-
-        chunk_subquery = (
-            self.db.query(
-                Document.file_name.label("file_name"),
-                func.coalesce(func.sum(Document.chunk_num), 0).label("memory_count"),
-            )
-            .join(Knowledge, Document.kb_id == Knowledge.id)
-            .filter(
-                Knowledge.workspace_id == workspace_id,
-                Knowledge.status == 1,
-                Knowledge.permission_id == "Memory",
-                Document.status == 1,
-            )
-            .group_by(Document.file_name)
-            .subquery()
-        )
 
         columns = load_only(
             EndUser.id,
@@ -3059,18 +3087,13 @@ class EndUserRepository:
         base_query = (
             self.db.query(
                 EndUser,
-                chunk_subquery.c.memory_count.label("memory_count"),
                 expires_at.label("expire_time"),
             )
             .options(columns)
             .outerjoin(Workspace, Workspace.id == EndUser.workspace_id)
-            .join(
-                chunk_subquery,
-                chunk_subquery.c.file_name == func.concat(cast(EndUser.id, String), ".txt"),
-            )
             .filter(
                 EndUser.workspace_id == workspace_id,
-                chunk_subquery.c.memory_count > 0,
+                EndUser.id.in_(memory_ids),
                 EndUser.is_active == True,
             )
         )
@@ -3103,10 +3126,12 @@ class EndUserRepository:
         )
 
         items = []
-        for end_user_orm, memory_count, expire_time in rows:
+        for end_user_orm, expire_time in rows:
             items.append({
                 "end_user": end_user_orm,
-                "memory_count": int(memory_count or 0),
+                "memory_count": int(
+                    memory_counts_normalized.get(str(end_user_orm.id), 0) or 0
+                ),
                 "expire_time": expire_time,
             })
         return items, total

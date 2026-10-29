@@ -50,7 +50,6 @@ from app.models.document_model import Document
 from app.models.user_model import User
 from app.schemas import knowledge_schema
 from app.schemas import file_schema
-from app.utils.redis_cache import invalidate_cache
 from app.schemas.response_schema import ApiResponse
 from app.repositories import knowledge_repository, knowledgeshare_repository
 from app.services import knowledge_service, document_service
@@ -334,7 +333,8 @@ async def get_knowledges(
             filters.append(knowledge_model.Knowledge.parent_id == parent_id)
         else:
             filters.append(knowledge_model.Knowledge.parent_id == current_user.current_workspace_id)
-    filters.append(knowledge_model.Knowledge.permission_id != knowledge_model.PermissionType.Memory)
+    # RAG 独立迁移过渡期：不按 PermissionType.Memory 过滤，存量 USER_RAG_MERORY
+    # 暂时可见；全量迁移到 rag_memory_current 并验证后，统一删除这些系统记忆库。
     # 3. Execute paged query
     try:
         api_logger.debug("Start executing knowledge base paging query")
@@ -638,6 +638,29 @@ async def kb_batch_download(
     )
 
 
+def _reject_memory_kb_mutation(db_knowledge, current_user, op: str) -> None:
+    """系统记忆库（permission_id=Memory）不允许通过管理接口改名/改配置/删除。
+
+    RAG 迁移过渡期该库在列表中对所有工作区可见（见 get_knowledges 的过滤
+    注释），但它是存量迁移脚本 `migrate_rag_kb_to_index.py` 的数据来源：
+    用户侧修改或软删会让迁移与旧展示链路失效。清理统一走迁移脚本
+    `--purge --yes`，接口层一律 403。
+    """
+    permission_id = str(getattr(db_knowledge, "permission_id", "") or "")
+    if permission_id != knowledge_model.PermissionType.Memory:
+        return
+    api_logger.warning(
+        "Reject %s on system memory knowledge base: knowledge_id=%s, user=%s",
+        op,
+        getattr(db_knowledge, "id", None),
+        current_user.username,
+    )
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="系统记忆库不允许通过该接口修改或删除",
+    )
+
+
 async def _update_knowledge(
         knowledge_id: uuid.UUID,
         update_data: knowledge_schema.KnowledgeUpdate,
@@ -658,6 +681,8 @@ async def _update_knowledge(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="The knowledge base does not exist or you do not have permission to access it"
             )
+
+        _reject_memory_kb_mutation(db_knowledge, current_user, "update")
 
         # 2. If updating the embedding_id, delete the knowledge base vector index, reset all document parsing progress to 0, and set chunk_num to 0
         update_dict = update_data.model_dump(exclude_unset=True)
@@ -743,12 +768,6 @@ async def _update_knowledge(
         await db.commit()
         await db.refresh(db_knowledge)
         api_logger.info(f"The knowledge base has been successfully updated: {db_knowledge.name} (ID: {db_knowledge.id})")
-
-        if db_knowledge.name == "USER_RAG_MERORY":
-            try:
-                await invalidate_cache(prefix=f"storage_type:{db_knowledge.workspace_id}")
-            except Exception:
-                pass
 
         if graph_enabled_before is not None:
             try:
@@ -836,18 +855,14 @@ async def delete_knowledge(
                 detail="The knowledge base does not exist or you do not have permission to access it"
             )
 
+        _reject_memory_kb_mutation(db_knowledge, current_user, "delete")
+
         # 2. Soft-delete knowledge base
         api_logger.debug(f"Perform a soft delete: {db_knowledge.name} (ID: {knowledge_id})")
         db_knowledge.status = 2
         db_knowledge.updated_at = utcnow_naive()
         await db.commit()
         api_logger.info(f"The knowledge base has been successfully deleted: {db_knowledge.name} (ID: {knowledge_id})")
-
-        if db_knowledge.name == "USER_RAG_MERORY":
-            try:
-                await invalidate_cache(prefix=f"storage_type:{db_knowledge.workspace_id}")
-            except Exception:
-                pass
 
         return success(msg="The knowledge base has been successfully deleted")
     except Exception as e:

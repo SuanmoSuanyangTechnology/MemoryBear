@@ -36,7 +36,8 @@ services:
     networks:
       - celery
 
-  # Fast memory writer - consumes only memory_fast_tasks
+  # Fast memory writer - consumes memory_fast_tasks + memory_rag_tasks
+  # （RAG 记忆写入任务量与 fast 写入同量级，共用 worker 避免多开一个进程）
   worker-memory-fast:
     image: redbear-mem-open:latest
     container_name: worker-memory-fast
@@ -45,7 +46,7 @@ services:
     volumes:
       - ./files:/files
       - /etc/localtime:/etc/localtime:ro
-    command: celery -A app.celery_worker.celery_app worker -E --loglevel=info --pool=threads --concurrency=32 --queues=memory_fast_tasks -n memory_fast_worker@%h
+    command: celery -A app.celery_worker.celery_app worker -E --loglevel=info --pool=threads --concurrency=32 --queues=memory_fast_tasks,memory_rag_tasks -n memory_fast_worker@%h
     restart: unless-stopped
     networks:
       - celery

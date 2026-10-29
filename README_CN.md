@@ -127,7 +127,7 @@ MemoryBear 是红熊 AI 自主研发的新一代 AI 记忆系统，核心突破�
 | 队列 | Worker 类型 | 并发 | 用途 |
 |------|-------------|------|------|
 | `memory_tasks` | threads | 100 | 记忆读写（asyncio 友好） |
-| `memory_fast_tasks` | threads | 32 | 高频快速写入（独立队列，避免互相阻塞） |
+| `memory_fast_tasks` | threads | 32 | 高频快速写入 + RAG 记忆索引写入（独立队列，避免互相阻塞） |
 | `document_tasks` | prefork | 4 | 文档解析（CPU 密集） |
 | `periodic_tasks` | prefork | 2 | 定时任务、反思引擎、各类扫描器 |
 | `workflow_trigger_tasks` | prefork | 2 | 工作流定时触发 |
@@ -384,8 +384,8 @@ uv run -m app.main
 # 记忆任务 Worker（线程池，支持高并发 asyncio）
 celery -A app.celery_worker.celery_app worker -E --loglevel=info --pool=threads --concurrency=100 --queues=memory_tasks -n memory_worker@%h
 
-# 快速写入 Worker（线程池，独立队列，避免与普通写入互相阻塞）
-celery -A app.celery_worker.celery_app worker -E --loglevel=info --pool=threads --concurrency=32 --queues=memory_fast_tasks -n memory_fast_worker@%h
+# 快速写入 Worker（线程池，独立队列，避免与普通写入互相阻塞；同时消费 memory_rag_tasks）
+celery -A app.celery_worker.celery_app worker -E --loglevel=info --pool=threads --concurrency=32 --queues=memory_fast_tasks,memory_rag_tasks -n memory_fast_worker@%h
 
 # 文档解析 Worker（进程池，CPU 密集型）
 celery -A app.celery_worker.celery_app worker -E --loglevel=info --pool=prefork --concurrency=4 --queues=document_tasks --max-tasks-per-child=100 -n document_worker@%h

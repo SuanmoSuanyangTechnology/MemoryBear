@@ -3,7 +3,7 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session, selectinload
 from app.models.document_model import Document
-from app.models.knowledge_model import Knowledge, PermissionType
+from app.models.knowledge_model import Knowledge
 from app.models.models_model import ModelConfig
 from app.schemas import knowledge_schema
 from app.core.logging_config import get_db_logger
@@ -434,7 +434,6 @@ def get_knowledges_by_parent_ids(
                 Knowledge.parent_id.in_(parent_ids),
                 Knowledge.workspace_id == workspace_id,
                 Knowledge.status != 2,
-                Knowledge.permission_id != PermissionType.Memory,
             )
             .all()
         )
@@ -463,7 +462,6 @@ async def get_knowledges_by_parent_ids_async(
             Knowledge.parent_id.in_(parent_ids),
             Knowledge.workspace_id == workspace_id,
             Knowledge.status != 2,
-            Knowledge.permission_id != PermissionType.Memory,
         )
         result = await db.execute(stmt)
         return [knowledge_schema.Knowledge.model_validate(item) for item in result.scalars().all()]
@@ -596,21 +594,11 @@ def delete_knowledge_by_id(db: Session, knowledge_id: uuid.UUID):
 async def delete_knowledge_by_id_async(db: AsyncSession, knowledge_id: uuid.UUID):
     """Async version of delete_knowledge_by_id."""
     try:
-        knowledge = await get_knowledge_by_id_async(db, knowledge_id)
-        knowledge_name = knowledge.name if knowledge else "unknown"
-        knowledge_workspace_id = knowledge.workspace_id if knowledge else None
-
         result = await db.execute(delete(Knowledge).where(Knowledge.id == knowledge_id))
         await db.commit()
 
         if result.rowcount and result.rowcount > 0:
-            db_logger.info(f"knowledge base record deleted successfully (async): {knowledge_name} (ID: {knowledge_id})")
-            if knowledge_name == "USER_RAG_MERORY" and knowledge_workspace_id:
-                from app.utils.redis_cache import invalidate_cache
-                try:
-                    await invalidate_cache(prefix=f"storage_type:{knowledge_workspace_id}")
-                except Exception:
-                    pass
+            db_logger.info(f"knowledge base record deleted successfully (async): {knowledge_id}")
         else:
             db_logger.warning(f"The knowledge base record does not exist, and cannot be deleted (async): knowledge_id={knowledge_id}")
     except Exception as e:
