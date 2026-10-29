@@ -6,6 +6,7 @@ import socket
 import tempfile
 import time
 import uuid
+from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -108,7 +109,12 @@ from app.integrations.model.invoke_backend import ref_from_model_info, ref_from_
 from app.models import App, AppRelease, Document, File, Knowledge, User, Workspace
 from app.models.end_user_model import EndUser
 from app.models.file_model import FILE_ROLE_SOURCE
-from app.repositories.end_user_repository import get_active_end_users_by_workspace, get_end_users_by_workspace, get_all_active_workspaces
+from app.repositories.end_user_repository import (
+    count_inactive_end_users_by_workspace,
+    get_all_active_workspaces,
+    get_recently_active_end_user_ids_page,
+    get_recently_active_reflection_candidates_page,
+)
 from app.schemas import document_schema, file_schema
 from app.services.memory_config_service import MemoryConfigService
 from app.services.memory_forget_service import MemoryForgetService
@@ -149,6 +155,11 @@ EMBEDDING_MAX_WORKERS = int(os.getenv("EMBEDDING_MAX_WORKERS", "3"))
 AUTO_QUESTIONS_MAX_WORKERS = int(os.getenv("AUTO_QUESTIONS_MAX_WORKERS", "5"))
 # 文档解析页数上限
 MAX_DOCUMENT_PAGES = int(os.getenv("MAX_DOCUMENT_PAGES", "200"))
+
+# 反思 / 拓扑扫描的终端用户分页大小：峰值内存只与页大小相关，不随空间内用户数增长
+_END_USER_SCAN_PAGE_SIZE = 500
+# 扫描结果里保留的派发用户 ID 样本数：只留前几个便于排查，避免大空间下日志/返回值过大
+_SCAN_DISPATCH_SAMPLE_SIZE = 100
 
 # ── GDS 拓扑分数（eigenvector 中心性）扫描/计算常量 ──────────────
 _GDS_TOPOLOGY_INFLIGHT_KEY_FMT = "gds_topology:inflight:{end_user_id}"
@@ -2992,15 +3003,6 @@ def _is_active_recently(db, end_user_id: str, inactive_hours: int | None = None)
     return (utcnow_naive() - last_write).total_seconds() / 3600 < inactive_hours
 
 
-def _should_skip_reflection_by_inactivity(db, end_user_id: str, inactive_hours: int | None = None) -> bool:
-    """低频反思前置过滤：不活跃则跳过（True=跳过，False=执行）。
-
-    仅按 write_time 做活跃过滤，不含周期判断——低频全量去重的增量节奏由
-    run_dedup_full_scan 内部按实体类型的扫描时间自行控制。
-    """
-    return not _is_active_recently(db, end_user_id, inactive_hours)
-
-
 def _should_reflect_now(db, end_user_id: str, reflection_time, iteration_period: int) -> bool:
     """高频反思：判断该用户现在是否需要反思。scan 派发前和 do 执行前都用它（保证一致 + 幂等）。
 
@@ -3037,6 +3039,7 @@ def scan_layer2_reflection(self) -> Dict[str, Any]:
     redis_client = get_sync_redis_client()
     dispatched = 0
     dispatched_user_ids = []
+    recent_dispatched = deque(maxlen=10)
     skip_period_or_new = 0
     skip_inflight = 0
 
@@ -3057,12 +3060,34 @@ def scan_layer2_reflection(self) -> Dict[str, Any]:
                 # 单个 workspace 配置异常（无启用配置 / 缺 embedding / 模型被删）只跳过该 workspace
                 logger.warning(f"高频反思scan 跳过配置异常的 workspace={ws_id}: {e}")
                 continue
-            iteration_period = config.reflexion_iteration_period or 24
-            # 活跃性（write_time）已在 DB 层过滤，此处仅按 reflection_time 判周期
-            for user in get_active_end_users_by_workspace(db, ws_id_uuid, active_since):
-                uid = str(user.id)
+        iteration_period = config.reflexion_iteration_period or 24
+
+        # 候选集按主键游标分页：活跃性 + 有记忆已在 SQL 过滤，每页一个短只读 session
+        after_id: uuid.UUID | None = None
+        while True:
+            try:
+                with get_db_read() as db:
+                    candidates = get_recently_active_reflection_candidates_page(
+                        db,
+                        ws_id_uuid,
+                        active_since,
+                        after_id=after_id,
+                        limit=_END_USER_SCAN_PAGE_SIZE,
+                    )
+            except Exception as e:
+                # 单页查询失败只放弃该 workspace 的剩余用户，不拖垮整轮扫描
+                logger.error(
+                    f"高频反思scan 分页查询候选失败 workspace={ws_id} "
+                    f"after_id={after_id}: {e}"
+                )
+                break
+            if not candidates:
+                break
+            for candidate in candidates:
+                uid = str(candidate.end_user_id)
                 try:
-                    rt = user.reflection_time
+                    # 此处仅按 reflection_time 判周期
+                    rt = candidate.reflection_time
                     if rt is not None:
                         rt_naive = as_utc_aware(rt).replace(tzinfo=None)
                         if (utcnow_naive() - rt_naive).total_seconds() / 3600 < iteration_period:
@@ -3086,22 +3111,21 @@ def scan_layer2_reflection(self) -> Dict[str, Any]:
                         queue="reflection_tasks",
                     )
                     dispatched += 1
-                    dispatched_user_ids.append(uid)
+                    recent_dispatched.append(uid)
+                    if len(dispatched_user_ids) < _SCAN_DISPATCH_SAMPLE_SIZE:
+                        dispatched_user_ids.append(uid)
                     # 每派发 10 个用户打印一次进度
                     if dispatched % 10 == 0:
                         logger.info(
                             f"scan_layer2_reflection 进度: 已派发 {dispatched} 个用户, "
-                            f"最近10个: {dispatched_user_ids[-10:]}"
+                            f"最近10个: {list(recent_dispatched)}"
                         )
                 except Exception as e:
                     logger.error(f"高频反思scan 处理用户失败 user={uid}: {e}")
-                    try:
-                        db.rollback()
-                    except Exception:
-                        pass
+            after_id = candidates[-1].end_user_id
 
     logger.info(
-        f"scan_layer2_reflection 完成: 派发 {dispatched} {dispatched_user_ids}, "
+        f"scan_layer2_reflection 完成: 派发 {dispatched} 样本 {dispatched_user_ids}, "
         f"跳过(未到周期/无新增) {skip_period_or_new}, 在途 {skip_inflight}, "
         f"耗时 {time.time() - start_time:.1f}s"
     )
@@ -3380,7 +3404,11 @@ def do_layer2_reflection(self, end_user_id: str | None = None, config_id: str = 
     acks_late=False,
 )
 def scan_layer2_dedup_full_scan(self) -> Dict[str, Any]:
-    """低频去重扫描器：遍历用户，启用反思 + 最近活跃 + 未在途 的派发 do_layer2_dedup_full_scan。"""
+    """低频去重扫描器：遍历用户，启用反思 + 最近活跃 + 未在途 的派发 do_layer2_dedup_full_scan。
+
+    用户按主键游标分页拉取，每页一个短只读 session 且只取 ID：大空间下不会把全量
+    用户整行载入内存；活跃性由 SQL 过滤，无需逐用户回查 write_time。
+    """
     start_time = time.time()
     from app.models.workspace_model import Workspace
 
@@ -3389,6 +3417,7 @@ def scan_layer2_dedup_full_scan(self) -> Dict[str, Any]:
     dispatched_user_ids = []
     skip_inactive = 0
     skip_inflight = 0
+    active_since = utcnow_naive() - timedelta(hours=settings.REFLECT_LAYER2_INACTIVE_HOURS)
 
     # db-session 规范：先用只读短 session 取 workspace 列表，
     # 再【按 workspace 粒度】开独立 session，处理完即释放，避免 identity-map 累积。
@@ -3408,13 +3437,38 @@ def scan_layer2_dedup_full_scan(self) -> Dict[str, Any]:
                 continue
             if not config.reflexion_enabled:
                 continue
-            for user in get_end_users_by_workspace(db, ws_id_uuid):
-                uid = str(user.id)
+            # 不活跃用户只计数、不逐行取回（口径与 _is_active_recently 一致）
+            try:
+                skip_inactive += count_inactive_end_users_by_workspace(
+                    db, ws_id_uuid, active_since
+                )
+            except Exception as e:
+                logger.warning(f"反思低频去重scan 统计不活跃用户失败 workspace={ws_id}: {e}")
+
+        # 活跃用户按主键游标分页：每页独立短 session，取出即释放
+        after_id: uuid.UUID | None = None
+        while True:
+            try:
+                with get_db_read() as db:
+                    user_ids = get_recently_active_end_user_ids_page(
+                        db,
+                        ws_id_uuid,
+                        active_since,
+                        after_id=after_id,
+                        limit=_END_USER_SCAN_PAGE_SIZE,
+                    )
+            except Exception as e:
+                # 单页查询失败只放弃该 workspace 的剩余用户，不拖垮整轮扫描
+                logger.error(
+                    f"反思低频去重scan 分页查询用户失败 workspace={ws_id} "
+                    f"after_id={after_id}: {e}"
+                )
+                break
+            if not user_ids:
+                break
+            for user_id in user_ids:
+                uid = str(user_id)
                 try:
-                    # 最近活跃度过滤（复用现有函数，阈值取 settings）
-                    if _should_skip_reflection_by_inactivity(db, uid):
-                        skip_inactive += 1
-                        continue
                     # 在途锁：抢不到说明该用户已有去重任务在途，跳过（独立 key）
                     if redis_client is not None:
                         ok = redis_client.set(
@@ -3432,16 +3486,14 @@ def scan_layer2_dedup_full_scan(self) -> Dict[str, Any]:
                         queue="reflection_tasks",
                     )
                     dispatched += 1
-                    dispatched_user_ids.append(uid)
+                    if len(dispatched_user_ids) < _SCAN_DISPATCH_SAMPLE_SIZE:
+                        dispatched_user_ids.append(uid)
                 except Exception as e:
                     logger.error(f"反思低频去重scan 处理用户失败 user={uid}: {e}")
-                    try:
-                        db.rollback()
-                    except Exception:
-                        pass
+            after_id = user_ids[-1]
 
     logger.info(
-        f"scan_layer2_dedup_full_scan 完成: 派发 {dispatched} {dispatched_user_ids}, "
+        f"scan_layer2_dedup_full_scan 完成: 派发 {dispatched} 样本 {dispatched_user_ids}, "
         f"跳过(不活跃) {skip_inactive}, 在途 {skip_inflight}, "
         f"耗时 {time.time() - start_time:.1f}s"
     )
@@ -3718,16 +3770,37 @@ def scan_gds_topology_score(self) -> Dict[str, Any]:
 
     dispatched = 0
     dispatched_user_ids = []
+    recent_dispatched = deque(maxlen=10)
     skip_inflight = 0
 
     with get_db_read() as db:
         workspace_ids = get_all_active_workspaces(db)
 
     for ws_id_uuid in workspace_ids:
-        with get_db_read() as db:
-            active_since = utcnow_naive() - timedelta(hours=settings.GDS_TOPOLOGY_ACTIVE_HOURS)
-            for user in get_active_end_users_by_workspace(db, ws_id_uuid, active_since):
-                uid = str(user.id)
+        active_since = utcnow_naive() - timedelta(hours=settings.GDS_TOPOLOGY_ACTIVE_HOURS)
+        # 候选集按主键游标分页：活跃性 + 有记忆已在 SQL 过滤，每页一个短只读 session
+        after_id: uuid.UUID | None = None
+        while True:
+            try:
+                with get_db_read() as db:
+                    user_ids = get_recently_active_end_user_ids_page(
+                        db,
+                        ws_id_uuid,
+                        active_since,
+                        after_id=after_id,
+                        limit=_END_USER_SCAN_PAGE_SIZE,
+                    )
+            except Exception as e:
+                # 单页查询失败只放弃该 workspace 的剩余用户，不拖垮整轮扫描
+                logger.error(
+                    f"GDS拓扑scan 分页查询用户失败 workspace={ws_id_uuid} "
+                    f"after_id={after_id}: {e}"
+                )
+                break
+            if not user_ids:
+                break
+            for user_id in user_ids:
+                uid = str(user_id)
                 try:
                     inflight_token = uuid.uuid4().hex
                     ok = redis_client.set(
@@ -3742,21 +3815,20 @@ def scan_gds_topology_score(self) -> Dict[str, Any]:
                         queue="memory_heavy_tasks",
                     )
                     dispatched += 1
-                    dispatched_user_ids.append(uid)
+                    recent_dispatched.append(uid)
+                    if len(dispatched_user_ids) < _SCAN_DISPATCH_SAMPLE_SIZE:
+                        dispatched_user_ids.append(uid)
                     if dispatched % 10 == 0:
                         logger.info(
                             f"scan_gds_topology_score 进度: 已派发 {dispatched} 个用户, "
-                            f"最近10个: {dispatched_user_ids[-10:]}"
+                            f"最近10个: {list(recent_dispatched)}"
                         )
                 except Exception as e:
                     logger.error(f"GDS拓扑scan 处理用户失败 user={uid}: {e}")
-                    try:
-                        db.rollback()
-                    except Exception:
-                        pass
+            after_id = user_ids[-1]
 
     logger.info(
-        f"scan_gds_topology_score 完成: 派发 {dispatched} {dispatched_user_ids}, "
+        f"scan_gds_topology_score 完成: 派发 {dispatched} 样本 {dispatched_user_ids}, "
         f"在途 {skip_inflight}, "
         f"耗时 {time.time() - start_time:.1f}s"
     )
@@ -4168,6 +4240,7 @@ def scan_refresh_insight_summary_cache(self) -> Dict[str, Any]:
     redis_client = get_sync_redis_client()
     dispatched = 0
     dispatched_user_ids: List[str] = []
+    recent_dispatched = deque(maxlen=10)
     skip_no_change = 0  # write_time 为 null 或 数据未变
     skip_fresh = 0  # 数据有变但缓存刚刷过（未到最短刷新间隔）
     skip_inflight = 0  # 在途锁未抢到
@@ -4178,59 +4251,78 @@ def scan_refresh_insight_summary_cache(self) -> Dict[str, Any]:
         workspace_ids = EndUserRepository(db).get_all_active_workspaces()
 
     for ws_id in workspace_ids:
-        # 列裁剪查询：返回普通元组，不受 session 关闭后 detach 影响，且内存更省
-        with get_db_read() as db:
-            rows = EndUserRepository(db).get_neo4j_memory_cache_refresh_fields(ws_id)
-
-        for row in rows:
-            eu_id = str(row.end_user_id)
+        # 候选集按主键游标分页：每页一个短只读 session，大空间下不再一次载入全部用户
+        after_id: uuid.UUID | None = None
+        while True:
             try:
-                decisions = classify_memory_cache_refresh(
-                    insight_at=row.memory_insight_updated_at,
-                    summary_at=row.user_summary_updated_at,
-                    write_at=row.write_time,
-                    metadata_updated_at=row.metadata_updated_at,
-                )
-                refresh_insight = decisions.insight == "dispatch"
-                refresh_summary = decisions.summary == "dispatch"
-                if not refresh_insight and not refresh_summary:
-                    if "skip_fresh" in (decisions.insight, decisions.summary):
-                        skip_fresh += 1
-                    else:
-                        skip_no_change += 1
-                    continue
-
-                # 在途锁：抢不到说明该用户已有刷新任务在途，跳过
-                if redis_client is not None:
-                    ok = redis_client.set(
-                        CACHE_INFLIGHT_KEY_FMT.format(end_user_id=eu_id),
-                        "1", nx=True, ex=CACHE_INFLIGHT_TTL_SEC,
-                    )
-                    if not ok:
-                        skip_inflight += 1
-                        continue
-
-                # 派发：用 countdown 错峰，每 60 个一波、每波摊到 0~295s，平滑 LLM 调用
-                countdown = (dispatched % 60) * 5
-                do_refresh_insight_summary_cache.apply_async(
-                    kwargs={
-                        "end_user_id": eu_id,
-                        "workspace_id": str(row.workspace_id),
-                        "language": "zh",  # 与旧任务行为对齐
-                        "refresh_insight": refresh_insight,
-                        "refresh_summary": refresh_summary,
-                    },
-                    countdown=countdown,
-                )
-                dispatched += 1
-                dispatched_user_ids.append(eu_id)
-                if dispatched % 50 == 0:
-                    logger.info(
-                        f"scan_refresh_insight_summary_cache 进度: 已派发 {dispatched}, "
-                        f"最近 10 个: {dispatched_user_ids[-10:]}"
+                with get_db_read() as db:
+                    rows = EndUserRepository(db).get_neo4j_memory_cache_refresh_fields_page(
+                        ws_id,
+                        after_id=after_id,
+                        limit=_END_USER_SCAN_PAGE_SIZE,
                     )
             except Exception as e:
-                logger.error(f"洞察/摘要缓存scan 处理用户失败 user={eu_id}: {e}")
+                # 单页查询失败只放弃该 workspace 的剩余用户，不拖垮整轮扫描
+                logger.error(
+                    f"洞察/摘要缓存scan 分页查询候选失败 workspace={ws_id} "
+                    f"after_id={after_id}: {e}"
+                )
+                break
+            if not rows:
+                break
+
+            for row in rows:
+                eu_id = str(row.end_user_id)
+                try:
+                    decisions = classify_memory_cache_refresh(
+                        insight_at=row.memory_insight_updated_at,
+                        summary_at=row.user_summary_updated_at,
+                        write_at=row.write_time,
+                        metadata_updated_at=row.metadata_updated_at,
+                    )
+                    refresh_insight = decisions.insight == "dispatch"
+                    refresh_summary = decisions.summary == "dispatch"
+                    if not refresh_insight and not refresh_summary:
+                        if "skip_fresh" in (decisions.insight, decisions.summary):
+                            skip_fresh += 1
+                        else:
+                            skip_no_change += 1
+                        continue
+
+                    # 在途锁：抢不到说明该用户已有刷新任务在途，跳过
+                    if redis_client is not None:
+                        ok = redis_client.set(
+                            CACHE_INFLIGHT_KEY_FMT.format(end_user_id=eu_id),
+                            "1", nx=True, ex=CACHE_INFLIGHT_TTL_SEC,
+                        )
+                        if not ok:
+                            skip_inflight += 1
+                            continue
+
+                    # 派发：用 countdown 错峰，每 60 个一波、每波摊到 0~295s，平滑 LLM 调用
+                    countdown = (dispatched % 60) * 5
+                    do_refresh_insight_summary_cache.apply_async(
+                        kwargs={
+                            "end_user_id": eu_id,
+                            "workspace_id": str(row.workspace_id),
+                            "language": "zh",  # 与旧任务行为对齐
+                            "refresh_insight": refresh_insight,
+                            "refresh_summary": refresh_summary,
+                        },
+                        countdown=countdown,
+                    )
+                    dispatched += 1
+                    recent_dispatched.append(eu_id)
+                    if len(dispatched_user_ids) < _SCAN_DISPATCH_SAMPLE_SIZE:
+                        dispatched_user_ids.append(eu_id)
+                    if dispatched % 50 == 0:
+                        logger.info(
+                            f"scan_refresh_insight_summary_cache 进度: 已派发 {dispatched}, "
+                            f"最近 10 个: {list(recent_dispatched)}"
+                        )
+                except Exception as e:
+                    logger.error(f"洞察/摘要缓存scan 处理用户失败 user={eu_id}: {e}")
+            after_id = rows[-1].end_user_id
 
     logger.info(
         f"scan_refresh_insight_summary_cache 完成: 派发 {dispatched}, "
