@@ -22,6 +22,23 @@ logger = logging.getLogger(__name__)
 INDEX_NAME = get_index_name(MemoryNodeType.RAG_MEMORY)
 
 
+def _raise_if_incomplete(result: dict, operation: str) -> None:
+    """写入/删除存在分片失败或超时时抛出异常。
+
+    ``conflicts="proceed"`` 会把版本冲突计入 ``failures`` 而不让请求失败，只凭
+    ``deleted``/``updated`` 判断会误认为已全部生效，因此这里显式拦截，避免宿主
+    删除或身份归并留下未迁移的残留数据。
+    """
+    if result.get("timed_out"):
+        raise RuntimeError(f"{operation} timed out")
+    failures = result.get("failures") or []
+    if failures:
+        raise RuntimeError(
+            f"{operation} incomplete: {len(failures)} shard failure(s); "
+            f"first={failures[0]}"
+        )
+
+
 async def delete_messages_by_end_user(end_user_id: str) -> int:
     """删除宿主名下的全部 RAG 消息，返回删除条数。"""
     client = AsyncElasticsearch(**build_elasticsearch_client_config())
@@ -33,6 +50,7 @@ async def delete_messages_by_end_user(end_user_id: str) -> int:
             refresh=True,
             slices="auto",
         )
+        _raise_if_incomplete(result, "delete_by_query")
         deleted = int(result.get("deleted", 0) or 0)
         matched = int(result.get("total", 0) or 0)
         logger.info(
@@ -44,11 +62,11 @@ async def delete_messages_by_end_user(end_user_id: str) -> int:
         if deleted < matched:
             logger.warning(
                 "[RAGStorage] 删除未全覆盖: end_user=%s matched=%s deleted=%s "
-                "failures=%s",
+                "version_conflicts=%s",
                 end_user_id,
                 matched,
                 deleted,
-                len(result.get("failures") or []),
+                result.get("version_conflicts", 0),
             )
         return deleted
     finally:
@@ -79,11 +97,24 @@ async def reassign_end_user_messages(
         )
         updated = int(result.get("updated", 0) or 0)
         logger.info(
-            "[RAGStorage] 宿主归并迁移完成: sources=%s target=%s updated=%s",
+            "[RAGStorage] 宿主归并迁移完成: sources=%s target=%s "
+            "matched=%s updated=%s",
             source_ids,
             target_end_user_id,
+            int(result.get("total", 0) or 0),
             updated,
         )
+        _raise_if_incomplete(result, "update_by_query")
+        if updated < int(result.get("total", 0) or 0):
+            logger.warning(
+                "[RAGStorage] 归并未全覆盖: sources=%s target=%s matched=%s "
+                "updated=%s version_conflicts=%s",
+                source_ids,
+                target_end_user_id,
+                int(result.get("total", 0) or 0),
+                updated,
+                result.get("version_conflicts", 0),
+            )
         return updated
     finally:
         await client.close()

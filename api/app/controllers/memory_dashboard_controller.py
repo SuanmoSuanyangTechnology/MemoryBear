@@ -481,6 +481,14 @@ def get_current_user_rag_total_num(
     return success(data=total_chunk, msg="宿主RAG知识数据获取成功")
 
 
+# /rag_content 入口校验：keyword 走 match_phrase，超长会构造过大查询；
+# source 直连 terms 过滤，未知取值会静默返回空列表，故在此显式拦截。
+_RAG_KEYWORD_MAX_LENGTH = 200
+_RAG_SOURCES = frozenset(
+    {"api", "service_api", "mcp", "agent", "workflow", "legacy"}
+)
+
+
 @router.get("/rag_content", response_model=ApiResponse)
 async def get_rag_content(
     end_user_id: str = Query(..., description="宿主ID"),
@@ -500,6 +508,26 @@ async def get_rag_content(
     数据源为独立索引 `rag_memory_current`；items 字段为
     id / role / content / dialog_at / source / legacy。
     """
+    if keyword and len(keyword) > _RAG_KEYWORD_MAX_LENGTH:
+        return fail(
+            BizCode.INVALID_PARAMETER,
+            f"keyword 长度上限 {_RAG_KEYWORD_MAX_LENGTH}",
+            f"len={len(keyword)}",
+        )
+    if start_time is not None and end_time is not None and start_time > end_time:
+        return fail(
+            BizCode.INVALID_PARAMETER,
+            "start_time 不能晚于 end_time",
+            f"start={start_time}, end={end_time}",
+        )
+    if source:
+        unknown = [s for s in source if s not in _RAG_SOURCES]
+        if unknown:
+            return fail(
+                BizCode.INVALID_PARAMETER,
+                "source 取值非法",
+                f"unknown={unknown}, allowed={sorted(_RAG_SOURCES)}",
+            )
     data = await memory_dashboard_service.get_rag_content_async(
         end_user_id,
         page,

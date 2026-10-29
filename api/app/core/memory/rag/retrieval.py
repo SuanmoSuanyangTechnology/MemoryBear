@@ -134,6 +134,14 @@ class RagRetrieval:
         for item in keyword_results.items:
             self._merge_item(item, documents)
             node_id = str(item.data.get("id") or "")
+            if not node_id:
+                # 缺 id 的命中无法参与加权与后续构建，显式丢弃并告警，
+                # 避免空键让多条记录在分数字典里互相覆盖后被静默吞掉
+                logger.warning(
+                    "[RAGRetrieval] keyword hit without id dropped: data_keys=%s",
+                    sorted(item.data.keys()),
+                )
+                continue
             kw_scores[node_id] = normalized_keyword_score(
                 item.data.get("score"), self.fulltext_score_threshold
             )
@@ -141,6 +149,12 @@ class RagRetrieval:
         for item in embedding_results.items:
             self._merge_item(item, documents)
             node_id = str(item.data.get("id") or "")
+            if not node_id:
+                logger.warning(
+                    "[RAGRetrieval] embedding hit without id dropped: data_keys=%s",
+                    sorted(item.data.keys()),
+                )
+                continue
             emb_scores[node_id] = _clamp01(item.data.get("score"))
 
         for node_id, data in documents.items():
