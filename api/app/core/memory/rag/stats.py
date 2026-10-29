@@ -261,10 +261,11 @@ async def list_messages(
         }
 
     offset = (safe_page - 1) * safe_pagesize
-    if offset >= MAX_RESULT_WINDOW:
+    if offset + safe_pagesize > MAX_RESULT_WINDOW:
         raise ValueError(
-            f"page too deep: offset {offset} exceeds ES max_result_window "
-            f"{MAX_RESULT_WINDOW}; narrow the filters or request an earlier page"
+            f"page too deep: offset {offset} + size {safe_pagesize} exceeds "
+            f"ES max_result_window {MAX_RESULT_WINDOW}; narrow the filters "
+            "or request an earlier page"
         )
 
     async def _search(client: AsyncElasticsearch) -> dict[str, Any]:
@@ -314,12 +315,17 @@ def list_messages_sync(end_user_ids: Sequence[str] | None, **kwargs) -> dict[str
 
 async def daily_totals(
         end_user_ids: Sequence[str],
-        start: datetime,
-        end: datetime,
+        start: date | datetime,
+        end: date | datetime,
         *,
         exclude_legacy: bool = True,
 ) -> list[tuple[date, int]]:
-    """返回区间内逐日累计总量（用于记忆增长趋势），按日期升序。"""
+    """返回区间内逐日累计总量（用于记忆增长趋势），按日期升序。
+
+    入参按「UTC 自然日」对齐：即使传入带时分秒的 ``datetime``，也只取日期部分，
+    即区间为 ``[start 当天 00:00, end 当天 23:59:59.999999]``。趋势曲线以天为粒度，
+    调用方不应依赖更细的时间边界。
+    """
     if not end_user_ids:
         return []
 

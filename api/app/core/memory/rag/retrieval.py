@@ -94,6 +94,17 @@ class RagRetrieval:
         self.alpha = alpha
         self.fulltext_score_threshold = fulltext_score_threshold
 
+    def _report_error(self, error: MemoryRetrievalBusinessError) -> None:
+        """上报业务错误；回调自身异常不得中断召回主流程。"""
+        if self.on_error is None:
+            return
+        try:
+            self.on_error(error)
+        except Exception:
+            logger.warning(
+                "[RAGSearch] on_error callback failed, ignored", exc_info=True
+            )
+
     # ---------- 双路召回 ----------
 
     async def _fulltext(
@@ -227,15 +238,14 @@ class RagRetrieval:
             return True, []
         except Exception as exc:
             logger.warning("[RAGSearch] rerank failed, falling back to fusion: %s", exc)
-            if self.on_error is not None:
-                self.on_error(
-                    MemoryRetrievalBusinessError.model_call_failed(
-                        MemoryRetrievalStage.RERANK,
-                        exc,
-                        model_type=MemoryModelType.RERANK,
-                        impact=MemoryRetrievalImpact.ORDERING_DEGRADED,
-                    )
+            self._report_error(
+                MemoryRetrievalBusinessError.model_call_failed(
+                    MemoryRetrievalStage.RERANK,
+                    exc,
+                    model_type=MemoryModelType.RERANK,
+                    impact=MemoryRetrievalImpact.ORDERING_DEGRADED,
                 )
+            )
             return False, ["rerank_failed"]
 
     # ---------- 对外入口 ----------
@@ -271,25 +281,23 @@ class RagRetrieval:
         semantic_failed = isinstance(embedding_results, BaseException)
         if keyword_failed:
             logger.warning("[RAGSearch] keyword search error: %s", keyword_results)
-            if self.on_error is not None:
-                self.on_error(
-                    MemoryRetrievalBusinessError.model_call_failed(
-                        MemoryRetrievalStage.KEYWORD_SEARCH,
-                        keyword_results,
-                        impact=MemoryRetrievalImpact.INCOMPLETE,
-                    )
+            self._report_error(
+                MemoryRetrievalBusinessError.model_call_failed(
+                    MemoryRetrievalStage.KEYWORD_SEARCH,
+                    keyword_results,
+                    impact=MemoryRetrievalImpact.INCOMPLETE,
                 )
+            )
             keyword_results = StorageReadResult()
         if semantic_failed:
             logger.warning("[RAGSearch] embedding search error: %s", embedding_results)
-            if self.on_error is not None:
-                self.on_error(
-                    MemoryRetrievalBusinessError.model_call_failed(
-                        MemoryRetrievalStage.VECTOR_SEARCH,
-                        embedding_results,
-                        model_type=MemoryModelType.EMBEDDING,
-                    )
+            self._report_error(
+                MemoryRetrievalBusinessError.model_call_failed(
+                    MemoryRetrievalStage.VECTOR_SEARCH,
+                    embedding_results,
+                    model_type=MemoryModelType.EMBEDDING,
                 )
+            )
             embedding_results = StorageReadResult()
 
         documents, kw_scores, emb_scores = self._fuse(

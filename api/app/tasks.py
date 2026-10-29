@@ -2604,128 +2604,142 @@ def process_rag_memory(
     """
     loop = set_asyncio_event_loop()
 
-    # 1. 身份归并重定向：排队期间用户可能已被跨渠道归并
-    resolved_end_user_id = end_user_id
     try:
-        with get_db_context() as db:
-            from app.repositories.end_user_repository import EndUserRepository
-
-            resolved = EndUserRepository(db).resolve_merge_by_origin_id(
-                uuid.UUID(end_user_id)
-            )
-            if resolved:
-                logger.info(
-                    "[CELERY RAG] end_user_id merged, redirecting: %s → %s",
-                    end_user_id,
-                    resolved.id,
-                )
-                resolved_end_user_id = str(resolved.id)
-    except ValueError as exc:
-        # 非法 end_user_id 无法归属到任何宿主，按原 id 写入的文档不会被任何读取
-        # 路径召回，等价于丢记忆；属确定性错误，直接终止不重试
-        logger.error(
-            "[CELERY RAG] invalid end_user_id, aborting: %s (%s)",
-            end_user_id,
-            exc,
-            exc_info=True,
-        )
-        raise
-    except Exception as e:
-        # 归属解析失败时不静默按旧 id 写入：该用户可能已被跨渠道归并，
-        # 落到旧 id 的文档在读取路径（按新 id 过滤）里查不到，等于丢记忆
-        logger.error(
-            "[CELERY RAG] merge resolution failed for %s: %s",
-            end_user_id,
-            e,
-            exc_info=True,
-        )
-        raise self.retry(exc=e)
-
-    async def _run():
-        from app.core.memory.pipelines.base_pipeline import ModelClientMixin
-        from app.core.memory.storage.enums import MemoryNodeType
-        from app.core.memory.storage.provider.elasticsearch.client import ElasticClient
-
-        # 2. 加载用户记忆配置，构造 embedding 客户端
-        with get_db_context() as db:
-            memory_config = MemoryConfigService(db).load_memory_config(
-                config_id=uuid.UUID(config_id)
-            )
-            embedder = ModelClientMixin.get_embedding_client(
-                db,
-                memory_config.embedding_model_id,
-                memory_config.tenant_id,
-            )
-
-        # 3. 向量化（本任务唯一一次模型调用）
-        vector = await embedder.aembed_query(content)
-
-        # 4. 独立 ES 索引覆盖写（id 即 ES _id）
-        client = await ElasticClient.create()
+        # 1. 身份归并重定向：排队期间用户可能已被跨渠道归并
+        resolved_end_user_id = end_user_id
         try:
-            return await client.save_node(
-                MemoryNodeType.RAG_MEMORY,
-                {
-                    "id": id,
-                    "content": content,
-                    "role": role,
-                    "end_user_id": resolved_end_user_id,
-                    "config_id": config_id,
-                    "dialog_at": dialog_at,
-                    "source": source,
-                    "delete_at": None,
-                    "text_embedding": vector,
-                },
-            )
-        finally:
-            await client.close()
+            with get_db_context() as db:
+                from app.repositories.end_user_repository import EndUserRepository
 
-    try:
-        result = loop.run_until_complete(_run())
-        logger.info(
-            "[CELERY RAG] 写入完成: id=%s, end_user=%s, backend=%s",
-            id,
-            resolved_end_user_id,
-            getattr(result, "backend", None),
-        )
-        return {"status": "ok", "id": id}
-    except Exception as exc:
+                resolved = EndUserRepository(db).resolve_merge_by_origin_id(
+                    uuid.UUID(end_user_id)
+                )
+                if resolved:
+                    logger.info(
+                        "[CELERY RAG] end_user_id merged, redirecting: %s → %s",
+                        end_user_id,
+                        resolved.id,
+                    )
+                    resolved_end_user_id = str(resolved.id)
+        except ValueError as exc:
+            # 非法 end_user_id 无法归属到任何宿主，按原 id 写入的文档不会被任何
+            # 读取路径召回，等价于丢记忆；属确定性错误，直接终止不重试
+            logger.error(
+                "[CELERY RAG] invalid end_user_id, aborting: %s (%s)",
+                end_user_id,
+                exc,
+                exc_info=True,
+            )
+            raise
+        except Exception as e:
+            # 归属解析失败时不静默按旧 id 写入：该用户可能已被跨渠道归并，
+            # 落到旧 id 的文档在读取路径（按新 id 过滤）里查不到，等于丢记忆
+            logger.error(
+                "[CELERY RAG] merge resolution failed for %s: %s",
+                end_user_id,
+                e,
+                exc_info=True,
+            )
+            raise self.retry(exc=e)
+
+        from app.core.memory.pipelines.base_pipeline import ModelClientMixin
         from app.schemas.memory_config_schema import (
             InvalidConfigError,
             ModelInactiveError,
             ModelNotFoundError,
         )
 
-        # 配置类确定性错误直接 raise，让 Celery 标记 FAILURE，不做无意义重试
-        if isinstance(
-            exc, (ValueError, ModelNotFoundError, ModelInactiveError, InvalidConfigError)
-        ):
+        # 2. 加载用户记忆配置，构造 embedding 客户端。
+        # 配置/模型类异常属确定性错误，与写入阶段的瞬时异常分开处理，直接终止不重试
+        try:
+            with get_db_context() as db:
+                memory_config = MemoryConfigService(db).load_memory_config(
+                    config_id=uuid.UUID(config_id)
+                )
+                embedder = ModelClientMixin.get_embedding_client(
+                    db,
+                    memory_config.embedding_model_id,
+                    memory_config.tenant_id,
+                )
+        except (ValueError, ModelNotFoundError, ModelInactiveError, InvalidConfigError) as exc:
             logger.error(
-                "[CELERY RAG] 写入失败(no retry): id=%s, error_type=%s, err=%s",
+                "[CELERY RAG] 配置加载失败(no retry): id=%s, config=%s, "
+                "error_type=%s, err=%s",
                 id,
+                config_id,
                 type(exc).__name__,
                 exc,
                 exc_info=True,
             )
             raise
-        if self.request.retries >= self.max_retries:
-            # 重试耗尽：当前没有死信/补偿链路，至少留下明确告警，便于人工补数
-            logger.error(
-                "[CELERY RAG] 重试耗尽，记忆写入最终失败: id=%s, end_user=%s, err=%s",
+
+        async def _run():
+            from app.core.memory.storage.enums import MemoryNodeType
+            from app.core.memory.storage.provider.elasticsearch.client import ElasticClient
+
+            # 3. 向量化（本任务唯一一次模型调用）
+            vector = await embedder.aembed_query(content)
+
+            # 4. 独立 ES 索引覆盖写（id 即 ES _id）
+            client = await ElasticClient.create()
+            try:
+                return await client.save_node(
+                    MemoryNodeType.RAG_MEMORY,
+                    {
+                        "id": id,
+                        "content": content,
+                        "role": role,
+                        "end_user_id": resolved_end_user_id,
+                        "config_id": config_id,
+                        "dialog_at": dialog_at,
+                        "source": source,
+                        "delete_at": None,
+                        "text_embedding": vector,
+                    },
+                )
+            finally:
+                await client.close()
+
+        try:
+            result = loop.run_until_complete(_run())
+            logger.info(
+                "[CELERY RAG] 写入完成: id=%s, end_user=%s, backend=%s",
                 id,
                 resolved_end_user_id,
-                exc,
-                exc_info=True,
+                getattr(result, "backend", None),
             )
-        else:
-            logger.error(
-                "[CELERY RAG] 写入失败: id=%s, end_user=%s, err=%s",
-                id,
-                resolved_end_user_id,
-                exc,
-                exc_info=True,
-            )
-        raise self.retry(exc=exc)
+            return {"status": "ok", "id": id}
+        except Retry:
+            # Celery 的重试信号必须原样上抛，不能再次进入重试分支
+            raise
+        except Exception as exc:
+            if isinstance(exc, (ModelNotFoundError, ModelInactiveError, InvalidConfigError)):
+                logger.error(
+                    "[CELERY RAG] 写入失败(no retry): id=%s, error_type=%s, err=%s",
+                    id,
+                    type(exc).__name__,
+                    exc,
+                    exc_info=True,
+                )
+                raise
+            if self.request.retries >= self.max_retries:
+                # 重试耗尽：当前没有死信/补偿链路，至少留下明确告警，便于人工补数
+                logger.error(
+                    "[CELERY RAG] 重试耗尽，记忆写入最终失败: id=%s, end_user=%s, err=%s",
+                    id,
+                    resolved_end_user_id,
+                    exc,
+                    exc_info=True,
+                )
+            else:
+                logger.error(
+                    "[CELERY RAG] 写入失败: id=%s, end_user=%s, err=%s",
+                    id,
+                    resolved_end_user_id,
+                    exc,
+                    exc_info=True,
+                )
+            raise self.retry(exc=exc)
     finally:
         _shutdown_loop_gracefully(loop)
 

@@ -86,9 +86,13 @@ async def reassign_end_user_messages(
     只改挂未软删的文档，与 retrieval/stats/reembedding 的 ``delete_at``
     口径保持一致，避免把源宿主已删除的记录带到目标宿主。
 
-    已知限制：``_rag_memory_id`` 由 (end_user_id, dialog_at, content) 派生 uuid5，
-    同一内容在两个宿主下本来就有不同 ``id``；改挂只换 ``end_user_id`` 字段，
-    因此目标宿主下可能出现同内容的多条记录，不会自动去重。
+    已知限制：``_rag_memory_id`` 由 (end_user_id, dialog_at, role, content) 派生
+    uuid5，同一内容在两个宿主下本来就有不同 ``id``；改挂只换 ``end_user_id``
+    字段，因此目标宿主下可能出现同内容的多条记录，不会自动去重。
+
+    非原子：``slices="auto"`` 提升大宿主下的吞吐，但一旦超时/分片失败，
+    已落地的部分更新无法回滚；该脚本改挂只依赖 ``end_user_id``，重跑同一批
+    source→target 是幂等的，失败后由调用方重试即可收敛。
     """
     source_ids = [str(item) for item in source_end_user_ids if item]
     if not source_ids:
@@ -111,6 +115,7 @@ async def reassign_end_user_messages(
             },
             conflicts="proceed",
             refresh=True,
+            slices="auto",
         )
         updated = int(result.get("updated", 0) or 0)
         logger.info(

@@ -90,10 +90,15 @@ async def update_rag_embeddings(
         client: AsyncElasticsearch,
         updates: Sequence[tuple[str, Sequence[float]]],
         dimension: int,
-) -> int:
-    """批量覆盖写向量字段，返回成功条数。"""
+) -> tuple[int, int]:
+    """批量覆盖写向量字段，返回 (成功条数, 失败条数)。
+
+    不把整页任何一条失败都升级为异常：``raise_on_error=False`` 时单条失败
+    （如文档已被物理删除、版本冲突）不应导致调用方丢弃整页已成功的写入并
+    重新向量化。仅统计失败条数，交给上层决定是否继续/重试。
+    """
     if not updates:
-        return 0
+        return 0, 0
     field = get_embedding_field_name(MemoryNodeType.RAG_MEMORY, dimension)
     actions = [
         {
@@ -111,8 +116,12 @@ async def update_rag_embeddings(
         raise_on_error=False,
     )
     if errors:
-        raise RuntimeError(f"bulk update failures: {len(errors)}")
-    return int(success)
+        logger.warning(
+            "rag re-embed bulk update partial failure: failed=%s success=%s",
+            len(errors),
+            success,
+        )
+    return int(success), len(errors)
 
 
 def _pending_pairs(nodes: list[dict]) -> list[tuple[str, str]]:
@@ -206,7 +215,7 @@ async def rebuild_rag_end_user_vectors(
                             f"{dimension} is not supported by the "
                             f"{MemoryNodeType.RAG_MEMORY.value} index"
                         )
-                    processed += await update_rag_embeddings(
+                    success, failed_nodes = await update_rag_embeddings(
                         client,
                         [
                             (node_id, vector)
@@ -214,6 +223,13 @@ async def rebuild_rag_end_user_vectors(
                         ],
                         dimension,
                     )
+                    processed += success
+                    if failed_nodes:
+                        failed += failed_nodes
+                        incomplete = True
+                        first_error = first_error or (
+                            f"write rag_memory: {failed_nodes} bulk failure(s)"
+                        )
                 except Exception as exc:
                     logger.error(
                         "rag re-embed page failed: job=%s end_user=%s nodes=%s error=%s",

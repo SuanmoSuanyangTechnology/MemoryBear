@@ -531,11 +531,13 @@ async def get_rag_content(
                 f"unknown={unknown}, allowed={sorted(_RAG_SOURCES)}",
             )
     offset = (page - 1) * pagesize
-    if offset >= _RAG_MAX_RESULT_WINDOW:
+    # ES 的约束是 from_ + size <= max_result_window，只校验 offset 会让
+    # offset 接近上限、size 越界时仍触发 illegal_argument_exception
+    if offset + pagesize > _RAG_MAX_RESULT_WINDOW:
         return fail(
             BizCode.INVALID_PARAMETER,
-            f"翻页过深，offset 上限 {_RAG_MAX_RESULT_WINDOW}",
-            f"offset={offset}",
+            f"翻页过深，offset+pagesize 上限 {_RAG_MAX_RESULT_WINDOW}",
+            f"offset={offset}, pagesize={pagesize}",
         )
     data = await memory_dashboard_service.get_rag_content_async(
         end_user_id,

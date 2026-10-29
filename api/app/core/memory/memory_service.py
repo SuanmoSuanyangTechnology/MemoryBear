@@ -333,6 +333,11 @@ class MemoryService:
 
         - RAG 空间：删除独立索引中该宿主的消息，返回条数。
         - 图空间：删除 Neo4j 记忆节点和边，返回节点数。
+        - 归属无法判定（宿主不存在 / 未关联 workspace）：两种存储都清理，
+          返回两者删除量之和。
+
+        注意返回值口径与图侧不一致：RAG 分支统计的是「消息条数」，
+        图侧统计的是「节点数」，调用方不应把两者当作同一单位做累加或对账。
         """
         from app.core.memory.models.service_models import MemoryContext
         from app.core.memory.pipelines.forgetting_pipeline import ForgettingPipeline
@@ -363,12 +368,29 @@ class MemoryService:
 
         if not storage_type:
             # 查不到归属（宿主不存在 / 未关联 workspace）时不能默认当成图空间：
-            # RAG 空间的记忆只在 ES 里，落到图分支会静默漏删。
+            # RAG 空间的记忆只在 ES 里，落到图分支会静默漏删。归属未知时
+            # 两种存储都尝试清理，任一失败也不阻断另一条路径。
             logger.warning(
-                "[MemoryService] storage_type unresolved, fallback to graph delete: "
+                "[MemoryService] storage_type unresolved, delete both rag and graph: "
                 "end_user=%s",
                 end_user_id,
             )
+            from app.core.memory.rag.storage_ops import delete_messages_by_end_user
+
+            try:
+                rag_deleted = await delete_messages_by_end_user(end_user_id)
+            except Exception as exc:
+                logger.error(
+                    "[MemoryService] fallback rag delete failed: end_user=%s, err=%s",
+                    end_user_id,
+                    exc,
+                    exc_info=True,
+                )
+                rag_deleted = 0
+
+            pipeline = ForgettingPipeline(MemoryContext(end_user_id=end_user_id))
+            graph_deleted = await pipeline.delete_all_nodes_by_end_user_id(end_user_id)
+            return rag_deleted + graph_deleted
 
         if str(storage_type or "").strip().lower() == "rag":
             from app.core.memory.rag.storage_ops import delete_messages_by_end_user

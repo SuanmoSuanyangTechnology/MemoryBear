@@ -279,13 +279,39 @@ class EndUserService:
 
         source_strs = sorted(str(sid) for sid in source)
         if is_rag:
+            from app.core.memory.rag import stats as rag_stats
             from app.core.memory.rag.storage_ops import reassign_end_user_messages
 
-            moved = await reassign_end_user_messages(source_strs, str(target))
-            logger.info(
-                f"[merge_end_users] RAG 索引迁移完成: "
-                f"sources={len(source_strs)} messages={moved}"
-            )
+            try:
+                moved = await reassign_end_user_messages(source_strs, str(target))
+                logger.info(
+                    f"[merge_end_users] RAG 索引迁移完成: "
+                    f"sources={len(source_strs)} messages={moved}"
+                )
+            except Exception as exc:
+                # 归并本身不可逆：ES 迁移失败不能阻断后续 PG 引用表迁移与提交，
+                # 否则流程停在半途、映射已落库却无收尾。这里显式记 error 供人工补数
+                logger.error(
+                    f"[merge_end_users] RAG 索引迁移失败，需人工补数: "
+                    f"sources={source_strs} target={target} err={exc}",
+                    exc_info=True,
+                )
+
+            # RAG 模式没有图侧计数回写；改用独立索引聚合回写 target.memory_count，
+            # 避免依赖该字段的接口在合并后长期偏低
+            try:
+                new_count = await rag_stats.count_messages([str(target)])
+                self.user_repo.update_memory_count(target, new_count)
+                logger.info(
+                    f"[merge_end_users] target memory_count 同步完成(RAG): "
+                    f"target={target}, count={new_count}"
+                )
+            except Exception as exc:
+                logger.warning(
+                    f"[merge_end_users] 同步 target memory_count 失败（不影响合并结果）: "
+                    f"target={target}, err={exc}",
+                    exc_info=True,
+                )
         else:
             stats = await merge_end_user_memory_nodes(source_strs, str(target))
             logger.info(

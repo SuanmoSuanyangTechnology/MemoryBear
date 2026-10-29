@@ -40,7 +40,17 @@ def _reembed_job_snapshot(job_id: str) -> Optional[Dict[str, Any]]:
             db.query(Workspace.storage_type)
             .filter(Workspace.id == job.workspace_id)
             .scalar()
-        ) or "neo4j"
+        )
+        if storage_type is None:
+            # workspace 缺失时不能默默按图分支执行：后续扇出与单宿主重嵌入都会
+            # 处理错误的存储后端，且没有任何告警
+            logger.error(
+                "[MemoryReembed] workspace missing, aborting job snapshot: "
+                "job=%s workspace=%s",
+                job_id,
+                job.workspace_id,
+            )
+            return None
         return {
             "id": str(job.id),
             "workspace_id": job.workspace_id,
@@ -252,7 +262,7 @@ async def run_job(job_id: str, owner: str) -> Dict[str, Any]:
             )
             db.commit()
 
-        if snapshot["storage_type"] == "rag":
+        if str(snapshot["storage_type"] or "").strip().lower() == "rag":
             from app.core.memory.rag.stats import count_messages_by_end_user
 
             counts = await count_messages_by_end_user(active_end_user_ids)

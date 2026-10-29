@@ -1,22 +1,24 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """把旧知识库中的 RAG 记忆迁移到独立索引 ``rag_memory_current``。
 
 旧链路把每个宿主的历史消息写成 ``documents`` 表里的 ``{end_user_id}.txt``，
 再切分为知识库 chunk。本脚本按 document_id 顺序拼接 chunk 文本，复用旧展示层
 的角色切分规则还原消息，逐条写入独立索引，标记 ``source="legacy"``。
 
-幂等：消息 id 与写入链一致（uuid5 = 命名空间 + end_user_id + dialog_at + content + 文档内序号），
+幂等：消息 id = uuid5（命名空间 + end_user_id + dialog_at + content + 文档内序号），
 重复执行覆盖同一 ES 文档，不会产生重复数据；同文重复消息也不会互相覆盖。
+对话时间取自 document.created_at，重跑时稳定，避免重放产生重复记忆。
 
-向量：默认复用旧 chunk 的向量（旧 chunk 与消息为 1:N，同一 chunk 内的消息共享该向量），
-或用 ``--reembed`` 重新按当前 embedding 模型批量计算。两者都不可用时才留空。
+向量：仅复用旧 chunk 的向量（旧 chunk 与消息为 1:N，同一 chunk 内的消息共享该向量）。
+本脚本不发起任何外部模型请求；需要按当前模型重算向量时走平台的重嵌入任务
+（``/workspace_reembed``），那里有配额与续跑管理。
 
-清理（仅 ``--purge`` 显式开启时执行，且逐 KB 校验通过才删）：
+清理（仅 ``--purge --yes`` 显式开启时执行，且逐 KB 校验通过才删）：
 - ``knowledges.status = 2``（列表不再显示）
 - 删除该 KB 下 ``documents`` 记录
 - 删除旧 chunk 索引 ``vector_index_{kb_id}_node``
 
-独立运行：PostgreSQL / Elasticsearch / 模型服务连接信息全部从环境变量读取，
+独立运行：PostgreSQL / Elasticsearch 连接信息全部从环境变量读取，
 不读取项目 .env，也不 import app 包。
 
 Usage::
@@ -24,8 +26,7 @@ Usage::
     python scripts/migrate_rag_kb_to_index.py --dry-run
     python scripts/migrate_rag_kb_to_index.py --purge --dry-run
     python scripts/migrate_rag_kb_to_index.py
-    python scripts/migrate_rag_kb_to_index.py --reembed
-    python scripts/migrate_rag_kb_to_index.py --purge
+    python scripts/migrate_rag_kb_to_index.py --purge --yes
     python scripts/migrate_rag_kb_to_index.py --workspace-id <uuid>
 """
 from __future__ import annotations
@@ -108,8 +109,6 @@ if os.getenv("ELASTICSEARCH_PORT") and ":" not in ELASTICSEARCH_HOST_RAW.split("
         f"{ELASTICSEARCH_CONFIG['hosts'][0].rstrip('/')}:{os.getenv('ELASTICSEARCH_PORT')}"
     ]
 
-MODEL_SERVICE_BASE_URL = os.getenv("MODEL_SERVICE_BASE_URL", "http://127.0.0.1:8080").rstrip("/")
-
 
 def _validate_connection_config() -> None:
     """检查必填连接项，避免空配置发起难以定位的连接。"""
@@ -133,7 +132,6 @@ def _print_target_config() -> None:
     print(f"APP_ENV          : {APP_ENV}")
     print(f"PostgreSQL       : {POSTGRES_CONFIG['host']}:{POSTGRES_CONFIG['port']}/{POSTGRES_CONFIG['database']}")
     print(f"Elasticsearch    : {es_host}")
-    print(f"Model service    : {MODEL_SERVICE_BASE_URL}")
     print(f"目标索引         : {_RAG_INDEX}")
     print(f"断点文件         : {CHECKPOINT_PATH}")
     print("=" * 72)
@@ -143,17 +141,15 @@ def _print_target_config() -> None:
 # 常量
 # =====================================================================
 
-#: 与 api/app/core/memory/pipelines/dispatcher.py 的 _RAG_MEMORY_NAMESPACE 必须一致；
-#: 两边不一致会导致同一内容算出两个 id，迁移数据与在线写入互相重复。
+#: 与 api/app/core/memory/pipelines/dispatcher.py 的 _RAG_MEMORY_NAMESPACE 一致；
+#: 在线写入的 uuid5 还包含 role，本脚本额外拼入文档内序号，两者保证
+#: 「同一文档 + 同一消息」在重复执行时得到同一 id，不会产生重复数据。
 _RAG_MEMORY_NAMESPACE = uuid.UUID("8f3f1a52-6c1e-5b7a-9d4e-2a7c6b1f0e93")
 _RAG_INDEX = "rag_memory_current"
 _ROLE_SPLIT_RE = re.compile(r"(user|assistant):")
 _LEGACY_SOURCE = "legacy"
 _CHUNK_SCAN_SIZE = 500
-#: 与索引定义一致：默认维度用不带后缀的向量字段名 text_embedding
-DEFAULT_EMBEDDING_DIMENSION = 1024
 
-DEFAULT_EMBED_BATCH = 10
 MAX_RETRY_ROUNDS = 3
 RETRY_ROUND_INTERVAL_SECONDS = 5
 
@@ -326,6 +322,8 @@ ORDER BY k.id, d.file_name
 def _load_documents(engine, workspace_id: str | None, end_user_id: str | None) -> list[dict[str, Any]]:
     from sqlalchemy import text as sql_text
 
+    # extra 只由本函数内的固定字面量拼接（不含任何外部输入），参数值统一走
+    # params 绑定；二者必须成对传给 execute，否则筛选条件不会生效/缺参会直接报错
     extra = ""
     params: dict[str, Any] = {}
     if workspace_id:
@@ -360,91 +358,6 @@ def _load_documents(engine, workspace_id: str | None, end_user_id: str | None) -
     return documents
 
 
-def _load_embedding_binding(engine, workspace_ids: list[str]) -> dict[str, dict[str, str]]:
-    """返回 {workspace_id: {config_id, embedding_id, tenant_id}}（取该空间首个有效 embedding 配置）。"""
-    from sqlalchemy import text as sql_text
-
-    if not workspace_ids:
-        return {}
-    sql = sql_text(
-        "SELECT config_id, embedding_id, tenant_id FROM memory_config "
-        "WHERE workspace_id = :ws AND embedding_id IS NOT NULL LIMIT 1"
-    )
-    result: dict[str, dict[str, str]] = {}
-    with engine.connect() as conn:
-        for ws in workspace_ids:
-            row = conn.execute(sql, {"ws": ws}).fetchone()
-            if row is None:
-                continue
-            result[ws] = {
-                "config_id": str(row[0]),
-                "embedding_id": str(row[1]),
-                "tenant_id": str(row[2]),
-            }
-    return result
-
-
-# =====================================================================
-# 向量化（自写 HTTP，不 import app）
-# =====================================================================
-
-
-def _invoke_embedding(texts: list[str], *, embedding_id: str, tenant_id: str,
-                      actor_id: str) -> list[list[float]]:
-    """POST /internal/v1/invoke，返回与 texts 等长的向量列表。"""
-    import httpx
-
-    payload = {
-        "config_id": embedding_id,
-        "stream": False,
-        "type": "embedding",
-        "params": {"input": texts},
-    }
-    headers = {
-        "Content-Type": "application/json",
-        "X-Model-Actor-ID": actor_id,
-        "X-Model-Tenant-ID": tenant_id,
-        "X-Model-Source": "migrate_script",
-    }
-    url = f"{MODEL_SERVICE_BASE_URL}/internal/v1/invoke"
-    with httpx.Client(timeout=120.0) as client:
-        response = client.post(url, json=payload, headers=headers)
-
-    if response.status_code != 200:
-        raise RuntimeError(
-            f"invoke 失败 status={response.status_code} body={response.text[:300]}"
-        )
-    data = response.json()
-    vectors = data.get("vectors") if isinstance(data, dict) else None
-    if not isinstance(vectors, list) or len(vectors) != len(texts):
-        raise RuntimeError(
-            f"向量条数不符：期望 {len(texts)}，实际 "
-            f"{len(vectors) if isinstance(vectors, list) else 'N/A'}"
-        )
-    return [list(vector) for vector in vectors]
-
-
-def _embed_texts(texts: list[str], *, embedding_id: str, tenant_id: str,
-                 actor_id: str, batch_size: int = DEFAULT_EMBED_BATCH) -> tuple[list[list[float]], int]:
-    """按批向量化，返回 (vectors, dimension)；条数与维度不一致即失败。"""
-    vectors: list[list[float]] = []
-    dimension = 0
-    for start in range(0, len(texts), batch_size):
-        batch = texts[start:start + batch_size]
-        batch_vectors = _invoke_embedding(
-            batch, embedding_id=embedding_id, tenant_id=tenant_id, actor_id=actor_id
-        )
-        if len(batch_vectors) != len(batch):
-            raise RuntimeError("批量向量条数不一致")
-        for vector in batch_vectors:
-            if dimension == 0:
-                dimension = len(vector)
-            elif len(vector) != dimension:
-                raise RuntimeError("批量向量维度不一致")
-            vectors.append(vector)
-    return vectors, dimension
-
-
 # =====================================================================
 # 主流程
 # =====================================================================
@@ -459,10 +372,7 @@ class MigrationStats:
     skipped_empty: int = 0
     failures: int = 0
     reused_vectors: int = 0
-    reembedded_users: int = 0
-    reembedded_nodes: int = 0
     purged_kbs: int = 0
-    per_user: dict[str, int] = field(default_factory=dict)
     per_kb: dict[str, dict[str, int]] = field(default_factory=dict)
 
 
@@ -495,8 +405,13 @@ def migrate(
         dry_run: bool,
         skip_documents: set[str],
         stats: MigrationStats,
-        reuse_vectors: bool,
-) -> None:
+) -> set[str]:
+    """迁移文档正文，返回本次「真正完整写入」的 document_id 集合。
+
+    解析失败、缺 created_at、bulk 部分失败的文档都不计入返回值；断点只应
+    记录成功集合，否则重跑时这些文档会被跳过且永久不再重试。
+    """
+    completed: set[str] = set()
     for doc in documents:
         document_id = doc["document_id"]
         if document_id in skip_documents:
@@ -511,7 +426,9 @@ def migrate(
         stats.chunks += len(chunks)
         messages = split_messages_by_chunk(chunks)
 
-        per_kb = stats.per_kb.setdefault(kb_id, {"documents": 0, "written": 0, "failed": 0})
+        per_kb = stats.per_kb.setdefault(
+            kb_id, {"documents": 0, "messages": 0, "written": 0, "failed": 0}
+        )
         per_kb["documents"] += 1
 
         if not messages:
@@ -538,7 +455,7 @@ def migrate(
                 user_id, dialog_at, content, f"{document_id}:{ordinal}"
             )
             stats.messages += 1
-            stats.per_user[user_id] = stats.per_user.get(user_id, 0) + 1
+            per_kb["messages"] += 1
 
             source: dict[str, Any] = {
                 "id": memory_id,
@@ -548,7 +465,8 @@ def migrate(
                 "dialog_at": dialog_at,
                 "source": _LEGACY_SOURCE,
             }
-            if reuse_vectors and vector:
+            if vector:
+                # 复用旧 chunk 向量：同一 chunk 内的消息共享该向量
                 source["text_embedding"] = vector
                 stats.reused_vectors += 1
             actions.append(
@@ -570,95 +488,9 @@ def migrate(
             stats.failures += failed
             per_kb["failed"] += failed
             print(f"[ERROR] document={document_id} 写入失败 {failed} 条")
-
-
-def _scan_pending(client, end_user_id: str) -> list[tuple[str, str]]:
-    """按 search_after 分页扫该 end_user 在新索引里的全部消息（id + content）。"""
-    page_size = 500
-    body: dict[str, Any] = {
-        "query": {"term": {"end_user_id": end_user_id}},
-        "size": page_size,
-        "_source": ["id", "content"],
-        "sort": [{"id": {"order": "asc", "unmapped_type": "keyword"}}],
-    }
-    out: list[tuple[str, str]] = []
-    search_after: list[Any] | None = None
-    while True:
-        if search_after is not None:
-            body["search_after"] = search_after
-        result = client.search(index=_RAG_INDEX, **body)
-        hits = (result.get("hits") or {}).get("hits", [])
-        if not hits:
-            return out
-        for hit in hits:
-            source = hit.get("_source") or {}
-            node_id = source.get("id") or hit.get("_id")
-            content = source.get("content")
-            if node_id and isinstance(content, str) and content.strip():
-                out.append((str(node_id), content))
-        if len(hits) < page_size:
-            return out
-        search_after = hits[-1].get("sort")
-
-
-def reembed(
-        *,
-        client,
-        end_users: list[str],
-        bindings: dict[str, dict[str, str]],
-        user_workspace: dict[str, str],
-        stats: MigrationStats,
-) -> None:
-    """按 end_user 补算向量（仅在不复用旧向量时调用）。"""
-    for end_user_id in end_users:
-        ws_id = user_workspace.get(end_user_id, "")
-        binding = bindings.get(ws_id)
-        if not binding:
-            print(f"[WARN] end_user={end_user_id} 所属空间没有可用 embedding 配置，跳过")
-            continue
-
-        pending = _scan_pending(client, end_user_id)
-        if not pending:
-            continue
-
-        try:
-            vectors, dimension = _embed_texts(
-                [text for _, text in pending],
-                embedding_id=binding["embedding_id"],
-                tenant_id=binding["tenant_id"],
-                actor_id=end_user_id,
-            )
-        except Exception as exc:
-            print(f"[ERROR] end_user={end_user_id} 向量化失败: {exc}")
-            stats.failures += 1
-            continue
-
-        # 与索引 mapping 对齐：默认维度用不带后缀的字段名
-        field = (
-            "text_embedding"
-            if dimension == DEFAULT_EMBEDDING_DIMENSION
-            else f"text_embedding_{dimension}"
-        )
-        body = "".join(
-            json.dumps({
-                "update": {"_index": _RAG_INDEX, "_id": node_id},
-                "_source": {"doc": {field: vector}},
-            }, ensure_ascii=False) + "\n"
-            for (node_id, _), vector in zip(pending, vectors)
-        )
-        try:
-            resp = client.bulk(body=body, refresh=False)
-            if resp.get("errors"):
-                failed = sum(1 for item in resp.get("items", []) if item.get("error"))
-                print(f"[WARN] end_user={end_user_id} 向量写回失败 {failed} 条")
-                stats.failures += failed
-            else:
-                stats.reembedded_users += 1
-                stats.reembedded_nodes += len(pending)
-                print(f"[OK] end_user={end_user_id} 补向量 {len(pending)} 条 dim={dimension}")
-        except Exception as exc:
-            print(f"[ERROR] end_user={end_user_id} 向量写回异常: {exc}")
-            stats.failures += 1
+        else:
+            completed.add(document_id)
+    return completed
 
 
 def purge(
@@ -666,27 +498,52 @@ def purge(
         engine,
         client,
         stats: MigrationStats,
+        documents: list[dict[str, Any]],
+        done_documents: set[str],
         dry_run: bool,
 ) -> None:
-    """删除迁移已完成的旧记忆库（三层：knowledges / documents / 旧 chunk 索引）。"""
+    """删除迁移已完成的旧记忆库（三层：chunk 索引 / documents / knowledges）。
+
+    逐 KB 校验：该 KB 本次加载到的**每个** document 都必须已完整写入
+    （``done_documents`` 含本次成功与历史断点成功的文档），且本次写入条数
+    与解析出的消息数一致，才允许清理。
+    """
     from sqlalchemy import text as sql_text
 
-    candidates = [
-        kb_id for kb_id, v in stats.per_kb.items()
-        if v.get("documents", 0) > 0
-        and v.get("failed", 0) == 0
-        and (dry_run or v.get("written", 0) > 0)
-    ]
-    if not candidates:
-        print("没有可清理的 KB（无成功迁移的文档）")
-        return
+    docs_by_kb: dict[str, list[str]] = {}
+    for doc in documents:
+        docs_by_kb.setdefault(doc["kb_id"], []).append(doc["document_id"])
 
-    for kb_id in candidates:
-        if dry_run:
-            print(f"[DRY] 将清理 KB {kb_id}（status=2 + 删 documents + 删 chunk 索引）")
-            stats.purged_kbs += 1
+    purged = 0
+    for kb_id, doc_ids in docs_by_kb.items():
+        v = stats.per_kb.get(kb_id)
+        if not v or v.get("documents", 0) <= 0 or v.get("failed", 0) != 0:
             continue
+
+        if dry_run:
+            # dry-run 下 written 恒为 0，不能作为判定依据；这里只按解析结果预览，
+            # 真正的清理判定与 dry_run 完全解耦
+            if v.get("messages", 0) > 0:
+                print(f"[DRY] 将清理 KB {kb_id}（status=2 + 删 documents + 删 chunk 索引）")
+            continue
+
+        all_done = all(document_id in done_documents for document_id in doc_ids)
+        written_ok = v.get("written", 0) == v.get("messages", 0)
+        if not all_done or not written_ok:
+            print(
+                f"[WARN] 跳过 KB {kb_id}: 未全部迁移成功 "
+                f"(documents={len(doc_ids)}, all_done={all_done}, "
+                f"written={v.get('written', 0)}/{v.get('messages', 0)}, "
+                f"failed={v.get('failed', 0)})"
+            )
+            continue
+
         try:
+            # 先删 ES 索引、成功后再提交 PG：反过来一旦 ES 删除失败，
+            # documents 已删导致重跑查不到该 KB，旧 chunk 索引将永久残留
+            index = f"vector_index_{kb_id}_node".lower()
+            if client.indices.exists(index=index):
+                client.indices.delete(index=index)
             with engine.begin() as conn:
                 conn.execute(
                     sql_text("UPDATE knowledges SET status = 2 WHERE id = :k"),
@@ -696,14 +553,12 @@ def purge(
                     sql_text("DELETE FROM documents WHERE kb_id = :k"),
                     {"k": kb_id},
                 )
-            index = f"vector_index_{kb_id}_node".lower()
-            if client.indices.exists(index=index):
-                client.indices.delete(index=index)
-            stats.purged_kbs += 1
+            purged += 1
             print(f"[OK] 已清理 KB {kb_id}")
         except Exception as exc:
             print(f"[ERROR] 清理 KB {kb_id} 失败: {exc}")
             stats.failures += 1
+    stats.purged_kbs += purged
 
 
 def run(
@@ -711,7 +566,6 @@ def run(
         workspace_id: str | None,
         end_user_id: str | None,
         dry_run: bool,
-        reuse_vectors: bool,
         do_purge: bool,
 ) -> MigrationStats:
     _validate_connection_config()
@@ -733,54 +587,34 @@ def run(
         if skip_documents:
             print(f"断点续传：跳过已完成 {len(skip_documents)} 个 document")
 
-        # ---------- ① 迁移写正文（可选复用旧向量）----------
-        migrate(
+        # ---------- ① 迁移写正文（复用旧 chunk 向量）----------
+        completed = migrate(
             client=client,
             documents=documents,
             dry_run=dry_run,
             skip_documents=skip_documents,
             stats=stats,
-            reuse_vectors=reuse_vectors,
         )
+        done_documents = set(skip_documents)
         if not dry_run:
             client.indices.refresh(index=_RAG_INDEX)
-            done = sorted(skip_documents | {
-                d["document_id"] for d in documents
-                if d["document_id"] not in skip_documents
-            })
+            # 断点只记录真正完整写入的文档：解析失败/缺时间/部分失败的文档
+            # 必须留在待迁移集合里，否则重跑会被跳过且永久不再重试
+            done_documents |= completed
             _save_checkpoint(context, {
-                "done_documents": done,
-                "reembedded_users": checkpoint.get("reembedded_users", []),
-                "purged_kbs": checkpoint.get("purged_kbs", []),
+                "done_documents": sorted(done_documents),
             })
 
-        # ---------- ② 补算向量 ----------
-        if not dry_run and not reuse_vectors:
-            ws_ids = sorted({d["workspace_id"] for d in documents})
-            bindings = _load_embedding_binding(engine, ws_ids)
-            user_workspace = {d["end_user_id"]: d["workspace_id"] for d in documents}
-            done_users = set(checkpoint.get("reembedded_users", []))
-            targets = [u for u in stats.per_user if u not in done_users]
-            reembed(
-                client=client,
-                end_users=targets,
-                bindings=bindings,
-                user_workspace=user_workspace,
-                stats=stats,
-            )
-            if not dry_run:
-                client.indices.refresh(index=_RAG_INDEX)
-                _save_checkpoint(context, {
-                    "done_documents": sorted(skip_documents | {
-                        d["document_id"] for d in documents
-                    }),
-                    "reembedded_users": sorted(done_users | set(stats.per_user)),
-                    "purged_kbs": checkpoint.get("purged_kbs", []),
-                })
-
-        # ---------- ③ 清理旧库 ----------
+        # ---------- ② 清理旧库 ----------
         if do_purge:
-            purge(engine=engine, client=client, stats=stats, dry_run=dry_run)
+            purge(
+                engine=engine,
+                client=client,
+                stats=stats,
+                documents=documents,
+                done_documents=done_documents,
+                dry_run=dry_run,
+            )
 
         if not dry_run and stats.failures == 0:
             _clear_checkpoint()
@@ -795,11 +629,6 @@ def run(
         f"written={stats.written} skipped_empty={stats.skipped_empty} "
         f"failures={stats.failures} reused_vectors={stats.reused_vectors}"
     )
-    if stats.reembedded_users:
-        print(
-            f"reembedded_users={stats.reembedded_users} "
-            f"reembedded_nodes={stats.reembedded_nodes}"
-        )
     if stats.purged_kbs:
         print(f"purged_kbs={stats.purged_kbs}")
     for kb_id, v in sorted(stats.per_kb.items()):
@@ -818,11 +647,6 @@ def main() -> int:
     parser.add_argument("--end-user-id", help="只迁移指定宿主")
     parser.add_argument("--dry-run", action="store_true", help="只统计，不写 ES / 不改库")
     parser.add_argument(
-        "--reembed",
-        action="store_true",
-        help="不复用旧 chunk 向量，改为按当前 embedding 模型重新计算",
-    )
-    parser.add_argument(
         "--purge",
         action="store_true",
         help="迁移成功的 KB 一并清理（status=2 + 删 documents + 删 chunk 索引），不可回滚",
@@ -836,15 +660,6 @@ def main() -> int:
 
     _validate_env()
 
-    if args.reembed:
-        # 本脚本保持离线：不访问外部 embedding 服务。
-        # 需要重算向量请走平台的重嵌入任务（/workspace_reembed），那里有配额与续跑管理。
-        print(
-            "[ERROR] --reembed 会调用外部 embedding 模型，本脚本不发起外部请求；"
-            "请改用平台重嵌入任务，或去掉该参数以复用旧 chunk 向量"
-        )
-        return 2
-
     if args.purge and not args.yes:
         print("[ERROR] --purge 会删除 documents 与 chunk 索引且不可回滚，需同时传 --yes 确认")
         return 2
@@ -857,7 +672,6 @@ def main() -> int:
         workspace_id=args.workspace_id,
         end_user_id=args.end_user_id,
         dry_run=args.dry_run,
-        reuse_vectors=not args.reembed,
         do_purge=args.purge,
     )
     print(f"elapsed={time.time() - start:.2f}s")

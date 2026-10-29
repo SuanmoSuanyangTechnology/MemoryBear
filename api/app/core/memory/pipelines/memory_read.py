@@ -428,6 +428,14 @@ class ReadPipeLine(ModelClientMixin, BasePipeline):
             semantic_degraded = (
                 await self._should_degrade_semantic() if need_embedder else False
             )
+            if need_embedder and embedder is None:
+                # embedding_model_id 未配置/查询失败：向量路不可用，显式标记降级，
+                # 与「未降级但检索不到」区分开，避免静默丢掉语义召回
+                logger.warning(
+                    "[ReadPipeLine] rag: embedding client unavailable, "
+                    "vector search disabled for this query"
+                )
+                semantic_degraded = True
             reranker = None
             if enable_rerank:
                 reranker = await self._get_rerank_client()

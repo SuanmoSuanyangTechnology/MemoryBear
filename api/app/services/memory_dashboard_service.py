@@ -507,11 +507,20 @@ async def get_workspace_total_memory_count_only_async(
 
     try:
         if await _is_rag_workspace_async(db, workspace_id):
-            end_user_ids = (
-                [end_user_id]
-                if end_user_id
-                else await _workspace_end_user_ids_async(db, workspace_id)
-            )
+            if end_user_id:
+                # RAG 索引只按 end_user_id 过滤，没有 workspace 维度；
+                # 不校验归属会让任意合法 UUID 读到其它空间的记忆总量
+                if not await _end_user_in_workspace_async(
+                    db, workspace_id, end_user_id
+                ):
+                    business_logger.warning(
+                        f"拒绝跨空间读取 RAG 记忆总量: end_user_id={end_user_id}, "
+                        f"workspace_id={workspace_id}"
+                    )
+                    return 0
+                end_user_ids = [end_user_id]
+            else:
+                end_user_ids = await _workspace_end_user_ids_async(db, workspace_id)
             return await rag_stats.count_messages(end_user_ids)
 
         return await _get_workspace_total_memory_count_only_cached_async(
@@ -621,8 +630,12 @@ async def _get_rag_total_memory_count_async(
 
     if end_user_id:
         end_user = await repo.get_end_user_by_id_async(uuid.UUID(end_user_id))
-        if not end_user:
-            business_logger.warning(f"未找到宿主 {end_user_id}，返回0")
+        # get_end_user_by_id_async 只按 id + is_active 查询，不带 workspace 过滤；
+        # RAG 索引计数也只按 end_user_id，必须显式校验归属，否则可跨空间读取
+        if not end_user or str(end_user.workspace_id) != str(workspace_id):
+            business_logger.warning(
+                f"未找到宿主或宿主不属于当前空间 {workspace_id}: {end_user_id}，返回0"
+            )
             return {
                 "total_memory_count": 0,
                 "host_count": 0,
@@ -640,8 +653,10 @@ async def _get_rag_total_memory_count_async(
             }]
         }
 
-    rows = await repo.get_memory_counts_by_workspace_async(workspace_id)
-    if not rows:
+    # 「全部宿主」与其它 RAG 分支共用同一份宿主集合（App 关联 + 活跃），
+    # 否则 /dashboard_data 与只返回总量的接口会得到不同数值
+    end_user_ids = await _workspace_end_user_ids_async(db, workspace_id)
+    if not end_user_ids:
         business_logger.warning("未找到任何宿主，返回0")
         return {
             "total_memory_count": 0,
@@ -649,23 +664,26 @@ async def _get_rag_total_memory_count_async(
             "details": []
         }
 
-    counts = await rag_stats.count_messages_by_end_user(
-        [str(row.id) for row in rows]
+    rows = await repo.get_memory_counts_by_ids_async(
+        workspace_id,
+        [uuid.UUID(uid) for uid in end_user_ids],
     )
+    name_by_id = {str(row.id): row.other_name for row in rows}
+    counts = await rag_stats.count_messages_by_end_user(end_user_ids)
     details = [
         {
-            "end_user_id": str(row.id),
-            "count": counts.get(str(row.id), 0),
-            "name": row.other_name or None
+            "end_user_id": end_user_id,
+            "count": counts.get(end_user_id, 0),
+            "name": name_by_id.get(end_user_id) or None
         }
-        for row in rows
+        for end_user_id in end_user_ids
     ]
     total_count = sum(item["count"] for item in details)
 
-    business_logger.info(f"成功获取 RAG 记忆总量: {total_count} (来自 {len(rows)} 个宿主)")
+    business_logger.info(f"成功获取 RAG 记忆总量: {total_count} (来自 {len(details)} 个宿主)")
     return {
         "total_memory_count": total_count,
-        "host_count": len(rows),
+        "host_count": len(details),
         "details": details
     }
 

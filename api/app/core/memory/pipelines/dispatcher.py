@@ -24,7 +24,7 @@ from typing import Any, List, Optional
 
 from app.core.exceptions import RateLimitException
 from app.core.memory.enums import MemoryMessageSource
-from app.core.utils.datetime_utils import ensure_dialog_at
+from app.core.utils.datetime_utils import ensure_dialog_at, parse_iso_to_utc_naive
 from app.db import get_db_context, get_db_read
 from app.repositories.memory_message_repository import MemoryMessageRepository
 
@@ -371,18 +371,66 @@ async def safe_push_fast_write(
 # RAG 记忆派发（独立索引，逐条入队）
 # ──────────────────────────────────────────────
 
-# 内容派生 uuid5 的固定命名空间：同一用户 + 同一 dialog_at + 同一内容恒得同一 id，
-# 配合 ES 覆盖写实现幂等去重。
+# 内容派生 uuid5 的固定命名空间：同一用户 + 同一 dialog_at + 同一 role + 同一内容
+# 恒得同一 id，配合 ES 覆盖写实现幂等去重；role 参与命名空间是为了避免同回合
+# user/assistant 内容完全相同时互相覆盖。
 _RAG_MEMORY_NAMESPACE = uuid.UUID("8f3f1a52-6c1e-5b7a-9d4e-2a7c6b1f0e93")
 
 
-def _rag_memory_id(end_user_id: str, dialog_at: str, content: str) -> str:
+def _rag_memory_id(
+    end_user_id: str, dialog_at: str, role: str, content: str
+) -> str:
     return str(
         uuid.uuid5(
             _RAG_MEMORY_NAMESPACE,
-            f"{end_user_id}:{dialog_at}:{content}",
+            f"{end_user_id}:{dialog_at}:{role}:{content}",
         )
     )
+
+
+def _normalize_raw_dialog_at(raw: Any) -> str | None:
+    """把消息里的时间字段统一成字符串；datetime 先转 ISO，其它类型视为缺失。"""
+    if isinstance(raw, datetime):
+        if raw.tzinfo is None:
+            raw = raw.replace(tzinfo=timezone.utc)
+        return raw.isoformat()
+    return raw if isinstance(raw, str) else None
+
+
+def _resolve_message_identity(
+    message: Any, raw_dialog_at: Any
+) -> tuple[str, str]:
+    """返回 (展示用 dialog_at, 派生 id 用的稳定时间片段)。
+
+    ``ensure_dialog_at`` 在时间缺失/非法时会用服务端当前时间兜底，若把兜底值
+    直接用于 uuid5，同一消息重试/重放会得到不同 id，幂等覆盖写失效并产生重复记忆。
+    因此时间不可用时改用消息自身 id 作稳定片段；两者都没有才退回兜底时间（告警）。
+    """
+    raw = _normalize_raw_dialog_at(raw_dialog_at)
+    dialog_at = ensure_dialog_at(raw)
+    if raw and raw.strip():
+        try:
+            if parse_iso_to_utc_naive(raw.strip()) is not None:
+                return dialog_at, dialog_at
+        except Exception:
+            pass
+
+    if isinstance(message, dict):
+        message_id = message.get("original_message_id") or message.get("id")
+    else:
+        message_id = (
+            getattr(message, "original_message_id", None)
+            or getattr(message, "id", None)
+        )
+    if message_id:
+        return dialog_at, f"message_id:{message_id}"
+
+    logger.warning(
+        "[RAGDispatcher] message without usable dialog_at/id, "
+        "derived id is not replay-stable: raw=%r",
+        raw_dialog_at,
+    )
+    return dialog_at, dialog_at
 
 
 def build_rag_payloads(
@@ -410,13 +458,14 @@ def build_rag_payloads(
         if not text:
             continue
 
-        dialog_at = ensure_dialog_at(raw_dialog_at)
+        dialog_at, id_time = _resolve_message_identity(message, raw_dialog_at)
+        role_value = str(role or "user")
         payloads.append(
             {
-                "id": _rag_memory_id(end_user_id, dialog_at, text),
+                "id": _rag_memory_id(end_user_id, id_time, role_value, text),
                 "end_user_id": end_user_id,
                 "config_id": config_id,
-                "role": str(role or "user"),
+                "role": role_value,
                 "content": text,
                 "source": source,
                 "dialog_at": dialog_at,
@@ -443,6 +492,19 @@ async def push_rag_task(payload: dict) -> str:
     return msg_id
 
 
+class RagDispatchRateLimited(RateLimitException):
+    """RAG 逐条派发中途被限流。
+
+    携带已成功入队条数：此前已派发的消息已生效，本批属于「部分提交」，
+    上层据此区分「完全未写入」与「已写入前 N 条」。
+    """
+
+    def __init__(self, message: str, *, enqueued: int, total: int) -> None:
+        super().__init__(message)
+        self.enqueued = enqueued
+        self.total = total
+
+
 async def push_rag_messages(
     messages: List[Any],
     end_user_id: str,
@@ -452,13 +514,31 @@ async def push_rag_messages(
     """逐条派发 RAG 记忆任务；返回调度层消息 id 列表（不对外暴露）。
 
     串行派发：一条消息一次排队准入。若中途某条抛 ``RateLimitException``，
-    此前已派发的 payload 已入队生效，本批构成「部分提交」——上层拿到异常时
-    无法据此判断哪些消息已受理。RAG 记忆以内容派生 uuid5 作 ES 主键，
-    同一消息重复派发是幂等覆盖写，因此调用方直接整批重试即可收敛。
+    此前已派发的 payload 已入队生效，本批构成「部分提交」——抛出的
+    ``RagDispatchRateLimited`` 会带上已入队条数，调用方据此判断真实写入范围。
+    RAG 记忆以内容派生 uuid5 作 ES 主键，同一消息重复派发是幂等覆盖写，
+    因此调用方直接整批重试即可收敛。
     """
+    payloads = build_rag_payloads(messages, end_user_id, config_id, source)
+    total = len(payloads)
     msg_ids: List[str] = []
-    for payload in build_rag_payloads(messages, end_user_id, config_id, source):
-        msg_ids.append(await push_rag_task(payload))
+    try:
+        for payload in payloads:
+            msg_ids.append(await push_rag_task(payload))
+    except RateLimitException as exc:
+        logger.warning(
+            "[RAGDispatcher] RAG 派发限流，部分消息已入队: end_user=%s, "
+            "source=%s, enqueued=%s/%s",
+            end_user_id,
+            source,
+            len(msg_ids),
+            total,
+        )
+        raise RagDispatchRateLimited(
+            f"RAG dispatch rate limited: enqueued={len(msg_ids)}/{total}",
+            enqueued=len(msg_ids),
+            total=total,
+        ) from exc
     return msg_ids
 
 
@@ -501,12 +581,15 @@ async def dispatch_api_service_async(
                     config_id=str(config_id),
                     source="api",
                 )
-            except RateLimitException:
+            except RateLimitException as exc:
                 # 与 agent/workflow 口径一致：限流视为跳过本条记忆，
-                # 不能让 OpenAPI 写入接口整体失败（调用方可按原请求重试）
+                # 不能让 OpenAPI 写入接口整体失败（调用方可按原请求重试）。
+                # 中途限流时前若干条已入队，日志记录真实写入范围
                 logger.warning(
-                    "[RAGDispatcher] api 写入限流，跳过本条记忆: end_user=%s",
+                    "[RAGDispatcher] api 写入限流，跳过本条记忆: end_user=%s, "
+                    "enqueued=%s",
                     end_user_id,
+                    getattr(exc, "enqueued", 0),
                 )
         return []
 
@@ -631,13 +714,18 @@ async def ingest_agent_messages(
                 config_id=str(config_id),
                 source="agent",
             )
-        except RateLimitException:
-            # 对话型入口：限流只跳过本条记忆，不影响对话响应
+        except RateLimitException as exc:
+            # 对话型入口：限流只跳过本条记忆，不影响对话响应。
+            # 中途限流时前若干条已入队，按真实入队条数返回，避免上层误判
+            # 该回合完全没有写入记忆
+            enqueued = getattr(exc, "enqueued", 0)
             logger.warning(
-                "[RAGDispatcher] agent 写入限流，跳过本条记忆: end_user=%s",
+                "[RAGDispatcher] agent 写入限流，部分消息已入队: "
+                "end_user=%s, enqueued=%s",
                 end_user_id,
+                enqueued,
             )
-            return False
+            return bool(enqueued)
         return True
 
     # 构建 write_batch 输入 + 记录原始 role/should_memorize（用于后续 Fast Write）。
@@ -768,11 +856,14 @@ async def ingest_workflow_messages(
                     config_id=str(config_id),
                     source="workflow",
                 )
-            except RateLimitException:
-                # 对话型入口：限流只跳过本条记忆，不影响工作流响应
+            except RateLimitException as exc:
+                # 对话型入口：限流只跳过本条记忆，不影响工作流响应；
+                # 日志记录中途限流时已入队的条数
                 logger.warning(
-                    "[RAGDispatcher] workflow 写入限流，跳过本条记忆: end_user=%s",
+                    "[RAGDispatcher] workflow 写入限流，跳过本条记忆: "
+                    "end_user=%s, enqueued=%s",
                     end_user_id,
+                    getattr(exc, "enqueued", 0),
                 )
         return
 
@@ -1233,11 +1324,14 @@ async def dispatch_mcp_write(
                     config_id=str(config_id),
                     source="mcp",
                 )
-            except RateLimitException:
-                # 限流按跳过处理，避免 MCP 工具把限流报成写入失败
+            except RateLimitException as exc:
+                # 限流按跳过处理，避免 MCP 工具把限流报成写入失败；
+                # 记录中途限流时已入队的条数
                 logger.warning(
-                    "[RAGDispatcher] mcp 写入限流，跳过本条记忆: end_user=%s",
+                    "[RAGDispatcher] mcp 写入限流，跳过本条记忆: "
+                    "end_user=%s, enqueued=%s",
                     end_user_id,
+                    getattr(exc, "enqueued", 0),
                 )
                 return ""
             return msg_ids[0] if msg_ids else ""
