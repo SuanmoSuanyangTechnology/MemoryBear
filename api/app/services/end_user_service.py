@@ -301,7 +301,7 @@ class EndUserService:
             # 避免依赖该字段的接口在合并后长期偏低
             try:
                 new_count = await rag_stats.count_messages([str(target)])
-                self.user_repo.update_memory_count(target, new_count)
+                await self.user_repo.update_memory_count_async(target, new_count)
                 logger.info(
                     f"[merge_end_users] target memory_count 同步完成(RAG): "
                     f"target={target}, count={new_count}"
