@@ -21,11 +21,15 @@
 import json
 from typing import Optional
 
-from fastapi import APIRouter, Body, Header, Query, Request
-from fastapi import APIRouter, Header, Query, Request, Body
+from fastapi import APIRouter, Body, Header, Query, Request, Security
+from fastapi.security import APIKeyHeader, HTTPBearer
 from pydantic import ValidationError
 
-from app.core.api_key_auth import require_api_key_self_db
+from app.core.api_key_auth import require_api_key_self_db, get_current_api_key_auth
+from app.controllers.scene_community_graph_response import (
+    SCENE_GRAPH_ERROR_RESPONSES, scene_community_graph_response,
+)
+from app.schemas.scene_community_graph_schema import GraphResponse
 from app.core.api_key_utils import get_current_user_snapshot_from_api_key_async, validate_end_user_in_workspace_async
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
@@ -295,3 +299,21 @@ async def generate_cache(
         language_type=language_type,
         current_user=current_user,
     )
+
+
+@router.get(
+    "/analytics/scene_community_graph", response_model=GraphResponse,
+    responses=SCENE_GRAPH_ERROR_RESPONSES,
+    dependencies=[
+        Security(APIKeyHeader(name="X-API-Key", scheme_name="SceneGraphApiKey", auto_error=False)),
+        Security(HTTPBearer(scheme_name="SceneGraphApiKeyBearer", auto_error=False)),
+    ],
+    summary="API Key 场景社区图谱", operation_id="getSceneCommunityGraphForService",
+)
+@require_api_key_self_db(scopes=["memory"])
+async def get_scene_community_graph_for_service(
+    request: Request,
+    end_user_id: str = Query(..., description="终端用户 UUID", json_schema_extra={"format": "uuid"}),
+) -> dict:
+    auth = get_current_api_key_auth()
+    return await scene_community_graph_response(auth.workspace_id, end_user_id)
