@@ -339,14 +339,35 @@ class MemoryService:
 
         from sqlalchemy import select
 
-        async with get_async_db_context() as db:
-            from app.models.end_user_model import EndUser
-            from app.models.workspace_model import Workspace
+        end_user_uuid: uuid.UUID | None = None
+        try:
+            end_user_uuid = uuid.UUID(str(end_user_id))
+        except (ValueError, TypeError, AttributeError):
+            # 该方法被多处调用，非法 id 不应让删除整体失败；按图侧默认路径兜底
+            logger.warning(
+                "[MemoryService] invalid end_user_id, fallback to graph delete: %s",
+                end_user_id,
+            )
 
-            storage_type = await db.scalar(
-                select(Workspace.storage_type)
-                .join(EndUser, EndUser.workspace_id == Workspace.id)
-                .where(EndUser.id == uuid.UUID(end_user_id))
+        storage_type = None
+        if end_user_uuid is not None:
+            async with get_async_db_context() as db:
+                from app.models.end_user_model import EndUser
+                from app.models.workspace_model import Workspace
+
+                storage_type = await db.scalar(
+                    select(Workspace.storage_type)
+                    .join(EndUser, EndUser.workspace_id == Workspace.id)
+                    .where(EndUser.id == end_user_uuid)
+                )
+
+        if not storage_type:
+            # 查不到归属（宿主不存在 / 未关联 workspace）时不能默认当成图空间：
+            # RAG 空间的记忆只在 ES 里，落到图分支会静默漏删。
+            logger.warning(
+                "[MemoryService] storage_type unresolved, fallback to graph delete: "
+                "end_user=%s",
+                end_user_id,
             )
 
         if str(storage_type or "").strip().lower() == "rag":

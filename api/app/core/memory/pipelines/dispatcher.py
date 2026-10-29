@@ -397,11 +397,14 @@ def build_rag_payloads(
         if isinstance(message, dict):
             role = message.get("role")
             content = message.get("content")
-            raw_dialog_at = message.get("dialog_at")
+            raw_dialog_at = message.get("dialog_at") or message.get("created_at")
         else:
             role = getattr(message, "role", None)
             content = getattr(message, "content", None)
-            raw_dialog_at = getattr(message, "dialog_at", None)
+            raw_dialog_at = (
+                getattr(message, "dialog_at", None)
+                or getattr(message, "created_at", None)
+            )
 
         text = str(content or "").strip()
         if not text:
@@ -491,12 +494,20 @@ async def dispatch_api_service_async(
             and str(message.get("content", "") or "").strip()
         ]
         if rag_messages:
-            await push_rag_messages(
-                messages=rag_messages,
-                end_user_id=end_user_id,
-                config_id=str(config_id),
-                source="api",
-            )
+            try:
+                await push_rag_messages(
+                    messages=rag_messages,
+                    end_user_id=end_user_id,
+                    config_id=str(config_id),
+                    source="api",
+                )
+            except RateLimitException:
+                # 与 agent/workflow 口径一致：限流视为跳过本条记忆，
+                # 不能让 OpenAPI 写入接口整体失败（调用方可按原请求重试）
+                logger.warning(
+                    "[RAGDispatcher] api 写入限流，跳过本条记忆: end_user=%s",
+                    end_user_id,
+                )
         return []
 
     with get_db_context() as db:
@@ -586,7 +597,7 @@ async def ingest_agent_messages(
     storage_type: str = "neo4j",
     user_rag_memory_id: str = "",
 ) -> bool:
-    """批量 Agent 消息摄入；RAG 直写知识库，Neo4j 进入消息/任务流水线。
+    """批量 Agent 消息摄入；RAG 派发独立索引写入任务，Neo4j 进入消息/任务流水线。
 
     专用于同一回合的多条消息（典型场景：user + assistant 一起入队），确保：
     1. 一次 pg_advisory_xact_lock，seq 按 messages 顺序连续递增（消除并发派发的
@@ -1215,12 +1226,20 @@ async def dispatch_mcp_write(
     """
     if _is_rag_storage(storage_type):
         if str(message or "").strip():
-            msg_ids = await push_rag_messages(
-                messages=[{"role": "user", "content": message, "dialog_at": dialog_at}],
-                end_user_id=end_user_id,
-                config_id=str(config_id),
-                source="mcp",
-            )
+            try:
+                msg_ids = await push_rag_messages(
+                    messages=[{"role": "user", "content": message, "dialog_at": dialog_at}],
+                    end_user_id=end_user_id,
+                    config_id=str(config_id),
+                    source="mcp",
+                )
+            except RateLimitException:
+                # 限流按跳过处理，避免 MCP 工具把限流报成写入失败
+                logger.warning(
+                    "[RAGDispatcher] mcp 写入限流，跳过本条记忆: end_user=%s",
+                    end_user_id,
+                )
+                return ""
             return msg_ids[0] if msg_ids else ""
         return ""
 
