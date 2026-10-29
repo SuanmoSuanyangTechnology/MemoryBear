@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from sqlalchemy import Boolean, Column, DateTime, String, Text
+from sqlalchemy import Boolean, Column, DateTime, Integer, String, Text
 from sqlalchemy.dialects.postgresql import UUID
 
 from src.models.base import Base
@@ -15,6 +15,7 @@ class EndUser(Base):
     workspace_id = Column(UUID(as_uuid=True), nullable=False)
     other_name = Column(String, nullable=True)
     is_active = Column(Boolean, nullable=False)
+    memory_count = Column(Integer, nullable=False)
     write_time = Column(DateTime, nullable=True)
     memory_insight = Column(Text, nullable=True)
     behavior_pattern = Column(Text, nullable=True)
