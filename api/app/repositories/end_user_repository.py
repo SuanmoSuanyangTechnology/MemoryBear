@@ -3020,9 +3020,9 @@ class EndUserRepository:
 
         memory_ids: list[uuid.UUID] = []
         for user_id, count in (memory_counts or {}).items():
-            if int(count or 0) <= 0:
-                continue
             try:
+                if int(count or 0) <= 0:
+                    continue
                 memory_ids.append(uuid.UUID(str(user_id)))
             except (ValueError, AttributeError, TypeError):
                 continue

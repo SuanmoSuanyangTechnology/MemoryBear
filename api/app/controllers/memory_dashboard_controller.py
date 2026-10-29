@@ -481,7 +481,7 @@ def get_current_user_rag_total_num(
 
 
 @router.get("/rag_content", response_model=ApiResponse)
-def get_rag_content(
+async def get_rag_content(
     end_user_id: str = Query(..., description="宿主ID"),
     page: int = Query(1, gt=0, description="页码，从1开始"),
     pagesize: int = Query(15, gt=0, le=100, description="每页返回记录数"),
@@ -490,8 +490,8 @@ def get_rag_content(
     source: Optional[List[str]] = Query(None, description="来源筛选，可多值"),
     keyword: Optional[str] = Query(None, description="关键词（content 全文匹配）"),
     order: str = Query("desc", pattern="^(asc|desc)$", description="排序：desc=最新在前（默认），asc=最早在前"),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_db),
+    current_user: CurrentUserSnapshot = Depends(get_current_user_async),
 ):
     """
     获取 RAG 记忆消息（分页，默认最新在前）。
@@ -499,7 +499,7 @@ def get_rag_content(
     数据源为独立索引 `rag_memory_current`；items 字段为
     id / role / content / dialog_at / source / legacy。
     """
-    data = memory_dashboard_service.get_rag_content(
+    data = await memory_dashboard_service.get_rag_content_async(
         end_user_id,
         page,
         pagesize,
