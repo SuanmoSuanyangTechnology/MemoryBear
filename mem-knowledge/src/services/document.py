@@ -242,21 +242,13 @@ async def apply_document_update(
         if hasattr(document, field):
             setattr(document, field, value)
     await db.flush()
-    from ..repositories.wiki.state import cancel, reenable, withdraw
 
     wiki_pages = []
     wiki_delivery = None
     if plan.update_fields.get("run") == 2:
+        from ..repositories.wiki.state import cancel
+
         wiki_pages = await db.run_sync(lambda session: cancel(session, knowledge.id, document.id))
-    if plan.status_changed:
-        if document.status != 1:
-            wiki_pages = await db.run_sync(
-                lambda session: withdraw(session, knowledge.id, document.id)
-            )
-        else:
-            wiki_delivery = await db.run_sync(
-                lambda session: reenable(session, knowledge.id, document.id)
-            )
     document.updated_at = utcnow_naive()
     try:
         await db.commit()
