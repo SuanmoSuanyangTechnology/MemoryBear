@@ -16,7 +16,6 @@ from app.core.exceptions import BusinessException, ResourceNotFoundException
 from app.core.logging_config import get_business_logger
 from app.models import MultiAgentConfig
 from app.models import ReleaseShare, AppRelease, Conversation
-from app.repositories import knowledge_repository
 from app.integrations.knowledge.contracts import KnowledgeRetrievalSource
 from app.repositories.tool_repository import ToolRepository
 from app.services.conversation_service import ConversationService
@@ -865,15 +864,6 @@ class SharedChatService:
                 workspace = self.db.get(Workspace, workspace_id)
                 if workspace and workspace.storage_type:
                     storage_type = workspace.storage_type
-
-                # 获取 USER_RAG_MERORY 知识库 ID
-                knowledge = knowledge_repository.get_knowledge_by_name(
-                    db=self.db,
-                    name="USER_RAG_MERORY",
-                    workspace_id=workspace_id
-                )
-                if knowledge:
-                    user_rag_memory_id = str(knowledge.id)
             except Exception as e:
                 logger.warning(f"获取 storage_type 或 user_rag_memory_id 失败，使用默认值: {str(e)}")
 

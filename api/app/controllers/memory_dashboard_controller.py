@@ -122,8 +122,8 @@ async def get_workspace_end_users(
         - memory_num.total 直接取 end_user.memory_count
 
         RAG 模式：
-        - 使用 documents.chunk_num 聚合过滤 chunk 总数 > 0 的宿主
-        - memory_num.total 取聚合后的 chunk 总数
+        - 按独立索引 `rag_memory_current` 聚合宿主消息条数
+        - memory_num.total 取聚合后的消息条数
 
     返回工作空间下的宿主列表，支持分页查询和模糊搜索。
     通过 keyword 参数同时模糊匹配 other_name 和 id 字段。
@@ -205,13 +205,20 @@ async def get_workspace_end_users(
         api_logger.warning(f"获取工作空间激活配置失败: {str(e)}")
         workspace_config = {"memory_config_id": None, "memory_config_name": None}
 
-    try:
-        active_counts = await memory_dashboard_service.batch_get_active_counts(
-            tuple(end_user_ids)
-        )
-    except Exception as e:
-        api_logger.warning(f"批量获取活跃节点数失败，降级为 0: {str(e)}")
-        active_counts = {}
+    if current_workspace_type == "rag":
+        # RAG 无软删节点，独立索引计数即活跃计数
+        active_counts = {
+            str(item["end_user"].id): int(item.get("memory_count", 0) or 0)
+            for item in raw_items
+        }
+    else:
+        try:
+            active_counts = await memory_dashboard_service.batch_get_active_counts(
+                tuple(end_user_ids)
+            )
+        except Exception as e:
+            api_logger.warning(f"批量获取活跃节点数失败，降级为 0: {str(e)}")
+            active_counts = {}
 
     memory_limits = get_end_user_memory_limit(db, current_user.tenant_id)
 
@@ -478,13 +485,32 @@ def get_rag_content(
     end_user_id: str = Query(..., description="宿主ID"),
     page: int = Query(1, gt=0, description="页码，从1开始"),
     pagesize: int = Query(15, gt=0, le=100, description="每页返回记录数"),
+    start_time: Optional[int] = Query(None, description="起始时间（毫秒 UTC，闭区间）"),
+    end_time: Optional[int] = Query(None, description="结束时间（毫秒 UTC，闭区间）"),
+    source: Optional[List[str]] = Query(None, description="来源筛选，可多值"),
+    keyword: Optional[str] = Query(None, description="关键词（content 全文匹配）"),
+    order: str = Query("desc", pattern="^(asc|desc)$", description="排序：desc=最新在前（默认），asc=最早在前"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """
-    获取当前宿主知识库中的chunk内容（分页）
+    获取 RAG 记忆消息（分页，默认最新在前）。
+
+    数据源为独立索引 `rag_memory_current`；items 字段为
+    id / role / content / dialog_at / source / legacy。
     """
-    data = memory_dashboard_service.get_rag_content(end_user_id, page, pagesize, db, current_user)
+    data = memory_dashboard_service.get_rag_content(
+        end_user_id,
+        page,
+        pagesize,
+        db,
+        current_user,
+        start_time=start_time,
+        end_time=end_time,
+        source=source,
+        keyword=keyword,
+        order=order,
+    )
     return success(data=data, msg="宿主RAGchunk数据获取成功")
 
 

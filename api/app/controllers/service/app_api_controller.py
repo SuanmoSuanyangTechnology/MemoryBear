@@ -31,7 +31,6 @@ from app.models.app_model import AppType
 from app.models.workspace_model import Workspace
 from app.models.app_release_model import AppRelease
 from app.models.workflow_model import WorkflowExecution
-from app.repositories import knowledge_repository
 from app.repositories.end_user_repository import EndUserRepository
 from app.schemas import AppChatRequest, conversation_schema
 from app.schemas.api_key_schema import ApiKeyAuth
@@ -91,19 +90,6 @@ async def _prepare_v1_chat_memory_context_async(
         storage_type = "neo4j"
 
     user_rag_memory_id = ""
-    if storage_type == "rag":
-        knowledge = await knowledge_repository.get_knowledge_by_name_async(
-            db=db,
-            name="USER_RAG_MERORY",
-            workspace_id=workspace_id,
-        )
-        if knowledge:
-            user_rag_memory_id = str(knowledge.id)
-        else:
-            logger.warning(
-                f"未找到名为 'USER_RAG_MERORY' 的知识库，workspace_id: {workspace_id}，将使用 neo4j 存储"
-            )
-            storage_type = "neo4j"
 
     return storage_type, user_rag_memory_id
 

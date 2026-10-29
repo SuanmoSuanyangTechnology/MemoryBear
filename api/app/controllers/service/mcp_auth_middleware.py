@@ -46,9 +46,6 @@ mcp_config_id: ContextVar[uuid.UUID | None] = ContextVar(
 mcp_storage_type: ContextVar[str | None] = ContextVar(
     "mcp_storage_type", default=None
 )
-mcp_user_rag_memory_id: ContextVar[str] = ContextVar(
-    "mcp_user_rag_memory_id", default=""
-)
 
 
 class MCPAuthMiddleware(BaseHTTPMiddleware):
@@ -117,23 +114,13 @@ class MCPAuthMiddleware(BaseHTTPMiddleware):
                     BizCode.MEMORY_CONFIG_NOT_FOUND,
                 )
 
-            # 5. Resolve storage_type and the workspace RAG memory knowledge ID
+            # 5. Resolve storage_type
             storage_type = self._resolve_storage_type(db, workspace_id)
-            user_rag_memory_id = ""
-            if storage_type.lower() == "rag":
-                user_rag_memory_id = self._resolve_user_rag_memory_id(db, workspace_id)
-                if not user_rag_memory_id:
-                    logger.warning(
-                        "RAG workspace has no USER_RAG_MERORY knowledge, "
-                        "RAG writes will fail until it is configured: workspace_id=%s",
-                        workspace_id,
-                    )
 
         mcp_workspace_id.set(workspace_id)
         mcp_end_user_id.set(end_user_id)
         mcp_config_id.set(config_id)
         mcp_storage_type.set(storage_type)
-        mcp_user_rag_memory_id.set(user_rag_memory_id)
 
         return await call_next(request)
 
@@ -153,17 +140,6 @@ class MCPAuthMiddleware(BaseHTTPMiddleware):
 
         storage_type = get_workspace_storage_type_without_auth(db, workspace_id)
         return storage_type if storage_type else "neo4j"
-
-    @staticmethod
-    def _resolve_user_rag_memory_id(db, workspace_id: uuid.UUID) -> str:
-        from app.repositories.knowledge_repository import get_knowledge_by_name
-
-        knowledge = get_knowledge_by_name(
-            db=db,
-            name="USER_RAG_MERORY",
-            workspace_id=workspace_id,
-        )
-        return str(knowledge.id) if knowledge else ""
 
     @staticmethod
     def _unauthorized(message: str, code: BizCode) -> JSONResponse:
