@@ -16,6 +16,7 @@ MemoryWriteDispatcher — 记忆写入派发层
 各入口点保持原位置，通过本模块的函数进行统一派发。
 """
 
+import hashlib
 import logging
 import uuid
 from datetime import datetime, timezone
@@ -579,7 +580,7 @@ async def dispatch_api_service_async(
                     messages=rag_messages,
                     end_user_id=end_user_id,
                     config_id=str(config_id),
-                    source="api",
+                    source=MemoryMessageSource.SERVICE_API.value,
                 )
             except RateLimitException as exc:
                 # 与 agent/workflow 口径一致：限流视为跳过本条记忆，
@@ -1317,9 +1318,24 @@ async def dispatch_mcp_write(
     """
     if _is_rag_storage(storage_type):
         if str(message or "").strip():
+            rag_message: dict[str, Any] = {
+                "role": "user",
+                "content": message,
+                "dialog_at": dialog_at,
+            }
+            if not str(dialog_at or "").strip():
+                # MCP 单条写入没有消息 id；若把服务端兜底时间用于 uuid5，
+                # 同一内容每次调用都会得到不同 id。这里用 end_user + 内容
+                # 派生稳定键，让重复写入覆盖同一条记忆（幂等）
+                rag_message["original_message_id"] = (
+                    "mcp:"
+                    + hashlib.sha1(
+                        f"{end_user_id}:{message}".encode("utf-8")
+                    ).hexdigest()
+                )
             try:
                 msg_ids = await push_rag_messages(
-                    messages=[{"role": "user", "content": message, "dialog_at": dialog_at}],
+                    messages=[rag_message],
                     end_user_id=end_user_id,
                     config_id=str(config_id),
                     source="mcp",

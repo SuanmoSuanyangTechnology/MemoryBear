@@ -19,6 +19,7 @@ services:
     depends_on:
       - worker-memory
       - worker-memory-fast
+      - worker-memory-rag
       - worker-document
       - worker-periodic
 
@@ -46,6 +47,20 @@ services:
       - ./files:/files
       - /etc/localtime:/etc/localtime:ro
     command: celery -A app.celery_worker.celery_app worker -E --loglevel=info --pool=threads --concurrency=32 --queues=memory_fast_tasks -n memory_fast_worker@%h
+    restart: unless-stopped
+    networks:
+      - celery
+
+  # RAG memory writer - consumes only memory_rag_tasks
+  worker-memory-rag:
+    image: redbear-mem-open:latest
+    container_name: worker-memory-rag
+    env_file:
+      - .env
+    volumes:
+      - ./files:/files
+      - /etc/localtime:/etc/localtime:ro
+    command: celery -A app.celery_worker.celery_app worker -E --loglevel=info --pool=threads --concurrency=32 --queues=memory_rag_tasks -n memory_rag_worker@%h
     restart: unless-stopped
     networks:
       - celery

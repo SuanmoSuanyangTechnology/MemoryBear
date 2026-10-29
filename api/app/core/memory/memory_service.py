@@ -348,11 +348,13 @@ class MemoryService:
         try:
             end_user_uuid = uuid.UUID(str(end_user_id))
         except (ValueError, TypeError, AttributeError):
-            # 该方法被多处调用，非法 id 不应让删除整体失败；按图侧默认路径兜底
-            logger.warning(
-                "[MemoryService] invalid end_user_id, fallback to graph delete: %s",
+            # 非法 id 不应继续走删除分支：用原始字符串去 ES term 查询没有意义，
+            # 同时再跑一遍图删除只会放大误操作面。直接返回 0 并留 error 日志
+            logger.error(
+                "[MemoryService] invalid end_user_id, abort delete: %s",
                 end_user_id,
             )
+            return 0
 
         storage_type = None
         if end_user_uuid is not None:
@@ -366,14 +368,16 @@ class MemoryService:
                     .where(EndUser.id == end_user_uuid)
                 )
 
-        if not storage_type:
-            # 查不到归属（宿主不存在 / 未关联 workspace）时不能默认当成图空间：
-            # RAG 空间的记忆只在 ES 里，落到图分支会静默漏删。归属未知时
-            # 两种存储都尝试清理，任一失败也不阻断另一条路径。
+        normalized_type = str(storage_type or "").strip().lower()
+        if normalized_type not in ("rag", "neo4j"):
+            # 查不到归属（宿主不存在 / 未关联 workspace）或取值无法识别时，
+            # 不能默认当成图空间：RAG 记忆只在 ES 里，落到图分支会静默漏删。
+            # 归属未知时两种存储都尝试清理，任一失败也不阻断另一条路径。
             logger.warning(
                 "[MemoryService] storage_type unresolved, delete both rag and graph: "
-                "end_user=%s",
+                "end_user=%s, storage_type=%r",
                 end_user_id,
+                storage_type,
             )
             from app.core.memory.rag.storage_ops import delete_messages_by_end_user
 
@@ -390,9 +394,18 @@ class MemoryService:
 
             pipeline = ForgettingPipeline(MemoryContext(end_user_id=end_user_id))
             graph_deleted = await pipeline.delete_all_nodes_by_end_user_id(end_user_id)
-            return rag_deleted + graph_deleted
+            logger.info(
+                "[MemoryService] fallback delete done: end_user=%s "
+                "rag_messages=%s graph_nodes=%s",
+                end_user_id,
+                rag_deleted,
+                graph_deleted,
+            )
+            # 两者单位不同（消息条数 vs 节点数），不能相加后对外报告；
+            # RAG 条数只进日志，返回值维持图侧节点数口径
+            return graph_deleted
 
-        if str(storage_type or "").strip().lower() == "rag":
+        if normalized_type == "rag":
             from app.core.memory.rag.storage_ops import delete_messages_by_end_user
 
             return await delete_messages_by_end_user(end_user_id)

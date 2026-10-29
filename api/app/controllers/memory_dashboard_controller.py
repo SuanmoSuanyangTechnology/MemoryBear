@@ -8,6 +8,8 @@ from sqlalchemy.orm import Session
 
 from app.core.logging_config import get_api_logger
 from app.core.memory.analytics.user_card_tags import normalize_stored_user_card_tags
+from app.core.memory.enums import MemoryMessageSource
+from app.core.memory.rag import stats as rag_stats
 from app.core.error_codes import BizCode
 from app.core.quota_manager import get_end_user_memory_limit
 from app.core.response_utils import fail, success
@@ -485,10 +487,10 @@ def get_current_user_rag_total_num(
 # source 直连 terms 过滤，未知取值会静默返回空列表，故在此显式拦截。
 _RAG_KEYWORD_MAX_LENGTH = 200
 _RAG_SOURCES = frozenset(
-    {"api", "service_api", "mcp", "agent", "legacy", "workflow"}
+    {item.value for item in MemoryMessageSource} | {rag_stats.LEGACY_SOURCE}
 )
-# 与 rag.stats.MAX_RESULT_WINDOW 对齐：from_ + size 超过 ES 上限会直接抛错
-_RAG_MAX_RESULT_WINDOW = 10_000
+# 与 rag.stats 共用同一上限，避免两处漂移导致本层放行、下层抛 ValueError
+_RAG_MAX_RESULT_WINDOW = rag_stats.MAX_RESULT_WINDOW
 
 
 @router.get("/rag_content", response_model=ApiResponse)

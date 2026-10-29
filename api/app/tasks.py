@@ -2633,13 +2633,23 @@ def process_rag_memory(
             raise
         except Exception as e:
             # 归属解析失败时不静默按旧 id 写入：该用户可能已被跨渠道归并，
-            # 落到旧 id 的文档在读取路径（按新 id 过滤）里查不到，等于丢记忆
-            logger.error(
-                "[CELERY RAG] merge resolution failed for %s: %s",
-                end_user_id,
-                e,
-                exc_info=True,
-            )
+            # 落到旧 id 的文档在读取路径（按新 id 过滤）里查不到，等于丢记忆。
+            # 重试耗尽时单独告警，与写入阶段的日志口径保持一致
+            if self.request.retries >= self.max_retries:
+                logger.error(
+                    "[CELERY RAG] 重试耗尽，身份归并解析最终失败: "
+                    "end_user=%s, err=%s",
+                    end_user_id,
+                    e,
+                    exc_info=True,
+                )
+            else:
+                logger.error(
+                    "[CELERY RAG] merge resolution failed for %s: %s",
+                    end_user_id,
+                    e,
+                    exc_info=True,
+                )
             raise self.retry(exc=e)
 
         from app.core.memory.pipelines.base_pipeline import ModelClientMixin

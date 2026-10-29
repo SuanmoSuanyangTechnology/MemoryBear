@@ -2988,6 +2988,7 @@ class EndUserRepository:
             workspace_id: uuid.UUID,
             page: int,
             pagesize: int,
+            *,
             memory_counts: dict[str, int],
             keyword: Optional[str] = None,
             label: Optional[str] = None,
@@ -3018,14 +3019,24 @@ class EndUserRepository:
         from sqlalchemy.orm import load_only
         from sqlalchemy.sql.expression import nullslast
 
-        memory_ids: list[uuid.UUID] = []
+        memory_counts_normalized: dict[str, int] = {}
         for user_id, count in (memory_counts or {}).items():
             try:
                 if int(count or 0) <= 0:
                     continue
-                memory_ids.append(uuid.UUID(str(user_id)))
+                # 统一用 uuid 的规范小写带连字符形式作键，保证与 EndUser.id 的
+                # str() 结果一致；非规范键（大写/无连字符）会被归一化而不是查不到
+                memory_counts_normalized[str(uuid.UUID(str(user_id)))] = int(count)
             except (ValueError, AttributeError, TypeError):
+                db_logger.warning(
+                    "get_paginated_with_memory_rag: invalid end_user_id key "
+                    "skipped: %r",
+                    user_id,
+                )
                 continue
+        memory_ids = [
+            uuid.UUID(user_id) for user_id in memory_counts_normalized
+        ]
         if not memory_ids:
             return [], 0
 
@@ -3090,7 +3101,9 @@ class EndUserRepository:
         for end_user_orm, expire_time in rows:
             items.append({
                 "end_user": end_user_orm,
-                "memory_count": int(memory_counts.get(str(end_user_orm.id), 0) or 0),
+                "memory_count": int(
+                    memory_counts_normalized.get(str(end_user_orm.id), 0) or 0
+                ),
                 "expire_time": expire_time,
             })
         return items, total

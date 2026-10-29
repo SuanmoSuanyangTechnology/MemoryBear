@@ -230,6 +230,9 @@ async def rebuild_rag_end_user_vectors(
                         first_error = first_error or (
                             f"write rag_memory: {failed_nodes} bulk failure(s)"
                         )
+                        # 失败页不推进游标，重试时重做该页（bulk update 幂等），
+                        # 否则失败文档会被记为已处理并永久跳过
+                        break
                 except Exception as exc:
                     logger.error(
                         "rag re-embed page failed: job=%s end_user=%s nodes=%s error=%s",

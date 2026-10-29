@@ -58,11 +58,11 @@ async def test_rag_storage_does_not_push_fast_write_task(monkeypatch) -> None:
 
 
 async def test_rag_agent_write_bypasses_normal_and_fast_dispatch(monkeypatch) -> None:
-    rag_write = AsyncMock()
+    rag_write = AsyncMock(return_value=["msg-1"])
     normal_dispatch = AsyncMock()
     fast_dispatch = AsyncMock()
     monkeypatch.setattr(dispatcher, "check_memory_enabled", AsyncMock(return_value=True))
-    monkeypatch.setattr(dispatcher, "write_messages_to_rag", rag_write)
+    monkeypatch.setattr(dispatcher, "push_rag_messages", rag_write)
     monkeypatch.setattr(dispatcher, "check_sliding_window_and_dispatch", normal_dispatch)
     monkeypatch.setattr(dispatcher, "safe_push_fast_write", fast_dispatch)
     messages = [
@@ -76,24 +76,24 @@ async def test_rag_agent_write_bypasses_normal_and_fast_dispatch(monkeypatch) ->
         app_id="app-1",
         end_user_id="end-user-1",
         storage_type="rag",
-        user_rag_memory_id="knowledge-1",
     )
 
     assert result is True
     rag_write.assert_awaited_once_with(
         messages=messages,
         end_user_id="end-user-1",
-        user_rag_memory_id="knowledge-1",
+        config_id="",
+        source="agent",
     )
     normal_dispatch.assert_not_awaited()
     fast_dispatch.assert_not_awaited()
 
 
 async def test_rag_workflow_write_bypasses_normal_and_fast_dispatch(monkeypatch) -> None:
-    rag_write = AsyncMock()
+    rag_write = AsyncMock(return_value=["msg-1"])
     normal_dispatch = AsyncMock()
     fast_dispatch = AsyncMock()
-    monkeypatch.setattr(dispatcher, "write_messages_to_rag", rag_write)
+    monkeypatch.setattr(dispatcher, "push_rag_messages", rag_write)
     monkeypatch.setattr(dispatcher, "check_sliding_window_and_dispatch", normal_dispatch)
     monkeypatch.setattr(dispatcher, "safe_push_fast_write", fast_dispatch)
     messages = [
@@ -108,23 +108,23 @@ async def test_rag_workflow_write_bypasses_normal_and_fast_dispatch(monkeypatch)
         config_id="config-1",
         workspace_id="workspace-1",
         storage_type="rag",
-        user_rag_memory_id="knowledge-1",
     )
 
     rag_write.assert_awaited_once_with(
         messages=messages,
         end_user_id="end-user-1",
-        user_rag_memory_id="knowledge-1",
+        config_id="config-1",
+        source="workflow",
     )
     normal_dispatch.assert_not_awaited()
     fast_dispatch.assert_not_awaited()
 
 
 async def test_rag_api_write_bypasses_normal_and_fast_dispatch(monkeypatch) -> None:
-    rag_write = AsyncMock()
+    rag_write = AsyncMock(return_value=["msg-1"])
     normal_dispatch = AsyncMock()
     fast_dispatch = AsyncMock()
-    monkeypatch.setattr(dispatcher, "write_messages_to_rag", rag_write)
+    monkeypatch.setattr(dispatcher, "push_rag_messages", rag_write)
     monkeypatch.setattr(dispatcher, "push_write_task", normal_dispatch)
     monkeypatch.setattr(dispatcher, "safe_push_fast_write", fast_dispatch)
     messages = [{"role": "user", "content": "remember me"}]
@@ -135,24 +135,24 @@ async def test_rag_api_write_bypasses_normal_and_fast_dispatch(monkeypatch) -> N
         config_id="config-1",
         workspace_id="workspace-1",
         storage_type="rag",
-        user_rag_memory_id="knowledge-1",
     )
 
     assert task_ids == []
     rag_write.assert_awaited_once_with(
         messages=messages,
         end_user_id="end-user-1",
-        user_rag_memory_id="knowledge-1",
+        config_id="config-1",
+        source="service_api",
     )
     normal_dispatch.assert_not_awaited()
     fast_dispatch.assert_not_awaited()
 
 
 async def test_rag_mcp_write_bypasses_normal_and_fast_dispatch(monkeypatch) -> None:
-    rag_write = AsyncMock()
+    rag_write = AsyncMock(return_value=["msg-1"])
     normal_dispatch = AsyncMock()
     fast_dispatch = AsyncMock()
-    monkeypatch.setattr(dispatcher, "write_messages_to_rag", rag_write)
+    monkeypatch.setattr(dispatcher, "push_rag_messages", rag_write)
     monkeypatch.setattr(dispatcher, "push_write_task", normal_dispatch)
     monkeypatch.setattr(dispatcher, "safe_push_fast_write", fast_dispatch)
 
@@ -162,11 +162,10 @@ async def test_rag_mcp_write_bypasses_normal_and_fast_dispatch(monkeypatch) -> N
         config_id="config-1",
         workspace_id="workspace-1",
         storage_type="rag",
-        user_rag_memory_id="knowledge-1",
         dialog_at="2026-09-23T00:00:00+00:00",
     )
 
-    assert task_id == ""
+    assert task_id == "msg-1"
     rag_write.assert_awaited_once_with(
         messages=[{
             "role": "user",
@@ -174,7 +173,8 @@ async def test_rag_mcp_write_bypasses_normal_and_fast_dispatch(monkeypatch) -> N
             "dialog_at": "2026-09-23T00:00:00+00:00",
         }],
         end_user_id="end-user-1",
-        user_rag_memory_id="knowledge-1",
+        config_id="config-1",
+        source="mcp",
     )
     normal_dispatch.assert_not_awaited()
     fast_dispatch.assert_not_awaited()

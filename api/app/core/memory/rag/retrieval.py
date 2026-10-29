@@ -285,6 +285,9 @@ class RagRetrieval:
                 MemoryRetrievalBusinessError.model_call_failed(
                     MemoryRetrievalStage.KEYWORD_SEARCH,
                     keyword_results,
+                    # 全文检索本身不是模型调用，但告警结构只接受 llm/embedding/rerank，
+                    # 缺省会 TypeError；沿用 embedding 分类以便上报链路可用
+                    model_type=MemoryModelType.EMBEDDING,
                     impact=MemoryRetrievalImpact.INCOMPLETE,
                 )
             )
