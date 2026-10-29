@@ -150,6 +150,7 @@ INDEX_DEFINITIONS: dict[MemoryNodeLabel, IndexDefinition] = {
             "id": {"type": "keyword"},
             "role": {"type": "keyword"},
             "end_user_id": {"type": "keyword"},
+            "config_id": {"type": "keyword"},
             "dialog_at": {"type": "date"},
             "source": {"type": "keyword"},
             "delete_at": {"type": "date"},

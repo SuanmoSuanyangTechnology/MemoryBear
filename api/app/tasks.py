@@ -2620,12 +2620,16 @@ def process_rag_memory(
                     resolved.id,
                 )
                 resolved_end_user_id = str(resolved.id)
-    except ValueError:
-        # 非法 end_user_id 属确定性错误，重试无意义；按原始 id 继续写入
-        logger.warning(
-            "[CELERY RAG] invalid end_user_id, using original id: %s",
+    except ValueError as exc:
+        # 非法 end_user_id 无法归属到任何宿主，按原 id 写入的文档不会被任何读取
+        # 路径召回，等价于丢记忆；属确定性错误，直接终止不重试
+        logger.error(
+            "[CELERY RAG] invalid end_user_id, aborting: %s (%s)",
             end_user_id,
+            exc,
+            exc_info=True,
         )
+        raise
     except Exception as e:
         # 归属解析失败时不静默按旧 id 写入：该用户可能已被跨渠道归并，
         # 落到旧 id 的文档在读取路径（按新 id 过滤）里查不到，等于丢记忆

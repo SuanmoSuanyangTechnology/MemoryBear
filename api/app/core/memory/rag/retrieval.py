@@ -261,6 +261,12 @@ class RagRetrieval:
             )
             semantic_skipped = False
 
+        # return_exceptions=True 会把 CancelledError 也当作结果吞掉，若不显式上抛，
+        # 请求已被取消时仍会继续执行融合与重排，掩盖取消语义
+        for outcome in (keyword_results, embedding_results):
+            if isinstance(outcome, asyncio.CancelledError):
+                raise outcome
+
         keyword_failed = isinstance(keyword_results, BaseException)
         semantic_failed = isinstance(embedding_results, BaseException)
         if keyword_failed:
@@ -363,7 +369,7 @@ class RagRetrieval:
                 raw_hit_count=(
                     len(keyword_results.items) + len(embedding_results.items)
                 ),
-                merged_count=len(memories),
+                merged_count=len(documents),
                 degraded_reasons=degraded_reasons,
             ),
         )
