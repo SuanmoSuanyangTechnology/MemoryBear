@@ -403,7 +403,6 @@ cd memory-profile
 uv sync --frozen
 uv run uvicorn src.entry:app --host 0.0.0.0 --port 8082 --http zttp --http2 --no-access-log
 uv run ruff check .
-uv run pytest -q
 uv run python -m compileall -q src scripts migrations
 uv run python scripts/check_import_boundaries.py
 ```
