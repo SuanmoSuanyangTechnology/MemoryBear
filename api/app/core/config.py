@@ -26,16 +26,6 @@ def _resolve_usage_stream() -> str:
     return f"model:usage:{db_name}"
 
 
-def _scene_graph_bool(name: str, default: bool) -> bool:
-    value = os.getenv(name)
-    if value is None:
-        return default
-    normalized = value.strip().lower()
-    if normalized not in {"true", "false", "1", "0"}:
-        raise ValueError(f"invalid boolean configuration: {name}")
-    return normalized in {"true", "1"}
-
-
 class Settings:
     # ========================================================================
     # Deployment Mode Configuration
@@ -336,18 +326,6 @@ class Settings:
     EMOTION_REPLY_INJECTION_TIMEOUT_SECONDS: float = max(
         0.01, float(os.getenv("EMOTION_REPLY_INJECTION_TIMEOUT_SECONDS", "2.0"))
     )
-
-    # Scene community graph query API
-    ENABLE_SCENE_COMMUNITY_GRAPH: bool = _scene_graph_bool("ENABLE_SCENE_COMMUNITY_GRAPH", False)
-    SCENE_GRAPH_CACHE_ENABLED: bool = _scene_graph_bool("SCENE_GRAPH_CACHE_ENABLED", True)
-    SCENE_GRAPH_CACHE_TTL_SECONDS: int = int(os.getenv("SCENE_GRAPH_CACHE_TTL_SECONDS", "60"))
-    SCENE_GRAPH_MAX_COMMUNITIES: int = int(os.getenv("SCENE_GRAPH_MAX_COMMUNITIES", "1000"))
-    SCENE_GRAPH_MAX_SCENES: int = int(os.getenv("SCENE_GRAPH_MAX_SCENES", "5000"))
-    SCENE_GRAPH_MAX_DATA_BYTES: int = int(os.getenv("SCENE_GRAPH_MAX_DATA_BYTES", "10485760"))
-    SCENE_GRAPH_READ_BUDGET_SECONDS: float = float(os.getenv("SCENE_GRAPH_READ_BUDGET_SECONDS", "5"))
-    SCENE_GRAPH_DB_TIMEOUT_SECONDS: float = float(os.getenv("SCENE_GRAPH_DB_TIMEOUT_SECONDS", "3"))
-    SCENE_GRAPH_CACHE_TIMEOUT_SECONDS: float = float(os.getenv("SCENE_GRAPH_CACHE_TIMEOUT_SECONDS", "0.2"))
-    SCENE_GRAPH_MAX_MERGE_HOPS: int = int(os.getenv("SCENE_GRAPH_MAX_MERGE_HOPS", "8"))
 
     # Scene continuity BERT (/v1/rerank)
     SCENE_CONTINUITY_URL: str = os.getenv("SCENE_CONTINUITY_URL", "")

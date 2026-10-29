@@ -1,16 +1,23 @@
 from typing import Annotated, Any, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
-from app.schemas.response_schema import ApiResponse
 
+from src.common.responses import ApiResponse
 
 UNASSIGNED_ID = "virtual:scene-community:unassigned"
 TIME_FIELDS = ("started_at", "ended_at", "created_at", "updated_at")
-Milliseconds = Annotated[int, Field(
-    ge=1_000_000_000_000, le=9_999_999_999_999,
-    description="毫秒级时间戳（13 位整数）",
-    json_schema_extra={"format": "int64", "x-apifox-mock": "@integer(1609459200000, 1893456000000)"},
-)]
+Milliseconds = Annotated[
+    int,
+    Field(
+        ge=1_000_000_000_000,
+        le=9_999_999_999_999,
+        description="毫秒级时间戳（13 位整数）",
+        json_schema_extra={
+            "format": "int64",
+            "x-apifox-mock": "@integer(1609459200000, 1893456000000)",
+        },
+    ),
+]
 
 
 class StrictModel(BaseModel):
@@ -59,9 +66,7 @@ class Scene(StrictModel):
     id: str
     label: Literal["SceneSummary"] = "SceneSummary"
     properties: SceneProperties
-    unassigned_reason: Literal[
-        "NO_PARENT", "INVALID_PARENT_ID", "PARENT_NOT_FOUND"
-    ] | None = None
+    unassigned_reason: Literal["NO_PARENT", "INVALID_PARENT_ID", "PARENT_NOT_FOUND"] | None = None
 
     _valid_id = field_validator("id")(validate_business_id)
 
@@ -154,7 +159,7 @@ class GraphData(StrictModel):
         return self
 
 
-class GraphResponse(ApiResponse):
+class GraphResponse(ApiResponse[GraphData]):
     model_config = ConfigDict(extra="forbid", strict=True)
     code: Literal[0] = 0
     msg: Literal["OK"] = "OK"
@@ -169,3 +174,16 @@ class ErrorResponse(StrictModel):
     data: dict[str, Any] = Field(default_factory=dict)
     error: str
     time: Milliseconds
+
+
+SCENE_GRAPH_ERROR_RESPONSES = {
+    **{status: {"model": ErrorResponse} for status in (400, 500, 503)},
+    **{
+        status: {"description": "Existing authentication/workspace error"}
+        for status in (401, 403, 404)
+    },
+    200: {
+        "model": GraphResponse | ErrorResponse,
+        "description": "Check code: USER_NOT_FOUND is HTTP 200 / code 4001.",
+    },
+}

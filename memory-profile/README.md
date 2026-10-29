@@ -302,6 +302,37 @@ MEMORY_PROFILE_BASE_URL=http://memory-profile:8082
 
 With the flag enabled, every endpoint carrying `@memory_profile_proxy(...)` uses the remote service; endpoints without it keep their local implementation. The API marks API-key calls `x-source: ex_api` and everything else `in_api`, the same labelling the Gateway applies on the face it terminated credentials on, and it identifies the API-key face by the key itself (`x-api-key-id`) exactly as the Gateway does. The mode is derived from the caller's own path, so it cannot drift from the forwarded path. Transport/protocol failures fail closed as `SERVICE_UNAVAILABLE`. Set the flag back to `false` for a reversible rollback.
 
+## Scene community graph
+
+The scene community graph follows the same entry chain as the other analytics
+endpoints: `routes.py` → `AnalyticsHandler` → `ProfileAnalyticsService`.
+Grouping, validation and bounded caching live under
+`src/modules/analytics/scene_community_graph/`; Neo4j reads live in the analytics
+repository. User access and merge routing reuse
+`EndUserService.resolve_in_workspace()`, exactly as the existing graph endpoints
+do. There is no separate scene-specific merge traversal or PostgreSQL repository.
+The API provides JWT and API-key forwarding entries; this service owns user
+merge resolution, workspace checks, grouping, validation, response statistics,
+and the optional Redis cache. It reuses the runtime's pooled clients.
+
+Enable `ENABLE_MEMORY_PROFILE` and configure `MEMORY_PROFILE_BASE_URL` in the
+API process, then set `ENABLE_SCENE_COMMUNITY_GRAPH=true` in this service.
+The new API entries report service unavailable when forwarding is disabled.
+Scene graph settings belong to this service; `.env.example` lists their
+defaults, including a 60-second cache TTL and the complete-response limits.
+
+Scenes are grouped by their stored parent community ID. Missing, invalid, or
+unresolved parents appear in one `UNASSIGNED` group with a reason code.
+Successful responses contain `groups` and `statistics`; all non-null timestamps
+are integer milliseconds. Empty data is a successful response. Capacity limits
+and database failures return error envelopes instead of partial graphs.
+Authorization is checked before every cache lookup.
+Errors reuse `BizCode`, `LocalizedProfileError`, the `analytics.scene_graph.*`
+translation keys in both locale catalogs, and the service's global error handlers.
+Unexpected failures use the shared internal-error response. The cache adapter
+keeps this endpoint's byte/count limits and cached-payload validation while
+reusing the runtime's Redis client.
+
 ## Logging
 
 Logging is configured once by `src/common/observability/logging.py`; `logging.basicConfig()` is not used. Configuration:
@@ -367,6 +398,7 @@ cd memory-profile
 uv sync --frozen
 uv run uvicorn src.entry:app --host 0.0.0.0 --port 8082 --http zttp --http2 --no-access-log
 uv run ruff check .
+uv run pytest -q
 uv run python -m compileall -q src scripts migrations
 uv run python scripts/check_import_boundaries.py
 ```

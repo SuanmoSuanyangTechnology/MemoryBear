@@ -69,6 +69,8 @@ from src.modules.analytics.repository.workspace_statistics import (
     WorkspaceStatisticsRepository,
     WorkspaceStatisticsUnavailableError,
 )
+from src.modules.analytics.scene_community_graph.schemas import GraphData
+from src.modules.analytics.scene_community_graph.service import get_scene_community_graph_service
 from src.modules.shared import (
     EndUserService,
     ModelConfigService,
@@ -527,6 +529,7 @@ class ProfileAnalyticsService:
         self.end_user = EndUserService.from_postgres(
             runtime.postgres
         )
+        self.scene_graph = get_scene_community_graph_service(runtime, self.end_user)
         self.memory_statistics = MemoryStatisticsRepository(runtime.postgres)
         self.memory_graph = MemoryGraphRepository(runtime.neo4j)
         self.memory_search = MemorySearchRepository(runtime.elasticsearch)
@@ -543,6 +546,10 @@ class ProfileAnalyticsService:
         )
         self.task_bridge = runtime.task_bridge
         self.interest_cache_expire = runtime.settings.interest_cache_expire_seconds
+
+    async def scene_community_graph(self, end_user_id: str, workspace_id: UUID) -> GraphData:
+        """Read grouped scenes using the shared end-user boundary and pooled clients."""
+        return await self.scene_graph.get_graph(workspace_id, end_user_id)
 
     async def memory_insight(self, end_user_id: str, workspace_id: UUID) -> dict[str, Any]:
         """读缓存的记忆洞察；用户维度的问题一律走空态（文档 3.4 的 B 类响应）。"""

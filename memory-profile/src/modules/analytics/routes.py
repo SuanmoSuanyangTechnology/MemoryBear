@@ -12,6 +12,10 @@ from src.i18n import get_request_language
 from src.middleware.auth import MemoryPrincipal
 from src.middleware.identity import require_memory_context
 from src.modules.analytics.handler import AnalyticsHandler
+from src.modules.analytics.scene_community_graph.schemas import (
+    SCENE_GRAPH_ERROR_RESPONSES,
+    GraphResponse,
+)
 from src.modules.analytics.schemas import GenerateCacheBody
 
 router = APIRouter(prefix="/memory/analytics", tags=["Profile Analytics"])
@@ -98,6 +102,23 @@ async def community_graph(
     return await _handler(request).community_graph(
         context, end_user_id, get_request_language(request)
     )
+
+
+@router.get(
+    "/scene_community_graph",
+    response_model=GraphResponse,
+    responses=SCENE_GRAPH_ERROR_RESPONSES,
+    summary="Scene community graph",
+)
+@external_api
+async def scene_community_graph(
+    request: Request,
+    context: Context,
+    end_user_id: str = Query(
+        ..., description="End user UUID", json_schema_extra={"format": "uuid"}
+    ),
+) -> GraphResponse:
+    return await _handler(request).scene_community_graph(context, end_user_id)
 
 
 @router.get("/hot_memory_tags", response_model=ListApiResponse)

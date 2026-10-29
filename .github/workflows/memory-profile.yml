@@ -43,5 +43,8 @@ jobs:
       - name: Import boundaries
         run: uv run python scripts/check_import_boundaries.py
 
+      - name: Tests
+        run: uv run pytest -q
+
       - name: External API contract
         run: uv run python scripts/check_external_api_contract.py

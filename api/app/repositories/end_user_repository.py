@@ -3287,26 +3287,3 @@ def update_memory_config_id(db: Session, end_user_id: uuid.UUID, memory_config_i
     """
     repo = EndUserRepository(db)
     return repo.update_memory_config_id(end_user_id, memory_config_id)
-
-
-class SceneGraphUserLookup:
-    """Check an end user and each merge target inside the same workspace."""
-
-    async def find_active_flag(self, workspace_id: uuid.UUID, user_id: uuid.UUID) -> bool | None:
-        from app.db import get_async_db_context
-
-        async with get_async_db_context() as db:
-            result = await db.execute(select(EndUser.is_active).where(
-                EndUser.id == user_id, EndUser.workspace_id == workspace_id,
-            ))
-            return result.scalar_one_or_none()
-
-    async def merge_targets(self, workspace_id: uuid.UUID, user_id: uuid.UUID) -> list[uuid.UUID]:
-        from app.db import get_async_db_context
-
-        async with get_async_db_context() as db:
-            result = await db.execute(select(EndUserMerge.target_id).where(
-                EndUserMerge.origin_id == user_id,
-                EndUserMerge.workspace_id == workspace_id,
-            ).distinct().limit(2))
-            return list(result.scalars().all())

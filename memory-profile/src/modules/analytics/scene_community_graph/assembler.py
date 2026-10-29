@@ -1,14 +1,22 @@
 """Pure grouping logic: no network, authentication, cache, or database writes."""
-from datetime import datetime, timezone
+
+from datetime import UTC, datetime
 from typing import Any
 
 from pydantic import ValidationError
 
-from app.services.scene_community_graph_types import bad_data
-from app.schemas.scene_community_graph_schema import (
-    TIME_FIELDS, CommunityGroup, CommunityProperties, GraphData,
-    Scene, SceneProperties, Statistics, UnassignedGroup, validate_business_id,
+from src.modules.analytics.scene_community_graph.schemas import (
+    TIME_FIELDS,
+    CommunityGroup,
+    CommunityProperties,
+    GraphData,
+    Scene,
+    SceneProperties,
+    Statistics,
+    UnassignedGroup,
+    validate_business_id,
 )
+from src.modules.analytics.scene_community_graph.types import bad_data
 
 COMMUNITY_FIELDS = tuple(CommunityProperties.model_fields)
 SCENE_FIELDS = tuple(SceneProperties.model_fields)
@@ -28,8 +36,8 @@ def _time(value: Any) -> int | None:
         raise ValueError("invalid datetime")
     # SceneStorage stores UTC wall time as a Neo4j localdatetime.
     if value.tzinfo is None:
-        value = value.replace(tzinfo=timezone.utc)
-    delta = value.astimezone(timezone.utc) - datetime(1970, 1, 1, tzinfo=timezone.utc)
+        value = value.replace(tzinfo=UTC)
+    delta = value.astimezone(UTC) - datetime(1970, 1, 1, tzinfo=UTC)
     # Integer arithmetic avoids float rounding and truncates sub-millisecond precision.
     return delta.days * 86_400_000 + delta.seconds * 1000 + delta.microseconds // 1000
 
@@ -55,7 +63,9 @@ def _id(row: dict, seen: set[str]) -> str:
 
 
 def _sort_key(properties, names: tuple[str, ...], identifier: str) -> tuple:
-    value = next((getattr(properties, name) for name in names if getattr(properties, name) is not None), None)
+    value = next(
+        (getattr(properties, name) for name in names if getattr(properties, name) is not None), None
+    )
     if value is None:
         return (True, 0, identifier)
     return (False, -value, identifier)
@@ -101,7 +111,8 @@ def _assemble(community_rows: list[dict], scene_rows: list[dict]) -> GraphData:
             groups[parent].scenes.append(scene)
         else:
             scene = Scene(
-                id=identifier, properties=SceneProperties(**props),
+                id=identifier,
+                properties=SceneProperties(**props),
                 unassigned_reason=reason or "PARENT_NOT_FOUND",
             )
             unassigned.append(scene)
@@ -116,17 +127,28 @@ def _assemble(community_rows: list[dict], scene_rows: list[dict]) -> GraphData:
             group.properties.member_count = group.scene_count
     result = sorted(
         groups.values(),
-        key=lambda g: (not bool(g.scenes), *_sort_key(g.properties, ("updated_at", "created_at"), g.id)),
+        key=lambda g: (
+            not bool(g.scenes),
+            *_sort_key(g.properties, ("updated_at", "created_at"), g.id),
+        ),
     )
     if unassigned:
         unassigned.sort(key=scene_key)
-        result.append(UnassignedGroup(
-            properties=CommunityProperties(member_count=len(unassigned)),
-            scene_count=len(unassigned), scenes=unassigned,
-        ))
+        result.append(
+            UnassignedGroup(
+                properties=CommunityProperties(member_count=len(unassigned)),
+                scene_count=len(unassigned),
+                scenes=unassigned,
+            )
+        )
     assigned = len(scene_ids) - len(unassigned)
-    return GraphData(groups=result, statistics=Statistics(
-        total_scene_communities=len(groups), total_scene_summaries=len(scene_ids),
-        assigned_scene_summaries=assigned, unassigned_scene_summaries=len(unassigned),
-        total_groups=len(result),
-    ))
+    return GraphData(
+        groups=result,
+        statistics=Statistics(
+            total_scene_communities=len(groups),
+            total_scene_summaries=len(scene_ids),
+            assigned_scene_summaries=assigned,
+            unassigned_scene_summaries=len(unassigned),
+            total_groups=len(result),
+        ),
+    )

@@ -22,11 +22,6 @@ from app.core.memory.constants.graph_data_constants import (
 )
 from app.core.response_utils import fail, success
 from app.db import get_db_context
-from app.dependencies import cur_workspace_access_guard_async
-from app.controllers.scene_community_graph_response import (
-    SCENE_GRAPH_ERROR_RESPONSES, scene_community_graph_response,
-)
-from app.schemas.scene_community_graph_schema import GraphResponse
 from app.dependencies import CurrentUserSnapshot, get_current_user_async
 from app.integrations.profile.proxy import memory_profile_proxy
 from app.schemas.memory_storage_schema import GenerateCacheRequest
@@ -459,13 +454,18 @@ async def get_interest_distribution_by_user_api(
 
 
 @router.get(
-    "/scene_community_graph", response_model=GraphResponse,
-    responses=SCENE_GRAPH_ERROR_RESPONSES,
+    "/scene_community_graph", response_model=ApiResponse,
     summary="管理端场景社区图谱", operation_id="getSceneCommunityGraphForManager",
 )
-@cur_workspace_access_guard_async()
+@memory_profile_proxy(query_fields=("end_user_id",))
 async def get_scene_community_graph_for_manager(
     end_user_id: str = Query(..., description="终端用户 UUID", json_schema_extra={"format": "uuid"}),
     current_user: CurrentUserSnapshot = Depends(get_current_user_async),
+    request: Request = None,
 ) -> dict:
-    return await scene_community_graph_response(current_user.current_workspace_id, end_user_id)
+    """Forward scene community graph queries to memory-profile."""
+    return fail(
+        BizCode.SERVICE_UNAVAILABLE,
+        "记忆画像服务暂不可用",
+        "Memory profile integration is disabled",
+    )

@@ -345,6 +345,134 @@
         "status_code": 200
       }
     },
+    "GET /internal/v1/memory/analytics/scene_community_graph": {
+      "endpoint": "scene_community_graph",
+      "parameters": {
+        "query:end_user_id": {
+          "annotation": "str",
+          "constraints": [],
+          "default": null,
+          "in": "query",
+          "required": true
+        }
+      },
+      "response": {
+        "config": {
+          "extra": "forbid",
+          "strict": true
+        },
+        "declared": [
+          "200",
+          "400",
+          "401",
+          "403",
+          "404",
+          "500",
+          "503"
+        ],
+        "fields": {
+          "code": {
+            "annotation": "Literal[0]",
+            "constraints": [],
+            "default": 0,
+            "required": false
+          },
+          "data": {
+            "annotation": "src.modules.analytics.scene_community_graph.schemas.GraphData",
+            "config": {
+              "extra": "forbid",
+              "strict": true
+            },
+            "constraints": [],
+            "default": null,
+            "fields": {
+              "groups": {
+                "annotation": "list[src.modules.analytics.scene_community_graph.schemas.CommunityGroup | src.modules.analytics.scene_community_graph.schemas.UnassignedGroup]",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "statistics": {
+                "annotation": "src.modules.analytics.scene_community_graph.schemas.Statistics",
+                "config": {
+                  "extra": "forbid",
+                  "strict": true
+                },
+                "constraints": [],
+                "default": null,
+                "fields": {
+                  "assigned_scene_summaries": {
+                    "annotation": "int",
+                    "constraints": [
+                      "Ge(ge=0)"
+                    ],
+                    "default": null,
+                    "required": true
+                  },
+                  "total_groups": {
+                    "annotation": "int",
+                    "constraints": [
+                      "Ge(ge=0)"
+                    ],
+                    "default": null,
+                    "required": true
+                  },
+                  "total_scene_communities": {
+                    "annotation": "int",
+                    "constraints": [
+                      "Ge(ge=0)"
+                    ],
+                    "default": null,
+                    "required": true
+                  },
+                  "total_scene_summaries": {
+                    "annotation": "int",
+                    "constraints": [
+                      "Ge(ge=0)"
+                    ],
+                    "default": null,
+                    "required": true
+                  },
+                  "unassigned_scene_summaries": {
+                    "annotation": "int",
+                    "constraints": [
+                      "Ge(ge=0)"
+                    ],
+                    "default": null,
+                    "required": true
+                  }
+                },
+                "required": true
+              }
+            },
+            "required": true
+          },
+          "error": {
+            "annotation": "Literal[]",
+            "constraints": [],
+            "default": "",
+            "required": false
+          },
+          "msg": {
+            "annotation": "Literal[OK]",
+            "constraints": [],
+            "default": "OK",
+            "required": false
+          },
+          "time": {
+            "annotation": "int",
+            "constraints": [
+              "Ge(ge=1000000000000)",
+              "Le(le=9999999999999)"
+            ],
+            "default": null,
+            "required": true
+          }
+        },
+        "model": "src.modules.analytics.scene_community_graph.schemas.GraphResponse",
+        "status_code": 200
+      }
+    },
     "GET /internal/v1/memory/analytics/user_summary": {
       "endpoint": "user_summary",
       "parameters": {
