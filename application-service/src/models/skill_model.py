@@ -25,11 +25,31 @@ class Skill(Base):
     
     # Dedicated prompt
     prompt = Column(Text, comment="技能专属提示词")
-    
+
+    # Standard pack linkage (Agent Skills protocol compatibility). Same three
+    # columns as the host ``app/models/skill_model.py``; DDL lands in the monolith
+    # chain first (see ``base.py``).
+    package_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("skill_packages.id"),
+        nullable=True,
+        index=True,
+        comment="已安装的标准包",
+    )
+    skill_format = Column(
+        String(16), default="legacy", nullable=False, comment="技能格式：legacy | standard"
+    )
+    call_name = Column(
+        String(64),
+        nullable=True,
+        index=True,
+        comment="运行时调用名（read_skill / discovery 索引用），租户内唯一",
+    )
+
     # Status
     is_active = Column(Boolean, default=True, nullable=False, comment="是否激活")
     is_public = Column(Boolean, default=False, nullable=False, comment="是否公开到市场")
-    
+
     # Timestamps
     created_at = Column(DateTime, default=utcnow_naive, comment="创建时间")
     updated_at = Column(DateTime, default=utcnow_naive, onupdate=utcnow_naive, comment="更新时间")

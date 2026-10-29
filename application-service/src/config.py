@@ -115,6 +115,46 @@ class AppServiceSettings(BaseSettings):
         ),
         validation_alias="SANDBOX_FILE_ALLOWED_EXTENSIONS",
     )
+    # ---- Agent Skills standard packages (design doc §14) ----
+    # Single-file inline ceiling; larger or binary files go to object storage.
+    skill_package_inline_limit: int = Field(
+        default=2 * 1024 * 1024, ge=1, validation_alias="SKILL_PACKAGE_INLINE_LIMIT"
+    )
+    # A real community bundle (many skills, each with references/scripts) easily
+    # exceeds a few hundred files; the total-size cap below is the real guard.
+    skill_package_max_files: int = Field(
+        default=2000, ge=1, validation_alias="SKILL_PACKAGE_MAX_FILES"
+    )
+    skill_package_max_size: int = Field(
+        default=100 * 1024 * 1024, ge=1, validation_alias="SKILL_PACKAGE_MAX_SIZE"
+    )
+    # read_skill / discovery index budgets.
+    skill_read_max_chars: int = Field(
+        default=16000, ge=1, validation_alias="SKILL_READ_MAX_CHARS"
+    )
+    skill_desc_index_chars: int = Field(
+        default=200, ge=1, validation_alias="SKILL_DESC_INDEX_CHARS"
+    )
+    # URL import guard (SSRF face): https-only + host allow-list + timeout/size caps.
+    skill_import_url_hosts: str = Field(
+        default="github.com,codeload.github.com", validation_alias="SKILL_IMPORT_URL_HOSTS"
+    )
+    skill_import_url_timeout: float = Field(
+        default=15.0, gt=0, validation_alias="SKILL_IMPORT_URL_TIMEOUT"
+    )
+    skill_import_url_max_bytes: int = Field(
+        default=20 * 1024 * 1024, ge=1, validation_alias="SKILL_IMPORT_URL_MAX_BYTES"
+    )
+    # Follow the process proxy env (HTTP(S)_PROXY) for the public GitHub fetch.
+    # Default off keeps the SSRF face unchanged (an env proxy must be opt-in);
+    # deployments whose egress requires a proxy set this to true.
+    skill_import_url_trust_env: bool = Field(
+        default=False, validation_alias="SKILL_IMPORT_URL_TRUST_ENV"
+    )
+    # Upper bound on the members one plugin folder may carry (§7.8 rule 7).
+    skill_plugin_max_members: int = Field(
+        default=50, ge=1, validation_alias="SKILL_PLUGIN_MAX_MEMBERS"
+    )
     # Max calls of each single tool within one Agent run. One knob for every
     # Agent kind (agent app, sub-agent, cluster supervisor, workflow agent node).
     agent_tool_call_limit: int = Field(

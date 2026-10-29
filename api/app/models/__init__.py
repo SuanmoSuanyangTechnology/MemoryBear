@@ -35,6 +35,7 @@ from .tool_model import (
 )
 from .memory_perceptual_model import MemoryPerceptualModel
 from .skill_model import Skill
+from .skill_package_model import SkillPackage, SkillFile
 from .ontology_scene import OntologyScene
 from .ontology_class import OntologyClass
 from .ontology_scene import OntologyScene
@@ -124,6 +125,8 @@ __all__ = [
     "ModelBase",
     "LoadBalanceStrategy",
     "Skill",
+    "SkillPackage",
+    "SkillFile",
     "ImplicitEmotionsStorage",
     "AppAnnotation",
     "AppAnnotationSetting",

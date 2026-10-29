@@ -24,6 +24,37 @@ def _header(ctx: PromptContext) -> str:
     return "【执行要求】"
 
 
+def _today_text() -> str:
+    """Current date in the product's reference timezone (Asia/Shanghai).
+
+    The model has no clock, so without this anchor a "today / latest" request gets
+    resolved against its training cutoff — the observed failure was searching
+    "2025年7月11日 A股" in October 2026, which returned nothing and burned the
+    tool-call budget. A fixed +08:00 offset is the fallback when tzdata is missing
+    (Windows has no system zoneinfo).
+    """
+    from datetime import datetime, timedelta, timezone
+
+    try:
+        from ...utils.datetime_utils import resolve_iana_timezone
+
+        zone, _name = resolve_iana_timezone("Asia/Shanghai")
+    except Exception:  # noqa: BLE001 - missing tzdata must not disable the anchor
+        zone = timezone(timedelta(hours=8))
+    now = datetime.now(zone)
+    weekday = "一二三四五六日"[now.weekday()]
+    return f"{now:%Y-%m-%d}（星期{weekday}）"
+
+
+@prompt_block("base.current_date", order=ORDER_HEADER + 10)
+def _current_date(ctx: PromptContext) -> str:
+    return (
+        f"当前日期是 {_today_text()}，时区 Asia/Shanghai（UTC+8）。"
+        "涉及“今天/最新/近期”的信息，以该日期为基准；检索时不要自行臆造年份或历史日期，"
+        "也不要把训练语料里的日期当成本轮时间。"
+    )
+
+
 @prompt_block("base.core", order=ORDER_CORE)
 def _core(ctx: PromptContext) -> str:
     return (

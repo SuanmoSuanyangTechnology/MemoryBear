@@ -1,16 +1,19 @@
-"""Skill table access (frozen port of the monolith ``skill_repository``
-management-plane reads and writes; the host static methods become instance
-repositories, matching the port's repository convention)."""
+"""Skill table access (port of the monolith ``skill_repository`` management-plane reads).
+
+The write paths (``create`` / ``update`` / ``delete``) are gone: the import pipeline owns
+skill-row creation, and deletion (soft-delete the row + purge its pack) lives in
+``SkillPackageService`` where the plugin cascade can share one transaction (ADR-9).
+"""
 
 from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import and_, or_
+from sqlalchemy import and_, func, or_, select
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from ..models.skill_model import Skill
-from ..schemas.skill_schema import SkillCreate, SkillUpdate
 
 
 class SkillRepository:
@@ -18,16 +21,6 @@ class SkillRepository:
 
     def __init__(self, db: Session):
         self.db = db
-
-    def create(self, data: SkillCreate, tenant_id: uuid.UUID) -> Skill:
-        """Create a skill."""
-        skill = Skill(
-            **data.model_dump(),
-            tenant_id=tenant_id
-        )
-        self.db.add(skill)
-        self.db.flush()
-        return skill
 
     def get_by_id(self, skill_id: uuid.UUID, tenant_id: uuid.UUID | None = None) -> Skill | None:
         """Get a skill by ID."""
@@ -81,34 +74,46 @@ class SkillRepository:
 
         return skills, total
 
-    def update(self, skill_id: uuid.UUID, data: SkillUpdate, tenant_id: uuid.UUID) -> Skill | None:
-        """Update a skill."""
-        skill = self.db.query(Skill).filter(
-            Skill.id == skill_id,
-            Skill.tenant_id == tenant_id
-        ).first()
+    @staticmethod
+    async def list_skills_async(
+        db: AsyncSession,
+        tenant_id: uuid.UUID,
+        search: str | None = None,
+        is_active: bool | None = None,
+        is_public: bool | None = None,
+        page: int = 1,
+        pagesize: int = 10,
+    ) -> tuple[list[Skill], int]:
+        """Async list (runtime plane: the middleware loads skills inside the event loop)."""
 
-        if not skill:
-            return None
+        filters = [or_(Skill.tenant_id == tenant_id, Skill.is_public.is_(True))]
+        if search:
+            filters.append(Skill.name.ilike(f"%{search}%"))
+        if is_active is not None:
+            filters.append(Skill.is_active == is_active)
+        if is_public is not None:
+            filters.append(Skill.is_public == is_public)
 
-        update_data = data.model_dump(exclude_unset=True)
-        for key, value in update_data.items():
-            setattr(skill, key, value)
+        where_clause = and_(*filters)
+        total = (
+            await db.execute(select(func.count()).select_from(Skill).where(where_clause))
+        ).scalar_one()
+        result = await db.execute(
+            select(Skill)
+            .where(where_clause)
+            .order_by(Skill.created_at.desc())
+            .offset((page - 1) * pagesize)
+            .limit(pagesize)
+        )
+        return list(result.scalars().all()), total
 
-        self.db.flush()
-        return skill
+    @staticmethod
+    async def get_by_id_async(
+        db: AsyncSession, skill_id: uuid.UUID, tenant_id: uuid.UUID | None = None
+    ) -> Skill | None:
+        """Async single-row read (runtime plane)."""
 
-    def delete(self, skill_id: uuid.UUID, tenant_id: uuid.UUID) -> bool:
-        """Delete a skill."""
-        skill = self.db.query(Skill).filter(
-            Skill.id == skill_id,
-            Skill.tenant_id == tenant_id
-        ).first()
-
-        if not skill:
-            return False
-
-        # db.delete(skill)
-        skill.is_active = False
-        self.db.flush()
-        return True
+        stmt = select(Skill).where(Skill.id == skill_id).limit(1)
+        if tenant_id:
+            stmt = stmt.where(or_(Skill.tenant_id == tenant_id, Skill.is_public.is_(True)))
+        return (await db.execute(stmt)).scalar_one_or_none()

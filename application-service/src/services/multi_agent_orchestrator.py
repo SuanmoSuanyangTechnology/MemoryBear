@@ -226,6 +226,19 @@ class SubAgentTool:
         context = dict(_bag.values) if _bag is not None else {}
         sub_text = ""
         sub_error: Optional[str] = None
+        # A sub-agent that hit the step budget reports agent_complete status=failed with
+        # an error payload while still streaming text. Two very different cases share
+        # that shape: a pure failure (the text is only narration, unusable) and a rescued
+        # turn (rescued=True: the text already contains a real answer built from the
+        # tool results collected before the abort). Only the former must be rejected;
+        # returning a rescued report as "this failed" is what made the supervisor
+        # re-dispatch the same task over and over.
+        sub_failure: Optional[str] = None
+        sub_rescued = False
+        # The CLEAN final answer from agent_complete.output (last tool-call-free model
+        # message). Preferred over sub_text — sub_text accumulates every streamed model
+        # round including intermediate narration that the supervisor must not consume.
+        sub_final_answer: Optional[str] = None
 
         # Go through the streaming executor (preserving the execution tree,
         # conversation stripping, and ledger accounting), accumulating the body
@@ -275,6 +288,25 @@ class SubAgentTool:
                         pass
                 elif name in _SUB_RUN_LIFECYCLE_EVENTS or name == "sub_usage":
                     continue
+                elif name == "agent_complete":
+                    # Keep the observability event, and remember whether this is a pure
+                    # failure, a rescued turn (real answer present), or a normal success —
+                    # plus the CLEAN output (final answer, no intermediate narration) so
+                    # the tool return value feeds the supervisor exactly that.
+                    payload = self._parse_complete_event(event) or {}
+                    failure, rescued = self._sub_outcome_from_event(event)
+                    clean_output = str(payload.get("output") or "").strip()
+                    if clean_output:
+                        sub_final_answer = clean_output
+                    if rescued:
+                        sub_rescued = True
+                        sub_failure = None
+                    elif failure:
+                        sub_failure = failure
+                    await self._emit_sse(orch._inject_agent_meta(
+                        orch._strip_conversation_id(event),
+                        orch._sub_event_meta(self.agent_id, self.agent_name),
+                    ))
                 elif name in _CLUSTER_OBSERVABILITY_EVENTS:
                     # Strip the sub-conversation ID, then add agent attribution
                     # (same injection as the three-stage
@@ -317,7 +349,67 @@ class SubAgentTool:
 
         if sub_error:
             return f"子 Agent {self.agent_name} 执行失败: {sub_error[:500]}"
-        return sub_text or f"（子 Agent {self.agent_name} 未返回内容）"
+        # Prefer the clean final answer (no intermediate narration); fall back to the
+        # accumulated stream only if agent_complete carried no output field.
+        answer = sub_final_answer or sub_text.strip()
+        if sub_rescued:
+            # A step-budget abort whose rescue turn already produced a real answer from
+            # the tool results collected beforehand. The content is usable, so tell the
+            # supervisor to adopt it instead of re-dispatching the same task.
+            return (
+                f"子 Agent {self.agent_name} 因处理步骤达到上限提前中止，"
+                "但已基于中止前成功获取的工具结果整理出以下报告，可直接采用；"
+                "其中未能覆盖的部分已如实标注，请勿就同一任务再次派发。\n\n"
+                f"{answer}"
+            )
+        if sub_failure:
+            return (
+                f"子 Agent {self.agent_name} 执行失败（未完成，以下内容只是过程片段，不可当作结果使用）: "
+                f"{sub_failure[:500]}"
+                + (f"\n已产生的片段：{sub_text[:800]}" if sub_text.strip() else "")
+                + "\n可以换一种方式重派、换一个子 Agent，或直接基于你自己的工具/知识回答。"
+            )
+        return answer or f"（子 Agent {self.agent_name} 未返回内容）"
+
+    @staticmethod
+    def _parse_complete_event(event: str) -> Optional[dict]:
+        """Parse the JSON payload of an agent_complete SSE event (None on failure)."""
+        try:
+            data = json.loads(event.split("data: ", 1)[1].strip())
+        except Exception:
+            return None
+        return data if isinstance(data, dict) else None
+
+    @staticmethod
+    def _sub_outcome_from_event(event: str) -> tuple[Optional[str], bool]:
+        """Classify a sub-run agent_complete SSE event.
+
+        Returns ``(failure_reason, rescued)``:
+
+        - ``(None, False)``: a normal successful completion;
+        - ``(reason, False)``: a pure failure whose text is only narration;
+        - ``(None, True)``: a step-budget abort whose rescue turn already produced a
+          real answer from collected evidence (``rescued`` flag) — the turn is still
+          recorded as failed, but the content is usable and must be adopted.
+        """
+        data = SubAgentTool._parse_complete_event(event)
+        if not data:
+            return None, False
+        status = str(data.get("status") or "").lower()
+        error = data.get("error")
+        if status not in ("failed", "error") and not error:
+            return None, False
+        rescued = bool(
+            data.get("rescued")
+            or (isinstance(error, dict) and error.get("rescued"))
+        )
+        if rescued:
+            return None, True
+        if isinstance(error, dict):
+            reason = error.get("message") or error.get("error")
+        else:
+            reason = error
+        return str(reason or "execution aborted"), False
 
     def build(self) -> "BaseTool":  # noqa: F821 - deferred type reference
         """Build a LangChain BaseTool (async executor + description).
@@ -2919,7 +3011,11 @@ class MultiAgentOrchestrator:
         # 2. Skills (tools + skill prompt; the prompt is appended into system_prompt by the caller)
         try:
             skills_config = supervisor_config.get("skills")
-            if skills_config and isinstance(skills_config, dict) and skills_config.get("enabled"):
+            if (
+                skills_config
+                and isinstance(skills_config, dict)
+                and skills_config.get("skill_ids")
+            ):
                 _message = getattr(self, "_loop_entry_message", "") or ""
                 skill_tools, skill_prompts = await run_svc.load_skill_config(
                     skills_config,

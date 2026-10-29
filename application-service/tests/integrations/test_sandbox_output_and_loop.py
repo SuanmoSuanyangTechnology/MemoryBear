@@ -1,11 +1,9 @@
-"""Tests for sandbox output cleaning and the tool-call loop abort."""
+"""Tests for sandbox output cleaning and the over-limit tool reply."""
 
 from __future__ import annotations
 
 import sys
 import types
-
-import pytest
 
 try:  # pragma: no cover - environment dependent
     import datrie  # noqa: F401
@@ -104,30 +102,16 @@ def test_sanitize_output_cleans_terminal_sequences_before_redacting():
 def _bare_agent():
     from src.agent.langchain_agent import LangChainAgent
 
-    agent = LangChainAgent.__new__(LangChainAgent)  # skip __init__: no LLM needed
-    agent._loop_abort_reason = None
-    return agent
+    return LangChainAgent.__new__(LangChainAgent)  # skip __init__: no LLM needed
 
 
-def test_over_limit_returns_text_within_grace_then_aborts():
-    from langgraph.errors import GraphRecursionError
-
-    from src.agent.langchain_agent import (
-        TOOL_LIMIT_GRACE_REJECTIONS,
-        ToolCallLoopError,
-    )
-
+def test_over_limit_reply_is_in_band_and_never_raises():
+    # Over-limit rejections must steer the model to answer in-band instead of aborting
+    # the graph, no matter how many times the model keeps calling the tool.
     agent = _bare_agent()
     limit = 10
-
-    # rejections 1..GRACE only return a message; the model still gets a chance to stop
-    for n in range(1, TOOL_LIMIT_GRACE_REJECTIONS + 1):
-        reply = agent._over_limit_reply("terminal_tool", limit, limit + n)
-        assert "请勿再调用" in reply
-        assert agent._loop_abort_reason is None
-
-    # the next one aborts the loop, through the existing recursion-limit handling
-    with pytest.raises(ToolCallLoopError) as info:
-        agent._over_limit_reply("terminal_tool", limit, limit + TOOL_LIMIT_GRACE_REJECTIONS + 1)
-    assert isinstance(info.value, GraphRecursionError)
-    assert "terminal_tool" in agent._loop_abort_reason
+    for count in range(limit + 1, limit + 8):
+        reply = agent._over_limit_reply("terminal_tool", limit, count)
+        assert isinstance(reply, str)
+        assert "terminal_tool" in reply
+        assert "达到上限" in reply and "最终答案" in reply

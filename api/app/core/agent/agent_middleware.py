@@ -21,6 +21,7 @@ class AgentMiddleware:
         self.enabled = self.skills.get('enabled', False)
         self.all_skills = self.skills.get('all_skills', False)
         self.skill_ids = self.skills.get('skill_ids', [])
+        self._standard_skill_ids: List[str] = []  # standard 格式技能（Agent Skills 协议）
 
     @staticmethod
     def filter_tools(
@@ -81,18 +82,18 @@ class AgentMiddleware:
         tenant_id: uuid.UUID,
         base_tools: List = None,
         runtime_context: Optional[Dict[str, Any]] = None,
-    ) -> tuple[List, Dict[str, Any], Dict[str, str]]:
+    ) -> tuple[List, Dict[str, Any], Dict[str, str], str]:
         """
         加载技能关联的工具
-        
+
         Args:
             db: 数据库会话
             tenant_id: 租户id
             base_tools: 基础工具列表
             runtime_context: 运行时上下文, 含非业务参数
-        
+
         Returns:
-            (工具列表, 技能配置字典, 工具到技能的映射 {tool_name: skill_id})
+            (工具列表, 技能配置字典, 工具到技能的映射 {tool_name: skill_id}, standard 技能 discovery 索引段)
         """
 
         tools_dict = {}
@@ -119,6 +120,11 @@ class AgentMiddleware:
                 try:
                     skill = SkillRepository.get_by_id(db, uuid.UUID(skill_id), tenant_id)
                     if skill and skill.is_active:
+                        # standard 技能：不拼 prompt/keywords，记录进 standard 索引（discovery 层）
+                        if (skill.skill_format or "legacy") == "standard" and skill.package_id:
+                            if skill_id not in self._standard_skill_ids:
+                                self._standard_skill_ids.append(skill_id)
+                            continue
                         # 保存技能配置（包含prompt）
                         config = skill.config or {}
                         config['prompt'] = skill.prompt
@@ -143,8 +149,28 @@ class AgentMiddleware:
                     # 复制映射关系
                     if tool_name in skill_tool_map:
                         tool_to_skill_map[tool_name] = skill_tool_map[tool_name]
-        
-        return list(tools_dict.values()), skill_configs, tool_to_skill_map
+
+        # standard 技能（Agent Skills 协议）：注入 read_skill 工具 + discovery 索引
+        standard_index = ""
+        if self._standard_skill_ids:
+            from app.core.agent.skill_runtime_service import build_skill_index, create_read_skill_tool
+            standard_skills = []
+            for sid in self._standard_skill_ids:
+                try:
+                    skill = SkillRepository.get_by_id(db, uuid.UUID(sid), tenant_id)
+                    if skill and skill.package_id:
+                        from app.repositories.skill_package_repository import SkillPackageRepository
+                        pkg = SkillPackageRepository.get_by_id(db, skill.package_id, tenant_id)
+                        if pkg:
+                            standard_skills.append((pkg.name, skill.name, pkg.description))
+                except Exception:
+                    continue
+            if standard_skills:
+                standard_index = build_skill_index(standard_skills)
+                if 'read_skill' not in tools_dict:
+                    tools_dict['read_skill'] = create_read_skill_tool(tenant_id)
+
+        return list(tools_dict.values()), skill_configs, tool_to_skill_map, standard_index
 
     async def load_skill_tools_async(
         self,
@@ -152,8 +178,8 @@ class AgentMiddleware:
         tenant_id: uuid.UUID,
         base_tools: List = None,
         runtime_context: Optional[Dict[str, Any]] = None,
-    ) -> tuple[List, Dict[str, Any], Dict[str, str]]:
-        """异步加载技能关联的工具"""
+    ) -> tuple[List, Dict[str, Any], Dict[str, str], str]:
+        """异步加载技能关联的工具（返回末位多一个 standard_index：标准技能 discovery 索引段）"""
         tools_dict = {}
         tool_to_skill_map = {}
 
@@ -182,6 +208,11 @@ class AgentMiddleware:
                 try:
                     skill = await SkillRepository.get_by_id_async(db, uuid.UUID(skill_id), tenant_id)
                     if skill and skill.is_active:
+                        # standard 技能：不拼 prompt/keywords，记录进 standard 索引（discovery 层）
+                        if (skill.skill_format or "legacy") == "standard" and skill.package_id:
+                            if skill_id not in self._standard_skill_ids:
+                                self._standard_skill_ids.append(skill_id)
+                            continue
                         config = skill.config or {}
                         config['prompt'] = skill.prompt
                         config['name'] = skill.name
@@ -203,7 +234,33 @@ class AgentMiddleware:
                     if tool_name in skill_tool_map:
                         tool_to_skill_map[tool_name] = skill_tool_map[tool_name]
 
-        return list(tools_dict.values()), skill_configs, tool_to_skill_map
+        # standard 技能（Agent Skills 协议）：注入 read_skill 工具 + discovery 索引
+        standard_index = ""
+        if self._standard_skill_ids:
+            from sqlalchemy import select
+            from app.models.skill_model import Skill as SkillModel
+            from app.models.skill_package_model import SkillPackage
+            from app.core.agent.skill_runtime_service import build_skill_index, create_read_skill_tool
+            result = await db.execute(
+                select(SkillModel, SkillPackage)
+                .join(SkillPackage, SkillModel.package_id == SkillPackage.id)
+                .where(
+                    SkillModel.tenant_id == tenant_id,
+                    SkillModel.is_active.is_(True),
+                    SkillModel.skill_format == "standard"),
+            )
+            allowed_ids = set(self._standard_skill_ids)
+            standard_skills = [
+                (pkg.name, s.name, pkg.description)
+                for s, pkg in result.all()
+                if str(s.id) in allowed_ids
+            ]
+            if standard_skills:
+                standard_index = build_skill_index(standard_skills)
+                if 'read_skill' not in tools_dict:
+                    tools_dict['read_skill'] = create_read_skill_tool(tenant_id)
+
+        return list(tools_dict.values()), skill_configs, tool_to_skill_map, standard_index
 
     @staticmethod
     def get_active_prompts(activated_skill_ids: List[str], skill_configs: Dict[str, Any]) -> str:

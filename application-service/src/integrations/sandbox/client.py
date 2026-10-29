@@ -230,6 +230,25 @@ class SandboxServiceClient:
 
     # -- files (design doc 7.3 / 7.4) ---------------------------------------------------
 
+    async def stat(self, principal: SandboxPrincipal, path: str) -> dict[str, Any] | None:
+        """One path's entry (``name``/``path``/``kind``/``size``/``mtime_ms``); ``None`` if absent.
+
+        ``files/stat`` answers ``file_not_found`` both for a missing path *and* for an end
+        user without a sandbox instance yet (the service never allocates on a stat), so the
+        two are indistinguishable here by design — callers treat both as "not there".
+        """
+
+        try:
+            data = await self._post(
+                "internal/files/stat", {**principal.as_body(), "path": path}
+            )
+        except SandboxServiceError as exc:
+            if exc.kind == "file_not_found":
+                return None
+            raise
+        entry = data.get("entry")
+        return entry if isinstance(entry, dict) else None
+
     async def list_files(
         self, principal: SandboxPrincipal, path: str, depth: int = 1
     ) -> tuple[list[dict[str, Any]], bool]:

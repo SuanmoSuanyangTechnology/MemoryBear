@@ -1248,7 +1248,7 @@ class AgentRunService:
         if skill_enable:
             middleware = AgentMiddleware(skills=skills_config)
             async with get_async_db_context() as db:
-                skill_tools, skill_configs, tool_to_skill_map = await middleware.load_skill_tools_async(
+                skill_tools, skill_configs, tool_to_skill_map, standard_index = await middleware.load_skill_tools_async(
                     db,
                     tenant_id,
                     runtime_context={"user_id": user_id, "workspace_id": workspace_id},
@@ -1276,6 +1276,10 @@ class AgentRunService:
                 skill_prompts = AgentMiddleware.get_active_prompts(
                     activated_skill_ids, skill_configs
                 )
+
+            # standard 技能（Agent Skills 协议）：discovery 索引段并入提示词注入
+            if standard_index:
+                skill_prompts = f"{skill_prompts}\n\n{standard_index}" if skill_prompts else standard_index
 
         return tools, skill_prompts
 

@@ -213,9 +213,10 @@ class SupervisorConfig(BaseModel):
         """Fault-tolerant skill_ids normalization (the frontend compresses the
         same way; this is the backend fallback).
 
-        Rules match capabilityContract.compressSkills / the Agent runtime:
-        - when all_skills=true, skill_ids is meaningless → store [] (the editor
-          may leave null elements)
+        Rules:
+        - only ``skill_ids`` matters (non-empty enables those skills, empty mounts
+          none). The legacy ``enabled`` / ``all_skills`` switches are ignored and
+          have no effect; historical all_skills rows simply carry an empty list.
         - object elements yield their id; null / non-string elements are dropped
 
         Dirty entity fields under knowledge retrieval / tools / variables are
@@ -225,16 +226,13 @@ class SupervisorConfig(BaseModel):
         if isinstance(data, dict):
             skills = data.get("skills")
             if isinstance(skills, dict) and isinstance(skills.get("skill_ids"), list):
-                if skills.get("all_skills"):
-                    skills["skill_ids"] = []
-                else:
-                    skills["skill_ids"] = [
-                        vo.get("id") if isinstance(vo, dict) else vo
-                        for vo in skills["skill_ids"]
-                    ]
-                    skills["skill_ids"] = [
-                        vo for vo in skills["skill_ids"] if isinstance(vo, str)
-                    ]
+                skills["skill_ids"] = [
+                    vo.get("id") if isinstance(vo, dict) else vo
+                    for vo in skills["skill_ids"]
+                ]
+                skills["skill_ids"] = [
+                    vo for vo in skills["skill_ids"] if isinstance(vo, str)
+                ]
         return data
 
 

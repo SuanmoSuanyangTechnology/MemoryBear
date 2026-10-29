@@ -1295,11 +1295,11 @@ class AgentRunService:
 
         tools = []
         skill_prompts = ""
-        skill_enable = skills_config.get("enabled", False)
-        if skill_enable:
+        # 只认 skill_ids：非空即加载这些技能；历史 enabled/all_skills 一律忽略。
+        if skills_config.get("skill_ids"):
             middleware = AgentMiddleware(skills=skills_config)
             async with get_async_db_context() as db:
-                skill_tools, skill_configs, tool_to_skill_map = await middleware.load_skill_tools_async(
+                skill_tools, skill_configs, tool_to_skill_map, standard_index = await middleware.load_skill_tools_async(
                     db,
                     tenant_id,
                     runtime_context={"user_id": user_id, "workspace_id": workspace_id},
@@ -1327,6 +1327,10 @@ class AgentRunService:
                 skill_prompts = AgentMiddleware.get_active_prompts(
                     activated_skill_ids, skill_configs
                 )
+
+            # standard 技能（Agent Skills 协议）：discovery 索引段并入提示词注入
+            if standard_index:
+                skill_prompts = f"{skill_prompts}\n\n{standard_index}" if skill_prompts else standard_index
 
         return tools, skill_prompts
 
@@ -2016,15 +2020,29 @@ class AgentRunService:
                             await ContextEngineManager(db2).after_app_turn(**kwargs)
                     asyncio.create_task(_run_after_turn())
 
-            # 11. Mark the Agent execution record completed
+            # 11. Mark the Agent execution record (failed when the engine aborted
+            # mid-run; same contract as the streaming path)
             node_executions = result.get("node_executions", [])
+            _run_error = result.get("run_error")
             if agent_execution_id is not None:
                 await self._update_agent_execution_completed_async(
                     execution_id=agent_execution_id,
                     steps=orchestrator_node_executions + node_executions,
-                    status="completed",
+                    status="failed" if _run_error else "completed",
                     elapsed_time=elapsed_time,
                     token_usage=result.get("usage"),
+                    error_message=(
+                        json.dumps(
+                            {
+                                "message": (_run_error or {}).get("error") or "Agent 执行被中止",
+                                "type": "AgentRunAborted",
+                                "reason": (_run_error or {}).get("reason"),
+                                "rescued": bool((_run_error or {}).get("rescued")),
+                            },
+                            ensure_ascii=False,
+                        )[:2000]
+                        if _run_error else None
+                    ),
                     # Only cluster sub Agents persist the trace (single-Agent apps
                     # keep traces in steps; existing storage volume unchanged)
                     agent_log=_trace if sub_agent else None,
@@ -2569,6 +2587,14 @@ class AgentRunService:
             full_reasoning = ""
             total_tokens = 0
             node_executions = []
+            # Set when the engine aborted the run mid-way (tool-call loop / step budget).
+            # The body text produced so far is NOT an answer, so the turn must be
+            # reported as failed rather than completed (see langchain_agent.chat_stream).
+            run_error: Optional[Dict[str, Any]] = None
+            # Clean final answer captured out of band (type=final_answer). Used for the
+            # persisted/output-facing text and the cluster supervisor; None until the
+            # engine emits it, in which case callers fall back to full_content.
+            final_answer_content: Optional[str] = None
 
             # Start streaming TTS (synthesizes while text is being output)
             text_queue: asyncio.Queue = asyncio.Queue()
@@ -2582,7 +2608,11 @@ class AgentRunService:
                 message=llm_message,
                 history=history,
                 context=context,
-                files=processed_files
+                files=processed_files,
+                # The clean final-answer channel is cluster sub-agent only, so its
+                # agent_complete.output / supervisor tool result drop narration. Single
+                # runs leave it off, so no extra event enters their stream.
+                emit_final_answer=bool(sub_agent),
             )
 
             async for chunk in _chunk_stream:
@@ -2611,6 +2641,23 @@ class AgentRunService:
                     if isinstance(chunk.get("data"), dict):
                         _trace = chunk.get("data")
                     yield self._format_sse_event("agent_log_final", chunk)
+                elif isinstance(chunk, dict) and chunk.get("type") == "run_error":
+                    # Engine-level abort marker: recorded for the wrap-up below and not
+                    # forwarded as an event of its own (the turn ends with agent_complete
+                    # status=failed plus the standard error event). rescued=True means the
+                    # aborted turn already carries a usable answer built from evidence.
+                    run_error = {
+                        "code": chunk.get("code") or "agent_aborted",
+                        "reason": chunk.get("reason"),
+                        "message": chunk.get("error") or "",
+                        "rescued": bool(chunk.get("rescued")),
+                    }
+                elif isinstance(chunk, dict) and chunk.get("type") == "final_answer":
+                    # The clean final answer (last tool-call-free model message), captured
+                    # out of band for agent_complete.output / the cluster supervisor. It is
+                    # NOT forwarded: the live message stream above already carries the
+                    # visible body, and intermediate narration must not reach the supervisor.
+                    final_answer_content = chunk.get("content") or None
                 elif isinstance(chunk, dict):
                     event_type = str(chunk.get("type") or "unknown")
                     yield self._format_sse_event(event_type, chunk)
@@ -2678,14 +2725,43 @@ class AgentRunService:
                             await ContextEngineManager(db2).after_app_turn(**kwargs)
                     asyncio.create_task(_run_after_turn())
 
-            # 11.5 Mark the Agent execution record completed
+            # 11.5 Mark the Agent execution record (failed when the engine aborted)
+            _run_failed = run_error is not None
+            _run_rescued = bool(run_error and run_error.get("rescued"))
+            _run_error_text = None
+            if _run_failed:
+                _run_error_text = {
+                    "message": run_error.get("message") or "Agent 执行被中止",
+                    "type": "AgentRunAborted",
+                    "kind": run_error.get("code"),
+                    "reason": run_error.get("reason"),
+                    # A step-budget abort whose rescue turn produced a real answer: the
+                    # turn is still failed (it did not finish its planned flow), but the
+                    # content is usable. The cluster supervisor adopts it instead of
+                    # re-dispatching.
+                    "rescued": _run_rescued,
+                    "debug_id": self._build_debug_id(),
+                }
+                logger.warning(
+                    "流式 Agent 被中止，按失败收尾",
+                    extra={
+                        "reason": run_error.get("reason"),
+                        "rescued": _run_rescued,
+                        "content_length": len(full_content),
+                        "agent_execution_id": str(_agent_execution_id) if _agent_execution_id else None,
+                    },
+                )
             if _agent_execution_id is not None:
                 await self._update_agent_execution_completed_async(
                     execution_id=_agent_execution_id,
                     steps=orchestrator_node_executions + node_executions,
-                    status="completed",
+                    status="failed" if _run_failed else "completed",
                     elapsed_time=elapsed_time,
                     token_usage={"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": total_tokens},
+                    error_message=(
+                        json.dumps(_run_error_text, ensure_ascii=False)[:2000]
+                        if _run_failed else None
+                    ),
                     # Only cluster sub Agents persist the trace (single-Agent apps
                     # keep traces in steps; existing storage volume unchanged)
                     agent_log=_trace if sub_agent else None,
@@ -2693,17 +2769,18 @@ class AgentRunService:
 
             # Sub Agent completion event: the frontend marks the corresponding block
             # complete with it (carries elapsed time/tokens/final output).
-            # `output` MUST be included: the running panel's "output" has no other
-            # data source (a sub run's body text goes through sub_agent_message,
-            # which the frontend does not consume); without it only an empty `{}`
-            # remains.
+            # `output` is the CLEAN final answer (final_answer_content = last
+            # tool-call-free model message), not the concatenation of intermediate
+            # narration rounds; the orchestrator feeds exactly this to the supervisor.
             if sub_agent:
                 yield self._format_sse_event("agent_complete", {
                     "execution_id": str(_agent_execution_id) if _agent_execution_id else None,
                     "agent_id": (execution_owner or {}).get("agent_id"),
                     "agent_name": (execution_owner or {}).get("agent_name"),
-                    "status": "completed",
-                    "output": full_content,
+                    "status": "failed" if _run_failed else "completed",
+                    "output": final_answer_content or full_content,
+                    **({"error": _run_error_text} if _run_failed else {}),
+                    **({"rescued": True} if _run_rescued else {}),
                     "elapsed_time": elapsed_time,
                     "token_usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": total_tokens},
                 })
@@ -3893,7 +3970,6 @@ class AgentRunService:
                                 memory=memory,
                                 files=files,
                                 source=source,
-                                execution_mode=execution_mode,
                             ),
                             timeout=timeout
                         )
@@ -4157,7 +4233,6 @@ class AgentRunService:
                             files=files,
                             source=source,
                             user_message_id=model_user_message_id,
-                            execution_mode=execution_mode,
                             skip_save=skip_save,
                     ):
                         yield event_str

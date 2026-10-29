@@ -100,6 +100,21 @@ def test_no_tools_agent_gets_only_the_light_baseline():
     assert text.startswith("【执行要求】") and "以用户设定为准" in text
 
 
+@pytest.mark.parametrize("name", COMBOS)
+def test_current_date_anchor_is_always_injected(name):
+    """The model has no clock: "today / latest" must resolve against the run date.
+
+    Regression guard for the empty-search failure — a sub-agent invented a date from
+    its training data, every search returned nothing, and it burned the call budget.
+    """
+    text = build_agent_methodology(COMBOS[name], tool_call_limit=5)
+    assert "当前日期是 " in text
+    assert "Asia/Shanghai" in text
+    assert re.search(r"当前日期是 \d{4}-\d{2}-\d{2}（星期[一二三四五六日]）", text)
+    # The anchor must never claim a stale year.
+    assert "2024" not in text.split("当前日期是 ")[1][:64]
+
+
 def test_tools_bring_planning_and_budget_lines():
     text = build_agent_methodology([SEARCH], tool_call_limit=5)
     assert "编号计划" in text

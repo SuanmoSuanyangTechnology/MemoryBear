@@ -384,6 +384,11 @@ class Settings:
     FILE_PATH: str = os.getenv("FILE_PATH", "/files")
     FILE_URL_EXPIRES: int = int(os.getenv("FILE_URL_EXPIRES", "3600"))
 
+    # Skill Package（Agent Skills 标准包导入）
+    SKILL_PACKAGE_INLINE_LIMIT: int = int(os.getenv("SKILL_PACKAGE_INLINE_LIMIT", str(2 * 1024 * 1024)))  # 单文件超限走对象存储
+    SKILL_PACKAGE_MAX_FILES: int = int(os.getenv("SKILL_PACKAGE_MAX_FILES", "200"))
+    SKILL_PACKAGE_MAX_SIZE: int = int(os.getenv("SKILL_PACKAGE_MAX_SIZE", str(100 * 1024 * 1024)))
+
     # Storage Configuration
     STORAGE_TYPE: str = os.getenv("STORAGE_TYPE", "local")
 
