@@ -131,7 +131,8 @@ async def count_messages_by_end_user(
         return {}
 
     query = _build_query(end_user_ids, exclude_legacy=exclude_legacy)
-    assert query is not None
+    if query is None:
+        return {str(user_id): 0 for user_id in end_user_ids}
 
     async def _agg(client: AsyncElasticsearch) -> dict[str, int]:
         result = await client.search(

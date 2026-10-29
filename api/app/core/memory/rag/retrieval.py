@@ -107,6 +107,11 @@ class RagRetrieval:
     async def _embedding(
         self, query: str, limit: int, node_filters: dict
     ) -> StorageReadResult:
+        if self.embedder is None:
+            raise RuntimeError(
+                "RagRetrieval._embedding requires an embedder; "
+                "callers must skip the vector path when embedder is None"
+            )
         embed = await self.embedder.aembed_query(query)
         return await self.storage.search_by_embedding(
             node_filters=node_filters,

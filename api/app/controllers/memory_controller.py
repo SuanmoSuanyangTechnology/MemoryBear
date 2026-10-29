@@ -130,7 +130,7 @@ async def write_server_async(
         )
 
         if storage_type and storage_type.lower() == "rag":
-            api_logger.info(f"RAG write dispatched for end_user={effective_end_user_id}")
+            api_logger.info(f"RAG write completed for end_user={effective_end_user_id}")
             return success(data=dict(identity_data) if identity_data else {}, msg="RAG 写入完成")
 
         api_logger.info(
