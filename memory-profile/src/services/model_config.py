@@ -29,7 +29,7 @@ from src.infrastructure.model_service import (
     RerankHit,
 )
 from src.infrastructure.postgres import PostgresManager
-from src.modules.shared.repository.model_config import ModelConfigRepository
+from src.repositories.model_config import ModelConfigRepository
 
 logger = logging.getLogger(__name__)
 

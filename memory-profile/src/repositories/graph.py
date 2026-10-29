@@ -6,8 +6,7 @@ from collections.abc import Sequence
 from datetime import datetime, timedelta
 from typing import Any
 
-from src.infrastructure.neo4j import Neo4jManager
-from src.modules.analytics.constants import (
+from src.common.vocabulary import (
     COMMUNITY_GRAPH_ENTITY_FIELDS,
     COMMUNITY_GRAPH_NODE_FIELDS,
     EMOTION_TYPE_STORAGE_VALUES,
@@ -15,6 +14,7 @@ from src.modules.analytics.constants import (
     SUPPORTED_NODE_TYPES,
     WHITELIST_DEFAULT_FIELDS,
 )
+from src.infrastructure.neo4j import Neo4jManager
 
 
 def whitelist_projection(label: str) -> str:

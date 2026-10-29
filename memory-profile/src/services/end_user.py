@@ -14,7 +14,7 @@ from uuid import UUID
 
 from src.common.normalization import parse_uuid
 from src.infrastructure.postgres import PostgresManager
-from src.modules.shared.repository.end_user import EndUserRepository
+from src.repositories.end_user import EndUserRepository
 
 
 @dataclass(frozen=True, slots=True)
