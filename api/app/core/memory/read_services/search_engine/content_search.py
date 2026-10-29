@@ -2,7 +2,6 @@ import asyncio
 import json
 import logging
 import math
-import uuid
 from typing import Callable
 
 from langchain_core.documents import Document

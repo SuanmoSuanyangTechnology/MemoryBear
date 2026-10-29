@@ -4101,7 +4101,12 @@ def write_total_memory_task(workspace_id: str) -> Dict[str, Any]:
             )
 
             if storage_type == "rag":
-                # RAG 空间：总量取独立索引的消息条数
+                # RAG 空间：总量取独立索引的消息条数。
+                # 宿主集合按 (App.workspace_id, is_active) 过滤，与 dashboard 的
+                # _workspace_end_user_ids 同一口径；图侧分支走
+                # get_memory_count_stats_by_workspace_ids（按 EndUser.workspace_id 过滤）。
+                # 历史数据中 EndUser.workspace_id 与 App 归属不一致时，两者宿主集合会有
+                # 差异，属统计口径差异而非缺陷，对账时以 App 关联为准。
                 from app.core.memory.rag import stats as rag_stats
 
                 end_user_ids = EndUserRepository(db).get_ids_by_app_workspace(workspace_uuid)
