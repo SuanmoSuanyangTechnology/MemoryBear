@@ -125,12 +125,13 @@ Unified service architecture exposing two API surfaces:
 
 <img src="https://github.com/user-attachments/assets/61a442b8-19d6-423b-918f-9932f3d26447" alt="MemoryBear System Architecture" width="100%"/>
 
-**Celery Multi-Queue Async Architecture (7 worker types in docker-compose):**
+**Celery Multi-Queue Async Architecture (8 worker types in docker-compose):**
 
 | Queue | Worker Type | Concurrency | Purpose |
 |-------|-------------|-------------|---------|
 | `memory_tasks` | threads | 100 | Memory read/write (asyncio-friendly) |
 | `memory_fast_tasks` | threads | 32 | High-frequency fast writes (dedicated queue to avoid mutual blocking) |
+| `memory_rag_tasks` | threads | 32 | RAG memory index writes (dedicated queue) |
 | `document_tasks` | prefork | 4 | Document parsing (CPU-bound) |
 | `periodic_tasks` | prefork | 2 | Scheduled tasks, reflection engine, various scanners |
 | `workflow_trigger_tasks` | prefork | 2 | Workflow scheduled triggers |
@@ -383,6 +384,9 @@ celery -A app.celery_worker.celery_app worker -E --loglevel=info --pool=threads 
 
 # Fast-write worker (thread pool, dedicated queue to avoid blocking normal writes)
 celery -A app.celery_worker.celery_app worker -E --loglevel=info --pool=threads --concurrency=32 --queues=memory_fast_tasks -n memory_fast_worker@%h
+
+# RAG memory worker (thread pool, dedicated queue for RAG index writes)
+celery -A app.celery_worker.celery_app worker -E --loglevel=info --pool=threads --concurrency=32 --queues=memory_rag_tasks -n memory_rag_worker@%h
 
 # Document parsing worker (prefork, CPU-bound)
 celery -A app.celery_worker.celery_app worker -E --loglevel=info --pool=prefork --concurrency=4 --queues=document_tasks --max-tasks-per-child=100 -n document_worker@%h

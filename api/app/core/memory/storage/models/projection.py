@@ -196,5 +196,13 @@ DEFAULT_PROJECTION = {
     ),
     MemoryNodeType.DIALOGUE: NodeProjection(
         fields=("id", "content", "created_at", "score")
+    ),
+    # 有意不含 created_at：rag_memory 索引不落该字段（以 dialog_at 为业务时间），
+    # 投影与索引字段保持一致，下游不读 created_at
+    MemoryNodeType.RAG_MEMORY: NodeProjection(
+        fields=(
+            "id", "content", "role", "end_user_id", "dialog_at",
+            "source", "delete_at", "score",
+        )
     )
 }

@@ -122,12 +122,13 @@ MemoryBear 是红熊 AI 自主研发的新一代 AI 记忆系统，核心突破�
 
 <img src="https://github.com/user-attachments/assets/2424784c-0b9d-4560-94a9-36cb1f98d889" alt="MemoryBear System Architecture" width="100%"/>
 
-**Celery 多队列异步架构（docker-compose 共 7 类 Worker）：**
+**Celery 多队列异步架构（docker-compose 共 8 类 Worker）：**
 
 | 队列 | Worker 类型 | 并发 | 用途 |
 |------|-------------|------|------|
 | `memory_tasks` | threads | 100 | 记忆读写（asyncio 友好） |
 | `memory_fast_tasks` | threads | 32 | 高频快速写入（独立队列，避免互相阻塞） |
+| `memory_rag_tasks` | threads | 32 | RAG 记忆独立索引写入（专用队列） |
 | `document_tasks` | prefork | 4 | 文档解析（CPU 密集） |
 | `periodic_tasks` | prefork | 2 | 定时任务、反思引擎、各类扫描器 |
 | `workflow_trigger_tasks` | prefork | 2 | 工作流定时触发 |
@@ -386,6 +387,9 @@ celery -A app.celery_worker.celery_app worker -E --loglevel=info --pool=threads 
 
 # 快速写入 Worker（线程池，独立队列，避免与普通写入互相阻塞）
 celery -A app.celery_worker.celery_app worker -E --loglevel=info --pool=threads --concurrency=32 --queues=memory_fast_tasks -n memory_fast_worker@%h
+
+# RAG 记忆 Worker（线程池，独立队列，RAG 记忆独立索引写入）
+celery -A app.celery_worker.celery_app worker -E --loglevel=info --pool=threads --concurrency=32 --queues=memory_rag_tasks -n memory_rag_worker@%h
 
 # 文档解析 Worker（进程池，CPU 密集型）
 celery -A app.celery_worker.celery_app worker -E --loglevel=info --pool=prefork --concurrency=4 --queues=document_tasks --max-tasks-per-child=100 -n document_worker@%h

@@ -18,7 +18,6 @@ from app.core.memory.memory_service import MemoryService
 from app.core.response_utils import fail, success
 from app.db import get_async_db_context
 from app.dependencies import cur_workspace_access_guard, cur_workspace_access_guard_self_db, get_current_user_async, CurrentUserSnapshot
-from app.repositories import knowledge_repository
 from app.repositories.end_user_repository import EndUserRepository
 from app.schemas.memory_agent_schema import UserInput, Write_UserInput
 from app.schemas.memory_config_schema import ModelInactiveError, ModelNotFoundError
@@ -31,7 +30,6 @@ from app.services.memory_validation_service import MemoryValidationService
 from app.utils.sse_utils import format_sse_message
 
 DEFAULT_STORAGE_TYPE = "neo4j"
-USER_RAG_MEMORY_KNOWLEDGE_NAME = "USER_RAG_MERORY"  # 注：原拼写保留，历史遗留
 
 api_logger = get_api_logger()
 
@@ -64,7 +62,6 @@ async def write_server_async(
     language = get_language_from_header(language_type)
 
     storage_type = None
-    user_rag_memory_id = ''
     workspace_id = current_user.current_workspace_id
     # 跨渠道身份确认后的最终写入落点，默认与请求一致；命中归并时被覆盖为 target
     effective_end_user_id = user_input.end_user_id
@@ -116,15 +113,7 @@ async def write_server_async(
             user=current_user
         )
         if storage_type is None: storage_type = DEFAULT_STORAGE_TYPE
-        if workspace_id:
-
-            knowledge = await knowledge_repository.get_knowledge_by_name_async(
-                db=db,
-                name=USER_RAG_MEMORY_KNOWLEDGE_NAME,
-                workspace_id=workspace_id
-            )
-            if knowledge: user_rag_memory_id = str(knowledge.id)
-        api_logger.info(f"Async write: storage_type={storage_type}, user_rag_memory_id={user_rag_memory_id}")
+        api_logger.info(f"Async write: storage_type={storage_type}")
 
     try:
         # RAG / Neo4j 统一交给 dispatcher 分流，避免 Controller 与 Dispatcher 重复写入。
@@ -138,7 +127,6 @@ async def write_server_async(
             workspace_id=workspace_id_str,
             language=language,
             storage_type=storage_type,
-            user_rag_memory_id=user_rag_memory_id,
         )
 
         if storage_type and storage_type.lower() == "rag":
