@@ -226,13 +226,17 @@ async def rebuild_rag_end_user_vectors(
                     processed += success
                     if failed_nodes:
                         failed += failed_nodes
-                        incomplete = True
-                        first_error = first_error or (
-                            f"write rag_memory: {failed_nodes} bulk failure(s)"
+                        # 单条 bulk 失败（文档已被物理删除、版本冲突）多为永久失败：
+                        # 若把整页钉在同一游标上，重试会一直重做该页，该用户永远
+                        # 到不了 done，语义检索被永久降级。记录失败后继续推进游标，
+                        # 只有 scan / 向量化失败才阻塞游标。
+                        logger.error(
+                            "rag re-embed bulk partial failure, skip failed docs: "
+                            "job=%s end_user=%s failed=%s",
+                            job_id,
+                            end_user_id,
+                            failed_nodes,
                         )
-                        # 失败页不推进游标，重试时重做该页（bulk update 幂等），
-                        # 否则失败文档会被记为已处理并永久跳过
-                        break
                 except Exception as exc:
                     logger.error(
                         "rag re-embed page failed: job=%s end_user=%s nodes=%s error=%s",

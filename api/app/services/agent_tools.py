@@ -133,7 +133,6 @@ def create_agent_invocation_tool(
     """
     # 1. 获取工作空间的 storage_type
     storage_type = 'neo4j'  # 默认值
-    user_rag_memory_id = None
     
     try:
         workspace = workspace_repository.get_workspace_by_id(db, workspace_id)
@@ -244,7 +243,6 @@ def create_agent_invocation_tool(
                     workspace_id=workspace_id,
                     variables=context or {},
                     storage_type=storage_type,
-                    user_rag_memory_id=user_rag_memory_id
                 )
                 
                 elapsed_time = time.time() - start_time

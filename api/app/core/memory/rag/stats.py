@@ -179,7 +179,7 @@ def count_messages_by_end_user_sync(
 
 
 async def count_messages_by_day(
-        end_user_ids: Sequence[str],
+        end_user_ids: Sequence[str] | None,
         start: datetime,
         end: datetime,
         *,
@@ -223,7 +223,7 @@ async def count_messages_by_day(
     return await _with_client(_agg)
 
 
-def count_messages_by_day_sync(end_user_ids: Sequence[str], start: datetime, end: datetime, **kwargs) -> dict[date, int]:
+def count_messages_by_day_sync(end_user_ids: Sequence[str] | None, start: datetime, end: datetime, **kwargs) -> dict[date, int]:
     return _run_sync(count_messages_by_day(end_user_ids, start, end, **kwargs))
 
 
@@ -314,7 +314,7 @@ def list_messages_sync(end_user_ids: Sequence[str] | None, **kwargs) -> dict[str
 
 
 async def daily_totals(
-        end_user_ids: Sequence[str],
+        end_user_ids: Sequence[str] | None,
         start: date | datetime,
         end: date | datetime,
         *,
@@ -325,8 +325,11 @@ async def daily_totals(
     入参按「UTC 自然日」对齐：即使传入带时分秒的 ``datetime``，也只取日期部分，
     即区间为 ``[start 当天 00:00, end 当天 23:59:59.999999]``。趋势曲线以天为粒度，
     调用方不应依赖更细的时间边界。
+
+    ``end_user_ids`` 为 ``None`` 时表示「不限宿主」（与 ``_build_query`` 一致），
+    只有空列表才代表「范围为空、必然无结果」。
     """
-    if not end_user_ids:
+    if end_user_ids is not None and not end_user_ids:
         return []
 
     start_day = start.date() if isinstance(start, datetime) else start
@@ -368,5 +371,5 @@ async def daily_totals(
     return totals
 
 
-def daily_totals_sync(end_user_ids: Sequence[str], start: datetime, end: datetime, **kwargs) -> list[tuple[date, int]]:
+def daily_totals_sync(end_user_ids: Sequence[str] | None, start: datetime, end: datetime, **kwargs) -> list[tuple[date, int]]:
     return _run_sync(daily_totals(end_user_ids, start, end, **kwargs))

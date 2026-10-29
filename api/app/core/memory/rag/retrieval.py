@@ -280,7 +280,10 @@ class RagRetrieval:
         keyword_failed = isinstance(keyword_results, BaseException)
         semantic_failed = isinstance(embedding_results, BaseException)
         if keyword_failed:
-            logger.warning("[RAGSearch] keyword search error: %s", keyword_results)
+            # 全文失败且语义通道不可用（降级/未配置 embedder）时，两路都是空，
+            # 静默返回会让调用方误判「确实没有记忆」。此时按既有策略上抛，
+            # 其余情况只降级并记录 error 级日志。
+            logger.error("[RAGSearch] keyword search error: %s", keyword_results)
             self._report_error(
                 MemoryRetrievalBusinessError.model_call_failed(
                     MemoryRetrievalStage.KEYWORD_SEARCH,
@@ -291,6 +294,8 @@ class RagRetrieval:
                     impact=MemoryRetrievalImpact.INCOMPLETE,
                 )
             )
+            if semantic_skipped:
+                raise keyword_results
             keyword_results = StorageReadResult()
         if semantic_failed:
             logger.warning("[RAGSearch] embedding search error: %s", embedding_results)

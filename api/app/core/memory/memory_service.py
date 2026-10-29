@@ -334,10 +334,11 @@ class MemoryService:
         - RAG 空间：删除独立索引中该宿主的消息，返回条数。
         - 图空间：删除 Neo4j 记忆节点和边，返回节点数。
         - 归属无法判定（宿主不存在 / 未关联 workspace）：两种存储都清理，
-          返回两者删除量之和。
+          返回「删除条目总数」（RAG 消息条数 + 图节点数）。
 
-        注意返回值口径与图侧不一致：RAG 分支统计的是「消息条数」，
-        图侧统计的是「节点数」，调用方不应把两者当作同一单位做累加或对账。
+        注意返回值口径：RAG 分支统计的是「消息条数」，图侧统计的是「节点数」；
+        正常分支只会命中其中一种，只有归属未知的兜底分支才会相加，
+        结果仅用于粗略反馈，调用方不应把它当作单一存储的精确计数做对账。
         """
         from app.core.memory.models.service_models import MemoryContext
         from app.core.memory.pipelines.forgetting_pipeline import ForgettingPipeline
@@ -401,9 +402,9 @@ class MemoryService:
                 rag_deleted,
                 graph_deleted,
             )
-            # 两者单位不同（消息条数 vs 节点数），不能相加后对外报告；
-            # RAG 条数只进日志，返回值维持图侧节点数口径
-            return graph_deleted
+            # 两者单位不同（消息条数 vs 节点数），只能加总用于「删除条目总数」
+            # 的粗略反馈；正常分支按 storage_type 只命中一种，不会出现混算
+            return rag_deleted + graph_deleted
 
         if normalized_type == "rag":
             from app.core.memory.rag.storage_ops import delete_messages_by_end_user

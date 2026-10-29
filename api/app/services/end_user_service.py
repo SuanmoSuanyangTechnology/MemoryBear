@@ -19,6 +19,11 @@ from app.utils.redis_lock import RedisFairLock
 
 logger = get_memory_logger()
 
+# RAG 索引改挂是 update_by_query，失败后重跑幂等；有限次重试用于消化
+# 瞬时分片失败/超时，仍失败则保留 memory_count 并在日志里暴露待补数范围
+_RAG_MIGRATION_MAX_ATTEMPTS = 3
+_RAG_MIGRATION_RETRY_DELAY_SECONDS = 1.0
+
 
 class EndUserService:
     def __init__(self, db: AsyncSession):
@@ -282,35 +287,62 @@ class EndUserService:
             from app.core.memory.rag import stats as rag_stats
             from app.core.memory.rag.storage_ops import reassign_end_user_messages
 
-            try:
-                moved = await reassign_end_user_messages(source_strs, str(target))
-                logger.info(
-                    f"[merge_end_users] RAG 索引迁移完成: "
-                    f"sources={len(source_strs)} messages={moved}"
-                )
-            except Exception as exc:
-                # 归并本身不可逆：ES 迁移失败不能阻断后续 PG 引用表迁移与提交，
-                # 否则流程停在半途、映射已落库却无收尾。这里显式记 error 供人工补数
-                logger.error(
-                    f"[merge_end_users] RAG 索引迁移失败，需人工补数: "
-                    f"sources={source_strs} target={target} err={exc}",
-                    exc_info=True,
-                )
+            rag_migration_ok = False
+            for attempt in range(1, _RAG_MIGRATION_MAX_ATTEMPTS + 1):
+                try:
+                    moved = await reassign_end_user_messages(
+                        source_strs, str(target)
+                    )
+                    rag_migration_ok = True
+                    logger.info(
+                        f"[merge_end_users] RAG 索引迁移完成: "
+                        f"sources={len(source_strs)} messages={moved} "
+                        f"attempt={attempt}"
+                    )
+                    break
+                except Exception as exc:
+                    if attempt >= _RAG_MIGRATION_MAX_ATTEMPTS:
+                        # 归并本身不可逆：source 已软删，ES 迁移失败不能阻断
+                        # 后续 PG 引用表迁移与提交，否则流程停在半途、映射已落库
+                        # 却无收尾。这里显式记 error 供人工补数
+                        logger.error(
+                            f"[merge_end_users] RAG 索引迁移失败，需人工补数: "
+                            f"sources={source_strs} target={target} "
+                            f"attempts={attempt} err={exc}",
+                            exc_info=True,
+                        )
+                        break
+                    logger.warning(
+                        f"[merge_end_users] RAG 索引迁移失败，准备重试: "
+                        f"sources={source_strs} target={target} "
+                        f"attempt={attempt} err={exc}"
+                    )
+                    await asyncio.sleep(
+                        _RAG_MIGRATION_RETRY_DELAY_SECONDS * attempt
+                    )
 
-            # RAG 模式没有图侧计数回写；改用独立索引聚合回写 target.memory_count，
-            # 避免依赖该字段的接口在合并后长期偏低
-            try:
-                new_count = await rag_stats.count_messages([str(target)])
-                await self.user_repo.update_memory_count_async(target, new_count)
-                logger.info(
-                    f"[merge_end_users] target memory_count 同步完成(RAG): "
-                    f"target={target}, count={new_count}"
-                )
-            except Exception as exc:
-                logger.warning(
-                    f"[merge_end_users] 同步 target memory_count 失败（不影响合并结果）: "
-                    f"target={target}, err={exc}",
-                    exc_info=True,
+            if rag_migration_ok:
+                # RAG 模式没有图侧计数回写；改用独立索引聚合回写 target.memory_count，
+                # 避免依赖该字段的接口在合并后长期偏低
+                try:
+                    new_count = await rag_stats.count_messages([str(target)])
+                    await self.user_repo.update_memory_count_async(target, new_count)
+                    logger.info(
+                        f"[merge_end_users] target memory_count 同步完成(RAG): "
+                        f"target={target}, count={new_count}"
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        f"[merge_end_users] 同步 target memory_count 失败（不影响合并结果）: "
+                        f"target={target}, err={exc}",
+                        exc_info=True,
+                    )
+            else:
+                # 迁移未收敛时不能用 ES 当前存量回写：部分消息仍挂在 source 上，
+                # 改成偏低计数会把残留数据“合法化”，保留原值并依赖上面的错误日志补数
+                logger.error(
+                    f"[merge_end_users] RAG 索引迁移未完成，跳过 memory_count 回写: "
+                    f"target={target}, sources={source_strs}"
                 )
         else:
             stats = await merge_end_user_memory_nodes(source_strs, str(target))

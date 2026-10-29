@@ -7,8 +7,7 @@ Intercepts requests to /v1/mcp/* and:
 3. Resolves other_id + workspace_id → end_user.
 4. Resolves config_id: end_user.memory_config_id → workspace default.
 5. Resolves storage_type from workspace configuration.
-6. Resolves the workspace RAG memory knowledge ID when required.
-7. Stores the resolved values via contextvars.
+6. Stores the resolved values via contextvars.
 
 All identity and configuration is determined server-side from headers —
 the client never passes end_user_id, config_id, or storage_type as tool

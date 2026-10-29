@@ -1315,10 +1315,21 @@ def get_current_user_total_chunk(
 ) -> int:
     """
     RAG 宿主记忆总量：独立索引中该宿主的消息条数。
+
+    RAG 索引只按 ``end_user_id`` 过滤、没有 workspace 维度，查询前必须校验
+    该宿主属于当前工作空间，否则任意合法 UUID 都能读到其它空间的记忆总量。
     """
     business_logger.info(f"获取宿主记忆总量: end_user_id={end_user_id}, 操作者: {current_user.username}")
 
     try:
+        if not _end_user_in_workspace(
+            db, current_user.current_workspace_id, end_user_id
+        ):
+            business_logger.warning(
+                f"拒绝跨空间读取 RAG 记忆总量: end_user_id={end_user_id}, "
+                f"workspace_id={current_user.current_workspace_id}"
+            )
+            return 0
         total_chunk = rag_stats.count_messages_sync([end_user_id])
         business_logger.info(f"成功获取宿主记忆总量: {total_chunk}")
         return int(total_chunk)
@@ -1596,8 +1607,22 @@ async def generate_rag_profile(
     if not end_user:
         raise ValueError(f"end_user {end_user_id} 不存在")
 
-    rag_content = get_rag_content(end_user_id, page=1, pagesize=limit, db=db, current_user=current_user)
-    chunks = rag_content.get("items", [])
+    # get_rag_content 返回的是消息字典（id/role/content/dialog_at/source），
+    # 而 chunk 生成函数签名是 List[str]，这里显式取正文，避免把 dict 的 repr
+    # 拼进提示词。画像覆盖取 dialog_at 升序，保证与页面倒序展示的数据一致。
+    rag_content = get_rag_content(
+        end_user_id,
+        page=1,
+        pagesize=limit,
+        db=db,
+        current_user=current_user,
+        order="asc",
+    )
+    chunks = [
+        item.get("content", "")
+        for item in rag_content.get("items", [])
+        if str(item.get("content", "") or "").strip()
+    ]
 
     if not chunks:
         business_logger.warning(f"未找到chunk内容，无法生产RAG画像: end_user_id={end_user_id}")

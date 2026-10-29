@@ -497,7 +497,8 @@ class RagDispatchRateLimited(RateLimitException):
     """RAG 逐条派发中途被限流。
 
     携带已成功入队条数：此前已派发的消息已生效，本批属于「部分提交」，
-    上层据此区分「完全未写入」与「已写入前 N 条」。
+    上层据此区分「完全未写入」与「已写入前 N 条」。``total`` 是过滤空内容后
+    的实际待派发条数；``enqueued=0`` 表示第一条就被限流、本批完全未写入。
     """
 
     def __init__(self, message: str, *, enqueued: int, total: int) -> None:
@@ -536,7 +537,8 @@ async def push_rag_messages(
             total,
         )
         raise RagDispatchRateLimited(
-            f"RAG dispatch rate limited: enqueued={len(msg_ids)}/{total}",
+            f"RAG dispatch rate limited: enqueued={len(msg_ids)}/{total}; "
+            "已入队条目已生效，剩余条目未写入，整批重试可幂等收敛",
             enqueued=len(msg_ids),
             total=total,
         ) from exc
@@ -1323,10 +1325,20 @@ async def dispatch_mcp_write(
                 "content": message,
                 "dialog_at": dialog_at,
             }
-            if not str(dialog_at or "").strip():
-                # MCP 单条写入没有消息 id；若把服务端兜底时间用于 uuid5，
-                # 同一内容每次调用都会得到不同 id。这里用 end_user + 内容
-                # 派生稳定键，让重复写入覆盖同一条记忆（幂等）
+            raw_dialog_at = _normalize_raw_dialog_at(dialog_at)
+            needs_stable_id = not (raw_dialog_at or "").strip()
+            if not needs_stable_id:
+                # 非空但格式非法（如"昨天下午"）同样解析不出稳定时间：
+                # 若继续用服务端兜底时间参与 uuid5，同内容每次调用都会换 id
+                try:
+                    needs_stable_id = (
+                        parse_iso_to_utc_naive(raw_dialog_at.strip()) is None
+                    )
+                except Exception:
+                    needs_stable_id = True
+            if needs_stable_id:
+                # MCP 单条写入没有消息 id；用 end_user + 内容派生稳定键，
+                # 让重复写入覆盖同一条记忆（幂等）
                 rag_message["original_message_id"] = (
                     "mcp:"
                     + hashlib.sha1(

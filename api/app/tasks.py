@@ -2643,13 +2643,13 @@ def process_rag_memory(
                     e,
                     exc_info=True,
                 )
-            else:
-                logger.error(
-                    "[CELERY RAG] merge resolution failed for %s: %s",
-                    end_user_id,
-                    e,
-                    exc_info=True,
-                )
+                raise
+            logger.error(
+                "[CELERY RAG] merge resolution failed for %s: %s",
+                end_user_id,
+                e,
+                exc_info=True,
+            )
             raise self.retry(exc=e)
 
         from app.core.memory.pipelines.base_pipeline import ModelClientMixin
@@ -2682,6 +2682,30 @@ def process_rag_memory(
                 exc_info=True,
             )
             raise
+        except Exception as exc:
+            # 配置读取还包含数据库访问，连接超时/抖动属瞬时异常；
+            # 不能按确定性错误直接终止，否则这条记忆会无重试丢失
+            if self.request.retries >= self.max_retries:
+                logger.error(
+                    "[CELERY RAG] 重试耗尽，配置加载最终失败: id=%s, config=%s, "
+                    "error_type=%s, err=%s",
+                    id,
+                    config_id,
+                    type(exc).__name__,
+                    exc,
+                    exc_info=True,
+                )
+                raise
+            logger.error(
+                "[CELERY RAG] 配置加载失败(将重试): id=%s, config=%s, "
+                "error_type=%s, err=%s",
+                id,
+                config_id,
+                type(exc).__name__,
+                exc,
+                exc_info=True,
+            )
+            raise self.retry(exc=exc)
 
         async def _run():
             from app.core.memory.storage.enums import MemoryNodeType
@@ -2741,14 +2765,17 @@ def process_rag_memory(
                     exc,
                     exc_info=True,
                 )
-            else:
-                logger.error(
-                    "[CELERY RAG] 写入失败: id=%s, end_user=%s, err=%s",
-                    id,
-                    resolved_end_user_id,
-                    exc,
-                    exc_info=True,
-                )
+                # Celery 在超出 max_retries 后再调 self.retry 会抛
+                # MaxRetriesExceededError，与上面的「重试耗尽」日志不一致；
+                # 这里直接抛出原始异常，让任务以明确失败结束
+                raise exc
+            logger.error(
+                "[CELERY RAG] 写入失败: id=%s, end_user=%s, err=%s",
+                id,
+                resolved_end_user_id,
+                exc,
+                exc_info=True,
+            )
             raise self.retry(exc=exc)
     finally:
         _shutdown_loop_gracefully(loop)
@@ -4169,7 +4196,10 @@ def write_total_memory_task(workspace_id: str) -> Dict[str, Any]:
                 .scalar()
             )
 
-            if str(storage_type or "").strip().lower() == "rag":
+            # 字段是 String 列，取枚举成员时统一取 .value，避免
+            # ``StorageType.RAG`` 之类的字符串化结果错过 rag 分支
+            storage_value = getattr(storage_type, "value", storage_type)
+            if str(storage_value or "").strip().lower() == "rag":
                 # RAG 空间：总量取独立索引的消息条数。
                 # 宿主集合按 (App.workspace_id, is_active) 过滤，与 dashboard 的
                 # _workspace_end_user_ids 同一口径；图侧分支走
@@ -4179,7 +4209,13 @@ def write_total_memory_task(workspace_id: str) -> Dict[str, Any]:
                 from app.core.memory.rag import stats as rag_stats
 
                 end_user_ids = EndUserRepository(db).get_ids_by_app_workspace(workspace_uuid)
-                counts = rag_stats.count_messages_by_end_user_sync(end_user_ids)
+                # 无活跃宿主时不查 ES：空 terms 查询会退化为全索引统计，
+                # 让整个空间的总量严重偏大
+                counts = (
+                    rag_stats.count_messages_by_end_user_sync(end_user_ids)
+                    if end_user_ids
+                    else {}
+                )
                 total_num = sum(counts.values())
                 # 与图侧「活跃宿主数」口径对齐：只计有消息的宿主，
                 # 否则无消息用户会拉低前端的人均记忆量
