@@ -9,7 +9,7 @@ Independent, internal-only service hosting Memory domain modules. Routes are com
 - LLM calls go to the model service over its invoke face. This process never holds provider credentials: it names a `model_configs` row and its tenant, and the model service resolves channels and failover (`src/infrastructure/model_service.py`).
 - PostgreSQL, Neo4j, Redis, Elasticsearch, and the model-service client each have a dedicated lifecycle manager under `src/infrastructure/`; `src/runtime.py` only composes, probes, and closes them. The model service is not part of readiness: only generation endpoints need it.
 - `src/common/redis_cache.py` provides shared JSON helpers, zset JSON reads, exact/prefix/pattern invalidation, and the async `@redis_cache` cache-aside decorator. It reuses the existing `ProfileRuntime.redis` provider and does not add cache state to runtime.
-- `src/modules/shared/` holds the cross-module services other modules call; repositories stay internal. `EndUserService` owns the end-user rules: is this end user addressable from the caller's workspace? It exposes `exists_in_workspace()` for a strict one-lookup membership answer (no merge branch, no payload columns), `resolve_in_workspace()` for the merge-aware identity used by profile, summary and graph endpoints, and `active_end_user_ids()` for the batch target set; both require the user and the workspace to be active and collapse malformed/foreign/missing ids to `False`/`None`. `ModelConfigService` owns model resolution for every workspace slot (`llm`, `embedding`, `rerank`, `vision`, `audio`, `video`): workspace → active `memory_config` → preset/slot column → `model_configs` tenant/active check, with typed calls (`chat_model_for_workspace`, `embed_texts_for_workspace`, `rerank_for_workspace`) and `WorkspaceModelMemo` making the LLM a once-per-request lookup shared by every user in a batch. `WorkspaceService` owns the one workspace row (`row()`): identity, active/storage flags and all six model columns, so validation and model resolution read it once per request. Profile, interest distribution, graph and cache generation all go through these services, so neither the workspace boundary nor the model choice can drift between endpoints. The boundary predicates and the narrow-read template live in `src/modules/shared/end_user_scope.py` (`active_user_in_workspace`, `active_users_in_workspace`, `scoped_end_user_select`, `active_workspace_exists`); the access repository, the profile reads and the generation writes all compose them instead of repeating the conditions.
+- `src/services/` holds the cross-module services other modules call; their repositories live under `src/repositories/`. `EndUserService` owns the end-user rules: is this end user addressable from the caller's workspace? It exposes `exists_in_workspace()` for a strict one-lookup membership answer (no merge branch, no payload columns), `resolve_in_workspace()` for the merge-aware identity used by profile, summary and graph endpoints, and `active_end_user_ids()` for the batch target set; both require the user and the workspace to be active and collapse malformed/foreign/missing ids to `False`/`None`. `ModelConfigService` owns model resolution for every workspace slot (`llm`, `embedding`, `rerank`, `vision`, `audio`, `video`): workspace → active `memory_config` → preset/slot column → `model_configs` tenant/active check, with typed calls (`chat_model_for_workspace`, `embed_texts_for_workspace`, `rerank_for_workspace`) and `WorkspaceModelMemo` making the LLM a once-per-request lookup shared by every user in a batch. `WorkspaceService` owns the one workspace row (`row()`): identity, active/storage flags and all six model columns, so validation and model resolution read it once per request. Profile, interest distribution, graph and cache generation all go through these services, so neither the workspace boundary nor the model choice can drift between endpoints. The boundary predicates and the narrow-read template live in `src/repositories/end_user_scope.py` (`active_user_in_workspace`, `active_users_in_workspace`, `scoped_end_user_select`, `active_workspace_exists`); the access repository, the profile reads and the generation writes all compose them instead of repeating the conditions.
 
 Decorator usage:
 
@@ -100,7 +100,12 @@ records:
   models, and dataclasses included), plus wire-relevant `model_config`
   (`extra`, `strict`, `populate_by_name`, `from_attributes`) and field
   `validation_alias` / `serialization_alias`;
-- the response model and its fields, the status code, and declared responses.
+- the response model and its payload fields — nested models, `list[Model]`,
+  `dict[str, Model]` values, and every member of a union response (each shape
+  keeps its own field tree) — plus the status code and declared responses. The
+  payload models live in `src/modules/analytics/schemas.py`, are declared as the
+  routes' `response_model`, and are validated by FastAPI on every response, so
+  changing a payload key is both caught at runtime and reported as drift.
 
 Middleware-enforced identity headers (`x-tenant-id`, `x-workspace-id`,
 `x-source`, `x-user-id` / `x-api-key-id`) are global, not per-route, and are
@@ -155,7 +160,7 @@ Generation is a later, explicitly scoped extension over the read service:
 
 - which LLM: end user → workspace → active `memory_config` → effective LLM column
   (default-config workspaces follow the singleton `workspace_default_model_presets`)
-  → `model_configs` tenant/active check (`src/modules/shared/model_config_service.py`).
+  → `model_configs` tenant/active check (`src/services/model_config.py`).
   Only the LLM is validated; generation needs no embedding/rerank model, unlike
   the API's full memory-config load;
 - prompts: the generation pipelines run in memory-jobs, so the prompt templates
@@ -224,17 +229,16 @@ Generation is a later, explicitly scoped extension over the read service:
 ```text
 src/entry.py
   -> src/app.py
-  -> src/modules/__init__.py
-  -> src/modules/<domain>/routes.py
-  -> src/modules/<domain>/handler.py
-  -> src/modules/<domain>/service.py
-  -> src/modules/<domain>/repository/
-  -> src/modules/shared/               # 跨模块服务：end_user_service / model_config_service / workspace_service
-  -> src/modules/shared/repository/    # 这些服务的只读数据访问
+  -> src/modules/__init__.py           # 组装所有 domain router；唯一的路由清单
+  -> src/modules/<domain>/routes.py    # 只绑定 HTTP 参数
+  -> src/modules/<domain>/handler.py   # 翻译 transport 契约与响应信封
+  -> src/services/                     # 用例编排 + 纯逻辑/常量 + 跨模块服务（end_user / model_config / workspace_service）
+  -> src/repositories/                 # 全部数据访问（含 end_user_scope 边界谓词）
+  -> src/schemas/                      # DTO（graph / profile / workspace）
   -> src/infrastructure/               # 客户端与 producer；task_bridge.py 只投递任务，不注册任务
 ```
 
-`src/modules/__init__.py` composes every domain router into the single router `src/app.py` mounts, so a new module is registered there and nowhere else. Routes only bind HTTP parameters. Handlers translate transport contracts and response envelopes. Services own use-case orchestration. Repositories are named by domain capability and depend on shared infrastructure managers. LLM prompts, pipelines and their templates live in memory-jobs, which executes the generation tasks.
+`src/modules/__init__.py` composes every domain router into the single router `src/app.py` mounts, so a new module is registered there and nowhere else. `src/modules/` is transport only: routes bind HTTP parameters, handlers translate transport contracts and response envelopes, and the module's `schemas.py` describes only the HTTP interface's input/output (request/response shapes) — no business logic and no data access. Use-case orchestration and pure logic/constants live in `src/services/`; data access lives in `src/repositories/`; response value objects (DTOs) live in `src/schemas/`. Repositories depend on shared infrastructure managers, and the workspace-boundary predicates live in `src/repositories/end_user_scope.py`. LLM prompts, pipelines and their templates live in memory-jobs, which executes the generation tasks. The full layering contract and its automated enforcement are documented in `docs/architecture.md`.
 
 API-owned PostgreSQL tables are mapped under `src/models/references/` with a separate `ReadOnlyBase.metadata`, no foreign keys, and no relationships. Profile-owned tables belong under `src/models/owned/`, inherit `ProfileBase`, and are the only tables exposed to Alembic. PostgreSQL read repositories use SQLAlchemy ORM/select expressions only; native `text()` SQL and ORM write methods are rejected by the boundary script. The runtime pool explicitly uses rollback-on-return and invalidates any asyncpg connection still in a transaction at checkin or checkout; Alembic uses a separate short-lived migration engine without pooling.
 

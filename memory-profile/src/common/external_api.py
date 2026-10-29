@@ -8,8 +8,11 @@ The marker exists because API-key callers are outside this repository: changing
 a marked route's request parameters, request body, or response silently breaks
 them. The committed snapshot in ``external_api_contract.json`` records the shape
 the last release promised; :func:`verify_external_api_contract` compares the
-running code with it once at startup. A missing or unreadable snapshot fails
-startup (the guard must not go quiet), while drift logs a warning per change.
+running code with it once at startup. A response model's payload fields are
+recorded through the same tree — nested models, keyed values, and every member of
+a union — so a handler cannot reshape ``data`` without the snapshot changing. A
+missing or unreadable snapshot fails startup (the guard must not go quiet), while
+drift logs a warning per change.
 
 The contract is read from FastAPI's own route analysis (``route.dependant``),
 not re-derived from the function signature: FastAPI is the authority on where a
@@ -232,6 +235,66 @@ def _body_model(annotation: object) -> Any | None:
     return None
 
 
+def _model_variants(annotation: object) -> list[Any]:
+    """Member models of a union, so each payload shape keeps its own field tree.
+
+    A collection of variants (``list[A | B]``) is seen through, the same way
+    ``_body_model`` sees through ``list[Model]``.
+    """
+
+    annotation = _strip_wrappers(annotation)
+    if get_origin(annotation) in (list, tuple, set, frozenset):
+        args = get_args(annotation)
+        if len(args) == 1:
+            annotation = _strip_wrappers(args[0])
+    if get_origin(annotation) not in (Union, types.UnionType):
+        return []
+    members = [_strip_wrappers(arg) for arg in get_args(annotation) if arg is not type(None)]
+    if len(members) < 2:
+        return []
+    if not all(_is_pydantic_model(item) or _is_dataclass_model(item) for item in members):
+        return []
+    return members
+
+
+def _mapping_value_model(annotation: object) -> Any | None:
+    """The value model of ``dict[str, Model]`` / ``Mapping[str, Model]``."""
+
+    annotation = _strip_wrappers(annotation)
+    if get_origin(annotation) is not dict and get_origin(annotation) is not Mapping:
+        return None
+    args = get_args(annotation)
+    if len(args) != 2:
+        return None
+    value = _strip_wrappers(args[1])
+    if _is_pydantic_model(value) or _is_dataclass_model(value):
+        return value
+    return None
+
+
+def _nested_contract(annotation: object, seen: frozenset[type]) -> dict[str, Any]:
+    """Structure one field carries: a model's fields, union variants, or keyed values."""
+
+    model = _body_model(annotation)
+    if model is not None:
+        if model in seen:
+            return {"recursive": True}
+        return _model_contract(model, seen)
+    variants = _model_variants(annotation)
+    if variants:
+        return {
+            "variants": {
+                _annotation_text(member): _model_contract(member, seen) for member in variants
+            }
+        }
+    value_model = _mapping_value_model(annotation)
+    if value_model is not None:
+        if value_model in seen:
+            return {"recursive": True}
+        return {"values": _model_contract(value_model, seen)}
+    return {}
+
+
 # ── Field trees ──────────────────────────────────────────────────────────────
 
 
@@ -307,14 +370,7 @@ def _pydantic_fields(model: type[BaseModel], seen: frozenset[type]) -> dict[str,
             if alias is not None:
                 entry[attribute] = _alias_value(alias)
 
-        nested = _body_model(field.annotation)
-        if nested is not None and nested in seen:
-            entry["recursive"] = True
-        elif nested is not None:
-            nested_contract = _model_contract(nested, seen)
-            entry["fields"] = nested_contract["fields"]
-            if "config" in nested_contract:
-                entry["config"] = nested_contract["config"]
+        entry.update(_nested_contract(field.annotation, seen))
         fields[name] = entry
     return fields
 
@@ -342,14 +398,7 @@ def _dataclass_fields(model: type, seen: frozenset[type]) -> dict[str, dict[str,
             "default": default,
             "constraints": _constraints(annotation, None, field.name),
         }
-        nested = _body_model(annotation)
-        if nested is not None and nested in seen:
-            entry["recursive"] = True
-        elif nested is not None:
-            nested_contract = _model_contract(nested, seen)
-            entry["fields"] = nested_contract["fields"]
-            if "config" in nested_contract:
-                entry["config"] = nested_contract["config"]
+        entry.update(_nested_contract(annotation, seen))
         fields[field.name] = entry
     return fields
 
@@ -385,9 +434,7 @@ def _field_contract(field: Any, location: str) -> dict[str, Any]:
         "constraints": _constraints(annotation, info, field.name),
     }
 
-    model = _body_model(annotation)
-    if model is not None:
-        contract.update(_model_contract(model, frozenset()))
+    contract.update(_nested_contract(annotation, frozenset()))
     if location in {"body", "form", "file"} and getattr(info, "embed", None):
         contract["embed"] = True
     return contract
@@ -481,8 +528,15 @@ def _response_contract(route: Any) -> dict[str, Any]:
         "status_code": getattr(route, "status_code", None) or 200,
         "declared": sorted(str(key) for key in declared),
     }
-    if model is not None and _is_pydantic_model(model):
-        contract.update(_model_contract(model, frozenset()))
+    if model is not None:
+        variants = _model_variants(model)
+        if variants:
+            contract["variants"] = {
+                _annotation_text(variant): _model_contract(variant, frozenset())
+                for variant in variants
+            }
+        elif _is_pydantic_model(model):
+            contract.update(_model_contract(model, frozenset()))
     return contract
 
 
@@ -526,15 +580,23 @@ def dump_external_api_contract(contract: Mapping[str, Any]) -> str:
 # ── Diff ─────────────────────────────────────────────────────────────────────
 
 
+#: Keys whose contents are flattened into their own dotted paths.
+_CONTAINER_KEYS = ("fields", "variants", "values")
+
+
 def _flatten_route(route: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
     """Dotted-path view of a route, request-body and response fields included."""
 
     flat: dict[str, dict[str, Any]] = {}
 
     def visit(path: str, node: Mapping[str, Any]) -> None:
-        flat[path] = {key: value for key, value in node.items() if key != "fields"}
+        flat[path] = {key: value for key, value in node.items() if key not in _CONTAINER_KEYS}
         for name, child in (node.get("fields") or {}).items():
             visit(f"{path}.{name}", child)
+        for name, child in (node.get("variants") or {}).items():
+            visit(f"{path}.variants.{name}", child)
+        if node.get("values") is not None:
+            visit(f"{path}.values", node["values"])
 
     for name, node in (route.get("parameters") or {}).items():
         visit(name, node)
