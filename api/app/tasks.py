@@ -3123,6 +3123,9 @@ def scan_layer2_reflection(self) -> Dict[str, Any]:
                 except Exception as e:
                     logger.error(f"高频反思scan 处理用户失败 user={uid}: {e}")
             after_id = candidates[-1].end_user_id
+            # 不足一页说明后面没有候选了，直接结束，避免多发一次空查询
+            if len(candidates) < _END_USER_SCAN_PAGE_SIZE:
+                break
 
     logger.info(
         f"scan_layer2_reflection 完成: 派发 {dispatched} 样本 {dispatched_user_ids}, "
@@ -3491,6 +3494,9 @@ def scan_layer2_dedup_full_scan(self) -> Dict[str, Any]:
                 except Exception as e:
                     logger.error(f"反思低频去重scan 处理用户失败 user={uid}: {e}")
             after_id = user_ids[-1]
+            # 不足一页说明后面没有候选了，直接结束，避免多发一次空查询
+            if len(user_ids) < _END_USER_SCAN_PAGE_SIZE:
+                break
 
     logger.info(
         f"scan_layer2_dedup_full_scan 完成: 派发 {dispatched} 样本 {dispatched_user_ids}, "
@@ -3826,6 +3832,9 @@ def scan_gds_topology_score(self) -> Dict[str, Any]:
                 except Exception as e:
                     logger.error(f"GDS拓扑scan 处理用户失败 user={uid}: {e}")
             after_id = user_ids[-1]
+            # 不足一页说明后面没有候选了，直接结束，避免多发一次空查询
+            if len(user_ids) < _END_USER_SCAN_PAGE_SIZE:
+                break
 
     logger.info(
         f"scan_gds_topology_score 完成: 派发 {dispatched} 样本 {dispatched_user_ids}, "
@@ -4323,6 +4332,9 @@ def scan_refresh_insight_summary_cache(self) -> Dict[str, Any]:
                 except Exception as e:
                     logger.error(f"洞察/摘要缓存scan 处理用户失败 user={eu_id}: {e}")
             after_id = rows[-1].end_user_id
+            # 不足一页说明后面没有候选了，直接结束，避免多发一次空查询
+            if len(rows) < _END_USER_SCAN_PAGE_SIZE:
+                break
 
     logger.info(
         f"scan_refresh_insight_summary_cache 完成: 派发 {dispatched}, "
