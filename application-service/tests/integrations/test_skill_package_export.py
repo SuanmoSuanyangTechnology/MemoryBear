@@ -16,6 +16,9 @@ import types
 import uuid
 import zipfile
 
+import pytest
+
+from src.errors import BizCode, BusinessException
 from src.services.skill_package_service import SkillPackageService
 
 
@@ -155,3 +158,107 @@ def test_plugin_export_dedupes_same_named_member_dirs():
     )
     dirs = {n.split("/", 1)[0] for n in _unzip(blob)}
     assert dirs == {"research", "research-2"}
+
+
+class _OneSkillQuery:
+    """db.query(Skill).filter(...).first() always returns the queued skill."""
+
+    def __init__(self, skill):
+        self._skill = skill
+
+    def filter(self, *_conditions):
+        return self
+
+    def first(self):
+        return self._skill
+
+
+class _OneSkillDb:
+    def __init__(self, skill):
+        self._skill = skill
+
+    def query(self, _model):
+        return _OneSkillQuery(self._skill)
+
+
+def test_soft_deleted_skill_cannot_be_exported():
+    # After DELETE the row is is_active=False with its pack hard-deleted
+    # (package_id=None). Export is a content artifact: it must NOT_FOUND rather
+    # than fall through to the legacy-conversion placeholder.
+    from src.services.skill_package_service import SkillPackageRepository
+
+    soft_deleted = types.SimpleNamespace(
+        id=uuid.uuid4(),
+        tenant_id=uuid.uuid4(),
+        name="removed-skill",
+        is_active=False,
+        skill_format="standard",
+        package_id=None,
+    )
+    db = _OneSkillDb(soft_deleted)
+    repo = SkillPackageRepository(db)
+
+    with pytest.raises(BusinessException) as exc:
+        SkillPackageService.export_zip(db, soft_deleted.tenant_id, soft_deleted.id, )
+    assert exc.value.code == BizCode.NOT_FOUND
+
+
+class _Chain:
+    """Stand-in for a SQLAlchemy query chain ending in .first()/.all()."""
+
+    def __init__(self, first=None, all_rows=None):
+        self._first = first
+        self._all = all_rows or []
+
+    def filter(self, *_conditions):
+        return self
+
+    def order_by(self, *_cols):
+        return self
+
+    def first(self):
+        return self._first
+
+    def all(self):
+        return self._all
+
+
+class _ModelDb:
+    """Routes ``db.query(Model)`` to canned rows by ORM model class."""
+
+    def __init__(self, *, skill=None, package=None, files=None):
+        self._skill = skill
+        self._package = package
+        self._files = files or []
+
+    def query(self, model):
+        from src.models.skill_model import Skill
+        from src.models.skill_package_model import SkillFile, SkillPackage
+
+        if model is Skill:
+            return _Chain(first=self._skill)
+        if model is SkillPackage:
+            return _Chain(first=self._package)
+        if model is SkillFile:
+            return _Chain(all_rows=self._files)
+        return _Chain()
+
+
+def test_active_skill_still_exports():
+    # Regression guard: the is_active gate must not block a live standard skill.
+    pkg_id = uuid.uuid4()
+    active = types.SimpleNamespace(
+        id=uuid.uuid4(),
+        tenant_id=uuid.uuid4(),
+        name="live-skill",
+        is_active=True,
+        skill_format="standard",
+        package_id=pkg_id,
+    )
+    package = types.SimpleNamespace(id=pkg_id, name="live-pack")
+    files = [_FakeFile("SKILL.md", "---\nname: live\n---\n# body\n")]
+    db = _ModelDb(skill=active, package=package, files=files)
+
+    blob, filename = SkillPackageService.export_zip(db, active.tenant_id, active.id)
+    assert filename == "live-pack.zip"
+    assert "SKILL.md" in _unzip(blob)

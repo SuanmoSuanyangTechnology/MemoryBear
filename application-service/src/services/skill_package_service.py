@@ -1303,6 +1303,13 @@ class SkillPackageService:
                 return SkillPackageService._export_plugin_zip(db, repo, tenant_id, plugin)
             raise BusinessException("技能不存在或无权限", BizCode.NOT_FOUND)
 
+        # A soft-deleted skill is gone for good as far as content is concerned (its
+        # pack is hard-deleted on delete), so it must never export — not even a
+        # legacy-conversion placeholder. Detail/list still surface the row for bound-
+        # id echo, but export is a content artifact and has nothing to return.
+        if not skill.is_active:
+            raise BusinessException("技能不存在或已删除", BizCode.NOT_FOUND)
+
         member = SkillPackageService._skill_pack_entries(repo, tenant_id, skill)
         if member is None:
             raise BusinessException("技能包内容为空，无法导出", BizCode.NOT_FOUND)
