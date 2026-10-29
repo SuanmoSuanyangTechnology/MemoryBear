@@ -446,7 +446,13 @@ async def push_rag_messages(
     config_id: str,
     source: str,
 ) -> List[str]:
-    """逐条派发 RAG 记忆任务；返回调度层消息 id 列表（不对外暴露）。"""
+    """逐条派发 RAG 记忆任务；返回调度层消息 id 列表（不对外暴露）。
+
+    串行派发：一条消息一次排队准入。若中途某条抛 ``RateLimitException``，
+    此前已派发的 payload 已入队生效，本批构成「部分提交」——上层拿到异常时
+    无法据此判断哪些消息已受理。RAG 记忆以内容派生 uuid5 作 ES 主键，
+    同一消息重复派发是幂等覆盖写，因此调用方直接整批重试即可收敛。
+    """
     msg_ids: List[str] = []
     for payload in build_rag_payloads(messages, end_user_id, config_id, source):
         msg_ids.append(await push_rag_task(payload))

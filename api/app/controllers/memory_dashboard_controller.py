@@ -206,11 +206,9 @@ async def get_workspace_end_users(
         workspace_config = {"memory_config_id": None, "memory_config_name": None}
 
     if current_workspace_type == "rag":
-        # RAG 无软删节点，独立索引计数即活跃计数
-        active_counts = {
-            str(item["end_user"].id): int(item.get("memory_count", 0) or 0)
-            for item in raw_items
-        }
+        # RAG 无软删节点，独立索引计数即活跃计数：下方直接复用 memory_total，
+        # 不再单独维护一份同源副本（原实现只在当前页有值，易被误读为可分页聚合）。
+        active_counts = {}
     else:
         try:
             active_counts = await memory_dashboard_service.batch_get_active_counts(
@@ -257,7 +255,10 @@ async def get_workspace_end_users(
             "tags": normalize_stored_user_card_tags(getattr(end_user, "memory_tags", None)),
             "memory_num": {
                 "total": memory_total,
-                "active_count": active_counts.get(user_id, 0),
+                "active_count": (
+                    memory_total if current_workspace_type == "rag"
+                    else active_counts.get(user_id, 0)
+                ),
                 "memory_limit": memory_limits,
             },
             "memory_config": workspace_config,

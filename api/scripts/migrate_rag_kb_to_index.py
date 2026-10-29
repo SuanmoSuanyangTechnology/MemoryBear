@@ -479,7 +479,6 @@ def _bulk_index(client, actions: list[dict[str, Any]]) -> tuple[int, int]:
 
 def migrate(
         *,
-        engine,
         client,
         documents: list[dict[str, Any]],
         dry_run: bool,
@@ -590,13 +589,8 @@ def reembed(
         bindings: dict[str, dict[str, str]],
         user_workspace: dict[str, str],
         stats: MigrationStats,
-        reuse_vectors: bool,
 ) -> None:
-    """按 end_user 补算向量（仅当未复用旧向量时执行）。"""
-    if reuse_vectors:
-        print("已复用旧 chunk 向量，跳过 reembed")
-        return
-
+    """按 end_user 补算向量（仅在不复用旧向量时调用）。"""
     for end_user_id in end_users:
         ws_id = user_workspace.get(end_user_id, "")
         binding = bindings.get(ws_id)
@@ -722,7 +716,6 @@ def run(
 
         # ---------- ① 迁移写正文（可选复用旧向量）----------
         migrate(
-            engine=engine,
             client=client,
             documents=documents,
             dry_run=dry_run,
@@ -755,7 +748,6 @@ def run(
                 bindings=bindings,
                 user_workspace=user_workspace,
                 stats=stats,
-                reuse_vectors=reuse_vectors,
             )
             if not dry_run:
                 client.indices.refresh(index=_RAG_INDEX)

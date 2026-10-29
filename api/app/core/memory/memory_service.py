@@ -336,17 +336,17 @@ class MemoryService:
         """
         from app.core.memory.models.service_models import MemoryContext
         from app.core.memory.pipelines.forgetting_pipeline import ForgettingPipeline
-        from app.db import get_db_context
 
-        with get_db_context() as db:
+        from sqlalchemy import select
+
+        async with get_async_db_context() as db:
             from app.models.end_user_model import EndUser
             from app.models.workspace_model import Workspace
 
-            storage_type = (
-                db.query(Workspace.storage_type)
+            storage_type = await db.scalar(
+                select(Workspace.storage_type)
                 .join(EndUser, EndUser.workspace_id == Workspace.id)
-                .filter(EndUser.id == uuid.UUID(end_user_id))
-                .scalar()
+                .where(EndUser.id == uuid.UUID(end_user_id))
             )
 
         if str(storage_type or "").strip().lower() == "rag":

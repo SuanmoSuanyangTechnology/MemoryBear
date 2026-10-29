@@ -28,6 +28,7 @@ from app.core.memory.storage.provider.elasticsearch.config import (
 from app.core.memory.storage.provider.elasticsearch.index import get_index_name
 from app.core.memory.storage.provider.elasticsearch.index.definitions import (
     get_embedding_field_name,
+    is_supported_embedding_dimension,
 )
 from app.core.memory.storage_services.reembedding_engine import job_state
 from app.core.memory.storage_services.reembedding_engine.rebuilder import (
@@ -194,6 +195,12 @@ async def rebuild_rag_end_user_vectors(
                         embedder,
                         [text for _, text in pairs],
                     )
+                    if not is_supported_embedding_dimension(dimension):
+                        raise ValueError(
+                            "embedding dimension "
+                            f"{dimension} is not supported by the "
+                            f"{MemoryNodeType.RAG_MEMORY.value} index"
+                        )
                     processed += await update_rag_embeddings(
                         client,
                         [
