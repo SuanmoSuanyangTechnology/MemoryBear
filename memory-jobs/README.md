@@ -3,13 +3,13 @@
 MemoryBear 的 **Celery 任务执行服务**。与 `api`、`memory-profile` 同级独立部署，负责消费
 Celery 队列、执行后台任务（周期性扫描、记忆写入/遗忘/反思、文档解析等）。
 
-服务提供 Celery 应用、同步基础设施客户端、任务基类、健康检查、Docker/k8s 骨架，
-业务代码统一收在 `src/modules/` 下并按**功能**分包：`memory_insight`（记忆洞察）、
-`user_summary`（用户摘要）、`interest_distribution`（兴趣分布）、`profile_cache`
-（洞察 + 摘要的缓存编排），跨域共享的模型配置与数据访问在 `src/modules/shared/`。
-`src/tasks/` 只放 Celery 适配层，生成算法与提示词都在各自的功能包里。
+服务提供 Celery 应用、同步基础设施客户端、任务基类、健康检查、Docker/k8s 骨架。
+业务代码按 DDD 分层：领域规则在 `src/domain/`（工作空间、用户目录、洞察/摘要、
+兴趣分布），用例与端口在 `src/application/`，持久化/Neo4j/缓存/锁/提示词/投递适配器在
+`src/infrastructure/` 与 `src/interfaces/tasks/publishing.py`。
+`src/interfaces/tasks/` 只放 Celery 适配层：解析参数、调用用例、序列化结果。
 适配层按**任务域**分包、每个 Celery 任务一个模块；定时任务（beat）统一登记在
-`src/tasks/schedules.py`，不在别处写排期。
+`src/interfaces/tasks/schedules.py`，不在别处写排期。
 
 ---
 
@@ -41,35 +41,22 @@ memory-jobs/
 │   ├── entry.py                # CLI 入口：src.entry:celery_app
 │   ├── runtime.py              # 进程级基础设施组合（懒连接）
 │   ├── healthcheck.py          # 容器探针：python -m src.healthcheck
-│   ├── common/                 # 日志、任务上下文、归一化
-│   ├── prompts/                # 全部生成类提示词（单一入口 + templates/）
-│   ├── infrastructure/         # 同步 DB / Redis / ES / Neo4j / model-service / 企业版服务客户端
-│   ├── models/                 # 宿主表的 SQLAlchemy 映射
-│   ├── modules/                # 业务功能，按功能分包
-│   │   ├── memory_insight/     #   记忆洞察生成（算法 + 提示词）
-│   │   ├── user_summary/       #   用户摘要 + 热门标签
-│   │   ├── interest_distribution/  # 兴趣分布生成
-│   │   ├── profile_cache/      #   洞察 + 摘要的缓存编排
-│   │   └── shared/             #   跨域共享
-│   │       ├── model_config.py #     工作空间 LLM 解析与阻塞模型构建
-│   │       ├── scene_names.py  #     洞察输入的场景名投影（可选企业插件）
-│   │       └── repositories/   #     数据访问：每个聚合一个模块
-│   └── tasks/                  # Celery 适配层：每个任务一个模块
-│       ├── __init__.py         # 任务注册表：import 各任务包 + 路由
-│       ├── base.py             # JobTask：重试策略、db_session、客户端快捷方式
-│       ├── schedules.py        # 定时任务（beat）唯一登记处
-│       ├── health/
-│       │   └── ping.py         # memory_jobs.health.ping 示例/冒烟任务
-│       ├── interest_distribution/
-│       │   ├── generate.py     # memory_jobs.interest_distribution.generate
-│       │   ├── init_for_users.py  # memory_jobs.interest_distribution.init_for_users（dashboard 预热派发）
-│       │   └── dispatch.py     # 错峰投递（预热 fan-out）
-│       └── profile_cache/
-│           ├── generate.py     # memory_jobs.profile_cache.generate
-│           ├── generate_workspace.py  # memory_jobs.profile_cache.generate_workspace
-│           ├── scan.py         # memory_jobs.profile_cache.scan（beat 定时扫描）
-│           ├── dispatch.py     # 错峰投递（工作空间 fan-out 与 scan 共用）
-│           └── inflight.py     # 每用户并发锁
+│   ├── common/                 # 日志、任务上下文
+│   ├── prompts/                # 提示词模板（Jinja2）；由 PromptCatalog 适配器包装
+│   ├── domain/                 # DDD 领域层：聚合、值对象、领域服务、策略（仅标准库）
+│   ├── application/            # 应用层：用例、端口、DTO
+│   ├── infrastructure/         # 同步客户端 + 适配器（persistence/lock/cache/llm/prompts）
+│   ├── models/                 # 宿主表的 SQLAlchemy 映射（只允许适配器引用）
+│   ├── interfaces/             # 接口层：Celery 任务与健康探针
+│   │   └── tasks/              #   每个任务一个模块；只解析参数、调用用例、序列化结果
+│   │       ├── __init__.py     #   任务注册表：import 各任务包 + 路由
+│   │       ├── base.py         #   JobTask：重试策略、客户端快捷方式
+│   │       ├── schedules.py    #   定时任务（beat）唯一登记处
+│   │       ├── publishing.py   #   CeleryUnitPublisher：错峰投递适配器
+│   │       ├── health/ping.py
+│   │       ├── interest_distribution/{generate,init_for_users}.py
+│   │       └── profile_cache/{generate,generate_workspace,scan}.py
+│   └── composition.py          # 组合根：runtime -> 适配器 -> 用例
 ├── tests/
 ├── scripts/check_sync_only.py
 ├── deploy/k8s/                 # worker / beat 部署清单
@@ -123,7 +110,7 @@ uv run celery -A src.entry:celery_app beat --schedule=/tmp/celerybeat-schedule
 ```bash
 uv run celery -A src.entry:celery_app call memory_jobs.health.ping
 # 或本地直接执行（不需要 broker）：
-uv run python -c "from src.tasks.health.ping import ping; print(ping.apply().get())"
+uv run python -c "from src.interfaces.tasks.health.ping import ping; print(ping.apply().get())"
 ```
 
 依赖探针（容器 liveness/readiness 使用）：
@@ -204,17 +191,18 @@ priority field`）。该参数由 Celery 的 `task_queue_max_priority` 写出，
 
 ## 新增任务
 
-1. 业务逻辑按**功能**建包放在 `src/modules/` 下（例如 `src/modules/memory_write/`：
-   算法 + 提示词 + 提示词模板）；`src/tasks/` 下按任务域建包，每个 Celery 任务
-   一个模块（如 `src/tasks/memory_write/write.py`），并在该包的 `__init__.py` 里
-   显式 import 任务模块完成注册。
+1. 业务规则放在 `src/domain/<context>/`（聚合、值对象、领域服务、策略），用例放在
+   `src/application/<context>/`（事务边界、端口、DTO），`src/interfaces/tasks/` 下按
+   任务域建包，每个 Celery 任务一个模块（如 `src/interfaces/tasks/memory_write/write.py`），
+   并在该包的 `__init__.py` 里显式 import 任务模块完成注册。任务只解析参数、调用用例、
+   序列化结果；适配器的装配在 `src/composition.py`。
 2. 任务使用 `shared_task` + `JobTask` 基类，并显式命名（`memory_jobs.<domain>.<action>`）：
 
 ```python
 from celery import shared_task
 
 from src.runtime import get_runtime
-from src.tasks.base import JobTask
+from src.interfaces.tasks.base import JobTask
 
 
 @shared_task(bind=True, base=JobTask, name="memory_jobs.memory.write")
@@ -225,17 +213,17 @@ def write_memory(self, payload: dict) -> dict:
     return {"ok": True}
 ```
 
-3. 在 `src/tasks/__init__.py` 中 import 该任务包，并在 `TASK_ROUTES` 登记路由：
+3. 在 `src/interfaces/tasks/__init__.py` 中 import 该任务包，并在 `TASK_ROUTES` 登记路由：
 
 ```python
-from src.tasks import memory_write
+from src.interfaces.tasks import memory_write
 
 TASK_ROUTES = {
     "memory_jobs.memory.write": "memory_jobs_tasks",
 }
 ```
 
-4. 需要周期性执行时，**只改** `src/tasks/schedules.py`：在 `periodic_tasks()` 中
+4. 需要周期性执行时，**只改** `src/interfaces/tasks/schedules.py`：在 `periodic_tasks()` 中
    追加一条 `PeriodicTask`，`BEAT_SCHEDULE` 由它统一渲染：
 
 ```python
@@ -289,7 +277,9 @@ PeriodicTask(
   包含表定义与迁移；本服务只通过 HTTP 读取，不接触企业 schema。
   `MEMORY_ENTERPRISE_BASE_URL` 指向该服务（例：`http://memory-enterprise:8083`），
   `MEMORY_ENTERPRISE_TIMEOUT_SECONDS` 默认 3s，`MEMORY_ENTERPRISE_TOKEN` 设置后以
-  `X-Internal-Token` 发送。未配置时与「未装插件的 API」一致：洞察输入里 uuid 场景键
+  `X-Internal-Token` 发送。场景名查询还会带上 workspace 所属租户的 `X-Tenant-Id`，
+  服务端只返回该租户可见的场景（自有场景 + 系统默认场景）；租户为空的 workspace 不发起
+  查询。未配置时与「未装插件的 API」一致：洞察输入里 uuid 场景键
   视为已删除、整组丢弃。该服务**不参与**依赖探测，挂了只会丢场景名，不会让任务失败。
 - `JOBS_INTEREST_CACHE_EXPIRE_SECONDS`（默认 24h）：预热单元写入兴趣分布缓存的 TTL。
   与 memory-profile 的 `PROFILE_INTEREST_CACHE_EXPIRE_SECONDS` 是同一个键（重启后者的
@@ -306,7 +296,11 @@ cd memory-jobs
 uv run pytest
 uv run ruff check src tests scripts
 uv run python scripts/check_sync_only.py
+uv run python scripts/check_import_boundaries.py   # 分层依赖规则（domain/application/...）
 ```
+
+测试按层放在 `tests/{domain,application,infrastructure,interfaces}/`：领域规则不碰数据库，
+应用用例用内存 fake，适配器做 SQL/Cypher 形状测试，接口层只测参数解析与 payload。
 
 ## Docker / 部署
 
