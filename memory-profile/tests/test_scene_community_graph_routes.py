@@ -17,11 +17,11 @@ from src.error_handlers import register_error_handlers
 from src.i18n import LanguageMiddleware, clear_i18n, configure_i18n
 from src.middleware.auth import MemoryAuthConfig, MemoryAuthMiddleware
 from src.modules.analytics import routes
-from src.modules.analytics import service as analytics_service
-from src.modules.analytics.scene_community_graph.service import SceneGraphService
-from src.modules.analytics.scene_community_graph.types import Options
-from src.modules.shared.end_user_service import EndUserRef, EndUserService
 from src.runtime import ProfileRuntime
+from src.services import graph as graph_service
+from src.services.end_user import EndUserRef, EndUserService
+from src.services.scene_community_graph.service import SceneGraphService
+from src.services.scene_community_graph.types import Options
 
 PATH = "/internal/v1/memory/analytics/scene_community_graph"
 WORKSPACE, USER = uuid4(), uuid4()
@@ -68,7 +68,7 @@ def graph_app(monkeypatch):
     lookup, repo = Lookup(), Repo()
     service = SceneGraphService(lookup, repo, Options(enabled=True))
     monkeypatch.setattr(
-        analytics_service, "get_scene_community_graph_service", lambda runtime, end_users: service
+        graph_service, "get_scene_community_graph_service", lambda runtime, end_users: service
     )
     app = FastAPI()
     app.state.runtime = ProfileRuntime(ProfileSettings())
@@ -169,7 +169,7 @@ def test_handler_validates_service_output_before_serializing(graph_app, monkeypa
             return {"groups": [], "statistics": "private-data"}
 
     monkeypatch.setattr(
-        analytics_service,
+        graph_service,
         "get_scene_community_graph_service",
         lambda runtime, end_users: InvalidService(),
     )

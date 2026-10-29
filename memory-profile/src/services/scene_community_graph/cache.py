@@ -6,8 +6,8 @@ import logging
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from src.modules.analytics.scene_community_graph.schemas import GraphData
-from src.modules.analytics.scene_community_graph.types import AuthorizedUser, Options
+from src.schemas.scene_community_graph import GraphData
+from src.services.scene_community_graph.types import AuthorizedUser, Options
 
 logger = logging.getLogger(__name__)
 

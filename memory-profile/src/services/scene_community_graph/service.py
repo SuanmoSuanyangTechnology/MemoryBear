@@ -6,26 +6,26 @@ from uuid import UUID
 
 from src.common.errors import BizCode, LocalizedProfileError, ProfileError
 from src.common.normalization import parse_uuid
-from src.modules.analytics.repository.scene_community_graph import Neo4jRepository
-from src.modules.analytics.scene_community_graph.assembler import assemble
-from src.modules.analytics.scene_community_graph.cache import RedisDataCache, encode_data
-from src.modules.analytics.scene_community_graph.schemas import GraphData
-from src.modules.analytics.scene_community_graph.types import (
+from src.repositories.scene_community_graph import Neo4jRepository
+from src.runtime import ProfileRuntime
+from src.schemas.scene_community_graph import GraphData
+from src.services.end_user import EndUserService
+from src.services.scene_community_graph.assembler import assemble
+from src.services.scene_community_graph.cache import RedisDataCache, encode_data
+from src.services.scene_community_graph.types import (
     AuthorizedUser,
     Options,
     capacity_error,
     not_found,
     unavailable,
 )
-from src.modules.shared.end_user_service import EndUserService
-from src.runtime import ProfileRuntime
 
 logger = logging.getLogger(__name__)
 
 
 class Repository(Protocol):
-    async def communities(self, user: AuthorizedUser, limit: int) -> list[dict]: ...
-    async def scenes(self, user: AuthorizedUser, limit: int) -> list[dict]: ...
+    async def communities(self, end_user_id: UUID, limit: int) -> list[dict]: ...
+    async def scenes(self, end_user_id: UUID, limit: int) -> list[dict]: ...
 
 
 class Cache(Protocol):
@@ -104,10 +104,12 @@ class SceneGraphService:
             async with asyncio.timeout(self.options.read_timeout):
                 async with asyncio.TaskGroup() as tasks:
                     communities = tasks.create_task(
-                        self.repository.communities(user, self.options.max_communities + 1)
+                        self.repository.communities(
+                            user.end_user_id, self.options.max_communities + 1
+                        )
                     )
                     scenes = tasks.create_task(
-                        self.repository.scenes(user, self.options.max_scenes + 1)
+                        self.repository.scenes(user.end_user_id, self.options.max_scenes + 1)
                     )
         except Exception as exc:
             # TaskGroup waits for sibling cancellation/cleanup before raising.

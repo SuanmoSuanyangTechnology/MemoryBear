@@ -21,9 +21,133 @@
             "required": false
           },
           "data": {
-            "annotation": "dict[str, Any]",
+            "annotation": "src.modules.analytics.schemas.CommunityGraphResponse",
             "constraints": [],
             "default": null,
+            "fields": {
+              "edges": {
+                "annotation": "list[src.modules.analytics.schemas.CommunityRelationEdge | src.modules.analytics.schemas.CommunityMembershipEdge]",
+                "constraints": [],
+                "default": null,
+                "required": true,
+                "variants": {
+                  "src.modules.analytics.schemas.CommunityMembershipEdge": {
+                    "fields": {
+                      "id": {
+                        "annotation": "str",
+                        "constraints": [],
+                        "default": null,
+                        "required": true
+                      },
+                      "source": {
+                        "annotation": "str",
+                        "constraints": [],
+                        "default": null,
+                        "required": true
+                      },
+                      "target": {
+                        "annotation": "str",
+                        "constraints": [],
+                        "default": null,
+                        "required": true
+                      }
+                    }
+                  },
+                  "src.modules.analytics.schemas.CommunityRelationEdge": {
+                    "fields": {
+                      "id": {
+                        "annotation": "str",
+                        "constraints": [],
+                        "default": null,
+                        "required": true
+                      },
+                      "predicate_description": {
+                        "annotation": "Any",
+                        "constraints": [],
+                        "default": null,
+                        "required": false
+                      },
+                      "properties": {
+                        "annotation": "dict[str, Any]",
+                        "constraints": [],
+                        "default": null,
+                        "required": true
+                      },
+                      "source": {
+                        "annotation": "str",
+                        "constraints": [],
+                        "default": null,
+                        "required": true
+                      },
+                      "target": {
+                        "annotation": "str",
+                        "constraints": [],
+                        "default": null,
+                        "required": true
+                      }
+                    }
+                  }
+                }
+              },
+              "message": {
+                "annotation": "str | None",
+                "constraints": [],
+                "default": null,
+                "required": false
+              },
+              "nodes": {
+                "annotation": "list[src.modules.analytics.schemas.CommunityGraphNode]",
+                "constraints": [],
+                "default": null,
+                "fields": {
+                  "id": {
+                    "annotation": "str",
+                    "constraints": [],
+                    "default": null,
+                    "required": true
+                  },
+                  "label": {
+                    "annotation": "str",
+                    "constraints": [],
+                    "default": null,
+                    "required": true
+                  },
+                  "properties": {
+                    "annotation": "dict[str, Any]",
+                    "constraints": [],
+                    "default": null,
+                    "required": true
+                  }
+                },
+                "required": true
+              },
+              "statistics": {
+                "annotation": "src.modules.analytics.schemas.CommunityStatistics",
+                "constraints": [],
+                "default": null,
+                "fields": {
+                  "node_types": {
+                    "annotation": "dict[str, int]",
+                    "constraints": [],
+                    "default": null,
+                    "required": true
+                  },
+                  "total_edges": {
+                    "annotation": "int",
+                    "constraints": [],
+                    "default": null,
+                    "required": true
+                  },
+                  "total_nodes": {
+                    "annotation": "int",
+                    "constraints": [],
+                    "default": null,
+                    "required": true
+                  }
+                },
+                "required": true
+              }
+            },
             "required": true
           },
           "error": {
@@ -45,7 +169,7 @@
             "required": false
           }
         },
-        "model": "src.common.responses.ApiResponse[dict[str, Any]]",
+        "model": "src.common.responses.ApiResponse[CommunityGraphResponse]",
         "status_code": 200
       }
     },
@@ -111,9 +235,252 @@
             "required": false
           },
           "data": {
-            "annotation": "dict[str, Any]",
+            "annotation": "src.modules.analytics.schemas.GraphDataResponse",
             "constraints": [],
             "default": null,
+            "fields": {
+              "edges": {
+                "annotation": "list[src.modules.analytics.schemas.UnifiedEdge]",
+                "constraints": [],
+                "default": null,
+                "fields": {
+                  "a_to_b": {
+                    "annotation": "list[src.modules.analytics.schemas.EdgeGroupItem]",
+                    "constraints": [],
+                    "default": "<factory:list>",
+                    "fields": {
+                      "created_at": {
+                        "annotation": "Any",
+                        "constraints": [],
+                        "default": null,
+                        "required": false
+                      },
+                      "id": {
+                        "annotation": "str",
+                        "constraints": [],
+                        "default": null,
+                        "required": true
+                      },
+                      "predicate": {
+                        "annotation": "Any",
+                        "constraints": [],
+                        "default": null,
+                        "required": false
+                      },
+                      "predicate_description": {
+                        "annotation": "Any",
+                        "constraints": [],
+                        "default": null,
+                        "required": false
+                      },
+                      "predicate_surface": {
+                        "annotation": "Any",
+                        "constraints": [],
+                        "default": null,
+                        "required": false
+                      },
+                      "type": {
+                        "annotation": "str",
+                        "constraints": [],
+                        "default": null,
+                        "required": true
+                      },
+                      "valid_at": {
+                        "annotation": "Any",
+                        "constraints": [],
+                        "default": null,
+                        "required": false
+                      }
+                    },
+                    "required": false
+                  },
+                  "b_to_a": {
+                    "annotation": "list[src.modules.analytics.schemas.EdgeGroupItem]",
+                    "constraints": [],
+                    "default": "<factory:list>",
+                    "fields": {
+                      "created_at": {
+                        "annotation": "Any",
+                        "constraints": [],
+                        "default": null,
+                        "required": false
+                      },
+                      "id": {
+                        "annotation": "str",
+                        "constraints": [],
+                        "default": null,
+                        "required": true
+                      },
+                      "predicate": {
+                        "annotation": "Any",
+                        "constraints": [],
+                        "default": null,
+                        "required": false
+                      },
+                      "predicate_description": {
+                        "annotation": "Any",
+                        "constraints": [],
+                        "default": null,
+                        "required": false
+                      },
+                      "predicate_surface": {
+                        "annotation": "Any",
+                        "constraints": [],
+                        "default": null,
+                        "required": false
+                      },
+                      "type": {
+                        "annotation": "str",
+                        "constraints": [],
+                        "default": null,
+                        "required": true
+                      },
+                      "valid_at": {
+                        "annotation": "Any",
+                        "constraints": [],
+                        "default": null,
+                        "required": false
+                      }
+                    },
+                    "required": false
+                  },
+                  "edge_type": {
+                    "annotation": "Literal[SINGLE, UNIDIRECTIONAL_MULTI, BIDIRECTIONAL, MULTI_BIDIRECTIONAL]",
+                    "constraints": [],
+                    "default": null,
+                    "required": true
+                  },
+                  "node_a": {
+                    "annotation": "str",
+                    "constraints": [],
+                    "default": null,
+                    "required": true
+                  },
+                  "node_b": {
+                    "annotation": "str",
+                    "constraints": [],
+                    "default": null,
+                    "required": true
+                  },
+                  "total": {
+                    "annotation": "int",
+                    "constraints": [
+                      "Ge(ge=1)"
+                    ],
+                    "default": null,
+                    "required": true
+                  }
+                },
+                "required": true
+              },
+              "message": {
+                "annotation": "str | None",
+                "constraints": [],
+                "default": null,
+                "required": false
+              },
+              "nodes": {
+                "annotation": "list[src.modules.analytics.schemas.GraphNode]",
+                "config": {
+                  "extra": "ignore"
+                },
+                "constraints": [],
+                "default": null,
+                "fields": {
+                  "caption": {
+                    "annotation": "str",
+                    "constraints": [],
+                    "default": null,
+                    "required": true
+                  },
+                  "id": {
+                    "annotation": "str",
+                    "constraints": [],
+                    "default": null,
+                    "required": true
+                  },
+                  "label": {
+                    "annotation": "str",
+                    "constraints": [],
+                    "default": null,
+                    "required": true
+                  },
+                  "properties": {
+                    "annotation": "dict[str, Any]",
+                    "constraints": [],
+                    "default": "<factory:dict>",
+                    "required": false
+                  }
+                },
+                "required": true
+              },
+              "statistics": {
+                "annotation": "src.modules.analytics.schemas.GraphStatistics",
+                "constraints": [],
+                "default": null,
+                "fields": {
+                  "edge_types": {
+                    "annotation": "dict[str, int]",
+                    "constraints": [],
+                    "default": null,
+                    "required": true
+                  },
+                  "node_types": {
+                    "annotation": "dict[str, int]",
+                    "constraints": [],
+                    "default": null,
+                    "required": true
+                  },
+                  "per_type": {
+                    "annotation": "dict[str, src.modules.analytics.schemas.PerTypeStatistic]",
+                    "constraints": [],
+                    "default": null,
+                    "required": true,
+                    "values": {
+                      "fields": {
+                        "limit": {
+                          "annotation": "int",
+                          "constraints": [],
+                          "default": null,
+                          "required": true
+                        },
+                        "returned": {
+                          "annotation": "int",
+                          "constraints": [],
+                          "default": null,
+                          "required": true
+                        },
+                        "total": {
+                          "annotation": "int",
+                          "constraints": [],
+                          "default": null,
+                          "required": true
+                        },
+                        "truncated": {
+                          "annotation": "bool",
+                          "constraints": [],
+                          "default": null,
+                          "required": true
+                        }
+                      }
+                    }
+                  },
+                  "total_edges": {
+                    "annotation": "int",
+                    "constraints": [],
+                    "default": null,
+                    "required": true
+                  },
+                  "total_nodes": {
+                    "annotation": "int",
+                    "constraints": [],
+                    "default": null,
+                    "required": true
+                  }
+                },
+                "required": true
+              }
+            },
             "required": true
           },
           "error": {
@@ -135,7 +502,7 @@
             "required": false
           }
         },
-        "model": "src.common.responses.ApiResponse[dict[str, Any]]",
+        "model": "src.common.responses.ApiResponse[GraphDataResponse]",
         "status_code": 200
       }
     },
@@ -160,9 +527,23 @@
             "required": false
           },
           "data": {
-            "annotation": "list[dict[str, Any]]",
+            "annotation": "list[src.modules.analytics.schemas.HotMemoryTag]",
             "constraints": [],
             "default": null,
+            "fields": {
+              "frequency": {
+                "annotation": "int",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "name": {
+                "annotation": "str",
+                "constraints": [],
+                "default": null,
+                "required": true
+              }
+            },
             "required": true
           },
           "error": {
@@ -184,7 +565,7 @@
             "required": false
           }
         },
-        "model": "src.common.responses.ApiResponse[list[dict[str, Any]]]",
+        "model": "src.common.responses.ApiResponse[list[HotMemoryTag]]",
         "status_code": 200
       }
     },
@@ -219,9 +600,23 @@
             "required": false
           },
           "data": {
-            "annotation": "list[dict[str, Any]]",
+            "annotation": "list[src.modules.analytics.schemas.InterestItem]",
             "constraints": [],
             "default": null,
+            "fields": {
+              "frequency": {
+                "annotation": "int",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "name": {
+                "annotation": "str",
+                "constraints": [],
+                "default": null,
+                "required": true
+              }
+            },
             "required": true
           },
           "error": {
@@ -243,7 +638,7 @@
             "required": false
           }
         },
-        "model": "src.common.responses.ApiResponse[list[dict[str, Any]]]",
+        "model": "src.common.responses.ApiResponse[list[InterestItem]]",
         "status_code": 200
       }
     },
@@ -268,9 +663,73 @@
             "required": false
           },
           "data": {
-            "annotation": "dict[str, Any]",
+            "annotation": "src.modules.analytics.schemas.MemoryInsightData",
             "constraints": [],
             "default": null,
+            "fields": {
+              "actionable_findings": {
+                "annotation": "list[src.modules.analytics.schemas.ActionableFinding]",
+                "constraints": [],
+                "default": null,
+                "fields": {
+                  "finding": {
+                    "annotation": "str",
+                    "constraints": [],
+                    "default": null,
+                    "required": true
+                  },
+                  "recommended_action": {
+                    "annotation": "str",
+                    "constraints": [],
+                    "default": null,
+                    "required": true
+                  }
+                },
+                "required": true
+              },
+              "behavior_pattern": {
+                "annotation": "str | None",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "growth_trajectory": {
+                "annotation": "str | None",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "is_cached": {
+                "annotation": "bool",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "key_findings": {
+                "annotation": "list[str] | None",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "memory_insight": {
+                "annotation": "str | None",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "message": {
+                "annotation": "str | None",
+                "constraints": [],
+                "default": null,
+                "required": false
+              },
+              "updated_at": {
+                "annotation": "int | None",
+                "constraints": [],
+                "default": null,
+                "required": true
+              }
+            },
             "required": true
           },
           "error": {
@@ -292,7 +751,7 @@
             "required": false
           }
         },
-        "model": "src.common.responses.ApiResponse[dict[str, Any]]",
+        "model": "src.common.responses.ApiResponse[MemoryInsightData]",
         "status_code": 200
       }
     },
@@ -317,9 +776,29 @@
             "required": false
           },
           "data": {
-            "annotation": "list[dict[str, Any]]",
+            "annotation": "list[src.modules.analytics.schemas.MemoryTypeStatistic]",
             "constraints": [],
             "default": null,
+            "fields": {
+              "count": {
+                "annotation": "int",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "percentage": {
+                "annotation": "float",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "type": {
+                "annotation": "str",
+                "constraints": [],
+                "default": null,
+                "required": true
+              }
+            },
             "required": true
           },
           "error": {
@@ -341,7 +820,7 @@
             "required": false
           }
         },
-        "model": "src.common.responses.ApiResponse[list[dict[str, Any]]]",
+        "model": "src.common.responses.ApiResponse[list[MemoryTypeStatistic]]",
         "status_code": 200
       }
     },
@@ -378,7 +857,7 @@
             "required": false
           },
           "data": {
-            "annotation": "src.modules.analytics.scene_community_graph.schemas.GraphData",
+            "annotation": "src.schemas.scene_community_graph.GraphData",
             "config": {
               "extra": "forbid",
               "strict": true
@@ -387,13 +866,585 @@
             "default": null,
             "fields": {
               "groups": {
-                "annotation": "list[src.modules.analytics.scene_community_graph.schemas.CommunityGroup | src.modules.analytics.scene_community_graph.schemas.UnassignedGroup]",
+                "annotation": "list[src.schemas.scene_community_graph.CommunityGroup | src.schemas.scene_community_graph.UnassignedGroup]",
                 "constraints": [],
                 "default": null,
-                "required": true
+                "required": true,
+                "variants": {
+                  "src.schemas.scene_community_graph.CommunityGroup": {
+                    "config": {
+                      "extra": "forbid",
+                      "strict": true
+                    },
+                    "fields": {
+                      "id": {
+                        "annotation": "str",
+                        "constraints": [],
+                        "default": null,
+                        "required": true
+                      },
+                      "kind": {
+                        "annotation": "Literal[COMMUNITY]",
+                        "constraints": [],
+                        "default": "COMMUNITY",
+                        "required": false
+                      },
+                      "label": {
+                        "annotation": "Literal[SceneCommunity]",
+                        "constraints": [],
+                        "default": "SceneCommunity",
+                        "required": false
+                      },
+                      "properties": {
+                        "annotation": "src.schemas.scene_community_graph.CommunityProperties",
+                        "config": {
+                          "extra": "forbid",
+                          "strict": true
+                        },
+                        "constraints": [],
+                        "default": null,
+                        "fields": {
+                          "boundary_exclude_rule": {
+                            "annotation": "str | None",
+                            "constraints": [],
+                            "default": null,
+                            "required": false
+                          },
+                          "boundary_include_rule": {
+                            "annotation": "str | None",
+                            "constraints": [],
+                            "default": null,
+                            "required": false
+                          },
+                          "boundary_instance_anchor": {
+                            "annotation": "str | None",
+                            "constraints": [],
+                            "default": null,
+                            "required": false
+                          },
+                          "boundary_lifecycle_anchor": {
+                            "annotation": "str | None",
+                            "constraints": [],
+                            "default": null,
+                            "required": false
+                          },
+                          "boundary_primary_matter": {
+                            "annotation": "str | None",
+                            "constraints": [],
+                            "default": null,
+                            "required": false
+                          },
+                          "category_l1": {
+                            "annotation": "str | None",
+                            "constraints": [],
+                            "default": null,
+                            "required": false
+                          },
+                          "created_at": {
+                            "annotation": "int | None",
+                            "constraints": [
+                              "Ge(ge=1000000000000)",
+                              "Le(le=9999999999999)"
+                            ],
+                            "default": null,
+                            "required": false
+                          },
+                          "ended_at": {
+                            "annotation": "int | None",
+                            "constraints": [
+                              "Ge(ge=1000000000000)",
+                              "Le(le=9999999999999)"
+                            ],
+                            "default": null,
+                            "required": false
+                          },
+                          "member_count": {
+                            "annotation": "int",
+                            "constraints": [
+                              "Ge(ge=0)"
+                            ],
+                            "default": null,
+                            "required": true
+                          },
+                          "started_at": {
+                            "annotation": "int | None",
+                            "constraints": [
+                              "Ge(ge=1000000000000)",
+                              "Le(le=9999999999999)"
+                            ],
+                            "default": null,
+                            "required": false
+                          },
+                          "summary": {
+                            "annotation": "str | None",
+                            "constraints": [],
+                            "default": null,
+                            "required": false
+                          },
+                          "topic_name": {
+                            "annotation": "str | None",
+                            "constraints": [],
+                            "default": null,
+                            "required": false
+                          },
+                          "topic_scope": {
+                            "annotation": "str | None",
+                            "constraints": [],
+                            "default": null,
+                            "required": false
+                          },
+                          "updated_at": {
+                            "annotation": "int | None",
+                            "constraints": [
+                              "Ge(ge=1000000000000)",
+                              "Le(le=9999999999999)"
+                            ],
+                            "default": null,
+                            "required": false
+                          }
+                        },
+                        "required": true
+                      },
+                      "scene_count": {
+                        "annotation": "int",
+                        "constraints": [
+                          "Ge(ge=0)"
+                        ],
+                        "default": null,
+                        "required": true
+                      },
+                      "scenes": {
+                        "annotation": "list[src.schemas.scene_community_graph.Scene]",
+                        "config": {
+                          "extra": "forbid",
+                          "strict": true
+                        },
+                        "constraints": [],
+                        "default": null,
+                        "fields": {
+                          "id": {
+                            "annotation": "str",
+                            "constraints": [],
+                            "default": null,
+                            "required": true
+                          },
+                          "label": {
+                            "annotation": "Literal[SceneSummary]",
+                            "constraints": [],
+                            "default": "SceneSummary",
+                            "required": false
+                          },
+                          "properties": {
+                            "annotation": "src.schemas.scene_community_graph.SceneProperties",
+                            "config": {
+                              "extra": "forbid",
+                              "strict": true
+                            },
+                            "constraints": [],
+                            "default": null,
+                            "fields": {
+                              "close_reason": {
+                                "annotation": "str | None",
+                                "constraints": [],
+                                "default": null,
+                                "required": false
+                              },
+                              "community_category_l1": {
+                                "annotation": "str | None",
+                                "constraints": [],
+                                "default": null,
+                                "required": false
+                              },
+                              "community_eligibility": {
+                                "annotation": "str | None",
+                                "constraints": [],
+                                "default": null,
+                                "required": false
+                              },
+                              "community_status": {
+                                "annotation": "str | None",
+                                "constraints": [],
+                                "default": null,
+                                "required": false
+                              },
+                              "content": {
+                                "annotation": "str",
+                                "constraints": [],
+                                "default": null,
+                                "required": true
+                              },
+                              "conversation_id": {
+                                "annotation": "str | None",
+                                "constraints": [],
+                                "default": null,
+                                "required": false
+                              },
+                              "created_at": {
+                                "annotation": "int | None",
+                                "constraints": [
+                                  "Ge(ge=1000000000000)",
+                                  "Le(le=9999999999999)"
+                                ],
+                                "default": null,
+                                "required": false
+                              },
+                              "ended_at": {
+                                "annotation": "int | None",
+                                "constraints": [
+                                  "Ge(ge=1000000000000)",
+                                  "Le(le=9999999999999)"
+                                ],
+                                "default": null,
+                                "required": false
+                              },
+                              "scene_community_id": {
+                                "annotation": "str | None",
+                                "constraints": [],
+                                "default": null,
+                                "required": false
+                              },
+                              "started_at": {
+                                "annotation": "int | None",
+                                "constraints": [
+                                  "Ge(ge=1000000000000)",
+                                  "Le(le=9999999999999)"
+                                ],
+                                "default": null,
+                                "required": false
+                              },
+                              "topic_scope": {
+                                "annotation": "str | None",
+                                "constraints": [],
+                                "default": null,
+                                "required": false
+                              },
+                              "turn_count": {
+                                "annotation": "int | None",
+                                "constraints": [
+                                  "Ge(ge=0)"
+                                ],
+                                "default": null,
+                                "required": false
+                              },
+                              "updated_at": {
+                                "annotation": "int | None",
+                                "constraints": [
+                                  "Ge(ge=1000000000000)",
+                                  "Le(le=9999999999999)"
+                                ],
+                                "default": null,
+                                "required": false
+                              }
+                            },
+                            "required": true
+                          },
+                          "unassigned_reason": {
+                            "annotation": "Literal[NO_PARENT, INVALID_PARENT_ID, PARENT_NOT_FOUND] | None",
+                            "constraints": [],
+                            "default": null,
+                            "required": false
+                          }
+                        },
+                        "required": true
+                      },
+                      "virtual": {
+                        "annotation": "Literal[False]",
+                        "constraints": [],
+                        "default": false,
+                        "required": false
+                      }
+                    }
+                  },
+                  "src.schemas.scene_community_graph.UnassignedGroup": {
+                    "config": {
+                      "extra": "forbid",
+                      "strict": true
+                    },
+                    "fields": {
+                      "id": {
+                        "annotation": "Literal[virtual:scene-community:unassigned]",
+                        "constraints": [],
+                        "default": "virtual:scene-community:unassigned",
+                        "required": false
+                      },
+                      "kind": {
+                        "annotation": "Literal[UNASSIGNED]",
+                        "constraints": [],
+                        "default": "UNASSIGNED",
+                        "required": false
+                      },
+                      "label": {
+                        "annotation": "Literal[UnassignedSceneGroup]",
+                        "constraints": [],
+                        "default": "UnassignedSceneGroup",
+                        "required": false
+                      },
+                      "properties": {
+                        "annotation": "src.schemas.scene_community_graph.CommunityProperties",
+                        "config": {
+                          "extra": "forbid",
+                          "strict": true
+                        },
+                        "constraints": [],
+                        "default": null,
+                        "fields": {
+                          "boundary_exclude_rule": {
+                            "annotation": "str | None",
+                            "constraints": [],
+                            "default": null,
+                            "required": false
+                          },
+                          "boundary_include_rule": {
+                            "annotation": "str | None",
+                            "constraints": [],
+                            "default": null,
+                            "required": false
+                          },
+                          "boundary_instance_anchor": {
+                            "annotation": "str | None",
+                            "constraints": [],
+                            "default": null,
+                            "required": false
+                          },
+                          "boundary_lifecycle_anchor": {
+                            "annotation": "str | None",
+                            "constraints": [],
+                            "default": null,
+                            "required": false
+                          },
+                          "boundary_primary_matter": {
+                            "annotation": "str | None",
+                            "constraints": [],
+                            "default": null,
+                            "required": false
+                          },
+                          "category_l1": {
+                            "annotation": "str | None",
+                            "constraints": [],
+                            "default": null,
+                            "required": false
+                          },
+                          "created_at": {
+                            "annotation": "int | None",
+                            "constraints": [
+                              "Ge(ge=1000000000000)",
+                              "Le(le=9999999999999)"
+                            ],
+                            "default": null,
+                            "required": false
+                          },
+                          "ended_at": {
+                            "annotation": "int | None",
+                            "constraints": [
+                              "Ge(ge=1000000000000)",
+                              "Le(le=9999999999999)"
+                            ],
+                            "default": null,
+                            "required": false
+                          },
+                          "member_count": {
+                            "annotation": "int",
+                            "constraints": [
+                              "Ge(ge=0)"
+                            ],
+                            "default": null,
+                            "required": true
+                          },
+                          "started_at": {
+                            "annotation": "int | None",
+                            "constraints": [
+                              "Ge(ge=1000000000000)",
+                              "Le(le=9999999999999)"
+                            ],
+                            "default": null,
+                            "required": false
+                          },
+                          "summary": {
+                            "annotation": "str | None",
+                            "constraints": [],
+                            "default": null,
+                            "required": false
+                          },
+                          "topic_name": {
+                            "annotation": "str | None",
+                            "constraints": [],
+                            "default": null,
+                            "required": false
+                          },
+                          "topic_scope": {
+                            "annotation": "str | None",
+                            "constraints": [],
+                            "default": null,
+                            "required": false
+                          },
+                          "updated_at": {
+                            "annotation": "int | None",
+                            "constraints": [
+                              "Ge(ge=1000000000000)",
+                              "Le(le=9999999999999)"
+                            ],
+                            "default": null,
+                            "required": false
+                          }
+                        },
+                        "required": true
+                      },
+                      "scene_count": {
+                        "annotation": "int",
+                        "constraints": [
+                          "Ge(ge=1)"
+                        ],
+                        "default": null,
+                        "required": true
+                      },
+                      "scenes": {
+                        "annotation": "list[src.schemas.scene_community_graph.Scene]",
+                        "config": {
+                          "extra": "forbid",
+                          "strict": true
+                        },
+                        "constraints": [
+                          "MinLen(min_length=1)"
+                        ],
+                        "default": null,
+                        "fields": {
+                          "id": {
+                            "annotation": "str",
+                            "constraints": [],
+                            "default": null,
+                            "required": true
+                          },
+                          "label": {
+                            "annotation": "Literal[SceneSummary]",
+                            "constraints": [],
+                            "default": "SceneSummary",
+                            "required": false
+                          },
+                          "properties": {
+                            "annotation": "src.schemas.scene_community_graph.SceneProperties",
+                            "config": {
+                              "extra": "forbid",
+                              "strict": true
+                            },
+                            "constraints": [],
+                            "default": null,
+                            "fields": {
+                              "close_reason": {
+                                "annotation": "str | None",
+                                "constraints": [],
+                                "default": null,
+                                "required": false
+                              },
+                              "community_category_l1": {
+                                "annotation": "str | None",
+                                "constraints": [],
+                                "default": null,
+                                "required": false
+                              },
+                              "community_eligibility": {
+                                "annotation": "str | None",
+                                "constraints": [],
+                                "default": null,
+                                "required": false
+                              },
+                              "community_status": {
+                                "annotation": "str | None",
+                                "constraints": [],
+                                "default": null,
+                                "required": false
+                              },
+                              "content": {
+                                "annotation": "str",
+                                "constraints": [],
+                                "default": null,
+                                "required": true
+                              },
+                              "conversation_id": {
+                                "annotation": "str | None",
+                                "constraints": [],
+                                "default": null,
+                                "required": false
+                              },
+                              "created_at": {
+                                "annotation": "int | None",
+                                "constraints": [
+                                  "Ge(ge=1000000000000)",
+                                  "Le(le=9999999999999)"
+                                ],
+                                "default": null,
+                                "required": false
+                              },
+                              "ended_at": {
+                                "annotation": "int | None",
+                                "constraints": [
+                                  "Ge(ge=1000000000000)",
+                                  "Le(le=9999999999999)"
+                                ],
+                                "default": null,
+                                "required": false
+                              },
+                              "scene_community_id": {
+                                "annotation": "str | None",
+                                "constraints": [],
+                                "default": null,
+                                "required": false
+                              },
+                              "started_at": {
+                                "annotation": "int | None",
+                                "constraints": [
+                                  "Ge(ge=1000000000000)",
+                                  "Le(le=9999999999999)"
+                                ],
+                                "default": null,
+                                "required": false
+                              },
+                              "topic_scope": {
+                                "annotation": "str | None",
+                                "constraints": [],
+                                "default": null,
+                                "required": false
+                              },
+                              "turn_count": {
+                                "annotation": "int | None",
+                                "constraints": [
+                                  "Ge(ge=0)"
+                                ],
+                                "default": null,
+                                "required": false
+                              },
+                              "updated_at": {
+                                "annotation": "int | None",
+                                "constraints": [
+                                  "Ge(ge=1000000000000)",
+                                  "Le(le=9999999999999)"
+                                ],
+                                "default": null,
+                                "required": false
+                              }
+                            },
+                            "required": true
+                          },
+                          "unassigned_reason": {
+                            "annotation": "Literal[NO_PARENT, INVALID_PARENT_ID, PARENT_NOT_FOUND] | None",
+                            "constraints": [],
+                            "default": null,
+                            "required": false
+                          }
+                        },
+                        "required": true
+                      },
+                      "virtual": {
+                        "annotation": "Literal[True]",
+                        "constraints": [],
+                        "default": true,
+                        "required": false
+                      }
+                    }
+                  }
+                }
               },
               "statistics": {
-                "annotation": "src.modules.analytics.scene_community_graph.schemas.Statistics",
+                "annotation": "src.schemas.scene_community_graph.Statistics",
                 "config": {
                   "extra": "forbid",
                   "strict": true
@@ -469,7 +1520,7 @@
             "required": true
           }
         },
-        "model": "src.modules.analytics.scene_community_graph.schemas.GraphResponse",
+        "model": "src.schemas.scene_community_graph.GraphResponse",
         "status_code": 200
       }
     },
@@ -494,9 +1545,59 @@
             "required": false
           },
           "data": {
-            "annotation": "dict[str, Any]",
+            "annotation": "src.modules.analytics.schemas.UserSummaryData",
             "constraints": [],
             "default": null,
+            "fields": {
+              "core_values": {
+                "annotation": "str | None",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "is_cached": {
+                "annotation": "bool",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "message": {
+                "annotation": "str | None",
+                "constraints": [],
+                "default": null,
+                "required": false
+              },
+              "one_sentence": {
+                "annotation": "str | None",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "personality": {
+                "annotation": "str | None",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "tags": {
+                "annotation": "list[str]",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "updated_at": {
+                "annotation": "int | None",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "user_summary": {
+                "annotation": "str | None",
+                "constraints": [],
+                "default": null,
+                "required": true
+              }
+            },
             "required": true
           },
           "error": {
@@ -518,7 +1619,7 @@
             "required": false
           }
         },
-        "model": "src.common.responses.ApiResponse[dict[str, Any]]",
+        "model": "src.common.responses.ApiResponse[UserSummaryData]",
         "status_code": 200
       }
     },
@@ -535,9 +1636,73 @@
             "required": false
           },
           "data": {
-            "annotation": "dict[str, Any]",
+            "annotation": "src.schemas.workspace.WorkspaceStatistics",
             "constraints": [],
             "default": null,
+            "fields": {
+              "generated_at": {
+                "annotation": "int | str | None",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "statistics": {
+                "annotation": "list[src.schemas.workspace.WorkspaceStatistic]",
+                "constraints": [],
+                "default": null,
+                "fields": {
+                  "change": {
+                    "annotation": "float | None",
+                    "constraints": [],
+                    "default": null,
+                    "required": true
+                  },
+                  "count": {
+                    "annotation": "int",
+                    "constraints": [],
+                    "default": null,
+                    "required": true
+                  },
+                  "percentage": {
+                    "annotation": "float",
+                    "constraints": [],
+                    "default": null,
+                    "required": true
+                  },
+                  "type": {
+                    "annotation": "str",
+                    "constraints": [],
+                    "default": null,
+                    "required": true
+                  }
+                },
+                "required": true
+              },
+              "total_count": {
+                "annotation": "int",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "total_count_change": {
+                "annotation": "float | None",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "total_users": {
+                "annotation": "int",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "update": {
+                "annotation": "int",
+                "constraints": [],
+                "default": null,
+                "required": true
+              }
+            },
             "required": true
           },
           "error": {
@@ -559,7 +1724,7 @@
             "required": false
           }
         },
-        "model": "src.common.responses.ApiResponse[dict[str, Any]]",
+        "model": "src.common.responses.ApiResponse[WorkspaceStatistics]",
         "status_code": 200
       }
     },
@@ -573,7 +1738,7 @@
             "populate_by_name": true
           },
           "constraints": [],
-          "default": "<factory:GenerateCacheBody>",
+          "default": null,
           "fields": {
             "end_user_id": {
               "annotation": "str | None",
@@ -583,7 +1748,7 @@
             }
           },
           "in": "body",
-          "required": false
+          "required": true
         }
       },
       "response": {
@@ -596,10 +1761,68 @@
             "required": false
           },
           "data": {
-            "annotation": "dict[str, Any]",
+            "annotation": "src.modules.analytics.schemas.GenerateCacheUserResult | src.modules.analytics.schemas.GenerateCacheBatchResult",
             "constraints": [],
             "default": null,
-            "required": true
+            "required": true,
+            "variants": {
+              "src.modules.analytics.schemas.GenerateCacheBatchResult": {
+                "fields": {
+                  "errors": {
+                    "annotation": "list[dict[str, Any]]",
+                    "constraints": [],
+                    "default": null,
+                    "required": true
+                  },
+                  "failed": {
+                    "annotation": "int",
+                    "constraints": [],
+                    "default": null,
+                    "required": true
+                  },
+                  "successful": {
+                    "annotation": "int",
+                    "constraints": [],
+                    "default": null,
+                    "required": true
+                  },
+                  "total_users": {
+                    "annotation": "int",
+                    "constraints": [],
+                    "default": null,
+                    "required": true
+                  }
+                }
+              },
+              "src.modules.analytics.schemas.GenerateCacheUserResult": {
+                "fields": {
+                  "end_user_id": {
+                    "annotation": "str",
+                    "constraints": [],
+                    "default": null,
+                    "required": true
+                  },
+                  "errors": {
+                    "annotation": "list[dict[str, Any]]",
+                    "constraints": [],
+                    "default": null,
+                    "required": true
+                  },
+                  "insight_success": {
+                    "annotation": "bool | None",
+                    "constraints": [],
+                    "default": null,
+                    "required": true
+                  },
+                  "summary_success": {
+                    "annotation": "bool | None",
+                    "constraints": [],
+                    "default": null,
+                    "required": true
+                  }
+                }
+              }
+            }
           },
           "error": {
             "annotation": "str",
@@ -620,7 +1843,7 @@
             "required": false
           }
         },
-        "model": "src.common.responses.ApiResponse[dict[str, Any]]",
+        "model": "src.common.responses.ApiResponse[Union[GenerateCacheUserResult, GenerateCacheBatchResult]]",
         "status_code": 200
       }
     }

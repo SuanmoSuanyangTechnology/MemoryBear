@@ -6,17 +6,17 @@ import pytest
 from pydantic import ValidationError
 
 from src.common.errors import ProfileError
-from src.modules.analytics.repository.scene_community_graph import (
+from src.repositories.scene_community_graph import (
     COMMUNITIES_QUERY,
     SCENES_QUERY,
     Neo4jRepository,
 )
-from src.modules.analytics.scene_community_graph.assembler import assemble
-from src.modules.analytics.scene_community_graph.cache import RedisDataCache, encode_data
-from src.modules.analytics.scene_community_graph.schemas import CommunityProperties, GraphData
-from src.modules.analytics.scene_community_graph.service import SceneGraphService
-from src.modules.analytics.scene_community_graph.types import AuthorizedUser, Options
-from src.modules.shared.end_user_service import EndUserRef
+from src.schemas.scene_community_graph import CommunityProperties, GraphData
+from src.services.end_user import EndUserRef
+from src.services.scene_community_graph.assembler import assemble
+from src.services.scene_community_graph.cache import RedisDataCache, encode_data
+from src.services.scene_community_graph.service import SceneGraphService
+from src.services.scene_community_graph.types import AuthorizedUser, Options
 
 WORKSPACE = UUID("10000000-0000-4000-8000-000000000001")
 USER = UUID("20000000-0000-4000-8000-000000000001")
@@ -219,7 +219,7 @@ def test_shared_resolution_supplies_the_merge_target_for_queries_and_cache():
         target = uuid4()
         lookup.users[(WORKSPACE, USER)] = EndUserRef(target, WORKSPACE)
         await service.get_graph(WORKSPACE, str(USER))
-        assert all(call[1].end_user_id == target for call in repo.calls)
+        assert all(call[1] == target for call in repo.calls)
         assert cache.key(AuthorizedUser(WORKSPACE, target)) in redis.values
         assert cache.key(AuthorizedUser(WORKSPACE, USER)) not in redis.values
         with pytest.raises(ProfileError) as missing:
@@ -357,8 +357,8 @@ def test_repository_uses_parameterized_reads_and_whitelist():
 
         repo = Neo4jRepository(Connector())
         user = AuthorizedUser(WORKSPACE, USER)
-        await repo.communities(user, 1001)
-        await repo.scenes(user, 5001)
+        await repo.communities(user.end_user_id, 1001)
+        await repo.scenes(user.end_user_id, 5001)
         assert [c[1]["probe_limit"] for c in calls] == [1001, 5001]
         assert all(c[1]["end_user_id"] == str(USER) for c in calls)
         assert str(USER) not in SCENES_QUERY

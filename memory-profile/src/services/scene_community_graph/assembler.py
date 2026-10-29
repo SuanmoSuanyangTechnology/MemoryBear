@@ -5,7 +5,7 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from src.modules.analytics.scene_community_graph.schemas import (
+from src.schemas.scene_community_graph import (
     TIME_FIELDS,
     CommunityGroup,
     CommunityProperties,
@@ -16,7 +16,7 @@ from src.modules.analytics.scene_community_graph.schemas import (
     UnassignedGroup,
     validate_business_id,
 )
-from src.modules.analytics.scene_community_graph.types import bad_data
+from src.services.scene_community_graph.types import bad_data
 
 COMMUNITY_FIELDS = tuple(CommunityProperties.model_fields)
 SCENE_FIELDS = tuple(SceneProperties.model_fields)
