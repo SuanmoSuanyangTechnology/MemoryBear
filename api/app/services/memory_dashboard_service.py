@@ -343,6 +343,10 @@ async def _get_rag_memory_increment_async(
     """
     from datetime import datetime, time
 
+    if int(limit) <= 0:
+        # 契约是「返回最近 limit 天」；limit<=0 时不再退化成返回 1 天
+        return []
+
     end_user_ids = await _workspace_end_user_ids_async(db, workspace_id)
     today = utcnow_naive().replace(hour=0, minute=0, second=0, microsecond=0)
     start_day = today - timedelta(days=max(int(limit) - 1, 0))
@@ -524,7 +528,7 @@ async def get_workspace_total_memory_count_only_async(
         raise
 
 
-@redis_cache(prefix="memory_count_total", id_arg="workspace_id", skip_args=["current_user"])
+@redis_cache(prefix="memory_count_total", id_arg="workspace_id", skip_args=["current_user", "db"])
 async def _get_workspace_total_memory_count_only_cached_async(
     db,
     workspace_id: uuid.UUID,
@@ -666,7 +670,7 @@ async def _get_rag_total_memory_count_async(
     }
 
 
-@redis_cache(prefix="memory_count", id_arg="workspace_id", skip_args=["current_user"])
+@redis_cache(prefix="memory_count", id_arg="workspace_id", skip_args=["current_user", "db"])
 async def _get_workspace_total_memory_count_cached_async(
     db,
     workspace_id: uuid.UUID,
@@ -1306,15 +1310,77 @@ def get_current_user_total_chunk(
         raise
 
 
+def _end_user_in_workspace(
+    db: Session,
+    workspace_id: uuid.UUID | None,
+    end_user_id: str,
+) -> bool:
+    """校验宿主归属当前工作空间。
+
+    RAG 索引只按 ``end_user_id`` 过滤、没有 workspace 维度，若不校验归属，
+    任意合法 UUID 都能读到其它空间的记忆。
+    """
+    from app.models.end_user_model import EndUser
+
+    if workspace_id is None:
+        return False
+    try:
+        euid = uuid.UUID(str(end_user_id))
+    except (ValueError, TypeError, AttributeError):
+        return False
+    row = (
+        db.query(EndUser.id)
+        .filter(
+            EndUser.id == euid,
+            EndUser.workspace_id == workspace_id,
+            EndUser.is_active.is_(True),
+        )
+        .first()
+    )
+    return row is not None
+
+
+async def _end_user_in_workspace_async(
+    db: AsyncSession,
+    workspace_id: uuid.UUID | None,
+    end_user_id: str,
+) -> bool:
+    from sqlalchemy import select
+
+    from app.models.end_user_model import EndUser
+
+    if workspace_id is None:
+        return False
+    try:
+        euid = uuid.UUID(str(end_user_id))
+    except (ValueError, TypeError, AttributeError):
+        return False
+    row = await db.execute(
+        select(EndUser.id).where(
+            EndUser.id == euid,
+            EndUser.workspace_id == workspace_id,
+            EndUser.is_active.is_(True),
+        )
+    )
+    return row.first() is not None
+
+
 def _resolve_rag_scope_ids(
     db: Session,
     current_user: User,
     end_user_id: Optional[str],
 ) -> List[str]:
-    """RAG 记忆查询范围：传宿主=单宿主，不传=当前空间全部宿主。"""
+    """RAG 记忆查询范围：传宿主=单宿主（须属于当前空间），不传=当前空间全部宿主。"""
+    workspace_id = current_user.current_workspace_id
     if end_user_id:
+        if not _end_user_in_workspace(db, workspace_id, end_user_id):
+            business_logger.warning(
+                f"拒绝跨空间读取 RAG 记忆: end_user_id={end_user_id}, "
+                f"workspace_id={workspace_id}"
+            )
+            return []
         return [end_user_id]
-    return _workspace_end_user_ids(db, current_user.current_workspace_id)
+    return _workspace_end_user_ids(db, workspace_id)
 
 
 async def _resolve_rag_scope_ids_async(
@@ -1322,9 +1388,16 @@ async def _resolve_rag_scope_ids_async(
     current_user: User,
     end_user_id: Optional[str],
 ) -> List[str]:
+    workspace_id = current_user.current_workspace_id
     if end_user_id:
+        if not await _end_user_in_workspace_async(db, workspace_id, end_user_id):
+            business_logger.warning(
+                f"拒绝跨空间读取 RAG 记忆: end_user_id={end_user_id}, "
+                f"workspace_id={workspace_id}"
+            )
+            return []
         return [end_user_id]
-    return await _workspace_end_user_ids_async(db, current_user.current_workspace_id)
+    return await _workspace_end_user_ids_async(db, workspace_id)
 
 
 def get_rag_content(
