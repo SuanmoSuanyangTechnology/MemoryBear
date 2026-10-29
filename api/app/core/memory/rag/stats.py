@@ -31,6 +31,10 @@ LEGACY_SOURCE = "legacy"
 #: 列表接口单页上限，与控制器 Query 校验保持一致。
 MAX_PAGE_SIZE = 100
 
+# ES 默认 index.max_result_window；from_ + size 越界会抛
+# illegal_argument_exception，因此在入口显式拦截深分页。
+MAX_RESULT_WINDOW = 10_000
+
 
 def _active_clause() -> dict[str, Any]:
     """未软删：与召回口径一致。"""
@@ -256,11 +260,18 @@ async def list_messages(
             "items": [],
         }
 
+    offset = (safe_page - 1) * safe_pagesize
+    if offset >= MAX_RESULT_WINDOW:
+        raise ValueError(
+            f"page too deep: offset {offset} exceeds ES max_result_window "
+            f"{MAX_RESULT_WINDOW}; narrow the filters or request an earlier page"
+        )
+
     async def _search(client: AsyncElasticsearch) -> dict[str, Any]:
         result = await client.search(
             index=INDEX_NAME,
             query=query,
-            from_=(safe_page - 1) * safe_pagesize,
+            from_=offset,
             size=safe_pagesize,
             sort=[
                 {"dialog_at": {"order": safe_order, "missing": "_last"}},

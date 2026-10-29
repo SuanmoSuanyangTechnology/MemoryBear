@@ -485,8 +485,10 @@ def get_current_user_rag_total_num(
 # source 直连 terms 过滤，未知取值会静默返回空列表，故在此显式拦截。
 _RAG_KEYWORD_MAX_LENGTH = 200
 _RAG_SOURCES = frozenset(
-    {"api", "service_api", "mcp", "agent", "workflow", "legacy"}
+    {"api", "service_api", "mcp", "agent", "legacy", "workflow"}
 )
+# 与 rag.stats.MAX_RESULT_WINDOW 对齐：from_ + size 超过 ES 上限会直接抛错
+_RAG_MAX_RESULT_WINDOW = 10_000
 
 
 @router.get("/rag_content", response_model=ApiResponse)
@@ -528,6 +530,13 @@ async def get_rag_content(
                 "source 取值非法",
                 f"unknown={unknown}, allowed={sorted(_RAG_SOURCES)}",
             )
+    offset = (page - 1) * pagesize
+    if offset >= _RAG_MAX_RESULT_WINDOW:
+        return fail(
+            BizCode.INVALID_PARAMETER,
+            f"翻页过深，offset 上限 {_RAG_MAX_RESULT_WINDOW}",
+            f"offset={offset}",
+        )
     data = await memory_dashboard_service.get_rag_content_async(
         end_user_id,
         page,

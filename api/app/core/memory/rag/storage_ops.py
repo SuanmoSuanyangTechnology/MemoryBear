@@ -40,7 +40,12 @@ def _raise_if_incomplete(result: dict, operation: str) -> None:
 
 
 async def delete_messages_by_end_user(end_user_id: str) -> int:
-    """删除宿主名下的全部 RAG 消息，返回删除条数。"""
+    """删除宿主名下的全部 RAG 消息，返回删除条数。
+
+    有意选择硬删：与图侧 ``delete_all_nodes_by_end_user_id`` 语义对齐，且本模块
+    读取路径统一以 ``delete_at`` 不存在为前提；此处不额外过滤软删标记，
+    即已标记删除的文档也一并物理清除。
+    """
     client = AsyncElasticsearch(**build_elasticsearch_client_config())
     try:
         result = await client.delete_by_query(
@@ -60,13 +65,12 @@ async def delete_messages_by_end_user(end_user_id: str) -> int:
             deleted,
         )
         if deleted < matched:
-            logger.warning(
-                "[RAGStorage] 删除未全覆盖: end_user=%s matched=%s deleted=%s "
-                "version_conflicts=%s",
-                end_user_id,
-                matched,
-                deleted,
-                result.get("version_conflicts", 0),
+            # 版本冲突不进入 failures，只体现在 deleted < total；
+            # 此时若当作成功返回，调用方会把残留数据当成已清理。
+            raise RuntimeError(
+                "delete_by_query incomplete: "
+                f"end_user={end_user_id} matched={matched} deleted={deleted} "
+                f"version_conflicts={result.get('version_conflicts', 0)}"
             )
         return deleted
     finally:
@@ -77,7 +81,15 @@ async def reassign_end_user_messages(
         source_end_user_ids: Sequence[str],
         target_end_user_id: str,
 ) -> int:
-    """把多个宿主名下的记忆改挂到目标宿主（身份归并），返回更新条数。"""
+    """把多个宿主名下的记忆改挂到目标宿主（身份归并），返回更新条数。
+
+    只改挂未软删的文档，与 retrieval/stats/reembedding 的 ``delete_at``
+    口径保持一致，避免把源宿主已删除的记录带到目标宿主。
+
+    已知限制：``_rag_memory_id`` 由 (end_user_id, dialog_at, content) 派生 uuid5，
+    同一内容在两个宿主下本来就有不同 ``id``；改挂只换 ``end_user_id`` 字段，
+    因此目标宿主下可能出现同内容的多条记录，不会自动去重。
+    """
     source_ids = [str(item) for item in source_end_user_ids if item]
     if not source_ids:
         return 0
@@ -86,7 +98,12 @@ async def reassign_end_user_messages(
     try:
         result = await client.update_by_query(
             index=INDEX_NAME,
-            query={"terms": {"end_user_id": source_ids}},
+            query={
+                "bool": {
+                    "filter": [{"terms": {"end_user_id": source_ids}}],
+                    "must_not": [{"exists": {"field": "delete_at"}}],
+                }
+            },
             script={
                 "lang": "painless",
                 "source": "ctx._source.end_user_id = params.target",
@@ -106,14 +123,13 @@ async def reassign_end_user_messages(
         )
         _raise_if_incomplete(result, "update_by_query")
         if updated < int(result.get("total", 0) or 0):
-            logger.warning(
-                "[RAGStorage] 归并未全覆盖: sources=%s target=%s matched=%s "
-                "updated=%s version_conflicts=%s",
-                source_ids,
-                target_end_user_id,
-                int(result.get("total", 0) or 0),
-                updated,
-                result.get("version_conflicts", 0),
+            # 版本冲突不进入 failures，只体现在 updated < total；
+            # 若当作成功返回，源宿主残留消息会成为孤儿，且归并不可幂等补齐。
+            raise RuntimeError(
+                "update_by_query incomplete: "
+                f"sources={source_ids} target={target_end_user_id} "
+                f"matched={int(result.get('total', 0) or 0)} updated={updated} "
+                f"version_conflicts={result.get('version_conflicts', 0)}"
             )
         return updated
     finally:
