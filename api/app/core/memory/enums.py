@@ -17,6 +17,7 @@ class SearchStrategy(StrEnum):
     NORMAL = "1"
     QUICK = "2"
     EXPRESS = "5"
+    COMMUNITY = "6"
 
     RECENT = "3"
     META = "4"
@@ -30,6 +31,7 @@ class SearchStrategy(StrEnum):
             "recent": cls.RECENT,
             "meta": cls.META,
             "express": cls.EXPRESS,
+            "community": cls.COMMUNITY,
             "conv": cls.RECENT  # NOTE: 兼容
         }
         method = aliases.get(str(value).lower())
