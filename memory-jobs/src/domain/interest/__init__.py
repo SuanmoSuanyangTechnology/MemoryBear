@@ -1,0 +1,2 @@
+"""Interest-distribution bounded context."""
+

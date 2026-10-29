@@ -113,7 +113,7 @@ async def batch_approve(
     """审核当前 FAQ 内容并将来源基线推进至最新已发布 Wiki 快照。
 
     每项只需 faq_id；旧版本和快照字段兼容接收但忽略。已通过且基线最新的条目跳过，
-    保留逐条处理结果。不会自动改写问答或启用 FAQ；单条审核仍校验客户端审核目标。
+    保留逐条处理结果。不会自动改写问答或启用 FAQ；单条审核同样接受当前内容与最新基线。
     """
     scope = scope_for(kb_id, principal)
     return success(
@@ -235,6 +235,10 @@ async def approve_faq(
     principal: PrincipalDep,
     runtime: RuntimeDep,
 ):
+    """审核当前 FAQ 和最新已发布 Wiki 快照；旧版本、快照字段传入后直接忽略。
+
+    请求体可传空对象。来源不可用但当前快照存在时仍允许审核；不会自动启用 FAQ。
+    """
     scope = scope_for(kb_id, principal)
     return success(
         data=await service.run(

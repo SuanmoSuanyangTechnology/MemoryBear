@@ -108,9 +108,16 @@ class AgentConfigConverter:
 
         # 1. Parse model parameters
         if model_parameters:
+            from pydantic import BaseModel as _BaseModel
             from ..schemas.app_schema import ModelParameters
+            # 结构化列绑定的是 models.model_parameters.ModelParameters（与 schema 版
+            # 同字段但不同类），pydantic v2 按"同一个类"做 isinstance，直接判断会恒 False，
+            # 导致整个 model_parameters 被重置成默认值（json_output 等回显为 False）。
+            # 这里统一：任意 BaseModel 实例先 dump，再用 schema 版重建。
             if isinstance(model_parameters, ModelParameters):
                 result["model_parameters"] = model_parameters
+            elif isinstance(model_parameters, _BaseModel):
+                result["model_parameters"] = ModelParameters(**model_parameters.model_dump())
             elif isinstance(model_parameters, dict):
                 result["model_parameters"] = ModelParameters(**model_parameters)
             else:

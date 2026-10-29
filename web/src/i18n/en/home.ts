@@ -136,6 +136,7 @@ export const home = {
       predictionProgress: 'Prediction Process',
       preferenceEngine: 'Preference Engine',
       sceneCommunityEngine: 'Multimodal Episodic Memory Reconstruction Engine',
+      personalityAnchor: 'Personality Anchor Engine',
     },
     dashboard: {
       total_models: 'Available Models',

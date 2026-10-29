@@ -341,6 +341,7 @@ export const userMemory = {
       PREFERENCE: 'Preference Engine',
       SCENE_RECONSTRUCTION: 'Multimodal Episodic Memory Reconstruction Engine',
       PREDICTION: 'Memory Prediction Workbench',
+      PERSONALITY_ANCHOR: 'Personality Anchor Engine',
 
       memorySubject: 'Memory Subject',
       basicInfo: 'Basic Information',

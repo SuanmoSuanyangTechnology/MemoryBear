@@ -19,11 +19,30 @@ models:
   tags:
   - 大语言模型
   logo: volcano
+- name: doubao-seed-2-1-pro-260915
+  type: llm
+  provider: volcano
+  description: 新一代旗舰级通用模型，重点升级 Coding、Agent 与多模态能力，支持深度思考、GUI 任务处理、工具调用与结构化输出。支持约 1M 上下文窗口，适合长文档、代码库与复杂 Agent 流程。
+  is_deprecated: false
+  is_official: true
+  input_modalities:
+  - text
+  - image
+  - video
+  output_modalities:
+  - text
+  features:
+  - thinking
+  - json_output
+  - function_call
+  tags:
+  - 大语言模型
+  logo: volcano
 - name: doubao-seed-2-0-lite-260215
   type: llm
   provider: volcano
   description: 面向高频企业场景兼顾性能与成本的均衡型模型，综合能力超越上一代Doubao-Seed-1.8。胜任非结构化信息处理、内容创作、搜索推荐、数据分析等生产型工作，支持长上下文、多源信息融合、多步指令执行与高保真结构化输出。在保障稳定效果的同时显著优化成本。兼顾生成质量与响应速度，适合作为通用生产级模型。
-  is_deprecated: false
+  is_deprecated: true
   is_official: true
   input_modalities:
   - text
@@ -42,7 +61,7 @@ models:
   type: llm
   provider: volcano
   description: 面向低时延、高并发与成本敏感场景，提供极致的模型推理速度。模型效果与Doubao-Seed-1.6相当。支持256k上下文、4档思考长度和多模态理解，适合成本和速度优先的轻量级任务。
-  is_deprecated: false
+  is_deprecated: true
   is_official: true
   input_modalities:
   - text
@@ -82,7 +101,7 @@ models:
   type: llm
   provider: volcano
   description: Doubao-Seed-1.8 面向多模态 Agent 场景定向优化。Agent 能力上，Tool Use、复杂指令遵循等能力均大幅增强。多模态理解方面，视觉基础能力显著提升，可低帧率理解超长视频，视频运动理解、复杂空间理解及文档结构化解析能力也有所优化，还原生支持智能上下文管理，用户可配置上下文策略。
-  is_deprecated: false
+  is_deprecated: true
   is_official: true
   input_modalities:
   - text
@@ -101,7 +120,7 @@ models:
   provider: volcano
   description: Doubao-Seed-1.6全新多模态深度思考模型，同时支持minimal/low/medium/high 四种reasoning
     effort。 更强模型效果，服务复杂任务和有挑战场景。支持 256k 上下文窗口，输出长度支持最大 32k tokens。
-  is_deprecated: false
+  is_deprecated: true
   is_official: true
   input_modalities:
   - text
@@ -120,7 +139,7 @@ models:
   type: llm
   provider: volcano
   description: 更高性价比，常见任务的最佳选择，支持minimal、low、medium、high 四种reasoning_effort思考深度
-  is_deprecated: false
+  is_deprecated: true
   is_official: true
   input_modalities:
   - text
@@ -140,7 +159,7 @@ models:
   provider: volcano
   description: Doubao-Seed-1.6-flash推理速度极致的多模态深度思考模型，TPOT低至10ms； 同时支持文本和视觉理解，文本理解能力超过上一代lite，视觉理解比肩友商pro系列模型。支持
     256k 上下文窗口，输出长度支持最大 16k tokens。
-  is_deprecated: false
+  is_deprecated: true
   is_official: true
   input_modalities:
   - text
@@ -159,7 +178,7 @@ models:
   type: llm
   provider: volcano
   description: 面向Agentic编程任务进行了深度优化。
-  is_deprecated: false
+  is_deprecated: true
   is_official: true
   input_modalities:
   - text
@@ -179,7 +198,7 @@ models:
   type: llm
   provider: volcano
   description: 全新Doubao-Seed-1.6系列视觉深度思考模型，视觉理解能力显著增强，并支持image_process视觉工具
-  is_deprecated: false
+  is_deprecated: true
   is_official: true
   input_modalities:
   - text
@@ -199,7 +218,7 @@ models:
   provider: volcano
   description: 全新升级的多模态大模型，支持任意分辨率和极端长宽比图像识别，增强视觉推理、文档识别、细节信息理解和指令遵循能力。支持 32k 上下文窗口，输出长度支持最大
     12k tokens。
-  is_deprecated: false
+  is_deprecated: true
   is_official: true
   input_modalities:
   - text
@@ -215,7 +234,7 @@ models:
   type: llm
   provider: volcano
   description: 全新一代主力模型，性能全面升级，在知识、代码、推理等方面表现卓越。最大支持 128k 上下文窗口，输出长度支持最大 12k tokens。
-  is_deprecated: false
+  is_deprecated: true
   is_official: true
   input_modalities:
   - text
@@ -231,7 +250,7 @@ models:
   type: llm
   provider: volcano
   description: 全新一代轻量版模型，极致响应速度，效果与时延均达到全球一流水平。支持 32k 上下文窗口，输出长度支持最大 12k tokens。
-  is_deprecated: false
+  is_deprecated: true
   is_official: true
   input_modalities:
   - text
@@ -247,11 +266,28 @@ models:
   type: video
   provider: volcano
   description: 豆包视频生成模型Seedance 1.5 pro 作为全球领先的视频生成模型，可生成音画高精同步的视频内容。支持多人多语言对白，全面覆盖环境音、动作音、合成音、乐器音、背景音及人声，支持首尾帧，实现影视级叙事效果，满足影视、漫剧、电商及广告领域的高阶创作需求。
+  is_deprecated: true
+  is_official: true
+  input_modalities:
+  - text
+  - image
+  output_modalities:
+  - video
+  features: []
+  tags:
+  - 视频生成
+  logo: volcano
+- name: doubao-seedance-2-0-mini-260615
+  type: video
+  provider: volcano
+  description: 新一代高性价比视频生成模型，支持文本、图像、音频与视频参考输入，音画同步生成；相比上一代生成速度更快、价格更低，适合批量视频创作场景。
   is_deprecated: false
   is_official: true
   input_modalities:
   - text
   - image
+  - video
+  - audio
   output_modalities:
   - video
   features: []
@@ -319,6 +355,21 @@ models:
   tags:
   - 视频生成
   - 文生视频
+  logo: volcano
+- name: doubao-seedream-5-0-pro-260628
+  type: image
+  provider: volcano
+  description: 面向精准图像编辑与可控生产的新一代图像生成模型，支持文生图与图像编辑，输出上限约 236 万像素（如 1920×1080、1536×1536）。
+  is_deprecated: false
+  is_official: true
+  input_modalities:
+  - text
+  - image
+  output_modalities:
+  - image
+  features: []
+  tags:
+  - 图像生成
   logo: volcano
 - name: doubao-seedream-5-0-260128
   type: image

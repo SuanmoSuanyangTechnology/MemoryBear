@@ -23,11 +23,11 @@ from celery.signals import (
 )
 from task_bridge.mem_router import PRIORITY_STEPS, TaskPriority
 
-from src import tasks as task_registry
 from src.bootstrap import get_settings
 from src.common import get_logger, setup_logging
 from src.common.context import clear_task_id, set_task_id
 from src.config import JobsSettings
+from src.interfaces import tasks as task_registry
 from src.runtime import get_runtime
 
 # Bare names are parsed by Celery's Click CLI and would silently override the
@@ -60,7 +60,7 @@ celery_app = Celery(
     "memory_jobs",
     broker=settings.resolved_celery_broker_url,
     backend=settings.resolved_celery_result_backend,
-    include=["src.tasks"],
+    include=["src.interfaces.tasks"],
 )
 
 celery_app.conf.update(

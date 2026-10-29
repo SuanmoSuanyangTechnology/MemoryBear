@@ -3516,6 +3516,7 @@ class WorkflowService:
             node_id: str,
             config: WorkflowConfig,
             workspace_id: uuid.UUID,
+            user_id: str | None = None,
             invalidate_cache: bool = False,
             bypass_cache: bool = False,
     ) -> dict[str, Any]:
@@ -3544,6 +3545,8 @@ class WorkflowService:
             debug_input_data=debug_input_data,
         )
         rerun_input["bypass_cache"] = bypass_cache
+        if user_id:
+            rerun_input["user_id"] = user_id
         return await self.run_single_node(
             app_id=app_id,
             node_id=node_id,
@@ -5837,6 +5840,38 @@ class WorkflowService:
             )
             await db.commit()
         return conversation_id
+
+    async def _ensure_single_node_conversation(
+            self,
+            *,
+            app_id: uuid.UUID,
+            workspace_id: uuid.UUID,
+            config: WorkflowConfig,
+            input_data: dict[str, Any],
+            variable_pool,
+    ) -> None:
+        """Give a fresh-workflow single-node run the draft conversation that
+        memory nodes need; full draft runs and prior debug snapshots already
+        carry one."""
+        if not self._supports_conversation(config):
+            return
+        if variable_pool.get_value("sys.conversation_id"):
+            return
+        conversation_id = await self._ensure_conversation_async(
+            app_id=app_id,
+            workspace_id=workspace_id,
+            user_id=input_data.get("user_id"),
+            conversation_id=None,
+            enable_conversation=True,
+        )
+        input_data["conversation_id"] = str(conversation_id)
+        await variable_pool.new(
+            "sys",
+            "conversation_id",
+            str(conversation_id),
+            VariableType.STRING,
+            mut=False,
+        )
 
     def _trace_context_chain(self, end_msg) -> list[dict[str, Any]]:
         """沿 parent_message_id 链回溯，返回从根到 end_msg 之前的对话消息（不含 end_msg 自身）。
@@ -9512,6 +9547,13 @@ class WorkflowService:
         await self._inject_single_node_flat_inputs(
             variable_pool=variable_pool,
             input_data=input_data,
+        )
+        await self._ensure_single_node_conversation(
+            app_id=app_id,
+            workspace_id=workspace_id,
+            config=config,
+            input_data=input_data,
+            variable_pool=variable_pool,
         )
         state = self._build_single_node_workflow_state(
             workflow_state_cls=WorkflowState,

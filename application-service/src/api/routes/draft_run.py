@@ -930,10 +930,19 @@ async def run_single_workflow_node(
         raise BusinessException("工作流配置不存在，无法运行", BizCode.CONFIG_MISSING)
 
     raw_inputs = payload.inputs or {}
+    user_id = raw_inputs.pop("sys.user_id", None)
+    if not user_id:
+        # sys.user_id feeds the memory callback as an end_users.id; the console
+        # principal lives in users.id, so resolve its draft end user first.
+        user_id = await _get_or_create_draft_end_user_id(
+            app_id=app_id,
+            workspace_id=workspace_id,
+            other_id=str(principal.actor_id),
+        )
     input_data = {
         "message": raw_inputs.pop("sys.message", None),
         "files": raw_inputs.pop("sys.files", None),
-        "user_id": raw_inputs.pop("sys.user_id", str(principal.actor_id)),
+        "user_id": user_id,
         "trigger_payload": raw_inputs.pop("trigger_payload", None),
         "inputs": raw_inputs,
         "conversation_id": "",
@@ -1080,6 +1089,7 @@ async def rerun_workflow_node(
         payload: app_schema.NodeRerunRequest,
         workspace_id: WorkspaceId,
         db: DbSession,
+        principal: Caller,
 ):
     service = AppService(db)
     app = service._get_app_or_404(app_id)
@@ -1088,11 +1098,19 @@ async def rerun_workflow_node(
     config = workflow_service.get_workflow_config(app_id)
     if not config:
         raise BusinessException("工作流配置不存在，无法运行", BizCode.CONFIG_MISSING)
+    # The persisted debug input may still carry the console users.id from an
+    # older debug run; rerun under the current caller's draft end user.
+    end_user_id = await _get_or_create_draft_end_user_id(
+        app_id=app_id,
+        workspace_id=workspace_id,
+        other_id=str(principal.actor_id),
+    )
     result = await workflow_service.rerun_node_from_last_debug(
         app_id=app_id,
         node_id=node_id,
         config=config,
         workspace_id=workspace_id,
+        user_id=end_user_id,
         invalidate_cache=payload.invalidate_cache,
         bypass_cache=payload.bypass_cache,
     )

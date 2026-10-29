@@ -20,6 +20,7 @@ from uuid import UUID
 import httpx
 
 from src.config import JobsSettings
+from src.domain.shared.ids import TenantId
 
 logger = logging.getLogger(__name__)
 
@@ -68,8 +69,15 @@ class MemoryEnterpriseManager:
                 )
             return self._client
 
-    def scene_names(self, scene_ids: Sequence[UUID]) -> Mapping[str, str]:
-        """Resolve ``scene_type_id`` → scene name; empty when unavailable."""
+    def scene_names(
+        self, scene_ids: Sequence[UUID], tenant_id: TenantId
+    ) -> Mapping[str, str]:
+        """Resolve ``scene_type_id`` → scene name for one tenant; empty if unavailable.
+
+        The service scopes the lookup to ``X-Tenant-Id`` (own scenes plus the
+        shared system default), so a caller can never enumerate another tenant's
+        scenes through this path.
+        """
 
         if not self.enabled or not scene_ids:
             return {}
@@ -77,6 +85,7 @@ class MemoryEnterpriseManager:
             response = self.client().post(
                 SCENE_NAMES_PATH,
                 json={"scene_ids": [str(scene_id) for scene_id in scene_ids]},
+                headers={"X-Tenant-Id": str(tenant_id)},
             )
             response.raise_for_status()
             payload: Any = response.json()

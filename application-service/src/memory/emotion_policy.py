@@ -17,6 +17,7 @@ back to the base prompt.
 from __future__ import annotations
 
 import logging
+from time import perf_counter
 from typing import Any
 
 from ..infrastructure.upstream import MonolithUpstream, UpstreamUnavailableError
@@ -41,7 +42,12 @@ class RemoteEmotionPolicyProvider:
             emotion_code: str,
     ) -> dict | None:
         """Return this turn's strategy; every failure degrades to None."""
+        started = perf_counter()
         if not app_id or not tenant_id or not emotion_code:
+            logger.debug(
+                "[EmotionReply] skipped event=policy_callback tenant_id=%s app_id=%s "
+                "result=miss reason=missing_identity", tenant_id, app_id,
+            )
             return None
         try:
             response = await self._upstream.forward_async("POST", _STRATEGY_PATH, json_body={
@@ -51,23 +57,39 @@ class RemoteEmotionPolicyProvider:
             })
         except UpstreamUnavailableError as exc:
             logger.warning(
-                "[EmotionReply] policy callback unavailable, keeping base prompt: err=%s", exc
+                "[EmotionReply] failed event=policy_callback tenant_id=%s app_id=%s "
+                "result=miss reason=upstream_unavailable error_type=%s elapsed_ms=%.1f",
+                tenant_id, app_id, type(exc).__name__, (perf_counter() - started) * 1000,
             )
             return None
         body = response.body if isinstance(response.body, dict) else {}
         if response.status_code != 200 or body.get("code") != 0:
             logger.warning(
-                "[EmotionReply] policy callback rejected, keeping base prompt: status=%s code=%s",
-                response.status_code, body.get("code"),
+                "[EmotionReply] failed event=policy_callback tenant_id=%s app_id=%s "
+                "result=miss reason=upstream_rejected status_code=%s elapsed_ms=%.1f",
+                tenant_id, app_id, response.status_code, (perf_counter() - started) * 1000,
             )
             return None
         data = body.get("data")
         if not isinstance(data, dict) or not data.get("available"):
             logger.warning(
-                "[EmotionReply] policy callback reports unavailable, keeping base prompt"
+                "[EmotionReply] skipped event=policy_callback tenant_id=%s app_id=%s "
+                "result=miss reason=provider_unavailable elapsed_ms=%.1f",
+                tenant_id, app_id, (perf_counter() - started) * 1000,
             )
             return None
         strategy = data.get("strategy")
+        source = strategy.get("ontology_source") if isinstance(strategy, dict) else None
+        logger.info(
+            "[EmotionReply] %s event=policy_callback tenant_id=%s app_id=%s "
+            "ontology_id=%s ontology_source=%s result=%s reason=%s elapsed_ms=%.1f",
+            "completed" if isinstance(strategy, dict) else "skipped", tenant_id, app_id,
+            strategy.get("ontology_id") if isinstance(strategy, dict) else None,
+            source if source in ("custom", "system_default") else "none",
+            "hit" if isinstance(strategy, dict) else "miss",
+            "emotion_configured" if isinstance(strategy, dict) else "strategy_unavailable",
+            (perf_counter() - started) * 1000,
+        )
         return strategy if isinstance(strategy, dict) else None
 
 

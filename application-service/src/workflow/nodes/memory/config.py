@@ -33,7 +33,7 @@ class MemoryReadNodeConfig(BaseNodeConfig):
 
     search_switch: str = Field(
         "0",
-        description="Search mode: 0=verify, 1=direct, 2=context"
+        description="Search mode: 0/deep, 1/normal, 2/quick, 5/express, 3/recent, 4/meta, 6/community "
     )
 
 

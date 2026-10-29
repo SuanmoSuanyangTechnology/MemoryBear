@@ -65,11 +65,60 @@ def _forward_response(
     return JSONResponse(status_code=result.status_code, content=result.body)
 
 
+def _fetch_domain_projection(
+    upstream: MonolithUpstream, end_user_id: UUID, workspace_id: UUID
+) -> dict[str, Any]:
+    """取单体组装好的 ``domain_specific_info`` 投影，供本服务拼进响应。
+
+    场景名和字段展示名来自本体配置表，只有单体的企业插件能读，本服务不重复
+    实现翻译：条目解析、按场景归组、同名合并去重、每字段截 10 条都在单体完成，
+    这里只拿成品。
+
+    降级策略：取不到就返回空字典，不阻断主响应。
+    - 未配置 upstream：属于部署缺配置，打 ERROR（补齐即可恢复）；
+    - 调用失败 / 单体返回非成功：属于运行期异常，打 WARNING 并带上状态码和业务码；
+    - 两种情况下响应里都是 ``domain_specific_info: {}``，与"该用户本来就没有领域
+      数据"表现一致，前端不需要区分。
+    """
+
+    if not upstream.configured:
+        logger.error(
+            "Domain projection skipped: monolith upstream is not configured "
+            "(APPLICATION_SERVICE_UPSTREAM_BASE_URL / APPLICATION_SERVICE_CALLBACK_SECRET)"
+        )
+        return {}
+    try:
+        result = upstream.forward(
+            "POST",
+            "/api/internal/app-service/end-user/domain-info",
+            json_body={"end_user_id": str(end_user_id)},
+            headers={"X-Workspace-Id": str(workspace_id)},
+        )
+    except UpstreamUnavailableError:
+        logger.warning(
+            "Domain projection callback unavailable for end_user=%s", end_user_id, exc_info=True
+        )
+        return {}
+    body = result.body if isinstance(result.body, dict) else {}
+    data = body.get("data")
+    domains = data.get("domain_specific_info") if isinstance(data, dict) else None
+    if result.status_code != 200 or body.get("code") != 0 or not isinstance(domains, dict):
+        logger.warning(
+            "Domain projection callback rejected: status=%s code=%s msg=%s",
+            result.status_code,
+            body.get("code"),
+            body.get("msg"),
+        )
+        return {}
+    return domains
+
+
 @router.get("/info", summary="查询终端用户信息", response_model=ApiResponse)
 def get_end_user_info(
     end_user_id: str,
     db: DbSession,
     principal: Caller,
+    upstream: Upstream,
 ):
     workspace_id = principal.workspace_id
     if workspace_id is None:
@@ -119,6 +168,12 @@ def get_end_user_info(
     }
     filtered_meta.update(
         project_display_profile(raw_meta, limit_per_key=END_USER_INFO_PROFILE_KEY_LIMIT)
+    )
+    # The domain projection needs ontology configuration only the monolith can
+    # query, so it comes back already assembled (parsing, grouping, dedupe and
+    # the 10-value cap all happen there).
+    filtered_meta["domain_specific_info"] = _fetch_domain_projection(
+        upstream, end_user.id, workspace_id
     )
 
     response_data = {

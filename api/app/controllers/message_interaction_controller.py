@@ -159,8 +159,22 @@ async def regenerate_message(
     # ---- agent 分支（AGENT）----
     service = AppService(db)
     agent_cfg = service.get_agent_config(app_id=app_id, workspace_id=workspace_id)
+
+    # 多模型对比试运行中，每一列可能使用不同的模型与 model_parameters，
+    # 这些信息随原始 assistant 消息落库在 meta_data 中；重新生成必须还原
+    # 该消息实际使用的模型与参数，而不是应用默认模型/全局参数。
+    target_msg = db.get(Message, message_id)
+    msg_meta = dict(getattr(target_msg, "meta_data", None) or {})
+    meta_model_config_id = msg_meta.get("model_config_id")
+    model_parameters_override = msg_meta.get("model_parameters_override")
+
     model_config = None
-    if agent_cfg.default_model_config_id:
+    if meta_model_config_id:
+        try:
+            model_config = db.get(ModelConfig, uuid.UUID(str(meta_model_config_id)))
+        except (ValueError, TypeError):
+            model_config = None
+    if not model_config and agent_cfg.default_model_config_id:
         model_config = db.get(ModelConfig, agent_cfg.default_model_config_id)
 
     if not model_config:
@@ -178,6 +192,7 @@ async def regenerate_message(
                         model_config=model_config,
                         workspace_id=workspace_id,
                         user_id=str(current_user.id),
+                        model_parameters_override=model_parameters_override,
                 ):
                     yield event
 
@@ -195,6 +210,7 @@ async def regenerate_message(
         model_config=model_config,
         workspace_id=workspace_id,
         user_id=str(current_user.id),
+        model_parameters_override=model_parameters_override,
     )
 
     return success(data=app_schema.RegenerateResponse(**result))

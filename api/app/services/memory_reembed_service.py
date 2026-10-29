@@ -426,19 +426,31 @@ async def should_degrade_semantic(
     永久失败的行（``failed`` 且重试预算耗尽）永远到不了 ``done``，因此会持续
     降级，直到运维手动重试该任务。
 
-    :return: 存在一个未作废、且目标模型等于 ``embedding_model_id`` 的任务，且
-        该 end_user 在其中没有 ``done`` 行时返回 ``True``。
+    只检查该目标模型最近的一次重建。成功任务已完成当时的存量扫描；之后新增
+    或当时没有向量的 end_user 不会有任务明细，不能因此永久阻止其向量检索。
+    新一轮尚未完成或失败的任务仍需要逐用户检查，不能被旧的成功记录放行。
+
+    :return: 最近一次匹配任务未成功，且该 end_user 没有 ``done`` 明细时返回 ``True``。
     """
+    latest_job = (
+        select(MemoryReembedJob.id, MemoryReembedJob.status)
+        .where(
+            MemoryReembedJob.workspace_id == workspace_id,
+            MemoryReembedJob.new_embedding_config_id == str(embedding_model_id),
+        )
+        .order_by(MemoryReembedJob.created_at.desc(), MemoryReembedJob.id.desc())
+        .limit(1)
+        .subquery()
+    )
     done_row = select(MemoryReembedJobUser.id).where(
-        MemoryReembedJobUser.job_id == MemoryReembedJob.id,
+        MemoryReembedJobUser.job_id == latest_job.c.id,
         MemoryReembedJobUser.end_user_id == end_user_id,
         MemoryReembedJobUser.status == ReembedUserStatus.done.value,
     )
     stmt = (
-        select(MemoryReembedJob.id)
+        select(latest_job.c.id)
         .where(
-            MemoryReembedJob.workspace_id == workspace_id,
-            MemoryReembedJob.new_embedding_config_id == str(embedding_model_id),
+            latest_job.c.status != ReembedJobStatus.succeeded.value,
             ~exists(done_row),
         )
         .limit(1)
