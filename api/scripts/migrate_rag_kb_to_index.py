@@ -51,16 +51,27 @@ if hasattr(sys.stdout, "reconfigure"):
 # =====================================================================
 
 
+_MISSING_ENV: list[str] = []
+
+
 def _required_env(name: str) -> str:
     value = os.getenv(name, "").strip()
     if not value:
-        raise ValueError(f"缺少必填环境变量: {name}")
+        _MISSING_ENV.append(name)
     return value
 
 
+def _validate_env() -> None:
+    """运行期校验环境变量，避免导入模块（--help / pytest / IDE）时直接崩溃。"""
+    if _MISSING_ENV:
+        raise ValueError(
+            "缺少必填环境变量: " + ", ".join(sorted(set(_MISSING_ENV)))
+        )
+    if APP_ENV not in {"test", "pre", "prod"}:
+        raise ValueError("APP_ENV 必须是 test、pre 或 prod")
+
+
 APP_ENV = _required_env("APP_ENV").lower()
-if APP_ENV not in {"test", "pre", "prod"}:
-    raise ValueError("APP_ENV 必须是 test、pre 或 prod")
 
 POSTGRES_CONFIG = {
     "host": _required_env("DB_HOST"),
@@ -499,22 +510,30 @@ def migrate(
         chunks = list(_iter_chunks(client, kb_id, document_id))
         stats.chunks += len(chunks)
         messages = split_messages_by_chunk(chunks)
-        if not messages:
-            stats.skipped_empty += 1
-            continue
 
         per_kb = stats.per_kb.setdefault(kb_id, {"documents": 0, "written": 0, "failed": 0})
         per_kb["documents"] += 1
 
+        if not messages:
+            # 解析不出消息同样计入失败，否则该 KB 会被 purge 误判为「全部迁移成功」
+            stats.skipped_empty += 1
+            per_kb["failed"] += 1
+            stats.failures += 1
+            continue
+
+        if created_at is None:
+            # dialog_at 在索引里是 date 类型，写空串会让整条 bulk 失败；
+            # 缺创建时间时也无法确定消息先后，跳过并计入失败，避免后续 purge 误删
+            print(f"[WARN] document 缺少 created_at，跳过: document_id={document_id}")
+            per_kb["failed"] += 1
+            stats.failures += 1
+            continue
+
         actions: list[dict[str, Any]] = []
         for ordinal, (role, content, vector) in enumerate(messages):
             # 旧文档只有创建时间：按文档内序号加毫秒，保证同文档消息有稳定先后
-            message_dt = (
-                created_at + timedelta(milliseconds=ordinal)
-                if created_at is not None
-                else None
-            )
-            dialog_at = message_dt.isoformat() if message_dt is not None else ""
+            message_dt = created_at + timedelta(milliseconds=ordinal)
+            dialog_at = message_dt.isoformat()
             memory_id = _rag_memory_id(
                 user_id, dialog_at, content, f"{document_id}:{ordinal}"
             )
@@ -808,7 +827,27 @@ def main() -> int:
         action="store_true",
         help="迁移成功的 KB 一并清理（status=2 + 删 documents + 删 chunk 索引），不可回滚",
     )
+    parser.add_argument(
+        "--yes",
+        action="store_true",
+        help="配合 --purge 使用，确认执行不可回滚的删除操作",
+    )
     args = parser.parse_args()
+
+    _validate_env()
+
+    if args.reembed:
+        # 本脚本保持离线：不访问外部 embedding 服务。
+        # 需要重算向量请走平台的重嵌入任务（/workspace_reembed），那里有配额与续跑管理。
+        print(
+            "[ERROR] --reembed 会调用外部 embedding 模型，本脚本不发起外部请求；"
+            "请改用平台重嵌入任务，或去掉该参数以复用旧 chunk 向量"
+        )
+        return 2
+
+    if args.purge and not args.yes:
+        print("[ERROR] --purge 会删除 documents 与 chunk 索引且不可回滚，需同时传 --yes 确认")
+        return 2
 
     if args.purge and args.dry_run:
         print("[INFO] --purge 与 --dry-run 同时开启：只打印将要清理的 KB，不执行")
