@@ -125,6 +125,12 @@ async def _prepare_public_memory_context_async(
         db: AsyncSession,
         workspace_id: uuid.UUID,
 ) -> tuple[str, str]:
+    """返回 (storage_type, user_rag_memory_id)。
+
+    user_rag_memory_id 恒为空串：RAG 记忆已改为独立 ES 索引
+    （``rag_memory_current``），不再需要按知识库定位。该位保留仅为兼容下游
+    memory 调用链既有的解包与传参，待下游统一清理后一并移除。
+    """
     storage_type = await workspace_service.get_workspace_storage_type_without_auth_async(
         db=db,
         workspace_id=workspace_id,

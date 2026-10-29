@@ -9,7 +9,6 @@ from langchain_core.documents import Document
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.runnables.config import RunnableConfig, var_child_runnable_config
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.memory.enums import Neo4jNodeType, TripletPredicate, StorageType
 from app.core.memory.exceptions import (
@@ -61,18 +60,9 @@ from app.core.memory.storage.service import get_storage_service
 from app.core.models import RedBearChatModel, RedBearEmbeddings, RedBearRerank
 from app.core.models.llm import StructResponse
 from app.db import get_async_db_context
-from app.integrations.knowledge.contracts import (
-    KnowledgeCallContext,
-    KnowledgePrincipal,
-    KnowledgeRetrievalSource,
-)
-from app.integrations.knowledge.runtime import get_knowledge_retriever
 from app.models import Conversation, MemoryMessage
-from app.repositories import knowledge_repository
 from app.schemas.app_schema import FileInput, FileType, TransferMethod
 from app.schemas.model_schema import ModelInfo
-from app.schemas.chunk_schema import RetrieveType
-from app.schemas.knowledge_retrieval_schema import KnowledgeRetrievalRequest
 from app.utils.redis_cache import redis_cache
 
 logger = logging.getLogger(__name__)
