@@ -265,33 +265,79 @@ class EndUserService:
             f"meta_keys={list(merged_meta.keys())}"
         )
 
-        # ── 3. Neo4j 操作（storage custom 原子事务 + 逐节点 Outbox） ──
-        source_strs = sorted(str(sid) for sid in source)
-        stats = await merge_end_user_memory_nodes(source_strs, str(target))
-        logger.info(
-            f"[merge_end_users] Neo4j 合并完成: "
-            f"sources={stats.sources_merged}, "
-            f"nodes={stats.reassigned_nodes + stats.preference_buckets_moved}, "
-            f"discarded={stats.preference_buckets_discarded}, "
-            f"edges={stats.reassigned_edges}, "
-            f"outbox={stats.outbox_events}"
-        )
+        # ── 3. 记忆数据归属迁移：RAG 走独立索引，图空间走 Neo4j ──
+        from app.models.workspace_model import Workspace
 
-        # 同步 target 用户的 memory_count（只读 Neo4j 计数）。
-        connector = Neo4jConnector(shared_driver=True)
-        try:
-            from app.core.memory.utils.memory_count_utils import (
-                sync_end_user_memory_count_from_neo4j,
+        storage_type = (
+            await self.db.execute(
+                select(Workspace.storage_type).where(
+                    Workspace.id == target_user.workspace_id
+                )
             )
-            new_count = await sync_end_user_memory_count_from_neo4j(
-                str(target), connector
-            )
+        ).scalar_one_or_none()
+        is_rag = str(storage_type or "").strip().lower() == "rag"
+
+        source_strs = sorted(str(sid) for sid in source)
+        if is_rag:
+            from app.core.memory.rag import stats as rag_stats
+            from app.core.memory.rag.storage_ops import reassign_end_user_messages
+
+            try:
+                moved = await reassign_end_user_messages(source_strs, str(target))
+                logger.info(
+                    f"[merge_end_users] RAG 索引迁移完成: "
+                    f"sources={len(source_strs)} messages={moved}"
+                )
+            except Exception as exc:
+                # 归并本身不可逆：ES 迁移失败不能阻断后续 PG 引用表迁移与提交，
+                # 否则流程停在半途、映射已落库却无收尾。这里显式记 error 供人工补数
+                logger.error(
+                    f"[merge_end_users] RAG 索引迁移失败，需人工补数: "
+                    f"sources={source_strs} target={target} err={exc}",
+                    exc_info=True,
+                )
+
+            # RAG 模式没有图侧计数回写；改用独立索引聚合回写 target.memory_count，
+            # 避免依赖该字段的接口在合并后长期偏低
+            try:
+                new_count = await rag_stats.count_messages([str(target)])
+                await self.user_repo.update_memory_count_async(target, new_count)
+                logger.info(
+                    f"[merge_end_users] target memory_count 同步完成(RAG): "
+                    f"target={target}, count={new_count}"
+                )
+            except Exception as exc:
+                logger.warning(
+                    f"[merge_end_users] 同步 target memory_count 失败（不影响合并结果）: "
+                    f"target={target}, err={exc}",
+                    exc_info=True,
+                )
+        else:
+            stats = await merge_end_user_memory_nodes(source_strs, str(target))
             logger.info(
-                f"[merge_end_users] target memory_count 同步完成: "
-                f"target={target}, count={new_count}"
+                f"[merge_end_users] Neo4j 合并完成: "
+                f"sources={stats.sources_merged}, "
+                f"nodes={stats.reassigned_nodes + stats.preference_buckets_moved}, "
+                f"discarded={stats.preference_buckets_discarded}, "
+                f"edges={stats.reassigned_edges}, "
+                f"outbox={stats.outbox_events}"
             )
-        finally:
-            await connector.close()
+
+            # 同步 target 用户的 memory_count（只读 Neo4j 计数）。
+            connector = Neo4jConnector(shared_driver=True)
+            try:
+                from app.core.memory.utils.memory_count_utils import (
+                    sync_end_user_memory_count_from_neo4j,
+                )
+                new_count = await sync_end_user_memory_count_from_neo4j(
+                    str(target), connector
+                )
+                logger.info(
+                    f"[merge_end_users] target memory_count 同步完成: "
+                    f"target={target}, count={new_count}"
+                )
+            finally:
+                await connector.close()
 
         # ── 3.5 PG 引用表迁移：将 source 的 end_user_id 改为 target ──
         pg_stats: dict[str, int] = {}
@@ -321,7 +367,13 @@ class EndUserService:
                 exc_info=True,
             )
 
-        # ── 6. 触发 target 反思（合并后数据已变化，立刻做一轮去重 + 摘要） ──
+        # ── 6. 触发 target 反思（仅图空间；RAG 记忆无图侧反思数据） ──
+        if is_rag:
+            logger.info(
+                f"[merge_end_users] RAG 空间跳过图侧反思: target={target}"
+            )
+            return
+
         try:
             from app.services.memory_config_service import MemoryConfigService
             config_svc = MemoryConfigService(self.db)

@@ -24,7 +24,6 @@ from app.dependencies import get_current_user, get_current_user_async, cur_works
 from app.models import User
 from app.models.annotation_model import HitLogSource
 from app.models.app_model import AppType
-from app.repositories import knowledge_repository
 from app.schemas import app_schema, tool_schema
 from app.schemas.response_schema import PageData, PageMeta
 from app.schemas.workflow_schema import WorkflowConfig as WorkflowConfigSchema
@@ -357,13 +356,6 @@ async def _prepare_draft_memory_context_async(
             storage_type = "neo4j"
 
         user_rag_memory_id = ""
-        knowledge = await knowledge_repository.get_knowledge_by_name_async(
-            db=db,
-            name="USER_RAG_MERORY",
-            workspace_id=workspace_id,
-        )
-        if knowledge:
-            user_rag_memory_id = str(knowledge.id)
 
     return storage_type, user_rag_memory_id
 

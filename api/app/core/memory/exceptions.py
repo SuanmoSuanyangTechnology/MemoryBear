@@ -106,6 +106,7 @@ class MemoryRetrievalErrorCode(str, Enum):
 class MemoryRetrievalStage(str, Enum):
     QUERY_PROCESS = "query_process"
     VECTOR_SEARCH = "vector_search"
+    KEYWORD_SEARCH = "keyword_search"
     RELATION_SEARCH = "relation_search"
     PERCEPTUAL_ANALYSIS = "perceptual_analysis"
     RERANK = "rerank"

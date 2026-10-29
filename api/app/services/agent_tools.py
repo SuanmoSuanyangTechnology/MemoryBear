@@ -13,7 +13,7 @@ from app.services.agent_registry import AgentRegistry
 from app.core.exceptions import BusinessException, ResourceNotFoundException
 from app.core.error_codes import BizCode
 from app.core.logging_config import get_business_logger
-from app.repositories import workspace_repository, knowledge_repository
+from app.repositories import workspace_repository
 
 
 logger = get_business_logger()
@@ -151,36 +151,6 @@ def create_agent_invocation_tool(
             "获取工作空间存储类型失败，使用默认值 neo4j",
             extra={"workspace_id": str(workspace_id), "error": str(e)}
         )
-    
-    # 2. 如果 storage_type 是 rag，获取知识库 ID
-    if storage_type == 'rag':
-        try:
-            knowledge = knowledge_repository.get_knowledge_by_name(
-                db=db,
-                name="USER_RAG_MEMORY",
-                workspace_id=workspace_id
-            )
-            if knowledge:
-                user_rag_memory_id = str(knowledge.id)
-                logger.debug(
-                    "获取 RAG 知识库成功",
-                    extra={
-                        "workspace_id": str(workspace_id),
-                        "knowledge_id": user_rag_memory_id
-                    }
-                )
-            else:
-                logger.warning(
-                    "未找到名为 'USER_RAG_MEMORY' 的知识库，将使用 neo4j 存储",
-                    extra={"workspace_id": str(workspace_id)}
-                )
-                storage_type = 'neo4j'
-        except Exception as e:
-            logger.warning(
-                "获取 RAG 知识库失败，将使用 neo4j 存储",
-                extra={"workspace_id": str(workspace_id), "error": str(e)}
-            )
-            storage_type = 'neo4j'
     
     if invocation_chain is None:
         invocation_chain = []

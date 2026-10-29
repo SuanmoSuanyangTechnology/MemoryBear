@@ -423,7 +423,34 @@ class ReadPipeLine(ModelClientMixin, BasePipeline):
                 semantic_degraded=semantic_degraded,
             )
         else:
-            return RAGSearchService(self.ctx)
+            embedder = (await self._get_embedding_client()) if need_embedder else None
+            # 切换 embedding 模型后、该用户向量重建完成前，跳过向量检索。
+            semantic_degraded = (
+                await self._should_degrade_semantic() if need_embedder else False
+            )
+            if need_embedder and embedder is None:
+                # embedding_model_id 未配置/查询失败：向量路不可用，显式标记降级，
+                # 与「未降级但检索不到」区分开，避免静默丢掉语义召回
+                logger.warning(
+                    "[ReadPipeLine] rag: embedding client unavailable, "
+                    "vector search disabled for this query"
+                )
+                semantic_degraded = True
+            reranker = None
+            if enable_rerank:
+                reranker = await self._get_rerank_client()
+                if reranker is None:
+                    logger.warning(
+                        "[ReadPipeLine] enable_rerank=True but rerank_model_id not configured, "
+                        "falling back to score fusion"
+                    )
+            return RAGSearchService(
+                self.ctx,
+                embedder=embedder,
+                reranker=reranker,
+                on_error=self._record_retrieval_error,
+                semantic_degraded=semantic_degraded,
+            )
 
     async def _get_llm_client(self):
         """懒加载 LLM client：首次调用借短连接查 model API key，后续复用缓存。"""
