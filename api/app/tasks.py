@@ -2620,12 +2620,22 @@ def process_rag_memory(
                     resolved.id,
                 )
                 resolved_end_user_id = str(resolved.id)
-    except Exception as e:
+    except ValueError:
+        # 非法 end_user_id 属确定性错误，重试无意义；按原始 id 继续写入
         logger.warning(
-            "[CELERY RAG] merge resolution failed for %s: %s, using original id",
+            "[CELERY RAG] invalid end_user_id, using original id: %s",
+            end_user_id,
+        )
+    except Exception as e:
+        # 归属解析失败时不静默按旧 id 写入：该用户可能已被跨渠道归并，
+        # 落到旧 id 的文档在读取路径（按新 id 过滤）里查不到，等于丢记忆
+        logger.error(
+            "[CELERY RAG] merge resolution failed for %s: %s",
             end_user_id,
             e,
+            exc_info=True,
         )
+        raise self.retry(exc=e)
 
     async def _run():
         from app.core.memory.pipelines.base_pipeline import ModelClientMixin
@@ -2656,6 +2666,7 @@ def process_rag_memory(
                     "content": content,
                     "role": role,
                     "end_user_id": resolved_end_user_id,
+                    "config_id": config_id,
                     "dialog_at": dialog_at,
                     "source": source,
                     "delete_at": None,
@@ -2671,18 +2682,48 @@ def process_rag_memory(
             "[CELERY RAG] 写入完成: id=%s, end_user=%s, backend=%s",
             id,
             resolved_end_user_id,
-            result.backend,
+            getattr(result, "backend", None),
         )
         return {"status": "ok", "id": id}
     except Exception as exc:
-        logger.error(
-            "[CELERY RAG] 写入失败: id=%s, end_user=%s, err=%s",
-            id,
-            resolved_end_user_id,
-            exc,
-            exc_info=True,
+        from app.schemas.memory_config_schema import (
+            InvalidConfigError,
+            ModelInactiveError,
+            ModelNotFoundError,
         )
+
+        # 配置类确定性错误直接 raise，让 Celery 标记 FAILURE，不做无意义重试
+        if isinstance(
+            exc, (ValueError, ModelNotFoundError, ModelInactiveError, InvalidConfigError)
+        ):
+            logger.error(
+                "[CELERY RAG] 写入失败(no retry): id=%s, error_type=%s, err=%s",
+                id,
+                type(exc).__name__,
+                exc,
+                exc_info=True,
+            )
+            raise
+        if self.request.retries >= self.max_retries:
+            # 重试耗尽：当前没有死信/补偿链路，至少留下明确告警，便于人工补数
+            logger.error(
+                "[CELERY RAG] 重试耗尽，记忆写入最终失败: id=%s, end_user=%s, err=%s",
+                id,
+                resolved_end_user_id,
+                exc,
+                exc_info=True,
+            )
+        else:
+            logger.error(
+                "[CELERY RAG] 写入失败: id=%s, end_user=%s, err=%s",
+                id,
+                resolved_end_user_id,
+                exc,
+                exc_info=True,
+            )
         raise self.retry(exc=exc)
+    finally:
+        _shutdown_loop_gracefully(loop)
 
 
 @celery_app.task(name="app.core.memory.agent.write_message", bind=True, acks_late=False, max_retries=0)
@@ -4100,7 +4141,7 @@ def write_total_memory_task(workspace_id: str) -> Dict[str, Any]:
                 .scalar()
             )
 
-            if storage_type == "rag":
+            if str(storage_type or "").strip().lower() == "rag":
                 # RAG 空间：总量取独立索引的消息条数。
                 # 宿主集合按 (App.workspace_id, is_active) 过滤，与 dashboard 的
                 # _workspace_end_user_ids 同一口径；图侧分支走
@@ -4110,8 +4151,11 @@ def write_total_memory_task(workspace_id: str) -> Dict[str, Any]:
                 from app.core.memory.rag import stats as rag_stats
 
                 end_user_ids = EndUserRepository(db).get_ids_by_app_workspace(workspace_uuid)
-                total_num = rag_stats.count_messages_sync(end_user_ids)
-                end_user_count = len(end_user_ids)
+                counts = rag_stats.count_messages_by_end_user_sync(end_user_ids)
+                total_num = sum(counts.values())
+                # 与图侧「活跃宿主数」口径对齐：只计有消息的宿主，
+                # 否则无消息用户会拉低前端的人均记忆量
+                end_user_count = sum(1 for count in counts.values() if count > 0)
             else:
                 # 无活跃宿主时不在返回中，按 (0, 0) 处理
                 total_num, end_user_count = (
