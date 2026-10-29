@@ -115,6 +115,7 @@ class CommunitySearchService:
             raise
         finally:
             self.trace.database_requests = self.repository.database_requests
+            self.trace.skipped_hits = list(self.repository.skipped_hits)
             log_community_trace(self.trace, operation_id=self.operation_id, end_user_id=self.repository.end_user_id)
 
     def _result(self, *, memories=None, content="", reason=None) -> MemorySearchResult:

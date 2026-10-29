@@ -33,6 +33,9 @@ class CommunityRetrievalTrace(BaseModel):
         description="Per-community matched_scene_count before top-K selection and selected candidates.",
     )
     merged_ranking: list[dict[str, Any]] = Field(default_factory=list)
+    skipped_hits: list[dict[str, Any]] = Field(
+        default_factory=list, description="Hits skipped for invalid scores, including stage and raw score diagnostics.",
+    )
     packing_actions: list[dict[str, Any]] = Field(default_factory=list)
     evidence_ids: list[str] = Field(default_factory=list)
     final_tokens: int = 0

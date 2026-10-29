@@ -17,6 +17,7 @@ class CommunityRetrievalRepository:
         self.end_user_id = end_user_id
         self.policy = policy
         self.database_requests = 0
+        self.skipped_hits: list[dict] = []
 
     def _validate(self, node: dict, *, scene: bool, community_id: str | None = None) -> None:
         if not isinstance(node, Mapping) or not isinstance(node.get("id"), str) or not node["id"]:
@@ -95,7 +96,16 @@ class CommunityRetrievalRepository:
                 raise CommunityRetrievalError("invalid_node_id")
             if (not isinstance(score, Real) or isinstance(score, bool) or not math.isfinite(score)
                     or (score < 0 if fulltext else not threshold + 1.0 - 1e-6 <= score <= 2.0 + 1e-6)):
-                raise CommunityRetrievalError("invalid_search_score")
+                self.skipped_hits.append({
+                    "stage": "scene_selection" if scene else "community_selection",
+                    "search_type": "fulltext" if fulltext else "vector",
+                    "community_id": community_id,
+                    "node_id": node["id"],
+                    # Keep NaN/inf visible in JSON without serializing arbitrary payloads.
+                    "raw_score": repr(score) if score is None or isinstance(score, (Real, str)) else type(score).__name__,
+                    "reason": "invalid_search_score",
+                })
+                continue
             candidates.append((float(score) if fulltext else min(1.0, max(-1.0, float(score) - 1.0)), node))
         return sorted(candidates, key=lambda item: (-item[0], item[1]["id"])), hits["total"]["value"]
 
