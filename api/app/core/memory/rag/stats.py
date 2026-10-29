@@ -60,6 +60,11 @@ def _build_query(
     if exclude_legacy:
         filters.append({"bool": {"must_not": [{"term": {"source": LEGACY_SOURCE}}]}})
     if keyword and keyword.strip():
+        # 用 match_phrase 而非 match：content 是 text + cjk 分析器，match 只要任一
+        # bigram 命中即返回（如搜「发票申请」会因命中「申请」而召回无关文档），
+        # match_phrase 要求 bigram 按序相邻，靠近「包含该关键词」的直觉语义。
+        # 与召回链路的 multi_match 口径不同：召回求高召回率再融合排序，
+        # 此处是列表筛选，精度优先。
         must.append({"match_phrase": {"content": keyword.strip()}})
     if start is not None or end is not None:
         bounds: dict[str, str] = {}

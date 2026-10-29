@@ -1340,12 +1340,13 @@ def get_rag_content(
     keyword: Optional[str] = None,
     order: str = "desc",
 ) -> dict:
-    """读取 RAG 记忆消息（分页，默认最新在前）。
+    """读取 RAG 记忆消息（分页，默认最新在前），供同步调用方使用。
 
     数据源为独立索引 `rag_memory_current`：
-    - end_user_id 传值时只查该宿主，不传时查当前空间全部宿主
+    - end_user_id 传值时只查该宿主；本模块内的画像生成等调用恒传值，
+      「不传即当前空间全部宿主」仅为服务层防御分支，/rag_content 接口要求必填
     - start_time/end_time 为毫秒 UTC 闭区间
-    - source 支持多值过滤，keyword 走 content 全文匹配
+    - source 支持多值过滤，keyword 走 content 的 match_phrase 匹配
     """
     business_logger.info(
         f"获取RAG内容: end_user_id={end_user_id}, page={page}, pagesize={pagesize}, "
@@ -1389,7 +1390,14 @@ async def get_rag_content_async(
     keyword: Optional[str] = None,
     order: str = "desc",
 ) -> dict:
-    """get_rag_content 的异步版本（供异步链路直接 await）。"""
+    """读取 RAG 记忆消息（分页，默认最新在前）。
+
+    数据源为独立索引 `rag_memory_current`：
+    - end_user_id 为空时回退为当前空间全部宿主；对外的 /rag_content 接口要求必填，
+      该回退仅作为服务层防御分支保留
+    - start_time/end_time 为毫秒 UTC 闭区间
+    - source 支持多值过滤，keyword 走 content 的 match_phrase 匹配
+    """
     from app.core.utils.datetime_utils import parse_timestamp_to_utc_naive
 
     end_user_ids = await _resolve_rag_scope_ids_async(db, current_user, end_user_id)

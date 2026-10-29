@@ -31,13 +31,25 @@ async def delete_messages_by_end_user(end_user_id: str) -> int:
             query={"term": {"end_user_id": end_user_id}},
             conflicts="proceed",
             refresh=True,
+            slices="auto",
         )
         deleted = int(result.get("deleted", 0) or 0)
+        matched = int(result.get("total", 0) or 0)
         logger.info(
-            "[RAGStorage] 删除宿主记忆完成: end_user=%s deleted=%s",
+            "[RAGStorage] 删除宿主记忆完成: end_user=%s matched=%s deleted=%s",
             end_user_id,
+            matched,
             deleted,
         )
+        if deleted < matched:
+            logger.warning(
+                "[RAGStorage] 删除未全覆盖: end_user=%s matched=%s deleted=%s "
+                "failures=%s",
+                end_user_id,
+                matched,
+                deleted,
+                len(result.get("failures") or []),
+            )
         return deleted
     finally:
         await client.close()
