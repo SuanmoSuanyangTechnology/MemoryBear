@@ -144,6 +144,34 @@ _SHORT_TERM_COUNT_QUERY = _ELIGIBLE_STATEMENTS + """
 RETURN count(DISTINCT s.id) AS total
 """
 
+# 单用户的三类图计数合并为一条查询：一次会话、一次往返，三个数字来自同一快照。
+# 各子查询保留与单指标查询逐字一致的 label + end_user_id 谓词，索引计划不变。
+_GRAPH_MEMORY_COUNTS_QUERY = """
+UNWIND [$end_user_id] AS uid
+CALL (uid) {
+    MATCH (summary:MemorySummary)
+    WHERE summary.end_user_id = uid
+      AND summary.delete_at IS NULL
+    RETURN count(summary) AS episodic_count
+}
+CALL (uid) {
+    MATCH (entity:ExtractedEntity)
+    WHERE entity.end_user_id = uid
+      AND entity.delete_at IS NULL
+      AND entity.is_explicit_memory = true
+    RETURN count(entity) AS explicit_entity_count
+}
+CALL (uid) {
+    MATCH (statement:Statement)
+    WHERE statement.end_user_id = uid
+      AND statement.delete_at IS NULL
+      AND statement.emotion_type IS NOT NULL
+      AND toLower(trim(statement.emotion_type)) IN $emotion_types
+    RETURN count(statement) AS emotional_count
+}
+RETURN episodic_count, explicit_entity_count, emotional_count
+"""
+
 
 class MemoryGraphRepository:
     def __init__(self, neo4j: Neo4jManager) -> None:
@@ -299,6 +327,30 @@ class MemoryGraphRepository:
             """,
             end_user_id=end_user_id,
         )
+
+    async def memory_counts(self, end_user_id: str) -> dict[str, int]:
+        """三类图计数：一条查询取回同一快照下的 episodic / semantic / emotional。
+
+        与 :class:`MemoryStatisticsRepository` 的合并查询是同一取舍：三个计数各自
+        的真实 DB 工作都很小，开销主要在「开 session + 占一条池连接 + 一次往返」，
+        合并后每请求从 3 次往返/3 条连接降到 1 次，且三个数字来自同一事务快照。
+
+        单指标方法（:meth:`episodic_count` 等）保留为回落路径：合并查询里的任一
+        子查询失败（例如脏 ``emotion_type`` 触发类型错误）时，服务层改为逐指标
+        查询，仍能保留「单个指标失败只把该项降级为 0」的语义。
+        """
+
+        rows = await self._query(
+            _GRAPH_MEMORY_COUNTS_QUERY,
+            end_user_id=end_user_id,
+            emotion_types=list(EMOTION_TYPE_STORAGE_VALUES),
+        )
+        row = rows[0] if rows else {}
+        return {
+            "episodic": int(row.get("episodic_count") or 0),
+            "semantic_explicit": int(row.get("explicit_entity_count") or 0),
+            "emotional": int(row.get("emotional_count") or 0),
+        }
 
     async def episodic_count(self, end_user_id: str) -> int:
         rows = await self._query(

@@ -108,12 +108,7 @@ class ProfileQueryService:
                     "implicit habits",
                     lambda: self.memory_statistics.habit_count_for_users([end_user_id]),
                 ),
-                safe_count("episodic", lambda: self.memory_graph.episodic_count(end_user_id)),
-                safe_count(
-                    "semantic explicit",
-                    lambda: self.memory_graph.semantic_explicit_count(end_user_id),
-                ),
-                safe_count("emotional", lambda: self.memory_graph.emotional_count(end_user_id)),
+                self._graph_memory_counts(end_user_id),
             ),
             safe_count(
                 "short term",
@@ -122,7 +117,10 @@ class ProfileQueryService:
                 ),
             ),
         )
-        implicit_count, episodic, semantic, emotional = memory_counts
+        implicit_count, graph_counts = memory_counts
+        episodic = graph_counts["episodic"]
+        semantic = graph_counts["semantic_explicit"]
+        emotional = graph_counts["emotional"]
         counts = {
             "PERCEPTUAL_MEMORY": source_counts["perceptual"],
             "WORKING_MEMORY": (
@@ -171,6 +169,35 @@ class ProfileQueryService:
             safe_count("forgotten", lambda: self.memory_statistics.forgotten_count(user_id)),
         )
         return dict(zip(COUNT_KEYS, values, strict=True))
+
+    async def _graph_memory_counts(self, end_user_id: str) -> dict[str, int]:
+        """三类图计数优先一条查询取回（单连接、单快照）。
+
+        合并查询失败时回落到三个单指标查询，从而保留原先「单个指标失败只把该项
+        降级为 0」的语义（见 :func:`safe_count`）；这也是仓储层保留那 3 个单指标
+        方法的原因。
+        """
+
+        try:
+            return await self.memory_graph.memory_counts(end_user_id)
+        except Exception:
+            logger.warning(
+                "graph memory counts merged query degraded to per-metric queries",
+                exc_info=True,
+            )
+        episodic, semantic, emotional = await asyncio.gather(
+            safe_count("episodic", lambda: self.memory_graph.episodic_count(end_user_id)),
+            safe_count(
+                "semantic explicit",
+                lambda: self.memory_graph.semantic_explicit_count(end_user_id),
+            ),
+            safe_count("emotional", lambda: self.memory_graph.emotional_count(end_user_id)),
+        )
+        return {
+            "episodic": episodic,
+            "semantic_explicit": semantic,
+            "emotional": emotional,
+        }
 
     # ── 工作空间热门标签 / legacy 终端用户画像 ──────────────────────────
 
