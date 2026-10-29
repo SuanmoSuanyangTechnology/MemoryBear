@@ -10,6 +10,7 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Any, Literal
 
+from json_repair import json_repair
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from app.core.memory.models.metadata_models import (
@@ -18,6 +19,7 @@ from app.core.memory.models.metadata_models import (
     parse_entry_triplet,
 )
 from app.core.memory.utils.prompt.template_render import prompt_env
+from app.core.utils.datetime_utils import as_utc_aware
 
 logger = logging.getLogger(__name__)
 
@@ -190,6 +192,12 @@ def _preference_value(node: object, field: str, default: object = None) -> objec
     return getattr(node, field, default)
 
 
+def _normalize_updated_at(value: object) -> datetime:
+    if not isinstance(value, datetime):
+        return datetime.min
+    return as_utc_aware(value).replace(tzinfo=None)
+
+
 def normalize_preference_evidence(nodes: list[object]) -> list[AtomicEvidence]:
     """将 Preference 快照转为可追溯的原子证据。
 
@@ -211,9 +219,7 @@ def normalize_preference_evidence(nodes: list[object]) -> list[AtomicEvidence]:
         situation_key = _clean_text(_preference_value(node, "situation_key"))
         if not node_id or not subject or not situation_key:
             continue
-        updated_at = _preference_value(node, "updated_at")
-        if not isinstance(updated_at, datetime):
-            updated_at = datetime.min
+        updated_at = _normalize_updated_at(_preference_value(node, "updated_at"))
         for index, (mode, text) in enumerate(zip(modes, texts)):
             content = _clean_text(text)
             if mode not in _VALID_MODES or not content:
@@ -441,14 +447,31 @@ async def extract_ai_personality(
         )
     )
     response = await asyncio.wait_for(
-        llm_client.with_structured_output(AIPersonalityOutput, include_raw=True).ainvoke(
+        llm_client.call_structured(
             [{"role": "user", "content": prompt}],
+            AIPersonalityOutput,
+            include_raw=True,
         ),
         timeout=timeout_seconds,
     )
-    raw = response["raw"]
-    tool_calls = getattr(raw, "tool_calls", [])
-    if len(tool_calls) != 1 or tool_calls[0].get("name") != AIPersonalityOutput.__name__:
-        raise ValueError("AI personality model did not return the expected tool call")
-    output = _parse_personality_entries(tool_calls[0].get("args"))
+    result = response.get("parsed") if isinstance(response, dict) and "parsed" in response else response
+    if result is None and isinstance(response, dict):
+        raw = response.get("raw")
+        for call in getattr(raw, "tool_calls", []) or []:
+            if call.get("name") == AIPersonalityOutput.__name__ and isinstance(call.get("args"), dict):
+                result = call["args"]
+                break
+        if result is None:
+            for call in (getattr(raw, "additional_kwargs", None) or {}).get("tool_calls", []):
+                function = call.get("function", {})
+                if function.get("name") != AIPersonalityOutput.__name__:
+                    continue
+                arguments = function.get("arguments")
+                if isinstance(arguments, str) and arguments.strip():
+                    result = json_repair.repair_json(arguments, return_objects=True)
+                    break
+        content = getattr(raw, "content", None)
+        if result is None and isinstance(content, str) and content.strip():
+            result = json_repair.repair_json(content, return_objects=True)
+    output = result if isinstance(result, AIPersonalityOutput) else _parse_personality_entries(result)
     return validate_personality_output(output, evidence)
