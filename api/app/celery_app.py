@@ -152,6 +152,8 @@ celery_app.conf.update(
         'app.tasks.do_refresh_insight_summary_cache': {'queue': 'memory_heavy_tasks'}, # NOTE：单用户生成记忆洞察、用户摘要缓存
         'app.tasks.scan_refresh_user_tags': {'queue': 'periodic_tasks'},
         'app.tasks.do_refresh_user_tags': {'queue': 'memory_heavy_tasks'},
+        'app.tasks.scan_extract_ai_personality': {'queue': 'periodic_tasks'},
+        'app.tasks.do_extract_ai_personality_for_user': {'queue': 'memory_heavy_tasks'},
         'app.tasks.scan_forget_candidates': {'queue': 'periodic_tasks'},
         'app.tasks.do_forget_for_user': {'queue': 'memory_heavy_tasks'},
         'app.tasks.scan_expired_end_users': {'queue': 'periodic_tasks'},
@@ -242,6 +244,14 @@ try:
     }
 except ImportError:
     _HAS_NOTIFICATION_TASKS = False
+
+# 企业版 AI 人格模块存在时才安排扫描，纯社区部署不投递该任务。
+try:
+    import premium.memory.ai_personality  # noqa: F401
+
+    _HAS_AI_PERSONALITY = True
+except ImportError:
+    _HAS_AI_PERSONALITY = False
 
 # Celery Beat schedule for periodic tasks
 memory_increment_schedule = crontab(hour=settings.MEMORY_INCREMENT_HOUR, minute=settings.MEMORY_INCREMENT_MINUTE)
@@ -396,6 +406,16 @@ beat_schedule_config = {
 }
 
 celery_app.conf.beat_schedule = beat_schedule_config
+
+if _HAS_AI_PERSONALITY:
+    celery_app.conf.beat_schedule["extract-ai-personality"] = {
+        "task": "app.tasks.scan_extract_ai_personality",
+        "schedule": crontab(
+            hour=settings.AI_PERSONALITY_EXTRACTION_HOUR,
+            minute=settings.AI_PERSONALITY_EXTRACTION_MINUTE,
+        ),
+        "options": {"queue": "periodic_tasks"},
+    }
 
 # 企业版订阅任务调度配置（_HAS_SUBSCRIPTION_TASKS 在上方路由注册处探测完成）
 # 可通过环境变量调整频率（默认保持原行为）：
