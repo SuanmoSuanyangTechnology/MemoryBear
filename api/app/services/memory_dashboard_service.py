@@ -31,19 +31,36 @@ business_logger = get_business_logger()
 
 
 def _workspace_end_user_ids(db: Session, workspace_id: uuid.UUID) -> List[str]:
-    """工作空间下所有活跃宿主 ID（与 RAG 统计口径一致）。"""
-    from app.repositories.end_user_repository import EndUserRepository
+    """工作空间下所有活跃宿主 ID（与 RAG 统计口径一致）。
 
-    return EndUserRepository(db).get_ids_by_app_workspace(workspace_id)
+    统一以 EndUser 行为准（workspace_id + 活跃状态）：ES 文档归属就是
+    end_user_id，而 MCP / Service API 宿主可以没有 App（app_id 为 NULL），
+    App join 会漏掉这些宿主及其记忆统计。
+    """
+    rows = (
+        db.query(EndUser.id)
+        .filter(
+            EndUser.workspace_id == workspace_id,
+            EndUser.is_active.is_(True),
+        )
+        .all()
+    )
+    return [str(row[0]) for row in rows]
 
 
 async def _workspace_end_user_ids_async(
     db: AsyncSession,
     workspace_id: uuid.UUID,
 ) -> List[str]:
-    from app.repositories.end_user_repository import EndUserRepository
+    from sqlalchemy import select
 
-    return await EndUserRepository(db).get_ids_by_app_workspace_async(workspace_id)
+    result = await db.execute(
+        select(EndUser.id).where(
+            EndUser.workspace_id == workspace_id,
+            EndUser.is_active.is_(True),
+        )
+    )
+    return [str(row[0]) for row in result.all()]
 
 
 async def _is_rag_workspace_async(
@@ -66,8 +83,6 @@ async def get_dashboard_memory_updates_async(
     current_total: int | None,
 ) -> dict[str, int | None]:
     """Reuse the branch total and compare it with workspace-level baselines."""
-    from app.repositories.end_user_repository import EndUserRepository
-
     result = {"memory_update": None, "memory_update_change": None}
     if current_total is None:
         return result
@@ -90,8 +105,7 @@ async def get_dashboard_memory_updates_async(
                 yesterday = baselines.get(yesterday_start.date())
                 day_before = baselines.get(day_before_start.date())
             elif storage_type == "rag":
-                users = EndUserRepository(db)
-                user_ids = await users.get_ids_by_app_workspace_async(workspace_id)
+                user_ids = await _workspace_end_user_ids_async(db, workspace_id)
                 if not user_ids:
                     # 空宿主列表时 count_messages 恒返回 0，会让
                     # memory_update = current_total - 0 误算成一次巨大增量；
@@ -1179,9 +1193,7 @@ def get_dashboard_yesterday_changes(
             else:
                 changes["total_memory_change"] = _calc_percentage(today_memory, last_record.total_num)
         elif storage_type == "rag":
-            from app.repositories.end_user_repository import EndUserRepository
-
-            end_user_ids = EndUserRepository(db).get_ids_by_app_workspace(workspace_id)
+            end_user_ids = _workspace_end_user_ids(db, workspace_id)
             if not end_user_ids:
                 changes["total_memory_change"] = None
             else:
@@ -1355,9 +1367,7 @@ async def get_dashboard_yesterday_changes_async(
             else:
                 changes["total_memory_change"] = _calc_percentage(today_memory, last_record.total_num)
         elif storage_type == "rag":
-            from app.repositories.end_user_repository import EndUserRepository
-
-            end_user_ids = await EndUserRepository(db).get_ids_by_app_workspace_async(workspace_id)
+            end_user_ids = await _workspace_end_user_ids_async(db, workspace_id)
             if not end_user_ids:
                 changes["total_memory_change"] = None
             else:

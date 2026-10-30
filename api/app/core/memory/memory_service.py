@@ -356,6 +356,11 @@ class MemoryService:
             )
             return 0
 
+        # ES term 查询与图节点都按规范形式写入（各写入入口均已解析为
+        # str(end_user.id)）；这里统一用解析后的规范 id，避免调用方传入
+        # 大写/无连字符 UUID 时精确匹配查不到文档、静默漏删
+        canonical_end_user_id = str(end_user_uuid)
+
         async with get_async_db_context() as db:
             from app.models.end_user_model import EndUser
             from app.models.workspace_model import Workspace
@@ -396,7 +401,7 @@ class MemoryService:
             # 仍在」且没有重试入口。删除本身幂等，交由调用方重试收敛
             rag_error: Exception | None = None
             try:
-                rag_deleted = await delete_messages_by_end_user(end_user_id)
+                rag_deleted = await delete_messages_by_end_user(canonical_end_user_id)
             except Exception as exc:
                 logger.error(
                     "[MemoryService] fallback rag delete failed: end_user=%s, err=%s",
@@ -407,9 +412,13 @@ class MemoryService:
                 rag_deleted = 0
                 rag_error = exc
 
-            pipeline = ForgettingPipeline(MemoryContext(end_user_id=end_user_id))
+            pipeline = ForgettingPipeline(
+                MemoryContext(end_user_id=canonical_end_user_id)
+            )
             try:
-                graph_deleted = await pipeline.delete_all_nodes_by_end_user_id(end_user_id)
+                graph_deleted = await pipeline.delete_all_nodes_by_end_user_id(
+                    canonical_end_user_id
+                )
             except Exception as exc:
                 # 图侧失败必须上抛，不能按 0 吞掉：调用层（memory_storage_controller）
                 # 拿到返回值后会立刻把宿主落库为 is_active=False / memory_count=0
@@ -439,10 +448,14 @@ class MemoryService:
         if normalized_type == "rag":
             from app.core.memory.rag.storage_ops import delete_messages_by_end_user
 
-            return await delete_messages_by_end_user(end_user_id)
+            return await delete_messages_by_end_user(canonical_end_user_id)
 
-        pipeline = ForgettingPipeline(MemoryContext(end_user_id=end_user_id))
-        return await pipeline.delete_all_nodes_by_end_user_id(end_user_id)
+        pipeline = ForgettingPipeline(
+            MemoryContext(end_user_id=canonical_end_user_id)
+        )
+        return await pipeline.delete_all_nodes_by_end_user_id(
+            canonical_end_user_id
+        )
 
     # ──────────────────────────────────────────────
     # 实例方法：写入执行（由 write_message_task 调用）

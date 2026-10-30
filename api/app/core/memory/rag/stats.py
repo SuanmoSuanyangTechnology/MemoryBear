@@ -126,13 +126,16 @@ def _stats_client_config() -> dict[str, Any]:
 def _log_late_result(future) -> None:
     """兜底取回后台仍在运行的 future 的结果状态。
 
-    超时放弃等待后协程会继续跑到 ES 自身超时，其结果/异常无人取回会触发
+    超时放弃等待后协程可能稍后才结束，其结果/异常无人取回会触发
     "Future exception was never retrieved"；成功则静默，失败记 error。
     """
     if future.cancelled():
         return
     exc = future.exception()
     if exc is not None:
+        if isinstance(exc, TimeoutError):
+            # 协程内的 wait_for 超时已经是预期结果，调用方已记录主日志
+            return
         logger.error(
             "[RagStats] late sync stats finished with error: %s",
             exc,
@@ -153,17 +156,23 @@ def _run_sync(coro):
             "_run_sync called from a running event loop; use the async "
             "entry (await count_messages/daily_totals/...) instead"
         )
-    future = _SYNC_EXECUTOR.submit(asyncio.run, coro)
+    # 协程内部再套一层 wait_for：future.cancel() 对已开跑的 future 是 no-op，
+    # 只有让协程自身收到 cancelled 才能尽快释放共享 worker，避免 ES 挂起时
+    # 8 个 worker 被长期占满、后续同步统计全部排队超时
+    future = _SYNC_EXECUTOR.submit(
+        asyncio.run,
+        asyncio.wait_for(coro, timeout=_SYNC_RESULT_TIMEOUT_SECONDS),
+    )
     future.add_done_callback(_log_late_result)
     try:
         return future.result(timeout=_SYNC_RESULT_TIMEOUT_SECONDS)
     except FutureTimeoutError:
-        # 已排队未开跑的能被真正取消；已开跑的 cancel() 是 no-op，
-        # 由 ES 客户端自身超时收尾（协程无法从外部强杀）
+        # 已排队未开跑的能被 future.cancel() 真正取消；已开跑的由协程内的
+        # wait_for 触发协作式取消（ES 客户端取消后连接即释放）
         future.cancel()
         logger.error(
             "[RagStats] sync stats timed out after %ss (ES may be hanging); "
-            "the underlying call keeps running until the ES client times out",
+            "cancellation requested for the worker coroutine",
             _SYNC_RESULT_TIMEOUT_SECONDS,
         )
         raise

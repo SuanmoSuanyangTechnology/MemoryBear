@@ -548,14 +548,30 @@ class ReadPipeLine(ModelClientMixin, BasePipeline):
         return self._llm_client
 
     async def _get_embedding_client(self):
-        """懒加载 embedding client：首次调用借短连接查 model API key，后续复用缓存。"""
+        """懒加载 embedding client：首次调用借短连接查 model API key，后续复用缓存。
+
+        未配置 embedding 模型或模型配置不可用时返回 None：调用方
+        ``_build_retrieval_deps`` 会据此标记 semantic_degraded 并降级为
+        纯全文检索。不能上抛——那会让「未配置向量模型」的空间整条读取失败。
+        """
         if self._embedding_client is None:
+            cfg = self.ctx.memory_config
+            if not cfg.embedding_model_id:
+                return None
             async with get_async_db_context() as db:
-                self._embedding_client = await self.get_embedding_client_async(
-                    db,
-                    self.ctx.memory_config.embedding_model_id,
-                    tenant_id=self.ctx.memory_config.tenant_id
-                )
+                try:
+                    self._embedding_client = await self.get_embedding_client_async(
+                        db,
+                        cfg.embedding_model_id,
+                        tenant_id=cfg.tenant_id
+                    )
+                except ValueError:
+                    # 模型配置不存在/已停用：确定性不可用，降级而非阻断读取
+                    logger.warning(
+                        "[ReadPipeLine] embedding model unavailable: %s",
+                        cfg.embedding_model_id,
+                    )
+                    return None
         return self._embedding_client
 
     async def _get_perceptual_llm_client(self, perceptual_type: int):

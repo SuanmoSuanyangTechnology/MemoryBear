@@ -2584,6 +2584,9 @@ def sync_knowledge_for_kb(kb_id: uuid.UUID):
 #: memory_storage_controller 的删除路径保持一致（1200s + 60s 等待）。
 _RAG_WRITE_LOCK_EXPIRE_SECONDS = 1200
 _RAG_WRITE_LOCK_TIMEOUT_SECONDS = 60
+# owner 每次重解析都变化时最多重抢几轮；超过按写锁超时交给任务重试，
+# 避免异常归并链让 worker 无限循环
+_RAG_WRITE_LOCK_MAX_ATTEMPTS = 3
 
 
 class _RagOwnerGone(Exception):
@@ -2617,12 +2620,13 @@ def _acquire_rag_write_lock(
     """Resolve → lock → re-resolve：保证锁覆盖写入时的真实 owner。
 
     任务排队期间宿主可能已被归并（owner 变化）或删除（owner 消失）：
-    - owner 变化：释放旧锁，按新 owner 重新抢，直到稳定；
+    - owner 变化：释放旧锁，按新 owner 重新抢，最多重抢
+      ``_RAG_WRITE_LOCK_MAX_ATTEMPTS`` 轮，超过按写锁超时处理；
     - owner 消失：抛 ``_RagOwnerGone``，调用方放弃写入；
     - 抢锁超时（删除/归并正持有）：抛 ``_RagWriteLockTimeout``，交由任务重试。
     """
     candidate_id = end_user_id
-    while True:
+    for _ in range(_RAG_WRITE_LOCK_MAX_ATTEMPTS):
         owner_id, active = _resolve_rag_write_owner(candidate_id)
         if not active:
             raise _RagOwnerGone(owner_id)
@@ -2646,6 +2650,8 @@ def _acquire_rag_write_lock(
         if not confirmed_active:
             raise _RagOwnerGone(confirmed_id)
         candidate_id = confirmed_id
+
+    raise _RagWriteLockTimeout(candidate_id)
 
 
 @celery_app.task(
@@ -4349,14 +4355,20 @@ def write_total_memory_task(workspace_id: str) -> Dict[str, Any]:
             # ``StorageType.RAG`` 之类的字符串化结果错过 rag 分支
             storage_value = getattr(storage_type, "value", storage_type)
             if str(storage_value or "").strip().lower() == "rag":
-                # RAG 空间：总量取独立索引的消息条数。
-                # 宿主集合按 (App.workspace_id, is_active) 过滤，与 dashboard 的
-                # _workspace_end_user_ids 同一口径；图侧分支走
-                # get_memory_count_stats_by_workspace_ids（按 EndUser.workspace_id 过滤）。
-                # 历史数据中 EndUser.workspace_id 与 App 归属不一致时，两者宿主集合会有
-                # 差异，属统计口径差异而非缺陷，对账时以 App 关联为准。
+                # RAG 空间：总量取独立索引的消息条数。宿主集合统一以 EndUser
+                # 行为准（workspace_id + 活跃状态）：ES 文档归属就是 end_user_id，
+                # 而 MCP / Service API 宿主可以没有 App（app_id 为 NULL），
+                # App join 会漏掉它们的存量记忆，导致总量与宿主数偏低
                 is_rag_storage = True
-                end_user_ids = EndUserRepository(db).get_ids_by_app_workspace(workspace_uuid)
+                end_user_ids = [
+                    str(row[0])
+                    for row in db.query(EndUser.id)
+                    .filter(
+                        EndUser.workspace_id == workspace_uuid,
+                        EndUser.is_active.is_(True),
+                    )
+                    .all()
+                ]
             else:
                 # 无活跃宿主时不在返回中，按 (0, 0) 处理
                 total_num, end_user_count = (
