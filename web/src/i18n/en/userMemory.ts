@@ -185,6 +185,12 @@ export const userMemory = {
 
       communityNetwork: 'Community Graph',
       community: 'Community',
+      sceneCount: 'Scene Count',
+      includedScenes: 'Included Scenes',
+      noScenes: 'No scenes',
+      unassignedScenes: 'Unassigned Scenes',
+      belongsToCommunity: 'Belongs to Community',
+      SceneSummary: 'Scene',
       "Person": "Person Entity Node",
       "Organization": "Organization Entity Node",
       "ORG": "Organization Entity Node",

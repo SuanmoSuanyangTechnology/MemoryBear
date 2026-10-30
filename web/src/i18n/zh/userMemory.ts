@@ -186,6 +186,12 @@ export const userMemory = {
 
       communityNetwork: '社区图谱',
       community: '社区',
+      sceneCount: '场景数',
+      includedScenes: '包含的场景',
+      noScenes: '暂无场景',
+      unassignedScenes: '未分组场景',
+      belongsToCommunity: '所属社区',
+      SceneSummary: '场景',
       "Person": "人物实体节点",
       "Organization": "组织实体节点",
       "ORG": "组织实体节点",
