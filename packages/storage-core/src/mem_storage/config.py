@@ -6,7 +6,14 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Annotated, Literal, TypeAlias
 
-from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    SecretStr,
+    field_validator,
+    model_validator,
+)
 
 S3_MIN_MULTIPART_PART_SIZE = 5 * 1024 * 1024
 OSS_MIN_MULTIPART_PART_SIZE = 100 * 1024
@@ -35,7 +42,18 @@ class LocalStorageConfig(StorageConfigBase):
         return value
 
 
-class OSSStorageConfig(StorageConfigBase):
+class RemoteStorageConfig(StorageConfigBase):
+    connection_pool_size: int = Field(default=16, ge=1)
+    max_concurrency: int = Field(default=16, ge=1)
+
+    @model_validator(mode="after")
+    def validate_pool_capacity(self) -> RemoteStorageConfig:
+        if self.connection_pool_size < self.max_concurrency:
+            raise ValueError("connection_pool_size must be at least max_concurrency")
+        return self
+
+
+class OSSStorageConfig(RemoteStorageConfig):
     storage_type: Literal[StorageType.OSS] = StorageType.OSS
     endpoint: str = Field(min_length=1)
     access_key_id: SecretStr
@@ -48,7 +66,7 @@ class OSSStorageConfig(StorageConfigBase):
     )
 
 
-class S3StorageConfig(StorageConfigBase):
+class S3StorageConfig(RemoteStorageConfig):
     storage_type: Literal[StorageType.S3] = StorageType.S3
     region: str = Field(min_length=1)
     access_key_id: SecretStr
@@ -61,7 +79,7 @@ class S3StorageConfig(StorageConfigBase):
     )
 
 
-class MinIOStorageConfig(StorageConfigBase):
+class MinIOStorageConfig(RemoteStorageConfig):
     storage_type: Literal[StorageType.MINIO] = StorageType.MINIO
     region: str = "us-east-1"
     access_key_id: SecretStr

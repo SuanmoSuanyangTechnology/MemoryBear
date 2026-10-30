@@ -52,13 +52,16 @@ async def dispatch_qa_import(
     kb_id: uuid.UUID,
     document_id: uuid.UUID,
     filename: str,
-    content: bytes,
+    content: bytes | None = None,
+    *,
+    file_key: str | None = None,
 ) -> str:
     await _persist_qa_dispatch_state(runtime, document_id, state="queued")
     try:
         return await dispatcher.send(
             "app.core.rag.tasks.import_qa_chunks",
-            args=[str(kb_id), str(document_id), filename, content],
+            args=[str(kb_id), str(document_id), filename],
+            kwargs={"file_key": file_key} if file_key is not None else {"contents": content},
             queue="qa_import",
         )
     except Exception:

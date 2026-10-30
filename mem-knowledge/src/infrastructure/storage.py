@@ -45,6 +45,8 @@ class StorageManager:
             return LocalStorageConfig(root_path=self._settings.file_path)
         if self._settings.storage_type == "oss":
             return OSSStorageConfig(
+                connection_pool_size=self._settings.storage_connection_pool_size,
+                max_concurrency=self._settings.storage_max_concurrency,
                 endpoint=self._settings.oss_endpoint,
                 access_key_id=self._settings.oss_access_key_id,
                 access_key_secret=self._settings.oss_access_key_secret,
@@ -52,6 +54,8 @@ class StorageManager:
             )
         if self._settings.storage_type == "minio":
             return MinIOStorageConfig(
+                connection_pool_size=self._settings.storage_connection_pool_size,
+                max_concurrency=self._settings.storage_max_concurrency,
                 endpoint_url=self._settings.minio_endpoint_url,
                 access_key_id=self._settings.minio_access_key_id,
                 secret_access_key=self._settings.minio_secret_access_key,
@@ -60,6 +64,8 @@ class StorageManager:
                 ensure_bucket=True,
             )
         return S3StorageConfig(
+            connection_pool_size=self._settings.storage_connection_pool_size,
+            max_concurrency=self._settings.storage_max_concurrency,
             region=self._settings.s3_region,
             access_key_id=self._settings.s3_access_key_id,
             secret_access_key=self._settings.s3_secret_access_key,
@@ -84,13 +90,7 @@ class StorageManager:
                     self._local_path_ready,
                     self._settings.file_path,
                 )
-            if self._settings.storage_type == "oss":
-                await asyncio.to_thread(backend.bucket.get_bucket_info)
-                return True
-            await asyncio.to_thread(
-                backend.client.head_bucket,
-                Bucket=backend.bucket_name,
-            )
+            await backend.ping()
             return True
         except Exception:
             return False

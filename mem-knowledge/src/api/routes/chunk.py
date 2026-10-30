@@ -508,7 +508,7 @@ async def import_qa_new_doc(
         kb_id,
         resources.document_id,
         filename,
-        content,
+        file_key=plan.file_key,
     )
     return _success(
         request,
