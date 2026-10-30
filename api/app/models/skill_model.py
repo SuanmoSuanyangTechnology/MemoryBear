@@ -28,7 +28,13 @@ class Skill(Base):
 
     # 标准包联动（Phase 1：Agent Skills 协议兼容）
     package_id = Column(UUID(as_uuid=True), ForeignKey("skill_packages.id"), nullable=True, index=True, comment="已安装的标准包")
-    skill_format = Column(String(16), default="legacy", nullable=False, comment="技能格式：legacy | standard")
+    skill_format = Column(
+        String(16),
+        default="legacy",
+        server_default="legacy",
+        nullable=False,
+        comment="技能格式：legacy | standard",
+    )
     
     # 状态
     is_active = Column(Boolean, default=True, nullable=False, comment="是否激活")
