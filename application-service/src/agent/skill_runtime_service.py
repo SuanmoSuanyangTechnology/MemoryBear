@@ -32,7 +32,7 @@ from langchain_core.tools import BaseTool
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
-from ..db import get_async_db_context, get_db_context
+from ..db import end_read_transaction, get_async_db_context, get_db_context
 from ..models.skill_model import Skill
 from ..models.skill_package_model import SkillFile, SkillPackage
 
@@ -155,33 +155,77 @@ def _read_file_text(db, package_id: uuid.UUID, rel_path: str) -> Optional[str]:
     return file_row
 
 
-def _format_file_result(file_row) -> str:
-    """Render a resolved file row, or the corrective hint when it cannot be read."""
+def _truncate_file_text(text: str) -> str:
+    """Apply the ``read_skill`` read budget to one file body."""
+
+    if len(text) > READ_SKILL_MAX_CHARS:
+        return (
+            text[:READ_SKILL_MAX_CHARS]
+            + "\n\n[truncated：文件超长，已截断。可指定更小的 path 读取 references/ 分片]"
+        )
+    return text
+
+
+def _binary_only_result(file_row) -> Optional[str]:
+    """Corrective message for a binary file that has no stored payload to read."""
+
+    if file_row.storage_ref:
+        return None  # caller reads it back from object storage instead
+    return (
+        f"[read_skill] '{file_row.rel_path}' 是二进制文件"
+        f"（{file_row.size} 字节），不支持文本读取。"
+    )
+
+
+def _format_file_result(file_row) -> Optional[str]:
+    """Sync renderer for the LangChain sync path (``ReadSkillTool._run``)."""
 
     if file_row is None:
         return None  # caller builds the "not found + listing" message
     if file_row.is_binary or file_row.content is None:
-        if file_row.storage_ref:
-            from ..services.skill_package_service import SkillPackageService
+        hint = _binary_only_result(file_row)
+        if hint is not None:
+            return hint
+        from ..services.skill_package_service import SkillPackageService
 
-            try:
-                text = SkillPackageService._read_storage_object(file_row.storage_ref).decode(
-                    "utf-8", errors="replace"
-                )
-            except Exception as exc:  # noqa: BLE001 - storage read must not break the turn
-                logger.warning("read_skill storage read failed error=%s", type(exc).__name__)
-                return f"[read_skill] 读取 '{file_row.rel_path}' 失败。"
-        else:
-            return (
-                f"[read_skill] '{file_row.rel_path}' 是二进制文件"
-                f"（{file_row.size} 字节），不支持文本读取。"
+        try:
+            text = SkillPackageService._read_storage_object(file_row.storage_ref).decode(
+                "utf-8", errors="replace"
             )
+        except Exception as exc:  # noqa: BLE001 - storage read must not break the turn
+            logger.warning("read_skill storage read failed error=%s", type(exc).__name__)
+            return f"[read_skill] 读取 '{file_row.rel_path}' 失败。"
     else:
         text = file_row.content
+    return _truncate_file_text(text)
 
-    if len(text) > READ_SKILL_MAX_CHARS:
-        text = text[:READ_SKILL_MAX_CHARS] + "\n\n[truncated：文件超长，已截断。可指定更小的 path 读取 references/ 分片]"
-    return text
+
+async def _format_file_result_async(file_row) -> Optional[str]:
+    """Async renderer for ``_read_skill_file``.
+
+    The sync renderer reaches object storage through ``_read_storage_object``, which
+    starts a private thread and joins it; on the event loop that blocks every other
+    request. This mirror awaits the storage client directly, matching
+    ``skill_script_service._read_pack_bytes``.
+    """
+
+    if file_row is None:
+        return None
+    if file_row.is_binary or file_row.content is None:
+        hint = _binary_only_result(file_row)
+        if hint is not None:
+            return hint
+        from ..storage import StorageFactory
+
+        try:
+            payload = await StorageFactory.get_storage().download(file_row.storage_ref)
+        except Exception as exc:  # noqa: BLE001 - storage read must not break the turn
+            logger.warning("read_skill storage read failed error=%s", type(exc).__name__)
+            return f"[read_skill] 读取 '{file_row.rel_path}' 失败。"
+        text = payload.decode("utf-8", errors="replace")
+    else:
+        text = file_row.content
+    return _truncate_file_text(text)
 
 
 async def _read_skill_file(tenant_id: uuid.UUID, identifier: str, path: Optional[str]) -> str:
@@ -237,7 +281,11 @@ async def _read_skill_file(tenant_id: uuid.UUID, identifier: str, path: Optional
             listing = "\n".join(f"- {n[0]}" for n in names[:50])
             return f"[read_skill] 包内不存在 '{target_path}'。可用文件：\n{listing}"
 
-        result = _format_file_result(file_row)
+        # Release the pooled connection before the storage read: a large payload
+        # must not hold an idle-in-transaction connection.
+        await end_read_transaction(db, "read_skill")
+
+        result = await _format_file_result_async(file_row)
         return result if isinstance(result, str) else ""
 
 

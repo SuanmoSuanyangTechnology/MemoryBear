@@ -30,6 +30,7 @@ from typing import Any, Optional
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..db import end_read_transaction
 from ..integrations.sandbox.client import SandboxPrincipal, SandboxServiceClient
 from ..integrations.sandbox.errors import SandboxServiceError
 from ..models.skill_model import Skill
@@ -258,6 +259,13 @@ async def run_skill_script(
         raise SkillScriptError(f"非法脚本路径 '{script}'（只允许包内相对路径）")
 
     skill, package, files = await resolve_pack(db, tenant_id, identifier)
+    # The metadata read is done: hand the pooled connection back before staging and
+    # executing. A script may run for the sandbox read timeout (330s per execution),
+    # and holding an idle-in-transaction connection for that long exhausts the pool
+    # (same posture as ``apps.citation_download`` / the multi-agent prepare phase).
+    # ``expire_on_commit=False`` keeps ``skill`` / ``package`` / ``files`` readable.
+    await end_read_transaction(db, "skill_script.run")
+
     available = {f.rel_path for f in files}
     if script_rel not in available:
         listing = "\n".join(f"- {p}" for p in sorted(available)[:50])
