@@ -179,7 +179,7 @@ const ExtractedEntityGraphDetail: FC = () => {
                 <div className="rb:text-[#5B6167] rb:text-[12px] rb:leading-4">
                   {t('userMemory.totalCategoryStats')}
                 </div>
-                <div className="rb:mt-1 rb:font-[MiSans-Bold] rb:font-bold rb:text-[18px] rb:text-[#171719] rb:leading-6.5">
+                <div className="rb:mt-1 rb:font-[MiSans-Bold] rb:font-bold rb:text-[18px] rb:text-gray-900 rb:leading-6.5">
                   {totalCount || 0}
                 </div>
               </div>
@@ -187,7 +187,7 @@ const ExtractedEntityGraphDetail: FC = () => {
                 {(isHasMore ? typeStats.slice(0, 6) : typeStats).map((item, index) => (
                   <div key={index} className="rb:px-4 rb:pt-2.5 rb:pb-2 rb-border rb:rounded-xl rb:text-[#5B6167] rb:text-[12px]">
                     {t(`userMemory.${item.type}`)}
-                    <div className="rb:mt-1 rb:font-[MiSans-Bold] rb:font-bold rb:text-[16px] rb:text-[#171719] rb:leading-5.5">{item.count || 0}</div>
+                    <div className="rb:mt-1 rb:font-[MiSans-Bold] rb:font-bold rb:text-[16px] rb:text-gray-900 rb:leading-5.5">{item.count || 0}</div>
                   </div>
                 ))}
               </div>

@@ -208,7 +208,7 @@ const Share: FC = () => {
           arrow={false}
         >
           <span 
-            className='rb:border rb:border-[#171719] rb:px-1 rb:py-0.5 rb:rounded rb:text-gray-900 rb:text-xs rb:cursor-pointer'
+            className='rb:border rb:border-primary-600 rb:px-1 rb:py-0.5 rb:rounded rb:text-primary-600 rb:text-xs rb:cursor-pointer'
           >{t('knowledgeBase.viewBasicInfo')}</span>
         </Popover>
       </Flex>

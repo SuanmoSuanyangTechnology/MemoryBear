@@ -132,7 +132,7 @@ const Mcp = forwardRef<McpRef, { getStatusTag: (status: string) => ReactNode; ke
               >
                 <Flex vertical gap={4} className="rb:bg-[#F6F6F6] rb:rounded-lg rb:py-2! rb:px-3! rb:text-[#5B6167] rb:leading-5">
                   {t(`tool.server_url`)}
-                  <div className="rb:h-10 rb:break-all rb:line-clamp-2 rb:text-[#171719]">
+                  <div className="rb:h-10 rb:break-all rb:line-clamp-2 rb:text-gray-900">
                     {item.config_data?.server_url}
                   </div>
                 </Flex>

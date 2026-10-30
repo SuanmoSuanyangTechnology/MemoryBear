@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:30:02 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-07-16 17:40:40
+ * @Last Modified time: 2026-10-30 16:35:54
  */
 /**
  * Memory Extraction Engine Configuration Page
@@ -322,7 +322,7 @@ const MemoryExtractionEngine: FC = () => {
                                           isInput={true}
                                           prefix={<span className="rb:text-[#5B6167]">{t('emotionEngine.currentValue')}:</span>}
                                           inputClassName="rb:w-[155px]!"
-                                          classNames={isDefault ? { track: 'rb:bg-[#171719]! rb:opacity-65' } : {}}
+                                          classNames={isDefault ? { track: 'rb:bg-primary-600! rb:opacity-65' } : {}}
                                         />
                                       </>
                                       : config.control === 'inputNumber'

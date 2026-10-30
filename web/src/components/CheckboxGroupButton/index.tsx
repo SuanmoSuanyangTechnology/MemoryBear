@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-05-27 15:00:00 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-27 17:13:29
+ * @Last Modified time: 2026-10-30 16:50:22
  */
 /**
  * CheckboxGroupButton Component
@@ -120,10 +120,10 @@ const CheckboxGroupButton: FC<CheckboxCardProps> = ({
               {
                 'rb:py-1.5 rb:px-2': size === 'default',
                 'rb:py-1': size === 'small',
-                'rb:border rb:border-[#EBEBEB] rb:hover:border-[#171719]': type === 'outer',
-                'rb:border rb:border-[#F6F6F6] rb:bg-[#F6F6F6] rb:hover:bg-[#FFFFFF] rb:hover:border-[#171719]': type === 'inner',
-                'rb:border-[#171719]!': type === 'outer' && isSelected,
-                'rb:bg-white rb:hover:bg-white rb:border-[#171719]!': type === 'inner' && isSelected,
+                'rb:border rb:border-[#EBEBEB] rb:hover:border-primary-600': type === 'outer',
+                'rb:border rb:border-[#F6F6F6] rb:bg-[#F6F6F6] rb:hover:bg-[#FFFFFF] rb:hover:border-primary-600': type === 'inner',
+                'rb:border-primary-600!': type === 'outer' && isSelected,
+                'rb:bg-white rb:hover:bg-white rb:border-primary-600!': type === 'inner' && isSelected,
                 'rb:opacity-50 rb:cursor-not-allowed': option.disabled,
               },
               option.span ? `rb:col-span-${option.span}` : ''

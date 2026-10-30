@@ -33,7 +33,7 @@ const EditableTable: FC<EditableTableProps> = ({
 
   const getColumns = (remove: (index: number) => void): TableProps<TableRow>['columns'] => {
     const hasType = typeOptions.length > 0;
-    const formClassName = 'rb:mb-0! rb:bg-[#F6F6F6] rb:rounded-lg rb:h-7! rb:py-[1px]! rb:px-[6px]! rb:border rb:border-[#F6F6F6] rb:hover:border-[#171719]!'
+    const formClassName = 'rb:mb-0! rb:bg-[#F6F6F6] rb:rounded-lg rb:h-7! rb:py-[1px]! rb:px-[6px]! rb:border rb:border-[#F6F6F6] rb:hover:border-primary-600!'
 
     return [
       {

@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:00:12 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-07-02 16:15:49
+ * @Last Modified time: 2026-10-30 16:44:08
  */
 /**
  * Forgetting Engine Configuration Page
@@ -225,7 +225,7 @@ const ForgettingEngine: React.FC = () => {
                           isInput={true}
                           prefix={<span className="rb:text-[#5B6167]">{t('emotionEngine.currentValue')}:</span>}
                           inputClassName="rb:w-[155px]!"
-                          classNames={isDefault ? { track: 'rb:bg-[#171719]! rb:opacity-65' } : {}}
+                          classNames={isDefault ? { track: 'rb:bg-[#155EEF]! rb:opacity-65' } : {}}
                         />
                         : null
                       }

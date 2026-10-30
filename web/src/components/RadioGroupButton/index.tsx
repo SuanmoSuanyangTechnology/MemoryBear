@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-03-16 14:53:33 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-09-03 14:00:39
+ * @Last Modified time: 2026-10-30 16:22:35
  */
 /**
  * RadioGroupButton Component
@@ -95,10 +95,10 @@ const RadioGroupButton: FC<RadioCardProps> = ({
           className={clsx('rb:px-2 rb:leading-4.5 rb:cursor-pointer', {
             'rb:rounded-full': circle,
             'rb:rounded-lg': !circle,
-            'rb:bg-[#171719] rb:font-medium rb:text-white': value === option.value && variant === 'filled',
+            'rb:bg-primary-600 rb:font-medium rb:text-white': value === option.value && variant === 'filled',
             'rb:bg-gray-100': value !== option.value && variant === 'filled',
-            'rb:border rb:border-[#171719] rb:font-medium': value === option.value && variant === 'outlined',
-            'rb-border rb:text-[#171719]': value !== option.value && variant === 'outlined',
+            'rb:border rb:border-primary-600 rb:font-medium': value === option.value && variant === 'outlined',
+            'rb-border rb:text-gray-900': value !== option.value && variant === 'outlined',
             'rb:py-1 rb:text-[12px]': size === 'small',
             'rb:py-2 rb:text-[14px]': size === 'default',
           })}

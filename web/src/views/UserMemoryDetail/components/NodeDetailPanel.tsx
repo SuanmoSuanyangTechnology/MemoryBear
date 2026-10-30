@@ -307,10 +307,10 @@ const NodeDetailPanel: FC<NodeDetailPanelProps> = ({
           {activeTab !== 'communityNetwork' &&
             <div className="rb:absolute rb:bottom-3 rb:left-6 rb:right-6 rb:bg-white">
               <Flex align="center" gap={12}>
-                <Flex align="center" justify="center" gap={6} className="rb:flex-1 rb:border rb:border-[#E5E6EB] rb:rounded-xl rb:h-11 rb:font-medium rb:leading-5 rb:text-gray-800 rb:cursor-pointer rb:hover:border-[#171719]" onClick={onForget}>
+                <Flex align="center" justify="center" gap={6} className="rb:flex-1 rb:border rb:border-[#E5E6EB] rb:rounded-xl rb:h-11 rb:font-medium rb:leading-5 rb:text-gray-800 rb:cursor-pointer rb:hover:border-primary-600 rb:hover:text-primary-600" onClick={onForget}>
                   {t('userMemory.forgetThisMemory')}
                 </Flex>
-                <Flex align="center" justify="center" className="rb:flex-1 rb:border rb:border-[#171719] rb:rounded-xl rb:h-11 rb:font-medium rb:leading-5 rb:cursor-pointer" onClick={onViewAll}>
+                <Flex align="center" justify="center" className="rb:flex-1 rb:border rb:border-primary-600 rb:text-primary-600 rb:rounded-xl rb:h-11 rb:font-medium rb:leading-5 rb:cursor-pointer" onClick={onViewAll}>
                   {t('userMemory.completeMemory')}
                 </Flex>
               </Flex>

@@ -66,7 +66,7 @@ const ButtonCheckbox: FC<ButtonCheckboxProps> = ({
       gap={4}
       className={clsx("rb:border rb:rounded-lg rb:px-2! rb:text-[12px] rb:h-6 rb:cursor-pointer", {
         // Checked state: blue background and border
-        "rb:bg-[#FAFAFA] rb:border-[#171719]": checked,
+        "rb:bg-[#FAFAFA] rb:border-primary-600": checked,
         // Unchecked state: gray border and dark text
         "rb:border-[#EBEBEB] rb:text-[#212332] rb:hover:bg-[#F0F3F8]": !checked,
         "rb:opacity-65 rb:cursor-not-allowed!": disabled
