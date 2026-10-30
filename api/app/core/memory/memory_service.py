@@ -379,6 +379,10 @@ class MemoryService:
             )
             from app.core.memory.rag.storage_ops import delete_messages_by_end_user
 
+            # 两种存储都尝试清理，但失败必须上抛：调用层拿到返回值后会立刻
+            # finalize_memory_delete，吞掉 RAG 失败会留下「宿主已删除、ES 记忆
+            # 仍在」且没有重试入口。删除本身幂等，交由调用方重试收敛
+            rag_error: Exception | None = None
             try:
                 rag_deleted = await delete_messages_by_end_user(end_user_id)
             except Exception as exc:
@@ -389,6 +393,7 @@ class MemoryService:
                     exc_info=True,
                 )
                 rag_deleted = 0
+                rag_error = exc
 
             pipeline = ForgettingPipeline(MemoryContext(end_user_id=end_user_id))
             try:
@@ -412,6 +417,9 @@ class MemoryService:
                 rag_deleted,
                 graph_deleted,
             )
+            if rag_error is not None:
+                # 图侧已尽量清理，但 RAG 失败仍要上抛，交由调用方重试
+                raise rag_error
             # 两者单位不同（消息条数 vs 节点数），只能加总用于「删除条目总数」
             # 的粗略反馈；正常分支按 storage_type 只命中一种，不会出现混算
             return rag_deleted + graph_deleted

@@ -2808,8 +2808,8 @@ def process_rag_memory(
         #     （get_sync_redis_client）key 不在同一 keyspace，等于没加锁。
         #     Redis 不可用时保持既有降级（告警后继续写）：删除/归并同样依赖这把
         #     锁，Redis 故障期间它们也无法执行，此时不加锁不会引入竞态。
-        redis_client = get_thread_safe_sync_redis()
         try:
+            redis_client = get_thread_safe_sync_redis()
             resolved_end_user_id, write_lock = _acquire_rag_write_lock(
                 end_user_id,
                 redis_client=redis_client,
@@ -2823,6 +2823,13 @@ def process_rag_memory(
             return {"status": "skipped_user_gone", "id": id}
         except _RagWriteLockTimeout:
             # 删除/归并正持锁：短暂重试比直接丢记忆安全
+            if self.request.retries >= self.max_retries:
+                logger.error(
+                    "[CELERY RAG] 重试耗尽，写锁等待超时: id=%s, end_user=%s",
+                    id,
+                    end_user_id,
+                )
+                raise
             raise self.retry(
                 exc=RuntimeError(
                     f"memory_write lock timeout: end_user={end_user_id}"
