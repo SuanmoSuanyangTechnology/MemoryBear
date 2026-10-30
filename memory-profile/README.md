@@ -320,23 +320,28 @@ The API provides JWT and API-key forwarding entries; this service owns user
 merge resolution, workspace checks, grouping, validation, response statistics,
 and the optional Redis cache. It reuses the runtime's pooled clients.
 
-Enable `ENABLE_MEMORY_PROFILE` and configure `MEMORY_PROFILE_BASE_URL` in the
-API process, then set `ENABLE_SCENE_COMMUNITY_GRAPH=true` in this service.
-The new API entries report service unavailable when forwarding is disabled.
-Scene graph settings belong to this service; `.env.example` lists their
-defaults, including a 60-second cache TTL and the complete-response limits.
+Configure the API's existing memory-profile integration to reach this service.
+The scene graph endpoint has no feature switch, graph-type parameter, or
+scene-specific environment variables. It reuses the shared `@redis_cache`
+decorator with a 60-second TTL. Cache keys include the workspace and resolved
+end user; authorization is checked before every cache lookup. Complete-response
+limits and read timeouts are service constants.
 
 Scenes are grouped by their stored parent community ID. Missing, invalid, or
 unresolved parents appear in one `UNASSIGNED` group with a reason code.
+Each group carries `kind` (`COMMUNITY` or `UNASSIGNED`); there is no redundant
+`virtual` field. Real community properties contain `topic_name` when its stored
+value is non-null, otherwise `topic_scope`, never both. Scene summaries always
+retain `topic_scope`, including null when no scope exists.
 Successful responses contain `groups` and `statistics`; all non-null timestamps
 are integer milliseconds. Empty data is a successful response. Capacity limits
 and database failures return error envelopes instead of partial graphs.
 Authorization is checked before every cache lookup.
 Errors reuse `BizCode`, `LocalizedProfileError`, the `analytics.scene_graph.*`
 translation keys in both locale catalogs, and the service's global error handlers.
-Unexpected failures use the shared internal-error response. The cache adapter
-keeps this endpoint's byte/count limits and cached-payload validation while
-reusing the runtime's Redis client.
+Unexpected failures use the shared internal-error response. The common cache
+decorator restores the validated response model and falls back to Neo4j when
+Redis is unavailable or the cached payload is invalid.
 
 ## Logging
 
