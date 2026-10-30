@@ -4209,7 +4209,11 @@ def write_total_memory_task(workspace_id: str) -> Dict[str, Any]:
     try:
         workspace_uuid = uuid.UUID(workspace_id)
 
-        # --- 单 session：聚合活跃宿主记忆量 → 写入统计结果 ---
+        # --- session 1：只读 workspace 归属与宿主/统计数据 ---
+        is_rag_storage = False
+        end_user_ids: List[str] = []
+        total_num = 0
+        end_user_count = 0
         with get_db_context() as db:
             from app.models.workspace_model import Workspace
 
@@ -4233,20 +4237,8 @@ def write_total_memory_task(workspace_id: str) -> Dict[str, Any]:
                 # get_memory_count_stats_by_workspace_ids（按 EndUser.workspace_id 过滤）。
                 # 历史数据中 EndUser.workspace_id 与 App 归属不一致时，两者宿主集合会有
                 # 差异，属统计口径差异而非缺陷，对账时以 App 关联为准。
-                from app.core.memory.rag import stats as rag_stats
-
+                is_rag_storage = True
                 end_user_ids = EndUserRepository(db).get_ids_by_app_workspace(workspace_uuid)
-                # 无活跃宿主时不查 ES：空 terms 查询会退化为全索引统计，
-                # 让整个空间的总量严重偏大
-                counts = (
-                    rag_stats.count_messages_by_end_user_sync(end_user_ids)
-                    if end_user_ids
-                    else {}
-                )
-                total_num = sum(counts.values())
-                # 与图侧「活跃宿主数」口径对齐：只计有消息的宿主，
-                # 否则无消息用户会拉低前端的人均记忆量
-                end_user_count = sum(1 for count in counts.values() if count > 0)
             else:
                 # 无活跃宿主时不在返回中，按 (0, 0) 处理
                 total_num, end_user_count = (
@@ -4255,6 +4247,26 @@ def write_total_memory_task(workspace_id: str) -> Dict[str, Any]:
                     .get(workspace_uuid, (0, 0))
                 )
 
+        # --- RAG 的 ES 聚合在 DB session 外执行：同步 ES 调用最长可达
+        # 60~90s，若在 session 内执行，write_all_workspaces_memory_task 按空间
+        # 串行遍历多个 RAG 空间时会把每条连接闲置占用同等时长，容易耗尽连接池 ---
+        if is_rag_storage:
+            from app.core.memory.rag import stats as rag_stats
+
+            # 无活跃宿主时不查 ES：空 terms 查询会退化为全索引统计，
+            # 让整个空间的总量严重偏大
+            counts = (
+                rag_stats.count_messages_by_end_user_sync(end_user_ids)
+                if end_user_ids
+                else {}
+            )
+            total_num = sum(counts.values())
+            # 与图侧「活跃宿主数」口径对齐：只计有消息的宿主，
+            # 否则无消息用户会拉低前端的人均记忆量
+            end_user_count = sum(1 for count in counts.values() if count > 0)
+
+        # --- session 2：写增量 ---
+        with get_db_context() as db:
             # 返回值即客户端生成的内存增量主键与时间戳，无需再访问已过期的 ORM 属性
             increment_id, increment_created_at = MemoryIncrementRepository(db).write_memory_increment(
                 workspace_id=workspace_uuid,

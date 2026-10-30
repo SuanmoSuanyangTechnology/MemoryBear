@@ -3034,8 +3034,13 @@ class EndUserRepository:
                 if int(count or 0) <= 0:
                     continue
                 # 统一用 uuid 的规范小写带连字符形式作键，保证与 EndUser.id 的
-                # str() 结果一致；非规范键（大写/无连字符）会被归一化而不是查不到
-                memory_counts_normalized[str(uuid.UUID(str(user_id)))] = int(count)
+                # str() 结果一致；非规范键（大写/无连字符）会被归一化而不是查不到。
+                # 归一化后可能多个原始 key 指向同一宿主（如大写与无连字符形式
+                # 同时存在），必须累加而不是覆盖，否则该宿主计数丢失
+                normalized_key = str(uuid.UUID(str(user_id)))
+                memory_counts_normalized[normalized_key] = (
+                    memory_counts_normalized.get(normalized_key, 0) + int(count)
+                )
             except (ValueError, AttributeError, TypeError):
                 db_logger.warning(
                     "get_paginated_with_memory_rag: invalid end_user_id key "
