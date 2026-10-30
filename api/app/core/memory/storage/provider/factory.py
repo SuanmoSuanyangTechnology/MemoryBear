@@ -7,6 +7,7 @@ from app.core.config import settings
 from app.core.memory.storage.enums import (
     BackendType,
     MemoryNodeLabel,
+    MemoryNodeType,
     StorageBackendType,
 )
 from app.core.memory.storage.provider.base import BaseClient
@@ -41,6 +42,13 @@ class BackendFactory:
             StorageBackendType.TEXT_NODE,
             StorageBackendType.VECTOR_NODE,
         }
+    )
+
+    #: 只存在于独立 ES 索引、没有 Neo4j 投影的标签。RAG 记忆空间的写入只落在
+    #: ``rag_memory_current``，读取不能跟随 ``MEMORY_READ_BACKEND`` 切到 Neo4j，
+    #: 否则设置 MEMORY_READ_BACKEND=NEO4J 时 RAG 召回会静默查空索引。
+    ELASTIC_ONLY_LABELS: ClassVar[frozenset[str]] = frozenset(
+        {MemoryNodeType.RAG_MEMORY.value}
     )
 
     def __init__(self) -> None:
@@ -159,9 +167,13 @@ class BackendFactory:
         label: MemoryNodeLabel,
         dim: StorageBackendType,
     ) -> BaseClient:
-        del label  # FEATURE: Reserved for future per-node overrides.
         if dim not in self._READ_DIMENSIONS:
             raise ValueError(f"Unsupported read storage dimension: {dim}")
+        # RAG 记忆空间固定走 ES：它只存在于独立索引 rag_memory_current，不存在
+        # Neo4j 节点。MEMORY_READ_BACKEND 只负责切换图侧（GRAPH/TEXT/VECTOR_MAIN_READ）
+        # 的读取后端，不能影响 RAG 标签，否则 NEO4J 配置下 RAG 召回会查空。
+        if str(label) in self.ELASTIC_ONLY_LABELS:
+            return self.get_client(BackendType.ELASTIC)
         return self.get_client(self._read_backend)
 
     def get_node_clients(
