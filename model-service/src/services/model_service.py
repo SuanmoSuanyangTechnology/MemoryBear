@@ -1217,10 +1217,16 @@ class ModelConfigService:
         服务侧统一复用请求 Session，省一次连接且检查与写入同事务。
         """
         try:
+            # Re-check after the probe released the read transaction: a
+            # concurrent create/plaza import may have won in the meantime.
             if ModelConfigRepository.get_by_name(
                 db, model_data["name"], provider=model_data["provider"], tenant_id=tenant_id,
             ):
                 raise BusinessException("模型名称已存在", BizCode.DUPLICATE_NAME)
+            _assert_plaza_entry_absent(
+                db, name=model_data["name"], provider=model_data["provider"],
+                model_type=model_data["type"],
+            )
             model = ModelConfigRepository.create(db, {**model_data, "tenant_id": tenant_id})
             ChannelService(db).register_for_model(
                 provider=model_data["provider"], tenant_id=tenant_id,
@@ -1286,6 +1292,10 @@ class ModelConfigService:
             snapshot, credential = ModelConfigService._prepare_asr_model(
                 db, model_data, tenant_id
             )
+            # End the read transaction before the probe: holding it would pin a
+            # pool connection for the whole provider round-trip. The duplicate
+            # check is repeated inside _save_asr_model's write transaction.
+            db.rollback()
             await _probe_asr_submission(
                 model_name=snapshot["name"],
                 provider=snapshot["provider"],
@@ -1309,6 +1319,9 @@ class ModelConfigService:
         _require_wellformed_api_base(provider, credential.api_base, model_data.type)
         _require_supported_api_base(provider, credential.api_base, model_data.type)
 
+        # End the read transaction before the provider round-trip (see the ASR
+        # branch); duplicate/plaza checks are repeated inside the write txn.
+        db.rollback()
         validation_result = await ModelConfigService.validate_model_config(
             db=db,
             model_name=model_data.name,
@@ -1348,6 +1361,15 @@ class ModelConfigService:
         )
 
         try:
+            # Re-check after the network round-trip: the read transaction was
+            # released during validation, so another request may have won.
+            if ModelConfigRepository.get_by_name(
+                db, model_data.name, provider=provider, tenant_id=tenant_id
+            ):
+                raise BusinessException("模型名称已存在", BizCode.DUPLICATE_NAME)
+            _assert_plaza_entry_absent(
+                db, name=model_data.name, provider=provider, model_type=model_data.type
+            )
             model = ModelConfigRepository.create(db, model_config_data)
             ChannelService(db).register_for_model(
                 provider=provider,

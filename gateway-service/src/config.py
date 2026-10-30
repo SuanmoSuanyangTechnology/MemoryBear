@@ -66,15 +66,30 @@ class Settings:
 
     # ---- 服务自身配置 ----
     SERVICE_NAME: str = "gateway"
+    # /stub 与 /v1/stub 回显注入的身份头与内部 token，仅供 e2e/单测；生产必须关闭
+    ENABLE_STUB_ENDPOINTS: bool = (
+        os.getenv("ENABLE_STUB_ENDPOINTS", "false").lower() == "true"
+    )
     # Audit stream (identity consumes it via XREADGROUP and persists events).
     # An explicit key wins; otherwise derive audit:stream:<DB_NAME>, which must
     # match identity's write-side name. Gateway connects to no database: DB_NAME
     # is only the shared deployment namespace.
     AUDIT_STREAM_KEY: str = os.getenv("AUDIT_STREAM_KEY", "").strip()
+    # Hard cap on stream length (approximate trim): bounds Redis memory when
+    # the identity consumer lags; long-term retention is audit_logs.
+    AUDIT_STREAM_MAXLEN: int = int(os.getenv("AUDIT_STREAM_MAXLEN", "500000"))
     DB_NAME: str = os.getenv("DB_NAME", "").strip()
     # 凭据类型判定路径前缀（设计 §3.2）：命中前缀 → API key 路径，其余 → 用户 JWT 路径
     API_KEY_PATH_PREFIXES: tuple[str, ...] = tuple(
         p for p in os.getenv("API_KEY_PATH_PREFIXES", "/v1/").split(",") if p)
+
+    # ---- API key 快照回源（identity 是凭据权威；空 URL = 关闭回源，miss 即 401）----
+    IDENTITY_API_KEY_VERIFY_URL: str = os.getenv("IDENTITY_API_KEY_VERIFY_URL", "").strip()
+    IDENTITY_API_KEY_VERIFY_TIMEOUT_MS: int = int(
+        os.getenv("IDENTITY_API_KEY_VERIFY_TIMEOUT_MS", "500"))
+    # 负缓存 TTL：identity 明确 401 后短期不再回源；0 = 关闭负缓存
+    API_KEY_MISS_CACHE_TTL_SECONDS: int = int(
+        os.getenv("API_KEY_MISS_CACHE_TTL_SECONDS", "30"))
 
     @property
     def audit_stream_key_name(self) -> str:

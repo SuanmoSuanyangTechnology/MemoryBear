@@ -9,6 +9,7 @@ import {
   enabledFaq,
   deleteFaq,
   batchEnabledFaq,
+  batchApproveFaq,
 } from '@/api/kbWiki';
 import SearchInput from '@/components/SearchInput';
 import Table, { type TableRef } from '@/components/Table';
@@ -19,6 +20,7 @@ import FaqDetailDrawer, { type FaqDetailDrawerRef } from './FaqDetailDrawer';
 import { formatDateTime } from '@/utils/format'
 import type { FaqItem, FaqStatus, AllFaqStatus, FaqListResponse } from './types';
 import { statusColors } from './constants';
+import Tag from '@/components/Tag';
 
 const statuses: AllFaqStatus[] = ['all', 'pending', 'approved', 'change_pending'];
 
@@ -89,6 +91,21 @@ export default function FaqWorkspace({ knowledgeBaseId, onOpenWikiPage }: {
         setBusy(false)
       })
   }
+  const handleBatchApprove = () => {
+    setBusy(true)
+    batchApproveFaq(knowledgeBaseId, {
+      items: selectedList.map(vo => ({
+        faq_id: vo.id
+      }))
+    })
+      .then(() => {
+        message.success(t('common.operateSuccess'))
+        refresh()
+      })
+      .finally(() => {
+        setBusy(false)
+      })
+  }
   const handleDelete = (vo: FaqItem) => {
       modal.confirm({
         title: t('common.confirmDeleteDesc', { name: vo.standard_question }),
@@ -119,12 +136,24 @@ export default function FaqWorkspace({ knowledgeBaseId, onOpenWikiPage }: {
       title: t('knowledgeBase.faq.question&answer'),
       dataIndex: 'standard_question',
       render: (value, row) => (
-        <Flex vertical className="rb:max-w-120! rb:overflow-hidden! rb:cursor-pointer rb:group" onClick={() => faqDetailDrawerRef.current?.handleOpen(row)}>
-          <div
-            className="rb:truncate rb:font-medium rb:text-gray-900 rb:group-hover:text-blue-500"
-          >
-            {value}
-          </div>
+        <Flex vertical gap={4} className="rb:max-w-120! rb:overflow-hidden! rb:cursor-pointer">
+          <Flex align="center" gap={4} wrap className="rb:min-w-0">
+            <span className="rb:min-w-0 rb:font-medium rb:text-gray-900 rb:hover:text-blue-500"
+              onClick={() => faqDetailDrawerRef.current?.handleOpen(row)}
+            >
+              {value}
+            </span>
+            {row.source?.title && row.source.wiki_page_id && row.source.source_status === 'available' && (
+              <Tag color="default" className="rb:hover:text-blue-500 rb:hover:border-[rgba(21,94,239,0.25)] rb:hover:bg-[rgba(21,94,239,0.06)]"
+                onClick={(event) => {
+                  event?.stopPropagation();
+                  if (row.source.wiki_page_id) onOpenWikiPage(row.source.wiki_page_id);
+                }}
+              >
+                {t('knowledgeBase.faq.sourceLabel', { name: row.source.title })}
+              </Tag>
+            )}
+          </Flex>
           <div className="rb:text-gray-600 rb:truncate">{row.standard_answer}</div>
         </Flex>
       ),
@@ -147,7 +176,7 @@ export default function FaqWorkspace({ knowledgeBaseId, onOpenWikiPage }: {
       dataIndex: 'is_enabled',
       width: '80px',
       render: (value, row) => (
-        <Switch checked={value} onChange={() => handleSwitch(row)} />
+        <Switch checked={value} disabled={['pending', 'change_pending'].includes(row.review_status)} onChange={() => handleSwitch(row)} />
       ),
     },
     {
@@ -225,11 +254,12 @@ export default function FaqWorkspace({ knowledgeBaseId, onOpenWikiPage }: {
           </Form.Item>
         </Form>
         <Space size={12} wrap>
-          {/* <Button
+          <Button
             disabled={selectedList.filter(vo => ['pending', 'change_pending'].includes(vo.review_status)).length < 1 || busy}
+            onClick={handleBatchApprove}
           >
-            {t('knowledgeBase.faq.approve')}
-          </Button> */}
+            {t('knowledgeBase.faq.reviewApprove')}
+          </Button>
           <Button
             disabled={selectedList.filter(vo => !vo.is_enabled).length < 1 || busy}
             onClick={() => handleBatchSwitch(true)}

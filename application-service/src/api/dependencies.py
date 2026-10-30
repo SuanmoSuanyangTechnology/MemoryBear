@@ -14,7 +14,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from ..infrastructure.upstream import MonolithUpstream
-from ..integrations.model_invoke import ModelInvokeClient
 from ..runtime import ProcessRuntime
 
 ACTOR_ID_HEADER = "X-App-Actor-ID"
@@ -57,13 +56,6 @@ def get_upstream(request: Request) -> MonolithUpstream:
 
     runtime: ProcessRuntime = request.app.state.runtime
     return runtime.upstream
-
-
-def get_model_invoke(request: Request) -> ModelInvokeClient:
-    """Process-wide model-service invoke client (embedding generation)."""
-
-    runtime: ProcessRuntime = request.app.state.runtime
-    return runtime.model_invoke
 
 
 def get_sync_redis(request: Request) -> SyncRedis:
@@ -179,13 +171,11 @@ __all__ = [
     "API_KEY_ID_HEADER",
     "TENANT_ID_HEADER",
     "WORKSPACE_ID_HEADER",
-    "ModelInvokeClient",
     "MonolithUpstream",
     "Principal",
     "ShareTokenData",
     "SyncRedis",
     "get_async_db",
-    "get_model_invoke",
     "get_principal",
     "get_runtime",
     "get_share_user_id",

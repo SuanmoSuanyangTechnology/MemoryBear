@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.controllers import memory_config_controller
 from app.controllers import ontology_controller
 from app.controllers.emotion_config_controller import EmotionConfigUpdate
-from app.core.api_key_auth import require_api_key_self_db
+from app.core.api_key_auth import get_current_api_key_auth, require_api_key_self_db
 from app.core.api_key_utils import get_current_user_snapshot_from_api_key_async
 from app.core.error_codes import BizCode
 from app.core.logging_config import get_business_logger
@@ -34,11 +34,59 @@ from app.schemas.memory_storage_schema import (
 )
 from app.schemas.memory_storage_schema import ForgettingConfigUpdateRequest
 from app.schemas.memory_preference_config_schema import PreferenceConfigUpdate
+from app.schemas.personality_anchor_config_schema import PersonalityAnchorConfigUpdate
+from app.schemas.response_schema import ApiResponse
 from app.schemas.scene_memory_schema import SceneConfigUpdate
+from app.services.personality_anchor_config_service import PersonalityAnchorConfigService
 from app.utils.config_utils import resolve_config_id_async
 
 router = APIRouter(prefix="/memory_config", tags=["V1 - Memory Config API"])
 logger = get_business_logger()
+
+
+@router.get("/read_config_personality_anchor", response_model=ApiResponse)
+@require_api_key_self_db(scopes=["memory"])
+async def read_config_personality_anchor(
+    request: Request,
+    config_id: uuid.UUID = Query(..., description="记忆配置ID"),
+):
+    """Read personality-anchor settings within the API Key workspace."""
+    api_key_auth = get_current_api_key_auth()
+    async with get_async_db_context() as db:
+        data = await PersonalityAnchorConfigService(db).get(
+            config_id, api_key_auth.workspace_id,
+        )
+    if data is None:
+        return fail(BizCode.MEMORY_CONFIG_NOT_FOUND, "配置不存在或无权访问")
+    return success(data=data, msg="查询成功")
+
+
+@router.post("/update_config_personality_anchor", response_model=ApiResponse)
+@require_api_key_self_db(scopes=["memory"])
+async def update_config_personality_anchor(
+    request: Request,
+    payload: PersonalityAnchorConfigUpdate,
+):
+    """Replace all six settings within the API Key workspace."""
+    from app.utils.redis_cache import invalidate_cache
+
+    api_key_auth = get_current_api_key_auth()
+    async with get_async_db_context() as db:
+        data = await PersonalityAnchorConfigService(db).update(
+            payload.config_id,
+            api_key_auth.workspace_id,
+            payload.model_dump(exclude={"config_id"}),
+        )
+    if data is None:
+        return fail(BizCode.MEMORY_CONFIG_NOT_FOUND, "配置不存在或无权访问")
+    try:
+        await invalidate_cache(prefix=f"memory_config:{payload.config_id}")
+    except Exception:
+        logger.exception(
+            "Personality-anchor configuration was saved but cache invalidation failed: config_id=%s",
+            payload.config_id,
+        )
+    return success(data=data, msg="更新成功")
 
 
 async def _verify_config_ownership_async(config_id: str, workspace_id: uuid.UUID, db: AsyncSession):

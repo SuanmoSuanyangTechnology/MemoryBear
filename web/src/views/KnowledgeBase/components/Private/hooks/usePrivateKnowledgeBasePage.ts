@@ -94,7 +94,7 @@ export const usePrivateKnowledgeBasePage = () => {
       setFolderPath([]);
       setSelectedKeys([]);
       setFolder({ kb_id: knowledgeBaseId, parent_id: knowledgeBaseId });
-      setQuery({ ...DEFAULT_QUERY, _timestamp: Date.now() });
+      setQuery({ ...DEFAULT_QUERY });
       setAutoExpandPath([]);
       timers.push(setTimeout(() => setFolderTreeRefreshKey((value) => value + 1), 100));
       timers.push(setTimeout(() => fileWorkspaceRef.current?.refreshTable(), 200));
@@ -108,7 +108,6 @@ export const usePrivateKnowledgeBasePage = () => {
       setQuery((previous) => ({
         ...previous,
         parent_id: targetFolderId,
-        _timestamp: Date.now(),
       }));
       setSelectedKeys([targetFolderId]);
       setAutoExpandPath(state.documentFolderPath);
@@ -127,7 +126,7 @@ export const usePrivateKnowledgeBasePage = () => {
     if (!keys.length) {
       setParentId(knowledgeBaseId);
       setFolder({ kb_id: knowledgeBaseId, parent_id: knowledgeBaseId });
-      setQuery({ ...DEFAULT_QUERY, _timestamp: Date.now() });
+      setQuery({ ...DEFAULT_QUERY });
       setSelectedKeys([]);
       return;
     }
@@ -135,19 +134,23 @@ export const usePrivateKnowledgeBasePage = () => {
     const targetFolderId = String(keys[0]);
     setParentId(targetFolderId);
     setFolder((previous) => ({ ...previous, parent_id: targetFolderId }));
-    setQuery((previous) => ({
+    // Restoring the tree selection must not reload an already selected folder.
+    setQuery((previous) => previous.parent_id === targetFolderId ? previous : ({
       ...previous,
       parent_id: targetFolderId,
-      _timestamp: Date.now(),
     }));
     setSelectedKeys(keys);
   }, [knowledgeBaseId]);
 
+  const refreshFolderTree = useCallback(() => {
+    setFolderTreeRefreshKey((value) => value + 1);
+  }, []);
+
   const refreshDirectoryTree = useCallback(async () => {
     await fetchKnowledgeBaseDetail();
     await new Promise((resolve) => setTimeout(resolve, 300));
-    setFolderTreeRefreshKey((value) => value + 1);
-  }, [fetchKnowledgeBaseDetail]);
+    refreshFolderTree();
+  }, [fetchKnowledgeBaseDetail, refreshFolderTree]);
 
   const onToggleDirectory = () => {
     setDirectoryCollapsed((collapsed) => !collapsed)
@@ -170,6 +173,7 @@ export const usePrivateKnowledgeBasePage = () => {
     handleFolderPathChange: setFolderPath,
     handleFolderSelect,
     refreshDirectoryTree,
+    refreshFolderTree,
     setQuery,
     directoryCollapsed,
     onToggleDirectory,

@@ -8,6 +8,7 @@ from typing import Optional, Annotated, Literal
 
 import yaml
 from fastapi import APIRouter, Depends, Path, Form, UploadFile, File, Query
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import StreamingResponse, Response
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
@@ -454,8 +455,8 @@ def list_apps(
         tag_search: str | None = None,
         include_shared: bool = True,
         shared_only: bool = False,
-        page: int = 1,
-        pagesize: int = 10,
+        page: int = Query(1, ge=1, description="页码，从 1 开始"),
+        pagesize: int = Query(10, ge=1, le=100, description="每页数量，最大 100"),
         ids: Optional[str] = None,
         orchestration_mode: str | None = Query(None, description="编排模式过滤（仅 multi_agent 生效），如 supervisor_loop"),
         ontology_status: Literal["all", "bound", "default"] = Query(
@@ -479,6 +480,17 @@ def list_apps(
     """
     from sqlalchemy import select as sa_select
     from app.models.api_key_model import ApiKey
+    from app.models.app_model import AppType
+
+    # type 支持逗号分隔多值，但每个值都必须是合法的应用类型枚举
+    if type:
+        valid_types = {t.value for t in AppType}
+        invalid_types = [t.strip() for t in type.split(",") if t.strip() and t.strip() not in valid_types]
+        if invalid_types:
+            raise RequestValidationError(
+                [{"loc": ("query", "type"), "msg": f"非法的应用类型: {','.join(invalid_types)}",
+                  "type": "enum"}]
+            )
 
     workspace_id = current_user.current_workspace_id
     service = app_service.AppService(db)
@@ -1518,10 +1530,19 @@ async def run_single_workflow_node(
         raise BusinessException("工作流配置不存在，无法运行", BizCode.CONFIG_MISSING)
 
     raw_inputs = payload.inputs or {}
+    user_id = raw_inputs.pop("sys.user_id", None)
+    if not user_id:
+        # sys.user_id feeds memory nodes as an end_users.id; the console
+        # principal lives in users.id, so resolve its draft end user first.
+        user_id = await _get_or_create_draft_end_user_id(
+            app_id=app_id,
+            workspace_id=workspace_id,
+            other_id=str(current_user.id),
+        )
     input_data = {
         "message": raw_inputs.pop("sys.message", None),
         "files": raw_inputs.pop("sys.files", None),
-        "user_id": raw_inputs.pop("sys.user_id", str(current_user.id)),
+        "user_id": user_id,
         "trigger_payload": raw_inputs.pop("trigger_payload", None),
         "inputs": raw_inputs,
         "conversation_id": "",
@@ -1670,11 +1691,19 @@ async def rerun_workflow_node(
     config = workflow_service.get_workflow_config(app_id)
     if not config:
         raise BusinessException("工作流配置不存在，无法运行", BizCode.CONFIG_MISSING)
+    # The persisted debug input may still carry the console users.id from an
+    # older debug run; rerun under the current caller's draft end user.
+    end_user_id = await _get_or_create_draft_end_user_id(
+        app_id=app_id,
+        workspace_id=workspace_id,
+        other_id=str(current_user.id),
+    )
     result = await workflow_service.rerun_node_from_last_debug(
         app_id=app_id,
         node_id=node_id,
         config=config,
         workspace_id=workspace_id,
+        user_id=end_user_id,
         invalidate_cache=payload.invalidate_cache,
         bypass_cache=payload.bypass_cache,
     )

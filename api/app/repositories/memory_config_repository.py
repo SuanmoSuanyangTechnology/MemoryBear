@@ -20,6 +20,7 @@ from app.core.exceptions import BusinessException
 from app.core.logging_config import get_config_logger, get_db_logger
 from app.models.memory_config_model import MemoryConfig
 from app.models.workspace_model import Workspace
+from app.schemas.personality_anchor_config_schema import PersonalityAnchorConfig
 from app.schemas.memory_storage_schema import (
     ConfigParamsCreate,
     ConfigUpdate,
@@ -565,6 +566,42 @@ class MemoryConfigRepository:
             return config
         except Exception as e:
             db_logger.error(f"根据ID查询记忆配置失败(异步): config_id={config_id} - {str(e)}")
+            raise
+
+    async def get_personality_anchor_config_async(
+        self, config_id: UUID, workspace_id: UUID,
+    ) -> Optional[MemoryConfig]:
+        """Read a configuration only within its workspace."""
+        result = await self.db.execute(
+            select(MemoryConfig).where(
+                MemoryConfig.config_id == config_id,
+                MemoryConfig.workspace_id == workspace_id,
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def update_personality_anchor_config_async(
+        self, config_id: UUID, workspace_id: UUID, values: Dict,
+    ) -> Optional[MemoryConfig]:
+        """Lock and atomically replace only personality-anchor settings."""
+        try:
+            result = await self.db.execute(
+                select(MemoryConfig).where(
+                    MemoryConfig.config_id == config_id,
+                    MemoryConfig.workspace_id == workspace_id,
+                ).with_for_update()
+            )
+            config = result.scalar_one_or_none()
+            if config is None:
+                return None
+            for field in PersonalityAnchorConfig.model_fields:
+                if getattr(config, field) != values[field]:
+                    setattr(config, field, values[field])
+            await self.db.commit()
+            await self.db.refresh(config)
+            return config
+        except Exception:
+            await self.db.rollback()
             raise
 
     async def update_prediction_config_async(

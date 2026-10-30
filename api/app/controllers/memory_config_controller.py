@@ -36,6 +36,7 @@ from app.schemas.memory_storage_schema import (
 )
 from app.schemas.memory_api_schema import PredictionConfigUpdateRequest
 from app.schemas.memory_preference_config_schema import PreferenceConfigUpdate
+from app.schemas.personality_anchor_config_schema import PersonalityAnchorConfigUpdate
 from app.schemas.response_schema import ApiResponse
 from app.schemas.scene_memory_schema import SceneConfig, SceneConfigUpdate, SceneSplitDemoRequest
 from app.schemas.scene_community_schema import (
@@ -46,6 +47,7 @@ from app.services.emotion_config_service import EmotionConfigService
 from app.services.memory_forget_service import MemoryForgetService
 from app.services.memory_storage_service import DataConfigService
 from app.services.prediction_config_service import PredictionConfigService
+from app.services.personality_anchor_config_service import PersonalityAnchorConfigService
 from app.services.scene_community_config_service import SceneCommunityConfigService
 from app.services.scene_community_preview_service import (
     SceneCommunityPreviewService,
@@ -67,6 +69,49 @@ community_preview_router = APIRouter(
     prefix="/memory/configs/community",
     tags=["Memory Config"],
 )
+
+
+@router.get("/read_config_personality_anchor", response_model=ApiResponse)
+async def read_personality_anchor_config(
+    config_id: UUID,
+    current_user: CurrentUserSnapshot = Depends(get_current_user_async),
+) -> dict:
+    """Read personality-anchor settings for a workspace-owned configuration."""
+    workspace_id = current_user.current_workspace_id
+    if workspace_id is None:
+        return fail(BizCode.INVALID_PARAMETER, "请先切换到一个工作空间")
+    async with get_async_db_context() as db:
+        data = await PersonalityAnchorConfigService(db).get(config_id, workspace_id)
+    if data is None:
+        return fail(BizCode.MEMORY_CONFIG_NOT_FOUND, "配置不存在或无权访问")
+    return success(data=data, msg="查询成功")
+
+
+@router.post("/update_config_personality_anchor", response_model=ApiResponse)
+async def update_personality_anchor_config(
+    payload: PersonalityAnchorConfigUpdate,
+    current_user: CurrentUserSnapshot = Depends(get_current_user_async),
+) -> dict:
+    """Save the complete personality-anchor settings without running the engine."""
+    from app.utils.redis_cache import invalidate_cache
+
+    workspace_id = current_user.current_workspace_id
+    if workspace_id is None:
+        return fail(BizCode.INVALID_PARAMETER, "请先切换到一个工作空间")
+    async with get_async_db_context() as db:
+        data = await PersonalityAnchorConfigService(db).update(
+            payload.config_id, workspace_id, payload.model_dump(exclude={"config_id"}),
+        )
+    if data is None:
+        return fail(BizCode.MEMORY_CONFIG_NOT_FOUND, "配置不存在或无权访问")
+    try:
+        await invalidate_cache(prefix=f"memory_config:{payload.config_id}")
+    except Exception:
+        api_logger.exception(
+            "Personality-anchor configuration was saved but cache invalidation failed: config_id=%s",
+            payload.config_id,
+        )
+    return success(data=data, msg="更新成功")
 
 
 @router.get("/read_config_prediction", response_model=ApiResponse)

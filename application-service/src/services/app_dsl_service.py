@@ -799,41 +799,6 @@ class AppDslService:
             )
         return r.id if r else None
 
-    def _find_app_by_name(
-        self,
-        name: str | None,
-        workspace_id: uuid.UUID,
-        app_type: str | None = None,
-    ) -> App | None:
-        """Match an app by name inside the target workspace: an app owned by the
-        workspace first, then one shared into it.
-
-        Never matches across workspaces, so imports can't pick up an app with the
-        same name from another workspace. A non-empty app_type additionally
-        filters by app type, so a workflow/cluster with the same name is not
-        rebound as a sub-agent.
-        """
-        if not name:
-            return None
-        type_filter = [App.type == app_type] if app_type else []
-        own = self.db.query(App).filter(
-            App.name == name,
-            App.workspace_id == workspace_id,
-            App.is_active.is_(True),
-            *type_filter,
-        ).first()
-        if own:
-            return own
-        return self.db.query(App).join(
-            AppShare, AppShare.source_app_id == App.id
-        ).filter(
-            App.name == name,
-            App.is_active.is_(True),
-            AppShare.target_workspace_id == workspace_id,
-            AppShare.is_active.is_(True),
-            *type_filter,
-        ).first()
-
     def _locate_agent_app(self, agent_id, workspace_id: uuid.UUID) -> App | None:
         """Locate a sub-agent app in the target workspace by an entry's agent_id.
 
@@ -874,21 +839,15 @@ class AppDslService:
         for s in (sub_agents or []):
             ref = s.get("_ref")
             entry = {k: v for k, v in s.items() if k != "_ref"}
-            if ref:
-                a = self._find_app_by_name(ref.get("name"), workspace_id, AppType.AGENT)
-                label = ref.get("name")
-            else:
-                # Legacy DSL without _ref: agent_id is a source-workspace App.id or
-                # a historical AppRelease.id. Locate it inside the target workspace
-                # (same-environment import) or rebind by entry name (cross-env
-                # import); never keep the original value — it would dangle.
-                a = self._locate_agent_app(entry.get("agent_id"), workspace_id)
-                if not a and entry.get("name"):
-                    a = self._find_app_by_name(entry.get("name"), workspace_id, AppType.AGENT)
-                label = entry.get("name") or entry.get("agent_id")
+            # Only the referenced Agent app ID decides whether the entry survives:
+            # new DSL carries _ref.id, legacy DSL carries agent_id (a source-workspace
+            # App.id or historical AppRelease.id). Referenced apps must be published,
+            # so an ID hit is reused without re-checking status or rebinding by name;
+            # an ID miss (cross-environment) drops the whole entry.
+            agent_id = (ref or {}).get("id") or entry.get("agent_id")
+            label = (ref or {}).get("name") or entry.get("name") or agent_id
+            a = self._locate_agent_app(agent_id, workspace_id)
             if not a:
-                # No matching sub-agent in the target workspace: drop the whole
-                # entry so no dangling ID can be read back
                 warnings.append(
                     f"子 Agent '{label}' 在目标工作空间不存在，已清空，请导入后手动添加"
                 )
@@ -910,15 +869,11 @@ class AppDslService:
         for r in rules:
             ref = r.get("_ref")
             entry = {k: v for k, v in r.items() if k != "_ref"}
-            if ref:
-                a = self._find_app_by_name(ref.get("name"), workspace_id, AppType.AGENT)
-                label = ref.get("name")
-            else:
-                # Legacy DSL without _ref: target_agent_id is a source-workspace ID
-                # that must be re-located; drop the whole rule when unmatched so no
-                # dangling route remains
-                a = self._locate_agent_app(entry.get("target_agent_id"), workspace_id)
-                label = entry.get("target_agent_id")
+            # Same ID-only rule as sub_agents: new DSL carries _ref.id, legacy DSL
+            # carries target_agent_id; names never decide a rebind.
+            agent_id = (ref or {}).get("id") or entry.get("target_agent_id")
+            label = (ref or {}).get("name") or agent_id
+            a = self._locate_agent_app(agent_id, workspace_id)
             if not a:
                 # Target agent missing (possibly its sub-agent entry was dropped):
                 # drop the rule to avoid a dangling route
@@ -1103,18 +1058,17 @@ class AppDslService:
                         )
                     config["model"] = model
 
-                # Reference mode: rebind the referenced Agent app by name in the
-                # target workspace. When unmatched (including legacy DSL with only
-                # a source-workspace raw ID) fall back to inline mode and clear the
-                # reference; nodes and edges are kept for manual re-configuration.
+                # Reference mode: locate the referenced Agent app by ID in the
+                # target workspace (_ref.id, or legacy reference.app_id). When the
+                # ID misses (cross-environment), fall back to inline mode and clear
+                # the reference; nodes and edges are kept for manual re-configuration.
                 if config.get("mode") == "reference":
                     reference = dict(config.get("reference") or {})
                     ref = reference.pop("_ref", None)
+                    ref_id = ref.get("id") if isinstance(ref, dict) else None
                     ref_name = ref.get("name") if isinstance(ref, dict) else None
-                    target_app = (
-                        self._find_app_by_name(ref_name, workspace_id, AppType.AGENT)
-                        if ref_name
-                        else None
+                    target_app = self._locate_agent_app(
+                        ref_id or reference.get("app_id"), workspace_id
                     )
                     if target_app:
                         reference["app_id"] = str(target_app.id)
@@ -1122,7 +1076,7 @@ class AppDslService:
                         reference["release_id"] = None
                         config["reference"] = reference
                     else:
-                        _ref_label = ref_name or reference.get("app_id")
+                        _ref_label = ref_name or ref_id or reference.get("app_id")
                         warnings.append(
                             f"[{node_label}] 引用的 Agent 应用 '{_ref_label}' "
                             "在目标工作空间不存在，已回退为内置模式，请导入后手动配置"

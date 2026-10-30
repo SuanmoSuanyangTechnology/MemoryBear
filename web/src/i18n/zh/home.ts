@@ -137,6 +137,7 @@ export const home = {
       preferenceEngine: '偏好引擎',
       sceneCommunityEngine: '多模态情景记忆重构引擎',
       resources: '资源中心',
+      personalityAnchor: '人格锚定引擎',
     },
     dashboard: {
       total_models: '可用模型总数',

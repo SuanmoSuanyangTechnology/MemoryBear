@@ -48,6 +48,8 @@ class MemoryReadNode(BaseNode):
             raise RuntimeError("End user id is required")
 
         config_id = await self._get_workspace_memory_config_id(state)
+        raw_app_id = self.workflow_config.get("app_id")
+        app_id = uuid.UUID(str(raw_app_id)) if raw_app_id else None
 
         memory_service = await MemoryService.create(
             storage_type=state["memory_storage_type"],
@@ -55,6 +57,7 @@ class MemoryReadNode(BaseNode):
             end_user_id=end_user_id,
             user_rag_memory_id=state["user_rag_memory_id"],
             conversation_id=variable_pool.get_value("sys.conversation_id"),
+            app_id=app_id,
         )
         query = self._render_template(self.typed_config.message, variable_pool)
         self._process = {"query": query, "config_id": str(config_id)}

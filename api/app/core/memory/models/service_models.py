@@ -32,6 +32,7 @@ class MemoryContext(BaseModel):
     model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
 
     end_user_id: str
+    app_id: uuid.UUID | None = None
     config_id: uuid.UUID | None = None
     memory_config: MemoryConfig | None = None
     storage_type: StorageType = StorageType.NEO4J
@@ -53,6 +54,10 @@ class Memory(BaseModel):
     @field_serializer("source")
     def serialize_source(self, v) -> str:
         return v.value
+
+    @field_serializer("score")
+    def serialize_score(self, v: float) -> float:
+        return round(v, 2)
 
 
 class RelationMemory(BaseModel):

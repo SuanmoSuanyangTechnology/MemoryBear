@@ -251,8 +251,6 @@ export const nodeLibraryPart1: NodeLibrary[] = [
           },
           memory: {
             type: 'memoryConfig',
-            dependsOn: 'mode',
-            dependsOnValue: 'inline',
             needMsg: false,
             defaultValue: {
               enable: false,
@@ -369,6 +367,7 @@ export const nodeLibraryPart1: NodeLibrary[] = [
               { value: '1', label: 'memoryConversation.normalReply' },
               { value: '2', label: 'memoryConversation.quickReply' },
               { value: '5', label: 'memoryConversation.quickReplyPlus' },
+              { value: '6', label: 'memoryConversation.community' },
               { value: '3', label: 'memoryConversation.conv' },
               { value: '4', label: 'memoryConversation.metadata' },
             ],

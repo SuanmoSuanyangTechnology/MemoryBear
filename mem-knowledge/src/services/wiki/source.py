@@ -58,7 +58,7 @@ def _incomplete_source(session, document_id, source_task_id):
     document.progress = -1.0 if read_wiki_config(knowledge.parser_config).enabled else 1.0
     state.last_progress = document.progress
     append_log(
-        document, "QA source partially imported; Wiki generation requires a complete source."
+        document, "问答数据未完整导入，Wiki 生成已停止；请完成导入后重新发起 Wiki 处理。"
     )
 
 
@@ -174,7 +174,7 @@ def _handoff_failed(session, document_id, task_id):
         document.run, document.progress = 0, -1.0
         state.error_code = "WIKI_DISPATCH_FAILED"
         append_log(
-            document, "Source ready; Wiki dispatch exhausted retries. Retry Wiki explicitly."
+            document, "文档来源已就绪，但 Wiki 任务派发重试次数已用尽；请重新发起 Wiki 处理。"
         )
 
 

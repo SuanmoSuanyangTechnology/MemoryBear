@@ -115,7 +115,7 @@ class SceneCommunityIncrementalService:
                 separators=(",", ":"),
             )
         )
-        result = await llm.with_structured_output(schema, strict=True).ainvoke(prompt)
+        result = await llm.call_structured(prompt, schema, strict=True)
         return result if isinstance(result, schema) else schema.model_validate(result)
 
     # Step [1/3] O1: route a SceneSummary to an ontology category.

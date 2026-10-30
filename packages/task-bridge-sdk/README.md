@@ -78,6 +78,14 @@ dependencies = ["task-bridge-sdk"]
 dependencies = ["task-bridge-sdk[celery]"]
 ```
 
+MemoryBear 的任务契约（任务名、队列、路由表）在 `mem-router` extra 里。它同样没有第三方
+依赖，可以单独安装，也可以和 Celery 一起装：
+
+```toml
+dependencies = ["task-bridge-sdk[mem-router]"]        # 只需要契约（worker 侧）
+dependencies = ["task-bridge-sdk[celery,mem-router]"] # 既投递也用契约（producer 侧）
+```
+
 在宿主服务中通过路径依赖引入：
 
 ```toml
@@ -96,6 +104,48 @@ task-bridge-sdk = { path = "../packages/task-bridge-sdk" }
 
 > 本地修改本包后，宿主服务需要重新同步（路径依赖按已安装副本解析）：
 > `uv sync --reinstall-package task-bridge-sdk`
+
+## MemoryBear 任务契约（`mem-router`）
+
+`task_bridge.mem_router` 是 producer（`memory-profile`）与 worker（`memory-jobs`）唯一的
+任务名/队列来源，任何一边改名都不会只落在一处：
+
+| 导出 | 内容 |
+|------|------|
+| `TaskName` | worker 注册的任务名，如 `memory_jobs.profile_cache.generate` |
+| `QueueName` | memory-jobs 自有的队列，当前只有 `memory_jobs_tasks` |
+| `TASK_ROUTES` | `task name -> queue` 表；worker 渲染成 Celery 的 `task_routes`，producer 据此投递 |
+| `TaskPriority` / `MAX_PRIORITY` | AMQP 优先级（9/5/0，数字大者先投递）与队列 `x-max-priority` 的上限；producer 与 worker 必须用同一组 |
+| `PRIORITY_STEPS` | Redis broker 专用 bucket `(0,3,6,9)`：数字小者先消费，与 AMQP 相反 |
+
+```python
+from task_bridge.mem_router import MAX_PRIORITY, PRIORITY_STEPS, QueueName, TaskName, TaskPriority
+
+# worker：注册时取名，路由表交给 Celery
+@shared_task(name=TaskName.PROFILE_CACHE_GENERATE.value)
+def generate(...): ...
+
+celery_app.conf.update(task_routes=dict(TASK_ROUTES))
+
+# worker：优先级与 bucket 也要来自同一契约
+celery_app.conf.update(
+    # RabbitMQ 只有队列带 x-max-priority 才按优先级投递，且声明的三方参数必须一致
+    task_queue_max_priority=MAX_PRIORITY,
+    task_default_priority=int(TaskPriority.NORMAL),
+    # 仅 Redis broker：kombu 的分桶列表
+    broker_transport_options={"priority_steps": list(PRIORITY_STEPS)},
+)
+
+# producer：按名投递到表里声明的队列
+await bridge.asubmit(
+    TaskName.PROFILE_CACHE_GENERATE,
+    kwargs={...},
+    queue=QueueName.MEMORY_JOBS.value,
+    priority=int(TaskPriority.INTERACTIVE),
+)
+```
+
+该模块只依赖标准库，装 `celery` extra 不是使用它的前提。
 
 ## 快速开始
 

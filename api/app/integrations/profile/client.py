@@ -103,6 +103,7 @@ class MemoryProfileServiceClient:
         query: Mapping[str, Any] | None = None,
         payload: Any | None = None,
         raw: bool = False,
+        timeout: float | None = None,
     ) -> dict[str, Any] | MemoryProfileRawResponse:
         """Forward one caller route and return its ApiResponse object.
 
@@ -146,12 +147,28 @@ class MemoryProfileServiceClient:
 
         started_at = time.perf_counter()
         try:
+            # ``timeout=None`` means "use the pool default"; httpx would read a
+            # literal None as "no timeout". A bare float, on the other hand,
+            # replaces every phase — including the short connect/pool budgets
+            # configured for the pool — so only the read/write budget grows.
+            if timeout is None:
+                extra: dict[str, Any] = {}
+            else:
+                current = self._client.timeout
+                extra = {
+                    "timeout": httpx.Timeout(
+                        timeout,
+                        connect=current.connect,
+                        pool=current.pool,
+                    )
+                }
             response = await self._client.request(
                 http_method,
                 self._url(path),
                 headers=headers,
                 params=params,
                 json=payload,
+                **extra,
             )
         except httpx.TimeoutException as exc:
             logger.warning(

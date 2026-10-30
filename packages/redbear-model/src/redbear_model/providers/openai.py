@@ -17,7 +17,7 @@ from redbear_model.runtime.client_pool import HttpClients
 
 
 class CompatibleChatOpenAI(ChatOpenAI):
-    """Preserve reasoning content and avoid strict tool/JSON conflicts."""
+    """Preserve reasoning content and avoid strict tool/JSON conflicts (tools + dict response_format go via extra_body)."""
 
     def _get_request_payload(
         self,
@@ -27,15 +27,15 @@ class CompatibleChatOpenAI(ChatOpenAI):
         **kwargs: Any,
     ) -> dict:
         payload = super()._get_request_payload(input_, stop=stop, **kwargs)
-        # json_output 开启时 response_format 是字典（json_object 等）。留在顶层会让
+        # 工具 + json_output 同时存在时，response_format（json_object 等字典）留在顶层会让
         # langchain_openai 切到 .parse()/.stream()，而该路径要求所有工具 strict=True，
-        # 动态工具不满足会直接报错。所以字典形式一律改经 extra_body 透传（SDK 合并进
-        # 请求体顶层），上游 API 仍能收到 JSON 约束——与是否带工具无关：只要 json_output
-        # 开着就走 extra_body，没开时 payload 里没有该键，行为完全不变。
+        # 动态工具不满足会直接报错。此时改经 extra_body 透传（SDK 合并进请求体顶层），
+        # 上游 API 仍能收到 JSON 约束。
+        # 没有工具时不做处理，response_format 保持在顶层，行为与此前一致。
         # pydantic 类（with_structured_output(json_schema)）必须留在顶层：它依赖 .parse()
         # 的 parsed 解析与截断报错，且无法序列化进 extra_body。
         response_format = payload.get("response_format")
-        if isinstance(response_format, dict):
+        if payload.get("tools") and isinstance(response_format, dict):
             payload.pop("response_format")
             payload["extra_body"] = {
                 **(payload.get("extra_body") or {}),

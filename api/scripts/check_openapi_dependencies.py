@@ -22,6 +22,16 @@ FORBIDDEN_PACKAGES = frozenset({
 })
 
 
+def local_source_paths(project):
+    """Workspace packages that ``uv --no-emit-local`` omits, keyed by canonical name."""
+    sources = project.get("tool", {}).get("uv", {}).get("sources", {})
+    return {
+        canonicalize_name(name): source["path"]
+        for name, source in sources.items()
+        if "path" in source
+    }
+
+
 def validate(api_dir: Path):
     lock = tomllib.loads((api_dir / "uv.lock").read_text())
     project = tomllib.loads((api_dir / "pyproject.toml").read_text())
@@ -34,15 +44,20 @@ def validate(api_dir: Path):
         if requirement.marker is None or requirement.marker.evaluate():
             declared[canonicalize_name(requirement.name)] = requirement
 
+    local_sources = local_source_paths(project)
+    local_paths = set(local_sources.values())
     selected = {}
-    has_local_adapter = False
+    included_local = set()
     errors = []
     for line in (api_dir / "requirements-openapi.txt").read_text().splitlines():
         line = line.strip()
         if not line or line.startswith("#"):
             continue
-        if line == "../packages/redbear-model":
-            has_local_adapter = True
+        if line.startswith(("./", "../", "/")):
+            if line in local_paths:
+                included_local.add(line)
+            else:
+                errors.append(f"{line}: local source is not declared in [tool.uv.sources]")
             continue
         requirement = Requirement(line)
         if requirement.marker is not None and not requirement.marker.evaluate():
@@ -65,10 +80,17 @@ def validate(api_dir: Path):
             errors.append(f"{name}: export {version} violates pyproject.toml {declared[name].specifier}")
 
     for name in declared:
-        if name not in selected and name not in EXCLUDED_ROOTS and name != "redbear-model":
-            errors.append(f"{name}: missing export dependency; regenerate or explicitly classify as runtime-only")
-    if not has_local_adapter:
-        errors.append("local redbear-model source must be included")
+        if name in selected or name in EXCLUDED_ROOTS:
+            continue
+        # Local workspace packages never reach the generated file; their path
+        # line stands in for a pinned requirement.
+        path = local_sources.get(name)
+        if path is not None and path in included_local:
+            continue
+        errors.append(f"{name}: missing export dependency; regenerate or explicitly classify as runtime-only")
+    for name, path in local_sources.items():
+        if path not in included_local:
+            errors.append(f"{name}: local source {path} missing from requirements-openapi.txt")
     if errors:
         raise ValueError("OpenAPI dependency drift:\n" + "\n".join(errors))
     return len(selected)

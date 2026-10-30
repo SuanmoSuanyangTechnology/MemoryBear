@@ -137,6 +137,7 @@ export const home = {
       preferenceEngine: 'Preference Engine',
       sceneCommunityEngine: 'Multimodal Episodic Memory Reconstruction Engine',
       resources: 'Resource Center',
+      personalityAnchor: 'Personality Anchor Engine',
     },
     dashboard: {
       total_models: 'Available Models',

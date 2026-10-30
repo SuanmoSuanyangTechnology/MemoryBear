@@ -26,6 +26,11 @@ from app.schemas.response_schema import PageData, PageMeta
 
 logger = get_business_logger()
 
+# Fields the gateway snapshot is built from (identity build_api_key_snapshot).
+# Updates touching only name/description/quota_limit cannot change auth behavior.
+_SNAPSHOT_FIELDS = frozenset(
+    {"scopes", "rate_limit", "daily_request_limit", "is_active", "expires_at"})
+
 
 class ApiKeyService:
     """API Key 业务逻辑服务"""
@@ -236,11 +241,16 @@ class ApiKeyService:
                     )
 
         update_data = data.model_dump(exclude_unset=True)
+        plain = api_key.api_key  # 明文不随更新变化；commit/refresh 前捕获
         ApiKeyRepository.update(db, api_key_id, update_data)
         db.commit()
         db.refresh(api_key)
 
         logger.info("API Key 更新成功", extra={"api_key_id": str(api_key_id)})
+        # 快照字段变更必须重建：带明文通知 → identity 删旧 + 直连 DB 组装写回。
+        # 停用/过期时 build 返回 None → 保持删除（网关 401）；重新启用走同一路径重建。
+        if _SNAPSHOT_FIELDS & update_data.keys():
+            notify_api_key_created_sync(plain)
         return api_key
 
     @staticmethod

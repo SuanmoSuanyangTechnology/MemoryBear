@@ -15,7 +15,12 @@ from app.core.config import settings
 from app.core.logging_config import get_logger
 from app.core.memory.models.metadata_models import (
     split_metadata_entry,
+    drop_deleted_scene_entries,
     flatten_domain_specific_info,
+    project_domain_names,
+)
+from app.core.memory.ontology_services.scene_name_resolver import (
+    load_scene_names, load_scene_names_async,
 )
 from app.core.memory.pipelines.base_pipeline import ModelClientMixin
 from app.core.memory.utils.prompt.template_render import prompt_env
@@ -130,15 +135,25 @@ def _memory_insight_metadata_groups(metadata: dict[str, object]) -> list[tuple[s
     return list(groups.items())
 
 
-def build_memory_insight_metadata_input(meta_data: object) -> dict[str, list[str]]:
+def build_memory_insight_metadata_input(
+    meta_data: object, scene_names_by_id: dict[str, str] | None = None,
+) -> dict[str, list[str]]:
     """提取参与洞察生成的全部画像字段，并执行输入上限。
 
-    每个分组最多 MEMORY_INSIGHT_META_FIELD_LIMIT 条，单条最多 MEMORY_INSIGHT_INPUT_TEXT_LIMIT 字，
-    全部条目合计最多 MEMORY_INSIGHT_META_TOTAL_CHAR_LIMIT 字，超出时按字段顺序截断。
+    domain_specific_info 中 uuid 键查不到场景名称时视为场景已删除，整组丢弃；
+    历史 name 键原样保留。每个分组最多 MEMORY_INSIGHT_META_FIELD_LIMIT 条，
+    单条最多 MEMORY_INSIGHT_INPUT_TEXT_LIMIT 字，全部条目合计最多
+    MEMORY_INSIGHT_META_TOTAL_CHAR_LIMIT 字，超出时按字段顺序截断。
     """
     if not isinstance(meta_data, dict):
         return {}
-    metadata = cast(dict[str, object], meta_data)
+    metadata = dict(cast(dict[str, object], meta_data))
+    metadata["domain_specific_info"] = project_domain_names(
+        drop_deleted_scene_entries(
+            metadata.get("domain_specific_info"), scene_names_by_id,
+        ),
+        scene_names_by_id,
+    )
 
     result: dict[str, list[str]] = {}
     total_chars = 0
@@ -543,7 +558,11 @@ async def refresh_memory_insight(
             error="用户不存在、已停用或不属于当前工作空间",
         )
 
-    metadata_input = build_memory_insight_metadata_input(source["meta_data"])
+    scene_names = (
+        load_scene_names(source["meta_data"])
+        if use_sync_db else await load_scene_names_async(source["meta_data"])
+    )
+    metadata_input = build_memory_insight_metadata_input(source["meta_data"], scene_names)
     fallback_statements: list[str] = []
     if count_memory_insight_entries(metadata_input) < MEMORY_INSIGHT_MIN_ENTRIES:
         async with Neo4jConnector() as connector:

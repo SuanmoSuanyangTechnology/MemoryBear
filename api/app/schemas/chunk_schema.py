@@ -19,7 +19,24 @@ class RetrieveType(StrEnum):
     SEMANTIC = "semantic"
     Graph = "graph"
     HYBRID = "hybrid"
-    WIKI_FAQ = "wiki-FAQ"
+    WIKI_FAQ = "wiki-faq"
+
+    @classmethod
+    def _missing_(cls, value: object) -> "RetrieveType | None":
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            return next((kind for kind in cls if kind.value == normalized), None)
+        return None
+
+    @property
+    def public_value(self) -> str:
+        """类型发现接口保留历史标识，输入和内部处理统一使用小写。"""
+        return "wiki-FAQ" if self is RetrieveType.WIKI_FAQ else self.value
+
+
+_RETRIEVE_TYPE_DESCRIPTION = (
+    "检索方式，忽略大小写及首尾空格；FAQ 使用 wiki-faq，兼容历史 wiki-FAQ。"
+)
 
 
 class KnowledgeBaseConfig(BaseModel):
@@ -189,7 +206,10 @@ class _ChunkRetrieveBase(BaseModel):
     similarity_threshold: float | None = Field(None)
     vector_similarity_weight: float | None = Field(None)
     top_k: int | None = Field(20, ge=1, le=100)
-    retrieve_type: RetrieveType | None = Field(None)
+    retrieve_type: RetrieveType | None = Field(
+        None,
+        description=_RETRIEVE_TYPE_DESCRIPTION,
+    )
     rerank_mode: RerankMode | None = None
     rerank_weights: RerankWeights | None = None
     enable_graph_retrieval: int = Field(
@@ -220,6 +240,10 @@ class _ChunkRetrieveBase(BaseModel):
 class _HttpChunkRetrieve(_ChunkRetrieveBase):
     """Supported request parameters for HTTP retrieval routes."""
 
+    similarity_threshold: float | None = Field(None, ge=0, le=1)
+    vector_similarity_weight: float | None = Field(None, ge=0, le=1)
+    top_k: int = Field(20, ge=1, le=100)
+
     @model_validator(mode="after")
     def validate_knowledge_ids(self) -> "_HttpChunkRetrieve":
         if not self.kb_ids and not self.ex_ids:
@@ -234,7 +258,21 @@ class ApiChunkRetrieve(_HttpChunkRetrieve):
 class V1ChunkRetrieve(_HttpChunkRetrieve):
     """Supported request parameters for API Key retrieval."""
 
-    retrieve_type: Literal["participle", "semantic", "graph", "hybrid"] | None = None
+    retrieve_type: RetrieveType | None = Field(
+        None,
+        description=_RETRIEVE_TYPE_DESCRIPTION,
+        # 保留 V1 已发布的内联枚举结构，运行时仍复用统一的类型归一化。
+        json_schema_extra={
+            "anyOf": [
+                {
+                    "type": "string",
+                    "enum": [kind.value for kind in RetrieveType],
+                },
+                {"type": "null"},
+            ],
+            "title": "Retrieve Type",
+        },
+    )
 
 
 class ChunkRetrieve(_ChunkRetrieveBase):

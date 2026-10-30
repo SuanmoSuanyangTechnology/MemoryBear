@@ -18,7 +18,19 @@ class RetrieveType(StrEnum):
     SEMANTIC = "semantic"
     Graph = "graph"
     HYBRID = "hybrid"
-    WIKI_FAQ = "wiki-FAQ"
+    WIKI_FAQ = "wiki-faq"
+
+    @classmethod
+    def _missing_(cls, value: object) -> "RetrieveType | None":
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            return next((kind for kind in cls if kind.value == normalized), None)
+        return None
+
+    @property
+    def public_value(self) -> str:
+        """类型发现接口保留历史标识，输入和内部处理统一使用小写。"""
+        return "wiki-FAQ" if self is RetrieveType.WIKI_FAQ else self.value
 
 
 class KnowledgeRetrievalSource(StrEnum):
@@ -175,11 +187,14 @@ class ChunkRetrieve(BaseModel):
     ex_ids: list[str] | None = None
     knowledge_bases: list[KnowledgeBaseConfig] = Field(default_factory=list)
     file_names_filter: list[str] | None = None
-    similarity_threshold: float | None = None
-    vector_similarity_weight: float | None = None
-    top_k: int | None = Field(20, ge=1, le=100)
+    similarity_threshold: float | None = Field(None, ge=0, le=1)
+    vector_similarity_weight: float | None = Field(None, ge=0, le=1)
+    top_k: int = Field(20, ge=1, le=100)
     top_n: int | None = Field(20, ge=1, le=100)
-    retrieve_type: RetrieveType | None = None
+    retrieve_type: RetrieveType | None = Field(
+        None,
+        description="检索方式，忽略大小写及首尾空格；FAQ 使用 wiki-faq，兼容历史 wiki-FAQ。",
+    )
     enable_graph_retrieval: int = Field(0, ge=0, le=1)
     rerank_id: uuid.UUID | None = None
     rerank_score_threshold: float | None = Field(None, ge=0, le=1)

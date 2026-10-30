@@ -583,10 +583,19 @@ class AgentConfig(BaseModel):
 
 class PublishRequest(BaseModel):
     """Publish app request"""
-    version_name: str
+    version_name: str = Field(..., description="版本名称，可自定义")
     release_notes: str = Field(..., description="版本说明")
     name: str = Field(..., description="公开分享标题")
     icon: Optional[str] = Field(None, description="公开分享图标，未传则使用应用图标")
+
+    @field_validator("version_name")
+    @classmethod
+    def _validate_version_name(cls, value: str) -> str:
+        """版本名称允许自定义，仅要求去除首尾空白后非空。"""
+        normalized = (value or "").strip()
+        if not normalized:
+            raise ValueError("版本名称不能为空")
+        return normalized
 
 
 class AppDisplayInfo(BaseModel):

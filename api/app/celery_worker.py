@@ -64,6 +64,28 @@ except ImportError:
     pass  # 社区版无 premium 模块，静默跳过
 
 
+# Worker 不经过 Web 的 memory 模块加载，直接注册无连接状态的查询插件。
+try:
+    from app.plugins import register_plugin
+    from premium.memory.ontology.services.scene_query import OntologySceneQuery
+
+    register_plugin("memory.ontology_query", OntologySceneQuery())
+    logger.info("Ontology query plugin registered for Celery worker")
+except ImportError:
+    pass  # 社区版无 premium 模块，静默跳过
+
+
+# Worker 不加载 Web 路由，独立注册同一进程内 AI 人格门面。
+try:
+    from app.plugins import register_plugin
+    from premium.memory.ai_personality.service import AIPersonalityPlugin
+
+    register_plugin("memory.ai_personality", AIPersonalityPlugin())
+    logger.info("AI personality plugin registered for Celery worker")
+except ImportError:
+    pass  # 社区版无 premium 模块，静默跳过
+
+
 @worker_process_init.connect
 def _reinit_db_pool(**kwargs):
     """

@@ -4,8 +4,8 @@
   projection (ModelConfig/ModelChannel rows → package contract snapshots; DateTime time
   columns are converted to unix ms at the boundary)
 - Process-wide shared ChannelSnapshotCache (TTL 60s): per-request registries reuse the same
-  instance; write paths (ChannelService) invalidate eagerly via invalidate_channel_cache,
-  with no reliance on TTL expiry
+  instance; channel writes belong to the model service, so this read-only service picks up
+  changes on the next TTL expiry
 - Dual sync/async reads: management plane/worker/sync paths use resolve_config_sync; async
   paths use resolve_config_async (never use a sync session inside an async context)
 - Host tenant_id is normalized to UUID at the entry points (_normalize_tenant_id): the host
@@ -70,9 +70,8 @@ from sqlalchemy.orm import Session, joinedload
 
 from ..utils.datetime_utils import to_timestamp_ms
 from ..models.models_model import ModelBase, ModelChannel, ModelConfig
-from .channel_service import cipher_from_env
+from ..utils.cipher import cipher_from_env
 from .usage_load import channel_loads_async, channel_loads_sync
-from ..utils.redis_cache import invalidate_workspace_model_options
 
 _CHANNEL_CACHE_TTL_MS = 60_000
 _shared_cache = ChannelSnapshotCache(ttl_ms=_CHANNEL_CACHE_TTL_MS)
@@ -319,16 +318,6 @@ async def resolve_config_plan_async(
         tenant_id,
         config_row,
     )
-
-
-def invalidate_channel_cache(
-    tenant_id: uuid.UUID | None = None,
-    provider: str | None = None,
-) -> None:
-    """Write paths invalidate the channel snapshot cache eagerly (all keys of the tenant are invalidated together; see the in-package cache semantics)."""
-    _shared_cache.invalidate(tenant_id, provider)
-    # Workspace model options are filtered by channel availability, so channel-state changes must invalidate them too (no-op when tenant_id is empty)
-    invalidate_workspace_model_options((tenant_id,))
 
 
 def parse_members(config: dict | None) -> list[tuple[str, str]]:
@@ -791,35 +780,12 @@ def candidate_channels_batch_sync(
     return result
 
 
-def affected_config_ids(
-    db: Session,
-    *,
-    tenant_id: uuid.UUID,
-    provider: str,
-    model_names: Sequence[str] | None,
-) -> list[uuid.UUID]:
-    """Reverse lookup of the impact set of a channel change (used by write paths to invalidate the Redis runtime cache).
-
-    model_names=None → provider-level channel, affecting every config of that tenant+provider;
-    non-None → named channel, only configs whose name ∈ model_names (a conservative superset).
-    """
-    stmt = select(ModelConfig.id).where(
-        ModelConfig.tenant_id == tenant_id,
-        ModelConfig.provider == provider,
-    )
-    if model_names is not None:
-        stmt = stmt.where(ModelConfig.name.in_(list(model_names)))
-    return list(db.execute(stmt).scalars().all())
-
-
 __all__ = [
     "SOURCE",
     "ResolvedWithPlan",
-    "affected_config_ids",
     "candidate_channels_async",
     "candidate_channels_batch_sync",
     "candidate_channels_sync",
-    "invalidate_channel_cache",
     "parse_members",
     "resolve_composite_async",
     "resolve_composite_plan_async",

@@ -70,8 +70,7 @@ class SceneSummaryService:
             scene_messages=serialized
         )
         llm, embedder = self._build_clients(memory_config)
-        structured = llm.with_structured_output(SceneValueSummaryOutput, strict=True)
-        result = await structured.ainvoke(prompt)
+        result = await llm.call_structured(prompt, SceneValueSummaryOutput, strict=True)
         parsed = (
             result
             if isinstance(result, SceneValueSummaryOutput)

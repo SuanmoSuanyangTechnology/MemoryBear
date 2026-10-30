@@ -41,6 +41,13 @@ class MemoryCacheRefreshFields(NamedTuple):
     user_summary_updated_at: datetime | None
 
 
+class ReflectionScanCandidate(NamedTuple):
+    """高频反思 scan 的轻量候选：只含派发与周期判断所需字段。"""
+
+    end_user_id: uuid.UUID
+    reflection_time: datetime | None
+
+
 class MemoryInsightSourceRow(TypedDict):
     meta_data: object
     metadata_row_exists: bool
@@ -326,6 +333,103 @@ class EndUserRepository:
             self.db.rollback()
             db_logger.exception("Failed to page active users: workspace_id=%s", workspace_id)
             raise
+
+    def get_recently_active_end_user_ids_page(
+        self,
+        workspace_id: uuid.UUID,
+        active_since: datetime,
+        after_id: uuid.UUID | None = None,
+        limit: int = 500,
+    ) -> List[uuid.UUID]:
+        """按 ID 游标分页查询 workspace 下「有记忆且最近活跃」的用户 ID。
+
+        扫描任务的统一取数入口：``is_active`` + ``write_time > active_since`` +
+        ``memory_count > 0`` 全部下沉 SQL，调用方不再把空间内用户整行载入内存，
+        也不会为每个用户单独回查 write_time（消除 N+1 与逐行 INFO 日志）。
+        """
+        try:
+            result = self.db.execute(
+                self._build_recently_active_scan_query(
+                    (EndUser.id,), workspace_id, active_since, after_id, limit
+                )
+            )
+            return list(result.scalars().all())
+        except Exception:
+            self.db.rollback()
+            db_logger.exception(
+                "分页查询工作空间 %s 下最近活跃终端用户 ID 时出错", workspace_id
+            )
+            raise
+
+    def get_recently_active_reflection_candidates_page(
+        self,
+        workspace_id: uuid.UUID,
+        active_since: datetime,
+        after_id: uuid.UUID | None = None,
+        limit: int = 500,
+    ) -> List[ReflectionScanCandidate]:
+        """分页查询反思扫描候选（ID + reflection_time），过滤口径同 ID 分页查询。"""
+        try:
+            rows = self.db.execute(
+                self._build_recently_active_scan_query(
+                    (EndUser.id, EndUser.reflection_time),
+                    workspace_id,
+                    active_since,
+                    after_id,
+                    limit,
+                )
+            ).all()
+            return [ReflectionScanCandidate(row[0], row[1]) for row in rows]
+        except Exception:
+            self.db.rollback()
+            db_logger.exception(
+                "分页查询工作空间 %s 下反思扫描候选时出错", workspace_id
+            )
+            raise
+
+    def count_inactive_end_users_by_workspace(
+        self,
+        workspace_id: uuid.UUID,
+        active_since: datetime,
+    ) -> int:
+        """统计 workspace 下「有记忆但最近不活跃」而被跳过的有效用户数。
+
+        与 :meth:`get_recently_active_end_user_ids_page` 的过滤口径互补：
+        ``write_time`` 为空或早于 ``active_since`` 都算不活跃；``memory_count = 0``
+        属于前置过滤，不计入本指标。
+        """
+        try:
+            result = self.db.execute(
+                select(func.count(EndUser.id)).where(
+                    EndUser.workspace_id == workspace_id,
+                    EndUser.is_active.is_(True),
+                    EndUser.memory_count > 0,
+                    or_(
+                        EndUser.write_time.is_(None),
+                        EndUser.write_time <= active_since,
+                    ),
+                )
+            )
+            return int(result.scalar_one())
+        except Exception:
+            self.db.rollback()
+            db_logger.exception(
+                "统计工作空间 %s 下不活跃终端用户数时出错", workspace_id
+            )
+            raise
+
+    @staticmethod
+    def _build_recently_active_scan_query(columns, workspace_id, active_since, after_id, limit):
+        """扫描任务统一的候选集查询：有记忆 + 最近活跃 + 主键游标分页。"""
+        stmt = select(*columns).where(
+            EndUser.workspace_id == workspace_id,
+            EndUser.is_active.is_(True),
+            EndUser.write_time > active_since,
+            EndUser.memory_count > 0,
+        )
+        if after_id is not None:
+            stmt = stmt.where(EndUser.id > after_id)
+        return stmt.order_by(EndUser.id.asc()).limit(limit)
 
     @staticmethod
     def _build_active_end_user_ids_page_query(workspace_id, after_id, limit):
@@ -1692,6 +1796,7 @@ class EndUserRepository:
         """按主键游标分页获取需要刷新名片 Tag 的有效用户。
 
         Tag 缓存字段不完整，或 metadata 的更新时间晚于 Tag 更新时间时，用户会进入候选集。
+        仅取 ``memory_count > 0`` 的用户
         查询只返回派发任务所需的轻量字段，避免扫描阶段占用过多数据库连接和内存。
         """
         query = (
@@ -1704,6 +1809,7 @@ class EndUserRepository:
             .join(Workspace, Workspace.id == EndUser.workspace_id)
             .filter(
                 EndUser.is_active.is_(True),
+                EndUser.memory_count > 0,
                 Workspace.is_active.is_(True),
                 or_(
                     EndUser.memory_tags.is_(None),
@@ -1990,12 +2096,12 @@ class EndUserRepository:
             await self.db.rollback()
             raise
 
-    def get_neo4j_memory_cache_refresh_fields(
-            self,
-            workspace_id: uuid.UUID,
-    ) -> List[MemoryCacheRefreshFields]:
-        """返回指定 Neo4j Workspace 下的缓存刷新原始字段。"""
-        rows = (
+    def _build_neo4j_memory_cache_refresh_query(self, workspace_id: uuid.UUID):
+        """缓存刷新候选集的统一查询：仅 ``memory_count > 0`` 的 neo4j 空间有效用户。
+
+        0 记忆宿主没有可洞察/可摘要的内容，直接前置过滤掉。
+        """
+        return (
             self.db.query(
                 EndUser.id,
                 EndUser.workspace_id,
@@ -2009,11 +2115,34 @@ class EndUserRepository:
             .filter(
                 EndUser.workspace_id == workspace_id,
                 EndUser.is_active.is_(True),
+                EndUser.memory_count > 0,
                 Workspace.is_active.is_(True),
                 sa.or_(Workspace.storage_type.is_(None), Workspace.storage_type == "neo4j"),  # NULL 视为 neo4j
             )
-            .all()
         )
+
+    def get_neo4j_memory_cache_refresh_fields(
+            self,
+            workspace_id: uuid.UUID,
+    ) -> List[MemoryCacheRefreshFields]:
+        """返回指定 Neo4j Workspace 下的缓存刷新原始字段（整表版本）。"""
+        rows = self._build_neo4j_memory_cache_refresh_query(workspace_id).all()
+        return [MemoryCacheRefreshFields(*row) for row in rows]
+
+    def get_neo4j_memory_cache_refresh_fields_page(
+            self,
+            workspace_id: uuid.UUID,
+            after_id: uuid.UUID | None = None,
+            limit: int = 500,
+    ) -> List[MemoryCacheRefreshFields]:
+        """按主键游标分页返回缓存刷新原始字段，过滤口径与整表版本一致。
+
+        扫描任务每页只取 ``limit`` 行，大空间下不再一次载入全部候选用户。
+        """
+        query = self._build_neo4j_memory_cache_refresh_query(workspace_id)
+        if after_id is not None:
+            query = query.filter(EndUser.id > after_id)
+        rows = query.order_by(EndUser.id.asc()).limit(limit).all()
         return [MemoryCacheRefreshFields(*row) for row in rows]
 
     async def get_forgetting_threshold_async(self, end_user_id: uuid.UUID) -> Optional[float]:
@@ -3181,6 +3310,42 @@ def get_active_end_users_by_workspace(
     repo = EndUserRepository(db)
     end_users = repo.get_active_end_users_by_workspace(workspace_id, active_since)
     return end_users
+
+
+def get_recently_active_end_user_ids_page(
+    db: Session,
+    workspace_id: uuid.UUID,
+    active_since: datetime,
+    after_id: uuid.UUID | None = None,
+    limit: int = 500,
+) -> List[uuid.UUID]:
+    """按主键游标分页查询有记忆且最近活跃的终端用户 ID（只为扫描派发取 ID）。"""
+    repo = EndUserRepository(db)
+    return repo.get_recently_active_end_user_ids_page(
+        workspace_id, active_since, after_id=after_id, limit=limit
+    )
+
+
+def get_recently_active_reflection_candidates_page(
+    db: Session,
+    workspace_id: uuid.UUID,
+    active_since: datetime,
+    after_id: uuid.UUID | None = None,
+    limit: int = 500,
+) -> List[ReflectionScanCandidate]:
+    """按主键游标分页查询反思扫描候选（ID + reflection_time）。"""
+    repo = EndUserRepository(db)
+    return repo.get_recently_active_reflection_candidates_page(
+        workspace_id, active_since, after_id=after_id, limit=limit
+    )
+
+
+def count_inactive_end_users_by_workspace(
+    db: Session, workspace_id: uuid.UUID, active_since: datetime
+) -> int:
+    """统计工作空间下因不活跃（write_time 为空或早于 active_since）被跳过的用户数。"""
+    repo = EndUserRepository(db)
+    return repo.count_inactive_end_users_by_workspace(workspace_id, active_since)
 
 
 def get_end_users_count_by_workspace(db: Session, workspace_id: uuid.UUID) -> int:

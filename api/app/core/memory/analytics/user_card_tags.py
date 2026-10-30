@@ -10,7 +10,10 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field, model_validator
 
 from app.core.logging_config import get_logger
-from app.core.memory.models.metadata_models import flatten_domain_specific_info, split_metadata_entry
+from app.core.memory.models.metadata_models import (
+    drop_deleted_scene_entries, flatten_domain_specific_info, split_metadata_entry,
+)
+from app.core.memory.ontology_services.scene_name_resolver import load_scene_names
 from app.core.memory.pipelines.base_pipeline import ModelClientMixin
 from app.core.memory.utils.prompt.template_render import prompt_env
 from app.core.utils.datetime_utils import utcnow_naive
@@ -77,11 +80,15 @@ def _clean_text(value: str) -> str:
     return " ".join(value.split())
 
 
-def build_user_card_tag_input(meta_data: object) -> dict[str, list[str]]:
+def build_user_card_tag_input(
+    meta_data: object, scene_names_by_id: dict[str, str] | None = None,
+) -> dict[str, list[str]]:
     """提取生成名片 Tag 的 metadata 字段，并清理字符串空白。
 
     identity_background / relationships 只取白名单二级键的完整条目；
-    domain_specific_info 展平为 ``<scene> | <field_key> | <内容>``；
+    domain_specific_info 展平为 ``<scene_name> | <field_key> | <内容>``；
+    使用调用方提供的映射转换 scene_type_id，查不到的 uuid 视为场景已删除并丢弃，
+    历史 name 键原样保留。
     旧字段只取 core_facts、traits、goals、interests，原样取值。
     """
     if not isinstance(meta_data, dict):
@@ -92,12 +99,18 @@ def build_user_card_tag_input(meta_data: object) -> dict[str, list[str]]:
         "relationships": USER_CARD_TAG_RELATION_KEYS,
     }
     result: dict[str, list[str]] = {}
+    scene_name_map = scene_names_by_id or {}
     for field in USER_CARD_TAG_META_FIELDS:
         if field == "domain_specific_info":
+            raw_ds = meta_data.get(field)
+            if not isinstance(raw_ds, dict):
+                result[field] = []
+                continue
+            raw_ds = drop_deleted_scene_entries(raw_ds, scene_name_map)
             result[field] = [
                 normalized
-                for scene_key, field_key, content in flatten_domain_specific_info(meta_data.get(field))
-                if (normalized := _clean_text(f"{scene_key} | {field_key} | {content}"))
+                for scene_key, field_key, content in flatten_domain_specific_info(raw_ds)
+                if (normalized := _clean_text(f"{scene_name_map.get(scene_key, scene_key)} | {field_key} | {content}"))
             ]
             continue
         if field in level2_whitelist:
@@ -269,7 +282,8 @@ async def refresh_user_card_tags(end_user_id: str, workspace_id: str) -> dict[st
         return {"status": "skipped_source", "tags_count": 0}
 
     input_started_at = time.monotonic()
-    tag_input = build_user_card_tag_input(source["meta_data"])
+    metadata = source["meta_data"]
+    tag_input = build_user_card_tag_input(metadata, load_scene_names(metadata))
     input_count = sum(len(values) for values in tag_input.values())
     logger.info(
         "用户名片Tag阶段=input_normalize user=%s input_count=%s elapsed=%.3fs",

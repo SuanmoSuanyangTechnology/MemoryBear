@@ -765,6 +765,10 @@ class AppLogService:
                 subs_by_parent.get(str(execution.id), [])
             )
             execution_nodes = _steps_to_node_executions(steps) if steps else []
+            # 主管自身轨迹（supervisor_loop 直接自答时无 steps/无子记录，但 agent_log 有内容）
+            master_node = self._master_execution_to_node(execution)
+            if master_node is not None:
+                execution_nodes.append(master_node)
 
             if not execution_nodes and not child_nodes:
                 continue
@@ -902,6 +906,51 @@ class AppLogService:
             orchestration_mode=sub.orchestration_mode,
         )
 
+    @staticmethod
+    def _master_execution_to_node(execution) -> Optional[AppLogNodeExecution]:
+        """把集群主（编排）执行记录自身投影成一个 node_type='agent' 节点。
+
+        supervisor_loop 的主管可能零派发直接自答（direct_answer），此时没有任何
+        子 Agent 记录；主管自身的 LLM 轮次与自有工具调用落在它的 agent_log 里。
+        不补这一节点，切换版本/日志详情就拿不到主管的工具调用框。
+        无有效 trace（无 iterations）时返回 None。
+        """
+        meta = execution.meta_data if isinstance(execution.meta_data, dict) else {}
+        trace = getattr(execution, "agent_log", None)
+        if not (isinstance(trace, dict) and trace.get("iterations")):
+            legacy = meta.get("agent_log")
+            if isinstance(legacy, dict) and legacy.get("iterations"):
+                trace = legacy
+        if not (isinstance(trace, dict) and trace.get("iterations")):
+            return None
+        agent_name = meta.get("agent_name") or "主编排"
+        return AppLogNodeExecution(
+            node_id=str(execution.id),
+            node_type="agent",
+            node_name=agent_name,
+            status=execution.status or "completed",
+            error=execution.error_message,
+            input=meta.get("task"),
+            output=_trace_final_output(trace),
+            agent_log=trace,
+            elapsed_time=execution.elapsed_time,
+            token_usage=execution.token_usage,
+            meta={
+                "agent_id": meta.get("agent_id"),
+                "agent_name": agent_name,
+                "execution_id": str(execution.id),
+                "parent_execution_id": None,
+                "depth": 0,
+                "orchestration_mode": getattr(execution, "orchestration_mode", None),
+            },
+            agent_id=meta.get("agent_id"),
+            agent_name=agent_name,
+            execution_id=str(execution.id),
+            parent_execution_id=None,
+            depth=0,
+            orchestration_mode=getattr(execution, "orchestration_mode", None),
+        )
+
     def build_agent_execution_summary(
         self,
         node_executions_map: dict[str, list[AppLogNodeExecution]],
@@ -994,6 +1043,10 @@ class AppLogService:
 
         nodes = _steps_to_node_executions(execution.steps) if execution.steps else []
         child_nodes = self._build_child_nodes(agent_exec_repo.list_by_parent(execution.id))
+        # 主管自身轨迹（supervisor_loop 直接自答时无 steps/无子记录，但 agent_log 有内容）
+        master_node = self._master_execution_to_node(execution)
+        if master_node is not None:
+            nodes = nodes + [master_node]
         if not nodes and not child_nodes:
             return []
         return [n.model_dump() for n in (nodes + child_nodes)]

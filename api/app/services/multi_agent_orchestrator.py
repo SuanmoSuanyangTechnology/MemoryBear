@@ -926,6 +926,7 @@ class MultiAgentOrchestrator:
                 elapsed_time=elapsed_time,
                 token_usage=token_usage,
                 error_message=error_message,
+                agent_log=getattr(self, "_master_agent_log", None),
                 meta_patch=meta_patch,
             )
         except Exception as e:
@@ -2749,6 +2750,7 @@ class MultiAgentOrchestrator:
                         workspace_id,
                         getattr(self, "_loop_storage_type", "") or "",
                         getattr(self, "_loop_user_rag_memory_id", "") or "",
+                        app_id=self._app_id,
                     )
                     tools.extend(memory_tools)
         except Exception as e:
@@ -2893,6 +2895,8 @@ class MultiAgentOrchestrator:
         """
         # 子 Agent 执行参数（SubAgentTool 执行体读取）
         self._loop_user_id = user_id
+        # 主管自有轨迹（LLM/工具调用）最终快照，收尾时持久化到 master 执行记录
+        self._master_agent_log: Optional[Dict[str, Any]] = None
         # 子 Agent 的联网搜索：纯请求级透传（体验分享入口的会话级开关）。
         # 主管本体不提供搜索配置（SupervisorConfig 无 web_search）
         self._loop_web_search = bool(web_search)
@@ -3020,6 +3024,13 @@ class MultiAgentOrchestrator:
                     _trace_tokens = _trace_total_tokens(item)
                     if _trace_tokens:
                         supervisor_tokens = max(supervisor_tokens, _trace_tokens)
+                    # 主管自有轨迹（LLM 轮次 + 自有工具调用）此前只经 SSE 实时下发，
+                    # 不落库 → 切换版本 / 日志详情这类靠 agent_executions 重建的入口
+                    # 拿不到主管工具框。这里留存最终 trace，收尾时写进 master 记录。
+                    if _item_type in ("agent_log", "agent_log_final"):
+                        _trace_data = item.get("data")
+                        if isinstance(_trace_data, dict):
+                            self._master_agent_log = _trace_data
                 # list（node_executions）忽略：步骤归属由执行记录承载
         finally:
             pump.cancel()

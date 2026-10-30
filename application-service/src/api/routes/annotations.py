@@ -26,7 +26,6 @@ from sqlalchemy.orm import Session
 
 from ...errors import BizCode, BusinessException
 from ...guards.workspace_access import require_workspace_access
-from ...integrations.model_invoke import ModelInvokeClient
 from ...models.annotation_model import AppAnnotationSetting
 from ...models.app_model import App
 from ...repositories import cross_domain_read
@@ -45,7 +44,6 @@ from ...services.annotation_service import AnnotationService
 from ..dependencies import (
     API_KEY_ID_HEADER,
     Principal,
-    get_model_invoke,
     get_principal,
     get_sync_db,
 )
@@ -60,7 +58,6 @@ v1_router = APIRouter(prefix="/app/annotations", tags=["Annotation API (v1)"])
 DbSession = Annotated[Session, Depends(get_sync_db)]
 WorkspaceId = Annotated[UUID, Depends(require_workspace_access)]
 Caller = Annotated[Principal, Depends(get_principal)]
-ModelInvoke = Annotated[ModelInvokeClient, Depends(get_model_invoke)]
 
 # Host messages, kept verbatim on the wire (the manager and /v1 faces each have
 # their own enable-required text).
@@ -79,7 +76,6 @@ def _generate_question_embedding(
     model_config_id: UUID,
     principal: Principal,
     workspace_id: UUID | None,
-    client: ModelInvokeClient,
     failure_log: str,
 ) -> list[float] | None:
     """Best-effort embedding for one question.
@@ -93,10 +89,8 @@ def _generate_question_embedding(
         return service.generate_embedding(
             question,
             ref=ref,
-            tenant_id=principal.tenant_id,
             workspace_id=workspace_id,
             actor_id=principal.actor_id,
-            client=client,
         )
     except Exception as error:
         logger.warning(failure_log, error)
@@ -134,7 +128,6 @@ def create_annotation(
     workspace_id: WorkspaceId,
     principal: Caller,
     db: DbSession,
-    model_invoke: ModelInvoke,
 ):
     service = AnnotationService(db)
     setting = _require_annotation_enabled(service, app_id)
@@ -147,7 +140,6 @@ def create_annotation(
             model_config_id=setting.model_config_id,
             principal=principal,
             workspace_id=workspace_id,
-            client=model_invoke,
             failure_log="生成Embedding失败，继续创建标注: %s",
         )
 
@@ -302,7 +294,6 @@ def update_annotation(
     workspace_id: WorkspaceId,
     principal: Caller,
     db: DbSession,
-    model_invoke: ModelInvoke,
 ):
     service = AnnotationService(db)
     setting = _require_annotation_enabled(service, app_id)
@@ -315,7 +306,6 @@ def update_annotation(
             model_config_id=setting.model_config_id,
             principal=principal,
             workspace_id=workspace_id,
-            client=model_invoke,
             failure_log="重新生成Embedding失败: %s",
         )
 
@@ -359,7 +349,6 @@ def import_annotations(
     workspace_id: WorkspaceId,
     principal: Caller,
     db: DbSession,
-    model_invoke: ModelInvoke,
     file: Annotated[UploadFile, File(description="CSV文件，列：问题, 答案")],
 ):
     filename = (file.filename or "").lower()
@@ -404,10 +393,8 @@ def import_annotations(
                 item["embedding"] = service.generate_embedding(
                     item["question"],
                     ref=ref,
-                    tenant_id=principal.tenant_id,
                     workspace_id=workspace_id,
                     actor_id=principal.actor_id,
-                    client=model_invoke,
                 )
             except Exception as error:
                 logger.warning(
@@ -503,7 +490,6 @@ def v1_create_annotation(
     payload: AnnotationCreate,
     principal: Caller,
     db: DbSession,
-    model_invoke: ModelInvoke,
 ):
     app_id = _resolve_v1_app(request, db, principal)
 
@@ -518,7 +504,6 @@ def v1_create_annotation(
             model_config_id=setting.model_config_id,
             principal=principal,
             workspace_id=principal.workspace_id,
-            client=model_invoke,
             failure_log="生成Embedding失败，继续创建标注: %s",
         )
 
@@ -583,7 +568,6 @@ def v1_update_annotation(
     payload: AnnotationUpdate,
     principal: Caller,
     db: DbSession,
-    model_invoke: ModelInvoke,
 ):
     app_id = _resolve_v1_app(request, db, principal)
 
@@ -602,7 +586,6 @@ def v1_update_annotation(
             model_config_id=setting.model_config_id,
             principal=principal,
             workspace_id=principal.workspace_id,
-            client=model_invoke,
             failure_log="重新生成Embedding失败: %s",
         )
 

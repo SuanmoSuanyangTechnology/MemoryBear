@@ -4,7 +4,7 @@
  */
 
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState, type Key } from 'react';
-import { Form, Select, Input, InputNumber } from 'antd';
+import { Form, Select, Input } from 'antd';
 import type { DefaultOptionType } from 'antd/es/select'
 import { useTranslation } from 'react-i18next';
 
@@ -240,7 +240,7 @@ const SubAgentModal = forwardRef<SubAgentModalRef, SubAgentModalProps>(({
           </Form.Item>
         )}
 
-        <FormItem
+        {/* <FormItem
           name="priority"
           label={t('application.priority')}
           rules={[
@@ -255,7 +255,7 @@ const SubAgentModal = forwardRef<SubAgentModalRef, SubAgentModalProps>(({
             step={1}
             className="rb:w-full!"
           />
-        </FormItem>
+        </FormItem> */}
       </Form>
     </RbModal>
   );

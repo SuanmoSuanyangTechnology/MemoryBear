@@ -28,6 +28,7 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
+from pydantic import ValidationError as PydanticValidationError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
@@ -87,8 +88,9 @@ from ...utils.datetime_utils import to_timestamp_ms
 from ...utils.redis_cache import CACHE_MISS, get_json_async, set_json_async
 from ...utils.sse_stream import sse_response
 from ..dependencies import Principal, get_principal, get_sync_db
-from ..schemas.common import success
+from ..schemas.common import fail, success
 from ..schemas.response_schema import ApiResponse, PageData, PageMeta
+from starlette.responses import JSONResponse
 from .annotations import _resolve_v1_app
 from .public_share import (
     _get_or_create_public_end_user_async,
@@ -220,8 +222,23 @@ async def regenerate_message(
     # ---- agent branch (the host routes every non-workflow type here; shared
     # config resolution rejects non-agent types with APP_TYPE_NOT_SUPPORTED) ----
     agent_cfg = app_service.get_agent_config(app_id=app_id, workspace_id=workspace_id)
+
+    # In a multi-model compare trial run each column may use a different model
+    # with different model_parameters; those are persisted on the original
+    # assistant message's meta_data. Regenerate must restore the model/parameters
+    # that actually produced the message instead of the app default/global ones.
+    target_msg = db.get(Message, message_id)
+    msg_meta = dict(getattr(target_msg, "meta_data", None) or {})
+    meta_model_config_id = msg_meta.get("model_config_id")
+    model_parameters_override = msg_meta.get("model_parameters_override")
+
     model_config = None
-    if agent_cfg.default_model_config_id:
+    if meta_model_config_id:
+        try:
+            model_config = db.get(ModelConfig, UUID(str(meta_model_config_id)))
+        except (ValueError, TypeError):
+            model_config = None
+    if not model_config and agent_cfg.default_model_config_id:
         model_config = db.get(ModelConfig, agent_cfg.default_model_config_id)
 
     if not model_config:
@@ -237,6 +254,7 @@ async def regenerate_message(
                         model_config=model_config,
                         workspace_id=workspace_id,
                         user_id=str(principal.actor_id),
+                        model_parameters_override=model_parameters_override,
                 ):
                     yield event
 
@@ -248,6 +266,7 @@ async def regenerate_message(
         model_config=model_config,
         workspace_id=workspace_id,
         user_id=str(principal.actor_id),
+        model_parameters_override=model_parameters_override,
     )
     return success(data=RegenerateResponse(**result))
 
@@ -529,6 +548,41 @@ async def _read_json_body(request: Request) -> dict:
     if not isinstance(body, dict):
         raise BusinessException("请求体必须是 JSON 对象", BizCode.INVALID_PARAMETER)
     return body
+
+
+class ChatRequestValidationError(Exception):
+    """/v1/app/chat 请求体框架校验失败：携带对外展示的 detail。"""
+
+    def __init__(self, detail: str):
+        self.detail = detail
+        super().__init__(detail)
+
+
+def _validation_failed_response(detail: str) -> JSONResponse:
+    """V1 chat 框架请求校验失败统一信封：HTTP 422 / code 1001（文档 1.2）。"""
+    return JSONResponse(
+        status_code=422,
+        content=fail(code=BizCode.VALIDATION_FAILED.value, msg=detail, error=detail),
+    )
+
+
+async def _parse_chat_payload(request: Request) -> AppChatRequest:
+    """解析 /v1/app/chat 请求体，非法 JSON / 非 object / 字段类型错误统一为 422/1001。"""
+    try:
+        body = await request.json()
+    except (json.JSONDecodeError, UnicodeDecodeError, ValueError):
+        raise ChatRequestValidationError("请求体不是合法的 JSON")
+    if not isinstance(body, dict):
+        raise ChatRequestValidationError("请求体必须是 JSON 对象")
+    try:
+        return AppChatRequest(**body)
+    except PydanticValidationError as exc:
+        # 文档 1.2：仅 message 类型错误走标准 fail 信封（422/1001）；
+        # conversation_id 非法 UUID 等其余字段校验失败保持全局
+        # PydanticValidationError 处理器的 VALIDATION_FAILED 信封
+        if any("message" in err.get("loc", ()) for err in exc.errors()):
+            raise ChatRequestValidationError("数据验证失败")
+        raise
 
 
 def _parse_release_config(release: AppRelease) -> dict:
@@ -865,8 +919,10 @@ async def v1_chat(
     app_id = _require_app_id(_resolve_v1_app(request, db, principal))
     workspace_id = principal.workspace_id
 
-    body = await _read_json_body(request)
-    payload = AppChatRequest(**body)
+    try:
+        payload = await _parse_chat_payload(request)
+    except ChatRequestValidationError as exc:
+        return _validation_failed_response(exc.detail)
 
     # App cache: a hit skips the app row lookup; the cached current release id
     # skips the release-by-current lookup too (host cache shape, 60s TTL).

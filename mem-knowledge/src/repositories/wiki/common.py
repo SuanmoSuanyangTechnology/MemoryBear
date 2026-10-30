@@ -123,7 +123,7 @@ def settle_progress(session, document, state):
         document.process_duration = max(0.0, (utcnow_naive() - started).total_seconds())
     tasks = current_tasks(session, state)
     counts = Counter(task.status for task in tasks)
-    finished = counts["succeeded"] + counts["failed"]
+    finished = counts["succeeded"] + counts["failed"] + counts["skipped"]
     total = len(tasks)
     if state.status == "failed" and state.mapped_version != state.requested_version:
         document.run, document.progress = 0, -1.0
@@ -149,10 +149,16 @@ def settle_progress(session, document, state):
         state.status, state.stage = "running", "reducing"
     state.last_progress = document.progress
     if previous != (state.status, document.run, document.progress):
+        if counts["failed"]:
+            outcome = "本次 Wiki 处理未完成。" if finished == total else "其余页面仍在处理中。"
+            append_log(document, f"Wiki 页面处理已结束 {finished}/{total} 个，其中 "
+                       f"{counts['failed']} 个失败。{outcome}")
+            return
         append_log(
             document,
             f"Wiki pages: finished={finished}/{total}, "
-            f"succeeded={counts['succeeded']}, failed={counts['failed']}; "
+            f"succeeded={counts['succeeded']}, failed={counts['failed']}, "
+            f"skipped={counts['skipped']}; "
             f"status={state.status}.",
         )
 

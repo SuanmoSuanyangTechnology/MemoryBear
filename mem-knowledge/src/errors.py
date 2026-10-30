@@ -42,6 +42,11 @@ class ErrorDefinition:
 # for a missing API route. Keep numeric code 404 for existing consumers.
 _DEFINITIONS = {
     "KB_FAQ_INDEX_FAILED": ErrorDefinition(503, True, 503, "http"),
+    "KB_FAQ_IMAGE_QUERY_UNSUPPORTED": ErrorDefinition(400, False, 400, "http"),
+    "KB_FAQ_FILE_FILTER_UNSUPPORTED": ErrorDefinition(400, False, 400, "http"),
+    "KB_FAQ_AUTO_METADATA_UNSUPPORTED": ErrorDefinition(400, False, 400, "http"),
+    "KB_FAQ_METADATA_FILTER_UNSUPPORTED": ErrorDefinition(400, False, 400, "http"),
+    "KB_FAQ_MIXED_RETRIEVAL_UNSUPPORTED": ErrorDefinition(400, False, 400, "http"),
     "KB_FAQ_DISPATCH_FAILED": ErrorDefinition(503, True, 503, "http"),
     "KB_FAQ_WORKER_LOST": ErrorDefinition(503, True, 503, "http"),
     "KB_FAQ_CONFLICT": ErrorDefinition(409, False, 409, "http"),

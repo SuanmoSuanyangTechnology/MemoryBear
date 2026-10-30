@@ -15,7 +15,7 @@ from fastapi import FastAPI
 
 from src import db
 from src import redis as iredis
-from src.controllers import acl, jwks, user_snapshot
+from src.controllers import acl, api_key_verify, jwks, user_snapshot
 from src.services import audit_consumer, notify, reconcile, retention, schema_check
 
 logger = logging.getLogger(__name__)
@@ -47,6 +47,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="identity-service", lifespan=lifespan)
 app.include_router(jwks.router)
 app.include_router(user_snapshot.router)
+app.include_router(api_key_verify.router)
 app.include_router(acl.router)
 
 

@@ -5,8 +5,11 @@ Independent, internal-only service hosting Memory domain modules. Routes are com
 ## Boundary and ownership
 
 - This service reads shared PostgreSQL tables through read-only mappings, plus Neo4j, Redis, and Elasticsearch. It does not import `api` or `app` code.
-- PostgreSQL, Neo4j, Redis, and Elasticsearch each have a dedicated lifecycle manager under `src/infrastructure/`; `src/runtime.py` only composes, probes, and closes them.
+- The generation endpoints submit their work to memory-jobs, which performs the only writes to `end_users` (the two cached text groups). This service therefore reads shared PostgreSQL through read-only mappings only; the boundary script's AST checks enforce that, not a connection-level read-only setting.
+- LLM calls go to the model service over its invoke face. This process never holds provider credentials: it names a `model_configs` row and its tenant, and the model service resolves channels and failover (`src/infrastructure/model_service.py`).
+- PostgreSQL, Neo4j, Redis, Elasticsearch, and the model-service client each have a dedicated lifecycle manager under `src/infrastructure/`; `src/runtime.py` only composes, probes, and closes them. The model service is not part of readiness: only generation endpoints need it.
 - `src/common/redis_cache.py` provides shared JSON helpers, zset JSON reads, exact/prefix/pattern invalidation, and the async `@redis_cache` cache-aside decorator. It reuses the existing `ProfileRuntime.redis` provider and does not add cache state to runtime.
+- `src/services/` holds the cross-module services other modules call; their repositories live under `src/repositories/`. `EndUserService` owns the end-user rules: is this end user addressable from the caller's workspace? It exposes `exists_in_workspace()` for a strict one-lookup membership answer (no merge branch, no payload columns), `resolve_in_workspace()` for the merge-aware identity used by profile, summary and graph endpoints, and `active_end_user_ids()` for the batch target set; both require the user and the workspace to be active and collapse malformed/foreign/missing ids to `False`/`None`. `ModelConfigService` owns model resolution for every workspace slot (`llm`, `embedding`, `rerank`, `vision`, `audio`, `video`): workspace → active `memory_config` → preset/slot column → `model_configs` tenant/active check, with typed calls (`chat_model_for_workspace`, `embed_texts_for_workspace`, `rerank_for_workspace`) and `WorkspaceModelMemo` making the LLM a once-per-request lookup shared by every user in a batch. `WorkspaceService` owns the one workspace row (`row()`): identity, active/storage flags and all six model columns, so validation and model resolution read it once per request. Profile, interest distribution, graph and cache generation all go through these services, so neither the workspace boundary nor the model choice can drift between endpoints. The boundary predicates and the narrow-read template live in `src/repositories/end_user_scope.py` (`active_user_in_workspace`, `active_users_in_workspace`, `scoped_end_user_select`, `active_workspace_exists`); the access repository, the profile reads and the generation writes all compose them instead of repeating the conditions.
 
 Decorator usage:
 
@@ -97,7 +100,12 @@ records:
   models, and dataclasses included), plus wire-relevant `model_config`
   (`extra`, `strict`, `populate_by_name`, `from_attributes`) and field
   `validation_alias` / `serialization_alias`;
-- the response model and its fields, the status code, and declared responses.
+- the response model and its payload fields — nested models, `list[Model]`,
+  `dict[str, Model]` values, and every member of a union response (each shape
+  keeps its own field tree) — plus the status code and declared responses. The
+  payload models live in `src/modules/analytics/schemas.py`, are declared as the
+  routes' `response_model`, and are validated by FastAPI on every response, so
+  changing a payload key is both caught at runtime and reported as drift.
 
 Middleware-enforced identity headers (`x-tenant-id`, `x-workspace-id`,
 `x-source`, `x-user-id` / `x-api-key-id`) are global, not per-route, and are
@@ -146,22 +154,93 @@ The legacy response envelope is exactly:
 
 The field names intentionally remain `msg`, `error`, and millisecond `time`, matching `api/app/core/response_utils.py`. Health responses use their dedicated probe shape.
 
+## Generation endpoints
+
+Generation is a later, explicitly scoped extension over the read service:
+
+- which LLM: end user → workspace → active `memory_config` → effective LLM column
+  (default-config workspaces follow the singleton `workspace_default_model_presets`)
+  → `model_configs` tenant/active check (`src/services/model_config.py`).
+  Only the LLM is validated; generation needs no embedding/rerank model, unlike
+  the API's full memory-config load;
+- prompts: the generation pipelines run in memory-jobs, so the prompt templates
+  live there (`memory-jobs/src/prompts/templates/`); this service sends only the
+  task name and its parameters;
+- writes: only `end_users.memory_insight*` and `end_users.user_summary*`, with the
+  API's optimistic concurrency conditions for insight; for the migrated endpoints
+  those writes happen in memory-jobs, so this service no longer writes
+  `end_users` at all;
+- `interest_distribution` is generated by `memory_jobs.interest_distribution.generate`
+  and awaited the same way; the cache stays here. It uses the same Redis key
+  (`cache:memory:interest_distribution:by_user:<id>:<lang>`) and payload shape as
+  the API, so either implementation can serve a cache entry written by the other.
+  The worker only reports `cacheable`; this service owns the key, the TTL and the
+  "cache the empty result too" rule;
+- `generate_cache` with an `end_user_id` does **not** run the pipeline here: the
+  service publishes `memory_jobs.profile_cache.generate` through
+  `task-bridge-sdk` (a bare Celery producer — no task registration, no worker)
+  and waits on the result backend, then returns the API's response shape. The
+  wait is bounded by a fixed 960s budget (above the worker's 900s hard limit).
+  Task name, queue and routing table come from `task_bridge.mem_router` (the
+  `mem-router` extra of `task-bridge-sdk`) — the same contract memory-jobs
+  registers from — and each flow declares its own wait budget next to the submit
+  call; none of them is a setting. The adapter itself is generic:
+  `TaskBridgeManager.submit(task_name, kwargs=...)` names the task; queue and
+  priority default to memory-jobs' queue at the interactive level and can be
+  overridden per publish. Broker and result backend default to Redis DB 3/4,
+  matching the API and memory-jobs. The task result is the API's
+  `data` shape verbatim (`end_user_id` / `insight_success` / `summary_success` /
+  `errors`), and this service returns it unchanged. `interest_distribution`
+  follows the same pattern with a fixed 120s budget.
+- `generate_cache` without an `end_user_id` dispatches
+  `memory_jobs.profile_cache.generate_workspace`: the worker enumerates the
+  workspace's active users and queues one `memory_jobs.profile_cache.generate`
+  unit per user. The response keeps the API's batch shape
+  (`total_users` / `successful` / `failed` / `errors`); with the fan-out,
+  `successful` counts the units that were queued and `failed` the ones the
+  broker refused, while each unit reports its own generation outcome. The wait
+  is bounded by a 3600s budget; a normal dispatch answers in seconds, and the
+  budget only tolerates a rolling upgrade still running the old serial
+  implementation.
+- Workspace-level facts — the workspace row and the LLM configuration — are
+  resolved lazily by `WorkspaceModelMemo`, once per request for a single user
+  and once per unit for a fanned-out batch. A failed resolution is not retried
+  inside the same request.
+- Deployments that enable `generate_cache` or `interest_distribution` need a
+  reachable broker/result backend and a running `memory_jobs_tasks` worker
+  (memory-jobs). Without one these endpoints keep the legacy envelope:
+  HTTP 200 with `code=10003` (`SERVICE_UNAVAILABLE`) and a localized `msg` —
+  the API's `fail()` never changed the HTTP status either.
+- Every submission carries `TaskPriority.INTERACTIVE` — 9 on AMQP, the highest
+  level — and the producer declares `memory_jobs_tasks` with the same
+  `x-max-priority` as the worker, so a request someone is waiting on is dequeued
+  before memory-jobs' nightly sweep (0) and any bulk fan-out (5). Task name,
+  queue, routing table and the priority levels all come from
+  `task_bridge.mem_router`, which memory-jobs configures its worker from.
+  Changing one side alone leaves submissions unread, unprioritised, or rejected
+  with `PRECONDITION_FAILED`.
+- Deployments that enable `generate_cache` must grant `UPDATE` on `end_users`
+  to the **memory-jobs** PostgreSQL role (all generation now runs there). This
+  service's role can stay read-only; without the grant only the generation
+  endpoints fail.
+
 ## Source layout
 
 ```text
 src/entry.py
   -> src/app.py
-  -> src/modules/__init__.py
-  -> src/modules/<domain>/routes.py
-  -> src/modules/<domain>/handler.py
-  -> src/modules/<domain>/service.py
-  -> src/modules/<domain>/repository/
-  -> src/infrastructure/
+  -> src/modules/__init__.py           # 组装所有 domain router；唯一的路由清单
+  -> src/modules/<domain>/routes.py    # 只绑定 HTTP 参数
+  -> src/modules/<domain>/handler.py   # 翻译 transport 契约与响应信封
+  -> src/services/                     # 用例编排 + 纯逻辑/常量 + 跨模块服务（end_user / model_config / workspace_service）
+  -> src/repositories/                 # 全部数据访问（含 end_user_scope 边界谓词）
+  -> src/schemas/                      # DTO（graph / profile / workspace）
+  -> src/infrastructure/               # 客户端与 producer；task_bridge.py 只投递任务，不注册任务
 ```
 
-`src/modules/__init__.py` composes every domain router into the single router `src/app.py` mounts, so a new module is registered there and nowhere else. Routes only bind HTTP parameters. Handlers translate transport contracts and response envelopes. Services own use-case orchestration. Repositories are named by domain capability and depend on shared infrastructure managers.
+`src/modules/__init__.py` composes every domain router into the single router `src/app.py` mounts, so a new module is registered there and nowhere else. `src/modules/` is transport only: routes bind HTTP parameters, handlers translate transport contracts and response envelopes, and the module's `schemas.py` describes only the HTTP interface's input/output (request/response shapes) — no business logic and no data access. Use-case orchestration and pure logic/constants live in `src/services/`; data access lives in `src/repositories/`; response value objects (DTOs) live in `src/schemas/`. Repositories depend on shared infrastructure managers, and the workspace-boundary predicates live in `src/repositories/end_user_scope.py`. LLM prompts, pipelines and their templates live in memory-jobs, which executes the generation tasks. The full layering contract and its automated enforcement are documented in `docs/architecture.md`.
 
-API-owned PostgreSQL tables are mapped under `src/models/references/` with a separate `ReadOnlyBase.metadata`, no foreign keys, and no relationships. Profile-owned tables belong under `src/models/owned/`, inherit `ProfileBase`, and are the only tables exposed to Alembic. PostgreSQL reference repositories use SQLAlchemy ORM/select expressions only; native `text()` SQL and ORM write methods are rejected by the boundary script. Reference connections also set `default_transaction_read_only=on`, explicitly use rollback-on-return, and invalidate any asyncpg connection still in a transaction at checkin or checkout; Alembic uses a separate short-lived migration engine without pooling or the runtime read-only setting.
+API-owned PostgreSQL tables are mapped under `src/models/references/` with a separate `ReadOnlyBase.metadata`, no foreign keys, and no relationships. Profile-owned tables belong under `src/models/owned/`, inherit `ProfileBase`, and are the only tables exposed to Alembic. PostgreSQL read repositories use SQLAlchemy ORM/select expressions only; native `text()` SQL and ORM write methods are rejected by the boundary script. The runtime pool explicitly uses rollback-on-return and invalidates any asyncpg connection still in a transaction at checkin or checkout; Alembic uses a separate short-lived migration engine without pooling.
 
 ## Database migrations
 
@@ -208,7 +287,7 @@ The payload matches the API service exactly:
 
 ## Configuration
 
-Configuration is frozen after bootstrap. Paths are derived from the source location, never the current working directory. Precedence is repository `.env`, then `memory-profile/.env`, then process environment. Existing `DATABASE_*`/`POSTGRES_*`, `NEO4J_*`, `REDIS_*`, and `ELASTICSEARCH_*` variables are reused; service-specific settings use `PROFILE_*`. See `.env.example`.
+Configuration is frozen after bootstrap. Paths are derived from the source location, never the current working directory. Precedence is repository `.env`, then `memory-profile/.env`, then process environment. Existing `DATABASE_*`/`POSTGRES_*`, `NEO4J_*`, `REDIS_*`, and `ELASTICSEARCH_*` variables are reused; the model-service invoke face uses `MODEL_SERVICE_*`; service-specific settings use `PROFILE_*`. See `.env.example`.
 
 This service must use the same Redis logical DB as the API (the shared
 deployment uses `REDIS_DB=3`) so keys written by API workers stay visible.
@@ -226,6 +305,38 @@ MEMORY_PROFILE_BASE_URL=http://memory-profile:8082
 ```
 
 With the flag enabled, every endpoint carrying `@memory_profile_proxy(...)` uses the remote service; endpoints without it keep their local implementation. The API marks API-key calls `x-source: ex_api` and everything else `in_api`, the same labelling the Gateway applies on the face it terminated credentials on, and it identifies the API-key face by the key itself (`x-api-key-id`) exactly as the Gateway does. The mode is derived from the caller's own path, so it cannot drift from the forwarded path. Transport/protocol failures fail closed as `SERVICE_UNAVAILABLE`. Set the flag back to `false` for a reversible rollback.
+
+## Scene community graph
+
+The scene community graph follows the same entry chain as the other analytics
+endpoints: `routes.py` → `AnalyticsHandler` → `GraphQueryService`.
+Grouping, validation and bounded caching live under
+`src/services/scene_community_graph/`; response models live in
+`src/schemas/scene_community_graph.py` and Neo4j reads in
+`src/repositories/scene_community_graph.py`. User access and merge routing reuse
+`EndUserService.resolve_in_workspace()`, exactly as the existing graph endpoints
+do. There is no separate scene-specific merge traversal or PostgreSQL repository.
+The API provides JWT and API-key forwarding entries; this service owns user
+merge resolution, workspace checks, grouping, validation, response statistics,
+and the optional Redis cache. It reuses the runtime's pooled clients.
+
+Enable `ENABLE_MEMORY_PROFILE` and configure `MEMORY_PROFILE_BASE_URL` in the
+API process, then set `ENABLE_SCENE_COMMUNITY_GRAPH=true` in this service.
+The new API entries report service unavailable when forwarding is disabled.
+Scene graph settings belong to this service; `.env.example` lists their
+defaults, including a 60-second cache TTL and the complete-response limits.
+
+Scenes are grouped by their stored parent community ID. Missing, invalid, or
+unresolved parents appear in one `UNASSIGNED` group with a reason code.
+Successful responses contain `groups` and `statistics`; all non-null timestamps
+are integer milliseconds. Empty data is a successful response. Capacity limits
+and database failures return error envelopes instead of partial graphs.
+Authorization is checked before every cache lookup.
+Errors reuse `BizCode`, `LocalizedProfileError`, the `analytics.scene_graph.*`
+translation keys in both locale catalogs, and the service's global error handlers.
+Unexpected failures use the shared internal-error response. The cache adapter
+keeps this endpoint's byte/count limits and cached-payload validation while
+reusing the runtime's Redis client.
 
 ## Logging
 

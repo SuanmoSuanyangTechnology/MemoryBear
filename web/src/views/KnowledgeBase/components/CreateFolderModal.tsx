@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next';
 import type { FolderFormData, KnowledgeBaseFormData, CreateFolderModalRef, CreateFolderModalRefProps } from '@/views/KnowledgeBase/types';
 import RbModal from '@/components/RbModal'
 import { createFolder, getFolderList, updateKnowledgeBase } from '@/api/knowledgeBase';
+import styles from './CreateFolderModal.module.css';
 
 interface DirectoryOption {
   value: string;
@@ -95,7 +96,7 @@ const CreateFolderModal = forwardRef<CreateFolderModalRef,CreateFolderModalRefPr
   // Save form data and submit
   const handleSave =  () => {
     form
-      .validateFields({ validateOnly: true })
+      .validateFields()
       .then(async () => {
         setLoading(true)
         const formValues = form.getFieldsValue();
@@ -159,6 +160,7 @@ const CreateFolderModal = forwardRef<CreateFolderModalRef,CreateFolderModalRefPr
             </Form.Item>
             <Cascader<DirectoryOption>
               className="rb:w-full"
+              classNames={{ popup: { root: styles.directoryDropdown } }}
               open={directoryOpen}
               onOpenChange={setDirectoryOpen}
               options={directoryOptions}
@@ -178,8 +180,12 @@ const CreateFolderModal = forwardRef<CreateFolderModalRef,CreateFolderModalRefPr
         <Form.Item
           name="folder_name"
           label={t('knowledgeBase.name')}
+          rules={[
+            { required: true, message: t('common.pleaseEnter') },
+            { max: 255 }
+          ]}
         >
-          <Input placeholder={t('knowledgeBase.name')} />
+          <Input placeholder={t('knowledgeBase.name')} maxLength={255} />
         </Form.Item>
       </Form>
     </RbModal>

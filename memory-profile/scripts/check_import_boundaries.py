@@ -9,8 +9,10 @@ from pathlib import Path
 SERVICE_ROOT = Path(__file__).resolve().parents[1]
 FORBIDDEN_IMPORT_ROOTS = {"api", "app"}
 READ_ONLY_PG_REPOSITORIES = {
-    SERVICE_ROOT / "src/modules/analytics/repository/end_user_profile.py",
-    SERVICE_ROOT / "src/modules/analytics/repository/memory_statistics.py",
+    SERVICE_ROOT / "src/repositories/profile.py",
+    SERVICE_ROOT / "src/repositories/end_user.py",
+    SERVICE_ROOT / "src/repositories/model_config.py",
+    SERVICE_ROOT / "src/repositories/workspace.py",
 }
 FORBIDDEN_SQL_BUILDERS = {"text", "insert", "update", "delete"}
 FORBIDDEN_SESSION_METHODS = {"add", "add_all", "commit", "delete", "flush", "merge"}
@@ -26,14 +28,18 @@ MIGRATION_PATHS = (
 OBSOLETE_PATHS = (
     SERVICE_ROOT / "src/api",
     SERVICE_ROOT / "src/main.py",
-    SERVICE_ROOT / "src/repositories",
-    SERVICE_ROOT / "src/services",
+    SERVICE_ROOT / "src/domain",
     SERVICE_ROOT / "src/infrastructure/celery.py",
     SERVICE_ROOT / "src/models/owned/base.py",
     SERVICE_ROOT / "src/modules/analytics/repository/cache.py",
     SERVICE_ROOT / "src/modules/analytics/repository/neo4j.py",
     SERVICE_ROOT / "src/modules/analytics/repository/postgres.py",
+    SERVICE_ROOT / "src/modules/shared",
 )
+PURE_ROOTS = (
+    SERVICE_ROOT / "src/schemas",
+)
+PURE_FORBIDDEN_ROOTS = {"src.infrastructure", "src.models", "src.runtime"}
 
 
 def check_python(path: Path) -> list[str]:
@@ -80,6 +86,24 @@ def check_owned_model_boundary(path: Path) -> list[str]:
                 failures.append(f"{path}:{node.lineno}: owned migrations cannot use ReadOnlyBase")
         elif isinstance(node, ast.Name) and node.id == "ReadOnlyBase":
             failures.append(f"{path}:{node.lineno}: owned migrations cannot use ReadOnlyBase")
+    return failures
+
+
+def check_pure_boundary(path: Path) -> list[str]:
+    """Keep schemas free of infrastructure/models/runtime imports."""
+
+    failures: list[str] = []
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    for node in ast.walk(tree):
+        names: list[str] = []
+        if isinstance(node, ast.Import):
+            names.extend(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            if node.module:
+                names.append(node.module)
+        for name in names:
+            if any(name == root or name.startswith(root + ".") for root in PURE_FORBIDDEN_ROOTS):
+                failures.append(f"{path}:{node.lineno}: schemas cannot import {name}")
     return failures
 
 
@@ -162,6 +186,7 @@ def check_docker_assets() -> list[str]:
         "!memory-profile/alembic.ini",
         "!memory-profile/migrations/**",
         "!packages/auth-sdk/src/**",
+        "!packages/redbear-model/src/**",
     ):
         if rule not in ignore_source:
             failures.append(f"{dockerignore}: missing allow rule {rule}")
@@ -185,6 +210,9 @@ def main() -> int:
             failures.extend(check_owned_model_boundary(path))
     for path in READ_ONLY_PG_REPOSITORIES:
         failures.extend(check_read_only_repository(path))
+    for root in PURE_ROOTS:
+        for path in root.rglob("*.py"):
+            failures.extend(check_pure_boundary(path))
     failures.extend(check_docker_assets())
     if failures:
         print("\n".join(failures), file=sys.stderr)

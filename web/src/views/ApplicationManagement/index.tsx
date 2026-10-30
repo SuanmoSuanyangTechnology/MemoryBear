@@ -1,9 +1,3 @@
-/*
- * @Author: ZhaoYing 
- * @Date: 2026-02-03 16:34:12 
- * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-08-14 18:42:08
- */
 /**
  * Application Management Page
  * Displays and manages all applications in the workspace
@@ -25,7 +19,7 @@ import { formatDateTime } from '@/utils/format';
 import UploadWorkflowModal from './components/UploadWorkflowModal'
 import UploadModal from './components/UploadModal'
 import PageTabs from '@/components/PageTabs'
-import MySharing from './MySharing'
+import MySharing, { type MySharingRef } from './MySharing'
 import RbCard from '@/components/RbCard'
 import RbButton from '@/components/RbButton'
 import RbDescriptions from '@/components/RbDescriptions'
@@ -47,6 +41,7 @@ const ApplicationManagement: React.FC = () => {
   const [searchParams] = useSearchParams()
   const applicationModalRef = useRef<ApplicationModalRef>(null);
   const scrollListRef = useRef<PageScrollListRef>(null)
+  const mySharingRef = useRef<MySharingRef>(null)
   const uploadWorkflowModalRef = useRef<UploadWorkflowModalRef>(null);
   const uploadModalRef = useRef<UploadWorkflowModalRef>(null);
   const [form] = Form.useForm<Query>()
@@ -63,6 +58,13 @@ const ApplicationManagement: React.FC = () => {
   /** Refresh application list */
   const refresh = () => {
     scrollListRef.current?.refresh();
+  }
+  const refreshOntology = () => {
+    if (activeTab === 'myShare') {
+      mySharingRef.current?.refresh();
+    } else {
+      refresh();
+    }
   }
   
   /** Open create application modal */
@@ -324,7 +326,7 @@ const ApplicationManagement: React.FC = () => {
           )}
         />
       }
-      {activeTab === 'myShare' && <MySharing />}
+      {activeTab === 'myShare' && <MySharing ref={mySharingRef} switchOntology={(item) => ontologyConfigModalRef.current?.open(item)} />}
       
 
       <ApplicationModal
@@ -346,7 +348,7 @@ const ApplicationManagement: React.FC = () => {
             ref={ontologyConfigModalRef}
             request={request}
             defaultOntology={defaultOntology}
-            refresh={refresh}
+            refresh={refreshOntology}
           />
         )}
       </PrivateWrap>

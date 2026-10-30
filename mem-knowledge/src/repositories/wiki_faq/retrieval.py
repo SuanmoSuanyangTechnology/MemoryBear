@@ -1,39 +1,22 @@
 """FAQ 召回快照与资格；只返回值，不跨线程传递 ORM 或 Session。"""
 
-from sqlalchemy import String, cast, exists, func, or_, select
+from sqlalchemy import exists, or_, select
 
-from ...models.owned import Document, Knowledge, WikiPage
+from ...models.owned import Knowledge, WikiPage
 from ...models.owned.wiki_faq import WikiFAQ
 from ...models.references import Workspace
+from ...rag.faq.contracts import readable_faq_text
 from ..wiki.common import as_uuid
 from .common import get_faq, scoped
 
 
 def eligible(scope):
-    # 使用已发布来源而非当前Map就绪状态；普通重建不能暂停已审核FAQ的服务。
-    published = (
-        func.jsonb_array_elements(WikiPage.published_sources)
-        .table_valued("value")
-        .alias("faq_published_source")
-    )
-    live_document = exists(
-        select(Document.id).where(
-            Document.kb_id == WikiPage.kb_id,
-            Document.status == 1,
-            cast(Document.id, String) == published.c.value.op("->>")("document_id"),
-        )
-    ).correlate(WikiPage, published)
-    invalid_source = exists(
-        select(published.c.value).select_from(published).where(~live_document)
-    ).correlate(WikiPage)
-    available_page = exists(
+    # 已审核 FAQ 使用自己的问答；来源不可用只触发复核，不暂停召回。
+    published_page = exists(
         select(WikiPage.id).where(
             WikiPage.id == WikiFAQ.wiki_page_id,
             *scoped(WikiPage, scope),
             WikiPage.version > 0,
-            WikiPage.status != "unavailable",
-            func.jsonb_array_length(WikiPage.published_sources) > 0,
-            ~invalid_source,
         )
     )
     return (
@@ -41,7 +24,7 @@ def eligible(scope):
         WikiFAQ.review_state == "approved",
         WikiFAQ.is_enabled.is_(True),
         WikiFAQ.deleted_at.is_(None),
-        or_(WikiFAQ.wiki_page_id.is_(None), available_page),
+        or_(WikiFAQ.wiki_page_id.is_(None), published_page),
     )
 
 
@@ -50,10 +33,10 @@ def data(row):
         "id": str(row.id),
         "content_revision": row.content_revision,
         "row_version": row.row_version,
-        "standard_question": row.standard_question,
+        "standard_question": readable_faq_text(row.standard_question),
         "similar_questions": list(row.similar_questions),
         "negative_questions": list(row.negative_questions),
-        "answers": list(row.answers),
+        "answers": [readable_faq_text(answer) for answer in row.answers],
         "answer_strategy": row.answer_strategy,
         "wiki_page_id": str(row.wiki_page_id) if row.wiki_page_id else None,
     }

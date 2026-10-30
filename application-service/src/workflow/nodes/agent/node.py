@@ -206,6 +206,7 @@ class AgentNode(BaseNode):
                         state.get("memory_storage_type") or "neo4j",
                         state.get("user_rag_memory_id") or "",
                         config_id=config_id,
+                        app_id=self.workflow_config.get("app_id"),
                     )
                     if memory_tool:
                         langchain_tools.append(memory_tool)

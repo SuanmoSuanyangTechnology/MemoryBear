@@ -18,10 +18,11 @@ from, so both shapes reject identically.
 from __future__ import annotations
 
 import logging
+import time
 from datetime import UTC
 from typing import TYPE_CHECKING
 
-from auth_sdk.schema import UserContext
+from auth_sdk.schema import ApiKeyContext, UserContext
 from auth_sdk.snapshot import SnapshotUnavailable
 from fastapi import Request
 from jose.exceptions import JWTError
@@ -55,6 +56,12 @@ SOURCE_EXTERNAL = "ex_api"
 SOURCE_INTERNAL = "in_api"
 
 
+def _v1_fail(code: int, msg: str) -> dict:
+    """构造 /v1 外部集成统一失败信封（对齐宿主 app.core.response_utils.fail）。"""
+    return {"code": code, "msg": msg, "data": {}, "error": msg,
+            "time": int(time.time() * 1000)}
+
+
 def _extract_api_key(request: Request) -> str | None:
     """API key extraction: Authorization: Bearer <key> first, then X-API-Key
     (mirrors the monolith extract_api_key_from_request semantics — under the
@@ -65,6 +72,27 @@ def _extract_api_key(request: Request) -> str | None:
         if key:
             return key
     return request.headers.get("x-api-key") or None
+
+
+def _api_key_scope_denied(request: Request, ctx: ApiKeyContext) -> bool:
+    """Route-declared scope gate (all-of, matching the monolith
+    @require_api_key semantics): a key may only use routes whose required scopes
+    it carries. No target route means the request is never forwarded (stub /
+    unrouted), so nothing downstream is reachable; a resolved route with an empty
+    required_scopes is a misconfiguration and denies — never let a missing
+    declaration widen every key's reach."""
+    route = getattr(request.state, "target_route", None)
+    if route is None:
+        return False
+    if not route.required_scopes:
+        logger.warning(
+            "api key denied: route declares no required_scopes: %s",
+            request.url.path,
+        )
+        return True
+    # Snapshot values come from Redis (external boundary): a null/absent scopes
+    # field must deny, not raise.
+    return not set(route.required_scopes).issubset(ctx.scopes or ())
 
 
 def _profile_headers(
@@ -166,8 +194,8 @@ async def terminate_user(request: Request, deps: GatewayDeps) -> AuthResult:
 
 
 async def terminate_api_key(request: Request, deps: GatewayDeps) -> AuthResult:
-    """API-key path (/v1/): snapshot (fail-closed) → QPS + daily quota →
-    identity context + injected headers + audit event.
+    """API-key path (/v1/): snapshot (fail-closed) → route scope gate →
+    QPS + daily quota → identity context + injected headers + audit event.
 
     The key acts on behalf of its creator: the actor everywhere (headers,
     audit) is the creator user_id, the same subject the enterprise internal
@@ -175,18 +203,32 @@ async def terminate_api_key(request: Request, deps: GatewayDeps) -> AuthResult:
     """
     api_key = _extract_api_key(request)
     if api_key is None:
-        return AuthResult(status_code=401, detail="missing api key")
+        # /v1 契约：未携带 Key → 400 / code 3007（API_KEY_NOT_FOUND）
+        body = _v1_fail(3007, "请求未携带 API Key")
+        return AuthResult(status_code=400, detail="missing api key", body=body)
     try:
         ctx = await deps.reader.get_api_key_snapshot(api_key)
     except SnapshotUnavailable:
-        # Snapshot state unobtainable → reject (fail-closed)
-        return AuthResult(status_code=401, detail="auth unavailable")
+        # Snapshot state unobtainable → reject (fail-closed). 按无效 Key 契约返回。
+        body = _v1_fail(3009, "API Key 无效")
+        return AuthResult(status_code=401, detail="auth unavailable", body=body)
     if ctx is None:
-        return AuthResult(status_code=401, detail="invalid api key")
+        body = _v1_fail(3009, "API Key 无效")
+        return AuthResult(status_code=401, detail="invalid api key", body=body)
     if ctx.user_id is None:
         # No creator subject (deleted creator / stale snapshot): reject fast —
         # an ak:* placeholder must never reach downstream services.
-        return AuthResult(status_code=401, detail="invalid api key")
+        body = _v1_fail(3009, "API Key 无效")
+        return AuthResult(status_code=401, detail="invalid api key", body=body)
+    # Authorization before quota: an out-of-scope call must not consume the
+    # key's QPS/daily budget (monolith order: scope check before rate limits).
+    if _api_key_scope_denied(request, ctx):
+        # /v1 契约：权限范围不足 → 403 / code 3012（API_KEY_INVALID_SCOPE）
+        return AuthResult(
+            status_code=403,
+            detail="insufficient scope",
+            body=_v1_fail(3012, "API Key 权限不足"),
+        )
     if not ctx.rate_limit_disabled:
         for check, limit in (
             (deps.limiter.check_qps, ctx.rate_limit),
@@ -200,7 +242,11 @@ async def terminate_api_key(request: Request, deps: GatewayDeps) -> AuthResult:
                 # Quota state unobtainable → reject (fail-closed): the SDK
                 # limiter contract is "gateway converts to 401", never an
                 # unhandled 500.
-                return AuthResult(status_code=401, detail="auth unavailable")
+                return AuthResult(
+                    status_code=401,
+                    detail="auth unavailable",
+                    body=_v1_fail(3009, "API Key 无效"),
+                )
             if not allowed:
                 return AuthResult(
                     status_code=429, detail="rate limit exceeded", headers=headers
