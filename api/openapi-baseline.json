@@ -1251,6 +1251,47 @@
         }
       }
     },
+    "/v1/memory/emotion-reply": {
+      "post": {
+        "tags": [
+          "Emotion Reply"
+        ],
+        "summary": "获取本轮情绪回应提示词",
+        "operationId": "emotion_reply_v1_memory_emotion_reply_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmotionReplyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmotionReplyResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/knowledges/knowledgetype": {
       "get": {
         "tags": [
@@ -3905,7 +3946,7 @@
           "V1 - Memory API"
         ],
         "summary": "Get Hot Memory Tags Api",
-        "description": "查询 API Key 绑定空间下的热门记忆标签（实时聚合，无缓存）。\n\n空间由 API Key 绑定、不接受外部指定，杜绝跨空间越权。数据源为\nend_users.memory_tags，按文本精确匹配合并，frequency 为采用该 tag 的\n终端用户数。返回 data=[{\"name\", \"frequency\"}]，与管理端接口一致。",
+        "description": "查询 API Key 绑定空间下的热门记忆标签（实时聚合，无缓存）。\n\n空间由 API Key 绑定、不接受外部指定，杜绝跨空间越权。数据源为\nend_users.memory_tags，按文本精确匹配合并，frequency 为采用该 tag 的\n终端用户数。返回 data=[{\"name\", \"frequency\"}]，与管理端接口一致。\n\n与管理端实现共用同一处理函数，迁移开关打开时由它转发记忆画像服务；\n关闭时仍是原来的本地实现。",
         "operationId": "get_hot_memory_tags_api_v1_memory_analytics_hot_memory_tags_get",
         "parameters": [
           {
@@ -4204,6 +4245,94 @@
             "content": {
               "application/json": {
                 "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/memory_config/read_config_personality_anchor": {
+      "get": {
+        "tags": [
+          "V1 - Memory Config API"
+        ],
+        "summary": "Read Config Personality Anchor",
+        "description": "Read personality-anchor settings within the API Key workspace.",
+        "operationId": "read_config_personality_anchor_v1_memory_config_read_config_personality_anchor_get",
+        "parameters": [
+          {
+            "name": "config_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "记忆配置ID",
+              "title": "Config Id"
+            },
+            "description": "记忆配置ID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/memory_config/update_config_personality_anchor": {
+      "post": {
+        "tags": [
+          "V1 - Memory Config API"
+        ],
+        "summary": "Update Config Personality Anchor",
+        "description": "Replace all six settings within the API Key workspace.",
+        "operationId": "update_config_personality_anchor_v1_memory_config_update_config_personality_anchor_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PersonalityAnchorConfigUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse"
+                }
               }
             }
           },
@@ -5610,6 +5739,52 @@
             "content": {
               "application/json": {
                 "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/memory/analytics/scene_community_graph": {
+      "get": {
+        "tags": [
+          "V1 - User Memory API"
+        ],
+        "summary": "API Key 场景社区图谱",
+        "description": "Authenticate the API Key face and forward to memory-profile.",
+        "operationId": "getSceneCommunityGraphForService",
+        "parameters": [
+          {
+            "name": "end_user_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "终端用户 UUID",
+              "format": "uuid",
+              "title": "End User Id"
+            },
+            "description": "终端用户 UUID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse"
+                }
               }
             }
           },
@@ -7807,7 +7982,9 @@
           "similarity_threshold": {
             "anyOf": [
               {
-                "type": "number"
+                "type": "number",
+                "maximum": 1.0,
+                "minimum": 0.0
               },
               {
                 "type": "null"
@@ -7818,7 +7995,9 @@
           "vector_similarity_weight": {
             "anyOf": [
               {
-                "type": "number"
+                "type": "number",
+                "maximum": 1.0,
+                "minimum": 0.0
               },
               {
                 "type": "null"
@@ -7827,16 +8006,9 @@
             "title": "Vector Similarity Weight"
           },
           "top_k": {
-            "anyOf": [
-              {
-                "type": "integer",
-                "maximum": 100.0,
-                "minimum": 1.0
-              },
-              {
-                "type": "null"
-              }
-            ],
+            "type": "integer",
+            "maximum": 100.0,
+            "minimum": 1.0,
             "title": "Top K",
             "default": 20
           },
@@ -7848,7 +8020,8 @@
               {
                 "type": "null"
               }
-            ]
+            ],
+            "description": "检索方式，忽略大小写及首尾空格；FAQ 使用 wiki-faq，兼容历史 wiki-FAQ。"
           },
           "rerank_mode": {
             "anyOf": [
@@ -8494,6 +8667,31 @@
         ],
         "title": "AppCreate"
       },
+      "AppEmotionPolicyRequest": {
+        "properties": {
+          "app_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "App Id"
+          },
+          "tenant_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Tenant Id"
+          },
+          "emotion_code": {
+            "type": "string",
+            "title": "Emotion Code"
+          }
+        },
+        "type": "object",
+        "required": [
+          "app_id",
+          "tenant_id",
+          "emotion_code"
+        ],
+        "title": "AppEmotionPolicyRequest"
+      },
       "AppFeatures": {
         "properties": {
           "file_upload": {
@@ -8533,6 +8731,96 @@
         "type": "object",
         "title": "AppFeatures",
         "description": "应用功能特性配置"
+      },
+      "AppOntologyBatchRequest": {
+        "properties": {
+          "app_ids": {
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "type": "array",
+            "title": "App Ids"
+          }
+        },
+        "type": "object",
+        "title": "AppOntologyBatchRequest"
+      },
+      "AppOntologyBindRequest": {
+        "properties": {
+          "app_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "App Id"
+          },
+          "tenant_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Tenant Id"
+          },
+          "ontology_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Ontology Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "app_id",
+          "tenant_id",
+          "ontology_id"
+        ],
+        "title": "AppOntologyBindRequest"
+      },
+      "AppOntologyFilterRequest": {
+        "properties": {
+          "app_ids": {
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "type": "array",
+            "title": "App Ids"
+          },
+          "ontology_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ontology Status"
+          },
+          "field_search": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Field Search"
+          }
+        },
+        "type": "object",
+        "title": "AppOntologyFilterRequest"
+      },
+      "AppOntologyUnbindRequest": {
+        "properties": {
+          "app_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "App Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "app_id"
+        ],
+        "title": "AppOntologyUnbindRequest"
       },
       "AppShareCreate": {
         "properties": {
@@ -9170,6 +9458,33 @@
           "file"
         ],
         "title": "Body_import_qa_new_doc_v1_chunks__kb_id__import_qa_post"
+      },
+      "Body_import_skill_package_api_skills_packages_import_post": {
+        "properties": {
+          "file": {
+            "type": "string",
+            "format": "binary",
+            "title": "File",
+            "description": "标准技能包 zip（含 SKILL.md）"
+          },
+          "overwrite": {
+            "type": "boolean",
+            "title": "Overwrite",
+            "description": "同版本内容不同时覆盖更新",
+            "default": false
+          },
+          "conflict_strategy": {
+            "type": "string",
+            "title": "Conflict Strategy",
+            "description": "同名 legacy 技能冲突策略：overwrite | rename",
+            "default": "rename"
+          }
+        },
+        "type": "object",
+        "required": [
+          "file"
+        ],
+        "title": "Body_import_skill_package_api_skills_packages_import_post"
       },
       "Body_import_workflow_config_api_apps_workflow_import_post": {
         "properties": {
@@ -11312,6 +11627,121 @@
         "title": "EmotionReplyConfig",
         "description": "情绪感知回复配置。"
       },
+      "EmotionReplyData": {
+        "properties": {
+          "emotion_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Emotion Code"
+          },
+          "score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Score"
+          },
+          "tone": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tone"
+          },
+          "do": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Do"
+          },
+          "avoid": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Avoid"
+          },
+          "prompt_injection": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prompt Injection"
+          }
+        },
+        "type": "object",
+        "title": "EmotionReplyData"
+      },
+      "EmotionReplyRequest": {
+        "properties": {
+          "message": {
+            "type": "string",
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Message"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "message"
+        ],
+        "title": "EmotionReplyRequest"
+      },
+      "EmotionReplyResponse": {
+        "properties": {
+          "code": {
+            "type": "integer",
+            "title": "Code",
+            "description": "业务状态码，0=成功，非0=各类业务异常",
+            "default": 0
+          },
+          "msg": {
+            "type": "string",
+            "title": "Msg",
+            "description": "给人看的简短提示",
+            "default": "OK"
+          },
+          "data": {
+            "$ref": "#/components/schemas/EmotionReplyData"
+          },
+          "error": {
+            "type": "string",
+            "title": "Error",
+            "description": "失败时的字段级错误信息，成功时为空字符串",
+            "default": ""
+          },
+          "time": {
+            "type": "integer",
+            "title": "Time",
+            "description": "Unix时间戳（秒）"
+          }
+        },
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "title": "EmotionReplyResponse"
+      },
       "EmotionSuggestionsRequest": {
         "properties": {
           "end_user_id": {
@@ -11433,6 +11863,19 @@
         ],
         "title": "EmotionWordcloudRequest",
         "description": "获取情绪词云数据请求"
+      },
+      "EndUserDomainInfoRequest": {
+        "properties": {
+          "end_user_id": {
+            "type": "string",
+            "title": "End User Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "end_user_id"
+        ],
+        "title": "EndUserDomainInfoRequest"
       },
       "EndUserIdentityUpdate": {
         "properties": {
@@ -11782,70 +12225,28 @@
         "description": "本体提取请求模型\n\n用于POST /api/ontology/extract端点的请求体。\n\nAttributes:\n    scenario: 场景描述文本,不能为空\n    domain: 可选的领域提示(如Healthcare, Education等)\n    llm_id: LLM模型ID,必须提供\n    scene_id: 场景ID,必须提供,用于将提取的类保存到指定场景\n\nExamples:\n    >>> request = ExtractionRequest(\n    ...     scenario=\"医院管理患者记录...\",\n    ...     domain=\"Healthcare\",\n    ...     llm_id=\"550e8400-e29b-41d4-a716-446655440000\",\n    ...     scene_id=\"660e8400-e29b-41d4-a716-446655440000\"\n    ... )"
       },
       "FAQApprove": {
-        "properties": {
-          "expected_row_version": {
-            "type": "integer",
-            "minimum": 1.0,
-            "title": "Expected Row Version"
-          },
-          "content_revision": {
-            "type": "integer",
-            "minimum": 1.0,
-            "title": "Content Revision"
-          },
-          "reviewed_wiki_snapshot_id": {
-            "type": "string",
-            "format": "uuid",
-            "title": "Reviewed Wiki Snapshot Id"
-          }
-        },
+        "properties": {},
         "additionalProperties": false,
         "type": "object",
-        "required": [
-          "expected_row_version",
-          "content_revision",
-          "reviewed_wiki_snapshot_id"
-        ],
-        "title": "FAQApprove"
+        "title": "FAQApprove",
+        "description": "审核执行时的当前内容；旧版本与快照参数兼容接收但忽略。"
       },
       "FAQBatchApproval": {
         "properties": {
-          "expected_row_version": {
-            "type": "integer",
-            "minimum": 1.0,
-            "title": "Expected Row Version"
-          },
-          "content_revision": {
-            "type": "integer",
-            "minimum": 1.0,
-            "title": "Content Revision"
-          },
-          "reviewed_wiki_snapshot_id": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "uuid"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Reviewed Wiki Snapshot Id"
-          },
           "faq_id": {
             "type": "string",
             "format": "uuid",
-            "title": "Faq Id"
+            "title": "Faq Id",
+            "description": "待审核 FAQ ID；由服务端在事务内读取最新状态"
           }
         },
         "additionalProperties": false,
         "type": "object",
         "required": [
-          "expected_row_version",
-          "content_revision",
           "faq_id"
         ],
-        "title": "FAQBatchApproval"
+        "title": "FAQBatchApproval",
+        "description": "批量审核以执行时的 FAQ 内容和最新已发布 Wiki 快照为准。"
       },
       "FAQBatchApprove": {
         "properties": {
@@ -11856,7 +12257,8 @@
             "type": "array",
             "maxItems": 100,
             "minItems": 1,
-            "title": "Items"
+            "title": "Items",
+            "description": "按 FAQ ID 去重；审核当前内容并推进至最新已发布 Wiki 基线，已达目标则跳过"
           }
         },
         "additionalProperties": false,
@@ -12000,21 +12402,6 @@
           "is_enabled"
         ],
         "title": "FAQEnabled"
-      },
-      "FAQExpected": {
-        "properties": {
-          "expected_row_version": {
-            "type": "integer",
-            "minimum": 1.0,
-            "title": "Expected Row Version"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "expected_row_version"
-        ],
-        "title": "FAQExpected"
       },
       "FileInput": {
         "properties": {
@@ -14123,6 +14510,17 @@
             "type": "boolean",
             "title": "Draft",
             "default": false
+          },
+          "app_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "App Id"
           }
         },
         "type": "object",
@@ -15429,6 +15827,57 @@
         ],
         "title": "PermissionType"
       },
+      "PersonalityAnchorConfigUpdate": {
+        "properties": {
+          "personality_anchor_enabled": {
+            "type": "boolean",
+            "title": "Personality Anchor Enabled"
+          },
+          "personality_anchor_auto_solidify": {
+            "type": "boolean",
+            "title": "Personality Anchor Auto Solidify"
+          },
+          "personality_anchor_read_metadata": {
+            "type": "boolean",
+            "title": "Personality Anchor Read Metadata"
+          },
+          "personality_anchor_read_preferences": {
+            "type": "boolean",
+            "title": "Personality Anchor Read Preferences"
+          },
+          "personality_anchor_sync_cycle": {
+            "type": "string",
+            "enum": [
+              "daily",
+              "weekly",
+              "manual"
+            ],
+            "title": "Personality Anchor Sync Cycle"
+          },
+          "personality_anchor_base_principles": {
+            "type": "string",
+            "maxLength": 4000,
+            "title": "Personality Anchor Base Principles"
+          },
+          "config_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Config Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "personality_anchor_enabled",
+          "personality_anchor_auto_solidify",
+          "personality_anchor_read_metadata",
+          "personality_anchor_read_preferences",
+          "personality_anchor_sync_cycle",
+          "personality_anchor_base_principles",
+          "config_id"
+        ],
+        "title": "PersonalityAnchorConfigUpdate",
+        "description": "Replace all six settings of a workspace-owned configuration."
+      },
       "PilotRunInput": {
         "properties": {
           "config_id": {
@@ -15748,7 +16197,8 @@
         "properties": {
           "version_name": {
             "type": "string",
-            "title": "Version Name"
+            "title": "Version Name",
+            "description": "版本名称，可自定义"
           },
           "release_notes": {
             "type": "string",
@@ -16204,7 +16654,7 @@
           "semantic",
           "graph",
           "hybrid",
-          "wiki-FAQ"
+          "wiki-faq"
         ],
         "title": "RetrieveType",
         "description": "Retrieval type enumeration"
@@ -16505,6 +16955,196 @@
         "title": "ShareConversationRequest",
         "description": "分享会话请求"
       },
+      "ShortTermMemoCounts": {
+        "properties": {
+          "total": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Total"
+          },
+          "current": {
+            "$ref": "#/components/schemas/ShortTermMemoGroupCounts"
+          },
+          "ended": {
+            "$ref": "#/components/schemas/ShortTermMemoGroupCounts"
+          }
+        },
+        "type": "object",
+        "required": [
+          "total",
+          "current",
+          "ended"
+        ],
+        "title": "ShortTermMemoCounts"
+      },
+      "ShortTermMemoGroupCounts": {
+        "properties": {
+          "total": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Total"
+          },
+          "dated": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Dated"
+          },
+          "undated": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Undated"
+          }
+        },
+        "type": "object",
+        "required": [
+          "total",
+          "dated",
+          "undated"
+        ],
+        "title": "ShortTermMemoGroupCounts"
+      },
+      "ShortTermMemoItem": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "statement": {
+            "type": "string",
+            "title": "Statement"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "ongoing",
+              "ended"
+            ],
+            "title": "Status"
+          },
+          "start_date": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "format": "int64",
+                "description": "UTC Unix timestamp in milliseconds"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start Date"
+          },
+          "end_date": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "format": "int64",
+                "description": "UTC Unix timestamp in milliseconds"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End Date"
+          },
+          "is_time_unspecified": {
+            "type": "boolean",
+            "title": "Is Time Unspecified"
+          },
+          "retain_until": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "format": "int64",
+                "description": "UTC Unix timestamp in milliseconds"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retain Until"
+          },
+          "relative_days": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Relative Days"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "statement",
+          "status",
+          "start_date",
+          "end_date",
+          "is_time_unspecified",
+          "retain_until",
+          "relative_days"
+        ],
+        "title": "ShortTermMemoItem"
+      },
+      "ShortTermMemoList": {
+        "properties": {
+          "counts": {
+            "$ref": "#/components/schemas/ShortTermMemoCounts"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ShortTermMemoItem"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "page": {
+            "$ref": "#/components/schemas/PageMeta"
+          }
+        },
+        "type": "object",
+        "required": [
+          "counts",
+          "items",
+          "page"
+        ],
+        "title": "ShortTermMemoList"
+      },
+      "ShortTermMemoResponse": {
+        "properties": {
+          "code": {
+            "type": "integer",
+            "title": "Code",
+            "description": "业务状态码，0=成功，非0=各类业务异常",
+            "default": 0
+          },
+          "msg": {
+            "type": "string",
+            "title": "Msg",
+            "description": "给人看的简短提示",
+            "default": "OK"
+          },
+          "data": {
+            "$ref": "#/components/schemas/ShortTermMemoList"
+          },
+          "error": {
+            "type": "string",
+            "title": "Error",
+            "description": "失败时的字段级错误信息，成功时为空字符串",
+            "default": ""
+          },
+          "time": {
+            "type": "integer",
+            "format": "int64",
+            "title": "Time",
+            "description": "UTC Unix timestamp in milliseconds"
+          }
+        },
+        "type": "object",
+        "required": [
+          "data",
+          "time"
+        ],
+        "title": "ShortTermMemoResponse"
+      },
       "SkillConfig": {
         "properties": {
           "enabled": {
@@ -16548,71 +17188,33 @@
       },
       "SkillCreate": {
         "properties": {
-          "name": {
+          "skill_md": {
             "type": "string",
-            "title": "Name",
-            "description": "技能名称"
+            "title": "Skill Md",
+            "description": "SKILL.md 全文（含 YAML frontmatter 头部块）"
           },
-          "description": {
+          "files": {
             "anyOf": [
               {
-                "type": "string"
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Description",
-            "description": "技能描述"
-          },
-          "tools": {
-            "items": {
-              "additionalProperties": {
-                "type": "string"
-              },
-              "type": "object"
-            },
-            "type": "array",
-            "title": "Tools",
-            "description": "工具对象列表: [{\"tool_id\": \"xxx\", \"operation\": \"yyy\"}]"
-          },
-          "config": {
-            "additionalProperties": true,
-            "type": "object",
-            "title": "Config",
-            "description": "技能配置"
-          },
-          "prompt": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Prompt",
-            "description": "技能专属提示词"
-          },
-          "is_active": {
-            "type": "boolean",
-            "title": "Is Active",
-            "description": "是否激活",
-            "default": true
-          },
-          "is_public": {
-            "type": "boolean",
-            "title": "Is Public",
-            "description": "是否公开到市场",
-            "default": false
+            "title": "Files",
+            "description": "附加文件 {rel_path: 文本内容}，如 references/guide.md、scripts/run.py"
           }
         },
         "type": "object",
         "required": [
-          "name"
+          "skill_md"
         ],
         "title": "SkillCreate",
-        "description": "创建 Skill"
+        "description": "创建 Skill（一律创建标准格式）\n\n`skill_md`：SKILL.md 全文（含 YAML frontmatter 头部块）；\n`files`：可选附加文件 {rel_path: 文本内容}，如 references/guide.md。\n不再支持以 legacy 表单字段（name/prompt/keywords/tools）创建。"
       },
       "SkillUpdate": {
         "properties": {
@@ -16699,11 +17301,38 @@
               }
             ],
             "title": "Is Public"
+          },
+          "skill_md": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Skill Md",
+            "description": "SKILL.md 全文（含 frontmatter），standard 技能用于更新包内容"
+          },
+          "files": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Files",
+            "description": "附加文件 {rel_path: 文本内容}（整体替换）"
           }
         },
         "type": "object",
         "title": "SkillUpdate",
-        "description": "更新 Skill"
+        "description": "更新 Skill\n\n- standard 技能：传 skill_md / files 更新包内容（整体替换）\n- legacy 技能：传 name / description / tools / config / prompt 更新行字段（存量兼容）"
       },
       "StructuredRetrievalQuery": {
         "oneOf": [
@@ -16746,14 +17375,6 @@
             ],
             "title": "Role",
             "description": "角色描述"
-          },
-          "priority": {
-            "type": "integer",
-            "maximum": 100.0,
-            "minimum": 1.0,
-            "title": "Priority",
-            "description": "优先级（1-100）",
-            "default": 1
           },
           "capabilities": {
             "items": {
@@ -17594,7 +18215,9 @@
           "similarity_threshold": {
             "anyOf": [
               {
-                "type": "number"
+                "type": "number",
+                "maximum": 1.0,
+                "minimum": 0.0
               },
               {
                 "type": "null"
@@ -17605,7 +18228,9 @@
           "vector_similarity_weight": {
             "anyOf": [
               {
-                "type": "number"
+                "type": "number",
+                "maximum": 1.0,
+                "minimum": 0.0
               },
               {
                 "type": "null"
@@ -17614,16 +18239,9 @@
             "title": "Vector Similarity Weight"
           },
           "top_k": {
-            "anyOf": [
-              {
-                "type": "integer",
-                "maximum": 100.0,
-                "minimum": 1.0
-              },
-              {
-                "type": "null"
-              }
-            ],
+            "type": "integer",
+            "maximum": 100.0,
+            "minimum": 1.0,
             "title": "Top K",
             "default": 20
           },
@@ -17635,14 +18253,16 @@
                   "participle",
                   "semantic",
                   "graph",
-                  "hybrid"
+                  "hybrid",
+                  "wiki-faq"
                 ]
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Retrieve Type"
+            "title": "Retrieve Type",
+            "description": "检索方式，忽略大小写及首尾空格；FAQ 使用 wiki-faq，兼容历史 wiki-FAQ。"
           },
           "rerank_mode": {
             "anyOf": [
