@@ -2580,6 +2580,74 @@ def sync_knowledge_for_kb(kb_id: uuid.UUID):
         return f"sync knowledge '{kb_name}' failed: {e}"
 
 
+#: RAG 写入任务与删除 / 身份归并共用同一把按宿主的写锁，参数与
+#: memory_storage_controller 的删除路径保持一致（1200s + 60s 等待）。
+_RAG_WRITE_LOCK_EXPIRE_SECONDS = 1200
+_RAG_WRITE_LOCK_TIMEOUT_SECONDS = 60
+
+
+class _RagOwnerGone(Exception):
+    """拿锁后确认宿主已被删除：本次写入必须放弃，避免给已删除宿主复活记忆。"""
+
+
+class _RagWriteLockTimeout(Exception):
+    """等待 memory_write 写锁超时（删除/归并正持有），交由 Celery 重试。"""
+
+
+def _resolve_rag_write_owner(end_user_id: str) -> tuple[str, bool]:
+    """按合并映射解析当前 owner，并返回其是否仍然活跃。
+
+    ``get_end_user_by_id`` 先查活跃的原 id，查不到再按 ``end_user_merge`` 路由到
+    目标 id；返回 None 表示既未合并也不活跃（已被删除）。
+    """
+    from app.repositories.end_user_repository import EndUserRepository
+
+    with get_db_context() as db:
+        user = EndUserRepository(db).get_end_user_by_id(uuid.UUID(end_user_id))
+    if user is None:
+        return end_user_id, False
+    return str(user.id), True
+
+
+def _acquire_rag_write_lock(
+        end_user_id: str,
+        *,
+        redis_client,
+) -> tuple[str, RedisFairLock]:
+    """Resolve → lock → re-resolve：保证锁覆盖写入时的真实 owner。
+
+    任务排队期间宿主可能已被归并（owner 变化）或删除（owner 消失）：
+    - owner 变化：释放旧锁，按新 owner 重新抢，直到稳定；
+    - owner 消失：抛 ``_RagOwnerGone``，调用方放弃写入；
+    - 抢锁超时（删除/归并正持有）：抛 ``_RagWriteLockTimeout``，交由任务重试。
+    """
+    candidate_id = end_user_id
+    while True:
+        owner_id, active = _resolve_rag_write_owner(candidate_id)
+        if not active:
+            raise _RagOwnerGone(owner_id)
+        lock = RedisFairLock(
+            key=f"memory_write:{owner_id}",
+            redis_client=redis_client,
+            expire=_RAG_WRITE_LOCK_EXPIRE_SECONDS,
+            timeout=_RAG_WRITE_LOCK_TIMEOUT_SECONDS,
+            auto_renewal=True,
+        )
+        if not lock.acquire():
+            raise _RagWriteLockTimeout(owner_id)
+        try:
+            confirmed_id, confirmed_active = _resolve_rag_write_owner(candidate_id)
+        except Exception:
+            lock.release()
+            raise
+        if confirmed_active and confirmed_id == owner_id:
+            return owner_id, lock
+        lock.release()
+        if not confirmed_active:
+            raise _RagOwnerGone(confirmed_id)
+        candidate_id = confirmed_id
+
+
 @celery_app.task(
     bind=True,
     name="app.tasks.process_rag_memory",
@@ -2603,6 +2671,7 @@ def process_rag_memory(
     重试/重放时覆盖写同一文档，天然幂等。
     """
     loop = set_asyncio_event_loop()
+    write_lock = None
 
     try:
         # 1. 身份归并重定向：排队期间用户可能已被跨渠道归并
@@ -2729,6 +2798,46 @@ def process_rag_memory(
             )
             raise self.retry(exc=exc)
 
+        # 1.5 参与 memory_write:{end_user_id} 写锁协议：删除与身份归并都在同一把
+        #     锁下改归属/删数据，写入任务必须在锁内按「当前 owner」落库，否则：
+        #     - 归并期间解析出的旧 owner 已迁移完毕，随后写入会留在已软删的
+        #       source 上，读取按 target 过滤 → 记忆丢失；
+        #     - 删除期间/之后写入会给已删除宿主复活一条记忆。
+        #     锁必须落在业务 Redis（REDIS_DB）：删除与归并都用
+        #     get_thread_safe_sync_redis() 抢锁，若这里改用 Celery backend 库
+        #     （get_sync_redis_client）key 不在同一 keyspace，等于没加锁。
+        #     Redis 不可用时保持既有降级（告警后继续写）：删除/归并同样依赖这把
+        #     锁，Redis 故障期间它们也无法执行，此时不加锁不会引入竞态。
+        redis_client = get_thread_safe_sync_redis()
+        try:
+            resolved_end_user_id, write_lock = _acquire_rag_write_lock(
+                end_user_id,
+                redis_client=redis_client,
+            )
+        except _RagOwnerGone:
+            logger.warning(
+                "[CELERY RAG] 宿主已删除，放弃写入: id=%s, end_user=%s",
+                id,
+                end_user_id,
+            )
+            return {"status": "skipped_user_gone", "id": id}
+        except _RagWriteLockTimeout:
+            # 删除/归并正持锁：短暂重试比直接丢记忆安全
+            raise self.retry(
+                exc=RuntimeError(
+                    f"memory_write lock timeout: end_user={end_user_id}"
+                )
+            )
+        except RedisError as exc:
+            logger.warning(
+                "[CELERY RAG] Redis unavailable, writing without memory_write "
+                "lock: id=%s, end_user=%s, err=%s",
+                id,
+                end_user_id,
+                exc,
+            )
+            write_lock = None
+
         async def _run():
             from app.core.memory.storage.enums import MemoryNodeType
             from app.core.memory.storage.provider.elasticsearch.client import ElasticClient
@@ -2801,6 +2910,8 @@ def process_rag_memory(
             )
             raise self.retry(exc=exc)
     finally:
+        if write_lock is not None:
+            write_lock.release()
         _shutdown_loop_gracefully(loop)
 
 
