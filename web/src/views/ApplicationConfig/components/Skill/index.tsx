@@ -1,58 +1,34 @@
-/*
- * @Author: ZhaoYing 
- * @Date: 2026-02-05 10:42:56 
- * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-26 10:18:56
- */
-import { Fragment, useEffect, type FC } from 'react'
+import { useEffect, useRef, type FC } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Space, Switch, Form, Flex } from 'antd'
-import clsx from 'clsx'
+import { Button, Form, Flex } from 'antd'
 
-import type { SkillConfigForm } from './types'
-import RbCard from '@/components/RbCard/Card'
-import SkillsItem from './SkillsItem'
+import type { SkillConfigForm, SkillModalRef } from './types'
+import Empty from '@/components/Empty'
+import Card from '../Card'
+import SkillListModal from './SkillListModal'
+import SkillRow from './SkillRow'
 import { getSkillList } from '@/api/skill'
-import type { Skill } from '@/views/Skills/types'
-
-/**
- * Process flow steps for skill execution
- * Defines the sequential steps in the skill execution workflow
- */
-const processObj = [
-  'receiveTask',      // Step 1: Receive task
-  'analyTask',        // Step 2: Analyze task intent
-  'dynamicMatchSkill', // Step 3: Dynamically match appropriate skill
-  'executeTask'       // Step 4: Execute the task
-]
+import { Kind, type Skill } from '@/views/Skills/types'
+import { getPluginMembers, groupSkills } from './selection'
+import Tag from '@/components/Tag'
 
 const DEFAULT_SKILLS_PATH = ['skills']
 
 interface SkillListProps {
-  /**  Current skill configuration values */
-  value?: SkillConfigForm;
-  /** Callback function when configuration changes */
-  onChange?: (config: SkillConfigForm) => void;
   /** Parent form path for the skill configuration. */
   name?: string[];
-  /** Whether users may enable all skills at once. */
-  supportAll?: boolean;
 }
 
 /**
  * Skill Configuration Component
  * 
- * Main component for managing agent skill configuration including:
- * - Enabling/disabling skill functionality
- * - Configuring dynamic skill binding
- * - Displaying skill execution process flow
- * - Managing skill selection and assignment
+ * Main component for managing the skills available to an agent.
  */
 const SkillList: FC<SkillListProps> = ({
   name = DEFAULT_SKILLS_PATH,
-  supportAll = true,
 }) => {
   const { t } = useTranslation()
+  const skillModalRef = useRef<SkillModalRef>(null)
   const form = Form.useFormInstance()
   const skillConfig = (Form.useWatch(name, form) as SkillConfigForm | undefined) || {}
 
@@ -68,95 +44,106 @@ const SkillList: FC<SkillListProps> = ({
     const skillsWithoutName = normalizedSkills.filter(skill => !(skill as Skill).name)
 
     if (skillsWithoutName.length === 0) return
-
-    getSkillList({ page: 1, pagesize: 100 })
+    getSkillList({ page: 1, pagesize: 100, ids: skillIds.map(item => typeof item === 'string' ? item : item?.id).filter(Boolean).join(',') })
       .then(res => {
         const response = res as { items: Skill[] }
-        const skillMap = new Map(response.items.map(skill => [skill.id, skill]))
-        const completedSkills = normalizedSkills.map(skill => ({
-          ...skill,
-          ...skillMap.get(skill.id),
-        }))
+        const skillMap = new Map(response.items.flatMap(skill =>
+          (skill.kind === Kind.Plugin ? [skill, ...getPluginMembers(skill)] : [skill])
+            .map(item => [item.id, item] as const)
+        ))
+        const completedSkills = normalizedSkills.map(skill => skillMap.get(skill.id) ?? skill as Skill)
         const hasChanges = skillIds.some((skill, index) => (
           typeof skill === 'string'
           || (Boolean(skillMap.get(normalizedSkills[index].id)) && !(normalizedSkills[index] as Skill).name)
         ))
 
         if (hasChanges) {
-          form.setFieldValue([...name, 'skill_ids'], completedSkills)
+          form.setFieldValue([...name, 'skill_ids'], groupSkills(completedSkills, response.items.filter(skill => skill.kind === Kind.Plugin)))
         }
       })
   }, [form, name, skillConfig?.skill_ids])
 
-  useEffect(() => {
-    if (skillConfig?.enabled === false) {
-      form.setFields([
-        { name: [...name, 'all_skills'], value: false },
-        { name: [...name, 'skill_ids'], value: [] }
-      ])
-    }
-  }, [name, skillConfig?.enabled, form])
+  /** Opens the skill selection modal. */
+  const handleAddSkill = () => {
+    skillModalRef.current?.handleOpen()
+  }
 
+  /** Merges newly selected skills into the form without duplicates. */
+  const refresh = (values: SkillConfigForm['skill_ids']) => {
+    const currentSkills = form.getFieldValue([...name, 'skill_ids']) || []
+    form.setFieldValue([...name, 'skill_ids'], groupSkills([...currentSkills, ...(values ?? [])]))
+  }
 
   return (
-    <RbCard
-      title={<>
-        <div className="rb:font-[MiSans-Bold] rb:font-bold">{t('application.skill')}</div>
-        <div className="rb:font-regular! rb:text-[12px] rb:text-gray-600">{t('application.skillTitle')}</div>
-      </>}
+    <Card 
+      title={t('application.skill')}
       extra={
-        <Space>
-          <Form.Item
-            valuePropName="checked"
-            name={[...name, 'enabled']}
-            noStyle
-          >
-            <Switch />
-          </Form.Item>
-        </Space>
+        <Button className="rb:h-6! rb:py-0! rb:px-2! rb:rounded-md! rb:text-gray-800" onClick={handleAddSkill}>+ {t('application.addSkill')}</Button>
       }
-      headerType="borderless"
-      headerClassName={clsx('rb:py-[16px]! rb:leading-[22px]! rb:font-regular', {
-        'rb:h-[76px]! rb:py-[16px]!': !skillConfig?.enabled,
-        'rb:h-[68px]! rb:pb-2!': skillConfig?.enabled,
-      })}
     >
-      {skillConfig?.enabled && (
-        <Flex vertical gap={8} className="rb:bg-gray-50 rb:rounded-xl rb:pt-2.5! rb:pb-3! rb:px-3!">
-          <div className="rb:text-gray-800 rb:font-medium rb:leading-4.5 rb:px-1">
-            {t('application.executeProcessPreview')}
-          </div>
-          <Flex
-            align="center"
-            justify="space-between"
-            gap={14}
-            className="rb:text-[12px] rb:bg-[#FFFFFF]! rb:rounded-lg rb-border rb:py-2.5! rb:pl-4! rb:pr-3.25! rb:mb-2!"
-          >
-            {processObj.map((key, index) => (
-              <Fragment key={index}>
-                <Flex align="center" gap={8}>
-                  <Flex align="center" justify="center" className="rb:size-4 rb:rounded-full rb:bg-[#171719] rb:text-white rb:font-medium">
-                    {index + 1}
-                  </Flex>
-                  <span className="rb:inline-block rb:max-w-16">{t(`application.${key}`)}</span>
-                </Flex>
-                {index !== processObj.length - 1 && (
-                  <div className="rb:w-10 rb:h-4.5 rb:bg-cover rb:bg-[url('@/assets/images/application/arrow_right.svg')]" />
-                )}
-              </Fragment>
-            ))}
-          </Flex>
-          <Form.Item noStyle>
-            <SkillsItem
-              title={t('application.dynamicBindingSkill')}
-              parentName={name}
-              supportAll={supportAll}
-              emptyTitle={t('application.dynamicBindingSkill_empty')}
-            />
-          </Form.Item>
-        </Flex>
-      )}
-    </RbCard>
+      <div className="rb:leading-4.5 rb:text-[12px] rb:mb-2 rb:font-medium">
+        {t('application.skillTitle')}
+      </div>
+      <Form.List name={[...name, 'skill_ids']}>
+        {(fields, { remove }) => (
+          fields.length === 0
+            ? (
+              <Empty size={88}
+                subTitle={t('application.dynamicBindingSkill_empty')}
+                className="rb:flex rb:items-center rb:justify-center rb:min-h-44.5 rb:rounded-xl rb:border rb:border-[#D6E0EF]"
+              />
+            )
+            : (
+              <Flex vertical gap={12}>
+                {fields.map((field) => {
+                  const skill = form.getFieldValue([...name, 'skill_ids', field.name])
+                  return (
+                    <div key={field.key} className="rb:px-3 rb:py-1 rb:bg-[#FFFFFF] rb-border rb:rounded-lg">
+                      <SkillRow
+                        skill={skill}
+                        trailing={
+                          <>
+                            {skill.is_active === false && <Tag color="default" className="rb:shrink-0">{t('skills.unavailable')}</Tag>}
+                            <div onClick={() => remove(field.name)}
+                              className="rb:size-4.5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/common/delete.svg')] rb:hover:bg-[url('@/assets/images/common/delete_red.svg')]" />
+                          </>
+                        }
+                        renderMember={(_, memberIndex) => {
+                          const member = getPluginMembers(skill)[memberIndex]
+                          return (
+                            <SkillRow
+                              key={member.id || memberIndex} skill={member}
+                              trailing={
+                                <>
+                                  {member.is_active === false && <Tag color="default" className="rb:shrink-0">{t('skills.unavailable')}</Tag>}
+                                  <button type="button" aria-label={`${t('common.delete')} ${member.name}`}
+                                    onClick={() => {
+                                      const current = form.getFieldValue([...name, 'skill_ids', field.name]) as Skill
+                                      const members = (current.members ?? []).filter((_, index) => index !== memberIndex)
+                                      if (members.length === 0) remove(field.name)
+                                      else form.setFieldValue([...name, 'skill_ids', field.name], { ...current, members })
+                                    }}
+                                    className="rb:size-4.5 rb:shrink-0 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/common/delete.svg')] rb:hover:bg-[url('@/assets/images/common/delete_red.svg')]" />
+                                </>
+                              }
+                            />
+                          )
+                        }}
+                      />
+                    </div>
+                  )
+                })}
+              </Flex>
+            )
+        )}
+      </Form.List>
+      {/* Skill selection modal */}
+      <SkillListModal
+        ref={skillModalRef}
+        selectedList={form.getFieldValue([...name, 'skill_ids']) || []}
+        refresh={refresh}
+      />
+    </Card>
   )
 }
 

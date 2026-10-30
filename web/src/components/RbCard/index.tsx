@@ -1,9 +1,3 @@
-/*
- * @Author: ZhaoYing 
- * @Date: 2026-02-02 15:21:14 
- * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-08-14 18:49:36
- */
 /**
  * RbCard Component
  * 
@@ -26,7 +20,7 @@ interface RbCardProps extends CardProps {
   isNeedTooltip?: boolean;
   children?: ReactNode;
   /** Custom avatar component */
-  avatarText?: string;
+  avatarText?: string | ReactNode;
   avatarClassName?: string;
   /** Avatar image URL */
   avatarUrl?: string | null;

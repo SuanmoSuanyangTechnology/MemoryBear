@@ -119,7 +119,7 @@ export const home = {
       ontologySceneTypes: 'Ontology Scene Types',
       ontologyConfigureScene: 'Configure Scene',
       prompt: 'Prompt Engineering',
-      skills: 'Skill Library',
+      skills: 'Skills',
       workbench: 'Workbench',
       memoryRelated: 'Memory Hub',
       advancedSettings: 'Advanced Settings',
@@ -136,6 +136,7 @@ export const home = {
       predictionProgress: 'Prediction Process',
       preferenceEngine: 'Preference Engine',
       sceneCommunityEngine: 'Multimodal Episodic Memory Reconstruction Engine',
+      resources: 'Resource Center',
     },
     dashboard: {
       total_models: 'Available Models',
