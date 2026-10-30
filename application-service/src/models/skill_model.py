@@ -37,7 +37,11 @@ class Skill(Base):
         comment="已安装的标准包",
     )
     skill_format = Column(
-        String(16), default="legacy", nullable=False, comment="技能格式：legacy | standard"
+        String(16),
+        default="legacy",
+        server_default="legacy",
+        nullable=False,
+        comment="技能格式：legacy | standard",
     )
     call_name = Column(
         String(64),
