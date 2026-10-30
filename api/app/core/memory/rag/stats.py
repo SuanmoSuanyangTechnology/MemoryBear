@@ -136,7 +136,7 @@ def _log_late_result(future) -> None:
         logger.error(
             "[RagStats] late sync stats finished with error: %s",
             exc,
-            exc_info=exc,
+            exc_info=(type(exc), exc, exc.__traceback__),
         )
 
 
