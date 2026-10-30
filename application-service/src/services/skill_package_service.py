@@ -27,6 +27,7 @@ import asyncio
 import datetime
 import hashlib
 import io
+import logging
 import mimetypes
 import re
 import threading
@@ -56,6 +57,8 @@ _CALL_NAME_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 # Slugify for legacy rows: everything else collapses to a hyphen.
 _SLUG_INVALID_RE = re.compile(r"[^a-z0-9-]+")
 _SKILL_MD_GLOB_RE = re.compile(r"(^|/)SKILL\.md$")
+
+logger = logging.getLogger(__name__)
 
 DESCRIPTION_MAX = 1024
 MAX_REL_PATH_LEN = 1024
@@ -134,6 +137,29 @@ def _run_async(coro_factory: "Callable[[], Coroutine]"):
     if "error" in box:
         raise box["error"]
     return box.get("value")
+
+
+def _release_read_transaction(db: "Session | None", where: str) -> None:
+    """End the sync session's read transaction so its pooled connection goes back.
+
+    Sync routes run on the threadpool, so a blocking object-storage read here does
+    not stall the event loop — but it does keep the sync pool's connection checked
+    out for its whole duration. Sessions are ``expire_on_commit=False``, so rows
+    loaded before the commit stay readable. Failures only log a warning: this is a
+    side-channel optimization and must never affect the business path. No-op for
+    ``None`` or an idle session.
+    """
+
+    if db is None:
+        return
+    try:
+        if not db.in_transaction():
+            return
+        db.commit()
+    except Exception as exc:  # noqa: BLE001 - side-channel optimization
+        logger.warning(
+            "_release_read_transaction failed where=%s error=%s", where, exc
+        )
 
 
 def _skill_storage_key(tenant_id: uuid.UUID, package_id: uuid.UUID, rel_path: str) -> str:
@@ -1310,7 +1336,7 @@ class SkillPackageService:
         if not skill.is_active:
             raise BusinessException("技能不存在或已删除", BizCode.NOT_FOUND)
 
-        member = SkillPackageService._skill_pack_entries(repo, tenant_id, skill)
+        member = SkillPackageService._skill_pack_entries(repo, tenant_id, skill, db)
         if member is None:
             raise BusinessException("技能包内容为空，无法导出", BizCode.NOT_FOUND)
         entries, download_stem = member
@@ -1321,11 +1347,14 @@ class SkillPackageService:
         repo: SkillPackageRepository,
         tenant_id: uuid.UUID,
         skill: Skill,
+        db: Session | None = None,
     ) -> tuple[list[tuple[str, bytes]], str] | None:
         """One member's pack as pack-relative ``(rel_path, bytes)`` entries + download stem.
 
         Returns ``None`` for a standard row whose package/files are missing (nothing to
         export); a legacy row is converted on the fly to a single ``SKILL.md`` member.
+        ``db`` is only used to release the pooled connection before the object-storage
+        read-back; omitting it keeps this helper usable from pure-composition callers.
         """
 
         if (skill.skill_format or "legacy") == "standard" and skill.package_id:
@@ -1335,7 +1364,7 @@ class SkillPackageService:
             files = repo.get_files(pkg.id)
             if not files:
                 return None
-            return SkillPackageService._pack_file_entries(files), pkg.name
+            return SkillPackageService._pack_file_entries(files, db), pkg.name
 
         # legacy -> standard on-the-fly conversion (never written back)
         _frontmatter, files = SkillPackageService.legacy_to_package_files(skill)
@@ -1345,12 +1374,21 @@ class SkillPackageService:
         )
 
     @staticmethod
-    def _pack_file_entries(files) -> list[tuple[str, bytes]]:
-        """Resolve skill_files rows to bytes (object storage read back for big/binary)."""
+    def _pack_file_entries(files, db: Session | None = None) -> list[tuple[str, bytes]]:
+        """Resolve skill_files rows to bytes (object storage read back for big/binary).
+
+        Every row is already loaded, so the read transaction can be closed before the
+        first storage round-trip: a large pack must not hold a pooled connection while
+        its payloads are fetched one by one.
+        """
 
         entries: list[tuple[str, bytes]] = []
+        released = False
         for f in files:
             if f.storage_ref:
+                if not released:
+                    _release_read_transaction(db, "skill.export")
+                    released = True
                 payload = SkillPackageService._read_storage_object(f.storage_ref)
             else:
                 payload = (f.content or "").encode("utf-8")
@@ -1393,7 +1431,7 @@ class SkillPackageService:
             ).first()
             if not skill:
                 continue
-            member = SkillPackageService._skill_pack_entries(repo, tenant_id, skill)
+            member = SkillPackageService._skill_pack_entries(repo, tenant_id, skill, db)
             if member is None:
                 continue
             entries, _stem = member
@@ -1823,7 +1861,7 @@ class SkillPackageService:
                 if pkg:
                     detail = SkillPackageService._skill_card(skill, pkg)
                     files = repo.get_files(pkg.id)
-                    detail["skill_md"] = SkillPackageService._file_text(pkg.id, "SKILL.md", files)
+                    detail["skill_md"] = SkillPackageService._file_text(pkg.id, "SKILL.md", files, db)
                     detail["files"] = [
                         {
                             "rel_path": f.rel_path,
@@ -1868,7 +1906,9 @@ class SkillPackageService:
                     "has_scripts": pkg.has_scripts,
                     "is_active": skill.is_active,
                     "files_count": len(pkg_files),
-                    "skill_md": SkillPackageService._file_text(pkg.id, "SKILL.md", pkg_files),
+                    "skill_md": SkillPackageService._file_text(
+                        pkg.id, "SKILL.md", pkg_files, db
+                    ),
                     "files": [
                         {
                             "rel_path": f.rel_path,
@@ -1884,8 +1924,18 @@ class SkillPackageService:
         return detail
 
     @staticmethod
-    def _file_text(package_id: uuid.UUID, rel_path: str, files: list) -> Optional[str]:
-        """Read one pack file as text for detail/read_skill (object storage read back when needed)."""
+    def _file_text(
+        package_id: uuid.UUID,
+        rel_path: str,
+        files: list,
+        db: Session | None = None,
+    ) -> Optional[str]:
+        """Read one pack file as text for detail (object storage read back when needed).
+
+        ``db`` releases the pooled connection before the storage round-trip; the detail
+        response otherwise has no write to protect, so this is the only place the
+        request's read transaction needs to end.
+        """
 
         for f in files:
             if f.rel_path != rel_path:
@@ -1893,6 +1943,7 @@ class SkillPackageService:
             if f.content is not None:
                 return f.content
             if f.storage_ref:
+                _release_read_transaction(db, "skill.detail")
                 return SkillPackageService._read_storage_object(f.storage_ref).decode(
                     "utf-8", errors="replace"
                 )
