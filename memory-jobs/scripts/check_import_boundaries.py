@@ -9,7 +9,8 @@ executable version of that contract:
 * ``infrastructure`` implements domain/application ports, and may import only
   ``application.ports`` from the application layer;
 * ``interfaces`` (Celery tasks) may use application use cases, domain ids and
-  the composition root, never infrastructure adapters or ORM mappings;
+  the composition root's per-domain facades, never infrastructure adapters,
+  ORM mappings or a container adapter accessor;
 * ``models`` is a leaf: nothing under ``src`` except other models.
 
 ``src/tasks`` is treated as the interface layer until it moves to
@@ -74,6 +75,10 @@ FORBIDDEN_BY_LAYER = {
 }
 
 #: Third-party packages that only the infrastructure layer may touch.
+#: The container's public surface: one facade per task domain. An interface may
+#: ask for ``get_container().profile_cache`` but never for an adapter.
+CONTAINER_DOMAINS = frozenset({"profile_cache", "interest"})
+
 APPLICATION_FORBIDDEN_THIRD_PARTY = frozenset(
     {
         "celery",
@@ -117,6 +122,8 @@ def check_source(path: Path, source: str) -> list[str]:
 
     for lineno, name in _imports(tree):
         failures.extend(_check_import(path, lineno, name, layer))
+
+    failures.extend(_check_container_access(tree, path, layer))
     return failures
 
 
@@ -177,6 +184,39 @@ def _check_import(path: Path, lineno: int, name: str, layer: str) -> list[str]:
             ]
 
     return []
+
+
+def _check_container_access(tree: ast.AST, path: Path, layer: str) -> list[str]:
+    """The interface layer may only take a domain facade from the container.
+
+    ``get_container().profile_cache.generate()`` passes; anything reached
+    directly from the container (an adapter, a Unit of Work, a Redis client)
+    fails, so a task cannot bypass its use case.
+    """
+
+    if layer != INTERFACES:
+        return []
+
+    allowed = "|".join(sorted(CONTAINER_DOMAINS))
+    failures: list[str] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Attribute):
+            continue
+        call = node.value
+        if not isinstance(call, ast.Call) or not _is_get_container(call.func):
+            continue
+        if node.attr not in CONTAINER_DOMAINS:
+            failures.append(
+                f"{path}:{node.lineno}: interfaces may only use a domain facade "
+                f"(get_container().<{allowed}>), not get_container().{node.attr}"
+            )
+    return failures
+
+
+def _is_get_container(func: ast.expr) -> bool:
+    if isinstance(func, ast.Name):
+        return func.id == "get_container"
+    return isinstance(func, ast.Attribute) and func.attr == "get_container"
 
 
 def main() -> int:

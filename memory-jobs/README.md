@@ -44,7 +44,7 @@ memory-jobs/
 │   ├── common/                 # 日志、任务上下文
 │   ├── prompts/                # 提示词模板（Jinja2）；由 PromptCatalog 适配器包装
 │   ├── domain/                 # DDD 领域层：聚合、值对象、领域服务、策略（仅标准库）
-│   ├── application/            # 应用层：用例、端口、DTO
+│   ├── application/            # 应用层：用例、端口、DTO、提示词输入投影
 │   ├── infrastructure/         # 同步客户端 + 适配器（persistence/lock/cache/llm/prompts）
 │   ├── models/                 # 宿主表的 SQLAlchemy 映射（只允许适配器引用）
 │   ├── interfaces/             # 接口层：Celery 任务与健康探针
@@ -56,7 +56,11 @@ memory-jobs/
 │   │       ├── health/ping.py
 │   │       ├── interest_distribution/{generate,init_for_users}.py
 │   │       └── profile_cache/{generate,generate_workspace,scan}.py
-│   └── composition.py          # 组合根：runtime -> 适配器 -> 用例
+│   └── composition/            # 组合根：runtime -> 共享依赖 -> 每个任务域一个 wiring
+│       ├── container.py        #   Container：runtime + _dependencies + 域 facade
+│       ├── shared.py           #   SharedDependencies：进程内只构造一次的适配器
+│       ├── profile_cache.py    #   ProfileCacheWiring：generate/scan/fan_out
+│       └── interest.py         #   InterestWiring：generate/prewarm
 ├── tests/
 ├── scripts/check_sync_only.py
 ├── deploy/k8s/                 # worker / beat 部署清单
@@ -195,7 +199,10 @@ priority field`）。该参数由 Celery 的 `task_queue_max_priority` 写出，
    `src/application/<context>/`（事务边界、端口、DTO），`src/interfaces/tasks/` 下按
    任务域建包，每个 Celery 任务一个模块（如 `src/interfaces/tasks/memory_write/write.py`），
    并在该包的 `__init__.py` 里显式 import 任务模块完成注册。任务只解析参数、调用用例、
-   序列化结果；适配器的装配在 `src/composition.py`。
+   序列化结果；适配器的装配在 `src/composition/`：新任务域加一个 wiring 模块
+   （`profile_cache.py` 那样）并在 `Container` 上加一个 property，**不要**往共享适配器
+   或别的域的 wiring 里加东西。任务只能调用 `get_container().<domain>`，CI 的
+   `scripts/check_import_boundaries.py` 会拦截直接拿适配器的写法。
 2. 任务使用 `shared_task` + `JobTask` 基类，并显式命名（`memory_jobs.<domain>.<action>`）：
 
 ```python
@@ -281,6 +288,9 @@ PeriodicTask(
   服务端只返回该租户可见的场景（自有场景 + 系统默认场景）；租户为空的 workspace 不发起
   查询。未配置时与「未装插件的 API」一致：洞察输入里 uuid 场景键
   视为已删除、整组丢弃。该服务**不参与**依赖探测，挂了只会丢场景名，不会让任务失败。
+- `JOBS_SCAN_PAGE_SIZE`（默认 500）：周期扫描每次从库里取多少候选。按 `end_user.id`
+  keyset 分页，每页一个短读作用域，内存上界是页大小而不是工作空间的用户数；扫描期间
+  不持有数据库连接。
 - `JOBS_INTEREST_CACHE_EXPIRE_SECONDS`（默认 24h）：预热单元写入兴趣分布缓存的 TTL。
   与 memory-profile 的 `PROFILE_INTEREST_CACHE_EXPIRE_SECONDS` 是同一个键（重启后者的
   环境变量即可同时生效），两个写入方用同一个过期时间。

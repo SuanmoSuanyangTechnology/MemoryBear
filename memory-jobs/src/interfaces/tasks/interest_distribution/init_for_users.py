@@ -13,9 +13,9 @@ from typing import Any
 from celery import shared_task
 from task_bridge.mem_router import TaskName
 
-from src.common.normalization import normalize_language, parse_uuid
 from src.composition import get_container
-from src.domain.shared.ids import EndUserId, WorkspaceId
+from src.domain.shared.ids import EndUserId, WorkspaceId, parse_uuid
+from src.domain.shared.language import Language
 from src.interfaces.tasks.base import JobTask
 
 logger = logging.getLogger(__name__)
@@ -31,7 +31,7 @@ INIT_LIMIT = 5
 
 
 def _use_case(language: str, limit: int):
-    return get_container().prewarm_interest_distributions(language, limit)
+    return get_container().interest.prewarm(language, limit)
 
 
 @shared_task(
@@ -60,7 +60,7 @@ def init_for_users(
     ws_uuid = parse_uuid(workspace_id)
     if ws_uuid is None:
         raise ValueError(f"invalid workspace_id: {workspace_id!r}")
-    language = normalize_language(language)
+    language = Language.parse(language).value
 
     candidates: list[EndUserId] = []
     invalid = 0

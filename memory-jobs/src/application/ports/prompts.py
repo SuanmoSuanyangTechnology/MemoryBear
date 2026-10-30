@@ -1,8 +1,8 @@
 """Prompt rendering port.
 
-Prompts are domain artifacts, but rendering them currently uses Jinja2. The
-domain keeps the port and the application generators depend on it; the Jinja
-adapter lives in infrastructure.
+Prompts are an application artifact (text shaped for the model), but rendering
+them currently uses Jinja2. The application generators depend on this port; the
+Jinja adapter lives in infrastructure.
 """
 
 from __future__ import annotations

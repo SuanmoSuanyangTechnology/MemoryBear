@@ -1,4 +1,4 @@
-"""External lookups the domain needs.
+"""External lookups the insight-input projection needs.
 
 ``SceneNameLookup`` maps scene-type ids to their display names for one tenant.
 The enterprise edition supplies it; the open build passes ``None``.

@@ -11,7 +11,7 @@ from typing import Any
 from celery import shared_task
 from task_bridge.mem_router import TaskName
 
-from src.composition import SCAN_LANGUAGE, get_container
+from src.composition import get_container
 from src.interfaces.tasks.base import JobTask
 
 #: Enumeration plus dispatch only; the API used the same 10-minute budget.
@@ -20,7 +20,7 @@ SCAN_SOFT_TIME_LIMIT = 540
 
 
 def _use_case():
-    return get_container().scan_profile_caches(SCAN_LANGUAGE)
+    return get_container().profile_cache.scan()
 
 
 @shared_task(

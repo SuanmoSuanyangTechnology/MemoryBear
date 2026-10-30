@@ -1,8 +1,8 @@
 """Chat-model port.
 
-The domain service depends on the two calls it makes, not on the provider
-client. ``SyncChatModel`` in the infrastructure layer satisfies this protocol
-structurally, so no adapter class is needed for the model itself.
+The application generators depend on the two calls they make, not on the
+provider client. ``SyncChatModel`` in the infrastructure layer satisfies this
+protocol structurally, so no adapter class is needed for the model itself.
 """
 
 from __future__ import annotations

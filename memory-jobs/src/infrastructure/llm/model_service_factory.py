@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from src.domain.ports.llm import ChatModel
+from src.application.ports.chat_model import ChatModel
 from src.domain.shared.ids import ModelConfigId, TenantId
 from src.infrastructure.model_service import ModelServiceManager
 

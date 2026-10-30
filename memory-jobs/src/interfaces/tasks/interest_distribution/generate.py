@@ -15,20 +15,15 @@ from celery import shared_task
 from task_bridge.mem_router import TaskName
 
 from src.application.interest.generate import GenerateInterestDistributionCommand
-from src.common.normalization import normalize_language, parse_uuid
 from src.composition import get_container
-from src.domain.shared.ids import WorkspaceId
+from src.domain.shared.ids import WorkspaceId, parse_uuid
 from src.interfaces.tasks.base import JobTask
 
 logger = logging.getLogger(__name__)
 
 
 def _use_case():
-    return get_container().generate_interest_distribution()
-
-
-def _cache():
-    return get_container().interest_cache()
+    return get_container().interest.generate()
 
 
 @shared_task(
@@ -61,12 +56,9 @@ def generate(
             workspace_id=WorkspaceId(ws_uuid),
             language=language,
             limit=limit,
+            write_cache=write_cache,
         )
     ).to_payload()
-    if write_cache and result.get("cacheable"):
-        _cache().write(
-            end_user_id, normalize_language(language), result.get("items") or []
-        )
     logger.info(
         "interest distribution generated user=%s items=%s cacheable=%s elapsed=%.3fs",
         end_user_id,

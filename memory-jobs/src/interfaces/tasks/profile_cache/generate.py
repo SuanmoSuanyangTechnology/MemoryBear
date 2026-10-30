@@ -14,9 +14,8 @@ from celery import shared_task
 from task_bridge.mem_router import TaskName
 
 from src.application.profile_cache.generate import GenerateProfileCacheCommand
-from src.common.normalization import parse_uuid
 from src.composition import get_container
-from src.domain.shared.ids import WorkspaceId
+from src.domain.shared.ids import WorkspaceId, parse_uuid
 from src.interfaces.tasks.base import JobTask
 
 logger = logging.getLogger(__name__)
@@ -28,11 +27,7 @@ GENERATE_SOFT_TIME_LIMIT = 840
 
 
 def _use_case():
-    return get_container().generate_profile_cache()
-
-
-def _lock():
-    return get_container().inflight_lock()
+    return get_container().profile_cache.generate()
 
 
 @shared_task(
@@ -59,34 +54,20 @@ def generate(
     if ws_uuid is None:
         raise ValueError(f"invalid workspace_id: {workspace_id!r}")
 
-    lock = _lock()
-    if not lock.acquire(end_user_id, self.request.id):
-        logger.info(
-            "profile cache generation skipped, another refresh is in flight user=%s "
-            "workspace=%s",
-            end_user_id,
-            workspace_id,
+    outcome = _use_case().execute(
+        GenerateProfileCacheCommand(
+            end_user_id=end_user_id,
+            workspace_id=WorkspaceId(ws_uuid),
+            lock_owner=str(self.request.id or ""),
+            language=language,
+            refresh_insight=refresh_insight,
+            refresh_summary=refresh_summary,
         )
-        return {
-            "status": "skipped",
-            "reason": "inflight",
-            "end_user_id": end_user_id,
-            "workspace_id": workspace_id,
-            "task_id": self.request.id,
-        }
-
-    try:
-        result = _use_case().execute(
-            GenerateProfileCacheCommand(
-                end_user_id=end_user_id,
-                workspace_id=WorkspaceId(ws_uuid),
-                language=language,
-                refresh_insight=refresh_insight,
-                refresh_summary=refresh_summary,
-            )
-        ).to_payload()
-    finally:
-        lock.release(end_user_id, self.request.id)
+    )
+    result = outcome.to_payload()
+    if outcome.skipped_reason is not None:
+        result["task_id"] = self.request.id
+        return result
 
     requested = [
         name

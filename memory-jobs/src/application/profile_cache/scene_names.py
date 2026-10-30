@@ -19,7 +19,7 @@ from collections.abc import Mapping
 from typing import Any
 from uuid import UUID
 
-from src.domain.ports.scene_names import SceneNameLookup
+from src.application.ports.scene_names import SceneNameLookup
 from src.domain.shared.ids import TenantId
 
 logger = logging.getLogger(__name__)

@@ -12,9 +12,8 @@ from typing import Any
 from celery import shared_task
 from task_bridge.mem_router import TaskName
 
-from src.common.normalization import parse_uuid
 from src.composition import get_container
-from src.domain.shared.ids import WorkspaceId
+from src.domain.shared.ids import WorkspaceId, parse_uuid
 from src.interfaces.tasks.base import JobTask
 
 logger = logging.getLogger(__name__)
@@ -26,7 +25,7 @@ GENERATE_WORKSPACE_SOFT_TIME_LIMIT = 540
 
 
 def _use_case(language: str):
-    return get_container().fan_out_workspace(language)
+    return get_container().profile_cache.fan_out(language)
 
 
 @shared_task(

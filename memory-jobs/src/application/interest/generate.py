@@ -1,9 +1,11 @@
-"""Generate one user's interest distribution for the caller to cache.
+"""Generate one user's interest distribution and optionally cache it.
 
 The workspace and config are read in one short scope; the generation then runs
 under its own budget. A missing workspace is not cacheable, while a missing
 config or a failed generation degrades to an empty cacheable result — the
-behaviour the online path and the pre-warm both depend on.
+behaviour the online path and the pre-warm both depend on. The cache write is
+part of the use case: the online path asks the caller to store it, while the
+pre-warm's unit writes it here for the next request to hit.
 """
 
 from __future__ import annotations
@@ -13,13 +15,14 @@ from dataclasses import dataclass
 from typing import Any
 
 from src.application.interest.generator import generate_interest_distribution
+from src.application.ports.cache import InterestCache
 from src.application.ports.llm import ChatModelFactory
+from src.application.ports.prompts import PromptCatalog
 from src.application.ports.uow import Repositories, UnitOfWork
 from src.domain.interest.model import InterestDistribution
 from src.domain.interest.repository import InterestSourceReader
 from src.domain.model_config.model import ResolvedChatModel
 from src.domain.model_config.services import ModelResolutionService
-from src.domain.ports.prompts import PromptCatalog
 from src.domain.shared.errors import ModelConfigurationError
 from src.domain.shared.ids import WorkspaceId
 from src.domain.shared.language import Language
@@ -34,6 +37,8 @@ class GenerateInterestDistributionCommand:
     workspace_id: WorkspaceId
     language: str = "zh"
     limit: int = 5
+    #: The pre-warm's units set this; the online path leaves the cache to its caller.
+    write_cache: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,11 +58,13 @@ class GenerateInterestDistributionUseCase:
         source: InterestSourceReader,
         chat_models: ChatModelFactory,
         prompts: PromptCatalog,
+        cache: InterestCache,
     ) -> None:
         self.uow = uow
         self.source = source
         self.chat_models = chat_models
         self.prompts = prompts
+        self.cache = cache
         self.model_resolution = ModelResolutionService()
 
     def execute(
@@ -109,11 +116,14 @@ class GenerateInterestDistributionUseCase:
                 cacheable=True,
             )
 
+        items = [
+            {"name": item.name, "frequency": item.frequency}
+            for item in distribution.items
+        ]
+        if command.write_cache and distribution.cacheable:
+            self.cache.write(command.end_user_id, language.value, items)
         return InterestDistributionResult(
-            items=[
-                {"name": item.name, "frequency": item.frequency}
-                for item in distribution.items
-            ],
+            items=items,
             cacheable=distribution.cacheable,
         )
 

@@ -18,17 +18,33 @@ class InvalidIdentifier(DomainError):
     """A caller supplied an identifier that cannot be a domain identity."""
 
 
+class InvalidValue(DomainError):
+    """A value object or domain service rejected the value it was given.
+
+    Every domain rule violation uses this hierarchy, never ``ValueError``;
+    parsing and caller-contract checks at the boundary may still raise
+    ``ValueError``.
+    """
+
+
 class WorkspaceNotEligible(DomainError):
     """The workspace cannot generate profile caches.
 
     ``reason`` is part of the cross-service contract: the producer runs the same
-    predicate before publishing, so the three values must not drift.
+    predicate before publishing, so the three values must not drift. ``detail``
+    carries diagnostics (the storage type) without polluting the reason token.
     """
 
-    def __init__(self, workspace_id: WorkspaceId, reason: str) -> None:
-        super().__init__(reason)
+    def __init__(
+        self,
+        workspace_id: WorkspaceId,
+        reason: str,
+        detail: str | None = None,
+    ) -> None:
+        super().__init__(reason if detail is None else f"{reason} ({detail})")
         self.workspace_id = workspace_id
         self.reason = reason
+        self.detail = detail
 
 
 class UserNotFound(DomainError):

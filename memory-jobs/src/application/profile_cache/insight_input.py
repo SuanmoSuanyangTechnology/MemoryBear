@@ -10,11 +10,11 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import cast
 
-from src.domain.profile.metadata import (
+from src.application.profile_cache.metadata import (
     flatten_domain_specific_info,
     split_metadata_entry,
 )
-from src.domain.profile.scene_names import (
+from src.application.profile_cache.scene_names import (
     drop_deleted_scene_entries,
     project_domain_names,
 )

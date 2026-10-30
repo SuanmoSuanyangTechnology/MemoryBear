@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
 
+from src.domain.shared.errors import InvalidValue
 from src.domain.shared.ids import EndUserId, WorkspaceId
 from src.domain.shared.text import compact_text
 
@@ -30,6 +31,23 @@ class SourceVersion:
     metadata_updated_at: datetime | None
     metadata_row_exists: bool
 
+    def is_satisfied_by(self, current: SourceVersion) -> bool:
+        """True when ``current`` is still the version a write was built from.
+
+        The persistence adapter's conditional update encodes the same rule in
+        SQL (``write_time IS NOT DISTINCT FROM`` plus the metadata-row check);
+        this method is the domain's reading of it, used to explain a write that
+        matched no row.
+        """
+
+        if self.write_time != current.write_time:
+            return False
+        if self.metadata_row_exists != current.metadata_row_exists:
+            return False
+        if not self.metadata_row_exists:
+            return True
+        return self.metadata_updated_at == current.metadata_updated_at
+
 
 @dataclass(frozen=True, slots=True)
 class InsightFinding:
@@ -38,9 +56,9 @@ class InsightFinding:
 
     def __post_init__(self) -> None:
         if not 1 <= len(self.finding) <= 160:
-            raise ValueError("finding must be 1..160 characters")
+            raise InvalidValue("finding must be 1..160 characters")
         if not 1 <= len(self.recommended_action) <= 120:
-            raise ValueError("recommended_action must be 1..120 characters")
+            raise InvalidValue("recommended_action must be 1..120 characters")
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,9 +70,9 @@ class InsightContent:
 
     def __post_init__(self) -> None:
         if not 1 <= len(self.overview) <= 240:
-            raise ValueError("overview must be 1..240 characters")
+            raise InvalidValue("overview must be 1..240 characters")
         if len(self.findings) > 3:
-            raise ValueError("at most three findings are kept")
+            raise InvalidValue("at most three findings are kept")
 
     @classmethod
     def create(
@@ -94,6 +112,26 @@ class MemoryInsight:
     content: InsightContent
     source_version: SourceVersion
     generated_at: datetime
+
+    def is_superseded_by(self, current: SourceVersion) -> bool:
+        """The source moved after this insight was generated."""
+
+        return not self.source_version.is_satisfied_by(current)
+
+    def classify_missed_write(self, current: SourceVersion | None) -> WriteOutcome:
+        """Explain a conditional write that matched no row.
+
+        ``None`` means the user or its workspace is gone, inactive or no longer
+        Neo4j-backed; a source that still matches means the same (the row was
+        deleted between the update and this read). Only a moved source makes the
+        insight stale rather than unwritable-and-gone.
+        """
+
+        if current is None:
+            return WriteOutcome.NOT_FOUND
+        if self.is_superseded_by(current):
+            return WriteOutcome.SUPERSEDED
+        return WriteOutcome.NOT_FOUND
 
 
 @dataclass(frozen=True, slots=True)
