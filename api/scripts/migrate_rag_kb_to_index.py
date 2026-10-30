@@ -14,6 +14,9 @@
 （``/workspace_reembed``），那里有配额与续跑管理。
 
 清理（仅 ``--purge --yes`` 显式开启时执行，且逐 KB 校验通过才删）：
+- 校验范围是**整个 KB**，不是本次加载到的子集：只要该 KB 还有任一 document
+  不在已迁移集合里（例如 ``--end-user-id`` 只跑了一个宿主、同库其他宿主尚未
+  迁移），就跳过该 KB，避免连带删除其他宿主的旧数据
 - ``knowledges.status = 2``（列表不再显示）
 - 删除该 KB 下 ``documents`` 记录
 - 删除旧 chunk 索引 ``vector_index_{kb_id}_node``
@@ -346,6 +349,15 @@ ORDER BY k.id, d.file_name
 """
 
 
+#: 整库文档集合：清理校验用它，而不是本次按 --end-user-id 过滤后的子集。
+#: 两者口径必须一致（都只算 status = 1），否则会出现「校验通过、删除多删」。
+_KB_DOCUMENT_IDS_SQL = """
+SELECT d.id
+FROM documents d
+WHERE d.kb_id = :k AND d.status = 1
+"""
+
+
 def _load_documents(engine, workspace_id: str | None, end_user_id: str | None) -> list[dict[str, Any]]:
     from sqlalchemy import text as sql_text
 
@@ -552,11 +564,14 @@ def purge(
 ) -> None:
     """删除迁移已完成的旧记忆库（三层：chunk 索引 / documents / knowledges）。
 
-    逐 KB 校验：该 KB 本次加载到的**每个** document 都必须已完整写入
-    （``done_documents`` 含本次成功与历史断点成功的文档），且本次写入条数
-    与解析出的消息数一致，才允许清理。断点收尾轮（该 KB 全部文档都已在前轮
-    成功、本轮被 skip_documents 跳过、per_kb 无条目）仅按 ``all_done`` 判定，
-    否则已完整迁移的 KB 永远无法通过清理校验。
+    逐 KB 校验：先按**整库**文档集合校验（直接查 ``documents``，不受本次
+    ``--end-user-id`` 等过滤条件影响），该 KB 的每个 document 都必须已完整写入；
+    再校验本轮写入条数与解析出的消息数一致，才允许清理。断点收尾轮（该 KB 全部
+    文档都已在前轮成功、本轮被 skip_documents 跳过、per_kb 无条目）仅按整库覆盖
+    判定，否则已完整迁移的 KB 永远无法通过清理校验。
+
+    只按本次加载子集判定是危险的：``--end-user-id A`` 时子集只含 A 的文档，校验
+    会通过，但下面按 kb_id 整库删除，同库其他宿主尚未迁移的文档与旧索引会一起丢失。
     """
     from sqlalchemy import text as sql_text
 
@@ -570,25 +585,52 @@ def purge(
         if v is not None and (v.get("documents", 0) <= 0 or v.get("failed", 0) != 0):
             continue
 
+        # 清理校验以整库文档为准：--end-user-id / --workspace-id 只缩小本次加载
+        # 范围，但下面的状态更新与 DELETE 都是按 kb_id 整库执行，按子集判定会
+        # 连带删掉同库其他宿主尚未迁移的文档与旧索引。
+        with engine.connect() as conn:
+            kb_doc_ids = {
+                str(row[0])
+                for row in conn.execute(
+                    sql_text(_KB_DOCUMENT_IDS_SQL), {"k": kb_id}
+                ).all()
+            }
+        uncovered = kb_doc_ids - done_documents
+
         if dry_run:
             # dry-run 下 written 恒为 0，不能作为判定依据；这里只按解析结果预览，
             # 真正的清理判定与 dry_run 完全解耦
             if v is not None and v.get("messages", 0) > 0:
-                print(f"[DRY] 将清理 KB {kb_id}（status=2 + 删 documents + 删 chunk 索引）")
+                scope_note = ""
+                if len(doc_ids) != len(kb_doc_ids):
+                    scope_note = (
+                        f"，但该库共 {len(kb_doc_ids)} 个宿主文档，本次仅覆盖 "
+                        f"{len(doc_ids)} 个，正式执行时不会清理"
+                    )
+                print(
+                    f"[DRY] 将清理 KB {kb_id}"
+                    f"（status=2 + 删 documents + 删 chunk 索引）{scope_note}"
+                )
             continue
 
-        all_done = all(document_id in done_documents for document_id in doc_ids)
+        if uncovered:
+            print(
+                f"[WARN] 跳过 KB {kb_id}: 该库共 {len(kb_doc_ids)} 个宿主文档，"
+                f"{len(uncovered)} 个尚未迁移完成（可能未包含在本次 "
+                f"--end-user-id / --workspace-id 范围内），清理会连带删除这些宿主的旧数据"
+            )
+            continue
+
         # written_ok 只对本轮实际处理的文档有意义；断点收尾轮（v is None）
-        # 没有可比数据，仅按 all_done 判定
+        # 没有可比数据，仅按整库覆盖判定
         written_ok = (
             v is None
             or v.get("written", 0) == v.get("messages", 0)
         )
-        if not all_done or not written_ok:
+        if not written_ok:
             print(
-                f"[WARN] 跳过 KB {kb_id}: 未全部迁移成功 "
-                f"(documents={len(doc_ids)}, all_done={all_done}, "
-                f"written={v.get('written', 0)}/{v.get('messages', 0)}, "
+                f"[WARN] 跳过 KB {kb_id}: 本轮写入条数与解析出的消息数不一致 "
+                f"(written={v.get('written', 0)}/{v.get('messages', 0)}, "
                 f"failed={v.get('failed', 0)})"
             )
             continue
@@ -718,6 +760,12 @@ def main() -> int:
     if args.purge and not args.yes:
         print("[ERROR] --purge 会删除 documents 与 chunk 索引且不可回滚，需同时传 --yes 确认")
         return 2
+
+    if args.purge and args.end_user_id:
+        print(
+            "[INFO] --purge 与 --end-user-id 同时使用：只会清理「整库所有宿主文档"
+            "都已迁移完成」的知识库；同库仍有其他宿主未迁移时会自动跳过，不删任何数据"
+        )
 
     if args.purge and args.dry_run:
         print("[INFO] --purge 与 --dry-run 同时开启：只打印将要清理的 KB，不执行")
