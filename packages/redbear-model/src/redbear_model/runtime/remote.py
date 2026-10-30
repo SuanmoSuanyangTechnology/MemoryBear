@@ -62,7 +62,7 @@ HEADER_TRACE_ID = "X-Trace-Id"
 EVENT_STREAM_CONTENT_TYPE = "text/event-stream"
 
 _FRAME_KINDS = frozenset({"chunk", "result", "usage", "error", "done"})
-_DONE_STATUSES = frozenset({"ok", "fallback_succeeded"})
+DONE_STATUSES = frozenset({"ok", "fallback_succeeded"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -285,7 +285,7 @@ def decode_frame(event: str, data: str) -> InvokeFrame:
         return InvokeUsageFrame(event=_as_dict(payload, kind="usage"))
     if event == "done":
         status = _as_dict(payload, kind="done").get("status")
-        if status not in _DONE_STATUSES:
+        if status not in DONE_STATUSES:
             raise RemoteInvokeProtocolError(f"unknown done status: {status!r}")
         return InvokeDoneFrame(status=status)
     failure = _as_dict(payload, kind="error")
@@ -968,6 +968,7 @@ class RemoteRedBearChatModel(BaseChatModel):
 
 
 __all__ = [
+    "DONE_STATUSES",
     "EVENT_STREAM_CONTENT_TYPE",
     "HEADER_RESOURCE_ID",
     "HEADER_RESOURCE_TYPE",

@@ -30,6 +30,7 @@ RUN if [ "$NEED_MIRROR" == "1" ]; then \
     fi
 COPY packages/redbear-model /code/packages/redbear-model
 COPY packages/auth-sdk /code/packages/auth-sdk
+COPY packages/memorybear-grpc /code/packages/memorybear-grpc
 COPY model-service/pyproject.toml model-service/uv.lock /code/model-service/
 
 WORKDIR /code/model-service
@@ -81,9 +82,9 @@ COPY --from=builder --chown=memmodel:memmodel \
 
 USER memmodel
 
-EXPOSE 8080
+EXPOSE 8080 9090
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/internal/v1/health/live', timeout=3).read()"
 
-CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8080"]
+CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8080", "--loop", "asyncio"]

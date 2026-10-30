@@ -31,7 +31,11 @@ from pydantic import ValidationError
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 
-from .api.dependencies import Principal, principal_from_headers
+from .api.dependencies import (
+    API_KEY_ID_HEADER,
+    Principal,
+    principal_from_headers,
+)
 from .api.schemas.common import fail
 from .i18n import resolve_locale, translate
 from .request_logging import log_request_failure, safe_failure_detail
@@ -43,6 +47,9 @@ _PUBLIC_PATHS = frozenset(
     {
         "/internal/v1/health/live",
         "/internal/v1/health/ready",
+        # Prometheus scraping happens from the infrastructure network; the
+        # endpoint is restricted by NetworkPolicy, not by identity.
+        "/internal/v1/metrics",
     }
 )
 
@@ -185,6 +192,13 @@ class AppAuthMiddleware(BaseHTTPMiddleware):
             # Single inbound channel: the handler must never return a pass-through
             # here (its legacy-header set is empty); fail closed if one appears.
             return _auth_error(request, 401, "invalid token claims")
+        # The token is authoritative for the key identity; a context header
+        # that disagrees with the verified claims is a forged or stale binding
+        # and must never reach the key gate.
+        claims_key_id = getattr(ctx, "api_key_id", None) or None
+        metadata_key_id = request.headers.get(API_KEY_ID_HEADER) or None
+        if claims_key_id and metadata_key_id and claims_key_id != metadata_key_id:
+            return _auth_error(request, 401, "api key id mismatch")
         # Empty strings are a valid wire form for absent optional claims (the
         # interpreter defaults a missing workspace_id to ""); normalize them and
         # fail closed if the remaining identity claims cannot form a Principal.

@@ -1,0 +1,49 @@
+name: grpc-contract
+
+on:
+  pull_request:
+    paths:
+      - "proto/**"
+      - "packages/memorybear-grpc/**"
+      - ".github/workflows/grpc-contract.yml"
+  push:
+    branches: [develop, main]
+    paths:
+      - "proto/**"
+      - "packages/memorybear-grpc/**"
+      - ".github/workflows/grpc-contract.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: bufbuild/buf-setup-action@v1
+        with:
+          version: "1.47.2"
+          # Authenticated release lookup; unauthenticated calls hit the shared
+          # runner IP's GitHub API rate limit.
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+      - name: buf lint
+        run: buf lint proto
+      - name: buf breaking (skip until a baseline exists on develop)
+        run: |
+          if git cat-file -e origin/develop:proto/buf.yaml 2>/dev/null; then
+            buf breaking proto --against ".git#branch=origin/develop,subdir=proto"
+          else
+            echo "no proto baseline on develop yet; skipping breaking check"
+          fi
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+      - name: generated code is up to date
+        run: |
+          uv run --project packages/memorybear-grpc python proto/gen_proto.py
+          git diff --exit-code -- packages/memorybear-grpc/src
+          test -z "$(git status --porcelain -- packages/memorybear-grpc/src)"

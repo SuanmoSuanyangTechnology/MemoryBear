@@ -1,0 +1,14 @@
+version: v2
+modules:
+  - path: .
+# Streaming RPCs return a discriminated frame union, not a single response
+# envelope; the frame names are part of the wire contract (ChatFrame /
+# InvokeFrame), so the <Rpc>Response naming rule is intentionally relaxed.
+lint:
+  use:
+    - STANDARD
+  except:
+    - RPC_RESPONSE_STANDARD_NAME
+breaking:
+  use:
+    - FILE

@@ -16,6 +16,8 @@ _EXPORTS = {
     "RedBearRerank": (".rerank", "RedBearRerank"),
     "normalize_runtime_flags": (".flags", "normalize_runtime_flags"),
     "AsyncInvokeTransport": (".remote", "AsyncInvokeTransport"),
+    "DONE_STATUSES": (".remote", "DONE_STATUSES"),
+    "GrpcAsyncInvokeTransport": (".grpc_remote", "GrpcAsyncInvokeTransport"),
     "SyncInvokeTransport": (".remote", "SyncInvokeTransport"),
     "InvokeChunkFrame": (".remote", "InvokeChunkFrame"),
     "InvokeDoneFrame": (".remote", "InvokeDoneFrame"),
@@ -31,8 +33,10 @@ _EXPORTS = {
 }
 
 __all__ = [
+    "DONE_STATUSES",
     "INVOKE_PATH",
     "AsyncInvokeTransport",
+    "GrpcAsyncInvokeTransport",
     "InvokeChunkFrame",
     "InvokeDoneFrame",
     "InvokeFrame",

@@ -16,6 +16,7 @@ from .api.schemas.response_schema import ApiResponse
 from .auth import ModelAuthConfig, ModelAuthMiddleware, _load_gateway_auth
 from .bootstrap import get_settings
 from .config import ModelServiceSettings, configure_settings
+from .grpc.server import build_grpc_server
 from .i18n import LanguageContextMiddleware, load_catalogs
 from .i18n import configure as configure_i18n
 from .infrastructure import redis as infrastructure_redis
@@ -100,6 +101,15 @@ def create_app(settings: ModelServiceSettings | None = None) -> FastAPI:
         from .services.channel_registry import run_channel_invalidation_listener
         from .services.usage_consumer import run_usage_consumer
 
+        # Built here so HTTP and gRPC share one enterprise auth handler; the
+        # lifespan owns its refresh task. A missing package raises during
+        # construction (same fail-closed outcome as the HTTP middleware stack).
+        grpc_server = build_grpc_server(
+            service_settings,
+            runtime=application.state.runtime,
+            auth_config=model_auth_config,
+            gateway=gateway_auth,
+        )
         logger.info("Model service started: %s", service_settings.safe_summary())
         _sync_seed_models(application.state.runtime, service_settings)
         # A failed refresh start degrades hot reload only; channel-1 auth keeps
@@ -115,6 +125,8 @@ def create_app(settings: ModelServiceSettings | None = None) -> FastAPI:
         usage_consumer = asyncio.create_task(
             run_usage_consumer(application.state.runtime.database.async_session)
         )
+        if grpc_server is not None:
+            await grpc_server.start()
         try:
             yield
         finally:
@@ -123,6 +135,8 @@ def create_app(settings: ModelServiceSettings | None = None) -> FastAPI:
                 task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await task
+            if grpc_server is not None:
+                await grpc_server.stop(grace_s=service_settings.grpc_shutdown_grace_s)
             if gateway_auth is not None and hasattr(gateway_auth, "aclose"):
                 await gateway_auth.aclose()
             await application.state.runtime.aclose()

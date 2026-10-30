@@ -14,6 +14,7 @@ from .api.schemas.response_schema import ApiResponse
 from .auth import AppAuthConfig, AppAuthMiddleware, _load_gateway_auth
 from .bootstrap import get_settings
 from .config import AppServiceSettings, configure_settings
+from .grpc.server import build_grpc_server
 from .i18n import LanguageContextMiddleware, load_catalogs
 from .i18n import configure as configure_i18n
 from .integrations.knowledge.runtime import (
@@ -89,6 +90,13 @@ def create_app(settings: AppServiceSettings | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
+        # Built here, not in create_app: grpc.aio requires a running event loop,
+        # and create_app() runs at module import before uvicorn starts the loop.
+        grpc_server = build_grpc_server(
+            service_settings,
+            auth_config=app_auth_config,
+            gateway=gateway_auth,
+        )
         logger.info("Application service started: %s", service_settings.safe_summary())
         # A failed refresh start degrades hot reload only; auth keeps the rules
         # loaded so far, so startup must not be blocked by it.
@@ -106,9 +114,13 @@ def create_app(settings: AppServiceSettings | None = None) -> FastAPI:
         # Post-stream persistence runs in the background; enqueue calls degrade
         # to sync writes while the queue is down, so this is not fail-closed.
         await BatchPersistQueue.start()
+        if grpc_server is not None:
+            await grpc_server.start()
         try:
             yield
         finally:
+            if grpc_server is not None:
+                await grpc_server.stop(grace_s=service_settings.grpc_shutdown_grace_s)
             if gateway_auth is not None:
                 await gateway_auth.aclose()
             # Drain queued persistence before the database engine is disposed.
