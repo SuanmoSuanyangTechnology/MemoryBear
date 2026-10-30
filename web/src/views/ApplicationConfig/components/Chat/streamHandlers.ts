@@ -45,7 +45,7 @@ export const createCompareStreamHandler = (deps: CompareStreamDeps) => {
 
   return (data: SSEMessage[]) => {
     data.map(item => {
-      const { model_config_id, conversation_id, content, message_length, audio_url, citations, suggested_questions, error, message_id, user_message_id } = item.data as {
+      const { model_config_id, conversation_id, content, message_length, audio_url, citations, suggested_questions, error, message_id, user_message_id } = (item.data || {}) as {
         model_config_id: string; conversation_id: string; content: string; message_length: number; audio_url: string;
         input?: any;
         output?: any;

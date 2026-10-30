@@ -6,6 +6,7 @@ import socket
 import tempfile
 import time
 import uuid
+from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -108,7 +109,12 @@ from app.integrations.model.invoke_backend import ref_from_model_info, ref_from_
 from app.models import App, AppRelease, Document, File, Knowledge, User, Workspace
 from app.models.end_user_model import EndUser
 from app.models.file_model import FILE_ROLE_SOURCE
-from app.repositories.end_user_repository import get_active_end_users_by_workspace, get_end_users_by_workspace, get_all_active_workspaces
+from app.repositories.end_user_repository import (
+    count_inactive_end_users_by_workspace,
+    get_all_active_workspaces,
+    get_recently_active_end_user_ids_page,
+    get_recently_active_reflection_candidates_page,
+)
 from app.schemas import document_schema, file_schema
 from app.services.memory_config_service import MemoryConfigService
 from app.services.memory_forget_service import MemoryForgetService
@@ -149,6 +155,11 @@ EMBEDDING_MAX_WORKERS = int(os.getenv("EMBEDDING_MAX_WORKERS", "3"))
 AUTO_QUESTIONS_MAX_WORKERS = int(os.getenv("AUTO_QUESTIONS_MAX_WORKERS", "5"))
 # 文档解析页数上限
 MAX_DOCUMENT_PAGES = int(os.getenv("MAX_DOCUMENT_PAGES", "200"))
+
+# 反思 / 拓扑扫描的终端用户分页大小：峰值内存只与页大小相关，不随空间内用户数增长
+_END_USER_SCAN_PAGE_SIZE = 500
+# 扫描结果里保留的派发用户 ID 样本数：只留前几个便于排查，避免大空间下日志/返回值过大
+_SCAN_DISPATCH_SAMPLE_SIZE = 100
 
 # ── GDS 拓扑分数（eigenvector 中心性）扫描/计算常量 ──────────────
 _GDS_TOPOLOGY_INFLIGHT_KEY_FMT = "gds_topology:inflight:{end_user_id}"
@@ -2992,15 +3003,6 @@ def _is_active_recently(db, end_user_id: str, inactive_hours: int | None = None)
     return (utcnow_naive() - last_write).total_seconds() / 3600 < inactive_hours
 
 
-def _should_skip_reflection_by_inactivity(db, end_user_id: str, inactive_hours: int | None = None) -> bool:
-    """低频反思前置过滤：不活跃则跳过（True=跳过，False=执行）。
-
-    仅按 write_time 做活跃过滤，不含周期判断——低频全量去重的增量节奏由
-    run_dedup_full_scan 内部按实体类型的扫描时间自行控制。
-    """
-    return not _is_active_recently(db, end_user_id, inactive_hours)
-
-
 def _should_reflect_now(db, end_user_id: str, reflection_time, iteration_period: int) -> bool:
     """高频反思：判断该用户现在是否需要反思。scan 派发前和 do 执行前都用它（保证一致 + 幂等）。
 
@@ -3037,6 +3039,7 @@ def scan_layer2_reflection(self) -> Dict[str, Any]:
     redis_client = get_sync_redis_client()
     dispatched = 0
     dispatched_user_ids = []
+    recent_dispatched = deque(maxlen=10)
     skip_period_or_new = 0
     skip_inflight = 0
 
@@ -3057,12 +3060,34 @@ def scan_layer2_reflection(self) -> Dict[str, Any]:
                 # 单个 workspace 配置异常（无启用配置 / 缺 embedding / 模型被删）只跳过该 workspace
                 logger.warning(f"高频反思scan 跳过配置异常的 workspace={ws_id}: {e}")
                 continue
-            iteration_period = config.reflexion_iteration_period or 24
-            # 活跃性（write_time）已在 DB 层过滤，此处仅按 reflection_time 判周期
-            for user in get_active_end_users_by_workspace(db, ws_id_uuid, active_since):
-                uid = str(user.id)
+        iteration_period = config.reflexion_iteration_period or 24
+
+        # 候选集按主键游标分页：活跃性 + 有记忆已在 SQL 过滤，每页一个短只读 session
+        after_id: uuid.UUID | None = None
+        while True:
+            try:
+                with get_db_read() as db:
+                    candidates = get_recently_active_reflection_candidates_page(
+                        db,
+                        ws_id_uuid,
+                        active_since,
+                        after_id=after_id,
+                        limit=_END_USER_SCAN_PAGE_SIZE,
+                    )
+            except Exception as e:
+                # 单页查询失败只放弃该 workspace 的剩余用户，不拖垮整轮扫描
+                logger.error(
+                    f"高频反思scan 分页查询候选失败 workspace={ws_id} "
+                    f"after_id={after_id}: {e}"
+                )
+                break
+            if not candidates:
+                break
+            for candidate in candidates:
+                uid = str(candidate.end_user_id)
                 try:
-                    rt = user.reflection_time
+                    # 此处仅按 reflection_time 判周期
+                    rt = candidate.reflection_time
                     if rt is not None:
                         rt_naive = as_utc_aware(rt).replace(tzinfo=None)
                         if (utcnow_naive() - rt_naive).total_seconds() / 3600 < iteration_period:
@@ -3086,22 +3111,24 @@ def scan_layer2_reflection(self) -> Dict[str, Any]:
                         queue="reflection_tasks",
                     )
                     dispatched += 1
-                    dispatched_user_ids.append(uid)
+                    recent_dispatched.append(uid)
+                    if len(dispatched_user_ids) < _SCAN_DISPATCH_SAMPLE_SIZE:
+                        dispatched_user_ids.append(uid)
                     # 每派发 10 个用户打印一次进度
                     if dispatched % 10 == 0:
                         logger.info(
                             f"scan_layer2_reflection 进度: 已派发 {dispatched} 个用户, "
-                            f"最近10个: {dispatched_user_ids[-10:]}"
+                            f"最近10个: {list(recent_dispatched)}"
                         )
                 except Exception as e:
                     logger.error(f"高频反思scan 处理用户失败 user={uid}: {e}")
-                    try:
-                        db.rollback()
-                    except Exception:
-                        pass
+            after_id = candidates[-1].end_user_id
+            # 不足一页说明后面没有候选了，直接结束，避免多发一次空查询
+            if len(candidates) < _END_USER_SCAN_PAGE_SIZE:
+                break
 
     logger.info(
-        f"scan_layer2_reflection 完成: 派发 {dispatched} {dispatched_user_ids}, "
+        f"scan_layer2_reflection 完成: 派发 {dispatched} 样本 {dispatched_user_ids}, "
         f"跳过(未到周期/无新增) {skip_period_or_new}, 在途 {skip_inflight}, "
         f"耗时 {time.time() - start_time:.1f}s"
     )
@@ -3380,7 +3407,11 @@ def do_layer2_reflection(self, end_user_id: str | None = None, config_id: str = 
     acks_late=False,
 )
 def scan_layer2_dedup_full_scan(self) -> Dict[str, Any]:
-    """低频去重扫描器：遍历用户，启用反思 + 最近活跃 + 未在途 的派发 do_layer2_dedup_full_scan。"""
+    """低频去重扫描器：遍历用户，启用反思 + 最近活跃 + 未在途 的派发 do_layer2_dedup_full_scan。
+
+    用户按主键游标分页拉取，每页一个短只读 session 且只取 ID：大空间下不会把全量
+    用户整行载入内存；活跃性由 SQL 过滤，无需逐用户回查 write_time。
+    """
     start_time = time.time()
     from app.models.workspace_model import Workspace
 
@@ -3389,6 +3420,7 @@ def scan_layer2_dedup_full_scan(self) -> Dict[str, Any]:
     dispatched_user_ids = []
     skip_inactive = 0
     skip_inflight = 0
+    active_since = utcnow_naive() - timedelta(hours=settings.REFLECT_LAYER2_INACTIVE_HOURS)
 
     # db-session 规范：先用只读短 session 取 workspace 列表，
     # 再【按 workspace 粒度】开独立 session，处理完即释放，避免 identity-map 累积。
@@ -3408,13 +3440,38 @@ def scan_layer2_dedup_full_scan(self) -> Dict[str, Any]:
                 continue
             if not config.reflexion_enabled:
                 continue
-            for user in get_end_users_by_workspace(db, ws_id_uuid):
-                uid = str(user.id)
+            # 不活跃用户只计数、不逐行取回（口径与 _is_active_recently 一致）
+            try:
+                skip_inactive += count_inactive_end_users_by_workspace(
+                    db, ws_id_uuid, active_since
+                )
+            except Exception as e:
+                logger.warning(f"反思低频去重scan 统计不活跃用户失败 workspace={ws_id}: {e}")
+
+        # 活跃用户按主键游标分页：每页独立短 session，取出即释放
+        after_id: uuid.UUID | None = None
+        while True:
+            try:
+                with get_db_read() as db:
+                    user_ids = get_recently_active_end_user_ids_page(
+                        db,
+                        ws_id_uuid,
+                        active_since,
+                        after_id=after_id,
+                        limit=_END_USER_SCAN_PAGE_SIZE,
+                    )
+            except Exception as e:
+                # 单页查询失败只放弃该 workspace 的剩余用户，不拖垮整轮扫描
+                logger.error(
+                    f"反思低频去重scan 分页查询用户失败 workspace={ws_id} "
+                    f"after_id={after_id}: {e}"
+                )
+                break
+            if not user_ids:
+                break
+            for user_id in user_ids:
+                uid = str(user_id)
                 try:
-                    # 最近活跃度过滤（复用现有函数，阈值取 settings）
-                    if _should_skip_reflection_by_inactivity(db, uid):
-                        skip_inactive += 1
-                        continue
                     # 在途锁：抢不到说明该用户已有去重任务在途，跳过（独立 key）
                     if redis_client is not None:
                         ok = redis_client.set(
@@ -3432,16 +3489,17 @@ def scan_layer2_dedup_full_scan(self) -> Dict[str, Any]:
                         queue="reflection_tasks",
                     )
                     dispatched += 1
-                    dispatched_user_ids.append(uid)
+                    if len(dispatched_user_ids) < _SCAN_DISPATCH_SAMPLE_SIZE:
+                        dispatched_user_ids.append(uid)
                 except Exception as e:
                     logger.error(f"反思低频去重scan 处理用户失败 user={uid}: {e}")
-                    try:
-                        db.rollback()
-                    except Exception:
-                        pass
+            after_id = user_ids[-1]
+            # 不足一页说明后面没有候选了，直接结束，避免多发一次空查询
+            if len(user_ids) < _END_USER_SCAN_PAGE_SIZE:
+                break
 
     logger.info(
-        f"scan_layer2_dedup_full_scan 完成: 派发 {dispatched} {dispatched_user_ids}, "
+        f"scan_layer2_dedup_full_scan 完成: 派发 {dispatched} 样本 {dispatched_user_ids}, "
         f"跳过(不活跃) {skip_inactive}, 在途 {skip_inflight}, "
         f"耗时 {time.time() - start_time:.1f}s"
     )
@@ -3718,16 +3776,37 @@ def scan_gds_topology_score(self) -> Dict[str, Any]:
 
     dispatched = 0
     dispatched_user_ids = []
+    recent_dispatched = deque(maxlen=10)
     skip_inflight = 0
 
     with get_db_read() as db:
         workspace_ids = get_all_active_workspaces(db)
 
     for ws_id_uuid in workspace_ids:
-        with get_db_read() as db:
-            active_since = utcnow_naive() - timedelta(hours=settings.GDS_TOPOLOGY_ACTIVE_HOURS)
-            for user in get_active_end_users_by_workspace(db, ws_id_uuid, active_since):
-                uid = str(user.id)
+        active_since = utcnow_naive() - timedelta(hours=settings.GDS_TOPOLOGY_ACTIVE_HOURS)
+        # 候选集按主键游标分页：活跃性 + 有记忆已在 SQL 过滤，每页一个短只读 session
+        after_id: uuid.UUID | None = None
+        while True:
+            try:
+                with get_db_read() as db:
+                    user_ids = get_recently_active_end_user_ids_page(
+                        db,
+                        ws_id_uuid,
+                        active_since,
+                        after_id=after_id,
+                        limit=_END_USER_SCAN_PAGE_SIZE,
+                    )
+            except Exception as e:
+                # 单页查询失败只放弃该 workspace 的剩余用户，不拖垮整轮扫描
+                logger.error(
+                    f"GDS拓扑scan 分页查询用户失败 workspace={ws_id_uuid} "
+                    f"after_id={after_id}: {e}"
+                )
+                break
+            if not user_ids:
+                break
+            for user_id in user_ids:
+                uid = str(user_id)
                 try:
                     inflight_token = uuid.uuid4().hex
                     ok = redis_client.set(
@@ -3742,21 +3821,23 @@ def scan_gds_topology_score(self) -> Dict[str, Any]:
                         queue="memory_heavy_tasks",
                     )
                     dispatched += 1
-                    dispatched_user_ids.append(uid)
+                    recent_dispatched.append(uid)
+                    if len(dispatched_user_ids) < _SCAN_DISPATCH_SAMPLE_SIZE:
+                        dispatched_user_ids.append(uid)
                     if dispatched % 10 == 0:
                         logger.info(
                             f"scan_gds_topology_score 进度: 已派发 {dispatched} 个用户, "
-                            f"最近10个: {dispatched_user_ids[-10:]}"
+                            f"最近10个: {list(recent_dispatched)}"
                         )
                 except Exception as e:
                     logger.error(f"GDS拓扑scan 处理用户失败 user={uid}: {e}")
-                    try:
-                        db.rollback()
-                    except Exception:
-                        pass
+            after_id = user_ids[-1]
+            # 不足一页说明后面没有候选了，直接结束，避免多发一次空查询
+            if len(user_ids) < _END_USER_SCAN_PAGE_SIZE:
+                break
 
     logger.info(
-        f"scan_gds_topology_score 完成: 派发 {dispatched} {dispatched_user_ids}, "
+        f"scan_gds_topology_score 完成: 派发 {dispatched} 样本 {dispatched_user_ids}, "
         f"在途 {skip_inflight}, "
         f"耗时 {time.time() - start_time:.1f}s"
     )
@@ -4168,6 +4249,7 @@ def scan_refresh_insight_summary_cache(self) -> Dict[str, Any]:
     redis_client = get_sync_redis_client()
     dispatched = 0
     dispatched_user_ids: List[str] = []
+    recent_dispatched = deque(maxlen=10)
     skip_no_change = 0  # write_time 为 null 或 数据未变
     skip_fresh = 0  # 数据有变但缓存刚刷过（未到最短刷新间隔）
     skip_inflight = 0  # 在途锁未抢到
@@ -4178,59 +4260,81 @@ def scan_refresh_insight_summary_cache(self) -> Dict[str, Any]:
         workspace_ids = EndUserRepository(db).get_all_active_workspaces()
 
     for ws_id in workspace_ids:
-        # 列裁剪查询：返回普通元组，不受 session 关闭后 detach 影响，且内存更省
-        with get_db_read() as db:
-            rows = EndUserRepository(db).get_neo4j_memory_cache_refresh_fields(ws_id)
-
-        for row in rows:
-            eu_id = str(row.end_user_id)
+        # 候选集按主键游标分页：每页一个短只读 session，大空间下不再一次载入全部用户
+        after_id: uuid.UUID | None = None
+        while True:
             try:
-                decisions = classify_memory_cache_refresh(
-                    insight_at=row.memory_insight_updated_at,
-                    summary_at=row.user_summary_updated_at,
-                    write_at=row.write_time,
-                    metadata_updated_at=row.metadata_updated_at,
-                )
-                refresh_insight = decisions.insight == "dispatch"
-                refresh_summary = decisions.summary == "dispatch"
-                if not refresh_insight and not refresh_summary:
-                    if "skip_fresh" in (decisions.insight, decisions.summary):
-                        skip_fresh += 1
-                    else:
-                        skip_no_change += 1
-                    continue
-
-                # 在途锁：抢不到说明该用户已有刷新任务在途，跳过
-                if redis_client is not None:
-                    ok = redis_client.set(
-                        CACHE_INFLIGHT_KEY_FMT.format(end_user_id=eu_id),
-                        "1", nx=True, ex=CACHE_INFLIGHT_TTL_SEC,
-                    )
-                    if not ok:
-                        skip_inflight += 1
-                        continue
-
-                # 派发：用 countdown 错峰，每 60 个一波、每波摊到 0~295s，平滑 LLM 调用
-                countdown = (dispatched % 60) * 5
-                do_refresh_insight_summary_cache.apply_async(
-                    kwargs={
-                        "end_user_id": eu_id,
-                        "workspace_id": str(row.workspace_id),
-                        "language": "zh",  # 与旧任务行为对齐
-                        "refresh_insight": refresh_insight,
-                        "refresh_summary": refresh_summary,
-                    },
-                    countdown=countdown,
-                )
-                dispatched += 1
-                dispatched_user_ids.append(eu_id)
-                if dispatched % 50 == 0:
-                    logger.info(
-                        f"scan_refresh_insight_summary_cache 进度: 已派发 {dispatched}, "
-                        f"最近 10 个: {dispatched_user_ids[-10:]}"
+                with get_db_read() as db:
+                    rows = EndUserRepository(db).get_neo4j_memory_cache_refresh_fields_page(
+                        ws_id,
+                        after_id=after_id,
+                        limit=_END_USER_SCAN_PAGE_SIZE,
                     )
             except Exception as e:
-                logger.error(f"洞察/摘要缓存scan 处理用户失败 user={eu_id}: {e}")
+                # 单页查询失败只放弃该 workspace 的剩余用户，不拖垮整轮扫描
+                logger.error(
+                    f"洞察/摘要缓存scan 分页查询候选失败 workspace={ws_id} "
+                    f"after_id={after_id}: {e}"
+                )
+                break
+            if not rows:
+                break
+
+            for row in rows:
+                eu_id = str(row.end_user_id)
+                try:
+                    decisions = classify_memory_cache_refresh(
+                        insight_at=row.memory_insight_updated_at,
+                        summary_at=row.user_summary_updated_at,
+                        write_at=row.write_time,
+                        metadata_updated_at=row.metadata_updated_at,
+                    )
+                    refresh_insight = decisions.insight == "dispatch"
+                    refresh_summary = decisions.summary == "dispatch"
+                    if not refresh_insight and not refresh_summary:
+                        if "skip_fresh" in (decisions.insight, decisions.summary):
+                            skip_fresh += 1
+                        else:
+                            skip_no_change += 1
+                        continue
+
+                    # 在途锁：抢不到说明该用户已有刷新任务在途，跳过
+                    if redis_client is not None:
+                        ok = redis_client.set(
+                            CACHE_INFLIGHT_KEY_FMT.format(end_user_id=eu_id),
+                            "1", nx=True, ex=CACHE_INFLIGHT_TTL_SEC,
+                        )
+                        if not ok:
+                            skip_inflight += 1
+                            continue
+
+                    # 派发：用 countdown 错峰，每 60 个一波、每波摊到 0~295s，平滑 LLM 调用
+                    countdown = (dispatched % 60) * 5
+                    do_refresh_insight_summary_cache.apply_async(
+                        kwargs={
+                            "end_user_id": eu_id,
+                            "workspace_id": str(row.workspace_id),
+                            "language": "zh",  # 与旧任务行为对齐
+                            "refresh_insight": refresh_insight,
+                            "refresh_summary": refresh_summary,
+                        },
+                        countdown=countdown,
+                    )
+                    dispatched += 1
+                    recent_dispatched.append(eu_id)
+                    if len(dispatched_user_ids) < _SCAN_DISPATCH_SAMPLE_SIZE:
+                        dispatched_user_ids.append(eu_id)
+                    if dispatched % 50 == 0:
+                        logger.info(
+                            f"scan_refresh_insight_summary_cache 进度: 已派发 {dispatched}, "
+                            f"最近 10 个: {list(recent_dispatched)}"
+                        )
+                except Exception as e:
+                    logger.error(f"洞察/摘要缓存scan 处理用户失败 user={eu_id}: {e}")
+            after_id = rows[-1].end_user_id
+            # 不足一页说明后面没有候选了，直接结束，避免多发一次空查询
+            if len(rows) < _END_USER_SCAN_PAGE_SIZE:
+                break
 
     logger.info(
         f"scan_refresh_insight_summary_cache 完成: 派发 {dispatched}, "
@@ -4359,7 +4463,327 @@ def do_refresh_insight_summary_cache(
     return result
 
 
-# 用户名片 Tag 定时刷新任务
+# ==================== AI 人格：Redis key / 任务参数 ====================
+# 社区侧保存短期 inflight token 与扫描游标；pending 与用户评估 checkpoint 均由企业端持有。
+
+AI_PERSONALITY_INFLIGHT_KEY_FMT = "ai_personality:inflight:{end_user_id}"
+AI_PERSONALITY_INFLIGHT_TTL_SEC = 600  # 仅防止短时间重复派发，不充当执行锁
+AI_PERSONALITY_RUNNING_KEY_FMT = "ai_personality:running:{end_user_id}"
+AI_PERSONALITY_RUNNING_TTL_SEC = 240  # 大于 do 任务的 180 秒硬超时
+AI_PERSONALITY_BATCH_TTL_SEC = 86400
+AI_PERSONALITY_SCAN_PAGE_SIZE = 500
+AI_PERSONALITY_SCAN_CURSOR_KEY = "ai_personality:scan_cursor:v1"
+AI_PERSONALITY_SCAN_BUDGET_SEC = 480  # 留出软时限前的收尾余量
+
+
+def _enterprise_ai_personality_plugin():
+    from app.plugins import get_plugin
+
+    plugin = get_plugin("memory.ai_personality")
+    if plugin is None:
+        raise RuntimeError("AI personality plugin 'memory.ai_personality' is not registered")
+    return plugin
+
+
+def _ai_personality_memory_config(db, workspace_uuid: uuid.UUID):
+    config_service = MemoryConfigService(db)
+    config_id = config_service.get_workspace_active_config_id(workspace_uuid)
+    return config_service.load_memory_config(config_id)
+
+
+# ==================== AI 人格：Scan 轻量扫描 ====================
+
+@celery_app.task(
+    name="app.tasks.scan_extract_ai_personality",
+    bind=True,
+    ignore_result=False,
+    max_retries=0,
+    acks_late=False,
+    time_limit=600,
+    soft_time_limit=540,
+)
+def scan_extract_ai_personality(self) -> Dict[str, Any]:
+    """从企业端分页读取候选用户，并派发单用户 AI 人格提取任务。"""
+    started_at = time.time()
+    redis_client = get_sync_redis_client()
+    if redis_client is None:
+        raise RuntimeError("Redis unavailable: AI personality scan requires inflight locks")
+    try:
+        redis_client.ping()
+    except Exception as exc:
+        raise RuntimeError("Redis unavailable: AI personality scan stopped") from exc
+
+    from app.core.exceptions import BusinessException
+    from app.schemas.memory_config_schema import ConfigurationError
+    from app.services.model_service import ModelApiKeyService
+
+    counts = {
+        "candidates": 0,
+        "dispatched": 0,
+        "skip_inflight": 0,
+        "skip_no_config": 0,
+        "failed": 0,
+    }
+    workspace_config_available: dict[str, bool] = {}
+    # 从上次游标续扫；只记录已处理用户，避免时间预算耗尽时跳过页内候选。
+    stored_cursor = redis_client.get(AI_PERSONALITY_SCAN_CURSOR_KEY)
+    after_id: str | None = (
+        stored_cursor.decode() if isinstance(stored_cursor, bytes) else stored_cursor
+    )
+    plugin = _enterprise_ai_personality_plugin()
+
+    def scan_result(status: str) -> Dict[str, Any]:
+        return {
+            "status": status,
+            **counts,
+            "elapsed_time": time.time() - started_at,
+            "task_id": self.request.id,
+        }
+
+    loop = set_asyncio_event_loop()
+    try:
+        while time.time() - started_at < AI_PERSONALITY_SCAN_BUDGET_SEC:
+            page = loop.run_until_complete(plugin.list_candidates(
+                after_id=after_id,
+                limit=AI_PERSONALITY_SCAN_PAGE_SIZE,
+            ))
+            counts["candidates"] += len(page.items)
+            last_processed_id = after_id
+            for candidate in page.items:
+                if time.time() - started_at >= AI_PERSONALITY_SCAN_BUDGET_SEC:
+                    if last_processed_id is not None:
+                        redis_client.set(AI_PERSONALITY_SCAN_CURSOR_KEY, last_processed_id)
+                    return scan_result("PARTIAL")
+                end_user_id = candidate.end_user_id
+                workspace_id = candidate.workspace_id
+                # 同一轮扫描每个 workspace 只检查一次配置和模型引用，不构造客户端。
+                if workspace_id not in workspace_config_available:
+                    with get_db_context() as db:
+                        try:
+                            memory_config = _ai_personality_memory_config(db, uuid.UUID(workspace_id))
+                            model_ref = ModelApiKeyService.resolve_invoke_ref(
+                                db, memory_config.llm_model_id, tenant_id=memory_config.tenant_id,
+                            )
+                            if model_ref is None:
+                                raise ValueError(f"模型配置不可用: {memory_config.llm_model_id}")
+                        except (BusinessException, ConfigurationError, ValueError) as exc:
+                            logger.warning("AI人格scan跳过无可用配置 workspace=%s: %s", workspace_id, exc)
+                            workspace_config_available[workspace_id] = False
+                        else:
+                            workspace_config_available[workspace_id] = True
+                if not workspace_config_available[workspace_id]:
+                    counts["skip_no_config"] += 1
+                    last_processed_id = end_user_id
+                    continue
+
+                # 派发前短期去重；真正的执行互斥由 do 任务启动后获取运行锁。
+                inflight_key = AI_PERSONALITY_INFLIGHT_KEY_FMT.format(end_user_id=end_user_id)
+                lock_token = uuid.uuid4().hex
+                try:
+                    acquired = bool(redis_client.set(
+                        inflight_key,
+                        lock_token,
+                        nx=True,
+                        ex=AI_PERSONALITY_INFLIGHT_TTL_SEC,
+                    ))
+                except Exception as exc:
+                    raise RuntimeError("Redis unavailable while locking AI personality task") from exc
+                if not acquired:
+                    counts["skip_inflight"] += 1
+                    last_processed_id = end_user_id
+                    continue
+                try:
+                    do_extract_ai_personality_for_user.apply_async(
+                        kwargs={
+                            "end_user_id": end_user_id,
+                            "workspace_id": workspace_id,
+                            "expected_source_version": candidate.source_version,
+                            "lock_token": lock_token,
+                        },
+                        queue="memory_heavy_tasks",
+                    )
+                    counts["dispatched"] += 1
+                except Exception:
+                    counts["failed"] += 1
+                    redis_client.eval(UNLOCK_SCRIPT, 1, inflight_key, lock_token)
+                    logger.error("AI人格scan派发失败 user=%s", end_user_id, exc_info=True)
+                last_processed_id = end_user_id
+
+            # 整页处理完后推进游标；全部扫描结束时清除游标，下轮从头开始。
+            after_id = page.next_after_id
+            if after_id is None:
+                redis_client.delete(AI_PERSONALITY_SCAN_CURSOR_KEY)
+                break
+            redis_client.set(AI_PERSONALITY_SCAN_CURSOR_KEY, after_id)
+    finally:
+        _shutdown_loop_gracefully(loop)
+
+    return scan_result("SUCCESS" if after_id is None else "PARTIAL")
+
+
+# ==================== AI 人格：Do 单用户提取 ====================
+
+@celery_app.task(
+    name="app.tasks.do_extract_ai_personality_for_user",
+    bind=True,
+    ignore_result=False,
+    max_retries=0,
+    acks_late=False,
+    time_limit=180,
+    soft_time_limit=150,
+)
+def do_extract_ai_personality_for_user(
+        self,
+        end_user_id: str,
+        workspace_id: str,
+        expected_source_version: str,
+        lock_token: str,
+) -> Dict[str, Any]:
+    """通过企业插件读取证据，提取人格条目并发布企业 pending 批次。"""
+    from app.core.memory.analytics.ai_personality import (
+        build_atomic_evidence,
+        build_evidence_fingerprint,
+        extract_ai_personality,
+        normalize_metadata_evidence,
+        normalize_preference_evidence,
+    )
+    from app.core.exceptions import BusinessException
+    from app.core.memory.pipelines.base_pipeline import ModelClientMixin
+    from app.schemas.memory_config_schema import ConfigurationError
+
+    started_at = time.time()
+    redis_client = get_sync_redis_client()
+    inflight_key = AI_PERSONALITY_INFLIGHT_KEY_FMT.format(end_user_id=end_user_id)
+    running_key = AI_PERSONALITY_RUNNING_KEY_FMT.format(end_user_id=end_user_id)
+    if redis_client is None:
+        raise RuntimeError("Redis unavailable: AI personality task requires execution lock")
+
+    # 排队超过派发去重窗口也可执行；运行锁在启动时获取并覆盖任务硬超时。
+    acquired = redis_client.set(running_key, lock_token, nx=True, ex=AI_PERSONALITY_RUNNING_TTL_SEC)
+    if not acquired:
+        redis_client.eval(UNLOCK_SCRIPT, 1, inflight_key, lock_token)
+        return {"status": "skipped_inflight", "entry_count": 0}
+
+    async def _run() -> Dict[str, Any]:
+        from premium.memory.ai_personality.errors import SourceChangedError
+        from premium.memory.ai_personality.schemas import PendingPublishRequest
+
+        plugin = _enterprise_ai_personality_plugin()
+        # 企业端校验源版本后返回证据快照；不匹配时不做模型调用。
+        try:
+            snapshot = await plugin.get_evidence(
+                end_user_id=end_user_id,
+                workspace_id=workspace_id,
+                expected_source_version=expected_source_version,
+            )
+        except SourceChangedError:
+            return {"status": "skipped_source_changed", "entry_count": 0}
+        if (
+            snapshot.end_user_id != end_user_id
+            or snapshot.workspace_id != workspace_id
+            or snapshot.source_version != expected_source_version
+        ):
+            raise RuntimeError("Enterprise evidence snapshot identity or source version mismatch")
+
+        # 规范化证据并固定指纹，供企业端发布时校验来源。
+        preference_nodes = [item.model_dump() for item in snapshot.preferences]
+        metadata_evidence = normalize_metadata_evidence(snapshot.metadata)
+        preference_evidence = normalize_preference_evidence(preference_nodes)
+        evidence = build_atomic_evidence(snapshot.metadata, preference_nodes)
+        source_fingerprint = build_evidence_fingerprint(evidence)
+        generated_at = utcnow()
+        batch_id = str(uuid.uuid4())
+
+        # 所有处理结果统一发布到企业端；发布时源版本变化则放弃本批次。
+        async def publish(outcome: str, entries: list, expires_at=None) -> bool:
+            try:
+                await plugin.publish(PendingPublishRequest(
+                    batch_id=batch_id,
+                    end_user_id=end_user_id,
+                    workspace_id=workspace_id,
+                    source_version=snapshot.source_version,
+                    source_fingerprint=source_fingerprint,
+                    generated_at=generated_at,
+                    expires_at=expires_at,
+                    outcome=outcome,
+                    entries=entries,
+                ))
+            except SourceChangedError:
+                return False
+            return True
+
+        source_changed = {"status": "skipped_source_changed", "entry_count": 0}
+        if not metadata_evidence and not preference_evidence:
+            if not await publish("skipped_empty", []):
+                return source_changed
+            return {"status": "skipped_empty", "entry_count": 0, "batch_id": batch_id}
+
+        # 排队期间配置可能变化：重新读取 workspace 配置，再构造实际使用的客户端。
+        workspace_uuid = uuid.UUID(workspace_id)
+        with get_db_context() as db:
+            try:
+                memory_config = _ai_personality_memory_config(db, workspace_uuid)
+                llm_client = ModelClientMixin.get_llm_client(
+                    db, memory_config.llm_model_id, memory_config.tenant_id,
+                )
+            except (BusinessException, ConfigurationError, ValueError) as exc:
+                logger.warning("AI人格do跳过无可用配置 user=%s workspace=%s: %s", end_user_id, workspace_id, exc)
+                return {"status": "skipped_no_config", "entry_count": 0}
+        entries = await extract_ai_personality(llm_client, evidence)
+        if not entries:
+            if not await publish("skipped_no_grounded_entries", []):
+                return source_changed
+            return {
+                "status": "skipped_no_grounded_entries",
+                "entry_count": 0,
+                "batch_id": batch_id,
+            }
+
+        expires_at = generated_at + timedelta(seconds=AI_PERSONALITY_BATCH_TTL_SEC)
+        if not await publish("published", entries, expires_at):
+            return source_changed
+
+        dimension_counts: dict[str, int] = {}
+        for entry in entries:
+            dimension = entry["dimension"]
+            dimension_counts[dimension] = dimension_counts.get(dimension, 0) + 1
+        return {
+            "status": "success",
+            "batch_id": batch_id,
+            "source_fingerprint": source_fingerprint,
+            "entry_count": len(entries),
+            "dimension_counts": dimension_counts,
+            "expires_at": to_iso_z(expires_at),
+        }
+
+    loop = set_asyncio_event_loop()
+    try:
+        result = loop.run_until_complete(_run())
+    except Exception as exc:
+        logger.error(
+            "AI人格提取失败 user=%s workspace=%s error_type=%s",
+            end_user_id,
+            workspace_id,
+            type(exc).__name__,
+            exc_info=True,
+        )
+        raise
+    finally:
+        _shutdown_loop_gracefully(loop)
+        # 仅释放本任务持有的锁，避免误删后续任务的 token。
+        for key in (running_key, inflight_key):
+            try:
+                redis_client.eval(UNLOCK_SCRIPT, 1, key, lock_token)
+            except Exception:
+                logger.warning("AI人格do释放锁失败 user=%s key=%s", end_user_id, key, exc_info=True)
+
+    result.update(
+        elapsed_time=time.time() - started_at,
+        task_id=self.request.id,
+        end_user_id=end_user_id,
+    )
+    return result
+
 
 USER_TAG_INFLIGHT_KEY_FMT = "user_tags:inflight:{end_user_id}"
 USER_TAG_INFLIGHT_TTL_SEC = 600

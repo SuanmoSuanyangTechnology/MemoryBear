@@ -824,6 +824,706 @@
         "status_code": 200
       }
     },
+    "GET /internal/v1/memory/analytics/scene_community_graph": {
+      "endpoint": "scene_community_graph",
+      "parameters": {
+        "query:end_user_id": {
+          "annotation": "str",
+          "constraints": [],
+          "default": null,
+          "in": "query",
+          "required": true
+        }
+      },
+      "response": {
+        "config": {
+          "extra": "forbid",
+          "strict": true
+        },
+        "declared": [
+          "200",
+          "400",
+          "401",
+          "403",
+          "404",
+          "500",
+          "503"
+        ],
+        "fields": {
+          "code": {
+            "annotation": "Literal[0]",
+            "constraints": [],
+            "default": 0,
+            "required": false
+          },
+          "data": {
+            "annotation": "src.schemas.scene_community_graph.GraphData",
+            "config": {
+              "extra": "forbid",
+              "strict": true
+            },
+            "constraints": [],
+            "default": null,
+            "fields": {
+              "groups": {
+                "annotation": "list[src.schemas.scene_community_graph.CommunityGroup | src.schemas.scene_community_graph.UnassignedGroup]",
+                "constraints": [],
+                "default": null,
+                "required": true,
+                "variants": {
+                  "src.schemas.scene_community_graph.CommunityGroup": {
+                    "config": {
+                      "extra": "forbid",
+                      "strict": true
+                    },
+                    "fields": {
+                      "id": {
+                        "annotation": "str",
+                        "constraints": [],
+                        "default": null,
+                        "required": true
+                      },
+                      "kind": {
+                        "annotation": "Literal[COMMUNITY]",
+                        "constraints": [],
+                        "default": "COMMUNITY",
+                        "required": false
+                      },
+                      "label": {
+                        "annotation": "Literal[SceneCommunity]",
+                        "constraints": [],
+                        "default": "SceneCommunity",
+                        "required": false
+                      },
+                      "properties": {
+                        "annotation": "src.schemas.scene_community_graph.CommunityProperties",
+                        "config": {
+                          "extra": "forbid",
+                          "strict": true
+                        },
+                        "constraints": [],
+                        "default": null,
+                        "fields": {
+                          "boundary_exclude_rule": {
+                            "annotation": "str | None",
+                            "constraints": [],
+                            "default": null,
+                            "required": false
+                          },
+                          "boundary_include_rule": {
+                            "annotation": "str | None",
+                            "constraints": [],
+                            "default": null,
+                            "required": false
+                          },
+                          "boundary_instance_anchor": {
+                            "annotation": "str | None",
+                            "constraints": [],
+                            "default": null,
+                            "required": false
+                          },
+                          "boundary_lifecycle_anchor": {
+                            "annotation": "str | None",
+                            "constraints": [],
+                            "default": null,
+                            "required": false
+                          },
+                          "boundary_primary_matter": {
+                            "annotation": "str | None",
+                            "constraints": [],
+                            "default": null,
+                            "required": false
+                          },
+                          "category_l1": {
+                            "annotation": "str | None",
+                            "constraints": [],
+                            "default": null,
+                            "required": false
+                          },
+                          "created_at": {
+                            "annotation": "int | None",
+                            "constraints": [
+                              "Ge(ge=1000000000000)",
+                              "Le(le=9999999999999)"
+                            ],
+                            "default": null,
+                            "required": false
+                          },
+                          "ended_at": {
+                            "annotation": "int | None",
+                            "constraints": [
+                              "Ge(ge=1000000000000)",
+                              "Le(le=9999999999999)"
+                            ],
+                            "default": null,
+                            "required": false
+                          },
+                          "member_count": {
+                            "annotation": "int",
+                            "constraints": [
+                              "Ge(ge=0)"
+                            ],
+                            "default": null,
+                            "required": true
+                          },
+                          "started_at": {
+                            "annotation": "int | None",
+                            "constraints": [
+                              "Ge(ge=1000000000000)",
+                              "Le(le=9999999999999)"
+                            ],
+                            "default": null,
+                            "required": false
+                          },
+                          "summary": {
+                            "annotation": "str | None",
+                            "constraints": [],
+                            "default": null,
+                            "required": false
+                          },
+                          "topic_name": {
+                            "annotation": "str | None",
+                            "constraints": [],
+                            "default": null,
+                            "required": false
+                          },
+                          "topic_scope": {
+                            "annotation": "str | None",
+                            "constraints": [],
+                            "default": null,
+                            "required": false
+                          },
+                          "updated_at": {
+                            "annotation": "int | None",
+                            "constraints": [
+                              "Ge(ge=1000000000000)",
+                              "Le(le=9999999999999)"
+                            ],
+                            "default": null,
+                            "required": false
+                          }
+                        },
+                        "required": true
+                      },
+                      "scene_count": {
+                        "annotation": "int",
+                        "constraints": [
+                          "Ge(ge=0)"
+                        ],
+                        "default": null,
+                        "required": true
+                      },
+                      "scenes": {
+                        "annotation": "list[src.schemas.scene_community_graph.Scene]",
+                        "config": {
+                          "extra": "forbid",
+                          "strict": true
+                        },
+                        "constraints": [],
+                        "default": null,
+                        "fields": {
+                          "id": {
+                            "annotation": "str",
+                            "constraints": [],
+                            "default": null,
+                            "required": true
+                          },
+                          "label": {
+                            "annotation": "Literal[SceneSummary]",
+                            "constraints": [],
+                            "default": "SceneSummary",
+                            "required": false
+                          },
+                          "properties": {
+                            "annotation": "src.schemas.scene_community_graph.SceneProperties",
+                            "config": {
+                              "extra": "forbid",
+                              "strict": true
+                            },
+                            "constraints": [],
+                            "default": null,
+                            "fields": {
+                              "close_reason": {
+                                "annotation": "str | None",
+                                "constraints": [],
+                                "default": null,
+                                "required": false
+                              },
+                              "community_category_l1": {
+                                "annotation": "str | None",
+                                "constraints": [],
+                                "default": null,
+                                "required": false
+                              },
+                              "community_eligibility": {
+                                "annotation": "str | None",
+                                "constraints": [],
+                                "default": null,
+                                "required": false
+                              },
+                              "community_status": {
+                                "annotation": "str | None",
+                                "constraints": [],
+                                "default": null,
+                                "required": false
+                              },
+                              "content": {
+                                "annotation": "str",
+                                "constraints": [],
+                                "default": null,
+                                "required": true
+                              },
+                              "conversation_id": {
+                                "annotation": "str | None",
+                                "constraints": [],
+                                "default": null,
+                                "required": false
+                              },
+                              "created_at": {
+                                "annotation": "int | None",
+                                "constraints": [
+                                  "Ge(ge=1000000000000)",
+                                  "Le(le=9999999999999)"
+                                ],
+                                "default": null,
+                                "required": false
+                              },
+                              "ended_at": {
+                                "annotation": "int | None",
+                                "constraints": [
+                                  "Ge(ge=1000000000000)",
+                                  "Le(le=9999999999999)"
+                                ],
+                                "default": null,
+                                "required": false
+                              },
+                              "scene_community_id": {
+                                "annotation": "str | None",
+                                "constraints": [],
+                                "default": null,
+                                "required": false
+                              },
+                              "started_at": {
+                                "annotation": "int | None",
+                                "constraints": [
+                                  "Ge(ge=1000000000000)",
+                                  "Le(le=9999999999999)"
+                                ],
+                                "default": null,
+                                "required": false
+                              },
+                              "topic_scope": {
+                                "annotation": "str | None",
+                                "constraints": [],
+                                "default": null,
+                                "required": false
+                              },
+                              "turn_count": {
+                                "annotation": "int | None",
+                                "constraints": [
+                                  "Ge(ge=0)"
+                                ],
+                                "default": null,
+                                "required": false
+                              },
+                              "updated_at": {
+                                "annotation": "int | None",
+                                "constraints": [
+                                  "Ge(ge=1000000000000)",
+                                  "Le(le=9999999999999)"
+                                ],
+                                "default": null,
+                                "required": false
+                              }
+                            },
+                            "required": true
+                          },
+                          "unassigned_reason": {
+                            "annotation": "Literal[NO_PARENT, INVALID_PARENT_ID, PARENT_NOT_FOUND] | None",
+                            "constraints": [],
+                            "default": null,
+                            "required": false
+                          }
+                        },
+                        "required": true
+                      },
+                      "virtual": {
+                        "annotation": "Literal[False]",
+                        "constraints": [],
+                        "default": false,
+                        "required": false
+                      }
+                    }
+                  },
+                  "src.schemas.scene_community_graph.UnassignedGroup": {
+                    "config": {
+                      "extra": "forbid",
+                      "strict": true
+                    },
+                    "fields": {
+                      "id": {
+                        "annotation": "Literal[virtual:scene-community:unassigned]",
+                        "constraints": [],
+                        "default": "virtual:scene-community:unassigned",
+                        "required": false
+                      },
+                      "kind": {
+                        "annotation": "Literal[UNASSIGNED]",
+                        "constraints": [],
+                        "default": "UNASSIGNED",
+                        "required": false
+                      },
+                      "label": {
+                        "annotation": "Literal[UnassignedSceneGroup]",
+                        "constraints": [],
+                        "default": "UnassignedSceneGroup",
+                        "required": false
+                      },
+                      "properties": {
+                        "annotation": "src.schemas.scene_community_graph.CommunityProperties",
+                        "config": {
+                          "extra": "forbid",
+                          "strict": true
+                        },
+                        "constraints": [],
+                        "default": null,
+                        "fields": {
+                          "boundary_exclude_rule": {
+                            "annotation": "str | None",
+                            "constraints": [],
+                            "default": null,
+                            "required": false
+                          },
+                          "boundary_include_rule": {
+                            "annotation": "str | None",
+                            "constraints": [],
+                            "default": null,
+                            "required": false
+                          },
+                          "boundary_instance_anchor": {
+                            "annotation": "str | None",
+                            "constraints": [],
+                            "default": null,
+                            "required": false
+                          },
+                          "boundary_lifecycle_anchor": {
+                            "annotation": "str | None",
+                            "constraints": [],
+                            "default": null,
+                            "required": false
+                          },
+                          "boundary_primary_matter": {
+                            "annotation": "str | None",
+                            "constraints": [],
+                            "default": null,
+                            "required": false
+                          },
+                          "category_l1": {
+                            "annotation": "str | None",
+                            "constraints": [],
+                            "default": null,
+                            "required": false
+                          },
+                          "created_at": {
+                            "annotation": "int | None",
+                            "constraints": [
+                              "Ge(ge=1000000000000)",
+                              "Le(le=9999999999999)"
+                            ],
+                            "default": null,
+                            "required": false
+                          },
+                          "ended_at": {
+                            "annotation": "int | None",
+                            "constraints": [
+                              "Ge(ge=1000000000000)",
+                              "Le(le=9999999999999)"
+                            ],
+                            "default": null,
+                            "required": false
+                          },
+                          "member_count": {
+                            "annotation": "int",
+                            "constraints": [
+                              "Ge(ge=0)"
+                            ],
+                            "default": null,
+                            "required": true
+                          },
+                          "started_at": {
+                            "annotation": "int | None",
+                            "constraints": [
+                              "Ge(ge=1000000000000)",
+                              "Le(le=9999999999999)"
+                            ],
+                            "default": null,
+                            "required": false
+                          },
+                          "summary": {
+                            "annotation": "str | None",
+                            "constraints": [],
+                            "default": null,
+                            "required": false
+                          },
+                          "topic_name": {
+                            "annotation": "str | None",
+                            "constraints": [],
+                            "default": null,
+                            "required": false
+                          },
+                          "topic_scope": {
+                            "annotation": "str | None",
+                            "constraints": [],
+                            "default": null,
+                            "required": false
+                          },
+                          "updated_at": {
+                            "annotation": "int | None",
+                            "constraints": [
+                              "Ge(ge=1000000000000)",
+                              "Le(le=9999999999999)"
+                            ],
+                            "default": null,
+                            "required": false
+                          }
+                        },
+                        "required": true
+                      },
+                      "scene_count": {
+                        "annotation": "int",
+                        "constraints": [
+                          "Ge(ge=1)"
+                        ],
+                        "default": null,
+                        "required": true
+                      },
+                      "scenes": {
+                        "annotation": "list[src.schemas.scene_community_graph.Scene]",
+                        "config": {
+                          "extra": "forbid",
+                          "strict": true
+                        },
+                        "constraints": [
+                          "MinLen(min_length=1)"
+                        ],
+                        "default": null,
+                        "fields": {
+                          "id": {
+                            "annotation": "str",
+                            "constraints": [],
+                            "default": null,
+                            "required": true
+                          },
+                          "label": {
+                            "annotation": "Literal[SceneSummary]",
+                            "constraints": [],
+                            "default": "SceneSummary",
+                            "required": false
+                          },
+                          "properties": {
+                            "annotation": "src.schemas.scene_community_graph.SceneProperties",
+                            "config": {
+                              "extra": "forbid",
+                              "strict": true
+                            },
+                            "constraints": [],
+                            "default": null,
+                            "fields": {
+                              "close_reason": {
+                                "annotation": "str | None",
+                                "constraints": [],
+                                "default": null,
+                                "required": false
+                              },
+                              "community_category_l1": {
+                                "annotation": "str | None",
+                                "constraints": [],
+                                "default": null,
+                                "required": false
+                              },
+                              "community_eligibility": {
+                                "annotation": "str | None",
+                                "constraints": [],
+                                "default": null,
+                                "required": false
+                              },
+                              "community_status": {
+                                "annotation": "str | None",
+                                "constraints": [],
+                                "default": null,
+                                "required": false
+                              },
+                              "content": {
+                                "annotation": "str",
+                                "constraints": [],
+                                "default": null,
+                                "required": true
+                              },
+                              "conversation_id": {
+                                "annotation": "str | None",
+                                "constraints": [],
+                                "default": null,
+                                "required": false
+                              },
+                              "created_at": {
+                                "annotation": "int | None",
+                                "constraints": [
+                                  "Ge(ge=1000000000000)",
+                                  "Le(le=9999999999999)"
+                                ],
+                                "default": null,
+                                "required": false
+                              },
+                              "ended_at": {
+                                "annotation": "int | None",
+                                "constraints": [
+                                  "Ge(ge=1000000000000)",
+                                  "Le(le=9999999999999)"
+                                ],
+                                "default": null,
+                                "required": false
+                              },
+                              "scene_community_id": {
+                                "annotation": "str | None",
+                                "constraints": [],
+                                "default": null,
+                                "required": false
+                              },
+                              "started_at": {
+                                "annotation": "int | None",
+                                "constraints": [
+                                  "Ge(ge=1000000000000)",
+                                  "Le(le=9999999999999)"
+                                ],
+                                "default": null,
+                                "required": false
+                              },
+                              "topic_scope": {
+                                "annotation": "str | None",
+                                "constraints": [],
+                                "default": null,
+                                "required": false
+                              },
+                              "turn_count": {
+                                "annotation": "int | None",
+                                "constraints": [
+                                  "Ge(ge=0)"
+                                ],
+                                "default": null,
+                                "required": false
+                              },
+                              "updated_at": {
+                                "annotation": "int | None",
+                                "constraints": [
+                                  "Ge(ge=1000000000000)",
+                                  "Le(le=9999999999999)"
+                                ],
+                                "default": null,
+                                "required": false
+                              }
+                            },
+                            "required": true
+                          },
+                          "unassigned_reason": {
+                            "annotation": "Literal[NO_PARENT, INVALID_PARENT_ID, PARENT_NOT_FOUND] | None",
+                            "constraints": [],
+                            "default": null,
+                            "required": false
+                          }
+                        },
+                        "required": true
+                      },
+                      "virtual": {
+                        "annotation": "Literal[True]",
+                        "constraints": [],
+                        "default": true,
+                        "required": false
+                      }
+                    }
+                  }
+                }
+              },
+              "statistics": {
+                "annotation": "src.schemas.scene_community_graph.Statistics",
+                "config": {
+                  "extra": "forbid",
+                  "strict": true
+                },
+                "constraints": [],
+                "default": null,
+                "fields": {
+                  "assigned_scene_summaries": {
+                    "annotation": "int",
+                    "constraints": [
+                      "Ge(ge=0)"
+                    ],
+                    "default": null,
+                    "required": true
+                  },
+                  "total_groups": {
+                    "annotation": "int",
+                    "constraints": [
+                      "Ge(ge=0)"
+                    ],
+                    "default": null,
+                    "required": true
+                  },
+                  "total_scene_communities": {
+                    "annotation": "int",
+                    "constraints": [
+                      "Ge(ge=0)"
+                    ],
+                    "default": null,
+                    "required": true
+                  },
+                  "total_scene_summaries": {
+                    "annotation": "int",
+                    "constraints": [
+                      "Ge(ge=0)"
+                    ],
+                    "default": null,
+                    "required": true
+                  },
+                  "unassigned_scene_summaries": {
+                    "annotation": "int",
+                    "constraints": [
+                      "Ge(ge=0)"
+                    ],
+                    "default": null,
+                    "required": true
+                  }
+                },
+                "required": true
+              }
+            },
+            "required": true
+          },
+          "error": {
+            "annotation": "Literal[]",
+            "constraints": [],
+            "default": "",
+            "required": false
+          },
+          "msg": {
+            "annotation": "Literal[OK]",
+            "constraints": [],
+            "default": "OK",
+            "required": false
+          },
+          "time": {
+            "annotation": "int",
+            "constraints": [
+              "Ge(ge=1000000000000)",
+              "Le(le=9999999999999)"
+            ],
+            "default": null,
+            "required": true
+          }
+        },
+        "model": "src.schemas.scene_community_graph.GraphResponse",
+        "status_code": 200
+      }
+    },
     "GET /internal/v1/memory/analytics/user_summary": {
       "endpoint": "user_summary",
       "parameters": {

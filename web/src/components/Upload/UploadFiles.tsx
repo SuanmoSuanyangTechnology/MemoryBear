@@ -41,6 +41,7 @@ interface UploadFilesProps extends Omit<UploadProps, 'onChange'> {
   isCanDrag?: boolean;
   /** 自定义移除文件回调 */
   onRemove?: (file: UploadFile) => boolean | void | Promise<boolean | void>;
+  draggerHeight?: number;
 }
 const ALL_FILE_TYPE: {
   [key: string]: string;
@@ -87,6 +88,7 @@ const UploadFiles = forwardRef<UploadFilesRef, UploadFilesProps>(({
   maxCount = 1,
   isCanDrag = false,
   onRemove: customOnRemove,
+  draggerHeight = 270,
   ...props
 }, ref) => {
   const { t } = useTranslation();
@@ -240,7 +242,7 @@ const UploadFiles = forwardRef<UploadFilesRef, UploadFilesProps>(({
   if (isCanDrag) {
     return (
       <div className="rb:mb-6 rb:w-full  rb:border rb:border-dashed rb:border-gray-900 rb:rounded-xl">
-        <Dragger {...uploadProps} style={{ height: '270px' }}>
+        <Dragger {...uploadProps} height={draggerHeight}>
           <Flex vertical align="center" justify="center">
             <div className="rb:size-12 rb:bg-cover rb:bg-[url('@/assets/images/CloudUploadOutlined.svg')]"></div>
             {(!isAutoUpload || !hasProgress) &&

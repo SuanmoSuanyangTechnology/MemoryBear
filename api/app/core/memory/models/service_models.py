@@ -55,6 +55,10 @@ class Memory(BaseModel):
     def serialize_source(self, v) -> str:
         return v.value
 
+    @field_serializer("score")
+    def serialize_score(self, v: float) -> float:
+        return round(v, 2)
+
 
 class RelationMemory(BaseModel):
     source: str = ""

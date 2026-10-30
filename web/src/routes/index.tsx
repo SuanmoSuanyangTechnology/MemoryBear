@@ -1,9 +1,3 @@
-/*
- * @Author: ZhaoYing 
- * @Date: 2026-02-02 16:33:11 
- * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-07-09 15:07:20
- */
 /**
  * Route Configuration
  * 
@@ -84,12 +78,13 @@ const componentMap: Record<string, LazyExoticComponent<ComponentType<object>>> =
   OrderHistory: lazy(() => import('@/views/OrderHistory')),
   Package: lazy(() => import('@/views/Package')),
   ToolManagement: lazy(() => import('@/views/ToolManagement')),
+  ResourceCenter: lazy(() => import('@/views/ResourceCenter')),
   SpaceConfig: lazy(() => import('@/views/SpaceConfig')),
   Ontology: lazy(() => import('@/views/Ontology')),
   Prompt: lazy(() => import('@/views/Prompt')),
   PromptHistory: lazy(() => import('@/views/Prompt/pages/History')),
   Skills: lazy(() => import('@/views/Skills')),
-  SkillConfig: lazy(() => import('@/views/Skills/pages/SkillConfig')),
+  // SkillConfig: lazy(() => import('@/views/Skills/pages/SkillConfig')),
   Account: lazy(() => import('@/views/Account')),
   MemoryEngine: lazy(() => import('@/views/MemoryEngine')),
   BrainMemory: lazy(() => import('@/views/BrainMemory')),

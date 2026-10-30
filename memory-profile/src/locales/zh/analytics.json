@@ -1,4 +1,12 @@
 {
+  "scene_graph": {
+    "user_not_found": "用户不存在",
+    "invalid_user_id": "无效的用户ID格式",
+    "bad_data": "场景社区数据异常",
+    "capacity_exceeded": "场景社区图谱数据量超过完整响应上限",
+    "unavailable": "场景社区图谱服务暂不可用",
+    "disabled": "场景社区图谱服务尚未启用"
+  },
   "msg": {
     "query_success": "查询成功",
     "data_not_ready": "数据尚未生成",

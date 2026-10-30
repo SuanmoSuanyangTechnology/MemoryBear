@@ -679,9 +679,9 @@ class Neo4jClient(BaseClient):
                     elif sim_f > top_heap[0][0]:
                         heapq.heapreplace(top_heap, (sim_f, node_id))
 
-                if len(batch) < 1000:
-                    break
-                last_id = batch[-1]["id"]
+            if len(batch) < 1000:
+                break
+            last_id = batch[-1]["id"]
 
         if not top_heap:
             return StorageReadResult(backend=self.name)

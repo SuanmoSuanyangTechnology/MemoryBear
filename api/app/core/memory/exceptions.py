@@ -7,6 +7,9 @@ from __future__ import annotations
 from enum import Enum
 from typing import Optional
 
+class CommunityRetrievalError(RuntimeError):
+    """Internal failure reason; the read pipeline supplies the public error contract."""
+
 
 class JobSupersededError(RuntimeError):
     """The job lost ownership, so its remaining pages must not be written."""

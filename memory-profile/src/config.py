@@ -170,6 +170,30 @@ class ProfileSettings(BaseSettings):
     redis_db: int = Field(1, validation_alias="REDIS_DB")
     redis_pool_size: int = Field(100, validation_alias="PROFILE_REDIS_POOL_SIZE")
 
+    enable_scene_community_graph: bool = Field(
+        False, validation_alias="ENABLE_SCENE_COMMUNITY_GRAPH"
+    )
+    scene_graph_cache_enabled: bool = Field(True, validation_alias="SCENE_GRAPH_CACHE_ENABLED")
+    scene_graph_cache_ttl_seconds: int = Field(
+        60, gt=0, validation_alias="SCENE_GRAPH_CACHE_TTL_SECONDS"
+    )
+    scene_graph_max_communities: int = Field(
+        1000, gt=0, validation_alias="SCENE_GRAPH_MAX_COMMUNITIES"
+    )
+    scene_graph_max_scenes: int = Field(5000, gt=0, validation_alias="SCENE_GRAPH_MAX_SCENES")
+    scene_graph_max_data_bytes: int = Field(
+        10 * 1024 * 1024, gt=0, validation_alias="SCENE_GRAPH_MAX_DATA_BYTES"
+    )
+    scene_graph_read_budget_seconds: float = Field(
+        5.0, gt=0, allow_inf_nan=False, validation_alias="SCENE_GRAPH_READ_BUDGET_SECONDS"
+    )
+    scene_graph_db_timeout_seconds: float = Field(
+        3.0, gt=0, allow_inf_nan=False, validation_alias="SCENE_GRAPH_DB_TIMEOUT_SECONDS"
+    )
+    scene_graph_cache_timeout_seconds: float = Field(
+        0.2, gt=0, allow_inf_nan=False, validation_alias="SCENE_GRAPH_CACHE_TIMEOUT_SECONDS"
+    )
+
     elasticsearch_host: str = Field("https://127.0.0.1", validation_alias="ELASTICSEARCH_HOST")
     elasticsearch_port: int = Field(9200, validation_alias="ELASTICSEARCH_PORT")
     elasticsearch_username: str = Field("elastic", validation_alias="ELASTICSEARCH_USERNAME")
@@ -196,6 +220,17 @@ class ProfileSettings(BaseSettings):
         if parsed.query or parsed.fragment:
             raise ValueError("MODEL_SERVICE_BASE_URL must not contain query or fragment")
         return value
+
+    @field_validator("enable_scene_community_graph", "scene_graph_cache_enabled", mode="before")
+    @classmethod
+    def validate_scene_graph_boolean(cls, value: object) -> bool:
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (str, int)):
+            normalized = str(value).strip().lower()
+            if normalized in {"true", "false", "1", "0"}:
+                return normalized in {"true", "1"}
+        raise ValueError("scene graph boolean settings must be true, false, 1, or 0")
 
     @field_validator("log_level", mode="before")
     @classmethod
