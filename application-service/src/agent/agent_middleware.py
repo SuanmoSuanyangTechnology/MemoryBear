@@ -3,7 +3,6 @@ import uuid
 from typing import List, Dict, Any, Optional
 from langchain_core.runnables import RunnablePassthrough
 
-from ..repositories.skill_package_repository import SkillPackageRepository
 from ..services.skill_service import SkillService
 from ..repositories.skill_repository import SkillRepository
 from .skill_runtime_service import (
@@ -110,95 +109,6 @@ class AgentMiddleware:
         
         return filtered_tools, activated_skill_ids
     
-    def load_skill_tools(
-        self,
-        db,
-        tenant_id: uuid.UUID,
-        base_tools: List = None,
-        runtime_context: Optional[Dict[str, Any]] = None,
-    ) -> tuple[List, Dict[str, Any], Dict[str, str], str]:
-        """
-        加载技能关联的工具
-
-        Args:
-            db: 数据库会话
-            tenant_id: 租户id
-            base_tools: 基础工具列表
-            runtime_context: 运行时上下文, 含非业务参数
-
-        Returns:
-            (工具列表, 技能配置字典, 工具到技能的映射 {tool_name: skill_id}, standard 技能 discovery 索引段)
-        """
-
-        tools_dict = {}
-        tool_to_skill_map = {}  # 工具名称到技能ID的映射
-        
-        if base_tools:
-            for tool in base_tools:
-                tool_name = getattr(tool, 'name', str(id(tool)))
-                tools_dict[tool_name] = tool
-                # base_tools 不属于任何 skill，不加入映射
-
-        skill_configs = {}
-        skill_ids_to_load = list(self.skill_ids)
-
-        if skill_ids_to_load:
-            for skill_id in skill_ids_to_load:
-                try:
-                    skill = SkillRepository(db).get_by_id(uuid.UUID(skill_id), tenant_id)
-                    if skill and skill.is_active:
-                        # standard 技能：不拼 prompt/keywords，记录进 standard 索引（discovery 层）
-                        if (skill.skill_format or "legacy") == "standard" and skill.package_id:
-                            if skill_id not in self._standard_skill_ids:
-                                self._standard_skill_ids.append(skill_id)
-                            continue
-                        # 保存技能配置（包含prompt）
-                        config = skill.config or {}
-                        config['prompt'] = skill.prompt
-                        config['name'] = skill.name
-                        skill_configs[skill_id] = config
-                except Exception:
-                    continue
-            
-            # 加载技能工具并获取映射关系
-            skill_tools, skill_tool_map = SkillService.load_skill_tools(
-                db,
-                skill_ids_to_load,
-                tenant_id,
-                runtime_context=runtime_context,
-            )
-            
-            # 只添加不冲突的 skill_tools
-            for tool in skill_tools:
-                tool_name = getattr(tool, 'name', str(id(tool)))
-                if tool_name not in tools_dict:
-                    tools_dict[tool_name] = tool
-                    # 复制映射关系
-                    if tool_name in skill_tool_map:
-                        tool_to_skill_map[tool_name] = skill_tool_map[tool_name]
-
-        # standard 技能（Agent Skills 协议）：注入 read_skill 工具 + discovery 索引
-        standard_index = ""
-        if self._standard_skill_ids:
-            package_repo = SkillPackageRepository(db)
-            standard_skills = []
-            for sid in self._standard_skill_ids:
-                try:
-                    skill = SkillRepository(db).get_by_id(uuid.UUID(sid), tenant_id)
-                    if skill and skill.package_id:
-                        pkg = package_repo.get_by_id(skill.package_id, tenant_id)
-                        if pkg:
-                            standard_skills.append(skill_index_triple(skill, pkg))
-                except Exception:
-                    continue
-            if standard_skills:
-                standard_index = build_skill_index(standard_skills)
-                if 'read_skill' not in tools_dict:
-                    tools_dict['read_skill'] = create_read_skill_tool(tenant_id)
-                _inject_script_tool(tools_dict, tenant_id, runtime_context)
-
-        return list(tools_dict.values()), skill_configs, tool_to_skill_map, standard_index
-
     async def load_skill_tools_async(
         self,
         db,

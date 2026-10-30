@@ -1,0 +1,30 @@
+syntax = "proto3";
+
+package memorybear.application.v1;
+
+message ChatRequest {
+  bytes body_json = 1;
+}
+
+message EventFrame {
+  string event = 1;
+  bytes data_json = 2;
+}
+
+message ResultFrame {
+  int32 http_status = 1;
+  bytes body_json = 2;
+  map<string, string> headers = 3;
+}
+
+message ChatFrame {
+  oneof payload {
+    EventFrame event = 1;
+    ResultFrame result = 2;
+  }
+  uint64 seq = 3;
+}
+
+service AppChatService {
+  rpc Chat(ChatRequest) returns (stream ChatFrame);
+}

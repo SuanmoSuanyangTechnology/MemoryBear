@@ -13,6 +13,8 @@ dependencies = [
     "auth-sdk>=0.1",
     "fastapi>=0.119,<1",
     "httpx>=0.28,<1",
+    "memorybear-grpc",
+    "prometheus-client>=0.21,<1",
     "psycopg[binary]>=3.2,<4",
     "pydantic>=2.12,<3",
     "pydantic-settings>=2.11,<3",
@@ -35,6 +37,7 @@ dev = [
 [tool.uv.sources]
 redbear-model = { path = "../packages/redbear-model" }
 auth-sdk = { path = "../packages/auth-sdk" }
+memorybear-grpc = { path = "../packages/memorybear-grpc" }
 
 [tool.hatch.build.targets.wheel]
 packages = ["src"]
@@ -65,3 +68,9 @@ select = ["E", "F", "I", "UP", "B", "ASYNC"]
 # 27 端点逐条移植自宿主 model_controller（含 FastAPI 参数默认值写法），保持与宿主
 # 逐行可比便于 M7-4 代理核对与 M8 sync→async 整改；M8 整改时一并收敛。
 "src/api/routes/models.py" = ["B008", "E501", "UP045"]
+
+# Resolve through the mirror so re-locks keep every lock URL on it.
+[[tool.uv.index]]
+name = "tencent"
+url = "https://mirrors.cloud.tencent.com/pypi/simple"
+default = true

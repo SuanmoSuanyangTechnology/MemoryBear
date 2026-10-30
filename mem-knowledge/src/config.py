@@ -131,6 +131,15 @@ class KnowledgeSettings(BaseSettings):
         default="local",
         validation_alias="STORAGE_TYPE",
     )
+    storage_connection_pool_size: int = Field(
+        default=16, ge=1, validation_alias="STORAGE_CONNECTION_POOL_SIZE",
+    )
+    storage_max_concurrency: int = Field(
+        default=16, ge=1, validation_alias="STORAGE_MAX_CONCURRENCY",
+    )
+    kb_image_download_concurrency: int = Field(
+        default=8, ge=1, validation_alias="KB_IMAGE_DOWNLOAD_CONCURRENCY",
+    )
     file_path: Path = Field(default=Path("/files"), validation_alias="FILE_PATH")
     oss_endpoint: str = Field(default="", validation_alias="OSS_ENDPOINT")
     oss_access_key_id: SecretStr = Field(
