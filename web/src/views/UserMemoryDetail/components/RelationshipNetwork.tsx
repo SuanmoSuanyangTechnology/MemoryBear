@@ -11,7 +11,7 @@ import { Flex, type SegmentedProps, Button } from 'antd'
 import clsx from 'clsx'
 
 import type { GraphData, Node as GraphNode, PerceptualNodeProperties } from '../types'
-import type { RawCommunityNode } from '@/components/D3Graph/types'
+import type { CommunityD3Node, RawCommunityNode } from '@/components/D3Graph/types'
 import {
   getMemorySearchEdges,
 } from '@/api/memory'
@@ -62,7 +62,7 @@ const RelationshipNetwork = forwardRef<RelationshipNetworkRef, RelationshipNetwo
   const [nodes, setNodes] = useState<Node[]>([])
   const [links, setLinks] = useState<Edge[]>()
   const [categories, setCategories] = useState<{ name: string; value: number; }[]>([])
-  const [selectedNode, setSelectedNode] = useState<GraphNode | RawCommunityNode | EdgeClickData | null>(null)
+  const [selectedNode, setSelectedNode] = useState<GraphNode | RawCommunityNode | CommunityD3Node | EdgeClickData | null>(null)
   // 双向边当前选中的半边方向
   const [activeEdgeDirection, setActiveEdgeDirection] = useState<'a_to_b' | 'b_to_a' | null>(null)
   // 边详情面板中当前激活的关系下标
@@ -265,7 +265,12 @@ const RelationshipNetwork = forwardRef<RelationshipNetworkRef, RelationshipNetwo
         />
       </div>
       {activeTab === 'communityNetwork'
-        ? <CommunityNetwork onSelectCommunity={community => setSelectedNode(community)} />
+        ? <CommunityNetwork
+            onSelectCommunity={community => setSelectedNode(community)}
+            onSelectNode={node => setSelectedNode(node)}
+            selectedNodeId={selectedNode && 'community' in selectedNode ? selectedNode.id : null}
+            selectedCommunityId={selectedNode && 'scenes' in selectedNode ? selectedNode.id : null}
+          />
         : <div className="rb:absolute rb:inset-0">
           {categories.length > 0 &&
             <Flex gap={24} align="center" justify="space-between" wrap={false}

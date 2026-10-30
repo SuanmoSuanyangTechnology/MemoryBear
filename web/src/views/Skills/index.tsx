@@ -134,7 +134,7 @@ const Skills = () => {
                 </>}
                 isNeedTooltip={false}
                 className="rb:h-full! rb:cursor-pointer"
-                avatarText={<div className={clsx("rb:size-6 rb:bg-cover", plugin ? "rb:bg-[url('@/assets/images/menuNew/application_purple.svg')]" : "rb:bg-[url('@/assets/images/menuNew/skills.svg')]")} />}
+                avatarText={<div className={clsx("rb:size-6 rb:bg-cover", plugin ? "rb:bg-[url('@/assets/images/menuNew/plugin.svg')]" : "rb:bg-[url('@/assets/images/menuNew/skill.svg')]")} />}
                 avatarClassName={plugin ? 'rb:bg-[rgba(156,111,255,0.06)]!' : "rb:bg-[rgba(21,94,239,0.06)]!"}
                 extra={<MoreDropdown
                 items={[

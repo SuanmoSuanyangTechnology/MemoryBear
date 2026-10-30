@@ -50,6 +50,7 @@ from .prompt_optimizer_model import (
 )
 from .release_share_model import ReleaseShare
 from .skill_model import Skill
+from .skill_package_model import SkillFile, SkillPackage, SkillPlugin
 from .tool_model import (
     AuthType,
     BuiltinToolConfig,
@@ -137,6 +138,9 @@ __all__ = [
     "ReleaseShare",
     "RoleType",
     "Skill",
+    "SkillFile",
+    "SkillPackage",
+    "SkillPlugin",
     "ToolConfig",
     "ToolExecution",
     "ToolStatus",

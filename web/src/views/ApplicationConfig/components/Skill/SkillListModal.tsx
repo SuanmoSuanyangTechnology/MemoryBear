@@ -2,8 +2,8 @@ import { forwardRef, useImperativeHandle, useState } from 'react'
 import { Flex, Skeleton, Tree } from 'antd'
 import type { DataNode } from 'antd/es/tree'
 import { getSkillIds, getPluginMembers, groupSkills } from './selection'
-import pluginIcon from '@/assets/images/menuNew/application_purple.svg'
-import skillIcon from '@/assets/images/menuNew/skills.svg'
+import pluginIcon from '@/assets/images/menuNew/plugin.svg'
+import skillIcon from '@/assets/images/menuNew/skill.svg'
 import { useTranslation } from 'react-i18next'
 import { DownOutlined } from '@ant-design/icons';
 

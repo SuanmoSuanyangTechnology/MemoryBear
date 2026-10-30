@@ -15,6 +15,7 @@ from sqlalchemy import select
 from starlette.background import BackgroundTask
 
 from ...errors import KnowledgeError
+from ...infrastructure.streaming import ClosingStreamingResponse
 from ...models.owned import FILE_ROLE_SOURCE, File, Knowledge
 from ...runtime import ProcessRuntime
 from ...services import file as file_service
@@ -274,7 +275,7 @@ async def get_file(
     if not file_key:
         raise file_service._not_found("KB_FILE_STORAGE_KEY_MISSING")
     media_type = mimetypes.guess_type(file_name)[0] or "application/octet-stream"
-    return StreamingResponse(
+    return ClosingStreamingResponse(
         KnowledgeFileStorage(runtime.storage).download_stream(file_key),
         media_type=media_type,
         headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(file_name)}"},
@@ -312,7 +313,7 @@ async def batch_download_files(
             qa_exports[file.file_key] = export
     entries = file_service.build_zip_arcnames(snapshots)
     zip_name = file_service.make_zip_filename(snapshots, request_body.zip_filename)
-    return StreamingResponse(
+    return ClosingStreamingResponse(
         file_service.stream_zip_files(
             entries,
             KnowledgeFileStorage(runtime.storage),

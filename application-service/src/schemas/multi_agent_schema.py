@@ -45,7 +45,6 @@ class SubAgentConfig(BaseModel):
     agent_id: uuid.UUID = Field(..., description="Agent ID")
     name: str = Field(..., description="Agent 名称")
     role: Optional[str] = Field(None, description="角色描述")
-    priority: int = Field(default=1, ge=1, le=100, description="优先级（1-100）")
     capabilities: List[str] = Field(default_factory=list, description="能力列表")
     release_policy: Literal["current", "pinned"] = Field(
         default="current",
@@ -141,7 +140,7 @@ class ExecutionConfig(BaseModel):
         default=3,
         ge=1,
         le=10,
-        description="主管循环单轮内最多分派子 Agent 次数（tool_call_limit），仅 orchestration_mode=supervisor_loop 生效"
+        description="已废弃，不再生效：所有 Agent 的单工具调用上限统一由环境变量 AGENT_TOOL_CALL_LIMIT 控制（默认 5）"
     )
 
     # Sub-agent execution mode config
@@ -214,9 +213,10 @@ class SupervisorConfig(BaseModel):
         """Fault-tolerant skill_ids normalization (the frontend compresses the
         same way; this is the backend fallback).
 
-        Rules match capabilityContract.compressSkills / the Agent runtime:
-        - when all_skills=true, skill_ids is meaningless → store [] (the editor
-          may leave null elements)
+        Rules:
+        - only ``skill_ids`` matters (non-empty enables those skills, empty mounts
+          none). The legacy ``enabled`` / ``all_skills`` switches are ignored and
+          have no effect; historical all_skills rows simply carry an empty list.
         - object elements yield their id; null / non-string elements are dropped
 
         Dirty entity fields under knowledge retrieval / tools / variables are
@@ -226,16 +226,13 @@ class SupervisorConfig(BaseModel):
         if isinstance(data, dict):
             skills = data.get("skills")
             if isinstance(skills, dict) and isinstance(skills.get("skill_ids"), list):
-                if skills.get("all_skills"):
-                    skills["skill_ids"] = []
-                else:
-                    skills["skill_ids"] = [
-                        vo.get("id") if isinstance(vo, dict) else vo
-                        for vo in skills["skill_ids"]
-                    ]
-                    skills["skill_ids"] = [
-                        vo for vo in skills["skill_ids"] if isinstance(vo, str)
-                    ]
+                skills["skill_ids"] = [
+                    vo.get("id") if isinstance(vo, dict) else vo
+                    for vo in skills["skill_ids"]
+                ]
+                skills["skill_ids"] = [
+                    vo for vo in skills["skill_ids"] if isinstance(vo, str)
+                ]
         return data
 
 

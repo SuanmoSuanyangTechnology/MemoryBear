@@ -845,6 +845,7 @@ async def v1_chat(
         payload = await _parse_chat_payload(request)
     except ChatRequestValidationError as exc:
         return _validation_failed_response(exc.detail)
+
     prep = await prepare_chat(app_id=app_id, workspace_id=workspace_id, payload=payload)
     if payload.stream:
         return sse_response(chat_stream(prep))

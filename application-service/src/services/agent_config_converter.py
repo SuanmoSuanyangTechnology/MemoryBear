@@ -102,7 +102,7 @@ class AgentConfigConverter:
             "memory": MemoryConfig(enabled=True),
             "variables": [],
             "tools": [],
-            "skills": SkillConfig(enabled=False, all_skills=False, skill_ids=[]),
+            "skills": SkillConfig(skill_ids=[]),
             "features": AppFeatures(),
         }
 
@@ -154,7 +154,7 @@ class AgentConfigConverter:
         if skills:
             result["skills"] = SkillConfig(**skills)
         else:
-            result["skills"] = SkillConfig(enabled=False, all_skills=False, skill_ids=[])
+            result["skills"] = SkillConfig(skill_ids=[])
 
         if features:
             result["features"] = AppFeatures(**features)

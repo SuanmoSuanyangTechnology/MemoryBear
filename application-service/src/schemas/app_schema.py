@@ -165,10 +165,13 @@ class ToolConfig(BaseModel):
 
 
 class SkillConfig(BaseModel):
-    """Skill config"""
-    enabled: bool = Field(default=True, description="是否启用该技能")
-    skill_ids: Optional[list[str]] = Field(default_factory=list, description="技能ID列表")
-    all_skills: Optional[bool] = Field(default=False, description="是否允许访问所有技能")
+    """Skill config
+
+    历史字段 ``enabled`` / ``all_skills`` 已废弃：后端只按 ``skill_ids`` 是否非空
+    决定挂载哪些技能。老数据若仍带这两个键，Pydantic 默认 ``extra=ignore`` 会直接丢弃，
+    无需迁移；新数据只应传 ``skill_ids``。
+    """
+    skill_ids: Optional[list[str]] = Field(default_factory=list, description="技能ID列表（非空即启用这些技能，空列表=不挂技能）")
 
 
 # ---------- App Features ----------

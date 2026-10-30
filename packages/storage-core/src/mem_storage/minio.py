@@ -31,6 +31,8 @@ class MinIOStorage(S3Storage):
                 bucket_name=config.bucket_name,
                 endpoint_url=config.endpoint_url,
                 multipart_part_size=config.multipart_part_size,
+                connection_pool_size=config.connection_pool_size,
+                max_concurrency=config.max_concurrency,
             ),
             client=client,
             owns_client=owns_client,
@@ -43,7 +45,7 @@ class MinIOStorage(S3Storage):
             if self._bucket_ready:
                 return
             try:
-                await asyncio.to_thread(
+                await self._requests.call(
                     self.client.head_bucket,
                     Bucket=self.bucket_name,
                 )
@@ -56,8 +58,6 @@ class MinIOStorage(S3Storage):
                     ) from exc
                 params: dict[str, Any] = {"Bucket": self.bucket_name}
                 if self.region != "us-east-1":
-                    params["CreateBucketConfiguration"] = {
-                        "LocationConstraint": self.region
-                    }
-                await asyncio.to_thread(self.client.create_bucket, **params)
+                    params["CreateBucketConfiguration"] = {"LocationConstraint": self.region}
+                await self._requests.call(self.client.create_bucket, **params)
             self._bucket_ready = True

@@ -8,8 +8,8 @@ import ToolList from './ToolList/ToolList';
 import RbModal from '@/components/RbModal';
 import SkillFiles from './SkillFiles';
 import Empty from '@/components/Empty';
-import pluginIcon from '@/assets/images/menuNew/application_purple.svg';
-import skillIcon from '@/assets/images/menuNew/skills.svg';
+import pluginIcon from '@/assets/images/menuNew/plugin.svg';
+import skillIcon from '@/assets/images/menuNew/skill.svg';
 
 export interface SkillDetailRef { handleOpen: (skill: Skill) => void }
 

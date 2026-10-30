@@ -5,18 +5,19 @@
  */
 import { type FC } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Space, Flex, Divider, type SegmentedProps, Image } from 'antd'
+import { Space, Flex, type SegmentedProps, Image } from 'antd'
 import dayjs from 'dayjs'
 import clsx from 'clsx'
 
 import RbCard from '@/components/RbCard/Card'
 import type { Node as GraphNode, PerceptualNodeProperties, StatementNodeProperties, ExtractedEntityNodeProperties, AssistantPrunedNodeProperties, PreferenceNodeProperties } from '../types'
-import type { RawCommunityNode } from '@/components/D3Graph/types'
+import type { CommunityD3Node, RawCommunityNode } from '@/components/D3Graph/types'
 import Tag from '@/components/Tag'
 import type { Node, EdgeClickData } from '@/components/Charts/GraphNetworkChart/types'
 import AudioPlayer from './AudioPlayer'
 import VideoPlayer from './VideoPlayer'
 import EdgeDetailPanel from './EdgeDetailPanel'
+import CommunityEntityDetails from './CommunityEntityDetails'
 
 const KEYS: Record<string, string[]> = {
   image: ['summary', 'keywords', 'topic', 'domain', 'scene'],
@@ -36,7 +37,7 @@ const getFileType = (fileType: string) => {
 }
 
 interface NodeDetailPanelProps {
-  selectedNode: GraphNode | RawCommunityNode | EdgeClickData
+  selectedNode: GraphNode | RawCommunityNode | CommunityD3Node | EdgeClickData
   nodes: Node[]
   activeTab: SegmentedProps['value']
   activeRelationIndex: number
@@ -76,7 +77,9 @@ const NodeDetailPanel: FC<NodeDetailPanelProps> = ({
       })}
       extra={<div className="rb:cursor-pointer rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/userMemory/close.svg')]" onClick={onClose}></div>}
     >
-      {isEdge
+      {activeTab === 'communityNetwork'
+        ? <div className="rb:h-full rb:overflow-auto"><CommunityEntityDetails node={selectedNode as CommunityD3Node | RawCommunityNode} /></div>
+        : isEdge
         ? <EdgeDetailPanel
             selectedNode={selectedNode as any}
             nodes={nodes}
@@ -87,31 +90,6 @@ const NodeDetailPanel: FC<NodeDetailPanelProps> = ({
           />
         : <>
           <div className="rb:overflow-auto rb:h-full">
-            {(selectedNode as RawCommunityNode).properties.community_id
-              ? <div>
-                  <div className="rb:font-medium rb:text-gray-800 rb:text-[16px] rb:leading-5.5 rb:pl-1">
-                    {(selectedNode as RawCommunityNode).properties.name || selectedNode.id}
-                  </div>
-                  {(selectedNode as RawCommunityNode).properties.summary && <>
-                    <div className="rb:mt-3 rb:font-medium rb:leading-5 rb:pl-1">{t('userMemory.summary')}</div>
-                    <div className="rb:bg-gray-100 rb:rounded-xl rb:px-3 rb:py-2.5 rb:mt-2">
-                      {(selectedNode as RawCommunityNode).properties.summary}
-                    </div>
-                  </>}
-                  <Flex align="center" justify="space-between" className="rb:mt-5!">
-                    <span className="rb:text-gray-600 rb:font-regular rb:pl-1">{t('userMemory.member_count')}</span>
-                    <span className="rb:font-medium">{(selectedNode as RawCommunityNode).properties.member_count}{t('userMemory.member_count_desc')}</span>
-                  </Flex>
-
-                  {(selectedNode as RawCommunityNode).properties.core_entities && <>
-                    <Divider className='rb:my-2.5!' />
-                    <div className="rb:font-medium rb:leading-5 rb:pl-1">{t('userMemory.core_entities')}</div>
-                    <ul className="rb:list-disc rb:pl-4 rb:text-gray-600 rb:mt-2">
-                      {(selectedNode as RawCommunityNode).properties.core_entities?.map((entity, index) => <li key={index}>{entity}</li>)}
-                    </ul>
-                  </>}
-                </div>
-              : <>
                 {((selectedNode as Node).name || (selectedNode as GraphNode).label === 'Conversation') &&
                   <div className="rb:font-medium rb:text-[16px] rb:text-gray-800 rb:leading-5.5 rb:mb-3">
                     {(selectedNode as Node).name || (selectedNode as GraphNode).label}
@@ -324,7 +302,6 @@ const NodeDetailPanel: FC<NodeDetailPanelProps> = ({
                     })}
                   </>}
                 </Flex>
-              </>}
           </div>
 
           {activeTab !== 'communityNetwork' &&
