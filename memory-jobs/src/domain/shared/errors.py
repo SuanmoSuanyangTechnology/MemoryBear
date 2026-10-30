@@ -32,7 +32,9 @@ class WorkspaceNotEligible(DomainError):
 
     ``reason`` is part of the cross-service contract: the producer runs the same
     predicate before publishing, so the three values must not drift. ``detail``
-    carries diagnostics (the storage type) without polluting the reason token.
+    carries diagnostics (the storage type) as a separate field; ``str(error)``
+    stays equal to ``reason`` so a caller that logs or matches the message never
+    picks up the diagnostic suffix.
     """
 
     def __init__(
@@ -41,7 +43,7 @@ class WorkspaceNotEligible(DomainError):
         reason: str,
         detail: str | None = None,
     ) -> None:
-        super().__init__(reason if detail is None else f"{reason} ({detail})")
+        super().__init__(reason)
         self.workspace_id = workspace_id
         self.reason = reason
         self.detail = detail

@@ -89,7 +89,10 @@ class MemoryEnterpriseManager:
 
         names = payload.get("names") if isinstance(payload, dict) else None
         if not isinstance(names, dict):
-            raise ValueError("memory-enterprise returned an unexpected payload")
+            raise ValueError(
+                "memory-enterprise returned an unexpected payload: "
+                f"{type(names).__name__}"
+            ) from None
         return {
             key: value
             for key, value in names.items()

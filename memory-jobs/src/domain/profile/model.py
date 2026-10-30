@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
 
+from src.domain.shared.clock import as_utc_aware
 from src.domain.shared.errors import InvalidValue
 from src.domain.shared.ids import EndUserId, WorkspaceId
 from src.domain.shared.text import compact_text
@@ -40,13 +41,15 @@ class SourceVersion:
         matched no row.
         """
 
-        if self.write_time != current.write_time:
+        if as_utc_aware(self.write_time) != as_utc_aware(current.write_time):
             return False
         if self.metadata_row_exists != current.metadata_row_exists:
             return False
         if not self.metadata_row_exists:
             return True
-        return self.metadata_updated_at == current.metadata_updated_at
+        return as_utc_aware(self.metadata_updated_at) == as_utc_aware(
+            current.metadata_updated_at
+        )
 
 
 @dataclass(frozen=True, slots=True)

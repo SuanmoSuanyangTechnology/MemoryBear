@@ -24,7 +24,9 @@ class SceneNameLookup(Protocol):
 
         * a mapping — the authoritative answer; ids missing from it have no
           name (deleted, or never existed), so the caller may drop them;
-        * ``{}`` — authoritative "none of these ids has a name";
+        * ``{}`` — authoritative "none of these ids has a name". A deployment
+          without the enterprise service answers this way: the stored uuid
+          scenes cannot exist there either, so this is not a failure;
         * ``None`` — the lookup is unavailable (transport failure, bad payload).
           Callers must not read that as "deleted": the projection is skipped and
           the stored keys are kept as they are.

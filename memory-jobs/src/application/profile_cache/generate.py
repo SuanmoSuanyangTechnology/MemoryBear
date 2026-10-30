@@ -62,6 +62,13 @@ from src.domain.workspace.model import Workspace
 
 logger = logging.getLogger(__name__)
 
+def _canonical_end_user_id(raw: str) -> str:
+    """The lock-key shape the scanner and the fan-out already use."""
+
+    parsed = parse_uuid(raw)
+    return raw if parsed is None else str(parsed)
+
+
 INSUFFICIENT_MEMORY_INSIGHT_TEXT = "该用户记忆不足，暂无法生成有效洞察。"
 INSUFFICIENT_MEMORY_INSIGHT_TEXT_EN = (
     "There is insufficient user memory to generate a meaningful insight."
@@ -165,7 +172,8 @@ class GenerateProfileCacheUseCase:
         prompts: PromptCatalog,
         clock: Clock,
         lock: InflightLock,
-        scene_names: SceneNameLookup | None = None,
+        #: Required: an omitted lookup would silently drop every uuid scene.
+        scene_names: SceneNameLookup,
     ) -> None:
         self.uow = uow
         self.insight_statements = insight_statements
@@ -182,10 +190,13 @@ class GenerateProfileCacheUseCase:
         """Refresh one user's cache columns unless another attempt holds the lock.
 
         The lock is released on every exit path; ``acquire`` is reentrant for a
-        redelivered attempt that kept the same token.
+        redelivered attempt that kept the same token. The key is the canonical
+        UUID string the scanner and the fan-out use, so an uppercase or
+        differently formatted id from a producer cannot open a second lock.
         """
 
-        if not self.lock.acquire(command.end_user_id, command.lock_owner):
+        lock_subject = _canonical_end_user_id(command.end_user_id)
+        if not self.lock.acquire(lock_subject, command.lock_owner):
             logger.info(
                 "profile cache generation skipped, another refresh is in flight "
                 "user=%s workspace=%s",
@@ -199,7 +210,7 @@ class GenerateProfileCacheUseCase:
         try:
             return self._execute(command)
         finally:
-            self.lock.release(command.end_user_id, command.lock_owner)
+            self.lock.release(lock_subject, command.lock_owner)
 
     def _execute(self, command: GenerateProfileCacheCommand) -> ProfileCacheResult:
         language = Language.parse(command.language)

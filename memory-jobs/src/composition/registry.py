@@ -6,10 +6,13 @@ construction order; each ``name`` is the attribute tasks reach through
 ``get_container().<name>`` (``scripts/check_import_boundaries.py`` keeps its own
 allowlist in sync through a test).
 
-Every ``build`` must be pure assembly: construct adapters and facades, but never
-connect, query, or block. The container builds all registered modules eagerly at
-startup, so one build that performs I/O would delay or break every task, not
-just its own domain.
+Every ``build`` must stay assembly-only: construct adapters and facades, but
+never open a connection, query, or block. Creating a lazy client object is fine
+even when it initializes a driver or a pool (for example SQLAlchemy's
+``create_engine`` opens no connection until first use), so ``build`` may hand a
+sessionmaker to the Unit of Work; it must not perform network I/O. The container
+builds all registered modules eagerly at startup, so one build that blocks would
+delay or break every task, not just its own domain.
 """
 
 from __future__ import annotations

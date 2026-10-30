@@ -122,7 +122,7 @@ class ScanSweep[C, G]:
             cursor: Any | None = None
             while True:
                 with self._uow.read() as repositories:
-                    batch, cursor = self._page(
+                    batch, next_cursor = self._page(
                         repositories, group, cursor, self._page_size
                     )
                 if not batch:
@@ -165,8 +165,22 @@ class ScanSweep[C, G]:
                                 "event": f"{self._event_prefix}_scan_progress",
                             },
                         )
-                if cursor is None:
+                if next_cursor is None:
                     break
+                if next_cursor == cursor:
+                    # A full page that hands back the same cursor would loop
+                    # forever; stop instead of silently re-reading it.
+                    logger.warning(
+                        "%s scan cursor did not advance group=%s cursor=%s; stopping",
+                        self._name,
+                        group,
+                        cursor,
+                        extra={
+                            "event": f"{self._event_prefix}_scan_cursor_stuck",
+                        },
+                    )
+                    break
+                cursor = next_cursor
 
         elapsed_seconds = time.monotonic() - started_at
         logger.info(
