@@ -27,6 +27,9 @@ jobs:
       - uses: bufbuild/buf-setup-action@v1
         with:
           version: "1.47.2"
+          # Authenticated release lookup; unauthenticated calls hit the shared
+          # runner IP's GitHub API rate limit.
+          github_token: ${{ secrets.GITHUB_TOKEN }}
       - name: buf lint
         run: buf lint proto
       - name: buf breaking (skip until a baseline exists on develop)
