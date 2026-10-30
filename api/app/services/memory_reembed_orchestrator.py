@@ -272,30 +272,20 @@ async def run_job(job_id: str, owner: str) -> Dict[str, Any]:
             return {"status": "REJECTED", "error": dimension_error}
 
         # 只取 id 一列：避免把大工作空间下所有 end_user 行拉进 identity map。
-        # 宿主口径按存储后端分流：RAG 分支用 App 关联口径（get_ids_by_app_workspace，
-        # 与统计/对账同源）——ES 文档归属由写入侧 App 链路决定，行归属与 App
-        # 不一致的历史数据按行过滤会漏算；图分支维持 EndUser.workspace_id
-        # （图数据本就按行归属组织）
-        from app.repositories.end_user_repository import EndUserRepository
-
+        # 主枚举统一以 EndUser 行为准（workspace_id + 活跃状态）：图侧与 ES 侧
+        # 的文档归属都是 end_user_id。不能按 App 关联过滤——MCP / Service API
+        # 宿主可以没有 App（app_id 为 NULL），App join 会漏掉这些宿主的存量向量。
         is_rag = str(snapshot["storage_type"] or "").strip().lower() == "rag"
         with get_db_context() as db:
-            if is_rag:
-                active_end_user_ids = list(
-                    EndUserRepository(db).get_ids_by_app_workspace(
-                        snapshot["workspace_id"]
-                    )
+            active_end_user_ids = [
+                str(row[0])
+                for row in db.query(EndUser.id)
+                .filter(
+                    EndUser.workspace_id == snapshot["workspace_id"],
+                    EndUser.is_active.is_(True),
                 )
-            else:
-                active_end_user_ids = [
-                    str(row[0])
-                    for row in db.query(EndUser.id)
-                    .filter(
-                        EndUser.workspace_id == snapshot["workspace_id"],
-                        EndUser.is_active.is_(True),
-                    )
-                    .all()
-                ]
+                .all()
+            ]
             active_end_users = len(active_end_user_ids)
             db.query(MemoryReembedJob).filter(
                 MemoryReembedJob.id == uuid.UUID(job_id),
