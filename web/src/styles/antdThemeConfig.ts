@@ -3,7 +3,7 @@ import type { ThemeConfig } from 'antd';
 // 浅色主题配置
 export const lightTheme: ThemeConfig = {
   token: {
-    colorPrimary: '#171719',
+    colorPrimary: '#155EEF',
     colorBgBase: '#ffffff',
     colorTextBase: '#171719',
     colorBorder: '#DFE4ED',
@@ -45,7 +45,7 @@ export const lightTheme: ThemeConfig = {
       itemHoverBg: 'rgba(223,228,237,0.5)',
 
       itemBg: 'transparent',
-      itemSelectedBg: '#171719',
+      itemSelectedBg: '#155EEF',
 
       subMenuItemBg: 'transparent',
 
@@ -74,8 +74,8 @@ export const lightTheme: ThemeConfig = {
       primaryShadow: 'none',
       dangerShadow: 'none',
       defaultGhostBorderColor: '#EBEBEB',
-      defaultHoverColor: 'rgba(23, 23, 25, 0.7)',
-      defaultHoverBorderColor: 'rgba(23, 23, 25, 0.7)',
+      defaultHoverColor: '#155EEF',
+      defaultHoverBorderColor: '#155EEF',
     },
     Form: {
       labelColor: '#171719',
@@ -87,9 +87,9 @@ export const lightTheme: ThemeConfig = {
       railSize: 6,
       handleSize: 10,
       handleSizeHover: 10,
-      handleColor: '#171719',
-      handleActiveOutlineColor: '#171719',
-      trackBg: '#171719',
+      handleColor: '#155EEF',
+      handleActiveOutlineColor: '#155EEF',
+      trackBg: '#155EEF',
       railBg: '#EBEBEB',
     },
     Table: {
@@ -112,7 +112,7 @@ export const lightTheme: ThemeConfig = {
       itemColor: '#5B6167',
       lastItemColor: '#171719',
       linkColor: '#5B6167',
-      linkHoverColor: '#171719',
+      linkHoverColor: '#155EEF',
       fontSize: 18,
     },
     Input: {
@@ -156,9 +156,9 @@ export const lightTheme: ThemeConfig = {
     },
     Tree: {
       // nodeSelectedColor: '#FFFFFF',
-      directoryNodeSelectedBg: 'rgba(23,23,25,0.25)',
-      nodeSelectedBg: 'rgba(23,23,25,0.25)',
-      nodeHoverColor: '#171719',
+      directoryNodeSelectedBg: '#D1E0FF',
+      nodeSelectedBg: '#D1E0FF',
+      nodeHoverColor: '#155EEF',
     }
   }
 };

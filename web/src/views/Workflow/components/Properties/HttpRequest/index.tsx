@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-09 18:35:43 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-07-21 19:03:45
+ * @Last Modified time: 2026-10-30 15:53:11
  */
 import { type FC, useMemo, useRef, useState } from "react";
 import { useTranslation } from 'react-i18next'
@@ -295,7 +295,7 @@ const HttpRequest: FC<{ options: Suggestion[]; selectedNode?: any; graphRef?: an
               title="JSON"
               titleVariant="borderless"
               size="small"
-              className="rb:bg-[#F6F6F6] rb:border-[#F6F6F6]! rb:hover:bg-white rb:hover:border-[#171719]!"
+              className="rb:bg-[#F6F6F6] rb:border-[#F6F6F6]! rb:hover:bg-white rb:hover:border-primary-600!"
             />
           </Form.Item>
         }
@@ -309,13 +309,13 @@ const HttpRequest: FC<{ options: Suggestion[]; selectedNode?: any; graphRef?: an
               title="RAW TEXT"
               titleVariant="borderless"
               size="small"
-              className="rb:bg-[#F6F6F6] rb:border-[#F6F6F6]! rb:hover:bg-white rb:hover:border-[#171719]!"
+              className="rb:bg-gray-100 rb:border-gray-100! rb:hover:bg-white rb:hover:border-primary-600!"
             />
           </Form.Item>
         }
         {values?.body?.content_type === 'binary' &&
           <Form.Item name={['body', 'data']}
-            className="rb:bg-[#F6F6F6] rb:border-[#F6F6F6]! rb:hover:bg-white rb:hover:border-[#171719]! rb:border rb:rounded-lg rb:mb-0!"
+            className="rb:bg-[#F6F6F6] rb:border-[#F6F6F6]! rb:hover:bg-white rb:hover:border-primary-600! rb:border rb:rounded-lg rb:mb-0!"
           >
             <Editor
               key={['body', 'data'].join('_')}

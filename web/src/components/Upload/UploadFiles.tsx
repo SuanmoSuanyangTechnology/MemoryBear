@@ -241,7 +241,7 @@ const UploadFiles = forwardRef<UploadFilesRef, UploadFilesProps>(({
 
   if (isCanDrag) {
     return (
-      <div className="rb:mb-6 rb:w-full  rb:border rb:border-dashed rb:border-gray-900 rb:rounded-xl">
+      <div className="rb:mb-6 rb:w-full  rb:border rb:border-dashed rb:border-primary-600 rb:rounded-xl">
         <Dragger {...uploadProps} height={draggerHeight}>
           <Flex vertical align="center" justify="center">
             <div className="rb:size-12 rb:bg-cover rb:bg-[url('@/assets/images/CloudUploadOutlined.svg')]"></div>

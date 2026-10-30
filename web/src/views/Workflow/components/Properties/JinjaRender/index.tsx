@@ -163,7 +163,7 @@ const JinjaRender: FC<JinjaRenderProps> = ({ selectedNode, options, templateOpti
           options={templateOptions}
           titleVariant="borderless"
           size="small"
-          className="rb:bg-[#F6F6F6] rb:border-[#F6F6F6]! rb:hover:bg-white rb:hover:border-[#171719]!"
+          className="rb:bg-[#F6F6F6] rb:border-[#F6F6F6]! rb:hover:bg-white rb:hover:border-primary-600!"
         />
       </Form.Item>
     </>

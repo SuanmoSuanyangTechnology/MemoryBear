@@ -165,7 +165,7 @@ const SkillDetail = forwardRef<SkillDetailRef>((_props, ref) => {
                 {detail?.members?.length
                   ? <div className="rb:grid rb:grid-cols-2 rb:gap-3 rb:[@media(max-width:600px)]:grid-cols-1">
                     {detail.members.map((item, index) => (
-                      <div key={item.id ?? index} onClick={() => showMember(item)} className="rb:min-w-0 rb:p-3.5 rb:border rb:border-gray-400 rb:rounded-lg rb:bg-white rb:cursor-pointer rb:hover:border-gray-900">
+                      <div key={item.id ?? index} onClick={() => showMember(item)} className="rb:min-w-0 rb:p-3.5 rb:border rb:border-gray-400 rb:rounded-lg rb:bg-white rb:cursor-pointer rb:hover:border-primary-600">
                         <strong className="rb:block rb:mb-1.5 rb:text-[13px] rb:font-semibold">{item.name}</strong>
                         <span className="rb:block rb:text-gray-600 rb:text-[13px] rb:leading-5">{item.description || t('skills.noDescription')}</span>
                       </div>

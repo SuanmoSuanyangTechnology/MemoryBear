@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:37:31 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-08-14 17:14:24
+ * @Last Modified time: 2026-10-30 16:30:11
  */
 /**
  * Order Payment Page
@@ -197,7 +197,7 @@ const OrderPayment: React.FC = () => {
             <div className="rb:grid rb:grid-cols-2 rb:bg-[#F7F9FC] rb:gap-5 rb:p-3 rb:rounded-lg">
               <div className="rb:text-[12px] rb:text-[#5B6167]">
                 {t('pricing.currentExpiredAt')}
-                <div className="rb:font-medium rb:text-[16px] rb:text-[#171719]">{dayjs(pkg?.expired_at).format('YYYY-MM-DD')}</div>
+                <div className="rb:font-medium rb:text-[16px] rb:text-gray-900">{dayjs(pkg?.expired_at).format('YYYY-MM-DD')}</div>
               </div>
               <div className="rb:text-[12px] rb:text-[#5B6167]">
                 {t('pricing.upgradeExpiredAt')}
@@ -221,7 +221,7 @@ const OrderPayment: React.FC = () => {
             <div className="rb:grid rb:grid-cols-2 rb:bg-[#F7F9FC] rb:gap-5 rb:p-3 rb:rounded-lg">
               <div className="rb:text-[12px] rb:text-[#5B6167]">
                 {t('pricing.currentExpiredAt')}
-                <div className="rb:font-medium rb:text-[16px] rb:text-[#171719]">{dayjs(pkg?.expired_at).format('YYYY-MM-DD')}</div>
+                <div className="rb:font-medium rb:text-[16px] rb:text-gray-900">{dayjs(pkg?.expired_at).format('YYYY-MM-DD')}</div>
               </div>
               <div className="rb:text-[12px] rb:text-[#5B6167]">
                 {t('pricing.renewalExpiredAt')}
@@ -268,13 +268,13 @@ const OrderPayment: React.FC = () => {
                             <div className="rb:grid rb:md:grid-cols-2 rb:gap-y-3 rb:gap-x-8 rb:text-[12px] rb:text-[#5B6167]">
                               <div>
                                 <div className="rb:mb-1">{t('package.perShareAmount')}</div>
-                                <div className="rb:text-[#171719]">
+                                <div className="rb:text-gray-900">
                                   {tier.quota_grants[key]} {t(`package.${getUnit(key)}`)}
                                 </div>
                               </div>
                               <div>
                                 <div className="rb:mb-1">{t('package.validity')}</div>
-                                <div className="rb:text-[#171719]">{tier.amount}{t(`package.${tier.billing_cycle}`)}</div>
+                                <div className="rb:text-gray-900">{tier.amount}{t(`package.${tier.billing_cycle}`)}</div>
                               </div>
                             </div>
                           </td>

@@ -212,7 +212,7 @@ const ApplicationManagement: React.FC = () => {
               
               <Flex
                 className={clsx("rb-border rb:rounded-lg rb:bg-[#FFFFFF]", {
-                  'rb:border-[#171719]!': focus
+                  'rb:border-primary-600!': focus
                 })}
                 onMouseEnter={() => setFocus(true)}
                 onMouseLeave={() => setFocus(false)}
@@ -280,7 +280,7 @@ const ApplicationManagement: React.FC = () => {
               avatarClassName={clsx({
                 'rb:bg-[#155EEF]': item.type === 'agent',
                 'rb:bg-[#9C6FFF]!': item.type === 'multi_agent',
-                'rb:bg-[#171719]': item.type.includes('workflow'),
+                'rb:bg-primary-600': item.type.includes('workflow'),
               })}
               footer={
                 item.is_shared

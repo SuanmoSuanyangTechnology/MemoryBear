@@ -65,7 +65,7 @@ const ChatInput: FC<ChatInputProps> = ({
   return (
     <div className={`rb:absolute rb:bottom-3 rb:left-0 rb:right-0 rb:w-full ${className}`}>
       <Flex gap={0} vertical justify="space-between" className={clsx("rb-border rb:shadow-[0px_2px_12px_0px_rgba(23,23,25,0.12)] rb:rounded-3xl rb:min-h-30", {
-        ' rb:border-[#171719]!': isFocus
+        ' rb:border-primary-600!': isFocus
       })}>
         <div className="rb:overflow-x-auto rb:max-w-full">
           <FileList fileList={previewFileList} onDelete={handleDelete} />
@@ -98,7 +98,7 @@ const ChatInput: FC<ChatInputProps> = ({
           <Flex align="center" justify="center"
             className={clsx('rb:size-7 rb:rounded-full rb:shadow-[0px 2px 12px 0px rgba(23,23,25,0.1)]', {
               'rb:cursor-not-allowed rb:bg-[#F6F6F6]': !canSend,
-              'rb:cursor-pointer rb:bg-[#171719]': canSend
+              'rb:cursor-pointer rb:bg-primary-600': canSend
             })}
             onClick={handleSend}
           >

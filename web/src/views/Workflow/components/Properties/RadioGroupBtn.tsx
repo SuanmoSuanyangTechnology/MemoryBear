@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-02 15:19:30 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-20 17:55:51
+ * @Last Modified time: 2026-10-30 15:56:29
  */
 /**
  * RadioGroupCard Component
@@ -95,7 +95,7 @@ const RadioGroupBtn: FC<RadioCardProps> = ({
           'rb:rounded-lg rb:bg-[#F6F6F6] rb:border-[#F6F6F6] rb:py-1.25': !type,
           'rb:rounded-lg rb-border rb:py-1.25 rb:hover:bg-[#F6F6F6]': type === 'outer',
           'rb:bg-white rb:rounded-md rb:border-white rb:py-px': type === 'inner',
-          'rb:border-[#171719]! rb:bg-white rb:hover:bg-white': option.value === value,
+          'rb:border-primary-600! rb:bg-white rb:hover:bg-white': option.value === value,
         })} onClick={() => handleChange(option)}>
           {option.label}
         </div>

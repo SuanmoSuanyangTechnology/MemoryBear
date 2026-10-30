@@ -233,7 +233,7 @@ const ProcessData: FC<ProcessDataProps> = ({
                   key={item.value}
                   className={clsx("rb:rounded-[13px] rb:py-0.5 rb:px-3 rb:leading-5 rb:cursor-pointer", {
                     'rb:bg-white': tripletTab !== item.value,
-                    'rb:bg-[#171719] rb:text-white': tripletTab === item.value
+                    'rb:bg-primary-600 rb:text-white': tripletTab === item.value
                   })}
                   onClick={() => setTripletTab(item.value)}
                 >

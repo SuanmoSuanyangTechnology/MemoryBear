@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:29:29 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-08-13 16:03:49
+ * @Last Modified time: 2026-10-30 16:49:43
  */
 import { type FC, useState, useRef, useEffect } from 'react';
 import clsx from 'clsx';
@@ -138,7 +138,7 @@ const Api: FC<{ application: Application | null }> = ({ application }) => {
           <Space size={8}>
             {['GET', 'POST', 'PUT', 'DELETE'].map((method) => (
               <div key={method} className={clsx("rb:w-20 rb:h-7 rb:leading-7 rb:text-center rb:rounded-md rb:text-regular", {
-                'rb:bg-[#171719] rb:text-white': activeMethods.includes(method),
+                'rb:bg-primary-600 rb:text-white': activeMethods.includes(method),
                 'rb:bg-white rb:border rb:border-[#EBEBEB] rb:text-[#212332]': !activeMethods.includes(method),
               })}>
                 {method}

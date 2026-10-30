@@ -140,19 +140,12 @@
 .properties :global(.ant-radio-wrapper .ant-radio-inner) {
   width: 12px;
   height: 12px;
-  border-color: #A8A9AA;
 }
 .properties :global(.ant-radio-wrapper .ant-radio-inner::after) {
   width: 12px;
   height: 12px;
   margin-block-start: -6px;
   margin-inline-start: -6px;
-}
-.properties :global(.ant-radio-wrapper .ant-radio-checked .ant-radio-inner) {
-  border-color: #171719;
-}
-.properties :global(.ant-radio-wrapper .ant-radio-checked::after) {
-  border: 4px solid #171719;
 }
 .properties :global(.ant-radio-wrapper span.ant-radio+*) {
   padding-inline-start: 3px;
