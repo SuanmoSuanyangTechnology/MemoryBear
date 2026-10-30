@@ -613,12 +613,17 @@ async def dispatch_api_service_async(
                 # 与 agent/workflow 口径一致：限流视为跳过本条记忆，
                 # 不能让 OpenAPI 写入接口整体失败（调用方可按原请求重试）。
                 # 中途限流时前若干条已入队，日志记录真实写入范围
+                enqueued = getattr(exc, "enqueued", 0)
                 logger.warning(
                     "[RAGDispatcher] api 写入限流，跳过本条记忆: end_user=%s, "
                     "enqueued=%s",
                     end_user_id,
-                    getattr(exc, "enqueued", 0),
+                    enqueued,
                 )
+                if enqueued <= 0:
+                    # 一条都没入队：不能返回成功，否则 /write 会向调用方
+                    # 报告「RAG 写入完成」而实际什么都没持久化
+                    raise
             except ValueError as exc:
                 # end_user_id 非法等确定性构造失败：与限流同口径跳过本批记忆，
                 # 不让 OpenAPI 写入接口整体失败；调度层/Redis 等基础设施异常
