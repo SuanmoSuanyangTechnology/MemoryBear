@@ -158,6 +158,25 @@ _ROLE_SPLIT_RE = re.compile(r"^(user|assistant):", re.M)
 _LEGACY_SOURCE = "legacy"
 _CHUNK_SCAN_SIZE = 500
 
+#: 与平台侧 ``definitions.py`` 的维度注册保持一致（本脚本离线运行、不 import app 包）：
+#: 默认维度写无后缀字段 ``text_embedding``，其它受支持维度写
+#: ``text_embedding_{dim}``。复用的旧向量必须按自身长度选字段——维度与目标
+#: 字段不匹配会让整条 bulk 被 ES 拒绝，该文档重试到耗尽也迁不过去，
+#: 进而永久阻塞其所属 KB 的 purge 校验
+_DEFAULT_EMBEDDING_DIMENSION = 1024
+_SUPPORTED_EMBEDDING_DIMENSIONS = (768, 1024, 1536, 2048, 3072, 4096)
+_TEXT_EMBEDDING_FIELD = "text_embedding"
+
+
+def _embedding_field_for(dimension: int) -> str | None:
+    """按向量维度返回目标字段名；维度未注册时返回 None（该向量不写入）。"""
+    if dimension == _DEFAULT_EMBEDDING_DIMENSION:
+        return _TEXT_EMBEDDING_FIELD
+    if dimension not in _SUPPORTED_EMBEDDING_DIMENSIONS:
+        return None
+    return f"{_TEXT_EMBEDDING_FIELD}_{dimension}"
+
+
 MAX_RETRY_ROUNDS = 3
 RETRY_ROUND_INTERVAL_SECONDS = 5
 
@@ -462,6 +481,7 @@ def migrate(
             continue
 
         actions: list[dict[str, Any]] = []
+        unsupported_dim_warned = False
         for ordinal, (role, content, vector) in enumerate(messages):
             # 旧文档只有创建时间：按文档内序号加毫秒，保证同文档消息有稳定先后
             message_dt = created_at + timedelta(milliseconds=ordinal)
@@ -481,9 +501,22 @@ def migrate(
                 "source": _LEGACY_SOURCE,
             }
             if vector:
-                # 复用旧 chunk 向量：同一 chunk 内的消息共享该向量
-                source["text_embedding"] = vector
-                stats.reused_vectors += 1
+                # 复用旧 chunk 向量：同一 chunk 内的消息共享该向量。
+                # 字段名按向量自身维度解析：旧库模型维度未必是默认 1024，
+                # 写死 text_embedding 会因 dims 不匹配被 ES 拒绝整条 action
+                vector_field = _embedding_field_for(len(vector))
+                if vector_field is None:
+                    # 维度未在索引注册：留空由重嵌入任务按当前模型补齐，
+                    # 比让整条文档反复写入失败、永久阻塞 purge 更可控
+                    if not unsupported_dim_warned:
+                        print(
+                            f"[WARN] document={document_id} 存在未注册的向量维度 "
+                            f"{len(vector)}，已跳过向量（留待重嵌入）"
+                        )
+                        unsupported_dim_warned = True
+                else:
+                    source[vector_field] = vector
+                    stats.reused_vectors += 1
             actions.append(
                 {
                     "_op_type": "index",

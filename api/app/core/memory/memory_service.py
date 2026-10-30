@@ -394,15 +394,17 @@ class MemoryService:
             try:
                 graph_deleted = await pipeline.delete_all_nodes_by_end_user_id(end_user_id)
             except Exception as exc:
-                # 与上方 RAG 删除同口径：兜底分支任一侧失败都不阻断另一侧，
-                # 失败侧按 0 计入并留 error 日志
+                # 图侧失败必须上抛，不能按 0 吞掉：调用层（memory_storage_controller）
+                # 拿到返回值后会立刻把宿主落库为 is_active=False / memory_count=0
+                # （finalize_memory_delete_async），吞异常会留下「用户显示已删除、
+                # 图记忆仍在」且再无重试入口。删除本身是幂等的，交由调用方重试收敛
                 logger.error(
                     "[MemoryService] fallback graph delete failed: end_user=%s, err=%s",
                     end_user_id,
                     exc,
                     exc_info=True,
                 )
-                graph_deleted = 0
+                raise
             logger.info(
                 "[MemoryService] fallback delete done: end_user=%s "
                 "rag_messages=%s graph_nodes=%s",

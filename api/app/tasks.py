@@ -4188,7 +4188,7 @@ def sync_all_end_user_memory_counts(self) -> Dict[str, Any]:
 #     return data
 
 
-@celery_app.task(name="app.tasks.write_total_memory_task")
+@celery_app.task(name="app.tasks.write_total_memory_task", acks_late=False)
 def write_total_memory_task(workspace_id: str) -> Dict[str, Any]:
     """定时任务：查询工作空间下所有宿主的记忆总量并写入数据库
 
