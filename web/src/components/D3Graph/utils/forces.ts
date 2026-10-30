@@ -45,11 +45,12 @@ export function addZoom(
 // ─── Node drag ────────────────────────────────────────────────────────────────
 
 export function makeNodeDrag<N extends d3.SimulationNodeDatum & { x?: number; y?: number }>(
-  simulation: d3.Simulation<N, d3.SimulationLinkDatum<N>>,
+  onDragStart: () => void,
+  onDrag: () => void,
 ) {
   return d3.drag<SVGGElement, N>()
-    .on('start', (_e, d) => { d.fx = d.x; d.fy = d.y })
-    .on('drag', (e, d) => { d.fx = e.x; d.fy = e.y; d.x = e.x; d.y = e.y; simulation.alpha(0).restart() })
+    .on('start', (_e, d) => { onDragStart(); d.fx = d.x; d.fy = d.y })
+    .on('drag', (e, d) => { d.fx = e.x; d.fy = e.y; d.x = e.x; d.y = e.y; onDrag() })
     .on('end', (e, d) => { d.fx = e.x; d.fy = e.y })
 }
 
@@ -62,9 +63,9 @@ export function makeClusterForce<N extends d3.SimulationNodeDatum & { x?: number
   centers: Record<string | number, { x: number; y: number }>,
   width: number,
   height: number,
-  opts: { pullStrength?: number; minSepRatio?: number; pushStrength?: number } = {}
+  opts: { pullStrength?: number; minSepRatio?: number; pushStrength?: number; centerGroup?: string } = {}
 ) {
-  const { pullStrength = 0.45, minSepRatio = 0.68, pushStrength = 1.0 } = opts
+  const { pullStrength = 0.45, minSepRatio = 0.68, pushStrength = 1.0, centerGroup } = opts
   return (alpha: number) => {
     // pre-group nodes by key to avoid repeated filter() in hot path
     const groups = new Map<string, N[]>()
@@ -101,8 +102,10 @@ export function makeClusterForce<N extends d3.SimulationNodeDatum & { x?: number
         if (dist >= minSep) continue
         const push = ((minSep - dist) / dist) * pushStrength * alpha
         const fx = dx * push, fy = dy * push
-        groups.get(keys[i])?.forEach(d => { d.vx = (d.vx ?? 0) - fx; d.vy = (d.vy ?? 0) - fy })
-        groups.get(keys[j])?.forEach(d => { d.vx = (d.vx ?? 0) + fx; d.vy = (d.vy ?? 0) + fy })
+        const iFactor = keys[i] === centerGroup ? 0 : keys[j] === centerGroup ? 2 : 1
+        const jFactor = keys[j] === centerGroup ? 0 : keys[i] === centerGroup ? 2 : 1
+        groups.get(keys[i])?.forEach(d => { d.vx = (d.vx ?? 0) - fx * iFactor; d.vy = (d.vy ?? 0) - fy * iFactor })
+        groups.get(keys[j])?.forEach(d => { d.vx = (d.vx ?? 0) + fx * jFactor; d.vy = (d.vy ?? 0) + fy * jFactor })
       }
     }
   }
