@@ -130,7 +130,7 @@ Unified service architecture exposing two API surfaces:
 | Queue | Worker Type | Concurrency | Purpose |
 |-------|-------------|-------------|---------|
 | `memory_tasks` | threads | 100 | Memory read/write (asyncio-friendly) |
-| `memory_fast_tasks` | threads | 32 | High-frequency fast writes (dedicated queue to avoid mutual blocking) |
+| `memory_fast_tasks` | threads | 32 | High-frequency fast writes + RAG memory index writes (dedicated queue to avoid mutual blocking) |
 | `document_tasks` | prefork | 4 | Document parsing (CPU-bound) |
 | `periodic_tasks` | prefork | 2 | Scheduled tasks, reflection engine, various scanners |
 | `workflow_trigger_tasks` | prefork | 2 | Workflow scheduled triggers |
@@ -381,8 +381,8 @@ Access API documentation at http://localhost:8000/docs
 # Memory worker (thread pool, asyncio-friendly, high concurrency)
 celery -A app.celery_worker.celery_app worker -E --loglevel=info --pool=threads --concurrency=100 --queues=memory_tasks -n memory_worker@%h
 
-# Fast-write worker (thread pool, dedicated queue to avoid blocking normal writes)
-celery -A app.celery_worker.celery_app worker -E --loglevel=info --pool=threads --concurrency=32 --queues=memory_fast_tasks -n memory_fast_worker@%h
+# Fast-write worker (thread pool, dedicated queue to avoid blocking normal writes; also consumes memory_rag_tasks)
+celery -A app.celery_worker.celery_app worker -E --loglevel=info --pool=threads --concurrency=32 --queues=memory_fast_tasks,memory_rag_tasks -n memory_fast_worker@%h
 
 # Document parsing worker (prefork, CPU-bound)
 celery -A app.celery_worker.celery_app worker -E --loglevel=info --pool=prefork --concurrency=4 --queues=document_tasks --max-tasks-per-child=100 -n document_worker@%h

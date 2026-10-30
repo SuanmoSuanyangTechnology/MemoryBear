@@ -750,7 +750,7 @@ class MultiAgentService:
         app_id: uuid.UUID,
         request: MultiAgentRunRequest,
         storage_type :str,
-        user_rag_memory_id :str,
+        user_rag_memory_id :str = "",
         source: str = HitLogSource.CONSOLE,
     ):
         """运行多 Agent 任务（流式返回）

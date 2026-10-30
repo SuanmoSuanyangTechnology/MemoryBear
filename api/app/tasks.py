@@ -2591,6 +2591,356 @@ def sync_knowledge_for_kb(kb_id: uuid.UUID):
         return f"sync knowledge '{kb_name}' failed: {e}"
 
 
+#: RAG 写入任务与删除 / 身份归并共用同一把按宿主的写锁，参数与
+#: memory_storage_controller 的删除路径保持一致（1200s + 60s 等待）。
+_RAG_WRITE_LOCK_EXPIRE_SECONDS = 1200
+_RAG_WRITE_LOCK_TIMEOUT_SECONDS = 60
+# owner 每次重解析都变化时最多重抢几轮；超过按写锁超时交给任务重试，
+# 避免异常归并链让 worker 无限循环
+_RAG_WRITE_LOCK_MAX_ATTEMPTS = 3
+
+
+class _RagOwnerGone(Exception):
+    """拿锁后确认宿主已被删除：本次写入必须放弃，避免给已删除宿主复活记忆。"""
+
+
+class _RagWriteLockTimeout(Exception):
+    """等待 memory_write 写锁超时（删除/归并正持有），交由 Celery 重试。"""
+
+
+def _resolve_rag_write_owner(end_user_id: str) -> tuple[str, bool]:
+    """按合并映射解析当前 owner，并返回其是否仍然活跃。
+
+    ``get_end_user_by_id`` 先查活跃的原 id，查不到再按 ``end_user_merge`` 路由到
+    目标 id；返回 None 表示既未合并也不活跃（已被删除）。
+    """
+    from app.repositories.end_user_repository import EndUserRepository
+
+    with get_db_context() as db:
+        user = EndUserRepository(db).get_end_user_by_id(uuid.UUID(end_user_id))
+        if user is None:
+            return end_user_id, False
+        # 必须在会话关闭前取出主键：Session 关闭后 ORM 实例已 detached，
+        # 再访问 user.id 会抛 DetachedInstanceError，任务每次都在抢锁前失败
+        return str(user.id), True
+
+
+def _acquire_rag_write_lock(
+        end_user_id: str,
+        *,
+        redis_client,
+) -> tuple[str, RedisFairLock]:
+    """Resolve → lock → re-resolve：保证锁覆盖写入时的真实 owner。
+
+    任务排队期间宿主可能已被归并（owner 变化）或删除（owner 消失）：
+    - owner 变化：释放旧锁，按新 owner 重新抢，最多重抢
+      ``_RAG_WRITE_LOCK_MAX_ATTEMPTS`` 轮，超过按写锁超时处理；
+    - owner 消失：抛 ``_RagOwnerGone``，调用方放弃写入；
+    - 抢锁超时（删除/归并正持有）：抛 ``_RagWriteLockTimeout``，交由任务重试。
+    """
+    candidate_id = end_user_id
+    for _ in range(_RAG_WRITE_LOCK_MAX_ATTEMPTS):
+        owner_id, active = _resolve_rag_write_owner(candidate_id)
+        if not active:
+            raise _RagOwnerGone(owner_id)
+        lock = RedisFairLock(
+            key=f"memory_write:{owner_id}",
+            redis_client=redis_client,
+            expire=_RAG_WRITE_LOCK_EXPIRE_SECONDS,
+            timeout=_RAG_WRITE_LOCK_TIMEOUT_SECONDS,
+            auto_renewal=True,
+        )
+        if not lock.acquire():
+            raise _RagWriteLockTimeout(owner_id)
+        try:
+            confirmed_id, confirmed_active = _resolve_rag_write_owner(candidate_id)
+        except Exception:
+            lock.release()
+            raise
+        if confirmed_active and confirmed_id == owner_id:
+            return owner_id, lock
+        lock.release()
+        if not confirmed_active:
+            raise _RagOwnerGone(confirmed_id)
+        candidate_id = confirmed_id
+
+    raise _RagWriteLockTimeout(candidate_id)
+
+
+@celery_app.task(
+    bind=True,
+    name="app.tasks.process_rag_memory",
+    queue="memory_rag_tasks",
+    max_retries=3,
+    retry_backoff=True,
+)
+def process_rag_memory(
+        self,
+        id: str,
+        end_user_id: str,
+        config_id: str,
+        role: str,
+        content: str,
+        source: str = "",
+        dialog_at: str = "",
+) -> Dict[str, Any]:
+    """RAG 记忆独立写入任务：身份归并 → 加载配置 → 向量化 → ES 覆盖写。
+
+    payload 的每个 key 即本函数形参；id 由入口按内容派生 uuid5，
+    重试/重放时覆盖写同一文档，天然幂等。
+    """
+    loop = set_asyncio_event_loop()
+    write_lock = None
+
+    try:
+        # 1. 身份归并重定向：排队期间用户可能已被跨渠道归并
+        resolved_end_user_id = end_user_id
+        # end_user_id 格式校验单独前置：resolve_merge_by_origin_id 内部是 DB
+        # 访问，连接/参数绑定异常也可能抛 ValueError，与格式解析共用 except
+        # 会把后者误判为「确定性错误」而放弃重试
+        try:
+            end_user_uuid = uuid.UUID(end_user_id)
+        except (TypeError, ValueError) as exc:
+            # 非法 end_user_id 无法归属到任何宿主，按原 id 写入的文档不会被任何
+            # 读取路径召回，等价于丢记忆；属确定性错误，直接终止不重试
+            logger.error(
+                "[CELERY RAG] invalid end_user_id, aborting(no retry): %s (%s)",
+                end_user_id,
+                exc,
+                exc_info=True,
+            )
+            raise
+        try:
+            with get_db_context() as db:
+                from app.repositories.end_user_repository import EndUserRepository
+
+                resolved = EndUserRepository(db).resolve_merge_by_origin_id(
+                    end_user_uuid
+                )
+                if resolved:
+                    logger.info(
+                        "[CELERY RAG] end_user_id merged, redirecting: %s → %s",
+                        end_user_id,
+                        resolved.id,
+                    )
+                    resolved_end_user_id = str(resolved.id)
+        except Exception as e:
+            # 归属解析失败时不静默按旧 id 写入：该用户可能已被跨渠道归并，
+            # 落到旧 id 的文档在读取路径（按新 id 过滤）里查不到，等于丢记忆。
+            # 重试耗尽时单独告警，与写入阶段的日志口径保持一致
+            if self.request.retries >= self.max_retries:
+                logger.error(
+                    "[CELERY RAG] 重试耗尽，身份归并解析最终失败: "
+                    "end_user=%s, err=%s",
+                    end_user_id,
+                    e,
+                    exc_info=True,
+                )
+                raise
+            logger.error(
+                "[CELERY RAG] merge resolution failed for %s: %s",
+                end_user_id,
+                e,
+                exc_info=True,
+            )
+            raise self.retry(exc=e)
+
+        from app.core.memory.pipelines.base_pipeline import ModelClientMixin
+        from app.schemas.memory_config_schema import (
+            InvalidConfigError,
+            ModelInactiveError,
+            ModelNotFoundError,
+        )
+
+        # 2. 加载用户记忆配置，构造 embedding 客户端。
+        # config_id 由调度层写入 payload，格式非法属确定性错误：先单独解析，
+        # 不与配置加载共用 except——load_memory_config 内部含 DB 访问，其
+        # ValueError 属数据/连接类问题，应落入下方重试分支，而不是误判为
+        # 「不重试」直接丢记忆
+        try:
+            config_uuid = uuid.UUID(config_id)
+        except (TypeError, ValueError) as exc:
+            logger.error(
+                "[CELERY RAG] invalid config_id, aborting(no retry): id=%s, "
+                "config=%r, err=%s",
+                id,
+                config_id,
+                exc,
+                exc_info=True,
+            )
+            raise
+
+        # 配置/模型类异常属确定性错误，与写入阶段的瞬时异常分开处理，直接终止不重试
+        try:
+            with get_db_context() as db:
+                memory_config = MemoryConfigService(db).load_memory_config(
+                    config_id=config_uuid
+                )
+                embedder = ModelClientMixin.get_embedding_client(
+                    db,
+                    memory_config.embedding_model_id,
+                    memory_config.tenant_id,
+                )
+        except (ModelNotFoundError, ModelInactiveError, InvalidConfigError) as exc:
+            logger.error(
+                "[CELERY RAG] 配置加载失败(no retry): id=%s, config=%s, "
+                "error_type=%s, err=%s",
+                id,
+                config_id,
+                type(exc).__name__,
+                exc,
+                exc_info=True,
+            )
+            raise
+        except Exception as exc:
+            # 配置读取还包含数据库访问，连接超时/抖动属瞬时异常；
+            # 不能按确定性错误直接终止，否则这条记忆会无重试丢失
+            if self.request.retries >= self.max_retries:
+                logger.error(
+                    "[CELERY RAG] 重试耗尽，配置加载最终失败: id=%s, config=%s, "
+                    "error_type=%s, err=%s",
+                    id,
+                    config_id,
+                    type(exc).__name__,
+                    exc,
+                    exc_info=True,
+                )
+                raise
+            logger.error(
+                "[CELERY RAG] 配置加载失败(将重试): id=%s, config=%s, "
+                "error_type=%s, err=%s",
+                id,
+                config_id,
+                type(exc).__name__,
+                exc,
+                exc_info=True,
+            )
+            raise self.retry(exc=exc)
+
+        # 1.5 参与 memory_write:{end_user_id} 写锁协议：删除与身份归并都在同一把
+        #     锁下改归属/删数据，写入任务必须在锁内按「当前 owner」落库，否则：
+        #     - 归并期间解析出的旧 owner 已迁移完毕，随后写入会留在已软删的
+        #       source 上，读取按 target 过滤 → 记忆丢失；
+        #     - 删除期间/之后写入会给已删除宿主复活一条记忆。
+        #     锁必须落在业务 Redis（REDIS_DB）：删除与归并都用
+        #     get_thread_safe_sync_redis() 抢锁，若这里改用 Celery backend 库
+        #     （get_sync_redis_client）key 不在同一 keyspace，等于没加锁。
+        #     Redis 不可用时保持既有降级（告警后继续写）：删除/归并同样依赖这把
+        #     锁，Redis 故障期间它们也无法执行，此时不加锁不会引入竞态。
+        try:
+            redis_client = get_thread_safe_sync_redis()
+            resolved_end_user_id, write_lock = _acquire_rag_write_lock(
+                end_user_id,
+                redis_client=redis_client,
+            )
+        except _RagOwnerGone:
+            logger.warning(
+                "[CELERY RAG] 宿主已删除，放弃写入: id=%s, end_user=%s",
+                id,
+                end_user_id,
+            )
+            return {"status": "skipped_user_gone", "id": id}
+        except _RagWriteLockTimeout:
+            # 删除/归并正持锁：短暂重试比直接丢记忆安全
+            if self.request.retries >= self.max_retries:
+                logger.error(
+                    "[CELERY RAG] 重试耗尽，写锁等待超时: id=%s, end_user=%s",
+                    id,
+                    end_user_id,
+                )
+                raise
+            raise self.retry(
+                exc=RuntimeError(
+                    f"memory_write lock timeout: end_user={end_user_id}"
+                )
+            )
+        except RedisError as exc:
+            logger.warning(
+                "[CELERY RAG] Redis unavailable, writing without memory_write "
+                "lock: id=%s, end_user=%s, err=%s",
+                id,
+                end_user_id,
+                exc,
+            )
+            write_lock = None
+
+        async def _run():
+            from app.core.memory.storage.enums import MemoryNodeType
+            from app.core.memory.storage.provider.elasticsearch.client import ElasticClient
+
+            # 3. 向量化（本任务唯一一次模型调用）
+            vector = await embedder.aembed_query(content)
+
+            # 4. 独立 ES 索引覆盖写（id 即 ES _id）
+            client = await ElasticClient.create()
+            try:
+                return await client.save_node(
+                    MemoryNodeType.RAG_MEMORY,
+                    {
+                        "id": id,
+                        "content": content,
+                        "role": role,
+                        "end_user_id": resolved_end_user_id,
+                        "config_id": config_id,
+                        "dialog_at": dialog_at,
+                        "source": source,
+                        "delete_at": None,
+                        "text_embedding": vector,
+                    },
+                )
+            finally:
+                await client.close()
+
+        try:
+            result = loop.run_until_complete(_run())
+            logger.info(
+                "[CELERY RAG] 写入完成: id=%s, end_user=%s, backend=%s",
+                id,
+                resolved_end_user_id,
+                getattr(result, "backend", None),
+            )
+            return {"status": "ok", "id": id}
+        except Retry:
+            # Celery 的重试信号必须原样上抛，不能再次进入重试分支
+            raise
+        except Exception as exc:
+            if isinstance(exc, (ModelNotFoundError, ModelInactiveError, InvalidConfigError)):
+                logger.error(
+                    "[CELERY RAG] 写入失败(no retry): id=%s, error_type=%s, err=%s",
+                    id,
+                    type(exc).__name__,
+                    exc,
+                    exc_info=True,
+                )
+                raise
+            if self.request.retries >= self.max_retries:
+                # 重试耗尽：当前没有死信/补偿链路，至少留下明确告警，便于人工补数
+                logger.error(
+                    "[CELERY RAG] 重试耗尽，记忆写入最终失败: id=%s, end_user=%s, err=%s",
+                    id,
+                    resolved_end_user_id,
+                    exc,
+                    exc_info=True,
+                )
+                # Celery 在超出 max_retries 后再调 self.retry 会抛
+                # MaxRetriesExceededError，与上面的「重试耗尽」日志不一致；
+                # 裸 raise 原样上抛原始异常（保留完整 traceback 链），让任务
+                # 以明确失败结束
+                raise
+            logger.error(
+                "[CELERY RAG] 写入失败: id=%s, end_user=%s, err=%s",
+                id,
+                resolved_end_user_id,
+                exc,
+                exc_info=True,
+            )
+            raise self.retry(exc=exc)
+    finally:
+        if write_lock is not None:
+            write_lock.release()
+        _shutdown_loop_gracefully(loop)
+
+
 @celery_app.task(name="app.core.memory.agent.write_message", bind=True, acks_late=False, max_retries=0)
 def write_message_task(
         self,
@@ -4045,7 +4395,7 @@ def sync_all_end_user_memory_counts(self) -> Dict[str, Any]:
 #     return data
 
 
-@celery_app.task(name="app.tasks.write_total_memory_task")
+@celery_app.task(name="app.tasks.write_total_memory_task", acks_late=False)
 def write_total_memory_task(workspace_id: str) -> Dict[str, Any]:
     """定时任务：查询工作空间下所有宿主的记忆总量并写入数据库
 
@@ -4066,15 +4416,70 @@ def write_total_memory_task(workspace_id: str) -> Dict[str, Any]:
     try:
         workspace_uuid = uuid.UUID(workspace_id)
 
-        # --- 单 session：聚合活跃宿主记忆量 → 写入统计结果 ---
+        # --- session 1：只读 workspace 归属与宿主/统计数据 ---
+        is_rag_storage = False
+        end_user_ids: List[str] = []
+        total_num = 0
+        end_user_count = 0
         with get_db_context() as db:
-            # 无活跃宿主时不在返回中，按 (0, 0) 处理
-            total_num, end_user_count = (
-                EndUserRepository(db)
-                .get_memory_count_stats_by_workspace_ids([workspace_uuid])
-                .get(workspace_uuid, (0, 0))
-            )
+            from app.models.workspace_model import Workspace
 
+            storage_type = (
+                db.query(Workspace.storage_type)
+                .filter(Workspace.id == workspace_uuid)
+                .scalar()
+            )
+            if storage_type is None:
+                # workspace 已删除/非法：缺失即报错（外层捕获后返回 FAILURE），
+                # 不再静默走图分支落一条 0 增量、任务还报 SUCCESS 的误导性结果
+                raise ValueError(f"workspace not found: {workspace_id}")
+
+            # 字段是 String 列，取枚举成员时统一取 .value，避免
+            # ``StorageType.RAG`` 之类的字符串化结果错过 rag 分支
+            storage_value = getattr(storage_type, "value", storage_type)
+            if str(storage_value or "").strip().lower() == "rag":
+                # RAG 空间：总量取独立索引的消息条数。宿主集合统一以 EndUser
+                # 行为准（workspace_id + 活跃状态）：ES 文档归属就是 end_user_id，
+                # 而 MCP / Service API 宿主可以没有 App（app_id 为 NULL），
+                # App join 会漏掉它们的存量记忆，导致总量与宿主数偏低
+                is_rag_storage = True
+                end_user_ids = [
+                    str(row[0])
+                    for row in db.query(EndUser.id)
+                    .filter(
+                        EndUser.workspace_id == workspace_uuid,
+                        EndUser.is_active.is_(True),
+                    )
+                    .all()
+                ]
+            else:
+                # 无活跃宿主时不在返回中，按 (0, 0) 处理
+                total_num, end_user_count = (
+                    EndUserRepository(db)
+                    .get_memory_count_stats_by_workspace_ids([workspace_uuid])
+                    .get(workspace_uuid, (0, 0))
+                )
+
+        # --- RAG 的 ES 聚合在 DB session 外执行：同步 ES 调用最长可达
+        # 60~90s，若在 session 内执行，write_all_workspaces_memory_task 按空间
+        # 串行遍历多个 RAG 空间时会把每条连接闲置占用同等时长，容易耗尽连接池 ---
+        if is_rag_storage:
+            from app.core.memory.rag import stats as rag_stats
+
+            # 无活跃宿主时不查 ES：空 terms 查询会退化为全索引统计，
+            # 让整个空间的总量严重偏大
+            counts = (
+                rag_stats.count_messages_by_end_user_sync(end_user_ids)
+                if end_user_ids
+                else {}
+            )
+            total_num = sum(counts.values())
+            # 与图侧「活跃宿主数」口径对齐：只计有消息的宿主，
+            # 否则无消息用户会拉低前端的人均记忆量
+            end_user_count = sum(1 for count in counts.values() if count > 0)
+
+        # --- session 2：写增量 ---
+        with get_db_context() as db:
             # 返回值即客户端生成的内存增量主键与时间戳，无需再访问已过期的 ORM 属性
             increment_id, increment_created_at = MemoryIncrementRepository(db).write_memory_increment(
                 workspace_id=workspace_uuid,

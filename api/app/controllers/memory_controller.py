@@ -18,7 +18,6 @@ from app.core.memory.memory_service import MemoryService
 from app.core.response_utils import fail, success
 from app.db import get_async_db_context
 from app.dependencies import cur_workspace_access_guard, cur_workspace_access_guard_self_db, get_current_user_async, CurrentUserSnapshot
-from app.repositories import knowledge_repository
 from app.repositories.end_user_repository import EndUserRepository
 from app.schemas.memory_agent_schema import UserInput, Write_UserInput
 from app.schemas.memory_config_schema import ModelInactiveError, ModelNotFoundError
@@ -31,7 +30,6 @@ from app.services.memory_validation_service import MemoryValidationService
 from app.utils.sse_utils import format_sse_message
 
 DEFAULT_STORAGE_TYPE = "neo4j"
-USER_RAG_MEMORY_KNOWLEDGE_NAME = "USER_RAG_MERORY"  # 注：原拼写保留，历史遗留
 
 api_logger = get_api_logger()
 
@@ -64,22 +62,28 @@ async def write_server_async(
     language = get_language_from_header(language_type)
 
     storage_type = None
-    user_rag_memory_id = ''
     workspace_id = current_user.current_workspace_id
     # 跨渠道身份确认后的最终写入落点，默认与请求一致；命中归并时被覆盖为 target
     effective_end_user_id = user_input.end_user_id
     identity_data = None
     async with get_async_db_context() as db:
+        # 宿主归属无条件校验：写入接口不能只在身份确认分支校验，否则提交其他空间
+        # 的宿主 ID 会把内容直接写进对方记忆集合（图记忆与 RAG 记忆都适用）。
+        try:
+            end_user_uuid = uuid.UUID(user_input.end_user_id)
+        except (TypeError, ValueError):
+            return fail(BizCode.INVALID_PARAMETER, "终端用户 ID 格式无效", "invalid end_user_id")
+        end_user = await EndUserRepository(db).get_end_user_by_id_async(end_user_uuid)
+        if end_user is None:
+            return fail(BizCode.USER_NOT_FOUND, "终端用户不存在", "end_user not found")
+        if str(end_user.workspace_id) != str(workspace_id):
+            return fail(BizCode.PERMISSION_DENIED, "该终端用户不属于当前工作空间", "workspace mismatch")
+        # 合并路由：原 ID 已被合并时，写入落点统一改为合并目标
+        effective_end_user_id = str(end_user.id)
+
         # ── 跨渠道身份确认（仅在带标识时执行；不带/空串/纯空白则完全不碰身份字段）──
         if user_input.identity_features and user_input.identity_features.strip():
             clean_features = user_input.identity_features.strip()
-            end_user = await EndUserRepository(db).get_end_user_by_id_async(
-                uuid.UUID(user_input.end_user_id)
-            )
-            if end_user is None:
-                return fail(BizCode.USER_NOT_FOUND, "终端用户不存在", "end_user not found")
-            if str(end_user.workspace_id) != str(workspace_id):
-                return fail(BizCode.PERMISSION_DENIED, "该终端用户不属于当前工作空间", "workspace mismatch")
             # 快路径条件同时校验 status：只比标识时，若标识已落库而 status 不是
             # confirmed（历史数据、S4 写入的 expired、或上一次归并中途失败留下的
             # 脏状态），身份确认会被永久跳过、无法自愈。
@@ -116,15 +120,7 @@ async def write_server_async(
             user=current_user
         )
         if storage_type is None: storage_type = DEFAULT_STORAGE_TYPE
-        if workspace_id:
-
-            knowledge = await knowledge_repository.get_knowledge_by_name_async(
-                db=db,
-                name=USER_RAG_MEMORY_KNOWLEDGE_NAME,
-                workspace_id=workspace_id
-            )
-            if knowledge: user_rag_memory_id = str(knowledge.id)
-        api_logger.info(f"Async write: storage_type={storage_type}, user_rag_memory_id={user_rag_memory_id}")
+        api_logger.info(f"Async write: storage_type={storage_type}")
 
     try:
         # RAG / Neo4j 统一交给 dispatcher 分流，避免 Controller 与 Dispatcher 重复写入。
@@ -138,7 +134,6 @@ async def write_server_async(
             workspace_id=workspace_id_str,
             language=language,
             storage_type=storage_type,
-            user_rag_memory_id=user_rag_memory_id,
         )
 
         if storage_type and storage_type.lower() == "rag":
@@ -153,6 +148,11 @@ async def write_server_async(
         if identity_data:
             data.update(identity_data)
         return success(data=data, msg=f"已提交 {len(task_ids)} 个写入任务")
+    except ValueError as e:
+        # 消息为空/角色非法等调用方输入问题：属于参数错误，不能按内部错误
+        # (10001) 上报，否则调用方会误判为服务端故障而盲目重试
+        api_logger.warning(f"Async write rejected by validation: {str(e)}")
+        return fail(BizCode.INVALID_PARAMETER, "写入参数无效", str(e))
     except Exception as e:
         api_logger.error(f"Async write operation failed: {str(e)}")
         return fail(BizCode.INTERNAL_ERROR, "写入失败", str(e))

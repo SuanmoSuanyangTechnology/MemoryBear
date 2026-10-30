@@ -135,13 +135,28 @@ class MemoryService:
         embedder: Any,
         job_id: str,
         end_user_id: str,
+        storage_type: str = "neo4j",
         should_continue: Callable[[], bool] | None = None,
     ) -> Any:
         """通过统一记忆服务入口重算单个 end_user 的存量向量。
 
         MemoryService 持有存储生命周期；引擎内部的任务失效异常
         （``JobSupersededError``）直接向上透传，上层统一用该异常判断是否停止写入。
+
+        RAG 空间不经过图侧 scan/write 路由，改走独立索引的重算实现。
         """
+        if str(storage_type or "").strip().lower() == "rag":
+            from app.core.memory.rag.reembedding import (
+                rebuild_rag_end_user_vectors,
+            )
+
+            return await rebuild_rag_end_user_vectors(
+                embedder=embedder,
+                job_id=job_id,
+                end_user_id=end_user_id,
+                should_continue=should_continue,
+            )
+
         from app.core.memory.storage.service import MemoryStorageService
         from app.core.memory.storage_services.reembedding_engine.rebuilder import (
             rebuild_end_user_vectors,
@@ -241,7 +256,6 @@ class MemoryService:
         workspace_id: str,
         language: str = "zh",
         storage_type: str = "neo4j",
-        user_rag_memory_id: str = "",
     ) -> List[str]:
         """API Service 异步写入入口。"""
         from app.core.memory.pipelines.dispatcher import dispatch_api_service_async
@@ -252,7 +266,6 @@ class MemoryService:
             workspace_id=workspace_id,
             language=language,
             storage_type=storage_type,
-            user_rag_memory_id=user_rag_memory_id,
         )
 
     @staticmethod
@@ -263,7 +276,6 @@ class MemoryService:
         config_id: uuid.UUID,
         workspace_id: str,
         storage_type: str = "neo4j",
-        user_rag_memory_id: str = "",
         dialog_at: str = "",
     ) -> str:
         """MCP 单条消息写入入口。
@@ -276,11 +288,10 @@ class MemoryService:
             config_id: 记忆配置 ID
             workspace_id: 工作空间 ID
             storage_type: 存储类型 ("neo4j" | "rag")
-            user_rag_memory_id: RAG 记忆知识库 ID
             dialog_at: 对话发生时间（ISO 8601）
 
         Returns:
-            派发的任务 msg_id（RAG 路径返回空字符串）
+            派发的任务 msg_id（RAG 路径返回调度层消息 id）
         """
         from app.core.memory.pipelines.dispatcher import dispatch_mcp_write
 
@@ -290,22 +301,7 @@ class MemoryService:
             config_id=config_id,
             workspace_id=workspace_id,
             storage_type=storage_type,
-            user_rag_memory_id=user_rag_memory_id,
             dialog_at=dialog_at,
-        )
-
-    @staticmethod
-    async def write_messages_to_rag(
-        messages: List[dict],
-        end_user_id: str,
-        user_rag_memory_id: str,
-    ) -> None:
-        """将 messages 写入 RAG 存储。"""
-        from app.core.memory.pipelines.dispatcher import write_messages_to_rag
-        await write_messages_to_rag(
-            messages=messages,
-            end_user_id=end_user_id,
-            user_rag_memory_id=user_rag_memory_id,
         )
 
     @staticmethod
@@ -333,16 +329,133 @@ class MemoryService:
 
     @staticmethod
     async def delete_all_nodes_by_end_user_id(end_user_id: str) -> int:
-        """删除指定用户的所有 Neo4j 记忆节点和边。
+        """删除指定用户的全部记忆。
 
-        Returns:
-            删除的节点总数
+        - RAG 空间：删除独立索引中该宿主的消息，返回条数。
+        - 图空间：删除 Neo4j 记忆节点和边，返回节点数。
+        - 归属无法判定（宿主不存在 / 未关联 workspace）：两种存储都清理，
+          返回「删除条目总数」（RAG 消息条数 + 图节点数）。
+
+        注意返回值口径：RAG 分支统计的是「消息条数」，图侧统计的是「节点数」；
+        正常分支只会命中其中一种，只有归属未知的兜底分支才会相加，
+        结果仅用于粗略反馈，调用方不应把它当作单一存储的精确计数做对账。
         """
         from app.core.memory.models.service_models import MemoryContext
         from app.core.memory.pipelines.forgetting_pipeline import ForgettingPipeline
 
-        pipeline = ForgettingPipeline(MemoryContext(end_user_id=end_user_id))
-        return await pipeline.delete_all_nodes_by_end_user_id(end_user_id)
+        from sqlalchemy import select
+
+        try:
+            end_user_uuid = uuid.UUID(str(end_user_id))
+        except (ValueError, TypeError, AttributeError):
+            # 非法 id 不应继续走删除分支：用原始字符串去 ES term 查询没有意义，
+            # 同时再跑一遍图删除只会放大误操作面。直接返回 0 并留 error 日志
+            logger.error(
+                "[MemoryService] invalid end_user_id, abort delete: %s",
+                end_user_id,
+            )
+            return 0
+
+        # ES term 查询与图节点都按规范形式写入（各写入入口均已解析为
+        # str(end_user.id)）；这里统一用解析后的规范 id，避免调用方传入
+        # 大写/无连字符 UUID 时精确匹配查不到文档、静默漏删
+        canonical_end_user_id = str(end_user_uuid)
+
+        async with get_async_db_context() as db:
+            from app.models.end_user_model import EndUser
+            from app.models.workspace_model import Workspace
+
+            # 同时取 workspace 主键与 storage_type：只取 storage_type 时，
+            # 「宿主/空间不存在」与「storage_type 为 NULL」都会得到 None，
+            # 无法区分。仓库其他读取路径约定 NULL 视为 neo4j
+            # （见 end_user_repository 的 Workspace.storage_type.is_(None)），
+            # 空间确实存在时按该口径归一，避免误入双删兜底
+            row = (
+                await db.execute(
+                    select(Workspace.id, Workspace.storage_type)
+                    .join(EndUser, EndUser.workspace_id == Workspace.id)
+                    .where(EndUser.id == end_user_uuid)
+                )
+            ).first()
+
+        if row is not None and row[1] is None:
+            storage_type = "neo4j"
+        else:
+            storage_type = row[1] if row is not None else None
+
+        normalized_type = str(storage_type or "").strip().lower()
+        if normalized_type not in ("rag", "neo4j"):
+            # 查不到归属（宿主不存在 / 未关联 workspace）或取值无法识别时，
+            # 不能默认当成图空间：RAG 记忆只在 ES 里，落到图分支会静默漏删。
+            # 归属未知时两种存储都尝试清理，任一失败也不阻断另一条路径。
+            logger.warning(
+                "[MemoryService] storage_type unresolved, delete both rag and graph: "
+                "end_user=%s, storage_type=%r",
+                end_user_id,
+                storage_type,
+            )
+            from app.core.memory.rag.storage_ops import delete_messages_by_end_user
+
+            # 两种存储都尝试清理，但失败必须上抛：调用层拿到返回值后会立刻
+            # finalize_memory_delete，吞掉 RAG 失败会留下「宿主已删除、ES 记忆
+            # 仍在」且没有重试入口。删除本身幂等，交由调用方重试收敛
+            rag_error: Exception | None = None
+            try:
+                rag_deleted = await delete_messages_by_end_user(canonical_end_user_id)
+            except Exception as exc:
+                logger.error(
+                    "[MemoryService] fallback rag delete failed: end_user=%s, err=%s",
+                    end_user_id,
+                    exc,
+                    exc_info=True,
+                )
+                rag_deleted = 0
+                rag_error = exc
+
+            pipeline = ForgettingPipeline(
+                MemoryContext(end_user_id=canonical_end_user_id)
+            )
+            try:
+                graph_deleted = await pipeline.delete_all_nodes_by_end_user_id(
+                    canonical_end_user_id
+                )
+            except Exception as exc:
+                # 图侧失败必须上抛，不能按 0 吞掉：调用层（memory_storage_controller）
+                # 拿到返回值后会立刻把宿主落库为 is_active=False / memory_count=0
+                # （finalize_memory_delete_async），吞异常会留下「用户显示已删除、
+                # 图记忆仍在」且再无重试入口。删除本身是幂等的，交由调用方重试收敛
+                logger.error(
+                    "[MemoryService] fallback graph delete failed: end_user=%s, err=%s",
+                    end_user_id,
+                    exc,
+                    exc_info=True,
+                )
+                raise
+            logger.info(
+                "[MemoryService] fallback delete done: end_user=%s "
+                "rag_messages=%s graph_nodes=%s",
+                end_user_id,
+                rag_deleted,
+                graph_deleted,
+            )
+            if rag_error is not None:
+                # 图侧已尽量清理，但 RAG 失败仍要上抛，交由调用方重试
+                raise rag_error
+            # 两者单位不同（消息条数 vs 节点数），只能加总用于「删除条目总数」
+            # 的粗略反馈；正常分支按 storage_type 只命中一种，不会出现混算
+            return rag_deleted + graph_deleted
+
+        if normalized_type == "rag":
+            from app.core.memory.rag.storage_ops import delete_messages_by_end_user
+
+            return await delete_messages_by_end_user(canonical_end_user_id)
+
+        pipeline = ForgettingPipeline(
+            MemoryContext(end_user_id=canonical_end_user_id)
+        )
+        return await pipeline.delete_all_nodes_by_end_user_id(
+            canonical_end_user_id
+        )
 
     # ──────────────────────────────────────────────
     # 实例方法：写入执行（由 write_message_task 调用）

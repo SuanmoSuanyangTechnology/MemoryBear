@@ -27,7 +27,6 @@ from app.models.app_model import AppType
 from app.models.app_release_model import AppRelease
 from app.models.workflow_model import WorkflowExecution
 from app.models.workspace_model import Workspace
-from app.repositories import knowledge_repository
 from app.repositories.end_user_repository import EndUserRepository
 from app.repositories.workflow_repository import WorkflowConfigRepository
 from app.schemas import release_share_schema, conversation_schema, app_schema
@@ -125,6 +124,12 @@ async def _prepare_public_memory_context_async(
         db: AsyncSession,
         workspace_id: uuid.UUID,
 ) -> tuple[str, str]:
+    """返回 (storage_type, user_rag_memory_id)。
+
+    user_rag_memory_id 恒为空串：RAG 记忆已改为独立 ES 索引
+    （``rag_memory_current``），不再需要按知识库定位。该位保留仅为兼容下游
+    memory 调用链既有的解包与传参，待下游统一清理后一并移除。
+    """
     storage_type = await workspace_service.get_workspace_storage_type_without_auth_async(
         db=db,
         workspace_id=workspace_id,
@@ -133,19 +138,6 @@ async def _prepare_public_memory_context_async(
         storage_type = "neo4j"
 
     user_rag_memory_id = ""
-    if storage_type == "rag":
-        knowledge = await knowledge_repository.get_knowledge_by_name_async(
-            db=db,
-            name="USER_RAG_MERORY",
-            workspace_id=workspace_id,
-        )
-        if knowledge:
-            user_rag_memory_id = str(knowledge.id)
-        else:
-            logger.warning(
-                f"未找到名为 'USER_RAG_MERORY' 的知识库，workspace_id: {workspace_id}，将使用 neo4j 存储"
-            )
-            storage_type = "neo4j"
 
     return storage_type, user_rag_memory_id
 
@@ -1573,12 +1565,6 @@ async def regenerate_message(
         if storage_type is None:
             storage_type = 'neo4j'
         user_rag_memory_id = ''
-        if storage_type == 'rag' and workspace_id:
-            knowledge = knowledge_repository.get_knowledge_by_name(
-                db=db, name="USER_RAG_MERORY", workspace_id=workspace_id
-            )
-            if knowledge:
-                user_rag_memory_id = str(knowledge.id)
 
         # 深度思考：需快照 model_parameters 开启 + 请求开启才生效，否则强制关闭
         #（对齐 AGENT 分支对 deep_thinking 的处理；集群 thinking 经编排器 _prepare_turn_chat_features 消费）
@@ -1651,13 +1637,6 @@ async def regenerate_message(
     if storage_type is None:
         storage_type = 'neo4j'
     user_rag_memory_id = ''
-    if storage_type == 'rag':
-        if workspace_id:
-            knowledge = knowledge_repository.get_knowledge_by_name(
-                db=db, name="USER_RAG_MERORY", workspace_id=workspace_id
-            )
-            if knowledge:
-                user_rag_memory_id = str(knowledge.id)
 
     if payload.stream:
         # 流式返回

@@ -23,7 +23,6 @@ from app.dependencies import get_current_user, get_current_user_async, cur_works
 from app.models import User
 from app.models.annotation_model import HitLogSource
 from app.models.app_model import AppType
-from app.repositories import knowledge_repository
 from app.schemas import app_schema, tool_schema
 from app.schemas.response_schema import PageData, PageMeta
 from app.schemas.workflow_schema import WorkflowConfig as WorkflowConfigSchema
@@ -345,26 +344,14 @@ async def _prepare_draft_memory_context_async(
         *,
         workspace_id: uuid.UUID,
         current_user,
-) -> tuple[str, str]:
+) -> str:
     async with get_async_db_context() as db:
         storage_type = await workspace_service.get_workspace_storage_type_async(
             db=db,
             workspace_id=workspace_id,
             user=current_user,
         )
-        if storage_type is None:
-            storage_type = "neo4j"
-
-        user_rag_memory_id = ""
-        knowledge = await knowledge_repository.get_knowledge_by_name_async(
-            db=db,
-            name="USER_RAG_MERORY",
-            workspace_id=workspace_id,
-        )
-        if knowledge:
-            user_rag_memory_id = str(knowledge.id)
-
-    return storage_type, user_rag_memory_id
+        return storage_type or "neo4j"
 
 
 async def _load_agent_runtime_config(
@@ -990,7 +977,6 @@ async def draft_run(
     workspace_id = current_user.current_workspace_id
     current_user_id = str(current_user.id)
     storage_type: str | None = None
-    user_rag_memory_id = ""
 
     app = await _load_draft_run_app_snapshot(app_id, workspace_id)
     app_type = AppType(app.type)
@@ -1101,7 +1087,7 @@ async def draft_run(
     if app_type == AppType.AGENT:
         from app.services.draft_run_service import AgentRunService
 
-        storage_type, user_rag_memory_id = await _prepare_draft_memory_context_async(
+        storage_type = await _prepare_draft_memory_context_async(
             workspace_id=workspace_id,
             current_user=current_user,
         )
@@ -1148,7 +1134,6 @@ async def draft_run(
                             user_id=payload.user_id or current_user_id,
                             variables=payload.variables,
                             storage_type=storage_type,
-                            user_rag_memory_id=user_rag_memory_id,
                             files=payload.files,
                             source=source,
                     ):
@@ -1189,7 +1174,6 @@ async def draft_run(
                 user_id=payload.user_id or current_user_id,
                 variables=payload.variables,
                 storage_type=storage_type,
-                user_rag_memory_id=user_rag_memory_id,
                 files=payload.files,
                 source=source
             )
@@ -1220,7 +1204,7 @@ async def draft_run(
     from app.services.multi_agent_service import MultiAgentService
     from app.services.draft_run_service import AgentRunService
 
-    storage_type, user_rag_memory_id = await _prepare_draft_memory_context_async(
+    storage_type = await _prepare_draft_memory_context_async(
         workspace_id=workspace_id,
         current_user=current_user,
     )
@@ -1279,8 +1263,7 @@ async def draft_run(
                     async for event in multiservice.run_stream(
                             app_id=app_id,
                             request=multi_agent_request,
-                            storage_type=storage_type,
-                            user_rag_memory_id=user_rag_memory_id
+                            storage_type=storage_type
                     ):
                         yield event
                 finally:
@@ -1355,7 +1338,7 @@ async def draft_run_compare(
     if AppType(app.type) != AppType.AGENT:
         raise BusinessException("只有 Agent 类型应用支持对比试运行", BizCode.APP_TYPE_NOT_SUPPORTED)
 
-    storage_type, user_rag_memory_id = await _prepare_draft_memory_context_async(
+    storage_type = await _prepare_draft_memory_context_async(
         workspace_id=workspace_id,
         current_user=current_user,
     )
@@ -1445,7 +1428,6 @@ async def draft_run_compare(
                         user_id=payload.user_id,
                         variables=payload.variables,
                         storage_type=storage_type,
-                        user_rag_memory_id=user_rag_memory_id,
                         web_search=web_search,
                         memory=True,
                         parallel=payload.parallel,
@@ -1479,7 +1461,6 @@ async def draft_run_compare(
             user_id=payload.user_id,
             variables=payload.variables,
             storage_type=storage_type,
-            user_rag_memory_id=user_rag_memory_id,
             web_search=web_search,
             memory=True,
             parallel=payload.parallel,
