@@ -31,7 +31,7 @@ class SkillPackage(Base):
     )
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
-    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False, index=True, comment="租户ID")
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id", name="fk_skill_packages_tenant_id"), nullable=False, index=True, comment="租户ID")
 
     # 标准 frontmatter 字段
     name = Column(String(64), nullable=False, comment="标准 frontmatter name（小写字母/数字/连字符）")
@@ -41,7 +41,7 @@ class SkillPackage(Base):
     # 插件归属（原型「一个文件夹多技能」的分组列；NULL = 独立技能）
     plugin_id = Column(
         UUID(as_uuid=True),
-        ForeignKey("skill_plugins.id"),
+        ForeignKey("skill_plugins.id", name="fk_skill_packages_plugin_id"),
         nullable=True,
         index=True,
         comment="所属插件；NULL 表示独立导入的技能",
@@ -78,7 +78,7 @@ class SkillFile(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
     package_id = Column(
         UUID(as_uuid=True),
-        ForeignKey("skill_packages.id", ondelete="CASCADE"),
+        ForeignKey("skill_packages.id", ondelete="CASCADE", name="fk_skill_files_package_id"),
         nullable=False, index=True, comment="所属包",
     )
     rel_path = Column(String(1024), nullable=False, comment="相对包根路径，如 SKILL.md、references/faq.md")
@@ -105,7 +105,7 @@ class SkillPlugin(Base):
     )
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
-    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False, index=True, comment="租户ID")
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id", name="fk_skill_plugins_tenant_id"), nullable=False, index=True, comment="租户ID")
 
     name = Column(String(255), nullable=False, comment="插件展示名（导入向导可编辑）")
     description = Column(Text, comment="插件描述（导入向导可编辑）")

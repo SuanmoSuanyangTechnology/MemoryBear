@@ -27,7 +27,7 @@ class Skill(Base):
     prompt = Column(Text, comment="技能专属提示词")
 
     # 标准包联动（Phase 1：Agent Skills 协议兼容）
-    package_id = Column(UUID(as_uuid=True), ForeignKey("skill_packages.id"), nullable=True, index=True, comment="已安装的标准包")
+    package_id = Column(UUID(as_uuid=True), ForeignKey("skill_packages.id", name="fk_skills_package_id"), nullable=True, index=True, comment="已安装的标准包")
     skill_format = Column(
         String(16),
         default="legacy",
