@@ -19,7 +19,7 @@ from collections.abc import Mapping
 from typing import Any
 from uuid import UUID
 
-from src.domain.ports.scene_names import SceneNameLookup
+from src.application.ports.scene_names import SceneNameLookup
 from src.domain.shared.ids import TenantId
 
 logger = logging.getLogger(__name__)
@@ -110,15 +110,21 @@ def project_domain_names(
 
 def load_scene_names(
     metadata: object,
-    lookup: SceneNameLookup | None = None,
-    tenant_id: TenantId | None = None,
-) -> dict[str, str]:
+    lookup: SceneNameLookup,
+    tenant_id: TenantId | None,
+) -> dict[str, str] | None:
     """Resolve the scene names the metadata's keys point at, scoped to a tenant.
 
-    Returns ``{}`` when there is nothing to resolve, no lookup is installed or
-    the workspace carries no tenant; callers treat that as "every uuid scene is
-    unknown", exactly like the API. Scenes are tenant-owned, so a lookup without
-    a tenant could only leak another tenant's data — it never runs.
+    ``{}`` means "no uuid scene has a name": there is nothing to resolve, or
+    the lookup (an adapter in a deployment without the enterprise service)
+    answered authoritatively. The caller then drops the unknown uuid groups
+    exactly like the API does.
+
+    ``None`` means the lookup is unavailable (a failure or an adapter that
+    reports ``None``) or the workspace has no tenant. The caller must then skip
+    the projection and keep the stored keys: neither an outage nor a missing
+    tenant is evidence that the scenes were deleted. Tenantless workspaces are
+    rejected by model resolution before this runs, so that branch is defensive.
     """
 
     domains = metadata.get("domain_specific_info") if isinstance(metadata, dict) else None
@@ -128,14 +134,24 @@ def load_scene_names(
     for key in domains:
         if is_scene_type_id(key):
             keyed_ids[key] = UUID(key)
-    if not keyed_ids or lookup is None or tenant_id is None:
+    if not keyed_ids:
         return {}
+    if tenant_id is None:
+        # Scenes are tenant-owned; without one there is nothing legitimate to
+        # look up, and dropping the groups would be data loss.
+        return None
 
     try:
-        names = lookup(list({*keyed_ids.values()}), tenant_id)
+        names = lookup.resolve(list({*keyed_ids.values()}), tenant_id)
     except Exception:
         logger.warning("场景名查询失败，保留存储原键", exc_info=True)
-        return {}
+        return None
+    if names is None:
+        logger.warning(
+            "场景名查询不可用，保留存储原键",
+            extra={"event": "profile_scene_names_unavailable"},
+        )
+        return None
     return {
         key: names[str(value)]
         for key, value in keyed_ids.items()

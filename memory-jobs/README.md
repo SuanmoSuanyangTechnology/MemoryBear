@@ -6,10 +6,14 @@ Celery 队列、执行后台任务（周期性扫描、记忆写入/遗忘/反�
 服务提供 Celery 应用、同步基础设施客户端、任务基类、健康检查、Docker/k8s 骨架。
 业务代码按 DDD 分层：领域规则在 `src/domain/`（工作空间、用户目录、洞察/摘要、
 兴趣分布），用例与端口在 `src/application/`，持久化/Neo4j/缓存/锁/提示词/投递适配器在
-`src/infrastructure/` 与 `src/interfaces/tasks/publishing.py`。
-`src/interfaces/tasks/` 只放 Celery 适配层：解析参数、调用用例、序列化结果。
-适配层按**任务域**分包、每个 Celery 任务一个模块；定时任务（beat）统一登记在
-`src/interfaces/tasks/schedules.py`，不在别处写排期。
+`src/infrastructure/`（投递适配器是 `src/infrastructure/publishing.py`）。
+`src/interfaces/tasks/` 只放执行器适配层：`registry.py` 是入站任务的唯一清单（线上任务名 +
+handler 工厂），`celery_adapter.py` 把清单渲染成 Celery 任务（资源档位、确认/结果策略、
+attempt token 注入），`serialization.py` 是任务返回值的唯一序列化点，`schedules.py` 统一
+登记 beat 条目，不在别处写排期。任务业务逻辑在 `src/application/jobs/`：每个 handler 校验
+payload、调用用例、返回应用层结果对象（如 `ProfileCacheResult`）并决定失败语义；它不
+import Celery、不认识 `self.request`，也不决定响应键名，因此更换执行器只需重写
+`interfaces/tasks/` 下的适配器，handler 原样复用。
 
 ---
 
@@ -44,19 +48,23 @@ memory-jobs/
 │   ├── common/                 # 日志、任务上下文
 │   ├── prompts/                # 提示词模板（Jinja2）；由 PromptCatalog 适配器包装
 │   ├── domain/                 # DDD 领域层：聚合、值对象、领域服务、策略（仅标准库）
-│   ├── application/            # 应用层：用例、端口、DTO
-│   ├── infrastructure/         # 同步客户端 + 适配器（persistence/lock/cache/llm/prompts）
+│   ├── application/            # 应用层：用例、端口、DTO、提示词输入投影、jobs（入站 handler）
+│   ├── infrastructure/         # 同步客户端 + 适配器（persistence/lock/cache/llm/prompts/publishing）
 │   ├── models/                 # 宿主表的 SQLAlchemy 映射（只允许适配器引用）
-│   ├── interfaces/             # 接口层：Celery 任务与健康探针
-│   │   └── tasks/              #   每个任务一个模块；只解析参数、调用用例、序列化结果
-│   │       ├── __init__.py     #   任务注册表：import 各任务包 + 路由
-│   │       ├── base.py         #   JobTask：重试策略、客户端快捷方式
-│   │       ├── schedules.py    #   定时任务（beat）唯一登记处
-│   │       ├── publishing.py   #   CeleryUnitPublisher：错峰投递适配器
-│   │       ├── health/ping.py
-│   │       ├── interest_distribution/{generate,init_for_users}.py
-│   │       └── profile_cache/{generate,generate_workspace,scan}.py
-│   └── composition.py          # 组合根：runtime -> 适配器 -> 用例
+│   ├── interfaces/             # 接口层：执行器适配器与健康探针
+│   │   └── tasks/              #   只做执行器绑定：名字、资源档位、ack/结果策略、attempt token
+│   │       ├── __init__.py     #   注册入口：加载适配器 + 路由 + beat 渲染
+│   │       ├── registry.py     #   JOBS：线上任务名 -> handler 工厂（唯一清单）
+│   │       ├── celery_adapter.py #  JOBS -> shared_task（遍历注册表）
+│   │       ├── serialization.py  #  结果对象 -> 响应字典（含 task_id 前的所有键）
+│   │       ├── base.py         #   JobTask：重试与确认策略（不含客户端访问器）
+│   │       └── schedules.py    #   定时任务（beat）唯一登记处
+│   └── composition/            # 组合根：runtime -> 共享服务 -> 每域自行装配适配器
+│       ├── container.py        #   Container：按注册表构建并暴露各域 facade
+│       ├── registry.py         #   MODULES：任务域注册表（名字 + 装配函数）
+│       ├── shared.py           #   SharedDependencies：仅跨域共享的服务
+│       ├── profile_cache.py    #   ProfileCacheWiring + build_profile_cache_wiring
+│       └── interest.py         #   InterestWiring + build_interest_wiring
 ├── tests/
 ├── scripts/check_sync_only.py
 ├── deploy/k8s/                 # worker / beat 部署清单
@@ -110,7 +118,7 @@ uv run celery -A src.entry:celery_app beat --schedule=/tmp/celerybeat-schedule
 ```bash
 uv run celery -A src.entry:celery_app call memory_jobs.health.ping
 # 或本地直接执行（不需要 broker）：
-uv run python -c "from src.interfaces.tasks.health.ping import ping; print(ping.apply().get())"
+uv run python -c "from src.interfaces.tasks.celery_adapter import TASKS; print(TASKS['memory_jobs.health.ping'].apply().get())"
 ```
 
 依赖探针（容器 liveness/readiness 使用）：
@@ -192,36 +200,51 @@ priority field`）。该参数由 Celery 的 `task_queue_max_priority` 写出，
 ## 新增任务
 
 1. 业务规则放在 `src/domain/<context>/`（聚合、值对象、领域服务、策略），用例放在
-   `src/application/<context>/`（事务边界、端口、DTO），`src/interfaces/tasks/` 下按
-   任务域建包，每个 Celery 任务一个模块（如 `src/interfaces/tasks/memory_write/write.py`），
-   并在该包的 `__init__.py` 里显式 import 任务模块完成注册。任务只解析参数、调用用例、
-   序列化结果；适配器的装配在 `src/composition.py`。
-2. 任务使用 `shared_task` + `JobTask` 基类，并显式命名（`memory_jobs.<domain>.<action>`）：
+   `src/application/<context>/`（事务边界、端口、DTO）；适配器的装配在 `src/composition/`：
+   新任务域加一个 wiring 模块（`profile_cache.py` 那样），在其中实现
+   `build_<domain>_wiring(runtime, shared)` 自行装配本域适配器，然后在
+   `src/composition/registry.py` 的 `MODULES` 里注册一行——`Container` 本身不需要改。
+   只有**多个域都会用**的服务才放进 `SharedDependencies`；单域适配器既不要放共享层，也
+   不要放别的域的 wiring。任务只能调用 `get_container().<domain>`，CI 的
+   `scripts/check_import_boundaries.py` 会拦截直接拿适配器的写法；它的 facade 白名单从
+   `MODULES` 解析，不需要第二份清单。
+2. 任务本身写成 `src/application/jobs/` 下的 handler：只做 payload 校验、调用用例、返回
+   应用层结果对象与失败语义，不 import Celery、不碰 `self.request`，也不拼响应字典。
+   执行策略用语义化的 `JobSpec` 声明（资源档位、是否可重试、确认/结果），不写具体秒数：
 
 ```python
-from celery import shared_task
-
-from src.runtime import get_runtime
-from src.interfaces.tasks.base import JobTask
+from src.application.ports.jobs import JobSpec, ResourceClass
 
 
-@shared_task(bind=True, base=JobTask, name="memory_jobs.memory.write")
-def write_memory(self, payload: dict) -> dict:
-    # 事务边界由 db_session 管理：成功自动 commit，异常自动 rollback
-    with self.db_session() as session:
+class WriteMemoryJob:
+    spec = JobSpec(resource_class=ResourceClass.BULK)
+
+    def __init__(self, use_case: WriteMemoryUseCase) -> None:
+        self._use_case = use_case
+
+    def handle(self, payload: Mapping[str, Any], *, attempt_token: str) -> WriteMemoryReport:
         ...
-    return {"ok": True}
+        return self._use_case.execute(command)
 ```
 
-3. 在 `src/interfaces/tasks/__init__.py` 中 import 该任务包，并在 `TASK_ROUTES` 登记路由：
+   返回值由 `src/interfaces/tasks/serialization.py` 转成响应（并追加 `task_id`）。新增
+   结果类型时，要在该文件的 `_SERIALIZERS` 里加一条映射；未登记的类型会直接抛
+   `TypeError`，而不是悄悄返回一个形状不同的 payload。
+
+3. 在 `src/interfaces/tasks/registry.py` 的 `JOBS` 里加一行（线上任务名取自
+   `task_bridge.mem_router.TaskName`，handler 从组合根惰性构造）：
 
 ```python
-from src.interfaces.tasks import memory_write
-
-TASK_ROUTES = {
-    "memory_jobs.memory.write": "memory_jobs_tasks",
-}
+JobRegistration(
+    name=TaskName.MEMORY_WRITE.value,
+    spec=WriteMemoryJob.spec,
+    build=lambda: WriteMemoryJob(get_container().memory_write.generate()),
+)
 ```
+
+`celery_adapter.py` 会自动把它注册成 Celery 任务（名字、资源档位、确认/结果策略、
+attempt token 都由此而来），不需要再写 `@shared_task`，也不需要在别处登记模块；路由来自
+`task_bridge` 的 `TASK_ROUTES`，所以新任务名要同时在 `task_bridge` 里声明。
 
 4. 需要周期性执行时，**只改** `src/interfaces/tasks/schedules.py`：在 `periodic_tasks()` 中
    追加一条 `PeriodicTask`，`BEAT_SCHEDULE` 由它统一渲染：
@@ -244,9 +267,10 @@ PeriodicTask(
 
 - **同步到底**：任务函数、仓储、模型调用链中不得出现 `async def` / `await`。
 - **不 import `api` / `app`**：两个服务独立部署，共享代码应下沉到 `packages/`。
-- **幂等**：`task_acks_late=True` + 重试意味着任务可能被执行多次。
-- **事务**：使用 `self.db_session()`，不要在任务里手动 `commit()`。
-- **重试**：基类只对 `OperationalError`（连接类故障）自动重试；业务失败由任务自行判断。
+- **幂等**：`acks_late` + 重试意味着任务可能被执行多次。
+- **事务**：事务边界在用例的 Unit of Work 里，handler 与 executor 适配器都不手动 `commit()`。
+- **重试**：`JobTask` 只对 `OperationalError`（连接类故障）自动重试，且只有 `spec.retryable`
+  的任务会消耗重试预算；业务失败由 handler 自行判断。
 - 参数与返回值必须是 JSON 可序列化类型（`task_serializer=json`）。
 
 ## 基础设施生命周期
@@ -279,8 +303,14 @@ PeriodicTask(
   `MEMORY_ENTERPRISE_TIMEOUT_SECONDS` 默认 3s，`MEMORY_ENTERPRISE_TOKEN` 设置后以
   `X-Internal-Token` 发送。场景名查询还会带上 workspace 所属租户的 `X-Tenant-Id`，
   服务端只返回该租户可见的场景（自有场景 + 系统默认场景）；租户为空的 workspace 不发起
-  查询。未配置时与「未装插件的 API」一致：洞察输入里 uuid 场景键
-  视为已删除、整组丢弃。该服务**不参与**依赖探测，挂了只会丢场景名，不会让任务失败。
+  查询。
+  - **未配置**（开放版）：与「未装插件的 API」一致，洞察输入里 uuid 场景键视为已删除、整组丢弃。
+  - **已配置但不可用**（超时 / 5xx / 坏响应）：不再视为删除——跳过场景名投影，**保留存储里的
+    原键**；日志与行为一致（`场景名查询失败/不可用，保留存储原键`）。
+  该服务**不参与**依赖探测，挂了只会失去场景名映射，不会让任务失败。
+- `JOBS_SCAN_PAGE_SIZE`（默认 500）：周期扫描每次从库里取多少候选。按 `end_user.id`
+  keyset 分页，每页一个短读作用域，内存上界是页大小而不是工作空间的用户数；扫描期间
+  不持有数据库连接。
 - `JOBS_INTEREST_CACHE_EXPIRE_SECONDS`（默认 24h）：预热单元写入兴趣分布缓存的 TTL。
   与 memory-profile 的 `PROFILE_INTEREST_CACHE_EXPIRE_SECONDS` 是同一个键（重启后者的
   环境变量即可同时生效），两个写入方用同一个过期时间。

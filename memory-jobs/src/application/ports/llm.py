@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from src.domain.ports.llm import ChatModel
+from src.application.ports.chat_model import ChatModel
 from src.domain.shared.ids import ModelConfigId, TenantId
 
 
