@@ -594,10 +594,6 @@ async def draft_run(
         if payload.stream:
             source = HitLogSource.EXTERNAL if is_shared else HitLogSource.CONSOLE
 
-            # In-process execution only; sandbox execution mode is not part of
-            # this service (feature parity is kept via the execution_mode flag).
-            execution_mode = "in_process"
-
             async def event_generator():
                 async with get_async_db_context() as stream_db:
                     _draft_service = AgentRunService(stream_db)
@@ -613,7 +609,6 @@ async def draft_run(
                             user_rag_memory_id=user_rag_memory_id,
                             files=payload.files,
                             source=source,
-                            execution_mode=execution_mode,
                     ):
                         yield event
 
@@ -850,9 +845,6 @@ async def draft_run_compare(
     web_search_feature = features_config.get("web_search", {})
     web_search = isinstance(web_search_feature, dict) and web_search_feature.get("enabled", False)
 
-    # In-process execution only (see draft_run)
-    execution_mode = "in_process"
-
     if payload.stream:
         source = HitLogSource.CONSOLE
 
@@ -875,7 +867,6 @@ async def draft_run_compare(
                         timeout=payload.timeout or 60,
                         files=payload.files,
                         source=source,
-                        execution_mode=execution_mode,
                 ):
                     yield event
 
@@ -901,7 +892,6 @@ async def draft_run_compare(
             timeout=payload.timeout or 60,
             files=payload.files,
             source=source,
-            execution_mode=execution_mode,
         )
 
     logger.info(

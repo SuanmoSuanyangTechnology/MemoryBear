@@ -65,6 +65,101 @@ class AppServiceSettings(BaseSettings):
     sandbox_api_key: SecretStr = Field(
         default=SecretStr("redbear-sandbox"), validation_alias="SANDBOX_API_KEY"
     )
+    # Independent sandbox service (core/sandbox-service), unrelated to
+    # `sandbox_url` above (legacy code-node sandbox). Consumed by the
+    # code-interpreter / terminal / sandbox-file builtin tools; disabling it
+    # makes those tools return an explicit "not enabled" error.
+    enable_sandbox_service: bool = Field(
+        default=False, validation_alias="ENABLE_SANDBOX_SERVICE"
+    )
+    sandbox_service_base_url: str = Field(
+        default="", validation_alias="SANDBOX_SERVICE_BASE_URL"
+    )
+    # Must match sandbox-service `SANDBOX_API_TOKEN` (at least 16 characters).
+    sandbox_service_api_token: SecretStr = Field(
+        default=SecretStr(""), validation_alias="SANDBOX_SERVICE_API_TOKEN"
+    )
+    sandbox_service_connect_timeout_seconds: float = Field(
+        default=5.0, gt=0, validation_alias="SANDBOX_SERVICE_CONNECT_TIMEOUT_SECONDS"
+    )
+    sandbox_service_pool_timeout_seconds: float = Field(
+        default=5.0, gt=0, validation_alias="SANDBOX_SERVICE_POOL_TIMEOUT_SECONDS"
+    )
+    # Server-side hard cap is 300s per execution, plus queuing / first-instance
+    # creation headroom.
+    sandbox_service_read_timeout_seconds: float = Field(
+        default=330.0, gt=0, validation_alias="SANDBOX_SERVICE_READ_TIMEOUT_SECONDS"
+    )
+    sandbox_service_write_timeout_seconds: float = Field(
+        default=30.0, gt=0, validation_alias="SANDBOX_SERVICE_WRITE_TIMEOUT_SECONDS"
+    )
+    sandbox_service_max_connections: int = Field(
+        default=100, ge=1, validation_alias="SANDBOX_SERVICE_MAX_CONNECTIONS"
+    )
+    sandbox_service_health_timeout_seconds: float = Field(
+        default=3.0, gt=0, validation_alias="SANDBOX_SERVICE_HEALTH_TIMEOUT_SECONDS"
+    )
+    # Artifact egress / user-file ingress limits, enforced here (never by the
+    # sandbox): per-file cap, per-call cumulative cap, extension allow-list
+    # (comma separated, case-insensitive, leading dot).
+    sandbox_file_max_bytes: int = Field(
+        default=100 * 1024 * 1024, ge=1, validation_alias="SANDBOX_FILE_MAX_BYTES"
+    )
+    sandbox_file_max_total_bytes: int = Field(
+        default=200 * 1024 * 1024, ge=1, validation_alias="SANDBOX_FILE_MAX_TOTAL_BYTES"
+    )
+    sandbox_file_allowed_extensions: str = Field(
+        default=(
+            ".pptx,.docx,.xlsx,.pdf,.csv,.txt,.md,.json,"
+            ".png,.jpg,.jpeg,.gif,.webp,.svg,.zip,.ppt,.doc,.xls"
+        ),
+        validation_alias="SANDBOX_FILE_ALLOWED_EXTENSIONS",
+    )
+    # ---- Agent Skills standard packages (design doc §14) ----
+    # Single-file inline ceiling; larger or binary files go to object storage.
+    skill_package_inline_limit: int = Field(
+        default=2 * 1024 * 1024, ge=1, validation_alias="SKILL_PACKAGE_INLINE_LIMIT"
+    )
+    # A real community bundle (many skills, each with references/scripts) easily
+    # exceeds a few hundred files; the total-size cap below is the real guard.
+    skill_package_max_files: int = Field(
+        default=2000, ge=1, validation_alias="SKILL_PACKAGE_MAX_FILES"
+    )
+    skill_package_max_size: int = Field(
+        default=100 * 1024 * 1024, ge=1, validation_alias="SKILL_PACKAGE_MAX_SIZE"
+    )
+    # read_skill / discovery index budgets.
+    skill_read_max_chars: int = Field(
+        default=16000, ge=1, validation_alias="SKILL_READ_MAX_CHARS"
+    )
+    skill_desc_index_chars: int = Field(
+        default=200, ge=1, validation_alias="SKILL_DESC_INDEX_CHARS"
+    )
+    # URL import guard (SSRF face): https-only + host allow-list + timeout/size caps.
+    skill_import_url_hosts: str = Field(
+        default="github.com,codeload.github.com", validation_alias="SKILL_IMPORT_URL_HOSTS"
+    )
+    skill_import_url_timeout: float = Field(
+        default=15.0, gt=0, validation_alias="SKILL_IMPORT_URL_TIMEOUT"
+    )
+    skill_import_url_max_bytes: int = Field(
+        default=20 * 1024 * 1024, ge=1, validation_alias="SKILL_IMPORT_URL_MAX_BYTES"
+    )
+    # Follow the process proxy env (HTTP(S)_PROXY) for the public GitHub fetch.
+    # Default off keeps the SSRF face unchanged (an env proxy must be opt-in);
+    # deployments whose egress requires a proxy set this to true.
+    skill_import_url_trust_env: bool = Field(
+        default=False, validation_alias="SKILL_IMPORT_URL_TRUST_ENV"
+    )
+    # Upper bound on the members one plugin folder may carry (§7.8 rule 7).
+    skill_plugin_max_members: int = Field(
+        default=50, ge=1, validation_alias="SKILL_PLUGIN_MAX_MEMBERS"
+    )
+    # Max calls of each single tool within one Agent run. One knob for every
+    # Agent kind (agent app, sub-agent, cluster supervisor, workflow agent node).
+    agent_tool_call_limit: int = Field(
+        default=5, ge=1, le=100, validation_alias="AGENT_TOOL_CALL_LIMIT"
+    )
     db_host: str = Field(default="127.0.0.1", validation_alias="DB_HOST")
     db_port: int = Field(default=5432, ge=1, le=65535, validation_alias="DB_PORT")
     db_user: str = Field(default="postgres", validation_alias="DB_USER")
@@ -400,14 +495,6 @@ class AppServiceSettings(BaseSettings):
     )
     fast_write_emotion_http_timeout_seconds: float = Field(
         default=2.0, gt=0, validation_alias="FAST_WRITE_EMOTION_HTTP_TIMEOUT_SECONDS"
-    )
-    # E2B sandbox callback settings (host `settings.E2B_CALLBACK_*`); kept for
-    # config-shape parity, the sandbox execution path itself is fail-closed.
-    e2b_callback_url: str = Field(
-        default="http://host.docker.internal:8000", validation_alias="E2B_CALLBACK_URL"
-    )
-    e2b_callback_secret: SecretStr = Field(
-        default=SecretStr("sandbox-callback-secret"), validation_alias="E2B_CALLBACK_SECRET"
     )
     llm_network_retry_attempts: int = Field(
         default=3, ge=1, validation_alias="LLM_NETWORK_RETRY_ATTEMPTS"

@@ -23,7 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..utils.datetime_utils import to_iso_z, utcnow_naive
 from ..workflow.node_cache import sanitize_json_text
 from ..agent.agent_middleware import AgentMiddleware
-from ..agent.langchain_agent import LangChainAgent
+from ..agent.langchain_agent import DEFAULT_AGENT_ROLE_PROMPT, LangChainAgent
 from ..config import current_settings
 from ..errors import BizCode
 from ..errors import BusinessException
@@ -184,6 +184,7 @@ def build_uploaded_images_manifest(
     for index, reference in enumerate(image_references, start=1):
         lines.append(f"[图片{index}] {reference.name or reference.url or '本地图片'}")
     return "\n".join(lines), image_references
+
 
 
 class WebSearchInput(BaseModel):
@@ -1247,16 +1248,16 @@ class AgentRunService:
 
     async def load_tools_config(self, tools_config, web_search, tenant_id, user_id=None, workspace_id=None) -> list:
         """Load tool configuration."""
+        from ..tools.builtin.sandbox_default import build_sandbox_tools, drop_sandbox_tools
+
         tools = []
         if web_search:
             search_tool = create_web_search_tool({})
             tools.append(search_tool)
-        if not tools_config:
-            return tools
-        async with get_async_db_context() as db:
-            tool_service = ToolService(db)
+        if tools_config and isinstance(tools_config, list):
+            async with get_async_db_context() as db:
+                tool_service = ToolService(db)
 
-            if tools_config and isinstance(tools_config, list):
                 for tool_config in tools_config:
                     if tool_config.get("enabled", False):
                         # Look up the tool instance by tool name
@@ -1269,6 +1270,10 @@ class AgentRunService:
                             # Convert to a LangChain tool
                             langchain_tool = tool_instance.to_langchain_tool(tool_config.get("operation", None))
                             tools.append(langchain_tool)
+        # Sandbox tools are not configurable: with ENABLE_SANDBOX_SERVICE on, every Agent run
+        # carries the full set. Drop stale configured copies first so names never collide.
+        tools = drop_sandbox_tools(tools)
+        tools.extend(build_sandbox_tools(user_id=user_id, workspace_id=workspace_id))
         logger.debug(
             "已添加网络搜索工具",
             extra={
@@ -1290,11 +1295,11 @@ class AgentRunService:
 
         tools = []
         skill_prompts = ""
-        skill_enable = skills_config.get("enabled", False)
-        if skill_enable:
+        # 只认 skill_ids：非空即加载这些技能；历史 enabled/all_skills 一律忽略。
+        if skills_config.get("skill_ids"):
             middleware = AgentMiddleware(skills=skills_config)
             async with get_async_db_context() as db:
-                skill_tools, skill_configs, tool_to_skill_map = await middleware.load_skill_tools_async(
+                skill_tools, skill_configs, tool_to_skill_map, standard_index = await middleware.load_skill_tools_async(
                     db,
                     tenant_id,
                     runtime_context={"user_id": user_id, "workspace_id": workspace_id},
@@ -1322,6 +1327,10 @@ class AgentRunService:
                 skill_prompts = AgentMiddleware.get_active_prompts(
                     activated_skill_ids, skill_configs
                 )
+
+            # standard 技能（Agent Skills 协议）：discovery 索引段并入提示词注入
+            if standard_index:
+                skill_prompts = f"{skill_prompts}\n\n{standard_index}" if skill_prompts else standard_index
 
         return tools, skill_prompts
 
@@ -1557,7 +1566,6 @@ class AgentRunService:
             history: Optional[List[Dict[str, str]]] = None,
             skip_save: bool = False,
             stateless: bool = False,
-            execution_mode: Literal["in_process", "sandbox"] = "in_process",
             parent_execution_id: Optional[uuid.UUID] = None,
             orchestration_mode: Optional[str] = None,
             execution_owner: Optional[Dict[str, Any]] = None,
@@ -1582,7 +1590,6 @@ class AgentRunService:
             history: Externally supplied history messages (optional, for regeneration).
             skip_save: Whether to skip saving messages (for regeneration).
             stateless: Whether to run the sub Agent without conversation or message persistence.
-            execution_mode: Execution mode (in_process / sandbox).
             parent_execution_id: Execution ID of the parent (master) Agent in cluster orchestration; passed through by the orchestrator when sub_agent=True.
             orchestration_mode: Orchestration mode supervisor / supervisor_loop / collaboration (cluster scenarios only).
             execution_owner: {"release_id": UUID, "agent_name": str}, avoids the AgentConfigProxy.id foreign-key pitfall.
@@ -1623,8 +1630,8 @@ class AgentRunService:
         try:
             # 1. Fetch the API Key configuration
             api_key_config = await self._get_api_key(model_config.id, tenant_id=tenant_id)
-            # Remote mode: the undecrypted view serves the invoke seam and multimodal
-            # formatting; credentials still serve existing consumers like sandbox/usage
+            # The undecrypted view serves the invoke seam and multimodal formatting;
+            # plaintext credentials remain local for model invocation, TTS, and usage.
             model_view = await ModelConfigService.get_runtime_model_view_bridge_async(
                 self.db, model_config.id, tenant_id=tenant_id
             )
@@ -1657,7 +1664,7 @@ class AgentRunService:
             )
 
             # 3. Process the system prompt (with variable substitution)
-            system_prompt = system_prompt.get_text_content() or "你是一个专业的AI助手"
+            system_prompt = system_prompt.get_text_content() or DEFAULT_AGENT_ROLE_PROMPT
 
             # 4. Load tool/skill/knowledge/memory configuration in parallel (each uses
             # its own DB session; no interdependencies)
@@ -1863,6 +1870,7 @@ class AgentRunService:
             )
             use_agent_mode = ModelFeature.FUNCTION_CALL in features
             orchestrator_node_executions = []
+            executed_tool_names: list[str] = []
             if not use_agent_mode and tools:
                 # Weak models: drive multi-turn tool calls with a ReAct prompt and
                 # inject the trace into system_prompt
@@ -1876,6 +1884,9 @@ class AgentRunService:
                     processed_files=processed_files,
                     context_evidence_loader=load_annotation_context,
                 )
+                # Tools already executed by the ToolOrchestrator; record their names so
+                # the Agent's execution requirements describe them truthfully.
+                executed_tool_names = [n for n in (getattr(t, "name", None) for t in tools) if n]
                 tools = []
 
             agent = LangChainAgent(
@@ -1886,6 +1897,7 @@ class AgentRunService:
                 max_tokens=effective_params.get("max_tokens", 2000),
                 system_prompt=system_prompt,
                 tools=tools,
+                executed_tool_names=executed_tool_names,
                 deep_thinking=effective_params.get("deep_thinking", False),
                 thinking_budget_tokens=effective_params.get("thinking_budget_tokens"),
                 json_output=effective_params.get("json_output", False),
@@ -2016,15 +2028,29 @@ class AgentRunService:
                             await ContextEngineManager(db2).after_app_turn(**kwargs)
                     asyncio.create_task(_run_after_turn())
 
-            # 11. Mark the Agent execution record completed
+            # 11. Mark the Agent execution record (failed when the engine aborted
+            # mid-run; same contract as the streaming path)
             node_executions = result.get("node_executions", [])
+            _run_error = result.get("run_error")
             if agent_execution_id is not None:
                 await self._update_agent_execution_completed_async(
                     execution_id=agent_execution_id,
                     steps=orchestrator_node_executions + node_executions,
-                    status="completed",
+                    status="failed" if _run_error else "completed",
                     elapsed_time=elapsed_time,
                     token_usage=result.get("usage"),
+                    error_message=(
+                        json.dumps(
+                            {
+                                "message": (_run_error or {}).get("error") or "Agent 执行被中止",
+                                "type": "AgentRunAborted",
+                                "reason": (_run_error or {}).get("reason"),
+                                "rescued": bool((_run_error or {}).get("rescued")),
+                            },
+                            ensure_ascii=False,
+                        )[:2000]
+                        if _run_error else None
+                    ),
                     # Only cluster sub Agents persist the trace (single-Agent apps
                     # keep traces in steps; existing storage volume unchanged)
                     agent_log=_trace if sub_agent else None,
@@ -2145,7 +2171,6 @@ class AgentRunService:
             skip_save: bool = False,
             stateless: bool = False,
             user_message_id: Optional[uuid.UUID] = None,
-            execution_mode: Literal["in_process", "sandbox"] = "in_process",
             parent_execution_id: Optional[uuid.UUID] = None,
             orchestration_mode: Optional[str] = None,
             execution_owner: Optional[Dict[str, Any]] = None,
@@ -2213,8 +2238,8 @@ class AgentRunService:
         try:
             # 1. Fetch the API Key configuration
             api_key_config = await self._get_api_key(model_config.id, tenant_id=tenant_id)
-            # Remote mode: the undecrypted view serves the invoke seam and multimodal
-            # formatting; credentials still serve existing consumers like sandbox/usage
+            # The undecrypted view serves the invoke seam and multimodal formatting;
+            # plaintext credentials remain local for model invocation, TTS, and usage.
             model_view = await ModelConfigService.get_runtime_model_view_bridge_async(
                 self.db, model_config.id, tenant_id=tenant_id
             )
@@ -2241,7 +2266,7 @@ class AgentRunService:
             )
 
             # 3. Process the system prompt (with variable substitution)
-            system_prompt = system_prompt.get_text_content() or "你是一个专业的AI助手"
+            system_prompt = system_prompt.get_text_content() or DEFAULT_AGENT_ROLE_PROMPT
 
             # 4. Load tool/skill/knowledge/memory configuration in parallel (each uses
             # its own DB session; no interdependencies)
@@ -2465,60 +2490,30 @@ class AgentRunService:
                 )
                 tools = []
 
-            # Create the LangChain Agent (in-process) or route to sandbox
-            if execution_mode == "sandbox":
-                from .e2b_agent_adapter import E2BAgentAdapter
-                sandbox_payload = await self._build_sandbox_payload(
-                    agent_config=agent_config,
-                    model_config=model_config,
-                    api_key_config=api_key_config,
-                    effective_params=effective_params,
-                    message=message,
-                    system_prompt=system_prompt,
-                    workspace_id=workspace_id,
-                    user_id=user_id,
-                    conversation_id=conversation_id,
-                    tools=tools,
-                    history=history,
-                    context=None,
-                    variables=variables,
-                    files_config=features_config.get("file_upload", {}),
-                )
-                _sandbox_adapter = E2BAgentAdapter(self.db)
-                _sandbox_stream = self._sandbox_event_stream(
-                    payload=sandbox_payload,
-                    workspace_id=str(workspace_id),
-                    user_id=user_id or "",
-                    conversation_id=str(conversation_id),
-                    adapter=_sandbox_adapter,
-                )
-            else:
-                agent = LangChainAgent(
-                    model_name=api_key_config["model_name"],
-                    model_view=model_view,
-                    provider=api_key_config.get("provider", "openai"),
-                    temperature=effective_params.get("temperature", 0.7),
-                    max_tokens=effective_params.get("max_tokens", 2000),
-                    system_prompt=system_prompt,
-                    tools=tools,
-                    streaming=True,
-                    deep_thinking=effective_params.get("deep_thinking", False),
-                    thinking_budget_tokens=effective_params.get("thinking_budget_tokens"),
-                    json_output=effective_params.get("json_output", False),
-                    context_query=message,
-                    context_base_text=system_prompt + "\n" + str(history) + "\n" + message,
-                    context_evidence_loader=load_annotation_context,
-                )
+            agent = LangChainAgent(
+                model_name=api_key_config["model_name"],
+                model_view=model_view,
+                provider=api_key_config.get("provider", "openai"),
+                temperature=effective_params.get("temperature", 0.7),
+                max_tokens=effective_params.get("max_tokens", 2000),
+                system_prompt=system_prompt,
+                tools=tools,
+                streaming=True,
+                deep_thinking=effective_params.get("deep_thinking", False),
+                thinking_budget_tokens=effective_params.get("thinking_budget_tokens"),
+                json_output=effective_params.get("json_output", False),
+                context_query=message,
+                context_base_text=system_prompt + "\n" + str(history) + "\n" + message,
+                context_evidence_loader=load_annotation_context,
+            )
 
-                for t in tools:
-                    if hasattr(t, 'tool_instance') and hasattr(t.tool_instance, 'set_runtime_context'):
-                        t.tool_instance.set_runtime_context(
-                            user_id=user_id or "anonymous",
-                            conversation_id=str(conversation_id) if conversation_id else None,
-                            uploaded_files=processed_files or []
-                        )
-                _sandbox_adapter = None
-                _sandbox_stream = None
+            for t in tools:
+                if hasattr(t, 'tool_instance') and hasattr(t.tool_instance, 'set_runtime_context'):
+                    t.tool_instance.set_runtime_context(
+                        user_id=user_id or "anonymous",
+                        conversation_id=str(conversation_id) if conversation_id else None,
+                        uploaded_files=processed_files or []
+                    )
 
             context = None
 
@@ -2602,7 +2597,14 @@ class AgentRunService:
             full_reasoning = ""
             total_tokens = 0
             node_executions = []
-            sandbox_citations = []
+            # Set when the engine aborted the run mid-way (tool-call loop / step budget).
+            # The body text produced so far is NOT an answer, so the turn must be
+            # reported as failed rather than completed (see langchain_agent.chat_stream).
+            run_error: Optional[Dict[str, Any]] = None
+            # Clean final answer captured out of band (type=final_answer). Used for the
+            # persisted/output-facing text and the cluster supervisor; None until the
+            # engine emits it, in which case callers fall back to full_content.
+            final_answer_content: Optional[str] = None
 
             # Start streaming TTS (synthesizes while text is being output)
             text_queue: asyncio.Queue = asyncio.Queue()
@@ -2612,15 +2614,16 @@ class AgentRunService:
                 tenant_id=tenant_id, workspace_id=workspace_id
             ) if not sub_agent else (None, None)
 
-            if execution_mode == "sandbox":
-                _chunk_stream = _sandbox_stream
-            else:
-                _chunk_stream = agent.chat_stream(
-                    message=llm_message,
-                    history=history,
-                    context=context,
-                    files=processed_files
-                )
+            _chunk_stream = agent.chat_stream(
+                message=llm_message,
+                history=history,
+                context=context,
+                files=processed_files,
+                # The clean final-answer channel is cluster sub-agent only, so its
+                # agent_complete.output / supervisor tool result drop narration. Single
+                # runs leave it off, so no extra event enters their stream.
+                emit_final_answer=bool(sub_agent),
+            )
 
             async for chunk in _chunk_stream:
                 if isinstance(chunk, int):
@@ -2648,6 +2651,23 @@ class AgentRunService:
                     if isinstance(chunk.get("data"), dict):
                         _trace = chunk.get("data")
                     yield self._format_sse_event("agent_log_final", chunk)
+                elif isinstance(chunk, dict) and chunk.get("type") == "run_error":
+                    # Engine-level abort marker: recorded for the wrap-up below and not
+                    # forwarded as an event of its own (the turn ends with agent_complete
+                    # status=failed plus the standard error event). rescued=True means the
+                    # aborted turn already carries a usable answer built from evidence.
+                    run_error = {
+                        "code": chunk.get("code") or "agent_aborted",
+                        "reason": chunk.get("reason"),
+                        "message": chunk.get("error") or "",
+                        "rescued": bool(chunk.get("rescued")),
+                    }
+                elif isinstance(chunk, dict) and chunk.get("type") == "final_answer":
+                    # The clean final answer (last tool-call-free model message), captured
+                    # out of band for agent_complete.output / the cluster supervisor. It is
+                    # NOT forwarded: the live message stream above already carries the
+                    # visible body, and intermediate narration must not reach the supervisor.
+                    final_answer_content = chunk.get("content") or None
                 elif isinstance(chunk, dict):
                     event_type = str(chunk.get("type") or "unknown")
                     yield self._format_sse_event(event_type, chunk)
@@ -2660,23 +2680,6 @@ class AgentRunService:
             # Text finished; notify TTS
             if tts_task is not None:
                 await text_queue.put(None)
-
-            # Merge sandbox citations into collector
-            if _sandbox_adapter is not None:
-                sandbox_citations = getattr(_sandbox_adapter, "_sandbox_citations", [])
-                if sandbox_citations:
-                    seen_ids = {c.get("document_id") for c in citations_collector}
-                    for cit in sandbox_citations:
-                        doc_id = cit.get("document_id")
-                        if doc_id and doc_id not in seen_ids:
-                            seen_ids.add(doc_id)
-                            citations_collector.append(Citation(
-                                document_id=str(doc_id),
-                                doc_id=cit.get("doc_id", ""),
-                                file_name=cit.get("file_name", ""),
-                                knowledge_id=str(cit.get("knowledge_id", "")),
-                                score=cit.get("score", 0),
-                            ))
 
             elapsed_time = time.time() - start_time
             await self._record_api_key_usage_async(api_key_config.get("api_key_id"))
@@ -2738,14 +2741,43 @@ class AgentRunService:
                             await ContextEngineManager(db2).after_app_turn(**kwargs)
                     asyncio.create_task(_run_after_turn())
 
-            # 11.5 Mark the Agent execution record completed
+            # 11.5 Mark the Agent execution record (failed when the engine aborted)
+            _run_failed = run_error is not None
+            _run_rescued = bool(run_error and run_error.get("rescued"))
+            _run_error_text = None
+            if _run_failed:
+                _run_error_text = {
+                    "message": run_error.get("message") or "Agent 执行被中止",
+                    "type": "AgentRunAborted",
+                    "kind": run_error.get("code"),
+                    "reason": run_error.get("reason"),
+                    # A step-budget abort whose rescue turn produced a real answer: the
+                    # turn is still failed (it did not finish its planned flow), but the
+                    # content is usable. The cluster supervisor adopts it instead of
+                    # re-dispatching.
+                    "rescued": _run_rescued,
+                    "debug_id": self._build_debug_id(),
+                }
+                logger.warning(
+                    "流式 Agent 被中止，按失败收尾",
+                    extra={
+                        "reason": run_error.get("reason"),
+                        "rescued": _run_rescued,
+                        "content_length": len(full_content),
+                        "agent_execution_id": str(_agent_execution_id) if _agent_execution_id else None,
+                    },
+                )
             if _agent_execution_id is not None:
                 await self._update_agent_execution_completed_async(
                     execution_id=_agent_execution_id,
                     steps=orchestrator_node_executions + node_executions,
-                    status="completed",
+                    status="failed" if _run_failed else "completed",
                     elapsed_time=elapsed_time,
                     token_usage={"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": total_tokens},
+                    error_message=(
+                        json.dumps(_run_error_text, ensure_ascii=False)[:2000]
+                        if _run_failed else None
+                    ),
                     # Only cluster sub Agents persist the trace (single-Agent apps
                     # keep traces in steps; existing storage volume unchanged)
                     agent_log=_trace if sub_agent else None,
@@ -2753,17 +2785,18 @@ class AgentRunService:
 
             # Sub Agent completion event: the frontend marks the corresponding block
             # complete with it (carries elapsed time/tokens/final output).
-            # `output` MUST be included: the running panel's "output" has no other
-            # data source (a sub run's body text goes through sub_agent_message,
-            # which the frontend does not consume); without it only an empty `{}`
-            # remains.
+            # `output` is the CLEAN final answer (final_answer_content = last
+            # tool-call-free model message), not the concatenation of intermediate
+            # narration rounds; the orchestrator feeds exactly this to the supervisor.
             if sub_agent:
                 yield self._format_sse_event("agent_complete", {
                     "execution_id": str(_agent_execution_id) if _agent_execution_id else None,
                     "agent_id": (execution_owner or {}).get("agent_id"),
                     "agent_name": (execution_owner or {}).get("agent_name"),
-                    "status": "completed",
-                    "output": full_content,
+                    "status": "failed" if _run_failed else "completed",
+                    "output": final_answer_content or full_content,
+                    **({"error": _run_error_text} if _run_failed else {}),
+                    **({"rescued": True} if _run_rescued else {}),
                     "elapsed_time": elapsed_time,
                     "token_usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": total_tokens},
                 })
@@ -2928,6 +2961,7 @@ class AgentRunService:
                     "agent_name": (execution_owner or {}).get("agent_name"),
                     "status": "failed",
                     "output": full_content,
+                    "error": compact_error,
                     "elapsed_time": time.time() - start_time,
                     "token_usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": total_tokens},
                 })
@@ -2949,263 +2983,7 @@ class AgentRunService:
         """
         return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
-    # ──────────────────────────────────────────────────────────────
-    # Sandbox Execution Helpers
-    # ──────────────────────────────────────────────────────────────
 
-    async def _build_sandbox_payload(
-        self,
-        *,
-        agent_config: AgentConfig,
-        model_config: ModelConfig,
-        api_key_config: dict,
-        effective_params: dict,
-        message: str,
-        system_prompt: str,
-        workspace_id: uuid.UUID,
-        user_id: Optional[str],
-        conversation_id: Optional[str],
-        tools: list,
-        history: list | None,
-        context: str | None,
-        variables: dict | None,
-        files_config: dict | None,
-    ) -> dict:
-        """Build a rich snapshot payload for E2B sandbox execution.
-
-        Serializes the already-loaded tool instances directly from ``tools``
-        so names / descriptions / parameters match the in-process path exactly.
-        """
-        serialized_tools = self._serialize_tools_for_sandbox(tools=tools)
-
-        sandbox_agent_config = {
-            "system_prompt": system_prompt,
-            "tools": serialized_tools,
-            "max_iterations": getattr(agent_config, "max_iterations", None),
-            "strategy": getattr(agent_config, "strategy", "react"),
-            "tool_call_limit": getattr(agent_config, "tool_call_limit", 1),
-        }
-
-        sandbox_model_config = {
-            "model_name": api_key_config.get("model_name", ""),
-            "api_key": api_key_config.get("api_key", ""),
-            "api_base": api_key_config.get("api_base", ""),
-            "provider": api_key_config.get("provider", "openai"),
-            "temperature": effective_params.get("temperature", 0.7),
-            "max_tokens": effective_params.get("max_tokens", 2000),
-            "top_p": effective_params.get("top_p"),
-            "top_k": effective_params.get("top_k"),
-            "seed": effective_params.get("seed"),
-            "stop": effective_params.get("stop"),
-            "repetition_penalty": effective_params.get("repetition_penalty"),
-            "frequency_penalty": effective_params.get("frequency_penalty"),
-            "presence_penalty": effective_params.get("presence_penalty"),
-            "deep_thinking": effective_params.get("deep_thinking", False),
-            "thinking_budget_tokens": effective_params.get("thinking_budget_tokens"),
-            "json_output": effective_params.get("json_output", False),
-            "enable_search": effective_params.get("enable_search", False),
-            "is_omni": api_key_config.get("is_omni", False),
-            "capability": api_key_config.get("capability") or [],
-            "extra_headers": getattr(model_config, "extra_headers", None),
-            "concurrency": getattr(model_config, "concurrency", 5),
-        }
-
-        sandbox_context = {
-            "history": history or [],
-            "knowledge": context or "",
-            "variables": variables or {},
-        }
-
-        return {
-            "type": "agent_stream",
-            "agent_config": sandbox_agent_config,
-            "model_config": sandbox_model_config,
-            "message": message,
-            "context": sandbox_context,
-            "runtime_env": {
-                "callback_url": current_settings().e2b_callback_url,
-                "callback_secret": current_settings().e2b_callback_secret.get_secret_value(),
-                "workspace_id": str(workspace_id),
-                "user_id": user_id or "",
-                "execution_id": str(uuid.uuid4()),
-                "conversation_id": str(conversation_id or ""),
-            },
-        }
-
-    @staticmethod
-    def _serialize_tools_for_sandbox(*, tools: list) -> list[dict]:
-        """Serialize already-loaded tool instances for sandbox consumption.
-
-        Iterates the in-process tool list and produces a flat list of tool
-        descriptors that the sandbox's tool loader (runtime.tools.loader)
-        understands.  Uses the same names / descriptions / parameters as the
-        in-process path, so tool_start events and LLM behaviour are identical.
-        """
-        from ..tools.langchain_adapter import LangchainToolWrapper
-
-        serialized: list[dict] = []
-
-        for tool in tools:
-            meta = getattr(tool, "_tool_meta", None) or {}
-            meta_type = meta.get("tool_type", "")
-
-            # ── Knowledge retrieval ──────────────────────────
-            if meta_type == "knowledge_retrieval":
-                sources = meta.get("sources", [])
-                kb_ids = [s["id"] for s in sources if s.get("id")]
-                serialized.append({
-                    "name": tool.name,
-                    "description": tool.description or "",
-                    "type": "knowledge_retrieval",
-                    "tool_id": None,
-                    "kb_ids": kb_ids,
-                    "config": {
-                        "kb_ids": kb_ids,
-                        "top_k": getattr(tool, "top_k", 3),
-                        "score_threshold": getattr(tool, "score_threshold", 0.7),
-                    },
-                })
-                continue
-
-            # ── Memory (long-term) ────────────────────────────
-            if meta_type == "long_term_memory":
-                sources = meta.get("sources", [])
-                config_id = sources[0]["id"] if sources else None
-                serialized.append({
-                    "name": "memory_read",
-                    "description": "Read user's long-term memories",
-                    "type": "memory_read",
-                    "tool_id": None,
-                    "config": {"config_id": config_id},
-                })
-                serialized.append({
-                    "name": "memory_write",
-                    "description": "Save information to user's long-term memory",
-                    "type": "memory_write",
-                    "tool_id": None,
-                    "config": {"config_id": config_id},
-                })
-                continue
-
-            # ── Web search (via callback, same as in-process Search()) ─
-            if meta_type == "web_search":
-                serialized.append({
-                    "name": tool.name,
-                    "description": tool.description or "",
-                    "type": "builtin",
-                    "tool_id": None,
-                    "config": {},
-                })
-                continue
-
-            # ── Skill ─────────────────────────────────────────
-            if meta_type == "skill":
-                sources = meta.get("sources", [])
-                skill_id = sources[0]["id"] if sources else None
-                serialized.append({
-                    "name": tool.name,
-                    "description": tool.description or "",
-                    "type": "skill",
-                    "tool_id": skill_id,
-                    "config": {
-                        "skill_id": skill_id,
-                    },
-                })
-                continue
-
-            # ── Builtin / Custom / MCP (LangchainToolWrapper) ─
-            if isinstance(tool, LangchainToolWrapper):
-                ti = tool.tool_instance
-                tool_type = ti.tool_type.value if hasattr(ti.tool_type, "value") else str(ti.tool_type)
-                config_data = dict(ti.config) if hasattr(ti, "config") and ti.config else {}
-
-                # Include parameters so sandbox can rebuild the args_schema
-                if hasattr(ti, "parameters") and ti.parameters:
-                    props = {}
-                    required: list[str] = []
-                    for p in ti.parameters:
-                        if hasattr(p, "model_dump"):
-                            pd = p.model_dump()
-                        elif isinstance(p, dict):
-                            pd = p
-                        else:
-                            continue
-                        pname = pd.get("name", "")
-                        if not pname:
-                            continue
-                        props[pname] = {
-                            "type": pd.get("type", "string"),
-                            "description": pd.get("description", ""),
-                        }
-                        if pd.get("required"):
-                            required.append(pname)
-                        if pd.get("default") is not None:
-                            props[pname]["default"] = pd.get("default")
-                        if pd.get("enum"):
-                            props[pname]["enum"] = pd.get("enum")
-                    config_data["parameters"] = {"properties": props, "required": required}
-
-                # Operation may be on the wrapper (custom tools) or baked into
-                # the inner instance (builtin tools via OperationTool).
-                operation = tool.operation
-                if operation is None and hasattr(ti, "operation"):
-                    operation = ti.operation
-
-                serialized.append({
-                    "name": tool.name,
-                    "description": tool.description or "",
-                    "type": tool_type,
-                    "tool_id": ti.tool_id if hasattr(ti, "tool_id") else None,
-                    "config": config_data,
-                    "operation": operation,
-                })
-                continue
-
-            # ── Fallback (plain LangChain tool) ───────────────
-            serialized.append({
-                "name": tool.name,
-                "description": tool.description or "",
-                "type": meta_type or "builtin",
-                "tool_id": None,
-                "config": {},
-            })
-
-        return serialized
-
-    async def _sandbox_event_stream(
-        self,
-        *,
-        payload: dict,
-        workspace_id: str,
-        user_id: str,
-        conversation_id: str,
-        adapter: Any = None,
-    ) -> AsyncGenerator[Any, None]:
-        """Stream execution events from E2B sandbox.
-
-        Translates sandbox protocol events into chunks compatible with
-        agent.chat_stream() output format (str|int|dict).
-        """
-        from .e2b_sandbox_service import get_sandbox_service
-
-        sandbox_service = get_sandbox_service()
-
-        async for event in sandbox_service.run_agent(
-            agent_config=payload["agent_config"],
-            model_config=payload["model_config"],
-            message=payload["message"],
-            context=payload["context"],
-            workspace_id=workspace_id,
-            user_id=user_id,
-            conversation_id=conversation_id,
-            execution_id=payload["runtime_env"]["execution_id"],
-        ):
-            if adapter is not None:
-                chunk = adapter._translate_event_to_chunk(event)
-            else:
-                chunk = event
-            if chunk is not None:
-                yield chunk
 
     async def _get_api_key(self, model_config_id: uuid.UUID, tenant_id: uuid.UUID | None = None) -> Dict:
         """Fetch the model's API Key.
@@ -3240,9 +3018,6 @@ class AgentRunService:
                 "input_modalities": list(getattr(api_key, "input_modalities", None) or []),
                 "output_modalities": list(getattr(api_key, "output_modalities", None) or []),
                 "features": list(getattr(api_key, "features", None) or []),
-                # Legacy fields exist only in the sandbox payload scope
-                "is_omni": api_key.is_omni,
-                "capability": api_key.capability,
                 "tenant_id": api_key.tenant_id,
                 "model_config_id": api_key.model_config_id,
                 "channel_id": api_key.channel_id,
@@ -4211,7 +3986,6 @@ class AgentRunService:
                                 memory=memory,
                                 files=files,
                                 source=source,
-                                execution_mode=execution_mode,
                                 model_parameters_override=model_info["parameters"],
                             ),
                             timeout=timeout
@@ -4472,7 +4246,6 @@ class AgentRunService:
                             files=files,
                             source=source,
                             user_message_id=model_user_message_id,
-                            execution_mode=execution_mode,
                             skip_save=skip_save,
                             model_parameters_override=model_info["parameters"],
                     ):

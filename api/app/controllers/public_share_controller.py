@@ -10,7 +10,6 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
-from app.core.config import settings
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
 from app.core.logging_config import get_business_logger
@@ -842,7 +841,6 @@ async def chat(
 
         if payload.stream:
             source = HitLogSource.EXTERNAL
-            execution_mode = "sandbox" if settings.E2B_ENABLED else "in_process"
 
             from app.db import AsyncSessionLocal
 
@@ -868,7 +866,6 @@ async def chat(
                             workspace_id=workspace_id,
                             files=payload.files,
                             source=source,
-                            execution_mode=execution_mode,
                     ):
                         yield event
                 finally:
@@ -884,7 +881,6 @@ async def chat(
                 },
             )
         source = HitLogSource.EXTERNAL
-        execution_mode = "sandbox" if settings.E2B_ENABLED else "in_process"
         async with get_async_db_context() as db:
             app_chat_service = AppChatService(db)
             result = await app_chat_service.agent_chat(
@@ -900,7 +896,6 @@ async def chat(
                 workspace_id=workspace_id,
                 files=payload.files,
                 source=source,
-                execution_mode=execution_mode,
             )
         return success(data=conversation_schema.ChatResponse(**result).model_dump(mode="json"))
     elif app_type == AppType.MULTI_AGENT:
@@ -928,7 +923,6 @@ async def chat(
                             storage_type=storage_type,
                             user_rag_memory_id=user_rag_memory_id,
                             thinking=bool(getattr(payload, "thinking", False)),
-                            execution_mode="sandbox" if settings.E2B_ENABLED else "in_process",
                             files=payload.files,
                     ):
                         yield event
@@ -959,7 +953,6 @@ async def chat(
                 storage_type=storage_type,
                 user_rag_memory_id=user_rag_memory_id,
                 thinking=bool(getattr(payload, "thinking", False)),
-                execution_mode="sandbox" if settings.E2B_ENABLED else "in_process",
                 files=payload.files,
             )
 

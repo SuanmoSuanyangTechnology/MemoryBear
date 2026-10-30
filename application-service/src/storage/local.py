@@ -135,6 +135,29 @@ class LocalStorage(StorageBackend):
                 cause=e,
             )
 
+    async def download_stream(self, file_key: str) -> AsyncIterator[bytes]:
+        """Stream a file from the local file system in 64KB chunks."""
+        full_path = self._get_full_path(file_key)
+        if not full_path.exists():
+            logger.warning(f"File not found: {file_key}")
+            raise FileNotFoundError(f"File not found: {file_key}")
+        try:
+            async with aiofiles.open(full_path, "rb") as f:
+                while True:
+                    chunk = await f.read(64 * 1024)
+                    if not chunk:
+                        break
+                    yield chunk
+        except FileNotFoundError:
+            raise
+        except Exception as e:
+            logger.error(f"Failed to stream file {file_key}: {e}")
+            raise StorageDownloadError(
+                message=f"Failed to download file: {e}",
+                file_key=file_key,
+                cause=e,
+            )
+
     async def delete(self, file_key: str) -> bool:
         """
         Delete a file from the local file system.

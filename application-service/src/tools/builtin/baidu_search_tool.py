@@ -34,10 +34,13 @@ class BaiduSearchTool(BuiltinTool):
             ToolParameter(
                 name="search_type",
                 type=ParameterType.STRING,
-                description="搜索类型, web: 网页搜索；news：新闻搜索；image：图片搜索；video视频搜索",
+                description=(
+                    "搜索类型, web: 网页搜索（含新闻稿，时效性问题配合 time_filter=day/week 使用）；"
+                    "image：图片搜索；video：视频搜索"
+                ),
                 required=False,
                 default="web",
-                enum=["web", "news", "image", "video"]
+                enum=["web", "image", "video"]
             ),
             ToolParameter(
                 name="page_size",
@@ -100,13 +103,20 @@ class BaiduSearchTool(BuiltinTool):
             # Dispatch to the API call for the requested search type
             if search_type == "web":
                 result = await self._web_search(query, page_size, page_num, safe_search, region, time_filter)
-            elif search_type == "news":
-                result = await self._news_search(query, page_size, page_num, region, time_filter)
             elif search_type == "image":
                 result = await self._image_search(query, page_size, page_num, safe_search)
             elif search_type == "video":
                 result = await self._video_search(query, page_size, page_num, safe_search)
             else:
+                # "news" is deliberately unsupported: the qianfan ai_search endpoint has
+                # no news resource type and the old branch failed on every call (HTTP 200
+                # + text/plain). Point the caller at web + time_filter instead of an
+                # opaque decode error that looks retryable.
+                if search_type == "news":
+                    raise ValueError(
+                        "news 搜索类型不可用：请改用 search_type=web，"
+                        "并配合 time_filter=day/week 获取最新新闻稿，不要重试 news。"
+                    )
                 raise ValueError(f"不支持的搜索类型: {search_type}")
 
             execution_time = time.time() - start_time
@@ -164,46 +174,6 @@ class BaiduSearchTool(BuiltinTool):
             "references": results.get("references", [])
         }
 
-    async def _news_search(self, query: str, page_size: int, page_num: int,
-                          region: str, time_filter: str = None) -> Dict[str, Any]:
-        """News search."""
-        payload = {
-            "messages": [{"role": "user", "content": query}],
-            "edition": "standard",
-            "search_source": "baidu_search_v2",
-            "resource_type_filter": [{"type": "new", "top_k": min(page_size, 50)}],
-            "enable_full_content": True
-        }
-
-        if time_filter:
-            time_map = {"day": "now-1d/d", "week": "now-1w/d", "month": "now-1M/d", "year": "now-1y/d"}
-            if time_filter in time_map:
-                payload["search_filter"] = {"range": {"page_time": {"gte": time_map[time_filter], "lt": "now/d"}}}
-                payload["search_recency_filter"] = time_filter
-
-        results = await self._call_baidu_ai_search_api(payload)
-
-        search_results = []
-        if "references" in results:
-            for item in results["references"]:
-                search_results.append({
-                    "title": item.get("title", ""),
-                    "url": item.get("url", ""),
-                    "snippet": item.get("content", ""),
-                    "display_url": item.get("url", ""),
-                    "rank": len(search_results) + 1
-                })
-
-        return {
-            "search_type": "new",
-            "query": query,
-            "total_results": len(search_results),
-            "page_num": page_num,
-            "page_size": page_size,
-            "results": search_results,
-            "answer": results.get("result", ""),
-            "references": results.get("references", [])
-        }
 
     async def _image_search(self, query: str, page_size: int, page_num: int,
                            safe_search: bool) -> Dict[str, Any]:

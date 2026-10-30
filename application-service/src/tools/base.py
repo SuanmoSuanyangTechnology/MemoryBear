@@ -1,4 +1,7 @@
 """Base tool interface definitions."""
+import asyncio
+import logging
+import os
 import re
 import time
 from abc import ABC, abstractmethod
@@ -6,6 +9,21 @@ from typing import Any, Dict, List, Optional
 
 from ..models.tool_model import ToolType, ToolStatus
 from ..schemas.tool_schema import ToolParameter, ParameterType, ToolResult
+
+logger = logging.getLogger(__name__)
+
+# Hard ceiling for one tool call when the tool does not set its own limit.
+_DEFAULT_TOOL_TIMEOUT_S = 300.0
+
+
+def default_tool_timeout_s() -> float:
+    """Default per-call tool limit, from TOOL_EXECUTION_TIMEOUT_SECONDS (seconds, > 0)."""
+    raw = os.getenv("TOOL_EXECUTION_TIMEOUT_SECONDS", "").strip()
+    try:
+        value = float(raw) if raw else _DEFAULT_TOOL_TIMEOUT_S
+    except ValueError:
+        return _DEFAULT_TOOL_TIMEOUT_S
+    return value if value > 0 else _DEFAULT_TOOL_TIMEOUT_S
 
 
 class BaseTool(ABC):
@@ -76,6 +94,15 @@ class BaseTool(ABC):
         if key is None:
             return dict(self._runtime_context)
         return self._runtime_context.get(key, default)
+
+    def resolve_execution_timeout(self, parameters: Dict[str, Any]) -> float:
+        """Overall time limit (seconds) for one ``execute`` call.
+
+        ``safe_execute`` aborts the call and returns a TOOL_TIMEOUT error when it
+        runs longer, so the model always gets a result instead of waiting forever.
+        Tools with their own long-running semantics override this.
+        """
+        return default_tool_timeout_s()
 
     def validate_parameters(self, parameters: Dict[str, Any]) -> Dict[str, str]:
         """Validate parameters.
@@ -222,14 +249,33 @@ class BaseTool(ABC):
                     execution_time=execution_time
                 )
 
-            # Execute the tool
-            result = await self.execute(**kwargs)
+            # Execute the tool. Every call must end with a result the model can read,
+            # so a call that outlives its limit is reported as a failure, not awaited forever.
+            timeout_s = self.resolve_execution_timeout(kwargs)
+            try:
+                result = await asyncio.wait_for(self.execute(**kwargs), timeout=timeout_s)
+            except asyncio.TimeoutError:
+                logger.warning("tool_execution_timeout tool=%s timeout_s=%s", self.name, timeout_s)
+                return ToolResult.error_result(
+                    error=(
+                        f"工具 {self.name} 执行超过 {timeout_s:g} 秒仍未返回，已被终止。"
+                        "请缩小任务范围、拆成多步，或换一种方式完成。"
+                    ),
+                    error_code="TOOL_TIMEOUT",
+                    execution_time=time.time() - start_time,
+                )
+            if result is None:
+                return ToolResult.error_result(
+                    error=f"工具 {self.name} 没有返回结果",
+                    error_code="EMPTY_RESULT",
+                    execution_time=time.time() - start_time,
+                )
             return result
 
         except Exception as e:
             execution_time = time.time() - start_time
             return ToolResult.error_result(
-                error=str(e),
+                error=str(e) or type(e).__name__,
                 error_code="EXECUTION_ERROR",
                 execution_time=execution_time
             )

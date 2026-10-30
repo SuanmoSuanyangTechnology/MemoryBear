@@ -384,6 +384,11 @@ class Settings:
     FILE_PATH: str = os.getenv("FILE_PATH", "/files")
     FILE_URL_EXPIRES: int = int(os.getenv("FILE_URL_EXPIRES", "3600"))
 
+    # Skill Package（Agent Skills 标准包导入）
+    SKILL_PACKAGE_INLINE_LIMIT: int = int(os.getenv("SKILL_PACKAGE_INLINE_LIMIT", str(2 * 1024 * 1024)))  # 单文件超限走对象存储
+    SKILL_PACKAGE_MAX_FILES: int = int(os.getenv("SKILL_PACKAGE_MAX_FILES", "200"))
+    SKILL_PACKAGE_MAX_SIZE: int = int(os.getenv("SKILL_PACKAGE_MAX_SIZE", str(100 * 1024 * 1024)))
+
     # Storage Configuration
     STORAGE_TYPE: str = os.getenv("STORAGE_TYPE", "local")
 
@@ -545,22 +550,6 @@ class Settings:
     
     SANDBOX_URL: str = os.getenv("SANDBOX_URL", "")
     SANDBOX_API_KEY: str = os.getenv("SANDBOX_API_KEY", "redbear-sandbox")
-
-    # ─── E2B Sandbox Configuration (自建 E2B 基础设施) ───
-    E2B_ENABLED: bool = os.getenv("E2B_ENABLED", "false").lower() == "true"
-    # Orchestrator connection
-    E2B_ORCHESTRATOR_URL: str = os.getenv("E2B_ORCHESTRATOR_URL", "http://e2b-orchestrator:3001")
-    E2B_ORCHESTRATOR_SECRET: str = os.getenv("E2B_ORCHESTRATOR_SECRET", "changeme")
-    # Docker / template settings
-    E2B_TEMPLATE_ID: str = os.getenv("E2B_TEMPLATE_ID", "agent-runtime")
-    E2B_SANDBOX_TIMEOUT: int = int(os.getenv("E2B_SANDBOX_TIMEOUT", "600"))
-    E2B_SANDBOX_CPU: int = int(os.getenv("E2B_SANDBOX_CPU", "2"))
-    E2B_SANDBOX_MEMORY_MB: int = int(os.getenv("E2B_SANDBOX_MEMORY_MB", "512"))
-    # Callback (sandbox → API)
-    E2B_CALLBACK_URL: str = os.getenv("E2B_CALLBACK_URL", "http://host.docker.internal:8000")
-    E2B_CALLBACK_SECRET: str = os.getenv("E2B_CALLBACK_SECRET", "sandbox-callback-secret")
-    # Warm pool
-    E2B_WARM_POOL_SIZE: int = int(os.getenv("E2B_WARM_POOL_SIZE", "2"))
 
     REFLECTION_INTERVAL_SECONDS: float = float(os.getenv("REFLECTION_INTERVAL_SECONDS", "300"))
     HEALTH_CHECK_SECONDS: float = float(os.getenv("HEALTH_CHECK_SECONDS", "600"))

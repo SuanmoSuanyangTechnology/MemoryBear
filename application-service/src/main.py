@@ -21,6 +21,10 @@ from .integrations.knowledge.runtime import (
     close_knowledge_integration,
     initialize_knowledge_integration,
 )
+from .integrations.sandbox.runtime import (
+    close_sandbox_integration,
+    initialize_sandbox_integration,
+)
 from .logging import setup_logging
 from .request_logging import RequestLoggingFastAPI
 from .runtime import ProcessRuntime, set_process_runtime
@@ -111,6 +115,11 @@ def create_app(settings: AppServiceSettings | None = None) -> FastAPI:
         # Knowledge retriever selection is process-level: the workflow node and
         # draft runs resolve it lazily, so it must exist before serving traffic.
         await initialize_knowledge_integration()
+        # The sandbox service client pool is process-level too. Rule selection is
+        # explicit: present only when ENABLE_SANDBOX_SERVICE=true and the base URL
+        # / token validate, so an enabled-but-misconfigured deployment fails
+        # startup instead of failing each tool call.
+        await initialize_sandbox_integration()
         # Post-stream persistence runs in the background; enqueue calls degrade
         # to sync writes while the queue is down, so this is not fail-closed.
         await BatchPersistQueue.start()
@@ -128,6 +137,7 @@ def create_app(settings: AppServiceSettings | None = None) -> FastAPI:
             await BatchPersistQueue.stop()
             await close_http_client()
             await close_knowledge_integration()
+            await close_sandbox_integration()
             await application.state.runtime.aclose()
             logger.info("Application service stopped")
 

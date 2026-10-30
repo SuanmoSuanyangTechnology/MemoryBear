@@ -663,6 +663,10 @@ class VariablePoolInitializer:
             "input_variables": (input_variables, VariableType.OBJECT),
             "files": (user_files, VariableType.ARRAY_FILE)
         }
+        if input_data.get("sandbox_session_id"):
+            # Only a conversation-less whole-workflow run has this; the sandbox
+            # tools use it to partition the directory, it is not a conversation ID.
+            sys_vars["sandbox_session_id"] = (input_data["sandbox_session_id"], VariableType.STRING)
         if input_data.get("trigger") is not None:
             sys_vars["trigger"] = (input_data.get("trigger"), VariableType.OBJECT)
         if input_data.get("trigger_payload") is not None:
