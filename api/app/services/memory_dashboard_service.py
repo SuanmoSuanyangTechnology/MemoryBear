@@ -661,13 +661,19 @@ async def _get_rag_total_memory_count_async(
             }
 
         count = await rag_stats.count_messages([end_user_id])
+        # name 与全量分支、图侧单宿主分支同口径取 other_name：硬编码 None 会让
+        # 「传不传 end_user_id」时 details 结构不一致，前端展示宿主名缺失
+        rows = await repo.get_memory_counts_by_ids_async(
+            workspace_id, [uuid.UUID(end_user_id)]
+        )
+        name = rows[0][1] if rows else None
         return {
             "total_memory_count": count,
             "host_count": 1,
             "details": [{
                 "end_user_id": end_user_id,
                 "count": count,
-                "name": None
+                "name": name or None
             }]
         }
 
