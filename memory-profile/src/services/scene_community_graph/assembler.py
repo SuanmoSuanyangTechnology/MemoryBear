@@ -6,20 +6,19 @@ from typing import Any
 from pydantic import ValidationError
 
 from src.schemas.scene_community_graph import (
+    COMMUNITY_FIELDS,
+    SCENE_FIELDS,
     TIME_FIELDS,
     CommunityGroup,
-    CommunityProperties,
     GraphData,
     Scene,
     SceneProperties,
+    ScopedCommunityProperties,
     Statistics,
     UnassignedGroup,
     validate_business_id,
 )
 from src.services.scene_community_graph.types import bad_data
-
-COMMUNITY_FIELDS = tuple(CommunityProperties.model_fields)
-SCENE_FIELDS = tuple(SceneProperties.model_fields)
 
 
 def _time(value: Any) -> int | None:
@@ -88,8 +87,13 @@ def _assemble(community_rows: list[dict], scene_rows: list[dict]) -> GraphData:
         if props["member_count"] is None:
             fallback_count.add(identifier)
             props["member_count"] = 0
+        # A stored name takes precedence; never emit both topic fields.
+        if props["topic_name"] is None:
+            props.pop("topic_name")
+        else:
+            props.pop("topic_scope")
         groups[identifier] = CommunityGroup(
-            id=identifier, properties=CommunityProperties(**props), scene_count=0, scenes=[]
+            id=identifier, properties=props, scene_count=0, scenes=[]
         )
 
     unassigned: list[Scene] = []
@@ -136,7 +140,7 @@ def _assemble(community_rows: list[dict], scene_rows: list[dict]) -> GraphData:
         unassigned.sort(key=scene_key)
         result.append(
             UnassignedGroup(
-                properties=CommunityProperties(member_count=len(unassigned)),
+                properties=ScopedCommunityProperties(member_count=len(unassigned)),
                 scene_count=len(unassigned),
                 scenes=unassigned,
             )

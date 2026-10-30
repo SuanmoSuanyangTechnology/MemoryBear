@@ -896,114 +896,212 @@
                         "required": false
                       },
                       "properties": {
-                        "annotation": "src.schemas.scene_community_graph.CommunityProperties",
-                        "config": {
-                          "extra": "forbid",
-                          "strict": true
-                        },
+                        "annotation": "src.schemas.scene_community_graph.NamedCommunityProperties | src.schemas.scene_community_graph.ScopedCommunityProperties",
                         "constraints": [],
                         "default": null,
-                        "fields": {
-                          "boundary_exclude_rule": {
-                            "annotation": "str | None",
-                            "constraints": [],
-                            "default": null,
-                            "required": false
+                        "required": true,
+                        "variants": {
+                          "src.schemas.scene_community_graph.NamedCommunityProperties": {
+                            "config": {
+                              "extra": "forbid",
+                              "strict": true
+                            },
+                            "fields": {
+                              "boundary_exclude_rule": {
+                                "annotation": "str | None",
+                                "constraints": [],
+                                "default": null,
+                                "required": false
+                              },
+                              "boundary_include_rule": {
+                                "annotation": "str | None",
+                                "constraints": [],
+                                "default": null,
+                                "required": false
+                              },
+                              "boundary_instance_anchor": {
+                                "annotation": "str | None",
+                                "constraints": [],
+                                "default": null,
+                                "required": false
+                              },
+                              "boundary_lifecycle_anchor": {
+                                "annotation": "str | None",
+                                "constraints": [],
+                                "default": null,
+                                "required": false
+                              },
+                              "boundary_primary_matter": {
+                                "annotation": "str | None",
+                                "constraints": [],
+                                "default": null,
+                                "required": false
+                              },
+                              "category_l1": {
+                                "annotation": "str | None",
+                                "constraints": [],
+                                "default": null,
+                                "required": false
+                              },
+                              "created_at": {
+                                "annotation": "int | None",
+                                "constraints": [
+                                  "Ge(ge=1000000000000)",
+                                  "Le(le=9999999999999)"
+                                ],
+                                "default": null,
+                                "required": false
+                              },
+                              "ended_at": {
+                                "annotation": "int | None",
+                                "constraints": [
+                                  "Ge(ge=1000000000000)",
+                                  "Le(le=9999999999999)"
+                                ],
+                                "default": null,
+                                "required": false
+                              },
+                              "member_count": {
+                                "annotation": "int",
+                                "constraints": [
+                                  "Ge(ge=0)"
+                                ],
+                                "default": null,
+                                "required": true
+                              },
+                              "started_at": {
+                                "annotation": "int | None",
+                                "constraints": [
+                                  "Ge(ge=1000000000000)",
+                                  "Le(le=9999999999999)"
+                                ],
+                                "default": null,
+                                "required": false
+                              },
+                              "summary": {
+                                "annotation": "str | None",
+                                "constraints": [],
+                                "default": null,
+                                "required": false
+                              },
+                              "topic_name": {
+                                "annotation": "str",
+                                "constraints": [],
+                                "default": null,
+                                "required": true
+                              },
+                              "updated_at": {
+                                "annotation": "int | None",
+                                "constraints": [
+                                  "Ge(ge=1000000000000)",
+                                  "Le(le=9999999999999)"
+                                ],
+                                "default": null,
+                                "required": false
+                              }
+                            }
                           },
-                          "boundary_include_rule": {
-                            "annotation": "str | None",
-                            "constraints": [],
-                            "default": null,
-                            "required": false
-                          },
-                          "boundary_instance_anchor": {
-                            "annotation": "str | None",
-                            "constraints": [],
-                            "default": null,
-                            "required": false
-                          },
-                          "boundary_lifecycle_anchor": {
-                            "annotation": "str | None",
-                            "constraints": [],
-                            "default": null,
-                            "required": false
-                          },
-                          "boundary_primary_matter": {
-                            "annotation": "str | None",
-                            "constraints": [],
-                            "default": null,
-                            "required": false
-                          },
-                          "category_l1": {
-                            "annotation": "str | None",
-                            "constraints": [],
-                            "default": null,
-                            "required": false
-                          },
-                          "created_at": {
-                            "annotation": "int | None",
-                            "constraints": [
-                              "Ge(ge=1000000000000)",
-                              "Le(le=9999999999999)"
-                            ],
-                            "default": null,
-                            "required": false
-                          },
-                          "ended_at": {
-                            "annotation": "int | None",
-                            "constraints": [
-                              "Ge(ge=1000000000000)",
-                              "Le(le=9999999999999)"
-                            ],
-                            "default": null,
-                            "required": false
-                          },
-                          "member_count": {
-                            "annotation": "int",
-                            "constraints": [
-                              "Ge(ge=0)"
-                            ],
-                            "default": null,
-                            "required": true
-                          },
-                          "started_at": {
-                            "annotation": "int | None",
-                            "constraints": [
-                              "Ge(ge=1000000000000)",
-                              "Le(le=9999999999999)"
-                            ],
-                            "default": null,
-                            "required": false
-                          },
-                          "summary": {
-                            "annotation": "str | None",
-                            "constraints": [],
-                            "default": null,
-                            "required": false
-                          },
-                          "topic_name": {
-                            "annotation": "str | None",
-                            "constraints": [],
-                            "default": null,
-                            "required": false
-                          },
-                          "topic_scope": {
-                            "annotation": "str | None",
-                            "constraints": [],
-                            "default": null,
-                            "required": false
-                          },
-                          "updated_at": {
-                            "annotation": "int | None",
-                            "constraints": [
-                              "Ge(ge=1000000000000)",
-                              "Le(le=9999999999999)"
-                            ],
-                            "default": null,
-                            "required": false
+                          "src.schemas.scene_community_graph.ScopedCommunityProperties": {
+                            "config": {
+                              "extra": "forbid",
+                              "strict": true
+                            },
+                            "fields": {
+                              "boundary_exclude_rule": {
+                                "annotation": "str | None",
+                                "constraints": [],
+                                "default": null,
+                                "required": false
+                              },
+                              "boundary_include_rule": {
+                                "annotation": "str | None",
+                                "constraints": [],
+                                "default": null,
+                                "required": false
+                              },
+                              "boundary_instance_anchor": {
+                                "annotation": "str | None",
+                                "constraints": [],
+                                "default": null,
+                                "required": false
+                              },
+                              "boundary_lifecycle_anchor": {
+                                "annotation": "str | None",
+                                "constraints": [],
+                                "default": null,
+                                "required": false
+                              },
+                              "boundary_primary_matter": {
+                                "annotation": "str | None",
+                                "constraints": [],
+                                "default": null,
+                                "required": false
+                              },
+                              "category_l1": {
+                                "annotation": "str | None",
+                                "constraints": [],
+                                "default": null,
+                                "required": false
+                              },
+                              "created_at": {
+                                "annotation": "int | None",
+                                "constraints": [
+                                  "Ge(ge=1000000000000)",
+                                  "Le(le=9999999999999)"
+                                ],
+                                "default": null,
+                                "required": false
+                              },
+                              "ended_at": {
+                                "annotation": "int | None",
+                                "constraints": [
+                                  "Ge(ge=1000000000000)",
+                                  "Le(le=9999999999999)"
+                                ],
+                                "default": null,
+                                "required": false
+                              },
+                              "member_count": {
+                                "annotation": "int",
+                                "constraints": [
+                                  "Ge(ge=0)"
+                                ],
+                                "default": null,
+                                "required": true
+                              },
+                              "started_at": {
+                                "annotation": "int | None",
+                                "constraints": [
+                                  "Ge(ge=1000000000000)",
+                                  "Le(le=9999999999999)"
+                                ],
+                                "default": null,
+                                "required": false
+                              },
+                              "summary": {
+                                "annotation": "str | None",
+                                "constraints": [],
+                                "default": null,
+                                "required": false
+                              },
+                              "topic_scope": {
+                                "annotation": "str | None",
+                                "constraints": [],
+                                "default": null,
+                                "required": false
+                              },
+                              "updated_at": {
+                                "annotation": "int | None",
+                                "constraints": [
+                                  "Ge(ge=1000000000000)",
+                                  "Le(le=9999999999999)"
+                                ],
+                                "default": null,
+                                "required": false
+                              }
+                            }
                           }
-                        },
-                        "required": true
+                        }
                       },
                       "scene_count": {
                         "annotation": "int",
@@ -1146,12 +1244,6 @@
                           }
                         },
                         "required": true
-                      },
-                      "virtual": {
-                        "annotation": "Literal[False]",
-                        "constraints": [],
-                        "default": false,
-                        "required": false
                       }
                     }
                   },
@@ -1180,7 +1272,7 @@
                         "required": false
                       },
                       "properties": {
-                        "annotation": "src.schemas.scene_community_graph.CommunityProperties",
+                        "annotation": "src.schemas.scene_community_graph.ScopedCommunityProperties",
                         "config": {
                           "extra": "forbid",
                           "strict": true
@@ -1260,12 +1352,6 @@
                             "required": false
                           },
                           "summary": {
-                            "annotation": "str | None",
-                            "constraints": [],
-                            "default": null,
-                            "required": false
-                          },
-                          "topic_name": {
                             "annotation": "str | None",
                             "constraints": [],
                             "default": null,
@@ -1432,12 +1518,6 @@
                           }
                         },
                         "required": true
-                      },
-                      "virtual": {
-                        "annotation": "Literal[True]",
-                        "constraints": [],
-                        "default": true,
-                        "required": false
                       }
                     }
                   }
