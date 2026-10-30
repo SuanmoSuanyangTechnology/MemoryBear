@@ -3,8 +3,8 @@
 This tuple is the single list of task domains: adding a domain means adding its
 ``build_*_wiring`` here, and ``Container`` never changes. The order is the
 construction order; each ``name`` is the attribute tasks reach through
-``get_container().<name>`` (``scripts/check_import_boundaries.py`` keeps its own
-allowlist in sync through a test).
+``get_container().<name>``. ``scripts/check_import_boundaries.py`` derives its
+allowlist by parsing this tuple, so a new domain needs no second list.
 
 Every ``build`` must stay assembly-only: construct adapters and facades, but
 never open a connection, query, or block. Creating a lazy client object is fine

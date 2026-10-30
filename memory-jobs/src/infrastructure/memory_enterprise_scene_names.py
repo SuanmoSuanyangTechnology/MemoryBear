@@ -12,6 +12,8 @@ import logging
 from collections.abc import Mapping, Sequence
 from uuid import UUID
 
+import httpx
+
 from src.domain.shared.ids import TenantId
 from src.infrastructure.memory_enterprise import MemoryEnterpriseManager
 
@@ -35,7 +37,10 @@ class MemoryEnterpriseSceneNames:
             return {}
         try:
             return self._manager.scene_names(scene_type_ids, tenant_id)
-        except Exception as exc:
+        except (httpx.HTTPError, httpx.InvalidURL, ValueError) as exc:
+            # Transport failures, a misconfigured URL and an unusable payload
+            # (JSON/parse errors are ValueError) degrade; programming errors do
+            # not, so they keep their traceback.
             logger.warning(
                 "memory-enterprise scene names unavailable error=%s",
                 type(exc).__name__,

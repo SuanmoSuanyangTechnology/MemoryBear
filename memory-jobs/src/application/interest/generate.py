@@ -121,6 +121,8 @@ class GenerateInterestDistributionUseCase:
             for item in distribution.items
         ]
         if command.write_cache and distribution.cacheable:
+            # The key uses the same zh/en the online read path resolves;
+            # ``Language.parse`` normalizes the tags a producer may send.
             self.cache.write(command.end_user_id, language.value, items)
         return InterestDistributionResult(
             items=items,

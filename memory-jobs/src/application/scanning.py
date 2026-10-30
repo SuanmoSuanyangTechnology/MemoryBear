@@ -126,6 +126,21 @@ class ScanSweep[C, G]:
                         repositories, group, cursor, self._page_size
                     )
                 if not batch:
+                    if next_cursor is not None:
+                        # The page contract says an empty page ends the group;
+                        # a cursor here would silently skip the rest.
+                        logger.warning(
+                            "%s scan page returned no rows but a cursor; "
+                            "stopping group=%s cursor=%s",
+                            self._name,
+                            group,
+                            next_cursor,
+                            extra={
+                                "event": (
+                                    f"{self._event_prefix}_scan_empty_page_with_cursor"
+                                ),
+                            },
+                        )
                     break
                 for candidate in batch:
                     subject = ""
@@ -145,7 +160,7 @@ class ScanSweep[C, G]:
                     except Exception:
                         failed += 1
                         logger.error(
-                            "%s scan dispatch failed group=%s subject=%s",
+                            "%s scan unit failed group=%s subject=%s",
                             self._name,
                             group,
                             subject,

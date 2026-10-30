@@ -34,6 +34,8 @@ class SqlAlchemyProfileRefreshReader:
         after: EndUserId | None,
         limit: int,
     ) -> tuple[list[RefreshCandidate], EndUserId | None]:
+        if limit <= 0:
+            return [], None
         statement = (
             select(
                 EndUser.id.label("end_user_id"),
@@ -61,7 +63,11 @@ class SqlAlchemyProfileRefreshReader:
         )
         rows = self._session.execute(statement).mappings().all()
         candidates = [to_refresh_candidate(row) for row in rows]
-        # A short page is the last one; a full page hands back its last id as
-        # the exclusive cursor for the next call.
-        next_cursor = candidates[-1].end_user_id if len(candidates) == limit else None
+        # A short (or empty) page is the last one; a full page hands back its
+        # last id as the exclusive cursor for the next call.
+        next_cursor = (
+            candidates[-1].end_user_id
+            if candidates and len(candidates) == limit
+            else None
+        )
         return candidates, next_cursor

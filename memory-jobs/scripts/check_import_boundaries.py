@@ -89,7 +89,7 @@ def _registry_domain_names() -> frozenset[str]:
         raise RuntimeError(f"{REGISTRY_FILE}: domain registry not found")
     tree = ast.parse(REGISTRY_FILE.read_text(encoding="utf-8"))
 
-    names: set[str] = set()
+    names: list[str] = []
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
             continue
@@ -104,10 +104,18 @@ def _registry_domain_names() -> frozenset[str]:
                 and isinstance(value, ast.Constant)
                 and isinstance(value.value, str)
             ):
-                names.add(value.value)
+                names.append(value.value)
 
     if not names:
         raise RuntimeError(f"{REGISTRY_FILE}: no DomainModule(name=...) entries found")
+    invalid = [name for name in names if not name.isidentifier()]
+    if invalid:
+        raise RuntimeError(f"{REGISTRY_FILE}: invalid domain name(s) {invalid!r}")
+    duplicates = sorted({name for name in names if names.count(name) > 1})
+    if duplicates:
+        # The container builds a dict keyed by name; a duplicate would silently
+        # hide one facade from every task.
+        raise RuntimeError(f"{REGISTRY_FILE}: duplicate domain name(s) {duplicates!r}")
     return frozenset(names)
 
 
@@ -243,6 +251,12 @@ def _check_container_access(tree: ast.AST, path: Path, layer: str) -> list[str]:
     expressions through local aliases (``container = get_container()``) and
     through an aliased import, and it refuses to walk into a facade's private
     members (``container.profile_cache._dependencies``).
+
+    Limitation: once a facade is bound to a local name, the guard cannot tell a
+    facade method from a public attribute (``facade = get_container().x;
+    facade.some_attr``). Adapters live behind private members, which are
+    rejected, so the only remaining bypass needs a public adapter accessor — and
+    the wiring facades have none.
     """
 
     if layer != INTERFACES:
@@ -292,13 +306,17 @@ def _container_symbols(tree: ast.AST) -> tuple[frozenset[str], frozenset[str]]:
     modules: set[str] = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom):
-            if node.module not in CONTAINER_MODULES:
-                continue
-            for alias in node.names:
-                if alias.name == "get_container":
-                    callables.add(alias.asname or alias.name)
-                elif alias.name == "container" and node.module == "src.composition":
-                    modules.add(alias.asname or alias.name)
+            if node.module in CONTAINER_MODULES:
+                for alias in node.names:
+                    if alias.name == "get_container":
+                        callables.add(alias.asname or alias.name)
+                    elif alias.name == "container" and node.module == "src.composition":
+                        modules.add(alias.asname or alias.name)
+            elif node.module == "src":
+                # ``from src import composition`` binds the package, not a member.
+                for alias in node.names:
+                    if alias.name == "composition":
+                        modules.add(alias.asname or alias.name)
         elif isinstance(node, ast.Import):
             for alias in node.names:
                 if alias.name in CONTAINER_MODULES and alias.asname:
@@ -400,7 +418,7 @@ def main() -> int:
     try:
         for path in sorted(SOURCE_ROOT.rglob("*.py")):
             failures.extend(check_source(path, path.read_text(encoding="utf-8")))
-    except RuntimeError as exc:
+    except (RuntimeError, SyntaxError, OSError) as exc:
         # A broken registry surfaces as the checker's normal failure, not a
         # traceback from a module import.
         print(f"memory-jobs layer boundaries: {exc}", file=sys.stderr)

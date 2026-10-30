@@ -32,7 +32,13 @@ class TaskSender(Protocol):
 
 class CeleryUnitPublisher:
     def __init__(self, app: TaskSender | None = None) -> None:
-        self._app: TaskSender = app if app is not None else current_app
+        self._app = app
+
+    def _sender(self) -> TaskSender:
+        # ``current_app`` is a proxy, not a snapshot: resolve it at send time so
+        # the publisher binds to the app the process configured, no matter when
+        # the container happened to be built.
+        return self._app if self._app is not None else current_app
 
     def publish_profile_cache(
         self,
@@ -45,7 +51,7 @@ class CeleryUnitPublisher:
         priority: Priority,
         dispatch_index: int,
     ) -> None:
-        self._app.send_task(
+        self._sender().send_task(
             TaskName.PROFILE_CACHE_GENERATE.value,
             kwargs={
                 "end_user_id": end_user_id,
@@ -69,7 +75,7 @@ class CeleryUnitPublisher:
         priority: Priority,
         dispatch_index: int,
     ) -> None:
-        self._app.send_task(
+        self._sender().send_task(
             TaskName.INTEREST_DISTRIBUTION_GENERATE.value,
             kwargs={
                 "end_user_id": end_user_id,
