@@ -2,8 +2,8 @@ import { type FC, type ReactNode, useState } from 'react'
 import { DownOutlined, RightOutlined } from '@ant-design/icons'
 
 import { Kind, type Skill, type Member } from '@/views/Skills/types'
-import pluginIcon from '@/assets/images/menuNew/application_purple.svg'
-import skillIcon from '@/assets/images/menuNew/skills.svg'
+import pluginIcon from '@/assets/images/menuNew/plugin.svg'
+import skillIcon from '@/assets/images/menuNew/skill.svg'
 
 interface SkillRowProps {
   skill: Skill;
