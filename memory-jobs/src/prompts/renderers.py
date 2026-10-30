@@ -42,7 +42,9 @@ def render_user_summary_prompt(
 ) -> str:
     """Four-section user summary prompt."""
 
-    if user_display_name is None:
+    # The API substitutes the default for any falsy name, so a blank column value
+    # must never reach the template's pronoun rule as ``""``.
+    if not user_display_name:
         user_display_name = "该用户" if language == "zh" else "the user"
     return render_prompt(
         "user_summary",

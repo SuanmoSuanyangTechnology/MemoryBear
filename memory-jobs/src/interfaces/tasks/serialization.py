@@ -42,6 +42,7 @@ def _scan(report: ScanReport) -> dict[str, Any]:
         "skip_fresh": report.skip_fresh,
         "skip_inflight": report.skip_inflight,
         "failed": report.failed,
+        "page_failures": report.page_failures,
         "elapsed_seconds": report.elapsed_seconds,
     }
 

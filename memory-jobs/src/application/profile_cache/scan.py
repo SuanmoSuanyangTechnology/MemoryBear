@@ -65,6 +65,7 @@ class ScanProfileCachesUseCase:
             skip_fresh=sweep.skipped_count(SKIP_FRESH),
             skip_inflight=sweep.skipped_count(SKIP_INFLIGHT_REASON),
             failed=sweep.failed,
+            page_failures=sweep.page_failures,
             elapsed_seconds=sweep.elapsed_seconds,
         )
 

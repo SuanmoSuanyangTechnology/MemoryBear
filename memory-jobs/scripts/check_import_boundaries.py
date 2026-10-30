@@ -250,7 +250,9 @@ def _check_container_access(tree: ast.AST, path: Path, layer: str) -> list[str]:
     fails, so a task cannot bypass its use case. The check follows container
     expressions through local aliases (``container = get_container()``) and
     through an aliased import, and it refuses to walk into a facade's private
-    members (``container.profile_cache._dependencies``).
+    members (``container.profile_cache._dependencies``). A name rebound to
+    anything else — by assignment, loop target, ``with``, unpacking, walrus,
+    import or parameter — stops being an alias at that point.
 
     Limitation: once a facade is bound to a local name, the guard cannot tell a
     facade method from a public attribute (``facade = get_container().x;
@@ -264,15 +266,9 @@ def _check_container_access(tree: ast.AST, path: Path, layer: str) -> list[str]:
 
     domains = container_domains()
     callables, modules = _container_symbols(tree)
-    aliases = _container_aliases(tree, callables, modules)
     allowed = "|".join(sorted(domains))
     failures: list[str] = []
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Attribute):
-            continue
-        chain = _container_chain(node, callables, modules, aliases)
-        if chain is None:
-            continue
+    for node, chain in _container_chains(tree, callables, modules):
         first, *rest = chain
         if first not in domains:
             failures.append(
@@ -374,49 +370,161 @@ def _container_chain(
     return None
 
 
-def _container_aliases(
+def _container_chains(
     tree: ast.AST,
     callables: frozenset[str],
     modules: frozenset[str],
-) -> dict[str, tuple[str, ...]]:
-    """Names bound to a container expression, with the chain it was bound at.
+) -> list[tuple[ast.Attribute, list[str]]]:
+    """Every attribute chain rooted at the container, in source order.
 
-    Aliases are resolved in source order so ``b = a`` after
-    ``a = get_container()`` is followed too. Scoping is deliberately ignored:
-    the check is a conservative CI guard, not a dataflow analysis.
+    The name table is replayed in source order: an assignment, loop target,
+    ``with ... as``, unpacking, walrus, import, class or parameter that binds a
+    name to anything else clears the alias, so a local named ``container`` is not
+    mistaken for the root. A binding takes effect at the end of its value (or a
+    loop's iterable), so an expression that reads the name before it is rebound
+    is still checked against the old binding.
+
+    Scoping is deliberately ignored: a parameter named like an alias clears it
+    for the rest of the file. This is a conservative CI guard, not a dataflow
+    analysis — erring towards "not the container" keeps a reused name from
+    failing the build, at the cost of missing a bypass in that same file.
     """
 
-    aliases: dict[str, tuple[str, ...]] = {}
-    assignments = sorted(
-        (
-            node
-            for node in ast.walk(tree)
-            if isinstance(node, (ast.Assign, ast.AnnAssign))
-        ),
+    events = sorted(_binding_events(tree), key=lambda event: event[:2])
+    attributes = sorted(
+        (node for node in ast.walk(tree) if isinstance(node, ast.Attribute)),
         key=lambda node: (node.lineno, node.col_offset),
     )
-    for node in assignments:
+    aliases: dict[str, tuple[str, ...]] = {}
+    chains: list[tuple[ast.Attribute, list[str]]] = []
+    index = 0
+    for node in attributes:
+        position = (node.lineno, node.col_offset)
+        while index < len(events) and events[index][:2] < position:
+            _, _, name, value = events[index]
+            chain = (
+                _container_chain(value, callables, modules, aliases)
+                if value is not None
+                else None
+            )
+            if chain is None:
+                aliases.pop(name, None)
+            else:
+                aliases[name] = tuple(chain)
+            index += 1
+        chain = _container_chain(node, callables, modules, aliases)
+        if chain is not None:
+            chains.append((node, chain))
+    return chains
+
+
+def _binding_events(tree: ast.AST) -> list[tuple[int, int, str, ast.expr | None]]:
+    """Every rebinding of a plain name, with its value when it has one.
+
+    ``value`` is ``None`` when the binding cannot carry the container (a loop
+    target, a parameter, an import); otherwise the caller evaluates it and keeps
+    the name as an alias only when it evaluates to the container.
+    """
+
+    events: list[tuple[int, int, str, ast.expr | None]] = []
+    for node in ast.walk(tree):
         if isinstance(node, ast.Assign):
-            targets: list[ast.expr] = node.targets
-            value: ast.expr | None = node.value
-        else:
-            targets = [node.target]
-            value = node.value
-        if value is None:
-            continue
-        chain = _container_chain(value, callables, modules, aliases)
-        if chain is None:
-            # A name that no longer holds a container expression must stop
-            # being treated as one; otherwise a later attribute access on the
-            # reused name is a false positive that fails CI.
-            for target in targets:
-                if isinstance(target, ast.Name):
-                    aliases.pop(target.id, None)
-            continue
-        for target in targets:
-            if isinstance(target, ast.Name):
-                aliases[target.id] = tuple(chain)
-    return aliases
+            for target in node.targets:
+                for name in _bound_names(target):
+                    events.append((*_end(node.value), name, node.value))
+        elif isinstance(node, ast.AnnAssign):
+            # A bare annotation declares nothing; the value, if any, binds.
+            if node.value is not None:
+                for name in _bound_names(node.target):
+                    events.append((*_end(node.value), name, node.value))
+        elif isinstance(node, ast.NamedExpr):
+            for name in _bound_names(node.target):
+                events.append((*_end(node.value), name, node.value))
+        elif isinstance(node, (ast.For, ast.AsyncFor)):
+            # The target binds for the body, after the iterable is evaluated.
+            for name in _bound_names(node.target):
+                events.append((*_end(node.iter), name, None))
+        elif isinstance(
+            node, (ast.ListComp, ast.SetComp, ast.GeneratorExp, ast.DictComp)
+        ):
+            # The element is written before the target, so clear at the
+            # comprehension's start rather than at the target.
+            for generator in node.generators:
+                for name in _bound_names(generator.target):
+                    events.append((node.lineno, node.col_offset, name, None))
+        elif isinstance(node, (ast.With, ast.AsyncWith)):
+            for item in node.items:
+                if item.optional_vars is None:
+                    continue
+                for name in _bound_names(item.optional_vars):
+                    events.append((*_end(item.context_expr), name, None))
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+            for name in _argument_names(node.args):
+                events.append((node.lineno, node.col_offset, name, None))
+        elif isinstance(node, ast.ExceptHandler):
+            if node.name is not None:
+                events.append((node.lineno, node.col_offset, node.name, None))
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                name = alias.asname or alias.name.split(".", 1)[0]
+                events.append((node.lineno, node.col_offset, name, None))
+        elif isinstance(node, ast.ImportFrom):
+            for alias in node.names:
+                if alias.name != "*":
+                    events.append(
+                        (
+                            node.lineno,
+                            node.col_offset,
+                            alias.asname or alias.name,
+                            None,
+                        )
+                    )
+        elif isinstance(node, ast.ClassDef):
+            events.append((node.lineno, node.col_offset, node.name, None))
+    return events
+
+
+def _bound_names(target: ast.expr) -> list[str]:
+    """Plain names a target binds, expanding tuples, lists and stars."""
+
+    if isinstance(target, ast.Name):
+        return [target.id]
+    if isinstance(target, (ast.Tuple, ast.List)):
+        names: list[str] = []
+        for element in target.elts:
+            names.extend(_bound_names(element))
+        return names
+    if isinstance(target, ast.Starred):
+        return _bound_names(target.value)
+    return []
+
+
+def _argument_names(arguments: ast.arguments) -> list[str]:
+    names = [
+        argument.arg
+        for argument in (
+            *arguments.posonlyargs,
+            *arguments.args,
+            *arguments.kwonlyargs,
+        )
+    ]
+    if arguments.vararg is not None:
+        names.append(arguments.vararg.arg)
+    if arguments.kwarg is not None:
+        names.append(arguments.kwarg.arg)
+    return names
+
+
+def _end(node: ast.expr) -> tuple[int, int]:
+    """The position just after ``node``: where its binding takes effect."""
+
+    line = node.end_lineno if node.end_lineno is not None else node.lineno
+    column = (
+        node.end_col_offset
+        if node.end_col_offset is not None
+        else node.col_offset
+    )
+    return line, column
 
 
 def main() -> int:

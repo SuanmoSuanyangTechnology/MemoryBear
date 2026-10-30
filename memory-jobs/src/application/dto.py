@@ -19,6 +19,9 @@ class ScanReport:
     skip_fresh: int = 0
     skip_inflight: int = 0
     failed: int = 0
+    #: Pages whose read failed; that group stopped, the next one still ran.
+    #: A sweep that reads nothing must not look like one with no candidates.
+    page_failures: int = 0
     elapsed_seconds: float = 0.0
 
 

@@ -30,10 +30,16 @@ def text(payload: Mapping[str, Any], key: str, default: str) -> str:
 
 
 def flag(payload: Mapping[str, Any], key: str, default: bool) -> bool:
-    """An optional boolean field, keeping JSON's own ``true``/``false``."""
+    """An optional boolean field; a non-boolean is an error, not a guess.
+
+    JSON carries real booleans, so a string ``"false"`` or a number here means
+    the producer is broken. Coercing it would silently invert a refresh flag.
+    """
 
     value = payload.get(key, default)
-    return value if isinstance(value, bool) else bool(value)
+    if not isinstance(value, bool):
+        raise ValueError(f"{key} must be a boolean, got {value!r}")
+    return value
 
 
 def integer(payload: Mapping[str, Any], key: str, default: int) -> int:
