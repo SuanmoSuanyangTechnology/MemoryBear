@@ -12,10 +12,10 @@ helper) and re-applies the publish-state and scope checks; the host
 ``_get_app_id`` app-binding check is re-applied on the routes that carry it.
 Handlers ride either session: message management is synchronous on the
 request-scoped sync session; the chat face (``/v1`` chat and file upload) and
-reply regeneration are async — chat resolution runs on one async session, each
-stream opens its own session leg (the request-scoped session is torn down once
-the response body starts streaming), and regeneration runs on sync-db services
-through their own sync session context.
+reply regeneration are async — the chat key gate and resolution run on short
+async sessions, each stream opens its own session leg, so no session stays
+checked out for the lifetime of a streaming response; regeneration runs on
+sync-db services through their own sync session context.
 """
 
 from __future__ import annotations
@@ -30,7 +30,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, Upl
 from pydantic import ValidationError as PydanticValidationError
 from sqlalchemy.orm import Session
 
-from ...db import get_db_context
+from ...db import get_async_db_context, get_db_context
 from ...errors import BizCode, BusinessException, ResourceNotFoundException
 from ...guards.workspace_access import require_workspace_access
 from ...models import (
@@ -66,6 +66,7 @@ from ...services.chat_use_case import (
     chat_complete,
     chat_stream,
     prepare_chat,
+    resolve_app_for_chat,
 )
 from ...services.chat_use_case import (
     require_bound_app_id as _require_app_id,
@@ -84,7 +85,7 @@ from ...services.workflow_service import WorkflowService
 from ...utils.app_config_utils import agent_config_4_app_release
 from ...utils.datetime_utils import to_timestamp_ms
 from ...utils.sse_stream import sse_response
-from ..dependencies import Principal, get_principal, get_sync_db
+from ..dependencies import API_KEY_ID_HEADER, Principal, get_principal, get_sync_db
 from ..schemas.common import fail, success
 from ..schemas.response_schema import ApiResponse, PageData, PageMeta
 from starlette.responses import JSONResponse
@@ -823,7 +824,6 @@ def v1_get_app_basic_info(
 async def v1_chat(
     request: Request,
     principal: Caller,
-    db: DbSession,
 ):
     """Chat with the key's bound app (agent / multi-agent / workflow).
 
@@ -835,10 +835,15 @@ async def v1_chat(
     """
 
     # Auth gate first (host decorator order): the key binding, publish state
-    # and scope are re-applied before the body is even read. The binding rides
-    # the request-scoped sync session; preparation and both execution legs live
-    # in the shared chat use case (the gRPC servicer runs the same pipeline).
-    app_id = _require_app_id(_resolve_v1_app(request, db, principal))
+    # and scope are re-applied before the body is even read. The gate rides a
+    # short async session — a request-scoped sync session here would stay
+    # checked out until the SSE stream ends and starve the sync pool.
+    # Preparation and both execution legs live in the shared chat use case
+    # (the gRPC servicer runs the same pipeline).
+    app_id = await resolve_app_for_chat(
+        api_key_id=request.headers.get(API_KEY_ID_HEADER),
+        workspace_id=principal.workspace_id,
+    )
     workspace_id = principal.workspace_id
 
     try:
@@ -856,18 +861,22 @@ async def v1_chat(
 async def v1_upload_chat_file(
     request: Request,
     principal: Caller,
-    db: DbSession,
     file: Annotated[UploadFile, File()],
     storage_service: Annotated[FileStorageService, Depends(get_file_storage_service)],
 ):
     """Upload one file for multimodal chat, referenced later through the
     ``/chat`` request's ``files`` field."""
 
-    app_id = _require_app_id(_resolve_v1_app(request, db, principal))
+    app_id = await resolve_app_for_chat(
+        api_key_id=request.headers.get(API_KEY_ID_HEADER),
+        workspace_id=principal.workspace_id,
+    )
 
-    workspace = db.get(Workspace, principal.workspace_id)
-    if not workspace:
-        raise BusinessException("Workspace not found", BizCode.NOT_FOUND)
+    async with get_async_db_context() as adb:
+        workspace = await adb.get(Workspace, principal.workspace_id)
+        if workspace is None:
+            raise BusinessException("Workspace not found", BizCode.NOT_FOUND)
+        tenant_id = workspace.tenant_id
 
     logger.info(
         f"V1 app file upload: app_id={app_id}, "
@@ -876,8 +885,7 @@ async def v1_upload_chat_file(
 
     try:
         upload_result = await upload_workspace_file(
-            db=db,
-            tenant_id=workspace.tenant_id,
+            tenant_id=tenant_id,
             workspace_id=principal.workspace_id,
             file=file,
             storage_service=storage_service,
