@@ -105,8 +105,8 @@
       {
         "id": 28,
         "parent": 2,
-        "icon": "rb:bg-[url('@/assets/images/menuNew/skills.svg')]",
-        "active_icon": "rb:bg-[url('@/assets/images/menuNew/skills_active.svg')]",
+        "icon": "rb:bg-[url('@/assets/images/menuNew/resources.svg')]",
+        "active_icon": "rb:bg-[url('@/assets/images/menuNew/resources_active.svg')]",
         "code": "resources",
         "label": "资源中心",
         "i18nKey": "menu.resources",
