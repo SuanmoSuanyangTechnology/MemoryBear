@@ -54,6 +54,7 @@ MODEL_MODULES: dict[str, tuple[str, ...]] = {
         "WorkflowToolConfig",
     ),
     "skill_model": ("Skill",),
+    "skill_package_model": ("SkillFile", "SkillPackage", "SkillPlugin"),
     "mcp_market_model": ("McpMarket",),
     "mcp_market_config_model": ("McpMarketConfig",),
     "annotation_model": (

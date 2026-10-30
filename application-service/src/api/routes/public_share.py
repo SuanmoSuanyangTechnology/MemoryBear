@@ -10,10 +10,11 @@ share access token minted by ``/{share_token}/token`` and the gateway forwards
 these paths without terminating a user credential (see ``auth.py`` for the
 public-path exemption).
 
-Streaming contract: SSE generators open their own DB session, because the
-request-scoped dependency session is already torn down when the response body
-starts streaming. The chat endpoints use the async session; regeneration runs
-on sync-db services and uses the sync session context instead. Every stream is
+Streaming contract: the chat / regenerate / resume SSE handlers take no
+request-scoped session. They validate in a short session context, snapshot the
+plain values the stream needs, and let each SSE generator open its own session
+(chat on the async session; regeneration and resume on the sync context), so no
+pool connection stays checked out for the stream's lifetime. Every stream is
 wrapped by the shared keep-alive helper (heartbeat comments while silent, idle
 cutoff ahead of the gateway watchdog).
 """
@@ -516,7 +517,6 @@ async def regenerate_message(
     message_id: uuid.UUID,
     payload: app_schema.RegenerateRequest,
     share_data: ShareViewer,
-    db: DbSession,
 ):
     """Regenerate an assistant reply (multi-version, streaming or not).
 
@@ -525,230 +525,235 @@ async def regenerate_message(
     regenerated — that is rejected before the SSE response starts.
     """
 
-    message = db.get(Message, message_id)
-    if not message:
-        raise BusinessException("消息不存在", BizCode.NOT_FOUND)
+    with get_db_context() as db:
+        message = db.get(Message, message_id)
+        if not message:
+            raise BusinessException("消息不存在", BizCode.NOT_FOUND)
 
-    # Must run before the StreamingResponse: once SSE has started a failure
-    # cannot be turned into a clean HTTP error, so the front end would show a
-    # blank page instead of a warning toast.
-    assert_not_opening_statement(db, message_id)
+        # Must run before the StreamingResponse: once SSE has started a failure
+        # cannot be turned into a clean HTTP error, so the front end would show
+        # a blank page instead of a warning toast.
+        assert_not_opening_statement(db, message_id)
 
-    service = SharedChatService(db)
-    share, release = service.get_release_by_share_token(share_data.share_token, None)
-    workspace_id = release.app.workspace_id
+        service = SharedChatService(db)
+        share, release = service.get_release_by_share_token(share_data.share_token, None)
+        workspace_id = release.app.workspace_id
 
-    end_user_repo = EndUserRepository(db)
-    end_user = end_user_repo.get_or_create_end_user(
-        app_id=share.app_id,
-        workspace_id=workspace_id,
-        other_id=share_data.user_id,
-    )
+        end_user_repo = EndUserRepository(db)
+        end_user = end_user_repo.get_or_create_end_user(
+            app_id=share.app_id,
+            workspace_id=workspace_id,
+            other_id=share_data.user_id,
+        )
+        # The stream branches run after this short session closes, on their own
+        # sessions; snapshot the plain values they need while rows are attached.
+        end_user_id = str(end_user.id)
+        release_app_id = release.app_id
 
-    app_type = release.app.type if release.app else None
+        app_type = release.app.type if release.app else None
 
-    if app_type in (AppType.WORKFLOW, AppType.PURE_WORKFLOW):
-        if app_type == AppType.PURE_WORKFLOW:
+        if app_type in (AppType.WORKFLOW, AppType.PURE_WORKFLOW):
+            if app_type == AppType.PURE_WORKFLOW:
+                raise BusinessException(
+                    code=BizCode.APP_TYPE_NOT_SUPPORTED,
+                    message="纯工作流为一次性执行，不支持重新生成",
+                )
+
+            workflow_service = WorkflowService(db)
+            # Rebuild the config from the release snapshot (restoring the real
+            # config id and workflow_type). Not workflow_config_4_app_release: that
+            # one leaves workflow_type unset, and _supports_conversation would
+            # misjudge the flow as non-conversational.
+            config = AppService(db)._workflow_config_from_release(release)
+
+            if not workflow_service._supports_conversation(config):
+                raise BusinessException(
+                    code=BizCode.BAD_REQUEST,
+                    message="该工作流非对话流，不支持重新生成",
+                )
+
+            # Version-cap check must also run before the SSE response starts.
+            workflow_service._assert_regenerate_quota(message_id)
+
+            if payload.stream:
+                async def event_generator():
+                    with get_db_context() as stream_db:
+                        svc = WorkflowService(stream_db)
+                        async for event in svc.regenerate_stream(
+                                message_id=message_id,
+                                app_id=release_app_id,
+                                config=config,
+                                workspace_id=workspace_id,
+                                user_id=end_user_id,
+                                override_variables=payload.variables,
+                                # carry the real execution_id on the start event
+                                pre_create_execution=True,
+                        ):
+                            event_type = event.get("event", "message")
+                            if event_type not in SHARE_FORWARD_EVENTS:
+                                continue
+                            event_data = event.get("data", {})
+                            yield (
+                                f"event: {event_type}\ndata: "
+                                f"{json.dumps(event_data, default=str, ensure_ascii=False)}\n\n"
+                            )
+
+                return sse_response(event_generator())
+
+            result = await workflow_service.regenerate(
+                message_id=message_id,
+                app_id=release_app_id,
+                config=config,
+                workspace_id=workspace_id,
+                user_id=end_user_id,
+                override_variables=payload.variables,
+            )
+            return success(data=app_schema.WorkflowRegenerateResponse(**result))
+
+        # ---- multi-agent cluster branch (MULTI_AGENT) ----
+        # Reruns through the orchestrator (keeping supervisor routing / sub-agent
+        # orchestration), with the config taken from the published snapshot
+        # (multi_agent_config_4_app_release, same source as the share-side chat
+        # entry). Cluster traffic used to be rejected by the "non-AGENT" guard
+        # below. SSE events are whitelisted through SHARE_FORWARD_EVENTS (internal
+        # process events such as sub_agent_*/agent_dispatch are dropped; only the
+        # text stream and endpoint events pass through).
+        if app_type == AppType.MULTI_AGENT:
+            cluster_cfg = multi_agent_config_4_app_release(release)
+            # supervisor_loop allows zero sub-agents (the supervisor degrades to a
+            # bare agent); other modes require at least one
+            if not (cluster_cfg.sub_agents or []) and cluster_cfg.orchestration_mode != (
+                "supervisor_loop"
+            ):
+                raise BusinessException("多 Agent 应用未配置子 Agent", BizCode.AGENT_CONFIG_MISSING)
+
+            # Storage / memory context: same source as the AGENT branch below (that
+            # branch computes its own after this one, so its locals can't be reused —
+            # compute an independent copy here)
+            storage_type = workspace_service.get_workspace_storage_type_without_auth(
+                db=db, workspace_id=workspace_id
+            )
+            if storage_type is None:
+                storage_type = "neo4j"
+            user_rag_memory_id = ""
+            if storage_type == "rag" and workspace_id:
+                knowledge = knowledge_repository.get_knowledge_by_name(
+                    db=db, name="USER_RAG_MERORY", workspace_id=workspace_id
+                )
+                if knowledge:
+                    user_rag_memory_id = str(knowledge.id)
+
+            # Deep thinking: requires both the snapshot's model_parameters flag and
+            # the request flag; otherwise it stays off (aligns with the AGENT
+            # branch's deep_thinking handling; cluster thinking is consumed by the
+            # orchestrator's _prepare_turn_chat_features)
+            thinking = bool(getattr(payload, "thinking", False)) and bool(
+                (cluster_cfg.model_parameters or {}).get("deep_thinking", False)
+            )
+
+            if payload.stream:
+                async def cluster_event_generator():
+                    with get_db_context() as stream_db:
+                        svc = MultiAgentService(stream_db)
+                        async for event in svc.regenerate_stream(
+                                message_id=message_id,
+                                app_id=release_app_id,
+                                user_id=end_user_id,
+                                variables=payload.variables,
+                                web_search=payload.web_search,
+                                memory=payload.memory,
+                                storage_type=storage_type,
+                                user_rag_memory_id=user_rag_memory_id,
+                                thinking=thinking,
+                                config=cluster_cfg,
+                                source=HitLogSource.EXTERNAL,
+                        ):
+                            # The cluster path yields serialized SSE strings; filter
+                            # on the `event:` line against the whitelist
+                            m = SSE_EVENT_LINE.search(event)
+                            if m and m.group(1) not in SHARE_FORWARD_EVENTS:
+                                continue
+                            yield event
+
+                return sse_response(cluster_event_generator())
+
+            result = await MultiAgentService(db).regenerate(
+                message_id=message_id,
+                app_id=release_app_id,
+                user_id=end_user_id,
+                variables=payload.variables,
+                web_search=payload.web_search,
+                memory=payload.memory,
+                storage_type=storage_type,
+                user_rag_memory_id=user_rag_memory_id,
+                thinking=thinking,
+                config=cluster_cfg,
+                source=HitLogSource.EXTERNAL,
+            )
+            return success(data=app_schema.RegenerateResponse(**result))
+
+        if app_type != AppType.AGENT:
             raise BusinessException(
                 code=BizCode.APP_TYPE_NOT_SUPPORTED,
-                message="纯工作流为一次性执行，不支持重新生成",
+                message=f"不支持的应用类型: {app_type}",
             )
 
-        workflow_service = WorkflowService(db)
-        # Rebuild the config from the release snapshot (restoring the real
-        # config id and workflow_type). Not workflow_config_4_app_release: that
-        # one leaves workflow_type unset, and _supports_conversation would
-        # misjudge the flow as non-conversational.
-        config = AppService(db)._workflow_config_from_release(release)
+        agent_cfg = agent_config_4_app_release(release)
 
-        if not workflow_service._supports_conversation(config):
-            raise BusinessException(
-                code=BizCode.BAD_REQUEST,
-                message="该工作流非对话流，不支持重新生成",
-            )
+        if not (agent_cfg.model_parameters.get("deep_thinking", False) and payload.thinking):
+            agent_cfg.model_parameters["deep_thinking"] = False
 
-        # Version-cap check must also run before the SSE response starts.
-        workflow_service._assert_regenerate_quota(message_id)
-
-        if payload.stream:
-            async def event_generator():
-                with get_db_context() as stream_db:
-                    svc = WorkflowService(stream_db)
-                    async for event in svc.regenerate_stream(
-                            message_id=message_id,
-                            app_id=release.app_id,
-                            config=config,
-                            workspace_id=workspace_id,
-                            user_id=str(end_user.id),
-                            override_variables=payload.variables,
-                            # carry the real execution_id on the start event
-                            pre_create_execution=True,
-                    ):
-                        event_type = event.get("event", "message")
-                        if event_type not in SHARE_FORWARD_EVENTS:
-                            continue
-                        event_data = event.get("data", {})
-                        yield (
-                            f"event: {event_type}\ndata: "
-                            f"{json.dumps(event_data, default=str, ensure_ascii=False)}\n\n"
-                        )
-
-            return sse_response(event_generator())
-
-        result = await workflow_service.regenerate(
-            message_id=message_id,
-            app_id=release.app_id,
-            config=config,
-            workspace_id=workspace_id,
-            user_id=str(end_user.id),
-            override_variables=payload.variables,
-        )
-        return success(data=app_schema.WorkflowRegenerateResponse(**result))
-
-    # ---- multi-agent cluster branch (MULTI_AGENT) ----
-    # Reruns through the orchestrator (keeping supervisor routing / sub-agent
-    # orchestration), with the config taken from the published snapshot
-    # (multi_agent_config_4_app_release, same source as the share-side chat
-    # entry). Cluster traffic used to be rejected by the "non-AGENT" guard
-    # below. SSE events are whitelisted through SHARE_FORWARD_EVENTS (internal
-    # process events such as sub_agent_*/agent_dispatch are dropped; only the
-    # text stream and endpoint events pass through).
-    if app_type == AppType.MULTI_AGENT:
-        cluster_cfg = multi_agent_config_4_app_release(release)
-        # supervisor_loop allows zero sub-agents (the supervisor degrades to a
-        # bare agent); other modes require at least one
-        if not (cluster_cfg.sub_agents or []) and cluster_cfg.orchestration_mode != (
-            "supervisor_loop"
-        ):
-            raise BusinessException("多 Agent 应用未配置子 Agent", BizCode.AGENT_CONFIG_MISSING)
-
-        # Storage / memory context: same source as the AGENT branch below (that
-        # branch computes its own after this one, so its locals can't be reused —
-        # compute an independent copy here)
         storage_type = workspace_service.get_workspace_storage_type_without_auth(
             db=db, workspace_id=workspace_id
         )
         if storage_type is None:
             storage_type = "neo4j"
         user_rag_memory_id = ""
-        if storage_type == "rag" and workspace_id:
-            knowledge = knowledge_repository.get_knowledge_by_name(
-                db=db, name="USER_RAG_MERORY", workspace_id=workspace_id
-            )
-            if knowledge:
-                user_rag_memory_id = str(knowledge.id)
-
-        # Deep thinking: requires both the snapshot's model_parameters flag and
-        # the request flag; otherwise it stays off (aligns with the AGENT
-        # branch's deep_thinking handling; cluster thinking is consumed by the
-        # orchestrator's _prepare_turn_chat_features)
-        thinking = bool(getattr(payload, "thinking", False)) and bool(
-            (cluster_cfg.model_parameters or {}).get("deep_thinking", False)
-        )
+        if storage_type == "rag":
+            if workspace_id:
+                knowledge = knowledge_repository.get_knowledge_by_name(
+                    db=db, name="USER_RAG_MERORY", workspace_id=workspace_id
+                )
+                if knowledge:
+                    user_rag_memory_id = str(knowledge.id)
 
         if payload.stream:
-            async def cluster_event_generator():
+            async def event_generator():
                 with get_db_context() as stream_db:
-                    svc = MultiAgentService(stream_db)
+                    svc = AppChatService(stream_db)
                     async for event in svc.regenerate_stream(
                             message_id=message_id,
-                            app_id=release.app_id,
-                            user_id=str(end_user.id),
+                            config=agent_cfg,
+                            workspace_id=workspace_id,
+                            user_id=end_user_id,
                             variables=payload.variables,
                             web_search=payload.web_search,
                             memory=payload.memory,
                             storage_type=storage_type,
                             user_rag_memory_id=user_rag_memory_id,
-                            thinking=thinking,
-                            config=cluster_cfg,
-                            source=HitLogSource.EXTERNAL,
                     ):
-                        # The cluster path yields serialized SSE strings; filter
-                        # on the `event:` line against the whitelist
+                        # The agent path yields serialized SSE strings; filter on the
+                        # `event:` line to drop internal events (reasoning/agent_log).
                         m = SSE_EVENT_LINE.search(event)
                         if m and m.group(1) not in SHARE_FORWARD_EVENTS:
                             continue
                         yield event
 
-            return sse_response(cluster_event_generator())
+            return sse_response(event_generator())
 
-        result = await MultiAgentService(db).regenerate(
+        result = await AppChatService(db).regenerate(
             message_id=message_id,
-            app_id=release.app_id,
-            user_id=str(end_user.id),
+            config=agent_cfg,
+            workspace_id=workspace_id,
+            user_id=end_user_id,
             variables=payload.variables,
             web_search=payload.web_search,
             memory=payload.memory,
             storage_type=storage_type,
             user_rag_memory_id=user_rag_memory_id,
-            thinking=thinking,
-            config=cluster_cfg,
-            source=HitLogSource.EXTERNAL,
         )
+
         return success(data=app_schema.RegenerateResponse(**result))
-
-    if app_type != AppType.AGENT:
-        raise BusinessException(
-            code=BizCode.APP_TYPE_NOT_SUPPORTED,
-            message=f"不支持的应用类型: {app_type}",
-        )
-
-    agent_cfg = agent_config_4_app_release(release)
-
-    if not (agent_cfg.model_parameters.get("deep_thinking", False) and payload.thinking):
-        agent_cfg.model_parameters["deep_thinking"] = False
-
-    storage_type = workspace_service.get_workspace_storage_type_without_auth(
-        db=db, workspace_id=workspace_id
-    )
-    if storage_type is None:
-        storage_type = "neo4j"
-    user_rag_memory_id = ""
-    if storage_type == "rag":
-        if workspace_id:
-            knowledge = knowledge_repository.get_knowledge_by_name(
-                db=db, name="USER_RAG_MERORY", workspace_id=workspace_id
-            )
-            if knowledge:
-                user_rag_memory_id = str(knowledge.id)
-
-    if payload.stream:
-        async def event_generator():
-            with get_db_context() as stream_db:
-                svc = AppChatService(stream_db)
-                async for event in svc.regenerate_stream(
-                        message_id=message_id,
-                        config=agent_cfg,
-                        workspace_id=workspace_id,
-                        user_id=str(end_user.id),
-                        variables=payload.variables,
-                        web_search=payload.web_search,
-                        memory=payload.memory,
-                        storage_type=storage_type,
-                        user_rag_memory_id=user_rag_memory_id,
-                ):
-                    # The agent path yields serialized SSE strings; filter on the
-                    # `event:` line to drop internal events (reasoning/agent_log).
-                    m = SSE_EVENT_LINE.search(event)
-                    if m and m.group(1) not in SHARE_FORWARD_EVENTS:
-                        continue
-                    yield event
-
-        return sse_response(event_generator())
-
-    result = await AppChatService(db).regenerate(
-        message_id=message_id,
-        config=agent_cfg,
-        workspace_id=workspace_id,
-        user_id=str(end_user.id),
-        variables=payload.variables,
-        web_search=payload.web_search,
-        memory=payload.memory,
-        storage_type=storage_type,
-        user_rag_memory_id=user_rag_memory_id,
-    )
-
-    return success(data=app_schema.RegenerateResponse(**result))
 
 
 @router.get(
@@ -1243,7 +1248,6 @@ async def resume_and_submit_intervention(
     execution_id: str,
     payload: dict,
     share_data: ShareViewer,
-    db: DbSession,
 ):
     """Re-establish the interrupted SSE stream and push the viewer's action.
 
@@ -1260,27 +1264,28 @@ async def resume_and_submit_intervention(
     if not action_id:
         raise BusinessException("action_id 不能为空", BizCode.BAD_REQUEST)
 
-    share_service = SharedChatService(db)
-    share_token = share_data.share_token
-    share, release = share_service.get_release_by_share_token(share_token)
+    with get_db_context() as db:
+        share_service = SharedChatService(db)
+        share_token = share_data.share_token
+        share, release = share_service.get_release_by_share_token(share_token)
 
-    workflow_service = WorkflowService(db)
-    execution = workflow_service.get_execution(execution_id)
-    if not execution:
-        raise BusinessException("执行记录不存在", BizCode.NOT_FOUND)
+        workflow_service = WorkflowService(db)
+        execution = workflow_service.get_execution(execution_id)
+        if not execution:
+            raise BusinessException("执行记录不存在", BizCode.NOT_FOUND)
 
-    if execution.app.workspace_id != release.app.workspace_id:
-        raise BusinessException("无权操作此执行记录", BizCode.FORBIDDEN)
+        if execution.app.workspace_id != release.app.workspace_id:
+            raise BusinessException("无权操作此执行记录", BizCode.FORBIDDEN)
 
-    intervention_ctx = (execution.context or {}).get("human_intervention", {})
-    start_event_data = {
-        "conversation_id": intervention_ctx.get("conversation_id"),
-        "message_id": intervention_ctx.get("message_id"),
-        "execution_id": execution_id,
-    }
-    # Extracted before the response starts: the ORM row must not be touched
-    # once the stream is running.
-    execution_app_id = execution.app_id
+        intervention_ctx = (execution.context or {}).get("human_intervention", {})
+        start_event_data = {
+            "conversation_id": intervention_ctx.get("conversation_id"),
+            "message_id": intervention_ctx.get("message_id"),
+            "execution_id": execution_id,
+        }
+        # Extracted before the response starts: the ORM row must not be touched
+        # once the stream is running.
+        execution_app_id = execution.app_id
 
     async def event_generator():
         start_payload = json.dumps(start_event_data, default=str, ensure_ascii=False)

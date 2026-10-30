@@ -31,16 +31,11 @@ from pathlib import Path
 # needs async twins of their sync-db services. Remove entries as they are
 # fixed (a stale entry fails the guard on purpose).
 ALLOWED: dict[str, int] = {
-    "draft_run.py:run_single_workflow_node": 1,
-    "draft_run.py:rerun_workflow_node": 1,
-    "messages.py:regenerate_message": 1,
     "public_share.py:config_query": 1,
     "public_share.py:delete_message": 1,
     "public_share.py:get_user_feedback": 1,
     "public_share.py:list_conversation_shares": 1,
-    "public_share.py:regenerate_message": 1,
     "public_share.py:report_message": 1,
-    "public_share.py:resume_and_submit_intervention": 1,
     "public_share.py:revoke_share": 1,
     "public_share.py:share_conversation": 1,
     "public_share.py:submit_message_feedback": 1,
