@@ -19,6 +19,7 @@ from src.config import JobsSettings
 from src.infrastructure.llm.model_service_factory import ModelServiceChatModelFactory
 from src.infrastructure.persistence.postgres.uow import SqlAlchemyUnitOfWork
 from src.infrastructure.prompts.jinja_prompt_catalog import JinjaPromptCatalog
+from src.infrastructure.publishing import CeleryUnitPublisher
 from src.runtime import JobsRuntime
 
 
@@ -33,14 +34,6 @@ class SharedDependencies:
     publisher: UnitPublisher
 
 
-def _celery_publisher() -> UnitPublisher:
-    # Celery is the delivery mechanism and lives in the interface layer; the
-    # import stays local so loading the task package cannot cycle through us.
-    from src.interfaces.tasks.publishing import CeleryUnitPublisher
-
-    return CeleryUnitPublisher()
-
-
 def build_shared_dependencies(runtime: JobsRuntime) -> SharedDependencies:
     """Construct the services shared by every domain wiring.
 
@@ -52,5 +45,5 @@ def build_shared_dependencies(runtime: JobsRuntime) -> SharedDependencies:
         unit_of_work=SqlAlchemyUnitOfWork(runtime.postgres.session_factory()),
         chat_models=ModelServiceChatModelFactory(runtime.model_service),
         prompts=JinjaPromptCatalog(),
-        publisher=_celery_publisher(),
+        publisher=CeleryUnitPublisher(),
     )

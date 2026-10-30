@@ -72,9 +72,10 @@ INSUFFICIENT_MEMORY_INSIGHT_TEXT_EN = (
 class GenerateProfileCacheCommand:
     end_user_id: str
     workspace_id: WorkspaceId
-    #: Opaque identity of this attempt for the in-flight lock. A redelivered
-    #: execution keeps its token and therefore keeps the lock it already holds.
-    lock_owner: str
+    #: Opaque identity of this attempt for the in-flight lock. A retried attempt
+    #: that reuses its token re-enters the lock it already holds; the use case
+    #: never learns where the token came from.
+    attempt_token: str
     language: str = "zh"
     refresh_insight: bool = True
     refresh_summary: bool = True
@@ -183,15 +184,15 @@ class GenerateProfileCacheUseCase:
         """Refresh one user's cache columns unless another attempt holds the lock.
 
         The lock is released on every exit path; ``acquire`` is reentrant for a
-        redelivered attempt that kept the same token. The key is the canonical
-        UUID string the scanner and the fan-out use, so an uppercase or
-        differently formatted id from a producer cannot open a second lock.
+        retried attempt that reuses its token. The key is the canonical UUID
+        string the scanner and the fan-out use, so an uppercase or differently
+        formatted id from a producer cannot open a second lock.
         """
 
-        if not command.lock_owner:
-            # An empty owner would make every execution share the lock's
-            # sentinel value, so the exclusion would silently disappear.
-            raise ValueError("lock_owner is required to guard a cache refresh")
+        if not command.attempt_token:
+            # An empty token would make every attempt share the lock's sentinel
+            # value, so the exclusion would silently disappear.
+            raise ValueError("attempt_token is required to guard a cache refresh")
 
         parsed_user_id = parse_uuid(command.end_user_id)
         if parsed_user_id is None:
@@ -199,7 +200,7 @@ class GenerateProfileCacheUseCase:
             # validation below reports it without touching Redis.
             return self._execute(command)
         lock_subject = str(parsed_user_id)
-        if not self.lock.acquire(lock_subject, command.lock_owner):
+        if not self.lock.acquire(lock_subject, command.attempt_token):
             logger.info(
                 "profile cache generation skipped, another refresh is in flight "
                 "user=%s workspace=%s",
@@ -213,7 +214,7 @@ class GenerateProfileCacheUseCase:
         try:
             return self._execute(command)
         finally:
-            self.lock.release(lock_subject, command.lock_owner)
+            self.lock.release(lock_subject, command.attempt_token)
 
     def _execute(self, command: GenerateProfileCacheCommand) -> ProfileCacheResult:
         language = Language.parse(command.language)

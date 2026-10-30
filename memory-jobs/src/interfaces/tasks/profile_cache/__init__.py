@@ -5,7 +5,7 @@
 - ``scan``: periodic sweep dispatching stale users; its schedule is declared in
   ``src/tasks/schedules.py``
 
-The staggered publisher lives in ``src.interfaces.tasks.publishing`` and the per-user lock
+The staggered publisher lives in ``src.infrastructure.publishing`` and the per-user lock
 in ``src.infrastructure.lock``; both are application ports with Celery/Redis
 adapters. Importing this package registers all three tasks with the Celery app.
 """

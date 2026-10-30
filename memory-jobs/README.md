@@ -6,7 +6,7 @@ Celery 队列、执行后台任务（周期性扫描、记忆写入/遗忘/反�
 服务提供 Celery 应用、同步基础设施客户端、任务基类、健康检查、Docker/k8s 骨架。
 业务代码按 DDD 分层：领域规则在 `src/domain/`（工作空间、用户目录、洞察/摘要、
 兴趣分布），用例与端口在 `src/application/`，持久化/Neo4j/缓存/锁/提示词/投递适配器在
-`src/infrastructure/` 与 `src/interfaces/tasks/publishing.py`。
+`src/infrastructure/`（投递适配器是 `src/infrastructure/publishing.py`）。
 `src/interfaces/tasks/` 只放 Celery 适配层：解析参数、调用用例、序列化结果。
 适配层按**任务域**分包、每个 Celery 任务一个模块；定时任务（beat）统一登记在
 `src/interfaces/tasks/schedules.py`，不在别处写排期。
@@ -45,14 +45,13 @@ memory-jobs/
 │   ├── prompts/                # 提示词模板（Jinja2）；由 PromptCatalog 适配器包装
 │   ├── domain/                 # DDD 领域层：聚合、值对象、领域服务、策略（仅标准库）
 │   ├── application/            # 应用层：用例、端口、DTO、提示词输入投影
-│   ├── infrastructure/         # 同步客户端 + 适配器（persistence/lock/cache/llm/prompts）
+│   ├── infrastructure/         # 同步客户端 + 适配器（persistence/lock/cache/llm/prompts/publishing）
 │   ├── models/                 # 宿主表的 SQLAlchemy 映射（只允许适配器引用）
 │   ├── interfaces/             # 接口层：Celery 任务与健康探针
 │   │   └── tasks/              #   每个任务一个模块；只解析参数、调用用例、序列化结果
 │   │       ├── __init__.py     #   任务注册表：import 各任务包 + 路由
-│   │       ├── base.py         #   JobTask：重试策略、客户端快捷方式
+│   │       ├── base.py         #   JobTask：重试与确认策略（不含客户端访问器）
 │   │       ├── schedules.py    #   定时任务（beat）唯一登记处
-│   │       ├── publishing.py   #   CeleryUnitPublisher：错峰投递适配器
 │   │       ├── health/ping.py
 │   │       ├── interest_distribution/{generate,init_for_users}.py
 │   │       └── profile_cache/{generate,generate_workspace,scan}.py

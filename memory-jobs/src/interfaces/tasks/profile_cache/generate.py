@@ -58,7 +58,9 @@ def generate(
         GenerateProfileCacheCommand(
             end_user_id=end_user_id,
             workspace_id=WorkspaceId(ws_uuid),
-            lock_owner=str(self.request.id or ""),
+            # The Celery task id is this attempt's token; the application
+            # only sees the opaque value.
+            attempt_token=str(self.request.id or ""),
             language=language,
             refresh_insight=refresh_insight,
             refresh_summary=refresh_summary,

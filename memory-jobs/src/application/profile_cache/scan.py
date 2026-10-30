@@ -82,7 +82,7 @@ class ScanProfileCachesUseCase:
         return ScanDecision.skip(SKIP_NO_CHANGE)
 
     def _dispatch(
-        self, candidate: RefreshCandidate, plan: RefreshPlan, index: int
+        self, candidate: RefreshCandidate, plan: RefreshPlan, dispatch_index: int
     ) -> None:
         self.publisher.publish_profile_cache(
             end_user_id=str(candidate.end_user_id),
@@ -92,7 +92,7 @@ class ScanProfileCachesUseCase:
             refresh_summary=plan.dispatches_summary,
             # The sweep yields to every user-triggered unit.
             priority=Priority.BACKGROUND,
-            index=index,
+            dispatch_index=dispatch_index,
         )
 
 
