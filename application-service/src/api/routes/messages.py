@@ -11,11 +11,12 @@ pipeline, so the service resolves the binding from the injected key id (shared
 helper) and re-applies the publish-state and scope checks; the host
 ``_get_app_id`` app-binding check is re-applied on the routes that carry it.
 Handlers ride either session: message management is synchronous on the
-request-scoped sync session; the chat face (``/v1`` chat and file upload) and
-reply regeneration are async — the chat key gate and resolution run on short
-async sessions, each stream opens its own session leg, so no session stays
-checked out for the lifetime of a streaming response; regeneration runs on
-sync-db services through their own sync session context.
+request-scoped sync session; the chat face (``/v1`` chat and file upload) is
+async and runs the key gate on short async sessions; reply regeneration
+validates on short sync sessions and detaches the config snapshot it passes
+into the stream. No stream inherits a request-scoped session, so no pooled
+connection stays checked out for the lifetime of a streaming response; each
+stream opens its own session leg.
 """
 
 from __future__ import annotations
@@ -30,7 +31,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, Upl
 from pydantic import ValidationError as PydanticValidationError
 from sqlalchemy.orm import Session
 
-from ...db import get_async_db_context, get_db_context
+from ...db import detach_instances, get_async_db_context, get_db_context
 from ...errors import BizCode, BusinessException, ResourceNotFoundException
 from ...guards.workspace_access import require_workspace_access
 from ...models import (
@@ -112,40 +113,82 @@ async def regenerate_message(
     payload: RegenerateRequest,
     workspace_id: WorkspaceId,
     principal: Caller,
-    db: DbSession,
 ):
     """Regenerate an assistant reply (multi-version, streaming or not).
 
     Routed by app type: WORKFLOW reruns the flow through the restored input
     (conversational flows only), AGENT keeps the same context and re-invokes
     the LLM, PURE_WORKFLOW is one-shot and rejected. Every validation runs
-    before the SSE response starts, so failures still return clean HTTP
-    errors instead of a blank stream.
+    on a short session that closes before the SSE response starts, so
+    failures still return clean HTTP errors instead of a blank stream.
     """
 
-    app_service = AppService(db)
-    app = app_service._get_app_or_404(app_id)
+    # The validation session closes before the stream: a request-scoped sync
+    # dependency would be torn down only after the response completes, pinning
+    # a pooled connection for the whole stream lifetime.
+    with get_db_context() as db:
+        app_service = AppService(db)
+        app = app_service._get_app_or_404(app_id)
 
-    # Must run before the StreamingResponse: an opening statement has no parent
-    # user message to restore, and a failure after the stream started cannot
-    # become a clean HTTP error anymore.
-    assert_not_opening_statement(db, message_id)
+        # Must run before the StreamingResponse: an opening statement has no
+        # parent user message to restore, and a failure after the stream
+        # started cannot become a clean HTTP error anymore.
+        assert_not_opening_statement(db, message_id)
 
-    if app.type == AppType.PURE_WORKFLOW:
-        raise BusinessException(
-            "纯工作流为一次性执行，不支持重新生成", BizCode.APP_TYPE_NOT_SUPPORTED
-        )
+        if app.type == AppType.PURE_WORKFLOW:
+            raise BusinessException(
+                "纯工作流为一次性执行，不支持重新生成", BizCode.APP_TYPE_NOT_SUPPORTED
+            )
 
-    if app.type == AppType.WORKFLOW:
-        workflow_service = WorkflowService(db)
-        config = workflow_service._resolve_workflow_config(app, workspace_id)
-        # Only conversational flows carry the multi-turn semantics a
-        # single-round regeneration needs.
-        if not workflow_service._supports_conversation(config):
-            raise BusinessException("该工作流非对话流，不支持重新生成", BizCode.BAD_REQUEST)
+        app_type = app.type
 
-        workflow_service._assert_regenerate_quota(message_id)
+        if app_type == AppType.WORKFLOW:
+            workflow_service = WorkflowService(db)
+            config = workflow_service._resolve_workflow_config(app, workspace_id)
+            # Only conversational flows carry the multi-turn semantics a
+            # single-round regeneration needs.
+            if not workflow_service._supports_conversation(config):
+                raise BusinessException(
+                    "该工作流非对话流，不支持重新生成", BizCode.BAD_REQUEST
+                )
 
+            workflow_service._assert_regenerate_quota(message_id)
+            detach_instances(db, config)
+
+        elif app_type != AppType.MULTI_AGENT:
+            # ---- agent branch (the host routes every non-workflow type here;
+            # shared config resolution rejects non-agent types with
+            # APP_TYPE_NOT_SUPPORTED) ----
+            agent_cfg = app_service.get_agent_config(
+                app_id=app_id, workspace_id=workspace_id
+            )
+
+            # In a multi-model compare trial run each column may use a
+            # different model with different model_parameters; those are
+            # persisted on the original assistant message's meta_data.
+            # Regenerate must restore the model/parameters that actually
+            # produced the message instead of the app default/global ones.
+            target_msg = db.get(Message, message_id)
+            msg_meta = dict(getattr(target_msg, "meta_data", None) or {})
+            meta_model_config_id = msg_meta.get("model_config_id")
+            model_parameters_override = msg_meta.get("model_parameters_override")
+
+            model_config = None
+            if meta_model_config_id:
+                try:
+                    model_config = db.get(ModelConfig, UUID(str(meta_model_config_id)))
+                except (ValueError, TypeError):
+                    model_config = None
+            if not model_config and agent_cfg.default_model_config_id:
+                model_config = db.get(ModelConfig, agent_cfg.default_model_config_id)
+
+            if not model_config:
+                raise ResourceNotFoundException(
+                    "模型配置", str(agent_cfg.default_model_config_id)
+                )
+            detach_instances(db, agent_cfg, model_config)
+
+    if app_type == AppType.WORKFLOW:
         if payload.stream:
             async def event_generator():
                 with get_db_context() as stream_db:
@@ -167,14 +210,15 @@ async def regenerate_message(
 
             return sse_response(event_generator())
 
-        result = await workflow_service.regenerate(
-            message_id=message_id,
-            app_id=app_id,
-            config=config,
-            workspace_id=workspace_id,
-            user_id=str(principal.actor_id),
-            override_variables=payload.variables,
-        )
+        with get_db_context() as db:
+            result = await WorkflowService(db).regenerate(
+                message_id=message_id,
+                app_id=app_id,
+                config=config,
+                workspace_id=workspace_id,
+                user_id=str(principal.actor_id),
+                override_variables=payload.variables,
+            )
         return success(data=WorkflowRegenerateResponse(**result))
 
     # ---- multi-agent cluster branch (MULTI_AGENT) ----
@@ -182,7 +226,7 @@ async def regenerate_message(
     # orchestration); version management aligns with Agent apps. Cluster messages
     # previously fell into the single-agent engine branch, which lost the
     # orchestration semantics on rerun.
-    if app.type == AppType.MULTI_AGENT:
+    if app_type == AppType.MULTI_AGENT:
         if payload.stream:
             async def cluster_event_generator():
                 with get_db_context() as stream_db:
@@ -202,41 +246,17 @@ async def regenerate_message(
 
             return sse_response(cluster_event_generator())
 
-        result = await MultiAgentService(db).regenerate(
-            message_id=message_id,
-            app_id=app_id,
-            user_id=str(principal.actor_id),
-            variables=payload.variables,
-            web_search=payload.web_search,
-            memory=payload.memory,
-            thinking=True,
-        )
+        with get_db_context() as db:
+            result = await MultiAgentService(db).regenerate(
+                message_id=message_id,
+                app_id=app_id,
+                user_id=str(principal.actor_id),
+                variables=payload.variables,
+                web_search=payload.web_search,
+                memory=payload.memory,
+                thinking=True,
+            )
         return success(data=RegenerateResponse(**result))
-
-    # ---- agent branch (the host routes every non-workflow type here; shared
-    # config resolution rejects non-agent types with APP_TYPE_NOT_SUPPORTED) ----
-    agent_cfg = app_service.get_agent_config(app_id=app_id, workspace_id=workspace_id)
-
-    # In a multi-model compare trial run each column may use a different model
-    # with different model_parameters; those are persisted on the original
-    # assistant message's meta_data. Regenerate must restore the model/parameters
-    # that actually produced the message instead of the app default/global ones.
-    target_msg = db.get(Message, message_id)
-    msg_meta = dict(getattr(target_msg, "meta_data", None) or {})
-    meta_model_config_id = msg_meta.get("model_config_id")
-    model_parameters_override = msg_meta.get("model_parameters_override")
-
-    model_config = None
-    if meta_model_config_id:
-        try:
-            model_config = db.get(ModelConfig, UUID(str(meta_model_config_id)))
-        except (ValueError, TypeError):
-            model_config = None
-    if not model_config and agent_cfg.default_model_config_id:
-        model_config = db.get(ModelConfig, agent_cfg.default_model_config_id)
-
-    if not model_config:
-        raise ResourceNotFoundException("模型配置", str(agent_cfg.default_model_config_id))
 
     if payload.stream:
         async def event_generator():
@@ -254,14 +274,15 @@ async def regenerate_message(
 
         return sse_response(event_generator())
 
-    result = await AgentRunService(db).regenerate(
-        message_id=message_id,
-        agent_config=agent_cfg,
-        model_config=model_config,
-        workspace_id=workspace_id,
-        user_id=str(principal.actor_id),
-        model_parameters_override=model_parameters_override,
-    )
+    with get_db_context() as db:
+        result = await AgentRunService(db).regenerate(
+            message_id=message_id,
+            agent_config=agent_cfg,
+            model_config=model_config,
+            workspace_id=workspace_id,
+            user_id=str(principal.actor_id),
+            model_parameters_override=model_parameters_override,
+        )
     return success(data=RegenerateResponse(**result))
 
 
