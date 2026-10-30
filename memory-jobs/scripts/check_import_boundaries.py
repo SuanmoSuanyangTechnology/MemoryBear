@@ -406,6 +406,12 @@ def _container_aliases(
             continue
         chain = _container_chain(value, callables, modules, aliases)
         if chain is None:
+            # A name that no longer holds a container expression must stop
+            # being treated as one; otherwise a later attribute access on the
+            # reused name is a false positive that fails CI.
+            for target in targets:
+                if isinstance(target, ast.Name):
+                    aliases.pop(target.id, None)
             continue
         for target in targets:
             if isinstance(target, ast.Name):

@@ -55,7 +55,7 @@ from src.domain.profile.repository import (
     InsightStatementReader,
     SummarySourceReader,
 )
-from src.domain.shared.errors import ModelConfigurationError
+from src.domain.shared.errors import InvalidValue, ModelConfigurationError
 from src.domain.shared.ids import EndUserId, WorkspaceId, parse_uuid
 from src.domain.shared.language import Language
 from src.domain.workspace.model import Workspace
@@ -112,21 +112,6 @@ class ProfileCacheResult:
             errors=[],
             skipped_reason="inflight",
         )
-
-    def to_payload(self) -> dict[str, Any]:
-        if self.skipped_reason is not None:
-            return {
-                "status": "skipped",
-                "reason": self.skipped_reason,
-                "end_user_id": self.end_user_id,
-                "workspace_id": self.workspace_id,
-            }
-        return {
-            "end_user_id": self.end_user_id,
-            "insight_success": self.insight_success,
-            "summary_success": self.summary_success,
-            "errors": self.errors,
-        }
 
 
 class ChatModelMemo:
@@ -332,6 +317,21 @@ class GenerateProfileCacheUseCase:
             )
             with self.uow.transaction() as repositories:
                 outcome = repositories.insights.save_if_source_unchanged(insight)
+        except InvalidValue as exc:
+            # The model answered, but the content broke a domain invariant;
+            # this is not an infrastructure outage and must not be reported as
+            # one (the field tells the operator which part was rejected).
+            logger.warning(
+                "generate memory insight rejected content: end_user_id=%s field=%s error=%s",
+                command.end_user_id,
+                exc.field,
+                exc.message,
+            )
+            return PartResult(
+                False,
+                f"生成的洞察内容不合规: {exc.message}",
+                "generation_invalid",
+            )
         except Exception as exc:
             logger.exception(
                 "generate memory insight failed: end_user_id=%s error=%s",

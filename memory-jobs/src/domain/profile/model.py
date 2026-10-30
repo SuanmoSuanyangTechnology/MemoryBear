@@ -59,9 +59,14 @@ class InsightFinding:
 
     def __post_init__(self) -> None:
         if not 1 <= len(self.finding) <= 160:
-            raise InvalidValue("finding must be 1..160 characters")
+            raise InvalidValue(
+                "finding must be 1..160 characters", field="finding"
+            )
         if not 1 <= len(self.recommended_action) <= 120:
-            raise InvalidValue("recommended_action must be 1..120 characters")
+            raise InvalidValue(
+                "recommended_action must be 1..120 characters",
+                field="recommended_action",
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -73,9 +78,9 @@ class InsightContent:
 
     def __post_init__(self) -> None:
         if not 1 <= len(self.overview) <= 240:
-            raise InvalidValue("overview must be 1..240 characters")
+            raise InvalidValue("overview must be 1..240 characters", field="overview")
         if len(self.findings) > 3:
-            raise InvalidValue("at most three findings are kept")
+            raise InvalidValue("at most three findings are kept", field="key_findings")
 
     @classmethod
     def create(

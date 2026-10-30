@@ -55,6 +55,8 @@ class SweepReport:
     dispatched: int = 0
     skipped: dict[str, int] = field(default_factory=dict)
     failed: int = 0
+    #: Pages whose read failed; the group stops, the next group still runs.
+    page_failures: int = 0
     elapsed_seconds: float = 0.0
 
     def skipped_count(self, reason: str) -> int:
@@ -114,6 +116,7 @@ class ScanSweep[C, G]:
         dispatched = 0
         skipped: dict[str, int] = {}
         failed = 0
+        page_failures = 0
 
         with self._uow.read() as repositories:
             groups = self._groups(repositories)
@@ -121,10 +124,27 @@ class ScanSweep[C, G]:
         for group in groups:
             cursor: Any | None = None
             while True:
-                with self._uow.read() as repositories:
-                    batch, next_cursor = self._page(
-                        repositories, group, cursor, self._page_size
+                try:
+                    with self._uow.read() as repositories:
+                        batch, next_cursor = self._page(
+                            repositories, group, cursor, self._page_size
+                        )
+                except Exception:
+                    # A failed page means this group's remaining candidates are
+                    # unknown; stop the group and let the outer loop continue
+                    # with the next one instead of failing the whole sweep.
+                    page_failures += 1
+                    logger.error(
+                        "%s scan page failed group=%s cursor=%s; stopping group",
+                        self._name,
+                        group,
+                        cursor,
+                        exc_info=True,
+                        extra={
+                            "event": f"{self._event_prefix}_scan_page_failed",
+                        },
                     )
+                    break
                 if not batch:
                     if next_cursor is not None:
                         # The page contract says an empty page ends the group;
@@ -199,11 +219,13 @@ class ScanSweep[C, G]:
 
         elapsed_seconds = time.monotonic() - started_at
         logger.info(
-            "%s scan completed dispatched=%s skipped=%s failed=%s elapsed=%.3fs",
+            "%s scan completed dispatched=%s skipped=%s failed=%s page_failures=%s "
+            "elapsed=%.3fs",
             self._name,
             dispatched,
             skipped,
             failed,
+            page_failures,
             elapsed_seconds,
             extra={"event": f"{self._event_prefix}_scan_completed"},
         )
@@ -211,5 +233,6 @@ class ScanSweep[C, G]:
             dispatched=dispatched,
             skipped=skipped,
             failed=failed,
+            page_failures=page_failures,
             elapsed_seconds=elapsed_seconds,
         )

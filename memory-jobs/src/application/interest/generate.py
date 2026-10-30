@@ -46,9 +46,6 @@ class InterestDistributionResult:
     items: list[dict[str, Any]]
     cacheable: bool
 
-    def to_payload(self) -> dict[str, Any]:
-        return {"items": self.items, "cacheable": self.cacheable}
-
 
 class GenerateInterestDistributionUseCase:
     def __init__(

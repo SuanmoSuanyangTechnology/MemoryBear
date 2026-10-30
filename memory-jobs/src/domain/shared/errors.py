@@ -23,8 +23,15 @@ class InvalidValue(DomainError):
 
     Every domain rule violation uses this hierarchy, never ``ValueError``;
     parsing and caller-contract checks at the boundary may still raise
-    ``ValueError``.
+    ``ValueError``. ``field`` names the rejected part when the caller can offer
+    one, so an application can report a content problem separately from an
+    infrastructure failure.
     """
+
+    def __init__(self, message: str, *, field: str | None = None) -> None:
+        super().__init__(message)
+        self.message = message
+        self.field = field
 
 
 class WorkspaceNotEligible(DomainError):
