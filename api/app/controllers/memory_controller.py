@@ -148,6 +148,11 @@ async def write_server_async(
         if identity_data:
             data.update(identity_data)
         return success(data=data, msg=f"已提交 {len(task_ids)} 个写入任务")
+    except ValueError as e:
+        # 消息为空/角色非法等调用方输入问题：属于参数错误，不能按内部错误
+        # (10001) 上报，否则调用方会误判为服务端故障而盲目重试
+        api_logger.warning(f"Async write rejected by validation: {str(e)}")
+        return fail(BizCode.INVALID_PARAMETER, "写入参数无效", str(e))
     except Exception as e:
         api_logger.error(f"Async write operation failed: {str(e)}")
         return fail(BizCode.INTERNAL_ERROR, "写入失败", str(e))

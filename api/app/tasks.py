@@ -2607,9 +2607,11 @@ def _resolve_rag_write_owner(end_user_id: str) -> tuple[str, bool]:
 
     with get_db_context() as db:
         user = EndUserRepository(db).get_end_user_by_id(uuid.UUID(end_user_id))
-    if user is None:
-        return end_user_id, False
-    return str(user.id), True
+        if user is None:
+            return end_user_id, False
+        # 必须在会话关闭前取出主键：Session 关闭后 ORM 实例已 detached，
+        # 再访问 user.id 会抛 DetachedInstanceError，任务每次都在抢锁前失败
+        return str(user.id), True
 
 
 def _acquire_rag_write_lock(

@@ -15,6 +15,7 @@ Routes:
 """
 from __future__ import annotations
 
+import hashlib
 import logging
 import uuid
 from typing import Optional
@@ -284,20 +285,50 @@ def _resolve_memory_config(db: Session, workspace_id: str | None, user_id: str |
     if not end_user_id or not workspace_id:
         return None, None
 
-    cid: uuid.UUID | None = uuid.UUID(config_id) if config_id else None
-    if cid:
-        return end_user_id, cid
-
     try:
         from app.models.end_user_model import EndUser
         e_id = uuid.UUID(end_user_id)
         end_user = db.get(EndUser, e_id)
-        if end_user and end_user.memory_config_id:
-            cid = end_user.memory_config_id
     except (ValueError, AttributeError):
-        pass
+        return None, None
+
+    # user_id 来自沙箱头，必须与工作空间头一致：否则可借沙箱回调
+    # 写入/读取其它空间宿主的记忆（RAG 索引同样只按 end_user_id 隔离）
+    if (
+        end_user is None
+        or not end_user.is_active
+        or str(end_user.workspace_id) != str(workspace_id)
+    ):
+        return None, None
+
+    cid: uuid.UUID | None = uuid.UUID(config_id) if config_id else None
+    if cid:
+        return end_user_id, cid
+    if end_user.memory_config_id:
+        cid = end_user.memory_config_id
 
     return end_user_id, cid
+
+
+def _resolve_sandbox_storage_type(db: Session, workspace_id: str | None) -> str:
+    """按工作空间路由存储引擎；解析失败保持 neo4j 兼容行为。"""
+    if not workspace_id:
+        return "neo4j"
+    try:
+        from app.services.workspace_service import (
+            get_workspace_storage_type_without_auth,
+        )
+
+        return get_workspace_storage_type_without_auth(
+            db, uuid.UUID(workspace_id)
+        ) or "neo4j"
+    except Exception:
+        logger.warning(
+            "Unable to resolve sandbox workspace storage type: %s",
+            workspace_id,
+            exc_info=True,
+        )
+        return "neo4j"
 
 
 @router.post("/memory/read")
@@ -326,6 +357,7 @@ async def read_memory(
             config_id=config_id,
             end_user_id=end_user_id,
             workspace_id=workspace_id,
+            storage_type=_resolve_sandbox_storage_type(db, workspace_id),
         )
         result = await memory_service.read(
             query=body.query,
@@ -360,12 +392,58 @@ async def write_memory(
         if not config_id:
             return {"status": "error", "error": "no memory_config_id — configure memory for this end_user first"}
 
+        storage_type = _resolve_sandbox_storage_type(db, workspace_id)
+
+        if str(storage_type or "").strip().lower() == "rag":
+            # RAG 空间的记忆存储只有 ES 独立索引，WritePipeline 只写图：
+            # 必须改走 RAG 派发，否则会出现「返回 success 但召回永远为空」。
+            # 语义与 MCP 写入一致：只写单条 user 消息，无对话上下文。
+            text = str(body.content or "").strip()
+            if not text:
+                return {"status": "error", "error": "content is required"}
+
+            from app.core.exceptions import RateLimitException
+            from app.core.memory.enums import MemoryMessageSource
+            from app.core.memory.pipelines.dispatcher import push_rag_messages
+
+            # 沙箱工具没有消息 id / 对话时间：用宿主 + 内容派生稳定标识，
+            # 同一内容重复写入覆盖同一条记忆（幂等），不会每次生成新文档
+            rag_message = {
+                "role": "user",
+                "content": text,
+                "original_message_id": "sandbox:"
+                + hashlib.sha1(
+                    f"{end_user_id}:{text}".encode("utf-8")
+                ).hexdigest(),
+            }
+            try:
+                msg_ids = await push_rag_messages(
+                    messages=[rag_message],
+                    end_user_id=end_user_id,
+                    config_id=str(config_id),
+                    source=MemoryMessageSource.AGENT.value,
+                )
+            except RateLimitException as exc:
+                # 与 MCP 工具同口径：限流不报失败（报失败会诱发模型立即重试，
+                # 反而加剧限流），返回 skipped 让调用方稍后再写
+                logger.warning(
+                    "Sandbox RAG write rate limited: user=%s, err=%s",
+                    end_user_id,
+                    exc,
+                )
+                return {"status": "skipped", "msg_id": ""}
+            return {
+                "status": "success",
+                "msg_id": msg_ids[0] if msg_ids else "",
+            }
+
         from app.core.memory.memory_service import MemoryService
 
         memory_service = MemoryService(
             config_id=config_id,
             end_user_id=end_user_id,
             workspace_id=workspace_id,
+            storage_type=storage_type,
         )
         target_message: dict = body.metadata or {}
         target_message.setdefault("role", "user")

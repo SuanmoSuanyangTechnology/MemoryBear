@@ -757,7 +757,10 @@ def main() -> int:
 
     _validate_env()
 
-    if args.purge and not args.yes:
+    # --dry-run 不写 ES、不改库，没有不可回滚的删除，无需 --yes 确认；
+    # 否则 usage 中 `--purge --dry-run` 的预览方式会被 --yes 守卫挡住，
+    # 下面的 dry-run 提示分支也永远不可达
+    if args.purge and not args.yes and not args.dry_run:
         print("[ERROR] --purge 会删除 documents 与 chunk 索引且不可回滚，需同时传 --yes 确认")
         return 2
 

@@ -22,7 +22,9 @@ from app.core.memory.retrieval_trace.stage_events import (
 )
 from app.core.memory.retrieval_trace.stage_projection import build_validation_trace, project_memory_items
 from app.db import get_async_db_context
+from app.repositories.end_user_repository import EndUserRepository
 from app.schemas.memory_agent_schema import UserInput
+from app.services.workspace_service import get_workspace_storage_type_without_auth_async
 from app.services.memory_agent_service import MemoryAgentService
 from app.services.memory_config_service import MemoryConfigService
 from app.utils.sse_utils import format_sse_message
@@ -140,9 +142,11 @@ class MemoryValidationService:
             session_cache: ChatSessionCache,
             request_id: str,
             answer_service: MemoryAgentService | None = None,
+            storage_type: str = DEFAULT_STORAGE_TYPE,
     ) -> None:
         self.user_input = user_input
         self.memory_service = memory_service
+        self.storage_type = storage_type
         self.session_cache = session_cache
         self.request_id = request_id
         self.answer_service = answer_service or MemoryAgentService()
@@ -160,9 +164,22 @@ class MemoryValidationService:
             memory_config_id = await MemoryConfigService(db).get_config_id_by_end_user_async(
                 user_input.end_user_id
             )
+            # 与写入/对外读取同一路由口径：RAG 空间必须显式传入 storage_type，
+            # 否则 MemoryService 默认 neo4j，验证页在 RAG 空间恒为空结果
+            end_user = await EndUserRepository(db).get_end_user_by_id_async(
+                uuid.UUID(str(user_input.end_user_id))
+            )
+            storage_type = (
+                await get_workspace_storage_type_without_auth_async(
+                    db, end_user.workspace_id
+                )
+                if end_user is not None
+                else None
+            )
         memory_service = await MemoryService.create(
             memory_config_id,
             end_user_id=user_input.end_user_id,
+            storage_type=storage_type or DEFAULT_STORAGE_TYPE,
             draft=True,
         )
         return cls(
@@ -170,6 +187,7 @@ class MemoryValidationService:
             memory_service=memory_service,
             session_cache=ChatSessionCache(user_input.session_id.hex),
             request_id=request_id or str(uuid.uuid4()),
+            storage_type=storage_type or DEFAULT_STORAGE_TYPE,
         )
 
     @property
@@ -187,7 +205,7 @@ class MemoryValidationService:
                 "session_id": self.session_id,
                 "search_switch": user_input.search_switch,
                 "mode": SEARCH_MODE_NAMES.get(strategy, "unknown"),
-                "backend": DEFAULT_STORAGE_TYPE,
+                "backend": self.storage_type,
                 "limit": 10,
             })
 
@@ -318,7 +336,7 @@ class MemoryValidationService:
                 backend=(
                     search_result.execution_trace.backend
                     if search_result.execution_trace
-                    else DEFAULT_STORAGE_TYPE
+                    else self.storage_type
                 ),
                 limit=(
                     search_result.execution_trace.limit
