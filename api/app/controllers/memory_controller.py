@@ -67,16 +67,23 @@ async def write_server_async(
     effective_end_user_id = user_input.end_user_id
     identity_data = None
     async with get_async_db_context() as db:
+        # 宿主归属无条件校验：写入接口不能只在身份确认分支校验，否则提交其他空间
+        # 的宿主 ID 会把内容直接写进对方记忆集合（图记忆与 RAG 记忆都适用）。
+        try:
+            end_user_uuid = uuid.UUID(user_input.end_user_id)
+        except (TypeError, ValueError):
+            return fail(BizCode.INVALID_PARAMETER, "终端用户 ID 格式无效", "invalid end_user_id")
+        end_user = await EndUserRepository(db).get_end_user_by_id_async(end_user_uuid)
+        if end_user is None:
+            return fail(BizCode.USER_NOT_FOUND, "终端用户不存在", "end_user not found")
+        if str(end_user.workspace_id) != str(workspace_id):
+            return fail(BizCode.PERMISSION_DENIED, "该终端用户不属于当前工作空间", "workspace mismatch")
+        # 合并路由：原 ID 已被合并时，写入落点统一改为合并目标
+        effective_end_user_id = str(end_user.id)
+
         # ── 跨渠道身份确认（仅在带标识时执行；不带/空串/纯空白则完全不碰身份字段）──
         if user_input.identity_features and user_input.identity_features.strip():
             clean_features = user_input.identity_features.strip()
-            end_user = await EndUserRepository(db).get_end_user_by_id_async(
-                uuid.UUID(user_input.end_user_id)
-            )
-            if end_user is None:
-                return fail(BizCode.USER_NOT_FOUND, "终端用户不存在", "end_user not found")
-            if str(end_user.workspace_id) != str(workspace_id):
-                return fail(BizCode.PERMISSION_DENIED, "该终端用户不属于当前工作空间", "workspace mismatch")
             # 快路径条件同时校验 status：只比标识时，若标识已落库而 status 不是
             # confirmed（历史数据、S4 写入的 expired、或上一次归并中途失败留下的
             # 脏状态），身份确认会被永久跳过、无法自愈。
