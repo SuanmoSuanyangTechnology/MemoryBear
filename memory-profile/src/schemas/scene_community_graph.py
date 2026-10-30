@@ -43,7 +43,7 @@ class CommunityProperties(Times):
 
 
 class NamedCommunityProperties(CommunityProperties):
-    topic_name: str
+    topic_name: str | None = None
 
 
 class ScopedCommunityProperties(CommunityProperties):

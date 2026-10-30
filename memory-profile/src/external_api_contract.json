@@ -985,10 +985,10 @@
                                 "required": false
                               },
                               "topic_name": {
-                                "annotation": "str",
+                                "annotation": "str | None",
                                 "constraints": [],
                                 "default": null,
-                                "required": true
+                                "required": false
                               },
                               "updated_at": {
                                 "annotation": "int | None",
