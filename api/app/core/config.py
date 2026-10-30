@@ -587,6 +587,13 @@ class Settings:
     USER_TAG_REFRESH_MINUTE: int = TypeAdapter(
         Annotated[int, Field(ge=0, le=59, description="user tag refresh cron minute [0, 59]")]
     ).validate_python(int(os.getenv("USER_TAG_REFRESH_MINUTE", "30")))
+    # AI 人格提取时间（UTC，默认 19:00 = 北京时间次日 03:00）
+    AI_PERSONALITY_EXTRACTION_HOUR: int = TypeAdapter(
+        Annotated[int, Field(ge=0, le=23, description="AI personality extraction cron hour [0, 23]")]
+    ).validate_python(int(os.getenv("AI_PERSONALITY_EXTRACTION_HOUR", "19")))
+    AI_PERSONALITY_EXTRACTION_MINUTE: int = TypeAdapter(
+        Annotated[int, Field(ge=0, le=59, description="AI personality extraction cron minute [0, 59]")]
+    ).validate_python(int(os.getenv("AI_PERSONALITY_EXTRACTION_MINUTE", "0")))
     # 洞察/摘要缓存刷新新鲜度窗口（小时）：缓存上次刷新距今 < 该值则本轮跳过（限频，避免频繁重算），默认 72
     MEMORY_CACHE_FRESH_HOURS: int = TypeAdapter(
         Annotated[int, Field(ge=1, description="insight/summary cache freshness window in hours, must be >= 1")]

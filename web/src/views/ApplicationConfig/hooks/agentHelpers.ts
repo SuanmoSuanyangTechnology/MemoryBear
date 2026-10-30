@@ -7,7 +7,7 @@ import type { Config, FeaturesConfigForm, MemoryConfig } from '../types'
 import { normalizeSavedAgent } from './modelContract'
 import type { Variable } from '../components/VariableList/types'
 import type { KnowledgeConfig, KnowledgeConfigForm } from '@/components/Knowledge/types'
-import type { Skill } from '@/views/Skills/types'
+import { getSkillIds } from '../components/Skill/selection'
 
 /**
  * Build a variable list from a set of raw names (deduped, in first-seen order).
@@ -119,7 +119,7 @@ export function buildAgentSaveParams(data: Config, values: Config): Config {
     }),
     skills: {
       ...skills,
-      skill_ids: (skills?.skill_ids as Skill[])?.map(vo => vo.id)
+      skill_ids: getSkillIds(skills?.skill_ids)
     }
   }
 

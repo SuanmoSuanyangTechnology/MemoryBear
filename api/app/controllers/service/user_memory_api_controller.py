@@ -22,10 +22,9 @@ import json
 from typing import Optional
 
 from fastapi import APIRouter, Body, Header, Query, Request
-from fastapi import APIRouter, Header, Query, Request, Body
 from pydantic import ValidationError
 
-from app.core.api_key_auth import require_api_key_self_db
+from app.core.api_key_auth import get_current_api_key_auth, require_api_key_self_db
 from app.core.api_key_utils import get_current_user_snapshot_from_api_key_async, validate_end_user_in_workspace_async
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
@@ -33,6 +32,7 @@ from app.core.logging_config import get_business_logger
 from app.db import get_async_db_context
 from app.schemas.api_key_schema import ApiKeyAuth
 from app.schemas.memory_storage_schema import GenerateCacheRequest
+from app.schemas.response_schema import ApiResponse
 
 # 包装内部服务 controller
 from app.controllers import memory_analytics_controller
@@ -294,4 +294,22 @@ async def generate_cache(
         payload=cache_request,
         language_type=language_type,
         current_user=current_user,
+    )
+
+
+@router.get(
+    "/analytics/scene_community_graph", response_model=ApiResponse,
+    summary="API Key 场景社区图谱", operation_id="getSceneCommunityGraphForService",
+)
+@require_api_key_self_db(scopes=["memory"])
+async def get_scene_community_graph_for_service(
+    request: Request,
+    end_user_id: str = Query(..., description="终端用户 UUID", json_schema_extra={"format": "uuid"}),
+) -> dict:
+    """Authenticate the API Key face and forward to memory-profile."""
+    api_key_auth = get_current_api_key_auth()
+    async with get_async_db_context() as auth_db:
+        current_user = await get_current_user_snapshot_from_api_key_async(auth_db, api_key_auth)
+    return await memory_analytics_controller.get_scene_community_graph_for_manager(
+        end_user_id=end_user_id, current_user=current_user, request=request,
     )

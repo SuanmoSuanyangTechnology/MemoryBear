@@ -4463,7 +4463,327 @@ def do_refresh_insight_summary_cache(
     return result
 
 
-# 用户名片 Tag 定时刷新任务
+# ==================== AI 人格：Redis key / 任务参数 ====================
+# 社区侧保存短期 inflight token 与扫描游标；pending 与用户评估 checkpoint 均由企业端持有。
+
+AI_PERSONALITY_INFLIGHT_KEY_FMT = "ai_personality:inflight:{end_user_id}"
+AI_PERSONALITY_INFLIGHT_TTL_SEC = 600  # 仅防止短时间重复派发，不充当执行锁
+AI_PERSONALITY_RUNNING_KEY_FMT = "ai_personality:running:{end_user_id}"
+AI_PERSONALITY_RUNNING_TTL_SEC = 240  # 大于 do 任务的 180 秒硬超时
+AI_PERSONALITY_BATCH_TTL_SEC = 86400
+AI_PERSONALITY_SCAN_PAGE_SIZE = 500
+AI_PERSONALITY_SCAN_CURSOR_KEY = "ai_personality:scan_cursor:v1"
+AI_PERSONALITY_SCAN_BUDGET_SEC = 480  # 留出软时限前的收尾余量
+
+
+def _enterprise_ai_personality_plugin():
+    from app.plugins import get_plugin
+
+    plugin = get_plugin("memory.ai_personality")
+    if plugin is None:
+        raise RuntimeError("AI personality plugin 'memory.ai_personality' is not registered")
+    return plugin
+
+
+def _ai_personality_memory_config(db, workspace_uuid: uuid.UUID):
+    config_service = MemoryConfigService(db)
+    config_id = config_service.get_workspace_active_config_id(workspace_uuid)
+    return config_service.load_memory_config(config_id)
+
+
+# ==================== AI 人格：Scan 轻量扫描 ====================
+
+@celery_app.task(
+    name="app.tasks.scan_extract_ai_personality",
+    bind=True,
+    ignore_result=False,
+    max_retries=0,
+    acks_late=False,
+    time_limit=600,
+    soft_time_limit=540,
+)
+def scan_extract_ai_personality(self) -> Dict[str, Any]:
+    """从企业端分页读取候选用户，并派发单用户 AI 人格提取任务。"""
+    started_at = time.time()
+    redis_client = get_sync_redis_client()
+    if redis_client is None:
+        raise RuntimeError("Redis unavailable: AI personality scan requires inflight locks")
+    try:
+        redis_client.ping()
+    except Exception as exc:
+        raise RuntimeError("Redis unavailable: AI personality scan stopped") from exc
+
+    from app.core.exceptions import BusinessException
+    from app.schemas.memory_config_schema import ConfigurationError
+    from app.services.model_service import ModelApiKeyService
+
+    counts = {
+        "candidates": 0,
+        "dispatched": 0,
+        "skip_inflight": 0,
+        "skip_no_config": 0,
+        "failed": 0,
+    }
+    workspace_config_available: dict[str, bool] = {}
+    # 从上次游标续扫；只记录已处理用户，避免时间预算耗尽时跳过页内候选。
+    stored_cursor = redis_client.get(AI_PERSONALITY_SCAN_CURSOR_KEY)
+    after_id: str | None = (
+        stored_cursor.decode() if isinstance(stored_cursor, bytes) else stored_cursor
+    )
+    plugin = _enterprise_ai_personality_plugin()
+
+    def scan_result(status: str) -> Dict[str, Any]:
+        return {
+            "status": status,
+            **counts,
+            "elapsed_time": time.time() - started_at,
+            "task_id": self.request.id,
+        }
+
+    loop = set_asyncio_event_loop()
+    try:
+        while time.time() - started_at < AI_PERSONALITY_SCAN_BUDGET_SEC:
+            page = loop.run_until_complete(plugin.list_candidates(
+                after_id=after_id,
+                limit=AI_PERSONALITY_SCAN_PAGE_SIZE,
+            ))
+            counts["candidates"] += len(page.items)
+            last_processed_id = after_id
+            for candidate in page.items:
+                if time.time() - started_at >= AI_PERSONALITY_SCAN_BUDGET_SEC:
+                    if last_processed_id is not None:
+                        redis_client.set(AI_PERSONALITY_SCAN_CURSOR_KEY, last_processed_id)
+                    return scan_result("PARTIAL")
+                end_user_id = candidate.end_user_id
+                workspace_id = candidate.workspace_id
+                # 同一轮扫描每个 workspace 只检查一次配置和模型引用，不构造客户端。
+                if workspace_id not in workspace_config_available:
+                    with get_db_context() as db:
+                        try:
+                            memory_config = _ai_personality_memory_config(db, uuid.UUID(workspace_id))
+                            model_ref = ModelApiKeyService.resolve_invoke_ref(
+                                db, memory_config.llm_model_id, tenant_id=memory_config.tenant_id,
+                            )
+                            if model_ref is None:
+                                raise ValueError(f"模型配置不可用: {memory_config.llm_model_id}")
+                        except (BusinessException, ConfigurationError, ValueError) as exc:
+                            logger.warning("AI人格scan跳过无可用配置 workspace=%s: %s", workspace_id, exc)
+                            workspace_config_available[workspace_id] = False
+                        else:
+                            workspace_config_available[workspace_id] = True
+                if not workspace_config_available[workspace_id]:
+                    counts["skip_no_config"] += 1
+                    last_processed_id = end_user_id
+                    continue
+
+                # 派发前短期去重；真正的执行互斥由 do 任务启动后获取运行锁。
+                inflight_key = AI_PERSONALITY_INFLIGHT_KEY_FMT.format(end_user_id=end_user_id)
+                lock_token = uuid.uuid4().hex
+                try:
+                    acquired = bool(redis_client.set(
+                        inflight_key,
+                        lock_token,
+                        nx=True,
+                        ex=AI_PERSONALITY_INFLIGHT_TTL_SEC,
+                    ))
+                except Exception as exc:
+                    raise RuntimeError("Redis unavailable while locking AI personality task") from exc
+                if not acquired:
+                    counts["skip_inflight"] += 1
+                    last_processed_id = end_user_id
+                    continue
+                try:
+                    do_extract_ai_personality_for_user.apply_async(
+                        kwargs={
+                            "end_user_id": end_user_id,
+                            "workspace_id": workspace_id,
+                            "expected_source_version": candidate.source_version,
+                            "lock_token": lock_token,
+                        },
+                        queue="memory_heavy_tasks",
+                    )
+                    counts["dispatched"] += 1
+                except Exception:
+                    counts["failed"] += 1
+                    redis_client.eval(UNLOCK_SCRIPT, 1, inflight_key, lock_token)
+                    logger.error("AI人格scan派发失败 user=%s", end_user_id, exc_info=True)
+                last_processed_id = end_user_id
+
+            # 整页处理完后推进游标；全部扫描结束时清除游标，下轮从头开始。
+            after_id = page.next_after_id
+            if after_id is None:
+                redis_client.delete(AI_PERSONALITY_SCAN_CURSOR_KEY)
+                break
+            redis_client.set(AI_PERSONALITY_SCAN_CURSOR_KEY, after_id)
+    finally:
+        _shutdown_loop_gracefully(loop)
+
+    return scan_result("SUCCESS" if after_id is None else "PARTIAL")
+
+
+# ==================== AI 人格：Do 单用户提取 ====================
+
+@celery_app.task(
+    name="app.tasks.do_extract_ai_personality_for_user",
+    bind=True,
+    ignore_result=False,
+    max_retries=0,
+    acks_late=False,
+    time_limit=180,
+    soft_time_limit=150,
+)
+def do_extract_ai_personality_for_user(
+        self,
+        end_user_id: str,
+        workspace_id: str,
+        expected_source_version: str,
+        lock_token: str,
+) -> Dict[str, Any]:
+    """通过企业插件读取证据，提取人格条目并发布企业 pending 批次。"""
+    from app.core.memory.analytics.ai_personality import (
+        build_atomic_evidence,
+        build_evidence_fingerprint,
+        extract_ai_personality,
+        normalize_metadata_evidence,
+        normalize_preference_evidence,
+    )
+    from app.core.exceptions import BusinessException
+    from app.core.memory.pipelines.base_pipeline import ModelClientMixin
+    from app.schemas.memory_config_schema import ConfigurationError
+
+    started_at = time.time()
+    redis_client = get_sync_redis_client()
+    inflight_key = AI_PERSONALITY_INFLIGHT_KEY_FMT.format(end_user_id=end_user_id)
+    running_key = AI_PERSONALITY_RUNNING_KEY_FMT.format(end_user_id=end_user_id)
+    if redis_client is None:
+        raise RuntimeError("Redis unavailable: AI personality task requires execution lock")
+
+    # 排队超过派发去重窗口也可执行；运行锁在启动时获取并覆盖任务硬超时。
+    acquired = redis_client.set(running_key, lock_token, nx=True, ex=AI_PERSONALITY_RUNNING_TTL_SEC)
+    if not acquired:
+        redis_client.eval(UNLOCK_SCRIPT, 1, inflight_key, lock_token)
+        return {"status": "skipped_inflight", "entry_count": 0}
+
+    async def _run() -> Dict[str, Any]:
+        from premium.memory.ai_personality.errors import SourceChangedError
+        from premium.memory.ai_personality.schemas import PendingPublishRequest
+
+        plugin = _enterprise_ai_personality_plugin()
+        # 企业端校验源版本后返回证据快照；不匹配时不做模型调用。
+        try:
+            snapshot = await plugin.get_evidence(
+                end_user_id=end_user_id,
+                workspace_id=workspace_id,
+                expected_source_version=expected_source_version,
+            )
+        except SourceChangedError:
+            return {"status": "skipped_source_changed", "entry_count": 0}
+        if (
+            snapshot.end_user_id != end_user_id
+            or snapshot.workspace_id != workspace_id
+            or snapshot.source_version != expected_source_version
+        ):
+            raise RuntimeError("Enterprise evidence snapshot identity or source version mismatch")
+
+        # 规范化证据并固定指纹，供企业端发布时校验来源。
+        preference_nodes = [item.model_dump() for item in snapshot.preferences]
+        metadata_evidence = normalize_metadata_evidence(snapshot.metadata)
+        preference_evidence = normalize_preference_evidence(preference_nodes)
+        evidence = build_atomic_evidence(snapshot.metadata, preference_nodes)
+        source_fingerprint = build_evidence_fingerprint(evidence)
+        generated_at = utcnow()
+        batch_id = str(uuid.uuid4())
+
+        # 所有处理结果统一发布到企业端；发布时源版本变化则放弃本批次。
+        async def publish(outcome: str, entries: list, expires_at=None) -> bool:
+            try:
+                await plugin.publish(PendingPublishRequest(
+                    batch_id=batch_id,
+                    end_user_id=end_user_id,
+                    workspace_id=workspace_id,
+                    source_version=snapshot.source_version,
+                    source_fingerprint=source_fingerprint,
+                    generated_at=generated_at,
+                    expires_at=expires_at,
+                    outcome=outcome,
+                    entries=entries,
+                ))
+            except SourceChangedError:
+                return False
+            return True
+
+        source_changed = {"status": "skipped_source_changed", "entry_count": 0}
+        if not metadata_evidence and not preference_evidence:
+            if not await publish("skipped_empty", []):
+                return source_changed
+            return {"status": "skipped_empty", "entry_count": 0, "batch_id": batch_id}
+
+        # 排队期间配置可能变化：重新读取 workspace 配置，再构造实际使用的客户端。
+        workspace_uuid = uuid.UUID(workspace_id)
+        with get_db_context() as db:
+            try:
+                memory_config = _ai_personality_memory_config(db, workspace_uuid)
+                llm_client = ModelClientMixin.get_llm_client(
+                    db, memory_config.llm_model_id, memory_config.tenant_id,
+                )
+            except (BusinessException, ConfigurationError, ValueError) as exc:
+                logger.warning("AI人格do跳过无可用配置 user=%s workspace=%s: %s", end_user_id, workspace_id, exc)
+                return {"status": "skipped_no_config", "entry_count": 0}
+        entries = await extract_ai_personality(llm_client, evidence)
+        if not entries:
+            if not await publish("skipped_no_grounded_entries", []):
+                return source_changed
+            return {
+                "status": "skipped_no_grounded_entries",
+                "entry_count": 0,
+                "batch_id": batch_id,
+            }
+
+        expires_at = generated_at + timedelta(seconds=AI_PERSONALITY_BATCH_TTL_SEC)
+        if not await publish("published", entries, expires_at):
+            return source_changed
+
+        dimension_counts: dict[str, int] = {}
+        for entry in entries:
+            dimension = entry["dimension"]
+            dimension_counts[dimension] = dimension_counts.get(dimension, 0) + 1
+        return {
+            "status": "success",
+            "batch_id": batch_id,
+            "source_fingerprint": source_fingerprint,
+            "entry_count": len(entries),
+            "dimension_counts": dimension_counts,
+            "expires_at": to_iso_z(expires_at),
+        }
+
+    loop = set_asyncio_event_loop()
+    try:
+        result = loop.run_until_complete(_run())
+    except Exception as exc:
+        logger.error(
+            "AI人格提取失败 user=%s workspace=%s error_type=%s",
+            end_user_id,
+            workspace_id,
+            type(exc).__name__,
+            exc_info=True,
+        )
+        raise
+    finally:
+        _shutdown_loop_gracefully(loop)
+        # 仅释放本任务持有的锁，避免误删后续任务的 token。
+        for key in (running_key, inflight_key):
+            try:
+                redis_client.eval(UNLOCK_SCRIPT, 1, key, lock_token)
+            except Exception:
+                logger.warning("AI人格do释放锁失败 user=%s key=%s", end_user_id, key, exc_info=True)
+
+    result.update(
+        elapsed_time=time.time() - started_at,
+        task_id=self.request.id,
+        end_user_id=end_user_id,
+    )
+    return result
+
 
 USER_TAG_INFLIGHT_KEY_FMT = "user_tags:inflight:{end_user_id}"
 USER_TAG_INFLIGHT_TTL_SEC = 600

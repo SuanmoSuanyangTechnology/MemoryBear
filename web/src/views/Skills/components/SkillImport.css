@@ -1,0 +1,60 @@
+.skill-import-tree.ant-tree {
+  background: transparent;
+  color: #4e5969;
+  font-size: 13px;
+}
+
+.skill-import-tree .ant-tree-treenode {
+  min-height: 34px;
+  padding: 0;
+  align-items: center;
+}
+
+.skill-import-tree .ant-tree-switcher {
+  width: 24px;
+  height: 24px;
+  line-height: 24px;
+  flex-shrink: 0;
+  color: #5b6167;
+  align-self: center;
+}
+.skill-import-tree .ant-tree-switcher-noop {
+  display: none;
+}
+.skill-import-tree.ant-tree .ant-tree-switcher .ant-tree-switcher-icon {
+  vertical-align: middle;
+}
+
+.skill-import-tree .ant-tree-node-content-wrapper {
+  height: 34px;
+  min-height: 34px;
+  padding: 0 6px;
+  border-radius: 6px;
+  line-height: 34px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
+}
+
+.skill-import-tree .ant-tree-node-content-wrapper:hover {
+  background: #eef1f5;
+}
+.skill-import-tree.ant-tree .ant-tree-node-content-wrapper.ant-tree-node-selected {
+  background: #171719;
+  color: white;
+}
+
+.skill-import-tree .ant-tree-treenode-selected > .ant-tree-node-content-wrapper:hover {
+  background: #e9edf2;
+  color: #212332;
+}
+
+.skill-import-tree .ant-tree-iconEle {
+  width: 16px !important;
+  height: 16px !important;
+  margin-right: 4px;
+  line-height: 16px;
+  vertical-align: -3px;
+}
