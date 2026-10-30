@@ -3,9 +3,9 @@ from __future__ import annotations
 import httpx
 import pytest
 
-from src import main
+from src import bootstrap
+from src.bootstrap import create_app_from_env
 from src.envconf import ConfigError
-from src.main import create_app_from_env
 
 TOKEN = "unit-test-token-0123456789"
 # These tests are about app wiring, not egress: opt out explicitly so the default
@@ -47,9 +47,12 @@ def test_enabled_egress_policy_is_loaded_during_startup(tmp_path):
     assert app is not None
 
 
-def test_default_egress_without_a_policy_path_fails_at_startup():
-    with pytest.raises(ConfigError, match="SANDBOX_EGRESS_POLICY_PATH"):
-        create_app_from_env({**FAKE_ENV, "SANDBOX_EGRESS_ENABLED": "true"})
+def test_default_egress_uses_the_policy_shipped_with_the_service():
+    # No SANDBOX_EGRESS_POLICY_PATH: the file next to the service is picked up, so a
+    # deployment that carries it needs no extra configuration.
+    app = create_app_from_env({**FAKE_ENV, "SANDBOX_EGRESS_ENABLED": "true"})
+
+    assert app is not None
 
 
 def test_default_egress_with_a_missing_policy_file_fails_at_startup(tmp_path):
@@ -93,7 +96,7 @@ async def test_backend_is_closed_on_shutdown(monkeypatch):
         async def list_owned(self):
             return []
 
-    monkeypatch.setattr(main, "build_backend", lambda env, clock: Closable())
+    monkeypatch.setattr(bootstrap, "build_backend", lambda env, clock: Closable())
     app = create_app_from_env(FAKE_ENV)
     async with app.router.lifespan_context(app):
         assert closed == []

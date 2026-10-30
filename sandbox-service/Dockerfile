@@ -55,6 +55,11 @@ COPY --from=builder --chown=memsandbox:memsandbox \
     /code/sandbox-service/.venv /code/sandbox-service/.venv
 COPY --from=builder --chown=memsandbox:memsandbox \
     /code/sandbox-service/src /code/sandbox-service/src
+# Platform egress allowlist travels with the image: with no SANDBOX_EGRESS_POLICY_PATH
+# set, the service loads this file (see DEFAULT_POLICY_FILE in src/egress/policy.py),
+# so the checked-in policy takes effect without any deployment configuration.
+COPY --chown=memsandbox:memsandbox \
+    sandbox-service/egress-policy.json /code/sandbox-service/egress-policy.json
 
 USER memsandbox
 
@@ -66,4 +71,4 @@ EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=3).read()"
 
-CMD ["uvicorn", "--factory", "src.main:create_app_from_env", "--host", "0.0.0.0", "--port", "8080"]
+CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8080"]

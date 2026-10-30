@@ -45,6 +45,11 @@ class SchedulerConfig:
     tombstone_ttl_s: float = 7 * 24 * 3600
     tick_interval_s: float = 30.0  # how often the background runner calls ``tick``
     reconcile_interval_s: float = 300.0  # how often it calls ``reconcile``
+    # Which deployment this process is, e.g. ``prod`` or ``local-wan``. Written to every
+    # instance as ``sbx.owner``; reconcile only reaps orphans carrying the same value, so
+    # several deployments can share one substrate without destroying each other's
+    # instances. Empty means "unlabelled": such instances stay reapable by anyone.
+    deployment_id: str = ""
 
     # --- execution ---
     default_template: str = "workspace"

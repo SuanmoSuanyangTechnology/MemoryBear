@@ -20,9 +20,11 @@ def test_defaults_match_decided_values():
     assert cfg.scheduler.exec_timeout_default_s == 120.0
     assert cfg.scheduler.exec_timeout_max_s == 300.0
     assert cfg.budget.stdout_max_bytes == 1024 * 1024
+    assert cfg.audit.audit_sink == "stdout"
     assert cfg.audit.audit_log_path == "logs/sandbox-audit.jsonl"
+    assert cfg.audit.audit_queue_size == 10000
     assert cfg.egress.egress_enabled is True
-    assert cfg.egress.egress_policy_path is None
+    assert cfg.egress.egress_policy_path == "egress-policy.json"
 
 
 def test_values_are_parsed_by_field_type():
@@ -114,5 +116,7 @@ def test_known_variables_cover_every_field():
     assert "SANDBOX_STDOUT_MAX_BYTES" in names
     assert "SANDBOX_EXEC_TIMEOUT_MAX_S" in names
     assert "SANDBOX_AUDIT_LOG_PATH" in names
+    assert "SANDBOX_AUDIT_SINK" in names
+    assert "SANDBOX_AUDIT_QUEUE_SIZE" in names
     assert "SANDBOX_EGRESS_ENABLED" in names
     assert "SANDBOX_EGRESS_POLICY_PATH" in names

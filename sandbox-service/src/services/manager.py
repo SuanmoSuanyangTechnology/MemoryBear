@@ -28,6 +28,7 @@ from dataclasses import dataclass
 
 from ..backends.base import (
     META_KEY,
+    META_OWNER,
     META_TENANT,
     STATE_PAUSED,
     STATE_RUNNING,
@@ -148,11 +149,24 @@ class SandboxManager(FileOpsMixin):
         return self._registry
 
     def stats(self) -> dict[str, object]:
+        metrics = dict(self.metrics)
+        # The async sink swallows write errors on its writer thread, so its counters are the
+        # authoritative source for lost audit records. A synchronous sink never raises here
+        # (record_operation counts those itself), so this is additive in both modes.
+        counters_of = getattr(self._audit_sink, "counters", None)
+        if counters_of is not None:
+            sink_counters = counters_of()
+            metrics["audit_write_failures"] = metrics.get("audit_write_failures", 0) + int(
+                sink_counters.get("failures", 0)
+            )
+            metrics["audit_dropped"] = metrics.get("audit_dropped", 0) + int(
+                sink_counters.get("dropped", 0)
+            )
         return {
             "instances": self._registry.count(),
             "by_state": self._registry.counts_by_state(),
             "queue_depth": self._waiting,
-            "metrics": dict(self.metrics),
+            "metrics": metrics,
         }
 
     def record_operation(
@@ -396,10 +410,17 @@ class SandboxManager(FileOpsMixin):
         started_ms = self._clock.now_ms()
         grace_ms = _ms(self._cfg.orphan_grace_s)
         infos = await self._backend.list_owned()
+        # ``listed`` stays the full backend view: the ghost check below must notice our own
+        # instances disappearing, regardless of owner labels.
         listed = {i.instance_id for i in infos}
         known = {r.instance_id for r in self._registry.all() if r.instance_id}
+        owner = self._cfg.deployment_id
         for info in infos:
             if META_KEY not in info.metadata or info.instance_id in known:
+                continue
+            # Another deployment on the same substrate: never ours to reap. Unlabelled
+            # instances (created before SANDBOX_DEPLOYMENT_ID existed) stay reapable.
+            if owner and info.metadata.get(META_OWNER) not in (None, owner):
                 continue
             if started_ms - info.created_at_ms < grace_ms:
                 continue
@@ -756,11 +777,15 @@ class SandboxManager(FileOpsMixin):
         digest = sandbox.digest
         self._check_create_rate(digest)
         rec = await self._reserve(digest, sandbox.tenant_id)
+        metadata = {META_KEY: digest, META_TENANT: sandbox.tenant_id}
+        # Stamp the owning deployment so a shared substrate can tell deployments apart.
+        if self._cfg.deployment_id:
+            metadata[META_OWNER] = self._cfg.deployment_id
         spec = InstanceSpec(
             key_digest=digest,
             tenant_id=sandbox.tenant_id,
             template=self._cfg.default_template,
-            metadata={META_KEY: digest, META_TENANT: sandbox.tenant_id},
+            metadata=metadata,
             allow_internet_access=False if self._egress_policy is not None else None,
             network=(
                 self._egress_policy.network_config()

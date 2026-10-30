@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import asyncio
+import io
 import json
+import threading
 
 import httpx
 
@@ -10,9 +13,14 @@ from src.clock import ManualClock
 from src.egress import StrictEgressPolicy
 from src.keys import KernelKey, SandboxKey
 from src.observability import (
+    AsyncOperationAuditSink,
+    AuditConfig,
     InMemoryOperationAuditSink,
     JsonlOperationAuditSink,
+    NullOperationAuditSink,
     OperationAuditEvent,
+    StdoutOperationAuditSink,
+    build_audit_sink,
 )
 from src.services import SandboxManager, SchedulerConfig
 
@@ -87,12 +95,8 @@ async def test_operations_are_audited_without_request_contents():
     command = {**WHO, "conversation_id": "conversation", "cmd": f"echo {secret}"}
 
     async with client:
-        execute_response = await client.post(
-            "/internal/execute", json=execute, headers=AUTH
-        )
-        command_response = await client.post(
-            "/internal/commands", json=command, headers=AUTH
-        )
+        execute_response = await client.post("/internal/execute", json=execute, headers=AUTH)
+        command_response = await client.post("/internal/commands", json=command, headers=AUTH)
         assert execute_response.status_code == 200
         assert command_response.status_code == 200
         assert (
@@ -165,10 +169,7 @@ async def test_strict_egress_is_applied_audited_and_exported():
         "rule_count": 2,
     }
     assert "sandbox_egress_policy_applied_total 1" in metrics.text
-    assert (
-        'sandbox_operations_total{operation="egress_policy",outcome="applied"} 1'
-        in metrics.text
-    )
+    assert 'sandbox_operations_total{operation="egress_policy",outcome="applied"} 1' in metrics.text
 
 
 async def test_download_is_audited_after_stream_completes():
@@ -210,11 +211,7 @@ async def test_error_path_and_backend_failure_are_counted_once():
     assert manager.metrics["operation.execute.error"] == 1
     assert sum(event.operation == "backend_create" for event in sink.events) == 1
     assert (
-        sum(
-            event.operation == "execute" and event.outcome == "error"
-            for event in sink.events
-        )
-        == 1
+        sum(event.operation == "execute" and event.outcome == "error" for event in sink.events) == 1
     )
     assert (
         'sandbox_backend_errors_total{kind="BackendUnavailable",operation="create"} 1'
@@ -267,3 +264,156 @@ async def test_audit_sink_failure_does_not_interrupt_execution():
 
     assert result.verdict.ok
     assert manager.metrics["audit_write_failures"] >= 1
+
+
+def test_stdout_sink_writes_one_json_object_per_line():
+    stream = io.StringIO()
+    sink = StdoutOperationAuditSink(stream)
+
+    sink.record(OperationAuditEvent(ts_ms=1, operation="execute", outcome="ok", tenant_id="t"))
+    sink.record(OperationAuditEvent(ts_ms=2, operation="commands", outcome="error"))
+    sink.close()
+
+    lines = [json.loads(line) for line in stream.getvalue().splitlines()]
+    assert lines[0] == {"ts_ms": 1, "operation": "execute", "outcome": "ok", "tenant_id": "t"}
+    assert lines[1] == {"ts_ms": 2, "operation": "commands", "outcome": "error"}
+
+
+def test_jsonl_sink_rotates_and_keeps_bounded_backups(tmp_path):
+    target = tmp_path / "audit.jsonl"
+    sink = JsonlOperationAuditSink(target, max_bytes=120, backup_count=2)
+
+    for index in range(20):
+        sink.record(
+            OperationAuditEvent(ts_ms=index, operation="execute", outcome="ok", tenant_id="t")
+        )
+    sink.close()
+
+    names = sorted(p.name for p in tmp_path.iterdir())
+    assert names == ["audit.jsonl", "audit.jsonl.1", "audit.jsonl.2"]
+    # Rotation keeps at most backup_count older files, each holding only whole records.
+    for name in names:
+        path = tmp_path / name
+        for line in path.read_text(encoding="utf-8").splitlines():
+            assert json.loads(line)["operation"] == "execute"
+    # The newest record survives and older ones are bounded, not silently truncated mid-line.
+    assert "ts_ms" in (tmp_path / "audit.jsonl.1").read_text(encoding="utf-8")
+
+
+def test_async_sink_writes_off_the_caller_thread_and_drains_on_close():
+    captured: list[OperationAuditEvent] = []
+
+    class SlowSink:
+        def record(self, event):
+            captured.append(event)
+
+        def close(self):
+            pass
+
+    sink = AsyncOperationAuditSink(SlowSink(), queue_size=100)
+    for index in range(50):
+        sink.record(OperationAuditEvent(ts_ms=index, operation="execute", outcome="ok"))
+    sink.close()
+
+    assert [event.ts_ms for event in captured] == list(range(50))
+
+
+def test_async_sink_counts_dropped_events_instead_of_blocking():
+    class BlockedSink:
+        def __init__(self):
+            self.started = threading.Event()
+            self.release = threading.Event()
+
+        def record(self, event):
+            self.started.set()
+            self.release.wait(5)
+
+        def close(self):
+            self.release.set()
+
+    inner = BlockedSink()
+    sink = AsyncOperationAuditSink(inner, queue_size=1)
+    sink.record(OperationAuditEvent(ts_ms=1, operation="execute", outcome="ok"))
+    inner.started.wait(2)
+    for index in range(5):
+        sink.record(OperationAuditEvent(ts_ms=index, operation="execute", outcome="ok"))
+
+    counters = sink.counters()
+    inner.release.set()
+    sink.close()
+
+    assert counters["dropped"] >= 1
+
+
+def test_async_sink_counts_write_failures_without_raising():
+    class BrokenSink:
+        def record(self, _event):
+            raise OSError("disk full")
+
+        def close(self):
+            pass
+
+    sink = AsyncOperationAuditSink(BrokenSink(), queue_size=10)
+    sink.record(OperationAuditEvent(ts_ms=1, operation="execute", outcome="ok"))
+    sink.close()
+
+    assert sink.counters()["failures"] == 1
+
+
+def test_build_audit_sink_selects_mode_from_config():
+    assert isinstance(build_audit_sink(AuditConfig(audit_sink="none")), NullOperationAuditSink)
+
+    stdout_sink = build_audit_sink(AuditConfig(audit_sink="stdout"))
+    assert isinstance(stdout_sink, AsyncOperationAuditSink)
+    stdout_sink.close()
+
+
+def test_build_audit_sink_file_mode_creates_the_file(tmp_path):
+    path = tmp_path / "nested" / "audit.jsonl"
+    sink = build_audit_sink(AuditConfig(audit_sink="file", audit_log_path=str(path)))
+    sink.record(OperationAuditEvent(ts_ms=7, operation="execute", outcome="ok"))
+    sink.close()
+
+    assert json.loads(path.read_text(encoding="utf-8").splitlines()[0])["ts_ms"] == 7
+
+
+async def test_async_sink_counters_surface_as_metrics():
+    clock = ManualClock()
+
+    class BrokenSink:
+        def record(self, _event):
+            raise OSError("disk full")
+
+        def close(self):
+            pass
+
+    manager = SandboxManager(
+        FakeBackend(clock),
+        SchedulerConfig(),
+        clock=clock,
+        audit_sink=AsyncOperationAuditSink(BrokenSink(), queue_size=10),
+    )
+    app = create_app(manager, api_token=TOKEN)
+    key = KernelKey(SandboxKey("tenant", "workspace", "user"), "conversation")
+
+    result = await manager.execute(key, "print(1)")
+    # The drain thread has to observe the failure before /metrics is scraped.
+    for _ in range(100):
+        if manager.stats()["metrics"].get("audit_write_failures"):
+            break
+        await asyncio.sleep(0.01)
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://sandbox"
+    ) as client:
+        metrics = await client.get("/internal/metrics", headers=AUTH)
+    manager._audit_sink.close()  # noqa: SLF001 - close the writer thread for the test
+
+    assert result.verdict.ok
+    assert "sandbox_audit_write_failures_total " in metrics.text
+    assert "sandbox_audit_dropped_total 0" in metrics.text
+    failures_line = next(
+        line
+        for line in metrics.text.splitlines()
+        if line.startswith("sandbox_audit_write_failures_total ")
+    )
+    assert int(failures_line.split()[-1]) >= 1

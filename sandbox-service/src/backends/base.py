@@ -14,6 +14,9 @@ from typing import Protocol, runtime_checkable
 # Metadata written on every instance so orphans can be matched to a user.
 META_KEY = "sbx.key"
 META_TENANT = "sbx.tenant"
+# Which sandbox-service deployment created the instance (``SANDBOX_DEPLOYMENT_ID``).
+# Several deployments can share one substrate; reconcile only reaps its own.
+META_OWNER = "sbx.owner"
 
 STATE_RUNNING = "running"
 STATE_PAUSED = "paused"

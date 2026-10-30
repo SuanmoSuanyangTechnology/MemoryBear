@@ -8,6 +8,7 @@ import pytest
 
 from src.backends import (
     META_KEY,
+    META_OWNER,
     META_TENANT,
     BackendError,
     CapacityExhausted,
@@ -483,6 +484,83 @@ async def test_reconcile_forgets_instances_the_backend_lost(make_env):
     assert rep.lost == 1
     assert env.mgr.registry.get(sbx().digest) is None
     assert (await env.mgr.execute(K(), "b")).workspace_reset
+
+
+# --------------------------------------------------- deployment isolation (owner)
+
+
+async def test_created_instance_is_stamped_with_the_deployment_id(make_env):
+    env = make_env(deployment_id="prod")
+    out = await env.mgr.execute(K(), "a")
+
+    meta = env.backend._instances[out.instance_id].metadata
+    assert meta[META_OWNER] == "prod"
+    assert meta[META_KEY] == sbx().digest
+
+
+async def test_created_instance_has_no_owner_stamp_when_unset(make_env):
+    env = make_env()
+    out = await env.mgr.execute(K(), "a")
+
+    assert META_OWNER not in env.backend._instances[out.instance_id].metadata
+
+
+async def test_reconcile_leaves_another_deployments_orphans_alone(make_env):
+    env = make_env(deployment_id="prod")
+    now = env.clock.now_ms()
+    theirs = env.backend.inject_orphan(
+        {META_KEY: "ghost", META_TENANT: "t", META_OWNER: "local-wan"}, now - 10 * 60_000
+    )
+
+    rep = await env.mgr.reconcile()
+
+    assert rep.orphans_destroyed == 0 and rep.lost == 0
+    assert theirs in env.backend.instance_ids()
+
+
+async def test_reconcile_still_reaps_its_own_and_unlabelled_orphans(make_env):
+    env = make_env(deployment_id="prod")
+    now = env.clock.now_ms()
+    mine = env.backend.inject_orphan(
+        {META_KEY: "ghost", META_TENANT: "t", META_OWNER: "prod"}, now - 10 * 60_000
+    )
+    # Unlabelled = created before SANDBOX_DEPLOYMENT_ID existed; still reapable.
+    unlabelled = env.backend.inject_orphan({META_KEY: "ghost", META_TENANT: "t"}, now - 10 * 60_000)
+
+    rep = await env.mgr.reconcile()
+
+    assert rep.orphans_destroyed == 2 and rep.lost == 0
+    ids = set(env.backend.instance_ids())
+    assert mine not in ids and unlabelled not in ids
+
+
+async def test_without_deployment_id_every_orphan_is_still_reaped(make_env):
+    env = make_env()
+    now = env.clock.now_ms()
+    other = env.backend.inject_orphan(
+        {META_KEY: "ghost", META_TENANT: "t", META_OWNER: "local-wan"}, now - 10 * 60_000
+    )
+
+    rep = await env.mgr.reconcile()
+
+    assert rep.orphans_destroyed == 1
+    assert other not in env.backend.instance_ids()
+
+
+async def test_a_foreign_instance_does_not_make_our_own_instance_look_lost(make_env):
+    env = make_env(deployment_id="prod")
+    live = await env.mgr.execute(K(), "a")
+    env.clock.advance(200)  # past the orphan grace period
+    env.backend.inject_orphan(
+        {META_KEY: "ghost", META_TENANT: "t", META_OWNER: "local-wan"},
+        env.clock.now_ms() - 10 * 60_000,
+    )
+
+    rep = await env.mgr.reconcile()
+
+    assert rep.lost == 0 and rep.orphans_destroyed == 0
+    assert live.instance_id in env.backend.instance_ids()
+    assert env.mgr.registry.get(sbx().digest) is not None
 
 
 # ------------------------------------------------------------ terminal commands

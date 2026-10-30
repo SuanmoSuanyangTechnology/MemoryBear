@@ -20,18 +20,26 @@ _MAX_DOMAINS = 1024
 _LABEL = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
 
 
+# Shipped next to the service (image: ``/code/sandbox-service/egress-policy.json``).
+# Used when ``SANDBOX_EGRESS_POLICY_PATH`` is not set, so a build that carries the
+# file needs no extra configuration to take effect.
+DEFAULT_POLICY_FILE = "egress-policy.json"
+
+
 @dataclass(frozen=True)
 class EgressConfig:
-    """Deployment-level strict egress switch and mounted policy path.
+    """Deployment-level strict egress switch and policy file path.
 
     Strict egress is **on by default**: a deployment must opt out explicitly
-    (``SANDBOX_EGRESS_ENABLED=false``). While it is on, a missing policy path or a
-    missing policy file is a start-up failure - never a silent fallback to open
-    networking (see :func:`load_strict_egress_policy`).
+    (``SANDBOX_EGRESS_ENABLED=false``). With no path configured the service falls
+    back to the policy file shipped beside it (:data:`DEFAULT_POLICY_FILE`), so the
+    checked-in allowlist takes effect without any environment variable. While egress
+    is on, a missing policy file is a start-up failure - never a silent fallback to
+    open networking (see :func:`load_strict_egress_policy`).
     """
 
     egress_enabled: bool = True
-    egress_policy_path: str | None = None
+    egress_policy_path: str | None = DEFAULT_POLICY_FILE
 
 
 @dataclass(frozen=True)
@@ -114,10 +122,13 @@ def load_strict_egress_policy(
     - disabled by explicit configuration (``SANDBOX_EGRESS_ENABLED=false``): return
       ``None``; the operator has accepted that this deployment has no outbound
       protection.
-    - enabled (the default) with no configured path, or with a path that does not
-      exist: raise ``ConfigError`` so the process refuses to start.
-    - enabled with a file that exists but cannot be read, or that is not valid JSON or
-      not a valid policy document: raise ``ConfigError``.
+    - enabled (the default): read ``config.egress_policy_path``, which defaults to the
+      policy file shipped with the service (:data:`DEFAULT_POLICY_FILE`) resolved
+      against ``base_dir``. A relative default is exactly what the image layout needs,
+      so the checked-in allowlist applies without any environment variable.
+    - enabled with a path that does not exist, or a file that cannot be read, is not
+      valid JSON, or is not a valid policy document: raise ``ConfigError`` so the
+      process refuses to start.
 
     A policy that cannot be applied is never silently downgraded to open networking.
     """
@@ -127,9 +138,10 @@ def load_strict_egress_policy(
         return None
     if not config.egress_policy_path:
         raise ConfigError(
-            "strict egress is enabled by default and requires SANDBOX_EGRESS_POLICY_PATH; "
-            "point it at a policy file, or set SANDBOX_EGRESS_ENABLED=false to accept a "
-            "deployment without outbound protection"
+            "strict egress is enabled by default and needs a policy file; leave "
+            "SANDBOX_EGRESS_POLICY_PATH unset to use the shipped "
+            f"{DEFAULT_POLICY_FILE}, point it at another file, or set "
+            "SANDBOX_EGRESS_ENABLED=false to accept a deployment without outbound protection"
         )
     path = Path(config.egress_policy_path).expanduser()
     if not path.is_absolute() and base_dir is not None:

@@ -1,10 +1,16 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
-from src.egress.policy import EgressConfig, StrictEgressPolicy, load_strict_egress_policy
+from src.egress.policy import (
+    DEFAULT_POLICY_FILE,
+    EgressConfig,
+    StrictEgressPolicy,
+    load_strict_egress_policy,
+)
 from src.envconf import ConfigError
 
 
@@ -22,9 +28,22 @@ def test_explicitly_disabled_policy_needs_no_file():
     assert load_strict_egress_policy(EgressConfig(egress_enabled=False)) is None
 
 
-def test_enabled_policy_without_a_path_fails_closed():
+def test_enabled_policy_defaults_to_the_shipped_file():
+    assert EgressConfig().egress_policy_path == DEFAULT_POLICY_FILE
+
+
+def test_enabled_policy_with_the_shipped_file_missing_fails_closed(tmp_path):
     with pytest.raises(ConfigError, match="SANDBOX_EGRESS_POLICY_PATH"):
-        load_strict_egress_policy(EgressConfig(egress_enabled=True))
+        load_strict_egress_policy(EgressConfig(egress_enabled=True), base_dir=tmp_path)
+
+
+def test_the_policy_file_shipped_with_the_service_is_valid():
+    service_dir = Path(__file__).resolve().parents[1]
+
+    policy = load_strict_egress_policy(EgressConfig(), base_dir=service_dir)
+
+    assert policy is not None
+    assert policy.domains
 
 
 def test_load_normalizes_domains_and_compiles_standard_http_https_rules(tmp_path):
