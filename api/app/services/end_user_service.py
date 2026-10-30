@@ -339,21 +339,6 @@ class EndUserService:
                         _RAG_MIGRATION_RETRY_DELAY_SECONDS * attempt
                     )
 
-            # RAG 模式没有图侧计数回写；改用独立索引聚合回写 target.memory_count，
-            # 避免依赖该字段的接口在合并后长期偏低
-            try:
-                new_count = await rag_stats.count_messages([str(target)])
-                await self.user_repo.update_memory_count_async(target, new_count)
-                logger.info(
-                    f"[merge_end_users] target memory_count 同步完成(RAG): "
-                    f"target={target}, count={new_count}"
-                )
-            except Exception as exc:
-                logger.warning(
-                    f"[merge_end_users] 同步 target memory_count 失败（不影响合并结果）: "
-                    f"target={target}, err={exc}",
-                    exc_info=True,
-                )
         else:
             stats = await merge_end_user_memory_nodes(source_strs, str(target))
             logger.info(
@@ -396,6 +381,26 @@ class EndUserService:
 
         # ── 4. 提交引用表迁移（软删与映射已在 1.5 提交） ──
         await self.db.commit()
+
+        if is_rag:
+            # RAG 模式没有图侧计数回写；改用独立索引聚合回写 target.memory_count。
+            # 必须放在引用表提交之后：update_memory_count_async 内部自带
+            # commit/rollback，若与 3.5 的未提交迁移共用事务，它失败回滚会把
+            # 引用表迁移一并回滚，而外层只记 warning，迁移就被静默丢弃。
+            try:
+                new_count = await rag_stats.count_messages([str(target)])
+                await self.user_repo.update_memory_count_async(target, new_count)
+                logger.info(
+                    f"[merge_end_users] target memory_count 同步完成(RAG): "
+                    f"target={target}, count={new_count}"
+                )
+            except Exception as exc:
+                logger.warning(
+                    f"[merge_end_users] 同步 target memory_count 失败（不影响合并结果）: "
+                    f"target={target}, err={exc}",
+                    exc_info=True,
+                )
+
         logger.info(
             f"[merge_end_users] 全部完成: source={source}, target={target}"
         )
