@@ -24,6 +24,7 @@ from src.modules.analytics.schemas import (
     MemoryTypeStatistic,
     UserSummaryData,
 )
+from src.schemas.scene_community_graph import SCENE_GRAPH_ERROR_RESPONSES, GraphResponse
 from src.schemas.workspace import WorkspaceStatistics
 
 router = APIRouter(prefix="/memory/analytics", tags=["Profile Analytics"])
@@ -114,6 +115,23 @@ async def community_graph(
     return await _handler(request).community_graph(
         context, end_user_id, get_request_language(request)
     )
+
+
+@router.get(
+    "/scene_community_graph",
+    response_model=GraphResponse,
+    responses=SCENE_GRAPH_ERROR_RESPONSES,
+    summary="Scene community graph",
+)
+@external_api
+async def scene_community_graph(
+    request: Request,
+    context: Context,
+    end_user_id: str = Query(
+        ..., description="End user UUID", json_schema_extra={"format": "uuid"}
+    ),
+) -> GraphResponse:
+    return await _handler(request).scene_community_graph(context, end_user_id)
 
 
 @router.get("/hot_memory_tags", response_model=ApiResponse[list[HotMemoryTag]])

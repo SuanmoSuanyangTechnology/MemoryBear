@@ -1,4 +1,12 @@
 {
+  "scene_graph": {
+    "user_not_found": "User not found",
+    "invalid_user_id": "Invalid end user ID format",
+    "bad_data": "Invalid scene community data",
+    "capacity_exceeded": "Scene community graph exceeds the complete response limit",
+    "unavailable": "Scene community graph service is unavailable",
+    "disabled": "Scene community graph service is not enabled"
+  },
   "msg": {
     "query_success": "Query succeeded",
     "data_not_ready": "Data has not been generated yet",
