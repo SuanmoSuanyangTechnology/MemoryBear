@@ -172,7 +172,9 @@ class BackendFactory:
         # RAG 记忆空间固定走 ES：它只存在于独立索引 rag_memory_current，不存在
         # Neo4j 节点。MEMORY_READ_BACKEND 只负责切换图侧（GRAPH/TEXT/VECTOR_MAIN_READ）
         # 的读取后端，不能影响 RAG 标签，否则 NEO4J 配置下 RAG 召回会查空。
-        if str(label) in self.ELASTIC_ONLY_LABELS:
+        # 用 .value 与集合内容保持同一取值口径；同时兼容调用方直接传字符串
+        label_value = getattr(label, "value", label)
+        if str(label_value) in self.ELASTIC_ONLY_LABELS:
             return self.get_client(BackendType.ELASTIC)
         return self.get_client(self._read_backend)
 
