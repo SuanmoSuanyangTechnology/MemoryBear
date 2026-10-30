@@ -262,7 +262,6 @@ async def chat_stream(prep: ChatPreparation) -> AsyncIterator[str]:
                     user_rag_memory_id=prep.user_rag_memory_id,
                     workspace_id=prep.workspace_id,
                     files=payload.files,
-                    execution_mode="in_process",
             ):
                 yield event
         return
@@ -281,7 +280,6 @@ async def chat_stream(prep: ChatPreparation) -> AsyncIterator[str]:
                     storage_type=prep.storage_type,
                     user_rag_memory_id=prep.user_rag_memory_id,
                     thinking=bool(payload.thinking),
-                    execution_mode="in_process",
                     files=payload.files,
             ):
                 yield event
@@ -367,7 +365,6 @@ async def chat_complete(prep: ChatPreparation) -> dict:
                 user_rag_memory_id=prep.user_rag_memory_id,
                 workspace_id=str(prep.workspace_id),
                 files=payload.files,
-                execution_mode="in_process",
             )
         return success(data=ChatResponse(**result).model_dump(mode="json"))
 
@@ -384,7 +381,6 @@ async def chat_complete(prep: ChatPreparation) -> dict:
                 storage_type=prep.storage_type,
                 user_rag_memory_id=prep.user_rag_memory_id,
                 thinking=bool(payload.thinking),
-                execution_mode="in_process",
                 files=payload.files,
             )
         return success(data=ChatResponse(**result).model_dump(mode="json"))
