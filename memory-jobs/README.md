@@ -56,11 +56,12 @@ memory-jobs/
 │   │       ├── health/ping.py
 │   │       ├── interest_distribution/{generate,init_for_users}.py
 │   │       └── profile_cache/{generate,generate_workspace,scan}.py
-│   └── composition/            # 组合根：runtime -> 共享依赖 -> 每个任务域一个 wiring
-│       ├── container.py        #   Container：runtime + _dependencies + 域 facade
-│       ├── shared.py           #   SharedDependencies：进程内只构造一次的适配器
-│       ├── profile_cache.py    #   ProfileCacheWiring：generate/scan/fan_out
-│       └── interest.py         #   InterestWiring：generate/prewarm
+│   └── composition/            # 组合根：runtime -> 共享服务 -> 每域自行装配适配器
+│       ├── container.py        #   Container：按注册表构建并暴露各域 facade
+│       ├── registry.py         #   MODULES：任务域注册表（名字 + 装配函数）
+│       ├── shared.py           #   SharedDependencies：仅跨域共享的服务
+│       ├── profile_cache.py    #   ProfileCacheWiring + build_profile_cache_wiring
+│       └── interest.py         #   InterestWiring + build_interest_wiring
 ├── tests/
 ├── scripts/check_sync_only.py
 ├── deploy/k8s/                 # worker / beat 部署清单
@@ -200,9 +201,12 @@ priority field`）。该参数由 Celery 的 `task_queue_max_priority` 写出，
    任务域建包，每个 Celery 任务一个模块（如 `src/interfaces/tasks/memory_write/write.py`），
    并在该包的 `__init__.py` 里显式 import 任务模块完成注册。任务只解析参数、调用用例、
    序列化结果；适配器的装配在 `src/composition/`：新任务域加一个 wiring 模块
-   （`profile_cache.py` 那样）并在 `Container` 上加一个 property，**不要**往共享适配器
-   或别的域的 wiring 里加东西。任务只能调用 `get_container().<domain>`，CI 的
-   `scripts/check_import_boundaries.py` 会拦截直接拿适配器的写法。
+   （`profile_cache.py` 那样），在其中实现 `build_<domain>_wiring(runtime, shared)`
+   自行装配本域适配器，然后在 `registry.py` 的 `MODULES` 里注册一行——`Container`
+   本身不需要改。只有**多个域都会用**的服务才放进 `SharedDependencies`；单域适配器既
+   不要放共享层，也不要放别的域的 wiring。任务只能调用 `get_container().<domain>`，
+   CI 的 `scripts/check_import_boundaries.py` 会拦截直接拿适配器的写法；新域的名字
+   还要加进它的 `CONTAINER_DOMAINS` 白名单（测试会校验两边一致）。
 2. 任务使用 `shared_task` + `JobTask` 基类，并显式命名（`memory_jobs.<domain>.<action>`）：
 
 ```python
@@ -286,8 +290,11 @@ PeriodicTask(
   `MEMORY_ENTERPRISE_TIMEOUT_SECONDS` 默认 3s，`MEMORY_ENTERPRISE_TOKEN` 设置后以
   `X-Internal-Token` 发送。场景名查询还会带上 workspace 所属租户的 `X-Tenant-Id`，
   服务端只返回该租户可见的场景（自有场景 + 系统默认场景）；租户为空的 workspace 不发起
-  查询。未配置时与「未装插件的 API」一致：洞察输入里 uuid 场景键
-  视为已删除、整组丢弃。该服务**不参与**依赖探测，挂了只会丢场景名，不会让任务失败。
+  查询。
+  - **未配置**（开放版）：与「未装插件的 API」一致，洞察输入里 uuid 场景键视为已删除、整组丢弃。
+  - **已配置但不可用**（超时 / 5xx / 坏响应）：不再视为删除——跳过场景名投影，**保留存储里的
+    原键**；日志与行为一致（`场景名查询失败/不可用，保留存储原键`）。
+  该服务**不参与**依赖探测，挂了只会失去场景名映射，不会让任务失败。
 - `JOBS_SCAN_PAGE_SIZE`（默认 500）：周期扫描每次从库里取多少候选。按 `end_user.id`
   keyset 分页，每页一个短读作用域，内存上界是页大小而不是工作空间的用户数；扫描期间
   不持有数据库连接。

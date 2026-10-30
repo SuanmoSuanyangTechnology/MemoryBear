@@ -69,16 +69,21 @@ def build_memory_insight_metadata_input(
 
     ``domain_specific_info`` is projected to scene names first: uuid keys whose
     scene no longer exists are dropped, the rest are renamed. Legacy name-keyed
-    entries pass through, matching the API.
+    entries pass through, matching the API. ``None`` means the lookup was
+    unavailable, so the projection is skipped and the stored keys are kept
+    (dropping them would turn an outage into data loss).
     """
 
     if not isinstance(meta_data, dict):
         return {}
     metadata = dict(cast(dict[str, object], meta_data))
-    metadata["domain_specific_info"] = project_domain_names(
-        drop_deleted_scene_entries(metadata.get("domain_specific_info"), scene_names_by_id),
-        scene_names_by_id,
-    )
+    if scene_names_by_id is not None:
+        metadata["domain_specific_info"] = project_domain_names(
+            drop_deleted_scene_entries(
+                metadata.get("domain_specific_info"), scene_names_by_id
+            ),
+            scene_names_by_id,
+        )
 
     result: dict[str, list[str]] = {}
     total_chars = 0

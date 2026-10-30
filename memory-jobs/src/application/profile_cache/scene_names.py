@@ -112,13 +112,18 @@ def load_scene_names(
     metadata: object,
     lookup: SceneNameLookup | None = None,
     tenant_id: TenantId | None = None,
-) -> dict[str, str]:
+) -> dict[str, str] | None:
     """Resolve the scene names the metadata's keys point at, scoped to a tenant.
 
-    Returns ``{}`` when there is nothing to resolve, no lookup is installed or
-    the workspace carries no tenant; callers treat that as "every uuid scene is
-    unknown", exactly like the API. Scenes are tenant-owned, so a lookup without
-    a tenant could only leak another tenant's data — it never runs.
+    ``{}`` means "no uuid scene has a name": there is nothing to resolve, no
+    lookup is installed, or the workspace carries no tenant. That is
+    authoritative, and the caller drops the unknown uuid groups exactly like
+    the API does. Scenes are tenant-owned, so a lookup without a tenant could
+    only leak another tenant's data — it never runs.
+
+    ``None`` means the lookup is unavailable (a failure or an adapter that
+    reports ``None``). The caller must then skip the projection and keep the
+    stored keys: an outage is not evidence that the scenes were deleted.
     """
 
     domains = metadata.get("domain_specific_info") if isinstance(metadata, dict) else None
@@ -132,10 +137,16 @@ def load_scene_names(
         return {}
 
     try:
-        names = lookup(list({*keyed_ids.values()}), tenant_id)
+        names = lookup.resolve(list({*keyed_ids.values()}), tenant_id)
     except Exception:
         logger.warning("场景名查询失败，保留存储原键", exc_info=True)
-        return {}
+        return None
+    if names is None:
+        logger.warning(
+            "场景名查询不可用，保留存储原键",
+            extra={"event": "profile_scene_names_unavailable"},
+        )
+        return None
     return {
         key: names[str(value)]
         for key, value in keyed_ids.items()
