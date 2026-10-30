@@ -62,13 +62,6 @@ from src.domain.workspace.model import Workspace
 
 logger = logging.getLogger(__name__)
 
-def _canonical_end_user_id(raw: str) -> str:
-    """The lock-key shape the scanner and the fan-out already use."""
-
-    parsed = parse_uuid(raw)
-    return raw if parsed is None else str(parsed)
-
-
 INSUFFICIENT_MEMORY_INSIGHT_TEXT = "该用户记忆不足，暂无法生成有效洞察。"
 INSUFFICIENT_MEMORY_INSIGHT_TEXT_EN = (
     "There is insufficient user memory to generate a meaningful insight."
@@ -195,7 +188,17 @@ class GenerateProfileCacheUseCase:
         differently formatted id from a producer cannot open a second lock.
         """
 
-        lock_subject = _canonical_end_user_id(command.end_user_id)
+        if not command.lock_owner:
+            # An empty owner would make every execution share the lock's
+            # sentinel value, so the exclusion would silently disappear.
+            raise ValueError("lock_owner is required to guard a cache refresh")
+
+        parsed_user_id = parse_uuid(command.end_user_id)
+        if parsed_user_id is None:
+            # No canonical key exists for an unparseable id; the per-part
+            # validation below reports it without touching Redis.
+            return self._execute(command)
+        lock_subject = str(parsed_user_id)
         if not self.lock.acquire(lock_subject, command.lock_owner):
             logger.info(
                 "profile cache generation skipped, another refresh is in flight "

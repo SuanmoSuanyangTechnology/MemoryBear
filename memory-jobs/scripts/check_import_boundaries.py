@@ -111,9 +111,20 @@ def _registry_domain_names() -> frozenset[str]:
     return frozenset(names)
 
 
-#: One facade per task domain; an interface may ask for one of these but never
-#: for an adapter.
-CONTAINER_DOMAINS = _registry_domain_names()
+_container_domains_cache: frozenset[str] | None = None
+
+
+def container_domains() -> frozenset[str]:
+    """One facade per task domain; computed lazily so a bad registry is reportable.
+
+    Parsing at import time would abort with a traceback before ``main()`` can
+    turn the problem into the checker's usual failure message.
+    """
+
+    global _container_domains_cache
+    if _container_domains_cache is None:
+        _container_domains_cache = _registry_domain_names()
+    return _container_domains_cache
 
 #: Third-party packages that only the infrastructure layer may touch.
 APPLICATION_FORBIDDEN_THIRD_PARTY = frozenset(
@@ -237,18 +248,19 @@ def _check_container_access(tree: ast.AST, path: Path, layer: str) -> list[str]:
     if layer != INTERFACES:
         return []
 
-    callables = _container_callables(tree)
-    aliases = _container_aliases(tree, callables)
-    allowed = "|".join(sorted(CONTAINER_DOMAINS))
+    domains = container_domains()
+    callables, modules = _container_symbols(tree)
+    aliases = _container_aliases(tree, callables, modules)
+    allowed = "|".join(sorted(domains))
     failures: list[str] = []
     for node in ast.walk(tree):
         if not isinstance(node, ast.Attribute):
             continue
-        chain = _container_chain(node, callables, aliases)
+        chain = _container_chain(node, callables, modules, aliases)
         if chain is None:
             continue
         first, *rest = chain
-        if first not in CONTAINER_DOMAINS:
+        if first not in domains:
             failures.append(
                 f"{path}:{node.lineno}: interfaces may only use a domain facade "
                 f"(get_container().<{allowed}>), not get_container().{'.'.join(chain)}"
@@ -264,28 +276,68 @@ def _check_container_access(tree: ast.AST, path: Path, layer: str) -> list[str]:
     return failures
 
 
-def _container_callables(tree: ast.AST) -> frozenset[str]:
-    """Names that call the container, including an aliased import of it."""
+CONTAINER_MODULES = frozenset({"src.composition", "src.composition.container"})
 
-    names = {"get_container"}
+
+def _container_symbols(tree: ast.AST) -> tuple[frozenset[str], frozenset[str]]:
+    """Names bound to the container call, and names bound to its module.
+
+    Only names actually imported from the composition package count, so a
+    same-named local helper in an interface file is not mistaken for the
+    container. Qualified calls (``src.composition.get_container()``) are matched
+    through :func:`_is_container_module`, not through this set.
+    """
+
+    callables: set[str] = set()
+    modules: set[str] = set()
     for node in ast.walk(tree):
-        if not isinstance(node, ast.ImportFrom) or node.module != "src.composition":
-            continue
-        for alias in node.names:
-            if alias.name == "get_container":
-                names.add(alias.asname or alias.name)
-    return frozenset(names)
+        if isinstance(node, ast.ImportFrom):
+            if node.module not in CONTAINER_MODULES:
+                continue
+            for alias in node.names:
+                if alias.name == "get_container":
+                    callables.add(alias.asname or alias.name)
+                elif alias.name == "container" and node.module == "src.composition":
+                    modules.add(alias.asname or alias.name)
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name in CONTAINER_MODULES and alias.asname:
+                    modules.add(alias.asname)
+    return frozenset(callables), frozenset(modules)
 
 
-def _is_container_call(func: ast.expr, callables: frozenset[str]) -> bool:
+def _is_container_module(expr: ast.expr, modules: frozenset[str]) -> bool:
+    """True when ``expr`` names ``src.composition`` (or its ``container`` module)."""
+
+    if isinstance(expr, ast.Name):
+        return expr.id in modules
+    attrs: list[str] = []
+    node = expr
+    while isinstance(node, ast.Attribute):
+        attrs.append(node.attr)
+        node = node.value
+    attrs.reverse()
+    if not (isinstance(node, ast.Name) and node.id == "src"):
+        return False
+    return attrs in (["composition"], ["composition", "container"])
+
+
+def _is_container_call(
+    func: ast.expr,
+    callables: frozenset[str],
+    modules: frozenset[str],
+) -> bool:
     if isinstance(func, ast.Name):
         return func.id in callables
-    return isinstance(func, ast.Attribute) and func.attr in callables
+    if isinstance(func, ast.Attribute) and func.attr == "get_container":
+        return _is_container_module(func.value, modules)
+    return False
 
 
 def _container_chain(
     expr: ast.expr,
     callables: frozenset[str],
+    modules: frozenset[str],
     aliases: dict[str, tuple[str, ...]],
 ) -> list[str] | None:
     """Attribute names from the container root down to ``expr``, if rooted there."""
@@ -297,7 +349,7 @@ def _container_chain(
         node = node.value
     attrs.reverse()
 
-    if isinstance(node, ast.Call) and _is_container_call(node.func, callables):
+    if isinstance(node, ast.Call) and _is_container_call(node.func, callables, modules):
         return attrs
     if isinstance(node, ast.Name) and node.id in aliases:
         return [*aliases[node.id], *attrs]
@@ -307,6 +359,7 @@ def _container_chain(
 def _container_aliases(
     tree: ast.AST,
     callables: frozenset[str],
+    modules: frozenset[str],
 ) -> dict[str, tuple[str, ...]]:
     """Names bound to a container expression, with the chain it was bound at.
 
@@ -333,7 +386,7 @@ def _container_aliases(
             value = node.value
         if value is None:
             continue
-        chain = _container_chain(value, callables, aliases)
+        chain = _container_chain(value, callables, modules, aliases)
         if chain is None:
             continue
         for target in targets:
@@ -344,8 +397,14 @@ def _container_aliases(
 
 def main() -> int:
     failures: list[str] = []
-    for path in sorted(SOURCE_ROOT.rglob("*.py")):
-        failures.extend(check_source(path, path.read_text(encoding="utf-8")))
+    try:
+        for path in sorted(SOURCE_ROOT.rglob("*.py")):
+            failures.extend(check_source(path, path.read_text(encoding="utf-8")))
+    except RuntimeError as exc:
+        # A broken registry surfaces as the checker's normal failure, not a
+        # traceback from a module import.
+        print(f"memory-jobs layer boundaries: {exc}", file=sys.stderr)
+        return 1
     if failures:
         print("\n".join(failures), file=sys.stderr)
         return 1
