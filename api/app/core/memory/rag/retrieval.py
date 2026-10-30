@@ -214,9 +214,14 @@ class RagRetrieval:
                 query,
                 top_n=limit,
             )
+            # 重排器可能不解包 metadata（自定义/远端实现未透传 index）：
+            # 下标直取会抛 KeyError，被外层吞成 rerank_failed 掩盖真实结果。
+            # 缺 index 的文档跳过，按下方截断分支置 0 后置
             score_by_index = {
-                doc.metadata["index"]: doc.metadata.get("relevance_score", 0.0)
+                doc.metadata.get("index"): doc.metadata.get("relevance_score", 0.0)
                 for doc in reranked
+                if isinstance(doc.metadata, dict)
+                and doc.metadata.get("index") is not None
             }
             for index, memory in enumerate(documents):
                 if index in score_by_index:

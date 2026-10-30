@@ -360,11 +360,23 @@ class MemoryService:
             from app.models.end_user_model import EndUser
             from app.models.workspace_model import Workspace
 
-            storage_type = await db.scalar(
-                select(Workspace.storage_type)
-                .join(EndUser, EndUser.workspace_id == Workspace.id)
-                .where(EndUser.id == end_user_uuid)
-            )
+            # 同时取 workspace 主键与 storage_type：只取 storage_type 时，
+            # 「宿主/空间不存在」与「storage_type 为 NULL」都会得到 None，
+            # 无法区分。仓库其他读取路径约定 NULL 视为 neo4j
+            # （见 end_user_repository 的 Workspace.storage_type.is_(None)），
+            # 空间确实存在时按该口径归一，避免误入双删兜底
+            row = (
+                await db.execute(
+                    select(Workspace.id, Workspace.storage_type)
+                    .join(EndUser, EndUser.workspace_id == Workspace.id)
+                    .where(EndUser.id == end_user_uuid)
+                )
+            ).first()
+
+        if row is not None and row[1] is None:
+            storage_type = "neo4j"
+        else:
+            storage_type = row[1] if row is not None else None
 
         normalized_type = str(storage_type or "").strip().lower()
         if normalized_type not in ("rag", "neo4j"):

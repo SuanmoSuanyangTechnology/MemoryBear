@@ -386,7 +386,12 @@ async def list_messages(
         )
         items = []
         for hit in (result.get("hits") or {}).get("hits", []):
-            source = hit.get("_source") or {}
+            # 代理/客户端异常可能把 _source 返回成 list 等非 dict 值；
+            # 直取 .get 会抛 AttributeError 拖垮整页列表，与 reembedding
+            # 同口径先做类型保护
+            source = hit.get("_source")
+            if not isinstance(source, dict):
+                source = {}
             origin = str(source.get("source") or "")
             items.append(
                 {
