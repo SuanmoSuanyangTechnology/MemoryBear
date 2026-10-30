@@ -172,18 +172,19 @@ async def get_workspace_end_users(
     api_logger.info(f"用户 {current_user.username} 请求获取工作空间 {workspace_id} 的宿主列表, 类型: {current_workspace_type}")
 
     if current_workspace_type == "rag":
-        # RAG 分支走同步 ES 统计（count_messages_by_end_user_sync，单次最长
-        # 60s 超时），不能在事件循环里直接阻塞调用；丢到线程池执行。
+        # RAG 分支的 ES 聚合耗时较长，服务层只把纯 ES 统计放进线程池；
+        # PG 分页查询留在当前线程，避免请求级 Session 跨线程使用/被提前关闭。
         # 图分支为纯 PG 快查，维持既有直调方式
-        end_users_result = await asyncio.to_thread(
-            memory_dashboard_service.get_workspace_end_users_paginated_rag,
-            db=db,
-            workspace_id=workspace_id,
-            current_user=current_user,
-            page=page,
-            pagesize=pagesize,
-            keyword=keyword,
-            label=label,
+        end_users_result = (
+            await memory_dashboard_service.get_workspace_end_users_paginated_rag_async(
+                db=db,
+                workspace_id=workspace_id,
+                current_user=current_user,
+                page=page,
+                pagesize=pagesize,
+                keyword=keyword,
+                label=label,
+            )
         )
     else:
         end_users_result = memory_dashboard_service.get_workspace_end_users_paginated(

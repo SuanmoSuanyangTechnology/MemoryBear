@@ -1,3 +1,4 @@
+import asyncio
 import uuid
 from datetime import timedelta
 from typing import List, Optional, Dict, Any
@@ -324,6 +325,44 @@ def get_workspace_end_users_paginated_rag(
             f"获取 RAG 宿主列表（分页）失败: workspace_id={workspace_id} - {str(e)}"
         )
         raise
+
+async def get_workspace_end_users_paginated_rag_async(
+    db: Session,
+    workspace_id: uuid.UUID,
+    current_user: User,
+    page: int,
+    pagesize: int,
+    keyword: Optional[str] = None,
+    label: Optional[str] = None,
+) -> Dict[str, Any]:
+    """RAG 模式宿主列表分页（异步版）。
+
+    与同步版同样的口径，但同步 Session 不跨线程：PG 查询仍留在调用线程，
+    只把纯 ES 聚合（count_messages_by_end_user_sync）放进线程池，避免在事件
+    循环里阻塞，也避免请求级 Session 被后台线程继续使用。
+    """
+    business_logger.info(
+        f"获取 RAG 宿主列表（分页）: workspace_id={workspace_id}, "
+        f"keyword={keyword}, page={page}, pagesize={pagesize}, 操作者={current_user.username}"
+    )
+
+    from app.repositories.end_user_repository import EndUserRepository
+
+    end_user_ids = _workspace_end_user_ids(db, workspace_id)
+    memory_counts = await asyncio.to_thread(
+        rag_stats.count_messages_by_end_user_sync, end_user_ids
+    )
+    items, total = EndUserRepository(db).get_paginated_with_memory_rag(
+        workspace_id=workspace_id,
+        page=page,
+        pagesize=pagesize,
+        memory_counts=memory_counts,
+        keyword=keyword,
+        label=label,
+    )
+    business_logger.info(f"成功获取 RAG 宿主记录 {len(items)} 条，总计 {total} 条")
+    return {"items": items, "total": total}
+
 
 async def get_workspace_api_increment_async(
     workspace_id: uuid.UUID,
@@ -1643,17 +1682,16 @@ async def generate_rag_profile(
     if not end_user:
         raise ValueError(f"end_user {end_user_id} 不存在")
 
-    # get_rag_content 返回的是消息字典（id/role/content/dialog_at/source），
-    # 而 chunk 生成函数签名是 List[str]，这里显式取正文，避免把 dict 的 repr
-    # 拼进提示词。素材取「最近 limit 条」（desc 取页后反转为升序）：
-    # 数据量超过 limit 时最早对话不参与画像，保证画像反映最新记忆；
-    # 喂给生成器仍按 dialog_at 升序，维持对话时间线
-    rag_content = get_rag_content(
-        end_user_id,
+    # 本函数是 async（后续还有 await LLM 调用），不能再调用同步版
+    # get_rag_content：其内部 list_messages_sync → _run_sync 在运行中的事件
+    # 循环里会直接抛 RuntimeError。这里改用 async 的 rag_stats.list_messages，
+    # 宿主范围仍在当前同步 Session 上解析（与函数内其它 PG 读写同线程）。
+    # 素材取「最近 limit 条」（desc 取页后反转为升序），保证画像反映最新记忆
+    end_user_ids = _resolve_rag_scope_ids(db, current_user, end_user_id)
+    rag_content = await rag_stats.list_messages(
+        end_user_ids,
         page=1,
         pagesize=limit,
-        db=db,
-        current_user=current_user,
         order="desc",
     )
     chunks = [
