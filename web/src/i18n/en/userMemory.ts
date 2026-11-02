@@ -70,6 +70,7 @@ export const userMemory = {
       neverExpires: 'Never Expires',
 
       endUserProfile: 'Permanent Memory',
+      specialScene: 'Special Scenario',
       editEndUserProfile: 'Edit',
       other_name: 'Name',
       position: 'Position',
@@ -100,7 +101,7 @@ export const userMemory = {
         beliefs_or_stances: 'Belief',
         anchors: 'Anchors',
 
-        name: 'Name / Preferred Name',
+        name: 'Name and Preferred Name',
         age: 'Age',
         from: 'Hometown / Origin',
         residence: 'Residence',
