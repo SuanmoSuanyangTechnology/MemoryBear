@@ -1,4 +1,5 @@
 import type { UploadFile } from 'antd';
+import type { ToolItem, WorkflowToolItem } from '@/views/ToolManagement/types'
 
 // List query parameters
 export interface SkillQuery {
@@ -102,6 +103,7 @@ export interface LegacySkill {
     /** Tool operation/action */
     operation?: string;
     tool_missing?: boolean;
+    tool_info?: ToolItem | WorkflowToolItem;
   }>;
   /** Skill configuration settings */
   config: {
