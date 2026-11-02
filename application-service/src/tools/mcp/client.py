@@ -381,8 +381,15 @@ class SimpleMCPClient:
         elif self.is_sse:
             response_data = await self._send_sse_request(request)
         else:
-            async with self._session.post(self.server_url, json=request) as response:
-                response_data = await self._parse_streamable_response(response)
+            # ``ClientTimeout(total=...)`` raises a bare asyncio.TimeoutError, whose
+            # str() is "" — it used to reach MCPTool.execute as an empty error and
+            # collapse into the generic MCP_EXECUTION_ERROR everywhere downstream.
+            # Wrap it like the SSE branch does so the cause survives.
+            try:
+                async with self._session.post(self.server_url, json=request) as response:
+                    response_data = await self._parse_streamable_response(response)
+            except asyncio.TimeoutError:
+                raise MCPConnectionError(f"工具调用超时（>{self.timeout}s 未响应）")
 
         if "error" in response_data:
             error = response_data["error"]

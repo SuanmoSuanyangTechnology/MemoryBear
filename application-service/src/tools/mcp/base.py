@@ -1,4 +1,5 @@
 """MCP tool base class - consolidated version."""
+import asyncio
 import logging
 import time
 from typing import List, Dict, Any
@@ -146,14 +147,21 @@ class MCPTool(BaseTool):
 
         except Exception as e:
             execution_time = time.time() - start_time
-            # Type name keeps the record informative when ``str(e)`` is empty (e.g. a bare
-            # asyncio.TimeoutError); the traceback shows where the failure originated.
+            # A bare asyncio.TimeoutError stringifies to "", so ``str(e)`` alone would
+            # hand the caller an empty error that collapses into the bare error_code in
+            # the trace, the log API, the model prompt and the UI. Always return a
+            # non-empty, cause-specific message.
+            if isinstance(e, asyncio.TimeoutError):
+                error_text = f"请求超时（>{self.connection_config.get('timeout', 10)}s 未响应）"
+            else:
+                error_text = str(e).strip() or type(e).__name__
+            # The log keeps the exception type and traceback for the full picture.
             logger.error(
                 "MCP工具执行失败: %s, 错误: %s: %s",
                 requested_tool_name, type(e).__name__, e, exc_info=True,
             )
             return ToolResult.error_result(
-                error=str(e),
+                error=error_text,
                 error_code="MCP_EXECUTION_ERROR",
                 execution_time=execution_time
             )
