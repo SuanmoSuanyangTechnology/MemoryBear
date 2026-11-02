@@ -42,7 +42,7 @@ const ToolList: FC<ToolListProps> = ({value, onChange, readOnly = false}) => {
     if (value) {
       const processedData = value.map(async (item) => {
         // Skip if tool already has label (already processed)
-        if (!item.label && item.tool_id) {
+        if (!item.label && item.tool_id && !item.tool_missing) {
           try {
             // Fetch tool details and methods in parallel
             const [toolDetail, methods] = await Promise.all([
@@ -104,7 +104,7 @@ const ToolList: FC<ToolListProps> = ({value, onChange, readOnly = false}) => {
                   parameters: customFilterItem?.parameters
                 }
             }
-          } catch (error) {
+          } catch {
             // Return original item if fetch fails
             return item
           }
@@ -135,7 +135,7 @@ const ToolList: FC<ToolListProps> = ({value, onChange, readOnly = false}) => {
       is_active: true,
     }]
     setToolList(list)
-    onChange && onChange(list)
+    onChange?.(list)
   }
   
   /**
@@ -146,7 +146,7 @@ const ToolList: FC<ToolListProps> = ({value, onChange, readOnly = false}) => {
   const handleDeleteTool = (index: number) => {
     const list = toolList.filter((_item, idx) => idx !== index)
     setToolList([...list])
-    onChange && onChange(list)
+    onChange?.(list)
   }
   
   const content = (
@@ -160,9 +160,14 @@ const ToolList: FC<ToolListProps> = ({value, onChange, readOnly = false}) => {
                 <div className="rb:font-medium rb:leading-4">
                   {item.label || item.operation || item.tool_id}
                 </div>
-                {(!readOnly || item.is_active !== undefined) &&
+                {(!readOnly || item.is_active !== undefined) && !item.tool_missing &&
                   <Tag color={item.is_active ? 'success' : 'error'} className="rb:mt-1">
                     {item.is_active ? t('common.enable') : t('common.deleted')}
+                  </Tag>
+                }
+                {item.tool_missing &&
+                  <Tag color="error" className="rb:mt-1">
+                    {t('skills.unavailable')}
                   </Tag>
                 }
               </div>

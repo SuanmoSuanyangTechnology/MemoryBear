@@ -33,6 +33,11 @@ export interface SkillQuery {
    */
   ids?: string;
 }
+export interface Statistic {
+  plugin_count: number;
+  skill_count: number;
+  total: number;
+}
 
 /**
  * Type
@@ -96,6 +101,7 @@ export interface LegacySkill {
     tool_id: string;
     /** Tool operation/action */
     operation?: string;
+    tool_missing?: boolean;
   }>;
   /** Skill configuration settings */
   config: {
@@ -160,6 +166,7 @@ export interface Skill extends LegacySkill {
    * Update time (millisecond timestamp)
    */
   updated_at?: number;
+
 }
 
 
