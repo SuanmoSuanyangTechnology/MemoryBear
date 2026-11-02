@@ -25,6 +25,12 @@ import PrivateWrap from '../PrivateWrap';
 
 const { Header } = Layout;
 
+const resourceTabs = [
+  // { value: 'agent', iconClass: 'rb:bg-[url("@/assets/images/menuNew/application_gray.svg")]', activeIconClass: 'rb:bg-[url("@/assets/images/menuNew/application.svg")]' },
+  { value: 'skills', iconClass: 'rb:bg-[url("@/assets/images/menuNew/skills_gray.svg")]', activeIconClass: 'rb:bg-[url("@/assets/images/menuNew/skills.svg")]' },
+  // { value: 'tool', iconClass: 'rb:bg-[url("@/assets/images/menuNew/tool_gray.svg")]', activeIconClass: 'rb:bg-[url("@/assets/images/menuNew/tool.svg")]' },
+] as const;
+
 /**
  * @param source - Breadcrumb source type ('space' or 'manage'), defaults to 'manage'
  */
@@ -70,11 +76,6 @@ const AppHeader: FC<{ source?: 'space' | 'manage'; }> = ({ source = 'manage' }) 
   const breadcrumbs = allBreadcrumbs[breadcrumbSource] || [];
   const isResourceCenter = source === 'manage' && location.pathname === '/resources';
   const resourceType = searchParams.get('type') || 'skills';
-  const resourceTabs = [
-    // { value: 'agent', label: '应用', iconClass: 'rb:bg-[url("@/assets/images/menuNew/application_gray.svg")]', activeIconClass: 'rb:bg-[url("@/assets/images/menuNew/application.svg")]' },
-    { value: 'skills', label: '技能', iconClass: 'rb:bg-[url("@/assets/images/menuNew/skills_gray.svg")]', activeIconClass: 'rb:bg-[url("@/assets/images/menuNew/skills.svg")]' },
-    // { value: 'tool', label: '工具', iconClass: 'rb:bg-[url("@/assets/images/menuNew/tool_gray.svg")]', activeIconClass: 'rb:bg-[url("@/assets/images/menuNew/tool.svg")]' },
-  ] as const;
 
   useEffect(() => {
     if (isResourceCenter && resourceType) {
@@ -211,7 +212,7 @@ const AppHeader: FC<{ source?: 'space' | 'manage'; }> = ({ source = 'manage' }) 
                 }}
               >
                 <div className={clsx("rb:size-4.5 rb:bg-cover", isActive ? tab.activeIconClass : tab.iconClass)} />
-                {tab.label}
+                {t(`menu.${tab.value}`)}
               </Flex>
             )
           })}
