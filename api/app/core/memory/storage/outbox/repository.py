@@ -92,16 +92,18 @@ class OutboxRepository:
 
     def _claim_batch(self, worker_id: str, limit: int) -> list[ClaimedEvent]:
         other = events.alias("other_event")
-        blocked = sa.exists(sa.select(1).where(
+        has_processing = sa.exists(sa.select(1).where(
             other.c.label == events.c.label, other.c.node_id == events.c.node_id,
-            sa.or_(other.c.status == "processing", sa.and_(
-                other.c.status == "pending", other.c.sequence < events.c.sequence,
-            )),
+            other.c.status == "processing",
+        ))
+        has_earlier_pending = sa.exists(sa.select(1).where(
+            other.c.label == events.c.label, other.c.node_id == events.c.node_id,
+            other.c.status == "pending", other.c.sequence < events.c.sequence,
         ))
         claimed = []
         with self.sessions.begin() as session:
             rows = session.execute(sa.select(events).where(
-                events.c.status == "pending", ~blocked,
+                events.c.status == "pending", ~has_processing, ~has_earlier_pending,
             ).order_by(events.c.sequence).limit(limit).with_for_update(
                 skip_locked=True, of=events,
             )).mappings().all()
