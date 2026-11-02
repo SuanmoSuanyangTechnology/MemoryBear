@@ -71,6 +71,7 @@ export const userMemory = {
       neverExpires: '永不过期',
 
       endUserProfile: '永久记忆',
+      specialScene: '特殊场景',
       editEndUserProfile: '编辑',
       other_name: '名称',
       position: '职位',
@@ -101,7 +102,7 @@ export const userMemory = {
         anchors: '锚点',
         relations: '关系',
 
-        name: '姓名/称呼',
+        name: '姓名与称呼',
         age: '年龄',
         from: '籍贯/来自',
         residence: '居住地',

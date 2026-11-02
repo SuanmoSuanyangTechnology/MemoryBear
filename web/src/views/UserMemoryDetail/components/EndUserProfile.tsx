@@ -1,9 +1,3 @@
-/*
- * @Author: ZhaoYing 
- * @Date: 2026-02-03 18:33:30 
- * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-06-01 14:11:36
- */
 /**
  * End User Profile Component
  * Displays and manages end user profile information
@@ -12,8 +6,7 @@
 import { forwardRef, useImperativeHandle, useEffect, useState, useRef, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useParams } from 'react-router-dom'
-import { Skeleton, Flex } from 'antd';
-import dayjs from 'dayjs'
+import { Skeleton, List, Select } from 'antd';
 import clsx from 'clsx'
 
 import RbCard from '@/components/RbCard/Card'
@@ -21,7 +14,7 @@ import {
   getEndUserInfo,
 } from '@/api/memory'
 import EndUserProfileModal from './EndUserProfileModal'
-import type { EndUser, EndUserProfileModalRef, EndUserProfileRef } from '../types'
+import type { EndUser, EndUserProfileModalRef, EndUserProfileRef, SpecialScene } from '../types'
 import { OLD_META_DATA_KEY_FIELDS, NEW_META_DATA_KEY_FIELDS } from '../constant';
 
 /**
@@ -35,7 +28,7 @@ interface EndUserProfileProps {
 const formatValue = (value: string | string[] | null | undefined) => {
   if (!value) return '-'
   if (Array.isArray(value)) {
-    return value.length ? value.join(' | ') : '-'
+    return value.length ? value.join(', ') : '-'
   }
   return value
 }
@@ -45,16 +38,32 @@ const EndUserProfile = forwardRef<EndUserProfileRef, EndUserProfileProps>(({ cla
   const endUserProfileModalRef = useRef<EndUserProfileModalRef>(null)
   const [loading, setLoading] = useState<boolean>(false)
   const [data, setData] = useState<EndUser | null>(null)
+  const [selectedSceneId, setSelectedSceneId] = useState<string | null>(null)
+  const [specialScenes, setSpecialScenes] = useState<SpecialScene[]>([])
 
-  
   /** Fetch profile data */
   const getData = useCallback(() => {
     if (!id) return
+    setSelectedSceneId(null)
+    setSpecialScenes([])
     setLoading(true)
     getEndUserInfo(id).then((res) => {
       const userData = res as EndUser
       setData(userData)
-      setLoading(false) 
+      setLoading(false)
+      const specialSceneList = Object.entries(userData?.meta_data?.domain_specific_info ?? {}).map(
+        ([sceneId, fields]) => ({
+          id: sceneId,
+          name: sceneId,
+          fields: Object.entries(fields).map(([fieldKey, field]) => ({
+            key: `${sceneId}.${fieldKey}`,
+            label: field.field_label || fieldKey,
+            value: formatValue(field.values),
+          })),
+        }),
+      )
+      setSpecialScenes(specialSceneList)
+      setSelectedSceneId(specialSceneList[0].id)
     })
     .finally(() => {
       setLoading(false)
@@ -85,6 +94,20 @@ const EndUserProfile = forwardRef<EndUserProfileRef, EndUserProfileProps>(({ cla
   const metaDataKeyFields = hasOldMetaData
     ? OLD_META_DATA_KEY_FIELDS
     : NEW_META_DATA_KEY_FIELDS
+  const profileItems = [
+    { key: 'other_name', label: t('userMemory.other_name'), value: data?.other_name || '-' },
+    ...metaDataKeyFields
+      .filter((key) => {
+        const value = data?.meta_data?.[key]
+        return value && (!Array.isArray(value) || value.length > 0)
+      })
+      .map((key) => ({
+        key,
+        label: t(`userMemory.meta_data.${key}`),
+        value: formatValue(data?.meta_data?.[key]),
+      })),
+  ]
+  const selectedScene = specialScenes.find((scene) => scene.id === selectedSceneId) ?? specialScenes[0]
 
   return (
     <RbCard 
@@ -97,31 +120,36 @@ const EndUserProfile = forwardRef<EndUserProfileRef, EndUserProfileProps>(({ cla
       }
       headerClassName="rb:min-h-[46px]! rb:font-medium!"
       className={clsx("rb:bg-[#FFFFFF]! rb:shadow-[0px_2px_6px_0px_rgba(33,35,50,0.13)]! rb:absolute! rb:w-100 rb:top-3 rb:left-0 rb:bottom-0 rb:z-100", className)}
-      bodyClassName="rb:px-5! rb:pb-5! rb:pt-3.75! rb:max-h-[calc(100%-46px)]! rb:overflow-auto"
+      bodyClassName="rb:px-5! rb:py-0! rb:max-h-[calc(100%-46px)]! rb:overflow-auto"
     >
       {loading
         ? <Skeleton />
-        : <Flex vertical gap={20} className="rb:leading-5">
-          <div>
-            <div className="rb:text-[#7B8085]">{t('userMemory.other_name')}</div>
-            <div className="rb:mt-0.5">{data?.other_name || '-'}</div>
-          </div>
-          {metaDataKeyFields.map((key) => {
-            const value = data?.meta_data?.[key]
-            if (!value || (Array.isArray(value) && value.length < 1)) return null
-
-            return(
-              <div key={key}>
-                <div className="rb:text-[#7B8085]">{t(`userMemory.meta_data.${key}`)}</div>
-                <div className="rb:mt-0.5">{formatValue(value)}</div>
-              </div>
-            )
-          })}
-
-          <div className="rb:text-[#7B8085] rb:text-[12px] rb:leading-4.5">
-            {t('userMemory.updated_at')}: {data?.updated_at ? dayjs(data?.updated_at).format('YYYY/MM/DD HH:mm:ss') : ''}
-          </div>
-        </Flex>
+        : <div className="rb:leading-5">
+          <List
+            dataSource={[
+              ...profileItems,
+              ...(specialScenes.length
+                ? [{ key: 'special_scene', label: t('userMemory.specialScene'), value: (
+                  <Select
+                    className="rb:w-full"
+                    value={selectedSceneId}
+                    onChange={setSelectedSceneId}
+                    fieldNames={{label: 'name', value: 'id'}}
+                    options={specialScenes}
+                  />
+                )}]
+                : []
+              ),
+              ...(selectedScene?.fields ?? []),
+            ]}
+            renderItem={(item) => (
+              <List.Item key={item.key} className={item.key === 'special_scene' ? 'rb:border-0! rb:mt-3!' : undefined}>
+                <div className="rb:w-24 rb:shrink-0 rb:mr-3 rb:text-[#7B8085]">{item.label}</div>
+                <div className="rb:flex-1 rb:min-w-0 rb:wrap-break-word">{item.value}</div>
+              </List.Item>
+            )}
+          />
+        </div>
       }
       <EndUserProfileModal
         ref={endUserProfileModalRef}
