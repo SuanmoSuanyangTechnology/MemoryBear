@@ -9,6 +9,7 @@ patchable) rather than imported here.
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from functools import partial
@@ -26,6 +27,8 @@ from ..schemas.invoke_schema import (
     LLMInvokeRequest,
     VideoInvokeRequest,
 )
+from ..trace import get_trace_id
+from .invoke_diagnostics import DiagnosticCall, InvokeDiagnostics
 from .invoke_service import InvokeAttribution, InvokeFailure, InvokeOutcome
 
 #: Bounded chunk queue: absorbs provider bursts without hiding a stalled
@@ -74,6 +77,20 @@ def build_invoke_plan(
 ) -> InvokePlan:
     """Bind the facade call for one request (raises nothing; planning only)."""
     first_result_timeout_s, total_timeout_s = invoke_timeout_tiers(settings, request)
+    diagnostics = InvokeDiagnostics(
+        {
+            "trace_id": attribution.request_id or get_trace_id(),
+            "source_service": attribution.source_service,
+            "tenant_id": str(tenant_id),
+            "config_id": str(request.config_id),
+            "operation": request.type,
+            "stream": request.stream,
+            "resource_type": attribution.resource_type,
+            "resource_id": str(attribution.resource_id) if attribution.resource_id else None,
+            "first_result_timeout_s": first_result_timeout_s,
+            "total_timeout_s": total_timeout_s,
+        }
+    )
     if isinstance(request, LLMInvokeRequest) and request.stream:
         # Streamed llm: the first-frame budget covers parse + first chunk only;
         # draining runs outside the budget and inter-chunk idle is timed by the
@@ -94,7 +111,11 @@ def build_invoke_plan(
             client_pool=runtime.model_runtime.pool,
             cooldown_sessionmaker=runtime.database.async_session,
         )
-        return InvokePlan(call=call, total_timeout_s=total_timeout_s, chunk_sink=sink)
+        return InvokePlan(
+            call=DiagnosticCall(call, diagnostics),
+            total_timeout_s=total_timeout_s,
+            chunk_sink=sink,
+        )
     call = partial(
         invoke_call,
         db,
@@ -107,7 +128,7 @@ def build_invoke_plan(
         media_poll_interval_s=settings.invoke_media_poll_interval_s,
         media_poll_timeout_s=settings.invoke_media_poll_timeout_s,
     )
-    return InvokePlan(call=call, total_timeout_s=total_timeout_s)
+    return InvokePlan(call=DiagnosticCall(call, diagnostics), total_timeout_s=total_timeout_s)
 
 
 async def guarded(call: InvokeCall, *, timeout_s: float) -> InvokeOutcome:
@@ -119,6 +140,13 @@ async def guarded(call: InvokeCall, *, timeout_s: float) -> InvokeOutcome:
     try:
         return await asyncio.wait_for(call(), timeout=timeout_s)
     except TimeoutError as exc:
+        if isinstance(call, DiagnosticCall):
+            call.diagnostics.emit(
+                "model_invoke_total_timeout",
+                logging.ERROR,
+                error=exc,
+                timeout_s=timeout_s,
+            )
         raise InvokeFailure(
             code=BizCode.SERVICE_UNAVAILABLE,
             message=f"模型调用超时（>{timeout_s:g}s 未产出结果）",
