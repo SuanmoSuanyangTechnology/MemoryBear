@@ -57,8 +57,13 @@ const SkillFiles: FC<{ files: PreviewFile[] }> = ({ files }) => {
 
   return (
     <Flex aria-label={t('skills.filePreview')} component="section" className="rb:h-96 rb:overflow-hidden rb:rounded-xl rb-border">
-      <nav aria-label={t('skills.directoryTree')} className="rb:w-50 rb:shrink-0 rb:overflow-auto rb-border-r rb:bg-slate-50 rb:p-2">
-        <Tree blockNode showIcon className="skill-import-tree" treeData={treeData}
+      <nav aria-label={t('skills.directoryTree')} className="rb:w-60 rb:shrink-0 rb:overflow-auto rb-border-r rb:bg-slate-50 rb:p-2">
+        <Tree
+          blockNode
+          showIcon
+          className="skill-import-tree rb:[&_.ant-tree-node-selected]:bg-primary-600! rb:[&_.ant-tree-node-selected]:text-white! rb:[&_.ant-tree-node-selected_.ant-tree-iconEle]:brightness-0 rb:[&_.ant-tree-node-selected_.ant-tree-iconEle]:invert"
+          treeData={treeData}
+          titleRender={node => <span title={String(node.key)} className="rb:block rb:truncate">{node.title as string}</span>}
           selectedKeys={[selected.path]} expandedKeys={expandedKeys} autoExpandParent={false}
           onExpand={keys => setExpandedKeys(keys.map(String))}
           onSelect={keys => { if (keys.length) setActiveFile(String(keys[0])); }} />

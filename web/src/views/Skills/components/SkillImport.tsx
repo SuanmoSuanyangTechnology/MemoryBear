@@ -44,16 +44,7 @@ const SkillImport: FC<{ open: boolean; onClose: () => void; onImported?: () => v
     ? { url: (form.getFieldValue('url') ?? '').trim() }
     : { file: form.getFieldValue('files')?.[0] };
   const parse = async () => {
-    if (source === 'github') {
-      try {
-        const address = new URL((form.getFieldValue('url') ?? '').trim());
-        if (address.protocol !== 'https:' || address.hostname !== 'github.com' || address.username || address.password || address.pathname.split('/').filter(Boolean).length < 2) {
-          throw new Error();
-        }
-      } catch {
-        return;
-      }
-    } else if (!form.getFieldValue('files')?.[0]?.uid) {
+    if (source === 'package' && !form.getFieldValue('files')?.[0]?.uid) {
       return;
     }
     setLoading(true);
@@ -184,7 +175,30 @@ const SkillImport: FC<{ open: boolean; onClose: () => void; onImported?: () => v
                   />
                 </Form.Item>
                 {source === 'github' ? (
-                  <Form.Item name="url" label={t('skills.githubUrl')} rules={[{ required: true, whitespace: true, message: t('common.pleaseEnter') }]}
+                  <Form.Item name="url" label={t('skills.githubUrl')}
+                    validateFirst
+                    rules={[
+                      { required: true, whitespace: true, message: t('common.pleaseEnter') },
+                      {
+                        validator: (_, value: string) => {
+                          try {
+                            const address = new URL(value.trim());
+                            if (
+                              (address.protocol === 'http:' || address.protocol === 'https:') &&
+                              address.hostname === 'github.com' &&
+                              !address.username &&
+                              !address.password &&
+                              address.pathname.split('/').filter(Boolean).length >= 2
+                            ) {
+                              return Promise.resolve();
+                            }
+                          } catch {
+                            return Promise.reject(new Error(t('skills.invalidGithubUrl')));
+                          }
+                          return Promise.reject(new Error(t('skills.invalidGithubUrl')));
+                        },
+                      },
+                    ]}
                     extra={t('skills.githubHint')}
                   >
                     <Input placeholder="https://github.com/owner/repository/tree/main/skills/skill-name" />
