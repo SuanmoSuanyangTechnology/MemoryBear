@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:57:15 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-06-11 14:51:48
+ * @Last Modified time: 2026-10-27 15:52:01
  */
 /**
  * User Memory Detail Types
@@ -214,6 +214,8 @@ export interface EndUserMetaData {
     group?: string[];
     object?: string[];
     pet?: string[];
+
+    domain_specific_info?: Record<string, Record<string, { field_label: string; values?: string[] }>>
   }
 /**
  * End user profile
@@ -227,6 +229,19 @@ export interface EndUser {
   meta_data: EndUserMetaData;
   created_at: number;
   updated_at: number;
+}
+
+/** Display models derived from meta_data.domain_specific_info. */
+export interface SpecialSceneField {
+  key: string;
+  label: string;
+  value: string;
+}
+
+export interface SpecialScene {
+  id: string;
+  name: string;
+  fields: SpecialSceneField[];
 }
 /**
  * End user profile modal ref
