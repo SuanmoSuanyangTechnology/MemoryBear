@@ -24,7 +24,7 @@ from typing import Any
 import grpc
 from prometheus_client import Counter, Gauge, Histogram
 
-from .metadata import TRACE_ID_METADATA_KEY, metadata_dict
+from .metadata import trace_id_from_metadata
 
 logger = logging.getLogger(__name__)
 
@@ -80,7 +80,7 @@ def _wrap(handler, behavior: Callable[..., AsyncIterator[Any]]):
 
 
 class TraceInterceptor(grpc.aio.ServerInterceptor):
-    """Bind x-trace-id into the service's own ContextVar for the stream lifetime."""
+    """Bind x-trace-id (or the W3C traceparent trace-id) for the stream lifetime."""
 
     def __init__(self, bind: TraceBinder, reset: TraceResetter) -> None:
         self._bind = bind
@@ -97,9 +97,7 @@ class TraceInterceptor(grpc.aio.ServerInterceptor):
         original = handler.unary_stream
 
         async def unary_stream(request, context):
-            trace_id = metadata_dict(context.invocation_metadata()).get(
-                TRACE_ID_METADATA_KEY
-            )
+            trace_id = trace_id_from_metadata(context.invocation_metadata())
             token = self._bind(trace_id) if trace_id else None
             try:
                 async for item in original(request, context):

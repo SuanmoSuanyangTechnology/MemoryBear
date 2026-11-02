@@ -10,7 +10,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Iterator, Mapping
 from types import SimpleNamespace
 
-from .metadata import TRACE_ID_METADATA_KEY
+from .metadata import trace_id_from_metadata
 
 
 class MetadataHeaders(Mapping[str, str]):
@@ -50,7 +50,7 @@ class MetadataRequest:
         self.method = method
         self.url = SimpleNamespace(path=path)
         self.state = SimpleNamespace(
-            trace_id=trace_id or self.headers.get(TRACE_ID_METADATA_KEY)
+            trace_id=trace_id or trace_id_from_metadata(metadata)
         )
 
 

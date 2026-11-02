@@ -40,7 +40,13 @@ from ..services.invoke_emitter import (
 )
 from ..services.invoke_runner import build_invoke_plan, guarded
 from ..services.invoke_service import InvokeFailure, invoke
-from ..trace import TRACE_ID_HEADER, normalize_trace_id, reset_trace_id, set_trace_id
+from ..trace import (
+    reset_trace_id,
+    reset_traceparent,
+    resolve_trace,
+    set_trace_id,
+    set_traceparent,
+)
 from .auth import INVOKE_ACL_METHOD, INVOKE_ACL_PATH
 
 logger = logging.getLogger(__name__)
@@ -165,8 +171,9 @@ class InvokeServicer(invoke_pb2_grpc.ModelInvokeServiceServicer):
             # Same contract as the HTTP middleware: a missing or malformed trace
             # ID becomes a generated one, and the service ContextVar is bound so
             # usage attribution and logs agree across both transports.
-            trace_id = normalize_trace_id(view.headers.get(TRACE_ID_HEADER))
+            trace_id, traceparent = resolve_trace(view.headers)
             trace_token = set_trace_id(trace_id)
+            traceparent_token = set_traceparent(traceparent) if traceparent else None
             try:
                 principal = current_principal()
                 if not isinstance(principal, InvokePrincipal):
@@ -242,6 +249,8 @@ class InvokeServicer(invoke_pb2_grpc.ModelInvokeServiceServicer):
                     async for frame in _frames(events):
                         yield frame
             finally:
+                if traceparent_token is not None:
+                    reset_traceparent(traceparent_token)
                 reset_trace_id(trace_token)
         finally:
             reset_upstream_remaining(token)

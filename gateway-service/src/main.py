@@ -19,9 +19,11 @@ from memorybear_grpc.client import ChannelPool
 from src import config
 from src import redis as gredis
 from src.forward import Forwarder, StaticTargetResolver
-from src.identity_backfill import IdentityApiKeyBackfill
 from src.grpc_forward import GrpcForwarder
+from src.identity_backfill import IdentityApiKeyBackfill
+from src.metrics import gateway_route_table_size
 from src.middleware import GatewayDeps, GatewayMiddleware
+from src.route_reload import RouteFileWatcher
 from src.routes import router
 from src.stream_gate import StreamGate
 
@@ -31,6 +33,7 @@ def build_gateway_deps() -> GatewayDeps:
     # share the stream gate and the application-service circuit breaker: one
     # concurrency budget and one health signal cover the same upstream service.
     resolver = StaticTargetResolver(routes=config.settings.target_routes)
+    gateway_route_table_size.set(resolver.size)
     timeout = httpx.Timeout(connect=5.0, read=30.0, write=30.0, pool=5.0)
     gate = StreamGate(config.settings.gateway_stream_max_connections)
     forwarder = Forwarder(
@@ -57,7 +60,7 @@ def build_gateway_deps() -> GatewayDeps:
         pool=pool,
         gate=gate,
         circuit=forwarder.circuit_for("application-service"),
-        protocol_override=config.settings.app_chat_protocol,
+        default_protocol=config.settings.app_chat_protocol,
         default_target=config.settings.application_service_grpc_target,
         deadline_s=config.settings.gateway_grpc_deadline_s,
         heartbeat_s=config.settings.gateway_stream_heartbeat_s,
@@ -89,10 +92,23 @@ def get_deps():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await gredis.init_redis()
+    watcher = None
     try:
         app.state.gateway_deps = build_gateway_deps()
+        route_file = config.active_routes_file()
+        if route_file is not None:
+            watcher = RouteFileWatcher(
+                path=route_file,
+                resolver=app.state.gateway_deps.resolver,
+                loader=config.read_target_routes_file,
+                interval_s=config.settings.route_reload_interval_s,
+            )
+            app.state.route_watcher = watcher
+            watcher.start()
         yield
     finally:
+        if watcher is not None:
+            await watcher.stop()
         backfill = getattr(app.state, "identity_api_key_backfill", None)
         if backfill is not None:
             await backfill.aclose()

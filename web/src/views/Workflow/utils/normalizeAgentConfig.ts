@@ -6,6 +6,7 @@ const REFERENCE_CONFIG_KEYS = [
   'variable_mapping',
   'files',
   'error_handle',
+  'memory'
 ] as const
 
 export const normalizeAgentConfig = (config: Record<string, unknown>): Record<string, unknown> => {

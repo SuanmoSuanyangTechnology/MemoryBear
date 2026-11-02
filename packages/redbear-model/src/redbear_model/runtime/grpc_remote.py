@@ -108,12 +108,14 @@ class GrpcAsyncInvokeTransport(AsyncInvokeTransport):
         self._margin_s = margin_s
 
     def _stream_deadline(self) -> float | None:
-        """Streams are idle-bounded; only an upstream deadline caps their total."""
+        """Stream total = min(configured stream budget, live upstream budget)."""
 
+        total = self._timeouts.total_s
         remaining = upstream_remaining()
         if remaining is None:
-            return None
-        return max(0.001, remaining - self._margin_s)
+            return total
+        capped = max(0.001, remaining - self._margin_s)
+        return capped if total is None else min(total, capped)
 
     def _call_deadline(self) -> float:
         return deadline_for(budget_s=self._call_budget_s, margin_s=self._margin_s)
@@ -121,6 +123,13 @@ class GrpcAsyncInvokeTransport(AsyncInvokeTransport):
     async def _open(
         self, request: InvokeRequest, target: InvokeTarget, *, stream: bool
     ) -> Any:
+        remaining = upstream_remaining()
+        if remaining is not None and remaining <= self._margin_s:
+            # The margin is reserved for the response trip/orchestration; a
+            # downstream call started with no usable budget can never succeed.
+            raise RemoteInvokeUnavailableError(
+                "upstream deadline exhausted before model invoke"
+            )
         channel = await self._pool.channel(self._target_name)
         stub = invoke_pb2_grpc.ModelInvokeServiceStub(channel)
         return stub.Invoke(
