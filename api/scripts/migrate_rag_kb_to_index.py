@@ -25,7 +25,8 @@
 - 删除旧 chunk 索引 ``vector_index_{kb_id}_node``
 
 独立运行：PostgreSQL / Elasticsearch 连接信息全部从环境变量读取，
-不读取项目 .env，也不 import app 包。
+不读取项目 .env，也不 import app 包。``APP_ENV`` 只用于日志与断点标识，
+线上容器通常只在部署里配置 ``ENVIRONMENT``，因此缺省时回退到它。
 
 Usage::
 
@@ -74,11 +75,10 @@ def _validate_env() -> None:
         raise ValueError(
             "缺少必填环境变量: " + ", ".join(sorted(set(_MISSING_ENV)))
         )
-    if APP_ENV not in {"test", "pre", "prod"}:
-        raise ValueError("APP_ENV 必须是 test、pre 或 prod")
 
 
-APP_ENV = _required_env("APP_ENV").lower()
+# APP_ENV 不是连接依赖，只用于日志和断点标识；线上容器一般只注入 ENVIRONMENT
+APP_ENV = (os.getenv("APP_ENV") or os.getenv("ENVIRONMENT") or "unknown").strip().lower()
 
 POSTGRES_CONFIG = {
     "host": _required_env("DB_HOST"),
