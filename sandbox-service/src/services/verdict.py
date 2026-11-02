@@ -114,6 +114,21 @@ def _is_oom(
     return False
 
 
+def _clamp(
+    text: str, carried_bytes: int | None, max_bytes: int, head_ratio: float
+) -> tuple[str, int, bool]:
+    """Clamp one stream, keeping the true byte count when the backend carried it.
+
+    A backend that already bounds its own capture (``RunResult.stdout_bytes``) reports
+    the bytes the program really wrote; without that hint the text is all we know.
+    """
+
+    clamped, total, cut = clamp_text(text, max_bytes, head_ratio)
+    if carried_bytes is not None and carried_bytes > total:
+        return clamped, carried_bytes, True
+    return clamped, total, cut
+
+
 def judge(
     result: RunResult,
     budget: OutputBudget | None = None,
@@ -126,11 +141,11 @@ def judge(
     """Turn a raw ``RunResult`` into the single terminal verdict of one exec."""
 
     budget = budget or OutputBudget()
-    stdout, stdout_bytes, stdout_cut = clamp_text(
-        result.stdout, budget.stdout_max_bytes, budget.head_ratio
+    stdout, stdout_bytes, stdout_cut = _clamp(
+        result.stdout, result.stdout_bytes, budget.stdout_max_bytes, budget.head_ratio
     )
-    stderr, stderr_bytes, stderr_cut = clamp_text(
-        result.stderr, budget.stderr_max_bytes, budget.head_ratio
+    stderr, stderr_bytes, stderr_cut = _clamp(
+        result.stderr, result.stderr_bytes, budget.stderr_max_bytes, budget.head_ratio
     )
 
     error: str | None

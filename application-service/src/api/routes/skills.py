@@ -1,10 +1,11 @@
 """Skill family routes — management plane (design doc §9).
 
-Five endpoints mirroring the prototype's收敛: the import pipeline is the only write
+Six endpoints mirroring the prototype's收敛: the import pipeline is the only write
 entry point (ADR-9), so ``POST /skills`` and ``PUT /skills/{id}`` are gone.
 
 | method | path                        | role                                            |
 | GET    | ``/skills``                 | list: plugin rows + standalone skills, ``kind``  |
+| GET    | ``/skills/statistics``      | tab counts (plugin / skill / total), same filters |
 | GET    | ``/skills/{id}``            | the single detail entry (skill or plugin)        |
 | DELETE | ``/skills/{id}``            | soft-delete the row, purge the pack (ADR-13 A)   |
 | POST   | ``/skills/packages/import`` | import from zip / URL, ``dry_run`` preview       |
@@ -71,6 +72,27 @@ def list_skills(
     ]
     meta = PageMeta(page=page, pagesize=pagesize, total=total, hasnext=(page * pagesize) < total)
     return success(data=PageData(page=meta, items=items), msg="技能市场列表获取成功")
+
+
+@router.get("/statistics", summary="技能 Tab 数量统计", response_model=ApiResponse)
+def get_skill_statistics(
+        db: DbSession,
+        principal: Caller,
+        search: str | None = Query(None, description="搜索关键词（与列表接口一致，各 Tab 共用）"),
+        is_active: bool | None = Query(None, description="是否激活"),
+        is_public: bool | None = Query(None, description="是否公开"),
+):
+    """Plugin / skill / total counts under the list filters.
+
+    The search box is shared by every tab, so statistics accept the same query
+    conditions as ``GET /skills`` (minus ``kind`` / ``ids`` / pagination). Declared
+    before ``/{skill_id}`` so "statistics" is not captured by the UUID path.
+    """
+    stats = SkillPackageService.get_entry_statistics(
+        db, principal.tenant_id,
+        search=search, is_active=is_active, is_public=is_public,
+    )
+    return success(data=stats, msg="技能统计信息获取成功")
 
 
 @router.get("/{skill_id}", summary="获取技能详情", response_model=ApiResponse)

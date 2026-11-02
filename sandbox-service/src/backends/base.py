@@ -84,6 +84,10 @@ class RunResult:
     stderr: str = ""
     error: str | None = None
     duration_ms: int = 0
+    # Bytes the program actually wrote, when the backend knows it even though ``stdout``
+    # / ``stderr`` were already cut to fit. ``None`` means "the text is the whole truth".
+    stdout_bytes: int | None = None
+    stderr_bytes: int | None = None
 
 
 @dataclass(frozen=True)
