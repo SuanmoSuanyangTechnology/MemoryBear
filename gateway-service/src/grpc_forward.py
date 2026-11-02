@@ -20,6 +20,7 @@ from fastapi.responses import JSONResponse, Response, StreamingResponse
 from memorybear.application.v1 import chat_pb2, chat_pb2_grpc
 from memorybear_grpc.client import CLIENT_FRAMES, STREAM_CANCELLED, ChannelPool
 from memorybear_grpc.errors import http_status_for_grpc, parse_error_trailers
+from memorybear_grpc.metadata import traceparent_trace_id
 
 from .circuit import CircuitBreaker
 from .forward import TargetRoute
@@ -58,7 +59,7 @@ def _ascii_metadata(values: list[tuple[str, str]]) -> tuple[tuple[str, str], ...
 
 
 def _metadata(request: Request) -> tuple[tuple[str, str], ...]:
-    """Identity namespace plus accept-language; credentials never ride x-*.
+    """Identity namespace, accept-language and a validated W3C traceparent.
 
     The internal token, when issued, is the only authorization source (mirrors
     the HTTP forwarder); x-api-key / x-internal-token never leave the gateway.
@@ -68,6 +69,9 @@ def _metadata(request: Request) -> tuple[tuple[str, str], ...]:
     language = request.headers.get("accept-language")
     if language:
         values.append(("accept-language", language))
+    traceparent = request.headers.get("traceparent")
+    if traceparent_trace_id(traceparent) is not None:
+        values.append(("traceparent", traceparent))
     for name, value in request.headers.items():
         low = name.lower()
         if low.startswith("x-") and low not in _BLOCKED_HEADERS:
@@ -119,7 +123,7 @@ class GrpcForwarder:
         pool: ChannelPool,
         gate: StreamGate,
         circuit: CircuitBreaker | None = None,
-        protocol_override: str = "",
+        default_protocol: str = "",
         default_target: str = "",
         deadline_s: float = 3600.0,
         heartbeat_s: float = 30.0,
@@ -128,25 +132,22 @@ class GrpcForwarder:
         self._pool = pool
         self._gate = gate
         self._circuit = circuit or CircuitBreaker()
-        self._protocol_override = protocol_override
+        self._default_protocol = default_protocol
         self._default_target = default_target
         self._deadline_s = deadline_s
         self._heartbeat_s = heartbeat_s
         self._idle_timeout_s = idle_timeout_s
 
     def matches(self, request: Request, route: TargetRoute) -> bool:
-        """Protocol switch: an explicit env value wins; otherwise the route
-        default decides (routes.json may opt a path into gRPC)."""
+        """Protocol switch: the route file is authoritative; the env value is
+        only the default for routes that do not declare ``protocol``."""
 
         if request.method != "POST" or request.url.path != CHAT_PATH:
             return False
         if route.service != "application-service":
             return False
-        if self._protocol_override == "http":
-            return False
-        if self._protocol_override == "grpc":
-            return True
-        return route.protocol == "grpc"
+        protocol = route.protocol or self._default_protocol or "http"
+        return protocol == "grpc"
 
     async def forward(self, request: Request, route: TargetRoute) -> Response:
         if not route.grpc_method:

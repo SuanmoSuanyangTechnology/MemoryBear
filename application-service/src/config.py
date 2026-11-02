@@ -402,14 +402,21 @@ class AppServiceSettings(BaseSettings):
     model_service_invoke_media_idle_timeout_seconds: float = Field(
         default=720.0, gt=0, validation_alias="MODEL_SERVICE_INVOKE_MEDIA_IDLE_TIMEOUT_SECONDS"
     )
+    # Wall-clock cap for one invoke stream. A continuously producing stream
+    # never trips the idle timeout, so entries without an inbound deadline
+    # (HTTP chat, drafts) need this explicit total.
+    model_service_invoke_stream_budget_seconds: float = Field(
+        default=3600.0, gt=0, validation_alias="MODEL_SERVICE_INVOKE_STREAM_BUDGET_SECONDS"
+    )
     # East-west runtime invoke protocol: http keeps the SSE frame contract,
     # grpc uses ModelInvokeService with the same frame semantics.
     app_model_protocol: Literal["http", "grpc"] = Field(
         default="http", validation_alias="APP_MODEL_PROTOCOL"
     )
     model_service_grpc_target: str = Field(
-        # Same Service as the HTTP leg (`base_url`); the gRPC listener is a
-        # second port (9090) on it, not a separate `-grpc` Service.
+        # One headless Service per workload (`clusterIP: None`) exposes both
+        # 8080/http and 9090/grpc; round_robin then resolves per-Pod IPs under
+        # the unchanged service name.
         default="dns:///model-service:9090",
         validation_alias="MODEL_SERVICE_GRPC_TARGET",
     )

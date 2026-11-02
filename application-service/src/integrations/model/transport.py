@@ -9,6 +9,7 @@ from urllib.parse import quote
 
 import httpx
 
+from ...trace import get_traceparent
 from .contracts import ModelCallContext
 from .errors import ModelServiceTimeoutError, ModelServiceUnavailableError
 
@@ -58,6 +59,9 @@ def _request_headers(
     headers["X-Model-Source"] = context.source
     if context.trace_id:
         headers["X-Trace-Id"] = context.trace_id
+    traceparent = get_traceparent()
+    if traceparent:
+        headers["traceparent"] = traceparent
     return headers
 
 
