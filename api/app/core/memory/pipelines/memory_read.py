@@ -354,20 +354,15 @@ class ReadPipeLine(ModelClientMixin, BasePipeline):
     def _raw_relation_count(results: list) -> int:
         return sum(len(result.relations) for result in results if isinstance(result, MemorySearchResult))
 
-    @staticmethod
-    def _combine_with_profile(
-            memory_l0: MemorySearchResult,
-            results: MemorySearchResult,
-            include_metadata: bool,
-    ) -> MemorySearchResult:
-        """按需把用户画像 metadata 节点拼进检索结果。
+    async def _load_profile(self, include_metadata: bool) -> MemorySearchResult:
+        """加载用户画像 metadata。
 
-        画像仍参与拆题与摘要生成；``include_metadata=False`` 只影响对外返回的
-        memories，不改变检索链路本身。
+        ``include_metadata=False`` 时完全不加载画像，拆题、摘要与返回结果都
+        不会使用画像上下文。
         """
-        if include_metadata:
-            return memory_l0 + results
-        return results
+        if not include_metadata:
+            return MemorySearchResult(memories=[])
+        return await self._user_meta()
 
     async def _emit_result_ready(self, result: MemorySearchResult, started_at: float) -> None:
         profile_result = MemorySearchResult(memories=[])
@@ -667,7 +662,7 @@ class ReadPipeLine(ModelClientMixin, BasePipeline):
     ) -> MemorySearchResult:
         self._ensure_run_started()
         search_service = await self._get_search_service(includes, enable_rerank=enable_rerank)
-        memory_l0 = await self._user_meta()
+        memory_l0 = await self._load_profile(include_metadata)
         profile = project_profile_data(memory_l0)
         await self._emit_stage("profile_loaded", {
             "has_profile": profile_has_content(profile),
@@ -858,7 +853,7 @@ class ReadPipeLine(ModelClientMixin, BasePipeline):
 
         await self._emit_stage("context_prepared", {"memory_count": len(results.memories)})
 
-        combined = self._combine_with_profile(memory_l0, results, include_metadata)
+        combined = memory_l0 + results
         combined.execution_trace = hybrid_execution_trace
         await self._emit_stage("result_ready", {
             "duration_ms": self._elapsed_ms() if hasattr(self, "_elapsed_ms") else 1,
@@ -881,7 +876,7 @@ class ReadPipeLine(ModelClientMixin, BasePipeline):
         self._ensure_run_started()
         search_service = await self._get_search_service(includes, enable_rerank=enable_rerank)
 
-        memory_l0 = await self._user_meta()
+        memory_l0 = await self._load_profile(include_metadata)
         profile = project_profile_data(memory_l0)
         await self._emit_stage("profile_loaded", {
             "has_profile": profile_has_content(profile),
@@ -936,7 +931,7 @@ class ReadPipeLine(ModelClientMixin, BasePipeline):
                 on_error=self._record_retrieval_error,
             )
         await self._emit_stage("context_prepared", {"memory_count": len(results.memories)})
-        combined = self._combine_with_profile(memory_l0, results, include_metadata)
+        combined = memory_l0 + results
         combined.execution_trace = results.execution_trace
         items = project_result_items(memory_l0, results, limit=5)
         await self._emit_stage("result_ready", {
@@ -959,7 +954,7 @@ class ReadPipeLine(ModelClientMixin, BasePipeline):
                 MemoryNodeType.EXTRACTED_ENTITY,
                 MemoryNodeType.DIALOGUE,
             ]
-        meta_task = asyncio.ensure_future(self._user_meta())
+        meta_task = asyncio.ensure_future(self._load_profile(include_metadata))
         search_service = await self._get_search_service(includes, need_embedder=False, need_llm=False)
         express_res = await search_service.keyword_search(
             query,
@@ -973,7 +968,7 @@ class ReadPipeLine(ModelClientMixin, BasePipeline):
             "has_profile": profile_has_content(profile),
             "profile": profile,
         })
-        combined = self._combine_with_profile(memory_l0, express_res, include_metadata)
+        combined = memory_l0 + express_res
         combined.execution_trace = express_res.execution_trace
         # __add__ 只合并 memories/relations/content_str，其余字段必须显式传递。
         combined.dedup_summary = express_res.dedup_summary
@@ -987,7 +982,7 @@ class ReadPipeLine(ModelClientMixin, BasePipeline):
             enable_rerank: bool = False,
             include_metadata: bool = True,
     ) -> MemorySearchResult:
-        meta_task = asyncio.create_task(self._user_meta())
+        meta_task = asyncio.create_task(self._load_profile(include_metadata))
         search_service = await self._get_search_service(
             includes,
             need_llm=False,
@@ -1005,7 +1000,7 @@ class ReadPipeLine(ModelClientMixin, BasePipeline):
             "has_profile": profile_has_content(profile),
             "profile": profile,
         })
-        combined = self._combine_with_profile(memory_l0, quick_res, include_metadata)
+        combined = memory_l0 + quick_res
         combined.execution_trace = quick_res.execution_trace
         # __add__ 只合并 memories/relations/content_str，其余字段必须显式传递。
         combined.dedup_summary = quick_res.dedup_summary
