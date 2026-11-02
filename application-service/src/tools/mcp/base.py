@@ -1,4 +1,5 @@
 """MCP tool base class - consolidated version."""
+import asyncio
 import logging
 import time
 from typing import List, Dict, Any
@@ -118,10 +119,16 @@ class MCPTool(BaseTool):
     async def execute(self, **kwargs) -> ToolResult:
         """Execute the MCP tool."""
         start_time = time.time()
+        # Fallback only; the real name is resolved inside the ``try`` below. The error path
+        # used to re-read the already-popped ``tool_name`` and so always logged "unknown".
+        requested_tool_name = "unknown"
 
         try:
             # Determine the tool to call: prefer the tool_name argument, else the
-            # current tool name (extracted from available_tools)
+            # current tool name (extracted from available_tools). Both stay inside the
+            # ``try``: a failing ``self.name`` must still return a ToolResult, exactly as
+            # it did before this logging fix.
+            requested_tool_name = kwargs.get("tool_name") or self.name
             tool_name = kwargs.pop("tool_name", None) or self.name
             arguments = kwargs.pop("arguments", kwargs)  # remaining arguments become tool arguments
 
@@ -140,9 +147,21 @@ class MCPTool(BaseTool):
 
         except Exception as e:
             execution_time = time.time() - start_time
-            logger.error(f"MCP工具执行失败: {kwargs.get('tool_name', 'unknown')}, 错误: {e}")
+            # A bare asyncio.TimeoutError stringifies to "", so ``str(e)`` alone would
+            # hand the caller an empty error that collapses into the bare error_code in
+            # the trace, the log API, the model prompt and the UI. Always return a
+            # non-empty, cause-specific message.
+            if isinstance(e, asyncio.TimeoutError):
+                error_text = f"请求超时（>{self.connection_config.get('timeout', 10)}s 未响应）"
+            else:
+                error_text = str(e).strip() or type(e).__name__
+            # The log keeps the exception type and traceback for the full picture.
+            logger.error(
+                "MCP工具执行失败: %s, 错误: %s: %s",
+                requested_tool_name, type(e).__name__, e, exc_info=True,
+            )
             return ToolResult.error_result(
-                error=str(e),
+                error=error_text,
                 error_code="MCP_EXECUTION_ERROR",
                 execution_time=execution_time
             )
