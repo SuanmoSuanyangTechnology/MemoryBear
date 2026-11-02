@@ -163,6 +163,8 @@ async def read_memory_internal(
     Requires API Key with 'memory' scope.
     Extended version of /read/sync that supports `include` (Neo4j node types filter)
     and `limit` (max memories to return).
+    ``include_metadata`` (default True) controls whether the user profile metadata
+    node is prepended to the returned memories.
     """
     body = await request.json()
     payload = InternalReadInput(**body)
@@ -194,6 +196,7 @@ async def read_memory_internal(
         includes=includes,
         skip_summary=payload.skip_summary,
         enable_rerank=payload.enable_rerank,
+        include_metadata=payload.include_metadata,
     )
     return success(data={
         "answer": memory.content,
