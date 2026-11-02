@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:26:10 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-03 16:26:10 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-11-02 15:30:37
  */
 /**
  * Type definitions for tool configuration in application settings
@@ -33,6 +33,7 @@ export interface ToolOption {
   /** Whether tool is enabled */
   enabled?: boolean;
   is_active?: boolean;
+  tool_missing?: boolean;
 }
 
 /**
