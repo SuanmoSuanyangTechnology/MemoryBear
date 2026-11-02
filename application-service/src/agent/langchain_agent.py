@@ -1091,7 +1091,17 @@ class LangChainAgent:
 
         if not isinstance(payload, dict) or payload.get("success") is not False:
             return None
-        reason = payload.get("error") or payload.get("error_code") or ""
+        # Failure payloads are not uniform across the repo: ToolResult.error_result (and
+        # the adapter serialisation) uses ``error`` / ``error_code``, while several tools
+        # report the reason in ``message`` (e.g. mineru / openclaw connection payloads).
+        # Reading only the first two would turn those into the generic fallback and lose
+        # the actual cause.
+        reason = (
+            payload.get("error")
+            or payload.get("message")
+            or payload.get("error_code")
+            or ""
+        )
         return str(reason).strip() or "工具执行失败"
 
     @staticmethod
@@ -1106,22 +1116,34 @@ class LangChainAgent:
             text = str(data)
         return text[:max_length] + "...[truncated]" if len(text) > max_length else text
 
-    def _extract_tool_sources(self, tool_name: str, node: Dict[str, Any]) -> None:
-        """Extract source information from the tool instance and merge it into node["meta"]"""
+    def _extract_tool_sources(
+        self, tool_name: str, node: Dict[str, Any], attach: bool = True
+    ) -> None:
+        """Consume the tool instance's per-call state, optionally attaching it to the node.
+
+        These attributes are a hand-off between one tool call and whoever records it, so
+        they must be cleared on *every* call — a failed call that skipped this function
+        left ``_last_sources`` behind, and the next successful call would then report a
+        previous round's sources. ``attach=False`` (failures) drops the state instead of
+        writing sources onto a node that did not produce them.
+        """
+
         for t in self.tools:
             t_name = getattr(t, "name", None)
             if t_name == tool_name:
                 sources = getattr(t, "_last_sources", None)
                 context_stats = getattr(t, "_context_assembly_stats", None)
                 if sources:
-                    if not node.get("meta"):
-                        node["meta"] = {}
-                    node["meta"]["sources"] = sources
+                    if attach:
+                        if not node.get("meta"):
+                            node["meta"] = {}
+                        node["meta"]["sources"] = sources
                     t._last_sources = []
                 if context_stats:
-                    if not node.get("meta"):
-                        node["meta"] = {}
-                    node["meta"]["context_assembly"] = context_stats
+                    if attach:
+                        if not node.get("meta"):
+                            node["meta"] = {}
+                        node["meta"]["context_assembly"] = context_stats
                     t._context_assembly_stats = None
                 break
 
@@ -1244,9 +1266,12 @@ class LangChainAgent:
                             matched_node["elapsed_time"] = round(
                                 (time.time() - matched_node.get("started_at", time.time())) * 1000, 2
                             )
-                            if not failure_reason:
-                                # Extract extra source info from the tool (e.g. knowledge base retrieval sources)
-                                self._extract_tool_sources(tool_name, matched_node)
+                            # Always consume the tool's per-call state: skipping it on a
+                            # failed call left stale sources behind for the next call to
+                            # pick up. Failures drop the state, they do not attach it.
+                            self._extract_tool_sources(
+                                tool_name, matched_node, attach=not failure_reason
+                            )
 
                         if failure_reason:
                             trace.finish_tool(
@@ -1741,9 +1766,12 @@ class LangChainAgent:
                             matched_node["elapsed_time"] = round(
                                 (time.time() - matched_node.get("started_at", time.time())) * 1000, 2
                             )
-                            if not failure_reason:
-                                # Extract extra source info from the tool
-                                self._extract_tool_sources(tool_name, matched_node)
+                            # Always consume the tool's per-call state: skipping it on a
+                            # failed call left stale sources behind for the next call to
+                            # pick up. Failures drop the state, they do not attach it.
+                            self._extract_tool_sources(
+                                tool_name, matched_node, attach=not failure_reason
+                            )
                         if failure_reason:
                             trace.finish_tool(
                                 step_id=matched_step_id,
