@@ -14,11 +14,14 @@
 （``/workspace_reembed``），那里有配额与续跑管理。
 
 清理（仅 ``--purge --yes`` 显式开启时执行，且逐 KB 校验通过才删）：
-- 校验范围是**整个 KB**，不是本次加载到的子集：只要该 KB 还有任一 document
-  不在已迁移集合里（例如 ``--end-user-id`` 只跑了一个宿主、同库其他宿主尚未
-  迁移），就跳过该 KB，避免连带删除其他宿主的旧数据
+- 清理对象仅限 ``name='USER_RAG_MERORY'`` 且 ``permission_id='Memory'`` 的系统记忆库
+- 校验范围是**整个 KB 的宿主文档**（``{uuid}.txt``），不是本次加载到的子集：
+  只要还有宿主文档既未迁移、也没有可迁移内容，就跳过该 KB（例如
+  ``--end-user-id`` 只跑了一个宿主、同库其他宿主尚未迁移）
+- 没有可迁移内容的宿主文档（旧索引无 chunk / 只剩时间戳碎片）不阻塞清理；
+  非宿主命名的文档（如 ``xxx_time.txt``）不参与校验
 - ``knowledges.status = 2``（列表不再显示）
-- 删除该 KB 下 ``documents`` 记录
+- 删除该 KB 下**所有** ``documents`` 记录（含不参与校验的非宿主文档）
 - 删除旧 chunk 索引 ``vector_index_{kb_id}_node``
 
 独立运行：PostgreSQL / Elasticsearch 连接信息全部从环境变量读取，
@@ -160,7 +163,7 @@ _RAG_INDEX = "rag_memory_current"
 _ROLE_SPLIT_RE = re.compile(r"^(user|assistant):", re.M)
 #: 历史 chunk 会把一问一答挤在同一行（assistant: 不在行首）。仅在 chunk 以
 #: user: 开头时启用，避免把正文里出现的英文 assistant: 误当角色分隔
-_INLINE_ASSISTANT_RE = re.compile(r"\s+(assistant):")
+_INLINE_ASSISTANT_RE = re.compile(r"[ \t]+(assistant):")
 #: 旧链路会把时间戳单独存成 chunk（如 2025年12月22日15:43:32），没有检索价值
 _TIMESTAMP_RE = re.compile(r"^\d{4}年\d{1,2}月\d{1,2}日\d{1,2}:\d{2}:\d{2}$")
 _LEGACY_SOURCE = "legacy"
@@ -308,16 +311,17 @@ def split_messages_by_chunk(chunks: list[tuple[str, list[float] | None]]) -> lis
         if text.lstrip().startswith("user:"):
             text = _INLINE_ASSISTANT_RE.sub(r"\n\1:", text)
         parts = _ROLE_SPLIT_RE.split(text)
-        matched = 0
+        parsed = (len(parts) - 1) // 2
         index = 1
         while index < len(parts) - 1:
             role = parts[index].strip()
             content = parts[index + 1].strip().replace("\\n", "\n")
             if role in ("user", "assistant") and content and not _is_noise_message(content):
                 messages.append((role, content, vector))
-                matched += 1
             index += 2
-        if matched == 0:
+        # 只有完全解析不出角色标记时才整段兜底；有标记但内容全是噪声的
+        # chunk 直接丢弃，避免把前缀和噪声重新迁入检索索引
+        if parsed == 0:
             content = text.strip().replace("\\n", "\n")
             if content and not _is_noise_message(content):
                 messages.append(("assistant", content, vector))
@@ -385,7 +389,11 @@ ORDER BY k.id, d.file_name
 _KB_DOCUMENT_IDS_SQL = """
 SELECT d.id, d.file_name
 FROM documents d
-WHERE d.kb_id = :k AND d.status = 1
+JOIN knowledges k ON k.id = d.kb_id
+WHERE d.kb_id = :k
+  AND k.name = 'USER_RAG_MERORY'
+  AND k.permission_id = 'Memory'
+  AND d.status = 1
 """
 
 
@@ -727,6 +735,9 @@ def run(
             return stats
 
         skip_documents = set(checkpoint.get("done_documents", []))
+        # 空文档集合与 done_documents 同生命周期：断点轮里被过滤掉的空文档
+        # 也要参与清理校验，避免跨运行口径不一致
+        stats.empty_documents |= set(checkpoint.get("empty_documents", []))
         if skip_documents:
             print(f"断点续传：跳过已完成 {len(skip_documents)} 个 document")
 
@@ -746,6 +757,7 @@ def run(
             done_documents |= completed
             _save_checkpoint(context, {
                 "done_documents": sorted(done_documents),
+                "empty_documents": sorted(stats.empty_documents),
             })
 
         # ---------- ② 清理旧库 ----------
