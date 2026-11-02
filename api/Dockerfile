@@ -75,7 +75,6 @@ COPY packages/redbear-model /packages/redbear-model
 COPY api/pyproject.toml /code/pyproject.toml
 COPY api/uv.lock /code/uv.lock
 COPY api/app /code/app
-COPY api/scripts /code/scripts
 COPY api/alembic.ini /code/alembic.ini
 COPY api/migrations /code/migrations
 
