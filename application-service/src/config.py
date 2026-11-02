@@ -408,7 +408,9 @@ class AppServiceSettings(BaseSettings):
         default="http", validation_alias="APP_MODEL_PROTOCOL"
     )
     model_service_grpc_target: str = Field(
-        default="dns:///model-service-grpc:9090",
+        # Same Service as the HTTP leg (`base_url`); the gRPC listener is a
+        # second port (9090) on it, not a separate `-grpc` Service.
+        default="dns:///model-service:9090",
         validation_alias="MODEL_SERVICE_GRPC_TARGET",
     )
     model_service_invoke_call_budget_seconds: float = Field(

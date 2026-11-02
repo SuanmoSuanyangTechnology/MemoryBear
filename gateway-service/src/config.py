@@ -147,8 +147,10 @@ class Settings:
 
     @property
     def application_service_grpc_target(self) -> str:
+        # Same Service as the HTTP leg; gRPC is a second port (9090) on it,
+        # not a separate `-grpc` Service.
         return os.getenv(
-            "APPLICATION_SERVICE_GRPC_TARGET", "dns:///application-service-grpc:9090"
+            "APPLICATION_SERVICE_GRPC_TARGET", "dns:///application-service:9090"
         )
 
     @property
