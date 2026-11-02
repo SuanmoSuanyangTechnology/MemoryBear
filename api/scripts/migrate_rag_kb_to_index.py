@@ -158,6 +158,11 @@ _RAG_INDEX = "rag_memory_current"
 #: 轮次标记在行首、正文内换行存为字面量 \n（切分后还原）。正文里出现的
 #: "user:" / "assistant:"（引用对话、代码、URL 等）不锚定行首会被误拆
 _ROLE_SPLIT_RE = re.compile(r"^(user|assistant):", re.M)
+#: 历史 chunk 会把一问一答挤在同一行（assistant: 不在行首）。仅在 chunk 以
+#: user: 开头时启用，避免把正文里出现的英文 assistant: 误当角色分隔
+_INLINE_ASSISTANT_RE = re.compile(r"\s+(assistant):")
+#: 旧链路会把时间戳单独存成 chunk（如 2025年12月22日15:43:32），没有检索价值
+_TIMESTAMP_RE = re.compile(r"^\d{4}年\d{1,2}月\d{1,2}日\d{1,2}:\d{2}:\d{2}$")
 _LEGACY_SOURCE = "legacy"
 _CHUNK_SCAN_SIZE = 500
 
@@ -274,22 +279,48 @@ def _iter_chunks(
         search_after = hits[-1].get("sort")
 
 
+def _is_noise_message(content: str) -> bool:
+    """判断内容是否只是时间戳/一两个字符的碎片，没有检索价值。"""
+    text = content.strip()
+    if not text:
+        return True
+    if _TIMESTAMP_RE.fullmatch(text):
+        return True
+    if len(text) <= 2 and not re.search(r"[A-Za-z\u4e00-\u9fff]", text):
+        return True
+    return False
+
+
 def split_messages_by_chunk(chunks: list[tuple[str, list[float] | None]]) -> list[tuple[str, str, list[float] | None]]:
     """逐 chunk 切分：同一 chunk 内的消息共享该 chunk 的旧向量。
 
     实测旧链路 1 chunk = 1 轮对话（user + assistant），没有消息跨 chunk，
     因此逐 chunk 切分与整体拼接切分的消息数一致，可安全承载向量复用。
+
+    兼容历史 chunk 的三种非标准形态：
+    - 角色标记与内容挤在同一行（``user: hi assistant: hello``）：chunk 以
+      ``user:`` 开头时，把行内的 `` assistant:`` 也当作分隔；
+    - 完全没有角色前缀（纯文本 / 只有回复）：整段按 assistant 迁入；
+    - 纯时间戳或一两个字符的碎片：视为噪声跳过，避免污染检索。
     """
     messages: list[tuple[str, str, list[float] | None]] = []
     for text, vector in chunks:
+        if text.lstrip().startswith("user:"):
+            text = _INLINE_ASSISTANT_RE.sub(r"\n\1:", text)
         parts = _ROLE_SPLIT_RE.split(text)
+        matched = 0
         index = 1
         while index < len(parts) - 1:
             role = parts[index].strip()
             content = parts[index + 1].strip().replace("\\n", "\n")
-            if role in ("user", "assistant") and content:
+            if role in ("user", "assistant") and content and not _is_noise_message(content):
                 messages.append((role, content, vector))
+                matched += 1
             index += 2
+        if matched == 0:
+            content = text.strip().replace("\\n", "\n")
+            if content and not _is_noise_message(content):
+                messages.append(("assistant", content, vector))
     return messages
 
 
@@ -343,7 +374,7 @@ _LOAD_DOCUMENTS_SQL = """
 SELECT d.id, d.created_at, d.file_name, d.kb_id, k.workspace_id
 FROM documents d
 JOIN knowledges k ON k.id = d.kb_id
-WHERE k.permission_id = 'Memory' AND d.status = 1
+WHERE k.name = 'USER_RAG_MERORY' AND k.permission_id = 'Memory' AND d.status = 1
 {extra}
 ORDER BY k.id, d.file_name
 """
@@ -352,10 +383,26 @@ ORDER BY k.id, d.file_name
 #: 整库文档集合：清理校验用它，而不是本次按 --end-user-id 过滤后的子集。
 #: 两者口径必须一致（都只算 status = 1），否则会出现「校验通过、删除多删」。
 _KB_DOCUMENT_IDS_SQL = """
-SELECT d.id
+SELECT d.id, d.file_name
 FROM documents d
 WHERE d.kb_id = :k AND d.status = 1
 """
+
+
+def _is_host_document(file_name: str) -> bool:
+    """宿主记忆文档命名规则：``{end_user_id}.txt``，其中 end_user_id 是 UUID。
+
+    旧库里可能混入其它命名的文档（如 ``xxx_time.txt``），它们不属于宿主记忆，
+    不参与迁移，也不应阻塞所在 KB 的清理校验。
+    """
+    name = str(file_name or "")
+    if not name.endswith(".txt"):
+        return False
+    try:
+        uuid.UUID(name[:-4])
+        return True
+    except ValueError:
+        return False
 
 
 def _load_documents(engine, workspace_id: str | None, end_user_id: str | None) -> list[dict[str, Any]]:
@@ -378,13 +425,9 @@ def _load_documents(engine, workspace_id: str | None, end_user_id: str | None) -
     documents: list[dict[str, Any]] = []
     for document_id, created_at, file_name, kb_id, ws_id in rows:
         file_name = str(file_name or "")
-        user_id = file_name[:-4] if file_name.endswith(".txt") else ""
-        if not user_id:
+        if not _is_host_document(file_name):
             continue
-        try:
-            uuid.UUID(user_id)
-        except ValueError:
-            continue
+        user_id = file_name[:-4]
         documents.append(
             {
                 "document_id": str(document_id),
@@ -412,6 +455,8 @@ class MigrationStats:
     failures: int = 0
     reused_vectors: int = 0
     purged_kbs: int = 0
+    #: 旧索引里没有 chunk、没有任何可迁移内容的文档；不阻塞所在 KB 的清理
+    empty_documents: set[str] = field(default_factory=set)
     per_kb: dict[str, dict[str, int]] = field(default_factory=dict)
 
 
@@ -473,15 +518,17 @@ def migrate(
         messages = split_messages_by_chunk(chunks)
 
         per_kb = stats.per_kb.setdefault(
-            kb_id, {"documents": 0, "messages": 0, "written": 0, "failed": 0}
+            kb_id,
+            {"documents": 0, "messages": 0, "written": 0, "failed": 0, "empty": 0},
         )
         per_kb["documents"] += 1
 
         if not messages:
-            # 解析不出消息同样计入失败，否则该 KB 会被 purge 误判为「全部迁移成功」
+            # 旧索引里没有该文档的 chunk：没有任何可迁移内容。这类文档不计入
+            # failures，否则会永久阻塞所在 KB 的清理；单独记录供 purge 视为已处理
             stats.skipped_empty += 1
-            per_kb["failed"] += 1
-            stats.failures += 1
+            stats.empty_documents.add(document_id)
+            per_kb["empty"] += 1
             continue
 
         if created_at is None:
@@ -589,18 +636,17 @@ def purge(
         # 范围，但下面的状态更新与 DELETE 都是按 kb_id 整库执行，按子集判定会
         # 连带删掉同库其他宿主尚未迁移的文档与旧索引。
         with engine.connect() as conn:
-            kb_doc_ids = {
-                str(row[0])
-                for row in conn.execute(
-                    sql_text(_KB_DOCUMENT_IDS_SQL), {"k": kb_id}
-                ).all()
-            }
-        uncovered = kb_doc_ids - done_documents
+            rows = conn.execute(
+                sql_text(_KB_DOCUMENT_IDS_SQL), {"k": kb_id}
+            ).all()
+        # 非宿主命名的文档（如 xxx_time.txt）不属于迁移范围，不参与清理校验
+        kb_doc_ids = {str(row[0]) for row in rows if _is_host_document(row[1])}
+        uncovered = kb_doc_ids - done_documents - stats.empty_documents
 
         if dry_run:
             # dry-run 下 written 恒为 0，不能作为判定依据；这里只按解析结果预览，
             # 真正的清理判定与 dry_run 完全解耦
-            if v is not None and v.get("messages", 0) > 0:
+            if v is not None and (v.get("messages", 0) > 0 or v.get("empty", 0) > 0):
                 scope_note = ""
                 if len(doc_ids) != len(kb_doc_ids):
                     scope_note = (
@@ -731,7 +777,7 @@ def run(
     for kb_id, v in sorted(stats.per_kb.items()):
         print(
             f"  kb={kb_id} documents={v['documents']} "
-            f"written={v['written']} failed={v['failed']}"
+            f"written={v['written']} failed={v['failed']} empty={v.get('empty', 0)}"
         )
     return stats
 
