@@ -118,10 +118,16 @@ class MCPTool(BaseTool):
     async def execute(self, **kwargs) -> ToolResult:
         """Execute the MCP tool."""
         start_time = time.time()
+        # Fallback only; the real name is resolved inside the ``try`` below. The error path
+        # used to re-read the already-popped ``tool_name`` and so always logged "unknown".
+        requested_tool_name = "unknown"
 
         try:
             # Determine the tool to call: prefer the tool_name argument, else the
-            # current tool name (extracted from available_tools)
+            # current tool name (extracted from available_tools). Both stay inside the
+            # ``try``: a failing ``self.name`` must still return a ToolResult, exactly as
+            # it did before this logging fix.
+            requested_tool_name = kwargs.get("tool_name") or self.name
             tool_name = kwargs.pop("tool_name", None) or self.name
             arguments = kwargs.pop("arguments", kwargs)  # remaining arguments become tool arguments
 
@@ -140,7 +146,12 @@ class MCPTool(BaseTool):
 
         except Exception as e:
             execution_time = time.time() - start_time
-            logger.error(f"MCP工具执行失败: {kwargs.get('tool_name', 'unknown')}, 错误: {e}")
+            # Type name keeps the record informative when ``str(e)`` is empty (e.g. a bare
+            # asyncio.TimeoutError); the traceback shows where the failure originated.
+            logger.error(
+                "MCP工具执行失败: %s, 错误: %s: %s",
+                requested_tool_name, type(e).__name__, e, exc_info=True,
+            )
             return ToolResult.error_result(
                 error=str(e),
                 error_code="MCP_EXECUTION_ERROR",

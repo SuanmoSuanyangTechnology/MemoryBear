@@ -1061,6 +1061,40 @@ class LangChainAgent:
         return None
 
     @staticmethod
+    def _tool_failure_reason(output: Any) -> Optional[str]:
+        """Return the error message when a tool returned a failure payload, else None.
+
+        Tools never raise into the agent (see ``LangchainToolWrapper._arun``): a failure is
+        handed back in band as ``{"success": false, "error": ...}`` so the model still sees
+        why and can retry. LangChain therefore emits ``on_tool_end`` for a failed call, and
+        without this check the step was recorded as completed/success — which is what
+        ``GET /apps/{app_id}/logs/{conversation_id}`` projects into ``node_executions_map``
+        (``_steps_to_node_executions``), so a dead MCP tool showed up there as a healthy
+        call with an unreadable body. Same convention already used by ``_evidence_digest``.
+        """
+
+        # on_tool_end may carry the raw return value or the wrapping ToolMessage.
+        if not isinstance(output, (str, dict)):
+            content = getattr(output, "content", None)
+            if content is not None:
+                output = content
+
+        if isinstance(output, dict):
+            payload = output
+        elif isinstance(output, str) and output.lstrip().startswith("{"):
+            try:
+                payload = json.loads(output)
+            except (TypeError, ValueError):
+                return None
+        else:
+            return None
+
+        if not isinstance(payload, dict) or payload.get("success") is not False:
+            return None
+        reason = payload.get("error") or payload.get("error_code") or ""
+        return str(reason).strip() or "工具执行失败"
+
+    @staticmethod
     def _truncate_data(data, max_length: int = 2000) -> Any:
         if data is None:
             return None
@@ -1198,22 +1232,38 @@ class LangChainAgent:
                                 if n["node_name"] == tool_name and n["status"] == "running":
                                     matched_node = n
                                     break
+                        # Tools return failures in band instead of raising, so a failed
+                        # call closes here rather than on on_tool_error: settle it the
+                        # same way so the persisted step never reports a broken tool as ok.
+                        failure_reason = self._tool_failure_reason(tool_output)
                         if matched_node:
-                            matched_node["status"] = "completed"
+                            matched_node["status"] = "failed" if failure_reason else "completed"
                             matched_node["output"] = self._truncate_data(tool_output)
+                            if failure_reason:
+                                matched_node["error"] = failure_reason[:500]
                             matched_node["elapsed_time"] = round(
                                 (time.time() - matched_node.get("started_at", time.time())) * 1000, 2
                             )
-                            # Extract extra source info from the tool (e.g. knowledge base retrieval sources)
-                            self._extract_tool_sources(tool_name, matched_node)
+                            if not failure_reason:
+                                # Extract extra source info from the tool (e.g. knowledge base retrieval sources)
+                                self._extract_tool_sources(tool_name, matched_node)
 
-                        trace.finish_tool(
-                            step_id=matched_node.get("step_id") if matched_node else None,
-                            tool_name=tool_name,
-                            status="success",
-                            output=tool_output,
-                            meta=matched_node.get("meta") if matched_node else None,
-                        )
+                        if failure_reason:
+                            trace.finish_tool(
+                                step_id=matched_node.get("step_id") if matched_node else None,
+                                tool_name=tool_name,
+                                status="error",
+                                error=failure_reason[:500],
+                                meta=matched_node.get("meta") if matched_node else None,
+                            )
+                        else:
+                            trace.finish_tool(
+                                step_id=matched_node.get("step_id") if matched_node else None,
+                                tool_name=tool_name,
+                                status="success",
+                                output=tool_output,
+                                meta=matched_node.get("meta") if matched_node else None,
+                            )
 
                     elif kind == "on_tool_error":
                         error_msg = str(event.get("data", {}).get("error", ""))
@@ -1679,25 +1729,44 @@ class LangChainAgent:
                                     matched_node = n
                                     break
                         matched_step_id = matched_node.get("step_id") if matched_node else matched_step_id
+                        # Tools return failures in band instead of raising, so a failed
+                        # call closes here rather than on on_tool_error. Settle it the
+                        # same way and tell the frontend it failed, not "completed".
+                        failure_reason = self._tool_failure_reason(tool_output)
                         if matched_node:
-                            matched_node["status"] = "completed"
+                            matched_node["status"] = "failed" if failure_reason else "completed"
                             matched_node["output"] = self._truncate_data(tool_output)
+                            if failure_reason:
+                                matched_node["error"] = failure_reason[:500]
                             matched_node["elapsed_time"] = round(
                                 (time.time() - matched_node.get("started_at", time.time())) * 1000, 2
                             )
-                            # Extract extra source info from the tool
-                            self._extract_tool_sources(tool_name, matched_node)
-                        trace.finish_tool(
-                            step_id=matched_step_id,
-                            tool_name=tool_name,
-                            status="success",
-                            output=tool_output,
-                            meta=matched_node.get("meta") if matched_node else None,
-                        )
+                            if not failure_reason:
+                                # Extract extra source info from the tool
+                                self._extract_tool_sources(tool_name, matched_node)
+                        if failure_reason:
+                            trace.finish_tool(
+                                step_id=matched_step_id,
+                                tool_name=tool_name,
+                                status="error",
+                                error=failure_reason[:500],
+                                meta=matched_node.get("meta") if matched_node else None,
+                            )
+                        else:
+                            trace.finish_tool(
+                                step_id=matched_step_id,
+                                tool_name=tool_name,
+                                status="success",
+                                output=tool_output,
+                                meta=matched_node.get("meta") if matched_node else None,
+                            )
                         logger.debug(f"工具调用结束: {tool_name}")
                         # Push the tool-end event in real time (with the updated meta)
                         yield {"type": "agent_log", "data": trace.to_dict()}
-                        yield {"type": "tool_end", "step_id": matched_step_id, "name": tool_name, "output": self._truncate_data(tool_output), "meta": matched_node.get("meta") if matched_node else None}
+                        if failure_reason:
+                            yield {"type": "tool_error", "step_id": matched_step_id, "name": tool_name, "error": failure_reason[:500]}
+                        else:
+                            yield {"type": "tool_end", "step_id": matched_step_id, "name": tool_name, "output": self._truncate_data(tool_output), "meta": matched_node.get("meta") if matched_node else None}
                     elif kind == "on_tool_error":
                         error_msg = str(event.get("data", {}).get("error", ""))
                         tool_name = event.get("name", "unknown")
