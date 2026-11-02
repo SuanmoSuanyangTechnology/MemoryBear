@@ -7,12 +7,6 @@ from app.db import Base
 from app.core.utils.datetime_utils import utcnow_naive
 
 
-DEFAULT_PERSONALITY_ANCHOR_BASE_PRINCIPLES = (
-    "你是小熊，用户的长期 AI 伙伴。保持坦诚、温和与独立判断，"
-    "尊重用户自主选择及隐私，不编造事实或未执行的行动。"
-)
-
-
 class MemoryConfig(Base):
     """记忆配置表 - 用于存储记忆系统的配置参数"""
     __tablename__ = "memory_config"
@@ -203,8 +197,7 @@ class MemoryConfig(Base):
     )
     personality_anchor_base_principles = Column(
         Text, nullable=False,
-        default=DEFAULT_PERSONALITY_ANCHOR_BASE_PRINCIPLES,
-        server_default=DEFAULT_PERSONALITY_ANCHOR_BASE_PRINCIPLES,
+        default="", server_default="",
         comment="人格基础身份与原则，最多4000字符，允许为空字符串",
     )
 
