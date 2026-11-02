@@ -17,6 +17,12 @@ import httpx
 from .config import CubeConfig
 
 BODY_SNIPPET_CHARS = 300
+# One NDJSON event line. A longer line is dropped instead of buffered: the transport
+# must never hold an unbounded string just because the user printed one huge value.
+EVENT_LINE_MAX_BYTES = 4 * 1024 * 1024
+TRUNCATED_LINE = "truncated_line"
+# How much of a dropped line is inspected to tell stdout from stderr.
+_CLASSIFY_CHARS = 4096
 
 
 class HttpStatusError(Exception):
@@ -43,6 +49,25 @@ def _retry_after(resp: httpx.Response) -> float | None:
 
 def _segment(value: str) -> str:
     return quote(value, safe="")
+
+
+def _parse_line(line: bytes) -> dict[str, Any] | None:
+    """One NDJSON event line; ``None`` for a blank line or a non-object payload."""
+
+    text = line.strip()
+    if not text:
+        return None
+    try:
+        event = json.loads(text)
+    except ValueError as exc:
+        raise TransportFailure("execute stream carried a malformed line") from exc
+    return event if isinstance(event, dict) else None
+
+
+def _classify(prefix: bytes) -> str:
+    """Which stream an over-long line belongs to, guessed from its first bytes."""
+
+    return "stderr" if b'"type": "stderr"' in prefix or b'"type":"stderr"' in prefix else "stdout"
 
 
 class CubeClient:
@@ -125,14 +150,23 @@ class CubeClient:
             raise TransportFailure(f"data plane unreachable ({type(exc).__name__})") from exc
         return self._read(resp)
 
-    async def execute(
+    async def iter_events(
         self, sandbox_id: str, body: dict[str, Any], *, read_timeout: float
-    ) -> list[dict[str, Any]]:
-        """POST ``/execute`` and return the newline-delimited JSON events."""
+    ) -> AsyncIterator[dict[str, Any]]:
+        """Stream the newline-delimited JSON events of ``/execute``.
+
+        Events are yielded as they arrive, never collected here, and lines are split
+        from raw bytes with a cap, so neither the total output nor a single huge line
+        can grow this process's memory. A line over :data:`EVENT_LINE_MAX_BYTES` is
+        not parsed; it is reported as a ``{"type": "truncated_line", "bytes": n,
+        "stream": "stdout"|"stderr"}`` notice so the caller can account for the loss.
+        """
 
         url, headers = self._data_target(sandbox_id, "/execute")
         timeout = httpx.Timeout(read_timeout, connect=self._cfg.connect_timeout_s)
-        events: list[dict[str, Any]] = []
+        buf = bytearray()
+        skipping = 0  # bytes of the over-long line seen so far
+        stream = "stdout"
         try:
             async with self._http.stream(
                 "POST", url, json=body, headers=headers, timeout=timeout
@@ -142,19 +176,43 @@ class CubeClient:
                     raise HttpStatusError(
                         resp.status_code, text[:BODY_SNIPPET_CHARS], _retry_after(resp)
                     )
-                async for line in resp.aiter_lines():
-                    line = line.strip()
-                    if not line:
-                        continue
-                    try:
-                        event = json.loads(line)
-                    except ValueError as exc:
-                        raise TransportFailure("execute stream carried a malformed line") from exc
-                    if isinstance(event, dict):
-                        events.append(event)
+                async for chunk in resp.aiter_bytes():
+                    pos = 0
+                    while pos < len(chunk):
+                        nl = chunk.find(b"\n", pos)
+                        end = len(chunk) if nl < 0 else nl
+                        piece = chunk[pos:end]
+                        if skipping:
+                            skipping += len(piece)
+                        else:
+                            buf += piece
+                            # Cap applies on every append, whatever the chunk boundary
+                            # looks like, so the buffer never exceeds the limit even
+                            # transiently.
+                            if len(buf) > EVENT_LINE_MAX_BYTES:
+                                stream = _classify(bytes(buf[:_CLASSIFY_CHARS]))
+                                skipping = len(buf)
+                                buf.clear()
+                        if nl < 0:
+                            break
+                        if skipping:
+                            yield {"type": TRUNCATED_LINE, "bytes": skipping, "stream": stream}
+                            skipping = 0
+                            stream = "stdout"
+                        else:
+                            event = _parse_line(bytes(buf))
+                            buf.clear()
+                            if event is not None:
+                                yield event
+                        pos = nl + 1
+                if skipping:
+                    yield {"type": TRUNCATED_LINE, "bytes": skipping, "stream": stream}
+                elif buf:
+                    event = _parse_line(bytes(buf))
+                    if event is not None:
+                        yield event
         except httpx.HTTPError as exc:
             raise TransportFailure(f"execute stream broken ({type(exc).__name__})") from exc
-        return events
 
     # -- envd (files) -------------------------------------------------------------
 
