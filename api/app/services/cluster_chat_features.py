@@ -8,10 +8,6 @@
 """
 from typing import Any, Dict, Optional, Tuple
 
-EXECUTION_MODE_IN_PROCESS = "in_process"
-EXECUTION_MODE_SANDBOX = "sandbox"
-
-
 def _to_dict(value: Any) -> Dict[str, Any]:
     """pydantic 模型 / dict / 其它 → dict（其它一律空 dict）。"""
     if hasattr(value, "model_dump"):
@@ -73,18 +69,3 @@ def resolve_opening(
     }
     statement, questions = AgentRunService._get_opening_statement(safe_features, True, variables)
     return statement, list(questions or [])
-
-
-def resolve_execution_mode(settings_e2b_enabled: bool) -> str:
-    """入口执行模式：与 Agent 同规则（E2B_ENABLED → sandbox，否则 in_process）。"""
-    return EXECUTION_MODE_SANDBOX if settings_e2b_enabled else EXECUTION_MODE_IN_PROCESS
-
-
-def effective_execution_mode(requested: Optional[str]) -> Tuple[str, bool]:
-    """集群主管当前只有 in_process 实现。返回 (实际模式, 是否发生了回退)。
-
-    sandbox 的集群实现留待后续；这里保证不会静默：调用方据回退标志打 warning 并写入 end 事件。
-    """
-    if requested == EXECUTION_MODE_SANDBOX:
-        return EXECUTION_MODE_IN_PROCESS, True
-    return EXECUTION_MODE_IN_PROCESS, False

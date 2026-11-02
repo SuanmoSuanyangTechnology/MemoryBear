@@ -237,6 +237,27 @@ class ModelServiceSettings(BaseSettings):
         gt=0,
         validation_alias="MODEL_INVOKE_MEDIA_POLL_TIMEOUT_S",
     )
+    # gRPC server (same process as FastAPI; --loop asyncio is mandatory because
+    # grpc.aio cannot run on uvloop). Port 0 binds an ephemeral port in tests.
+    grpc_server_enabled: bool = Field(
+        default=False, validation_alias="GRPC_SERVER_ENABLED"
+    )
+    grpc_port: int = Field(default=9090, ge=0, le=65535, validation_alias="GRPC_PORT")
+    grpc_max_message_bytes: int = Field(
+        default=67108864, gt=0, validation_alias="GRPC_MAX_MESSAGE_BYTES"
+    )
+    grpc_keepalive_time_ms: int = Field(
+        default=30000, gt=0, validation_alias="GRPC_KEEPALIVE_TIME_MS"
+    )
+    grpc_keepalive_timeout_ms: int = Field(
+        default=10000, gt=0, validation_alias="GRPC_KEEPALIVE_TIMEOUT_MS"
+    )
+    grpc_max_concurrent_rpcs: int = Field(
+        default=512, gt=0, validation_alias="GRPC_MAX_CONCURRENT_RPCS"
+    )
+    grpc_shutdown_grace_s: int = Field(
+        default=20, ge=0, validation_alias="GRPC_SHUTDOWN_GRACE_S"
+    )
     # 渠道 least-used 选路：计量表滚动窗口（D14）与全局开关
     model_usage_load_window_minutes: int = Field(
         default=15,

@@ -6,22 +6,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 import uuid
 
 from app.models.skill_model import Skill
-from app.schemas.skill_schema import SkillCreate, SkillUpdate
+from app.schemas.skill_schema import SkillUpdate
 
 
 class SkillRepository:
     """Skill 数据访问层"""
 
-    @staticmethod
-    def create(db: Session, data: SkillCreate, tenant_id: uuid.UUID) -> Skill:
-        """创建技能"""
-        skill = Skill(
-            **data.model_dump(),
-            tenant_id=tenant_id
-        )
-        db.add(skill)
-        db.flush()
-        return skill
+    # 注：legacy 行创建已随统一创建入口（POST /skills 一律 standard）下线，
+    #     新技能由 SkillPackageService 写 skills + skill_packages 两处。
 
     @staticmethod
     def get_by_id(db: Session, skill_id: uuid.UUID, tenant_id: Optional[uuid.UUID] = None) -> Optional[Skill]:
@@ -155,6 +147,9 @@ class SkillRepository:
             return None
 
         update_data = data.model_dump(exclude_unset=True)
+        # skill_md / files 是 standard 包内容字段，不落 skills 行（由 SkillPackageService 处理）
+        update_data.pop("skill_md", None)
+        update_data.pop("files", None)
         for key, value in update_data.items():
             setattr(skill, key, value)
 

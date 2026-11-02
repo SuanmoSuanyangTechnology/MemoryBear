@@ -133,5 +133,55 @@ class Settings:
         raw = _target_routes_raw()
         return [TargetRoute(**item) for item in raw.get("routes", [])]
 
+    # ---- East-west gRPC (gateway -> application chat) ----
+    # Lazy reads for the same reason as target_routes: deployment and tests
+    # switch them at runtime.
+    @property
+    def app_chat_protocol(self) -> str:
+        value = os.getenv("GATEWAY_APP_CHAT_PROTOCOL", "").strip().lower()
+        if value not in ("", "http", "grpc"):
+            raise RuntimeError(
+                "GATEWAY_APP_CHAT_PROTOCOL must be one of: '' (route default), http, grpc"
+            )
+        return value
+
+    @property
+    def application_service_grpc_target(self) -> str:
+        return os.getenv(
+            "APPLICATION_SERVICE_GRPC_TARGET", "dns:///application-service-grpc:9090"
+        )
+
+    @property
+    def gateway_grpc_deadline_s(self) -> float:
+        return float(os.getenv("GATEWAY_GRPC_DEADLINE_S", "3600"))
+
+    @property
+    def grpc_max_message_bytes(self) -> int:
+        return int(os.getenv("GRPC_MAX_MESSAGE_BYTES", "67108864"))
+
+    @property
+    def grpc_keepalive_time_ms(self) -> int:
+        return int(os.getenv("GRPC_KEEPALIVE_TIME_MS", "30000"))
+
+    @property
+    def grpc_keepalive_timeout_ms(self) -> int:
+        return int(os.getenv("GRPC_KEEPALIVE_TIMEOUT_MS", "10000"))
+
+    @property
+    def grpc_shutdown_grace_s(self) -> float:
+        return float(os.getenv("GRPC_SHUTDOWN_GRACE_S", "20"))
+
+    @property
+    def gateway_stream_max_connections(self) -> int:
+        return int(os.getenv("GATEWAY_STREAM_MAX_CONNECTIONS", "100"))
+
+    @property
+    def gateway_stream_heartbeat_s(self) -> float:
+        return float(os.getenv("GATEWAY_STREAM_HEARTBEAT_S", "30"))
+
+    @property
+    def gateway_stream_idle_timeout_s(self) -> float:
+        return float(os.getenv("GATEWAY_STREAM_IDLE_TIMEOUT_S", "300"))
+
 
 settings = Settings()

@@ -1,5 +1,5 @@
 import * as d3 from 'd3'
-import type { CommunityD3Node, D3Link, HullDatum, RawCommunityNode } from '../types'
+import type { CommunityD3Node, HullDatum, RawCommunityNode } from '../types'
 
 // ─── Hull helpers ─────────────────────────────────────────────────────────────
 
@@ -39,11 +39,77 @@ function circlePoints(cx: number, cy: number, r: number): [number, number][] {
   })
 }
 
+function hullPoints(pts: [number, number][]): [number, number][] {
+  const pad = Math.min(40, Math.max(30, 22 + pts.length * 3))
+  if (pts.length < CIRCLE_THRESHOLD) {
+    const cx = pts.reduce((s, p) => s + p[0], 0) / pts.length
+    const cy = pts.reduce((s, p) => s + p[1], 0) / pts.length
+    const maxDist = Math.max(0, ...pts.map(([x, y]) => Math.hypot(x - cx, y - cy)))
+    return circlePoints(cx, cy, maxDist + pad)
+  }
+  return expandPoints(toHullPoints(pts), pad)
+}
+
+// Keep the same geometry as the rendered hulls when separating communities.
+export function separateCommunityHulls(nodes: CommunityD3Node[], communityMap: Map<string, string[]>, centerId?: string) {
+  const groups = new Map<string, CommunityD3Node[]>()
+  communityMap.forEach((_, id) => groups.set(id, []))
+  nodes.forEach(node => groups.get(node.community)?.push(node))
+
+  const gap = 18
+  const margin = 8 // Extra room for the smoothed Catmull-Rom curve and stroke.
+  const boxes = Array.from(groups, ([id, members]) => {
+    if (!members.length) return null
+    const points = hullPoints(members.map(node => [node.x ?? 0, node.y ?? 0]))
+    return {
+      id,
+      members,
+      minX: Math.min(...points.map(p => p[0])) - margin,
+      maxX: Math.max(...points.map(p => p[0])) + margin,
+      minY: Math.min(...points.map(p => p[1])) - margin,
+      maxY: Math.max(...points.map(p => p[1])) + margin,
+    }
+  }).filter((box): box is NonNullable<typeof box> => box !== null)
+
+  const shift = (box: typeof boxes[number], dx: number, dy: number) => {
+    box.minX += dx; box.maxX += dx; box.minY += dy; box.maxY += dy
+    box.members.forEach(node => {
+      node.x = (node.x ?? 0) + dx
+      node.y = (node.y ?? 0) + dy
+    })
+  }
+
+  // Resolving a pair may touch another pair, so repeat until all bounding boxes clear.
+  for (let pass = 0; pass < boxes.length * boxes.length; pass++) {
+    let moved = false
+    for (let i = 0; i < boxes.length; i++) {
+      for (let j = i + 1; j < boxes.length; j++) {
+        const a = boxes[i], b = boxes[j]
+        const overlapX = Math.min(a.maxX, b.maxX) - Math.max(a.minX, b.minX) + gap
+        const overlapY = Math.min(a.maxY, b.maxY) - Math.max(a.minY, b.minY) + gap
+        if (overlapX <= 0 || overlapY <= 0) continue
+        moved = true
+        if (overlapX < overlapY) {
+          const direction = (a.minX + a.maxX <= b.minX + b.maxX) ? 1 : -1
+          if (a.id !== centerId) shift(a, -direction * overlapX / (b.id === centerId ? 1 : 2), 0)
+          if (b.id !== centerId) shift(b, direction * overlapX / (a.id === centerId ? 1 : 2), 0)
+        } else {
+          const direction = (a.minY + a.maxY <= b.minY + b.maxY) ? 1 : -1
+          if (a.id !== centerId) shift(a, 0, -direction * overlapY / (b.id === centerId ? 1 : 2))
+          if (b.id !== centerId) shift(b, 0, direction * overlapY / (a.id === centerId ? 1 : 2))
+        }
+      }
+    }
+    if (!moved) break
+  }
+}
+
 export function buildHullData(
   nodes: CommunityD3Node[],
   communityMap: Map<string, string[]>,
   communityCaption: Map<string, string>,
-  colors: string[]
+  colors: string[],
+  hiddenHullId?: string,
 ): HullDatum[] {
   const getColor = (i: number) => colors[i % colors.length]
   const byComm = new Map<string, [number, number][]>()
@@ -56,17 +122,8 @@ export function buildHullData(
   let ci = 0
   byComm.forEach((pts, id) => {
     const color = getColor(ci++)
-    if (!pts.length) return
-    let pathPoints: [number, number][]
-    const pad = Math.min(40, 15 + pts.length * 3)
-    if (pts.length < CIRCLE_THRESHOLD) {
-      const cx = pts.reduce((s, p) => s + p[0], 0) / pts.length
-      const cy = pts.reduce((s, p) => s + p[1], 0) / pts.length
-      const maxDist = Math.max(0, ...pts.map(([x, y]) => Math.sqrt((x - cx) ** 2 + (y - cy) ** 2)))
-      pathPoints = circlePoints(cx, cy, maxDist + pad)
-    } else {
-      pathPoints = expandPoints(toHullPoints(pts), pad) as [number, number][]
-    }
+    if (!pts.length || id === hiddenHullId) return
+    const pathPoints = hullPoints(pts)
     const path = smoothLine(pathPoints)
     if (!path) return
     hulls.push({
@@ -87,14 +144,17 @@ export function renderHulls(
   hulls: HullDatum[],
   hiddenCommunities: Set<string>,
   nodes: CommunityD3Node[],
-  simulation: d3.Simulation<CommunityD3Node, D3Link>,
+  onDragStart: () => void,
+  onDrag: () => void,
   onCommunityClick?: (node: RawCommunityNode) => void,
-  communityNodeMap?: Map<string, RawCommunityNode>
+  communityNodeMap?: Map<string, RawCommunityNode>,
+  selectedCommunityId?: string | null
 ) {
   let dragNodes: CommunityD3Node[] = []
   let dragStart = { x: 0, y: 0 }
   const communityDrag = d3.drag<SVGPathElement, HullDatum>()
     .on('start', (event, d) => {
+      onDragStart()
       dragNodes = nodes.filter(n => n.community === d.id)
       dragStart = { x: event.x, y: event.y }
       dragNodes.forEach(n => { n.fx = n.x; n.fy = n.y })
@@ -106,7 +166,7 @@ export function renderHulls(
         n.fx = (n.fx ?? n.x ?? 0) + dx; n.fy = (n.fy ?? n.y ?? 0) + dy
         n.x = n.fx; n.y = n.fy
       })
-      simulation.alpha(0).restart()
+      onDrag()
     })
     .on('end', () => { dragNodes = [] })
 
@@ -115,8 +175,10 @@ export function renderHulls(
     .merge(pathSel)
     .call(communityDrag)
     .attr('d', d => d.path)
-    .attr('fill', d => d.color).attr('fill-opacity', 0.08)
-    .attr('stroke', d => d.color).attr('stroke-opacity', 0.5).attr('stroke-width', 1.5)
+    .attr('fill', d => d.color).attr('fill-opacity', d => d.id === selectedCommunityId ? 0.28 : 0.12)
+    .attr('stroke', d => d.color)
+    .attr('stroke-opacity', d => d.id === selectedCommunityId ? 1 : 0.55)
+    .attr('stroke-width', d => d.id === selectedCommunityId ? 3 : 1)
     .attr('stroke-dasharray', 'none')
     .style('display', d => hiddenCommunities.has(d.id) ? 'none' : null)
     .on('click', (event, d) => {

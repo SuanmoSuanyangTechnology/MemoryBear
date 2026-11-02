@@ -2,7 +2,7 @@
  * @Author: ZhaoYing
  * @Date: 2026-02-03 18:34:16
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-27 11:22:10
+ * @Last Modified time: 2026-10-30 16:26:24
  */
 import { type FC } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -63,7 +63,7 @@ const ActivationMetricsPieCard: FC<ActivationMetricsPieCardProps> = ({
           />
           {chartData && chartData.length > 0 && showCenter && (
             <div className="rb:absolute rb:left-1/2 rb:-translate-x-1/2 rb:top-[70px] rb:text-center rb:pointer-events-none">
-              <div className="rb:text-[24px] rb:leading-7 rb:font-[MiSans-Bold] rb:font-bold rb:text-[#171719]">{centerValue}</div>
+              <div className="rb:text-[24px] rb:leading-7 rb:font-[MiSans-Bold] rb:font-bold rb:text-gray-900">{centerValue}</div>
               {centerLabel && <div className="rb:text-[12px] rb:leading-4 rb:text-[#5B6167] rb:mt-1">{centerLabel}</div>}
             </div>
           )}

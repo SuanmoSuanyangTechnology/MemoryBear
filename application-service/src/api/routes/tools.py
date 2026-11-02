@@ -10,8 +10,10 @@ service methods that bridge to MCP discovery or tool execution run through
 from __future__ import annotations
 
 import asyncio
+import uuid
 from typing import Annotated
 
+import anyio.from_thread
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
@@ -207,14 +209,21 @@ def parse_openapi_schema(request: ParseSchemaRequest, db: DbSession, principal: 
 def execute_tool(request: ToolExecuteRequest, db: DbSession, principal: Caller):
     """Execute a tool"""
     try:
-        result = asyncio.run(ToolService(db).execute_tool(
-            tool_id=request.tool_id,
-            parameters=request.parameters,
-            tenant_id=principal.tenant_id,
-            user_id=principal.actor_id,
-            workspace_id=principal.workspace_id,
-            timeout=request.timeout
-        ))
+        async def _run():
+            service = ToolService(db)
+            return await service.execute_tool(
+                tool_id=request.tool_id,
+                parameters=request.parameters,
+                tenant_id=principal.tenant_id,
+                user_id=principal.actor_id,
+                workspace_id=principal.workspace_id,
+                timeout=request.timeout
+            )
+
+        # Hop back to the server's main loop instead of asyncio.run(): the process-wide async
+        # DB pool, Redis client and HTTP clients are bound to that loop, and a fresh loop
+        # per request made calls fail intermittently ("cannot determine tenant", "Event loop is closed").
+        result = anyio.from_thread.run(_run)
         if not result.success:
             status_code = 400 if result.error_code == "VALIDATION_ERROR" else 500
             raise HTTPException(status_code=status_code, detail=result.error)
@@ -261,13 +270,16 @@ def test_tool_connection(
     try:
         if test_request:
             # Custom tool API test
-            result = asyncio.run(ToolService(db).test_custom_tool(
+            result = anyio.from_thread.run(
+                ToolService(db).test_custom_tool,
                 tool_id, principal.tenant_id,
-                test_request.method, test_request.path, test_request.parameters
-            ))
+                test_request.method, test_request.path, test_request.parameters,
+            )
         else:
             # Plain connection test
-            result = asyncio.run(ToolService(db).test_connection(tool_id, principal.tenant_id))
+            result = anyio.from_thread.run(
+                ToolService(db).test_connection, tool_id, principal.tenant_id
+            )
         if result["success"] is False:
             raise BusinessException(result["message"], BizCode.SERVICE_UNAVAILABLE)
         return success(data=result, msg="连接测试完成")

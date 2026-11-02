@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from src.domain.shared.errors import InvalidValue
 from src.domain.shared.ids import WorkspaceId
 from src.domain.shared.language import Language
 
@@ -15,9 +16,9 @@ class Interest:
 
     def __post_init__(self) -> None:
         if not self.name.strip():
-            raise ValueError("interest name must not be blank")
+            raise InvalidValue("interest name must not be blank")
         if self.frequency < 1:
-            raise ValueError("interest frequency must be positive")
+            raise InvalidValue("interest frequency must be positive")
 
 
 @dataclass(frozen=True, slots=True)

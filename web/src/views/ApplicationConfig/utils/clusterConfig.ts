@@ -1,5 +1,6 @@
 import type { KnowledgeConfig } from '@/components/Knowledge/types'
 import type { Skill } from '@/views/Skills/types'
+import { getSkillIds } from '../components/Skill/selection'
 import type { SupervisorConfig, Config } from '../types'
 import { getModelInfo } from '@/api/models'
 import type { Model } from '@/views/ModelManagement/types'
@@ -31,8 +32,6 @@ const isDefaultSupervisorConfig = (supervisorConfig: SupervisorConfig): boolean 
   return !supervisorConfig.system_prompt
     && supervisorConfig.memory?.enabled !== true
     && knowledgeBases.length === 0
-    && skills?.enabled !== true
-    && skills?.all_skills !== true
     && (skills?.skill_ids?.length ?? 0) === 0
     && (supervisorConfig.variables?.length ?? 0) === 0
     && (supervisorConfig.tools?.length ?? 0) === 0
@@ -56,8 +55,6 @@ export const normalizeSupervisorConfigForForm = (
     },
     skills: {
       ...supervisorConfig?.skills,
-      enabled: supervisorConfig?.skills?.enabled ?? (supervisorConfig?.skills != null),
-      all_skills: supervisorConfig?.skills?.all_skills ?? false,
       skill_ids: skillIds,
     },
     variables: (supervisorConfig?.variables ?? []).map((variable, index) => ({
@@ -104,6 +101,10 @@ export const normalizeSupervisorConfigForSave = (
         enabled: vo.enabled
       }
     }),
+    skills: {
+      ...supervisorConfig.skills,
+      skill_ids: getSkillIds(supervisorConfig.skills?.skill_ids)
+    }
   }
 }
 

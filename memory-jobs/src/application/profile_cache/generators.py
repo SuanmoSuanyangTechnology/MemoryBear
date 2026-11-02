@@ -14,8 +14,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from src.domain.ports.llm import ChatModel
-from src.domain.ports.prompts import PromptCatalog
+from src.application.ports.chat_model import ChatModel
+from src.application.ports.prompts import PromptCatalog
 from src.domain.profile.model import InsightContent, SummarySections
 from src.domain.profile.read_models import EntityTag, StatementSample
 from src.domain.shared.language import Language

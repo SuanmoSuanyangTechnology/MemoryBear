@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-01-12 14:42:02 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-09-03 12:02:46
+ * @Last Modified time: 2026-10-30 16:10:46
  */
 import { type FC, useEffect, useState, useMemo, useRef, useCallback, Fragment } from 'react'
 import clsx from 'clsx'
@@ -352,7 +352,7 @@ const WorkingDetail: FC = () => {
                           gap={12}
                           align="center"
                           className={clsx("rb:cursor-pointer rb:rounded-xl rb:h-12 rb:py-1! rb:px-3! rb:hover:bg-[#F6F6F6]", {
-                            'rb:bg-[#171719] rb:hover:bg-[#171719]! rb:text-white': item.source === (selected as ApiMcpListItem)?.source,
+                            'rb:bg-primary-600 rb:hover:bg-primary-600! rb:text-white': item.source === (selected as ApiMcpListItem)?.source,
                           })}
                           onClick={() => handleSelect(item)}
                         >
@@ -367,7 +367,7 @@ const WorkingDetail: FC = () => {
                           gap={12}
                           align="center"
                           className={clsx("rb:cursor-pointer rb:rounded-xl rb:h-12 rb:py-1! rb:px-3! rb:hover:bg-[#F6F6F6]", {
-                            'rb:bg-[#171719] rb:hover:bg-[#171719]! rb:text-white': item.id === (selected as Conversation)?.id,
+                            'rb:bg-primary-600 rb:hover:bg-primary-600! rb:text-white': item.id === (selected as Conversation)?.id,
                           })}
                           onClick={() => handleSelect(item)}
                         >

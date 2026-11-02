@@ -1,0 +1,9 @@
+syntax = "proto3";
+
+package memorybear.common.v1;
+
+message ErrorInfo {
+  string code = 1;
+  string message = 2;
+  bool retryable = 3;
+}

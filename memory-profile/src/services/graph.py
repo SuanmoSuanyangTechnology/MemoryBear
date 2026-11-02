@@ -30,8 +30,10 @@ from src.i18n import EnumLabels, enum_labels
 from src.repositories.graph import MemoryGraphRepository
 from src.runtime import ProfileRuntime
 from src.schemas.graph import CommunityGraph, GraphData
+from src.schemas.scene_community_graph import GraphData as SceneCommunityGraphData
 from src.services._helpers import safe_count
 from src.services.end_user import EndUserService
+from src.services.scene_community_graph.service import get_scene_community_graph_service
 
 logger = logging.getLogger(__name__)
 
@@ -258,6 +260,13 @@ class GraphQueryService:
     def __init__(self, runtime: ProfileRuntime) -> None:
         self.end_user = EndUserService.from_postgres(runtime.postgres)
         self.memory_graph = MemoryGraphRepository(runtime.neo4j)
+        self.scene_graph = get_scene_community_graph_service(runtime, self.end_user)
+
+    async def scene_community_graph(
+        self, end_user_id: str, workspace_id: UUID,
+    ) -> SceneCommunityGraphData:
+        """Read grouped scene summaries using the shared graph access rules."""
+        return await self.scene_graph.get_graph(workspace_id, end_user_id)
 
     @redis_cache(
         prefix="memory_analytics_graph_data",

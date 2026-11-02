@@ -118,8 +118,8 @@ const Detail: FC = () => {
               </Button>
             }
             <Button
-              className="rb:px-2! rb:gap-0.5!"
-              icon={<div className="rb:bg-[url('@/assets/images/workflow/return.svg')] rb:size-4 rb:bg-cover"></div>}
+              className="rb:px-2! rb:gap-0.5! rb:group"
+              icon={<div className="rb:bg-[url('@/assets/images/workflow/return.svg')] rb:group-hover:bg-[url('@/assets/images/workflow/return_blue.svg')] rb:size-4 rb:bg-cover"></div>}
               onClick={handleGoBack}
             >
               {t('common.return')}

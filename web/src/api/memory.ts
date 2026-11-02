@@ -22,6 +22,7 @@ import type { ChatItem } from '@/components/Chat/types'
 import type { Query } from '@/views/UserMemory/types';
 import type { Query as ExtractedEntityQuery } from '@/views/UserMemoryDetail/pages/ExtractedEntityGraphDetail'
 import type { EmotionOverviewQuery, EmotionTimelineQuery } from '@/views/UserMemoryDetail/components/EmotionTimeAnalysis/types'
+import type { RawCommunityGraphData } from '@/components/D3Graph/types'
 
 /** Memory verification streaming conversation. */
 export const readServiceStream = (
@@ -109,7 +110,7 @@ export const deleteMemoryNode = (data: { end_user_id: string; element_id: string
 }
 // User Memory - Community graph
 export const getMemoryCommunityGraph = (end_user_id: string, config?: AxiosRequestConfig) => {
-  return request.get(`/memory/analytics/community_graph`, { end_user_id }, config)
+  return request.get<RawCommunityGraphData>(`/memory/analytics/scene_community_graph`, { end_user_id }, config)
 }
 // User Memory - User interest distribution
 export const getInterestDistributionByUser = (end_user_id: string) => {

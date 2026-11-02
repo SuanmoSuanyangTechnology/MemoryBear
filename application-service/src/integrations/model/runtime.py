@@ -10,6 +10,8 @@ from collections.abc import Callable
 from typing import Any
 from urllib.parse import urlparse
 
+from memorybear_grpc.client import ChannelPool
+
 from ...config import current_settings
 
 from .client import ModelServiceClient, ModelServiceSyncClient
@@ -18,9 +20,10 @@ from .invoke import (
     ModelInvokeClient,
     ModelInvokeSyncClient,
     invoke_media_timeouts,
+    invoke_timeouts,
 )
 
-ClientFactory = Callable[[], Any]
+ClientFactory = Callable[..., Any]
 
 logger = logging.getLogger(__name__)
 
@@ -80,6 +83,7 @@ class ModelIntegrationRuntime:
         invoke_sync_client_factory: ClientFactory | None = None,
         media_invoke_client_factory: ClientFactory | None = None,
         media_invoke_sync_client_factory: ClientFactory | None = None,
+        grpc_pool_factory: ClientFactory | None = None,
     ):
         self._client_factory = client_factory
         self._sync_client_factory = sync_client_factory
@@ -96,6 +100,10 @@ class ModelIntegrationRuntime:
         self._media_invoke_sync_client: Any | None = None
         self._media_invoke_clients: weakref.WeakKeyDictionary[
             asyncio.AbstractEventLoop, Any
+        ] = weakref.WeakKeyDictionary()
+        self._grpc_pool_factory = grpc_pool_factory
+        self._grpc_pools: weakref.WeakKeyDictionary[
+            asyncio.AbstractEventLoop, ChannelPool
         ] = weakref.WeakKeyDictionary()
 
     @property
@@ -134,10 +142,15 @@ class ModelIntegrationRuntime:
         client = self._invoke_clients.get(loop)
         if client is not None:
             return client
-        _validated_base_url()
+        if current_settings().app_model_protocol == "http":
+            _validated_base_url()
         self._prune_closed_loops()
-        factory = self._invoke_client_factory or _default_invoke_client_factory
-        client = factory()
+        factory = self._invoke_client_factory
+        client = (
+            _default_invoke_client_factory(self, loop)
+            if factory is None
+            else factory(loop)
+        )
         self._invoke_clients[loop] = client
         return client
 
@@ -176,12 +189,29 @@ class ModelIntegrationRuntime:
         client = self._media_invoke_clients.get(loop)
         if client is not None:
             return client
-        _validated_base_url()
+        if current_settings().app_model_protocol == "http":
+            _validated_base_url()
         self._prune_closed_loops()
-        factory = self._media_invoke_client_factory or _default_media_invoke_client_factory
-        client = factory()
+        factory = self._media_invoke_client_factory
+        client = (
+            _default_media_invoke_client_factory(self, loop)
+            if factory is None
+            else factory(loop)
+        )
         self._media_invoke_clients[loop] = client
         return client
+
+    def grpc_pool_for(self, loop: asyncio.AbstractEventLoop) -> ChannelPool:
+        """One pool per event loop: grpc.aio channels are bound to their loop."""
+
+        pool = self._grpc_pools.get(loop)
+        if pool is not None:
+            return pool
+        self._prune_closed_loops()
+        factory = self._grpc_pool_factory or _default_grpc_pool_factory
+        pool = factory()
+        self._grpc_pools[loop] = pool
+        return pool
 
     def _prune_closed_loops(self) -> None:
         """Drop pools bound to closed loops: their connections die with the loop and cannot be closed safely, so release the reference to prevent leaks."""
@@ -189,6 +219,8 @@ class ModelIntegrationRuntime:
         for registry in (self._invoke_clients, self._media_invoke_clients):
             for loop in [item for item in registry if item.is_closed()]:
                 registry.pop(loop, None)
+        for loop in [item for item in self._grpc_pools if item.is_closed()]:
+            self._grpc_pools.pop(loop, None)
 
     async def start(self) -> None:
         await self.close()
@@ -208,10 +240,12 @@ class ModelIntegrationRuntime:
         invoke_clients = list(self._invoke_clients.values())
         media_invoke_sync_client = self._media_invoke_sync_client
         media_invoke_clients = list(self._media_invoke_clients.values())
+        grpc_pools = list(self._grpc_pools.values())
         self._client = self._sync_client = self._invoke_sync_client = None
         self._media_invoke_sync_client = None
         self._invoke_clients = weakref.WeakKeyDictionary()
         self._media_invoke_clients = weakref.WeakKeyDictionary()
+        self._grpc_pools = weakref.WeakKeyDictionary()
         await _close_quietly(client)
         await _close_quietly(sync_client)
         await _close_quietly(invoke_sync_client)
@@ -220,6 +254,8 @@ class ModelIntegrationRuntime:
             await _close_quietly(invoke_client)
         for media_invoke_client in media_invoke_clients:
             await _close_quietly(media_invoke_client)
+        for pool in grpc_pools:
+            await _close_quietly(pool)
 
 
 def _default_client_factory() -> ModelServiceClient:
@@ -230,16 +266,51 @@ def _default_sync_client_factory() -> ModelServiceSyncClient:
     return ModelServiceSyncClient.from_settings(current_settings())
 
 
-def _default_invoke_client_factory() -> ModelInvokeClient:
-    return ModelInvokeClient.from_settings(current_settings())
+def _default_grpc_pool_factory() -> ChannelPool:
+    settings = current_settings()
+    return ChannelPool(
+        max_message_bytes=settings.grpc_max_message_bytes,
+        keepalive_time_ms=settings.grpc_keepalive_time_ms,
+        keepalive_timeout_ms=settings.grpc_keepalive_timeout_ms,
+    )
+
+
+def _default_invoke_client_factory(
+    runtime: ModelIntegrationRuntime,
+    loop: asyncio.AbstractEventLoop,
+) -> ModelInvokeClient:
+    settings = current_settings()
+    if settings.app_model_protocol == "grpc":
+        return ModelInvokeClient.for_grpc(
+            runtime.grpc_pool_for(loop),
+            target=settings.model_service_grpc_target,
+            timeouts=invoke_timeouts(settings),
+            call_budget_s=settings.model_service_invoke_call_budget_seconds,
+            margin_s=settings.model_service_invoke_grpc_margin_seconds,
+        )
+    return ModelInvokeClient.from_settings(settings)
 
 
 def _default_invoke_sync_client_factory() -> ModelInvokeSyncClient:
     return ModelInvokeSyncClient.from_settings(current_settings())
 
 
-def _default_media_invoke_client_factory() -> ModelInvokeClient:
-    return ModelInvokeClient.from_settings(current_settings(), timeouts=invoke_media_timeouts(current_settings()))
+def _default_media_invoke_client_factory(
+    runtime: ModelIntegrationRuntime,
+    loop: asyncio.AbstractEventLoop,
+) -> ModelInvokeClient:
+    settings = current_settings()
+    if settings.app_model_protocol == "grpc":
+        return ModelInvokeClient.for_grpc(
+            runtime.grpc_pool_for(loop),
+            target=settings.model_service_grpc_target,
+            timeouts=invoke_media_timeouts(settings),
+            call_budget_s=settings.model_service_invoke_media_call_budget_seconds,
+            margin_s=settings.model_service_invoke_grpc_margin_seconds,
+        )
+    return ModelInvokeClient.from_settings(
+        settings, timeouts=invoke_media_timeouts(settings)
+    )
 
 
 def _default_media_invoke_sync_client_factory() -> ModelInvokeSyncClient:

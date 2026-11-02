@@ -78,7 +78,7 @@ class MultiAgentConfig(Base):
         JSON,
         nullable=False,
         default=list,
-        comment="子 Agent 列表: [{'agent_id': 'uuid', 'name': '...', 'role': '...', 'priority': 1}]"
+        comment="子 Agent 列表: [{'agent_id': 'uuid', 'name': '...', 'role': '...'}]"
     )
 
     # Routing rules

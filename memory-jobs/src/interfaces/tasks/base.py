@@ -1,18 +1,14 @@
-"""Base task class and shared access to the synchronous runtime."""
+"""Base task class: retry and acknowledgement policy.
+
+Tasks reach infrastructure only through their use cases (composition root); this
+module carries no client accessors, so a task cannot open a session or a driver
+outside the Unit of Work.
+"""
 
 from __future__ import annotations
 
-from collections.abc import Iterator
-from contextlib import contextmanager
-
 from celery import Task
-from elasticsearch import Elasticsearch
-from neo4j import Driver
-from redis import Redis
 from sqlalchemy.exc import OperationalError
-from sqlalchemy.orm import Session
-
-from src.runtime import get_runtime
 
 
 class JobTask(Task):
@@ -33,22 +29,3 @@ class JobTask(Task):
     retry_jitter = True
     max_retries = 5
     acks_late = True
-
-    @contextmanager
-    def db_session(self) -> Iterator[Session]:
-        """One committed unit of work; rolls back and re-raises on failure."""
-
-        with get_runtime().postgres.session() as session:
-            yield session
-
-    @property
-    def redis_client(self) -> Redis:
-        return get_runtime().redis.client()
-
-    @property
-    def elasticsearch_client(self) -> Elasticsearch:
-        return get_runtime().elasticsearch.client()
-
-    @property
-    def neo4j_driver(self) -> Driver:
-        return get_runtime().neo4j.driver()

@@ -3,40 +3,32 @@ import { useParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { Spin, Flex } from 'antd';
 
-import type { CommunityD3Node, CommunityGraphData, RawCommunityGraphData, RawCommunityNode } from '@/components/D3Graph/types'
+import type { CommunityD3Node, CommunityGraphData, RawCommunityNode, RawCommunityGraphData } from '@/components/D3Graph/types'
 import { buildCommunityGraphData } from '@/components/D3Graph/utils'
 import CommunityGraph from '@/components/D3Graph/CommunityGraph'
 import { getMemoryCommunityGraph } from '@/api/memory'
+import CommunityEntityDetails from './CommunityEntityDetails'
+
+const COMMUNITY_COLORS = ['#526A86', '#9B706A', '#6C8B75', '#8A78A4', '#A58957', '#528C91', '#A66F89', '#7182A0']
 
 // ─── Tooltip ──────────────────────────────────────────────────────────────────
 
 const NodeTooltip: FC<{ node: CommunityD3Node }> = ({ node }) => {
-  const { t } = useTranslation()
   return (
-    <div className="rb:min-w-45 rb:max-w-65 rb:max-h-62.5 rb:overflow-y-auto rb:rounded-lg rb:border rb:border-[#DFE4ED] rb:bg-white rb:px-3.5 rb:py-2.5 rb:text-[13px] rb:shadow-[0_4px_16px_rgba(0,0,0,0.12)]">
-      <div className="rb:mb-1.5 rb:text-sm rb:font-semibold rb:text-[#1a1a1a]">
-        {node.properties?.name ?? node.name}
-      </div>
-      {node.properties?.description && (
-        <div className="rb:mb-1 rb:leading-5 rb:text-[#5B6167]">
-          {node.properties.description}
-        </div>
-      )}
-      <div className="rb:leading-5.5 rb:text-[#5B6167]">
-        {t('userMemory.type')}: 
-        <span className="rb:text-[#1a1a1a]">{node.properties?.entity_type}</span>
-      </div>
-      <div className="rb:leading-5.5 rb:text-[#5B6167]">
-        {t('userMemory.community')}: 
-        <span className="rb:font-medium" style={{ color: node.color }}>{node.properties?.community_name}</span>
-      </div>
+    <div className="rb:min-w-45 rb:max-w-65 rb:max-h-62.5 rb:overflow-y-auto rb:rounded-lg rb-border rb:bg-white rb:px-3.5 rb:py-2.5 rb:text-[13px] rb:shadow-[0_4px_16px_rgba(0,0,0,0.12)]">
+      <CommunityEntityDetails node={node} variant="hover" />
     </div>
   )
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-const CommunityNetwork: FC<{ onSelectCommunity?: (node: RawCommunityNode) => void }> = ({ onSelectCommunity }) => {
+const CommunityNetwork: FC<{
+  onSelectCommunity?: (node: RawCommunityNode) => void
+  onSelectNode?: (node: CommunityD3Node) => void
+  selectedNodeId?: string | null
+  selectedCommunityId?: string | null
+}> = ({ onSelectCommunity, onSelectNode, selectedNodeId, selectedCommunityId }) => {
   const { id } = useParams()
   const { t } = useTranslation()
   const [graphData, setGraphData] = useState<CommunityGraphData | null>(null)
@@ -50,20 +42,19 @@ const CommunityNetwork: FC<{ onSelectCommunity?: (node: RawCommunityNode) => voi
     setGraphData(null)
     setLoading(true)
     getMemoryCommunityGraph(id, { signal: controller.signal }).then(res => {
-      const raw = res as RawCommunityGraphData
-      if (!raw.nodes?.length) { setEmpty(true); return }
-      const built = buildCommunityGraphData(raw)
+      if (controller.signal.aborted) return
+      const built = buildCommunityGraphData(res as RawCommunityGraphData, COMMUNITY_COLORS)
       if (!built) { setEmpty(true); return }
       setGraphData(built)
-    }).catch((e) => { if (e?.code !== 'ERR_CANCELED') setEmpty(true) })
-      .finally(() => setLoading(false))
+    }).catch(() => { if (!controller.signal.aborted) setEmpty(true) })
+      .finally(() => { if (!controller.signal.aborted) setLoading(false) })
     return () => controller.abort()
   }, [id])
 
   if (loading) {
     return (
       <Flex align="center" justify="center" className="rb:w-full rb:h-full spin">
-        <Spin tip={t('userMemory.communityLoadingTip')} size="large" className="rb:text-[#5B6167]!">
+        <Spin tip={t('userMemory.communityLoadingTip')} size="large" className="rb:text-gray-600!">
           <div className="rb:w-64 rb:h-64" />
         </Spin>
       </Flex>
@@ -74,8 +65,12 @@ const CommunityNetwork: FC<{ onSelectCommunity?: (node: RawCommunityNode) => voi
     <CommunityGraph
       data={graphData}
       empty={empty}
+      colors={COMMUNITY_COLORS}
       showLegend={false}
       onCommunityClick={onSelectCommunity}
+      onNodeClick={onSelectNode}
+      selectedNodeId={selectedNodeId}
+      selectedCommunityId={selectedCommunityId}
       renderTooltip={node => <NodeTooltip node={node} />}
     />
   )

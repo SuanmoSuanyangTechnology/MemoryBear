@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-04-14 11:34:42 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-08-14 14:17:14
+ * @Last Modified time: 2026-10-30 15:08:03
  */
 /**
  * Package Component
@@ -39,7 +39,7 @@ import arrowSvg from '@/assets/images/package/arrow.svg?react'
 
 const btnClassNames = {
   permanent_free: 'rb:h-10! rb:rounded-lg!',
-  default: 'rb:h-10! rb:rounded-lg! rb:bg-[#212332]! rb:text-white! rb:border-0! rb:hover:border-0! rb:hover:opacity-[0.8]',
+  default: 'rb:h-10! rb:rounded-lg! rb:text-white! rb:border-0! rb:hover:border-0! rb:hover:opacity-[0.8] rb:shrink-0',
 }
 
 export const UnitWrapper = ({ titleKey, value, icon, unit, theme_color = '#171719' }: { titleKey: string; value?: number | string | null; icon: string; unit?: string; theme_color?: string; }) => {
@@ -234,7 +234,7 @@ const Package: FC = () => {
                 align="center"
                 justify="center"
                 className={clsx("rb:absolute rb:-left-6 rb:top-1/2 rb:-translate-y-1/2 rb:-translate-x-3 rb:z-10 rb:h-25 rb:rounded-lg rb:w-6 rb:bg-[rgba(255,255,255,0.6)] rb:border rb:border-[rgba(255,255,255,0.6)]", {
-                  'rb:hover:border-[#171719] rb:cursor-pointer': currentPage > 0,
+                  'rb:hover:border-primary-600 rb:cursor-pointer': currentPage > 0,
                   'rb:cursor-not-allowed': currentPage === 0
                 })}
                 onClick={() => {
@@ -351,7 +351,7 @@ const Package: FC = () => {
                 align="center"
                 justify="center"
                 className={clsx("rb:absolute rb:-right-12 rb:top-1/2 rb:-translate-y-1/2 rb:-translate-x-3 rb:z-10 rb:h-25 rb:rounded-lg rb:w-6 rb:bg-[rgba(255,255,255,0.6)] rb:border rb:border-[rgba(255,255,255,0.6)]", {
-                  'rb:hover:border-[#171719] rb:cursor-pointer': currentPage < totalPages - 1,
+                  'rb:hover:border-primary-600 rb:cursor-pointer': currentPage < totalPages - 1,
                   'rb:cursor-not-allowed': currentPage >= totalPages - 1
                 })}
                 onClick={() => {

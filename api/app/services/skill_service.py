@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from app.repositories.skill_repository import SkillRepository
-from app.schemas.skill_schema import SkillCreate, SkillUpdate
+from app.schemas.skill_schema import SkillUpdate
 from app.models.skill_model import Skill
 from app.core.exceptions import BusinessException
 from app.core.error_codes import BizCode
@@ -17,21 +17,8 @@ from app.services.tool_service import ToolService
 class SkillService:
     """Skill 业务逻辑层"""
 
-    @staticmethod
-    def create_skill(db: Session, data: SkillCreate, tenant_id: uuid.UUID) -> Skill:
-        """创建技能"""
-        # 检查同名技能
-        existing = db.query(Skill).filter(
-            Skill.tenant_id == tenant_id,
-            Skill.name == data.name
-        ).first()
-        if existing:
-            raise BusinessException(f"技能名称'{data.name}'已存在", BizCode.DUPLICATE_NAME)
-        
-        skill = SkillRepository.create(db, data, tenant_id)
-        db.commit()
-        db.refresh(skill)
-        return skill
+    # 注：技能创建已统一改造到 `POST /skills`（一律产出 standard 格式），
+    #     由 SkillPackageService.create_from_editor 负责，此处不再提供 legacy 行创建。
 
     @staticmethod
     def get_skill(db: Session, skill_id: uuid.UUID, tenant_id: uuid.UUID) -> Skill:
@@ -140,6 +127,10 @@ class SkillService:
             try:
                 skill = SkillRepository.get_by_id(db, uuid.UUID(skill_id), tenant_id)
                 if skill and skill.is_active:
+                    # standard 技能不挂平台工具（协议语义）；防御：即使行残留 tools 也跳过，
+                    # 避免 standard 技能的工具进 keyword 门控被永久过滤
+                    if (skill.skill_format or "legacy") == "standard":
+                        continue
                     # 加载技能关联的工具
                     for tool_config in skill.tools:
                         tool = tool_service.get_tool_instance(tool_config.get("tool_id", ""), tenant_id)
@@ -173,6 +164,9 @@ class SkillService:
             try:
                 skill = await SkillRepository.get_by_id_async(db, uuid.UUID(skill_id), tenant_id)
                 if skill and skill.is_active:
+                    # standard 技能不挂平台工具（协议语义）；防御同同步版
+                    if (skill.skill_format or "legacy") == "standard":
+                        continue
                     for tool_config in skill.tools:
                         tool = await tool_service.get_tool_instance_async(
                             tool_config.get("tool_id", ""),

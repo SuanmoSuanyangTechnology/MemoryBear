@@ -994,6 +994,19 @@ async def _report_usage(event: UsageEvent) -> None:
     await asyncio.to_thread(publish_usage_safely, usage_publisher, event)
 
 
+async def _release_connection(db: AsyncSession) -> None:
+    """配置解析后结束只读事务，把池连接还给连接池。
+
+    解析是本门面唯一的 DB 阶段；不归还则每条在途流都钉住一条连接直到排流结束。
+    会话是 ``expire_on_commit=False``，已加载行继续可读。失败仅告警，绝不抛回业务。
+    """
+
+    try:
+        await db.commit()
+    except Exception as exc:  # noqa: BLE001 - side-channel optimization
+        logger.warning("invoke: db release failed error=%s", exc)
+
+
 # ---------------- 门面 ----------------
 
 
@@ -1101,6 +1114,7 @@ async def invoke(
         if resolved_with_plan is None:
             raise _not_found(request.config_id)
         plan = resolved_with_plan.plan
+        await _release_connection(db)
         return await run_candidate_fallback_async(
             plan.candidates,
             entry=plan.entry,

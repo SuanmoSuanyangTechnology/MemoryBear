@@ -143,7 +143,7 @@ const FinalResult: FC<FinalResultProps> = ({
                 key={item.type}
                 className={clsx("rb:rounded-[13px] rb:py-0.5 rb:px-3 rb:leading-5 rb:cursor-pointer", {
                   'rb:bg-white': !((coreEntitiesTab && item.type === coreEntitiesTab) || (!coreEntitiesTab && index === 0)),
-                  'rb:bg-[#171719] rb:text-white': (coreEntitiesTab && item.type === coreEntitiesTab) || (!coreEntitiesTab && index === 0)
+                  'rb:bg-primary-600 rb:text-white': (coreEntitiesTab && item.type === coreEntitiesTab) || (!coreEntitiesTab && index === 0)
                 })}
                 onClick={() => setCoreEntitiesTab(item.type)}
               >

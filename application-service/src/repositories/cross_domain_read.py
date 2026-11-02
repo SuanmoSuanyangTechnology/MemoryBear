@@ -36,6 +36,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PgUUID
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from ..schemas.model_enums import LLM_FAMILY_TYPES
@@ -359,6 +360,22 @@ def get_api_key_binding(
             api_keys.c.workspace_id == workspace_id,
         )
     ).first()
+
+
+async def get_api_key_binding_async(
+    db: AsyncSession, api_key_id: UUID, workspace_id: UUID
+) -> Row | None:
+    """Async twin of ``get_api_key_binding`` for the async chat path."""
+
+    result = await db.execute(
+        select(
+            api_keys.c.resource_id, api_keys.c.type, api_keys.c.scopes
+        ).where(
+            api_keys.c.id == api_key_id,
+            api_keys.c.workspace_id == workspace_id,
+        )
+    )
+    return result.first()
 
 
 def get_workspaces_by_ids(
@@ -857,6 +874,7 @@ __all__ = [
     "find_tool_config_id_by_name",
     "get_active_subscription",
     "get_api_key_binding",
+    "get_api_key_binding_async",
     "get_api_key_resource_id",
     "get_available_kb_ids",
     "get_available_model_ids",

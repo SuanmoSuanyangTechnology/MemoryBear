@@ -197,8 +197,8 @@ const ResourcePackage: FC = () => {
                   gap={12}
                   className={clsx(
                     'rb:cursor-pointer rb:rounded-[10px] rb:p-3! rb:transition-colors', {
-                      'rb:bg-[#171719] rb:text-white': active,
-                      'rb:bg-white rb:border rb:border-[#EBEBEB] rb:hover:border-[#171719]': !active,
+                      'rb:bg-[#155EEF] rb:text-white': active,
+                      'rb:bg-white rb:border rb:border-[#EBEBEB] rb:hover:border-[#155EEF]': !active,
                     },
                   )}
                   onClick={() => handleSelectResourcePack(resource)}
@@ -209,7 +209,7 @@ const ResourcePackage: FC = () => {
                     className="rb:shrink-0 rb:size-8 rb:rounded-lg"
                     style={{ backgroundColor: active ? 'rgba(255,255,255,0.12)' : '#F4F5F7' }}
                   >
-                    <PackageIcon iconKey={getPackage(resource.billing_units[0])?.icon as string} color={active ? '#FFFFFF' : '#171719'} />
+                    <PackageIcon iconKey={getPackage(resource.billing_units[0])?.icon as string} color={active ? '#FFFFFF' : '#155EEF'} />
                   </Flex>
                   <div className="rb:min-w-0 rb:flex-1">
                     <div className="rb:text-[14px] rb:font-medium rb:truncate">{isZh ? resource.name_zh : resource.name_en}</div>
@@ -224,7 +224,7 @@ const ResourcePackage: FC = () => {
                         justify="center"
                         className={clsx(
                           'rb:shrink-0 rb:min-w-5 rb:h-5 rb:px-1.5! rb:rounded-full rb:text-[12px] rb:font-medium',
-                          active ? 'rb:bg-white rb:text-[#171719]' : 'rb:bg-[#171719] rb:text-white',
+                          active ? 'rb:bg-white rb:text-[#155EEF]' : 'rb:bg-[#155EEF] rb:text-white',
                         )}
                       >
                         x{inCartQty}
@@ -245,7 +245,7 @@ const ResourcePackage: FC = () => {
               <Flex justify="space-between" align="center" className="rb:border-b rb:border-[#EBEBEB] rb:py-3! rb:mx-4!">
                 <Flex gap={12} align="center">
                   <Flex align="center" justify="center" className="rb:size-9 rb:rounded-lg rb:bg-[#F4F5F7]">
-                    <PackageIcon iconKey={getPackage(selectedResourcePack.billing_units[0])?.icon as string} color="#171719" />
+                    <PackageIcon iconKey={getPackage(selectedResourcePack.billing_units[0])?.icon as string} color="#155EEF" />
                   </Flex>
                   <div>
                     <div className="rb:text-[15px] rb:font-bold">{isZh ? selectedResourcePack.name_zh : selectedResourcePack.name_en}</div>
@@ -275,7 +275,7 @@ const ResourcePackage: FC = () => {
                       key={tier.tier_id}
                       className={clsx(
                         'rb:relative rb:flex-1 rb:cursor-pointer rb:rounded-[10px] rb:px-4 rb:py-3 rb:transition-all',
-                        active ? 'rb:border rb:border-[#171719]' : 'rb:border rb:border-[#EBEBEB] rb:hover:border-[#EBEBEB]',
+                        active ? 'rb:border rb:border-[#155EEF]' : 'rb:border rb:border-[#EBEBEB] rb:hover:border-[#155EEF]',
                       )}
                       onClick={() => handleChangeTier(tier)}
                     >
@@ -322,7 +322,7 @@ const ResourcePackage: FC = () => {
                 }
                 <Button
                   type="primary"
-                  className="rb:h-10! rb:rounded-lg! rb:bg-[#171719]! rb:border-0! rb:hover:opacity-80!"
+                  className="rb:h-10! rb:rounded-lg! rb:bg-[#155EEF]! rb:border-0! rb:hover:opacity-80!"
                   onClick={handleAddToCart}
                 >
                   {isHasAdd ? t('package.confirmUpdateCart') :t('package.confirmAddCart')}
@@ -345,8 +345,8 @@ const ResourcePackage: FC = () => {
           <Flex
             align="center"
             justify="center"
-            className={clsx("rb:p-1! rb:rounded-lg rb:border rb:border-[#EBEBEB] rb:hover:border-[#171719]", {
-              'rb:border-[#171719]!': cartExpanded,
+            className={clsx("rb:p-1! rb:rounded-lg rb:border rb:border-[#EBEBEB] rb:hover:border-[#155EEF]", {
+              'rb:border-[#155EEF]!': cartExpanded,
             })}
           >
             <div
@@ -363,7 +363,7 @@ const ResourcePackage: FC = () => {
           <Button
             type="primary"
             disabled={cartCount < 1}
-            className="rb:h-10! rb:rounded-lg! rb:bg-[#171719]! rb:border-0! rb:hover:opacity-80! rb:disabled:bg-[#EBEBEB]!"
+            className="rb:h-10! rb:rounded-lg! rb:bg-[#155EEF]! rb:border-0! rb:hover:opacity-80! rb:disabled:bg-[#EBEBEB]!"
             onClick={handleCheckout}
           >
             {t('package.goToOrder')}

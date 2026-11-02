@@ -13,6 +13,48 @@ from .serialization import serialize_tool_parameter
 logger = logging.getLogger(__name__)
 
 
+def format_tool_argument_error(error: Exception) -> str:
+    """Turn an argument-validation failure into a tool result the model can act on.
+
+    LangChain validates arguments before the tool body runs. Without a handler the
+    failure surfaces only as a raw error event (the model gets no tool output and the
+    UI shows an empty result). Returning this text as the tool result lets the model
+    see exactly what was wrong and retry.
+    """
+    missing: List[str] = []
+    invalid: List[str] = []
+    try:
+        for item in error.errors():  # type: ignore[attr-defined]
+            loc = ".".join(str(p) for p in item.get("loc", ())) or "arguments"
+            if item.get("type") in ("missing", "value_error.missing"):
+                missing.append(loc)
+            else:
+                invalid.append(f"{loc}: {item.get('msg', 'invalid value')}")
+    except Exception:  # noqa: BLE001 - never let error formatting fail the call
+        invalid.append(str(error)[:300])
+
+    parts: List[str] = []
+    if missing:
+        parts.append(f"缺少必填参数: {', '.join(missing)}")
+    if invalid:
+        parts.append("参数不合法: " + "; ".join(invalid))
+    hint = "请补全参数后重新调用。"
+    if missing:
+        hint += (
+            "如果上一次调用的内容很长，很可能是输出达到长度上限被截断了，排在长内容之后的必填参数因此丢失："
+            "请把必填的短参数（如 path）写在最前面，并把长内容拆成多次较小的调用（例如先写骨架，再分段追加）。"
+        )
+    return json.dumps(
+        {
+            "success": False,
+            "error": "工具参数校验失败，工具没有被执行。" + " ".join(parts) + " " + hint,
+            "error_code": "INVALID_ARGUMENTS",
+        },
+        ensure_ascii=False,
+        indent=2,
+    )
+
+
 class LangchainToolWrapper(LangchainBaseTool):
     """Langchain tool wrapper"""
     
@@ -52,6 +94,7 @@ class LangchainToolWrapper(LangchainBaseTool):
             args_schema=args_schema,
             tool_instance=tool_instance,
             operation=operation,
+            handle_validation_error=format_tool_argument_error,
             **kwargs
         )
     
@@ -82,8 +125,18 @@ class LangchainToolWrapper(LangchainBaseTool):
             return LangchainAdapter._format_result_for_langchain(result)
             
         except Exception as e:
-            logger.error(f"工具执行失败: {self.name}, 错误: {e}")
-            raise ToolException(f"工具执行失败: {str(e)}")
+            # Do not raise: an exception here aborts the whole agent turn and the
+            # model never sees why. Hand the failure back as the tool result instead.
+            logger.error(f"工具执行失败: {self.name}, 错误: {e}", exc_info=True)
+            return json.dumps(
+                {
+                    "success": False,
+                    "error": f"工具执行失败: {str(e) or type(e).__name__}",
+                    "error_code": "EXECUTION_ERROR",
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
 
 
 class LangchainAdapter:

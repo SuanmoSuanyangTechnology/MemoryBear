@@ -7,6 +7,7 @@ import struct
 import uuid
 import zlib
 from collections.abc import AsyncIterator
+from contextlib import aclosing
 from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
@@ -499,13 +500,14 @@ async def stream_zip_files(
                 yield header
                 crc = compressed_size = raw_size = 0
                 compressor = zlib.compressobj(zlib.Z_DEFAULT_COMPRESSION, zlib.DEFLATED, -15)
-                async for chunk in chunks:
-                    crc = zlib.crc32(chunk, crc) & 0xFFFFFFFF
-                    raw_size += len(chunk)
-                    compressed = compressor.compress(chunk)
-                    compressed_size += len(compressed)
-                    if compressed:
-                        yield compressed
+                async with aclosing(chunks):
+                    async for chunk in chunks:
+                        crc = zlib.crc32(chunk, crc) & 0xFFFFFFFF
+                        raw_size += len(chunk)
+                        compressed = compressor.compress(chunk)
+                        compressed_size += len(compressed)
+                        if compressed:
+                            yield compressed
                 tail = compressor.flush()
                 compressed_size += len(tail)
                 if tail:

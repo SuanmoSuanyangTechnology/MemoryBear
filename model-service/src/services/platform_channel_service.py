@@ -2,7 +2,9 @@
 
 premium（SSO 新建租户绑定、控制台补绑、订单派额自愈）只传目标租户与 ``tenant_name``
 + ``quota_limit``；建 key 的上游协议在私有扩展的 ``provision_tenant_channel``（含默认
-计价组解析），凭据明文全程留在本进程——加密落 ``model_channels``，对外只出掩码视图。
+计价组解析），目标租户以 ``external_id`` 传给上游做唯一性校验（重复供给命中即返回
+既有 key，不会重复建 key），凭据明文全程留在本进程——加密落 ``model_channels``，
+对外只出掩码视图。
 
 轮换不变量：已存在 platform 渠道时**复用最早行**（created_at, id 升序）换凭据，而不是
 新建第二行——渠道选路按 least-used → created_at asc，旧凭据行更早会被反优先选中。
@@ -46,7 +48,7 @@ class PlatformChannelService:
         返回 ``{"channel": 脱敏视图, "metadata": 上游记账元数据}``；凭据明文不进返回值。
         """
         credential = PlatformChannelService._provision_upstream(
-            tenant_name=tenant_name, quota_limit=quota_limit
+            tenant_id=tenant_id, tenant_name=tenant_name, quota_limit=quota_limit
         )
         svc = ChannelService(db)
         existing = svc.list_tenant(
@@ -85,11 +87,13 @@ class PlatformChannelService:
         return deleted
 
     @staticmethod
-    def _provision_upstream(*, tenant_name: str, quota_limit: float) -> Any:
+    def _provision_upstream(
+        *, tenant_id: uuid.UUID, tenant_name: str, quota_limit: float
+    ) -> Any:
         semantics = get_platform_semantics()
         try:
             return semantics.provision_tenant_channel(
-                tenant_name=tenant_name, quota_limit=quota_limit
+                tenant_id=tenant_id, tenant_name=tenant_name, quota_limit=quota_limit
             )
         except ValueError as exc:
             raise BusinessException(str(exc), BizCode.INVALID_PARAMETER) from exc

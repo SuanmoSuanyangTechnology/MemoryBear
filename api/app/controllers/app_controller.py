@@ -14,7 +14,6 @@ from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 from urllib.parse import quote
 
-from app.core.config import settings
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
 from app.core.logging_config import get_business_logger
@@ -1117,8 +1116,6 @@ async def draft_run(
             from app.db import AsyncSessionLocal
             from app.services.draft_run_service import AgentRunService as _AgentRunService
 
-            execution_mode = "sandbox" if settings.E2B_ENABLED else "in_process"
-
             stream_db = AsyncSessionLocal()
             try:
                 _draft_service = _AgentRunService(stream_db)
@@ -1139,7 +1136,6 @@ async def draft_run(
                             storage_type=storage_type,
                             files=payload.files,
                             source=source,
-                            execution_mode=execution_mode,
                     ):
                         yield event
                 finally:
@@ -1418,7 +1414,6 @@ async def draft_run_compare(
     # 流式返回
     if payload.stream:
         source = HitLogSource.CONSOLE
-        execution_mode = "sandbox" if settings.E2B_ENABLED else "in_process"
 
         async def event_generator():
             from app.services.draft_run_service import AgentRunService
@@ -1439,7 +1434,6 @@ async def draft_run_compare(
                         timeout=payload.timeout or 60,
                         files=payload.files,
                         source=source,
-                        execution_mode=execution_mode,
                 ):
                     yield event
 
@@ -1456,7 +1450,6 @@ async def draft_run_compare(
     # 非流式返回
     from app.services.draft_run_service import AgentRunService
     source = HitLogSource.CONSOLE
-    execution_mode = "sandbox" if settings.E2B_ENABLED else "in_process"
     async with get_async_db_context() as db:
         draft_service = AgentRunService(db)
         result = await draft_service.run_compare(
@@ -1474,7 +1467,6 @@ async def draft_run_compare(
             timeout=payload.timeout or 60,
             files=payload.files,
             source=source,
-            execution_mode=execution_mode,
         )
 
     logger.info(

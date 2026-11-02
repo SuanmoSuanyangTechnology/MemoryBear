@@ -1,0 +1,47 @@
+[build-system]
+requires = ["hatchling>=1.26"]
+build-backend = "hatchling.build"
+
+[project]
+name = "sandbox-service"
+version = "0.1.0"
+description = "MemoryBear sandbox microservice"
+requires-python = ">=3.12,<3.13"
+# Backend-independent core. Each backend declares its own dependencies as an extra
+# (`uv sync --extra <backend>`), so a build only carries what it uses.
+dependencies = [
+    "fastapi==0.119.0",
+    "uvicorn==0.37.0",
+    "python-dotenv>=1.0,<2",
+]
+
+[project.optional-dependencies]
+cube = ["httpx==0.28.1"]
+
+[dependency-groups]
+dev = [
+    "httpx==0.28.1",
+    "pytest>=9,<10",
+    "pytest-asyncio>=1.3,<2",
+    "ruff>=0.16,<1",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+pythonpath = ["."]
+testpaths = ["tests"]
+# `live` tests need a real substrate; run them with `-m live`.
+addopts = "-m 'not live'"
+markers = ["live: needs a reachable real backend (deselected by default)"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "ASYNC"]
+# `timeout` is part of the backend / manager contract on purpose (wall-clock budget).
+ignore = ["ASYNC109"]

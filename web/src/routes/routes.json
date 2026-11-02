@@ -7,6 +7,7 @@
       { "path": "/model", "element": "ModelManagement" },
       { "path": "/space", "element": "SpaceManagement" },
       { "path": "/tool", "element": "ToolManagement" },
+      { "path": "/resources", "element": "ResourceCenter" },
       { "path": "/pricing", "element": "Package" },
       { "path": "/upgrade", "element": "Package" },
       { "path": "/order-pay", "element": "OrderPayment" },
@@ -53,13 +54,6 @@
       { "path": "/application/config/:id/:source", "element": "ApplicationConfig" },
       { "path": "/user-memory/neo4j/:id", "element": "Neo4jUserMemoryDetail" },
       { "path": "/user-memory/detail/:id/:type", "element": "MemoryNodeDetail" }
-    ]
-  },
-  {
-    "element": "BasicAuthLayout",
-    "children": [
-      { "path": "/skills/add", "element": "SkillConfig" },
-      { "path": "/skills/config/:id", "element": "SkillConfig" }
     ]
   },
   {

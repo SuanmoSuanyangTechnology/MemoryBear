@@ -65,7 +65,7 @@ class PrewarmInterestDistributionsUseCase:
                     write_cache=True,
                     # Pre-warm serves the next request, not a caller waiting now.
                     priority=Priority.NORMAL,
-                    index=dispatched,
+                    dispatch_index=dispatched,
                 )
             except Exception as exc:
                 errors.append({"end_user_id": key, "error": str(exc)})

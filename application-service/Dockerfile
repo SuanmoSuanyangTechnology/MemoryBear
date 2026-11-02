@@ -28,6 +28,7 @@ RUN if [ "$NEED_MIRROR" == "1" ]; then \
         pip install --no-cache-dir --index-url "${PYPI_INDEX_URL}" uv==0.10.11; \
     fi
 COPY packages/auth-sdk /code/packages/auth-sdk
+COPY packages/memorybear-grpc /code/packages/memorybear-grpc
 COPY application-service/pyproject.toml application-service/uv.lock /code/application-service/
 
 WORKDIR /code/application-service
@@ -73,9 +74,9 @@ COPY --from=builder --chown=memapp:memapp \
 
 USER memapp
 
-EXPOSE 8080
+EXPOSE 8080 9090
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/internal/v1/health/live', timeout=3).read()"
 
-CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8080"]
+CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8080", "--loop", "asyncio"]

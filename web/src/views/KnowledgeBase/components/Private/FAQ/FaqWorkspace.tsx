@@ -77,7 +77,7 @@ export default function FaqWorkspace({ knowledgeBaseId, onOpenWikiPage }: {
   const handleBatchSwitch = (is_enabled: boolean) => {
     setBusy(true)
     batchEnabledFaq(knowledgeBaseId, {
-      items: selectedList.map(vo => ({
+      items: selectedList.filter(vo => !['pending', 'change_pending'].includes(vo.review_status)).map(vo => ({
         faq_id: vo.id,
         expected_row_version: vo.row_version
       })),
@@ -261,13 +261,13 @@ export default function FaqWorkspace({ knowledgeBaseId, onOpenWikiPage }: {
             {t('knowledgeBase.faq.reviewApprove')}
           </Button>
           <Button
-            disabled={selectedList.filter(vo => !vo.is_enabled).length < 1 || busy}
+            disabled={selectedList.filter(vo => !vo.is_enabled && !['pending', 'change_pending'].includes(vo.review_status)).length < 1 || busy}
             onClick={() => handleBatchSwitch(true)}
           >
             {t('knowledgeBase.faq.enable')}
           </Button>
           <Button
-            disabled={selectedList.filter(vo => vo.is_enabled).length < 1 || busy}
+            disabled={selectedList.filter(vo => vo.is_enabled && !['pending', 'change_pending'].includes(vo.review_status)).length < 1 || busy}
             onClick={() => handleBatchSwitch(false)}
           >
             {t('knowledgeBase.faq.disable')}

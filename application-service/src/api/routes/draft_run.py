@@ -23,7 +23,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
-from ...db import get_async_db_context
+from ...db import detach_instances, get_async_db_context, get_db_context
 from ...errors import BizCode, BusinessException, ResourceNotFoundException
 from ...guards.workspace_access import require_workspace_access
 from ...models import (
@@ -594,10 +594,6 @@ async def draft_run(
         if payload.stream:
             source = HitLogSource.EXTERNAL if is_shared else HitLogSource.CONSOLE
 
-            # In-process execution only; sandbox execution mode is not part of
-            # this service (feature parity is kept via the execution_mode flag).
-            execution_mode = "in_process"
-
             async def event_generator():
                 async with get_async_db_context() as stream_db:
                     _draft_service = AgentRunService(stream_db)
@@ -613,7 +609,6 @@ async def draft_run(
                             user_rag_memory_id=user_rag_memory_id,
                             files=payload.files,
                             source=source,
-                            execution_mode=execution_mode,
                     ):
                         yield event
 
@@ -850,9 +845,6 @@ async def draft_run_compare(
     web_search_feature = features_config.get("web_search", {})
     web_search = isinstance(web_search_feature, dict) and web_search_feature.get("enabled", False)
 
-    # In-process execution only (see draft_run)
-    execution_mode = "in_process"
-
     if payload.stream:
         source = HitLogSource.CONSOLE
 
@@ -875,7 +867,6 @@ async def draft_run_compare(
                         timeout=payload.timeout or 60,
                         files=payload.files,
                         source=source,
-                        execution_mode=execution_mode,
                 ):
                     yield event
 
@@ -901,7 +892,6 @@ async def draft_run_compare(
             timeout=payload.timeout or 60,
             files=payload.files,
             source=source,
-            execution_mode=execution_mode,
         )
 
     logger.info(
@@ -925,7 +915,6 @@ async def run_single_workflow_node(
         node_id: str,
         payload: app_schema.NodeRunRequest,
         workspace_id: WorkspaceId,
-        db: DbSession,
         principal: Caller,
 ):
     """Run a single workflow node in isolation.
@@ -934,8 +923,9 @@ async def run_single_workflow_node(
     - Node variables: "node_id.var_name"
     - System variables: "sys.message", "sys.files"
     """
-    workflow_service = WorkflowService(db)
-    config = workflow_service.get_workflow_config(app_id)
+    with get_db_context() as db:
+        config = WorkflowService(db).get_workflow_config(app_id)
+        detach_instances(db, config)
     if not config:
         raise BusinessException("工作流配置不存在，无法运行", BizCode.CONFIG_MISSING)
 
@@ -961,27 +951,29 @@ async def run_single_workflow_node(
 
     if payload.stream:
         async def event_generator():
-            async for event in workflow_service.run_single_node_stream(
-                    app_id=app_id,
-                    node_id=node_id,
-                    config=config,
-                    workspace_id=workspace_id,
-                    input_data=input_data,
-            ):
-                yield (
-                    f"event: {event['event']}\ndata: "
-                    f"{json.dumps(event['data'], ensure_ascii=False)}\n\n"
-                )
+            with get_db_context() as stream_db:
+                async for event in WorkflowService(stream_db).run_single_node_stream(
+                        app_id=app_id,
+                        node_id=node_id,
+                        config=config,
+                        workspace_id=workspace_id,
+                        input_data=input_data,
+                ):
+                    yield (
+                        f"event: {event['event']}\ndata: "
+                        f"{json.dumps(event['data'], ensure_ascii=False)}\n\n"
+                    )
 
         return sse_response(event_generator())
 
-    result = await workflow_service.run_single_node(
-        app_id=app_id,
-        node_id=node_id,
-        config=config,
-        workspace_id=workspace_id,
-        input_data=input_data,
-    )
+    with get_db_context() as db:
+        result = await WorkflowService(db).run_single_node(
+            app_id=app_id,
+            node_id=node_id,
+            config=config,
+            workspace_id=workspace_id,
+            input_data=input_data,
+        )
     return success(data=result)
 
 
@@ -1098,14 +1090,14 @@ async def rerun_workflow_node(
         node_id: str,
         payload: app_schema.NodeRerunRequest,
         workspace_id: WorkspaceId,
-        db: DbSession,
         principal: Caller,
 ):
-    service = AppService(db)
-    app = service._get_app_or_404(app_id)
-    service._validate_app_accessible(app, workspace_id)
-    workflow_service = WorkflowService(db)
-    config = workflow_service.get_workflow_config(app_id)
+    with get_db_context() as db:
+        service = AppService(db)
+        app = service._get_app_or_404(app_id)
+        service._validate_app_accessible(app, workspace_id)
+        config = WorkflowService(db).get_workflow_config(app_id)
+        detach_instances(db, config)
     if not config:
         raise BusinessException("工作流配置不存在，无法运行", BizCode.CONFIG_MISSING)
     # The persisted debug input may still carry the console users.id from an
@@ -1115,15 +1107,16 @@ async def rerun_workflow_node(
         workspace_id=workspace_id,
         other_id=str(principal.actor_id),
     )
-    result = await workflow_service.rerun_node_from_last_debug(
-        app_id=app_id,
-        node_id=node_id,
-        config=config,
-        workspace_id=workspace_id,
-        user_id=end_user_id,
-        invalidate_cache=payload.invalidate_cache,
-        bypass_cache=payload.bypass_cache,
-    )
+    with get_db_context() as db:
+        result = await WorkflowService(db).rerun_node_from_last_debug(
+            app_id=app_id,
+            node_id=node_id,
+            config=config,
+            workspace_id=workspace_id,
+            user_id=end_user_id,
+            invalidate_cache=payload.invalidate_cache,
+            bypass_cache=payload.bypass_cache,
+        )
     return success(data=result)
 
 

@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2025-12-23 16:22:51 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-07-06 11:04:44
+ * @Last Modified time: 2026-10-30 15:50:39
  */
 import { type FC, useState, useMemo } from 'react';
 import { LexicalComposer } from '@lexical/react/LexicalComposer';
@@ -142,7 +142,7 @@ const Editor: FC<LexicalEditorProps> =({
                   minHeight: minheight,
                   padding: height ? '4px 6px' : variant === 'outlined' ? '6px 8px': '0',
                   border: type === 'input' && focused
-                    ? '1px solid #171719'
+                    ? '1px solid #155EEF'
                     : variant === 'outlined' ? '1px solid #EBEBEB' : 'none',
                   borderRadius: '8px',
                   outline: 'none',

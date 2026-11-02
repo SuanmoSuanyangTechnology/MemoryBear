@@ -75,6 +75,17 @@ except ImportError:
     pass  # 社区版无 premium 模块，静默跳过
 
 
+# Worker 不加载 Web 路由，独立注册同一进程内 AI 人格门面。
+try:
+    from app.plugins import register_plugin
+    from premium.memory.ai_personality.service import AIPersonalityPlugin
+
+    register_plugin("memory.ai_personality", AIPersonalityPlugin())
+    logger.info("AI personality plugin registered for Celery worker")
+except ImportError:
+    pass  # 社区版无 premium 模块，静默跳过
+
+
 @worker_process_init.connect
 def _reinit_db_pool(**kwargs):
     """

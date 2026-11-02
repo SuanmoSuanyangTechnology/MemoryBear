@@ -25,6 +25,17 @@ class Skill(Base):
     
     # 专属提示词
     prompt = Column(Text, comment="技能专属提示词")
+
+    # 标准包联动（Phase 1：Agent Skills 协议兼容）
+    package_id = Column(UUID(as_uuid=True), ForeignKey("skill_packages.id", name="fk_skills_package_id"), nullable=True, index=True, comment="已安装的标准包")
+    skill_format = Column(
+        String(16),
+        default="legacy",
+        server_default="legacy",
+        nullable=False,
+        comment="技能格式：legacy | standard",
+    )
+    call_name = Column(String(64), nullable=True, index=True, comment="运行时调用名（read_skill / discovery 索引用），租户内唯一")
     
     # 状态
     is_active = Column(Boolean, default=True, nullable=False, comment="是否激活")

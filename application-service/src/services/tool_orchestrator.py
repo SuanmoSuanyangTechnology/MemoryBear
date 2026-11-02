@@ -23,13 +23,17 @@ from ..schemas.model_schema import ModelInfo
 
 logger = logging.getLogger(__name__)
 
-# Exact names of single-call tools; a second call gets a hint to switch tools
-_SINGLE_CALL_TOOLS: frozenset = frozenset({"knowledge_retrieval_tool", "long_term_memory"})
+# Tools with a call cap: retrying with a new keyword/parameter is allowed, an
+# unbounded retry loop is not.
+_TOOL_CALL_LIMITS: Dict[str, int] = {
+    "knowledge_retrieval_tool": 3,
+    "long_term_memory": 3,
+}
 
 
-def _is_single_call_tool(name: str) -> bool:
-    """Check whether a tool is single-call: tool-object flag first, exact name match second."""
-    return name in _SINGLE_CALL_TOOLS
+def _get_tool_call_limit(name: str) -> Optional[int]:
+    """Return the tool's max call count; tools without an entry are uncapped."""
+    return _TOOL_CALL_LIMITS.get(name)
 
 
 # Parse the Thought/Action/Input triple from model output
@@ -49,13 +53,28 @@ _REACT_SYSTEM_TEMPLATE = """\
 1. 查看历史中的 Observation 字段，那里包含之前工具调用的完整结果
 2. 只有当历史信息不足或与当前问题无关时，才考虑调用新工具
 
+# 规划要求
+1. 简单、单步、凭常识即可回答的问题，不要规划，直接给最终答案。
+2. 只要任务需要多个步骤、多个工具或多来源信息，**必须先规划再动手**：在第一轮输出三段式之前，
+先按下面格式给出简短计划，紧接着在同一条回复中继续输出第一轮的 Thought/Action/Input（计划与第一个工具调用在同一轮，不要停下等待确认）：
+Plan：
+1. 子任务一（预期得到什么结果）
+2. 子任务二（预期得到什么结果）
+……
+Thought：……
+Action：……
+Input：……
+3. 从第二轮起，每轮在 Thought 开头标注当前在执行第几步（如「Thought：执行第2步，……」），严格按计划逐步推进；
+可以根据上一轮 Observation 的新情况增删或修订计划步骤，但不得跳过尚未完成的步骤直接给最终答案。
+
 # 基础规则
 1. 只能从上面列出的工具中选择，严禁编造不存在的工具名称。
 2. 每一轮思考**只能调用一个工具**，不允许一轮同时列出多个工具。
 3. 若任务需要多个步骤、依赖多个工具（如先查时间再查天气），必须分多轮依次调用。
-4. **严格禁止重复调用同一工具获取相同信息**，如有结果不满足请换用其他工具或直接回答。
+4. **禁止用相同参数重复调用同一工具获取相同信息**；但首轮结果为空、不相关或信息不全时，应当换关键词、换角度或调整参数再次调用同一工具（属于不同的有效尝试），或换用其他工具补充，不要只试一次就放弃。
 5. 如果用户问题不需要任何工具就能回答（或历史中已有答案），直接给出最终答案，不输出工具调用格式。
 6. 工具参数缺失时，不要编造参数，正常推理是否需要继续调用。
+7. 复杂或多要点问题不要只调查一个方面就收尾：先在内部把问题拆成若干要点，分多轮把各要点所需的信息查全，再统一作答。
 
 # 输出规范
 ## 调用工具时，**必须严格使用以下固定三段式格式输出**，一字不差遵守排版：
@@ -66,8 +85,11 @@ Input：JSON格式工具入参，无参数则填空对象 {{}}
 ## 无需调用工具、信息充足可以直接回答用户时：
 **直接输出纯自然语言回答即可，严禁输出 Thought、Action、Input 任何字段，不使用任何固定格式**。
 
-# 终止条件
-当已经收集到全部所需信息、无需再调用任何工具时，直接整理信息用普通自然语言回复用户，彻底停止三段式格式输出。
+# 终止条件（必须同时满足才允许结束工具调用）
+1. Plan 中的每个步骤都已执行并有对应 Observation 支撑，用户问题的每个要点也都有 Observation 或历史信息支撑；
+2. 没有任何步骤/要点的证据为空、不相关或互相矛盾——若有，必须先换关键词/参数重试或换工具补充，再考虑结束；
+3. 上述条件均满足后，整理信息用普通自然语言回复用户，彻底停止三段式格式输出。
+如果尽了合理努力（含换关键词重试）仍查不到某个步骤/要点的信息，可以结束，但必须在回答中明确指出该项缺少信息，不得编造。
 
 # 上下文说明
 你能看到历史对话和上一轮工具返回的观察结果，请基于已有结果继续推理下一步动作。\
@@ -82,7 +104,8 @@ _FINAL_ANSWER_SYSTEM_TEMPLATE = """\
 1. 只使用工具返回的信息回答，不编造、不脑补、不扩展无关内容
 2. 回答语言自然、通顺、礼貌，符合正常对话风格
 3. 如果工具返回结果为空或失败，请如实告知用户
-4. 不要输出任何 Thought/Action/Input 格式内容，只输出自然语言回答
+4. 若用户问题中只有部分要点有工具结果支撑，先回答有依据的部分，并明确指出其余要点缺少信息，不得用推测补齐
+5. 不要输出任何 Thought/Action/Input 格式内容，只输出自然语言回答
 """
 
 
@@ -91,8 +114,9 @@ def _build_tools_info(tools: Dict[str, Any]) -> str:
     lines = []
     for name, tool in tools.items():
         desc = getattr(tool, "description", "") or ""
-        if _is_single_call_tool(name):
-            desc = f"[{desc}][仅调用一次，结果不匹配时请换用其他工具]"
+        limit = _get_tool_call_limit(name)
+        if limit:
+            desc = f"[{desc}][最多调用{limit}次：结果不理想时应换关键词/参数重试，不要用相同参数重复调用]"
 
         param_parts = []
 
@@ -181,7 +205,7 @@ class ToolOrchestrator:
         """
         self.tools: Dict[str, Any] = {t.name: t for t in tools}
         self.max_rounds = max_rounds
-        self._single_call_counts: Dict[str, int] = {}
+        self._tool_call_counts: Dict[str, int] = {}
         from .context_assembler import ContextEvidenceCollector
         self.context_collector = ContextEvidenceCollector()
         self.context_assembler = None
@@ -287,11 +311,13 @@ class ToolOrchestrator:
 
     async def _call_tool(self, name: str, input_dict: dict) -> dict:
         """Execute a single tool call."""
-        # A single-call tool invoked more than once gets a hint to switch tools
-        if _is_single_call_tool(name):
-            self._single_call_counts[name] = self._single_call_counts.get(name, 0) + 1
-            if self._single_call_counts[name] > 1:
-                return {"success": False, "output": "", "error": f"[{name}] 已调用过一次，请勿重复调用，如结果不满足需求请换用其他工具补充信息。"}
+        # Capped tools: past the limit the model is told to switch tools or answer,
+        # so an invalid retry loop does not burn rounds.
+        limit = _get_tool_call_limit(name)
+        if limit is not None:
+            self._tool_call_counts[name] = self._tool_call_counts.get(name, 0) + 1
+            if self._tool_call_counts[name] > limit:
+                return {"success": False, "output": "", "error": f"[{name}] 已调用 {limit} 次，达到上限。请换用其他工具补充信息，或基于已有结果直接回答；不要再次调用本工具。"}
         tool = self.tools.get(name)
         if not tool:
             return {"success": False, "output": "", "error": f"工具 '{name}' 不存在"}

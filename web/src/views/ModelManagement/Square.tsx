@@ -63,9 +63,9 @@ const ModelSquare = forwardRef <BaseRef, { query: any; }>(({ query }, ref) => {
             {list.map(vo => (
               <div
                 key={vo.provider}
-                className={clsx('rb:border rb:border-gray-900 rb:rounded-full rb:px-2 rb:py-1 rb:cursor-pointer', {
-                  'rb:text-white rb:bg-gray-900': activeProvider === vo.provider,
-                  'rb:text-gray-900': activeProvider !== vo.provider,
+                className={clsx('rb:border rb:border-gray-200 rb:rounded-full rb:px-2 rb:py-1 rb:cursor-pointer', {
+                  'rb:text-white rb:bg-primary-600': activeProvider === vo.provider,
+                  'rb:text-gray-900 rb:bg-white': activeProvider !== vo.provider,
                 })}
                 onClick={() => setActiveProvider(vo.provider)}
               >{String(vo.provider).charAt(0).toUpperCase() + String(vo.provider).slice(1)}</div>

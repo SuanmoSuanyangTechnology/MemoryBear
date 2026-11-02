@@ -283,13 +283,28 @@ class StorageImageResolver:
         self,
         snapshots: Sequence[FileAssetSnapshot],
     ) -> list[bytes | BaseException]:
-        storage = KnowledgeFileStorage(self._runtime.storage)
-        return list(
-            await asyncio.gather(
-                *(storage.download(snapshot.file_key) for snapshot in snapshots),
-                return_exceptions=True,
-            )
-        )
+        return await _download_storage_images(self._runtime, snapshots)
+
+
+async def _download_storage_images(
+    runtime: ProcessRuntime,
+    snapshots: Sequence[FileAssetSnapshot],
+) -> list[bytes | BaseException]:
+    storage = KnowledgeFileStorage(runtime.storage)
+    pending = iter(enumerate(snapshots))
+    results: list[bytes | BaseException] = [b""] * len(snapshots)
+
+    async def download_next() -> None:
+        for index, snapshot in pending:
+            try:
+                results[index] = await storage.download(snapshot.file_key)
+            except Exception as exc:
+                results[index] = exc
+
+    async with asyncio.TaskGroup() as group:
+        for _ in range(min(len(snapshots), runtime.settings.kb_image_download_concurrency)):
+            group.create_task(download_next())
+    return results
 
 
 async def resolve_storage_images_async(
@@ -330,11 +345,7 @@ async def resolve_storage_images_async(
         for file_id in normalized_ids
         if file_id in snapshots_by_id
     ]
-    storage = KnowledgeFileStorage(runtime.storage)
-    downloaded = await asyncio.gather(
-        *(storage.download(snapshot.file_key) for snapshot in snapshots),
-        return_exceptions=True,
-    )
+    downloaded = await _download_storage_images(runtime, snapshots)
     result: dict[str, ImageEmbeddingContent] = {}
     for snapshot, content in zip(snapshots, downloaded, strict=True):
         if isinstance(content, BaseException):

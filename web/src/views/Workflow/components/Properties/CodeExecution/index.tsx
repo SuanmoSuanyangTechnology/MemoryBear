@@ -91,7 +91,7 @@ const CodeExecution: FC<CodeExecutionProps> = ({ options, selectedNode, graphRef
         />
       </Form.Item>
       
-      <Flex gap={4} vertical className="rb:border rb:bg-[#F6F6F6] rb:border-[#F6F6F6] rb:hover:bg-white rb:hover:border-[#171719] rb:pr-2! rb:rounded-md rb:py-1.5! rb:mb-4!">
+      <Flex gap={4} vertical className="rb:border rb:bg-[#F6F6F6] rb:border-[#F6F6F6] rb:hover:bg-white rb:hover:border-primary-600 rb:pr-2! rb:rounded-md rb:py-1.5! rb:mb-4!">
         <Form.Item name="language" noStyle className=" rb:px-2!">
           <Select 
             options={[

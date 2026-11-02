@@ -12,6 +12,8 @@ import logging
 from auth_sdk.schema import ApiKeyContext, UserContext
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
+from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
+from starlette.responses import Response
 
 from src import config
 from src.forward import Forwarder
@@ -30,6 +32,17 @@ async def _stub_endpoints_enabled() -> None:
 @router.get("/healthz")
 async def healthz():
     return {"status": "ok"}
+
+
+@router.get("/metrics")
+async def metrics():
+    """Prometheus scrape endpoint (counters only, no business data).
+
+    Internal-only by routing: the public Ingress carries only business path
+    prefixes, so no rule may target /metrics. Without this endpoint the
+    gateway's existing counters are registered but unobservable.
+    """
+    return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 
 def _stub_identity(request: Request, expected: type) -> object | None:
@@ -93,5 +106,8 @@ async def forward_route(request: Request):
     if route is None:
         logger.warning("unmatched route: %s %s", request.method, request.url.path)
         return JSONResponse(status_code=404, content={"detail": "not found"})
+    grpc_forwarder = getattr(request.app.state, "grpc_forwarder", None)
+    if grpc_forwarder is not None and grpc_forwarder.matches(request, route):
+        return await grpc_forwarder.forward(request, route)
     forwarder: Forwarder = request.app.state.forwarder
     return await forwarder.forward(request, route)

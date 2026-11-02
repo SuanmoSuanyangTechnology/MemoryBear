@@ -1,4 +1,5 @@
 import React, { useState, useRef, useMemo, useEffect, useLayoutEffect, type FC } from 'react'
+import * as d3 from 'd3'
 
 import { GRAPH_COLORS, initCommunityGraph } from './utils'
 import { useD3Graph } from './hooks'
@@ -16,6 +17,8 @@ const CommunityGraph: FC<CommunityGraphProps> = ({
   showLegend = true,
   onCommunityClick,
   onNodeClick,
+  selectedNodeId,
+  selectedCommunityId,
   defaultZoom = 1,
 }) => {
   // Tooltip position and hovered node state
@@ -51,6 +54,8 @@ const CommunityGraph: FC<CommunityGraphProps> = ({
   const onCommunityClickRef = useRef(onCommunityClick)
   const onNodeClickRef = useRef(onNodeClick)
   const renderTooltipRef = useRef(renderTooltip)
+  const selectedCommunityIdRef = useRef(selectedCommunityId)
+  selectedCommunityIdRef.current = selectedCommunityId
   useEffect(() => { onCommunityClickRef.current = onCommunityClick }, [onCommunityClick])
   useEffect(() => { onNodeClickRef.current = onNodeClick }, [onNodeClick])
   useEffect(() => { renderTooltipRef.current = renderTooltip }, [renderTooltip])
@@ -69,9 +74,22 @@ const CommunityGraph: FC<CommunityGraphProps> = ({
       graphState.communityMap,
       graphState.communityCaption,
       graphState.communityNodeMap,
-      { colors, showLegend, defaultZoom, setTooltip: renderTooltip ? updateTooltip : () => {}, onCommunityClickRef, onNodeClickRef }
+      { colors, showLegend, defaultZoom, setTooltip: renderTooltip ? updateTooltip : () => {}, onCommunityClickRef, onNodeClickRef, selectedCommunityIdRef }
     )
   }, [graphState, showLegend, defaultZoom])
+
+  // Update the selection in place so graph positions and zoom survive panel changes.
+  useEffect(() => {
+    const container = containerRef.current
+    if (!container) return
+    d3.select(container).selectAll<SVGCircleElement, CommunityD3Node>('g.entity-node circle')
+      .attr('fill-opacity', d => d.id === selectedNodeId ? 0.75 : 0.3)
+      .attr('stroke-width', d => d.id === selectedNodeId ? 3 : 1)
+    d3.select(container).selectAll<SVGPathElement, { id: string; color: string }>('path.hull')
+      .attr('fill-opacity', d => d.id === selectedCommunityId ? 0.28 : 0.12)
+      .attr('stroke-opacity', d => d.id === selectedCommunityId ? 1 : 0.55)
+      .attr('stroke-width', d => d.id === selectedCommunityId ? 3 : 1)
+  }, [containerRef, graphState, selectedNodeId, selectedCommunityId])
 
   const tooltipNode = tooltip && renderTooltipRef.current
     ? renderTooltipRef.current(tooltip.node)

@@ -1,9 +1,3 @@
-/*
- * @Author: ZhaoYing 
- * @Date: 2026-02-03 16:26:03 
- * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-06-03 23:04:12
- */
 /**
  * Tool List Component
  * Manages tool configurations for the application
@@ -32,6 +26,7 @@ interface ToolListProps {
   value?: ToolOption[];
   /** Callback when tools change */
   onChange?: (config: ToolOption[]) => void;
+  readOnly?: boolean;
 }
 
 /**
@@ -39,7 +34,7 @@ interface ToolListProps {
  * @param value - Current tool configurations
  * @param onChange - Callback when tools change
  */
-const ToolList: FC<ToolListProps> = ({value, onChange}) => {
+const ToolList: FC<ToolListProps> = ({value, onChange, readOnly = false}) => {
   const { t } = useTranslation()
   const toolModalRef = useRef<ToolModalRef>(null)
   const [toolList, setToolList] = useState<ToolOption[]>([])
@@ -154,40 +149,61 @@ const ToolList: FC<ToolListProps> = ({value, onChange}) => {
     onChange && onChange(list)
   }
   
-  return (
-    <Card
-      title={t('application.toolConfiguration')}
-      extra={
-        <Button className="rb:h-6! rb:py-0! rb:px-2! rb:rounded-md! rb:text-[#212332]" onClick={handleAddTool}>+ {t('application.addTool')}</Button>
-      }
-    >
+  const content = (
+    <>
       {toolList.length === 0
         ? <div className="rb-border rb:rounded-xl rb:pt-4 rb:pb-6"><Empty size={88} /></div>
-        : <Flex vertical gap={12}>
+        : <Flex vertical gap={12} className={readOnly ? 'rb:grid! rb:grid-cols-2 rb:[@media(max-width:600px)]:grid-cols-1 rb:[&>.ant-flex]:min-w-0 rb:[&>.ant-flex>div:first-child]:min-w-0 rb:[&>.ant-flex>div:first-child]:[overflow-wrap:anywhere]' : undefined}>
           {toolList.map((item, index) => (
             <Flex key={index} align="center" justify="space-between" className="rb:py-2.5! rb:pl-4! rb:pr-3! rb-border rb:rounded-lg">
               <div>
                 <div className="rb:font-medium rb:leading-4">
-                  {item.label}
+                  {item.label || item.operation || item.tool_id}
                 </div>
-                <Tag color={item.is_active ? 'success' : 'error'} className="rb:mt-1">
-                  {item.is_active ? t('common.enable') : t('common.deleted')}
-                </Tag>
+                {(!readOnly || item.is_active !== undefined) &&
+                  <Tag color={item.is_active ? 'success' : 'error'} className="rb:mt-1">
+                    {item.is_active ? t('common.enable') : t('common.deleted')}
+                  </Tag>
+                }
               </div>
-              <Space size={12}>
-                <div
-                  className="rb:w-6 rb:h-6 rb:cursor-pointer rb:bg-[url('@/assets/images/deleteBorder.svg')] rb:hover:bg-[url('@/assets/images/deleteBg.svg')]"
-                  onClick={() => handleDeleteTool(index)}
-                ></div>
-              </Space>
+              {!readOnly &&
+                <Space size={12}>
+                  <div
+                    className="rb:w-6 rb:h-6 rb:cursor-pointer rb:bg-[url('@/assets/images/deleteBorder.svg')] rb:hover:bg-[url('@/assets/images/deleteBg.svg')]"
+                    onClick={() => handleDeleteTool(index)}
+                  ></div>
+                </Space>
+              }
             </Flex>
           ))}
         </Flex>
       }
-      <ToolModal
-        ref={toolModalRef}
-        refresh={updateTools}
-      />
+      {!readOnly &&
+        <ToolModal
+          ref={toolModalRef}
+          refresh={updateTools}
+        />
+      }
+    </>
+  )
+
+  if (readOnly) {
+    return (
+      <section aria-label={t('application.toolConfiguration')}>
+        <div className="rb:mb-2">{t('application.toolConfiguration')}</div>
+        {content}
+      </section>
+    )
+  }
+
+  return (
+    <Card
+      title={t('application.toolConfiguration')}
+      extra={
+        !readOnly && <Button className="rb:h-6! rb:py-0! rb:px-2! rb:rounded-md! rb:text-gray-800" onClick={handleAddTool}>+ {t('application.addTool')}</Button>
+      }
+    >
+      {content}
     </Card>
   )
 }

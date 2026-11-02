@@ -6,7 +6,7 @@ import asyncio
 import logging
 from typing import Any
 
-from neo4j import AsyncDriver, AsyncGraphDatabase
+from neo4j import AsyncDriver, AsyncGraphDatabase, Query
 
 from src.config import ProfileSettings
 
@@ -54,7 +54,7 @@ class Neo4jManager:
                 self._loop = current_loop
             return self._driver
 
-    async def read_query(self, query: str, **params: Any) -> list[dict[str, Any]]:
+    async def read_query(self, query: str | Query, **params: Any) -> list[dict[str, Any]]:
         """执行一条只读 Cypher，返回记录字典列表。
 
         这是本服务所有图读查询的统一出口：连接、会话、访问模式与事务形态都由本层

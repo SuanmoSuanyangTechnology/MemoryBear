@@ -194,8 +194,10 @@ class GatewayMiddleware(BaseHTTPMiddleware):
         self._strategy = strategy
 
     async def dispatch(self, request, call_next):
-        # K8s probe 白名单：不依赖 Redis/DB，探活期间外部依赖故障不影响 liveness 判定
-        if request.url.path == "/healthz":
+        # Probe and scrape paths: no credentials and no Redis/DB dependency.
+        # Liveness and metrics collection must survive auth-infrastructure
+        # outages; /metrics is internal-only by ingress routing, not by auth.
+        if request.url.path in ("/healthz", "/metrics"):
             return await call_next(request)
         deps = self._deps_getter()  # 局部变量，避免并发 await 期间实例属性互覆
         # 先解析目标路由（aud 动态化 + 转发层取 route）；未命中即 None，走 stub 语义

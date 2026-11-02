@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import AsyncIterator
+from contextlib import aclosing
 
 from ..infrastructure.storage import StorageManager
 
@@ -55,8 +56,9 @@ class KnowledgeFileStorage:
         chunk_size: int = 64 * 1024,
     ) -> AsyncIterator[bytes]:
         backend = await self._manager.backend()
-        async for chunk in backend.download_stream(file_key, chunk_size):
-            yield chunk
+        async with aclosing(backend.download_stream(file_key, chunk_size)) as chunks:
+            async for chunk in chunks:
+                yield chunk
 
     async def delete(self, file_key: str) -> bool:
         return await (await self._manager.backend()).delete(file_key)

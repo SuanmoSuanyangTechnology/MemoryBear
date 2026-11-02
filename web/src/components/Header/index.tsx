@@ -1,9 +1,3 @@
-/*
- * @Author: ZhaoYing 
- * @Date: 2026-02-02 15:07:49 
- * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-16 10:31:21
- */
 /**
  * AppHeader Component
  * 
@@ -13,11 +7,11 @@
  * @component
  */
 
-import { type FC, useRef, useState } from 'react';
+import { type FC, useEffect, useRef, useState } from 'react';
 import { Layout, Dropdown, Breadcrumb, Flex, Tooltip, Button } from 'antd';
 import type { MenuProps, BreadcrumbProps } from 'antd';
 import { useTranslation } from 'react-i18next';
-import { useLocation } from 'react-router-dom';
+import { useLocation, useSearchParams } from 'react-router-dom';
 import clsx from 'clsx';
 
 import { useUser } from '@/store/user';
@@ -37,6 +31,7 @@ const { Header } = Layout;
 const AppHeader: FC<{ source?: 'space' | 'manage'; }> = ({ source = 'manage' }) => {
   const { t, i18n } = useTranslation();
   const location = useLocation();
+  const [searchParams, setSearchParams] = useSearchParams();
   const settingModalRef = useRef<SettingModalRef>(null)
   const userInfoModalRef = useRef<UserInfoModalRef>(null)
 
@@ -73,6 +68,19 @@ const AppHeader: FC<{ source?: 'space' | 'manage'; }> = ({ source = 'manage' }) 
 
   const breadcrumbSource = getBreadcrumbSource();
   const breadcrumbs = allBreadcrumbs[breadcrumbSource] || [];
+  const isResourceCenter = source === 'manage' && location.pathname === '/resources';
+  const resourceType = searchParams.get('type') || 'skills';
+  const resourceTabs = [
+    // { value: 'agent', label: '应用', iconClass: 'rb:bg-[url("@/assets/images/menuNew/application_gray.svg")]', activeIconClass: 'rb:bg-[url("@/assets/images/menuNew/application.svg")]' },
+    { value: 'skills', label: '技能', iconClass: 'rb:bg-[url("@/assets/images/menuNew/skills_gray.svg")]', activeIconClass: 'rb:bg-[url("@/assets/images/menuNew/skills.svg")]' },
+    // { value: 'tool', label: '工具', iconClass: 'rb:bg-[url("@/assets/images/menuNew/tool_gray.svg")]', activeIconClass: 'rb:bg-[url("@/assets/images/menuNew/tool.svg")]' },
+  ] as const;
+
+  useEffect(() => {
+    if (isResourceCenter && resourceType) {
+      document.title = `${t(`menu.${resourceType}`)} - ${t('memoryBear') }`
+    }
+  }, [resourceType, isResourceCenter])
 
 
   /** Handle user logout */
@@ -90,12 +98,12 @@ const AppHeader: FC<{ source?: 'space' | 'manage'; }> = ({ source = 'manage' }) 
     {
       key: '1',
       icon: user.username
-        ? <Flex align="center" justify="center" className="rb:size-10 rb:rounded-xl rb:bg-[#155EEF] rb:text-white">
+        ? <Flex align="center" justify="center" className="rb:size-10 rb:rounded-xl rb:bg-blue-500 rb:text-white">
           {/[\u4e00-\u9fa5]/.test(user.username) ? user.username.slice(-2) : user.username[0]}
         </Flex>
         : null,
       label: (<>
-        <div className="rb:text-[#212332] rb:leading-5">{user.username}</div>
+        <div className="rb:text-gray-800 rb:leading-5">{user.username}</div>
         <div className="rb:text-[12px] rb:text-[#7B8085] rb:leading-4.5 rb:mt-0.5 rb:mr-2">{user.email}</div>
       </>),
     },
@@ -111,7 +119,7 @@ const AppHeader: FC<{ source?: 'space' | 'manage'; }> = ({ source = 'manage' }) 
         {t('header.userInfo')}
         <div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/menuNew/arrow_t_r.svg')]"></div>
       </Flex>,
-      className: 'rb:text-[#212332]!',
+      className: 'rb:text-gray-800!',
       onClick: () => {
         userInfoModalRef.current?.handleOpen()
       },
@@ -123,7 +131,7 @@ const AppHeader: FC<{ source?: 'space' | 'manage'; }> = ({ source = 'manage' }) 
         {t('header.settings')}
         <div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/menuNew/arrow_t_r.svg')]"></div>
       </Flex>,
-      className: 'rb:text-[#212332]!',
+      className: 'rb:text-gray-800!',
       onClick: () => {
         settingModalRef.current?.handleOpen()
       },
@@ -185,8 +193,30 @@ const AppHeader: FC<{ source?: 'space' | 'manage'; }> = ({ source = 'manage' }) 
 
   return (
     <Header className={styles.header}>
-      {/* Breadcrumb navigation */}
-      <Breadcrumb separator="<" items={formatBreadcrumbNames() as BreadcrumbProps['items']} className="rb:font-medium! rb:flex-1!" />
+      {isResourceCenter ? (
+        <Flex align="center" gap={8} className="rb:flex-1! rb:min-w-0!">
+          {resourceTabs.map(tab => {
+            const isActive = tab.value === (resourceType === 'mcp' ? 'tool' : resourceType || 'agent')
+            return (
+              <Flex
+                key={tab.value}
+                align="center" justify="center" gap={4}
+                className={clsx('rb:h-9 rb:min-w-19.5 rb:px-3 rb:rounded-xl rb:text-gray-600 rb:cursor-pointer rb:whitespace-nowrap rb:hover:bg-gray-400 rb:hover:text-gray-800', {
+                  'rb:bg-gray-400 rb:text-gray-800 rb:font-medium': isActive,
+                })}
+                onClick={() => {
+                  const next = new URLSearchParams(searchParams);
+                  next.set('type', tab.value);
+                  setSearchParams(next);
+                }}
+              >
+                <div className={clsx("rb:size-4.5 rb:bg-cover", isActive ? tab.activeIconClass : tab.iconClass)} />
+                {tab.label}
+              </Flex>
+            )
+          })}
+        </Flex>
+      ) : <Breadcrumb separator="<" items={formatBreadcrumbNames() as BreadcrumbProps['items']} className="rb:font-medium! rb:flex-1!" />}
 
       <Flex gap={12} align="center" className="rb:shrink-0!">
         <PrivateWrap>
@@ -209,10 +239,10 @@ const AppHeader: FC<{ source?: 'space' | 'manage'; }> = ({ source = 'manage' }) 
             overlayClassName={styles.userDropdown}
           >
             <Flex align="center" className="rb:cursor-pointer rb:font-medium">
-              {user.username && <Flex align="center" justify="center" className="rb:size-8 rb:rounded-xl rb:bg-[#155EEF] rb:text-white rb:mr-2!">
+              {user.username && <Flex align="center" justify="center" className="rb:size-8 rb:rounded-xl rb:bg-blue-500 rb:text-white rb:mr-2!">
                 {/[\u4e00-\u9fa5]/.test(user.username) ? user.username.slice(-2) : user.username[0]}
               </Flex>}
-              <span className="rb:text-[#212332] rb:text-[12px] rb:leading-4 rb:mr-1">{user.username}</span>
+              <span className="rb:text-gray-800 rb:text-[12px] rb:leading-4 rb:mr-1">{user.username}</span>
               <div className={clsx("rb:size-3 rb:bg-cover rb:bg-[url('@/assets/images/common/arrow_up.svg')]", {
                 'rb:rotate-180': !open,
               })}></div>

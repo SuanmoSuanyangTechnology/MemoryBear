@@ -4,6 +4,9 @@ The workspace and model configuration are read once in a short scope. Insight
 and summary then run as separate aggregate writes (two transactions), which is
 the service's existing "partial success" semantics. Every failure is reported per
 part; only infrastructure failures reach Celery.
+
+The per-user in-flight guard also lives here: only one refresh per user runs at
+a time, so a redelivered unit and an online request cannot both generate.
 """
 
 from __future__ import annotations
@@ -13,8 +16,12 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
+from src.application.ports.chat_model import ChatModel
 from src.application.ports.clock import Clock
 from src.application.ports.llm import ChatModelFactory
+from src.application.ports.lock import InflightLock
+from src.application.ports.prompts import PromptCatalog
+from src.application.ports.scene_names import SceneNameLookup
 from src.application.ports.uow import UnitOfWork
 from src.application.profile_cache.generators import (
     SUMMARY_ENTITY_QUERY_LIMIT,
@@ -22,6 +29,14 @@ from src.application.profile_cache.generators import (
     MemoryInsightGenerator,
     UserSummaryGenerator,
 )
+from src.application.profile_cache.insight_input import (
+    MEMORY_INSIGHT_MIN_ENTRIES,
+    MEMORY_INSIGHT_STATEMENT_LIMIT,
+    build_memory_insight_metadata_input,
+    build_memory_insight_statement_input,
+    count_memory_insight_entries,
+)
+from src.application.profile_cache.scene_names import load_scene_names
 from src.application.profile_cache.workspace_guard import (
     ensure_workspace_can_generate,
 )
@@ -29,16 +44,6 @@ from src.domain.end_user.model import EndUser
 from src.domain.end_user.services import UserResolutionService
 from src.domain.model_config.model import ResolvedChatModel
 from src.domain.model_config.services import ModelResolutionService
-from src.domain.ports.llm import ChatModel
-from src.domain.ports.prompts import PromptCatalog
-from src.domain.ports.scene_names import SceneNameLookup
-from src.domain.profile.insight_input import (
-    MEMORY_INSIGHT_MIN_ENTRIES,
-    MEMORY_INSIGHT_STATEMENT_LIMIT,
-    build_memory_insight_metadata_input,
-    build_memory_insight_statement_input,
-    count_memory_insight_entries,
-)
 from src.domain.profile.model import (
     InsightContent,
     MemoryInsight,
@@ -50,8 +55,7 @@ from src.domain.profile.repository import (
     InsightStatementReader,
     SummarySourceReader,
 )
-from src.domain.profile.scene_names import load_scene_names
-from src.domain.shared.errors import ModelConfigurationError
+from src.domain.shared.errors import InvalidValue, ModelConfigurationError
 from src.domain.shared.ids import EndUserId, WorkspaceId, parse_uuid
 from src.domain.shared.language import Language
 from src.domain.workspace.model import Workspace
@@ -68,6 +72,10 @@ INSUFFICIENT_MEMORY_INSIGHT_TEXT_EN = (
 class GenerateProfileCacheCommand:
     end_user_id: str
     workspace_id: WorkspaceId
+    #: Opaque identity of this attempt for the in-flight lock. A retried attempt
+    #: that reuses its token re-enters the lock it already holds; the use case
+    #: never learns where the token came from.
+    attempt_token: str
     language: str = "zh"
     refresh_insight: bool = True
     refresh_summary: bool = True
@@ -83,17 +91,27 @@ class PartResult:
 @dataclass(frozen=True, slots=True)
 class ProfileCacheResult:
     end_user_id: str
+    workspace_id: str
     insight_success: bool | None
     summary_success: bool | None
     errors: list[dict[str, Any]]
+    #: Set when the refresh never ran; ``None`` means it ran (possibly failing).
+    skipped_reason: str | None = None
 
-    def to_payload(self) -> dict[str, Any]:
-        return {
-            "end_user_id": self.end_user_id,
-            "insight_success": self.insight_success,
-            "summary_success": self.summary_success,
-            "errors": self.errors,
-        }
+    @classmethod
+    def inflight_skipped(
+        cls, *, end_user_id: str, workspace_id: str
+    ) -> ProfileCacheResult:
+        """Another refresh already holds this user's lock."""
+
+        return cls(
+            end_user_id=end_user_id,
+            workspace_id=workspace_id,
+            insight_success=None,
+            summary_success=None,
+            errors=[],
+            skipped_reason="inflight",
+        )
 
 
 class ChatModelMemo:
@@ -132,7 +150,9 @@ class GenerateProfileCacheUseCase:
         chat_models: ChatModelFactory,
         prompts: PromptCatalog,
         clock: Clock,
-        scene_names: SceneNameLookup | None = None,
+        lock: InflightLock,
+        #: Required: an omitted lookup would silently drop every uuid scene.
+        scene_names: SceneNameLookup,
     ) -> None:
         self.uow = uow
         self.insight_statements = insight_statements
@@ -140,11 +160,48 @@ class GenerateProfileCacheUseCase:
         self.chat_models = chat_models
         self.prompts = prompts
         self.clock = clock
+        self.lock = lock
         self.scene_names = scene_names
         self.model_resolution = ModelResolutionService()
         self.user_resolution = UserResolutionService()
 
     def execute(self, command: GenerateProfileCacheCommand) -> ProfileCacheResult:
+        """Refresh one user's cache columns unless another attempt holds the lock.
+
+        The lock is released on every exit path; ``acquire`` is reentrant for a
+        retried attempt that reuses its token. The key is the canonical UUID
+        string the scanner and the fan-out use, so an uppercase or differently
+        formatted id from a producer cannot open a second lock.
+        """
+
+        if not command.attempt_token:
+            # An empty token would make every attempt share the lock's sentinel
+            # value, so the exclusion would silently disappear.
+            raise ValueError("attempt_token is required to guard a cache refresh")
+
+        parsed_user_id = parse_uuid(command.end_user_id)
+        if parsed_user_id is None:
+            # No canonical key exists for an unparseable id; the per-part
+            # validation below reports it without touching Redis.
+            return self._execute(command)
+        lock_subject = str(parsed_user_id)
+        if not self.lock.acquire(lock_subject, command.attempt_token):
+            logger.info(
+                "profile cache generation skipped, another refresh is in flight "
+                "user=%s workspace=%s",
+                command.end_user_id,
+                command.workspace_id,
+            )
+            return ProfileCacheResult.inflight_skipped(
+                end_user_id=command.end_user_id,
+                workspace_id=str(command.workspace_id),
+            )
+        try:
+            return self._execute(command)
+        finally:
+            self.lock.release(lock_subject, command.attempt_token)
+
+    def _execute(self, command: GenerateProfileCacheCommand) -> ProfileCacheResult:
         language = Language.parse(command.language)
         workspace, resolved = self._load_workspace_and_model(command.workspace_id)
         memo = ChatModelMemo(self.chat_models, resolved)
@@ -167,6 +224,7 @@ class GenerateProfileCacheUseCase:
             errors.append({"type": "summary", "error": summary.error})
         return ProfileCacheResult(
             end_user_id=command.end_user_id,
+            workspace_id=str(command.workspace_id),
             insight_success=insight.success if command.refresh_insight else None,
             summary_success=summary.success if command.refresh_summary else None,
             errors=errors,
@@ -259,6 +317,21 @@ class GenerateProfileCacheUseCase:
             )
             with self.uow.transaction() as repositories:
                 outcome = repositories.insights.save_if_source_unchanged(insight)
+        except InvalidValue as exc:
+            # The model answered, but the content broke a domain invariant;
+            # this is not an infrastructure outage and must not be reported as
+            # one (the field tells the operator which part was rejected).
+            logger.warning(
+                "generate memory insight rejected content: end_user_id=%s field=%s error=%s",
+                command.end_user_id,
+                exc.field,
+                exc.message,
+            )
+            return PartResult(
+                False,
+                f"生成的洞察内容不合规: {exc.message}",
+                "generation_invalid",
+            )
         except Exception as exc:
             logger.exception(
                 "generate memory insight failed: end_user_id=%s error=%s",

@@ -172,7 +172,7 @@ const AudioPlayer: FC<AudioPlayerProps> = ({ src, fileName, fileSize }) => {
           onChange={handleSeek}
           tooltip={{ formatter: null }}
           className="rb:flex-1 rb:m-0!"
-          styles={{ track: { background: '#171719' }, rail: { background: '#E4E4E4' }, handle: { display: 'none' } }}
+          styles={{ track: { background: '#155EEF' }, rail: { background: '#E4E4E4' }, handle: { display: 'none' } }}
         />
         <span className="rb:text-[12px] rb:leading-4.5 rb:text-[#5B6167] rb:whitespace-nowrap">{fmt(current)} / {fmt(duration)}</span>
       </Flex>

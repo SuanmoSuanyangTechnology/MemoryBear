@@ -179,6 +179,7 @@ class KnowledgeRetrievalPreparation:
                 single_request,
                 principal,
                 require_chunks=False,
+                require_active=False,
             )
             if not resolved:
                 raise KnowledgeError.from_code(
@@ -425,7 +426,9 @@ class KnowledgeRetrievalPreparation:
         principal: Principal,
         *,
         require_chunks: bool = True,
+        require_active: bool = True,
     ) -> list[_KnowledgeRef]:
+        allowed_statuses = (1,) if require_active else (0, 1)
         requested = list(request.kb_ids)
         ex_ids = getattr(request, "ex_ids", None)
         if ex_ids:
@@ -433,7 +436,7 @@ class KnowledgeRetrievalPreparation:
                 select(Knowledge.id).where(
                     Knowledge.external_id.in_(ex_ids),
                     Knowledge.workspace_id == principal.workspace_id,
-                    Knowledge.status == 1,
+                    Knowledge.status.in_(allowed_statuses),
                 )
             )
             requested.extend(result.scalars().all())
@@ -457,7 +460,7 @@ class KnowledgeRetrievalPreparation:
                 select(Knowledge).where(
                     Knowledge.id == knowledge_id,
                     Knowledge.workspace_id == principal.workspace_id,
-                    Knowledge.status == 1,
+                    Knowledge.status.in_(allowed_statuses),
                 )
             )
             knowledge = result.scalars().first()
@@ -467,7 +470,13 @@ class KnowledgeRetrievalPreparation:
             if knowledge.permission_id == PermissionType.Private:
                 append(
                     await cls._expand_folder(
-                        db, knowledge, config, explicit, set(), require_chunks=require_chunks
+                        db,
+                        knowledge,
+                        config,
+                        explicit,
+                        set(),
+                        require_chunks=require_chunks,
+                        require_active=require_active,
                     )
                 )
                 continue
@@ -481,13 +490,21 @@ class KnowledgeRetrievalPreparation:
             )
             for source_id in share_result.scalars().all():
                 source_result = await db.execute(
-                    select(Knowledge).where(Knowledge.id == source_id, Knowledge.status == 1)
+                    select(Knowledge).where(
+                        Knowledge.id == source_id, Knowledge.status.in_(allowed_statuses)
+                    )
                 )
                 source = source_result.scalars().first()
                 if source is not None:
                     append(
                         await cls._expand_folder(
-                            db, source, config, explicit, set(), require_chunks=require_chunks
+                            db,
+                            source,
+                            config,
+                            explicit,
+                            set(),
+                            require_chunks=require_chunks,
+                            require_active=require_active,
                         )
                     )
         return refs
@@ -502,8 +519,10 @@ class KnowledgeRetrievalPreparation:
         visited: set[uuid.UUID],
         *,
         require_chunks: bool = True,
+        require_active: bool = True,
     ) -> list[_KnowledgeRef]:
-        if not knowledge.is_active:
+        allowed_statuses = (1,) if require_active else (0, 1)
+        if knowledge.status not in allowed_statuses:
             return []
         config = explicit.get(knowledge.id) or inherited_config
         # Model capabilities are independent of whether documents have produced chunks.
@@ -516,14 +535,20 @@ class KnowledgeRetrievalPreparation:
             select(Knowledge).where(
                 Knowledge.parent_id == knowledge.id,
                 Knowledge.workspace_id == knowledge.workspace_id,
-                Knowledge.status == 1,
+                Knowledge.status.in_(allowed_statuses),
             )
         )
         refs = []
         for child in result.scalars().all():
             refs.extend(
                 await cls._expand_folder(
-                    db, child, config, explicit, visited, require_chunks=require_chunks
+                    db,
+                    child,
+                    config,
+                    explicit,
+                    visited,
+                    require_chunks=require_chunks,
+                    require_active=require_active,
                 )
             )
         return refs

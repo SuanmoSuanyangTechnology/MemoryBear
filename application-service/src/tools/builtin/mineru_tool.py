@@ -147,6 +147,14 @@ class MinerUTool(BuiltinTool):
             ),
         ]
 
+    def resolve_execution_timeout(self, parameters: Dict[str, Any]) -> float:
+        """MinerU 自带轮询超时（默认 1800s，最大 7200s）；总兜底在其基础上留 60 秒余量。"""
+        try:
+            polling = float(self._resolve_int_runtime_param("timeout", dict(parameters), _DEFAULT_TIMEOUT))
+        except (TypeError, ValueError):
+            polling = float(_DEFAULT_TIMEOUT)
+        return max(polling, 1.0) + 60.0
+
     # === Parameter validation ===
 
     def validate_parameters(self, parameters: Dict[str, Any]) -> Dict[str, str]:

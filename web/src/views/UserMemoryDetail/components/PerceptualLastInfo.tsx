@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 18:32:23 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-27 14:57:34
+ * @Last Modified time: 2026-10-30 16:24:15
  */
 import { type FC, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -126,7 +126,7 @@ const PerceptualLastInfo: FC = () => {
           <div
             key={key}
             className={clsx("rb:text-[12px] rb:rounded-[14px] rb:py-1 rb:pl-2 rb:pr-3 rb:cursor-pointer", {
-              'rb:bg-[#171719] rb:text-white': type === key,
+              'rb:bg-primary-600 rb:text-white': type === key,
               'rb:bg-[#F6F6F6]': type !== key
             })}
             onClick={() => setType(key)}

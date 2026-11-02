@@ -11,6 +11,7 @@ import { engine } from './en/engine'
 import { detail } from './en/detail'
 import { notificationCenter } from './en/notificationCenter'
 import { memoryConversation } from './en/memoryConversation'
+import { skills } from './en/skills';
 
 export const en = {
   translation: {
@@ -21,7 +22,8 @@ export const en = {
     ...application,
     ...userMemory,
     ...space,
-    ...tool,
+    tool,
+    skills,
     ...workflow,
     ...engine,
     ...detail,

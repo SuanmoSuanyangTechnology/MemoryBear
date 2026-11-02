@@ -23,7 +23,7 @@
 
 .customTree.ant-tree.ant-tree-directory .ant-tree-treenode-selected .ant-tree-node-content-wrapper:before,
 .customTree.ant-tree.ant-tree-directory .ant-tree-treenode-selected .ant-tree-node-content-wrapper:hover:before {
-    background: #171719 !important;
+    background: #155EEF !important;
 }
 .customTree.ant-tree.ant-tree-directory .ant-tree-treenode-selected .ant-tree-node-content-wrapper, 
 .customTree.ant-tree.ant-tree-directory .ant-tree-treenode-selected .ant-tree-node-content-wrapper:hover{

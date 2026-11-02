@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-02 15:19:30 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-09-03 14:20:12
+ * @Last Modified time: 2026-10-30 15:22:12
  */
 /**
  * RadioGroupCard Component
@@ -101,7 +101,7 @@ const RadioGroupCard: FC<RadioCardProps> = ({
       {options.map(option => (
         <div key={String(option.value)}
           className={clsx("rb:relative rb:border rb:rounded-xl rb:w-full rb:text-center rb:cursor-pointer", {
-            'rb:border rb:border-[#171719]!': option.value === value,
+            'rb:border rb:border-primary-600!': option.value === value,
             'rb:border-[#EBEBEB] rb:bg-white': option.value !== value,
             'rb:opacity-[0.75] rb:cursor-not-allowed!': option.disabled || disabled,
             'rb:py-5 rb:px-3 rb:leading-5.5': !block,

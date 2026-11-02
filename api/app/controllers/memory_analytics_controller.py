@@ -451,3 +451,21 @@ async def get_interest_distribution_by_user_api(
     except Exception as e:
         api_logger.error(f"Interest distribution by user failed: {str(e)}")
         return fail(BizCode.INTERNAL_ERROR, "获取兴趣分布标签失败", str(e))
+
+
+@router.get(
+    "/scene_community_graph", response_model=ApiResponse,
+    summary="管理端场景社区图谱", operation_id="getSceneCommunityGraphForManager",
+)
+@memory_profile_proxy(query_fields=("end_user_id",))
+async def get_scene_community_graph_for_manager(
+    end_user_id: str = Query(..., description="终端用户 UUID", json_schema_extra={"format": "uuid"}),
+    current_user: CurrentUserSnapshot = Depends(get_current_user_async),
+    request: Request = None,
+) -> dict:
+    """Forward scene community graph queries to memory-profile."""
+    return fail(
+        BizCode.SERVICE_UNAVAILABLE,
+        "记忆画像服务暂不可用",
+        "Memory profile integration is disabled",
+    )

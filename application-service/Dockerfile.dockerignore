@@ -9,6 +9,8 @@
 !packages/
 !packages/auth-sdk/
 !packages/auth-sdk/**
+!packages/memorybear-grpc/
+!packages/memorybear-grpc/**
 
 **/__pycache__/**
 **/__pycache__

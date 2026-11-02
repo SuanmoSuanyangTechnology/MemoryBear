@@ -32,7 +32,7 @@ export default {
           800: '#222222',
         },
         primary: {
-          600: '#171719', // default
+          600: '#155EEF', // default
         },
         red: {
           50: '#FFF2F0',

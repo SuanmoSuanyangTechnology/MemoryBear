@@ -26,11 +26,13 @@ dependencies = [
     "langchain-openai>=1.1,<2",
     "langgraph>=1.0,<2",
     "langid>=1.1.6,<2",
+    "memorybear-grpc",
     "olefile>=0.47,<1",
     "openpyxl>=3.1.5,<4",
     "orjson>=3.11,<4",
     "oss2>=2.19,<3",
     "pillow>=12.0,<13",
+    "prometheus-client>=0.21,<1",
     "psycopg[binary]>=3.2,<4",
     "psycopg2-binary>=2.9.11,<3",
     "pydantic>=2.12,<3",
@@ -68,6 +70,7 @@ dev = [
 
 [tool.uv.sources]
 auth-sdk = { path = "../packages/auth-sdk" }
+memorybear-grpc = { path = "../packages/memorybear-grpc" }
 redbear-model = { path = "../packages/redbear-model" }
 
 [tool.hatch.build.targets.wheel]
@@ -238,3 +241,9 @@ select = ["E", "F", "I", "UP", "B", "ASYNC"]
 # line-by-line comparison; only import paths, the logger helper, settings
 # access and the sandbox seam were rewritten mechanically.
 "src/services/app_chat_service.py" = ["E501", "E721", "E722", "F401", "F541", "I001", "UP006", "UP007", "UP035", "UP037", "UP041", "UP045", "B007", "B904", "F841"]
+
+# Resolve through the mirror so re-locks keep every lock URL on it.
+[[tool.uv.index]]
+name = "tencent"
+url = "https://mirrors.cloud.tencent.com/pypi/simple"
+default = true

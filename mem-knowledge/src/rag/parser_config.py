@@ -17,7 +17,7 @@ def _default_graph_config() -> dict[str, Any]:
     return {
         "use_graphrag": False,
         "scene_name": "",
-        "entity_types": ["organization", "person", "geo", "event", "category"],
+        "entity_types": [],
         "method": "general",
         "resolution": True,
         "community": True,

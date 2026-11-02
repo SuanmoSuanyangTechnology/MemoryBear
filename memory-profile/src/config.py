@@ -41,15 +41,11 @@ class ProfileSettings(BaseSettings):
         10, ge=1, le=50, validation_alias="PROFILE_MEMORY_TRACEMALLOC_FRAMES"
     )
     # 0 disables the RSS warning; set it to a container-aware alert threshold.
-    memory_rss_warn_bytes: int = Field(
-        0, ge=0, validation_alias="PROFILE_MEMORY_RSS_WARN_BYTES"
-    )
+    memory_rss_warn_bytes: int = Field(0, ge=0, validation_alias="PROFILE_MEMORY_RSS_WARN_BYTES")
 
     i18n_default_language: str = Field("zh", validation_alias="I18N_DEFAULT_LANGUAGE")
     i18n_fallback_language: str = Field("zh", validation_alias="I18N_FALLBACK_LANGUAGE")
-    i18n_supported_languages: str = Field(
-        "zh,en", validation_alias="I18N_SUPPORTED_LANGUAGES"
-    )
+    i18n_supported_languages: str = Field("zh,en", validation_alias="I18N_SUPPORTED_LANGUAGES")
     i18n_locales_dir: str | None = Field(None, validation_alias="I18N_LOCALES_DIR")
 
     memory_auth_mode: Literal["direct", "gateway"] = Field(
@@ -260,9 +256,7 @@ class ProfileSettings(BaseSettings):
             return explicit
         db_name = self.database_name.strip()
         if not db_name or any(ch.isspace() for ch in db_name):
-            raise ValueError(
-                f"DB_NAME must be non-empty without whitespace to derive {env_name}"
-            )
+            raise ValueError(f"DB_NAME must be non-empty without whitespace to derive {env_name}")
         return f"{base}:{db_name}"
 
     @property

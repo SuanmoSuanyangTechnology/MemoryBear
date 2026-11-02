@@ -64,7 +64,7 @@ from . import (
     tenant_quota_controller,
     tenant_subscription_controller,
 )
-from .internal import internal_app_service_controller, internal_sandbox_controller
+from .internal import internal_app_service_controller
 
 # 创建管理端 API 路由器
 manager_router = APIRouter()
@@ -131,7 +131,6 @@ manager_router.include_router(message_interaction_controller.router)  # 消息�
 manager_router.include_router(memory_display_controller.router)  # 记忆和引擎展示
 manager_router.include_router(workflow_trigger_controller.router)
 manager_router.include_router(human_intervention_controller.router)  # 人工介入功能
-manager_router.include_router(internal_sandbox_controller.router)
 manager_router.include_router(internal_app_service_controller.router)
 
 __all__ = ["manager_router"]

@@ -14,6 +14,7 @@ from .routes.human_intervention import router as human_intervention_router
 from .routes.human_intervention import v1_router as human_intervention_v1_router
 from .routes.messages import router as messages_router
 from .routes.messages import v1_router as messages_v1_router
+from .routes.metrics import router as metrics_router
 from .routes.multi_agent import router as multi_agent_router
 from .routes.prompt_optimizer import router as prompt_optimizer_router
 from .routes.public_share import router as public_share_router
@@ -34,6 +35,7 @@ internal_v1_router.include_router(human_intervention_router)
 internal_v1_router.include_router(human_intervention_v1_router)
 internal_v1_router.include_router(messages_router)
 internal_v1_router.include_router(messages_v1_router)
+internal_v1_router.include_router(metrics_router)
 internal_v1_router.include_router(multi_agent_router)
 internal_v1_router.include_router(prompt_optimizer_router)
 internal_v1_router.include_router(public_share_router)

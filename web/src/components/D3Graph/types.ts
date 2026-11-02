@@ -4,18 +4,49 @@ import type * as d3 from 'd3'
 // ─── Raw input types (mirror of API response, no external dependency) ─────────
 // These interfaces map 1-to-1 with the graph API response shape.
 
+export interface SceneTimes {
+  started_at: number | null
+  ended_at: number | null
+  created_at: number | null
+  updated_at: number | null
+}
+
+export interface RawSceneNode {
+  id: string
+  label: 'SceneSummary'
+  unassigned_reason: 'NO_PARENT' | 'INVALID_PARENT_ID' | 'PARENT_NOT_FOUND' | null
+  properties: SceneTimes & {
+    content: string
+    topic_name?: string | null
+    topic_scope: string | null
+    conversation_id: string | null
+    turn_count: number | null
+    close_reason: string | null
+    community_eligibility: string | null
+    community_category_l1: string | null
+    community_status: string | null
+    scene_community_id: string | null
+  }
+}
+
 export interface RawCommunityNode {
   id: string
-  label: 'Community'
-  properties: {
-    name: string
-    summary: string
-    member_entity_ids: string[]
+  label: 'SceneCommunity' | 'UnassignedSceneGroup'
+  kind: 'COMMUNITY' | 'UNASSIGNED'
+  virtual: boolean
+  scene_count: number
+  scenes: RawSceneNode[]
+  properties: SceneTimes & {
+    category_l1: string | null
+    topic_name: string | null
+    topic_scope: string | null
+    summary: string | null
     member_count: number
-    core_entities: string[]
-    community_id: string
-    end_user_id?: string
-    updated_at?: string
+    boundary_instance_anchor: string | null
+    boundary_lifecycle_anchor: string | null
+    boundary_primary_matter: string | null
+    boundary_include_rule: string | null
+    boundary_exclude_rule: string | null
   }
 }
 
@@ -38,8 +69,14 @@ export interface RawEdge {
 }
 
 export interface RawCommunityGraphData {
-  nodes: (RawCommunityNode | RawEntityNode)[]
-  edges: RawEdge[]
+  groups: RawCommunityNode[]
+  statistics: {
+    total_scene_communities: number
+    total_scene_summaries: number
+    assigned_scene_summaries: number
+    unassigned_scene_summaries: number
+    total_groups: number
+  }
 }
 
 // ─── D3 graph types ───────────────────────────────────────────────────────────
@@ -52,7 +89,10 @@ export interface CommunityD3Node extends d3.SimulationNodeDatum {
   label: string
   symbolSize: number
   color: string
-  properties?: RawEntityNode['properties']
+  properties?: RawSceneNode['properties']
+  communityName?: string
+  unassignedReason?: RawSceneNode['unassigned_reason']
+  isEmptyCommunity?: boolean
 }
 
 export interface D3Link extends d3.SimulationLinkDatum<CommunityD3Node> {
@@ -88,6 +128,8 @@ export interface CommunityGraphProps {
   showLegend?: boolean
   onCommunityClick?: (node: RawCommunityNode) => void
   onNodeClick?: (node: CommunityD3Node) => void
+  selectedNodeId?: string | null
+  selectedCommunityId?: string | null
   defaultZoom?: number
 }
 
@@ -99,6 +141,7 @@ export interface InitOptions {
   setTooltip: (s: { x: number; y: number; node: CommunityD3Node } | null) => void
   onCommunityClickRef: RefObject<((node: RawCommunityNode) => void) | undefined>
   onNodeClickRef: RefObject<((node: CommunityD3Node) => void) | undefined>
+  selectedCommunityIdRef: RefObject<string | null | undefined>
 }
 
 export interface LegendItem {

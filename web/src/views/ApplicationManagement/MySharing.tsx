@@ -127,7 +127,7 @@ const MySharing = forwardRef<MySharingRef, { switchOntology: (item: Application)
                 justify="space-between"
                 align="center"
                 className={clsx("rb:cursor-pointer rb:bg-white rb:py-3! rb:px-4! rb:rounded-2xl rb:border rb:border-white rb:group", {
-                  'rb:border-[#171719]!': selectedWorkspace === workspace.target_workspace_id
+                  'rb:border-primary-600!': selectedWorkspace === workspace.target_workspace_id
                 })}
                 onClick={() => handleSelectWorkspace(workspace.target_workspace_id)}
               >
@@ -160,7 +160,7 @@ const MySharing = forwardRef<MySharingRef, { switchOntology: (item: Application)
                 avatar={<Flex align="center" justify="center" className={clsx("rb:size-12 rb:rounded-lg rb:text-[24px] rb:text-[#ffffff] rb:bg-blue-500", {
                   'rb:bg-blue-500': item.source_app_type === 'agent',
                   'rb:bg-[#9C6FFF]!': item.source_app_type === 'multi_agent',
-                  'rb:bg-[#171719]': item.source_app_type === 'workflow',
+                  'rb:bg-primary-600': item.source_app_type === 'workflow',
                 })}>{item.source_app_name.trim()[0]}</Flex>}
                 subTitle={<Space size={6}>
                   <Tag color={item.source_app_type === 'agent' ? 'processing' : item.source_app_type === 'multi_agent' ? 'dark' : 'purple'}>{t(`application.${item.source_app_type}`)}</Tag>

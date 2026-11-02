@@ -11,10 +11,6 @@ behavior.
 """
 from typing import Any, Dict, Optional, Tuple
 
-EXECUTION_MODE_IN_PROCESS = "in_process"
-EXECUTION_MODE_SANDBOX = "sandbox"
-
-
 def _to_dict(value: Any) -> Dict[str, Any]:
     """Pydantic model / dict / anything else -> dict (anything else becomes an empty dict)."""
     if hasattr(value, "model_dump"):
@@ -80,20 +76,3 @@ def resolve_opening(
     }
     statement, questions = AgentRunService._get_opening_statement(safe_features, True, variables)
     return statement, list(questions or [])
-
-
-def resolve_execution_mode(settings_e2b_enabled: bool) -> str:
-    """Entry execution mode: same rule as the Agent (E2B_ENABLED -> sandbox, otherwise in_process)."""
-    return EXECUTION_MODE_SANDBOX if settings_e2b_enabled else EXECUTION_MODE_IN_PROCESS
-
-
-def effective_execution_mode(requested: Optional[str]) -> Tuple[str, bool]:
-    """Cluster supervisor currently has only an in_process implementation.
-
-    Returns (actual mode, whether a fallback occurred). A sandbox cluster
-    implementation is left for later; a fallback is never silent: callers log a
-    warning and write an end event based on the fallback flag.
-    """
-    if requested == EXECUTION_MODE_SANDBOX:
-        return EXECUTION_MODE_IN_PROCESS, True
-    return EXECUTION_MODE_IN_PROCESS, False

@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import AsyncIterator, Iterator
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 import httpx
@@ -47,6 +47,9 @@ from .errors import (
     biz_code_from_remote,
 )
 from .transport import ModelServiceHttpTransport, ModelServiceSyncTransport
+
+if TYPE_CHECKING:
+    from memorybear_grpc.client import ChannelPool
 
 logger = logging.getLogger(__name__)
 
@@ -194,16 +197,31 @@ class ModelInvokeClient:
     both sides -- so the host does not define its own.
     """
 
-    def __init__(self, transport: ModelServiceHttpTransport, *, timeouts: InvokeTimeouts):
+    def __init__(
+        self,
+        transport: ModelServiceHttpTransport | None,
+        *,
+        timeouts: InvokeTimeouts,
+        invoke: AsyncInvokeTransport | None = None,
+    ):
+        """Owns exactly one invoke transport: an HTTP pool or a gRPC channel (never both)."""
+
+        if (transport is None) == (invoke is None):
+            raise ValueError(
+                "ModelInvokeClient needs exactly one of transport/invoke"
+            )
         self._transport = transport
-        self._invoke = HostAsyncInvokeTransport(
-            transport.client,
-            base_url=str(transport.base_url).rstrip("/"),
-            timeouts=timeouts,
-        )
+        if invoke is None:
+            assert transport is not None
+            invoke = HostAsyncInvokeTransport(
+                transport.client,
+                base_url=str(transport.base_url).rstrip("/"),
+                timeouts=timeouts,
+            )
+        self._invoke = invoke
 
     @property
-    def async_transport(self) -> HostAsyncInvokeTransport:
+    def async_transport(self) -> AsyncInvokeTransport:
         """Lends the in-package transport carrying host error vocabulary; the in-package chat adapter consumes it directly."""
 
         return self._invoke
@@ -220,6 +238,35 @@ class ModelInvokeClient:
             limits=http_limits(settings),
         )
         return cls(transport, timeouts=resolved)
+
+    @classmethod
+    def for_grpc(
+        cls,
+        pool: ChannelPool,
+        *,
+        target: str,
+        timeouts: InvokeTimeouts | None = None,
+        call_budget_s: float = 180.0,
+        margin_s: float = 30.0,
+    ) -> ModelInvokeClient:
+        """gRPC-backed runtime channel; the pool (and its channels) stay caller-owned."""
+
+        if not target.strip():
+            raise ValueError("grpc invoke needs a non-empty target")
+        from .grpc_invoke import HostGrpcAsyncInvokeTransport
+
+        resolved = timeouts or InvokeTimeouts()
+        return cls(
+            None,
+            timeouts=resolved,
+            invoke=HostGrpcAsyncInvokeTransport(
+                pool,
+                target_name=target,
+                timeouts=resolved,
+                call_budget_s=call_budget_s,
+                margin_s=margin_s,
+            ),
+        )
 
     @classmethod
     def for_test(
@@ -254,7 +301,10 @@ class ModelInvokeClient:
         return await self._invoke.call(request, invoke_target(context))
 
     async def aclose(self) -> None:
-        await self._transport.aclose()
+        """Close the HTTP pool when owned; gRPC channels belong to the process pool."""
+
+        if self._transport is not None:
+            await self._transport.aclose()
 
 
 class ModelInvokeSyncClient:

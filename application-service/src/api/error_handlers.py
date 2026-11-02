@@ -59,6 +59,29 @@ def _request_locale(request: Request) -> str:
     return selected if isinstance(selected, str) and selected else get_default_locale()
 
 
+def validation_error_content(exc: PydanticValidationError, language: str) -> dict:
+    """Pydantic errors -> the legacy 422 envelope (HTTP handler and gRPC share it)."""
+
+    errors = []
+    for error in exc.errors():
+        field = ".".join(str(loc) for loc in error["loc"])
+        error_type = error["type"]
+        key = _VALIDATION_ERROR_KEYS.get(error_type, _VALIDATION_FALLBACK_KEY)
+        errors.append(
+            {
+                "field": field,
+                "message": translate(key, language, field=field),
+                "type": error_type,
+            }
+        )
+    return {
+        "success": False,
+        "error_code": "VALIDATION_FAILED",
+        "message": translate("errors.common.validation_failed", language),
+        "errors": errors,
+    }
+
+
 def _response(
     request: Request,
     *,
@@ -166,31 +189,13 @@ def register_error_handlers(application: FastAPI) -> None:
     async def pydantic_validation_error_handler(
         request: Request, exc: PydanticValidationError
     ):
-        language = _request_locale(request)
-        errors = []
-        for error in exc.errors():
-            field = ".".join(str(loc) for loc in error["loc"])
-            error_type = error["type"]
-            key = _VALIDATION_ERROR_KEYS.get(error_type, _VALIDATION_FALLBACK_KEY)
-            errors.append(
-                {
-                    "field": field,
-                    "message": translate(key, language, field=field),
-                    "type": error_type,
-                }
-            )
-        message = translate("errors.common.validation_failed", language)
+        content = validation_error_content(exc, _request_locale(request))
         return render_error(
             request,
             status_code=422,
-            content={
-                "success": False,
-                "error_code": "VALIDATION_FAILED",
-                "message": message,
-                "errors": errors,
-            },
+            content=content,
             error_code="VALIDATION_FAILED",
-            message=message,
+            message=content["message"],
             exception=exc,
             validation_errors=exc.errors(),
         )

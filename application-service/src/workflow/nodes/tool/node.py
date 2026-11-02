@@ -112,6 +112,21 @@ class ToolNode(BaseNode):
         tenant_id = await self._resolve_tenant_id_async(variable_pool)
         user_id = self._normalize_uuid(self.get_variable("sys.user_id", variable_pool))
         workspace_id = self._normalize_uuid(self.get_variable("sys.workspace_id", variable_pool))
+        # Only conversation-type workflows have a conversation ID; a pure workflow
+        # (no conversation) stays None and the sandbox tools refuse to run.
+        conversation_id = self._normalize_uuid(
+            self.get_variable("sys.conversation_id", variable_pool, strict=False)
+        )
+        if conversation_id is None:
+            # Debug conversation ID injected by WorkflowService for single-node
+            # dry runs; only used to partition the sandbox directory.
+            conversation_id = self._normalize_uuid(state.get("__debug_conversation_id"))
+        if conversation_id is None:
+            # Pure-workflow run: fixed sandbox directory ID derived by
+            # WorkflowService from app_id + user_id.
+            conversation_id = self._normalize_uuid(
+                self.get_variable("sys.sandbox_session_id", variable_pool, strict=False)
+            )
 
         if not tenant_id:
             logger.error(f"节点 {self.node_id} 缺少租户ID")
@@ -172,6 +187,7 @@ class ToolNode(BaseNode):
                 tenant_id=tenant_id,
                 user_id=user_id,
                 workspace_id=workspace_id,
+                conversation_id=conversation_id,
             )
 
         if result.success:

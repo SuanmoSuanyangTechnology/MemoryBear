@@ -174,24 +174,12 @@ const PrivateDirectoryPanel: FC<PrivateDirectoryPanelProps> = ({
         container.scrollTop += selectedBounds.bottom - visibleBottom;
       }
     };
-    let frame = 0;
-    const scheduleScroll = () => {
-      cancelAnimationFrame(frame);
-      frame = requestAnimationFrame(scrollSelectedIntoView);
-    };
-    const mutationObserver = new MutationObserver(scheduleScroll);
-    mutationObserver.observe(tree, { childList: true, subtree: true, attributes: true });
-    const resizeObserver = new ResizeObserver(scheduleScroll);
-    resizeObserver.observe(container);
-    resizeObserver.observe(tree);
-    scheduleScroll();
+    const frame = requestAnimationFrame(scrollSelectedIntoView);
 
     return () => {
       cancelAnimationFrame(frame);
-      mutationObserver.disconnect();
-      resizeObserver.disconnect();
     };
-  }, [selectedPageId, expandedKeys, isFilesMode, loading, keyword]);
+  }, [selectedPageId, isFilesMode, loading, keyword]);
 
   return (
     <aside className="rb:flex rb:h-full rb:w-63 rb:p-3 rb:shrink-0 rb:flex-col rb:border-r rb:border-[#EAECEE] rb:bg-[#FBFCFD]">

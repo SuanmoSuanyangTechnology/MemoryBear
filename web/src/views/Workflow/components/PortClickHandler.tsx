@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-09 18:30:28 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-06-05 14:02:05
+ * @Last Modified time: 2026-10-30 16:01:02
  */
 import { useEffect, useState } from 'react';
 import { Flex, Popover } from 'antd';
@@ -416,7 +416,7 @@ const PortClickHandler: React.FC<PortClickHandlerProps> = ({ graph, nodeClick, a
                   key={nodeType.type}
                   align="center"
                   gap={8}
-                  className="rb:rounded-xl rb:p-2! rb:border rb:border-[#EBEBEB] rb:cursor-pointer rb:hover:border rb:hover:border-[#171719]!"
+                  className="rb:rounded-xl rb:p-2! rb:border rb:border-[#EBEBEB] rb:cursor-pointer rb:hover:border rb:hover:border-primary-600!"
                   onClick={() => handleNodeSelect(nodeType)}
                 >
                   <div className={`rb:size-6 rb:bg-cover ${nodeType.icon}`} />

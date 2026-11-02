@@ -1,6 +1,6 @@
 """application-service local model base.
 
-- ServiceBase: the 39 app-domain tables mapped by this service (13 groups:
+- ServiceBase: the 42 app-domain tables mapped by this service (13 groups:
   application / agent / multi-agent / workflow / conversation / tool / skill /
   MCP market / annotation / feedback / end-user / prompt-optimizer / file).
   Their DDL is owned exclusively by the monolith migration chain (shared
@@ -20,7 +20,7 @@ class ServiceBase(DeclarativeBase):
 
 
 # Tables this service writes at runtime — the only DML targets allowed by
-# scripts/check_no_host_writes.py. 33 of the 39 mapped app-domain tables are
+# scripts/check_no_host_writes.py. 36 of the 42 mapped app-domain tables are
 # writable here (rows may be written by both sides during the coexistence
 # period; the write side follows the prefix routed to each backend). The other
 # six are read-only: `generic_files` (generic uploads stay on the monolith until
@@ -58,6 +58,9 @@ SERVICE_WRITE_TABLES = frozenset(
         "workflow_tool_configs",
         # skill
         "skills",
+        "skill_packages",
+        "skill_files",
+        "skill_plugins",
         # annotation
         "app_annotations",
         "app_annotation_settings",

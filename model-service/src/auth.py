@@ -45,6 +45,7 @@ _PUBLIC_PATHS = frozenset(
     {
         "/internal/v1/health/live",
         "/internal/v1/health/ready",
+        "/internal/v1/metrics",
     }
 )
 

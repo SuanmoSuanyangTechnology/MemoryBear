@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from time import time
 from typing import Any
 
 from src.common.errors import BizCode, LocalizedProfileError
@@ -22,6 +23,7 @@ from src.modules.analytics.schemas import (
     UserSummaryData,
 )
 from src.runtime import ProfileRuntime
+from src.schemas.scene_community_graph import GraphResponse
 from src.schemas.workspace import WorkspaceStatistics
 from src.services.generation import GenerationService
 from src.services.graph import SINGLE_TYPE_LIMIT_HARD_MAX, GraphQueryService
@@ -226,6 +228,12 @@ class AnalyticsHandler:
             data=data,
             msg=data.get("message", message("analytics.msg.query_success", language)),
         )
+
+    async def scene_community_graph(
+        self, context: MemoryPrincipal, end_user_id: str,
+    ) -> GraphResponse:
+        data = await self.graph_query.scene_community_graph(end_user_id, context.workspace_id)
+        return GraphResponse(data=data, time=int(time() * 1000))
 
     async def hot_memory_tags(
         self, context: MemoryPrincipal, limit: int, language: str

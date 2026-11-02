@@ -11,11 +11,12 @@ pipeline, so the service resolves the binding from the injected key id (shared
 helper) and re-applies the publish-state and scope checks; the host
 ``_get_app_id`` app-binding check is re-applied on the routes that carry it.
 Handlers ride either session: message management is synchronous on the
-request-scoped sync session; the chat face (``/v1`` chat and file upload) and
-reply regeneration are async — chat resolution runs on one async session, each
-stream opens its own session leg (the request-scoped session is torn down once
-the response body starts streaming), and regeneration runs on sync-db services
-through their own sync session context.
+request-scoped sync session; the chat face (``/v1`` chat and file upload) is
+async and runs the key gate on short async sessions; reply regeneration
+validates on short sync sessions and detaches the config snapshot it passes
+into the stream. No stream inherits a request-scoped session, so no pooled
+connection stays checked out for the lifetime of a streaming response; each
+stream opens its own session leg.
 """
 
 from __future__ import annotations
@@ -23,23 +24,18 @@ from __future__ import annotations
 import json
 import logging
 from datetime import datetime
-from types import SimpleNamespace
 from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
 from pydantic import ValidationError as PydanticValidationError
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
-from ...db import get_async_db_context, get_db_context
+from ...db import detach_instances, get_async_db_context, get_db_context
 from ...errors import BizCode, BusinessException, ResourceNotFoundException
 from ...guards.workspace_access import require_workspace_access
 from ...models import (
-    App,
     AppRelease,
-    AppShare,
     AppType,
     Message,
     MessageReportType,
@@ -60,14 +56,22 @@ from ...schemas.app_schema import (
     WorkflowRegenerateResponse,
 )
 from ...schemas.conversation_schema import (
-    ChatResponse,
     V1ConversationFeedbackListResponse,
     V1ConversationListItem,
     V1ConversationMessageListResponse,
 )
 from ...services.agent_config_helper import enrich_agent_config
-from ...services.app_chat_service import AppChatService, assert_not_opening_statement
+from ...services.app_chat_service import assert_not_opening_statement
 from ...services.app_service import AppService
+from ...services.chat_use_case import (
+    chat_complete,
+    chat_stream,
+    prepare_chat,
+    resolve_app_for_chat,
+)
+from ...services.chat_use_case import (
+    require_bound_app_id as _require_app_id,
+)
 from ...services.conversation_service import ConversationService
 from ...services.draft_run_service import AgentRunService
 from ...services.file_storage_service import (
@@ -79,23 +83,14 @@ from ...services.message_feedback_service import FavoriteService, FeedbackServic
 from ...services.message_report_service import ReportService
 from ...services.multi_agent_service import MultiAgentService
 from ...services.workflow_service import WorkflowService
-from ...utils.app_config_utils import (
-    agent_config_4_app_release,
-    multi_agent_config_4_app_release,
-    workflow_config_4_app_release,
-)
+from ...utils.app_config_utils import agent_config_4_app_release
 from ...utils.datetime_utils import to_timestamp_ms
-from ...utils.redis_cache import CACHE_MISS, get_json_async, set_json_async
 from ...utils.sse_stream import sse_response
-from ..dependencies import Principal, get_principal, get_sync_db
+from ..dependencies import API_KEY_ID_HEADER, Principal, get_principal, get_sync_db
 from ..schemas.common import fail, success
 from ..schemas.response_schema import ApiResponse, PageData, PageMeta
 from starlette.responses import JSONResponse
 from .annotations import _resolve_v1_app
-from .public_share import (
-    _get_or_create_public_end_user_async,
-    _prepare_public_memory_context_async,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -118,40 +113,82 @@ async def regenerate_message(
     payload: RegenerateRequest,
     workspace_id: WorkspaceId,
     principal: Caller,
-    db: DbSession,
 ):
     """Regenerate an assistant reply (multi-version, streaming or not).
 
     Routed by app type: WORKFLOW reruns the flow through the restored input
     (conversational flows only), AGENT keeps the same context and re-invokes
     the LLM, PURE_WORKFLOW is one-shot and rejected. Every validation runs
-    before the SSE response starts, so failures still return clean HTTP
-    errors instead of a blank stream.
+    on a short session that closes before the SSE response starts, so
+    failures still return clean HTTP errors instead of a blank stream.
     """
 
-    app_service = AppService(db)
-    app = app_service._get_app_or_404(app_id)
+    # The validation session closes before the stream: a request-scoped sync
+    # dependency would be torn down only after the response completes, pinning
+    # a pooled connection for the whole stream lifetime.
+    with get_db_context() as db:
+        app_service = AppService(db)
+        app = app_service._get_app_or_404(app_id)
 
-    # Must run before the StreamingResponse: an opening statement has no parent
-    # user message to restore, and a failure after the stream started cannot
-    # become a clean HTTP error anymore.
-    assert_not_opening_statement(db, message_id)
+        # Must run before the StreamingResponse: an opening statement has no
+        # parent user message to restore, and a failure after the stream
+        # started cannot become a clean HTTP error anymore.
+        assert_not_opening_statement(db, message_id)
 
-    if app.type == AppType.PURE_WORKFLOW:
-        raise BusinessException(
-            "纯工作流为一次性执行，不支持重新生成", BizCode.APP_TYPE_NOT_SUPPORTED
-        )
+        if app.type == AppType.PURE_WORKFLOW:
+            raise BusinessException(
+                "纯工作流为一次性执行，不支持重新生成", BizCode.APP_TYPE_NOT_SUPPORTED
+            )
 
-    if app.type == AppType.WORKFLOW:
-        workflow_service = WorkflowService(db)
-        config = workflow_service._resolve_workflow_config(app, workspace_id)
-        # Only conversational flows carry the multi-turn semantics a
-        # single-round regeneration needs.
-        if not workflow_service._supports_conversation(config):
-            raise BusinessException("该工作流非对话流，不支持重新生成", BizCode.BAD_REQUEST)
+        app_type = app.type
 
-        workflow_service._assert_regenerate_quota(message_id)
+        if app_type == AppType.WORKFLOW:
+            workflow_service = WorkflowService(db)
+            config = workflow_service._resolve_workflow_config(app, workspace_id)
+            # Only conversational flows carry the multi-turn semantics a
+            # single-round regeneration needs.
+            if not workflow_service._supports_conversation(config):
+                raise BusinessException(
+                    "该工作流非对话流，不支持重新生成", BizCode.BAD_REQUEST
+                )
 
+            workflow_service._assert_regenerate_quota(message_id)
+            detach_instances(db, config)
+
+        elif app_type != AppType.MULTI_AGENT:
+            # ---- agent branch (the host routes every non-workflow type here;
+            # shared config resolution rejects non-agent types with
+            # APP_TYPE_NOT_SUPPORTED) ----
+            agent_cfg = app_service.get_agent_config(
+                app_id=app_id, workspace_id=workspace_id
+            )
+
+            # In a multi-model compare trial run each column may use a
+            # different model with different model_parameters; those are
+            # persisted on the original assistant message's meta_data.
+            # Regenerate must restore the model/parameters that actually
+            # produced the message instead of the app default/global ones.
+            target_msg = db.get(Message, message_id)
+            msg_meta = dict(getattr(target_msg, "meta_data", None) or {})
+            meta_model_config_id = msg_meta.get("model_config_id")
+            model_parameters_override = msg_meta.get("model_parameters_override")
+
+            model_config = None
+            if meta_model_config_id:
+                try:
+                    model_config = db.get(ModelConfig, UUID(str(meta_model_config_id)))
+                except (ValueError, TypeError):
+                    model_config = None
+            if not model_config and agent_cfg.default_model_config_id:
+                model_config = db.get(ModelConfig, agent_cfg.default_model_config_id)
+
+            if not model_config:
+                raise ResourceNotFoundException(
+                    "模型配置", str(agent_cfg.default_model_config_id)
+                )
+            detach_instances(db, agent_cfg, model_config)
+
+    if app_type == AppType.WORKFLOW:
         if payload.stream:
             async def event_generator():
                 with get_db_context() as stream_db:
@@ -173,14 +210,15 @@ async def regenerate_message(
 
             return sse_response(event_generator())
 
-        result = await workflow_service.regenerate(
-            message_id=message_id,
-            app_id=app_id,
-            config=config,
-            workspace_id=workspace_id,
-            user_id=str(principal.actor_id),
-            override_variables=payload.variables,
-        )
+        with get_db_context() as db:
+            result = await WorkflowService(db).regenerate(
+                message_id=message_id,
+                app_id=app_id,
+                config=config,
+                workspace_id=workspace_id,
+                user_id=str(principal.actor_id),
+                override_variables=payload.variables,
+            )
         return success(data=WorkflowRegenerateResponse(**result))
 
     # ---- multi-agent cluster branch (MULTI_AGENT) ----
@@ -188,7 +226,7 @@ async def regenerate_message(
     # orchestration); version management aligns with Agent apps. Cluster messages
     # previously fell into the single-agent engine branch, which lost the
     # orchestration semantics on rerun.
-    if app.type == AppType.MULTI_AGENT:
+    if app_type == AppType.MULTI_AGENT:
         if payload.stream:
             async def cluster_event_generator():
                 with get_db_context() as stream_db:
@@ -208,41 +246,17 @@ async def regenerate_message(
 
             return sse_response(cluster_event_generator())
 
-        result = await MultiAgentService(db).regenerate(
-            message_id=message_id,
-            app_id=app_id,
-            user_id=str(principal.actor_id),
-            variables=payload.variables,
-            web_search=payload.web_search,
-            memory=payload.memory,
-            thinking=True,
-        )
+        with get_db_context() as db:
+            result = await MultiAgentService(db).regenerate(
+                message_id=message_id,
+                app_id=app_id,
+                user_id=str(principal.actor_id),
+                variables=payload.variables,
+                web_search=payload.web_search,
+                memory=payload.memory,
+                thinking=True,
+            )
         return success(data=RegenerateResponse(**result))
-
-    # ---- agent branch (the host routes every non-workflow type here; shared
-    # config resolution rejects non-agent types with APP_TYPE_NOT_SUPPORTED) ----
-    agent_cfg = app_service.get_agent_config(app_id=app_id, workspace_id=workspace_id)
-
-    # In a multi-model compare trial run each column may use a different model
-    # with different model_parameters; those are persisted on the original
-    # assistant message's meta_data. Regenerate must restore the model/parameters
-    # that actually produced the message instead of the app default/global ones.
-    target_msg = db.get(Message, message_id)
-    msg_meta = dict(getattr(target_msg, "meta_data", None) or {})
-    meta_model_config_id = msg_meta.get("model_config_id")
-    model_parameters_override = msg_meta.get("model_parameters_override")
-
-    model_config = None
-    if meta_model_config_id:
-        try:
-            model_config = db.get(ModelConfig, UUID(str(meta_model_config_id)))
-        except (ValueError, TypeError):
-            model_config = None
-    if not model_config and agent_cfg.default_model_config_id:
-        model_config = db.get(ModelConfig, agent_cfg.default_model_config_id)
-
-    if not model_config:
-        raise ResourceNotFoundException("模型配置", str(agent_cfg.default_model_config_id))
 
     if payload.stream:
         async def event_generator():
@@ -260,14 +274,15 @@ async def regenerate_message(
 
         return sse_response(event_generator())
 
-    result = await AgentRunService(db).regenerate(
-        message_id=message_id,
-        agent_config=agent_cfg,
-        model_config=model_config,
-        workspace_id=workspace_id,
-        user_id=str(principal.actor_id),
-        model_parameters_override=model_parameters_override,
-    )
+    with get_db_context() as db:
+        result = await AgentRunService(db).regenerate(
+            message_id=message_id,
+            agent_config=agent_cfg,
+            model_config=model_config,
+            workspace_id=workspace_id,
+            user_id=str(principal.actor_id),
+            model_parameters_override=model_parameters_override,
+        )
     return success(data=RegenerateResponse(**result))
 
 
@@ -523,14 +538,6 @@ def get_reports_statistics(
 # ==================== /v1 API-key face ====================
 
 
-def _require_app_id(app_id: UUID | None) -> UUID:
-    """Host ``_get_app_id``: reject keys that are not bound to an application."""
-
-    if not app_id:
-        raise BusinessException("API Key 未绑定应用", BizCode.BAD_REQUEST)
-    return app_id
-
-
 async def _read_json_body(request: Request) -> dict:
     """Parse the raw JSON body; malformed input becomes a parameter error.
 
@@ -558,20 +565,18 @@ class ChatRequestValidationError(Exception):
         super().__init__(detail)
 
 
+def chat_validation_content(detail: str) -> dict:
+    """V1 chat 框架请求校验失败统一信封内容：HTTP 422 / code 1001（文档 1.2）。"""
+    return fail(code=BizCode.VALIDATION_FAILED.value, msg=detail, error=detail)
+
+
 def _validation_failed_response(detail: str) -> JSONResponse:
     """V1 chat 框架请求校验失败统一信封：HTTP 422 / code 1001（文档 1.2）。"""
-    return JSONResponse(
-        status_code=422,
-        content=fail(code=BizCode.VALIDATION_FAILED.value, msg=detail, error=detail),
-    )
+    return JSONResponse(status_code=422, content=chat_validation_content(detail))
 
 
-async def _parse_chat_payload(request: Request) -> AppChatRequest:
-    """解析 /v1/app/chat 请求体，非法 JSON / 非 object / 字段类型错误统一为 422/1001。"""
-    try:
-        body = await request.json()
-    except (json.JSONDecodeError, UnicodeDecodeError, ValueError):
-        raise ChatRequestValidationError("请求体不是合法的 JSON")
+def validate_chat_body(body: object) -> AppChatRequest:
+    """已解码 JSON body → AppChatRequest；非法结构统一 422/1001（HTTP 与 gRPC 共用）。"""
     if not isinstance(body, dict):
         raise ChatRequestValidationError("请求体必须是 JSON 对象")
     try:
@@ -585,6 +590,15 @@ async def _parse_chat_payload(request: Request) -> AppChatRequest:
         raise
 
 
+async def _parse_chat_payload(request: Request) -> AppChatRequest:
+    """解析 /v1/app/chat 请求体，非法 JSON / 非 object / 字段类型错误统一为 422/1001。"""
+    try:
+        body = await request.json()
+    except (json.JSONDecodeError, UnicodeDecodeError, ValueError):
+        raise ChatRequestValidationError("请求体不是合法的 JSON")
+    return validate_chat_body(body)
+
+
 def _parse_release_config(release: AppRelease) -> dict:
     """Release config snapshot as a dict (JSON-string and dirty values tolerated)."""
 
@@ -595,22 +609,6 @@ def _parse_release_config(release: AppRelease) -> dict:
         except json.JSONDecodeError:
             config = {}
     return config if isinstance(config, dict) else {}
-
-
-def _check_app_config(release: AppRelease) -> None:
-    """Host ``_checkAppConfig``: the release snapshot must carry usable config."""
-
-    if release.type == AppType.AGENT:
-        if not release.config:
-            raise BusinessException("Agent 应用未配置模型", BizCode.AGENT_CONFIG_MISSING)
-    elif release.type == AppType.MULTI_AGENT:
-        if not release.config:
-            raise BusinessException("Multi-Agent 应用未配置模型", BizCode.AGENT_CONFIG_MISSING)
-    elif release.type in (AppType.WORKFLOW, AppType.PURE_WORKFLOW):
-        if not release.config:
-            raise BusinessException("工作流应用未配置模型", BizCode.AGENT_CONFIG_MISSING)
-    else:
-        raise BusinessException("不支持的应用类型", BizCode.APP_TYPE_NOT_SUPPORTED)
 
 
 def _get_standard_variables(variables: list, app_type: AppType) -> list:
@@ -843,67 +841,10 @@ def v1_get_app_basic_info(
     })
 
 
-async def _get_v1_chat_app_async(
-    db: AsyncSession, app_id: UUID, workspace_id: UUID
-) -> App:
-    """Async port of the host ``get_app_async``: the active app row plus the
-    workspace accessibility check (own workspace or an active share into it)."""
-
-    app = await db.scalar(
-        select(App).where(App.id == app_id, App.is_active.is_(True)).limit(1)
-    )
-    if not app:
-        raise ResourceNotFoundException("应用", str(app_id))
-    if app.workspace_id != workspace_id:
-        share_exists = await db.scalar(
-            select(AppShare.id).where(
-                AppShare.source_app_id == app.id,
-                AppShare.target_workspace_id == workspace_id,
-                AppShare.is_active.is_(True),
-            ).limit(1)
-        )
-        if not share_exists:
-            raise BusinessException("应用不可访问", BizCode.WORKSPACE_NO_ACCESS)
-    return app
-
-
-async def _get_release_by_id_async(
-    db: AsyncSession, app_id: UUID, release_id: UUID
-) -> AppRelease:
-    """Async port of the host ``get_release_by_id_async`` (active snapshots only)."""
-
-    release = await db.scalar(
-        select(AppRelease).where(
-            AppRelease.app_id == app_id,
-            AppRelease.id == release_id,
-            AppRelease.is_active.is_(True),
-        ).limit(1)
-    )
-    if not release:
-        raise BusinessException(
-            f"版本 {release_id} 不存在或已下线", BizCode.RELEASE_NOT_FOUND
-        )
-    return release
-
-
-async def _get_current_release_async(
-    db: AsyncSession, *, app_id: UUID, workspace_id: UUID
-) -> AppRelease | None:
-    """Async port of the host ``get_current_release_async``: re-validates the
-    app (a cache-hit stub carries no release pointer) and returns None when the
-    app is not published."""
-
-    app = await _get_v1_chat_app_async(db, app_id, workspace_id)
-    if not app.current_release_id:
-        return None
-    return await db.get(AppRelease, app.current_release_id)
-
-
 @v1_router.post("/chat", summary="发送消息（支持流式和非流式）")
 async def v1_chat(
     request: Request,
     principal: Caller,
-    db: DbSession,
 ):
     """Chat with the key's bound app (agent / multi-agent / workflow).
 
@@ -915,8 +856,15 @@ async def v1_chat(
     """
 
     # Auth gate first (host decorator order): the key binding, publish state
-    # and scope are re-applied before the body is even read.
-    app_id = _require_app_id(_resolve_v1_app(request, db, principal))
+    # and scope are re-applied before the body is even read. The gate rides a
+    # short async session — a request-scoped sync session here would stay
+    # checked out until the SSE stream ends and starve the sync pool.
+    # Preparation and both execution legs live in the shared chat use case
+    # (the gRPC servicer runs the same pipeline).
+    app_id = await resolve_app_for_chat(
+        api_key_id=request.headers.get(API_KEY_ID_HEADER),
+        workspace_id=principal.workspace_id,
+    )
     workspace_id = principal.workspace_id
 
     try:
@@ -924,245 +872,32 @@ async def v1_chat(
     except ChatRequestValidationError as exc:
         return _validation_failed_response(exc.detail)
 
-    # App cache: a hit skips the app row lookup; the cached current release id
-    # skips the release-by-current lookup too (host cache shape, 60s TTL).
-    app_cache_key = f"cache:v2:app:{app_id}"
-    app_cache = await get_json_async(app_cache_key)
-    app_stub = None
-    cached_release_id = None
-    if app_cache is not CACHE_MISS:
-        app_stub = SimpleNamespace(id=UUID(app_cache["id"]), type=app_cache["type"])
-        if app_cache.get("current_release_id"):
-            cached_release_id = UUID(app_cache["current_release_id"])
-
-    async with get_async_db_context() as adb:
-        if app_stub is not None:
-            app = app_stub
-        else:
-            app = await _get_v1_chat_app_async(adb, app_id, workspace_id)
-            await set_json_async(app_cache_key, {
-                "id": str(app.id),
-                "type": app.type,
-                "current_release_id": (
-                    str(app.current_release_id) if app.current_release_id else None
-                ),
-            }, ttl=60)
-
-        if payload.version is not None:
-            active_release = await _get_release_by_id_async(adb, app.id, payload.version)
-        elif cached_release_id is not None:
-            active_release = await _get_release_by_id_async(adb, app.id, cached_release_id)
-        else:
-            active_release = await _get_current_release_async(
-                adb, app_id=app.id, workspace_id=workspace_id
-            )
-        if not active_release:
-            raise BusinessException("应用未发布，不可用", BizCode.APP_NOT_PUBLISHED)
-
-        end_user = await _get_or_create_public_end_user_async(
-            adb,
-            app_id=app.id,
-            workspace_id=workspace_id,
-            other_id=payload.user_id,
-        )
-        end_user_id = str(end_user.id)
-
-        storage_type, user_rag_memory_id = await _prepare_public_memory_context_async(
-            db=adb,
-            workspace_id=workspace_id,
-        )
-
-        app_type = app.type
-        _check_app_config(active_release)
-
-        if app_type != AppType.PURE_WORKFLOW and not payload.message:
-            raise BusinessException(
-                "当前应用类型要求必须传入 message", BizCode.INVALID_PARAMETER
-            )
-
-        conversation_id = None
-        if app_type != AppType.PURE_WORKFLOW or payload.conversation_id:
-            conversation = await ConversationService(adb).create_or_get_conversation_async(
-                app_id=app.id,
-                workspace_id=workspace_id,
-                user_id=end_user_id,
-                is_draft=False,
-                conversation_id=payload.conversation_id,
-            )
-            conversation_id = conversation.id
-
-        runtime_config = None
-        if app_type == AppType.AGENT:
-            runtime_config = agent_config_4_app_release(active_release)
-        elif app_type == AppType.MULTI_AGENT:
-            runtime_config = multi_agent_config_4_app_release(active_release)
-        elif app_type in (AppType.WORKFLOW, AppType.PURE_WORKFLOW):
-            runtime_config = workflow_config_4_app_release(active_release)
-
-        release_id = active_release.id
-
-    web_search = True
-    memory = True
-    execution_mode = "in_process"
-
-    if app_type == AppType.AGENT:
-        agent_config = runtime_config
-
-        # The thinking switch stays off unless the agent is configured for deep
-        # thinking and the request explicitly asks for it.
-        if not (agent_config.model_parameters.get("deep_thinking", False) and payload.thinking):
-            agent_config.model_parameters["deep_thinking"] = False
-
-        if payload.stream:
-            async def event_generator():
-                async with get_async_db_context() as stream_db:
-                    chat_service = AppChatService(stream_db)
-                    async for event in chat_service.agent_chat_stream(
-                            message=payload.message,
-                            conversation_id=conversation_id,
-                            user_id=end_user_id,
-                            variables=payload.variables,
-                            web_search=web_search,
-                            config=agent_config,
-                            memory=memory,
-                            storage_type=storage_type,
-                            user_rag_memory_id=user_rag_memory_id,
-                            workspace_id=workspace_id,
-                            files=payload.files,
-                            execution_mode=execution_mode,
-                    ):
-                        yield event
-
-            return sse_response(event_generator())
-
-        async with get_async_db_context() as sdb:
-            result = await AppChatService(sdb).agent_chat(
-                message=payload.message,
-                conversation_id=conversation_id,
-                user_id=end_user_id,
-                variables=payload.variables,
-                config=agent_config,
-                web_search=web_search,
-                memory=memory,
-                storage_type=storage_type,
-                user_rag_memory_id=user_rag_memory_id,
-                workspace_id=str(workspace_id),
-                files=payload.files,
-                execution_mode=execution_mode,
-            )
-        return success(data=ChatResponse(**result).model_dump(mode="json"))
-
-    if app_type == AppType.MULTI_AGENT:
-        config = runtime_config
-
-        if payload.stream:
-            async def event_generator():
-                async with get_async_db_context() as stream_db:
-                    chat_service = AppChatService(stream_db)
-                    async for event in chat_service.multi_agent_chat_stream(
-                            message=payload.message,
-                            conversation_id=conversation_id,
-                            user_id=end_user_id,
-                            variables=payload.variables,
-                            config=config,
-                            web_search=web_search,
-                            memory=memory,
-                            storage_type=storage_type,
-                            user_rag_memory_id=user_rag_memory_id,
-                            thinking=bool(payload.thinking),
-                            execution_mode=execution_mode,
-                            files=payload.files,
-                    ):
-                        yield event
-
-            return sse_response(event_generator())
-
-        async with get_async_db_context() as sdb:
-            result = await AppChatService(sdb).multi_agent_chat(
-                message=payload.message,
-                conversation_id=conversation_id,
-                user_id=end_user_id,
-                variables=payload.variables,
-                config=config,
-                web_search=web_search,
-                memory=memory,
-                storage_type=storage_type,
-                user_rag_memory_id=user_rag_memory_id,
-                thinking=bool(payload.thinking),
-                execution_mode=execution_mode,
-                files=payload.files,
-            )
-        return success(data=ChatResponse(**result).model_dump(mode="json"))
-
-    if app_type in (AppType.WORKFLOW, AppType.PURE_WORKFLOW):
-        config = runtime_config
-
-        if payload.stream:
-            async def event_generator():
-                async with get_async_db_context() as stream_db:
-                    chat_service = AppChatService(stream_db)
-                    async for event in chat_service.workflow_chat_stream(
-                            message=payload.message,
-                            conversation_id=conversation_id,
-                            user_id=end_user_id,
-                            variables=payload.variables,
-                            files=payload.files,
-                            config=config,
-                            web_search=web_search,
-                            memory=memory,
-                            storage_type=storage_type,
-                            user_rag_memory_id=user_rag_memory_id,
-                            app_id=app_id,
-                            workspace_id=workspace_id,
-                            release_id=release_id,
-                            public=True,
-                    ):
-                        event_type = event.get("event", "message")
-                        event_data = event.get("data", {})
-                        yield (
-                            f"event: {event_type}\ndata: "
-                            f"{json.dumps(event_data, default=str, ensure_ascii=False)}\n\n"
-                        )
-
-            return sse_response(event_generator())
-
-        async with get_async_db_context() as sdb:
-            result = await AppChatService(sdb).workflow_chat(
-                message=payload.message,
-                conversation_id=conversation_id,
-                user_id=end_user_id,
-                variables=payload.variables,
-                config=config,
-                web_search=web_search,
-                memory=memory,
-                storage_type=storage_type,
-                user_rag_memory_id=user_rag_memory_id,
-                files=payload.files,
-                app_id=app_id,
-                workspace_id=workspace_id,
-                release_id=release_id,
-            )
-        return success(data=result, msg="工作流任务执行成功")
-
-    raise BusinessException(f"不支持的应用类型: {app_type}", BizCode.APP_TYPE_NOT_SUPPORTED)
+    prep = await prepare_chat(app_id=app_id, workspace_id=workspace_id, payload=payload)
+    if payload.stream:
+        return sse_response(chat_stream(prep))
+    return await chat_complete(prep)
 
 
 @v1_router.post("/files", summary="AI 对话文件上传", response_model=ApiResponse)
 async def v1_upload_chat_file(
     request: Request,
     principal: Caller,
-    db: DbSession,
     file: Annotated[UploadFile, File()],
     storage_service: Annotated[FileStorageService, Depends(get_file_storage_service)],
 ):
     """Upload one file for multimodal chat, referenced later through the
     ``/chat`` request's ``files`` field."""
 
-    app_id = _require_app_id(_resolve_v1_app(request, db, principal))
+    app_id = await resolve_app_for_chat(
+        api_key_id=request.headers.get(API_KEY_ID_HEADER),
+        workspace_id=principal.workspace_id,
+    )
 
-    workspace = db.get(Workspace, principal.workspace_id)
-    if not workspace:
-        raise BusinessException("Workspace not found", BizCode.NOT_FOUND)
+    async with get_async_db_context() as adb:
+        workspace = await adb.get(Workspace, principal.workspace_id)
+        if workspace is None:
+            raise BusinessException("Workspace not found", BizCode.NOT_FOUND)
+        tenant_id = workspace.tenant_id
 
     logger.info(
         f"V1 app file upload: app_id={app_id}, "
@@ -1171,8 +906,7 @@ async def v1_upload_chat_file(
 
     try:
         upload_result = await upload_workspace_file(
-            db=db,
-            tenant_id=workspace.tenant_id,
+            tenant_id=tenant_id,
             workspace_id=principal.workspace_id,
             file=file,
             storage_service=storage_service,

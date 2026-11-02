@@ -119,7 +119,7 @@ export const home = {
       ontologySceneTypes: '本体场景类型',
       ontologyConfigureScene: '配置场景',
       prompt: '提示词工程',
-      skills: '技能库',
+      skills: '技能',
       workbench: '工作台',
       memoryRelated: '记忆中枢',
       advancedSettings: '高级设置',
@@ -136,6 +136,7 @@ export const home = {
       predictionProgress: '预测推演流程',
       preferenceEngine: '偏好引擎',
       sceneCommunityEngine: '多模态情景记忆重构引擎',
+      resources: '资源中心',
       personalityAnchor: '人格锚定引擎',
     },
     dashboard: {

@@ -142,6 +142,18 @@ async def delete_json(
         raise RedisCacheUnavailableError("delete", key) from exc
 
 
+async def _discard_corrupted(
+    key: str,
+    client_provider: RedisClientProvider | None = None,
+) -> None:
+    """Best-effort removal so a corrupt payload cannot poison the key until TTL."""
+    try:
+        await delete_json(key, client_provider=client_provider)
+    except Exception:
+        # Cleanup must never fail the request that is already falling back.
+        logger.warning("Redis cache cleanup failed key=%s", key)
+
+
 async def zrange_json(
     key: str,
     start: int = 0,
@@ -328,6 +340,10 @@ def redis_cache(
 
             try:
                 cached = await get_json(cache_key, client_provider=provider)
+            except RedisCacheDecodeError:
+                logger.warning("Redis cache decode failed key=%s", cache_key)
+                await _discard_corrupted(cache_key, provider)
+                cached = CACHE_MISS
             except RedisCacheError:
                 logger.warning("Redis cache read failed key=%s", cache_key, exc_info=True)
                 cached = CACHE_MISS
@@ -340,6 +356,7 @@ def redis_cache(
                         cache_key,
                         exc_info=True,
                     )
+                    await _discard_corrupted(cache_key, provider)
 
             async def compute_and_store() -> Any:
                 result = await function(*args, **kwargs)

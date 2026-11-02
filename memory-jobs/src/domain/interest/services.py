@@ -11,6 +11,7 @@ from collections.abc import Sequence
 
 from src.domain.interest.model import Interest, InterestGroup
 from src.domain.interest.read_models import InterestCandidate
+from src.domain.shared.errors import InvalidValue
 from src.domain.shared.text import collapse_whitespace
 
 INTEREST_DISPLAY_LIMIT = 5
@@ -50,7 +51,9 @@ def validate_interest_groups(
             existing[1].extend(accepted_entity_ids)
 
     if has_named_interest and not validated_groups:
-        raise ValueError("LLM returned interests without valid source entity IDs")
+        raise InvalidValue(
+            "LLM returned interests without valid source entity IDs"
+        )
 
     return [
         InterestGroup(name=name, entity_ids=tuple(entity_ids))

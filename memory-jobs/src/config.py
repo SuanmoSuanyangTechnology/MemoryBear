@@ -189,6 +189,11 @@ class JobsSettings(BaseSettings):
     memory_cache_fresh_hours: int = Field(
         72, ge=1, validation_alias="MEMORY_CACHE_FRESH_HOURS"
     )
+    #: Candidates per page in any periodic sweep. Bounds the worker's memory on
+    #: a large workspace and keeps each read scope short.
+    scan_page_size: int = Field(
+        500, ge=1, le=10_000, validation_alias="JOBS_SCAN_PAGE_SIZE"
+    )
 
     # ------------------------------------------------ interest distribution cache
     #: TTL of the interest-distribution cache the pre-warm units write. Shares

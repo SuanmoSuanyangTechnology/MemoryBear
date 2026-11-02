@@ -226,6 +226,19 @@ class SubAgentTool:
         context = dict(_bag.values) if _bag is not None else {}
         sub_text = ""
         sub_error: Optional[str] = None
+        # A sub-agent that hit the step budget reports agent_complete status=failed with
+        # an error payload while still streaming text. Two very different cases share
+        # that shape: a pure failure (the text is only narration, unusable) and a rescued
+        # turn (rescued=True: the text already contains a real answer built from the
+        # tool results collected before the abort). Only the former must be rejected;
+        # returning a rescued report as "this failed" is what made the supervisor
+        # re-dispatch the same task over and over.
+        sub_failure: Optional[str] = None
+        sub_rescued = False
+        # The CLEAN final answer from agent_complete.output (last tool-call-free model
+        # message). Preferred over sub_text — sub_text accumulates every streamed model
+        # round including intermediate narration that the supervisor must not consume.
+        sub_final_answer: Optional[str] = None
 
         # Go through the streaming executor (preserving the execution tree,
         # conversation stripping, and ledger accounting), accumulating the body
@@ -275,6 +288,25 @@ class SubAgentTool:
                         pass
                 elif name in _SUB_RUN_LIFECYCLE_EVENTS or name == "sub_usage":
                     continue
+                elif name == "agent_complete":
+                    # Keep the observability event, and remember whether this is a pure
+                    # failure, a rescued turn (real answer present), or a normal success —
+                    # plus the CLEAN output (final answer, no intermediate narration) so
+                    # the tool return value feeds the supervisor exactly that.
+                    payload = self._parse_complete_event(event) or {}
+                    failure, rescued = self._sub_outcome_from_event(event)
+                    clean_output = str(payload.get("output") or "").strip()
+                    if clean_output:
+                        sub_final_answer = clean_output
+                    if rescued:
+                        sub_rescued = True
+                        sub_failure = None
+                    elif failure:
+                        sub_failure = failure
+                    await self._emit_sse(orch._inject_agent_meta(
+                        orch._strip_conversation_id(event),
+                        orch._sub_event_meta(self.agent_id, self.agent_name),
+                    ))
                 elif name in _CLUSTER_OBSERVABILITY_EVENTS:
                     # Strip the sub-conversation ID, then add agent attribution
                     # (same injection as the three-stage
@@ -317,7 +349,67 @@ class SubAgentTool:
 
         if sub_error:
             return f"子 Agent {self.agent_name} 执行失败: {sub_error[:500]}"
-        return sub_text or f"（子 Agent {self.agent_name} 未返回内容）"
+        # Prefer the clean final answer (no intermediate narration); fall back to the
+        # accumulated stream only if agent_complete carried no output field.
+        answer = sub_final_answer or sub_text.strip()
+        if sub_rescued:
+            # A step-budget abort whose rescue turn already produced a real answer from
+            # the tool results collected beforehand. The content is usable, so tell the
+            # supervisor to adopt it instead of re-dispatching the same task.
+            return (
+                f"子 Agent {self.agent_name} 因处理步骤达到上限提前中止，"
+                "但已基于中止前成功获取的工具结果整理出以下报告，可直接采用；"
+                "其中未能覆盖的部分已如实标注，请勿就同一任务再次派发。\n\n"
+                f"{answer}"
+            )
+        if sub_failure:
+            return (
+                f"子 Agent {self.agent_name} 执行失败（未完成，以下内容只是过程片段，不可当作结果使用）: "
+                f"{sub_failure[:500]}"
+                + (f"\n已产生的片段：{sub_text[:800]}" if sub_text.strip() else "")
+                + "\n可以换一种方式重派、换一个子 Agent，或直接基于你自己的工具/知识回答。"
+            )
+        return answer or f"（子 Agent {self.agent_name} 未返回内容）"
+
+    @staticmethod
+    def _parse_complete_event(event: str) -> Optional[dict]:
+        """Parse the JSON payload of an agent_complete SSE event (None on failure)."""
+        try:
+            data = json.loads(event.split("data: ", 1)[1].strip())
+        except Exception:
+            return None
+        return data if isinstance(data, dict) else None
+
+    @staticmethod
+    def _sub_outcome_from_event(event: str) -> tuple[Optional[str], bool]:
+        """Classify a sub-run agent_complete SSE event.
+
+        Returns ``(failure_reason, rescued)``:
+
+        - ``(None, False)``: a normal successful completion;
+        - ``(reason, False)``: a pure failure whose text is only narration;
+        - ``(None, True)``: a step-budget abort whose rescue turn already produced a
+          real answer from collected evidence (``rescued`` flag) — the turn is still
+          recorded as failed, but the content is usable and must be adopted.
+        """
+        data = SubAgentTool._parse_complete_event(event)
+        if not data:
+            return None, False
+        status = str(data.get("status") or "").lower()
+        error = data.get("error")
+        if status not in ("failed", "error") and not error:
+            return None, False
+        rescued = bool(
+            data.get("rescued")
+            or (isinstance(error, dict) and error.get("rescued"))
+        )
+        if rescued:
+            return None, True
+        if isinstance(error, dict):
+            reason = error.get("message") or error.get("error")
+        else:
+            reason = error
+        return str(reason or "execution aborted"), False
 
     def build(self) -> "BaseTool":  # noqa: F821 - deferred type reference
         """Build a LangChain BaseTool (async executor + description).
@@ -548,10 +640,6 @@ class MultiAgentOrchestrator:
         # Opening statement for a new conversation (passed in after entry
         # parsing; appended to the end of the supervisor history; None = not injected)
         self._loop_opening_statement: Optional[str] = None
-        # Execution mode: the cluster supervisor only implements in_process for
-        # now; sandbox requests fall back and are explicitly marked in the end event
-        self._execution_mode_requested: Optional[str] = None
-        self._execution_mode_actual: str = "in_process"
         # This turn's runtime state (suggested questions / citations / TTS / emotion);
         # reset each turn in _prepare_turn_chat_features
         self._loop_citations: list = []
@@ -567,23 +655,29 @@ class MultiAgentOrchestrator:
         # (= the created_at of the original user message) so the re-run context matches
         # the round being regenerated. None = no truncation (normal new turn).
         self._regenerate_before: Any = None
+        # Session-less callers (workflow Agent node referencing a cluster) have no
+        # conversation_id to load history from; they pass the history in directly.
+        # None = load from the conversation as usual.
+        self._external_history: Optional[List[Dict[str, Any]]] = None
+        # Workflow Agent node referencing a cluster shows the supervisor's own
+        # iteration trace, so it asks for the supervisor agent_log snapshots.
+        # Cluster apps keep the old contract (supervisor traces are not emitted).
+        self._emit_supervisor_trace: bool = False
 
     def _prepare_turn_chat_features(
         self,
         web_search: bool,
         thinking: bool,
         opening_statement: Optional[str],
-        execution_mode: Optional[str],
         user_message_id: Optional[uuid.UUID] = None,
     ) -> None:
         """Resolve this turn's "chat features" runtime state (aligned with Agent apps).
 
         Backward compatible: when existing clusters have no features and requests
-        carry no thinking/opening/execution_mode, everything resolves to
-        off/None and supervisor behavior is identical to before.
+        carry no thinking/opening_statement, everything resolves to off/None and
+        supervisor behavior is identical to before.
         """
         from .cluster_chat_features import (
-            effective_execution_mode,
             is_deep_thinking_on,
             is_supervisor_web_search_on,
         )
@@ -591,11 +685,6 @@ class MultiAgentOrchestrator:
         self._loop_supervisor_web_search = is_supervisor_web_search_on(self._features, web_search)
         self._loop_deep_thinking = is_deep_thinking_on(self.model_parameters, thinking)
         self._loop_opening_statement = opening_statement or None
-        self._execution_mode_requested = execution_mode
-        actual, fell_back = effective_execution_mode(execution_mode)
-        self._execution_mode_actual = actual
-        if fell_back:
-            logger.warning("集群主管暂不支持 sandbox 执行模式，已回退 in_process")
         # Reset every turn so reusing the same orchestrator across turns does not leak state
         self._loop_citations = []
         self._turn_extras = {}
@@ -671,6 +760,8 @@ class MultiAgentOrchestrator:
 
     async def _resolve_loop_history(self, conversation_id: Optional[uuid.UUID]) -> List[Dict[str, Any]]:
         """Supervisor history: use context_engine results when active this turn, otherwise the cluster's 20-turn history; then append the opening statement."""
+        if self._external_history is not None:
+            return self._with_opening(list(self._external_history))
         if self._turn_used_context_engine and self._turn_ctx_history is not None:
             return self._with_opening(list(self._turn_ctx_history))
         return self._with_opening(await self._load_cluster_history(conversation_id))
@@ -678,8 +769,6 @@ class MultiAgentOrchestrator:
     def _turn_end_extras(self) -> Dict[str, Any]:
         """Chat-feature extras for the end event; empty dict when no new capability is active (legacy frontend/contract unchanged)."""
         extras: Dict[str, Any] = {}
-        if self._execution_mode_requested:
-            extras["execution_mode_actual"] = self._execution_mode_actual
         # suggested_questions / citations / audio_url / audio_status: keys exist only when the corresponding feature is on
         extras.update(self._turn_extras or {})
         return extras
@@ -807,6 +896,7 @@ class MultiAgentOrchestrator:
         model_view: "ModelInfo",
         message: str,
         supervisor: Any,
+        conversation_id: Any = None,
     ) -> tuple:
         """Process the supervisor's attachments for this turn (aligned with Agent apps: validate -> MultimodalService -> image manifest).
 
@@ -1374,7 +1464,6 @@ class MultiAgentOrchestrator:
         message_id: Optional[uuid.UUID] = None,
         thinking: bool = False,
         opening_statement: Optional[str] = None,
-        execution_mode: Optional[str] = None,
         files: Optional[List[Any]] = None,
         user_message_id: Optional[uuid.UUID] = None,
         regenerate_before: Any = None,
@@ -1414,9 +1503,9 @@ class MultiAgentOrchestrator:
         self._turn_merge_tokens = 0
         # Reset supervisor-loop runtime state each turn (guard decisions never span turns)
         self._loop_stop_reason = None
-        # Chat-feature runtime state (web search / deep thinking / opening statement / execution mode); all defaults = legacy behavior
+        # Chat-feature runtime state (web search / deep thinking / opening statement); all defaults = legacy behavior
         self._prepare_turn_chat_features(
-            web_search, thinking, opening_statement, execution_mode, user_message_id
+            web_search, thinking, opening_statement, user_message_id
         )
 
         # Entry variable contract — one-shot validation + defaults + rendering
@@ -1570,7 +1659,7 @@ class MultiAgentOrchestrator:
                 # final_after_dispatch = wrap-up after dispatch;
                 # tool_call_limit/max_iterations = guard triggered; error = exception.
                 "loop_stop_reason": self._loop_stop_reason,
-                # Chat-feature extras (execution_mode_actual, etc.); empty when no new capability is active, contract unchanged
+                # Chat-feature extras; empty when no new capability is active, contract unchanged
                 **self._turn_end_extras(),
                 "usage": {
                     "routing_tokens": self._turn_routing_tokens,
@@ -1625,7 +1714,6 @@ class MultiAgentOrchestrator:
         user_rag_memory_id: str = '',
         thinking: bool = False,
         opening_statement: Optional[str] = None,
-        execution_mode: Optional[str] = None,
         files: Optional[List[Any]] = None,
         user_message_id: Optional[uuid.UUID] = None,
         regenerate_before: Any = None,
@@ -1669,9 +1757,9 @@ class MultiAgentOrchestrator:
 
         await self._ensure_master_execution(conversation_id, message_id)
 
-        # Chat-feature runtime state (web search / deep thinking / opening statement / execution mode); all defaults = legacy behavior
+        # Chat-feature runtime state (web search / deep thinking / opening statement); all defaults = legacy behavior
         self._prepare_turn_chat_features(
-            web_search, thinking, opening_statement, execution_mode, user_message_id
+            web_search, thinking, opening_statement, user_message_id
         )
 
         # Reset the token ledger each turn (same convention as streaming)
@@ -2118,15 +2206,15 @@ class MultiAgentOrchestrator:
         # 2. Stream-execute all sub-agents
         results = []
 
-        # Get the execution-mode config
-        execution_mode = self._execution_config.get("sub_agent_execution_mode", "parallel")
+        # Get the sub-agent scheduling-mode config
+        sub_agent_execution_mode = self._execution_config.get("sub_agent_execution_mode", "parallel")
 
         if collaboration_strategy == "decomposition":
             # Question-decomposition mode
             # Check whether there are dependencies
             has_dependencies = self._check_dependencies(collaboration_agents)
 
-            if has_dependencies or execution_mode == "sequential":
+            if has_dependencies or sub_agent_execution_mode == "sequential":
                 # Has dependencies or configured sequential: sequential streaming
                 logger.info("使用串行流式执行（问题拆分）")
                 for sub_q in sorted(collaboration_agents, key=lambda x: x.get("order", 0)):
@@ -2278,7 +2366,7 @@ class MultiAgentOrchestrator:
                             )
         else:
             # Other collaboration modes (sequential/parallel/hierarchical)
-            if collaboration_strategy == "parallel" and execution_mode == "parallel":
+            if collaboration_strategy == "parallel" and sub_agent_execution_mode == "parallel":
                 # Parallel collaboration + parallel streaming execution
                 logger.info(f"使用并行流式执行（并行协作），共 {len(collaboration_agents)} 个 Agent")
 
@@ -2724,7 +2812,7 @@ class MultiAgentOrchestrator:
         create_supervisor(agents, tools=[...])).
 
         All guards use existing engine parameters (nothing custom):
-        - tool_call_limit: execution_config.supervisor_max_tool_calls (default 3)
+        - tool_call_limit: the AGENT_TOOL_CALL_LIMIT setting (default 5)
           — the N+1th call of the same sub-agent is rejected and the model is
           told to give a final answer (no-progress detection);
         - max_iterations: execution_config.max_iterations — the supervisor loop
@@ -2736,7 +2824,7 @@ class MultiAgentOrchestrator:
         - GraphRecursionError: handled by the engine's internal graceful
           degradation.
         """
-        from ..agent.langchain_agent import LangChainAgent
+        from ..agent.langchain_agent import LangChainAgent, default_tool_call_limit
 
         mp = self.model_parameters
 
@@ -2746,12 +2834,10 @@ class MultiAgentOrchestrator:
             val = mp.get(key, default) if isinstance(mp, dict) else getattr(mp, key, default)
             return default if val is None else val
 
-        try:
-            tool_call_limit = int(
-                self._execution_config.get("supervisor_max_tool_calls", 3)
-            )
-        except (TypeError, ValueError, AttributeError):
-            tool_call_limit = 3
+        # One knob for every Agent kind: the AGENT_TOOL_CALL_LIMIT setting.
+        # execution_config.supervisor_max_tool_calls is kept for config
+        # compatibility but no longer read.
+        tool_call_limit = default_tool_call_limit()
 
         # max_iterations semantics = supervisor loop round limit (one round = the
         # batch of sub-agent calls issued by one supervisor decision; concurrent
@@ -2909,22 +2995,27 @@ class MultiAgentOrchestrator:
         try:
             tools_config = supervisor_config.get("tools") or []
             _sup_web = bool(getattr(self, "_loop_supervisor_web_search", False))
-            if tools_config or _sup_web:
-                own = await run_svc.load_tools_config(
-                    tools_config,
-                    _sup_web,
-                    self.tenant_id,
-                    user_id=user_id,
-                    workspace_id=await self._cluster_workspace_id(),
-                )
-                tools.extend(own)
+            # Always called: load_tools_config also appends the default sandbox tools
+            # (ENABLE_SANDBOX_SERVICE) even when nothing is configured.
+            own = await run_svc.load_tools_config(
+                tools_config,
+                _sup_web,
+                self.tenant_id,
+                user_id=user_id,
+                workspace_id=await self._cluster_workspace_id(),
+            )
+            tools.extend(own)
         except Exception as e:
             logger.warning(f"主管工具加载失败（已跳过普通工具段）: {e}")
 
         # 2. Skills (tools + skill prompt; the prompt is appended into system_prompt by the caller)
         try:
             skills_config = supervisor_config.get("skills")
-            if skills_config and isinstance(skills_config, dict) and skills_config.get("enabled"):
+            if (
+                skills_config
+                and isinstance(skills_config, dict)
+                and skills_config.get("skill_ids")
+            ):
                 _message = getattr(self, "_loop_entry_message", "") or ""
                 skill_tools, skill_prompts = await run_svc.load_skill_config(
                     skills_config,
@@ -3019,6 +3110,23 @@ class MultiAgentOrchestrator:
             except Exception as e:
                 logger.warning(f"主管工具：读取集群 workspace 失败（忽略）: {e}")
         return None
+
+    async def _agent_workspace_id(self, agent_config, db=None) -> Optional[uuid.UUID]:
+        """Workspace of a sub-agent's app, safe on async sessions.
+
+        ``agent_config.app.workspace_id`` can hit an expired ORM row (the session
+        committed earlier), and the implicit lazy refresh raises MissingGreenlet
+        on an AsyncSession. Re-fetch through _db_get, which awaits when needed.
+        """
+        session = self.db if db is None else db
+        app_id = getattr(agent_config, "app_id", None)
+        if app_id is not None and session is not None:
+            from ..models import App
+
+            app = await self._db_get(App, app_id, db=db)
+            if app is not None:
+                return app.workspace_id
+        return agent_config.app.workspace_id
 
     def cluster_memory_enabled(self) -> bool:
         """Cluster memory switch (long-term memory) — the single source of truth: supervisor_config.memory.enabled.
@@ -3199,7 +3307,7 @@ class MultiAgentOrchestrator:
         # File upload (features.file_upload): with no files, llm_message=message and
         # processed_files=None, unchanged from before
         llm_message, processed_files = await self._prepare_loop_files(
-            files, model_view, message, supervisor
+            files, model_view, message, supervisor, conversation_id
         )
 
         # Sub-agent observability event queue: SubAgentTool execution body -> supervisor
@@ -3291,6 +3399,8 @@ class MultiAgentOrchestrator:
                         _reasoning_chunk = item.get("content")
                         if _reasoning_chunk:
                             yield self._format_sse_event("reasoning", {"content": _reasoning_chunk})
+                    if _item_type == "agent_log" and self._emit_supervisor_trace:
+                        yield self._format_sse_event("agent_log", item)
                     if _item_type in ("tool_start", "tool_end", "tool_error"):
                         _tool_name = str(item.get("name") or "")
                         _sub_agent_tool_names = {
@@ -3388,7 +3498,7 @@ class MultiAgentOrchestrator:
             self._set_merge_mode_actual("loop", "loop 无正文产出")
             raise BusinessException(
                 "主管循环未产出任何回答（可能已达分派/轮数护栏仍未收尾），请重试或调整"
-                " supervisor_max_tool_calls；需要确定性编排可改用主管模式（三段式）",
+                " AGENT_TOOL_CALL_LIMIT；需要确定性编排可改用主管模式（三段式）",
                 BizCode.LLM_ERROR,
             )
 
@@ -3397,7 +3507,7 @@ class MultiAgentOrchestrator:
 
         - direct_answer: the supervisor answered directly (zero dispatch) — a core gain of loop mode;
         - final_after_dispatch: normal wrap-up after dispatching;
-        - tool_call_limit: a sub-agent hit the supervisor_max_tool_calls cap and was rejected (no-progress detection);
+        - tool_call_limit: a tool hit the AGENT_TOOL_CALL_LIMIT cap and was rejected (no-progress detection);
         - max_iterations: the supervisor loop hit max_iterations (round gate, see SubAgentTool._execute),
           or the engine raised GraphRecursionError (hard-truncation fallback);
         - error: any other exception.
@@ -3411,10 +3521,9 @@ class MultiAgentOrchestrator:
         total_calls = sum(int(getattr(w, "calls", 0) or 0) for w in wrappers)
         if total_calls == 0:
             return "direct_answer"
-        try:
-            limit = int(self._execution_config.get("supervisor_max_tool_calls", 3))
-        except (TypeError, ValueError, AttributeError):
-            limit = 3
+        from ..agent.langchain_agent import default_tool_call_limit
+
+        limit = default_tool_call_limit()
         if any(int(getattr(w, "calls", 0) or 0) >= max(1, limit) for w in wrappers):
             return "tool_call_limit"
         return "final_after_dispatch"
@@ -3465,7 +3574,7 @@ class MultiAgentOrchestrator:
         # File upload (features.file_upload): with no files, llm_message=message and
         # processed_files=None, unchanged from before
         llm_message, processed_files = await self._prepare_loop_files(
-            files, model_view, message, supervisor
+            files, model_view, message, supervisor, conversation_id
         )
 
         # Non-streaming loop: the sink is not attached (no SSE outlet), so sub-agent
@@ -3496,7 +3605,7 @@ class MultiAgentOrchestrator:
                 self._set_merge_mode_actual("loop", "loop 无正文产出")
                 raise BusinessException(
                     "主管循环未产出任何回答（可能已达分派/轮数护栏仍未收尾），请重试或调整"
-                    " supervisor_max_tool_calls；需要确定性编排可改用主管模式（三段式）",
+                    " AGENT_TOOL_CALL_LIMIT；需要确定性编排可改用主管模式（三段式）",
                     BizCode.LLM_ERROR,
                 )
             # Suggested questions / citations / TTS are produced only when the
@@ -4120,10 +4229,12 @@ class MultiAgentOrchestrator:
                     "Agent 模型配置不存在",
                     BizCode.AGENT_CONFIG_MISSING
                 )
+
             # History convention, see _sub_agent_history: supervisor_loop sees
             # only the task brief (empty history); three-stage supervisor
             # sub-agents answer the user directly and carry the cluster history.
             history = await self._sub_agent_history(conversation_id, db=agent_db)
+            sub_workspace_id = await self._agent_workspace_id(agent_config, db=agent_db)
 
             # Stream the agent execution
             # Attribution comes from instance state (current_execution_id) + a local lookup
@@ -4137,7 +4248,7 @@ class MultiAgentOrchestrator:
                 agent_config=agent_config,
                 model_config=model_config,
                 message=message,
-                workspace_id=agent_config.app.workspace_id,
+                workspace_id=sub_workspace_id,
                 conversation_id=str(conversation_id) if conversation_id else None,
                 user_id=user_id,
                 variables=context,
@@ -4204,6 +4315,7 @@ class MultiAgentOrchestrator:
                 )
             # Same as the streaming path (see _sub_agent_history)
             history = await self._sub_agent_history(conversation_id, db=agent_db)
+            sub_workspace_id = await self._agent_workspace_id(agent_config, db=agent_db)
 
             # Execute the agent
             # Sub-layer tokens are accounted uniformly here (usage.total_tokens from the
@@ -4213,7 +4325,7 @@ class MultiAgentOrchestrator:
                 agent_config=agent_config,
                 model_config=model_config,
                 message=message,
-                workspace_id=agent_config.app.workspace_id,
+                workspace_id=sub_workspace_id,
                 conversation_id=str(conversation_id) if conversation_id else None,
                 user_id=user_id,
                 variables=context,
@@ -4554,6 +4666,7 @@ class MultiAgentOrchestrator:
                         "agent_name": final_info.get("name"),
                         "status": final_status,
                         "output": active_text,
+                        "error": event_data.get("error") if event_name == "error" else None,
                         "elapsed_time": time.time() - active_started_at,
                         "token_usage": {"total_tokens": active_tokens},
                     })
@@ -4579,6 +4692,7 @@ class MultiAgentOrchestrator:
                         "agent_name": (agent_configs.get(active_agent_key or "", {}) or {}).get("name"),
                         "status": "failed",
                         "output": active_text,
+                        "error": str(e),
                         "elapsed_time": time.time() - active_started_at,
                         "token_usage": {"total_tokens": active_tokens},
                     })
@@ -4978,15 +5092,15 @@ class MultiAgentOrchestrator:
         # Detect dependencies
         has_dependencies = self._check_dependencies(sub_questions)
 
-        # Load the execution-mode config
-        execution_mode = self._execution_config.get("sub_agent_execution_mode", "parallel")
+        # Load the sub-agent scheduling-mode config
+        sub_agent_execution_mode = self._execution_config.get("sub_agent_execution_mode", "parallel")
 
         # Dependencies present: force serial mode
         if has_dependencies:
             logger.info("检测到子问题有依赖关系，强制使用串行执行")
-            execution_mode = "sequential"
+            sub_agent_execution_mode = "sequential"
 
-        if execution_mode == "sequential":
+        if sub_agent_execution_mode == "sequential":
             # Serial execution mode
             logger.info(f"串行执行 {len(sub_questions)} 个子问题")
 
