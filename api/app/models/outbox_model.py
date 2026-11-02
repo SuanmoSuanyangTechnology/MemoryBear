@@ -84,6 +84,13 @@ class OutboxEvent(Base):
         ),
         Index("ix_memory_outbox_node", "label", "node_id", "sequence"),
         Index(
+            "ix_memory_outbox_pending_node",
+            "label",
+            "node_id",
+            "sequence",
+            postgresql_where=text("status = 'pending'"),
+        ),
+        Index(
             "uq_memory_outbox_processing_node",
             "label",
             "node_id",
