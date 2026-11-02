@@ -20,7 +20,7 @@ const radioBaseStyle: React.CSSProperties = {
 };
 const activeRadioStyle = (active: boolean): React.CSSProperties => ({
   ...radioBaseStyle,
-  border: active ? '1px solid #171719' : radioBaseStyle.border,
+  border: active ? '1px solid #155EEF' : radioBaseStyle.border,
   backgroundColor: active ? '#FAFAFA' : 'transparent',
 });
 
@@ -67,7 +67,7 @@ const ParameterStep = ({ form, fileIds, isParentChildMode }: ParameterStepProps)
     <Flex vertical className="rb:mt-10! rb:px-40!">
       {fileIds.length > 0 && (
         <Flex align="center" wrap gap={8} className="rb:bg-[#F0F3F8] rb:border rb:border-[#DFE4ED] rb:rounded-lg rb:px-3! rb:py-2! rb:mb-4! rb:text-xs rb:text-gray-600">
-          <span className="rb:text-gray-700 rb:font-medium">{t('knowledgeBase.rechunking')}:</span>
+          <span className="rb:text-gray-600 rb:font-medium">{t('knowledgeBase.rechunking')}:</span>
           {fileIds.map((id) => <span key={id} className="rb:px-2 rb:py-0.5 rb:bg-white rb:border rb:border-[#DFE4ED] rb:rounded">{id}</span>)}
         </Flex>
       )}
@@ -104,7 +104,7 @@ const ParameterStep = ({ form, fileIds, isParentChildMode }: ParameterStepProps)
                               <div className={`rb:size-full rb:bg-cover ${typeTipImageMap[type]}`} />
                             </div>
                             <div>
-                              <div className="rb:text-sm rb:font-semibold rb:text-[#171719] rb:mb-2">
+                              <div className="rb:text-sm rb:font-semibold rb:text-gray-900 rb:mb-2">
                                 {t(`knowledgeBase.${type}TipsTitle`)}
                               </div>
                               <div className="rb:text-xs rb:text-[#5B6167] rb:leading-5 rb:mb-3">
@@ -137,7 +137,7 @@ const ParameterStep = ({ form, fileIds, isParentChildMode }: ParameterStepProps)
       <Flex
         align="center"
         justify="space-between"
-        className={`rb:w-full rb:border rb:rounded-xl rb:p-4! rb:mt-4! ${pdfEnhancementEnabled ? 'rb:border-[#171719] rb:bg-[#FAFAFA]' : 'rb-border'}`}
+        className={`rb:w-full rb:border rb:rounded-xl rb:p-4! rb:mt-4! ${pdfEnhancementEnabled ? 'rb:border-primary-600 rb:bg-[#FAFAFA]' : 'rb-border'}`}
       >
         <Form.Item name="pdfEnhancementEnabled" valuePropName="checked" noStyle>
           <Checkbox className="rb:mr-3">

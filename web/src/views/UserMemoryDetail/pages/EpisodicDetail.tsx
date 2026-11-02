@@ -190,11 +190,11 @@ const EpisodicDetail: FC = () => {
                       align="center"
                       className={clsx("rb:cursor-pointer rb:rounded-xl rb:px-3! rb:py-2!", {
                         'rb-border': selected?.id !== vo.id,
-                        'rb:border rb:border-[#171719]': selected?.id === vo.id,
+                        'rb:border rb:border-primary-600': selected?.id === vo.id,
                       })}
                       onClick={() => setSelected(vo)}
                     >
-                      <div className="rb:rounded-md rb:text-[#FFFFFF] rb:size-5 rb:text-[10px] rb:leading-3.5 rb:text-center rb:py-0.75 rb:bg-[#171719]">{index + 1}</div>
+                      <div className="rb:rounded-md rb:text-[#FFFFFF] rb:size-5 rb:text-[10px] rb:leading-3.5 rb:text-center rb:py-0.75 rb:bg-primary-600">{index + 1}</div>
                       <div className="rb:flex-1 rb:w-[calc(100%-36px)]">
                         <div className="rb:text-ellipsis rb:overflow-hidden rb:whitespace-nowrap rb:flex-1 rb:text-gray-800 rb:font-medium rb:leading-5 rb:mb-1">{vo.title}</div>
                         <Flex align="center" justify="space-between" className="rb:text-gray-600 rb:text-[12px]">
@@ -228,13 +228,13 @@ const EpisodicDetail: FC = () => {
                       <Col span={8}>
                         <div className="rb:text-gray-600 rb:leading-5">
                           {t('episodicDetail.created')}
-                          <div className="rb:font-medium rb:mt-1 rb:text-[#171719]">{formatDateTime(detail.created_at)}</div>
+                          <div className="rb:font-medium rb:mt-1 rb:text-gray-900">{formatDateTime(detail.created_at)}</div>
                         </div>
                       </Col>
                       <Col span={8}>
                         <div className="rb:text-gray-600 rb:leading-5">
                           {t('episodicDetail.episodic_type')}
-                          <div className="rb:font-medium rb:mt-1 rb:text-[#171719]">{detail.episodic_type}</div>
+                          <div className="rb:font-medium rb:mt-1 rb:text-gray-900">{detail.episodic_type}</div>
                         </div>
                       </Col>
                       {detail.involved_objects.length > 0 && <Col span={8}>

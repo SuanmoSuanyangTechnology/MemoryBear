@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:44:15 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-08-17 12:26:08
+ * @Last Modified time: 2026-10-30 16:27:41
  */
 /**
  * Prompt Editor Component
@@ -219,7 +219,7 @@ const Prompt: FC = () => {
                 />
                 <Flex align="center" gap={12} justify="space-between"
                   className={clsx("rb-border rb:shadow-[0px_2px_12px_0px_rgba(23,23,25,0.1)] rb:rounded-2xl rb:h-13 rb:px-3!", {
-                    'rb:border rb:border-[#171719]!': isFocus
+                    'rb:border rb:border-primary-600!': isFocus
                   })}
                 >
                   <Form.Item name="message" className="rb:flex-1 rb:mb-0!">
@@ -237,7 +237,7 @@ const Prompt: FC = () => {
                   <Flex align="center" justify="center"
                     className={clsx('rb:size-7 rb:rounded-full rb:shadow-[0px 2px 12px 0px rgba(23,23,25,0.1)]', {
                       'rb:cursor-not-allowed rb:bg-[#F6F6F6]': loading || !values || !values?.message || values?.message?.trim() === '',
-                      'rb:cursor-pointer rb:bg-[#171719]': !loading && !(!values || !values?.message || values?.message?.trim() === '')
+                      'rb:cursor-pointer rb:bg-primary-600': !loading && !(!values || !values?.message || values?.message?.trim() === '')
                     })}
                     onClick={handleSend}
                   >

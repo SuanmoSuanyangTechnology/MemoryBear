@@ -5,13 +5,14 @@ closed-source ``memory-enterprise`` service, which owns those tables and their
 migrations, and points this worker at it — so the worker never reads a schema it
 does not own.
 
-Every call here is best-effort: an unreachable or misconfigured service only
-costs the enterprise-derived fields (currently scene names), never the task.
+This module is transport and lifecycle only: it raises on failure. The
+best-effort policy (degrade instead of failing the task) lives in the adapters
+that implement an application port, such as
+``MemoryEnterpriseSceneNames``.
 """
 
 from __future__ import annotations
 
-import logging
 import threading
 from collections.abc import Mapping, Sequence
 from typing import Any
@@ -21,8 +22,6 @@ import httpx
 
 from src.config import JobsSettings
 from src.domain.shared.ids import TenantId
-
-logger = logging.getLogger(__name__)
 
 #: Scene-name resolution endpoint on the enterprise service.
 SCENE_NAMES_PATH = "/internal/v1/ontology/scene-names"
@@ -72,41 +71,28 @@ class MemoryEnterpriseManager:
     def scene_names(
         self, scene_ids: Sequence[UUID], tenant_id: TenantId
     ) -> Mapping[str, str]:
-        """Resolve ``scene_type_id`` → scene name for one tenant; empty if unavailable.
+        """Resolve ``scene_type_id`` → scene name for one tenant.
 
-        The service scopes the lookup to ``X-Tenant-Id`` (own scenes plus the
-        shared system default), so a caller can never enumerate another tenant's
-        scenes through this path.
+        Raises on a transport failure or an unusable payload; the adapter decides
+        how a caller should degrade. The service scopes the lookup to
+        ``X-Tenant-Id`` (own scenes plus the shared system default), so a caller
+        can never enumerate another tenant's scenes through this path.
         """
 
-        if not self.enabled or not scene_ids:
-            return {}
-        try:
-            response = self.client().post(
-                SCENE_NAMES_PATH,
-                json={"scene_ids": [str(scene_id) for scene_id in scene_ids]},
-                headers={"X-Tenant-Id": str(tenant_id)},
-            )
-            response.raise_for_status()
-            payload: Any = response.json()
-        except Exception as exc:
-            logger.warning(
-                "memory-enterprise scene names unavailable error=%s",
-                type(exc).__name__,
-                exc_info=True,
-                extra={
-                    "event": "enterprise_scene_names_failed",
-                    "exception_type": type(exc).__name__,
-                },
-            )
-            return {}
+        response = self.client().post(
+            SCENE_NAMES_PATH,
+            json={"scene_ids": [str(scene_id) for scene_id in scene_ids]},
+            headers={"X-Tenant-Id": str(tenant_id)},
+        )
+        response.raise_for_status()
+        payload: Any = response.json()
+
         names = payload.get("names") if isinstance(payload, dict) else None
         if not isinstance(names, dict):
-            logger.warning(
-                "memory-enterprise returned an unexpected payload",
-                extra={"event": "enterprise_scene_names_bad_payload"},
-            )
-            return {}
+            raise ValueError(
+                "memory-enterprise returned an unexpected payload: "
+                f"{type(names).__name__}"
+            ) from None
         return {
             key: value
             for key, value in names.items()

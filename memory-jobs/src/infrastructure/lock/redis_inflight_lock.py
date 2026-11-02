@@ -1,10 +1,10 @@
 """Redis implementation of the per-user in-flight lock.
 
-Ownership rule (unchanged from the task helper): the per-user unit acquires the
-key with its own task id; a redelivered message keeps its id and therefore keeps
-its lock. The sweep only reads the key and never takes it. A Redis outage
-degrades open in both directions: losing a lock costs a duplicate generation,
-blocking the work costs the user their refresh.
+Ownership rule: the per-user unit acquires the key with its attempt token; a
+retried attempt that reuses its token re-enters the lock it already holds. The
+sweep only reads the key and never takes it. A Redis outage degrades open in
+both directions: losing a lock costs a duplicate generation, blocking the work
+costs the user their refresh.
 """
 
 from __future__ import annotations
@@ -35,23 +35,27 @@ class RedisInflightLock:
     def __init__(self, client_provider: Callable[[], Redis]) -> None:
         self._client_provider = client_provider
 
-    def acquire(self, end_user_id: str, owner: str) -> bool:
-        value = owner or "1"
+    def acquire(self, end_user_id: str, token: str) -> bool:
+        if not token:
+            # Outside the try: an empty token is a programming error, not a
+            # Redis outage, so it must not degrade open.
+            raise ValueError("inflight lock requires a non-empty token")
         try:
             client = self._client_provider()
             key = inflight_key(end_user_id)
-            if client.set(key, value, nx=True, ex=INFLIGHT_TTL_SECONDS):
+            if client.set(key, token, nx=True, ex=INFLIGHT_TTL_SECONDS):
                 return True
-            return client.get(key) == value
+            return client.get(key) == token
         except Exception:  # pragma: no cover - degrade open rather than block work
             logger.warning("inflight lock unavailable user=%s", end_user_id, exc_info=True)
             return True
 
-    def release(self, end_user_id: str, owner: str) -> None:
-        value = owner or "1"
+    def release(self, end_user_id: str, token: str) -> None:
+        if not token:
+            raise ValueError("inflight lock requires a non-empty token")
         try:
             client = self._client_provider()
-            client.eval(_RELEASE_SCRIPT, 1, inflight_key(end_user_id), value)
+            client.eval(_RELEASE_SCRIPT, 1, inflight_key(end_user_id), token)
         except Exception:  # pragma: no cover - TTL is the backstop
             logger.warning(
                 "inflight lock release failed user=%s", end_user_id, exc_info=True

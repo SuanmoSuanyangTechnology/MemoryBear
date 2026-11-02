@@ -9,6 +9,7 @@ import threading
 import traceback
 from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager, contextmanager
+from typing import Any
 
 from sqlalchemy import Engine, create_engine, event, text
 from sqlalchemy.exc import DisconnectionError
@@ -305,6 +306,19 @@ async def get_async_db_context() -> AsyncIterator[AsyncSession]:
 
     async with get_process_runtime().database.async_session() as session:
         yield session
+
+
+def detach_instances(session: Session, *instances: Any) -> None:
+    """Detach loaded rows from a session that is about to close.
+
+    ``sync_session`` rolls back on exit, which expires session-bound instances;
+    detaching first keeps their loaded columns readable for work that runs on
+    its own session (streaming responses, config snapshots).
+    """
+
+    for instance in instances:
+        if instance is not None and instance in session:
+            session.expunge(instance)
 
 
 async def end_read_transaction(db: AsyncSession | None, where: str = "") -> None:

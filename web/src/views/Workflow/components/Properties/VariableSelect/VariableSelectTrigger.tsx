@@ -58,7 +58,7 @@ const VariableSelectTrigger: FC<VariableSelectTriggerProps> = ({
         'rb:w-full rb:cursor-pointer rb:rounded-lg rb:px-2! rb:transition-colors', {
           'rb:bg-[#F6F6F6] rb:border-none rb:shadow-none': variant === 'filled',
           'rb:border rb:border-[#d9d9d9] hover:rb:border-[#4096ff] rb:bg-white': variant === 'outlined',
-          'rb:border-[#171719]!': variant === 'outlined' && open,
+          'rb:border-primary-600!': variant === 'outlined' && open,
           'rb:border-none rb:shadow-none rb:bg-transparent': variant === 'borderless',
           'rb:text-[12px]': size === 'small',
           'rb:text-[14px]': size !== 'small',

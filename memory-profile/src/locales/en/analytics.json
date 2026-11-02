@@ -4,8 +4,7 @@
     "invalid_user_id": "Invalid end user ID format",
     "bad_data": "Invalid scene community data",
     "capacity_exceeded": "Scene community graph exceeds the complete response limit",
-    "unavailable": "Scene community graph service is unavailable",
-    "disabled": "Scene community graph service is not enabled"
+    "unavailable": "Scene community graph service is unavailable"
   },
   "msg": {
     "query_success": "Query succeeded",

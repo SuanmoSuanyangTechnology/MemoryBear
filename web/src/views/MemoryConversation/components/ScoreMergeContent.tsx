@@ -52,7 +52,7 @@ const ResultItem: FC<{ item: RecordValue; index: number }> = ({ item, index }) =
           <Flex
             align="center"
             justify="center"
-            className="rb:size-5 rb:shrink-0 rb:rounded-md rb:bg-gray-900 rb:font-medium rb:text-white"
+            className="rb:size-5 rb:shrink-0 rb:rounded-md rb:bg-primary-600 rb:font-medium rb:text-white"
           >
             {rank as string}
           </Flex>

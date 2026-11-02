@@ -1,7 +1,11 @@
 """SQLAlchemy implementation of the memory-insight aggregate.
 
-The optimistic update keeps the API's conditions: the row is written only when
-the source it was generated from did not move.
+The conditional update keeps the API's conditions: the row is written only when
+the source it was generated from did not move. The comparison is done in SQL so
+the check and the write are one atomic statement; when it matches no row, the
+adapter re-reads the source and lets the aggregate classify the miss
+(``MemoryInsight.classify_missed_write``), so "superseded" versus "gone" stays
+a domain decision.
 """
 
 from __future__ import annotations
@@ -57,7 +61,12 @@ class SqlAlchemyMemoryInsightRepository:
         return None if row is None else to_insight_source(row)
 
     def save_if_source_unchanged(self, insight: MemoryInsight) -> WriteOutcome:
-        """Write the insight back only when the source did not move meanwhile."""
+        """Write the insight back only when the source did not move meanwhile.
+
+        The guard is part of the ``UPDATE`` (one statement, no read-then-write
+        race). A missed update costs one re-read so the aggregate, not the
+        adapter, decides whether the row moved or disappeared.
+        """
 
         version = insight.source_version
         workspace_active = active_workspace_exists(
@@ -104,4 +113,10 @@ class SqlAlchemyMemoryInsightRepository:
             )
             .execution_options(synchronize_session=False)
         )
-        return WriteOutcome.UPDATED if result.rowcount else WriteOutcome.SUPERSEDED
+        if result.rowcount:
+            return WriteOutcome.UPDATED
+
+        current = self.find_source(insight.end_user_id, insight.workspace_id)
+        return insight.classify_missed_write(
+            None if current is None else current.version
+        )

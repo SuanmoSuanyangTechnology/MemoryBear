@@ -124,7 +124,7 @@ const SliderInput: FC<SliderInputProps> = ({
             marks={marks}
             tooltip={tooltip}
             className={sliderClassName}
-            classNames={disabled ? { track: 'rb:bg-[#171719]! rb:opacity-65' } : {}}
+            classNames={disabled ? { track: 'rb:bg-primary-600! rb:opacity-65' } : {}}
           />
         </Col>
         {/* Input number component */}

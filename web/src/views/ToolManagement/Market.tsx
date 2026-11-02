@@ -436,7 +436,7 @@ const Market: React.FC<{ getStatusTag?: (status: string) => ReactNode }> = () =>
                     align="center"
                     gap={8}
                     className={clsx('rb:bg-white rb:rounded-xl rb:py-2! rb:px-3! rb:cursor-pointer rb:transition-all', {
-                      'rb:border rb:border-[#171719]': selectedSource === source.id,
+                      'rb:border rb:border-primary-600': selectedSource === source.id,
                       'rb:shadow-[0px_2px_6px_0px_rgba(23,23,25,0.1)]': selectedSource !== source.id
                     })}
                     onClick={() => handleSelectSource(source.id)}

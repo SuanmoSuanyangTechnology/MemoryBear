@@ -72,7 +72,8 @@ def to_end_user(row: Mapping[str, Any]) -> EndUser:
     return EndUser(
         id=EndUserId(_as_uuid(row["id"])),
         workspace_id=WorkspaceId(_as_uuid(row["workspace_id"])),
-        display_name=row["other_name"],
+        # The host column defaults to ""; the aggregate's ``None`` means "no name".
+        display_name=row["other_name"] or None,
         status=UserStatus.ACTIVE if row["is_active"] else UserStatus.INACTIVE,
     )
 

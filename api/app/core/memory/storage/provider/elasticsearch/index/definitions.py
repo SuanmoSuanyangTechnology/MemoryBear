@@ -29,6 +29,7 @@ FULLTEXT_FIELDS: dict[MemoryNodeLabel, tuple[str, ...]] = {
     MemoryNodeType.PERCEPTUAL: ("summary", "topic", "domain", "keywords"),
     MemoryNodeType.ASSISTANT_PRUNED: ("text",),
     MemoryNodeType.DIALOGUE: ("content",),
+    MemoryNodeType.RAG_MEMORY: ("content",),
 }
 
 EMBEDDING_FIELDS: dict[MemoryNodeLabel, str] = {
@@ -43,6 +44,7 @@ EMBEDDING_FIELDS: dict[MemoryNodeLabel, str] = {
     MemoryNodeType.DIALOGUE: "dialog_embedding",
     MemoryNodeType.ASSISTANT_PRUNED: "text_embedding",
     MemoryNodeType.USER_SOURCE: "text_embedding",
+    MemoryNodeType.RAG_MEMORY: "text_embedding",
 }
 
 
@@ -139,6 +141,24 @@ def _index_definition(
 
 
 INDEX_DEFINITIONS: dict[MemoryNodeLabel, IndexDefinition] = {
+    MemoryNodeType.RAG_MEMORY: _index_definition(
+        "rag_memory",
+        MemoryNodeType.RAG_MEMORY,
+        schema_version=1,
+        generation=1,
+        # 有意不设 created_at：RAG 记忆以业务时间 dialog_at 为准（索引与
+        # DEFAULT_PROJECTION 投影字段保持一致）；下游 stats/list/retrieval
+        # 均只消费 dialog_at，不读 created_at。
+        prop={
+            "id": {"type": "keyword"},
+            "role": {"type": "keyword"},
+            "end_user_id": {"type": "keyword"},
+            "config_id": {"type": "keyword"},
+            "dialog_at": {"type": "date"},
+            "source": {"type": "keyword"},
+            "delete_at": {"type": "date"},
+        }
+    ),
     MemoryNodeType.ASSISTANT_ORIGINAL: _index_definition(
         "assistant_original",
         MemoryNodeType.ASSISTANT_ORIGINAL,

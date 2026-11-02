@@ -1,1 +1,1 @@
-"""Interface layer: Celery tasks and health probes."""
+"""Interface layer: executor adapters (Celery) and health probes."""

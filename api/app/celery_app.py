@@ -105,6 +105,8 @@ celery_app.conf.update(
 
         # Fast Write tasks → memory_fast_tasks queue (threads worker，独立队列，避免与普通写入互相阻塞)
         'app.core.memory.fast_write_message': {'queue': 'memory_fast_tasks'},
+        # RAG 记忆独立写入 → memory_rag_tasks queue
+        'app.tasks.process_rag_memory': {'queue': 'memory_rag_tasks'},
         'app.core.memory.generate_scene_summary': {'queue': 'memory_heavy_tasks'},
         'app.core.memory.run_scene_community_incremental': {'queue': 'memory_heavy_tasks'},
         'app.tasks.scan_scene_summary_idle': {'queue': 'periodic_tasks'},

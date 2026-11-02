@@ -13,6 +13,8 @@ from collections.abc import Callable
 
 from pydantic import BaseModel, Field
 
+from src.application.ports.chat_model import ChatModel
+from src.application.ports.prompts import PromptCatalog
 from src.domain.interest.model import (
     Interest,
     InterestDistribution,
@@ -25,8 +27,6 @@ from src.domain.interest.services import (
     aggregate_interest_groups,
     validate_interest_groups,
 )
-from src.domain.ports.llm import ChatModel
-from src.domain.ports.prompts import PromptCatalog
 from src.domain.shared.ids import WorkspaceId
 from src.domain.shared.language import Language
 

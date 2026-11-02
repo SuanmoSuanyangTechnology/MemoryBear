@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:29:41 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-08-13 16:08:07
+ * @Last Modified time: 2026-10-30 16:49:25
  */
 import { type FC, useState, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -111,7 +111,7 @@ const ReleasePage: FC<{data: Application; refresh: () => void}> = ({data, refres
                       </Tag>}
                     </>}
                     className={clsx("rb:hover:shadow-[0px_2px_8px_0px_rgba(0,0,0,0.2)]! rb:cursor-pointer rb:bg-white", {
-                      'rb:border! rb:border-[#171719]!': version.id === selectedVersion.id,
+                      'rb:border! rb:border-primary-600!': version.id === selectedVersion.id,
                       'rb:border-gray-400 ': version.id !== selectedVersion.id
                     })}
                     headerType="borderless"

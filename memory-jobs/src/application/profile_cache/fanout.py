@@ -56,7 +56,7 @@ class FanOutWorkspaceUseCase:
                     # so they sit below a single-user refresh but above the
                     # nightly sweep.
                     priority=Priority.NORMAL,
-                    index=index,
+                    dispatch_index=index,
                 )
             except Exception as exc:
                 errors.append({"end_user_id": str(user_id), "error": str(exc)})

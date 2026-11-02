@@ -1,21 +1,25 @@
 """Ports for publishing per-user work units.
 
-Priority is the application's vocabulary; the Celery adapter maps it onto the
-shared ``task_bridge`` contract.
+``Priority`` is the application's vocabulary: a semantic level, not a broker
+number. The executor adapter maps it onto its own transport contract.
+
+``dispatch_index`` is the position of the unit in the caller's burst. It is the
+only pacing information the application provides; whether and how to delay the
+unit is the adapter's decision.
 """
 
 from __future__ import annotations
 
-from enum import IntEnum
+from enum import StrEnum
 from typing import Protocol
 
 
-class Priority(IntEnum):
-    """Matches the shared AMQP contract: higher is more urgent."""
+class Priority(StrEnum):
+    """How urgent a unit is relative to the caller's other work."""
 
-    INTERACTIVE = 9
-    NORMAL = 5
-    BACKGROUND = 0
+    INTERACTIVE = "interactive"
+    NORMAL = "normal"
+    BACKGROUND = "background"
 
 
 class UnitPublisher(Protocol):
@@ -28,7 +32,7 @@ class UnitPublisher(Protocol):
         refresh_insight: bool,
         refresh_summary: bool,
         priority: Priority,
-        index: int,
+        dispatch_index: int,
     ) -> None: ...
 
     def publish_interest_distribution(
@@ -40,5 +44,5 @@ class UnitPublisher(Protocol):
         limit: int,
         write_cache: bool,
         priority: Priority,
-        index: int,
+        dispatch_index: int,
     ) -> None: ...

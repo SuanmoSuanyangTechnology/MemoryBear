@@ -15,6 +15,9 @@ RankBasis = Literal[
     "fusion_score",
     "source_adjusted_score",
     "rerank_score",
+    # top_n 截断后未进入重排结果的候选：final_score 置 0 仅表示明确后置，
+    # 并非由重排分决定，不能用 rerank_score 混称
+    "rerank_truncated",
     "provider_score",
     "input_order",
 ]

@@ -75,6 +75,11 @@ def create_grpc_server(
         ("grpc.keepalive_time_ms", keepalive_time_ms),
         ("grpc.keepalive_timeout_ms", keepalive_timeout_ms),
         ("grpc.keepalive_permit_without_calls", 1),
+        # grpc-core treats pings without data as abuse (5-minute min interval,
+        # 2 strikes) and answers with a too_many_pings GOAWAY that kills
+        # in-flight RPCs. Our clients ping at the configured keepalive cadence
+        # and the mesh is NetworkPolicy-bounded, so disable the detector.
+        ("grpc.http2.max_ping_strikes", 0),
     )
     server = grpc.aio.server(
         options=options,

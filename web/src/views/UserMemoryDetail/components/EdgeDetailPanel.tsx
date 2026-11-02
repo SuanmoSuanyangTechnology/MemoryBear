@@ -101,7 +101,7 @@ const EdgeDetailPanel: React.FC<EdgeDetailPanelProps> = ({
               onClick={() => handleRelationChange(index)}
               className={`rb:rounded-[13px] rb:py-0.5 rb:px-3 rb:leading-5 rb-border rb:cursor-pointer ${
                 activeRelationIndex === index
-                  ? 'rb:bg-[#171719] rb:border-[#171719]! rb:text-white'
+                  ? 'rb:bg-primary-600 rb:border-primary-600! rb:text-white'
                   : 'rb:bg-white'
               }`}
             >

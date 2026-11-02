@@ -35,7 +35,7 @@ const NoteNodeToolbar: FC<NoteNodeToolbarProps> = ({ node, onFormat, toolConfig,
   const fontSizeItems: MenuProps['items'] = FONT_SIZES.map(({ label, value }) => ({
     key: value,
     label: <span>{label}</span>,
-    className: toolConfig.fontSize === value ? 'rb:bg-[#171719] rb:text-white!' : ''
+    className: toolConfig.fontSize === value ? 'rb:bg-primary-600 rb:text-white!' : ''
   }));
 
   const handleColorClick: MenuProps['onClick'] = ({ key }) => {

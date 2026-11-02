@@ -2,7 +2,7 @@
  * @Author: ZhaoYing
  * @Date: 2026-01-07 20:37:34
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-08-12 12:12:55
+ * @Last Modified time: 2026-10-30 16:13:39
  */
 import { useEffect, useState, useMemo, forwardRef, useImperativeHandle, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -306,7 +306,7 @@ const ForgetDetail = forwardRef((_props, ref) => {
                 className={clsx(
                   'rb:cursor-pointer rb:px-3 rb:py-1 rb:rounded-lg rb:text-[14px] rb:leading-5 rb:transition-colors',
                   activeTab === item.key
-                    ? 'rb:bg-[#171719] rb:text-white rb:font-[MiSans-Bold] rb:font-bold'
+                    ? 'rb:bg-primary-600 rb:text-white rb:font-[MiSans-Bold] rb:font-bold'
                     : 'rb:bg-gray-100 rb:text-gray-600'
                 )}
               >

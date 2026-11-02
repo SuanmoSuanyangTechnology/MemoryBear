@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:57:26 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-08-18 14:38:58
+ * @Last Modified time: 2026-10-30 15:23:40
  */
 /**
  * Neo4j User Memory Detail View
@@ -126,7 +126,7 @@ const Neo4j: FC = () => {
               align="center"
               justify="center"
               className={clsx("rb:cursor-pointer rb:size-12 rb:rounded-xl rb:group rb:shrink-0", {
-                'rb:bg-[#171719]': selectedKey === 'Brain',
+                'rb:bg-primary-600': selectedKey === 'Brain',
                 'rb:hover:bg-[#EBEBEB]': selectedKey !== 'Brain',
               })}
               onClick={(e) => onOpenChange(e, 'Brain')}
@@ -147,7 +147,7 @@ const Neo4j: FC = () => {
                 align="center"
                 justify="center"
                 className={clsx("rb:cursor-pointer rb:size-12 rb:rounded-xl rb:group rb:shrink-0", {
-                  'rb:bg-[#171719]': isSelected,
+                  'rb:bg-primary-600': isSelected,
                   'rb:hover:bg-[#EBEBEB]': !isSelected,
                 })}
                 onClick={(e) => onOpenChange(e, item.key)}

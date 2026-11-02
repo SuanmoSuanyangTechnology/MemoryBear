@@ -1,3 +1,4 @@
+import asyncio
 import uuid
 from typing import List, Optional
 
@@ -10,6 +11,8 @@ from task_bridge.mem_router import MAX_PRIORITY, QueueName, TaskName, TaskPriori
 
 from app.core.logging_config import get_api_logger
 from app.core.memory.analytics.user_card_tags import normalize_stored_user_card_tags
+from app.core.memory.enums import MemoryMessageSource
+from app.core.memory.rag import stats as rag_stats
 from app.core.error_codes import BizCode
 from app.core.quota_manager import get_end_user_memory_limit
 from app.core.response_utils import fail, success
@@ -142,8 +145,8 @@ async def get_workspace_end_users(
         - memory_num.total 直接取 end_user.memory_count
 
         RAG 模式：
-        - 使用 documents.chunk_num 聚合过滤 chunk 总数 > 0 的宿主
-        - memory_num.total 取聚合后的 chunk 总数
+        - 按独立索引 `rag_memory_current` 聚合宿主消息条数
+        - memory_num.total 取聚合后的消息条数
 
     返回工作空间下的宿主列表，支持分页查询和模糊搜索。
     通过 keyword 参数同时模糊匹配 other_name 和 id 字段。
@@ -169,14 +172,19 @@ async def get_workspace_end_users(
     api_logger.info(f"用户 {current_user.username} 请求获取工作空间 {workspace_id} 的宿主列表, 类型: {current_workspace_type}")
 
     if current_workspace_type == "rag":
-        end_users_result = memory_dashboard_service.get_workspace_end_users_paginated_rag(
-            db=db,
-            workspace_id=workspace_id,
-            current_user=current_user,
-            page=page,
-            pagesize=pagesize,
-            keyword=keyword,
-            label=label,
+        # RAG 分支的 ES 聚合耗时较长，服务层只把纯 ES 统计放进线程池；
+        # PG 分页查询留在当前线程，避免请求级 Session 跨线程使用/被提前关闭。
+        # 图分支为纯 PG 快查，维持既有直调方式
+        end_users_result = (
+            await memory_dashboard_service.get_workspace_end_users_paginated_rag_async(
+                db=db,
+                workspace_id=workspace_id,
+                current_user=current_user,
+                page=page,
+                pagesize=pagesize,
+                keyword=keyword,
+                label=label,
+            )
         )
     else:
         end_users_result = memory_dashboard_service.get_workspace_end_users_paginated(
@@ -225,13 +233,18 @@ async def get_workspace_end_users(
         api_logger.warning(f"获取工作空间激活配置失败: {str(e)}")
         workspace_config = {"memory_config_id": None, "memory_config_name": None}
 
-    try:
-        active_counts = await memory_dashboard_service.batch_get_active_counts(
-            tuple(end_user_ids)
-        )
-    except Exception as e:
-        api_logger.warning(f"批量获取活跃节点数失败，降级为 0: {str(e)}")
+    if current_workspace_type == "rag":
+        # RAG 无软删节点，独立索引计数即活跃计数：下方直接复用 memory_total，
+        # 不再单独维护一份同源副本（原实现只在当前页有值，易被误读为可分页聚合）。
         active_counts = {}
+    else:
+        try:
+            active_counts = await memory_dashboard_service.batch_get_active_counts(
+                tuple(end_user_ids)
+            )
+        except Exception as e:
+            api_logger.warning(f"批量获取活跃节点数失败，降级为 0: {str(e)}")
+            active_counts = {}
 
     memory_limits = get_end_user_memory_limit(db, current_user.tenant_id)
 
@@ -270,7 +283,10 @@ async def get_workspace_end_users(
             "tags": normalize_stored_user_card_tags(getattr(end_user, "memory_tags", None)),
             "memory_num": {
                 "total": memory_total,
-                "active_count": active_counts.get(user_id, 0),
+                "active_count": (
+                    memory_total if current_workspace_type == "rag"
+                    else active_counts.get(user_id, 0)
+                ),
                 "memory_limit": memory_limits,
             },
             "memory_config": workspace_config,
@@ -493,19 +509,76 @@ def get_current_user_rag_total_num(
     return success(data=total_chunk, msg="宿主RAG知识数据获取成功")
 
 
+# /rag_content 入口校验：keyword 走 match_phrase，超长会构造过大查询；
+# source 直连 terms 过滤，未知取值会静默返回空列表，故在此显式拦截。
+# 深分页不在此预校验：由 rag.stats.list_messages 统一抛 ValueError，
+# 下方捕获后翻译为 INVALID_PARAMETER，保证校验口径只有一处
+_RAG_KEYWORD_MAX_LENGTH = 200
+_RAG_SOURCES = frozenset(
+    {item.value for item in MemoryMessageSource} | {rag_stats.LEGACY_SOURCE}
+)
+
+
 @router.get("/rag_content", response_model=ApiResponse)
-def get_rag_content(
+async def get_rag_content(
     end_user_id: str = Query(..., description="宿主ID"),
     page: int = Query(1, gt=0, description="页码，从1开始"),
     pagesize: int = Query(15, gt=0, le=100, description="每页返回记录数"),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    start_time: Optional[int] = Query(None, description="起始时间（毫秒 UTC，闭区间）"),
+    end_time: Optional[int] = Query(None, description="结束时间（毫秒 UTC，闭区间）"),
+    source: Optional[List[str]] = Query(None, description="来源筛选，可多值"),
+    keyword: Optional[str] = Query(None, description="关键词（content 全文匹配）"),
+    order: str = Query("desc", pattern="^(asc|desc)$", description="排序：desc=最新在前（默认），asc=最早在前"),
+    db: AsyncSession = Depends(get_async_db),
+    current_user: CurrentUserSnapshot = Depends(get_current_user_async),
 ):
     """
-    获取当前宿主知识库中的chunk内容（分页）
+    获取 RAG 记忆消息（分页，默认最新在前）。
+
+    数据源为独立索引 `rag_memory_current`；items 字段为
+    id / role / content / dialog_at / source / legacy。
     """
-    data = memory_dashboard_service.get_rag_content(end_user_id, page, pagesize, db, current_user)
-    return success(data=data, msg="宿主RAGchunk数据获取成功")
+    if keyword and len(keyword) > _RAG_KEYWORD_MAX_LENGTH:
+        return fail(
+            BizCode.INVALID_PARAMETER,
+            f"keyword 长度上限 {_RAG_KEYWORD_MAX_LENGTH}",
+            f"len={len(keyword)}",
+        )
+    if start_time is not None and end_time is not None and start_time > end_time:
+        return fail(
+            BizCode.INVALID_PARAMETER,
+            "start_time 不能晚于 end_time",
+            f"start={start_time}, end={end_time}",
+        )
+    if source:
+        # 兼容前端 ?source=（空字符串）：过滤空串后再校验，空串按「未传」处理，
+        # 与改造前静默忽略的行为保持一致
+        cleaned = [s for s in source if s and s.strip()]
+        unknown = [s for s in cleaned if s not in _RAG_SOURCES]
+        if unknown:
+            return fail(
+                BizCode.INVALID_PARAMETER,
+                "source 取值非法",
+                f"unknown={unknown}, allowed={sorted(_RAG_SOURCES)}",
+            )
+        source = cleaned or None
+    try:
+        data = await memory_dashboard_service.get_rag_content_async(
+            end_user_id,
+            page,
+            pagesize,
+            db,
+            current_user,
+            start_time=start_time,
+            end_time=end_time,
+            source=source,
+            keyword=keyword,
+            order=order,
+        )
+    except ValueError as exc:
+        # stats 层的深分页等参数校验（MAX_RESULT_WINDOW 单一口径）在此翻译
+        return fail(BizCode.INVALID_PARAMETER, "分页参数超出限制", str(exc))
+    return success(data=data, msg="宿主RAG记忆消息获取成功")
 
 
 @router.get("/chunk_summary_tag", response_model=ApiResponse)
@@ -573,7 +646,9 @@ async def get_chunk_insight(
 
 class GenerateRagProfileRequest(BaseModel):
     end_user_id: str = Field(..., description="宿主ID")
-    limit: int = Field(15, description="参与生成的chunk数量上限")
+    # 上限与 rag.stats.MAX_PAGE_SIZE（单页 100）对齐：list_messages 内部会
+    # 截断到该上限，入口不约束会让调用方误以为拿到了更多素材
+    limit: int = Field(15, gt=0, le=100, description="参与生成的chunk数量上限")
     max_tags: int = Field(10, description="最大标签数量")
 
 

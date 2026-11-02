@@ -28,7 +28,7 @@ const MoreDropdown: FC<MoreDropdownProps> = ({ items, placement = 'bottomRight',
       placement={placement}
     >
       {variant === 'outline'
-        ? <Flex align="center" justify="center" className="rb:cursor-pointer rb:border rb:border-[#EBEBEB] rb:rounded-lg rb:size-6! rb:hover:border-[#171719]">
+        ? <Flex align="center" justify="center" className="rb:cursor-pointer rb:border rb:border-[#EBEBEB] rb:rounded-lg rb:size-6! rb:hover:border-primary-600">
           <div
             onClick={(e) => { e.stopPropagation(); onClick?.(e); }}
             className={`rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/common/more.svg')]`}

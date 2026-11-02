@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-02 15:25:31 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-08-31 10:29:24
+ * @Last Modified time: 2026-10-30 15:19:13
  */
 /**
  * SiderMenu Component
@@ -298,7 +298,7 @@ const Menu: FC<{
       })}>
         {!collapsed && source === 'space' && user.current_workspace_name
           ? <Flex gap={9}>
-            <Flex align="center" justify="center" className="rb:size-10 rb:rounded-xl rb:bg-[#171719] rb:text-white rb:text-[18px] rb:font-medium">{user.current_workspace_name[0]}</Flex>
+            <Flex align="center" justify="center" className="rb:size-10 rb:rounded-xl rb:bg-primary-600 rb:text-white rb:text-[18px] rb:font-medium">{user.current_workspace_name[0]}</Flex>
             <div className="rb:w-32">
               <div className="rb:text-ellipsis rb:overflow-hidden rb:whitespace-nowrap rb:font-medium rb:text-[16px] rb:leading-5.5">{user.current_workspace_name}</div>
               <span className="rb:text-[14px] rb:text-[#5B6167] rb:leading-5 rb:font-regular">

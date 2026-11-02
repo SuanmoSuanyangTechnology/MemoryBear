@@ -13,9 +13,9 @@ import uuid
 from typing import AsyncIterator, Optional
 
 from fastapi import HTTPException, UploadFile, status
-from sqlalchemy.orm import Session
 
 from ..config import current_settings
+from ..db import get_async_db_context
 from ..storage import StorageFactory, StorageBackend
 from ..storage.exceptions import (
     StorageError,
@@ -397,13 +397,15 @@ class _MeteredUploadStream:
 
 
 async def _remove_partial_upload(
-    db: Session,
-    file_metadata: FileMetadata,
+    file_id: uuid.UUID,
     storage_service: FileStorageService,
     file_key: str,
 ) -> None:
-    file_metadata.status = "failed"
-    db.commit()
+    async with get_async_db_context() as adb:
+        record = await adb.get(FileMetadata, file_id)
+        if record is not None:
+            record.status = "failed"
+            await adb.commit()
     try:
         await storage_service.delete_file(file_key)
     except StorageDeleteError as exc:
@@ -412,7 +414,6 @@ async def _remove_partial_upload(
 
 async def upload_workspace_file(
     *,
-    db: Session,
     tenant_id: uuid.UUID,
     workspace_id: uuid.UUID | None,
     file: UploadFile,
@@ -462,9 +463,9 @@ async def upload_workspace_file(
         content_type=file.content_type,
         status="pending",
     )
-    db.add(file_metadata)
-    db.commit()
-    db.refresh(file_metadata)
+    async with get_async_db_context() as adb:
+        adb.add(file_metadata)
+        await adb.commit()
 
     stream = _MeteredUploadStream(file, max_file_size)
     try:
@@ -482,10 +483,10 @@ async def upload_workspace_file(
                 detail="The file is empty.",
             )
     except HTTPException:
-        await _remove_partial_upload(db, file_metadata, storage_service, file_key)
+        await _remove_partial_upload(file_id, storage_service, file_key)
         raise
     except StorageUploadError as e:
-        await _remove_partial_upload(db, file_metadata, storage_service, file_key)
+        await _remove_partial_upload(file_id, storage_service, file_key)
         api_logger.error(f"Storage upload failed: {e}")
         # A known non-zero size means the failure happened before the first
         # chunk was read, not that the client sent an empty body.
@@ -504,9 +505,12 @@ async def upload_workspace_file(
             detail=f"File storage failed: {str(e)}",
         )
 
-    file_metadata.file_size = total
-    file_metadata.status = "completed"
-    db.commit()
+    async with get_async_db_context() as adb:
+        record = await adb.get(FileMetadata, file_id)
+        if record is not None:
+            record.file_size = total
+            record.status = "completed"
+            await adb.commit()
     api_logger.info(f"File uploaded to storage: file_key={file_key}, size={total} bytes")
 
     return {"file_id": str(file_id), "file_key": file_key}

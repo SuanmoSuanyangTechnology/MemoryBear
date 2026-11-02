@@ -5,10 +5,7 @@ from uuid import UUID
 from neo4j import Query
 
 from src.infrastructure.neo4j import Neo4jManager
-from src.schemas.scene_community_graph import CommunityProperties, SceneProperties
-
-COMMUNITY_FIELDS = tuple(CommunityProperties.model_fields)
-SCENE_FIELDS = tuple(SceneProperties.model_fields)
+from src.schemas.scene_community_graph import COMMUNITY_FIELDS, SCENE_FIELDS
 
 
 def _query(label: str, variable: str, fields: tuple[str, ...]) -> str:

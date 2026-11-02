@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from src.domain.shared.errors import InvalidValue
+
 
 @dataclass(frozen=True, slots=True)
 class InterestCandidate:
@@ -14,7 +16,7 @@ class InterestCandidate:
 
     def __post_init__(self) -> None:
         if self.frequency < 1:
-            raise ValueError("candidate frequency must be positive")
+            raise InvalidValue("candidate frequency must be positive")
 
 
 @dataclass(frozen=True, slots=True)
@@ -36,8 +38,8 @@ class StatementEvidence:
         if not isinstance(self.statement_text, str):
             raise TypeError("statement_text must be a string")
         if not self.entity_ids:
-            raise ValueError("statement evidence must reference at least one entity")
+            raise InvalidValue("statement evidence must reference at least one entity")
         if any(not entity_id.strip() for entity_id in self.entity_ids):
-            raise ValueError("statement evidence contains a blank entity id")
+            raise InvalidValue("statement evidence contains a blank entity id")
         if not self.statement_text.strip():
-            raise ValueError("statement evidence text must not be blank")
+            raise InvalidValue("statement evidence text must not be blank")

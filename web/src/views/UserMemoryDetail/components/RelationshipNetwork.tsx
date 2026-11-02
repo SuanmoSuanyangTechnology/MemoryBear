@@ -289,7 +289,7 @@ const RelationshipNetwork = forwardRef<RelationshipNetworkRef, RelationshipNetwo
                     gap={4}
                     align="center"
                     className={clsx("rb:cursor-pointer rb:px-2! rb:py-1! rb:rounded-full rb:text-[12px] rb:leading-4 rb:text-gray-950", {
-                      'rb:border rb:border-[#171719]': selectedCategory === item.name,
+                      'rb:border rb:border-primary-600': selectedCategory === item.name,
                       'rb-border': selectedCategory !== item.name
                     })}
                     onClick={() => handleClickCategory(item.name)}

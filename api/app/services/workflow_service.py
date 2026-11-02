@@ -51,7 +51,6 @@ from app.aioRedis import aio_redis, aio_redis_delete, aio_redis_get, aio_redis_s
 from app.db import get_async_db_context, get_async_pool_status, get_db
 from app.models import App, AppRelease, Conversation, Message
 from app.models.workflow_model import WorkflowConfig, WorkflowExecution, WorkflowNodeCache, WorkflowNodeExecution
-from app.repositories import knowledge_repository
 from app.repositories.workflow_repository import (
     WorkflowConfigRepository,
     WorkflowExecutionRepository,
@@ -4863,20 +4862,6 @@ class WorkflowService:
             logger.warning(
                 f"Storage type not set for workspace {workspace_id}, using default: neo4j"
             )
-        if storage_type == "rag":
-            knowledge = knowledge_repository.get_knowledge_by_name(
-                db=self.db,
-                name="USER_RAG_MERORY",
-                workspace_id=workspace_id
-            )
-            if knowledge:
-                user_rag_memory_id = str(knowledge.id)
-            else:
-                logger.warning(
-                    f"No knowledge base named 'USER_RAG_MEMORY' found, "
-                    f"workspace_id: {workspace_id}, will use neo4j storage"
-                )
-                storage_type = 'neo4j'
         return storage_type, user_rag_memory_id
 
     async def _get_memory_store_info_async(self, workspace_id: uuid.UUID) -> tuple[str, str]:
@@ -4892,7 +4877,6 @@ class WorkflowService:
             return cached.get("storage_type", "neo4j"), cached.get("user_rag_memory_id", "")
 
         from app.models.workspace_model import Workspace
-        from app.models.knowledge_model import Knowledge
 
         async with get_async_db_context() as db:
             result = await db.execute(
@@ -4906,24 +4890,6 @@ class WorkflowService:
                 logger.warning(
                     f"Storage type not set for workspace {workspace_id}, using default: neo4j"
                 )
-
-            if storage_type == "rag":
-                result = await db.execute(
-                    select(Knowledge.id).where(
-                        Knowledge.name == "USER_RAG_MERORY",
-                        Knowledge.workspace_id == workspace_id,
-                        Knowledge.status == 1,
-                    ).limit(1)
-                )
-                knowledge_id = result.scalar_one_or_none()
-                if knowledge_id:
-                    user_rag_memory_id = str(knowledge_id)
-                else:
-                    logger.warning(
-                        f"No knowledge base named 'USER_RAG_MEMORY' found, "
-                        f"workspace_id: {workspace_id}, will use neo4j storage"
-                    )
-                    storage_type = "neo4j"
 
         await set_json_async(cache_key, {
             "storage_type": storage_type,

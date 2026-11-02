@@ -19,9 +19,23 @@ _REEMBED_TERMINAL_STATUSES = ("succeeded", "failed")
 _REEMBED_PENDING_REDISPATCH_SECONDS = 5 * 60
 
 
+class ReembedWorkspaceMissingError(Exception):
+    """job 行存在但其 workspace 已缺失。
+
+    与「job 行不存在」必须区分：后者对账层面自然消亡；前者任务永远无法执行，
+    需要显式置终态，否则会以 running 身份被对账任务反复重派（僵尸循环）。
+    正常路径下 workspace 硬删会被 FK 拦截、storage_type 非空，触发即数据异常。
+    """
+
+
 def _reembed_job_snapshot(job_id: str) -> Optional[Dict[str, Any]]:
-    """把 job 行读成普通 dict，避免 ORM 实例逃出 session。"""
+    """把 job 行读成普通 dict，避免 ORM 实例逃出 session。
+
+    :raises ReembedWorkspaceMissingError: workspace 缺失（区别于返回 None
+        表示的「job 行不存在」）。
+    """
     from app.models.memory_reembed_job_model import MemoryReembedJob
+    from app.models.workspace_model import Workspace
 
     try:
         job_uuid = uuid.UUID(str(job_id))
@@ -35,6 +49,23 @@ def _reembed_job_snapshot(job_id: str) -> Optional[Dict[str, Any]]:
         )
         if job is None:
             return None
+        storage_type = (
+            db.query(Workspace.storage_type)
+            .filter(Workspace.id == job.workspace_id)
+            .scalar()
+        )
+        if storage_type is None:
+            # workspace 缺失时不能默默按图分支执行：后续扇出与单宿主重嵌入都会
+            # 处理错误的存储后端，且没有任何告警
+            logger.error(
+                "[MemoryReembed] workspace missing, aborting job snapshot: "
+                "job=%s workspace=%s",
+                job_id,
+                job.workspace_id,
+            )
+            raise ReembedWorkspaceMissingError(
+                f"workspace not found: job={job_id} workspace={job.workspace_id}"
+            )
         return {
             "id": str(job.id),
             "workspace_id": job.workspace_id,
@@ -42,6 +73,7 @@ def _reembed_job_snapshot(job_id: str) -> Optional[Dict[str, Any]]:
             "status": job.status,
             "new_embedding_config_id": job.new_embedding_config_id,
             "created_at": job.created_at,
+            "storage_type": storage_type,
         }
 
 
@@ -152,7 +184,29 @@ async def run_job(job_id: str, owner: str) -> Dict[str, Any]:
     start_time = time.time()
 
     async def _run() -> Dict[str, Any]:
-        snapshot = _reembed_job_snapshot(job_id)
+        try:
+            snapshot = _reembed_job_snapshot(job_id)
+        except ReembedWorkspaceMissingError:
+            # workspace 缺失：job 永远不可能执行，能置终态就置终态防僵尸循环
+            # （notify=False：基础设施异常，不给用户发失败告警）。名下已有行时
+            # mark_job_failed 会按守卫拒绝——此时如实报错，只能人工恢复 workspace
+            # 或清理 job 行，不强行改写状态机
+            if memory_reembed_service.mark_job_failed(
+                job_id,
+                error="workspace not found; job cannot proceed",
+                notify=False,
+            ):
+                logger.error(
+                    "[MemoryReembed] job failed: workspace missing: job=%s",
+                    job_id,
+                )
+            else:
+                logger.error(
+                    "[MemoryReembed] workspace missing but job owns rows; "
+                    "needs manual cleanup: job=%s",
+                    job_id,
+                )
+            return {"status": "WORKSPACE_MISSING", "job_id": job_id}
         if snapshot is None:
             logger.warning("[MemoryReembed] job not found: job=%s", job_id)
             return {"status": "MISSING", "job_id": job_id}
@@ -218,6 +272,10 @@ async def run_job(job_id: str, owner: str) -> Dict[str, Any]:
             return {"status": "REJECTED", "error": dimension_error}
 
         # 只取 id 一列：避免把大工作空间下所有 end_user 行拉进 identity map。
+        # 主枚举统一以 EndUser 行为准（workspace_id + 活跃状态）：图侧与 ES 侧
+        # 的文档归属都是 end_user_id。不能按 App 关联过滤——MCP / Service API
+        # 宿主可以没有 App（app_id 为 NULL），App join 会漏掉这些宿主的存量向量。
+        is_rag = str(snapshot["storage_type"] or "").strip().lower() == "rag"
         with get_db_context() as db:
             active_end_user_ids = [
                 str(row[0])
@@ -245,7 +303,13 @@ async def run_job(job_id: str, owner: str) -> Dict[str, Any]:
             )
             db.commit()
 
-        node_counts = await inventory_end_users(active_end_user_ids)
+        if is_rag:
+            from app.core.memory.rag.stats import count_messages_by_end_user
+
+            counts = await count_messages_by_end_user(active_end_user_ids)
+            node_counts = {user_id: total for user_id, total in counts.items() if total > 0}
+        else:
+            node_counts = await inventory_end_users(active_end_user_ids)
 
         if not node_counts:
             memory_reembed_service.refresh_job_counters(job_id)
@@ -362,7 +426,12 @@ async def process_end_user(
     start_time = time.time()
 
     async def _run() -> Dict[str, Any]:
-        snapshot = _reembed_job_snapshot(job_id)
+        try:
+            snapshot = _reembed_job_snapshot(job_id)
+        except ReembedWorkspaceMissingError:
+            # 终态处置由 run_job（或人工）负责；子任务如实报告并退出，
+            # 不按图分支执行、也不动行状态
+            return {"status": "WORKSPACE_MISSING", "job_id": job_id}
         if snapshot is None:
             return {"status": "MISSING", "job_id": job_id}
         if snapshot["status"] in _REEMBED_TERMINAL_STATUSES:
@@ -431,6 +500,7 @@ async def process_end_user(
                     embedder=embedder,
                     job_id=job_id,
                     end_user_id=end_user_id,
+                    storage_type=snapshot["storage_type"],
                     should_continue=should_continue,
                 )
             except JobSupersededError:
@@ -515,6 +585,43 @@ async def process_end_user(
     return result
 
 
+def _reembed_workspace_missing(job_id: str) -> bool:
+    """对账重派前校验 job 的 workspace 是否仍存在（见 reconcile_active_jobs）。
+
+    job 行不存在时返回 False：这类 job 本应自然消亡，不归入「workspace 缺失」
+    统计，也不触发 mark_job_failed。
+    """
+    from app.models.memory_reembed_job_model import MemoryReembedJob
+    from app.models.workspace_model import Workspace
+
+    try:
+        job_uuid = uuid.UUID(str(job_id))
+    except (TypeError, ValueError):
+        return False
+    with get_db_read() as db:
+        workspace_id = (
+            db.query(MemoryReembedJob.workspace_id)
+            .filter(MemoryReembedJob.id == job_uuid)
+            .scalar()
+        )
+        if workspace_id is None:
+            # job 行不存在（已被清理）或 workspace_id 异常为 NULL：前者自然
+            # 消亡，后者属数据异常、按 workspace 缺失处理
+            job_exists = (
+                db.query(MemoryReembedJob.id)
+                .filter(MemoryReembedJob.id == job_uuid)
+                .first()
+                is not None
+            )
+            return job_exists
+        return (
+            db.query(Workspace.id)
+            .filter(Workspace.id == workspace_id)
+            .first()
+            is None
+        )
+
+
 def reconcile_active_jobs() -> Dict[str, Any]:
     from app.core.memory.storage_services.reembedding_engine import job_state
     from app.models.memory_reembed_job_model import MemoryReembedJob
@@ -558,6 +665,33 @@ def reconcile_active_jobs() -> Dict[str, Any]:
         age = (now - reference).total_seconds() if reference else 0
         if status == _REEMBED_PENDING and age < _REEMBED_PENDING_REDISPATCH_SECONDS:
             continue
+
+        # workspace 缺失的 job 永远无法推进：重派只会在 run_job 的 snapshot
+        # 处抛 ReembedWorkspaceMissingError 后原样返回，无限空转。重派前在
+        # 对账侧拦截：名下无行时顺手置终态；有行时守卫会拒绝置终态，跳过
+        # 重派并留 error 日志指引人工清理（删 job 行，user 行 CASCADE）。
+        # 正常路径该状态不可达（workspace_id 为 nullable=False FK 且无
+        # ondelete、storage_type NOT NULL），触发即数据异常
+        if _reembed_workspace_missing(job_id_str):
+            if memory_reembed_service.mark_job_failed(
+                job_id_str,
+                error="workspace not found; job cannot proceed",
+                notify=False,
+            ):
+                logger.error(
+                    "[MemoryReembed] reconciler failed job: workspace missing: "
+                    "job=%s",
+                    job_id_str,
+                )
+            else:
+                logger.error(
+                    "[MemoryReembed] reconciler skipped redispatch: workspace "
+                    "missing and job owns rows, needs manual cleanup: job=%s",
+                    job_id_str,
+                )
+            skipped += 1
+            continue
+
         if memory_reembed_service.dispatch_reembed_job(job_id_str) is not None:
             redispatched += 1
             logger.info(

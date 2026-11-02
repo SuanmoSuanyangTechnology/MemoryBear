@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-03-19 14:05:09 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-03-19 14:05:09 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-10-30 16:51:39
  */
 import { type FC, type ReactNode } from 'react'
 import { Flex } from 'antd';
@@ -40,7 +40,7 @@ const BtnTabs: FC<BtnTabsProps> = ({ items, activeKey, onChange, className, vari
           className={clsx('rb:px-2 rb:py-1 rb:text-[12px] rb:leading-4.5', {
             'rb:bg-gray-100': activeKey !== tab.key && variant === 'borderless',
             'rb-border rb:bg-white': activeKey !== tab.key && variant === 'outline',
-            'rb:bg-[#171719] rb:text-white rb:border-[#171719]': activeKey === tab.key,
+            'rb:bg-primary-600 rb:text-white rb:border-primary-600': activeKey === tab.key,
             'rb:rounded-full': circle,
             'rb:rounded-md': !circle,
             'rb:cursor-pointer': !disabled

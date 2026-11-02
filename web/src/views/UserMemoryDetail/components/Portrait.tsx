@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 18:32:18 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-16 14:19:15
+ * @Last Modified time: 2026-10-30 16:22:58
  */
 import { useEffect, useState, forwardRef, useImperativeHandle } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -97,7 +97,7 @@ const Portrait = forwardRef<{ handleRefresh: () => void; }>((_props, ref) => {
                   <div className="rb:text-[#5B6167]">{t(`implicitDetail.${key}`)}</div>
                   {item?.percentage ?? 0}%
                 </Flex>
-                <Progress percent={item?.percentage || 0} showInfo={false} strokeColor="#171719" />
+                <Progress percent={item?.percentage || 0} showInfo={false} strokeColor="#155EEF" />
               </div>
             )
           })}

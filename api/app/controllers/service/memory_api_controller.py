@@ -32,6 +32,7 @@ from app.schemas.response_schema import ApiResponse
 from app.services.end_user_service import EndUserService
 from app.services.file_storage_service import FileStorageService, get_file_storage_service, upload_workspace_file
 from app.services.memory_config_service import MemoryConfigService
+from app.services.workspace_service import get_workspace_storage_type_without_auth_async
 
 router = APIRouter(prefix="/memory", tags=["V1 - Memory API"])
 logger = get_business_logger()
@@ -79,6 +80,11 @@ async def read_memory_sync(
         async with get_async_db_context() as db:
             for euid in end_user_ids:
                 await validate_end_user_in_workspace_async(db, euid, api_key_auth.workspace_id)
+            # 读取必须按工作空间存储类型路由：MemoryService 默认 neo4j，
+            # RAG 空间不传 storage_type 会去空图里检索，静默返回无记忆
+            storage_type = await get_workspace_storage_type_without_auth_async(
+                db, api_key_auth.workspace_id
+            )
 
         logger.info(
             f"V1 memory read (sync) - end_user_ids: {end_user_ids}, workspace: {api_key_auth.workspace_id}"
@@ -87,7 +93,11 @@ async def read_memory_sync(
         async def _read_for_user(euid: str) -> tuple[str, dict]:
             async with get_async_db_context() as db:
                 config_id = await MemoryConfigService(db).get_config_id_by_end_user_async(euid)
-            service = await MemoryService.create(config_id, end_user_id=euid)
+            service = await MemoryService.create(
+                config_id,
+                end_user_id=euid,
+                storage_type=storage_type or "neo4j",
+            )
             memory = await service.read(
                 payload.message, search_switch=SearchStrategy(payload.search_switch),
                 enable_rerank=payload.enable_rerank,
@@ -105,7 +115,12 @@ async def read_memory_sync(
         res = {}
         for data in results:
             if isinstance(data, Exception):
-                pass
+                # 单个宿主读取失败不应让整批多用户读取 500；跳过并在日志中
+                # 保留失败宿主，其余宿主结果正常返回
+                logger.warning(
+                    "V1 memory read skipped one user: %s", data, exc_info=True
+                )
+                continue
             res[data[0]] = data[1]
 
         return success(data=res)
@@ -116,10 +131,14 @@ async def read_memory_sync(
         # 合并路由：必须先改写 payload 再查 config，否则已合并用户会取到旧用户的记忆配置
         payload.end_user_id = str(end_user.id)
         config_id = await MemoryConfigService(db).get_config_id_by_end_user_async(payload.end_user_id)
+        storage_type = await get_workspace_storage_type_without_auth_async(
+            db, api_key_auth.workspace_id
+        )
     logger.info(f"V1 memory read (sync) - end_user_id: {payload.end_user_id}, workspace: {api_key_auth.workspace_id}")
     service = await MemoryService.create(
         config_id,
         end_user_id=payload.end_user_id,
+        storage_type=storage_type or "neo4j",
     )
     memory = await service.read(
         payload.message, search_switch=SearchStrategy(payload.search_switch),
@@ -152,6 +171,9 @@ async def read_memory_internal(
         # 合并路由：必须先改写 payload 再查 config，否则已合并用户会取到旧用户的记忆配置
         payload.end_user_id = str(end_user.id)
         config_id = await MemoryConfigService(db).get_config_id_by_end_user_async(payload.end_user_id)
+        storage_type = await get_workspace_storage_type_without_auth_async(
+            db, api_key_auth.workspace_id
+        )
     logger.info(
         f"V1 memory read (internal) - end_user_id: {payload.end_user_id}, workspace: {api_key_auth.workspace_id}")
 
@@ -163,6 +185,7 @@ async def read_memory_internal(
     service = await MemoryService.create(
         config_id,
         end_user_id=payload.end_user_id,
+        storage_type=storage_type or "neo4j",
     )
     memory = await service.read(
         payload.message,
