@@ -7,6 +7,7 @@ import logging
 import time
 from collections.abc import Callable
 
+from langchain_core.messages import AIMessageChunk
 from pydantic import ValidationError
 
 from ...integrations.model.chat import RedBearChatModel
@@ -69,7 +70,9 @@ class WikiModel:
             })
         started = time.monotonic()
         try:
-            response = self.model.invoke(messages)
+            response = AIMessageChunk(content="")
+            for chunk in self.model.stream(messages):
+                response += chunk
         except Exception as exc:
             from ...error_mapping import map_model_error
 
