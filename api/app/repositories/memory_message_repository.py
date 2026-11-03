@@ -13,7 +13,7 @@ MemoryMessageRepository — memory_messages 表的数据访问层
 import logging
 import uuid
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 
 import sqlalchemy as sa
@@ -23,11 +23,45 @@ from sqlalchemy.orm import Session, aliased
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.memory.enums import MemoryMessageSource
-from app.core.utils.datetime_utils import ensure_dialog_at, to_iso_z, utcnow_naive
+from app.core.utils.datetime_utils import (
+    ensure_dialog_at,
+    parse_iso_to_utc_naive,
+    to_iso_z,
+    utcnow_naive,
+)
 from app.models.conversation_model import Conversation
 from app.models.memory_message_model import MemoryMessage
 
 logger = logging.getLogger(__name__)
+
+# 同批 created_at / dialog_at 强制严格递增的最小步长（毫秒级时钟粒度不足时
+# 同批多行会拿到相同时间戳，展示层按时间排序无次级定序依据，次序会抖动）
+_BATCH_TS_STEP = timedelta(milliseconds=1)
+
+
+def _as_aware_utc(dt: datetime) -> datetime:
+    """把任意 datetime 归一到 aware UTC，仅用于比较。"""
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+def _bump_monotonic_datetime(
+        prev_aware: Optional[datetime], value: datetime
+) -> tuple[datetime, datetime]:
+    """强制 value 严格晚于 prev（相同/更早则 prev + 1ms）。
+
+    返回 (修正后的 value, 新的 prev)。修正值保持 value 原有的 tz 风格
+    （naive 入 naive 出、aware 入按原时区出），避免悄悄改写调用方的时区语义。
+    """
+    value_aware = _as_aware_utc(value)
+    if prev_aware is not None and value_aware <= prev_aware:
+        value_aware = prev_aware + _BATCH_TS_STEP
+        if value.tzinfo is None:
+            value = value_aware.replace(tzinfo=None)
+        else:
+            value = value_aware.astimezone(value.tzinfo)
+    return value, value_aware
 
 
 class MemoryMessageRepository:
@@ -145,6 +179,8 @@ class MemoryMessageRepository:
 
         conv_uuid = uuid.UUID(conversation_id) if conversation_id else None
 
+        prev_created_aware: Optional[datetime] = None
+        prev_dialog_aware: Optional[datetime] = None
         for msg in messages:
             role = str(msg.get("role", "user"))
             content = str(msg.get("content", "") or "")
@@ -152,6 +188,24 @@ class MemoryMessageRepository:
                 continue
 
             next_seq += 1
+
+            # --- 同批时间戳严格递增（列表顺序即会话时序） ---
+            # 各行单独取 utcnow / 宿主传相同秒级时间戳都会并列，而展示查询
+            # 只按时间排序、无可靠次级定序键，user/assistant 次序会抖动。
+            # 同一调用即同一 seq 分组（同会话），按写入顺序把 created_at 与
+            # dialog_at 分别修正为严格递增（并列则 +1ms）。仅影响本批新写入。
+            created_at, prev_created_aware = _bump_monotonic_datetime(
+                prev_created_aware, msg.get("created_at") or utcnow_naive()
+            )
+            dialog_at = ensure_dialog_at(msg.get("dialog_at"))
+            dialog_dt = parse_iso_to_utc_naive(dialog_at)
+            if dialog_dt is not None:
+                if prev_dialog_aware is not None and dialog_dt <= prev_dialog_aware:
+                    dialog_dt = prev_dialog_aware + _BATCH_TS_STEP
+                    # 与 ensure_dialog_at 输出同为 aware UTC ISO 串
+                    dialog_at = dialog_dt.replace(tzinfo=timezone.utc).isoformat()
+                prev_dialog_aware = dialog_dt
+
             memory_message = MemoryMessage(
                 id=uuid.uuid4(),
                 conversation_id=conv_uuid,
@@ -162,8 +216,8 @@ class MemoryMessageRepository:
                 content=content,
                 message_seq=next_seq,
                 should_memorize=msg.get("should_memorize", True),
-                created_at=msg.get("created_at") or utcnow_naive(),
-                dialog_at=ensure_dialog_at(msg.get("dialog_at")),
+                created_at=created_at,
+                dialog_at=dialog_at,
                 files=msg.get("files"),
             )
             self.db.add(memory_message)
