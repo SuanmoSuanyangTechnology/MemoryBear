@@ -222,6 +222,14 @@ class SkillScriptTool(BuiltinTool):
             # In-band failure signal: LangChain only drops `data` when ToolResult.success is
             # False, so reporting the failure here keeps exit_code/stdout/stderr visible to
             # the model while still letting _tool_failure_reason mark the tool node failed.
+            #
+            # Cost of that workaround: ToolResult.success stays True, while
+            # ToolService.execute_tool (tool_service.py `_record_execution_complete*`) records
+            # COMPLETED from ToolResult.success and skips error_message. Safe today because
+            # sandbox tools are not in BUILTIN_TOOLS and carry no tool_id, so they never go
+            # through ToolService. If one is ever registered in the tool library or referenced
+            # by ID from a workflow tool node, switch to ToolResult.error_result and make
+            # _format_result_for_langchain pass `data` through on failure.
             "success": status == "ok",
             "exit_code": outcome.exit_code,
             "stdout": sanitize_sandbox_output(outcome.stdout),
