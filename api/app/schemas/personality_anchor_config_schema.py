@@ -27,8 +27,12 @@ class PersonalityAnchorConfigUpdate(PersonalityAnchorConfig):
     @field_validator("personality_anchor_base_principles", mode="before")
     @classmethod
     def trim_base_principles(cls, value: object) -> object:
-        """Remove surrounding whitespace before validating update input."""
-        return value.strip() if isinstance(value, str) else value
+        """Trim update input and reject blank base principles."""
+        if isinstance(value, str):
+            value = value.strip()
+            if not value:
+                raise ValueError("基础身份与原则不能为空")
+        return value
 
 
 class PersonalityAnchorConfigResponse(PersonalityAnchorConfig):
