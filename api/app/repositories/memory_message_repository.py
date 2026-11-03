@@ -1073,37 +1073,39 @@ class MemoryMessageRepository:
         batch_size: int | None = None,
     ):
         start = aliased(MemoryMessage, name="scene_start")
-        later = aliased(MemoryMessage, name="later_shift")
 
+        # Match the existing partial indexes' `should_memorize = TRUE` predicate.
         shifted_filters = (
             start.role == "user",
-            start.should_memorize.is_(True),
+            start.should_memorize == sa.true(),
             start.scene_boundary == "SHIFTED",
             start.scene_summary_claimed_at.is_(None),
         )
-        later_shifted = (
-            select(later.id)
-            .where(
-                later.end_user_id == start.end_user_id,
-                later.role == "user",
-                later.should_memorize.is_(True),
-                later.scene_boundary == "SHIFTED",
-                sa.tuple_(later.created_at, later.id)
-                > sa.tuple_(start.created_at, start.id),
-                sa.or_(
-                    sa.and_(
-                        start.conversation_id.is_not(None),
-                        later.conversation_id == start.conversation_id,
-                    ),
-                    sa.and_(
-                        start.conversation_id.is_(None),
-                        later.conversation_id.is_(None),
-                        later.source == start.source,
-                    ),
-                ),
+
+        def later_shifted_exists(*, conversation_stream: bool):
+            later = aliased(MemoryMessage, name="later_shift")
+            stream_conditions = (
+                (later.conversation_id == start.conversation_id,)
+                if conversation_stream
+                else (
+                    later.conversation_id.is_(None),
+                    later.source == start.source,
+                )
             )
-            .exists()
-        )
+            return (
+                select(later.id)
+                .where(
+                    later.end_user_id == start.end_user_id,
+                    later.role == "user",
+                    later.should_memorize == sa.true(),
+                    later.scene_boundary == "SHIFTED",
+                    *stream_conditions,
+                    sa.tuple_(later.created_at, later.id)
+                    > sa.tuple_(start.created_at, start.id),
+                )
+                .exists()
+            )
+
         columns = (
             start.id.label("id"),
             start.end_user_id.label("end_user_id"),
@@ -1130,7 +1132,7 @@ class MemoryMessageRepository:
                 .where(
                     message.end_user_id == start.end_user_id,
                     *stream_conditions,
-                    message.should_memorize.is_(True),
+                    message.should_memorize == sa.true(),
                     message.role.in_(("user", "assistant")),
                     func.length(func.trim(message.content)) > 0,
                     sa.or_(
@@ -1171,7 +1173,7 @@ class MemoryMessageRepository:
             .where(
                 *shifted_filters,
                 start.conversation_id.is_not(None),
-                ~later_shifted,
+                ~later_shifted_exists(conversation_stream=True),
                 *cursor_filter,
             )
             .order_by(start.created_at.asc(), start.id.asc())
@@ -1186,7 +1188,7 @@ class MemoryMessageRepository:
             .where(
                 *shifted_filters,
                 start.conversation_id.is_(None),
-                ~later_shifted,
+                ~later_shifted_exists(conversation_stream=False),
                 *cursor_filter,
             )
             .order_by(start.created_at.asc(), start.id.asc())
