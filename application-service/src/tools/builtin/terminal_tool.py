@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import time
 from typing import Any, List, Optional
 
@@ -25,6 +26,13 @@ from .sandbox_output import sanitize_sandbox_output
 logger = logging.getLogger(__name__)
 
 _ANONYMOUS_USER_IDS = {"", "anonymous"}
+
+# Heredoc whose closing delimiter never arrived. bash feeds what it got to the command
+# and still exits 0, so exit_code alone says "success" while the file is only half
+# written; the sole signal is this warning on stderr.
+_HEREDOC_UNTERMINATED_RE = re.compile(
+    r"here-document at line \d+ delimited by end-of-file", re.IGNORECASE
+)
 
 
 class TerminalTool(BuiltinTool):
@@ -158,11 +166,31 @@ class TerminalTool(BuiltinTool):
                 execution_time=_elapsed(),
             )
 
+        stdout = sanitize_sandbox_output(result.stdout)
+        stderr = sanitize_sandbox_output(result.stderr)
+
+        # Report a truncated heredoc as a failure. The command itself exited 0, but the
+        # body was cut short, so treating it as success hands the model a half-written
+        # file it will then read back, publish, or build on.
+        if _HEREDOC_UNTERMINATED_RE.search(stderr):
+            logger.warning("sandbox_command_heredoc_unterminated exit_code=%s", result.exit_code)
+            return ToolResult.error_result(
+                error=(
+                    "命令里有未闭合的 heredoc（缺少结束标记）：bash 只把已收到的部分交给了命令，"
+                    "仍以 exit_code 0 结束，所以文件内容并不完整。"
+                    "请让结束标记（如 EOF）单独占一行放在命令末尾后重新执行；"
+                    "内容较长时改用 sandbox_write_file 先写骨架，再用 old_string/new_string 分段追加。"
+                ),
+                error_code="SANDBOX_HEREDOC_UNTERMINATED",
+                execution_time=_elapsed(),
+                metadata={"exit_code": result.exit_code, "stderr": stderr[:2000]},
+            )
+
         data: dict[str, Any] = {
             "status": result.status,
             "exit_code": result.exit_code,
-            "stdout": sanitize_sandbox_output(result.stdout),
-            "stderr": sanitize_sandbox_output(result.stderr),
+            "stdout": stdout,
+            "stderr": stderr,
             "error": sanitize_sandbox_output(result.error),
             "duration_ms": result.duration_ms,
         }
