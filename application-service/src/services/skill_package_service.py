@@ -728,7 +728,20 @@ class SkillPackageService:
             override = meta_by_key.get(member["key"])
             display = (override or {}).get("name") or fm["name"]
             description = ((override or {}).get("description") or fm.get("description") or "")[:DESCRIPTION_MAX]
-            call_name = ((override or {}).get("call_name") or fm["name"])
+            # "Not provided" and "provided but empty" are different: only an absent key
+            # falls back to the frontmatter name. An explicit empty/blank override is
+            # rejected here, otherwise it silently resolves to ``fm["name"]`` and the
+            # caller gets an error about a name it never sent.
+            if override is not None and "call_name" in override:
+                call_name = override["call_name"]
+                if not str(call_name or "").strip():
+                    raise BusinessException(
+                        f"成员 {member['key']} 的 call_name 不能为空字符串；"
+                        "如需沿用 frontmatter 的名称，请省略该字段",
+                        BizCode.BAD_REQUEST,
+                    )
+            else:
+                call_name = fm["name"]
             call_name = SkillPackageService.validate_call_name(call_name)
 
             skill_md = member["files"]["SKILL.md"].decode("utf-8", errors="strict")
@@ -776,8 +789,8 @@ class SkillPackageService:
             resolved_plugin_name = (plugin_name or "").strip() or SkillPackageService._derive_plugin_name(source_ref)
             if repo is not None and repo.get_plugin_by_name(tenant_id, resolved_plugin_name):
                 raise BusinessException(
-                    f"插件 {resolved_plugin_name} 已存在；插件为整体导入，不支持重复导入"
-                    "（如需重装请先删除原插件）",
+                    f"插件 {resolved_plugin_name} 已存在；插件不支持增量合并成员"
+                    "（如需调整成员请先删除原插件后重新导入）",
                     BizCode.DUPLICATE_NAME,
                 )
 

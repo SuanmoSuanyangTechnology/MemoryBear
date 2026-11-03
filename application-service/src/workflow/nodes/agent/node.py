@@ -645,12 +645,27 @@ class AgentNode(BaseNode):
             self._build_reference_history(state, message),
         )
 
-    def _reference_runtime_context(self, variable_pool: VariablePool) -> tuple[uuid.UUID, str | None]:
+    def _reference_runtime_context(
+        self, state: WorkflowState, variable_pool: VariablePool
+    ) -> tuple[uuid.UUID, str | None, str | None]:
         workspace_id = self.get_variable("sys.workspace_id", variable_pool, strict=False)
         if not workspace_id:
             raise BusinessException("引用 Agent 执行缺少 workspace_id", BizCode.WORKSPACE_NO_ACCESS)
         user_id = self.get_variable("sys.user_id", variable_pool, strict=False)
-        return uuid.UUID(str(workspace_id)), str(user_id) if user_id else None
+        # The referenced Agent's sandbox tools key their instance by conversation and
+        # refuse to run without one, so resolve it here exactly like _prepare_tools does
+        # (same fallbacks: conversation-less workflows get a stable directory id).
+        conversation_id = self.get_variable("sys.conversation_id", variable_pool, strict=False)
+        if not conversation_id:
+            conversation_id = (
+                state.get("__debug_conversation_id")
+                or self.get_variable("sys.sandbox_session_id", variable_pool, strict=False)
+            )
+        return (
+            uuid.UUID(str(workspace_id)),
+            str(user_id) if user_id else None,
+            str(conversation_id) if conversation_id else None,
+        )
 
     async def _execute_reference(
         self,
@@ -659,7 +674,7 @@ class AgentNode(BaseNode):
     ) -> dict[str, Any]:
         reference = self.typed_config.reference
         message, variables, files, history = self._prepare_reference_inputs(state, variable_pool)
-        workspace_id, user_id = self._reference_runtime_context(variable_pool)
+        workspace_id, user_id, conversation_id = self._reference_runtime_context(state, variable_pool)
         result = await PublishedAgentRunner().run(
             app_id=reference.app_id,
             release_policy=reference.release_policy,
@@ -670,6 +685,7 @@ class AgentNode(BaseNode):
             variables=variables,
             files=files,
             history=history,
+            conversation_id=conversation_id,
             storage_type=state.get("memory_storage_type"),
             user_rag_memory_id=state.get("user_rag_memory_id"),
         )
@@ -697,7 +713,7 @@ class AgentNode(BaseNode):
     ):
         reference = self.typed_config.reference
         message, variables, files, history = self._prepare_reference_inputs(state, variable_pool)
-        workspace_id, user_id = self._reference_runtime_context(variable_pool)
+        workspace_id, user_id, conversation_id = self._reference_runtime_context(state, variable_pool)
         full_response = ""
         full_reasoning = ""
         usage: dict[str, Any] = {}
@@ -714,6 +730,7 @@ class AgentNode(BaseNode):
             variables=variables,
             files=files,
             history=history,
+            conversation_id=conversation_id,
             storage_type=state.get("memory_storage_type"),
             user_rag_memory_id=state.get("user_rag_memory_id"),
         ):

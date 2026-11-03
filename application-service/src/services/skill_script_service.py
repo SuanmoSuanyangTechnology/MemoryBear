@@ -56,7 +56,10 @@ import os, subprocess, sys
 _pkg = {pkg!r}
 _script = {script!r}
 _args = {args!r}
-os.chdir(_pkg)
+# No os.chdir here: this code runs in the conversation's persistent kernel, so changing
+# its cwd would leak into everything the user runs afterwards (a later relative-path
+# publish would look under the skill pack instead of the session directory).
+# Only the child gets the pack as cwd.
 _proc = subprocess.run(
     [sys.executable, _script, *_args],
     cwd=_pkg, capture_output=True, text=True, errors="replace",
@@ -65,7 +68,12 @@ if _proc.stdout:
     sys.stdout.write(_proc.stdout)
 if _proc.stderr:
     sys.stderr.write(_proc.stderr)
-sys.stdout.write("\\n{marker}:%d\\n" % _proc.returncode)
+if _proc.stdout and not _proc.stdout.endswith("\\n"):
+    sys.stdout.write("\\n")
+# The marker must own a whole line, and the write result (an int the kernel would echo
+# on the next prompt) must not become the last expression: flush() returns None.
+sys.stdout.write("{marker}:%d\\n" % _proc.returncode)
+sys.stdout.flush()
 '''
 INTERPRETERS = {
     "python": ("code", "python3"),
@@ -216,20 +224,29 @@ def build_command(interpreter: str, script_rel: str, args: list[str], *, max_byt
 
 
 def _split_exit_marker(stdout: str) -> tuple[str, Optional[int]]:
-    """Peel the runner's trailing ``__SKILL_SCRIPT_EXIT__:<n>`` line off stdout."""
+    """Peel the runner's trailing ``__SKILL_SCRIPT_EXIT__:<n>`` line off stdout.
+
+    The code channel runs in a persistent Jupyter-style kernel, so text may follow our
+    marker (an echoed expression value, a stray prompt). Only the marker line itself is
+    parsed and the body stops at the marker, so neither junk reaches the model nor turns
+    a real exit code into ``None``.
+    """
 
     marker = f"{EXIT_MARKER}:"
     index = stdout.rfind(marker)
     if index < 0:
         return stdout, None
-    tail = stdout[index + len(marker):].strip()
+    line_end = stdout.find("\n", index)
+    tail = stdout[index + len(marker):] if line_end < 0 else stdout[index + len(marker):line_end]
+    try:
+        exit_code = int(tail.strip())
+    except ValueError:
+        # Marker cut in half by the output budget, or not ours: leave stdout untouched.
+        return stdout, None
     body = stdout[:index]
     if body.endswith("\n"):
         body = body[:-1]
-    try:
-        return body, int(tail)
-    except ValueError:
-        return stdout, None
+    return body, exit_code
 
 
 async def run_skill_script(

@@ -28,6 +28,37 @@ logger = logging.getLogger(__name__)
 _LANGUAGE = "python3"
 _ANONYMOUS_USER_IDS = {"", "anonymous"}
 
+# SyntaxError messages that mean the source stopped mid-statement (the model's output hit
+# the token limit), not that the user wrote bad code. Sending these to the sandbox spends
+# a round trip only to get the same SyntaxError back.
+_TRUNCATED_SYNTAX_MARKERS = (
+    "incomplete input",
+    "unexpected EOF",
+    "was never closed",
+    "unterminated",
+    "EOF while scanning",
+)
+
+
+def _truncated_code_reason(code: str) -> Optional[str]:
+    """Return the SyntaxError text when ``code`` is cut off mid-statement, else None.
+
+    Compiled locally and cheaply: a truncation is a property of the source text, so
+    there is nothing the sandbox can add. Any other syntax error is left to the sandbox
+    so the message the model reads stays the real interpreter's.
+    """
+
+    try:
+        compile(code, "<code_interpreter_tool>", "exec")
+    except SyntaxError as exc:
+        message = str(exc.msg or exc)
+        if any(marker.lower() in message.lower() for marker in _TRUNCATED_SYNTAX_MARKERS):
+            return message
+    except (ValueError, TypeError):
+        # NUL bytes and the like: let the sandbox decide how to report them.
+        return None
+    return None
+
 
 class CodeInterpreterTool(BuiltinTool):
     """代码解释器 - 在隔离沙箱中执行代码并返回 stdout / stderr"""
@@ -95,6 +126,21 @@ class CodeInterpreterTool(BuiltinTool):
             return ToolResult.error_result(
                 error="代码解释器只支持 Python3；运行 Node.js 请用终端工具执行，如 node script.js",
                 error_code="INVALID_ARGUMENT",
+                execution_time=_elapsed(),
+            )
+
+        # 代码在上游被长度上限截断时，执行只会拿回同一个 SyntaxError。提前拒掉，
+        # 并告诉模型怎么分次写入，而不是让它白白多跑一轮。
+        if isinstance(code, str) and (truncated_reason := _truncated_code_reason(code)):
+            logger.warning("sandbox_code_truncated reason=%s", truncated_reason)
+            return ToolResult.error_result(
+                error=(
+                    f"代码不完整，本次未执行（{truncated_reason}）。"
+                    "通常是输出达到长度上限被截断，引号、括号或缩进块没有闭合。"
+                    "请把代码拆成多次较短的执行，或先用 sandbox_write_file 的 path + content "
+                    "把长代码写成脚本文件，再用终端 python 文件名 执行。"
+                ),
+                error_code="SANDBOX_CODE_TRUNCATED",
                 execution_time=_elapsed(),
             )
 
