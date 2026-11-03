@@ -2667,6 +2667,24 @@ def _acquire_rag_write_lock(
     raise _RagWriteLockTimeout(candidate_id)
 
 
+def _rag_role_rank(role_value: str) -> int:
+    """RAG 记忆展示层并列兜底定序：同一 dialog_at 内 user 固定排在 assistant 之前。
+
+    ES 排序键为 dialog_at，并列时原先只能退回 uuid 主键序（与会话时序无关），
+    user/assistant 会随机交错；写入时落 role_rank 后，排序以
+    ``dialog_at → role_rank → id`` 定序，历史文档缺该字段时按 missing 沉底。
+
+    由 worker 按 ``role`` 自行派生而非常规化进 payload：`payload 的 key 即任务
+    形参`，新增 payload 字段会让滚动发布期间仍在消费队列的旧 worker 收到
+    ``unexpected keyword argument`` 而整条记忆重试失败。
+    """
+    if role_value == "user":
+        return 0
+    if role_value == "assistant":
+        return 1
+    return 2
+
+
 @celery_app.task(
     bind=True,
     name="app.tasks.process_rag_memory",
@@ -2687,7 +2705,8 @@ def process_rag_memory(
     """RAG 记忆独立写入任务：身份归并 → 加载配置 → 向量化 → ES 覆盖写。
 
     payload 的每个 key 即本函数形参；id 由入口按内容派生 uuid5，
-    重试/重放时覆盖写同一文档，天然幂等。
+    重试/重放时覆盖写同一文档，天然幂等。role_rank 由本任务按 role 派生
+    后写入，作为展示层同 dialog_at 并列时的确定性兜底定序。
     """
     loop = set_asyncio_event_loop()
     write_lock = None
@@ -2880,6 +2899,7 @@ def process_rag_memory(
                         "id": id,
                         "content": content,
                         "role": role,
+                        "role_rank": _rag_role_rank(role),
                         "end_user_id": resolved_end_user_id,
                         "config_id": config_id,
                         "dialog_at": dialog_at,
