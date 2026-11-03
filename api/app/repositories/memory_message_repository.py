@@ -180,7 +180,7 @@ class MemoryMessageRepository:
         conv_uuid = uuid.UUID(conversation_id) if conversation_id else None
 
         prev_created_aware: Optional[datetime] = None
-        prev_dialog_aware: Optional[datetime] = None
+        prev_dialog_naive: Optional[datetime] = None
         for msg in messages:
             role = str(msg.get("role", "user"))
             content = str(msg.get("content", "") or "")
@@ -198,13 +198,14 @@ class MemoryMessageRepository:
                 prev_created_aware, msg.get("created_at") or utcnow_naive()
             )
             dialog_at = ensure_dialog_at(msg.get("dialog_at"))
+            # parse_iso_to_utc_naive 返回 naive UTC，变量名按实际语义命名
             dialog_dt = parse_iso_to_utc_naive(dialog_at)
             if dialog_dt is not None:
-                if prev_dialog_aware is not None and dialog_dt <= prev_dialog_aware:
-                    dialog_dt = prev_dialog_aware + _BATCH_TS_STEP
+                if prev_dialog_naive is not None and dialog_dt <= prev_dialog_naive:
+                    dialog_dt = prev_dialog_naive + _BATCH_TS_STEP
                     # 与 ensure_dialog_at 输出同为 aware UTC ISO 串
                     dialog_at = dialog_dt.replace(tzinfo=timezone.utc).isoformat()
-                prev_dialog_aware = dialog_dt
+                prev_dialog_naive = dialog_dt
 
             memory_message = MemoryMessage(
                 id=uuid.uuid4(),
