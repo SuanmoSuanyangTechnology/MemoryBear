@@ -89,8 +89,11 @@ class WikiModel:
             raise WikiError(mapped.code, retryable=mapped.retryable, diagnostics=details) from exc
         content = response.content
         if isinstance(content, list):
-            content = "".join(block.get("text", "") for block in content
-                              if isinstance(block, dict) and block.get("type") == "text")
+            content = "".join(
+                block if isinstance(block, str) else block.get("text", "")
+                for block in content
+                if isinstance(block, str) or block.get("type") == "text"
+            )
         metadata = getattr(response, "usage_metadata", None) or {}
         response_metadata = getattr(response, "response_metadata", None) or {}
         finish = response_metadata.get("finish_reason") or response_metadata.get("stop_reason")
