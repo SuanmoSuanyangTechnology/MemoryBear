@@ -9,7 +9,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 
-RetrievalType = Literal["keyword", "semantic", "hybrid", "provider"]
+RetrievalType = Literal["keyword", "semantic", "hybrid"]
 RankBasis = Literal[
     "keyword_score",
     "fusion_score",
@@ -108,11 +108,14 @@ def build_score_trace(
     backend: Literal["neo4j", "rag"] = "neo4j",
     matched_queries: Iterable[str] = (),
 ) -> RetrievalScoreTrace:
-    """根据已确定的召回结果构造轨迹，不重新计算最终排序。"""
-    if backend == "rag":
-        retrieval_type: RetrievalType = "provider"
-    elif keyword_hit and semantic_hit:
-        retrieval_type = "hybrid"
+    """根据已确定的召回结果构造轨迹，不重新计算最终排序。
+
+    retrieval_type 按 keyword/semantic 实际命中推导，neo4j 与 rag 后端同口径；
+    rag 后端此前硬编码为 "provider"，前端徽章文案只认 keyword/semantic/hybrid，
+    RAG 记忆的命中类型展示会缺失。
+    """
+    if keyword_hit and semantic_hit:
+        retrieval_type: RetrievalType = "hybrid"
     elif semantic_hit:
         retrieval_type = "semantic"
     else:
