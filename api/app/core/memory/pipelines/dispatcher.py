@@ -19,7 +19,7 @@ MemoryWriteDispatcher — 记忆写入派发层
 import hashlib
 import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from itertools import groupby
 from typing import Any, List, Optional
 
@@ -441,6 +441,20 @@ def _resolve_message_identity(
     return dialog_at, dialog_at
 
 
+def _rag_role_rank(role_value: str) -> int:
+    """展示层并列兜底定序：同一 dialog_at 内 user 固定排在 assistant 之前。
+
+    ES 排序键为 dialog_at，并列时原先只能退回 uuid 主键序（与会话时序无关），
+    user/assistant 会随机交错；写入时落 role_rank 后，排序以
+    ``dialog_at → role_rank → id`` 定序，历史文档缺该字段时按 missing 沉底。
+    """
+    if role_value == "user":
+        return 0
+    if role_value == "assistant":
+        return 1
+    return 2
+
+
 def build_rag_payloads(
     messages: List[Any],
     end_user_id: str,
@@ -459,6 +473,9 @@ def build_rag_payloads(
             f"invalid end_user_id for rag dispatch: {end_user_id!r}"
         ) from exc
     payloads: List[dict] = []
+    # 同批 dialog_at 严格递增的步长；一次调用即同一会话的一批消息
+    dialog_step = timedelta(milliseconds=1)
+    prev_dialog_aware: Optional[datetime] = None
     for message in messages:
         if isinstance(message, dict):
             role = message.get("role")
@@ -477,6 +494,16 @@ def build_rag_payloads(
             continue
 
         dialog_at, id_time = _resolve_message_identity(message, raw_dialog_at)
+        # --- 同批 dialog_at 强制严格递增（列表顺序即会话时序） ---
+        # 同刻度的宿主时间或服务端兜底会让同批消息 dialog_at 并列。只修正
+        # 落库的 dialog_at；id_time 不参与修正，幂等键与单条重放保持一致，
+        # 重复派发仍覆盖写同一文档（重放时按相同规则再修正，值也稳定）。
+        dialog_aware = parse_iso_to_utc_naive(dialog_at)
+        if dialog_aware is not None:
+            if prev_dialog_aware is not None and dialog_aware <= prev_dialog_aware:
+                dialog_aware = prev_dialog_aware + dialog_step
+                dialog_at = dialog_aware.replace(tzinfo=timezone.utc).isoformat()
+            prev_dialog_aware = dialog_aware
         # 归一化后再参与 uuid5 派生：大小写/首尾空白差异会导致同一消息
         # 派生不同 ES 主键，跨入口幂等覆盖写失效
         role_value = str(role or "user").strip().lower()
@@ -486,6 +513,7 @@ def build_rag_payloads(
                 "end_user_id": end_user_id,
                 "config_id": config_id,
                 "role": role_value,
+                "role_rank": _rag_role_rank(role_value),
                 "content": text,
                 "source": source,
                 "dialog_at": dialog_at,

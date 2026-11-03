@@ -2683,11 +2683,13 @@ def process_rag_memory(
         content: str,
         source: str = "",
         dialog_at: str = "",
+        role_rank: int = 2,
 ) -> Dict[str, Any]:
     """RAG 记忆独立写入任务：身份归并 → 加载配置 → 向量化 → ES 覆盖写。
 
     payload 的每个 key 即本函数形参；id 由入口按内容派生 uuid5，
-    重试/重放时覆盖写同一文档，天然幂等。
+    重试/重放时覆盖写同一文档，天然幂等。role_rank 为展示层并列兜底
+    定序（user=0/assistant=1/其他=2），早期排队的消息缺省按 2 处理。
     """
     loop = set_asyncio_event_loop()
     write_lock = None
@@ -2880,6 +2882,7 @@ def process_rag_memory(
                         "id": id,
                         "content": content,
                         "role": role,
+                        "role_rank": role_rank,
                         "end_user_id": resolved_end_user_id,
                         "config_id": config_id,
                         "dialog_at": dialog_at,
