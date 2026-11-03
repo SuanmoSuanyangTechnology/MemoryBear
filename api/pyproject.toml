@@ -150,6 +150,7 @@ dependencies = [
     "langid>=1.1.6",
     "asyncpg==0.31.0",
     "redbear-model",
+    "error-core",
     # Shared task/queue/priority contract with memory-jobs (contract only: no
     # transport, no extra dependencies).
     "task-bridge-sdk[mem-router]",
@@ -159,6 +160,7 @@ dependencies = [
 
 [tool.uv.sources]
 redbear-model = { path = "../packages/redbear-model" }
+error-core = { path = "../packages/error-core" }
 task-bridge-sdk = { path = "../packages/task-bridge-sdk" }
 
 [tool.pytest.ini_options]

@@ -57,7 +57,7 @@ class MultiAgentHandoffsService:
             if not config:
                 raise BusinessException(
                     "多 Agent 配置不存在",
-                    BizCode.RESOURCE_NOT_FOUND
+                    BizCode.NOT_FOUND
                 )
 
             # 2. 检查是否启用 handoffs

@@ -11,6 +11,7 @@ dependencies = [
     "alembic>=1.17,<2",
     "asyncpg>=0.31,<1",
     "auth-sdk>=0.1",
+    "error-core",
     "fastapi>=0.119,<1",
     "httpx>=0.28,<1",
     "memorybear-grpc",
@@ -36,6 +37,7 @@ dev = [
 
 [tool.uv.sources]
 redbear-model = { path = "../packages/redbear-model" }
+error-core = { path = "../packages/error-core" }
 auth-sdk = { path = "../packages/auth-sdk" }
 memorybear-grpc = { path = "../packages/memorybear-grpc" }
 

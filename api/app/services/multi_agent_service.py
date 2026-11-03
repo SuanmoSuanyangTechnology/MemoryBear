@@ -211,7 +211,7 @@ class MultiAgentService:
             .order_by(MultiAgentConfig.updated_at.desc())
         ).first()
         if existing:
-            raise BusinessException("应用已有多 Agent 配置", BizCode.DUPLICATE_RESOURCE)
+            raise BusinessException("应用已有多 Agent 配置", BizCode.RESOURCE_ALREADY_EXISTS)
 
         # 3. 验证主 Agent 存在
         master_agent = self.db.get(AgentConfig, data.master_agent_id)
@@ -1107,7 +1107,7 @@ class MultiAgentService:
         if not resolved:
             raise ResourceNotFoundException("多 Agent 配置", str(app_id))
         if not resolved.is_active:
-            raise BusinessException("多 Agent 配置已禁用", BizCode.RESOURCE_DISABLED)
+            raise BusinessException("多 Agent 配置已禁用", BizCode.STATE_CONFLICT)
         return resolved
 
     def _build_regenerate_meta(self, original_message_id, usage=None, extra: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
