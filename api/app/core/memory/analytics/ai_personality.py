@@ -5,6 +5,7 @@ import hashlib
 import json
 import logging
 import re
+import uuid
 from collections import defaultdict
 from datetime import datetime
 from enum import StrEnum
@@ -35,7 +36,6 @@ AI_PERSONALITY_DIMENSIONS = (
     "commitment_habit",
 )
 _VALID_MODES = frozenset({"positive", "negative", "relative"})
-_ENTRY_ID = re.compile(r"^A-\d{2}$")
 _SNAKE_CASE = re.compile(r"^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$")
 
 
@@ -96,7 +96,6 @@ class PersonalityEvidenceReference(BaseModel):
 class PersonalityEntry(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
-    entry_id: str = Field(min_length=1)
     word: str = Field(min_length=1)
     dimension: PersonalityDimension
     ai_interaction_rule: str = Field(min_length=1)
@@ -297,28 +296,24 @@ def validate_personality_output(
 
     参数：output 为结构化模型输出，evidence 为本次调用允许引用的原子证据。
     返回：通过校验的扁平条目，单维最多 5 条、总计最多 30 条。
-    关键规则：条目 ID/维度/文本必须合法且唯一，证据引用必须逐字段一致，Preference 必须可追溯或满足派生约束。
+    关键规则：维度/文本必须合法且唯一，证据引用必须逐字段一致，Preference 必须可追溯或满足派生约束。
     """
     evidence_by_id = {item.evidence_id: item for item in evidence}
     valid: list[dict[str, Any]] = []
-    seen_entry_ids: set[str] = set()
     seen_words: set[str] = set()
     seen_entries: set[tuple[str, str, str]] = set()
 
     for dimension in AI_PERSONALITY_DIMENSIONS:
         for entry in getattr(output, dimension)[:5]:
-            entry_id = _clean_text(entry.entry_id)
             word = _clean_text(entry.word)
             rule = _clean_text(entry.ai_interaction_rule)
             scope = _clean_text(entry.applicable_scope)
             basis = _clean_text(entry.formation_basis)
             word_key = word.casefold()
             duplicate_key = (word_key, rule.casefold(), scope.casefold())
-            # 先过滤标识、维度归属和核心文案，避免不完整条目进入证据核验。
+            # 先过滤维度归属和核心文案，避免不完整条目进入证据核验。
             if (
-                not _ENTRY_ID.fullmatch(entry_id)
-                or entry_id in seen_entry_ids
-                or entry.dimension.value != dimension
+                entry.dimension.value != dimension
                 or not all((word, rule, scope, basis))
                 or len(word) > 10
             ):
@@ -379,12 +374,11 @@ def validate_personality_output(
             if not preference_valid or not preferences:
                 continue
 
-            seen_entry_ids.add(entry_id)
             seen_words.add(word_key)
             seen_entries.add(duplicate_key)
             data = entry.model_dump(mode="json")
             data.update(
-                entry_id=entry_id,
+                entry_id=str(uuid.uuid4()),
                 word=word,
                 ai_interaction_rule=rule,
                 applicable_scope=scope,
