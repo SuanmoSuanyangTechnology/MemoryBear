@@ -477,19 +477,26 @@ async def _bulk_persist_messages(
             len(rows) - len(unique_rows),
         )
 
-    # --- 同批 created_at 强制严格递增 ---
+    # --- 同批 created_at 强制严格递增（按会话隔离） ---
     # _row 各自取 utcnow_naive()，时钟精度不足（Windows ~1-15ms）时同批多行会拿到
     # 完全相同的时间戳；messages 查询仅按 created_at 排序、无次级键，PG 对相同值的
     # 返回次序不定，对话展示便出现 user/assistant 交错。行的构造顺序即期望时序
-    # （开场白 < user < assistant < 下一轮 user…），按该顺序强制后一行严格大于前
-    # 一行（相同则 +1ms）。原开场白单独 -1ms 的补丁即此问题的局部修复，统一收敛至此。
-    prev_ts = None
+    # （开场白 < user < assistant < 下一轮 user…），按该顺序在同一会话内强制后一行
+    # 严格大于前一行（相同则 +1ms）。单调约束按 conversation 隔离：排序只在会话内
+    # 有意义，会话间互不影响，避免批内多会话交错时 +1ms 修正跨会话累积漂移。
+    # 原开场白单独 -1ms 的补丁即此问题的局部修复，已统一收敛至此。
+    prev_ts_by_conv = {}
     for r in unique_rows:
+        mid = r["id"]
+        if isinstance(mid, str):
+            mid = uuid_module.UUID(mid)
+        conv_id = row_conv[mid]
         ts = r["created_at"]
-        if prev_ts is not None and ts <= prev_ts:
-            ts = prev_ts + timedelta(milliseconds=1)
+        prev = prev_ts_by_conv.get(conv_id)
+        if prev is not None and ts <= prev:
+            ts = prev + timedelta(milliseconds=1)
             r["created_at"] = ts
-        prev_ts = ts
+        prev_ts_by_conv[conv_id] = ts
 
     # --- single idempotent multi-row INSERT for all messages ---
     inserted_ids: set[uuid_module.UUID] = set()
