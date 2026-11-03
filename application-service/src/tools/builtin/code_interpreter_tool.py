@@ -212,7 +212,27 @@ class CodeInterpreterTool(BuiltinTool):
             data["notice"] = "内核已重建，之前会话中的变量已丢失"
         if result.workspace_reset:
             data["notice"] = "沙箱已重建，/workspace 中的文件已丢失"
-        # 用户代码报错/超时是"执行成功但结果不是 ok"，交给模型自行读 status 修正代码
+        # 用户代码报错/超时是"执行成功但结果不是 ok"，交给模型自行读 status 修正代码。
+        # 但结果本身必须带上失败标记：否则工具节点永远是 completed，
+        # 报错的代码在日志/节点状态里和成功无法区分。
+        #
+        # 为什么用 data["success"] 而不直接返回 error_result：
+        # _format_result_for_langchain（langchain_adapter.py）在 ToolResult.success 为 False
+        # 时只回传 {success, error, error_code, execution_time}，data 会被整个丢掉，
+        # 模型就看不到 status / stderr，无法自行修正代码。
+        # 而 agent 的 _tool_failure_reason 读的是序列化后 payload 里的 success，
+        # 所以在 data 里给出 success=False，既保住诊断信息，工具节点也能标成 failed。
+        #
+        # 注意这个折中的代价：ToolResult.success 仍是 True，而
+        # ToolService.execute_tool（tool_service.py 的 _record_execution_complete*）
+        # 按 ToolResult.success 记 COMPLETED 并且不写 error_message。
+        # 目前安全——沙箱工具不在 BUILTIN_TOOLS 里、没有 tool_id，不走 ToolService；
+        # 但若日后把沙箱工具登记进工具库或按 ID 挂到工作流工具节点，
+        # 必须改成：返回 ToolResult.error_result，并让 _format_result_for_langchain
+        # 在失败时把 data 一并回传。
+        data["success"] = result.status == "ok"
+        if not data["success"] and not data["error"]:
+            data["error"] = f"代码未正常结束（status={result.status}）"
         return ToolResult.success_result(data=data, execution_time=_elapsed())
 
     @staticmethod
