@@ -34,8 +34,16 @@ _AUTH_BARE_RE = re.compile(
 _SECRET_KEY = (
     r"(?:[a-z0-9]+[_-])*(?:password|passwd|token|secret|api[_-]?key|access[_-]?key|client[_-]?secret)"
 )
-_SECRET_QUOTED_RE = re.compile(
-    rf"(?i)(?P<prefix>(?<![\w-])(?P<kq>[\"'])?{_SECRET_KEY}(?P=kq)\s*[:=]\s*)"
+# Python's ``re`` refuses to let a group that did not participate in the match satisfy a
+# backreference, so "key without quotes" never reaches the pattern below when the key
+# quote is optional. The two key shapes are therefore separate patterns.
+_SECRET_QUOTED_KEY_RE = re.compile(
+    rf"(?i)(?P<prefix>(?<![\w-])(?P<kq>[\"']){_SECRET_KEY}(?P=kq)\s*[:=]\s*)"
+    r"(?P<vq>[\"'])(?P<value>.*?)(?P=vq)"
+)
+# dotenv / shell style: ``OPENAI_API_KEY="..."``, ``DATABASE_PASSWORD='...'``
+_SECRET_BARE_KEY_RE = re.compile(
+    rf"(?i)(?P<prefix>(?<![\w-]){_SECRET_KEY}\s*[:=]\s*)"
     r"(?P<vq>[\"'])(?P<value>.*?)(?P=vq)"
 )
 _SECRET_BARE_RE = re.compile(
@@ -78,5 +86,6 @@ def sanitize_sandbox_output(text: str | None) -> str:
     cleaned = _AUTH_QUOTED_RE.sub(_replace_quoted, cleaned)
     cleaned = _AUTH_BARE_RE.sub(_replace_bare, cleaned)
     cleaned = _BEARER_RE.sub(rf"\1{_REDACTED}", cleaned)
-    cleaned = _SECRET_QUOTED_RE.sub(_replace_quoted, cleaned)
+    cleaned = _SECRET_QUOTED_KEY_RE.sub(_replace_quoted, cleaned)
+    cleaned = _SECRET_BARE_KEY_RE.sub(_replace_quoted, cleaned)
     return _SECRET_BARE_RE.sub(_replace_bare, cleaned)

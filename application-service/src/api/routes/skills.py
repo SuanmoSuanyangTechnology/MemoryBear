@@ -131,19 +131,29 @@ def import_skill_package(
     """Import a standard pack: fetch -> unpack -> validate -> persist (content_hash idempotent)."""
     tenant_id = principal.tenant_id
 
+    # Exactly one source, checked before the upload is read or the URL is fetched:
+    # taking the file and silently ignoring the URL would import something other than
+    # what the caller asked for, and leaves the audit trail ambiguous.
+    has_file = file is not None
+    has_url = bool((url or "").strip())
+    if has_file and has_url:
+        raise BusinessException(
+            "file 和 url 只能提供一个，不能同时提交", BizCode.BAD_REQUEST
+        )
+    if not has_file and not has_url:
+        raise BusinessException("缺少技能包来源（file 或 url 二选一）", BizCode.BAD_REQUEST)
+
     if not dry_run:
         # Charged on the commit branch only: previews write nothing (§12).
         ensure_skill_quota(db, principal)
 
     zip_bytes = None
     source_ref = None
-    if file is not None:
+    if has_file:
         zip_bytes = file.file.read()
         source_ref = file.filename
         if not zip_bytes:
             raise BusinessException("上传文件为空", BizCode.BAD_REQUEST)
-    elif not url:
-        raise BusinessException("缺少技能包来源（file 或 url 二选一）", BizCode.BAD_REQUEST)
 
     member_list = _parse_json_form(members, "members", expect="array")
     meta_list = _parse_json_form(meta, "meta", expect="object")
