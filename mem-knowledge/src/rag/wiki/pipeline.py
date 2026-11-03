@@ -192,14 +192,10 @@ def compress(model, items, *, target, language, limit=None):
             original for ref in item["source_item_refs"] for original in identities.get(ref, [ref])
         })} for item in values]
 
-    original_sources = defaultdict(set)
-    for item in items:
-        for ref in item["source_item_refs"]:
-            original_sources[ref].update(item["source_refs"])
-
     def compaction_input(values):
         return {"language": language, "target": target, "budget": max(128, limit // 2),
-                "items": [{**item, "item_ref": f"I{i + 1}"} for i, item in enumerate(values)]}
+                "items": [{**item, "source_item_refs": [f"I{i + 1}"]}
+                          for i, item in enumerate(values)]}
 
     for _ in range(model.settings.kb_wiki_compact_depth):
         if tokens(items) <= limit:
@@ -218,29 +214,32 @@ def compress(model, items, *, target, language, limit=None):
             groups.append(group)
         compressed = []
         for group in groups:
-            original = {ref for item in group for ref in item["source_item_refs"]}
+            # 模型只处理本批次身份；原始身份留在边界内，避免与来源句柄混用。
+            originals = {f"I{i + 1}": item for i, item in enumerate(group)}
             sources = {ref for item in group for ref in item["source_refs"]}
 
-            def validate(value, original=original, sources=sources):
+            def validate(value, originals=originals, sources=sources):
                 require_refs(
-                    value["covered_item_refs"] + value["omitted_item_refs"], original, complete=True
+                    value["covered_item_refs"] + value["omitted_item_refs"],
+                    originals,
+                    complete=True,
                 )
                 if value["omitted_item_refs"]:
                     raise ValueError("Evidence was omitted during compaction")
                 require_refs(
                     [r for i in value["items"] for r in i["source_item_refs"]],
-                    original,
+                    originals,
                     complete=True,
                 )
                 require_refs(
                     [r for i in value["items"] for r in i["source_refs"]], sources, complete=True
                 )
                 for item in value["items"]:
-                    require_refs(item["source_item_refs"], original)
+                    require_refs(item["source_item_refs"], originals)
                     support = {
                         ref
-                        for original_ref in item["source_item_refs"]
-                        for ref in original_sources[original_ref]
+                        for item_ref in item["source_item_refs"]
+                        for ref in originals[item_ref]["source_refs"]
                     }
                     require_refs(item["source_refs"], support, complete=True)
 
@@ -250,7 +249,11 @@ def compress(model, items, *, target, language, limit=None):
                 Compacted,
                 validate,
             )
-            compressed.extend(result["items"])
+            compressed.extend({**item, "source_item_refs": sorted({
+                original
+                for item_ref in item["source_item_refs"]
+                for original in originals[item_ref]["source_item_refs"]
+            })} for item in result["items"])
         items = compressed
     if tokens(items) > limit:
         raise WikiError("WIKI_COMPACTION_BUDGET_EXCEEDED", retryable=False)
