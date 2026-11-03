@@ -183,10 +183,11 @@ original fact represented, including all facts combined as duplicates; do not si
 Return full content, never a patch.""",
     "wiki_evidence_compact_v1": """Compress items within the token budget without losing evidence.
 Merge repetitions; preserve every independent fact, condition, number, negation and conflict.
-Return items with text, qualifiers, source_item_refs (original IDs) and source_refs.
-For an already compressed item, expand its original source_item_refs, never substitute its
-temporary item_ref for original identity. Retain every supporting source.
-Return covered_item_refs and omitted_item_refs partitioning all original IDs.
+Each input item has one batch-local I handle in source_item_refs. Return items with text,
+qualifiers, source_item_refs (the I handles represented) and source_refs (evidence handles).
+Merge source_item_refs when combining items. Retain every supporting source_refs handle
+exactly as supplied; never use I handles as source_refs or evidence handles as source_item_refs.
+Return covered_item_refs and omitted_item_refs partitioning all supplied I handles.
 If necessary information cannot fit, list omitted IDs honestly. Never claim coverage of dropped
 information. Return {"items": [...], "covered_item_refs": [...], "omitted_item_refs": [...]}.
 Do not create Wiki pages.""",
