@@ -198,7 +198,19 @@ class TerminalTool(BuiltinTool):
             data["truncated"] = True
         if result.workspace_reset:
             data["notice"] = "沙箱已重建，/workspace 中的文件已丢失"
-        # 命令失败/超时是"执行成功但结果不是 ok"，交给模型自行读 exit_code 与 stderr 修正
+        # 命令失败/超时是"执行成功但结果不是 ok"，交给模型自行读 exit_code 与 stderr 修正。
+        # 但结果本身必须带上失败标记：否则工具节点永远是 completed，
+        # 失败的命令在日志/节点状态里和成功无法区分。
+        command_failed = result.status != "ok" or result.exit_code != 0
+        if result.status in (None, "", "ok"):
+            data["status"] = "failed" if command_failed else "ok"
+        data["success"] = not command_failed
+        if command_failed and not data["error"]:
+            data["error"] = (
+                "命令未正常结束（超时或被终止）"
+                if result.exit_code is None
+                else f"命令以退出码 {result.exit_code} 结束"
+            )
         return ToolResult.success_result(data=data, execution_time=_elapsed())
 
     @staticmethod

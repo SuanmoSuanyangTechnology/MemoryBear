@@ -199,12 +199,34 @@ class SkillScriptTool(BuiltinTool):
                 execution_time=elapsed(),
             )
 
+        stderr = sanitize_sandbox_output(outcome.stderr)
+        # The sandbox status only says the command finished; the script's own exit code says
+        # whether the business logic succeeded. exit_code is None when the script never
+        # reached its trailing marker (timeout / killed), which is a failure too.
+        script_failed = outcome.exit_code != 0
+        # Keep an explicit sandbox state (timeout / workspace reset) instead of flattening it
+        # to "failed"; only a clean sandbox run needs the exit code to decide.
+        status = outcome.status if outcome.status not in (None, "", "ok") else (
+            "failed" if script_failed else "ok"
+        )
+        error_text = sanitize_sandbox_output(outcome.error)
+        if script_failed and not error_text:
+            # Gives the recorded node a readable cause instead of the generic fallback.
+            error_text = (
+                "脚本未正常结束（超时或被终止）"
+                if outcome.exit_code is None
+                else f"脚本以退出码 {outcome.exit_code} 结束"
+            )
         data: dict[str, Any] = {
-            "status": outcome.status,
+            "status": status,
+            # In-band failure signal: LangChain only drops `data` when ToolResult.success is
+            # False, so reporting the failure here keeps exit_code/stdout/stderr visible to
+            # the model while still letting _tool_failure_reason mark the tool node failed.
+            "success": status == "ok",
             "exit_code": outcome.exit_code,
             "stdout": sanitize_sandbox_output(outcome.stdout),
-            "stderr": sanitize_sandbox_output(outcome.stderr),
-            "error": sanitize_sandbox_output(outcome.error),
+            "stderr": stderr,
+            "error": error_text,
             "duration_ms": outcome.duration_ms,
             "skill": skill.strip(),
             "script": outcome.script,

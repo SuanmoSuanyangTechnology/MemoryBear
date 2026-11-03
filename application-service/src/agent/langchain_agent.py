@@ -53,10 +53,11 @@ def default_tool_call_limit() -> int:
 # Upper bound for the optional evidence-assembly step that runs after a tool returns.
 EVIDENCE_ASSEMBLY_TIMEOUT_S = 60.0
 
-# A run that called tools but ends with less text than this (or with a sentence ending
-# in a colon / ellipsis) did not answer the question — it stopped mid-narration. Such a
-# turn gets one extra tool-free closing turn; see LangChainAgent._needs_closing_answer.
-# Chosen well below a normal report and above a one-line "let me search" preamble.
+# Applies only when the last model round still asked for tools: then the accumulated text
+# is narration, and a run this short did not answer the question. A run whose last round
+# was tool-free already produced its answer and must never get a closing turn for being
+# short — that appended a second copy of the answer ("42" came back as "...```42").
+# See LangChainAgent._needs_closing_answer.
 CLOSING_ANSWER_MIN_CHARS = 200
 
 CLOSING_ANSWER_INSTRUCTION = (
@@ -634,7 +635,12 @@ class LangChainAgent:
             )
         return events
 
-    def _needs_closing_answer(self, content: str, node_executions) -> bool:
+    def _needs_closing_answer(
+        self,
+        content: str,
+        node_executions,
+        last_round_had_tool_calls: bool = True,
+    ) -> bool:
         """Whether this run ended on a narration instead of an answer.
 
         Symptom being fixed: the model writes "我将为您搜索……" (often along with tool
@@ -645,12 +651,22 @@ class LangChainAgent:
         Only runs that actually called tools are candidates: a bare agent's short reply
         is a legitimate answer, and a long reply ending in a colon is a formatted report,
         not a promise.
+
+        ``last_round_had_tool_calls`` is what separates narration from an answer. A run
+        whose last model round called no tool already finished: its text IS the answer,
+        however short ("42", "是"), and appending a closing turn there duplicates it.
+        Length is only evidence of unfinished work while the last round still wanted
+        tools, because the streamed body is then narration across rounds.
         """
         if not node_executions:
             return False
         text = (content or "").strip()
         if not text:
             return True
+        if not last_round_had_tool_calls:
+            # Finished, tool-free answer. Only an explicit promise ("让我继续搜索…")
+            # still reads as unfinished; its brevity alone does not.
+            return text.endswith(("：", ":", "…", "……"))
         if len(text) < CLOSING_ANSWER_MIN_CHARS:
             return True
         return text.endswith(("：", ":", "…", "……"))
@@ -1198,6 +1214,9 @@ class LangChainAgent:
             total_tokens = 0
             reasoning_content = ""
             last_event = {}
+            # Default True keeps the pre-existing guard for runs where no model round is
+            # observed; it is overwritten on every on_chat_model_end.
+            last_round_had_tool_calls = True
 
             try:
                 async for event in self.agent.astream_events(
@@ -1216,6 +1235,15 @@ class LangChainAgent:
                         output_text = self._content_to_text(output_message.content) if output_message else ""
                         tokens = self._extract_tokens_from_message(output_message) if output_message else 0
                         trace.finish_llm(output=output_text, tokens=tokens)
+                        # Feeds the final-answer guard: a tool-free last round already
+                        # answered, so it must not get a closing turn for being short.
+                        # Only a parsed message may overwrite it: an unparseable event
+                        # tells us nothing, and guessing "no tool calls" there would
+                        # suppress a closing turn we cannot justify skipping.
+                        if output_message is not None:
+                            last_round_had_tool_calls = bool(
+                                getattr(output_message, "tool_calls", None)
+                            )
 
                     elif kind == "on_tool_start":
                         tool_name = event.get("name", "unknown")
@@ -1430,7 +1458,9 @@ class LangChainAgent:
 
             # Same final-answer guard as the streaming path (see _needs_closing_answer):
             # a non-streaming run that ends on a narration gets one tool-free closing turn.
-            if self._needs_closing_answer(content, node_executions):
+            if self._needs_closing_answer(
+                content, node_executions, last_round_had_tool_calls
+            ):
                 try:
                     closing_text, closing_tokens = await self._closing_answer(messages, trace)
                 except Exception as closing_exc:  # noqa: BLE001 - keep the text we have
@@ -1551,6 +1581,10 @@ class LangChainAgent:
             final_answer_text = ''
             try:
                 last_event = {}
+                # Feeds the final-answer guard: a tool-free last round already answered, so
+                # it must not get a closing turn for being short. True by default keeps the
+                # previous behaviour for runs where no model round is observed.
+                last_round_had_tool_calls = True
                 async for event in self.agent.astream_events(
                         {"messages": messages},
                         version="v2",
@@ -1570,6 +1604,15 @@ class LangChainAgent:
                         output_text = self._content_to_text(output_message.content) if output_message else ""
                         tokens = self._extract_tokens_from_message(output_message) if output_message else 0
                         trace.finish_llm(output=output_text, tokens=tokens)
+                        # Whether the model was still asking for tools decides if the
+                        # streamed body is narration or the answer itself (see
+                        # _needs_closing_answer). Only a parsed message may overwrite it:
+                        # an unparseable event tells us nothing, and guessing "no tool
+                        # calls" there would suppress a closing turn without evidence.
+                        if output_message is not None:
+                            last_round_had_tool_calls = bool(
+                                getattr(output_message, "tool_calls", None)
+                            )
                         # The final answer is the last model message that carries text and
                         # no tool call. Intermediate narration rounds (they issue a tool
                         # call) are ignored even when they stream a preamble.
@@ -1857,12 +1900,15 @@ class LangChainAgent:
                 # sentence gets one extra tool-free closing turn (see
                 # _needs_closing_answer). Failure of the closing turn is harmless — the
                 # text produced so far is still delivered.
-                if self._needs_closing_answer(full_content, node_executions):
+                if self._needs_closing_answer(
+                    full_content, node_executions, last_round_had_tool_calls
+                ):
                     logger.warning(
                         "Agent 以过程性语句收尾，追加一次收尾生成",
                         extra={
                             "content_length": len((full_content or '').strip()),
                             "tool_call_count": len(node_executions),
+                            "last_round_had_tool_calls": last_round_had_tool_calls,
                         },
                     )
                     closing_stats: Dict[str, Any] = {"tokens": 0}

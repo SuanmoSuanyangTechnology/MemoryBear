@@ -212,7 +212,12 @@ class CodeInterpreterTool(BuiltinTool):
             data["notice"] = "内核已重建，之前会话中的变量已丢失"
         if result.workspace_reset:
             data["notice"] = "沙箱已重建，/workspace 中的文件已丢失"
-        # 用户代码报错/超时是"执行成功但结果不是 ok"，交给模型自行读 status 修正代码
+        # 用户代码报错/超时是"执行成功但结果不是 ok"，交给模型自行读 status 修正代码。
+        # 但结果本身必须带上失败标记：否则工具节点永远是 completed，
+        # 报错的代码在日志/节点状态里和成功无法区分。
+        data["success"] = result.status == "ok"
+        if not data["success"] and not data["error"]:
+            data["error"] = f"代码未正常结束（status={result.status}）"
         return ToolResult.success_result(data=data, execution_time=_elapsed())
 
     @staticmethod
