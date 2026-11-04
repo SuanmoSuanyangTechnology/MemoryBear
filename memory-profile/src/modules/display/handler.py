@@ -3,17 +3,25 @@
 from __future__ import annotations
 
 import logging
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+from datetime import UTC, datetime
 
 from src.common.errors import BizCode, ProfileError
+from src.common.normalization import resolve_timezone
 from src.common.pagination import PageData
-from src.common.responses import ApiResponse
+from src.common.responses import ApiResponse, failure
 from src.common.validation import parse_optional_uuid
 from src.i18n import resolve_language
 from src.middleware.auth import MemoryPrincipal
 from src.runtime import ProfileRuntime
-from src.schemas.display import AllItem, EngineItem, RetrievedItem, WrittenItem
-from src.services.display.query import MemoryDisplayService
+from src.schemas.display import (
+    ActivityCompositionData,
+    ActivityStatisticsData,
+    AllItem,
+    EngineItem,
+    RetrievedItem,
+    WrittenItem,
+)
+from src.services.display.query import MemoryDisplayService, activity_range
 
 logger = logging.getLogger(__name__)
 
@@ -42,14 +50,13 @@ def validate_timezone(timezone_str: str | None) -> str:
             detail="X-Timezone header is required",
             status_code=400,
         )
-    normalized = timezone_str.strip()
     try:
-        ZoneInfo(normalized)
-    except ZoneInfoNotFoundError as exc:
+        _, normalized = resolve_timezone(timezone_str)
+    except ValueError as exc:
         raise ProfileError(
             BizCode.INVALID_PARAMETER,
-            f"无效的时区: {normalized}",
-            detail=str(exc),
+            f"无效的时区: {timezone_str.strip()}",
+            detail=str(exc.__cause__ or exc),
             status_code=400,
         ) from exc
     return normalized
@@ -68,6 +75,52 @@ class MemoryDisplayHandler:
             self.service = MemoryDisplayService(runtime)
         else:
             raise ValueError("Either runtime or service must be provided")
+
+    async def get_yearly_activity_statistics(
+        self, context: MemoryPrincipal, year: str | None, timezone_name: str | None
+    ):
+        if context.workspace_id is None:
+            return failure(
+                BizCode.INVALID_PARAMETER, "请先切换到一个工作空间", "current_workspace_id is None"
+            )
+        try:
+            zone, zone_name = resolve_timezone(timezone_name)
+            first, length, start, end = activity_range(datetime.now(UTC), zone, year, None, True)
+        except ValueError as exc:
+            return failure(BizCode.INVALID_PARAMETER, "无效的统计参数", str(exc))
+        try:
+            data = await self.service.get_yearly_activity_statistics(
+                context.workspace_id, zone, zone_name, first, length, start, end
+            )
+            return ApiResponse[ActivityStatisticsData](data=data)
+        except Exception as exc:
+            logger.exception("年度记忆活动统计失败")
+            return failure(BizCode.INTERNAL_ERROR, "年度记忆活动统计失败", str(exc))
+
+    async def get_monthly_activity_composition(
+        self,
+        context: MemoryPrincipal,
+        year: str | None,
+        month: str | None,
+        timezone_name: str | None,
+    ):
+        if context.workspace_id is None:
+            return failure(
+                BizCode.INVALID_PARAMETER, "请先切换到一个工作空间", "current_workspace_id is None"
+            )
+        try:
+            zone, zone_name = resolve_timezone(timezone_name)
+            first, length, start, end = activity_range(datetime.now(UTC), zone, year, month, False)
+        except ValueError as exc:
+            return failure(BizCode.INVALID_PARAMETER, "无效的统计参数", str(exc))
+        try:
+            data = await self.service.get_monthly_activity_composition(
+                context.workspace_id, zone, zone_name, first, length, start, end
+            )
+            return ApiResponse[ActivityCompositionData](data=data)
+        except Exception as exc:
+            logger.exception("月度记忆活动统计失败")
+            return failure(BizCode.INTERNAL_ERROR, "月度记忆活动统计失败", str(exc))
 
     async def get_written(
         self,

@@ -48,7 +48,7 @@ def _time_window_error(start_time: Optional[int], end_time: Optional[int]):
 
 @router.get("/activity-statistics", response_model=ApiResponse)
 @memory_profile_proxy(query_fields=("year",))
-async def get_activity_statistics(
+async def get_yearly_activity_statistics(
     year: str | None = Query(None),
     timezone: str | None = Header(None, alias="X-Timezone"),
     current_user: CurrentUserSnapshot = Depends(get_current_user_async),
@@ -59,7 +59,7 @@ async def get_activity_statistics(
 
 @router.get("/activity-composition", response_model=ApiResponse)
 @memory_profile_proxy(query_fields=("year", "month"))
-async def get_activity_composition(
+async def get_monthly_activity_composition(
     year: str | None = Query(None),
     month: str | None = Query(None),
     timezone: str | None = Header(None, alias="X-Timezone"),

@@ -10,6 +10,17 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+
+def resolve_timezone(value: str | None) -> tuple[ZoneInfo, str]:
+    name = (value or "").strip()
+    if not name:
+        raise ValueError("timezone is required")
+    try:
+        return ZoneInfo(name), name
+    except (ZoneInfoNotFoundError, KeyError, ValueError) as exc:
+        raise ValueError(f"'{name}' is not a valid IANA timezone") from exc
 
 
 def parse_uuid(value: object) -> UUID | None:
