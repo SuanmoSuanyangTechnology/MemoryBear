@@ -27,7 +27,7 @@ from src.repositories.profile import (
 from src.repositories.search import MemorySearchRepository
 from src.runtime import ProfileRuntime
 from src.schemas.profile import MemoryInsight, UserSummary
-from src.services._helpers import safe_count, short_term_count
+from src.services._helpers import explicit_memory_count, safe_count, short_term_count
 from src.services.end_user import EndUserService
 
 logger = logging.getLogger(__name__)
@@ -61,7 +61,9 @@ class ProfileQueryService:
     def __init__(self, runtime: ProfileRuntime) -> None:
         self.end_user_profile = EndUserProfileRepository(runtime.postgres)
         self.end_user = EndUserService.from_postgres(runtime.postgres)
-        self.memory_statistics = MemoryStatisticsRepository(runtime.postgres)
+        self.memory_statistics = MemoryStatisticsRepository(
+            runtime.postgres, ontology_query_enabled=runtime.settings.edition == "enterprise"
+        )
         self.memory_graph = MemoryGraphRepository(runtime.neo4j)
         self.memory_search = MemorySearchRepository(runtime.elasticsearch)
         self.workspace_profile = WorkspaceProfileRepository(runtime.postgres)
@@ -101,7 +103,7 @@ class ProfileQueryService:
             return _zero_memory_statistics()
         # Fetch PG source counts, Neo4j counts and short-term memo counts concurrently.
         evaluated_at = datetime.now(UTC)
-        source_counts, memory_counts, short_term = await asyncio.gather(
+        source_counts, memory_counts, short_term, explicit_count = await asyncio.gather(
             self._memory_type_source_counts(user_id),
             asyncio.gather(
                 safe_count(
@@ -116,10 +118,15 @@ class ProfileQueryService:
                     self.memory_search, self.memory_graph, [str(user_id)], evaluated_at
                 ),
             ),
+            safe_count(
+                "explicit memories",
+                lambda: explicit_memory_count(
+                    self.memory_statistics, self.memory_graph, [str(user_id)]
+                ),
+            ),
         )
         implicit_count, graph_counts = memory_counts
         episodic = graph_counts["episodic"]
-        semantic = graph_counts["semantic_explicit"]
         emotional = graph_counts["emotional"]
         counts = {
             "PERCEPTUAL_MEMORY": source_counts["perceptual"],
@@ -127,7 +134,7 @@ class ProfileQueryService:
                 source_counts["active_conversations"] + source_counts["direct_sources"]
             ),
             "SHORT_TERM_MEMORY": short_term,
-            "EXPLICIT_MEMORY": episodic + semantic,
+            "EXPLICIT_MEMORY": explicit_count,
             "IMPLICIT_MEMORY": implicit_count,
             "EMOTIONAL_MEMORY": emotional,
             "EPISODIC_MEMORY": episodic,

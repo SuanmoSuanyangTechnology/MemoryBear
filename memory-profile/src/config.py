@@ -20,6 +20,8 @@ def _as_asyncpg_url(value: str) -> str:
 class ProfileSettings(BaseSettings):
     model_config = ConfigDict(frozen=True, extra="ignore", case_sensitive=False)
 
+    edition: str = Field("community", validation_alias="EDITION")
+
     service_name: str = Field("memory-profile", validation_alias="PROFILE_SERVICE_NAME")
     host: str = Field("0.0.0.0", validation_alias="PROFILE_HOST")
     port: int = Field(8082, validation_alias="PROFILE_PORT")

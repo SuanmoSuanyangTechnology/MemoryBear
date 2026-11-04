@@ -3400,3 +3400,30 @@ SET s += $summary,
     s.created_at = original_created_at
 RETURN s.id AS id
 """
+
+
+EXPLICIT_MEMORY_COUNTS = """
+UNWIND $end_user_ids AS user_id
+CALL {
+    WITH user_id
+    OPTIONAL MATCH (u:ExtractedEntity {end_user_id: user_id})
+    WHERE u.delete_at IS NULL
+      AND (u.entity_type = '用户' OR toLower(u.name) IN ['用户', '我', 'user', 'i'])
+    RETURN collect(u) AS users
+}
+CALL {
+    WITH users
+    UNWIND users AS u
+    OPTIONAL MATCH (u)--(e)--(m:MemorySummary)
+    WHERE e.delete_at IS NULL AND m.delete_at IS NULL
+    RETURN collect(DISTINCT {text: m.content, created_at: m.created_at}) AS summaries
+}
+CALL {
+    WITH user_id
+    MATCH (s:ExtractedEntity {end_user_id: user_id})
+    WHERE s.is_explicit_memory = true
+    RETURN count(s) AS semantic_count
+}
+RETURN user_id AS end_user_id, size(users) AS user_entity_count,
+       head(users).event_timeline AS event_timeline, summaries, semantic_count
+"""

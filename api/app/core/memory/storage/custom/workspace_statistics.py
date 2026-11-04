@@ -527,11 +527,10 @@ class WorkspaceStatisticsStorage:
         self,
         end_user_ids: Sequence[str],
     ) -> dict[str, int]:
-        """Aggregate episodic, explicit and emotional memories."""
+        """Aggregate episodic and emotional memories."""
         if not end_user_ids:
             return {
                 "episodic_count": 0,
-                "explicit_count": 0,
                 "emotional_count": 0,
             }
 
@@ -542,10 +541,6 @@ class WorkspaceStatisticsStorage:
 
         episodic_count = sum(
             item["episodic_count"] for item in elastic_statistics.values()
-        )
-        explicit_entity_count = sum(
-            item["explicit_entity_count"]
-            for item in elastic_statistics.values()
         )
         emotional_count = sum(
             item["emotional_count"] for item in elastic_statistics.values()
@@ -562,11 +557,9 @@ class WorkspaceStatisticsStorage:
                 missing_ids,
             )
             episodic_count += fallback["episodic_count"]
-            explicit_entity_count += fallback["explicit_entity_count"]
             emotional_count += fallback["emotional_count"]
 
         return {
             "episodic_count": episodic_count,
-            "explicit_count": episodic_count + explicit_entity_count,
             "emotional_count": emotional_count,
         }

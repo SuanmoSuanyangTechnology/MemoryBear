@@ -36,7 +36,7 @@ from app.repositories.end_user_repository import EndUserRepository
 from app.repositories.forget_log_repository import ForgetLogRepository
 from app.repositories.memory_message_repository import MemoryMessageRepository
 from app.repositories.memory_perceptual_repository import MemoryPerceptualRepository
-from app.services.memory_base_service import MIN_MEMORY_SUMMARY_COUNT
+from app.services.memory_base_service import MIN_MEMORY_SUMMARY_COUNT, count_explicit_memories
 from app.services.short_term_memo_service import count_short_term_memos_for_users
 from app.repositories.implicit_emotions_storage_repository import ImplicitEmotionsStorageRepository
 
@@ -249,6 +249,11 @@ async def get_workspace_statistics_async(
                 )
 
             async with asyncio.TaskGroup() as task_group:
+                explicit_task = task_group.create_task(
+                    count_explicit_memories(
+                        end_user_ids, connector=neo4j_client, use_sync_pg=use_sync_pg
+                    )
+                )
                 postgresql_task = task_group.create_task(
                     _get_postgresql_statistics(end_user_ids, use_sync_pg=use_sync_pg)
                 )
@@ -273,7 +278,7 @@ async def get_workspace_statistics_async(
             ]
             totals["WORKING_MEMORY"] += postgresql_statistics["working_count"]
             totals["SHORT_TERM_MEMORY"] += short_term_task.result()
-            totals["EXPLICIT_MEMORY"] += graph_statistics["explicit_count"]
+            totals["EXPLICIT_MEMORY"] += explicit_task.result()
             totals["IMPLICIT_MEMORY"] += postgresql_statistics["implicit_count"]
             totals["EMOTIONAL_MEMORY"] += graph_statistics["emotional_count"]
             totals["EPISODIC_MEMORY"] += graph_statistics["episodic_count"]

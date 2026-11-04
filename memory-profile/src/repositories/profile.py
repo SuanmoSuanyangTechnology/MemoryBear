@@ -11,7 +11,7 @@ from typing import Any
 from uuid import UUID
 
 import sqlalchemy as sa
-from sqlalchemy import ColumnElement, Select, any_, bindparam, func, select
+from sqlalchemy import ColumnElement, Select, any_, bindparam, func, select, text
 from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 
@@ -21,6 +21,8 @@ from src.infrastructure.postgres import PostgresManager
 from src.models.references import (
     Conversation,
     EndUser,
+    EndUserInfo,
+    Workspace,
     ForgetAudit,
     ImplicitEmotionsStorage,
     MemoryMessage,
@@ -81,9 +83,63 @@ class EndUserProfileRepository:
 _EXCLUDED_APP_ID = UUID("00000000-0000-0000-0000-000000000001")
 
 
+def _profile_statement(end_user_ids: list[str]):
+    return (
+        select(EndUserInfo.end_user_id, EndUserInfo.meta_data, Workspace.tenant_id)
+        .join(EndUser, EndUser.id == EndUserInfo.end_user_id)
+        .join(Workspace, Workspace.id == EndUser.workspace_id)
+        .where(EndUserInfo.end_user_id.in_([UUID(str(value)) for value in end_user_ids]))
+    )
+
+
+def _scene_ids(rows) -> list[UUID]:
+    ids = set()
+    for row in rows:
+        metadata = row.meta_data if isinstance(row.meta_data, dict) else {}
+        domains = metadata.get("domain_specific_info")
+        if not isinstance(domains, dict):
+            continue
+        for key in domains:
+            try:
+                ids.add(UUID(key))
+            except (ValueError, TypeError, AttributeError):
+                continue
+    return list(ids)
+
+
+_SCENE_QUERY = text("""
+    SELECT scene_type_id, scene_name, tenant_id
+    FROM ontology_scene_type
+    WHERE scene_type_id IN :scene_ids
+      AND tenant_id IN :tenant_ids
+""").bindparams(
+    bindparam("scene_ids", expanding=True, type_=PGUUID(as_uuid=True)),
+    bindparam("tenant_ids", expanding=True, type_=PGUUID(as_uuid=True)),
+)
+
+
+def _profile_data(rows, scenes) -> list[tuple[str, Any, dict[str, str]]]:
+    names = {}
+    for scene in scenes:
+        name = scene.scene_name
+        if not isinstance(name, str) or not name.strip():
+            continue
+        try:
+            UUID(name)
+        except ValueError:
+            names.setdefault(str(scene.tenant_id), {})[str(scene.scene_type_id)] = name
+    return [
+        (str(row.end_user_id), row.meta_data, names.get(str(row.tenant_id), {}))
+        for row in rows
+    ]
+
+
 class MemoryStatisticsRepository:
-    def __init__(self, postgres: PostgresManager) -> None:
+    def __init__(
+        self, postgres: PostgresManager, *, ontology_query_enabled: bool = False
+    ) -> None:
         self.postgres = postgres
+        self.ontology_query_enabled = ontology_query_enabled
 
     # ------------------------------------------------------------------
     # 各计数器的 SQL。单一来源：合并查询与单指标查询都从这里取语句，
@@ -279,6 +335,21 @@ class MemoryStatisticsRepository:
                 if isinstance(habits, list):
                     count += len(habits)
         return count
+
+    async def profiles_for_users(
+        self, end_user_ids: list[str]
+    ) -> list[tuple[str, Any, dict[str, str]]]:
+        async with self.postgres.session() as session:
+            rows = (await session.execute(_profile_statement(end_user_ids))).all()
+            scene_ids = _scene_ids(rows)
+            scenes = []
+            if scene_ids and self.ontology_query_enabled:
+                scenes = (await session.execute(_SCENE_QUERY, {
+                    "scene_ids": scene_ids,
+                    "tenant_ids": list({row.tenant_id for row in rows}),
+                })).all()
+        return _profile_data(rows, scenes)
+
 
 
 class WorkspaceProfileRepository:

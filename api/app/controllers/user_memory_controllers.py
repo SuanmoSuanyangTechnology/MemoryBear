@@ -4,6 +4,8 @@
 分析类（analytics）接口已迁移至 memory_analytics_controller；
 终端用户信息接口已迁移至 end_user_controller。
 """
+from uuid import UUID
+
 from fastapi import APIRouter, Depends, Header, Query
 
 from app.core.error_codes import BizCode
@@ -89,7 +91,7 @@ async def memory_space_entity_event_timeline(
 
 @router.get("/memory_space/entity_timeline", response_model=ApiResponse)
 async def memory_space_entity_timeline(
-        id: str,
+        id: str | None = Query(None, description="实体 elementId，与 end_user_id 二选一"),
         type: str = Query("all", description="来源筛选：all/key_node/statement/memory_summary"),
         sort: str = Query("time_desc", description="排序方式：time_asc/time_desc/occurred_asc/occurred_desc/recorded_asc/recorded_desc"),
         from_ts: int = Query(None, description="时间范围起始（UTC 毫秒时间戳），由前端按用户时区转换后传入"),
@@ -97,6 +99,7 @@ async def memory_space_entity_timeline(
         page: int = Query(1, ge=1, description="页码，从1开始"),
         pagesize: int = Query(10, ge=1, le=100, description="每页数量"),
         current_user: CurrentUserSnapshot = Depends(get_current_user_async),
+        end_user_id: str | None = Query(None, description="终端用户 UUID 字符串，与 id 二选一"),
 ):
     """ExtractedEntity 合并记忆时间线（关键节点 / 来源陈述 / 长期沉淀），分页 + 按来源筛选 + 排序 + 日期过滤。
 
@@ -104,7 +107,8 @@ async def memory_space_entity_timeline(
     Statement / MemorySummary 节点仍走旧接口 timeline_memories。
 
     Query 参数:
-        id: ExtractedEntity 节点的 Neo4j elementId
+        id: Optional ExtractedEntity elementId, mutually exclusive with end_user_id.
+        end_user_id: Optional UUID string identifying the user's own entity.
         type: 来源筛选，all/key_node/statement/memory_summary，默认 all
         sort: 排序方式，默认 time_desc（时间倒序）
               time_asc/time_desc: 全部按 created_at 排序（key_node=发生时间，statement/memory_summary=记录时间）
@@ -116,7 +120,18 @@ async def memory_space_entity_timeline(
         pagesize: 每页条数（1~100）
 
     total_count 与 type_stats 始终基于全量统计，不受筛选影响。
+    filtered_counts counts key nodes and summaries after date filtering, before type filtering and pagination.
     """
+    if (id is None) == (end_user_id is None):
+        return fail(BizCode.INVALID_PARAMETER, "id 和 end_user_id 必须且只能提供一个")
+    if id is not None and not id.strip():
+        return fail(BizCode.INVALID_PARAMETER, "id 不能为空")
+    if end_user_id is not None:
+        try:
+            end_user_id = str(UUID(end_user_id))
+        except ValueError:
+            return fail(BizCode.INVALID_USER_ID, "无效的终端用户ID格式", "invalid uuid")
+
     allowed = {"all", "key_node", "statement", "memory_summary"}
     if type not in allowed:
         return fail(BizCode.INVALID_PARAMETER, "type 取值非法", f"type={type}")
@@ -130,6 +145,7 @@ async def memory_space_entity_timeline(
 
     memory_entity = MemoryEntityService(id, "ExtractedEntity")
     result = await memory_entity.get_unified_timeline(
+        end_user_id=end_user_id,
         source_type=type,
         page=page,
         pagesize=pagesize,
