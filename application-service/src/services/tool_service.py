@@ -1369,6 +1369,23 @@ class ToolService:
             tenant_id=str(config.tenant_id) if config.tenant_id else None,
             config_data=config_data,
             is_active=config.is_active,
+            # Placeholder rows are the residue of a cross-tenant bundle landing
+            # (§7.5.2): visible and referencable, but they carry no type-specific
+            # config, so the console must show them as "needs rebuilding" rather
+            # than as a working tool.
+            is_placeholder=bool(config_data.get("placeholder")),
+            # 来源（§11.2）：只有本地副本记来源，市场状态按需求回填
+            origin=str(getattr(config, "origin", None) or "local"),
+            external=(
+                {
+                    "source": getattr(config, "external_source", None) or "community_market",
+                    "resource_id": getattr(config, "external_resource_id", None),
+                    "version": getattr(config, "external_version", None),
+                    "status": None,
+                }
+                if str(getattr(config, "origin", None) or "local") == "external"
+                else None
+            ),
             created_at=config.created_at
         )
 

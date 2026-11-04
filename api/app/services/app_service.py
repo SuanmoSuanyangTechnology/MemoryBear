@@ -43,6 +43,10 @@ from app.repositories.workflow_repository import WorkflowConfigRepository
 from app.schemas import app_schema
 from app.schemas.workflow_schema import WorkflowConfigUpdate
 from app.services.agent_config_converter import AgentConfigConverter
+from app.services.asset_release_resolver import (
+    AssetReleaseResolver,
+    AsyncAssetReleaseResolver,
+)
 from app.services.model_impact_service import config_ref_ids
 from app.services.model_service import ModelApiKeyService, ModelConfigService
 from app.services.workflow_service import WorkflowService
@@ -100,15 +104,10 @@ class AppService:
     def _check_app_accessible(self, app: App, workspace_id: Optional[uuid.UUID]) -> bool:
         """检查应用是否可访问（包括共享应用）
 
-        Args:
-            app: 应用对象
-            workspace_id: 工作空间ID
-
-        Returns:
-            bool: 是否可访问
+        资源中心取代了空间到空间的共享：外部空间可访问 = 存在 active 的
+        `app_asset_installations`。尚未回填的历史 `app_shares` 由
+        `AssetReleaseResolver` 内部兼容（§11.1 M3）。
         """
-        from app.models import AppShare
-
         if workspace_id is None:
             return True
 
@@ -116,15 +115,10 @@ class AppService:
         if app.workspace_id == workspace_id:
             return True
 
-        # 2. 检查是否是共享给本工作空间的应用
-        stmt = select(AppShare).where(
-            AppShare.source_app_id == app.id,
-            AppShare.target_workspace_id == workspace_id,
-            AppShare.is_active.is_(True)
+        # 2. 是否已拉取到本空间（资源中心安装，兼容历史共享行）
+        return AssetReleaseResolver(self.db).can_access(
+            app_id=app.id, workspace_id=workspace_id
         )
-        share = self.db.scalars(stmt).first()
-
-        return share is not None
 
     def  _validate_app_accessible(self, app: App, workspace_id: Optional[uuid.UUID]) -> None:
         """验证应用是否可访问（包括共享应用，用于只读操作）
@@ -757,20 +751,14 @@ class AppService:
         return app
 
     async def _check_app_accessible_async(self, app: App, workspace_id: Optional[uuid.UUID]) -> bool:
-        from app.models import AppShare
-
         if workspace_id is None:
             return True
         if app.workspace_id == workspace_id:
             return True
 
-        stmt = select(AppShare).where(
-            AppShare.source_app_id == app.id,
-            AppShare.target_workspace_id == workspace_id,
-            AppShare.is_active.is_(True)
+        return await AsyncAssetReleaseResolver(self.db).can_access(
+            app_id=app.id, workspace_id=workspace_id
         )
-        share = await self.db.scalar(stmt)
-        return share is not None
 
     async def _validate_app_accessible_async(self, app: App, workspace_id: Optional[uuid.UUID]) -> None:
         if not await self._check_app_accessible_async(app, workspace_id):
@@ -1795,11 +1783,12 @@ class AppService:
 
         # 共享应用：返回最新发布版本的配置快照，而非草稿
         if workspace_id and app.workspace_id != workspace_id:
-            if not app.current_release_id:
-                raise BusinessException("该应用尚未发布，无法使用", BizCode.AGENT_CONFIG_MISSING)
-            release = self.db.get(AppRelease, app.current_release_id)
+            # 钉住版本来自本空间拉取的那条资源中心条目，不是源应用的当前版本（§5.3）
+            release = AssetReleaseResolver(self.db).resolve_release(
+                app_id=app.id, workspace_id=workspace_id
+            )
             if not release:
-                raise BusinessException("发布版本不存在", BizCode.AGENT_CONFIG_MISSING)
+                raise BusinessException("该应用尚未发布，无法使用", BizCode.AGENT_CONFIG_MISSING)
             return self._agent_config_from_release(release)
 
         stmt = select(AgentConfig).where(
@@ -1928,11 +1917,12 @@ class AppService:
 
         # 共享应用：返回最新发布版本的配置快照，而非草稿
         if workspace_id and app.workspace_id != workspace_id:
-            if not app.current_release_id:
-                raise BusinessException("该应用尚未发布，无法使用", BizCode.CONFIG_MISSING)
-            release = self.db.get(AppRelease, app.current_release_id)
+            # 与 Agent 配置读取同一口径：跟随本空间的安装记录（§5.3）
+            release = AssetReleaseResolver(self.db).resolve_release(
+                app_id=app.id, workspace_id=workspace_id
+            )
             if not release:
-                raise BusinessException("发布版本不存在", BizCode.CONFIG_MISSING)
+                raise BusinessException("该应用尚未发布，无法使用", BizCode.CONFIG_MISSING)
             return self._workflow_config_from_release(release)
 
         repo = WorkflowConfigRepository(self.db)
@@ -2319,6 +2309,8 @@ class AppService:
             release_notes: Optional[str] = None,
             name: Optional[str] = None,
             icon: Optional[str] = None,
+            usage_examples: Optional[List[str]] = None,
+            categories: Optional[List[str]] = None,
     ) -> AppRelease:
         """发布应用（创建不可变快照）
 
@@ -2471,6 +2463,11 @@ class AppService:
             type=app.type,
             visibility=app.visibility,
             config=config,
+            usage_examples=[
+                {"order": index, "content": text}
+                for index, text in enumerate(usage_examples or [], start=1)
+            ],
+            categories=list(categories or []),
             default_model_config_id=default_model_config_id,
             published_by=publisher_id,
             published_at=now,
@@ -2520,10 +2517,13 @@ class AppService:
         # 只读操作，允许访问共享应用
         self._validate_app_accessible(app, workspace_id)
 
-        if not app.current_release_id:
+        # “当前版本”对消费方 = 条目钉住的版本，不是源应用的 current_release_id
+        resolved = AssetReleaseResolver(self.db).resolve(
+            app_id=app.id, workspace_id=workspace_id
+        )
+        if not resolved.release_id:
             return None
-
-        return self.db.get(AppRelease, app.current_release_id)
+        return self.db.get(AppRelease, resolved.release_id)
 
     async def get_current_release_async(
             self,
@@ -2532,9 +2532,13 @@ class AppService:
             workspace_id: Optional[uuid.UUID] = None
     ) -> Optional[AppRelease]:
         app = await self.get_app_async(app_id, workspace_id)
-        if not app.current_release_id:
+        # 与同步版同一口径：消费方读钉住版本（§5.3）
+        resolved = await AsyncAssetReleaseResolver(self.db).resolve(
+            app_id=app.id, workspace_id=workspace_id
+        )
+        if not resolved.release_id:
             return None
-        return await self.db.get(AppRelease, app.current_release_id)
+        return await self.db.get(AppRelease, resolved.release_id)
 
     def list_releases(
             self,
@@ -3094,12 +3098,14 @@ def get_workflow_config(db: Session, *, app_id: uuid.UUID, workspace_id: uuid.UU
 
 def publish(db: Session, *, app_id: uuid.UUID, publisher_id: uuid.UUID, workspace_id: uuid.UUID | None = None,
             version_name: str, release_notes: Optional[str] = None, name: Optional[str] = None,
-            icon: Optional[str] = None) -> AppRelease:
+            icon: Optional[str] = None, usage_examples: Optional[List[str]] = None,
+            categories: Optional[List[str]] = None) -> AppRelease:
     """发布应用（向后兼容接口）"""
     service = AppService(db)
     return service.publish(app_id=app_id, publisher_id=publisher_id, version_name=version_name,
                            workspace_id=workspace_id, release_notes=release_notes,
-                           name=name, icon=icon)
+                           name=name, icon=icon, usage_examples=usage_examples,
+                           categories=categories)
 
 
 def get_current_release(

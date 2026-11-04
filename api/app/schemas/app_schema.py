@@ -578,12 +578,73 @@ class AgentConfig(BaseModel):
         return to_timestamp_ms(dt)
 
 
+# ---------- 发布弹窗：使用示例 / 功能分类 ----------
+# 一期固定 8 项，不做运营自定义，也不建字典表（方案 §4.5）。
+#
+# 每项四元组 = (code, 中文展示名, 英文展示名, 排序)。
+# `code` 是**稳定英文短码**，不是中文名：它要当标识用 —— 存进
+# `app_releases.categories`、作为 `market_categories.code` 去 join、做列表筛选值。
+# 市场侧对该列有校验 `^[a-z0-9][a-z0-9-]{0,31}$`（接口文档.md §2 分类表），
+# 中文 code 会被直接拒绝；中文名是展示文案、可能改措辞，不能承担标识职责。
+# 投稿时把 code 原样作为 `display.categories` 传给市场，不做 name→code 映射。
+# 字段名与市场侧 `/api/market/categories` 的 `items[]` 对齐（code/name/name_en/sort），
+# 别在资源中心另造一套 value/label。
+APP_CATEGORY_OPTIONS: tuple[tuple[str, str, str, int], ...] = (
+    ("office", "办公提效", "Office Productivity", 10),
+    ("content", "内容创作", "Content Creation", 20),
+    ("knowledge", "知识检索", "Knowledge Retrieval", 30),
+    ("sales", "销售支持", "Sales Support", 40),
+    ("analytics", "数据分析", "Data Analysis", 50),
+    ("meeting", "会议协作", "Meeting Collaboration", 60),
+    ("research", "调研分析", "Research & Analysis", 70),
+    ("engineering", "研发编程", "Engineering & Coding", 80),
+)
+
+APP_CATEGORY_VALUES: tuple[str, ...] = tuple(
+    code for code, _name, _name_en, _sort in APP_CATEGORY_OPTIONS
+)
+
+
+def app_category_options() -> list[Dict[str, Any]]:
+    """分类字典项（每次返回新对象，调用方改不坏模块级常量）。
+
+    字段与市场侧同名字段一一对应，只少了 `id` / `resource_type` / `enabled` /
+    `count` —— 那四个是市场库那一行的属性，资源中心这份是代码里的固定枚举，
+    没有行可指、也没有分 tab 统计。
+    """
+
+    return [
+        {"code": code, "name": name, "name_en": name_en, "sort": sort}
+        for code, name, name_en, sort in APP_CATEGORY_OPTIONS
+    ]
+
+
+CATEGORIES_MAX_ITEMS = 5
+USAGE_EXAMPLES_MAX_ITEMS = 5
+USAGE_EXAMPLE_MAX_CHARS = 500
+
+
 class PublishRequest(BaseModel):
     """发布应用请求"""
     version_name: str = Field(..., description="版本名称，可自定义")
     release_notes: str = Field(..., description="版本说明")
     name: str = Field(..., description="公开分享标题")
     icon: Optional[str] = Field(None, description="公开分享图标，未传则使用应用图标")
+    usage_examples: List[str] = Field(
+        default_factory=list,
+        description=(
+            "使用示例，随版本冻结；0~5 条、每条 ≤500 字。"
+            "前端强制 3~5 条，后端宽松以兼容旧前端与开放 API；"
+            "提交社区市场时才要求 ≥3 条"
+        ),
+    )
+    categories: List[str] = Field(
+        default_factory=list,
+        description=(
+            "功能分类，随版本冻结；取值必须是固定 8 项枚举的 code（英文短码，"
+            "如 office），0~5 项。提交社区市场时才要求 ≥1 项"
+        ),
+    )
 
     @field_validator("version_name")
     @classmethod
@@ -593,6 +654,36 @@ class PublishRequest(BaseModel):
         if not normalized:
             raise ValueError("版本名称不能为空")
         return normalized
+
+    @field_validator("usage_examples")
+    @classmethod
+    def _validate_usage_examples(cls, value: Optional[List[str]]) -> List[str]:
+        """宽松档：≤5 条、每条 ≤500 字；去首尾空白，空串留给市场门禁拦截。"""
+        items = [str(item).strip() for item in (value or [])]
+        if len(items) > USAGE_EXAMPLES_MAX_ITEMS:
+            raise ValueError(f"使用示例最多 {USAGE_EXAMPLES_MAX_ITEMS} 条")
+        too_long = [
+            index for index, item in enumerate(items) if len(item) > USAGE_EXAMPLE_MAX_CHARS
+        ]
+        if too_long:
+            raise ValueError(
+                f"第 {too_long[0] + 1} 条使用示例超过 {USAGE_EXAMPLE_MAX_CHARS} 字"
+            )
+        return items
+
+    @field_validator("categories")
+    @classmethod
+    def _validate_categories(cls, value: Optional[List[str]]) -> List[str]:
+        """必须是固定枚举内的 code（英文短码），0~5 项且不重复。"""
+        items = [str(item).strip() for item in (value or [])]
+        if len(items) > CATEGORIES_MAX_ITEMS:
+            raise ValueError(f"功能分类最多 {CATEGORIES_MAX_ITEMS} 项")
+        invalid = [item for item in items if item not in APP_CATEGORY_VALUES]
+        if invalid:
+            raise ValueError(f"功能分类不在枚举内：{invalid[0]}")
+        if len(set(items)) != len(items):
+            raise ValueError("功能分类不能重复")
+        return items
 
 
 class AppDisplayInfo(BaseModel):
@@ -616,6 +707,8 @@ class AppRelease(BaseModel):
     type: str
     visibility: str
     config: Dict[str, Any] = {}
+    usage_examples: List[str] = []
+    categories: List[str] = []
     default_model_config_id: Optional[uuid.UUID] = None
     published_by: uuid.UUID
     publisher_name: str
@@ -635,6 +728,28 @@ class AppRelease(BaseModel):
             except json.JSONDecodeError:
                 return {}
         return v if v is not None else {}
+
+    @field_validator("usage_examples", mode="before")
+    @classmethod
+    def parse_usage_examples(cls, v):
+        """库里存 [{'order','content'}]，对外展开为纯字符串数组（方案 §4.3）。"""
+        if not v:
+            return []
+        expanded = []
+        for item in v:
+            if isinstance(item, dict):
+                text = item.get("content")
+                if isinstance(text, str) and text.strip():
+                    expanded.append(text.strip())
+            elif isinstance(item, str) and item.strip():
+                expanded.append(item.strip())
+        return expanded
+
+    @field_validator("categories", mode="before")
+    @classmethod
+    def parse_categories(cls, v):
+        """历史行可能为 NULL，统一降级为空数组。"""
+        return list(v) if v else []
 
     @field_serializer("created_at", when_used="json")
     def _serialize_created_at(self, dt: datetime.datetime):

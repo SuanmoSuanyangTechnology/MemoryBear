@@ -113,6 +113,20 @@ class ToolConfig(Base):
     version = Column(String(50), default="1.0.0")
     tags = Column(JSON, default=list)  # Tag list
 
+    # Where this row came from (§11.2). Only the local copy's provenance lives
+    # here; publication state stays authoritative in market-service.
+    origin = Column(
+        String(16), nullable=False, default="local", server_default="local",
+        comment="local（本租户创建）| external（从市场安装）",
+    )
+    external_source = Column(String(32), nullable=True, comment="本期固定 community_market")
+    external_resource_id = Column(
+        String(64), nullable=True, index=True, comment="market_resources.id",
+    )
+    external_version = Column(
+        String(64), nullable=True, comment="安装时的市场版本，不随市场新版本变化",
+    )
+
     # Soft delete flag
     is_active = Column(Boolean, default=True, server_default='true', nullable=False, index=True, comment="是否可用，False表示已删除")
 

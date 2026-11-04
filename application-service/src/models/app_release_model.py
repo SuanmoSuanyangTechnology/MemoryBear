@@ -33,6 +33,19 @@ class AppRelease(Base):
     # Type-specific config snapshot (stored uniformly for agent/workflow, etc.)
     config = Column(JSON, default=dict)
 
+    # Display fields frozen with the release: the resource center and the
+    # community market both read them off the pinned release, so every entry
+    # shows the same content for a given version.
+    usage_examples = Column(
+        JSON,
+        default=list,
+        comment="使用示例：[{'order': 1, 'content': '...'}]，0~5 条，每条 ≤500 字",
+    )
+    categories = Column(
+        JSON, default=list,
+        comment="功能分类 code 数组（英文短码，如 office），0~5 项，随 release 冻结",
+    )
+
     # Indexed field for easier queries (e.g. the agent's default model)
     default_model_config_id = Column(UUID(as_uuid=True), ForeignKey("model_configs.id"), nullable=True, index=True)
 

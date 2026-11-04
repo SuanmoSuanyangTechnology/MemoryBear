@@ -33,6 +33,16 @@ class AppRelease(Base):
     # 类型特定配置快照（针对 agent/workflow 等统一存放）
     config = Column(JSON, default=dict)
 
+    # 展示字段随版本冻结：资源中心与社区市场都读所钉住 release 上的这两列，
+    # 保证同一版本在任何入口看到的文案一致（方案 §4.3 / §4.5）
+    usage_examples = Column(
+        JSON, default=list, comment="使用示例：[{'order': 1, 'content': '...'}]，0~5 条，每条 ≤500 字"
+    )
+    categories = Column(
+        JSON, default=list,
+        comment="功能分类 code 数组（英文短码，如 office），0~5 项，随 release 冻结",
+    )
+
     # 便于查询的索引字段（例如 agent 的默认模型）
     default_model_config_id = Column(UUID(as_uuid=True), ForeignKey("model_configs.id"), nullable=True, index=True)
 

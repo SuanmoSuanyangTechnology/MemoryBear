@@ -77,6 +77,13 @@ class BizCode(IntEnum):
     INVALID_CONVERSATION = 6011
     CONFIG_MISSING = 6012
     APP_NOT_PUBLISHED = 6013
+    # community market / external catalog (6020~6029 reserved for this feature)
+    FEATURE_NOT_AVAILABLE = 6020
+    MARKET_UNAVAILABLE = 6021
+    MARKET_NOT_FOUND = 6022
+    MARKET_CONFLICT = 6023
+    BUNDLE_INCOMPLETE = 6024
+    REVIEW_STATE_CONFLICT = 6028
     # model (7xxx, kept for host-enum parity; consumed by the model domain)
     MODEL_CONFIG_INVALID = 7001
     API_KEY_MISSING = 7002
@@ -204,11 +211,17 @@ class BusinessException(Exception):
         code: BizCode | int | None = None,
         context: dict[str, Any] | None = None,
         cause: Exception | None = None,
+        data: dict[str, Any] | None = None,
     ):
         self.message = message
         self.code = code if code is not None else BizCode.BAD_REQUEST
         self.context = dict(context) if context else {}
         self.cause = cause
+        # Payload for the response envelope's `data` field. Used when one code
+        # covers several causes and the caller branches on `data.reason`
+        # (INCOMPLETE_BUNDLE / USAGE_EXAMPLES_INSUFFICIENT / ...), so the error
+        # code segment never has to grow.
+        self.data = dict(data) if data else {}
         super().__init__(self.message)
 
     def __str__(self) -> str:
