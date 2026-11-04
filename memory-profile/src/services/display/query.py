@@ -117,15 +117,7 @@ class MemoryDisplayService:
             )
         active_days = sum(item["total_activities"] > 0 for item in daily)
         total = sum(totals.values())
-        average = (
-            float(
-                (Decimal(total) / Decimal(active_days)).quantize(
-                    Decimal("0.01"), rounding=ROUND_HALF_UP
-                )
-            )
-            if active_days
-            else 0.0
-        )
+        average = total // active_days if active_days else 0
         return {
             "total_activities": total,
             "active_days": active_days,

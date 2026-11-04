@@ -73,7 +73,7 @@ class CompositionSummary(BaseModel):
 class ActivityStatisticsData(BaseModel):
     total_activities: int
     active_days: int
-    daily_average: float
+    daily_average: int
     peak_daily_activities: int
     involved_users: int
     category_totals: dict[str, int]
