@@ -372,6 +372,31 @@ class AppServiceSettings(BaseSettings):
     mem_knowledge_health_timeout_seconds: float = Field(
         default=3.0, gt=0, validation_alias="MEM_KNOWLEDGE_HEALTH_TIMEOUT_SECONDS"
     )
+    # East-west retrieval protocol: http keeps /internal/v1/chunks/retrieval,
+    # grpc uses KnowledgeRetrievalService with the same JSON body semantics.
+    # Route forwarding, detached calls and readiness stay on the HTTP base URL.
+    mem_knowledge_protocol: Literal["http", "grpc"] = Field(
+        default="http", validation_alias="MEM_KNOWLEDGE_PROTOCOL"
+    )
+    mem_knowledge_grpc_target: str = Field(
+        # One headless Service per workload (`clusterIP: None`) exposes both
+        # 8080/http and 9090/grpc; round_robin then resolves per-Pod IPs under
+        # the unchanged service name.
+        default="dns:///mem-knowledge:9090",
+        validation_alias="MEM_KNOWLEDGE_GRPC_TARGET",
+    )
+    mem_knowledge_grpc_timeout_seconds: float = Field(
+        default=120.0,
+        gt=0,
+        validation_alias="MEM_KNOWLEDGE_GRPC_TIMEOUT_SECONDS",
+    )
+    # Deadline margin kept for the response trip and orchestration after the
+    # knowledge call returns; must stay below the call budget.
+    mem_knowledge_grpc_margin_seconds: float = Field(
+        default=5.0,
+        gt=0,
+        validation_alias="MEM_KNOWLEDGE_GRPC_MARGIN_SECONDS",
+    )
     model_service_connect_timeout_seconds: float = Field(
         default=5.0, gt=0, validation_alias="MODEL_SERVICE_CONNECT_TIMEOUT_SECONDS"
     )
@@ -623,6 +648,26 @@ class AppServiceSettings(BaseSettings):
             raise ValueError(
                 "MODEL_SERVICE_INVOKE_GRPC_MARGIN_SECONDS must be smaller than "
                 "MODEL_SERVICE_INVOKE_MEDIA_CALL_BUDGET_SECONDS"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def check_knowledge_grpc_settings(self) -> AppServiceSettings:
+        """gRPC retrieval needs a target and a margin that cannot starve the call."""
+
+        if self.mem_knowledge_protocol != "grpc":
+            return self
+        if not self.mem_knowledge_grpc_target.strip():
+            raise ValueError(
+                "MEM_KNOWLEDGE_GRPC_TARGET must be set when MEM_KNOWLEDGE_PROTOCOL=grpc"
+            )
+        if (
+            self.mem_knowledge_grpc_margin_seconds
+            >= self.mem_knowledge_grpc_timeout_seconds
+        ):
+            raise ValueError(
+                "MEM_KNOWLEDGE_GRPC_MARGIN_SECONDS must be smaller than "
+                "MEM_KNOWLEDGE_GRPC_TIMEOUT_SECONDS"
             )
         return self
 

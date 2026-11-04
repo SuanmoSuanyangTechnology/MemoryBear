@@ -32,6 +32,12 @@ from .errors import (
     KnowledgeUnavailableError,
 )
 from .transport import KnowledgeHttpTransport
+from .wire import (
+    parse_envelope,
+    retrieval_policy_from_data,
+    retrieval_result_from_data,
+    retrieval_wire_payload,
+)
 from ...config import current_settings
 
 logger = logging.getLogger(__name__)
@@ -39,31 +45,6 @@ _HTTP_RETRIEVAL_REQUEST_SCHEMAS = {
     "/api/chunks/retrieval": ApiChunkRetrieve,
     "/v1/chunks/retrieval": V1ChunkRetrieve,
 }
-_REQUEST_RERANK_WIRE_FIELDS = ("rerank_id", "rerank_mode", "rerank_weights")
-_KNOWLEDGE_BASE_RERANK_WIRE_FIELDS = ("rerank_mode", "rerank_weights")
-
-
-def _retrieval_wire_payload(
-    request: KnowledgeRetrievalRequest,
-    context: KnowledgeCallContext,
-) -> dict[str, Any]:
-    normalized = request.model_copy(update={"source": context.source})
-    payload = normalized.model_dump(mode="json")
-    for field_name in _REQUEST_RERANK_WIRE_FIELDS:
-        if getattr(normalized, field_name) is None:
-            payload.pop(field_name, None)
-    knowledge_bases = []
-    for config in normalized.knowledge_bases:
-        config_payload = config.model_dump(
-            mode="json",
-            include=config.model_fields_set | {"kb_id"},
-        )
-        for field_name in _KNOWLEDGE_BASE_RERANK_WIRE_FIELDS:
-            if getattr(config, field_name) is None:
-                config_payload.pop(field_name, None)
-        knowledge_bases.append(config_payload)
-    payload["knowledge_bases"] = knowledge_bases
-    return payload
 
 
 class KnowledgeServiceClient:
@@ -244,17 +225,8 @@ class KnowledgeServiceClient:
             envelope = json.loads(raw)
             if not isinstance(envelope, dict) or envelope.get("code") != 0:
                 raise KnowledgeProtocolError("Knowledge retrieval policy request failed")
-            data = envelope.get("data")
-            if not isinstance(data, dict):
-                raise KnowledgeProtocolError("Knowledge retrieval policy data is incompatible")
-            policy: dict[str, frozenset[str]] = {}
-            for retrieve_type, modalities in data.items():
-                if isinstance(retrieve_type, str) and isinstance(modalities, list):
-                    policy[retrieve_type] = frozenset(
-                        modality for modality in modalities if isinstance(modality, str)
-                    )
-            return policy
-        except (TypeError, ValueError, json.JSONDecodeError) as exc:
+            return retrieval_policy_from_data(envelope.get("data"))
+        except (TypeError, ValueError) as exc:
             raise KnowledgeProtocolError("Knowledge retrieval policy is invalid") from exc
         finally:
             await upstream.aclose()
@@ -266,7 +238,7 @@ class KnowledgeServiceClient:
     ) -> KnowledgeRetrievalResult:
         started_at = time.perf_counter()
         payload = json.dumps(
-            _retrieval_wire_payload(request, context),
+            retrieval_wire_payload(request, context),
             ensure_ascii=False,
             separators=(",", ":"),
         ).encode()
@@ -296,34 +268,13 @@ class KnowledgeServiceClient:
                     "Knowledge service is unavailable"
                 ) from exc
             trace_id = upstream.headers.get("X-Trace-Id", context.trace_id)
-            try:
-                envelope = json.loads(raw)
-            except (TypeError, ValueError) as exc:
-                raise KnowledgeProtocolError(
-                    "Knowledge service returned invalid JSON"
-                ) from exc
-            if not isinstance(envelope, dict):
-                raise KnowledgeProtocolError("Knowledge service envelope must be an object")
-            code = envelope.get("code")
-            if not isinstance(code, int):
-                raise KnowledgeProtocolError("Knowledge service envelope code must be an integer")
-            if not 200 <= upstream.status_code < 300 or code != 0:
-                message = str(envelope.get("error") or envelope.get("msg") or "Knowledge error")
-                raise KnowledgeServiceError(upstream.status_code, code, message, trace_id)
-            data = envelope.get("data")
-            try:
-                if isinstance(data, list):
-                    result = KnowledgeRetrievalResult(chunks=data)
-                elif isinstance(data, dict):
-                    result = KnowledgeRetrievalResult.model_validate(data)
-                else:
-                    raise KnowledgeProtocolError(
-                        "Knowledge retrieval data must be a list or object"
-                    )
-            except ValueError as exc:
-                raise KnowledgeProtocolError(
-                    "Knowledge retrieval data is incompatible"
-                ) from exc
+            envelope = parse_envelope(
+                raw,
+                status_code=upstream.status_code,
+                trace_id=trace_id,
+            )
+            code = envelope["code"]
+            result = retrieval_result_from_data(envelope.get("data"))
             logger.info(
                 "knowledge_retrieval_completed status=%s code=%s source=%s "
                 "bytes=%s chunks=%s entities=%s relationships=%s header_ms=%.2f "
