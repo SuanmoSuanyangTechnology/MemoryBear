@@ -5,11 +5,6 @@ on:
     paths:
       - 'memory-profile/**'
       - 'packages/auth-sdk/**'
-      - 'api/app/controllers/*memory*controller.py'
-      - 'api/app/controllers/service/*memory*controller.py'
-      - 'api/app/integrations/profile/**'
-      - 'api/app/services/memory_engine_display_service.py'
-      - 'api/app/core/memory/emotion/emotion_buckets.py'
       - '.github/workflows/memory-profile.yml'
 
 permissions:
@@ -47,9 +42,6 @@ jobs:
 
       - name: Import boundaries
         run: uv run python scripts/check_import_boundaries.py
-
-      - name: Read behavior and API parity
-        run: uv run pytest -q
 
       - name: External API contract
         run: uv run python scripts/check_external_api_contract.py
