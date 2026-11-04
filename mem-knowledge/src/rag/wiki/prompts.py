@@ -181,15 +181,17 @@ Do not repeat the top-level page title inside the body. No IDs, versions, state 
 Return summary, content_markdown, used_fact_refs and source_refs. used_fact_refs includes every
 original fact represented, including all facts combined as duplicates; do not silently drop facts.
 Return full content, never a patch.""",
-    "wiki_evidence_compact_v1": """Compress items within the token budget without losing evidence.
-Merge repetitions; preserve every independent fact, condition, number, negation and conflict.
+    "wiki_evidence_compact_v1": """Summarize items within budget, measured in tokens.
+Prioritize information relevant to target and merge repetitions. Partial coverage is allowed.
+Preserve conditions, numbers, negation and conflicts in the information you retain.
 Each input item has one batch-local I handle in source_item_refs. Return items with text,
 qualifiers, source_item_refs (the I handles represented) and source_refs (evidence handles).
-Merge source_item_refs when combining items. Retain every supporting source_refs handle
-exactly as supplied; never use I handles as source_refs or evidence handles as source_item_refs.
-Return covered_item_refs and omitted_item_refs partitioning all supplied I handles.
-If necessary information cannot fit, list omitted IDs honestly. Never claim coverage of dropped
-information. Return {"items": [...], "covered_item_refs": [...], "omitted_item_refs": [...]}.
+Merge source_item_refs when combining items. Each returned item must name at least one supplied
+I handle and one supporting evidence handle. Never invent handles or cite another item's sources.
+The application restores supporting source_refs from the input items you identify.
+Return covered_item_refs for items actually represented and omitted_item_refs for omitted items.
+Never claim coverage of dropped information. Return at least one nonempty item.
+Return {"items": [...], "covered_item_refs": [...], "omitted_item_refs": [...]}.
 Do not create Wiki pages.""",
 }
 
