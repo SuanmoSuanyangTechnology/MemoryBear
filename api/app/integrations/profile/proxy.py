@@ -224,6 +224,7 @@ def memory_profile_proxy(
                     source=caller_source,
                     trace_id=trace_id,
                     language_type=language_type,
+                    timezone=request.headers.get("X-Timezone"),
                     query=query,
                     payload=payload,
                     raw=True,

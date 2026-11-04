@@ -7,7 +7,7 @@
 import uuid
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Header, Query
+from fastapi import APIRouter, Depends, Header, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.error_codes import BizCode
@@ -17,6 +17,7 @@ from app.core.response_utils import fail, success
 from app.core.utils.datetime_utils import resolve_iana_timezone
 from app.db import get_async_db
 from app.dependencies import CurrentUserSnapshot, get_current_user_async
+from app.integrations.profile.proxy import memory_profile_proxy
 from app.schemas.response_schema import ApiResponse, PageData, PageMeta
 from app.services.memory_display_record_service import MemoryDisplayRecordService
 from app.services.memory_engine_display_service import MemoryEngineDisplayService
@@ -43,6 +44,29 @@ def _time_window_error(start_time: Optional[int], end_time: Optional[int]):
             f"start={start_time}, end={end_time}",
         )
     return None
+
+
+@router.get("/activity-statistics", response_model=ApiResponse)
+@memory_profile_proxy(query_fields=("year",))
+async def get_activity_statistics(
+    year: str | None = Query(None),
+    timezone: str | None = Header(None, alias="X-Timezone"),
+    current_user: CurrentUserSnapshot = Depends(get_current_user_async),
+    request: Request = None,
+) -> dict:
+    return fail(BizCode.SERVICE_UNAVAILABLE, "记忆画像服务暂不可用")
+
+
+@router.get("/activity-composition", response_model=ApiResponse)
+@memory_profile_proxy(query_fields=("year", "month"))
+async def get_activity_composition(
+    year: str | None = Query(None),
+    month: str | None = Query(None),
+    timezone: str | None = Header(None, alias="X-Timezone"),
+    current_user: CurrentUserSnapshot = Depends(get_current_user_async),
+    request: Request = None,
+) -> dict:
+    return fail(BizCode.SERVICE_UNAVAILABLE, "记忆画像服务暂不可用")
 
 
 @router.get("/all", response_model=ApiResponse)

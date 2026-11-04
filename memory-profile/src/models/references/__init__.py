@@ -5,6 +5,7 @@ never used as a migration metadata target.
 """
 
 from src.models.references.end_user_model import EndUser, EndUserMerge
+from src.models.references.memory_display_model import MemoryDisplayRecord, MemoryEngineDisplayEvent
 from src.models.references.memory_generation_model import (
     EndUserInfo,
     MemoryConfigRow,
@@ -26,6 +27,8 @@ __all__ = [
     "EndUser",
     "EndUserInfo",
     "MemoryConfigRow",
+    "MemoryDisplayRecord",
+    "MemoryEngineDisplayEvent",
     "ModelConfig",
     "WorkspaceDefaultModelPreset",
     "EndUserMerge",
