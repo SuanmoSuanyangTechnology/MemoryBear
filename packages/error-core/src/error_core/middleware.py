@@ -34,7 +34,7 @@ class LanguageContextMiddleware(BaseHTTPMiddleware):
         request.state.language = language
         set_current_locale(language)
         response = await call_next(request)
-        response.headers["Content-Language"] = language
+        response.headers.setdefault("Content-Language", language)
         return response
 
 
