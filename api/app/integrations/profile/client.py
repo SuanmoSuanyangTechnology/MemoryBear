@@ -100,6 +100,7 @@ class MemoryProfileServiceClient:
         source: MemoryProfileAuthSource,
         trace_id: str,
         language_type: str | None = None,
+        timezone: str | None = None,
         query: Mapping[str, Any] | None = None,
         payload: Any | None = None,
         raw: bool = False,
@@ -140,6 +141,8 @@ class MemoryProfileServiceClient:
         }
         if language_type is not None:
             headers["X-Language-Type"] = language_type
+        if timezone is not None:
+            headers["X-Timezone"] = timezone
 
         params = None
         if query:
