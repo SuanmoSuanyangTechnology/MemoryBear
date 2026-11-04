@@ -1,11 +1,10 @@
 """记忆展示 服务接口 基于 API Key 认证
 
-提供基于 API Key 认证的对外服务。written / retrieved / engines 三个单接口直接
-调用对应的 service 层（与 manager 侧 /api 共用同一批 service 函数）；/all 暂仍
-委托 memory_display_controller 的聚合逻辑。
+提供基于 API Key 认证的对外服务。四个接口都复用 manager 侧
+memory_display_controller 的 handler，由 memory_profile_proxy 统一转发或回退。
 
-路由前缀: /memory/memory-display
-最终路径: /v1/memory/memory-display/...
+路由前缀: /memory-display
+最终路径: /v1/memory-display/...
 认证方式: API Key (@require_api_key)
 """
 
@@ -22,16 +21,12 @@ from app.core.api_key_utils import (
     validate_end_user_in_workspace_async,
 )
 from app.core.error_codes import BizCode
-from app.core.language_utils import get_language_from_header
 from app.core.logging_config import get_business_logger
-from app.core.response_utils import fail, success
+from app.core.response_utils import fail
 from app.core.utils.datetime_utils import resolve_iana_timezone
 from app.db import get_async_db_context
 from app.schemas.api_key_schema import ApiKeyAuth
-from app.schemas.response_schema import ApiResponse, PageData, PageMeta
-from app.services.memory_display_record_service import MemoryDisplayRecordService
-from app.services.memory_engine_display_service import MemoryEngineDisplayService
-from app.services.memory_retrieval_display_service import MemoryRetrievalDisplayService
+from app.schemas.response_schema import ApiResponse
 
 router = APIRouter(prefix="/memory-display", tags=["V1 - Memory Display API"])
 logger = get_business_logger()
@@ -90,40 +85,26 @@ async def get_written_memories(
     )
 
     async with get_async_db_context() as db:
+        current_user = await get_current_user_snapshot_from_api_key_async(db, api_key_auth)
         resolved_end_user_id = None
         if end_user_id is not None:
             # 合并路由：end_user 可能是合并目标（原 ID 已被合并且 is_active=False），
             # 必须改用 end_user.id，否则下游会按已被合并掉的旧 ID 查询而拿到空数据。
             end_user = await validate_end_user_in_workspace_async(db, end_user_id, workspace_id)
-            resolved_end_user_id = end_user.id
-        query_result = await MemoryDisplayRecordService.query_written(
-            db=db,
-            workspace_id=workspace_id,
+            resolved_end_user_id = str(end_user.id)
+
+    async with get_async_db_context() as db:
+        result = await memory_display_controller.get_written_memories(
+            end_user_id=resolved_end_user_id,
             page=page,
             pagesize=pagesize,
-            end_user_id=resolved_end_user_id,
             start_time=start_time,
             end_time=end_time,
+            current_user=current_user,
+            db=db,
+            request=request,
         )
-
-    if query_result is None:
-        return _encode_result(fail(
-            BizCode.USER_NOT_FOUND,
-            "终端用户不存在",
-            "end_user not found in current workspace",
-        ))
-    result_items, total = query_result
-
-    page_meta = PageMeta(
-        page=page,
-        pagesize=pagesize,
-        total=total,
-        hasnext=(page * pagesize < total),
-    )
-    return _encode_result(success(
-        data=PageData(page=page_meta, items=result_items),
-        msg="查询成功",
-    ))
+    return _encode_result(result)
 
 
 # ==================== 读取展示记录 ====================
@@ -157,40 +138,26 @@ async def get_retrieved_memories(
     )
 
     async with get_async_db_context() as db:
+        current_user = await get_current_user_snapshot_from_api_key_async(db, api_key_auth)
         resolved_end_user_id = None
         if end_user_id is not None:
             # 合并路由：end_user 可能是合并目标（原 ID 已被合并且 is_active=False），
             # 必须改用 end_user.id，否则下游会按已被合并掉的旧 ID 查询而拿到空数据。
             end_user = await validate_end_user_in_workspace_async(db, end_user_id, workspace_id)
-            resolved_end_user_id = end_user.id
-        query_result = await MemoryRetrievalDisplayService.query_retrieved(
-            db=db,
-            workspace_id=workspace_id,
+            resolved_end_user_id = str(end_user.id)
+
+    async with get_async_db_context() as db:
+        result = await memory_display_controller.get_retrieved_memories(
+            end_user_id=resolved_end_user_id,
             page=page,
             pagesize=pagesize,
-            end_user_id=resolved_end_user_id,
             start_time=start_time,
             end_time=end_time,
+            current_user=current_user,
+            db=db,
+            request=request,
         )
-
-    if query_result is None:
-        return _encode_result(fail(
-            BizCode.USER_NOT_FOUND,
-            "终端用户不存在",
-            "end_user not found in current workspace",
-        ))
-    result_items, total = query_result
-
-    page_meta = PageMeta(
-        page=page,
-        pagesize=pagesize,
-        total=total,
-        hasnext=(page * pagesize < total),
-    )
-    return _encode_result(success(
-        data=PageData(page=page_meta, items=result_items),
-        msg="查询成功",
-    ))
+    return _encode_result(result)
 
 
 # ==================== 引擎动态展示卡片 ====================
@@ -254,44 +221,29 @@ async def get_engine_display_cards(
         f"end_user_id: {end_user_id or '(workspace-level)'}"
     )
 
-    language = get_language_from_header(language_type)
     async with get_async_db_context() as db:
+        current_user = await get_current_user_snapshot_from_api_key_async(db, api_key_auth)
         resolved_end_user_id = None
         if end_user_id is not None:
             # 合并路由：end_user 可能是合并目标（原 ID 已被合并且 is_active=False），
             # 必须改用 end_user.id，否则下游会按已被合并掉的旧 ID 查询而拿到空数据。
             end_user = await validate_end_user_in_workspace_async(db, end_user_id, workspace_id)
-            resolved_end_user_id = end_user.id
-        query_result = await MemoryEngineDisplayService.query_cards(
-            db=db,
-            workspace_id=workspace_id,
+            resolved_end_user_id = str(end_user.id)
+
+    async with get_async_db_context() as db:
+        result = await memory_display_controller.get_engine_display_cards(
             timezone=tz_name,
-            language=language,
+            end_user_id=resolved_end_user_id,
             page=page,
             pagesize=pagesize,
-            end_user_id=resolved_end_user_id,
             start_time=start_time,
             end_time=end_time,
+            language_type=language_type,
+            current_user=current_user,
+            db=db,
+            request=request,
         )
-
-    if query_result is None:
-        return _encode_result(fail(
-            BizCode.USER_NOT_FOUND,
-            "终端用户不存在",
-            "end_user not found in current workspace",
-        ))
-    cards, total = query_result
-
-    page_meta = PageMeta(
-        page=page,
-        pagesize=pagesize,
-        total=total,
-        hasnext=(page * pagesize < total),
-    )
-    return _encode_result(success(
-        data=PageData(page=page_meta, items=cards),
-        msg="查询成功",
-    ))
+    return _encode_result(result)
 
 
 # ==================== 全部展示记录 ====================
@@ -349,5 +301,6 @@ async def get_all_memory_display(
             language_type=language_type,
             current_user=current_user,
             db=db,
+            request=request,
         )
     return _encode_result(result)

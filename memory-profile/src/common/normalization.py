@@ -106,3 +106,17 @@ def to_jsonable(value: Any) -> Any:
     if isinstance(value, (str, int, float, bool)) or value is None:
         return value
     return str(value)
+
+
+def as_utc_naive(value: datetime) -> datetime:
+    """Normalize a datetime to a naive UTC value for database comparisons."""
+
+    return as_utc(value).replace(tzinfo=None)
+
+
+def epoch_ms_to_datetime(value: int | float | None) -> datetime | None:
+    """Convert epoch milliseconds to a naive UTC datetime."""
+
+    if value is None:
+        return None
+    return datetime.fromtimestamp(value / 1000.0, tz=UTC).replace(tzinfo=None)

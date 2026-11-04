@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Optional
 
 from app.core.utils.datetime_utils import utcnow_naive
@@ -10,11 +10,12 @@ from app.dependencies import (
     cur_workspace_access_guard,
     get_current_user,
 )
+from app.integrations.profile.proxy import memory_profile_proxy
 from app.models.user_model import User
 from app.schemas.response_schema import ApiResponse
 from app.schemas.implicit_memory_schema import GenerateProfileRequest
 from app.services.implicit_memory_service import ImplicitMemoryService
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.orm import Session
 
 api_logger = get_api_logger()
@@ -88,6 +89,23 @@ def validate_user_id(user_id: str) -> None:
         raise ValueError("User ID is too short")
 
 
+def _profile_timestamp(value) -> datetime | None:
+    """Normalize persisted JSON timestamps and request bounds to naive UTC."""
+    if isinstance(value, datetime):
+        return value.replace(tzinfo=None) if value.tzinfo is None else value.astimezone(UTC).replace(tzinfo=None)
+    if isinstance(value, (int, float)):
+        try:
+            return datetime.fromtimestamp(value / 1000, UTC).replace(tzinfo=None)
+        except (ValueError, OverflowError, OSError):
+            return None
+    if isinstance(value, str):
+        try:
+            return _profile_timestamp(datetime.fromisoformat(value.replace("Z", "+00:00")))
+        except ValueError:
+            return None
+    return None
+
+
 def validate_date_range(start_date: Optional[datetime], end_date: Optional[datetime]) -> None:
     """
     Validate date range parameters.
@@ -125,10 +143,12 @@ def validate_confidence_threshold(threshold: float) -> None:
 
 @router.get("/check-data/{end_user_id}", response_model=ApiResponse)
 @cur_workspace_access_guard()
+@memory_profile_proxy(query_fields=())
 async def check_user_data_exists(
     end_user_id: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    request: Request = None,
 ) -> ApiResponse:
     """
     检查用户画像数据是否存在
@@ -147,7 +167,7 @@ async def check_user_data_exists(
         
         # Create service with user-specific config
         service = ImplicitMemoryService(db=db, end_user_id=end_user_id)
-        
+
         # Get cached profile
         cached_profile = await service.get_cached_profile(end_user_id=end_user_id, db=db)
         
@@ -167,6 +187,9 @@ async def check_user_data_exists(
 
 @router.get("/preferences/{end_user_id}", response_model=ApiResponse)
 @cur_workspace_access_guard()
+@memory_profile_proxy(
+    query_fields=("confidence_threshold", "tag_category", "start_date", "end_date"),
+)
 async def get_preference_tags(
     end_user_id: str,
     confidence_threshold: float = Query(0.5, ge=0.0, le=1.0, description="Minimum confidence threshold"),
@@ -174,7 +197,8 @@ async def get_preference_tags(
     start_date: Optional[datetime] = Query(None, description="Filter start date"),
     end_date: Optional[datetime] = Query(None, description="Filter end date"),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    request: Request = None,
 ) -> ApiResponse:
     """
     Get user preference tags from cache.
@@ -197,7 +221,7 @@ async def get_preference_tags(
         
         # Create service with user-specific config
         service = ImplicitMemoryService(db=db, end_user_id=end_user_id)
-        
+
         # Get cached profile
         cached_profile = await service.get_cached_profile(end_user_id=end_user_id, db=db)
         
@@ -221,12 +245,11 @@ async def get_preference_tags(
             
             # Filter by date range if specified
             if start_date or end_date:
-                created_at_ts = pref.get("created_at")
-                if created_at_ts:
-                    created_at = datetime.fromtimestamp(created_at_ts / 1000)
-                    if start_date and created_at < start_date:
+                created_at = _profile_timestamp(pref.get("created_at"))
+                if created_at is not None:
+                    if start_date and created_at < _profile_timestamp(start_date):
                         continue
-                    if end_date and created_at > end_date:
+                    if end_date and created_at > _profile_timestamp(end_date):
                         continue
             
             filtered_preferences.append(pref)
@@ -240,11 +263,13 @@ async def get_preference_tags(
 
 @router.get("/portrait/{end_user_id}", response_model=ApiResponse)
 @cur_workspace_access_guard()
+@memory_profile_proxy(query_fields=("include_history",))
 async def get_dimension_portrait(
     end_user_id: str,
     include_history: bool = Query(False, description="Include historical trends"),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    request: Request = None,
 ) -> ApiResponse:
     """
     Get user's four-dimension personality portrait from cache.
@@ -264,7 +289,7 @@ async def get_dimension_portrait(
         
         # Create service with user-specific config
         service = ImplicitMemoryService(db=db, end_user_id=end_user_id)
-        
+
         # Get cached profile
         cached_profile = await service.get_cached_profile(end_user_id=end_user_id, db=db)
         
@@ -284,11 +309,13 @@ async def get_dimension_portrait(
 
 @router.get("/interest-areas/{end_user_id}", response_model=ApiResponse)
 @cur_workspace_access_guard()
+@memory_profile_proxy(query_fields=("include_trends",))
 async def get_interest_area_distribution(
     end_user_id: str,
     include_trends: bool = Query(False, description="Include trend analysis"),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    request: Request = None,
 ) -> ApiResponse:
     """
     Get user's interest area distribution from cache.
@@ -308,7 +335,7 @@ async def get_interest_area_distribution(
         
         # Create service with user-specific config
         service = ImplicitMemoryService(db=db, end_user_id=end_user_id)
-        
+
         # Get cached profile
         cached_profile = await service.get_cached_profile(end_user_id=end_user_id, db=db)
         
@@ -328,13 +355,17 @@ async def get_interest_area_distribution(
 
 @router.get("/habits/{end_user_id}", response_model=ApiResponse)
 @cur_workspace_access_guard()
+@memory_profile_proxy(
+    query_fields=("confidence_level", "frequency_pattern", "time_period"),
+)
 async def get_behavior_habits(
     end_user_id: str,
     confidence_level: Optional[str] = Query(None, regex="^(high|medium|low)$", description="Filter by confidence level"),
     frequency_pattern: Optional[str] = Query(None, regex="^(daily|weekly|monthly|seasonal|occasional|event_triggered)$", description="Filter by frequency pattern"),
     time_period: Optional[str] = Query(None, regex="^(current|past)$", description="Filter by time period"),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    request: Request = None,
 ) -> ApiResponse:
     """
     Get user's behavioral habits from cache.
@@ -356,7 +387,7 @@ async def get_behavior_habits(
         
         # Create service with user-specific config
         service = ImplicitMemoryService(db=db, end_user_id=end_user_id)
-        
+
         # Get cached profile
         cached_profile = await service.get_cached_profile(end_user_id=end_user_id, db=db)
         
@@ -400,9 +431,6 @@ async def get_behavior_habits(
         
     except Exception as e:
         return handle_implicit_memory_error(e, "行为习惯获取", end_user_id)
-
-
-
 
 
 @router.post("/generate_profile", response_model=ApiResponse)

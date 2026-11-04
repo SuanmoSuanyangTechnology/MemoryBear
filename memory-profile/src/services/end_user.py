@@ -12,6 +12,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from uuid import UUID
 
+from src.common.errors import BizCode, ProfileError
 from src.common.normalization import parse_uuid
 from src.infrastructure.postgres import PostgresManager
 from src.repositories.end_user import EndUserRepository
@@ -43,9 +44,7 @@ class EndUserService:
 
         return await self.repository.active_ids_in_workspace(workspace_id)
 
-    async def exists_in_workspace(
-        self, end_user_id: str | UUID | None, workspace_id: UUID
-    ) -> bool:
+    async def exists_in_workspace(self, end_user_id: str | UUID | None, workspace_id: UUID) -> bool:
         """Strict membership answer for callers that need no identity.
 
         One primary-key lookup, no merge branch, no payload columns. A
@@ -57,6 +56,16 @@ class EndUserService:
         if user_id is None:
             return False
         return await self.repository.user_exists_in_workspace(user_id, workspace_id)
+
+    async def require_in_workspace(self, *, end_user_id: UUID, workspace_id: UUID) -> None:
+        """Apply the shared strict read boundary with the public read error contract."""
+        if not await self.exists_in_workspace(end_user_id, workspace_id):
+            raise ProfileError(
+                BizCode.USER_NOT_FOUND,
+                "终端用户不存在",
+                detail="end_user not found in current workspace",
+                status_code=404,
+            )
 
     async def resolve_in_workspace(
         self, end_user_id: str | UUID | None, workspace_id: UUID
