@@ -290,6 +290,28 @@ class KnowledgeSettings(BaseSettings):
     # Knowledge service environment variables
     kb_host: str = Field(default="0.0.0.0", validation_alias="KB_HOST")
     kb_port: int = Field(default=8080, ge=1, le=65535, validation_alias="KB_PORT")
+    # gRPC retrieval listener (same process as FastAPI; uvicorn must run with
+    # --loop asyncio because grpc.aio cannot run on uvloop). Port 0 binds an
+    # ephemeral port in tests.
+    grpc_server_enabled: bool = Field(
+        default=False, validation_alias="GRPC_SERVER_ENABLED"
+    )
+    grpc_port: int = Field(default=9090, ge=0, le=65535, validation_alias="GRPC_PORT")
+    grpc_max_message_bytes: int = Field(
+        default=67108864, gt=0, validation_alias="GRPC_MAX_MESSAGE_BYTES"
+    )
+    grpc_keepalive_time_ms: int = Field(
+        default=30000, gt=0, validation_alias="GRPC_KEEPALIVE_TIME_MS"
+    )
+    grpc_keepalive_timeout_ms: int = Field(
+        default=10000, gt=0, validation_alias="GRPC_KEEPALIVE_TIMEOUT_MS"
+    )
+    grpc_max_concurrent_rpcs: int = Field(
+        default=512, gt=0, validation_alias="GRPC_MAX_CONCURRENT_RPCS"
+    )
+    grpc_shutdown_grace_s: int = Field(
+        default=20, ge=0, validation_alias="GRPC_SHUTDOWN_GRACE_S"
+    )
     kb_process_role: Literal[
         "api",
         "document_worker",
@@ -624,6 +646,8 @@ class KnowledgeSettings(BaseSettings):
             "process_role": self.kb_process_role,
             "host": self.kb_host,
             "port": self.kb_port,
+            "grpc_server_enabled": self.grpc_server_enabled,
+            "grpc_port": self.grpc_port,
             "db_host": self.db_host,
             "db_port": self.db_port,
             "redis_host": self.redis_host,

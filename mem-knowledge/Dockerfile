@@ -33,6 +33,7 @@ RUN if [ "$NEED_MIRROR" == "1" ]; then \
 COPY packages/redbear-model /code/packages/redbear-model
 COPY packages/storage-core /code/packages/storage-core
 COPY packages/auth-sdk /code/packages/auth-sdk
+COPY packages/memorybear-grpc /code/packages/memorybear-grpc
 COPY mem-knowledge/pyproject.toml mem-knowledge/uv.lock /code/mem-knowledge/
 
 WORKDIR /code/mem-knowledge
@@ -110,7 +111,7 @@ RUN chown memknowledge:memknowledge /files
 
 USER memknowledge
 
-EXPOSE 8080
+EXPOSE 8080 9090
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD if [ "${KB_PROCESS_ROLE:-api}" = "api" ]; then \
@@ -119,4 +120,4 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
         python -m src.tasks.worker_health live; \
     fi
 
-CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8080"]
+CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8080", "--loop", "asyncio"]
