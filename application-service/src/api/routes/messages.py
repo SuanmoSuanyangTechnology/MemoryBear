@@ -311,7 +311,7 @@ def switch_message_version_with_branch(
     branch = WorkflowService(db)._build_branch_view(
         result["message_id"], user_id=str(principal.actor_id)
     )
-    return success(data=branch)
+    return success(data=branch, msg="消息版本切换成功")
 
 
 @router.get("/{app_id}/messages/{message_id}/versions", summary="获取消息的所有版本",
@@ -352,7 +352,7 @@ def submit_message_feedback(
         feedback_type=payload.feedback_type,
         feedback_content=payload.feedback_content,
     )
-    return success(data=MessageFeedbackResponse(**result))
+    return success(data=MessageFeedbackResponse(**result), msg="反馈提交成功")
 
 
 @router.post("/{app_id}/messages/{message_id}/favorite", summary="收藏/取消收藏消息",
@@ -421,14 +421,14 @@ def report_message(
         text_end_offset=payload.text_end_offset,
         selected_text=payload.selected_text,
     )
-    return success(data=MessageReportResponse(**result))
+    return success(data=MessageReportResponse(**result), msg="举报提交成功")
 
 
 @router.get("/enums/message_report_types", summary="获取举报类型枚举", response_model=ApiResponse)
 def get_message_report_types():
     """Report-type enum; the host route carries no guard and stays unguarded."""
 
-    return success(data=MessageReportType.get_all_types_with_labels())
+    return success(data=MessageReportType.get_all_types_with_labels(), msg="获取举报类型成功")
 
 
 @router.delete("/{app_id}/messages/{message_id}", summary="删除消息", response_model=ApiResponse)
@@ -690,7 +690,7 @@ def v1_get_app_variables(
     if not release:
         raise BusinessException("应用未发布，不可用", BizCode.APP_NOT_PUBLISHED)
 
-    return success(data=_variables_from_release(release))
+    return success(data=_variables_from_release(release), msg="获取应用变量配置成功")
 
 
 @v1_router.get("/conversations", summary="获取会话列表", response_model=ApiResponse)
@@ -720,7 +720,10 @@ def v1_list_conversations(
         total=result["total"],
         hasnext=result["hasnext"],
     )
-    return success(data=PageData(page=page_meta, items=items).model_dump(mode="json"))
+    return success(
+        data=PageData(page=page_meta, items=items).model_dump(mode="json"),
+        msg="获取会话列表成功",
+    )
 
 
 @v1_router.get("/conversations/{conversation_id}/messages", summary="获取会话历史消息",
@@ -744,7 +747,10 @@ def v1_list_conversation_messages(
         conversation_id=conversation_id,
         limit=limit,
     )
-    return success(data=V1ConversationMessageListResponse(**result).model_dump(mode="json"))
+    return success(
+        data=V1ConversationMessageListResponse(**result).model_dump(mode="json"),
+        msg="获取会话消息成功",
+    )
 
 
 @v1_router.post("/messages/{message_id}/feedback", summary="提交消息反馈（点赞/点踩）",
@@ -769,7 +775,10 @@ def v1_submit_message_feedback(
         feedback_type=payload.feedback_type,
         feedback_content=payload.feedback_content,
     )
-    return success(data=MessageFeedbackResponse(**result).model_dump(mode="json"))
+    return success(
+        data=MessageFeedbackResponse(**result).model_dump(mode="json"),
+        msg="反馈提交成功",
+    )
 
 
 @v1_router.get("/conversations/{conversation_id}/messages/feedbacks",
@@ -791,7 +800,10 @@ def v1_get_conversation_feedback(
         conversation_id=conversation_id,
         limit=limit,
     )
-    return success(data=V1ConversationFeedbackListResponse(**result).model_dump(mode="json"))
+    return success(
+        data=V1ConversationFeedbackListResponse(**result).model_dump(mode="json"),
+        msg="获取会话反馈状态成功",
+    )
 
 
 @v1_router.get("/messages/{message_id}/suggested", summary="获取消息预制问题",
@@ -811,7 +823,7 @@ def v1_get_message_suggested_questions(
         workspace_id=principal.workspace_id,
         message_id=message_id,
     )
-    return success(data=questions)
+    return success(data=questions, msg="获取预制问题成功")
 
 
 @v1_router.get("/info", summary="获取应用基本信息", response_model=ApiResponse)
@@ -843,7 +855,7 @@ def v1_get_app_basic_info(
         "description": release.description,
         "icon": release.icon,
         "type": release.type,
-    })
+    }, msg="获取应用基本信息成功")
 
 
 @v1_router.post("/chat", summary="发送消息（支持流式和非流式）")
@@ -921,7 +933,7 @@ async def v1_upload_chat_file(
         raise
 
     logger.info(f"File uploaded to storage: file_key={upload_result['file_key']}")
-    return success(data=upload_result, msg="File upload successful")
+    return success(data=upload_result, msg="文件上传成功")
 
 
 __all__ = ["router", "v1_router"]

@@ -648,7 +648,7 @@ async def delete_config(
                 return fail(
                     code=BizCode.FORBIDDEN,
                     msg=result["message"],
-                    data={"config_id": str(config_id), "is_default": result.get("is_default", False)}
+                    error=f"config_id={config_id}, is_default={result.get('is_default', False)}",
                 )
 
             if result["status"] == "warning":
@@ -658,7 +658,7 @@ async def delete_config(
                 return fail(
                     code=BizCode.RESOURCE_IN_USE,
                     msg=result["message"],
-                    data={"config_id": str(config_id), "is_default": result.get("is_default", False)}
+                    error=f"config_id={config_id}, is_default={result.get('is_default', False)}",
                 )
 
             api_logger.info(

@@ -27,6 +27,7 @@ from ..schemas.multi_agent_schema import MultiAgentConfigUpdate, MultiAgentRunRe
 from .model_ref_gate import raise_model_unavailable, resolve_invoke_ref
 from .multi_agent_orchestrator import MultiAgentOrchestrator
 from .multi_agent_release_resolver import describe_release_state, resolve_release_for_save
+from .tool_service import ToolService
 
 logger = logging.getLogger(__name__)
 
@@ -291,7 +292,10 @@ class MultiAgentService:
         }
 
     def check_config_data(
-        self, app_id: uuid.UUID, data: MultiAgentConfigUpdate
+        self,
+        app_id: uuid.UUID,
+        data: MultiAgentConfigUpdate,
+        stored_tools: list[dict[str, Any]] | None = None,
     ) -> MultiAgentConfig:
         # 1. Validate the app exists
         app = self.db.get(App, app_id)
@@ -353,10 +357,25 @@ class MultiAgentService:
         # Handle supervisor_config (supervisor-as-agent; None=bare supervisor, column stays NULL)
         if getattr(data, "supervisor_config", None) is None:
             supervisor_config_data = None
-        elif isinstance(data.supervisor_config, dict):
-            supervisor_config_data = convert_uuids_to_str(data.supervisor_config)
         else:
-            supervisor_config_data = convert_uuids_to_str(data.supervisor_config.model_dump())
+            supervisor_config_data = (
+                dict(data.supervisor_config)
+                if isinstance(data.supervisor_config, dict)
+                else data.supervisor_config.model_dump()
+            )
+            tools = supervisor_config_data.get("tools")
+            if tools:
+                tenant_id = cross_domain_read.get_workspace_tenant_id(
+                    self.db, app.workspace_id
+                )
+                if tenant_id is None:
+                    raise BusinessException(
+                        "应用所属工作空间不存在", BizCode.NOT_FOUND
+                    )
+                supervisor_config_data["tools"] = ToolService(
+                    self.db
+                ).validate_tool_selection(tenant_id, tools, stored_tools)
+            supervisor_config_data = convert_uuids_to_str(supervisor_config_data)
 
         # Handle model_parameters (may be None, a dict, or a Pydantic model)
         if data.model_parameters is None:
@@ -394,7 +413,12 @@ class MultiAgentService:
             The updated config
         """
         config = self.get_config(app_id)
-        new_config = self.check_config_data(app_id, data)
+        stored_tools = (
+            config.supervisor_config.get("tools")
+            if config and isinstance(config.supervisor_config, dict)
+            else None
+        )
+        new_config = self.check_config_data(app_id, data, stored_tools=stored_tools)
         if not config:
             config = new_config
             # "Keep original" has no meaning on the create branch; the NOT NULL

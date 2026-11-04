@@ -12,14 +12,21 @@ map the same physical tables during coexistence.
   provenance only; it carries no runtime content.
 """
 import uuid
+
 from sqlalchemy import (
-    Boolean, Column, DateTime, ForeignKey, Integer, String, Text,
+    Boolean,
+    Column,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
     UniqueConstraint,
 )
-from sqlalchemy.dialects.postgresql import UUID, JSON
+from sqlalchemy.dialects.postgresql import JSON, UUID
 
-from .base import ServiceBase as Base
 from ..utils.datetime_utils import utcnow_naive
+from .base import ServiceBase as Base
 
 
 class SkillPackage(Base):
@@ -36,10 +43,20 @@ class SkillPackage(Base):
     )
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
-    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False, index=True, comment="租户ID")
+    tenant_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("tenants.id"),
+        nullable=False,
+        index=True,
+        comment="租户ID",
+    )
 
     # 标准 frontmatter 字段
-    name = Column(String(64), nullable=False, comment="标准 frontmatter name（小写字母/数字/连字符）")
+    name = Column(
+        String(64),
+        nullable=False,
+        comment="标准 frontmatter name（小写字母/数字/连字符）",
+    )
     display_name = Column(String(255), comment="展示名（legacy 技能原名），标准协议不感知")
     description = Column(Text, comment="frontmatter description（≤1024 字符）")
 
@@ -53,9 +70,27 @@ class SkillPackage(Base):
     )
 
     # 包级校验与来源
-    content_hash = Column(String(64), nullable=False, index=True, comment="全包内容 SHA-256（文件级 sha256 按序聚合）")
-    source_type = Column(String(16), nullable=False, default="imported", comment="来源：imported | market")
+    content_hash = Column(
+        String(64),
+        nullable=False,
+        index=True,
+        comment="全包内容 SHA-256（文件级 sha256 按序聚合）",
+    )
+    source_type = Column(
+        String(16),
+        nullable=False,
+        default="imported",
+        comment="来源：imported | market",
+    )
     source_ref = Column(String(1024), comment="导入来源（GitHub URL / 文件名），审计用")
+    is_active = Column(
+        Boolean,
+        default=True,
+        server_default="true",
+        nullable=False,
+        index=True,
+        comment="是否可用（False 表示市场卸载）",
+    )
 
     # frontmatter 完整保留（license/compatibility/metadata/allowed-tools 原样）
     frontmatter_raw = Column(JSON, default=dict, comment="解析后的完整 frontmatter")
@@ -63,8 +98,18 @@ class SkillPackage(Base):
     compatibility = Column(Text, comment="环境要求（冗余列，安装提示用）")
 
     # 冗余标记
-    has_scripts = Column(Boolean, default=False, nullable=False, comment="scripts/ 目录非空（脚本在沙箱内执行）")
-    has_assets = Column(Boolean, default=False, nullable=False, comment="存在 assets/ 或对象存储文件")
+    has_scripts = Column(
+        Boolean,
+        default=False,
+        nullable=False,
+        comment="scripts/ 目录非空（脚本在沙箱内执行）",
+    )
+    has_assets = Column(
+        Boolean,
+        default=False,
+        nullable=False,
+        comment="存在 assets/ 或对象存储文件",
+    )
 
     created_at = Column(DateTime, default=utcnow_naive, comment="创建时间")
     updated_at = Column(DateTime, default=utcnow_naive, onupdate=utcnow_naive, comment="更新时间")
@@ -86,7 +131,11 @@ class SkillFile(Base):
         ForeignKey("skill_packages.id", ondelete="CASCADE"),
         nullable=False, index=True, comment="所属包",
     )
-    rel_path = Column(String(1024), nullable=False, comment="相对包根路径，如 SKILL.md、references/faq.md")
+    rel_path = Column(
+        String(1024),
+        nullable=False,
+        comment="相对包根路径，如 SKILL.md、references/faq.md",
+    )
     content = Column(Text, comment="文本内容（UTF-8）；二进制/超大文件为 null")
     storage_ref = Column(String(1024), comment="对象存储引用；与 content 互斥")
     is_binary = Column(Boolean, default=False, nullable=False, comment="是否二进制")
@@ -110,13 +159,32 @@ class SkillPlugin(Base):
     )
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
-    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False, index=True, comment="租户ID")
+    tenant_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("tenants.id"),
+        nullable=False,
+        index=True,
+        comment="租户ID",
+    )
 
     name = Column(String(255), nullable=False, comment="插件展示名（导入向导可编辑）")
     description = Column(Text, comment="插件描述（导入向导可编辑）")
 
-    source_type = Column(String(16), nullable=False, default="imported", comment="来源：imported（URL / zip）")
+    source_type = Column(
+        String(16),
+        nullable=False,
+        default="imported",
+        comment="来源：imported（URL / zip）",
+    )
     source_ref = Column(String(1024), comment="来源（GitHub 地址 / zip 文件名），审计")
+    is_active = Column(
+        Boolean,
+        default=True,
+        server_default="true",
+        nullable=False,
+        index=True,
+        comment="是否可用（False 表示市场卸载）",
+    )
 
     created_at = Column(DateTime, default=utcnow_naive, comment="创建时间")
     updated_at = Column(DateTime, default=utcnow_naive, onupdate=utcnow_naive, comment="更新时间")

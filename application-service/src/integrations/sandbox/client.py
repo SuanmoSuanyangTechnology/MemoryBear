@@ -372,7 +372,11 @@ class SandboxServiceClient:
     ) -> int:
         """Stream ``chunks`` into ``path`` inside the sandbox; returns the stored size."""
 
-        params = {**principal.as_body(), "path": path, "overwrite": "true" if overwrite else "false"}
+        params = {
+            **principal.as_body(),
+            "path": path,
+            "overwrite": "true" if overwrite else "false",
+        }
         resp = await self._request("PUT", "internal/files/upload", params=params, content=chunks)
         data = self._unwrap(resp)
         try:

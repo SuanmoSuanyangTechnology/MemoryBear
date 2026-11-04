@@ -62,7 +62,7 @@ def create_annotation(
         answer=payload.answer,
         embedding=embedding
     )
-    return success(data=annotation_schema.Annotation.model_validate(annotation))
+    return success(data=annotation_schema.Annotation.model_validate(annotation), msg="创建标注成功")
 
 
 @router.get("/{annotation_id}/hit-logs", summary="获取标注命中历史")
@@ -101,7 +101,7 @@ def list_annotations(
 
     data = [annotation_schema.AnnotationListItem.model_validate(item) for item in items]
     meta = PageMeta(page=page, pagesize=pagesize, total=total, hasnext=(page * pagesize) < total)
-    return success(data=PageData(page=meta, items=data))
+    return success(data=PageData(page=meta, items=data), msg="获取标注列表成功")
 
 
 # ==================== Annotation Settings (must be before {annotation_id} routes) ====================
@@ -122,14 +122,14 @@ def get_annotation_settings(
             "similarity_threshold": 0.85,
             "model_config_id": None,
             "enabled": 0,
-        })
+        }, msg="获取标注设置成功")
     return success(data=annotation_schema.AnnotationSettingResponse(
         app_id=str(setting.app_id),
         workspace_id=str(setting.workspace_id),
         similarity_threshold=setting.similarity_threshold,
         model_config_id=str(setting.model_config_id) if setting.model_config_id else None,
         enabled=setting.enabled,
-    ))
+    ), msg="获取标注设置成功")
 
 
 @router.put("/settings", summary="更新标注设置")
@@ -155,7 +155,7 @@ def update_annotation_settings(
         similarity_threshold=setting.similarity_threshold,
         model_config_id=str(setting.model_config_id) if setting.model_config_id else None,
         enabled=setting.enabled,
-    ))
+    ), msg="更新标注设置成功")
 
 
 # ==================== Batch Operations (must be before {annotation_id} routes) ====================
