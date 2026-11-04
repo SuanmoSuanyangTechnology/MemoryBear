@@ -528,12 +528,12 @@ async def get_rag_content(
     end_time: Optional[int] = Query(None, description="结束时间（毫秒 UTC，闭区间）"),
     source: Optional[List[str]] = Query(None, description="来源筛选，可多值"),
     keyword: Optional[str] = Query(None, description="关键词（content 全文匹配）"),
-    order: str = Query("desc", pattern="^(asc|desc)$", description="排序：desc=最新在前（默认），asc=最早在前"),
+    order: str = Query("asc", pattern="^(asc|desc)$", description="排序：asc=最早在前（默认），desc=最新在前"),
     db: AsyncSession = Depends(get_async_db),
     current_user: CurrentUserSnapshot = Depends(get_current_user_async),
 ):
     """
-    获取 RAG 记忆消息（分页，默认最新在前）。
+    获取 RAG 记忆消息（分页，默认最早在前，与对话阅读顺序一致）。
 
     数据源为独立索引 `rag_memory_current`；items 字段为
     id / role / content / dialog_at / source / legacy。
