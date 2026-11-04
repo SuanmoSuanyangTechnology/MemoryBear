@@ -161,7 +161,7 @@ def extract_candidates(model, snapshot, segments):
 
 
 def compress(model, items, *, target, language, limit=None):
-    """Bounded recursive compaction with original identity and source conservation."""
+    """Bounded recursive compaction with traceable identities for retained evidence."""
     limit = limit or model.settings.kb_wiki_input_tokens // 3
     if tokens(items) <= limit:
         return items
@@ -192,14 +192,10 @@ def compress(model, items, *, target, language, limit=None):
             original for ref in item["source_item_refs"] for original in identities.get(ref, [ref])
         })} for item in values]
 
-    original_sources = defaultdict(set)
-    for item in items:
-        for ref in item["source_item_refs"]:
-            original_sources[ref].update(item["source_refs"])
-
     def compaction_input(values):
         return {"language": language, "target": target, "budget": max(128, limit // 2),
-                "items": [{**item, "item_ref": f"I{i + 1}"} for i, item in enumerate(values)]}
+                "items": [{**item, "source_item_refs": [f"I{i + 1}"]}
+                          for i, item in enumerate(values)]}
 
     for _ in range(model.settings.kb_wiki_compact_depth):
         if tokens(items) <= limit:
@@ -218,31 +214,44 @@ def compress(model, items, *, target, language, limit=None):
             groups.append(group)
         compressed = []
         for group in groups:
-            original = {ref for item in group for ref in item["source_item_refs"]}
-            sources = {ref for item in group for ref in item["source_refs"]}
+            # 模型只处理本批次身份；原始身份留在边界内，避免与来源句柄混用。
+            originals = {f"I{i + 1}": item for i, item in enumerate(group)}
 
-            def validate(value, original=original, sources=sources):
+            def validate(value, originals=originals):
                 require_refs(
-                    value["covered_item_refs"] + value["omitted_item_refs"], original, complete=True
+                    value["covered_item_refs"] + value["omitted_item_refs"],
+                    originals,
                 )
-                if value["omitted_item_refs"]:
-                    raise ValueError("Evidence was omitted during compaction")
-                require_refs(
-                    [r for i in value["items"] for r in i["source_item_refs"]],
-                    original,
-                    complete=True,
-                )
-                require_refs(
-                    [r for i in value["items"] for r in i["source_refs"]], sources, complete=True
-                )
+                if not value["items"]:
+                    raise ValueError("Compaction returned no usable evidence items")
+                retained, missing_sources = set(), set()
                 for item in value["items"]:
-                    require_refs(item["source_item_refs"], original)
+                    if not item["text"].strip():
+                        raise ValueError("Compaction returned blank evidence text")
+                    require_refs(item["source_item_refs"], originals)
                     support = {
                         ref
-                        for original_ref in item["source_item_refs"]
-                        for ref in original_sources[original_ref]
+                        for item_ref in item["source_item_refs"]
+                        for ref in originals[item_ref]["source_refs"]
                     }
-                    require_refs(item["source_refs"], support, complete=True)
+                    require_refs(item["source_refs"], support)
+                    retained.update(item["source_item_refs"])
+                    missing_sources.update(support - set(item["source_refs"]))
+                    # 来源由保留条目的原始映射回填，不依赖模型完整抄写。
+                    item["source_refs"] = sorted(support)
+                omitted = sorted(originals.keys() - retained)
+                if omitted or value["omitted_item_refs"] or missing_sources:
+                    from ...tasks.observability import current_parent_task_id
+
+                    logger.warning("Wiki 证据压缩部分覆盖 %s", diagnostic_json({
+                        "event": "wiki_compaction_partial_coverage",
+                        "stage": "wiki_evidence_compact_v1",
+                        "task_id": current_parent_task_id(), "model_id": model.model_id,
+                        "input_items": len(originals), "retained_items": len(retained),
+                        "omitted_item_refs": omitted,
+                        "reported_omitted_item_refs": value["omitted_item_refs"],
+                        "restored_source_refs": sorted(missing_sources),
+                    }))
 
             result = model.call(
                 "wiki_evidence_compact_v1",
@@ -250,7 +259,11 @@ def compress(model, items, *, target, language, limit=None):
                 Compacted,
                 validate,
             )
-            compressed.extend(result["items"])
+            compressed.extend({**item, "source_item_refs": sorted({
+                original
+                for item_ref in item["source_item_refs"]
+                for original in originals[item_ref]["source_item_refs"]
+            })} for item in result["items"])
         items = compressed
     if tokens(items) > limit:
         raise WikiError("WIKI_COMPACTION_BUDGET_EXCEEDED", retryable=False)

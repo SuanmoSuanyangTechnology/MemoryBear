@@ -121,6 +121,7 @@ from .channel_registry import (
     resolve_config_plan_async,
 )
 from .channel_service import cipher_from_env
+from .invoke_diagnostics import current_diagnostics
 from .usage_publisher import usage_publisher
 
 logger = logging.getLogger(__name__)
@@ -645,13 +646,19 @@ def _bound_runtime(runtime: Any, params: LLMParams) -> Any:
     """
     if not params.tools:
         return runtime
+    diagnostics = current_diagnostics()
+    if diagnostics is not None:
+        diagnostics.stage = "tool_prepare"
     bind = getattr(runtime, "bind_tools", None)
     if not callable(bind):
         raise InvokeFailure(
             code=BizCode.INVALID_PARAMETER,
             message="当前模型运行时不支持工具调用（底层 runtime 无 bind_tools）",
         )
-    return bind(params.tools, tool_choice=params.tool_choice)
+    bound = bind(params.tools, tool_choice=params.tool_choice)
+    if diagnostics is not None:
+        diagnostics.stage = "provider_call"
+    return bound
 
 
 def _chunk_payload(chunk: Any) -> dict[str, Any]:
@@ -1034,7 +1041,8 @@ async def invoke(
     ``client_pool`` = 进程级模型客户端池（端点注入 ``runtime.model_runtime.pool``）：
     缺省时各 runtime 自建 httpx 客户端，逐请求握手且绕过进程并发闸门。
 
-    ``cooldown_sessionmaker`` = 熔断冷却落库会话工厂（端点注入 ``runtime.database.async_session``）：
+    ``cooldown_sessionmaker`` = 熔断冷却落库会话工厂
+    （端点注入 ``runtime.database.async_session``）：
     缺省时不置冷。放弃决策点（解密失败/瞬时耗尽/可换渠道）经 ``on_candidate_failure``
     零 IO 收集，``finally`` 后台落库 + 失效广播（best-effort，见 channel_cooldown）。
 
@@ -1083,24 +1091,31 @@ async def invoke(
     started = time.perf_counter()
     attempts = 0
     last_resolved: ResolvedModelConfig | None = None
+    diagnostics = current_diagnostics()
 
     async def _call(resolved: ResolvedModelConfig) -> Any:
         nonlocal attempts, last_resolved
         resolved = _materialize_default_base(resolved)
         attempts += 1
         last_resolved = resolved
-        if first_result_timeout_s is None:
-            return await run_family(resolved)
-        # wait_for 取消失败的 await：llm 的原生 async 调用真取消上游，embedding/rerank 的
-        # to_thread 只能弃等（请求线程跑完自灭）；超时文案带预算供排障
+        if diagnostics is not None:
+            diagnostics.start_candidate(resolved, attempts)
         try:
-            return await asyncio.wait_for(
-                run_family(resolved), timeout=first_result_timeout_s
-            )
-        except TimeoutError as exc:
-            raise TimeoutError(
-                f"first result timeout after {first_result_timeout_s:g}s"
-            ) from exc
+            if first_result_timeout_s is None:
+                return await run_family(resolved)
+            # 保留既有候选超时边界；诊断同时捕获取消，避免总截止绕过 Exception 日志。
+            try:
+                return await asyncio.wait_for(
+                    run_family(resolved), timeout=first_result_timeout_s
+                )
+            except TimeoutError as exc:
+                raise TimeoutError(
+                    f"first result timeout after {first_result_timeout_s:g}s"
+                ) from exc
+        except Exception as exc:
+            if diagnostics is not None:
+                diagnostics.emit("model_attempt_failed", logging.WARNING, error=exc)
+            raise
 
     async def _resolve_and_call() -> Any:
         if entry.provider is ModelProvider.COMPOSITE:
@@ -1144,6 +1159,8 @@ async def invoke(
         if chunk_sink is None:
             result_data: dict[str, Any] = outcome.result
         else:
+            if diagnostics is not None:
+                diagnostics.stage = "stream_read"
             result_data = await _drain_stream(
                 outcome.result, chunk_sink, idle_timeout_s=idle_timeout_s
             )
@@ -1155,7 +1172,11 @@ async def invoke(
             request.config_id,
             request.type,
             attempts,
-            SensitiveDataFilter.filter_string(str(exc)),
+            (
+                diagnostics.failure_message(exc)
+                if diagnostics
+                else SensitiveDataFilter.filter_string(str(exc))
+            ),
         )
         if isinstance(exc, InvokeTimeout):
             failure = InvokeFailure(

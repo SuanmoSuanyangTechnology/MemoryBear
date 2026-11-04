@@ -36,7 +36,13 @@ from ..services.chat_use_case import (
     prepare_chat,
     resolve_app_for_chat,
 )
-from ..trace import TRACE_ID_HEADER, normalize_trace_id, reset_trace_id, set_trace_id
+from ..trace import (
+    reset_trace_id,
+    reset_traceparent,
+    resolve_trace,
+    set_trace_id,
+    set_traceparent,
+)
 from .auth import APP_CHAT_ACL_METHOD, APP_CHAT_ACL_PATH, AppChatPrincipal
 from .envelope import abort_with, auth_rejection_content, json_bytes
 
@@ -96,9 +102,9 @@ class ChatServicer(chat_pb2_grpc.AppChatServiceServicer):
             # Same contract as the HTTP trace middleware: a missing or
             # malformed trace id becomes a generated one, and the service
             # ContextVar stays bound for the whole stream.
-            trace_token = set_trace_id(
-                normalize_trace_id(view.headers.get(TRACE_ID_HEADER))
-            )
+            trace_id, traceparent = resolve_trace(view.headers)
+            trace_token = set_trace_id(trace_id)
+            traceparent_token = set_traceparent(traceparent) if traceparent else None
             try:
                 principal = current_principal()
                 if not isinstance(principal, AppChatPrincipal):
@@ -195,6 +201,8 @@ class ChatServicer(chat_pb2_grpc.AppChatServiceServicer):
                 finally:
                     await events.aclose()
             finally:
+                if traceparent_token is not None:
+                    reset_traceparent(traceparent_token)
                 reset_trace_id(trace_token)
         finally:
             reset_upstream_remaining(token)

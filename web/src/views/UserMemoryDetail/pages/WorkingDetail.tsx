@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-01-12 14:42:02 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-10-30 16:10:46
+ * @Last Modified time: 2026-11-04 12:05:44
  */
 import { type FC, useEffect, useState, useMemo, useRef, useCallback, Fragment } from 'react'
 import clsx from 'clsx'
@@ -27,7 +27,6 @@ import RbAlert from '@/components/RbAlert'
 import ChatContent from '@/components/Chat/ChatContent'
 import SearchInput from '@/components/SearchInput'
 import type { ChatItem } from '@/components/Chat/types'
-import PageLoading from '@/components/Empty/PageLoading'
 import type { Data as SummaryData } from '../components/AboutMe'
 import { type Data as InsightData, INSIGHT_KEYS } from '../components/MemoryInsight'
 import ApiMcpMessageList, {
@@ -324,7 +323,7 @@ const WorkingDetail: FC = () => {
   return (
     <>
       {loading
-        ? <PageLoading />
+        ? <Skeleton active />
         : data.length === 0 && apiMcpList.length === 0
         ? <Empty className="rb:h-full!" />
         :(
@@ -351,7 +350,7 @@ const WorkingDetail: FC = () => {
                           key={item.source}
                           gap={12}
                           align="center"
-                          className={clsx("rb:cursor-pointer rb:rounded-xl rb:h-12 rb:py-1! rb:px-3! rb:hover:bg-[#F6F6F6]", {
+                          className={clsx("rb:cursor-pointer rb:rounded-xl rb:h-12 rb:py-1! rb:px-3! rb:hover:bg-gray-100", {
                             'rb:bg-primary-600 rb:hover:bg-primary-600! rb:text-white': item.source === (selected as ApiMcpListItem)?.source,
                           })}
                           onClick={() => handleSelect(item)}
@@ -366,7 +365,7 @@ const WorkingDetail: FC = () => {
                           key={item.id}
                           gap={12}
                           align="center"
-                          className={clsx("rb:cursor-pointer rb:rounded-xl rb:h-12 rb:py-1! rb:px-3! rb:hover:bg-[#F6F6F6]", {
+                          className={clsx("rb:cursor-pointer rb:rounded-xl rb:h-12 rb:py-1! rb:px-3! rb:hover:bg-gray-100", {
                             'rb:bg-primary-600 rb:hover:bg-primary-600! rb:text-white': item.id === (selected as Conversation)?.id,
                           })}
                           onClick={() => handleSelect(item)}
@@ -382,7 +381,7 @@ const WorkingDetail: FC = () => {
                               "rb:shrink-0 rb:uppercase rb:text-[10px] rb:leading-4 rb:px-1.5 rb:rounded-md rb:border",
                               item.id === (selected as Conversation)?.id
                                 ? "rb:border-white/30 rb:text-white"
-                                : "rb:border-[#E5E5E5] rb:text-[#5B6167]",
+                                : "rb:border-[#E5E5E5] rb:text-gray-600",
                             )}>
                               {item.type}
                             </div>

@@ -1,4 +1,5 @@
 import type { UploadFile } from 'antd';
+import type { ToolItem, WorkflowToolItem } from '@/views/ToolManagement/types'
 
 // List query parameters
 export interface SkillQuery {
@@ -32,6 +33,11 @@ export interface SkillQuery {
    * Empty segments are ignored; non-UUID values return 1000/400
    */
   ids?: string;
+}
+export interface Statistic {
+  plugin_count: number;
+  skill_count: number;
+  total: number;
 }
 
 /**
@@ -96,6 +102,8 @@ export interface LegacySkill {
     tool_id: string;
     /** Tool operation/action */
     operation?: string;
+    tool_missing?: boolean;
+    tool_info?: ToolItem | WorkflowToolItem;
   }>;
   /** Skill configuration settings */
   config: {
@@ -160,6 +168,7 @@ export interface Skill extends LegacySkill {
    * Update time (millisecond timestamp)
    */
   updated_at?: number;
+
 }
 
 

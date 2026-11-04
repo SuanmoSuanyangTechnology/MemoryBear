@@ -205,8 +205,8 @@ DEFAULT_PROJECTION = {
     # 投影与索引字段保持一致，下游不读 created_at
     MemoryNodeType.RAG_MEMORY: NodeProjection(
         fields=(
-            "id", "content", "role", "end_user_id", "config_id", "dialog_at",
-            "source", "delete_at", "score",
+            "id", "content", "role", "role_rank", "end_user_id", "config_id",
+            "dialog_at", "source", "delete_at", "score",
         )
     )
 }

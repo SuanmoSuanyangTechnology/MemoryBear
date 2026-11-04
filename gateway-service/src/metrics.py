@@ -12,3 +12,7 @@ gateway_upstream_errors_total = Counter(
     "gateway_upstream_errors_total", "Upstream errors", ["target", "error_type"])
 gateway_streaming_active_connections = Gauge(
     "gateway_streaming_active_connections", "Active streaming connections")
+gateway_route_reload_total = Counter(
+    "gateway_route_reload_total", "Route file reload attempts", ["result"])
+gateway_route_table_size = Gauge(
+    "gateway_route_table_size", "Routes in the active resolver")

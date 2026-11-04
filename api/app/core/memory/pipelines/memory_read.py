@@ -181,6 +181,7 @@ class ReadPipeLine(ModelClientMixin, BasePipeline):
             skip_summary=False,
             enable_rerank: bool = False,
             record_display: bool = False,
+            include_metadata: bool = True,
             retrieval_operation_id: str | None = None,
     ) -> MemorySearchResult:
         started_at = time.perf_counter()
@@ -210,16 +211,20 @@ class ReadPipeLine(ModelClientMixin, BasePipeline):
                 case SearchStrategy.DEEP:
                     res = await self._deep_read(query, history, limit,
                                                 includes=includes, skip_summary=skip_summary,
-                                                enable_rerank=enable_rerank)
+                                                enable_rerank=enable_rerank,
+                                                include_metadata=include_metadata)
                 case SearchStrategy.NORMAL:
                     res = await self._normal_read(query, history, limit,
                                                   includes=includes, skip_summary=skip_summary,
-                                                  enable_rerank=enable_rerank)
+                                                  enable_rerank=enable_rerank,
+                                                  include_metadata=include_metadata)
                 case SearchStrategy.QUICK:
                     res = await self._quick_read(query, limit, includes,
-                                                 enable_rerank=enable_rerank)
+                                                 enable_rerank=enable_rerank,
+                                                 include_metadata=include_metadata)
                 case SearchStrategy.EXPRESS:
-                    res = await self._express_read(query, limit, includes)
+                    res = await self._express_read(query, limit, includes,
+                                                   include_metadata=include_metadata)
                 case SearchStrategy.RECENT:
                     return await self._conv_history()
                 case SearchStrategy.META:
@@ -348,6 +353,16 @@ class ReadPipeLine(ModelClientMixin, BasePipeline):
     @staticmethod
     def _raw_relation_count(results: list) -> int:
         return sum(len(result.relations) for result in results if isinstance(result, MemorySearchResult))
+
+    async def _load_profile(self, include_metadata: bool) -> MemorySearchResult:
+        """加载用户画像 metadata。
+
+        ``include_metadata=False`` 时完全不加载画像，拆题、摘要与返回结果都
+        不会使用画像上下文。
+        """
+        if not include_metadata:
+            return MemorySearchResult(memories=[])
+        return await self._user_meta()
 
     async def _emit_result_ready(self, result: MemorySearchResult, started_at: float) -> None:
         profile_result = MemorySearchResult(memories=[])
@@ -643,10 +658,11 @@ class ReadPipeLine(ModelClientMixin, BasePipeline):
             includes: list,
             skip_summary=False,
             enable_rerank: bool = False,
+            include_metadata: bool = True,
     ) -> MemorySearchResult:
         self._ensure_run_started()
         search_service = await self._get_search_service(includes, enable_rerank=enable_rerank)
-        memory_l0 = await self._user_meta()
+        memory_l0 = await self._load_profile(include_metadata)
         profile = project_profile_data(memory_l0)
         await self._emit_stage("profile_loaded", {
             "has_profile": profile_has_content(profile),
@@ -855,11 +871,12 @@ class ReadPipeLine(ModelClientMixin, BasePipeline):
             includes=None,
             skip_summary=False,
             enable_rerank: bool = False,
+            include_metadata: bool = True,
     ) -> MemorySearchResult:
         self._ensure_run_started()
         search_service = await self._get_search_service(includes, enable_rerank=enable_rerank)
 
-        memory_l0 = await self._user_meta()
+        memory_l0 = await self._load_profile(include_metadata)
         profile = project_profile_data(memory_l0)
         await self._emit_stage("profile_loaded", {
             "has_profile": profile_has_content(profile),
@@ -925,7 +942,10 @@ class ReadPipeLine(ModelClientMixin, BasePipeline):
         })
         return combined
 
-    async def _express_read(self, query: str, limit: int, includes=None) -> MemorySearchResult:
+    async def _express_read(
+            self, query: str, limit: int, includes=None,
+            include_metadata: bool = True,
+    ) -> MemorySearchResult:
         """仅全文检索模式：不做 embedding、关系检索、query 拆分、摘要生成。"""
         if includes is None:
             includes = [
@@ -934,7 +954,7 @@ class ReadPipeLine(ModelClientMixin, BasePipeline):
                 MemoryNodeType.EXTRACTED_ENTITY,
                 MemoryNodeType.DIALOGUE,
             ]
-        meta_task = asyncio.ensure_future(self._user_meta())
+        meta_task = asyncio.ensure_future(self._load_profile(include_metadata))
         search_service = await self._get_search_service(includes, need_embedder=False, need_llm=False)
         express_res = await search_service.keyword_search(
             query,
@@ -959,9 +979,10 @@ class ReadPipeLine(ModelClientMixin, BasePipeline):
             query: str,
             limit: int,
             includes=None,
-            enable_rerank: bool = False
+            enable_rerank: bool = False,
+            include_metadata: bool = True,
     ) -> MemorySearchResult:
-        meta_task = asyncio.create_task(self._user_meta())
+        meta_task = asyncio.create_task(self._load_profile(include_metadata))
         search_service = await self._get_search_service(
             includes,
             need_llm=False,

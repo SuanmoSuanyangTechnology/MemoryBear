@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next';
 
 import { getSkillDetail } from '@/api/skill';
 import { Kind, SkillFormat, type MemberDetail, type Skill, type SkillDetail as SkillDetailData } from '../types';
-import ToolList from './ToolList/ToolList';
+import ToolList from './ToolList';
 import RbModal from '@/components/RbModal';
 import SkillFiles from './SkillFiles';
 import Empty from '@/components/Empty';
@@ -192,7 +192,7 @@ const SkillDetail = forwardRef<SkillDetailRef>((_props, ref) => {
                   <div className="">{t('skills.promptConfiguration')}</div>
                   <div className="rb:bg-gray-100 rb:rounded-xl rb:p-2 rb:text-gray-600 rb:mt-2">{current.prompt || '-'}</div>
                 </div>
-                <ToolList key={current.id} value={current.tools} readOnly />
+                <ToolList key={current.id} value={current.tools} />
               </Flex>
               : (!plugin || member) &&
               <SkillFiles key={current.id} files={files} />

@@ -43,6 +43,7 @@ from redbear_model.media_contracts import (
 from redbear_model.providers._sync_deadline import run_with_timeout
 from redbear_model.providers.dashscope import resolve_dashscope_native_base_address
 from redbear_model.runtime.client_pool import ModelClientPool
+from redbear_model.telemetry import current_provider_failure_reporter
 
 _DEFAULT_BASE = "https://dashscope.aliyuncs.com/api/v1"
 _MAX_REDIRECTS = 3
@@ -193,6 +194,8 @@ class DashScopeASRAdapter:
         self._config = config
         self._pool = client_pool
         self._options = options
+        # 同步媒体请求可能交给截止线程；在调用线程捕获可选旁路回调。
+        self._failure_reporter = current_provider_failure_reporter()
 
     def _deadline(self) -> float:
         return time.monotonic() + self._options.call_timeout_ms / 1000
@@ -264,7 +267,10 @@ class DashScopeASRAdapter:
             self._timeout(deadline)
             body.feed(chunk)
         self._timeout(deadline)
-        result = self._decode(body.finish(), response.status_code, operation)
+        decoded = body.finish()
+        result = self._decode_response(
+            decoded, response.status_code, operation, self._diagnostic_url(response)
+        )
         self._timeout(deadline)
         return result
 
@@ -287,10 +293,62 @@ class DashScopeASRAdapter:
         self._timeout(deadline)
         decoded = await asyncio.to_thread(body.finish)
         result = await asyncio.to_thread(
-            self._decode, decoded, response.status_code, operation
+            self._decode_response,
+            decoded,
+            response.status_code,
+            operation,
+            self._diagnostic_url(response),
         )
         self._timeout(deadline)
         return result
+
+    def _decode_response(
+        self,
+        body: bytes,
+        status_code: int,
+        operation: str,
+        upstream_url: str,
+    ) -> dict:
+        try:
+            return self._decode(body, status_code, operation)
+        except Exception as exc:
+            self._report_failure(
+                operation, upstream_url, exc, status_code=status_code, body=body
+            )
+            raise
+
+    def _report_failure(
+        self,
+        operation: str,
+        upstream_url: str,
+        exc: BaseException,
+        *,
+        status_code: int | None = None,
+        body: bytes | None = None,
+    ) -> None:
+        if self._failure_reporter is None:
+            return
+        try:
+            self._failure_reporter(
+                self._config,
+                operation=operation,
+                upstream_url=upstream_url,
+                status_code=status_code,
+                response_body=body.decode("utf-8", errors="replace")
+                if body is not None
+                else None,
+                error=exc,
+            )
+        except Exception:  # noqa: BLE001, S110 - diagnostic callback is observational
+            pass
+
+    def _diagnostic_url(self, response: httpx.Response) -> str:
+        if self._failure_reporter is None:
+            return ""
+        try:
+            return str(response.request.url)
+        except RuntimeError:
+            return ""
 
     @staticmethod
     def _network_error(operation: str, exc: httpx.HTTPError) -> MediaProviderError:
@@ -328,11 +386,13 @@ class DashScopeASRAdapter:
                 lambda: MediaCallTimeoutError(operation),
                 close_response,
             )
-        except MediaCallTimeoutError:
+        except MediaCallTimeoutError as exc:
+            self._report_failure(operation, str(request.url), exc)
             if operation == "asr.submit":
                 raise ModelSubmissionUncertainError(operation) from None
             raise
         except httpx.HTTPError as exc:
+            self._report_failure(operation, str(request.url), exc)
             raise self._network_error(operation, exc) from None
 
     async def _asend(
@@ -349,11 +409,13 @@ class DashScopeASRAdapter:
                 return await self._aread(response, deadline, operation)
             finally:
                 await response.aclose()
-        except MediaCallTimeoutError:
+        except MediaCallTimeoutError as exc:
+            self._report_failure(operation, str(request.url), exc)
             if operation == "asr.submit":
                 raise ModelSubmissionUncertainError(operation) from None
             raise
         except httpx.HTTPError as exc:
+            self._report_failure(operation, str(request.url), exc)
             raise self._network_error(operation, exc) from None
 
     def _payload(self, request: AudioTranscriptionRequest) -> dict:
@@ -564,6 +626,7 @@ class DashScopeASRAdapter:
                     )
                 return payload
             except httpx.HTTPError as exc:
+                self._report_failure("asr.download", current_url, exc)
                 raise self._network_error("asr.download", exc) from None
         raise MediaProviderError("asr.download")
 
@@ -591,6 +654,7 @@ class DashScopeASRAdapter:
                 finally:
                     await response.aclose()
             except httpx.HTTPError as exc:
+                self._report_failure("asr.download", url, exc)
                 raise self._network_error("asr.download", exc) from None
         raise MediaProviderError("asr.download")
 

@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-02 15:02:47 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-26 14:58:24
+ * @Last Modified time: 2026-11-04 12:00:19
  */
 /**
  * BodyWrapper Component
@@ -16,7 +16,7 @@
 import type { FC, ReactNode } from 'react'
 
 import PageEmpty from './PageEmpty'
-import PageLoading from './PageLoading'
+import { Skeleton } from 'antd'
 
 interface BodyWrapperProps {
   /** Content to render when not loading or empty */
@@ -28,9 +28,9 @@ interface BodyWrapperProps {
   className?: string;
 }
 const BodyWrapper: FC<BodyWrapperProps> = ({ children, loading = false, empty, className = 'rb:max-h-[calc(100%-48px)]!' }) => {
-  // Show loading spinner while data is being fetched
+  // Show skeleton while data is being fetched
   if (loading) {
-    return <PageLoading className={className} />
+    return <Skeleton active className={className} />
   }
   // Show empty state when no data is available
   if (!loading && empty) {

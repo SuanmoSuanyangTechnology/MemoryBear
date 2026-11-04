@@ -179,6 +179,10 @@ const RelationshipNetwork = forwardRef<RelationshipNetworkRef, RelationshipNetwo
   const handleChangeTab = (tab: SegmentedProps['value']) => {
     if (tab === 'communityNetwork') {
       edgeAbortRef.current?.abort()
+      setNodes([])
+      setLinks([])
+      setCategories([])
+      setSelectedNode(null)
     } else {
       getEdgeData()
     }

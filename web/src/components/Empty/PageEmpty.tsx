@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-02 15:04:18 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-09 13:50:04
+ * @Last Modified time: 2026-11-04 11:49:44
  */
 /**
  * PageEmpty Component
@@ -30,7 +30,7 @@ const PageEmpty: FC<{ size?: number | number[]; className?: string; }> = ({ size
       title={t('empty.pageEmpty')}
       subTitle={t('empty.pageEmptyDesc')}
       size={size}
-      className={`rb:h-full ${className}`}
+      className={`rb:h-full! ${className}`}
     />
   )
 }
