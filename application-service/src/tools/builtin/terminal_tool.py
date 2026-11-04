@@ -216,11 +216,12 @@ class TerminalTool(BuiltinTool):
         # 但若日后把沙箱工具登记进工具库或按 ID 挂到工作流工具节点，
         # 必须改成：返回 ToolResult.error_result，并让 _format_result_for_langchain
         # 在失败时把 data 一并回传。
-        command_failed = result.status != "ok" or result.exit_code != 0
-        if result.status in (None, "", "ok"):
-            data["status"] = "failed" if command_failed else "ok"
-        data["success"] = not command_failed
-        if command_failed and not data["error"]:
+        # 沙箱只返回 ok / error / timeout / oom / cancelled 这几个终态，非零退出码已在
+        # 沙箱侧（verdict.py + shell.fold_result）归为 error，所以 status 单值即可判定，
+        # 不再叠加 exit_code 分支 —— 与 code_interpreter / skill_script 口径一致，
+        # 避免两处派生规则日后跑偏。
+        data["success"] = result.status == "ok"
+        if not data["success"] and not data["error"]:
             data["error"] = (
                 "命令未正常结束（超时或被终止）"
                 if result.exit_code is None
