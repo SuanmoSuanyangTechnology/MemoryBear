@@ -32,11 +32,13 @@ class BusinessException(Exception):
         code: BizCode | int | None = None,
         context: dict[str, Any] | None = None,
         cause: Exception | None = None,
+        data: dict[str, Any] | None = None,
     ):
         self.message = message
         self.code = code if code is not None else BizCode.BAD_REQUEST
         self.context = dict(context) if context else {}
         self.cause = cause
+        self.data = dict(data) if data else None
         super().__init__(self.message)
 
     def __str__(self) -> str:

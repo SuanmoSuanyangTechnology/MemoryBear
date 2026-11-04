@@ -112,6 +112,7 @@ def _auth_error(
 
     language = resolve_locale(
         explicit=request.query_params.get("lang"),
+        language_type=request.headers.get("X-Language-Type"),
         accepted=request.headers.get("Accept-Language"),
     )
     message = translate("errors.common.unauthorized", language)

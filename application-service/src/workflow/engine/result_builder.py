@@ -91,6 +91,10 @@ class WorkflowResultBuilder:
             "error": result.get("error"),
             "error_node": result.get("error_node"),
         }
+        if result.get("error"):
+            payload["code"] = result.get("error_code")
+            payload["msg"] = result.get("error_msg")
+            payload["retryable"] = bool(result.get("error_retryable"))
         # Strip NUL (\x00) characters across the payload: nodes (code/http/
         # document_extractor, etc.) may decode binary content as text and introduce
         # NULs, which PostgreSQL text/JSON columns reject.

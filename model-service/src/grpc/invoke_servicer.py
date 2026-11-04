@@ -13,6 +13,8 @@ import logging
 from collections.abc import AsyncIterator, Iterable
 from typing import Any
 
+from error_core.codes import code_name, coerce_code
+from error_core.messages import user_message
 from memorybear.model.v1 import invoke_pb2, invoke_pb2_grpc
 from memorybear_grpc.errors import error_trailers, grpc_status_for_http
 from memorybear_grpc.interceptors import current_principal
@@ -23,6 +25,7 @@ from pydantic import TypeAdapter, ValidationError
 from ..api.dependencies import InvokePrincipal
 from ..api.schemas.common import fail
 from ..errors import BizCode
+from ..i18n import get_current_locale, resolve_locale, set_current_locale
 from ..runtime import ProcessRuntime
 from ..schemas.invoke_schema import InvokeRequestBody
 from ..services.invoke_attribution import attribution_from_headers
@@ -103,9 +106,16 @@ def _to_frame(event: InvokeEvent, seq: int) -> invoke_pb2.InvokeFrame | None:
     elif event.kind == EVENT_USAGE:
         frame.usage.event_json = _json_bytes(event.payload)
     elif event.kind == EVENT_ERROR:
-        frame.error.code = str(event.payload.get("code") or "")
-        frame.error.message = str(event.payload.get("message") or "")
-        frame.error.retryable = bool(event.payload.get("retryable"))
+        payload = event.payload
+        numeric = coerce_code(payload.get("code")) or int(BizCode.INTERNAL_ERROR)
+        detail = str(payload.get("error") or payload.get("message") or "")
+        frame.error.code = str(numeric)
+        frame.error.message = detail
+        frame.error.retryable = bool(payload.get("retryable"))
+        frame.error.biz_code = numeric
+        frame.error.user_msg = str(payload.get("msg") or "")
+        frame.error.detail = detail
+        frame.error.code_name = code_name(numeric)
     elif event.kind == EVENT_DONE:
         frame.done.status = str(event.payload.get("status") or "")
     else:
@@ -175,6 +185,14 @@ class InvokeServicer(invoke_pb2_grpc.ModelInvokeServiceServicer):
             trace_token = set_trace_id(trace_id)
             traceparent_token = set_traceparent(traceparent) if traceparent else None
             try:
+                metadata = dict(context.invocation_metadata())
+                previous_locale = get_current_locale()
+                set_current_locale(
+                    resolve_locale(
+                        language_type=metadata.get("x-language-type"),
+                        accepted=metadata.get("accept-language"),
+                    )
+                )
                 principal = current_principal()
                 if not isinstance(principal, InvokePrincipal):
                     await _abort_with(
@@ -182,7 +200,8 @@ class InvokeServicer(invoke_pb2_grpc.ModelInvokeServiceServicer):
                         401,
                         fail(
                             BizCode.UNAUTHORIZED.value,
-                            "未认证的调用方",
+                            user_message(BizCode.UNAUTHORIZED, get_current_locale())
+                            or "未授权访问",
                             error="missing principal",
                         ),
                     )
@@ -205,10 +224,17 @@ class InvokeServicer(invoke_pb2_grpc.ModelInvokeServiceServicer):
                         trace_id=trace_id,
                     )
                 except InvokeFailure as failure:
+                    code = coerce_code(failure.code) or BizCode.INTERNAL_ERROR.value
                     await _abort_with(
                         context,
                         failure.http_status,
-                        fail(failure.code.value, failure.message, error=failure.message),
+                        fail(
+                            code,
+                            failure.msg
+                            or user_message(code, get_current_locale())
+                            or failure.message,
+                            error=failure.detail or failure.message,
+                        ),
                     )
                 async with self._runtime.database.async_session() as db:
                     plan = build_invoke_plan(
@@ -234,13 +260,16 @@ class InvokeServicer(invoke_pb2_grpc.ModelInvokeServiceServicer):
                                 plan.call, timeout_s=plan.total_timeout_s
                             )
                         except InvokeFailure as failure:
+                            code = coerce_code(failure.code) or BizCode.INTERNAL_ERROR.value
                             await _abort_with(
                                 context,
                                 failure.http_status,
                                 fail(
-                                    failure.code.value,
-                                    failure.message,
-                                    error=failure.message,
+                                    code,
+                                    failure.msg
+                                    or user_message(code, get_current_locale())
+                                    or failure.message,
+                                    error=failure.detail or failure.message,
                                 ),
                             )
                         async for frame in _frames(_emit(result_events(outcome))):
@@ -249,6 +278,7 @@ class InvokeServicer(invoke_pb2_grpc.ModelInvokeServiceServicer):
                     async for frame in _frames(events):
                         yield frame
             finally:
+                set_current_locale(previous_locale)
                 if traceparent_token is not None:
                     reset_traceparent(traceparent_token)
                 reset_trace_id(trace_token)

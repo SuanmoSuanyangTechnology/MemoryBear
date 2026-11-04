@@ -30,10 +30,12 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
 from pydantic import ValidationError as PydanticValidationError
 from sqlalchemy.orm import Session
+from starlette.responses import JSONResponse
 
 from ...db import detach_instances, get_async_db_context, get_db_context
 from ...errors import BizCode, BusinessException, ResourceNotFoundException
 from ...guards.workspace_access import require_workspace_access
+from ...i18n import get_current_locale, translate
 from ...models import (
     AppRelease,
     AppType,
@@ -89,7 +91,6 @@ from ...utils.sse_stream import sse_response
 from ..dependencies import API_KEY_ID_HEADER, Principal, get_principal, get_sync_db
 from ..schemas.common import fail, success
 from ..schemas.response_schema import ApiResponse, PageData, PageMeta
-from starlette.responses import JSONResponse
 from .annotations import _resolve_v1_app
 
 logger = logging.getLogger(__name__)
@@ -567,7 +568,11 @@ class ChatRequestValidationError(Exception):
 
 def chat_validation_content(detail: str) -> dict:
     """V1 chat 框架请求校验失败统一信封内容：HTTP 422 / code 1001（文档 1.2）。"""
-    return fail(code=BizCode.VALIDATION_FAILED.value, msg=detail, error=detail)
+    return fail(
+        code=BizCode.VALIDATION_FAILED.value,
+        msg=translate("errors.common.validation_failed", get_current_locale()),
+        error=detail,
+    )
 
 
 def _validation_failed_response(detail: str) -> JSONResponse:
@@ -586,7 +591,7 @@ def validate_chat_body(body: object) -> AppChatRequest:
         # conversation_id 非法 UUID 等其余字段校验失败保持全局
         # PydanticValidationError 处理器的 VALIDATION_FAILED 信封
         if any("message" in err.get("loc", ()) for err in exc.errors()):
-            raise ChatRequestValidationError("数据验证失败")
+            raise ChatRequestValidationError("数据验证失败") from exc
         raise
 
 
@@ -594,8 +599,8 @@ async def _parse_chat_payload(request: Request) -> AppChatRequest:
     """解析 /v1/app/chat 请求体，非法 JSON / 非 object / 字段类型错误统一为 422/1001。"""
     try:
         body = await request.json()
-    except (json.JSONDecodeError, UnicodeDecodeError, ValueError):
-        raise ChatRequestValidationError("请求体不是合法的 JSON")
+    except (json.JSONDecodeError, UnicodeDecodeError, ValueError) as exc:
+        raise ChatRequestValidationError("请求体不是合法的 JSON") from exc
     return validate_chat_body(body)
 
 

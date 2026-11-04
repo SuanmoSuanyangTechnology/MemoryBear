@@ -5,12 +5,21 @@ from __future__ import annotations
 import time
 from typing import Any
 
+from .codes import BizCode
+from .messages import user_message
+
 
 def now_ms() -> int:
     return int(time.time() * 1000)
 
 
-def success(data: Any = None, msg: str = "OK") -> dict[str, Any]:
+def success(
+    data: Any = None,
+    msg: str | None = None,
+    locale: str | None = None,
+) -> dict[str, Any]:
+    if msg is None:
+        msg = user_message(BizCode.OK, locale) or "成功"
     return {
         "code": 0,
         "msg": msg,

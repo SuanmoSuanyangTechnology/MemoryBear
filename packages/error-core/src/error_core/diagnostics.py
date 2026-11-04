@@ -15,9 +15,16 @@ _KEY_VALUE = re.compile(
     r"(?:(?:bearer|basic)\s+)?[^\s,;\"']+"
 )
 
+_PLAIN_BEARER_WORDS = r"(?:tokens?|credentials?|auth(?:entication|orization)?|headers?)\b"
+
 _REDACTIONS = (
     (_KEY_VALUE, r"\1\2[REDACTED]"),
-    (re.compile(r"(?i)\bbearer\s+[^\s,;\"']+"), "[REDACTED]"),
+    (
+        re.compile(
+            rf"(?i)\bbearer\s+(?!{_PLAIN_BEARER_WORDS})[^\s,;\"']+"
+        ),
+        "[REDACTED]",
+    ),
     (re.compile(r"\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b"), "[REDACTED_JWT]"),
 )
 

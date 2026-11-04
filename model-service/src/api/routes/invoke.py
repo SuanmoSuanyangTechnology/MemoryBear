@@ -30,15 +30,19 @@ from __future__ import annotations
 import asyncio
 from typing import Annotated
 
+from error_core.codes import BizCode, coerce_code
+from error_core.messages import user_message
 from fastapi import APIRouter, Depends, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ...i18n import get_current_locale
 from ...schemas.invoke_schema import InvokeRequestBody
 from ...services.invoke_attribution import attribution_from_headers
 from ...services.invoke_emitter import chunk_events, sse_frames, stream_events
 from ...services.invoke_runner import build_invoke_plan, guarded
 from ...services.invoke_service import InvokeFailure, invoke
+from ...trace import TRACE_ID_HEADER, get_trace_id
 from ..dependencies import InvokePrincipal, get_async_db, get_invoke_principal
 from ..schemas.common import fail, success
 
@@ -53,12 +57,27 @@ Caller = Annotated[InvokePrincipal, Depends(get_invoke_principal)]
 router = APIRouter(prefix="/invoke", tags=["Invoke"])
 
 
-def _failure_response(failure: InvokeFailure) -> JSONResponse:
-    """Non-stream failure: the facade hands in the HTTP semantics explicitly."""
-    return JSONResponse(
-        status_code=failure.http_status,
-        content=fail(failure.code.value, failure.message, error=failure.message),
+def _failure_response(request: Request, failure: InvokeFailure) -> JSONResponse:
+    """Non-stream failure: locale-rendered msg, diagnostic error, explicit HTTP status."""
+
+    code = coerce_code(failure.code) or BizCode.INTERNAL_ERROR.value
+    msg = (
+        failure.msg
+        or user_message(code, get_current_locale())
+        or failure.message
     )
+    headers: dict[str, str] = {}
+    if failure.retry_after_seconds is not None:
+        headers["Retry-After"] = str(failure.retry_after_seconds)
+    response = JSONResponse(
+        status_code=failure.http_status,
+        content=fail(code, msg, error=failure.detail or failure.message),
+        headers=headers,
+    )
+    response.headers[TRACE_ID_HEADER] = (
+        getattr(request.state, "trace_id", "") or get_trace_id()
+    )
+    return response
 
 
 @router.post("", response_model=None)
@@ -77,7 +96,7 @@ async def invoke_model(
             trace_id=getattr(request.state, "trace_id", None),
         )
     except InvokeFailure as failure:
-        return _failure_response(failure)
+        return _failure_response(request, failure)
 
     plan = build_invoke_plan(
         invoke,
@@ -107,7 +126,7 @@ async def invoke_model(
     try:
         outcome = await guarded(plan.call, timeout_s=plan.total_timeout_s)
     except InvokeFailure as failure:
-        return _failure_response(failure)
+        return _failure_response(request, failure)
     return JSONResponse(status_code=200, content=success(data=outcome.data))
 
 

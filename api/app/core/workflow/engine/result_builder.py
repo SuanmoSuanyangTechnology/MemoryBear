@@ -91,6 +91,10 @@ class WorkflowResultBuilder:
             "error": result.get("error"),
             "error_node": result.get("error_node"),
         }
+        if result.get("error"):
+            payload["code"] = result.get("error_code")
+            payload["msg"] = result.get("error_msg")
+            payload["retryable"] = bool(result.get("error_retryable"))
         # 统一剥除 NUL(\x00) 字符：节点（code/http/document_extractor 等）可能
         # 把二进制内容当文本解码而带入 NUL，PostgreSQL 文本/JSON 列拒绝该字符。
         return sanitize_value(payload)
