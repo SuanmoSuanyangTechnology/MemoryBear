@@ -1,9 +1,8 @@
-"""Shared perceptual memory enums and error messages."""
-
-from __future__ import annotations
+"""Perceptual fields and coercion rules matching the original API."""
 
 from enum import IntEnum
 from typing import Any
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, RootModel
 
@@ -20,6 +19,26 @@ class FileStorageService(IntEnum):
     REMOTE = 2
 
 
+class PerceptualContent(BaseModel):
+    keywords: list[str]
+    topic: str
+    domain: str
+
+
+class VisualModal(BaseModel):
+    scene: list[str]
+
+
+class AudioModal(BaseModel):
+    speaker_count: int
+
+
+class TextModal(BaseModel):
+    section_count: int
+    title: str
+    first_line: str
+
+
 class PerceptualCounts(BaseModel):
     vision: int
     audio: int
@@ -33,18 +52,19 @@ class MemoryCount(BaseModel):
 
 
 class TimelineItem(BaseModel):
-    id: str
+    model_config = ConfigDict(from_attributes=True)
+    id: UUID
     perceptual_type: PerceptualType
     storage_service: FileStorageService
     file_path: str
     file_name: str
     file_ext: str
-    summary: str | None
-    meta_data: Any
-    topic: Any
-    domain: Any
-    keywords: Any
-    created_time: int | None
+    summary: str | None = None
+    meta_data: dict[str, Any] | None = None
+    topic: str
+    domain: str
+    keywords: list[str]
+    created_time: int
 
 
 class MemoryTimeline(BaseModel):
@@ -61,24 +81,22 @@ class LatestMemoryBase(BaseModel):
     file_path: str
     storage_type: int | None
     summary: str | None
-    keywords: list[Any]
+    keywords: list[str]
     topic: str
     domain: str
     created_time: int | None
 
 
-class VisualMemory(LatestMemoryBase):
-    scene: list[Any]
+class VisualMemory(LatestMemoryBase, VisualModal):
+    pass
 
 
-class AudioMemory(LatestMemoryBase):
-    speaker_count: int
+class AudioMemory(LatestMemoryBase, AudioModal):
+    pass
 
 
-class TextMemory(LatestMemoryBase):
-    section_count: Any
-    title: Any
-    first_line: Any
+class TextMemory(LatestMemoryBase, TextModal):
+    pass
 
 
 class EmptyMemory(BaseModel):

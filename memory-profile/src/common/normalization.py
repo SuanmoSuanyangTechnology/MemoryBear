@@ -126,8 +126,10 @@ def as_utc_naive(value: datetime) -> datetime:
 
 
 def epoch_ms_to_datetime(value: int | float | None) -> datetime | None:
-    """Convert epoch milliseconds to a naive UTC datetime."""
+    """Use the legacy API seconds/milliseconds rule and return naive UTC."""
 
     if value is None:
         return None
-    return datetime.fromtimestamp(value / 1000.0, tz=UTC).replace(tzinfo=None)
+    if value > 1e10:
+        value = value / 1000
+    return datetime.fromtimestamp(value, UTC).replace(tzinfo=None)

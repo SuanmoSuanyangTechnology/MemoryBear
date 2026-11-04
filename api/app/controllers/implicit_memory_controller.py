@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Optional
 
 from app.core.utils.datetime_utils import utcnow_naive
@@ -89,21 +89,6 @@ def validate_user_id(user_id: str) -> None:
         raise ValueError("User ID is too short")
 
 
-def _profile_timestamp(value) -> datetime | None:
-    """Normalize persisted JSON timestamps and request bounds to naive UTC."""
-    if isinstance(value, datetime):
-        return value.replace(tzinfo=None) if value.tzinfo is None else value.astimezone(UTC).replace(tzinfo=None)
-    if isinstance(value, (int, float)):
-        try:
-            return datetime.fromtimestamp(value / 1000, UTC).replace(tzinfo=None)
-        except (ValueError, OverflowError, OSError):
-            return None
-    if isinstance(value, str):
-        try:
-            return _profile_timestamp(datetime.fromisoformat(value.replace("Z", "+00:00")))
-        except ValueError:
-            return None
-    return None
 
 
 def validate_date_range(start_date: Optional[datetime], end_date: Optional[datetime]) -> None:
@@ -245,11 +230,12 @@ async def get_preference_tags(
             
             # Filter by date range if specified
             if start_date or end_date:
-                created_at = _profile_timestamp(pref.get("created_at"))
-                if created_at is not None:
-                    if start_date and created_at < _profile_timestamp(start_date):
+                created_at_ts = pref.get("created_at")
+                if created_at_ts:
+                    created_at = datetime.fromtimestamp(created_at_ts / 1000)
+                    if start_date and created_at < start_date:
                         continue
-                    if end_date and created_at > _profile_timestamp(end_date):
+                    if end_date and created_at > end_date:
                         continue
             
             filtered_preferences.append(pref)

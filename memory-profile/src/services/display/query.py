@@ -102,7 +102,9 @@ class MemoryDisplayService:
         else:
             raise ValueError("Either runtime or end_users must be provided")
 
-    async def get_yearly_activity_statistics(self, workspace_id, zone, zone_name, first, length, start, end):
+    async def get_yearly_activity_statistics(
+        self, workspace_id, zone, zone_name, first, length, start, end
+    ):
         counts, user_ids = await self.repository.counts(workspace_id, zone_name, start, end, True)
         involved = await self.repository.involved_users(workspace_id, user_ids)
         totals = {key: 0 for key in CATEGORIES}
@@ -128,7 +130,9 @@ class MemoryDisplayService:
             "daily_activities": daily,
         }
 
-    async def get_monthly_activity_composition(self, workspace_id, zone, zone_name, first, length, start, end):
+    async def get_monthly_activity_composition(
+        self, workspace_id, zone, zone_name, first, length, start, end
+    ):
         counts, _ = await self.repository.counts(workspace_id, zone_name, start, end, False)
         totals = {key: 0 for key in CATEGORIES}
         daily = []
@@ -166,7 +170,7 @@ class MemoryDisplayService:
     async def _ensure_user_in_workspace(self, end_user_id: UUID | None, workspace_id: UUID) -> None:
         if end_user_id is None:
             return
-        await self.end_users.require_in_workspace(
+        await self.end_users.require_display_user(
             end_user_id=end_user_id,
             workspace_id=workspace_id,
         )

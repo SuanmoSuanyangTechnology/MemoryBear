@@ -10,7 +10,6 @@ from src.common.normalization import resolve_timezone
 from src.common.pagination import PageData
 from src.common.responses import ApiResponse, failure
 from src.common.validation import parse_optional_uuid
-from src.i18n import resolve_language
 from src.middleware.auth import MemoryPrincipal
 from src.runtime import ProfileRuntime
 from src.schemas.display import (
@@ -56,7 +55,7 @@ def validate_timezone(timezone_str: str | None) -> str:
         raise ProfileError(
             BizCode.INVALID_PARAMETER,
             f"无效的时区: {timezone_str.strip()}",
-            detail=str(exc.__cause__ or exc),
+            detail=str(exc),
             status_code=400,
         ) from exc
     return normalized
@@ -132,9 +131,11 @@ class MemoryDisplayHandler:
         start_time: int | None = None,
         end_time: int | None = None,
     ) -> WrittenPageApiResponse:
-        validate_time_window(start_time, end_time)
         user_uuid = parse_optional_uuid(end_user_id)
-        items, total = await self.service.query_written(
+        validate_time_window(start_time, end_time)
+        items, total = await self._read(
+            self.service.query_written,
+            "写入展示记录查询失败",
             workspace_id=context.workspace_id,
             page=page,
             pagesize=pagesize,
@@ -162,9 +163,11 @@ class MemoryDisplayHandler:
         start_time: int | None = None,
         end_time: int | None = None,
     ) -> RetrievedPageApiResponse:
-        validate_time_window(start_time, end_time)
         user_uuid = parse_optional_uuid(end_user_id)
-        items, total = await self.service.query_retrieved(
+        validate_time_window(start_time, end_time)
+        items, total = await self._read(
+            self.service.query_retrieved,
+            "读取展示记录查询失败",
             workspace_id=context.workspace_id,
             page=page,
             pagesize=pagesize,
@@ -194,12 +197,16 @@ class MemoryDisplayHandler:
         start_time: int | None = None,
         end_time: int | None = None,
     ) -> EnginePageApiResponse:
-        validate_time_window(start_time, end_time)
-        tz_name = validate_timezone(timezone)
-        language = resolve_language(language_type)
         user_uuid = parse_optional_uuid(end_user_id)
+        tz_name = validate_timezone(timezone)
+        validate_time_window(start_time, end_time)
+        language = str(getattr(language_type, "value", language_type) or "zh").lower().strip()
+        if language not in {"zh", "en"}:
+            language = "zh"
 
-        cards, total = await self.service.query_engines(
+        cards, total = await self._read(
+            self.service.query_engines,
+            "引擎展示记录查询失败",
             workspace_id=context.workspace_id,
             timezone=tz_name,
             language=language,
@@ -232,12 +239,16 @@ class MemoryDisplayHandler:
         start_time: int | None = None,
         end_time: int | None = None,
     ) -> AllPageApiResponse:
-        validate_time_window(start_time, end_time)
-        tz_name = validate_timezone(timezone)
-        language = resolve_language(language_type)
         user_uuid = parse_optional_uuid(end_user_id)
+        tz_name = validate_timezone(timezone)
+        validate_time_window(start_time, end_time)
+        language = str(getattr(language_type, "value", language_type) or "zh").lower().strip()
+        if language not in {"zh", "en"}:
+            language = "zh"
 
-        items, total = await self.service.query_all(
+        items, total = await self._read(
+            self.service.query_all,
+            "展示记录查询失败",
             workspace_id=context.workspace_id,
             timezone=tz_name,
             language=language,
@@ -257,3 +268,14 @@ class MemoryDisplayHandler:
             ),
             msg="查询成功",
         )
+
+    @staticmethod
+    async def _read(method, message: str, **kwargs):
+        try:
+            return await method(**kwargs)
+        except ProfileError:
+            raise
+        except Exception as exc:
+            raise ProfileError(
+                BizCode.INTERNAL_ERROR, message, detail=str(exc), status_code=200
+            ) from exc

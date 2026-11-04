@@ -1,4 +1,4 @@
-"""Endpoint decorators for optional memory-profile forwarding."""
+"""Endpoint decorators for mandatory memory-profile forwarding."""
 
 from __future__ import annotations
 
@@ -12,12 +12,13 @@ from uuid import uuid4
 from fastapi import Request, Response
 
 from app.core.error_codes import BizCode
+from app.core.language_utils import get_language_from_header
 from app.core.response_utils import fail
 from app.core.trace import get_trace_id
 
 from .contracts import MemoryProfileAuthSource, MemoryProfileRawResponse
 from .errors import MemoryProfileClientError, MemoryProfileConfigurationError
-from .runtime import get_memory_profile_client, is_memory_profile_enabled
+from .runtime import get_memory_profile_client
 
 logger = logging.getLogger(__name__)
 P = ParamSpec("P")
@@ -114,8 +115,8 @@ def memory_profile_proxy(
     timeout_seconds: float | None = None,
     target_path: str | None = None,
 ):
-    """Forward one route to memory-profile when its integration is enabled.
-    The wrapped function remains the complete legacy implementation. The API-key
+    """Forward a migrated route to memory-profile for every request.
+    The wrapped function defines the route signature, not a local fallback. The API-key
     routes run their authentication, workspace validation, and merge routing
     before calling it, so the decorator only replaces the final use-case call.
     Forwarding is path-driven: the handler declares ``request: Request`` and its
@@ -146,9 +147,6 @@ def memory_profile_proxy(
         async def wrapped(
             *args: P.args, **kwargs: P.kwargs
         ) -> R | dict[str, Any] | Response:
-            if not is_memory_profile_enabled():
-                return await handler(*args, **kwargs)
-
             # FastAPI and the API-key callers invoke handlers with keyword
             # arguments; binding the full signature costs ~2µs per request.
             if "request" in kwargs and "current_user" in kwargs:
@@ -203,13 +201,14 @@ def memory_profile_proxy(
             # Language is presentation-only, so every proxied route forwards it
             # even when the handler does not declare the header. An explicit
             # ``language_field`` still wins for callers that carry it elsewhere.
-            language_type = (
-                arguments.get(language_field) if language_field else None
-            )
-            if language_type is None:
+            if language_field is not None:
+                # Display keeps the legacy API's zh/en-only header rule. Resolve
+                # it here so the downstream middleware cannot add a fallback.
+                language_type = get_language_from_header(arguments.get(language_field))
+            else:
                 language_type = request.headers.get("X-Language-Type")
-            if language_type is None:
-                language_type = request.headers.get("Accept-Language")
+                if language_type is None:
+                    language_type = request.headers.get("Accept-Language")
             trace_id = get_trace_id() or uuid4().hex
             caller_source = (
                 _caller_source(caller_path) if source is None else source

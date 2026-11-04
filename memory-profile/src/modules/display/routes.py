@@ -8,7 +8,6 @@ from fastapi import APIRouter, Depends, Header, Query, Request
 
 from src.common.external_api import external_api
 from src.common.responses import ApiResponse
-from src.i18n import get_request_language
 from src.middleware.auth import MemoryPrincipal
 from src.middleware.identity import require_memory_context
 from src.modules.display.handler import (
@@ -46,7 +45,9 @@ async def get_monthly_activity_composition(
     month: str | None = Query(None),
     timezone_name: str | None = Header(None, alias="X-Timezone"),
 ):
-    return await _handler(request).get_monthly_activity_composition(context, year, month, timezone_name)
+    return await _handler(request).get_monthly_activity_composition(
+        context, year, month, timezone_name
+    )
 
 
 @router.get("/written", response_model=WrittenPageApiResponse)
@@ -107,7 +108,7 @@ async def get_engines(
     return await _handler(request).get_engines(
         context,
         timezone=timezone,
-        language_type=get_request_language(request),
+        language_type=language_type,
         page=page,
         pagesize=pagesize,
         end_user_id=end_user_id,
@@ -133,7 +134,7 @@ async def get_all(
     return await _handler(request).get_all(
         context,
         timezone=timezone,
-        language_type=get_request_language(request),
+        language_type=language_type,
         page=page,
         pagesize=pagesize,
         end_user_id=end_user_id,

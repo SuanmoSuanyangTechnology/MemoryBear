@@ -14,7 +14,7 @@ from src.models.references.memory_display_model import (
     MemoryDisplayRecord,
     MemoryEngineDisplayEvent,
 )
-from src.repositories.end_user import active_workspace_exists, scoped_end_user_select
+from src.repositories.end_user import active_owned_user_select
 
 OTHER_ENGINE_TYPES = (
     "CROSS_MODAL",
@@ -176,7 +176,7 @@ class MemoryDisplayRepository:
     ) -> tuple[list[dict[str, Any]], int]:
         base_filter = MemoryDisplayRecord.operation == operation
         if end_user_id is not None:
-            owned_by_workspace = scoped_end_user_select(
+            owned_by_workspace = active_owned_user_select(
                 EndUser.id, end_user_id=end_user_id, workspace_id=workspace_id
             ).exists()
             base_filter = and_(
@@ -188,7 +188,6 @@ class MemoryDisplayRepository:
             base_filter = and_(
                 base_filter,
                 MemoryDisplayRecord.workspace_id == workspace_id,
-                active_workspace_exists(workspace_id),
             )
 
         if start_time is not None:
@@ -260,12 +259,11 @@ class MemoryDisplayRepository:
             if is_workspace_level:
                 stmt = stmt.select_from(display_event).where(
                     display_event.workspace_id == workspace_id,
-                    active_workspace_exists(workspace_id),
                 )
             else:
                 stmt = stmt.select_from(display_event).where(
                     display_event.end_user_id == end_user_id,
-                    scoped_end_user_select(
+                    active_owned_user_select(
                         EndUser.id, end_user_id=end_user_id, workspace_id=workspace_id
                     ).exists(),
                 )
@@ -358,13 +356,12 @@ class MemoryDisplayRepository:
             if is_workspace_level:
                 events_stmt = events_stmt.where(
                     display_event.workspace_id == workspace_id,
-                    active_workspace_exists(workspace_id),
                     or_(*event_filters),
                 )
             else:
                 events_stmt = events_stmt.where(
                     display_event.end_user_id == end_user_id,
-                    scoped_end_user_select(
+                    active_owned_user_select(
                         EndUser.id, end_user_id=end_user_id, workspace_id=workspace_id
                     ).exists(),
                     or_(*event_filters),
@@ -373,9 +370,7 @@ class MemoryDisplayRepository:
                 events_stmt = events_stmt.where(display_event.occurred_at >= start_time)
             if end_time is not None:
                 events_stmt = events_stmt.where(display_event.occurred_at <= end_time)
-            events_stmt = events_stmt.order_by(
-                display_event.occurred_at.desc(), display_event.id.desc()
-            )
+            events_stmt = events_stmt.order_by(display_event.occurred_at.desc())
 
             events_result = await session.execute(events_stmt)
             events = [

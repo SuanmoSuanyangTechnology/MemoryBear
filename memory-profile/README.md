@@ -298,14 +298,22 @@ as well.
 
 ## API cutover
 
-The monolith keeps distinct public JWT (`/api`) and API-key (`/v1`) adapters. Their authentication, workspace selection, end-user validation/merge behavior, and request-body semantics are intentionally not collapsed. Contract-equivalent endpoints opt into forwarding with the API-side `@memory_profile_proxy(...)` decorator; undecorated endpoints always execute their original local implementation. It defaults to the legacy implementation. After deploying this service, enable proxying in the API process:
+The monolith keeps distinct public JWT (`/api`) and API-key (`/v1`) adapters. Their authentication, workspace selection, end-user validation/merge behavior, and request-body semantics are intentionally not collapsed. Migrated endpoints use the API-side `@memory_profile_proxy(...)` decorator and always forward to memory-profile. Configure its address in the API process:
 
 ```dotenv
-ENABLE_MEMORY_PROFILE=true
 MEMORY_PROFILE_BASE_URL=http://memory-profile:8082
 ```
 
-With the flag enabled, every endpoint carrying `@memory_profile_proxy(...)` uses the remote service; endpoints without it keep their local implementation. The API marks API-key calls `x-source: ex_api` and everything else `in_api`, the same labelling the Gateway applies on the face it terminated credentials on, and it identifies the API-key face by the key itself (`x-api-key-id`) exactly as the Gateway does. The mode is derived from the caller's own path, so it cannot drift from the forwarded path. Transport/protocol failures fail closed as `SERVICE_UNAVAILABLE`. Set the flag back to `false` for a reversible rollback.
+Every endpoint carrying `@memory_profile_proxy(...)` uses the remote service; endpoints without it keep their local implementation. The API marks API-key calls `x-source: ex_api` and everything else `in_api`, the same labelling the Gateway applies on the face it terminated credentials on, and it identifies the API-key face by the key itself (`x-api-key-id`) exactly as the Gateway does. The mode is derived from the caller's own path, so it cannot drift from the forwarded path. Transport/protocol failures return `SERVICE_UNAVAILABLE`; there is no switch or local fallback. API readiness also requires memory-profile to be ready.
+
+Display, perceptual and implicit reads retain the original API's filtering,
+field coercion, cached JSON values and business error envelopes. Display time
+filters accept seconds or milliseconds using the original magnitude rule.
+Implicit preference dates retain the original numeric-millisecond conversion
+in process-local time; deploy API and profile with the same process timezone.
+The read repositories retain workspace isolation. Display requires an active
+user in that workspace; perceptual and implicit historical reads do not add
+an activity-status requirement. Other modules keep their existing access rules.
 
 ## Scene community graph
 

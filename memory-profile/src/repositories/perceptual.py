@@ -10,7 +10,7 @@ from sqlalchemy import func, select
 from src.infrastructure.postgres import PostgresManager
 from src.models.references import EndUser
 from src.models.references.memory_statistics_model import MemoryPerceptual
-from src.repositories.end_user import scoped_end_user_select
+from src.repositories.end_user import owned_user_select
 
 
 class MemoryPerceptualRepository:
@@ -56,7 +56,7 @@ class MemoryPerceptualRepository:
             statement = (
                 select(MemoryPerceptual)
                 .where(*filters)
-                .order_by(MemoryPerceptual.created_time.desc(), MemoryPerceptual.id.desc())
+                .order_by(MemoryPerceptual.created_time.desc())
                 .offset((page - 1) * page_size)
                 .limit(page_size)
             )
@@ -73,7 +73,7 @@ class MemoryPerceptualRepository:
                 MemoryPerceptual.perceptual_type == perceptual_type,
                 self._scope(end_user_id, workspace_id),
             )
-            .order_by(MemoryPerceptual.created_time.desc(), MemoryPerceptual.id.desc())
+            .order_by(MemoryPerceptual.created_time.desc())
             .limit(1)
         )
         async with self.postgres.session() as session:
@@ -97,6 +97,6 @@ class MemoryPerceptualRepository:
 
     @staticmethod
     def _scope(end_user_id: UUID, workspace_id: UUID):
-        return scoped_end_user_select(
+        return owned_user_select(
             EndUser.id, end_user_id=end_user_id, workspace_id=workspace_id
         ).exists()

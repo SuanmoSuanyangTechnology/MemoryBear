@@ -1,35 +1,42 @@
-"""Read-only implicit memory profile service."""
+"""Read cached profiles using the original API's filtering and error semantics."""
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+import logging
+from datetime import datetime
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 from src.common.errors import BizCode, ProfileError
-from src.common.normalization import as_utc_naive
-from src.repositories.implicit_memory import (
-    ImplicitMemoryRepository,
-)
-from src.services.end_user import EndUserService
+from src.repositories.implicit_memory import ImplicitMemoryRepository
 
 if TYPE_CHECKING:
     from src.runtime import ProfileRuntime
 
+logger = logging.getLogger(__name__)
 
-def _profile_timestamp(value: Any) -> datetime | None:
-    if isinstance(value, (int, float)):
-        try:
-            return datetime.fromtimestamp(value / 1000, UTC).replace(tzinfo=None)
-        except (ValueError, OverflowError, OSError):
-            return None
-    if isinstance(value, str):
-        try:
-            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-        except ValueError:
-            return None
-        return as_utc_naive(parsed)
-    return None
+
+def implicit_read_error(exc: Exception, operation: str, *, include_detail: bool) -> ProfileError:
+    """Preserve the API's manager/API-key distinction for cached-read failures."""
+    error_text = str(exc).lower()
+    if isinstance(exc, ValueError):
+        if "user" in error_text and "not found" in error_text:
+            code, message = BizCode.INVALID_USER_ID, "无效的用户ID"
+        elif "insufficient" in error_text or "no data" in error_text:
+            code, message = BizCode.INSUFFICIENT_DATA, "数据不足，无法进行分析"
+        else:
+            code, message = BizCode.INVALID_FILTER_PARAMS, "无效的参数"
+    elif isinstance(exc, KeyError):
+        code, message = BizCode.INSUFFICIENT_DATA, "缺少必要的数据"
+    elif isinstance(exc, (ConnectionError, TimeoutError)):
+        code, message = BizCode.SERVICE_UNAVAILABLE, "服务暂时不可用"
+    elif "analysis" in error_text or "llm" in error_text:
+        code, message = BizCode.ANALYSIS_FAILED, "分析处理失败"
+    elif "storage" in error_text or "database" in error_text:
+        code, message = BizCode.PROFILE_STORAGE_ERROR, "数据存储失败"
+    else:
+        code, message = BizCode.INTERNAL_ERROR, f"{operation}失败"
+    return ProfileError(code, message, detail=str(exc) if include_detail else "", status_code=200)
 
 
 class ImplicitMemoryService:
@@ -38,7 +45,6 @@ class ImplicitMemoryService:
         runtime: ProfileRuntime | None = None,
         *,
         repository: ImplicitMemoryRepository | None = None,
-        end_users: EndUserService | None = None,
     ) -> None:
         if repository is not None:
             self.repository = repository
@@ -46,151 +52,109 @@ class ImplicitMemoryService:
             self.repository = ImplicitMemoryRepository(runtime.postgres)
         else:
             raise ValueError("Either runtime or repository must be provided")
-        if end_users is not None:
-            self.end_users = end_users
-        elif runtime is not None:
-            self.end_users = EndUserService.from_postgres(runtime.postgres)
-        else:
-            raise ValueError("Either runtime or end_users must be provided")
 
-    async def _profile(self, *, end_user_id: UUID, workspace_id: UUID) -> dict[str, Any] | None:
-        await self.end_users.require_in_workspace(
-            end_user_id=end_user_id,
-            workspace_id=workspace_id,
-        )
-        return await self.repository.get_profile(end_user_id, workspace_id)
+    async def _profile(self, *, end_user_id: str | UUID, workspace_id: UUID) -> Any:
+        # The old manager's get_cached_profile logs storage failures and returns
+        # None; it does not reinterpret them as a new business error.
+        try:
+            return await self.repository.get_profile(end_user_id, workspace_id)
+        except Exception:
+            logger.exception("从数据库获取用户画像失败: user=%s", end_user_id)
+            return None
 
-    async def check_data(self, *, end_user_id: UUID, workspace_id: UUID) -> bool:
-        return (
-            await self._profile(
-                end_user_id=end_user_id,
-                workspace_id=workspace_id,
-            )
-            is not None
-        )
+    async def check_data(self, *, end_user_id: str | UUID, workspace_id: UUID) -> bool:
+        return await self._profile(end_user_id=end_user_id, workspace_id=workspace_id) is not None
 
-    async def _required_profile(self, *, end_user_id: UUID, workspace_id: UUID) -> dict[str, Any]:
-        profile = await self._profile(
-            end_user_id=end_user_id,
-            workspace_id=workspace_id,
-        )
+    async def _required_profile(self, *, end_user_id: str | UUID, workspace_id: UUID) -> Any:
+        profile = await self._profile(end_user_id=end_user_id, workspace_id=workspace_id)
         if profile is None:
-            raise ProfileError(
-                BizCode.NOT_FOUND,
-                "",
-                detail="",
-                status_code=404,
-            )
+            raise ProfileError(BizCode.NOT_FOUND, "", detail="", status_code=200)
         return profile
 
     async def preferences(
         self,
         *,
-        end_user_id: UUID,
+        end_user_id: str | UUID,
         workspace_id: UUID,
         confidence_threshold: float,
         tag_category: str | None,
         start_date: datetime | None,
         end_date: datetime | None,
-    ) -> list[dict[str, Any]]:
-        profile = await self._required_profile(
-            end_user_id=end_user_id,
-            workspace_id=workspace_id,
-        )
-        preferences = profile.get("preferences", [])
-        if not isinstance(preferences, list):
-            return []
-        start = as_utc_naive(start_date) if start_date else None
-        end = as_utc_naive(end_date) if end_date else None
+    ) -> list[Any]:
+        profile = await self._required_profile(end_user_id=end_user_id, workspace_id=workspace_id)
         result = []
-        for preference in preferences:
-            if not isinstance(preference, dict):
-                continue
-            if preference.get("confidence_score", 0) < confidence_threshold:
+        for preference in profile.get("preferences", []):
+            if (
+                confidence_threshold is not None
+                and preference.get("confidence_score", 0) < confidence_threshold
+            ):
                 continue
             if tag_category and preference.get("category") != tag_category:
                 continue
-            if start or end:
-                created = _profile_timestamp(preference.get("created_at"))
-                if created is not None:
-                    if start and created < start:
+            if start_date or end_date:
+                created_at_ts = preference.get("created_at")
+                if created_at_ts:
+                    # Intentionally retain the original process-local conversion.
+                    # Adding ISO parsing or UTC normalization changes old results.
+                    created = datetime.fromtimestamp(created_at_ts / 1000)
+                    if start_date and created < start_date:
                         continue
-                    if end and created > end:
+                    if end_date and created > end_date:
                         continue
             result.append(preference)
         return result
 
-    async def portrait(self, *, end_user_id: UUID, workspace_id: UUID) -> dict[str, Any]:
-        profile = await self._required_profile(
-            end_user_id=end_user_id,
-            workspace_id=workspace_id,
-        )
-        portrait = profile.get("portrait", {})
-        return portrait if isinstance(portrait, dict) else {}
+    async def portrait(self, *, end_user_id: str | UUID, workspace_id: UUID) -> Any:
+        profile = await self._required_profile(end_user_id=end_user_id, workspace_id=workspace_id)
+        return profile.get("portrait", {})
 
-    async def interest_areas(self, *, end_user_id: UUID, workspace_id: UUID) -> dict[str, Any]:
-        profile = await self._required_profile(
-            end_user_id=end_user_id,
-            workspace_id=workspace_id,
-        )
-        interest_areas = profile.get("interest_areas", {})
-        return interest_areas if isinstance(interest_areas, dict) else {}
+    async def interest_areas(self, *, end_user_id: str | UUID, workspace_id: UUID) -> Any:
+        profile = await self._required_profile(end_user_id=end_user_id, workspace_id=workspace_id)
+        return profile.get("interest_areas", {})
 
     async def habits(
         self,
         *,
-        end_user_id: UUID,
+        end_user_id: str | UUID,
         workspace_id: UUID,
         confidence_level: str | None,
         frequency_pattern: str | None,
         time_period: str | None,
-    ) -> list[dict[str, Any]]:
-        profile = await self._required_profile(
-            end_user_id=end_user_id,
-            workspace_id=workspace_id,
-        )
-        habits = profile.get("habits", [])
-        if not isinstance(habits, list):
-            return []
-        confidence_mapping = {"high": 85, "medium": 50, "low": 20}
+    ) -> list[Any]:
+        profile = await self._required_profile(end_user_id=end_user_id, workspace_id=workspace_id)
         result = []
-        for habit in habits:
-            if not isinstance(habit, dict):
-                continue
+        for habit in profile.get("habits", []):
             if confidence_level:
-                minimum = confidence_mapping[confidence_level]
+                minimum = {"high": 85, "medium": 50, "low": 20}.get(confidence_level.lower())
                 if habit.get("confidence_level", 0) < minimum:
                     continue
             if frequency_pattern and habit.get("frequency_pattern") != frequency_pattern:
                 continue
             if time_period:
                 is_current = habit.get("is_current", True)
-                if time_period == "current" and not is_current:
+                if time_period.lower() == "current" and not is_current:
                     continue
-                if time_period == "past" and is_current:
+                if time_period.lower() == "past" and is_current:
                     continue
             result.append(habit)
         return result
 
-    async def aggregate(self, *, end_user_id: UUID, workspace_id: UUID) -> dict[str, Any] | None:
-        profile = await self._profile(
-            end_user_id=end_user_id,
-            workspace_id=workspace_id,
-        )
+    async def aggregate(
+        self, *, end_user_id: str | UUID, workspace_id: UUID
+    ) -> dict[str, Any] | None:
+        # The API-key endpoint did not swallow repository failures.
+        profile = await self.repository.get_profile(end_user_id, workspace_id)
         if profile is None:
             return None
-        habits = profile.get("habits", [])
         preferences = [
             preference
             for preference in profile.get("preferences", [])
-            if isinstance(preference, dict) and preference.get("confidence_score", 0) >= 0.5
+            if preference.get("confidence_score", 0) >= 0.5
         ]
-        portrait = profile.get("portrait", {})
-        interest_areas = profile.get("interest_areas", {})
         return {
             "end_user_id": str(end_user_id),
-            "habits": habits if isinstance(habits, list) else [],
+            "habits": profile.get("habits", []),
             "preferences": preferences,
-            "portrait": portrait if isinstance(portrait, dict) else {},
-            "interest_areas": (interest_areas if isinstance(interest_areas, dict) else {}),
+            "portrait": profile.get("portrait", {}),
+            "interest_areas": profile.get("interest_areas", {}),
         }

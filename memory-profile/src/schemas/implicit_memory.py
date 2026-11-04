@@ -1,4 +1,4 @@
-"""Fixed read envelopes around extensible, API-owned cached profile sections."""
+"""Read envelopes preserving the API's persisted JSON section values."""
 
 from typing import Any
 
@@ -9,13 +9,13 @@ class ProfileExists(BaseModel):
     exists: bool
 
 
-class SnapshotSection(RootModel[dict[str, Any]]):
-    """Persisted section keys are extensible and must survive reads unchanged."""
+class SnapshotSection(RootModel[Any]):
+    """Do not turn a persisted list/scalar into a different empty object."""
 
 
 class ImplicitProfile(BaseModel):
     end_user_id: str
-    habits: list[dict[str, Any]]
-    preferences: list[dict[str, Any]]
-    portrait: dict[str, Any]
-    interest_areas: dict[str, Any]
+    habits: Any
+    preferences: list[Any]
+    portrait: Any
+    interest_areas: Any

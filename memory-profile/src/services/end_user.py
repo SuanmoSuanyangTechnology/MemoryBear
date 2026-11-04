@@ -67,6 +67,16 @@ class EndUserService:
                 status_code=404,
             )
 
+    async def require_display_user(self, *, end_user_id: UUID, workspace_id: UUID) -> None:
+        """Preserve the display API's original user rule and error response."""
+        if not await self.repository.display_user_exists(end_user_id, workspace_id):
+            raise ProfileError(
+                BizCode.USER_NOT_FOUND,
+                "终端用户不存在",
+                detail="end_user not found in current workspace",
+                status_code=200,
+            )
+
     async def resolve_in_workspace(
         self, end_user_id: str | UUID | None, workspace_id: UUID
     ) -> EndUserRef | None:

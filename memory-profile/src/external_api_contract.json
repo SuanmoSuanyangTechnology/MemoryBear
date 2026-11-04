@@ -2681,25 +2681,25 @@
                 "required": true
               },
               "habits": {
-                "annotation": "list[dict[str, Any]]",
+                "annotation": "Any",
                 "constraints": [],
                 "default": null,
                 "required": true
               },
               "interest_areas": {
-                "annotation": "dict[str, Any]",
+                "annotation": "Any",
                 "constraints": [],
                 "default": null,
                 "required": true
               },
               "portrait": {
-                "annotation": "dict[str, Any]",
+                "annotation": "Any",
                 "constraints": [],
                 "default": null,
                 "required": true
               },
               "preferences": {
-                "annotation": "list[dict[str, Any]]",
+                "annotation": "list[Any]",
                 "constraints": [],
                 "default": null,
                 "required": true

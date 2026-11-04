@@ -1,7 +1,7 @@
 """记忆展示 服务接口 基于 API Key 认证
 
 提供基于 API Key 认证的对外服务。四个接口都复用 manager 侧
-memory_display_controller 的 handler，由 memory_profile_proxy 统一转发或回退。
+memory_display_controller 的 handler，由 memory_profile_proxy 统一转发到 profile。
 
 路由前缀: /memory-display
 最终路径: /v1/memory-display/...

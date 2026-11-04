@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from src.common.errors import BizCode, ProfileError
 from src.common.responses import ApiResponse
 from src.common.validation import parse_required_uuid
 from src.middleware.auth import MemoryPrincipal
@@ -29,7 +30,9 @@ class PerceptualMemoryHandler:
             raise ValueError("Either runtime or service must be provided")
 
     async def count(self, context: MemoryPrincipal, end_user_id: str) -> CountApiResponse:
-        data = await self.service.count(
+        data = await self._read(
+            self.service.count,
+            "Failed to fetch memory statistics",
             end_user_id=parse_required_uuid(end_user_id),
             workspace_id=context.workspace_id,
         )
@@ -44,7 +47,9 @@ class PerceptualMemoryHandler:
         page: int,
         page_size: int,
     ) -> TimelineApiResponse:
-        data = await self.service.timeline(
+        data = await self._read(
+            self.service.timeline,
+            "Failed to fetch perceptual memory timeline",
             end_user_id=parse_required_uuid(end_user_id),
             workspace_id=context.workspace_id,
             perceptual_type=perceptual_type,
@@ -62,18 +67,19 @@ class PerceptualMemoryHandler:
         end_user_id: str,
         perceptual_type: PerceptualType,
     ) -> LatestApiResponse:
-        data = await self.service.latest(
+        label = {
+            PerceptualType.VISION: "visual",
+            PerceptualType.AUDIO: "audio",
+            PerceptualType.TEXT: "text",
+        }[perceptual_type]
+        data = await self._read(
+            self.service.latest,
+            f"Failed to fetch latest {label} memory",
             end_user_id=parse_required_uuid(end_user_id),
             workspace_id=context.workspace_id,
             perceptual_type=perceptual_type,
         )
         payload = data if data is not None else {}
-        labels = {
-            PerceptualType.VISION: "visual",
-            PerceptualType.AUDIO: "audio",
-            PerceptualType.TEXT: "text",
-        }
-        label = labels[perceptual_type]
         return LatestApiResponse(
             data=payload,
             msg=(
@@ -82,3 +88,10 @@ class PerceptualMemoryHandler:
                 else f"No {label} memory available"
             ),
         )
+
+    @staticmethod
+    async def _read(method, message: str, **kwargs):
+        try:
+            return await method(**kwargs)
+        except Exception as exc:
+            raise ProfileError(BizCode.INTERNAL_ERROR, message, status_code=200) from exc

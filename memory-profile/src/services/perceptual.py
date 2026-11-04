@@ -2,29 +2,28 @@
 
 from __future__ import annotations
 
-import logging
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
-from src.common.errors import BizCode, ProfileError
 from src.common.normalization import datetime_to_epoch_ms
 from src.repositories.perceptual import (
     MemoryPerceptualRepository,
 )
 from src.schemas.perceptual import (
+    AudioModal,
     FileStorageService,
     LatestMemory,
     MemoryCount,
     MemoryTimeline,
+    PerceptualContent,
     PerceptualType,
+    TextModal,
     TimelineItem,
+    VisualModal,
 )
-from src.services.end_user import EndUserService
 
 if TYPE_CHECKING:
     from src.runtime import ProfileRuntime
-
-logger = logging.getLogger(__name__)
 
 
 class PerceptualMemoryService:
@@ -33,7 +32,6 @@ class PerceptualMemoryService:
         runtime: ProfileRuntime | None = None,
         *,
         repository: MemoryPerceptualRepository | None = None,
-        end_users: EndUserService | None = None,
     ) -> None:
         if repository is not None:
             self.repository = repository
@@ -41,18 +39,8 @@ class PerceptualMemoryService:
             self.repository = MemoryPerceptualRepository(runtime.postgres)
         else:
             raise ValueError("Either runtime or repository must be provided")
-        if end_users is not None:
-            self.end_users = end_users
-        elif runtime is not None:
-            self.end_users = EndUserService.from_postgres(runtime.postgres)
-        else:
-            raise ValueError("Either runtime or end_users must be provided")
 
     async def count(self, *, end_user_id: UUID, workspace_id: UUID) -> MemoryCount:
-        await self.end_users.require_in_workspace(
-            end_user_id=end_user_id,
-            workspace_id=workspace_id,
-        )
         counts = await self.repository.count_by_type(end_user_id, workspace_id)
         return MemoryCount.model_validate(
             {
@@ -75,10 +63,6 @@ class PerceptualMemoryService:
         page: int,
         page_size: int,
     ) -> MemoryTimeline:
-        await self.end_users.require_in_workspace(
-            end_user_id=end_user_id,
-            workspace_id=workspace_id,
-        )
         rows, total = await self.repository.timeline(
             end_user_id=end_user_id,
             workspace_id=workspace_id,
@@ -103,10 +87,6 @@ class PerceptualMemoryService:
         workspace_id: UUID,
         perceptual_type: PerceptualType,
     ) -> LatestMemory | None:
-        await self.end_users.require_in_workspace(
-            end_user_id=end_user_id,
-            workspace_id=workspace_id,
-        )
         row = await self.repository.latest(
             end_user_id=end_user_id,
             workspace_id=workspace_id,
@@ -116,121 +96,55 @@ class PerceptualMemoryService:
             return None
         return LatestMemory.model_validate(self._latest_item(row, perceptual_type))
 
-    @staticmethod
-    def _content(row: dict[str, Any]) -> dict[str, Any]:
-        meta_data = row.get("meta_data")
-        if not isinstance(meta_data, dict):
-            raise ProfileError(
-                BizCode.INTERNAL_ERROR,
-                "Perceptual memory metadata is invalid",
-                status_code=500,
-            )
-        content = meta_data.get("content")
-        if not isinstance(content, dict):
-            raise ProfileError(
-                BizCode.INTERNAL_ERROR,
-                "Perceptual memory content is invalid",
-                status_code=500,
-            )
-        return content
-
     def _timeline_item(self, row: dict[str, Any]) -> TimelineItem:
         meta_data = row.get("meta_data") or {}
-        content = (
-            meta_data.get("content")
-            if isinstance(meta_data, dict) and isinstance(meta_data.get("content"), dict)
-            else {}
+        content = meta_data.get("content", {})
+        parsed = (
+            PerceptualContent(**content)
+            if content
+            else PerceptualContent(topic="Unknown", domain="Unknown", keywords=[])
         )
-        storage_service = FileStorageService(int(row["storage_service"])).value
-        return TimelineItem.model_validate(
-            {
-                "id": str(row["id"]),
-                "perceptual_type": int(row["perceptual_type"]),
-                "storage_service": storage_service,
-                "file_path": row["file_path"],
-                "file_name": row["file_name"],
-                "file_ext": row["file_ext"],
-                "summary": row["summary"],
-                "meta_data": meta_data,
-                "topic": content.get("topic", "Unknown"),
-                "domain": content.get("domain", "Unknown"),
-                "keywords": content.get("keywords", []),
-                "created_time": datetime_to_epoch_ms(row["created_time"]),
-            }
+        return TimelineItem(
+            id=row["id"],
+            perceptual_type=PerceptualType(row["perceptual_type"]),
+            storage_service=FileStorageService(row["storage_service"]),
+            file_path=row["file_path"],
+            file_name=row["file_name"],
+            file_ext=row["file_ext"],
+            summary=row["summary"],
+            meta_data=meta_data,
+            topic=parsed.topic,
+            domain=parsed.domain,
+            keywords=parsed.keywords,
+            created_time=datetime_to_epoch_ms(row["created_time"]),
         )
 
     def _latest_item(self, row: dict[str, Any], perceptual_type: PerceptualType) -> dict[str, Any]:
-        meta_data = row.get("meta_data")
-        if not isinstance(meta_data, dict):
-            raise ProfileError(
-                BizCode.INTERNAL_ERROR,
-                f"Modalities not defined, perceptual memory_id={row['id']}",
-                status_code=500,
-            )
+        meta_data = row.get("meta_data") or {}
         modalities = meta_data.get("modalities")
-        content = self._content(row)
-        if not isinstance(modalities, dict):
-            raise ProfileError(
-                BizCode.INTERNAL_ERROR,
-                f"Modalities not defined, perceptual memory_id={row['id']}",
-                status_code=500,
-            )
-
-        if perceptual_type == PerceptualType.VISION:
-            scene = modalities.get("scene")
-            if not isinstance(scene, list):
-                raise ProfileError(
-                    BizCode.INTERNAL_ERROR,
-                    f"Modalities not defined, perceptual memory_id={row['id']}",
-                    status_code=500,
-                )
-            detail = {"scene": scene}
-        elif perceptual_type == PerceptualType.AUDIO:
-            speaker_count = modalities.get("speaker_count")
-            if not isinstance(speaker_count, int):
-                raise ProfileError(
-                    BizCode.INTERNAL_ERROR,
-                    f"Modalities not defined, perceptual memory_id={row['id']}",
-                    status_code=500,
-                )
-            detail = {"speaker_count": speaker_count}
-        else:
-            required = ("section_count", "title", "first_line")
-            if any(key not in modalities for key in required):
-                raise ProfileError(
-                    BizCode.INTERNAL_ERROR,
-                    f"Modalities not defined, perceptual memory_id={row['id']}",
-                    status_code=500,
-                )
-            detail = {
-                "section_count": modalities["section_count"],
-                "title": modalities["title"],
-                "first_line": modalities["first_line"],
-            }
-
-        keywords = content.get("keywords")
-        topic = content.get("topic")
-        domain = content.get("domain")
-        if (
-            not isinstance(keywords, list)
-            or not isinstance(topic, str)
-            or not isinstance(domain, str)
-        ):
-            raise ProfileError(
-                BizCode.INTERNAL_ERROR,
-                f"Content not defined, perceptual memory_id={row['id']}",
-                status_code=500,
-            )
-
+        content = meta_data.get("content")
+        if not modalities:
+            raise ValueError(f"Modalities not defined, perceptual memory_id={row['id']}")
+        if not content:
+            raise ValueError(f"Content not defined, perceptual memory_id={row['id']}")
+        parsed = PerceptualContent(**content)
+        modal_type = {
+            PerceptualType.VISION: VisualModal,
+            PerceptualType.AUDIO: AudioModal,
+            PerceptualType.TEXT: TextModal,
+        }.get(perceptual_type)
+        if modal_type is None:
+            raise ValueError("Unsupported perceptual type")
+        detail = modal_type(**modalities).model_dump()
         return {
             "id": str(row["id"]),
             "file_name": row["file_name"],
             "file_path": row["file_path"],
             "storage_type": row["storage_service"],
             "summary": row["summary"],
-            "keywords": keywords,
-            "topic": topic,
-            "domain": domain,
+            "keywords": parsed.keywords,
+            "topic": parsed.topic,
+            "domain": parsed.domain,
             "created_time": datetime_to_epoch_ms(row["created_time"]),
             **detail,
         }
