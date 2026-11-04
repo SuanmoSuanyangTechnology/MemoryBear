@@ -1,0 +1,55 @@
+{
+  "errors": {
+    "workspace_required": "Please select a workspace first",
+    "current_workspace_missing": "No current workspace is selected",
+    "user_not_found": "End user not found",
+    "user_not_in_workspace": "End user not found in the current workspace"
+  },
+  "display": {
+    "error": {
+      "invalid_time_window": "start_time must not be greater than end_time",
+      "timezone_required": "X-Timezone must not be empty",
+      "timezone_header_required": "X-Timezone header is required",
+      "invalid_timezone": "Invalid timezone: {timezone}",
+      "invalid_iana_timezone": "'{timezone}' is not a valid IANA timezone",
+      "invalid_statistics_parameters": "Invalid statistics parameters",
+      "invalid_year": "year must be a four-digit calendar year",
+      "year_month_required": "year and month must be provided together",
+      "invalid_month": "month must be an integer between 1 and 12",
+      "yearly_statistics_failed": "Failed to query yearly memory activity statistics",
+      "monthly_statistics_failed": "Failed to query monthly memory activity statistics",
+      "written_failed": "Failed to query written memory display records",
+      "retrieved_failed": "Failed to query retrieved memory display records",
+      "engines_failed": "Failed to query engine display records",
+      "all_failed": "Failed to query memory display records"
+    }
+  },
+  "perceptual": {
+    "error": {
+      "count_failed": "Failed to fetch memory statistics",
+      "timeline_failed": "Failed to fetch perceptual memory timeline",
+      "latest_visual_failed": "Failed to fetch latest visual memory",
+      "latest_audio_failed": "Failed to fetch latest audio memory",
+      "latest_text_failed": "Failed to fetch latest text memory"
+    }
+  },
+  "implicit": {
+    "error": {
+      "invalid_user_id": "Invalid user ID",
+      "insufficient_data": "Insufficient data for analysis",
+      "invalid_parameters": "Invalid parameters",
+      "missing_data": "Required data is missing",
+      "service_unavailable": "Service temporarily unavailable",
+      "analysis_failed": "Analysis failed",
+      "storage_failed": "Data storage failed",
+      "check_data_failed": "Failed to check profile data",
+      "preferences_failed": "Failed to retrieve preference tags",
+      "portrait_failed": "Failed to retrieve the four-dimensional profile",
+      "interest_areas_failed": "Failed to retrieve the interest area distribution",
+      "habits_failed": "Failed to retrieve behavioral habits",
+      "aggregate_failed": "Failed to query implicit memory",
+      "snapshot_not_ready": "Implicit memory snapshot has not been generated yet",
+      "user_id_empty": "User ID cannot be empty"
+    }
+  }
+}

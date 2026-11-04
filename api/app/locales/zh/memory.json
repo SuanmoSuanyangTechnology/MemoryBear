@@ -8,6 +8,22 @@
   "errors": {
     "recover_not_allowed": "该记忆不可恢复，可能已恢复或为不可恢复类型",
     "neo4j_node_not_found": "Neo4j 节点不存在或已被删除",
-    "internal_error": "恢复记忆失败"
+    "internal_error": "恢复记忆失败",
+    "workspace_required": "请先切换到一个工作空间",
+    "current_workspace_missing": "未选择当前工作空间",
+    "profile_unavailable": "记忆画像服务暂不可用",
+    "profile_unavailable_detail": "记忆画像服务不可用",
+    "invalid_end_user_id": "无效的 end_user_id 格式: {value}",
+    "user_not_found": "终端用户不存在",
+    "user_other_workspace": "该终端用户不属于当前工作空间"
+  },
+  "display": {
+    "error": {
+      "invalid_time_window": "start_time 不能大于 end_time",
+      "timezone_required": "X-Timezone 不能为空",
+      "timezone_header_required": "必须提供 X-Timezone 请求头",
+      "invalid_timezone": "无效的时区: {timezone}",
+      "invalid_iana_timezone": "'{timezone}' 不是有效的 IANA 时区"
+    }
   }
 }

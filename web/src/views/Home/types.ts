@@ -1,3 +1,54 @@
+import type { activityKinds } from './constants'
+
+export type ActivityKind = typeof activityKinds[number]
+
+export interface ActivityDay {
+  date: string;
+  counts: Record<ActivityKind, number>;
+  total?: number;
+  categories?: ActivityCategories;
+}
+
+export interface ActivityStatisticsResponse {
+  total_activities: number;
+  active_days: number;
+  daily_average: number;
+  peak_daily_activities: number;
+  involved_users: number;
+  category_totals: Record<ActivityKind, number>;
+  daily_activities: Array<{
+    date: string;
+    timestamp: number;
+    total_activities: number;
+  }>;
+}
+
+export type ActivityCategories = Record<ActivityKind, { count: number; percentage: number }>
+
+export interface ActivityCompositionResponse {
+  summary: {
+    total_activities: number;
+    categories: ActivityCategories;
+  };
+  daily_activities: Array<{
+    date: string;
+    timestamp: number;
+    total_activities: number;
+    categories: ActivityCategories;
+  }>;
+}
+
+export interface ActivityQuery {
+  start_date: string;
+  end_date: string;
+}
+
+export interface ActivityResponse {
+  days: ActivityDay[];
+  user_count: number;
+  simulated: boolean;
+}
+
 export interface DashboardData {
   total_memory: number;
   total_app: number;

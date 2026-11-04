@@ -9,6 +9,9 @@ from pathlib import Path
 SERVICE_ROOT = Path(__file__).resolve().parents[1]
 FORBIDDEN_IMPORT_ROOTS = {"api", "app"}
 READ_ONLY_PG_REPOSITORIES = {
+    SERVICE_ROOT / "src/repositories/display.py",
+    SERVICE_ROOT / "src/repositories/perceptual.py",
+    SERVICE_ROOT / "src/repositories/implicit_memory.py",
     SERVICE_ROOT / "src/repositories/profile.py",
     SERVICE_ROOT / "src/repositories/end_user.py",
     SERVICE_ROOT / "src/repositories/model_config.py",
@@ -36,15 +39,31 @@ OBSOLETE_PATHS = (
     SERVICE_ROOT / "src/modules/analytics/repository/postgres.py",
     SERVICE_ROOT / "src/modules/shared",
 )
-PURE_ROOTS = (
-    SERVICE_ROOT / "src/schemas",
-)
-PURE_FORBIDDEN_ROOTS = {"src.infrastructure", "src.models", "src.runtime"}
+PURE_ROOTS = (SERVICE_ROOT / "src/schemas",)
+PURE_FORBIDDEN_ROOTS = {"src.infrastructure", "src.models", "src.runtime", "src.modules"}
 
 
 def check_python(path: Path) -> list[str]:
     failures: list[str] = []
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    if path.is_relative_to(SERVICE_ROOT / "src/services") or path.is_relative_to(
+        SERVICE_ROOT / "src/repositories"
+    ):
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.ImportFrom)
+                and node.module
+                and node.module.startswith("src.modules")
+            ):
+                failures.append(
+                    f"{path}:{node.lineno}: business layers cannot import {node.module}"
+                )
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    if alias.name.startswith("src.modules"):
+                        failures.append(
+                            f"{path}:{node.lineno}: business layers cannot import {alias.name}"
+                        )
     for node in ast.walk(tree):
         names: list[str] = []
         if isinstance(node, ast.Import):

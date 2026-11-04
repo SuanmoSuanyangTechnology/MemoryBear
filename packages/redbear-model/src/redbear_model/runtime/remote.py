@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from collections.abc import AsyncIterator, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, NoReturn
@@ -58,6 +59,7 @@ HEADER_SOURCE = "X-Model-Source"
 HEADER_RESOURCE_TYPE = "X-Model-Resource-Type"
 HEADER_RESOURCE_ID = "X-Model-Resource-ID"
 HEADER_TRACE_ID = "X-Trace-Id"
+HEADER_TRACEPARENT = "traceparent"
 
 EVENT_STREAM_CONTENT_TYPE = "text/event-stream"
 
@@ -100,12 +102,14 @@ InvokeFrame = (
 
 
 class InvokeTimeouts(BaseModel):
-    """Connect / inter-frame idle / write budgets.
+    """Connect / inter-frame idle / write budgets, plus an optional stream total.
 
     ``idle_s`` maps onto httpx's ``read`` timeout, which applies per read
     operation -- for a streaming response that *is* the gap between frames. The
     host management-plane ``read`` budget is a whole-response semantic and must
-    not be reused here: a long generation would trip it.
+    not be reused here: a long generation would trip it. ``total_s`` is the
+    wall-clock cap for one stream; a continuously producing stream never trips
+    ``idle_s``, so callers that can outlive their inbound deadline must set it.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -114,6 +118,7 @@ class InvokeTimeouts(BaseModel):
     idle_s: float = 60.0
     write_s: float = 60.0
     pool_s: float | None = None
+    total_s: float | None = Field(default=None, gt=0)
 
     def httpx_timeout(self) -> httpx.Timeout:
         return httpx.Timeout(
@@ -155,6 +160,7 @@ class InvokeTarget:
     resource_type: str | None = None
     resource_id: UUID | None = None
     trace_id: str | None = None
+    traceparent: str | None = None
 
     def headers(self) -> dict[str, str]:
         headers = {
@@ -174,6 +180,8 @@ class InvokeTarget:
             headers[HEADER_RESOURCE_ID] = str(self.resource_id)
         if self.trace_id:
             headers[HEADER_TRACE_ID] = self.trace_id
+        if self.traceparent:
+            headers[HEADER_TRACEPARENT] = self.traceparent
         return headers
 
 
@@ -464,8 +472,14 @@ class AsyncInvokeTransport:
             if EVENT_STREAM_CONTENT_TYPE not in content_type.lower():
                 await self._raise_for_non_stream(response)
             state = _FrameStream()
+            total = self._timeouts.total_s
+            deadline = None if total is None else time.monotonic() + total
             try:
                 async for event, data in parse_sse_events_async(response.aiter_lines()):
+                    if deadline is not None and time.monotonic() >= deadline:
+                        raise RemoteInvokeUnavailableError(
+                            "remote invoke exceeded the total stream budget"
+                        )
                     yield state.feed(event, data)
                     if state.done:
                         return
@@ -565,8 +579,14 @@ class SyncInvokeTransport:
             if EVENT_STREAM_CONTENT_TYPE not in content_type.lower():
                 self._raise_for_non_stream(response)
             state = _FrameStream()
+            total = self._timeouts.total_s
+            deadline = None if total is None else time.monotonic() + total
             try:
                 for event, data in parse_sse_events(response.iter_lines()):
+                    if deadline is not None and time.monotonic() >= deadline:
+                        raise RemoteInvokeUnavailableError(
+                            "remote invoke exceeded the total stream budget"
+                        )
                     yield state.feed(event, data)
                     if state.done:
                         return

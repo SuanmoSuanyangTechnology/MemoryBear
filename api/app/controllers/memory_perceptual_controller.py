@@ -1,14 +1,15 @@
 import uuid
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Query
-from sqlalchemy.orm import Session
+from fastapi import APIRouter, Depends, Query, Request
+from starlette.concurrency import run_in_threadpool
 
 from app.core.error_codes import BizCode
 from app.core.logging_config import get_api_logger
 from app.core.response_utils import success, fail
-from app.db import get_db
+from app.db import get_db_context
 from app.dependencies import get_current_user
+from app.integrations.profile.proxy import memory_profile_proxy
 from app.models import User
 from app.models.memory_perceptual_model import PerceptualType
 from app.schemas.memory_perceptual_schema import (
@@ -27,11 +28,38 @@ router = APIRouter(
 )
 
 
+def _get_memory_count_sync(end_user_id: uuid.UUID):
+    with get_db_context() as db:
+        return MemoryPerceptualService(db).get_memory_count(end_user_id)
+
+
+def _get_timeline_sync(
+    end_user_id: uuid.UUID,
+    perceptual_type: Optional[PerceptualType],
+    page: int,
+    page_size: int,
+):
+    query = PerceptualQuerySchema(
+        filter=PerceptualFilter(type=perceptual_type),
+        page=page,
+        page_size=page_size,
+    )
+    with get_db_context() as db:
+        return MemoryPerceptualService(db).get_time_line(end_user_id, query)
+
+
+def _get_latest_sync(end_user_id: uuid.UUID, method_name: str):
+    with get_db_context() as db:
+        service = MemoryPerceptualService(db)
+        return getattr(service, method_name)(end_user_id)
+
+
 @router.get("/{end_user_id}/count", response_model=ApiResponse)
-def get_memory_count(
+@memory_profile_proxy(query_fields=())
+async def get_memory_count(
         end_user_id: uuid.UUID,
         current_user: User = Depends(get_current_user),
-        db: Session = Depends(get_db)
+        request: Request = None,
 ):
     """Retrieve perceptual memory statistics for a user group.
 
@@ -46,8 +74,7 @@ def get_memory_count(
     api_logger.info(f"Fetching perceptual memory statistics: user={current_user.username}, end_user_id={end_user_id}")
 
     try:
-        service = MemoryPerceptualService(db)
-        count_stats = service.get_memory_count(end_user_id)
+        count_stats = await run_in_threadpool(_get_memory_count_sync, end_user_id)
 
         api_logger.info(f"Memory statistics fetched successfully: total={count_stats.get('total', 0)}")
 
@@ -65,10 +92,11 @@ def get_memory_count(
 
 
 @router.get("/{end_user_id}/last_visual", response_model=ApiResponse)
-def get_last_visual_memory(
+@memory_profile_proxy(query_fields=())
+async def get_last_visual_memory(
         end_user_id: uuid.UUID,
         current_user: User = Depends(get_current_user),
-        db: Session = Depends(get_db)
+        request: Request = None,
 ):
     """Retrieve the most recent VISION-type memory for a user.
 
@@ -83,8 +111,9 @@ def get_last_visual_memory(
     api_logger.info(f"Fetching latest visual memory: user={current_user.username}, end_user_id={end_user_id}")
 
     try:
-        service = MemoryPerceptualService(db)
-        visual_memory = service.get_latest_visual_memory(end_user_id)
+        visual_memory = await run_in_threadpool(
+            _get_latest_sync, end_user_id, "get_latest_visual_memory"
+        )
 
         if visual_memory is None:
             api_logger.info(f"No visual memory found: end_user_id={end_user_id}")
@@ -109,10 +138,11 @@ def get_last_visual_memory(
 
 
 @router.get("/{end_user_id}/last_listen", response_model=ApiResponse)
-def get_last_memory_listen(
+@memory_profile_proxy(query_fields=())
+async def get_last_memory_listen(
         end_user_id: uuid.UUID,
         current_user: User = Depends(get_current_user),
-        db: Session = Depends(get_db)
+        request: Request = None,
 ):
     """Retrieve the most recent AUDIO-type memory for a user.
 
@@ -127,8 +157,9 @@ def get_last_memory_listen(
     api_logger.info(f"Fetching latest audio memory: user={current_user.username}, end_user_id={end_user_id}")
 
     try:
-        service = MemoryPerceptualService(db)
-        audio_memory = service.get_latest_audio_memory(end_user_id)
+        audio_memory = await run_in_threadpool(
+            _get_latest_sync, end_user_id, "get_latest_audio_memory"
+        )
 
         if audio_memory is None:
             api_logger.info(f"No audio memory found: end_user_id={end_user_id}")
@@ -153,10 +184,11 @@ def get_last_memory_listen(
 
 
 @router.get("/{end_user_id}/last_text", response_model=ApiResponse)
-def get_last_text_memory(
+@memory_profile_proxy(query_fields=())
+async def get_last_text_memory(
         end_user_id: uuid.UUID,
         current_user: User = Depends(get_current_user),
-        db: Session = Depends(get_db)
+        request: Request = None,
 ):
     """Retrieve the most recent TEXT-type memory for a user.
 
@@ -172,8 +204,9 @@ def get_last_text_memory(
 
     try:
         # 调用服务层获取最近的文本记忆
-        service = MemoryPerceptualService(db)
-        text_memory = service.get_latest_text_memory(end_user_id)
+        text_memory = await run_in_threadpool(
+            _get_latest_sync, end_user_id, "get_latest_text_memory"
+        )
 
         if text_memory is None:
             api_logger.info(f"No text memory found: end_user_id={end_user_id}")
@@ -198,13 +231,16 @@ def get_last_text_memory(
 
 
 @router.get("/{end_user_id}/timeline", response_model=ApiResponse)
-def get_memory_time_line(
+@memory_profile_proxy(
+    query_fields=("perceptual_type", "page", "page_size"),
+)
+async def get_memory_time_line(
         end_user_id: uuid.UUID,
         perceptual_type: Optional[PerceptualType] = Query(None, description="感知类型过滤"),
         page: int = Query(1, ge=1, description="页码"),
         page_size: int = Query(10, ge=1, le=100, description="每页大小"),
         current_user: User = Depends(get_current_user),
-        db: Session = Depends(get_db)
+        request: Request = None,
 ):
     """Retrieve a timeline of perceptual memories for a user group.
 
@@ -225,14 +261,13 @@ def get_memory_time_line(
     )
 
     try:
-        query = PerceptualQuerySchema(
-            filter=PerceptualFilter(type=perceptual_type),
-            page=page,
-            page_size=page_size
+        timeline_data = await run_in_threadpool(
+            _get_timeline_sync,
+            end_user_id,
+            perceptual_type,
+            page,
+            page_size,
         )
-
-        service = MemoryPerceptualService(db)
-        timeline_data = service.get_time_line(end_user_id, query)
 
         api_logger.info(
             f"Perceptual memory timeline retrieved successfully: total={timeline_data.total}, "

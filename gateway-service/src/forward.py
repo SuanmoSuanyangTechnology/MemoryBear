@@ -27,6 +27,7 @@ from typing import Literal, Protocol
 import httpx
 from fastapi import Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
+from memorybear_grpc.metadata import traceparent_trace_id
 from pydantic import BaseModel
 
 from .circuit import CircuitBreaker
@@ -74,7 +75,9 @@ class TargetRoute(BaseModel):
     required_scopes: tuple[str, ...] = ()
     # Optional gRPC dispatch: base_url stays the HTTP fallback so one route
     # entry flips transports without a second config surface.
-    protocol: Literal["http", "grpc"] = "http"
+    # None = inherit GATEWAY_APP_CHAT_PROTOCOL; an explicit value in the route
+    # file wins so a hot reload can roll back without touching the deployment.
+    protocol: Literal["http", "grpc"] | None = None
     grpc_target: str | None = None
     grpc_method: str = ""
 
@@ -89,6 +92,15 @@ class StaticTargetResolver:
     def __init__(self, routes: list[TargetRoute]) -> None:
         # 前缀最长匹配：按 path_prefix 长度降序，首个命中即返回
         self._routes = sorted(routes, key=lambda r: len(r.path_prefix), reverse=True)
+
+    def replace(self, routes: list[TargetRoute]) -> None:
+        """Atomically swap the route table; in-flight requests keep their route."""
+
+        self._routes = sorted(routes, key=lambda r: len(r.path_prefix), reverse=True)
+
+    @property
+    def size(self) -> int:
+        return len(self._routes)
 
     def resolve(self, path: str) -> TargetRoute | None:
         for route in self._routes:
@@ -148,6 +160,11 @@ class Forwarder:
             value = request.headers.get(name)
             if value is not None:
                 headers[name] = value
+        # traceparent is the standard non-x-* tracing carrier; only a valid
+        # value is propagated so malformed input cannot poison downstream logs.
+        traceparent = request.headers.get("traceparent")
+        if traceparent_trace_id(traceparent) is not None:
+            headers["traceparent"] = traceparent
         # Identity headers (x-user-id / x-tenant-id / x-kb-* / x-model-* ...) were
         # sanitized and injected by the middleware after termination; re-serialize
         # them from the scope here. Credential headers no longer reach this layer:

@@ -46,7 +46,7 @@ dependencies = [
     "python-multipart>=0.0.20,<1",
     "pytz>=2025.2,<2027",
     "pyyaml>=6.0.3,<7",
-    "redbear-model[all]",
+    "redbear-model[all,grpc]",
     "redis>=6.4,<7",
     "requests>=2.32,<3",
     "simpleeval>=1.0.3,<2",
