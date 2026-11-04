@@ -128,6 +128,36 @@ def _safe_exception_chain(nodes: list[BaseException]) -> list[dict]:
     return result
 
 
+def failure_diagnostics(
+    exception: BaseException | None,
+    validation_errors: list[dict] | None = None,
+) -> tuple[dict, list[BaseException], bool]:
+    """HTTP 与 gRPC 共用异常链和校验详情脱敏，避免日志泄露输入。"""
+    context: dict = {}
+    if validation_errors is not None:
+        context["validation_errors"] = _validation_summary(validation_errors)
+        context["validation_error_count"] = len(validation_errors)
+    nodes = _exception_nodes(exception)
+    chain_truncated = len(nodes) >= MAX_FAILURE_FIELDS
+    sensitive_chain = (
+        validation_errors is not None
+        or chain_truncated
+        or any(_sensitive_exception(e) for e in nodes)
+    )
+    if chain_truncated:
+        context["exception_chain_truncated"] = True
+    if nodes:
+        context["exception_type"] = type(nodes[0]).__name__
+        if sensitive_chain:
+            context["exception_chain"] = _safe_exception_chain(nodes)
+        else:
+            context["exception_message"] = _bounded(nodes[0])
+            if len(nodes) > 1:
+                context["cause_type"] = type(nodes[1]).__name__
+                context["cause_message"] = _bounded(nodes[1])
+    return context, nodes, sensitive_chain
+
+
 def log_request_failure(
     request: Request,
     *,
@@ -167,27 +197,8 @@ def log_request_failure(
     }
     if context["route"] == "<unresolved>":
         context["path"] = _bounded(request.url.path)
-    if validation_errors is not None:
-        context["validation_errors"] = _validation_summary(validation_errors)
-        context["validation_error_count"] = len(validation_errors)
-    nodes = _exception_nodes(exception)
-    chain_truncated = len(nodes) >= MAX_FAILURE_FIELDS
-    sensitive_chain = (
-        validation_errors is not None
-        or chain_truncated
-        or any(_sensitive_exception(e) for e in nodes)
-    )
-    if chain_truncated:
-        context["exception_chain_truncated"] = True
-    if nodes:
-        context["exception_type"] = type(nodes[0]).__name__
-        if sensitive_chain:
-            context["exception_chain"] = _safe_exception_chain(nodes)
-        else:
-            context["exception_message"] = _bounded(nodes[0])
-            if len(nodes) > 1:
-                context["cause_type"] = type(nodes[1]).__name__
-                context["cause_message"] = _bounded(nodes[1])
+    diagnostics, nodes, sensitive_chain = failure_diagnostics(exception, validation_errors)
+    context.update(diagnostics)
     dependency_failure = status_code >= 500 or response_code == DEPENDENCY_FAILURE_RESPONSE_CODE
     with_stack = (
         exception is not None and not sensitive_chain and (dependency_failure or len(nodes) > 1)

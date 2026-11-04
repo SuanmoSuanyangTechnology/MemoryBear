@@ -24,10 +24,14 @@ from memorybear_grpc.metadata import (
 from pydantic import ValidationError
 
 from ..api.dependencies import Principal
-from ..api.schemas.chunk import KnowledgeRetrievalSource, RetrievalPolicyRequest
-from ..api.schemas.knowledge_retrieval import KnowledgeRetrievalRequest
+from ..api.schemas.chunk import ChunkRetrieve, KnowledgeRetrievalSource, RetrievalPolicyRequest
+from ..api.schemas.knowledge_retrieval import (
+    KnowledgeRetrievalRequest,
+    prepare_retrieval_request,
+)
 from ..errors import KnowledgeError
 from ..i18n import resolve_locale
+from ..request_logging import failure_diagnostics
 from ..runtime import ProcessRuntime
 from ..services.knowledge_retrieval import KnowledgeRetrievalService
 from ..services.knowledge_retrieval_preparation import KnowledgeRetrievalPreparation
@@ -49,10 +53,12 @@ def _decode_json_object(body_json: bytes, *, error_code: str) -> dict[str, Any]:
     return body
 
 
-def _decode_retrieval_request(body_json: bytes) -> KnowledgeRetrievalRequest:
+def _decode_retrieval_request(
+    body_json: bytes, source: KnowledgeRetrievalSource
+) -> KnowledgeRetrievalRequest:
     body = _decode_json_object(body_json, error_code="KB_RETRIEVAL_REQUEST_INVALID")
     try:
-        return KnowledgeRetrievalRequest.model_validate(body)
+        return prepare_retrieval_request(ChunkRetrieve.model_validate(body), source)
     except ValidationError as exc:
         if any(
             any(part in _RERANK_FIELDS for part in error.get("loc", ()))
@@ -110,6 +116,37 @@ def _retrieval_data(result: Any) -> dict[str, Any] | list[dict[str, Any]]:
     return [chunk.model_dump(mode="json") for chunk in result.chunks]
 
 
+def _log_failure(
+    error: KnowledgeError,
+    *,
+    operation: str,
+    stage: str,
+    trace_id: str,
+    principal: Principal | None,
+    source: KnowledgeRetrievalSource | None = None,
+) -> None:
+    diagnostics, nodes, sensitive_chain = failure_diagnostics(error)
+    details = {
+        "operation": operation,
+        "stage": stage,
+        "trace_id": trace_id,
+        "code": error.code,
+        "status": error.status_code,
+        "params": dict(error.params),
+        "source": source.value if source is not None else None,
+        "actor_id": str(principal.actor_id) if principal else None,
+        "tenant_id": str(principal.tenant_id) if principal else None,
+        "workspace_id": str(principal.workspace_id) if principal else None,
+        **diagnostics,
+    }
+    logger.warning(
+        "knowledge_grpc_failed %s",
+        json.dumps(details, ensure_ascii=False, default=str),
+        exc_info=(type(error), error, error.__traceback__)
+        if not sensitive_chain and len(nodes) > 1 else None,
+    )
+
+
 class KnowledgeRetrievalServicer(
     retrieval_pb2_grpc.KnowledgeRetrievalServiceServicer
 ):
@@ -126,12 +163,14 @@ class KnowledgeRetrievalServicer(
         language = _language(context)
         started = time.perf_counter()
         source: KnowledgeRetrievalSource | None = None
+        principal: Principal | None = None
+        stage = "request_validation"
         try:
             try:
                 principal = _principal()
                 source = _source(context)
-                retrieval_request = _decode_retrieval_request(request.body_json)
-                retrieval_request.source = source
+                retrieval_request = _decode_retrieval_request(request.body_json, source)
+                stage = "retrieval"
                 result = await KnowledgeRetrievalService.retrieve_async(
                     self._runtime,
                     retrieval_request,
@@ -139,14 +178,9 @@ class KnowledgeRetrievalServicer(
                 )
                 body = success_body(_retrieval_data(result), "retrieval successful")
             except KnowledgeError as exc:
-                logger.warning(
-                    "knowledge_grpc_retrieval_failed code=%s status=%s source=%s "
-                    "elapsed_ms=%.2f trace_id=%s",
-                    exc.code,
-                    exc.status_code,
-                    source.value if source is not None else "unknown",
-                    (time.perf_counter() - started) * 1000,
-                    trace_id,
+                _log_failure(
+                    exc, operation="Retrieve", stage=stage, trace_id=trace_id,
+                    principal=principal, source=source,
                 )
                 await abort_with_error(
                     context, exc, language=language, trace_id=trace_id
@@ -187,10 +221,13 @@ class KnowledgeRetrievalServicer(
         trace_id, trace_token = _bind_trace()
         language = _language(context)
         started = time.perf_counter()
+        principal: Principal | None = None
+        stage = "request_validation"
         try:
             try:
                 principal = _principal()
                 policy_request = _decode_policy_request(request.body_json)
+                stage = "retrieval_policy"
                 async with self._runtime.database.async_session() as db:
                     policy = await KnowledgeRetrievalPreparation.prepare_policy_with_db(
                         db,
@@ -202,13 +239,9 @@ class KnowledgeRetrievalServicer(
                     "retrieval policy resolved",
                 )
             except KnowledgeError as exc:
-                logger.warning(
-                    "knowledge_grpc_retrieval_policy_failed code=%s status=%s "
-                    "elapsed_ms=%.2f trace_id=%s",
-                    exc.code,
-                    exc.status_code,
-                    (time.perf_counter() - started) * 1000,
-                    trace_id,
+                _log_failure(
+                    exc, operation="RetrievalPolicy", stage=stage, trace_id=trace_id,
+                    principal=principal,
                 )
                 await abort_with_error(
                     context, exc, language=language, trace_id=trace_id
