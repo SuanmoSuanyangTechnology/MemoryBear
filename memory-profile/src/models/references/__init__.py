@@ -36,3 +36,7 @@ __all__ = [
     "ShortTermMemory",
     "Workspace",
 ]
+
+from src.models.references.memory_display_model import MemoryDisplayRecord, MemoryEngineDisplayEvent
+
+__all__ += ["MemoryDisplayRecord", "MemoryEngineDisplayEvent"]

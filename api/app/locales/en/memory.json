@@ -8,6 +8,22 @@
   "errors": {
     "recover_not_allowed": "This memory cannot be recovered, it may have already been recovered or is of an unrecoverable type",
     "neo4j_node_not_found": "Neo4j node does not exist or has been deleted",
-    "internal_error": "Failed to recover memory"
+    "internal_error": "Failed to recover memory",
+    "workspace_required": "Please select a workspace first",
+    "current_workspace_missing": "No current workspace is selected",
+    "profile_unavailable": "Memory profile service temporarily unavailable",
+    "profile_unavailable_detail": "Memory profile service unavailable",
+    "invalid_end_user_id": "Invalid end_user_id format: {value}",
+    "user_not_found": "End user not found",
+    "user_other_workspace": "End user does not belong to this workspace"
+  },
+  "display": {
+    "error": {
+      "invalid_time_window": "start_time must not be greater than end_time",
+      "timezone_required": "X-Timezone must not be empty",
+      "timezone_header_required": "X-Timezone header is required",
+      "invalid_timezone": "Invalid timezone: {timezone}",
+      "invalid_iana_timezone": "'{timezone}' is not a valid IANA timezone"
+    }
   }
 }
