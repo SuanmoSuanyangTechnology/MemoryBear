@@ -42,6 +42,7 @@ from ..models.tool_model import (
     ToolType,
     WorkflowToolConfig,
 )
+from ..protocols.market_gateway import MarketGateway
 from ..repositories.tool_repository import (
     BuiltinToolRepository,
     CustomToolRepository,
@@ -49,6 +50,7 @@ from ..repositories.tool_repository import (
     ToolRepository,
     WorkflowToolRepository,
 )
+from ..schemas.external_catalog_schema import ExternalRef
 from ..schemas.tool_schema import (
     BuiltinToolConfigSchema,
     CustomToolConfigSchema,
@@ -315,6 +317,14 @@ class ToolService:
 
                 # Update status logic
                 self._update_tool_status(config_obj)
+            elif is_enabled is not None and config_obj.tool_type == ToolType.BUILTIN.value:
+                # Toggle a builtin tool without overwriting its stored config
+                builtin_config = self.db.query(BuiltinToolConfig).filter(
+                    BuiltinToolConfig.id == config_obj.id
+                ).first()
+                if builtin_config:
+                    builtin_config.is_enabled = is_enabled
+                self._update_tool_status(config_obj)
 
             # Clear cache
             self._clear_tool_cache(tool_id)
@@ -500,13 +510,15 @@ class ToolService:
     async def get_tool_methods(
             self,
             tool_id: str,
-            tenant_id: uuid.UUID
+            tenant_id: uuid.UUID,
+            read_only: bool = False,
     ) -> list[dict[str, Any]] | None:
         """Get all methods of a tool.
 
         Args:
             tool_id: Tool ID
             tenant_id: Tenant ID
+            read_only: Never discover MCP methods when no cached list exists
 
         Returns:
             Method list, or None.
@@ -521,7 +533,7 @@ class ToolService:
             elif config.tool_type == ToolType.CUSTOM.value:
                 return await self._get_custom_tool_methods(config)
             elif config.tool_type == ToolType.MCP.value:
-                return await self._get_mcp_tool_methods(config)
+                return await self._get_mcp_tool_methods(config, read_only=read_only)
             elif config.tool_type == ToolType.WORKFLOW.value:
                 return await self._get_workflow_tool_methods(config)
             else:
@@ -531,14 +543,134 @@ class ToolService:
             logger.error(f"获取工具方法失败: {tool_id}, {e}")
             return []
 
-    async def _get_builtin_tool_methods(self, config: ToolConfig) -> list[dict[str, Any]]:
+    async def get_tool_methods_batch(
+            self,
+            tool_ids: list[str],
+            tenant_id: uuid.UUID,
+    ) -> tuple[list[dict[str, Any]], list[str]]:
+        """Build method trees for up to 100 tools with one query per table."""
+        seen: set[str] = set()
+        parsed: list[tuple[str, uuid.UUID | None]] = []
+        for raw in tool_ids:
+            if raw in seen:
+                continue
+            seen.add(raw)
+            try:
+                parsed.append((raw, uuid.UUID(raw)))
+            except (ValueError, TypeError):
+                parsed.append((raw, None))
+
+        valid_ids = [uid for _, uid in parsed if uid is not None]
+        configs = self.tool_repo.find_by_ids(valid_ids, tenant_id)
+        by_id = {config.id: config for config in configs}
+        missing = [
+            raw for raw, uid in parsed if uid is None or uid not in by_id
+        ]
+        ordered = [by_id[uid] for _, uid in parsed if uid in by_id]
+
+        grouped: dict[str, list[uuid.UUID]] = {}
+        for config in ordered:
+            grouped.setdefault(config.tool_type, []).append(config.id)
+
+        builtin_map: dict[uuid.UUID, BuiltinToolConfig] = {}
+        custom_map: dict[uuid.UUID, CustomToolConfig] = {}
+        mcp_map: dict[uuid.UUID, MCPToolConfig] = {}
+        workflow_map: dict[uuid.UUID, WorkflowToolConfig] = {}
+
+        if ToolType.BUILTIN.value in grouped:
+            builtin_map = {
+                row.id: row
+                for row in self.builtin_repo.find_by_tool_ids(
+                    grouped[ToolType.BUILTIN.value]
+                )
+            }
+        if ToolType.CUSTOM.value in grouped:
+            custom_map = {
+                row.id: row
+                for row in self.custom_repo.find_by_tool_ids(
+                    grouped[ToolType.CUSTOM.value]
+                )
+            }
+        if ToolType.MCP.value in grouped:
+            mcp_map = {
+                row.id: row
+                for row in self.mcp_repo.find_by_tool_ids(
+                    grouped[ToolType.MCP.value]
+                )
+            }
+        if ToolType.WORKFLOW.value in grouped:
+            workflow_map = {
+                row.id: row
+                for row in self.workflow_repo.find_by_tool_ids(
+                    grouped[ToolType.WORKFLOW.value]
+                )
+            }
+
+        items: list[dict[str, Any]] = []
+        for config in ordered:
+            try:
+                if config.tool_type == ToolType.BUILTIN.value:
+                    methods = await self._get_builtin_tool_methods(
+                        config, builtin_map.get(config.id)
+                    )
+                elif config.tool_type == ToolType.CUSTOM.value:
+                    methods = await self._get_custom_tool_methods(
+                        config, custom_map.get(config.id)
+                    )
+                elif config.tool_type == ToolType.MCP.value:
+                    methods = await self._get_mcp_tool_methods(
+                        config, mcp_map.get(config.id), read_only=True
+                    )
+                elif config.tool_type == ToolType.WORKFLOW.value:
+                    methods = await self._get_workflow_tool_methods(
+                        config, workflow_map.get(config.id)
+                    )
+                else:
+                    methods = []
+            except Exception as exc:
+                logger.error("构建工具方法失败: %s, %s", config.id, exc)
+                methods = []
+
+            items.append({
+                "tool_id": str(config.id),
+                "name": config.name,
+                "tool_type": config.tool_type,
+                "origin": config.origin or "local",
+                "is_active": config.is_active,
+                "method_count": len(methods),
+                "methods": methods,
+            })
+
+        return items, missing
+
+    def validate_tool_selection(
+            self,
+            tenant_id: uuid.UUID,
+            tools: list[dict[str, Any]] | None,
+            stored_tools: list[dict[str, Any]] | dict[str, Any] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Validate and normalize an app's tools block before saving."""
+        from .tool_selection_validator import validate_tool_selection
+
+        return validate_tool_selection(self, tenant_id, tools, stored_tools)
+
+    async def _get_builtin_tool_methods(
+            self,
+            config: ToolConfig,
+            builtin_config: BuiltinToolConfig | None = None,
+    ) -> list[dict[str, Any]]:
         """Get the methods of a builtin tool."""
-        builtin_config = self.builtin_repo.find_by_tool_id(config.id)
+        preloaded = builtin_config
+        builtin_config = builtin_config or self.builtin_repo.find_by_tool_id(config.id)
         if not builtin_config or builtin_config.tool_class not in BUILTIN_TOOLS:
             return []
 
-        # Get the tool instance
-        tool_instance = self.get_tool_instance(str(config.id), config.tenant_id)
+        if preloaded is not None:
+            tool_instance = self._create_builtin_instance(
+                config, builtin_config=preloaded
+            )
+        else:
+            tool_instance = self.get_tool_instance(str(config.id), config.tenant_id)
         if not tool_instance:
             return []
 
@@ -557,6 +689,7 @@ class ToolService:
                 operation_params = self._get_operation_specific_params(tool_instance, operation)
                 methods.append({
                     "method_id": f"{config.name}_{operation}",
+                    "operation_key": operation,
                     "name": operation,
                     "description": f"{config.description} - {operation}",
                     "parameters": operation_params
@@ -566,6 +699,7 @@ class ToolService:
             # Only one method
             return [{
                 "method_id": config.name,
+                "operation_key": None,
                 "name": config.name,
                 "description": config.description,
                 "parameters": [p for p in tool_instance.parameters if p.name != "operation"]
@@ -895,9 +1029,13 @@ class ToolService:
                 }
             ]
 
-    async def _get_custom_tool_methods(self, config: ToolConfig) -> list[dict[str, Any]]:
+    async def _get_custom_tool_methods(
+            self,
+            config: ToolConfig,
+            custom_config: CustomToolConfig | None = None,
+    ) -> list[dict[str, Any]]:
         """Get the methods of a custom tool."""
-        custom_config = self.custom_repo.find_by_tool_id(config.id)
+        custom_config = custom_config or self.custom_repo.find_by_tool_id(config.id)
         if not custom_config:
             return []
 
@@ -957,6 +1095,7 @@ class ToolService:
 
                 methods.append({
                     "method_id": operation_id,
+                    "operation_key": operation_id,
                     "name": operation.get("summary", operation_id),
                     "description": operation.get("description", ""),
                     "method": operation.get("method", "GET"),
@@ -970,14 +1109,21 @@ class ToolService:
             logger.error(f"解析自定义工具schema失败: {e}")
             return []
 
-    async def _get_mcp_tool_methods(self, config: ToolConfig) -> list[dict[str, Any]]:
+    async def _get_mcp_tool_methods(
+            self,
+            config: ToolConfig,
+            mcp_config: MCPToolConfig | None = None,
+            read_only: bool = False,
+    ) -> list[dict[str, Any]]:
         """Get the methods and parameters of an MCP tool."""
-        mcp_config = self.mcp_repo.find_by_tool_id(config.id)
+        mcp_config = mcp_config or self.mcp_repo.find_by_tool_id(config.id)
         if not mcp_config:
             return []
 
         available_tools = mcp_config.available_tools or []
         if not available_tools:
+            if read_only:
+                return []
             # If no tool list is present, try syncing
             try:
                 success, tools, _ = await self.mcp_tool_manager.discover_tools(
@@ -1030,6 +1176,7 @@ class ToolService:
 
                     methods.append({
                         "method_id": tool_name,
+                        "operation_key": tool_name,
                         "name": tool_name,
                         "description": tool_data.get("description", f"MCP工具: {tool_name}"),
                         "parameters": parameters
@@ -1039,6 +1186,7 @@ class ToolService:
                 tool_name = str(tool_item)
                 methods.append({
                     "method_id": tool_name,
+                    "operation_key": tool_name,
                     "name": tool_name,
                     "description": f"MCP工具: {tool_name}",
                     "parameters": []
@@ -1173,9 +1321,13 @@ class ToolService:
             return await self._create_workflow_instance_async(config)
         return None
 
-    def _create_builtin_instance(self, config: ToolConfig) -> BaseTool | None:
+    def _create_builtin_instance(
+            self,
+            config: ToolConfig,
+            builtin_config: BuiltinToolConfig | None = None,
+    ) -> BaseTool | None:
         """Create a builtin tool instance."""
-        builtin_config = self.builtin_repo.find_by_tool_id(config.id)
+        builtin_config = builtin_config or self.builtin_repo.find_by_tool_id(config.id)
 
         if not builtin_config or builtin_config.tool_class not in BUILTIN_TOOLS:
             return None
@@ -1228,9 +1380,13 @@ class ToolService:
 
         return MCPTool(str(config.id), tool_config)
 
-    def _create_workflow_instance(self, config: ToolConfig) -> WorkflowAsTool | None:
+    def _create_workflow_instance(
+            self,
+            config: ToolConfig,
+            workflow_config: WorkflowToolConfig | None = None,
+    ) -> WorkflowAsTool | None:
         """Create a workflow tool instance."""
-        workflow_config = self.workflow_repo.find_by_tool_id(config.id)
+        workflow_config = workflow_config or self.workflow_repo.find_by_tool_id(config.id)
 
         if not workflow_config:
             return None
@@ -1357,6 +1513,7 @@ class ToolService:
                     "timeout": workflow_config.timeout or 300,
                 })
 
+        origin = config.origin or "local"
         return ToolInfo(
             id=str(config.id),
             name=config.name,
@@ -1369,8 +1526,97 @@ class ToolService:
             tenant_id=str(config.tenant_id) if config.tenant_id else None,
             config_data=config_data,
             is_active=config.is_active,
+            origin=origin,
+            method_count=0,
+            external=self._external_ref(config, origin=origin),
             created_at=config.created_at
         )
+
+    @staticmethod
+    def _external_ref(config: ToolConfig, *, origin: str | None = None) -> ExternalRef | None:
+        """Describe the market source of an installed copy (never publication state)."""
+        effective_origin = origin or config.origin or "local"
+        if effective_origin != "external" or not config.external_resource_id:
+            return None
+        return ExternalRef(
+            source=config.external_source or "community_market",
+            resource_id=config.external_resource_id,
+            version=config.external_version or "",
+        )
+
+    @staticmethod
+    def _normalize_external_status(value: str | None) -> str:
+        return value if value in ("published", "unlisted") else "unknown"
+
+    async def _market_status_map(
+            self,
+            gateway: MarketGateway | None,
+            local_ids: list[str],
+            tenant_id: uuid.UUID,
+    ) -> dict[str, str | None]:
+        """Best-effort installed-copy status lookup; failures degrade to unknown."""
+        if gateway is None or not local_ids:
+            return {}
+        try:
+            statuses = await gateway.publication_status(
+                "tool", local_ids, str(tenant_id)
+            )
+        except Exception as exc:
+            logger.warning("查询市场安装状态失败: %s", exc)
+            return {}
+        return {item.local_resource_id: item.status for item in statuses}
+
+    async def enrich_tool_provenance(
+            self,
+            tools: list[ToolInfo],
+            tenant_id: uuid.UUID,
+            gateway: MarketGateway | None = None,
+            include_external_status: bool = False,
+    ) -> list[ToolInfo]:
+        """Attach method counts (read-only, no MCP discovery) and optional market status."""
+        if not tools:
+            return tools
+        items, _ = await self.get_tool_methods_batch(
+            [tool.id for tool in tools], tenant_id
+        )
+        counts = {item["tool_id"]: item["method_count"] for item in items}
+        tools = [
+            tool.model_copy(update={"method_count": counts.get(tool.id, 0)})
+            for tool in tools
+        ]
+        if not include_external_status:
+            return tools
+        installed = [tool.id for tool in tools if tool.external is not None]
+        if not installed:
+            return tools
+        statuses = await self._market_status_map(gateway, installed, tenant_id)
+        return [
+            tool.model_copy(update={
+                "external": tool.external.model_copy(update={
+                    "status": self._normalize_external_status(statuses.get(tool.id))
+                })
+            }) if tool.external is not None else tool
+            for tool in tools
+        ]
+
+    async def enrich_tool_detail(
+            self,
+            detail: ToolDetailSchema,
+            tenant_id: uuid.UUID,
+            gateway: MarketGateway | None = None,
+            include_external_status: bool = False,
+    ) -> ToolDetailSchema:
+        """Attach the method count and optional market status to one tool detail."""
+        items, _ = await self.get_tool_methods_batch([detail.id], tenant_id)
+        updates: dict[str, Any] = {
+            "method_count": items[0]["method_count"] if items else 0
+        }
+        if include_external_status and detail.external is not None:
+            statuses = await self._market_status_map(gateway, [detail.id], tenant_id)
+            updates["external"] = detail.external.model_copy(update={
+                "status": self._normalize_external_status(statuses.get(detail.id))
+            })
+        return detail.model_copy(update=updates)
 
     def _config_to_detail(self, config: ToolConfig) -> ToolDetailSchema:
         """Convert a config row to a ToolDetailSchema object."""
@@ -1462,14 +1708,24 @@ class ToolService:
         duplicate_fields = duplicate_fields_map.get(tool_type, set())
         return {k: v for k, v in config_data.items() if k not in duplicate_fields}
 
-    async def _get_workflow_tool_methods(self, config: ToolConfig) -> list[dict[str, Any]]:
+    async def _get_workflow_tool_methods(
+            self,
+            config: ToolConfig,
+            workflow_config: WorkflowToolConfig | None = None,
+    ) -> list[dict[str, Any]]:
         """Get the method list of a workflow tool."""
-        tool_instance = self.get_tool_instance(str(config.id), config.tenant_id)
+        if workflow_config is None:
+            tool_instance = self.get_tool_instance(str(config.id), config.tenant_id)
+        else:
+            tool_instance = self._create_workflow_instance(
+                config, workflow_config=workflow_config
+            )
         if not tool_instance:
             return []
 
         return [{
             "method_id": config.name,
+            "operation_key": None,
             "name": config.name,
             "description": config.description,
             "parameters": [serialize_tool_parameter(param) for param in tool_instance.parameters]

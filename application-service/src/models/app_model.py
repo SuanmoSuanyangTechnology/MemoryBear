@@ -41,7 +41,7 @@ class App(Base):
     __tablename__ = "apps"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
-    workspace_id = Column(UUID(as_uuid=True), nullable=False, comment="workspaces.id")
+    workspace_id = Column(UUID(as_uuid=True), nullable=False, index=True, comment="workspaces.id")
     created_by = Column(UUID(as_uuid=True), nullable=False, comment="users.id")
 
     name = Column(String, index=True, nullable=False)
@@ -60,6 +60,12 @@ class App(Base):
 
     # Tags or extended metadata
     tags = Column(JSON, default=list)
+
+    # Market provenance: describes the local copy's origin, not publication state.
+    origin = Column(String(16), default="local", server_default="local", nullable=False, index=True)
+    external_source = Column(String(32), nullable=True)
+    external_resource_id = Column(String(64), nullable=True, index=True)
+    external_version = Column(String(64), nullable=True)
 
     # Current published release pointer (points to the snapshot after publish, unaffected by edits)
     current_release_id = Column(

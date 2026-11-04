@@ -15,6 +15,7 @@ from enum import Enum
 
 from ..utils.datetime_utils import to_timestamp_ms
 from ..models.tool_model import ToolType, ToolStatus, AuthType
+from .external_catalog_schema import ExternalRef
 
 
 class ParameterType(str, Enum):
@@ -103,6 +104,9 @@ class ToolInfo(BaseModel):
     is_active: bool = Field(True, description="是否可用（False 表示已删除）")
     tags: List[str] = Field(default_factory=list, description="工具标签")
     tenant_id: Optional[str] = Field(None, description="租户ID")
+    origin: str = Field("local", description="本地副本来源：local / external")
+    method_count: int = Field(0, description="可调用方法数，不发起网络请求")
+    external: Optional[ExternalRef] = Field(None, description="来源信息；origin=local 时为 null")
     created_at: datetime = Field(..., description="创建时间")
 
     class Config:
@@ -202,6 +206,9 @@ class WorkflowToolConfigSchema(BaseModel):
 
 class ToolDetailSchema(ToolConfigSchema):
     """Tool detail schema (includes type-specific config)."""
+    origin: str = Field("local", description="本地副本来源：local / external")
+    method_count: int = Field(0, description="可调用方法数，不发起网络请求")
+    external: Optional[ExternalRef] = Field(None, description="来源信息；origin=local 时为 null")
     builtin_config: Optional[BuiltinToolConfigSchema] = None
     custom_config: Optional[CustomToolConfigSchema] = None
     mcp_config: Optional[MCPToolConfigSchema] = None
@@ -277,6 +284,11 @@ class ParseSchemaRequest(BaseModel):
     """Parse schema request."""
     schema_content: Optional[str] = Field(None, description="OpenAPI schema内容")
     schema_url: Optional[str] = Field(None, description="OpenAPI schema URL")
+
+
+class ToolMethodsBatchRequest(BaseModel):
+    """Batch method lookup for the app tool selector."""
+    tool_ids: list[str] = Field(..., min_length=1, max_length=100)
 
 
 class ToolListQuery(BaseModel):
