@@ -18,7 +18,12 @@ from typing import Any
 from uuid import UUID
 
 import httpx
+from memorybear_grpc.client import ChannelPool, SyncChannelPool
 from redbear_model.errors import RemoteInvokeError
+from redbear_model.runtime.grpc_remote import (
+    GrpcAsyncInvokeTransport,
+    GrpcSyncInvokeTransport,
+)
 from redbear_model.runtime.remote import (
     AsyncInvokeTransport,
     InvokeFrame,
@@ -151,6 +156,43 @@ class KBSyncInvokeTransport(SyncInvokeTransport):
             raise to_invoke_error(exc) from exc
 
 
+class KBGrpcAsyncInvokeTransport(GrpcAsyncInvokeTransport):
+    """gRPC 异步 transport 的 km 面：错误翻译与 :class:`KBAsyncInvokeTransport` 一致。"""
+
+    async def call(self, request: InvokeRequest, target: InvokeTarget) -> Any:
+        try:
+            return await super().call(request, target)
+        except RemoteInvokeError as exc:
+            raise to_invoke_error(exc) from exc
+
+    async def stream(
+        self, request: InvokeRequest, target: InvokeTarget
+    ) -> AsyncIterator[InvokeFrame]:
+        try:
+            async for frame in super().stream(request, target):
+                yield frame
+        except RemoteInvokeError as exc:
+            raise to_invoke_error(exc) from exc
+
+
+class KBGrpcSyncInvokeTransport(GrpcSyncInvokeTransport):
+    """gRPC 同步 transport 的 km 面：错误翻译与 :class:`KBSyncInvokeTransport` 一致。"""
+
+    def call(self, request: InvokeRequest, target: InvokeTarget) -> Any:
+        try:
+            return super().call(request, target)
+        except RemoteInvokeError as exc:
+            raise to_invoke_error(exc) from exc
+
+    def stream(
+        self, request: InvokeRequest, target: InvokeTarget
+    ) -> Iterator[InvokeFrame]:
+        try:
+            yield from super().stream(request, target)
+        except RemoteInvokeError as exc:
+            raise to_invoke_error(exc) from exc
+
+
 class ModelInvokeClient:
     """运行面异步调用通道：帧原样透出（``InvokeFrame``），失败翻 km 语汇。
 
@@ -158,16 +200,22 @@ class ModelInvokeClient:
     ——那是双方共同的 wire 契约，km 不另立一套。
     """
 
-    def __init__(self, http_client: httpx.AsyncClient, *, timeouts: InvokeTimeouts):
+    def __init__(
+        self,
+        http_client: httpx.AsyncClient,
+        *,
+        timeouts: InvokeTimeouts,
+        invoke: AsyncInvokeTransport | None = None,
+    ):
         self._http = http_client
-        self._invoke = KBAsyncInvokeTransport(
+        self._invoke = invoke or KBAsyncInvokeTransport(
             http_client,
             base_url=str(http_client.base_url).rstrip("/"),
             timeouts=timeouts,
         )
 
     @property
-    def async_transport(self) -> KBAsyncInvokeTransport:
+    def async_transport(self) -> AsyncInvokeTransport:
         """借出带 km 错误词表的包内 transport：chat 壳直接消费它。"""
 
         return self._invoke
@@ -188,6 +236,41 @@ class ModelInvokeClient:
             trust_env=False,
         )
         return cls(http_client, timeouts=resolved)
+
+    @classmethod
+    def for_grpc(
+        cls,
+        settings: KnowledgeSettings,
+        pool: ChannelPool,
+        *,
+        target: str,
+        timeouts: InvokeTimeouts | None = None,
+        call_budget_s: float = 180.0,
+        margin_s: float = 30.0,
+    ) -> ModelInvokeClient:
+        """gRPC 运行面：invoke 走共享 channel pool，HTTP 客户端只保留 availability 查询。"""
+
+        resolved = timeouts or invoke_timeouts(settings)
+        http_client = httpx.AsyncClient(
+            base_url=settings.model_service_base_url.rstrip("/") + "/",
+            timeout=resolved.httpx_timeout(),
+            limits=httpx.Limits(
+                max_connections=settings.model_service_max_connections,
+                max_keepalive_connections=settings.model_service_max_keepalive_connections,
+            ),
+            trust_env=False,
+        )
+        return cls(
+            http_client,
+            timeouts=resolved,
+            invoke=KBGrpcAsyncInvokeTransport(
+                pool,
+                target_name=target,
+                timeouts=resolved,
+                call_budget_s=call_budget_s,
+                margin_s=margin_s,
+            ),
+        )
 
     @classmethod
     def for_test(
@@ -255,8 +338,19 @@ class ModelInvokeSyncClient:
     ``KBSyncInvokeTransport``。媒体族同步孪生传媒体档 timeouts（:func:`invoke_media_timeouts`）。
     """
 
-    def __init__(self, http_client: httpx.Client, *, timeouts: InvokeTimeouts):
+    def __init__(
+        self,
+        http_client: httpx.Client | None,
+        *,
+        timeouts: InvokeTimeouts,
+        invoke: SyncInvokeTransport | None = None,
+    ):
         self._http = http_client
+        if invoke is not None:
+            self._invoke = invoke
+            return
+        if http_client is None:
+            raise ValueError("sync model invoke needs an HTTP client or a transport")
         self._invoke = KBSyncInvokeTransport(
             http_client,
             base_url=str(http_client.base_url).rstrip("/"),
@@ -264,7 +358,7 @@ class ModelInvokeSyncClient:
         )
 
     @property
-    def sync_transport(self) -> KBSyncInvokeTransport:
+    def sync_transport(self) -> SyncInvokeTransport:
         """借出带 km 错误词表的包内同步 transport：同步 LLM 壳直接消费它。"""
 
         return self._invoke
@@ -284,6 +378,31 @@ class ModelInvokeSyncClient:
             trust_env=False,
         )
         return cls(http_client, timeouts=resolved)
+
+    @classmethod
+    def for_grpc(
+        cls,
+        pool: SyncChannelPool,
+        *,
+        target: str,
+        timeouts: InvokeTimeouts | None = None,
+        call_budget_s: float = 180.0,
+        margin_s: float = 30.0,
+    ) -> ModelInvokeSyncClient:
+        """gRPC 同步面：同步 channel pool 由进程 runtime 持有并统一关闭。"""
+
+        resolved = timeouts or InvokeTimeouts()
+        return cls(
+            None,
+            timeouts=resolved,
+            invoke=KBGrpcSyncInvokeTransport(
+                pool,
+                target_name=target,
+                timeouts=resolved,
+                call_budget_s=call_budget_s,
+                margin_s=margin_s,
+            ),
+        )
 
     @classmethod
     def for_test(
@@ -309,11 +428,14 @@ class ModelInvokeSyncClient:
         return self._invoke.call(request, invoke_target(context))
 
     def close(self) -> None:
-        self._http.close()
+        if self._http is not None:
+            self._http.close()
 
 
 __all__ = [
     "KBAsyncInvokeTransport",
+    "KBGrpcAsyncInvokeTransport",
+    "KBGrpcSyncInvokeTransport",
     "KBSyncInvokeTransport",
     "MODEL_SOURCE_MEM_KNOWLEDGE",
     "ModelCallContext",
