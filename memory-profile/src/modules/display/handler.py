@@ -5,10 +5,10 @@ from __future__ import annotations
 import logging
 from datetime import UTC, datetime
 
-from src.common.errors import BizCode, ProfileError
+from src.common.errors import BizCode, LocalizedProfileError, ProfileError
 from src.common.normalization import resolve_timezone
 from src.common.pagination import PageData
-from src.common.responses import ApiResponse, failure
+from src.common.responses import ApiResponse
 from src.common.validation import parse_optional_uuid
 from src.middleware.auth import MemoryPrincipal
 from src.runtime import ProfileRuntime
@@ -33,9 +33,9 @@ AllPageApiResponse = ApiResponse[PageData[AllItem]]
 
 def validate_time_window(start_time: int | None, end_time: int | None) -> None:
     if start_time is not None and end_time is not None and start_time > end_time:
-        raise ProfileError(
+        raise LocalizedProfileError(
             BizCode.INVALID_PARAMETER,
-            "start_time 不能大于 end_time",
+            "memory.display.error.invalid_time_window",
             detail=f"start={start_time}, end={end_time}",
             status_code=400,
         )
@@ -43,22 +43,46 @@ def validate_time_window(start_time: int | None, end_time: int | None) -> None:
 
 def validate_timezone(timezone_str: str | None) -> str:
     if not timezone_str or not timezone_str.strip():
-        raise ProfileError(
+        raise LocalizedProfileError(
             BizCode.MISSING_PARAMETER,
-            "X-Timezone 不能为空",
-            detail="X-Timezone header is required",
+            "memory.display.error.timezone_required",
+            detail_key="memory.display.error.timezone_header_required",
             status_code=400,
         )
     try:
         _, normalized = resolve_timezone(timezone_str)
     except ValueError as exc:
-        raise ProfileError(
+        raise LocalizedProfileError(
             BizCode.INVALID_PARAMETER,
-            f"无效的时区: {timezone_str.strip()}",
-            detail=str(exc),
+            "memory.display.error.invalid_timezone",
+            message_params={"timezone": timezone_str.strip()},
+            detail_key="memory.display.error.invalid_iana_timezone",
+            detail_params={"timezone": timezone_str.strip()},
             status_code=400,
         ) from exc
     return normalized
+
+
+def _statistics_window(
+    timezone_name: str | None, year: str | None, month: str | None, *, annual: bool
+):
+    try:
+        zone, zone_name = resolve_timezone(timezone_name)
+    except ValueError as exc:
+        name = (timezone_name or "").strip()
+        raise LocalizedProfileError(
+            BizCode.INVALID_PARAMETER,
+            "memory.display.error.invalid_statistics_parameters",
+            detail_key=(
+                "memory.display.error.invalid_iana_timezone"
+                if name
+                else "memory.display.error.timezone_required"
+            ),
+            detail_params={"timezone": name},
+            status_code=200,
+        ) from exc
+    first, length, start, end = activity_range(datetime.now(UTC), zone, year, month, annual)
+    return zone, zone_name, first, length, start, end
 
 
 class MemoryDisplayHandler:
@@ -79,14 +103,15 @@ class MemoryDisplayHandler:
         self, context: MemoryPrincipal, year: str | None, timezone_name: str | None
     ):
         if context.workspace_id is None:
-            return failure(
-                BizCode.INVALID_PARAMETER, "请先切换到一个工作空间", "current_workspace_id is None"
+            raise LocalizedProfileError(
+                BizCode.INVALID_PARAMETER,
+                "memory.errors.workspace_required",
+                detail_key="memory.errors.current_workspace_missing",
+                status_code=200,
             )
-        try:
-            zone, zone_name = resolve_timezone(timezone_name)
-            first, length, start, end = activity_range(datetime.now(UTC), zone, year, None, True)
-        except ValueError as exc:
-            return failure(BizCode.INVALID_PARAMETER, "无效的统计参数", str(exc))
+        zone, zone_name, first, length, start, end = _statistics_window(
+            timezone_name, year, None, annual=True
+        )
         try:
             data = await self.service.get_yearly_activity_statistics(
                 context.workspace_id, zone, zone_name, first, length, start, end
@@ -94,7 +119,12 @@ class MemoryDisplayHandler:
             return ApiResponse[ActivityStatisticsData](data=data)
         except Exception as exc:
             logger.exception("年度记忆活动统计失败")
-            return failure(BizCode.INTERNAL_ERROR, "年度记忆活动统计失败", str(exc))
+            raise LocalizedProfileError(
+                BizCode.INTERNAL_ERROR,
+                "memory.display.error.yearly_statistics_failed",
+                detail=str(exc),
+                status_code=200,
+            ) from exc
 
     async def get_monthly_activity_composition(
         self,
@@ -104,14 +134,15 @@ class MemoryDisplayHandler:
         timezone_name: str | None,
     ):
         if context.workspace_id is None:
-            return failure(
-                BizCode.INVALID_PARAMETER, "请先切换到一个工作空间", "current_workspace_id is None"
+            raise LocalizedProfileError(
+                BizCode.INVALID_PARAMETER,
+                "memory.errors.workspace_required",
+                detail_key="memory.errors.current_workspace_missing",
+                status_code=200,
             )
-        try:
-            zone, zone_name = resolve_timezone(timezone_name)
-            first, length, start, end = activity_range(datetime.now(UTC), zone, year, month, False)
-        except ValueError as exc:
-            return failure(BizCode.INVALID_PARAMETER, "无效的统计参数", str(exc))
+        zone, zone_name, first, length, start, end = _statistics_window(
+            timezone_name, year, month, annual=False
+        )
         try:
             data = await self.service.get_monthly_activity_composition(
                 context.workspace_id, zone, zone_name, first, length, start, end
@@ -119,7 +150,12 @@ class MemoryDisplayHandler:
             return ApiResponse[ActivityCompositionData](data=data)
         except Exception as exc:
             logger.exception("月度记忆活动统计失败")
-            return failure(BizCode.INTERNAL_ERROR, "月度记忆活动统计失败", str(exc))
+            raise LocalizedProfileError(
+                BizCode.INTERNAL_ERROR,
+                "memory.display.error.monthly_statistics_failed",
+                detail=str(exc),
+                status_code=200,
+            ) from exc
 
     async def get_written(
         self,
@@ -135,7 +171,7 @@ class MemoryDisplayHandler:
         validate_time_window(start_time, end_time)
         items, total = await self._read(
             self.service.query_written,
-            "写入展示记录查询失败",
+            "memory.display.error.written_failed",
             workspace_id=context.workspace_id,
             page=page,
             pagesize=pagesize,
@@ -167,7 +203,7 @@ class MemoryDisplayHandler:
         validate_time_window(start_time, end_time)
         items, total = await self._read(
             self.service.query_retrieved,
-            "读取展示记录查询失败",
+            "memory.display.error.retrieved_failed",
             workspace_id=context.workspace_id,
             page=page,
             pagesize=pagesize,
@@ -206,7 +242,7 @@ class MemoryDisplayHandler:
 
         cards, total = await self._read(
             self.service.query_engines,
-            "引擎展示记录查询失败",
+            "memory.display.error.engines_failed",
             workspace_id=context.workspace_id,
             timezone=tz_name,
             language=language,
@@ -248,7 +284,7 @@ class MemoryDisplayHandler:
 
         items, total = await self._read(
             self.service.query_all,
-            "展示记录查询失败",
+            "memory.display.error.all_failed",
             workspace_id=context.workspace_id,
             timezone=tz_name,
             language=language,
@@ -270,12 +306,12 @@ class MemoryDisplayHandler:
         )
 
     @staticmethod
-    async def _read(method, message: str, **kwargs):
+    async def _read(method, message_key: str, **kwargs):
         try:
             return await method(**kwargs)
         except ProfileError:
             raise
         except Exception as exc:
-            raise ProfileError(
-                BizCode.INTERNAL_ERROR, message, detail=str(exc), status_code=200
+            raise LocalizedProfileError(
+                BizCode.INTERNAL_ERROR, message_key, detail=str(exc), status_code=200
             ) from exc

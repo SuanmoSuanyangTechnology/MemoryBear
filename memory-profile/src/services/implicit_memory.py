@@ -7,7 +7,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
-from src.common.errors import BizCode, ProfileError
+from src.common.errors import BizCode, LocalizedProfileError, ProfileError
 from src.repositories.implicit_memory import ImplicitMemoryRepository
 
 if TYPE_CHECKING:
@@ -16,27 +16,34 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def implicit_read_error(exc: Exception, operation: str, *, include_detail: bool) -> ProfileError:
+def implicit_read_error(
+    exc: Exception, operation_key: str, *, include_detail: bool
+) -> LocalizedProfileError:
     """Preserve the API's manager/API-key distinction for cached-read failures."""
     error_text = str(exc).lower()
     if isinstance(exc, ValueError):
         if "user" in error_text and "not found" in error_text:
-            code, message = BizCode.INVALID_USER_ID, "无效的用户ID"
+            code, message_key = BizCode.INVALID_USER_ID, "memory.implicit.error.invalid_user_id"
         elif "insufficient" in error_text or "no data" in error_text:
-            code, message = BizCode.INSUFFICIENT_DATA, "数据不足，无法进行分析"
+            code, message_key = BizCode.INSUFFICIENT_DATA, "memory.implicit.error.insufficient_data"
         else:
-            code, message = BizCode.INVALID_FILTER_PARAMS, "无效的参数"
+            code, message_key = (
+                BizCode.INVALID_FILTER_PARAMS,
+                "memory.implicit.error.invalid_parameters",
+            )
     elif isinstance(exc, KeyError):
-        code, message = BizCode.INSUFFICIENT_DATA, "缺少必要的数据"
+        code, message_key = BizCode.INSUFFICIENT_DATA, "memory.implicit.error.missing_data"
     elif isinstance(exc, (ConnectionError, TimeoutError)):
-        code, message = BizCode.SERVICE_UNAVAILABLE, "服务暂时不可用"
+        code, message_key = BizCode.SERVICE_UNAVAILABLE, "memory.implicit.error.service_unavailable"
     elif "analysis" in error_text or "llm" in error_text:
-        code, message = BizCode.ANALYSIS_FAILED, "分析处理失败"
+        code, message_key = BizCode.ANALYSIS_FAILED, "memory.implicit.error.analysis_failed"
     elif "storage" in error_text or "database" in error_text:
-        code, message = BizCode.PROFILE_STORAGE_ERROR, "数据存储失败"
+        code, message_key = BizCode.PROFILE_STORAGE_ERROR, "memory.implicit.error.storage_failed"
     else:
-        code, message = BizCode.INTERNAL_ERROR, f"{operation}失败"
-    return ProfileError(code, message, detail=str(exc) if include_detail else "", status_code=200)
+        code, message_key = BizCode.INTERNAL_ERROR, operation_key
+    return LocalizedProfileError(
+        code, message_key, detail=str(exc) if include_detail else "", status_code=200
+    )
 
 
 class ImplicitMemoryService:

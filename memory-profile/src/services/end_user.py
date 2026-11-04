@@ -12,7 +12,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from uuid import UUID
 
-from src.common.errors import BizCode, ProfileError
+from src.common.errors import BizCode, LocalizedProfileError
 from src.common.normalization import parse_uuid
 from src.infrastructure.postgres import PostgresManager
 from src.repositories.end_user import EndUserRepository
@@ -60,20 +60,20 @@ class EndUserService:
     async def require_in_workspace(self, *, end_user_id: UUID, workspace_id: UUID) -> None:
         """Apply the shared strict read boundary with the public read error contract."""
         if not await self.exists_in_workspace(end_user_id, workspace_id):
-            raise ProfileError(
+            raise LocalizedProfileError(
                 BizCode.USER_NOT_FOUND,
-                "终端用户不存在",
-                detail="end_user not found in current workspace",
+                "memory.errors.user_not_found",
+                detail_key="memory.errors.user_not_in_workspace",
                 status_code=404,
             )
 
     async def require_display_user(self, *, end_user_id: UUID, workspace_id: UUID) -> None:
         """Preserve the display API's original user rule and error response."""
         if not await self.repository.display_user_exists(end_user_id, workspace_id):
-            raise ProfileError(
+            raise LocalizedProfileError(
                 BizCode.USER_NOT_FOUND,
-                "终端用户不存在",
-                detail="end_user not found in current workspace",
+                "memory.errors.user_not_found",
+                detail_key="memory.errors.user_not_in_workspace",
                 status_code=200,
             )
 

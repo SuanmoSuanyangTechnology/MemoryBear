@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from src.common.errors import BizCode, ProfileError
+from src.common.errors import BizCode, LocalizedProfileError
 from src.common.responses import ApiResponse
 from src.common.validation import parse_required_uuid
 from src.middleware.auth import MemoryPrincipal
@@ -32,7 +32,7 @@ class PerceptualMemoryHandler:
     async def count(self, context: MemoryPrincipal, end_user_id: str) -> CountApiResponse:
         data = await self._read(
             self.service.count,
-            "Failed to fetch memory statistics",
+            "memory.perceptual.error.count_failed",
             end_user_id=parse_required_uuid(end_user_id),
             workspace_id=context.workspace_id,
         )
@@ -49,7 +49,7 @@ class PerceptualMemoryHandler:
     ) -> TimelineApiResponse:
         data = await self._read(
             self.service.timeline,
-            "Failed to fetch perceptual memory timeline",
+            "memory.perceptual.error.timeline_failed",
             end_user_id=parse_required_uuid(end_user_id),
             workspace_id=context.workspace_id,
             perceptual_type=perceptual_type,
@@ -74,7 +74,7 @@ class PerceptualMemoryHandler:
         }[perceptual_type]
         data = await self._read(
             self.service.latest,
-            f"Failed to fetch latest {label} memory",
+            f"memory.perceptual.error.latest_{label}_failed",
             end_user_id=parse_required_uuid(end_user_id),
             workspace_id=context.workspace_id,
             perceptual_type=perceptual_type,
@@ -90,8 +90,10 @@ class PerceptualMemoryHandler:
         )
 
     @staticmethod
-    async def _read(method, message: str, **kwargs):
+    async def _read(method, message_key: str, **kwargs):
         try:
             return await method(**kwargs)
         except Exception as exc:
-            raise ProfileError(BizCode.INTERNAL_ERROR, message, status_code=200) from exc
+            raise LocalizedProfileError(
+                BizCode.INTERNAL_ERROR, message_key, status_code=200
+            ) from exc

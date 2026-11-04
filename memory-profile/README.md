@@ -315,6 +315,14 @@ The read repositories retain workspace isolation. Display requires an active
 user in that workspace; perceptual and implicit historical reads do not add
 an activity-status requirement. Other modules keep their existing access rules.
 
+Read errors use the existing global `src.i18n` language middleware and exception
+handler. Services raise `LocalizedProfileError` with translation keys; display,
+perceptual and implicit read messages live in the shared `locales/zh/memory.json`
+and `locales/en/memory.json` catalogs. API forwarding failures and API-key
+prechecks use the API's existing `app.i18n` translation service. Business codes,
+HTTP statuses, data payloads and technical exception details retain their
+existing behavior; an intentionally empty cached-profile error stays empty.
+
 ## Scene community graph
 
 The scene community graph follows the same entry chain as the other analytics

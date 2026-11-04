@@ -13,6 +13,7 @@ from zoneinfo import ZoneInfo
 
 from pydantic import TypeAdapter
 
+from src.common.errors import BizCode, LocalizedProfileError
 from src.common.normalization import datetime_to_epoch_ms, epoch_ms_to_datetime
 from src.repositories.display import MemoryDisplayRepository
 from src.schemas.display import AllItem, EngineItem, RetrievedItem, WrittenItem
@@ -35,13 +36,28 @@ def activity_range(
     if year is not None and (
         len(year) != 4 or not year.isascii() or not year.isdecimal() or int(year) == 0
     ):
-        raise ValueError("year 必须是四位自然年")
+        raise LocalizedProfileError(
+            BizCode.INVALID_PARAMETER,
+            "memory.display.error.invalid_statistics_parameters",
+            detail_key="memory.display.error.invalid_year",
+            status_code=200,
+        )
     if not annual and (year is None) != (month is None):
-        raise ValueError("year 和 month 必须同时传入")
+        raise LocalizedProfileError(
+            BizCode.INVALID_PARAMETER,
+            "memory.display.error.invalid_statistics_parameters",
+            detail_key="memory.display.error.year_month_required",
+            status_code=200,
+        )
     if month is not None and (
         not month.isascii() or not month.isdecimal() or not 1 <= int(month) <= 12
     ):
-        raise ValueError("month 必须是 1 到 12 的整数")
+        raise LocalizedProfileError(
+            BizCode.INVALID_PARAMETER,
+            "memory.display.error.invalid_statistics_parameters",
+            detail_key="memory.display.error.invalid_month",
+            status_code=200,
+        )
 
     today = now.astimezone(zone).date()
     if year is None:

@@ -21,10 +21,13 @@ from app.core.api_key_utils import (
     validate_end_user_in_workspace_async,
 )
 from app.core.error_codes import BizCode
+from app.core.language_utils import get_language_from_header
 from app.core.logging_config import get_business_logger
 from app.core.response_utils import fail
 from app.core.utils.datetime_utils import resolve_iana_timezone
 from app.db import get_async_db_context
+from app.i18n.dependencies import get_current_language
+from app.i18n.service import t
 from app.schemas.api_key_schema import ApiKeyAuth
 from app.schemas.response_schema import ApiResponse
 
@@ -39,12 +42,12 @@ def _encode_result(result):
     return jsonable_encoder(result)
 
 
-def _time_window_error(start_time: Optional[int], end_time: Optional[int]):
+def _time_window_error(start_time: Optional[int], end_time: Optional[int], language: str):
     """校验时间窗：start_time > end_time 时返回 fail 响应，否则返回 None。"""
     if start_time is not None and end_time is not None and start_time > end_time:
         return fail(
             BizCode.INVALID_PARAMETER,
-            "start_time 不能大于 end_time",
+            t("memory.display.error.invalid_time_window", language),
             f"start={start_time}, end={end_time}",
         )
     return None
@@ -74,7 +77,10 @@ async def get_written_memories(
     负责展示文案映射；name 和 content 保持记忆生成时的原始语言，不受
     X-Language-Type 影响。
     """
-    window_error = _time_window_error(start_time, end_time)
+    language = get_language_from_header(
+        request.headers.get("X-Language-Type") or await get_current_language(request)
+    )
+    window_error = _time_window_error(start_time, end_time, language)
     if window_error is not None:
         return _encode_result(window_error)
 
@@ -90,7 +96,9 @@ async def get_written_memories(
         if end_user_id is not None:
             # 合并路由：end_user 可能是合并目标（原 ID 已被合并且 is_active=False），
             # 必须改用 end_user.id，否则下游会按已被合并掉的旧 ID 查询而拿到空数据。
-            end_user = await validate_end_user_in_workspace_async(db, end_user_id, workspace_id)
+            end_user = await validate_end_user_in_workspace_async(
+                db, end_user_id, workspace_id, locale=language
+            )
             resolved_end_user_id = str(end_user.id)
 
     async with get_async_db_context() as db:
@@ -127,7 +135,10 @@ async def get_retrieved_memories(
     - 不传 end_user_id：返回 API Key 所属工作空间的全部读取卡片（空间级），
       每项额外携带 end_user_id 字段区分归属。
     """
-    window_error = _time_window_error(start_time, end_time)
+    language = get_language_from_header(
+        request.headers.get("X-Language-Type") or await get_current_language(request)
+    )
+    window_error = _time_window_error(start_time, end_time, language)
     if window_error is not None:
         return _encode_result(window_error)
 
@@ -143,7 +154,9 @@ async def get_retrieved_memories(
         if end_user_id is not None:
             # 合并路由：end_user 可能是合并目标（原 ID 已被合并且 is_active=False），
             # 必须改用 end_user.id，否则下游会按已被合并掉的旧 ID 查询而拿到空数据。
-            end_user = await validate_end_user_in_workspace_async(db, end_user_id, workspace_id)
+            end_user = await validate_end_user_in_workspace_async(
+                db, end_user_id, workspace_id, locale=language
+            )
             resolved_end_user_id = str(end_user.id)
 
     async with get_async_db_context() as db:
@@ -195,7 +208,10 @@ async def get_engine_display_cards(
     前端统一传全局时区设置（useI18n().timeZone），
     保证卡片的聚合日期与前端展示 occurred_at 时使用的时区一致。
     """
-    window_error = _time_window_error(start_time, end_time)
+    language = get_language_from_header(
+        request.headers.get("X-Language-Type") or await get_current_language(request)
+    )
+    window_error = _time_window_error(start_time, end_time, language)
     if window_error is not None:
         return _encode_result(window_error)
 
@@ -203,16 +219,16 @@ async def get_engine_display_cards(
     if not timezone or not timezone.strip():
         return _encode_result(fail(
             BizCode.MISSING_PARAMETER,
-            "X-Timezone 不能为空",
-            "X-Timezone header is required",
+            t("memory.display.error.timezone_required", language),
+            t("memory.display.error.timezone_header_required", language),
         ))
     try:
         _, tz_name = resolve_iana_timezone(timezone)
-    except ValueError as e:
+    except ValueError:
         return _encode_result(fail(
             BizCode.INVALID_PARAMETER,
-            f"无效的时区: {timezone.strip()}",
-            str(e),
+            t("memory.display.error.invalid_timezone", language, timezone=timezone.strip()),
+            t("memory.display.error.invalid_iana_timezone", language, timezone=timezone.strip()),
         ))
 
     workspace_id = api_key_auth.workspace_id
@@ -227,7 +243,9 @@ async def get_engine_display_cards(
         if end_user_id is not None:
             # 合并路由：end_user 可能是合并目标（原 ID 已被合并且 is_active=False），
             # 必须改用 end_user.id，否则下游会按已被合并掉的旧 ID 查询而拿到空数据。
-            end_user = await validate_end_user_in_workspace_async(db, end_user_id, workspace_id)
+            end_user = await validate_end_user_in_workspace_async(
+                db, end_user_id, workspace_id, locale=language
+            )
             resolved_end_user_id = str(end_user.id)
 
     async with get_async_db_context() as db:
@@ -273,12 +291,15 @@ async def get_all_memory_display(
     - 不传 end_user_id：API Key 所属工作空间的统一时间线（空间级），
       每项额外携带 end_user_id 区分归属。
     """
+    language = get_language_from_header(
+        request.headers.get("X-Language-Type") or await get_current_language(request)
+    )
     resolved_end_user_id = None
     async with get_async_db_context() as db:
         current_user = await get_current_user_snapshot_from_api_key_async(db, api_key_auth)
         if end_user_id is not None:
             end_user = await validate_end_user_in_workspace_async(
-                db, end_user_id, api_key_auth.workspace_id
+                db, end_user_id, api_key_auth.workspace_id, locale=language
             )
             # 合并路由：end_user 可能是合并目标（原 ID 已被合并且 is_active=False），
             # 必须改用 end_user.id，否则下游会按已被合并掉的旧 ID 查询而拿到空数据。

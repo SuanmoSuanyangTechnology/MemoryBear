@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal
 
-from src.common.errors import BizCode, ProfileError
+from src.common.errors import BizCode, LocalizedProfileError, ProfileError
 from src.common.responses import ApiResponse
 from src.middleware.auth import MemoryPrincipal
 from src.runtime import ProfileRuntime
@@ -35,7 +35,7 @@ class ImplicitMemoryHandler:
     async def check_data(self, context: MemoryPrincipal, end_user_id: str) -> ExistsApiResponse:
         exists = await self._read(
             self.service.check_data,
-            "检查画像数据",
+            "memory.implicit.error.check_data_failed",
             context,
             end_user_id,
         )
@@ -56,7 +56,7 @@ class ImplicitMemoryHandler:
     ) -> ListApiResponse:
         data = await self._read(
             self.service.preferences,
-            "偏好标签获取",
+            "memory.implicit.error.preferences_failed",
             context,
             end_user_id,
             confidence_threshold=confidence_threshold,
@@ -69,7 +69,7 @@ class ImplicitMemoryHandler:
     async def portrait(self, context: MemoryPrincipal, end_user_id: str) -> ObjectApiResponse:
         data = await self._read(
             self.service.portrait,
-            "四维画像获取",
+            "memory.implicit.error.portrait_failed",
             context,
             end_user_id,
         )
@@ -78,7 +78,7 @@ class ImplicitMemoryHandler:
     async def interest_areas(self, context: MemoryPrincipal, end_user_id: str) -> ObjectApiResponse:
         data = await self._read(
             self.service.interest_areas,
-            "兴趣领域分布获取",
+            "memory.implicit.error.interest_areas_failed",
             context,
             end_user_id,
         )
@@ -100,7 +100,7 @@ class ImplicitMemoryHandler:
     ) -> ListApiResponse:
         data = await self._read(
             self.service.habits,
-            "行为习惯获取",
+            "memory.implicit.error.habits_failed",
             context,
             end_user_id,
             confidence_level=confidence_level,
@@ -112,15 +112,15 @@ class ImplicitMemoryHandler:
     async def aggregate(self, context: MemoryPrincipal, end_user_id: str) -> AggregateApiResponse:
         data = await self._read(
             self.service.aggregate,
-            "隐性记忆查询",
+            "memory.implicit.error.aggregate_failed",
             context,
             end_user_id,
             include_detail=False,
         )
         if data is None:
-            raise ProfileError(
+            raise LocalizedProfileError(
                 BizCode.NOT_FOUND,
-                "隐性记忆快照尚未生成",
+                "memory.implicit.error.snapshot_not_ready",
                 status_code=200,
             )
         return AggregateApiResponse(data=data, msg="查询成功")
@@ -128,7 +128,7 @@ class ImplicitMemoryHandler:
     @staticmethod
     async def _read(
         method,
-        operation: str,
+        operation_key: str,
         context: MemoryPrincipal,
         end_user_id: str,
         *,
@@ -137,11 +137,16 @@ class ImplicitMemoryHandler:
     ) -> Any:
         try:
             if not isinstance(end_user_id, str) or not end_user_id.strip():
-                raise ValueError("User ID cannot be empty")
+                raise LocalizedProfileError(
+                    BizCode.INVALID_FILTER_PARAMS,
+                    "memory.implicit.error.invalid_parameters",
+                    detail_key="memory.implicit.error.user_id_empty",
+                    status_code=200,
+                )
             return await method(
                 end_user_id=end_user_id, workspace_id=context.workspace_id, **filters
             )
         except ProfileError:
             raise
         except Exception as exc:
-            raise implicit_read_error(exc, operation, include_detail=include_detail) from exc
+            raise implicit_read_error(exc, operation_key, include_detail=include_detail) from exc

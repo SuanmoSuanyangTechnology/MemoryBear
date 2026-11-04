@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from src.common.errors import BizCode, ProfileError
+from src.common.errors import BizCode, LocalizedProfileError
 
 
 def parse_required_uuid(value: str, *, name: str = "end_user_id") -> UUID:
@@ -13,10 +13,12 @@ def parse_required_uuid(value: str, *, name: str = "end_user_id") -> UUID:
     try:
         return UUID(value)
     except (TypeError, ValueError, AttributeError) as exc:
-        raise ProfileError(
+        raise LocalizedProfileError(
             BizCode.INVALID_PARAMETER,
-            f"无效的 {name}",
-            detail=f"'{value}' is not a valid UUID",
+            "common.validation.invalid_parameter",
+            message_params={"name": name},
+            detail_key="common.validation.invalid_uuid",
+            detail_params={"value": value},
             status_code=400,
         ) from exc
 

@@ -15,6 +15,8 @@ from app.core.error_codes import BizCode
 from app.core.language_utils import get_language_from_header
 from app.core.response_utils import fail
 from app.core.trace import get_trace_id
+from app.i18n.dependencies import get_current_language
+from app.i18n.service import t
 
 from .contracts import MemoryProfileAuthSource, MemoryProfileRawResponse
 from .errors import MemoryProfileClientError, MemoryProfileConfigurationError
@@ -160,12 +162,21 @@ def memory_profile_proxy(
                     "request: Request"
                 )
             current_user = arguments.get("current_user")
+            error_language = (
+                arguments.get(language_field)
+                if language_field
+                else request.headers.get("X-Language-Type")
+            )
+            if error_language is None:
+                error_language = await get_current_language(request)
+            else:
+                error_language = get_language_from_header(error_language)
             workspace_id = getattr(current_user, "current_workspace_id", None)
             if workspace_id is None:
                 return fail(
                     BizCode.INVALID_PARAMETER,
-                    "请先切换到一个工作空间",
-                    "current_workspace_id is None",
+                    t("memory.errors.workspace_required", error_language),
+                    t("memory.errors.current_workspace_missing", error_language),
                 )
 
             # The query is rebuilt from the declared fields rather than forwarded
@@ -209,6 +220,8 @@ def memory_profile_proxy(
                 language_type = request.headers.get("X-Language-Type")
                 if language_type is None:
                     language_type = request.headers.get("Accept-Language")
+                if language_type is None:
+                    language_type = error_language
             trace_id = get_trace_id() or uuid4().hex
             caller_source = (
                 _caller_source(caller_path) if source is None else source
@@ -247,8 +260,8 @@ def memory_profile_proxy(
                 )
                 return fail(
                     BizCode.SERVICE_UNAVAILABLE,
-                    "记忆画像服务暂不可用",
-                    "Memory profile service unavailable",
+                    t("memory.errors.profile_unavailable", error_language),
+                    t("memory.errors.profile_unavailable_detail", error_language),
                 )
 
         return wrapped

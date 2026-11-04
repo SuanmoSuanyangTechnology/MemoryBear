@@ -8,9 +8,11 @@ from fastapi import APIRouter, Query, Request, Response
 from app.core.api_key_auth import get_current_api_key_auth, require_api_key_self_db
 from app.core.api_key_utils import validate_end_user_in_workspace_async
 from app.core.error_codes import BizCode
+from app.core.language_utils import get_language_from_header
 from app.core.logging_config import get_api_logger
 from app.core.response_utils import fail, success
 from app.db import get_async_db_context, get_db_context
+from app.i18n.dependencies import get_current_language
 from app.integrations.profile.contracts import MemoryProfileAuthSource
 from app.integrations.profile.proxy import memory_profile_proxy
 from app.repositories.implicit_emotions_storage_repository import (
@@ -156,11 +158,15 @@ async def get_implicit_memory(
     """返回单个终端用户已持久化的隐性记忆快照。"""
     # API Key 的授权边界是 workspace；先校验用户归属，再读取业务数据。
     api_key_auth = get_current_api_key_auth()
+    language = get_language_from_header(
+        request.headers.get("X-Language-Type") or await get_current_language(request)
+    )
     async with get_async_db_context() as auth_db:
         end_user = await validate_end_user_in_workspace_async(
             auth_db,
             end_user_id,
             api_key_auth.workspace_id,
+            locale=language,
         )
         resolved_end_user_id = str(end_user.id)
 
