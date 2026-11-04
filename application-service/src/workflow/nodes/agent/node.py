@@ -129,8 +129,8 @@ class AgentNode(BaseNode):
         selectors = [s for s in (self.typed_config.tools or []) if s.enabled]
         user_id = self.get_variable("sys.user_id", variable_pool, strict=False)
         workspace_id = self.get_variable("sys.workspace_id", variable_pool, strict=False)
-        # Only conversational workflows carry a conversation id; a pure workflow (no
-        # conversation) leaves it None and the sandbox tools refuse to execute.
+        # Regular tool-library tools run under the real conversation whenever one
+        # exists; only conversational workflows carry it.
         conversation_id = self.get_variable("sys.conversation_id", variable_pool, strict=False)
         if not conversation_id:
             # Single-node dry run / conversation-less workflow: fixed sandbox directory ID
@@ -230,6 +230,14 @@ class AgentNode(BaseNode):
 
         # Sandbox tools are not configurable: with ENABLE_SANDBOX_SERVICE on, every Agent node
         # run carries the full set. Drop stale configured copies first so names never collide.
+        # In a single-node dry run the stable debug session id must win over a real
+        # conversation restored from the debug snapshot, otherwise the kernel executes under
+        # an id the finally cleanup never closes (kernel leak + cross-run state bleed).
+        sandbox_conversation_id = (
+            state.get("__debug_conversation_id")
+            or conversation_id
+            or self.get_variable("sys.sandbox_session_id", variable_pool, strict=False)
+        )
         try:
             from ....tools.builtin.sandbox_default import build_sandbox_tools, drop_sandbox_tools
 
@@ -238,7 +246,7 @@ class AgentNode(BaseNode):
                 build_sandbox_tools(
                     user_id=user_id,
                     workspace_id=workspace_id,
-                    conversation_id=conversation_id,
+                    conversation_id=sandbox_conversation_id,
                 )
             )
         except Exception as e:

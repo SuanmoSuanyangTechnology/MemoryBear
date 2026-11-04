@@ -112,15 +112,17 @@ class ToolNode(BaseNode):
         tenant_id = await self._resolve_tenant_id_async(variable_pool)
         user_id = self._normalize_uuid(self.get_variable("sys.user_id", variable_pool))
         workspace_id = self._normalize_uuid(self.get_variable("sys.workspace_id", variable_pool))
-        # Only conversation-type workflows have a conversation ID; a pure workflow
-        # (no conversation) stays None and the sandbox tools refuse to run.
-        conversation_id = self._normalize_uuid(
-            self.get_variable("sys.conversation_id", variable_pool, strict=False)
-        )
+        # In a single-node dry run the stable debug session id must take precedence
+        # over a real conversation restored from the debug snapshot: the finally
+        # cleanup closes exactly this id, so they must agree (otherwise the real
+        # conversation's kernel leaks and per-run state bleeds). It only partitions
+        # the sandbox directory and is not a real conversation.
+        conversation_id = self._normalize_uuid(state.get("__debug_conversation_id"))
         if conversation_id is None:
-            # Debug conversation ID injected by WorkflowService for single-node
-            # dry runs; only used to partition the sandbox directory.
-            conversation_id = self._normalize_uuid(state.get("__debug_conversation_id"))
+            # Conversation-type workflows carry a real conversation ID.
+            conversation_id = self._normalize_uuid(
+                self.get_variable("sys.conversation_id", variable_pool, strict=False)
+            )
         if conversation_id is None:
             # Pure-workflow run: fixed sandbox directory ID derived by
             # WorkflowService from app_id + user_id.

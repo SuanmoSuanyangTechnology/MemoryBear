@@ -9825,16 +9825,20 @@ class WorkflowService:
                 state["__single_node_action_id"] = hi_action_id
                 state["__single_node_form_data"] = hi_form_data
 
-        # A single-node dry run has no conversation ID, so sandbox tools (code
-        # interpreter, terminal, file import/export) would refuse to run. Provide a
-        # stable debug session ID used only to partition the sandbox directory; it is
-        # deliberately not written into sys.conversation_id so it is never mistaken
-        # for a real conversation. Repeated single-node runs of the same application
-        # by the same user share it.
-        if not input_data.get("conversation_id"):
-            state["__debug_conversation_id"] = self._derive_sandbox_session_id(
-                app_id, input_data.get("user_id", "")
-            )
+        # Sandbox tools (code interpreter, terminal, file import/export) key their
+        # kernels by conversation. A single-node dry run must NEVER execute under a
+        # real conversation inherited from a previous whole-workflow run (restored
+        # into sys.conversation_id from the debug snapshot): the finally cleanup only
+        # knows the derived id below, so reusing the inherited one leaks that
+        # conversation's kernel (closed_kernels=0) and breaks per-run state isolation.
+        # Always assign the stable debug session id for single-node runs; it only
+        # partitions the sandbox directory, is deliberately not written into
+        # sys.conversation_id, and repeated single-node runs of the same application
+        # by the same user share it. The finally block closes exactly this id, so
+        # execution and cleanup always agree.
+        state["__debug_conversation_id"] = self._derive_sandbox_session_id(
+            app_id, input_data.get("user_id", "")
+        )
 
         node = NodeFactory.create_node(node_config, workflow_config_dict, [])
         return node_config, node, state, variable_pool
