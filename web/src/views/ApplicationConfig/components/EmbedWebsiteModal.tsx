@@ -115,13 +115,13 @@ const EmbedWebsiteModal = forwardRef<EmbedWebsiteModalRef, EmbedWebsiteModalProp
         <Flex gap={10}>
           <div
             className={clsx("rb:cursor-pointer rb:border rb:border-transparent rb:rounded-lg rb:bg-cover rb:w-47 rb:h-32 rb:bg-[url('@/assets/images/conversation/iframe-option.svg')]", {
-              'rb:border-[#171719]!': type === 'iframe'
+              'rb:border-primary-600!': type === 'iframe'
             })}
             onClick={() => setType('iframe')}
           ></div>
           <div
             className={clsx("rb:cursor-pointer rb:border rb:border-transparent rb:rounded-lg rb:bg-cover rb:w-47 rb:h-32 rb:bg-[url('@/assets/images/conversation/scripts-option.svg')]", {
-              'rb:border-[#171719]!': type === 'scripts'
+              'rb:border-primary-600!': type === 'scripts'
             })}
             onClick={() => setType('scripts')}
           ></div>

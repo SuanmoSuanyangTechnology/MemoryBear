@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:33:15 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-08-14 18:35:33
+ * @Last Modified time: 2026-11-04 12:04:33
  */
 /**
  * Memory Management Page
@@ -11,7 +11,7 @@
  */
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Button, Space, App, Flex, Row, Col } from 'antd';
+import { Button, Space, App, Flex, Row, Col, Skeleton } from 'antd';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import clsx from 'clsx';
@@ -23,7 +23,6 @@ import type { Memory, MemoryFormRef } from '@/views/MemoryManagement/types'
 import RbCard from '@/components/RbCard/Card'
 import { getMemoryConfigList, deleteMemoryConfig, setActiveMemoryConfig } from '@/api/memory'
 import Empty from '@/components/Empty'
-import PageLoading from '@/components/Empty/PageLoading'
 import pageEmptyIcon from '@/assets/images/empty/pageEmpty.png'
 import { formatDateTime } from '@/utils/format';
 import Tag from '@/components/Tag'
@@ -87,10 +86,10 @@ const MemoryManagement: React.FC = () => {
       title: t('memory.switchActiveTitle'),
       icon: null,
       content: (
-        <div className="rb:text-[14px] rb:leading-6 rb:text-[#5B6167]">
+        <div className="rb:text-[14px] rb:leading-6 rb:text-gray-600">
           <div>
             {t('memory.switchActiveConfirmPrefix')}
-            「<span className="rb:font-medium rb:text-[#212332]">{item.config_name}</span>」
+            「<span className="rb:font-medium rb:text-gray-800">{item.config_name}</span>」
             {t('memory.switchActiveConfirmSuffix')}
           </div>
           <div>{t('memory.switchActiveDesc')}</div>
@@ -172,7 +171,7 @@ const MemoryManagement: React.FC = () => {
       </Flex>
 
       {loading
-        ? <PageLoading className="rb:flex-1!" />
+        ? <Skeleton active className="rb:flex-1!" />
         : data.length === 0
           ? <Empty
               url={pageEmptyIcon}
@@ -241,7 +240,7 @@ const MemoryManagement: React.FC = () => {
                               </Button>
                           }
                           {!item.is_system_default && <>
-                            <div className="rb:size-4.5 rb:hover:bg-[#EBEBEB] rb:rounded-md">
+                            <div className="rb:size-4.5 rb:hover:bg-gray-200 rb:rounded-md">
                               <div
                                 className="rb:size-4.5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/common/edit.svg')]"
                                 onClick={() => handleEdit(item)}

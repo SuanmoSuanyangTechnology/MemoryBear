@@ -97,7 +97,7 @@ const RequestModeContent: FC<{ log: LogItem }> = ({ log }) => {
           <p className="rb:text-[12px] rb:font-medium rb:text-gray-900">
             {t(`memoryConversation.requestMode.${modeKey}`)}
           </p>
-          <Flex align="center" className="rb:shrink-0 rb:rounded-sm rb:bg-gray-900 rb:h-4 rb:px-1! rb:text-[12px] rb:text-white">
+          <Flex align="center" className="rb:shrink-0 rb:rounded-sm rb:bg-primary-600 rb:h-4 rb:px-1! rb:text-[12px] rb:text-white">
             search_switch={searchSwitch}
           </Flex>
         </Flex>

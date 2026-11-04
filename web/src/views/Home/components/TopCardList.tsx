@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:28:07 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-07 23:23:04
+ * @Last Modified time: 2026-11-04 11:43:35
  */
 /**
  * Top Card List Component
@@ -21,7 +21,7 @@ import type { DashboardData } from '../types'
 const list = [
   {
     key: 'total_memory',
-    background: 'rb:bg-[url("@/assets/images/home/totalMemoryCapacity.png")] rb:bg-cover rb:bg-no-repeat',
+    background: 'rb:bg-primary-600',
   },
   {
     key: 'total_app',
