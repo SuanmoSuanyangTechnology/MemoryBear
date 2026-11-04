@@ -269,10 +269,10 @@ def coerce_code(value: BizCode | int | str | None) -> int | None:
     ``None`` (the caller decides between pass-through and fallback).
     """
 
-    if isinstance(value, BizCode):
-        return int(value)
     if isinstance(value, bool) or value is None:
         return None
+    if isinstance(value, BizCode):
+        return int(value)
     if isinstance(value, int):
         return value
     if isinstance(value, str):

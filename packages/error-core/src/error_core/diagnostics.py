@@ -99,7 +99,7 @@ def format_channel_diagnostics(
     detail: str = "",
 ) -> str:
     shown = entries[:_MAX_ENTRIES]
-    parts = [entry.render() for entry in shown if entry.render()]
+    parts = [rendered for entry in shown if (rendered := entry.render())]
     if len(entries) > _MAX_ENTRIES:
         parts.append(f"... (+{len(entries) - _MAX_ENTRIES} more)")
     if detail:
