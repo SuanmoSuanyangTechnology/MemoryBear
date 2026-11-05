@@ -50,6 +50,7 @@ from .ontology_scene import OntologyScene
 from .ontology_class import OntologyClass
 from .ontology_scene import OntologyScene
 from .ontology_class import OntologyClass
+from .ontology_preference import OntologyPreferenceScene, OntologyPreferenceClass
 from .implicit_emotions_storage_model import ImplicitEmotionsStorage
 from .annotation_model import AppAnnotation, AppAnnotationSetting
 from .reflection_log_model import MemoryReflectionLog
@@ -161,4 +162,6 @@ __all__ = [
     "MemoryReembedJobUser",
     "ReembedJobStatus",
     "ReembedUserStatus",
+    "OntologyPreferenceScene",
+    "OntologyPreferenceClass",
 ]
