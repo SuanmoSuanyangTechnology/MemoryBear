@@ -26,6 +26,7 @@ from .integrations.sandbox.runtime import (
     initialize_sandbox_integration,
 )
 from .logging import setup_logging
+from .protocols.market_gateway import DisabledMarketGateway, MarketGateway
 from .request_logging import RequestLoggingFastAPI
 from .runtime import ProcessRuntime, set_process_runtime
 from .sensitive import SensitiveDataFilter
@@ -57,6 +58,20 @@ def _register_enterprise_plugins(runtime: ProcessRuntime) -> None:
     register_app_plugins(runtime.upstream)
 
 
+def load_market_gateway(runtime: ProcessRuntime) -> MarketGateway:
+    settings = runtime.settings
+    if settings.application_service_market_mode == "disabled":
+        return DisabledMarketGateway()
+    try:
+        from enterprise_ext.app_market import build_market_gateway
+    except ImportError as exc:
+        raise RuntimeError(
+            "APPLICATION_SERVICE_MARKET_MODE=gateway requires the private "
+            "'enterprise-extensions' package (not installed in open-source builds)"
+        ) from exc
+    return build_market_gateway(settings)
+
+
 def create_app(settings: AppServiceSettings | None = None) -> FastAPI:
     """Construct the internal API without connecting to dependencies."""
 
@@ -71,6 +86,7 @@ def create_app(settings: AppServiceSettings | None = None) -> FastAPI:
     # process resources through this module-level registration.
     set_process_runtime(runtime)
     _register_enterprise_plugins(runtime)
+    runtime.market_gateway = load_market_gateway(runtime)
 
     app_auth_config = AppAuthConfig(
         auth_mode=service_settings.application_service_auth_mode,

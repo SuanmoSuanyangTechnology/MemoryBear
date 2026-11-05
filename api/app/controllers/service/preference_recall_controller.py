@@ -9,7 +9,7 @@ from fastapi.responses import JSONResponse
 
 from app.controllers.service.mcp_auth_middleware import OTHER_ID_HEADER
 from app.core.api_key_auth import get_current_api_key_auth, require_api_key_self_db
-from app.core.error_codes import BizCode, HTTP_MAPPING
+from app.core.error_codes import BizCode, http_status_for
 from app.core.memory.storage_services.preference_engine.full_recall_service import (
     execute_full_preference_recall,
 )
@@ -28,7 +28,7 @@ router = APIRouter(prefix="/memory/preference", tags=["V1 - Preference Recall AP
 
 
 def _failure(code: BizCode, message: str) -> JSONResponse:
-    return JSONResponse(content=fail(code, message), status_code=HTTP_MAPPING[code])
+    return JSONResponse(content=fail(code, message), status_code=http_status_for(code))
 
 
 async def _resolve_caller(request: Request):

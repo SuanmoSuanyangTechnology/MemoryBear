@@ -49,7 +49,10 @@ def build_chat_authenticator(config: AppAuthConfig, *, gateway: object | None = 
             method=APP_CHAT_ACL_METHOD,
             path=APP_CHAT_ACL_PATH,
         )
-        language = resolve_locale(accepted=request.headers.get("accept-language"))
+        language = resolve_locale(
+            language_type=request.headers.get("x-language-type"),
+            accepted=request.headers.get("accept-language"),
+        )
 
         async def reject(http_status: int, detail: str) -> None:
             await abort_with(

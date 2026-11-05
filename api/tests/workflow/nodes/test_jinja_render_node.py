@@ -158,7 +158,7 @@ async def test_jinja_simple_template():
     variable_pool = await simple_vairable_pool("test")
     await variable_pool.new("conv", "username", "Alice", VariableType.STRING, mut=True)
     
-    result = await JinjaRenderNode(SIMPLE_TEMPLATE_CONFIG, {}).execute(state, variable_pool)
+    result = await JinjaRenderNode(SIMPLE_TEMPLATE_CONFIG, {}, []).execute(state, variable_pool)
     assert result == "Hello, Alice!"
 
 
@@ -171,7 +171,7 @@ async def test_jinja_multi_variable():
     await variable_pool.new("conv", "name", "Bob", VariableType.STRING, mut=True)
     await variable_pool.new("conv", "age", 25, VariableType.NUMBER, mut=True)
     
-    result = await JinjaRenderNode(MULTI_VARIABLE_CONFIG, {}).execute(state, variable_pool)
+    result = await JinjaRenderNode(MULTI_VARIABLE_CONFIG, {}, []).execute(state, variable_pool)
     assert result == "Hi, Bob! You are 25 years old."
 
 
@@ -183,7 +183,7 @@ async def test_jinja_conditional_true():
     variable_pool = await simple_vairable_pool("test")
     await variable_pool.new("conv", "is_admin", True, VariableType.BOOLEAN, mut=True)
     
-    result = await JinjaRenderNode(CONDITIONAL_TEMPLATE_CONFIG, {}).execute(state, variable_pool)
+    result = await JinjaRenderNode(CONDITIONAL_TEMPLATE_CONFIG, {}, []).execute(state, variable_pool)
     assert result == "Admin"
 
 
@@ -194,7 +194,7 @@ async def test_jinja_conditional_false():
     variable_pool = await simple_vairable_pool("test")
     await variable_pool.new("conv", "is_admin", False, VariableType.BOOLEAN, mut=True)
     
-    result = await JinjaRenderNode(CONDITIONAL_TEMPLATE_CONFIG, {}).execute(state, variable_pool)
+    result = await JinjaRenderNode(CONDITIONAL_TEMPLATE_CONFIG, {}, []).execute(state, variable_pool)
     assert result == "User"
 
 
@@ -206,7 +206,7 @@ async def test_jinja_loop_array():
     variable_pool = await simple_vairable_pool("test")
     await variable_pool.new("conv", "items", ["apple", "banana", "cherry"], VariableType.ARRAY_STRING, mut=True)
     
-    result = await JinjaRenderNode(LOOP_TEMPLATE_CONFIG, {}).execute(state, variable_pool)
+    result = await JinjaRenderNode(LOOP_TEMPLATE_CONFIG, {}, []).execute(state, variable_pool)
     assert result == "apple, banana, cherry"
 
 
@@ -217,7 +217,7 @@ async def test_jinja_loop_empty_array():
     variable_pool = await simple_vairable_pool("test")
     await variable_pool.new("conv", "items", [], VariableType.ARRAY_STRING, mut=True)
     
-    result = await JinjaRenderNode(LOOP_TEMPLATE_CONFIG, {}).execute(state, variable_pool)
+    result = await JinjaRenderNode(LOOP_TEMPLATE_CONFIG, {}, []).execute(state, variable_pool)
     assert result == ""
 
 
@@ -228,7 +228,7 @@ async def test_jinja_loop_single_item():
     variable_pool = await simple_vairable_pool("test")
     await variable_pool.new("conv", "items", ["apple"], VariableType.ARRAY_STRING, mut=True)
     
-    result = await JinjaRenderNode(LOOP_TEMPLATE_CONFIG, {}).execute(state, variable_pool)
+    result = await JinjaRenderNode(LOOP_TEMPLATE_CONFIG, {}, []).execute(state, variable_pool)
     assert result == "apple"
 
 
@@ -240,7 +240,7 @@ async def test_jinja_filter_upper():
     variable_pool = await simple_vairable_pool("test")
     await variable_pool.new("conv", "text", "hello world", VariableType.STRING, mut=True)
     
-    result = await JinjaRenderNode(FILTER_TEMPLATE_CONFIG, {}).execute(state, variable_pool)
+    result = await JinjaRenderNode(FILTER_TEMPLATE_CONFIG, {}, []).execute(state, variable_pool)
     assert result == "HELLO WORLD"
 
 
@@ -265,7 +265,7 @@ async def test_jinja_filter_lower():
             ]
         }
     }
-    result = await JinjaRenderNode(config, {}).execute(state, variable_pool)
+    result = await JinjaRenderNode(config, {}, []).execute(state, variable_pool)
     assert result == "hello world"
 
 
@@ -290,7 +290,7 @@ async def test_jinja_filter_title():
             ]
         }
     }
-    result = await JinjaRenderNode(config, {}).execute(state, variable_pool)
+    result = await JinjaRenderNode(config, {}, []).execute(state, variable_pool)
     assert result == "Hello World"
 
 
@@ -315,7 +315,7 @@ async def test_jinja_filter_length():
             ]
         }
     }
-    result = await JinjaRenderNode(config, {}).execute(state, variable_pool)
+    result = await JinjaRenderNode(config, {}, []).execute(state, variable_pool)
     assert result == "Length: 5"
 
 
@@ -327,7 +327,7 @@ async def test_jinja_object_access():
     variable_pool = await simple_vairable_pool("test")
     await variable_pool.new("conv", "user", {"name": "Alice", "age": 30}, VariableType.OBJECT, mut=True)
     
-    result = await JinjaRenderNode(OBJECT_TEMPLATE_CONFIG, {}).execute(state, variable_pool)
+    result = await JinjaRenderNode(OBJECT_TEMPLATE_CONFIG, {}, []).execute(state, variable_pool)
     assert result == "Name: Alice, Age: 30"
 
 
@@ -359,7 +359,7 @@ async def test_jinja_nested_object():
             ]
         }
     }
-    result = await JinjaRenderNode(config, {}).execute(state, variable_pool)
+    result = await JinjaRenderNode(config, {}, []).execute(state, variable_pool)
     assert result == "Bob lives in Beijing"
 
 
@@ -372,7 +372,7 @@ async def test_jinja_math_addition():
     await variable_pool.new("conv", "a", 10, VariableType.NUMBER, mut=True)
     await variable_pool.new("conv", "b", 20, VariableType.NUMBER, mut=True)
     
-    result = await JinjaRenderNode(MATH_TEMPLATE_CONFIG, {}).execute(state, variable_pool)
+    result = await JinjaRenderNode(MATH_TEMPLATE_CONFIG, {}, []).execute(state, variable_pool)
     assert result == "10 + 20 = 30"
 
 
@@ -402,7 +402,7 @@ async def test_jinja_math_subtraction():
             ]
         }
     }
-    result = await JinjaRenderNode(config, {}).execute(state, variable_pool)
+    result = await JinjaRenderNode(config, {}, []).execute(state, variable_pool)
     assert result == "30 - 10 = 20"
 
 
@@ -432,7 +432,7 @@ async def test_jinja_math_multiplication():
             ]
         }
     }
-    result = await JinjaRenderNode(config, {}).execute(state, variable_pool)
+    result = await JinjaRenderNode(config, {}, []).execute(state, variable_pool)
     assert result == "5 * 6 = 30"
 
 
@@ -462,7 +462,7 @@ async def test_jinja_math_division():
             ]
         }
     }
-    result = await JinjaRenderNode(config, {}).execute(state, variable_pool)
+    result = await JinjaRenderNode(config, {}, []).execute(state, variable_pool)
     assert result == "20 / 4 = 5.0"
 
 
@@ -474,7 +474,7 @@ async def test_jinja_default_value_missing():
     variable_pool = await simple_vairable_pool("test")
     # 不创建 name 变量
     
-    result = await JinjaRenderNode(DEFAULT_VALUE_CONFIG, {}).execute(state, variable_pool)
+    result = await JinjaRenderNode(DEFAULT_VALUE_CONFIG, {}, []).execute(state, variable_pool)
     assert result == "Guest"
 
 
@@ -485,7 +485,7 @@ async def test_jinja_default_value_present():
     variable_pool = await simple_vairable_pool("test")
     await variable_pool.new("conv", "name", "Alice", VariableType.STRING, mut=True)
     
-    result = await JinjaRenderNode(DEFAULT_VALUE_CONFIG, {}).execute(state, variable_pool)
+    result = await JinjaRenderNode(DEFAULT_VALUE_CONFIG, {}, []).execute(state, variable_pool)
     assert result == "Alice"
 
 
@@ -516,7 +516,7 @@ async def test_jinja_string_concatenation():
             ]
         }
     }
-    result = await JinjaRenderNode(config, {}).execute(state, variable_pool)
+    result = await JinjaRenderNode(config, {}, []).execute(state, variable_pool)
     assert result == "Hello World"
 
 
@@ -542,7 +542,7 @@ async def test_jinja_comparison():
             ]
         }
     }
-    result = await JinjaRenderNode(config, {}).execute(state, variable_pool)
+    result = await JinjaRenderNode(config, {}, []).execute(state, variable_pool)
     assert result == "B"
 
 
@@ -568,7 +568,7 @@ async def test_jinja_array_index():
             ]
         }
     }
-    result = await JinjaRenderNode(config, {}).execute(state, variable_pool)
+    result = await JinjaRenderNode(config, {}, []).execute(state, variable_pool)
     assert result == "First: first, Last: third"
 
 
@@ -593,7 +593,7 @@ async def test_jinja_array_slice():
             ]
         }
     }
-    result = await JinjaRenderNode(config, {}).execute(state, variable_pool)
+    result = await JinjaRenderNode(config, {}, []).execute(state, variable_pool)
     assert result == "234"
 
 
@@ -623,7 +623,7 @@ async def test_jinja_complex_template():
             ]
         }
     }
-    result = await JinjaRenderNode(config, {}).execute(state, variable_pool)
+    result = await JinjaRenderNode(config, {}, []).execute(state, variable_pool)
     assert result == "Alice (25), Bob (30), Charlie (35)"
 
 
@@ -649,7 +649,7 @@ async def test_jinja_empty_string():
             ]
         }
     }
-    result = await JinjaRenderNode(config, {}).execute(state, variable_pool)
+    result = await JinjaRenderNode(config, {}, []).execute(state, variable_pool)
     assert result == "Empty"
 
 
@@ -674,7 +674,7 @@ async def test_jinja_zero_value():
             ]
         }
     }
-    result = await JinjaRenderNode(config, {}).execute(state, variable_pool)
+    result = await JinjaRenderNode(config, {}, []).execute(state, variable_pool)
     assert result == "Count: 0"
 
 
@@ -700,7 +700,7 @@ async def test_jinja_special_characters():
             ]
         }
     }
-    result = await JinjaRenderNode(config, {}).execute(state, variable_pool)
+    result = await JinjaRenderNode(config, {}, []).execute(state, variable_pool)
     assert result == "Hello \"World\""
 
 
@@ -730,7 +730,7 @@ async def test_jinja_newline():
             ]
         }
     }
-    result = await JinjaRenderNode(config, {}).execute(state, variable_pool)
+    result = await JinjaRenderNode(config, {}, []).execute(state, variable_pool)
     assert result == "First line\nSecond line"
 
 
@@ -757,7 +757,7 @@ async def test_jinja_invalid_template():
         }
     }
     with pytest.raises(RuntimeError) as exc_info:
-        await JinjaRenderNode(config, {}).execute(state, variable_pool)
+        await JinjaRenderNode(config, {}, []).execute(state, variable_pool)
     assert "render failed" in str(exc_info.value)
 
 
@@ -783,7 +783,7 @@ async def test_jinja_undefined_variable_strict_false():
         }
     }
     # 非严格模式下，未定义变量会被渲染为空字符串
-    result = await JinjaRenderNode(config, {}).execute(state, variable_pool)
+    result = await JinjaRenderNode(config, {}, []).execute(state, variable_pool)
     assert result == "Hello, !"
 
 
@@ -809,7 +809,7 @@ async def test_jinja_boolean_true():
             ]
         }
     }
-    result = await JinjaRenderNode(config, {}).execute(state, variable_pool)
+    result = await JinjaRenderNode(config, {}, []).execute(state, variable_pool)
     assert result == "Flag is True"
 
 
@@ -834,7 +834,7 @@ async def test_jinja_boolean_false():
             ]
         }
     }
-    result = await JinjaRenderNode(config, {}).execute(state, variable_pool)
+    result = await JinjaRenderNode(config, {}, []).execute(state, variable_pool)
     assert result == "Flag is False"
 
 
@@ -860,7 +860,7 @@ async def test_jinja_float_number():
             ]
         }
     }
-    result = await JinjaRenderNode(config, {}).execute(state, variable_pool)
+    result = await JinjaRenderNode(config, {}, []).execute(state, variable_pool)
     assert result == "Price: $19.99"
 
 
@@ -885,5 +885,5 @@ async def test_jinja_float_formatting():
             ]
         }
     }
-    result = await JinjaRenderNode(config, {}).execute(state, variable_pool)
+    result = await JinjaRenderNode(config, {}, []).execute(state, variable_pool)
     assert result == "3.14"

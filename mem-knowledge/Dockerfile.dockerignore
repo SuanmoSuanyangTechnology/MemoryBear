@@ -12,6 +12,8 @@
 !packages/
 !packages/redbear-model/
 !packages/redbear-model/**
+!packages/error-core/
+!packages/error-core/**
 !packages/storage-core/
 !packages/storage-core/**
 !packages/auth-sdk/

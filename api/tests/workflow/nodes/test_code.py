@@ -2,11 +2,33 @@
 # Author: Eternity
 # @Email: 1533512157@qq.com
 # @Time : 2026/2/6 09:59
-import pytest
+import os
 
+import pytest
+from pytest import MonkeyPatch
+
+from app.core.config import settings
+from app.core.workflow.nodes import http_client
 from app.core.workflow.nodes.code import CodeNode
 from app.core.workflow.variable.base_variable import VariableType
 from tests.workflow.nodes.base import simple_state, simple_vairable_pool
+
+TEST_SANDBOX_URL = os.getenv("TEST_SANDBOX_URL", "")
+
+pytestmark = pytest.mark.skipif(
+    not TEST_SANDBOX_URL,
+    reason="TEST_SANDBOX_URL not set; these tests require a live sandbox service",
+)
+
+
+@pytest.fixture(scope="module", autouse=True)
+async def _sandbox_client():
+    patch = MonkeyPatch()
+    patch.setattr(settings, "SANDBOX_URL", TEST_SANDBOX_URL)
+    await http_client.init_http_client()
+    yield
+    await http_client.close_http_client()
+    patch.undo()
 
 
 @pytest.mark.asyncio
@@ -68,7 +90,7 @@ async def test_code_python_complex_output():
     variable_pool = await simple_vairable_pool("test")
     await variable_pool.new("conv", "x", 1, VariableType.NUMBER, mut=True)
     await variable_pool.new("conv", "y", 2, VariableType.NUMBER, mut=True)
-    result = await CodeNode(node_config, {}).execute(state, variable_pool)
+    result = await CodeNode(node_config, {}, []).execute(state, variable_pool)
     assert result == {'number': 3, 'string': '3', 'boolean': True, 'dict': {'sum': 3}, 'array_string': ['3'],
                       'array_number': [3], 'array_object': [{'sum': 3}], 'array_boolean': [True]}
 
@@ -132,7 +154,7 @@ async def test_code_javascript_complex_output():
     variable_pool = await simple_vairable_pool("test")
     await variable_pool.new("conv", "x", 1, VariableType.NUMBER, mut=True)
     await variable_pool.new("conv", "y", 2, VariableType.NUMBER, mut=True)
-    result = await CodeNode(node_config, {}).execute(state, variable_pool)
+    result = await CodeNode(node_config, {}, []).execute(state, variable_pool)
     assert result == {'number': 3, 'string': '3', 'boolean': True, 'dict': {'sum': 3}, 'array_string': ['3'],
                       'array_number': [3], 'array_object': [{'sum': 3}], 'array_boolean': [True]}
 
@@ -169,7 +191,7 @@ async def test_code_python_operation_permissions():
     await variable_pool.new("conv", "x", 1, VariableType.NUMBER, mut=True)
     await variable_pool.new("conv", "y", 2, VariableType.NUMBER, mut=True)
     with pytest.raises(RuntimeError, match="Operation not permitted"):
-        await CodeNode(node_config, {}).execute(state, variable_pool)
+        await CodeNode(node_config, {}, []).execute(state, variable_pool)
 
 
 @pytest.mark.asyncio
@@ -204,7 +226,7 @@ async def test_code_javascript_operation_permissions():
     await variable_pool.new("conv", "x", 1, VariableType.NUMBER, mut=True)
     await variable_pool.new("conv", "y", 2, VariableType.NUMBER, mut=True)
     with pytest.raises(RuntimeError, match="Operation not permitted"):
-        await CodeNode(node_config, {}).execute(state, variable_pool)
+        await CodeNode(node_config, {}, []).execute(state, variable_pool)
 
 
 @pytest.mark.asyncio
@@ -239,7 +261,7 @@ async def test_code_python_run_error():
     await variable_pool.new("conv", "x", 1, VariableType.NUMBER, mut=True)
     await variable_pool.new("conv", "y", 2, VariableType.NUMBER, mut=True)
     with pytest.raises(Exception) as exc_info:
-        await CodeNode(node_config, {}).execute(state, variable_pool)
+        await CodeNode(node_config, {}, []).execute(state, variable_pool)
     assert "'(' was never closed" in str(exc_info.value)
 
 
@@ -275,5 +297,5 @@ async def test_code_javascript_run_error():
     await variable_pool.new("conv", "x", 1, VariableType.NUMBER, mut=True)
     await variable_pool.new("conv", "y", 2, VariableType.NUMBER, mut=True)
     with pytest.raises(Exception) as exc_info:
-        await CodeNode(node_config, {}).execute(state, variable_pool)
+        await CodeNode(node_config, {}, []).execute(state, variable_pool)
     assert "SyntaxError" in str(exc_info.value)

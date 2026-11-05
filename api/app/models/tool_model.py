@@ -1,14 +1,24 @@
 """工具管理相关数据模型"""
 import uuid
-from datetime import datetime
 from enum import StrEnum
 
-from sqlalchemy import Column, String, Text, DateTime, JSON, ForeignKey, Integer, Float, Boolean, text
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    Column,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    text,
+)
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 
-from app.db import Base
 from app.core.utils.datetime_utils import utcnow_naive
+from app.db import Base
 
 
 class ToolType(StrEnum):
@@ -112,6 +122,12 @@ class ToolConfig(Base):
     # 元数据
     version = Column(String(50), default="1.0.0")
     tags = Column(JSON, default=list)  # 标签列表
+
+    # Market provenance: describes the local copy's origin, not publication state.
+    origin = Column(String(16), default="local", server_default="local", nullable=False, index=True)
+    external_source = Column(String(32), nullable=True)
+    external_resource_id = Column(String(64), nullable=True, index=True)
+    external_version = Column(String(64), nullable=True)
 
     # 逻辑删除标志
     is_active = Column(Boolean, default=True, server_default='true', nullable=False, index=True, comment="是否可用，False表示已删除")

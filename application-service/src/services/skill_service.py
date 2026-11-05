@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import logging
 import uuid
-from typing import List
 
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -26,6 +25,7 @@ from sqlalchemy.orm import Session
 from ..errors import BizCode, BusinessException
 from ..models.skill_model import Skill
 from ..repositories.skill_repository import SkillRepository
+from ..tools.langchain_adapter import LangchainAdapter, plan_tool_selections
 from .tool_service import ToolService
 
 logger = logging.getLogger(__name__)
@@ -84,10 +84,10 @@ class SkillService:
     @staticmethod
     def load_skill_tools(
         db: Session,
-        skill_ids: List[str],
+        skill_ids: list[str],
         tenant_id: uuid.UUID,
         runtime_context: dict | None = None,
-    ) -> tuple[List, dict[str, str]]:
+    ) -> tuple[list, dict[str, str]]:
         """Load the platform tools bound by legacy skills.
 
         Returns ``(tools, tool-to-skill map)``. Standard skills are skipped outright
@@ -95,7 +95,7 @@ class SkillService:
         still carrying ``tools`` must not leak into keyword gating.
         """
 
-        tools: List = []
+        tools: list = []
         tool_to_skill_map: dict[str, str] = {}
         tool_service = ToolService(db)
         repo = SkillRepository(db)
@@ -106,12 +106,17 @@ class SkillService:
                 if skill and skill.is_active:
                     if (skill.skill_format or "legacy") == "standard":
                         continue
-                    for tool_config in skill.tools:
-                        tool = tool_service.get_tool_instance(tool_config.get("tool_id", ""), tenant_id)
-                        if tool:
-                            if runtime_context:
-                                tool.set_runtime_context(**runtime_context)
-                            langchain_tool = tool.to_langchain_tool(tool_config.get("operation", None))
+                    selections = plan_tool_selections(
+                        (tool_config.get("tool_id", ""), tool_config.get("operation"))
+                        for tool_config in skill.tools
+                    )
+                    for tool_id, operation in selections:
+                        tool = tool_service.get_tool_instance(tool_id, tenant_id)
+                        if not tool:
+                            continue
+                        if runtime_context:
+                            tool.set_runtime_context(**runtime_context)
+                        for langchain_tool in LangchainAdapter.convert_selection(tool, operation):
                             tools.append(langchain_tool)
                             tool_name = getattr(langchain_tool, "name", str(id(langchain_tool)))
                             tool_to_skill_map[tool_name] = skill_id
@@ -124,13 +129,13 @@ class SkillService:
     @staticmethod
     async def load_skill_tools_async(
         db: AsyncSession,
-        skill_ids: List[str],
+        skill_ids: list[str],
         tenant_id: uuid.UUID,
         runtime_context: dict | None = None,
-    ) -> tuple[List, dict[str, str]]:
+    ) -> tuple[list, dict[str, str]]:
         """Async variant of :meth:`load_skill_tools` (runtime plane)."""
 
-        tools: List = []
+        tools: list = []
         tool_to_skill_map: dict[str, str] = {}
         tool_service = ToolService(db)
 
@@ -140,15 +145,20 @@ class SkillService:
                 if skill and skill.is_active:
                     if (skill.skill_format or "legacy") == "standard":
                         continue
-                    for tool_config in skill.tools:
+                    selections = plan_tool_selections(
+                        (tool_config.get("tool_id", ""), tool_config.get("operation"))
+                        for tool_config in skill.tools
+                    )
+                    for tool_id, operation in selections:
                         tool = await tool_service.get_tool_instance_async(
-                            tool_config.get("tool_id", ""),
+                            tool_id,
                             tenant_id,
                         )
-                        if tool:
-                            if runtime_context:
-                                tool.set_runtime_context(**runtime_context)
-                            langchain_tool = tool.to_langchain_tool(tool_config.get("operation", None))
+                        if not tool:
+                            continue
+                        if runtime_context:
+                            tool.set_runtime_context(**runtime_context)
+                        for langchain_tool in LangchainAdapter.convert_selection(tool, operation):
                             tools.append(langchain_tool)
                             tool_name = getattr(langchain_tool, "name", str(id(langchain_tool)))
                             tool_to_skill_map[tool_name] = skill_id

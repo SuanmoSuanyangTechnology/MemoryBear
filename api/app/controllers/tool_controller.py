@@ -137,6 +137,9 @@ async def update_tool(
         service: ToolService = Depends(get_tool_service)
 ):
     """更新工具"""
+    is_enabled = request.is_enabled
+    if is_enabled is None:
+        is_enabled = (request.config or {}).get("is_enabled")
     try:
         success_flag = service.update_tool(
             tool_id=tool_id,
@@ -145,7 +148,7 @@ async def update_tool(
             description=request.description,
             icon=request.icon,
             config=request.config,
-            is_enabled=request.config.get("is_enabled", None),
+            is_enabled=is_enabled,
             tags=request.tags
         )
         if not success_flag:

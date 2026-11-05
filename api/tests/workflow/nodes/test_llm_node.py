@@ -7,6 +7,11 @@ import pytest
 from app.core.workflow.nodes import LLMNode
 from tests.workflow.nodes.base import TEST_MODEL_ID, simple_state, simple_vairable_pool
 
+pytestmark = pytest.mark.skipif(
+    not TEST_MODEL_ID,
+    reason="TEST_MODEL_ID not set; these tests require a live model",
+)
+
 
 @pytest.mark.asyncio
 async def test_llm_memory_no_stream():
@@ -49,7 +54,7 @@ async def test_llm_memory_no_stream():
     }
     state = simple_state()
     variable_pool = await simple_vairable_pool("输出上一句话")
-    result = await LLMNode(node_config, {}).execute(state, variable_pool)
+    result = await LLMNode(node_config, {}, []).execute(state, variable_pool)
     assert '123456' in result.content
 
 
@@ -94,7 +99,7 @@ async def test_llm_memory_stream():
     }
     state = simple_state()
     variable_pool = await simple_vairable_pool("输出上一句话")
-    async for event in LLMNode(node_config, {}).execute_stream(state, variable_pool):
+    async for event in LLMNode(node_config, {}, []).execute_stream(state, variable_pool):
         if event.get("__final__"):
             assert '123456' in event.get("result").content
 
@@ -140,6 +145,6 @@ async def test_llm_vision():
     }
     state = simple_state()
     variable_pool = await simple_vairable_pool("图片里面有什么")
-    async for event in LLMNode(node_config, {}).execute_stream(state, variable_pool):
+    async for event in LLMNode(node_config, {}, []).execute_stream(state, variable_pool):
         if event.get("__final__"):
             assert '花' in event.get("result").content

@@ -9,6 +9,7 @@ from .routes.apps import router as apps_router
 from .routes.conversation_shares import router as conversation_shares_router
 from .routes.draft_run import router as draft_run_router
 from .routes.end_users import router as end_users_router
+from .routes.external_catalog import router as external_catalog_router
 from .routes.health import router as health_router
 from .routes.human_intervention import router as human_intervention_router
 from .routes.human_intervention import v1_router as human_intervention_v1_router
@@ -31,6 +32,7 @@ internal_v1_router.include_router(app_logs_router)
 internal_v1_router.include_router(conversation_shares_router)
 internal_v1_router.include_router(draft_run_router)
 internal_v1_router.include_router(end_users_router)
+internal_v1_router.include_router(external_catalog_router)
 internal_v1_router.include_router(human_intervention_router)
 internal_v1_router.include_router(human_intervention_v1_router)
 internal_v1_router.include_router(messages_router)

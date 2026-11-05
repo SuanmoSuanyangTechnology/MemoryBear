@@ -5,6 +5,8 @@ from __future__ import annotations
 import logging
 from uuid import UUID
 
+from error_core.codes import coerce_code
+
 from ...errors import BizCode
 
 logger = logging.getLogger(__name__)
@@ -36,48 +38,46 @@ class ModelInvokeFailedError(ModelServiceClientError):
     ``biz_code`` is translated from the service-side code surface (SSE frames give
     ``BizCode`` names, JSON envelopes give numeric values); the semantics are
     **passed through without re-encoding**: callers apply the existing
-    ``HTTP_MAPPING`` to decide the outward status.
+    ``HTTP_MAPPING`` to decide the outward status. ``user_msg`` carries the
+    service-side localized copy verbatim, while ``detail`` carries the diagnostic
+    surface (provider/status plus the upstream service suffix).
     """
 
     def __init__(
         self,
         *,
-        biz_code: BizCode,
+        biz_code: int | BizCode,
         message: str,
+        user_msg: str | None = None,
+        detail: str | None = None,
         attempts: int | None = None,
         channel_id: UUID | None = None,
         retryable: bool = False,
         http_status: int | None = None,
-    ):
+    ) -> None:
         self.biz_code = biz_code
-        self.message = message
+        self.user_msg = user_msg
+        self.detail = detail if detail is not None else message
+        # ``message`` is a compatibility alias of the diagnostic surface, matching
+        # ``RemoteInvokeFailedError`` in the model package.
+        self.message = self.detail
         self.attempts = attempts
         self.channel_id = channel_id
         self.retryable = retryable
         self.http_status = http_status
-        super().__init__(f"Model invoke failed ({biz_code.name}): {message}")
+        super().__init__(message)
 
 
-_BY_NAME = {code.name: code for code in BizCode}
-_BY_VALUE = {int(code): code for code in BizCode}
+def biz_code_from_remote(value: int | str | None) -> int:
+    """Service-side code surface -> numeric host code, preserving unknown numbers.
 
-
-def biz_code_from_remote(code: str | int | None) -> BizCode:
-    """Service-side code surface -> host ``BizCode``: names (SSE frames) and numbers (envelopes) share one path.
-
-    The model-domain values of the two enums align item by item (the service-side
-    ``src/errors.py`` is a value-for-value port of the host enum), so numeric values
-    are accepted directly and names are looked up by name; unknown codes are never
-    guessed -- they log a warning and fall back to ``INTERNAL_ERROR``.
+    Known enum names and digit strings are coerced through ``error_core``; an
+    unknown numeric code passes through unchanged, while an unknown name falls
+    back to ``UPSTREAM_UNKNOWN`` after logging a warning.
     """
 
-    if code is None or isinstance(code, bool):
-        return BizCode.INTERNAL_ERROR
-    if isinstance(code, int):
-        return _BY_VALUE.get(code) or _unknown(code)
-    return _BY_NAME.get(str(code).strip().upper()) or _unknown(code)
-
-
-def _unknown(code: object) -> BizCode:
-    logger.warning("model_service_invoke_unknown_code code=%r", code)
-    return BizCode.INTERNAL_ERROR
+    numeric = coerce_code(value)
+    if numeric is not None:
+        return numeric
+    logger.warning("unknown remote biz code: %r", value)
+    return int(BizCode.UPSTREAM_UNKNOWN)

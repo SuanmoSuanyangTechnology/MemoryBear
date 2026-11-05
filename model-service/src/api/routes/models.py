@@ -8,15 +8,19 @@
 """
 from __future__ import annotations
 
+import json
 import logging
 import uuid
 from typing import Optional
 
+from error_core.diagnostics import format_diagnostics
+from error_core.messages import user_message
 from fastapi import APIRouter, Depends, Query, Response, status
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
 from ...errors import BizCode, BusinessException
+from ...i18n import get_current_locale
 from ...infrastructure.model_provider_config import get_model_provider_metadata
 from ...models.models_model import LoadBalanceStrategy, ModelProvider, ModelType
 from ...repositories.model_repository import ModelConfigRepository
@@ -26,6 +30,7 @@ from ...services.model_impact_service import collect_model_impact
 from ...services.model_profile_view import wire_model_base, wire_model_config
 from ...services.model_quota import check_model_activation_quota, check_model_quota
 from ...services.model_service import ModelBaseService, ModelConfigService
+from ...trace import get_trace_id
 from ..dependencies import (
     InvokePrincipal,
     Principal,
@@ -45,15 +50,22 @@ router = APIRouter(
 
 
 def _model_in_use_response(exc: BusinessException) -> JSONResponse | None:
-    """模型被业务引用（RESOURCE_IN_USE）时渲染 409 + 影响面清单；其他业务异常返回 None。
+    """模型被业务引用（RESOURCE_IN_USE）时渲染 409 信封；其他业务异常返回 None。
 
     全局异常处理器会丢弃 context，故此处按既有 JSONResponse 先例自行渲染。
+    影响面清单只进入诊断串 ``error``，失败响应 ``data`` 恒为 ``{}``。
     """
     impact = exc.context.get("impact") if exc.code == BizCode.RESOURCE_IN_USE else None
     if impact is None:
         return None
     code = exc.code.value if isinstance(exc.code, BizCode) else exc.code
-    return JSONResponse(status_code=409, content=fail(code, exc.message, data=impact))
+    locale = get_current_locale()
+    msg = user_message(code, locale) or exc.message
+    detail = exc.message
+    if impact:
+        detail = f"{detail} impact={json.dumps(impact, ensure_ascii=False, separators=(',', ':'))}"
+    error = format_diagnostics(trace_id=get_trace_id(), detail=detail)
+    return JSONResponse(status_code=409, content=fail(code, msg, error=error))
 
 
 @router.get("/type", response_model=ApiResponse)
@@ -415,7 +427,7 @@ def update_model(
 ):
     """
     更新模型配置（启用前做渠道可用性预检：无候选 409，组合成员为空 400；
-    显式禁用命中业务引用 409 + data.impact）
+    显式禁用命中业务引用 409，影响面清单仅进入诊断串 error）
     """
     logger.info(f"更新模型配置请求: model_id={model_id}, 用户: {principal.actor_name}, tenant_id={principal.tenant_id}")
 

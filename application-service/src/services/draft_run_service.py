@@ -1249,27 +1249,33 @@ class AgentRunService:
     async def load_tools_config(self, tools_config, web_search, tenant_id, user_id=None, workspace_id=None) -> list:
         """Load tool configuration."""
         from ..tools.builtin.sandbox_default import build_sandbox_tools, drop_sandbox_tools
+        from ..tools.langchain_adapter import LangchainAdapter, plan_tool_selections
 
         tools = []
         if web_search:
             search_tool = create_web_search_tool({})
             tools.append(search_tool)
         if tools_config and isinstance(tools_config, list):
+            selections = [
+                (tool_config.get("tool_id", ""), tool_config.get("operation"))
+                for tool_config in tools_config
+                if tool_config.get("enabled", False)
+            ]
             async with get_async_db_context() as db:
                 tool_service = ToolService(db)
+                instances = {}
 
-                for tool_config in tools_config:
-                    if tool_config.get("enabled", False):
-                        # Look up the tool instance by tool name
-                        tool_instance = await tool_service.get_tool_instance_async(
-                            tool_config.get("tool_id", ""),
-                            tenant_id,
-                        )
-                        if tool_instance:
-                            tool_instance.set_runtime_context(user_id=user_id, workspace_id=workspace_id)
-                            # Convert to a LangChain tool
-                            langchain_tool = tool_instance.to_langchain_tool(tool_config.get("operation", None))
-                            tools.append(langchain_tool)
+                for tool_id, operation in plan_tool_selections(selections):
+                    tool_instance = instances.get(tool_id)
+                    if tool_instance is None:
+                        # Look up the tool instance by tool id
+                        tool_instance = await tool_service.get_tool_instance_async(tool_id, tenant_id)
+                        if not tool_instance:
+                            continue
+                        tool_instance.set_runtime_context(user_id=user_id, workspace_id=workspace_id)
+                        instances[tool_id] = tool_instance
+                    # Expand second-level selections into their current methods
+                    tools.extend(LangchainAdapter.convert_selection(tool_instance, operation))
         # Sandbox tools are not configurable: with ENABLE_SANDBOX_SERVICE on, every Agent run
         # carries the full set. Drop stale configured copies first so names never collide.
         tools = drop_sandbox_tools(tools)

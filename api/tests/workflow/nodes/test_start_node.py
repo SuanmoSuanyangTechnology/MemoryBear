@@ -202,7 +202,7 @@ async def test_start_node_basic():
     state = simple_state()
     variable_pool = await simple_vairable_pool("test message")
     
-    result = await StartNode(BASIC_CONFIG, {}).execute(state, variable_pool)
+    result = await StartNode(BASIC_CONFIG, {}, []).execute(state, variable_pool)
     
     assert isinstance(result, dict)
     assert "message" in result
@@ -219,7 +219,7 @@ async def test_start_node_system_variables():
     state = simple_state()
     variable_pool = await simple_vairable_pool("hello world")
     
-    result = await StartNode(BASIC_CONFIG, {}).execute(state, variable_pool)
+    result = await StartNode(BASIC_CONFIG, {}, []).execute(state, variable_pool)
     
     assert result["message"] == "hello world"
     assert result["execution_id"] == state["execution_id"]
@@ -234,7 +234,7 @@ async def test_start_node_single_variable_with_default():
     state = simple_state()
     variable_pool = await simple_vairable_pool("test")
     
-    result = await StartNode(SINGLE_VARIABLE_CONFIG, {}).execute(state, variable_pool)
+    result = await StartNode(SINGLE_VARIABLE_CONFIG, {}, []).execute(state, variable_pool)
     
     assert "language" in result
     assert result["language"] == "zh-CN"
@@ -249,7 +249,7 @@ async def test_start_node_single_variable_with_input():
     input_vars = {"language": "en-US"}
     variable_pool = await create_variable_pool_with_inputs("test", input_vars)
     
-    result = await StartNode(SINGLE_VARIABLE_CONFIG, {}).execute(state, variable_pool)
+    result = await StartNode(SINGLE_VARIABLE_CONFIG, {}, []).execute(state, variable_pool)
     
     assert "language" in result
     assert result["language"] == "en-US"
@@ -261,7 +261,7 @@ async def test_start_node_multi_variables_with_defaults():
     state = simple_state()
     variable_pool = await simple_vairable_pool("test")
     
-    result = await StartNode(MULTI_VARIABLES_CONFIG, {}).execute(state, variable_pool)
+    result = await StartNode(MULTI_VARIABLES_CONFIG, {}, []).execute(state, variable_pool)
     
     assert "language" in result
     assert "max_length" in result
@@ -284,7 +284,7 @@ async def test_start_node_multi_variables_with_inputs():
     }
     variable_pool = await create_variable_pool_with_inputs("test", input_vars)
     
-    result = await StartNode(MULTI_VARIABLES_CONFIG, {}).execute(state, variable_pool)
+    result = await StartNode(MULTI_VARIABLES_CONFIG, {}, []).execute(state, variable_pool)
     
     assert result["language"] == "ja-JP"
     assert result["max_length"] == 2000
@@ -302,7 +302,7 @@ async def test_start_node_partial_inputs():
     }
     variable_pool = await create_variable_pool_with_inputs("test", input_vars)
     
-    result = await StartNode(MULTI_VARIABLES_CONFIG, {}).execute(state, variable_pool)
+    result = await StartNode(MULTI_VARIABLES_CONFIG, {}, []).execute(state, variable_pool)
     
     assert result["language"] == "fr-FR"  # 使用输入值
     assert result["max_length"] == 1000  # 使用默认值
@@ -321,7 +321,7 @@ async def test_start_node_required_variable_provided():
     }
     variable_pool = await create_variable_pool_with_inputs("test", input_vars)
     
-    result = await StartNode(REQUIRED_VARIABLE_CONFIG, {}).execute(state, variable_pool)
+    result = await StartNode(REQUIRED_VARIABLE_CONFIG, {}, []).execute(state, variable_pool)
     
     assert "api_key" in result
     assert result["api_key"] == "test_api_key_12345"
@@ -335,7 +335,7 @@ async def test_start_node_required_variable_missing():
     
     # 不提供必需变量
     with pytest.raises(ValueError) as exc_info:
-        await StartNode(REQUIRED_VARIABLE_CONFIG, {}).execute(state, variable_pool)
+        await StartNode(REQUIRED_VARIABLE_CONFIG, {}, []).execute(state, variable_pool)
     
     assert "缺少必需的输入变量" in str(exc_info.value)
     assert "api_key" in str(exc_info.value)
@@ -352,7 +352,7 @@ async def test_start_node_mixed_variables():
     }
     variable_pool = await create_variable_pool_with_inputs("test", input_vars)
     
-    result = await StartNode(MIXED_VARIABLES_CONFIG, {}).execute(state, variable_pool)
+    result = await StartNode(MIXED_VARIABLES_CONFIG, {}, []).execute(state, variable_pool)
     
     assert result["user_id"] == "user_123"  # 必需变量
     assert result["timeout"] == 30  # 可选变量使用默认值
@@ -370,7 +370,7 @@ async def test_start_node_mixed_variables_all_provided():
     }
     variable_pool = await create_variable_pool_with_inputs("test", input_vars)
     
-    result = await StartNode(MIXED_VARIABLES_CONFIG, {}).execute(state, variable_pool)
+    result = await StartNode(MIXED_VARIABLES_CONFIG, {}, []).execute(state, variable_pool)
     
     assert result["user_id"] == "user_456"
     assert result["timeout"] == 60
@@ -383,7 +383,7 @@ async def test_start_node_different_types_defaults():
     state = simple_state()
     variable_pool = await simple_vairable_pool("test")
     
-    result = await StartNode(DIFFERENT_TYPES_CONFIG, {}).execute(state, variable_pool)
+    result = await StartNode(DIFFERENT_TYPES_CONFIG, {}, []).execute(state, variable_pool)
     
     assert result["name"] == "default_name"
     assert result["count"] == 0
@@ -407,7 +407,7 @@ async def test_start_node_different_types_inputs():
     }
     variable_pool = await create_variable_pool_with_inputs("test", input_vars)
     
-    result = await StartNode(DIFFERENT_TYPES_CONFIG, {}).execute(state, variable_pool)
+    result = await StartNode(DIFFERENT_TYPES_CONFIG, {}, []).execute(state, variable_pool)
     
     assert result["name"] == "custom_name"
     assert result["count"] == 100
@@ -423,7 +423,7 @@ async def test_start_node_empty_message():
     state = simple_state()
     variable_pool = await simple_vairable_pool("")
     
-    result = await StartNode(BASIC_CONFIG, {}).execute(state, variable_pool)
+    result = await StartNode(BASIC_CONFIG, {}, []).execute(state, variable_pool)
     
     assert result["message"] == ""
 
@@ -435,7 +435,7 @@ async def test_start_node_no_input_variables():
     variable_pool = await simple_vairable_pool("test")
     
     # 不设置 input_variables
-    result = await StartNode(SINGLE_VARIABLE_CONFIG, {}).execute(state, variable_pool)
+    result = await StartNode(SINGLE_VARIABLE_CONFIG, {}, []).execute(state, variable_pool)
     
     # 应该使用默认值
     assert result["language"] == "zh-CN"
@@ -449,7 +449,7 @@ async def test_start_node_empty_input_variables():
     # 设置空的输入变量字典
     variable_pool = await create_variable_pool_with_inputs("test", {})
     
-    result = await StartNode(SINGLE_VARIABLE_CONFIG, {}).execute(state, variable_pool)
+    result = await StartNode(SINGLE_VARIABLE_CONFIG, {}, []).execute(state, variable_pool)
     
     # 应该使用默认值
     assert result["language"] == "zh-CN"
@@ -467,7 +467,7 @@ async def test_start_node_extra_input_variables():
     }
     variable_pool = await create_variable_pool_with_inputs("test", input_vars)
     
-    result = await StartNode(SINGLE_VARIABLE_CONFIG, {}).execute(state, variable_pool)
+    result = await StartNode(SINGLE_VARIABLE_CONFIG, {}, []).execute(state, variable_pool)
     
     assert result["language"] == "de-DE"
     assert "extra_var" not in result  # 额外变量不应该出现在输出中
@@ -501,7 +501,7 @@ async def test_start_node_array_string_variable():
     }
     variable_pool = await create_variable_pool_with_inputs("test", input_vars)
     
-    result = await StartNode(config, {}).execute(state, variable_pool)
+    result = await StartNode(config, {}, []).execute(state, variable_pool)
     
     assert result["categories"] == ["cat1", "cat2", "cat3"]
 
@@ -533,7 +533,7 @@ async def test_start_node_array_number_variable():
     }
     variable_pool = await create_variable_pool_with_inputs("test", input_vars)
     
-    result = await StartNode(config, {}).execute(state, variable_pool)
+    result = await StartNode(config, {}, []).execute(state, variable_pool)
     
     assert result["scores"] == [85, 90, 95]
 
@@ -568,7 +568,7 @@ async def test_start_node_array_object_variable():
     }
     variable_pool = await create_variable_pool_with_inputs("test", input_vars)
     
-    result = await StartNode(config, {}).execute(state, variable_pool)
+    result = await StartNode(config, {}, []).execute(state, variable_pool)
     
     assert len(result["users"]) == 2
     assert result["users"][0]["name"] == "Alice"
@@ -611,7 +611,7 @@ async def test_start_node_complex_object():
     }
     variable_pool = await create_variable_pool_with_inputs("test", input_vars)
     
-    result = await StartNode(config, {}).execute(state, variable_pool)
+    result = await StartNode(config, {}, []).execute(state, variable_pool)
     
     assert result["settings"]["theme"] == "dark"
     assert result["settings"]["language"] == "zh-CN"
@@ -654,7 +654,7 @@ async def test_start_node_zero_and_false_values():
     }
     variable_pool = await create_variable_pool_with_inputs("test", input_vars)
     
-    result = await StartNode(config, {}).execute(state, variable_pool)
+    result = await StartNode(config, {}, []).execute(state, variable_pool)
     
     # 0 和 False 应该被正确识别，而不是使用默认值
     assert result["count"] == 0
@@ -667,7 +667,7 @@ async def test_start_node_output_types():
     state = simple_state()
     variable_pool = await simple_vairable_pool("test")
     
-    node = StartNode(MULTI_VARIABLES_CONFIG, {})
+    node = StartNode(MULTI_VARIABLES_CONFIG, {}, [])
     await node.execute(state, variable_pool)
     
     output_types = node._output_types()
@@ -690,7 +690,7 @@ async def test_start_node_multiple_executions():
     """测试多次执行 Start 节点"""
     state = simple_state()
     
-    node = StartNode(SINGLE_VARIABLE_CONFIG, {})
+    node = StartNode(SINGLE_VARIABLE_CONFIG, {}, [])
     
     # 第一次执行
     variable_pool1 = await create_variable_pool_with_inputs("first message", {})
@@ -729,7 +729,7 @@ async def test_start_node_with_description():
     
     # 测试缺少必需变量时，错误信息包含描述
     with pytest.raises(ValueError) as exc_info:
-        await StartNode(config, {}).execute(state, variable_pool)
+        await StartNode(config, {}, []).execute(state, variable_pool)
     
     assert "api_endpoint" in str(exc_info.value)
     assert "API 端点 URL" in str(exc_info.value)
@@ -839,7 +839,7 @@ async def test_start_node_paragraph_variable():
     state = simple_state()
     input_vars = {"bio": "这是一段多行文本...\n第二行内容"}
     variable_pool = await create_variable_pool_with_inputs("test", input_vars)
-    result = await StartNode(PARAGRAPH_CONFIG, {}).execute(state, variable_pool)
+    result = await StartNode(PARAGRAPH_CONFIG, {}, []).execute(state, variable_pool)
     assert result["bio"] == "这是一段多行文本...\n第二行内容"
 
 
@@ -849,7 +849,7 @@ async def test_start_node_paragraph_default():
     state = simple_state()
     input_vars = {}
     variable_pool = await create_variable_pool_with_inputs("test", input_vars)
-    result = await StartNode(PARAGRAPH_CONFIG, {}).execute(state, variable_pool)
+    result = await StartNode(PARAGRAPH_CONFIG, {}, []).execute(state, variable_pool)
     assert result["bio"] == ""
 
 
@@ -860,7 +860,7 @@ async def test_start_node_paragraph_exceeds_max_length():
     input_vars = {"bio": "a" * 2001}
     variable_pool = await create_variable_pool_with_inputs("test", input_vars)
     with pytest.raises(ValueError) as exc_info:
-        await StartNode(PARAGRAPH_CONFIG, {}).execute(state, variable_pool)
+        await StartNode(PARAGRAPH_CONFIG, {}, []).execute(state, variable_pool)
     assert "bio" in str(exc_info.value)
     assert "2000" in str(exc_info.value)
 
@@ -871,7 +871,7 @@ async def test_start_node_select_variable():
     state = simple_state()
     input_vars = {"category": "science"}
     variable_pool = await create_variable_pool_with_inputs("test", input_vars)
-    result = await StartNode(SELECT_CONFIG, {}).execute(state, variable_pool)
+    result = await StartNode(SELECT_CONFIG, {}, []).execute(state, variable_pool)
     assert result["category"] == "science"
 
 
@@ -881,7 +881,7 @@ async def test_start_node_select_default():
     state = simple_state()
     input_vars = {}
     variable_pool = await create_variable_pool_with_inputs("test", input_vars)
-    result = await StartNode(SELECT_CONFIG, {}).execute(state, variable_pool)
+    result = await StartNode(SELECT_CONFIG, {}, []).execute(state, variable_pool)
     assert result["category"] == "technology"
 
 
@@ -892,7 +892,7 @@ async def test_start_node_select_invalid_option():
     input_vars = {"category": "invalid_category"}
     variable_pool = await create_variable_pool_with_inputs("test", input_vars)
     with pytest.raises(ValueError) as exc_info:
-        await StartNode(SELECT_CONFIG, {}).execute(state, variable_pool)
+        await StartNode(SELECT_CONFIG, {}, []).execute(state, variable_pool)
     assert "invalid_category" in str(exc_info.value)
     assert "可选范围内" in str(exc_info.value)
 
@@ -911,7 +911,7 @@ async def test_start_node_file_variable():
     }
     input_vars = {"attachment": file_value}
     variable_pool = await create_variable_pool_with_inputs("test", input_vars)
-    result = await StartNode(FILE_CONFIG, {}).execute(state, variable_pool)
+    result = await StartNode(FILE_CONFIG, {}, []).execute(state, variable_pool)
     assert result["attachment"]["type"] == "document"
 
 
@@ -930,7 +930,7 @@ async def test_start_node_file_invalid_type():
     input_vars = {"attachment": file_value}
     variable_pool = await create_variable_pool_with_inputs("test", input_vars)
     with pytest.raises(ValueError) as exc_info:
-        await StartNode(FILE_CONFIG, {}).execute(state, variable_pool)
+        await StartNode(FILE_CONFIG, {}, []).execute(state, variable_pool)
     assert "video" in str(exc_info.value)
     assert "允许范围内" in str(exc_info.value)
 
@@ -945,7 +945,7 @@ async def test_start_node_file_list_variable():
     ]
     input_vars = {"documents": files_list}
     variable_pool = await create_variable_pool_with_inputs("test", input_vars)
-    result = await StartNode(FILE_LIST_CONFIG, {}).execute(state, variable_pool)
+    result = await StartNode(FILE_LIST_CONFIG, {}, []).execute(state, variable_pool)
     assert len(result["documents"]) == 2
 
 
@@ -960,7 +960,7 @@ async def test_start_node_file_list_exceeds_count():
     input_vars = {"documents": files_list}
     variable_pool = await create_variable_pool_with_inputs("test", input_vars)
     with pytest.raises(ValueError) as exc_info:
-        await StartNode(FILE_LIST_CONFIG, {}).execute(state, variable_pool)
+        await StartNode(FILE_LIST_CONFIG, {}, []).execute(state, variable_pool)
     assert "超过限制" in str(exc_info.value)
 
 
@@ -975,7 +975,7 @@ async def test_start_node_file_list_invalid_type():
     input_vars = {"documents": files_list}
     variable_pool = await create_variable_pool_with_inputs("test", input_vars)
     with pytest.raises(ValueError) as exc_info:
-        await StartNode(FILE_LIST_CONFIG, {}).execute(state, variable_pool)
+        await StartNode(FILE_LIST_CONFIG, {}, []).execute(state, variable_pool)
     assert "image" in str(exc_info.value)
 
 
@@ -985,7 +985,7 @@ async def test_start_node_json_variable():
     state = simple_state()
     input_vars = {"settings": {"theme": "dark", "lang": "en"}}
     variable_pool = await create_variable_pool_with_inputs("test", input_vars)
-    result = await StartNode(JSON_CONFIG, {}).execute(state, variable_pool)
+    result = await StartNode(JSON_CONFIG, {}, []).execute(state, variable_pool)
     assert result["settings"]["theme"] == "dark"
     assert result["settings"]["lang"] == "en"
 
@@ -996,7 +996,7 @@ async def test_start_node_json_default():
     state = simple_state()
     input_vars = {}
     variable_pool = await create_variable_pool_with_inputs("test", input_vars)
-    result = await StartNode(JSON_CONFIG, {}).execute(state, variable_pool)
+    result = await StartNode(JSON_CONFIG, {}, []).execute(state, variable_pool)
     assert result["settings"]["theme"] == "light"
 
 
@@ -1006,7 +1006,7 @@ async def test_start_node_json_string_auto_parse():
     state = simple_state()
     input_vars = {"settings": '{"theme": "dark", "lang": "en"}'}
     variable_pool = await create_variable_pool_with_inputs("test", input_vars)
-    result = await StartNode(JSON_CONFIG, {}).execute(state, variable_pool)
+    result = await StartNode(JSON_CONFIG, {}, []).execute(state, variable_pool)
     assert result["settings"]["theme"] == "dark"
     assert result["settings"]["lang"] == "en"
 
@@ -1018,5 +1018,5 @@ async def test_start_node_json_invalid_string():
     input_vars = {"settings": "not a json string"}
     variable_pool = await create_variable_pool_with_inputs("test", input_vars)
     with pytest.raises(ValueError) as exc_info:
-        await StartNode(JSON_CONFIG, {}).execute(state, variable_pool)
+        await StartNode(JSON_CONFIG, {}, []).execute(state, variable_pool)
     assert "不是有效的 JSON 对象" in str(exc_info.value)

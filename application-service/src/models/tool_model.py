@@ -113,6 +113,12 @@ class ToolConfig(Base):
     version = Column(String(50), default="1.0.0")
     tags = Column(JSON, default=list)  # Tag list
 
+    # Market provenance: describes the local copy's origin, not publication state.
+    origin = Column(String(16), default="local", server_default="local", nullable=False, index=True)
+    external_source = Column(String(32), nullable=True)
+    external_resource_id = Column(String(64), nullable=True, index=True)
+    external_version = Column(String(64), nullable=True)
+
     # Soft delete flag
     is_active = Column(Boolean, default=True, server_default='true', nullable=False, index=True, comment="是否可用，False表示已删除")
 

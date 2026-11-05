@@ -23,12 +23,16 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import logging
 from collections.abc import AsyncIterator
 
 from fastapi.responses import StreamingResponse
 
 from ..config import current_settings
+from ..errors import BizCode, BusinessException
+from ..i18n import get_current_locale
+from ..services.chat_errors import error_payload
 
 logger = logging.getLogger(__name__)
 
@@ -51,8 +55,16 @@ SSE_RESPONSE_HEADERS = {
     "X-Accel-Buffering": "no",
 }
 
-# Final frame emitted when the source stays silent past the idle timeout.
-IDLE_ERROR_FRAME = 'event: end\ndata: {"error": "stream idle timeout"}\n\n'
+
+def build_idle_error_frame() -> str:
+    """Build the terminal frame emitted when the source stays silent past the
+    idle timeout; ``time`` must be the real timestamp at cutoff, not import time."""
+
+    payload = error_payload(
+        BusinessException("stream idle timeout", BizCode.SERVICE_UNAVAILABLE),
+        locale=get_current_locale(),
+    )
+    return f"event: end\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
 
 async def _pump_source(
@@ -82,7 +94,7 @@ async def _pump_source(
 async def with_sse_keepalive(
         source: AsyncIterator[str],
         *,
-        idle_error_frame: str = IDLE_ERROR_FRAME,
+        idle_error_frame: str | None = None,
 ) -> AsyncIterator[str]:
     """Wrap an SSE string stream with heartbeats and an idle cutoff.
 
@@ -114,7 +126,11 @@ async def with_sse_keepalive(
                         "SSE stream idle for %.0fs (limit %.0fs), closing",
                         idle_elapsed, idle_timeout,
                     )
-                    yield idle_error_frame
+                    yield (
+                        idle_error_frame
+                        if idle_error_frame is not None
+                        else build_idle_error_frame()
+                    )
                     return
                 yield HEARTBEAT_FRAME
                 continue
@@ -138,7 +154,7 @@ async def with_sse_keepalive(
 def sse_response(
         source: AsyncIterator[str],
         *,
-        idle_error_frame: str = IDLE_ERROR_FRAME,
+        idle_error_frame: str | None = None,
 ) -> StreamingResponse:
     """Build a StreamingResponse over the keep-alive wrapper."""
 
@@ -151,8 +167,8 @@ def sse_response(
 
 __all__ = [
     "HEARTBEAT_FRAME",
-    "IDLE_ERROR_FRAME",
     "SSE_RESPONSE_HEADERS",
+    "build_idle_error_frame",
     "sse_response",
     "with_sse_keepalive",
 ]
