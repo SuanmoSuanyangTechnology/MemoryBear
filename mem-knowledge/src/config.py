@@ -226,6 +226,33 @@ class KnowledgeSettings(BaseSettings):
         ge=0,
         validation_alias="MODEL_SERVICE_MAX_KEEPALIVE_CONNECTIONS",
     )
+    # East-west invoke protocol: http keeps the SSE/JSON invoke contract, grpc
+    # uses ModelInvokeService with the same frame semantics. The management
+    # availability probe (GET /internal/v1/models/{id}) stays HTTP.
+    model_service_protocol: Literal["http", "grpc"] = Field(
+        default="http", validation_alias="MODEL_SERVICE_PROTOCOL"
+    )
+    model_service_grpc_target: str = Field(
+        default="dns:///model-service:9090",
+        validation_alias="MODEL_SERVICE_GRPC_TARGET",
+    )
+    model_service_invoke_grpc_call_budget_seconds: float = Field(
+        default=180.0,
+        gt=0,
+        validation_alias="MODEL_SERVICE_INVOKE_GRPC_CALL_BUDGET_SECONDS",
+    )
+    model_service_invoke_grpc_media_call_budget_seconds: float = Field(
+        default=720.0,
+        gt=0,
+        validation_alias="MODEL_SERVICE_INVOKE_GRPC_MEDIA_CALL_BUDGET_SECONDS",
+    )
+    # Deadline margin kept for the response trip and orchestration after the
+    # model call returns; must stay below both call budgets.
+    model_service_invoke_grpc_margin_seconds: float = Field(
+        default=5.0,
+        gt=0,
+        validation_alias="MODEL_SERVICE_INVOKE_GRPC_MARGIN_SECONDS",
+    )
 
     llm_timeout: float = Field(default=120.0, gt=0, validation_alias="LLM_TIMEOUT")
     llm_max_retries: int = Field(default=2, ge=0, validation_alias="LLM_MAX_RETRIES")
@@ -290,6 +317,28 @@ class KnowledgeSettings(BaseSettings):
     # Knowledge service environment variables
     kb_host: str = Field(default="0.0.0.0", validation_alias="KB_HOST")
     kb_port: int = Field(default=8080, ge=1, le=65535, validation_alias="KB_PORT")
+    # gRPC retrieval listener (same process as FastAPI; uvicorn must run with
+    # --loop asyncio because grpc.aio cannot run on uvloop). Port 0 binds an
+    # ephemeral port in tests.
+    grpc_server_enabled: bool = Field(
+        default=False, validation_alias="GRPC_SERVER_ENABLED"
+    )
+    grpc_port: int = Field(default=9090, ge=0, le=65535, validation_alias="GRPC_PORT")
+    grpc_max_message_bytes: int = Field(
+        default=67108864, gt=0, validation_alias="GRPC_MAX_MESSAGE_BYTES"
+    )
+    grpc_keepalive_time_ms: int = Field(
+        default=30000, gt=0, validation_alias="GRPC_KEEPALIVE_TIME_MS"
+    )
+    grpc_keepalive_timeout_ms: int = Field(
+        default=10000, gt=0, validation_alias="GRPC_KEEPALIVE_TIMEOUT_MS"
+    )
+    grpc_max_concurrent_rpcs: int = Field(
+        default=512, gt=0, validation_alias="GRPC_MAX_CONCURRENT_RPCS"
+    )
+    grpc_shutdown_grace_s: int = Field(
+        default=20, ge=0, validation_alias="GRPC_SHUTDOWN_GRACE_S"
+    )
     kb_process_role: Literal[
         "api",
         "document_worker",
@@ -534,6 +583,30 @@ class KnowledgeSettings(BaseSettings):
             raise ValueError("KB_WORKER_HEALTH_STATE_FILE must be absolute")
         return self
 
+    @model_validator(mode="after")
+    def validate_model_service_grpc(self) -> KnowledgeSettings:
+        """gRPC invoke needs a target and a margin that cannot starve the call."""
+
+        if self.model_service_protocol != "grpc":
+            return self
+        if not self.model_service_grpc_target.strip():
+            raise ValueError(
+                "MODEL_SERVICE_GRPC_TARGET must be set when "
+                "MODEL_SERVICE_PROTOCOL=grpc"
+            )
+        margin = self.model_service_invoke_grpc_margin_seconds
+        if margin >= self.model_service_invoke_grpc_call_budget_seconds:
+            raise ValueError(
+                "MODEL_SERVICE_INVOKE_GRPC_MARGIN_SECONDS must be smaller than "
+                "MODEL_SERVICE_INVOKE_GRPC_CALL_BUDGET_SECONDS"
+            )
+        if margin >= self.model_service_invoke_grpc_media_call_budget_seconds:
+            raise ValueError(
+                "MODEL_SERVICE_INVOKE_GRPC_MARGIN_SECONDS must be smaller than "
+                "MODEL_SERVICE_INVOKE_GRPC_MEDIA_CALL_BUDGET_SECONDS"
+            )
+        return self
+
     @property
     def database_url_sync(self) -> str:
         return self._database_url("postgresql+psycopg")
@@ -624,6 +697,9 @@ class KnowledgeSettings(BaseSettings):
             "process_role": self.kb_process_role,
             "host": self.kb_host,
             "port": self.kb_port,
+            "grpc_server_enabled": self.grpc_server_enabled,
+            "grpc_port": self.grpc_port,
+            "model_service_protocol": self.model_service_protocol,
             "db_host": self.db_host,
             "db_port": self.db_port,
             "redis_host": self.redis_host,

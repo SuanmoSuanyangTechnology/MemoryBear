@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 from sqlalchemy import delete, select, update
 
 from ...models.owned import (
@@ -23,6 +25,7 @@ from ...rag.wiki.config import (
     normalize_name,
     read_wiki_config,
 )
+from ...rag.wiki.identity import TOPIC_IDENTITY_VERSION, same_name_target, topic_identity
 from .common import (
     append_log,
     as_uuid,
@@ -34,6 +37,8 @@ from .common import (
     settle_progress,
 )
 from .state import affected_page_ids, dirty_pages
+
+logger = logging.getLogger(__name__)
 
 
 def load_map(session, delivery, *, failure_limit=None):
@@ -81,7 +86,10 @@ def load_map(session, delivery, *, failure_limit=None):
         "input_hash": state.input_hash,
         "plan_ready": state.plan_ready,
         "plan": load_plan(session, state),
-        "reuse_candidate": bool(state.input_hash and not state.plan_ready),
+        "reuse_candidate": bool(
+            state.input_hash and not state.plan_ready
+            and (state.map_progress or {}).get("identity_version") == TOPIC_IDENTITY_VERSION
+        ),
         "mapped": state.mapped_version == state.requested_version,
         "requested_version": state.requested_version,
     }
@@ -173,9 +181,22 @@ def _page_for_candidate(session, scope, candidate, document_id):
         if normalize_name(page.topic_scope) == topic_scope
         and names.intersection({page.normalized_name, *(normalize_name(v) for v in page.aliases)})
     ]
+    identities = [{"page_id": str(page.id), "kind": page.page_type, "name": page.title,
+                   "canonical_key": page.canonical_key} for page in existing]
+    target = same_name_target(
+        candidate, identities, kb_id=str(scope["kb_id"]), document_id=str(document_id),
+    )
+    if target is not None:
+        page = next(page for page in existing if str(page.id) == target["page_id"])
+        logger.info("Wiki 主题复用 knowledge_id=%s document_id=%s page_id=%s identity=%s",
+                    scope["kb_id"], document_id, page.id,
+                    topic_identity(candidate["kind"], candidate["name"]))
+        return _assign_missing_folder(session, scope, page, candidate)
     if len(matches) == 1:
         return _assign_missing_folder(session, scope, matches[0], candidate)
-    key = fingerprint([candidate["kind"], name, topic_scope or str(document_id)])
+    key = fingerprint([
+        TOPIC_IDENTITY_VERSION, *topic_identity(candidate["kind"], candidate["name"]),
+    ])
     page = session.scalar(
         select(WikiPage).where(WikiPage.kb_id == scope["kb_id"], WikiPage.canonical_key == key)
     )
@@ -208,16 +229,31 @@ def fix_plan(
         plan = load_plan(session, state)
         mapping = {}
         for candidate in candidates:
+            if candidate.get("page_id"):
+                fixed = [topic for topic in plan["topics"]
+                         if topic["page_id"] == candidate["page_id"]]
+                if len(fixed) != 1:
+                    raise WikiDeferred("WIKI_PLAN_CHANGED")
+                mapping[candidate["topic_ref"]] = fixed[0]["page_id"]
+                continue
             names = {normalize_name(candidate["name"]),
                      *(normalize_name(alias) for alias in candidate["aliases"])}
-            matches = [topic for topic in plan["topics"] if (
-                topic["page_id"] == candidate.get("existing_page_id") or (
+            matches = [topic for topic in plan["topics"]
+                       if topic["page_id"] == candidate.get("existing_page_id")]
+            if not matches:
+                target = same_name_target(
+                    candidate, plan["topics"], kb_id=str(knowledge.id),
+                    document_id=str(document.id),
+                )
+                if target is not None:
+                    matches = [target]
+            if not matches:
+                matches = [topic for topic in plan["topics"] if (
                     topic["kind"] == candidate["kind"]
                     and normalize_name(topic["scope"]) == normalize_name(candidate["scope"])
                     and names & {normalize_name(topic["title"]),
                                  *(normalize_name(alias) for alias in topic["aliases"])}
-                )
-            )]
+                )]
             if len(matches) != 1:
                 raise WikiDeferred("WIKI_PLAN_CHANGED")
             if candidate.get("topic_ref"):
@@ -295,7 +331,8 @@ def fix_plan(
                 operation="upsert" if page_id in new_ids else "retract",
             )
         )
-    state.map_progress = {"candidate_count": len(topics), "planned_pages": len(targets)}
+    state.map_progress = {"candidate_count": len(topics), "planned_pages": len(targets),
+                          "identity_version": TOPIC_IDENTITY_VERSION}
     state.plan_ready, state.input_hash = True, input_hash
     state.stage = "materials"
     append_log(document, f"Wiki page plan ready: pages={len(targets)}.")
@@ -312,12 +349,14 @@ def load_planning_context(session, delivery):
 
 def _planning_context(session, kb_id):
     pages = [{"page_id": str(row.id), "name": row.title, "kind": row.page_type,
+              "canonical_key": row.canonical_key,
               "scope": row.topic_scope, "aliases": row.aliases,
               "description": row.summary, "status": row.status,
               "folder_id": str(row.folder_id) if row.folder_id else None}
              for row in session.execute(select(
                  WikiPage.id, WikiPage.title, WikiPage.page_type, WikiPage.topic_scope,
                  WikiPage.aliases, WikiPage.folder_id, WikiPage.summary, WikiPage.status,
+                 WikiPage.canonical_key,
              ).where(WikiPage.kb_id == kb_id, WikiPage.page_type != "summary")
              .order_by(WikiPage.id))]
     folders = {folder.id: folder for folder in session.scalars(
@@ -334,7 +373,7 @@ def _planning_context(session, kb_id):
     # 正文发布和状态推进不应使分类失效；只校验身份、目录归属及目录结构。
     revision = fingerprint({
         "pages": [{key: page[key] for key in (
-            "page_id", "name", "kind", "scope", "aliases", "folder_id"
+            "page_id", "name", "kind", "scope", "aliases", "folder_id", "canonical_key"
         )} for page in pages],
         "folders": [
             [str(folder.id), str(folder.parent_id), folder.name] for folder in folders.values()
@@ -522,7 +561,7 @@ def confirm_reused_map(session, delivery, input_hash, config_hash, *, document_t
     state.plan_ready = True
     state.mapped_version = state.requested_version
     state.stage = "reducing"
-    state.map_progress = {"reused": True}
+    state.map_progress = {"reused": True, "identity_version": TOPIC_IDENTITY_VERSION}
     append_log(document, "Wiki Map reused after source and configuration verification.")
     session.flush()
     settle_progress(session, document, state)

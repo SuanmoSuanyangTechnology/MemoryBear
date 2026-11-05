@@ -17,12 +17,14 @@ PROTO_FILES = (
     "memorybear/common/v1/common.proto",
     "memorybear/application/v1/chat.proto",
     "memorybear/model/v1/invoke.proto",
+    "memorybear/knowledge/v1/retrieval.proto",
 )
 _PACKAGE_DIRS = (
     "memorybear_grpc",
     "memorybear/common/v1",
     "memorybear/application/v1",
     "memorybear/model/v1",
+    "memorybear/knowledge/v1",
 )
 
 

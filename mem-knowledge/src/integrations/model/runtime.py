@@ -16,10 +16,13 @@ from __future__ import annotations
 import asyncio
 import inspect
 import logging
+import threading
 import weakref
 from collections.abc import Callable
 from typing import Any
 from urllib.parse import urlparse
+
+from memorybear_grpc.client import ChannelPool, SyncChannelPool
 
 from ...config import KnowledgeSettings
 from .errors import ModelInvokeConfigurationError
@@ -27,6 +30,7 @@ from .invoke import (
     ModelInvokeClient,
     ModelInvokeSyncClient,
     invoke_media_timeouts,
+    invoke_timeouts,
 )
 
 logger = logging.getLogger(__name__)
@@ -86,6 +90,11 @@ class ModelInvokeRuntime:
         self._media_invoke_clients: weakref.WeakKeyDictionary[
             asyncio.AbstractEventLoop, Any
         ] = weakref.WeakKeyDictionary()
+        self._grpc_pools: weakref.WeakKeyDictionary[
+            asyncio.AbstractEventLoop, ChannelPool
+        ] = weakref.WeakKeyDictionary()
+        self._grpc_sync_pool: SyncChannelPool | None = None
+        self._grpc_pool_lock = threading.Lock()
 
     @property
     def invoke_client(self) -> ModelInvokeClient:
@@ -115,8 +124,10 @@ class ModelInvokeRuntime:
             return client
         _validated_base_url(self._settings)
         self._prune_closed_loops()
-        factory = self._invoke_client_factory or self._default_invoke_client
-        client = factory()
+        factory = self._invoke_client_factory
+        client = (
+            self._default_invoke_client(loop) if factory is None else factory()
+        )
         self._invoke_clients[loop] = client
         return client
 
@@ -157,30 +168,109 @@ class ModelInvokeRuntime:
             return client
         _validated_base_url(self._settings)
         self._prune_closed_loops()
-        factory = self._media_invoke_client_factory or self._default_media_invoke_client
-        client = factory()
+        factory = self._media_invoke_client_factory
+        client = (
+            self._default_media_invoke_client(loop) if factory is None else factory()
+        )
         self._media_invoke_clients[loop] = client
         return client
 
     def _prune_closed_loops(self) -> None:
         """丢弃已关闭循环上的池：其连接随循环失效且无法再安全关闭，只能解除引用防泄漏。"""
 
-        for registry in (self._invoke_clients, self._media_invoke_clients):
+        for registry in (
+            self._invoke_clients,
+            self._media_invoke_clients,
+            self._grpc_pools,
+        ):
             for loop in [item for item in registry if item.is_closed()]:
                 registry.pop(loop, None)
 
-    def _default_invoke_client(self) -> ModelInvokeClient:
+    def _grpc_pool_for(self, loop: asyncio.AbstractEventLoop) -> ChannelPool:
+        """One pool per event loop: grpc.aio channels are bound to their loop."""
+
+        pool = self._grpc_pools.get(loop)
+        if pool is not None:
+            return pool
+        with self._grpc_pool_lock:
+            pool = self._grpc_pools.get(loop)
+            if pool is None:
+                pool = ChannelPool(
+                    max_message_bytes=self._settings.grpc_max_message_bytes,
+                    keepalive_time_ms=self._settings.grpc_keepalive_time_ms,
+                    keepalive_timeout_ms=self._settings.grpc_keepalive_timeout_ms,
+                )
+                self._grpc_pools[loop] = pool
+        return pool
+
+    def _grpc_sync_pool_instance(self) -> SyncChannelPool:
+        """Process-level sync pool; channels are thread-safe and not loop-bound."""
+
+        with self._grpc_pool_lock:
+            if self._grpc_sync_pool is None:
+                self._grpc_sync_pool = SyncChannelPool(
+                    max_message_bytes=self._settings.grpc_max_message_bytes,
+                    keepalive_time_ms=self._settings.grpc_keepalive_time_ms,
+                    keepalive_timeout_ms=self._settings.grpc_keepalive_timeout_ms,
+                )
+            return self._grpc_sync_pool
+
+    def _default_invoke_client(self, loop: asyncio.AbstractEventLoop) -> ModelInvokeClient:
+        if self._settings.model_service_protocol == "grpc":
+            return ModelInvokeClient.for_grpc(
+                self._settings,
+                self._grpc_pool_for(loop),
+                target=self._settings.model_service_grpc_target,
+                timeouts=invoke_timeouts(self._settings),
+                call_budget_s=(
+                    self._settings.model_service_invoke_grpc_call_budget_seconds
+                ),
+                margin_s=self._settings.model_service_invoke_grpc_margin_seconds,
+            )
         return ModelInvokeClient.from_settings(self._settings)
 
     def _default_invoke_sync_client(self) -> ModelInvokeSyncClient:
+        if self._settings.model_service_protocol == "grpc":
+            return ModelInvokeSyncClient.for_grpc(
+                self._grpc_sync_pool_instance(),
+                target=self._settings.model_service_grpc_target,
+                timeouts=invoke_timeouts(self._settings),
+                call_budget_s=(
+                    self._settings.model_service_invoke_grpc_call_budget_seconds
+                ),
+                margin_s=self._settings.model_service_invoke_grpc_margin_seconds,
+            )
         return ModelInvokeSyncClient.from_settings(self._settings)
 
-    def _default_media_invoke_client(self) -> ModelInvokeClient:
+    def _default_media_invoke_client(
+        self, loop: asyncio.AbstractEventLoop
+    ) -> ModelInvokeClient:
+        if self._settings.model_service_protocol == "grpc":
+            return ModelInvokeClient.for_grpc(
+                self._settings,
+                self._grpc_pool_for(loop),
+                target=self._settings.model_service_grpc_target,
+                timeouts=invoke_media_timeouts(self._settings),
+                call_budget_s=(
+                    self._settings.model_service_invoke_grpc_media_call_budget_seconds
+                ),
+                margin_s=self._settings.model_service_invoke_grpc_margin_seconds,
+            )
         return ModelInvokeClient.from_settings(
             self._settings, timeouts=invoke_media_timeouts(self._settings)
         )
 
     def _default_media_invoke_sync_client(self) -> ModelInvokeSyncClient:
+        if self._settings.model_service_protocol == "grpc":
+            return ModelInvokeSyncClient.for_grpc(
+                self._grpc_sync_pool_instance(),
+                target=self._settings.model_service_grpc_target,
+                timeouts=invoke_media_timeouts(self._settings),
+                call_budget_s=(
+                    self._settings.model_service_invoke_grpc_media_call_budget_seconds
+                ),
+                margin_s=self._settings.model_service_invoke_grpc_margin_seconds,
+            )
         return ModelInvokeSyncClient.from_settings(
             self._settings, timeouts=invoke_media_timeouts(self._settings)
         )
@@ -190,16 +280,23 @@ class ModelInvokeRuntime:
         invoke_clients = list(self._invoke_clients.values())
         media_invoke_sync_client = self._media_invoke_sync_client
         media_invoke_clients = list(self._media_invoke_clients.values())
+        grpc_pools = list(self._grpc_pools.values())
+        grpc_sync_pool = self._grpc_sync_pool
         self._invoke_sync_client = None
         self._media_invoke_sync_client = None
         self._invoke_clients = weakref.WeakKeyDictionary()
         self._media_invoke_clients = weakref.WeakKeyDictionary()
+        self._grpc_pools = weakref.WeakKeyDictionary()
+        self._grpc_sync_pool = None
         await _close_quietly(invoke_sync_client)
         await _close_quietly(media_invoke_sync_client)
         for invoke_client in invoke_clients:
             await _close_quietly(invoke_client)
         for media_invoke_client in media_invoke_clients:
             await _close_quietly(media_invoke_client)
+        for pool in grpc_pools:
+            await _close_quietly(pool)
+        await _close_quietly(grpc_sync_pool)
 
     def reset_after_fork(self) -> None:
         """fork 子进程弃置父进程槽：父 sockets 在子进程不可用（且关闭会伤及父进程）。"""
@@ -208,6 +305,8 @@ class ModelInvokeRuntime:
         self._media_invoke_sync_client = None
         self._invoke_clients = weakref.WeakKeyDictionary()
         self._media_invoke_clients = weakref.WeakKeyDictionary()
+        self._grpc_pools = weakref.WeakKeyDictionary()
+        self._grpc_sync_pool = None
 
 
 __all__ = ["ModelInvokeRuntime"]

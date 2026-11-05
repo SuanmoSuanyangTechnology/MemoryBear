@@ -1,13 +1,16 @@
-"""FAQ 索引同步与纯向量召回；数据库资格不依赖展示状态 change_pending。"""
+"""FAQ 索引同步、向量候选召回与数据库资格复核。"""
 
 import asyncio
 import logging
 import random
 import uuid
+from collections.abc import Sequence
+from typing import Any
 
+from ..api.dependencies import Principal
 from ..api.schemas.chunk import ImageRetrievalQuery, RetrieveType
 from ..api.schemas.knowledge_metadata import MetadataFilterMode
-from ..api.schemas.knowledge_retrieval import KnowledgeRetrievalRequest, KnowledgeRetrievalResult
+from ..api.schemas.knowledge_retrieval import KnowledgeRetrievalRequest
 from ..error_mapping import map_text_embedding_error
 from ..errors import KnowledgeError
 from ..rag.faq.index import (
@@ -27,6 +30,7 @@ from ..rag.retrieval.models import RetrievalSearchOptions
 from ..rag.wiki.config import WikiError
 from ..rag.wiki.diagnostics import diagnostic_json, exception_details
 from ..repositories.wiki_faq import retrieval as repository
+from ..runtime import ProcessRuntime
 from .knowledge_retrieval_preparation import KnowledgeRetrievalPreparation as Preparation
 from .wiki.runtime import transaction
 
@@ -34,17 +38,21 @@ logger = logging.getLogger(__name__)
 
 
 def validate_request(request: KnowledgeRetrievalRequest) -> None:
+    configured_ids = {config.kb_id for config in request.knowledge_bases}
+    has_faq = any(
+        Preparation._resolve_retrieve_type(request, config) is RetrieveType.WIKI_FAQ
+        for config in request.knowledge_bases
+    ) or (
+        request.retrieve_type is RetrieveType.WIKI_FAQ
+        and (bool(request.ex_ids) or any(kb_id not in configured_ids for kb_id in request.kb_ids))
+    )
+    if not has_faq:
+        return
     error_code = None
     if isinstance(request.normalized_query, ImageRetrievalQuery):
         error_code = "KB_FAQ_IMAGE_QUERY_UNSUPPORTED"
     elif request.file_names_filter:
         error_code = "KB_FAQ_FILE_FILTER_UNSUPPORTED"
-    elif any(
-        "retrieve_type" in config.model_fields_set
-        and config.retrieve_type != RetrieveType.WIKI_FAQ
-        for config in request.knowledge_bases
-    ):
-        error_code = "KB_FAQ_MIXED_RETRIEVAL_UNSUPPORTED"
     elif request.metadata_filter_mode is not MetadataFilterMode.DISABLED:
         # FAQ 不支持元数据过滤；禁用时忽略历史配置，空组不能绕过未解析 AUTO 的拒绝。
         if any(group.conditions for group in request.metadata_filters):
@@ -204,86 +212,74 @@ async def _search_faq_vectors(store, target, vector, options):
         raise
 
 
-async def retrieve(runtime, request, principal):
-    validate_request(request)
+async def search_target(
+    runtime: ProcessRuntime,
+    client: Any,
+    store: AsyncElasticSearchRetrieval,
+    request: KnowledgeRetrievalRequest,
+    target: FAQTarget,
+) -> list[DocumentChunk]:
     async with runtime.database.async_session() as db:
-        targets = await Preparation.prepare_faq_with_db(db, request, principal)
-    if not targets:
-        return KnowledgeRetrievalResult()
-    client = await runtime.elasticsearch.client()
-    store = AsyncElasticSearchRetrieval(client)
-    semaphore = asyncio.Semaphore(FAQ_SYNC_CONCURRENCY)
-
-    async def search_target(target):
-        async with semaphore:
-            async with runtime.database.async_session() as db:
-                versions = await repository.eligible_versions(db, target.scope)
-            identities = [
-                projection_id(faq_id, revision)
-                for faq_id, revision, negatives in versions
-                if request.query_text.strip().casefold()
-                not in {q.strip().casefold() for q in negatives}
-            ]
-            if not identities or not await client.indices.exists(index=target.index_name):
-                return target, []
-            try:
-                vector = await query_vector(
-                    embedding_for(runtime, target), target, request.query_text
-                )
-            except Exception as exc:
-                logger.exception(
-                    "FAQ 查询向量化失败 kb_id=%s index=%s stage=query_embedding details=%s",
-                    target.scope["kb_id"],
-                    target.index_name,
-                    diagnostic_json(exception_details(exc)),
-                )
-                mapped = map_text_embedding_error(exc)
-                if mapped is None or mapped is exc:
-                    raise
-                raise mapped from exc
-            candidates = []
-            for offset in range(0, len(identities), FAQ_ID_BATCH_SIZE):
-                candidates.extend(
-                    await _search_faq_vectors(
-                        store,
-                        target,
-                        vector,
-                        RetrievalSearchOptions(
-                            indices=target.index_name,
-                            top_k=target.top_k,
-                            score_threshold=target.score_threshold,
-                            file_names_filter=(),
-                            document_ids_include=None,
-                            extra_filters=(
-                                {
-                                    "ids": {
-                                        "values": identities[offset : offset + FAQ_ID_BATCH_SIZE]
-                                    }
-                                },
-                            ),
-                        ),
-                    )
-                )
-            candidates.sort(key=lambda chunk: (-chunk.metadata["score"], chunk.metadata["doc_id"]))
-            return target, candidates[: target.top_k]
-
-    tasks = [asyncio.create_task(search_target(target)) for target in targets]
+        versions = await repository.eligible_versions(db, target.scope)
+    identities = [
+        projection_id(faq_id, revision)
+        for faq_id, revision, negatives in versions
+        if request.query_text.strip().casefold() not in {q.strip().casefold() for q in negatives}
+    ]
+    if not identities or not await client.indices.exists(index=target.index_name):
+        return []
     try:
-        groups = await asyncio.gather(*tasks)
-    except BaseException:
-        for task in tasks:
-            task.cancel()
-        await asyncio.gather(*tasks, return_exceptions=True)
-        raise
+        vector = await query_vector(embedding_for(runtime, target), target, request.query_text)
+    except Exception as exc:
+        logger.exception(
+            "FAQ 查询向量化失败 kb_id=%s index=%s stage=query_embedding details=%s",
+            target.scope["kb_id"],
+            target.index_name,
+            diagnostic_json(exception_details(exc)),
+        )
+        mapped = map_text_embedding_error(exc)
+        if mapped is None or mapped is exc:
+            raise
+        raise mapped from exc
+    candidates = []
+    for offset in range(0, len(identities), FAQ_ID_BATCH_SIZE):
+        candidates.extend(
+            await _search_faq_vectors(
+                store,
+                target,
+                vector,
+                RetrievalSearchOptions(
+                    indices=target.index_name,
+                    top_k=target.top_k,
+                    score_threshold=target.score_threshold,
+                    file_names_filter=(),
+                    document_ids_include=None,
+                    extra_filters=(
+                        {"ids": {"values": identities[offset : offset + FAQ_ID_BATCH_SIZE]}},
+                    ),
+                ),
+            )
+        )
+    candidates.sort(key=lambda chunk: (-chunk.metadata["score"], chunk.metadata["doc_id"]))
+    return candidates[: target.top_k]
+
+
+async def hydrate_results(
+    runtime: ProcessRuntime,
+    request: KnowledgeRetrievalRequest,
+    principal: Principal,
+    groups: Sequence[tuple[FAQTarget, list[DocumentChunk]]],
+) -> dict[uuid.UUID, list[DocumentChunk]]:
     # ES查询之后重新解析授权；分享撤销/知识库停用/模型切换均不能沿用旧快照放行。
     async with runtime.database.async_session() as db:
         current_targets = await Preparation.prepare_faq_with_db(db, request, principal)
         current = {str(target.scope["kb_id"]): target for target in current_targets}
-        output = []
+        output = {}
         for target, candidates in groups:
             fresh = current.get(str(target.scope["kb_id"]))
             if fresh is None or fresh.scope != target.scope or fresh.model_key != target.model_key:
                 continue
+            chunks = []
             ids = [uuid.UUID(chunk.metadata["doc_id"]) for chunk in candidates]
             rows = await repository.hydrate(db, fresh.scope, ids)
             for chunk in candidates:
@@ -293,12 +289,12 @@ async def retrieve(runtime, request, principal):
                     and row["content_revision"] == chunk.metadata.get("content_revision")
                     and not excluded_question(row, request.query_text)
                 ):
-                    output.append(result_chunk(row, fresh, chunk.metadata["score"]))
-    output.sort(key=lambda chunk: (-chunk.metadata["score"], chunk.metadata["faq_id"]))
-    logger.info(
-        "wiki-FAQ 召回完成 workspace_id=%s kb_count=%s result_count=%s",
-        principal.workspace_id,
-        len(targets),
-        min(len(output), request.top_k),
-    )
-    return KnowledgeRetrievalResult(chunks=output[: request.top_k])
+                    chunks.append(result_chunk(row, fresh, chunk.metadata["score"]))
+            output[target.scope["kb_id"]] = chunks
+    return output
+
+
+async def retrieve(runtime, request, principal):
+    from .knowledge_retrieval import KnowledgeRetrievalService
+
+    return await KnowledgeRetrievalService.retrieve_async(runtime, request, principal)

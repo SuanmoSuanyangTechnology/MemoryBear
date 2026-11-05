@@ -1,0 +1,27 @@
+syntax = "proto3";
+
+package memorybear.knowledge.v1;
+
+// Internal knowledge retrieval face. Request and response bodies stay JSON so
+// the HTTP and gRPC transports share one schema definition; identity, source
+// and trace travel in invocation metadata.
+message RetrieveRequest {
+  bytes body_json = 1;
+}
+
+message RetrieveResponse {
+  bytes body_json = 1;
+}
+
+message RetrievalPolicyRequest {
+  bytes body_json = 1;
+}
+
+message RetrievalPolicyResponse {
+  bytes body_json = 1;
+}
+
+service KnowledgeRetrievalService {
+  rpc Retrieve(RetrieveRequest) returns (RetrieveResponse);
+  rpc RetrievalPolicy(RetrievalPolicyRequest) returns (RetrievalPolicyResponse);
+}

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import inspect
+import logging
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
@@ -17,15 +18,45 @@ from .route_proxy import KnowledgeRouteProxy
 if TYPE_CHECKING:
     from .client import KnowledgeServiceClient
 
+logger = logging.getLogger(__name__)
 RemoteFactory = Callable[[], Any]
+GrpcRetrieverFactory = Callable[[Any], Any]
+GrpcPoolFactory = Callable[[], Any]
+
+
+async def _close_quietly(client: Any | None) -> None:
+    if client is None:
+        return
+    close = getattr(client, "aclose", None) or getattr(client, "close", None)
+    if close is None:
+        return
+    try:
+        result = close()
+        if inspect.isawaitable(result):
+            await result
+    except Exception:
+        logger.warning(
+            "knowledge_integration_close_failed client=%s",
+            type(client).__name__,
+            exc_info=True,
+        )
 
 
 class KnowledgeIntegrationRuntime:
-    def __init__(self, remote_factory: RemoteFactory | None = None):
+    def __init__(
+        self,
+        remote_factory: RemoteFactory | None = None,
+        *,
+        grpc_retriever_factory: GrpcRetrieverFactory | None = None,
+        grpc_pool_factory: GrpcPoolFactory | None = None,
+    ):
         self._remote_factory = remote_factory
+        self._grpc_retriever_factory = grpc_retriever_factory
+        self._grpc_pool_factory = grpc_pool_factory
         self._remote: Any | None = None
         self._retriever: KnowledgeRetriever | None = None
         self._route_proxy: KnowledgeRouteProxy | None = None
+        self._grpc_pool: Any | None = None
         self._enabled = False
 
     @property
@@ -61,20 +92,33 @@ class KnowledgeIntegrationRuntime:
         factory = self._remote_factory or _default_remote_factory
         remote = factory()
         self._remote = remote
-        self._retriever = remote
+        # Route forwarding, detached calls and readiness stay on the HTTP
+        # client; only the retrieval face can switch protocol.
         self._route_proxy = remote
+        if current_settings().mem_knowledge_protocol == "grpc":
+            pool_factory = self._grpc_pool_factory or _default_grpc_pool_factory
+            pool = pool_factory()
+            self._grpc_pool = pool
+            retriever_factory = (
+                self._grpc_retriever_factory or _default_grpc_retriever_factory
+            )
+            self._retriever = retriever_factory(pool)
+        else:
+            self._retriever = remote
 
     async def close(self) -> None:
         remote = self._remote
+        retriever = self._retriever
+        pool = self._grpc_pool
         self._remote = None
         self._retriever = None
         self._route_proxy = None
+        self._grpc_pool = None
         self._enabled = False
-        close = getattr(remote, "aclose", None)
-        if close is not None:
-            result = close()
-            if inspect.isawaitable(result):
-                await result
+        if retriever is not remote:
+            await _close_quietly(retriever)
+        await _close_quietly(remote)
+        await _close_quietly(pool)
 
     async def ready(self) -> bool:
         if not self._enabled:
@@ -90,6 +134,29 @@ def _default_remote_factory() -> Any:
     from .client import KnowledgeServiceClient
 
     return KnowledgeServiceClient.from_settings(current_settings())
+
+
+def _default_grpc_pool_factory() -> Any:
+    from memorybear_grpc.client import ChannelPool
+
+    settings = current_settings()
+    return ChannelPool(
+        max_message_bytes=settings.grpc_max_message_bytes,
+        keepalive_time_ms=settings.grpc_keepalive_time_ms,
+        keepalive_timeout_ms=settings.grpc_keepalive_timeout_ms,
+    )
+
+
+def _default_grpc_retriever_factory(pool: Any) -> Any:
+    from .grpc_client import KnowledgeGrpcRetriever
+
+    settings = current_settings()
+    return KnowledgeGrpcRetriever(
+        pool,
+        target=settings.mem_knowledge_grpc_target,
+        timeout_s=settings.mem_knowledge_grpc_timeout_seconds,
+        margin_s=settings.mem_knowledge_grpc_margin_seconds,
+    )
 
 
 _runtime = KnowledgeIntegrationRuntime()

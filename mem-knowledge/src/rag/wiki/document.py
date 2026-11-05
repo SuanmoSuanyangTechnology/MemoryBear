@@ -7,9 +7,10 @@ from ...integrations.model.errors import ModelInvokeClientError
 from ...tasks.observability import current_parent_task_id
 from ..chunk.token_utils import split_by_token_limit
 from .batching import batches, parallel
-from .config import WikiError, normalize_name, source_reference_key
+from .config import WikiError, source_reference_key
 from .contracts import Citations
 from .diagnostics import diagnostic_json, exception_details
+from .identity import merge_candidate, topic_identity
 from .model import request_tokens, tokens
 from .pipeline import (
     PAGE_LINK,
@@ -139,21 +140,29 @@ def prepare_document(model, snapshot, candidates, segments, catalog, *, fixed_pl
                       for segment in segments)
     results = parallel(operations, model.settings)
     cited = defaultdict(set)
-    identities = {(t["kind"], normalize_name(t["title"]), normalize_name(t["scope"])):
-                  t["topic_ref"] for t in topics}
+    identities = {topic_identity(t["kind"], t["title"]): t for t in topics}
     for result in results[1:]:
         for batch in result:
             for topic in batch["topics"]:
                 cited[topic["topic_ref"]].update(topic["source_refs"])
             for candidate in batch["new_candidates"]:
-                key = (candidate["kind"], normalize_name(candidate["name"]),
-                       normalize_name(candidate["scope"]))
-                handle = identities.get(key)
-                if handle is None:
-                    handle = f"T{len(topics) + 1}"
-                    topics.append({**candidate, "topic_ref": handle, "title": candidate["name"]})
-                    identities[key] = handle
-                cited[handle].update(candidate["source_refs"])
+                key = topic_identity(candidate["kind"], candidate["name"])
+                target = identities.get(key)
+                if target is None:
+                    target = {**candidate, "topic_ref": f"T{len(topics) + 1}",
+                              "title": candidate["name"]}
+                    topics.append(target)
+                    identities[key] = target
+                else:
+                    logger.info("Wiki 补充主题归并 %s", diagnostic_json({
+                        "stage": "wiki_chunk_citations_v2", "task_id": current_parent_task_id(),
+                        "knowledge_id": snapshot.get("kb_id"),
+                        "document_id": snapshot.get("document_id"), "identity": key,
+                        "topic_ref": target["topic_ref"],
+                        "scopes": [target["scope"], candidate["scope"]],
+                    }))
+                    merge_candidate(target, candidate)
+                cited[target["topic_ref"]].update(target["source_refs"])
     limit = model.settings.kb_wiki_max_topics
     if limit and len(topics) > limit:
         raise WikiError("WIKI_TOPIC_BUDGET_EXCEEDED", retryable=False)

@@ -39,6 +39,7 @@ _REASONS = {
     "WIKI_PLAN_CHANGED": "Wiki 页面生成计划已变更",
     "WIKI_PARTICIPANT_CHANGED": "参与 Wiki 页面生成的文档已变更",
     "WIKI_IDENTITY_CHANGED": "Wiki 主题归属已变更",
+    "WIKI_IDENTITY_AMBIGUOUS": "存在多个同名同类型的历史 Wiki 页面，需要先处理重复主题",
     "WIKI_TAXONOMY_CHANGED": "Wiki 目录已变更，本次分类结果无法沿用",
     "WIKI_TAXONOMY_TARGET_MISMATCH": "Wiki 分类结果与待处理主题不一致",
     "WIKI_MATERIAL_PLAN_MISMATCH": "Wiki 来源素材与页面生成计划不一致",
