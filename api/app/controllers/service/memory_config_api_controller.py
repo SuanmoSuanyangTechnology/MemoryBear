@@ -16,6 +16,7 @@ from app.core.error_codes import BizCode
 from app.core.logging_config import get_business_logger
 from app.core.response_utils import fail, success
 from app.db import get_async_db_context, get_db_context
+from app.integrations.profile.proxy import memory_profile_proxy
 from app.repositories.memory_config_repository import MemoryConfigRepository
 from app.schemas.api_key_schema import ApiKeyAuth
 from app.schemas.memory_api_schema import (
@@ -46,6 +47,10 @@ logger = get_business_logger()
 
 @router.get("/read_config_personality_anchor", response_model=ApiResponse)
 @require_api_key_self_db(scopes=["memory"])
+@memory_profile_proxy(
+    query_fields=("config_id",),
+    preserve_status=True,
+)
 async def read_config_personality_anchor(
     request: Request,
     config_id: uuid.UUID = Query(..., description="记忆配置ID"),
@@ -63,6 +68,10 @@ async def read_config_personality_anchor(
 
 @router.post("/update_config_personality_anchor", response_model=ApiResponse)
 @require_api_key_self_db(scopes=["memory"])
+@memory_profile_proxy(
+    raw_body=True,
+    preserve_status=True,
+)
 async def update_config_personality_anchor(
     request: Request,
     payload: PersonalityAnchorConfigUpdate,
@@ -136,6 +145,9 @@ async def _verify_config_ownership_async(config_id: str, workspace_id: uuid.UUID
 
 @router.get("/read_all_config")
 @require_api_key_self_db(scopes=["memory"])
+@memory_profile_proxy(
+    preserve_status=True,
+)
 async def read_all_config(
         request: Request,
         api_key_auth: ApiKeyAuth = None,
@@ -152,6 +164,7 @@ async def read_all_config(
         current_user = await get_current_user_snapshot_from_api_key_async(auth_db, api_key_auth)
 
         return await memory_config_controller.read_all_config(
+            request=request,
             current_user=current_user,
         )
 
@@ -180,6 +193,10 @@ async def get_ontology_scenes(
 
 @router.get("/read_config_extracted")
 @require_api_key_self_db(scopes=["memory"])
+@memory_profile_proxy(
+    query_fields=("config_id",),
+    preserve_status=True,
+)
 async def read_config_extracted(
         request: Request,
         config_id: str = Query(..., description="config_id"),
@@ -199,6 +216,7 @@ async def read_config_extracted(
         current_user = await get_current_user_snapshot_from_api_key_async(auth_db, api_key_auth)
 
         return await memory_config_controller.read_config_extracted(
+            request=request,
             config_id=config_id,
             current_user=current_user,
         )
@@ -206,6 +224,10 @@ async def read_config_extracted(
 
 @router.get("/read_config_forgetting")
 @require_api_key_self_db(scopes=["memory"])
+@memory_profile_proxy(
+    query_fields=("config_id",),
+    preserve_status=True,
+)
 async def read_config_forgetting(
         request: Request,
         config_id: str = Query(..., description="config_id"),
@@ -225,6 +247,7 @@ async def read_config_forgetting(
         current_user = await get_current_user_snapshot_from_api_key_async(auth_db, api_key_auth)
 
         result = await memory_config_controller.read_forgetting_config(
+            request=request,
             config_id=config_id,
             current_user=current_user,
         )
@@ -233,6 +256,10 @@ async def read_config_forgetting(
 
 @router.get("/read_config_emotion")
 @require_api_key_self_db(scopes=["memory"])
+@memory_profile_proxy(
+    query_fields=("config_id",),
+    preserve_status=True,
+)
 async def read_config_emotion(
         request: Request,
         config_id: str = Query(..., description="config_id"),
@@ -252,6 +279,7 @@ async def read_config_emotion(
         current_user = await get_current_user_snapshot_from_api_key_async(auth_db, api_key_auth)
 
         return jsonable_encoder(await memory_config_controller.get_emotion_config(
+            request=request,
             config_id=config_id,
             current_user=current_user,
         ))
@@ -259,6 +287,10 @@ async def read_config_emotion(
 
 @router.get("/read_config_reflection")
 @require_api_key_self_db(scopes=["memory"])
+@memory_profile_proxy(
+    query_fields=("config_id",),
+    preserve_status=True,
+)
 async def read_config_reflection(
         request: Request,
         config_id: str = Query(..., description="config_id"),
@@ -278,6 +310,7 @@ async def read_config_reflection(
         current_user = await get_current_user_snapshot_from_api_key_async(auth_db, api_key_auth)
 
         return jsonable_encoder(await memory_config_controller.start_reflection_configs(
+            request=request,
             config_id=config_id,
             current_user=current_user,
         ))
@@ -285,6 +318,10 @@ async def read_config_reflection(
 
 @router.post("/create_config")
 @require_api_key_self_db(scopes=["memory"])
+@memory_profile_proxy(
+    raw_body=True,
+    preserve_status=True,
+)
 async def create_memory_config(
         request: Request,
         api_key_auth: ApiKeyAuth = None,
@@ -319,6 +356,7 @@ async def create_memory_config(
     # create_config 有 @check_memory_engine_quota 装饰器，需要同步 db
     with get_db_context() as sync_db:
         result = await memory_config_controller.create_config(
+            request=request,
             payload=mgmt_payload,
             current_user=current_user,
             db=sync_db,
@@ -329,6 +367,10 @@ async def create_memory_config(
 
 @router.put("/update_config")
 @require_api_key_self_db(scopes=["memory"])
+@memory_profile_proxy(
+    raw_body=True,
+    preserve_status=True,
+)
 async def update_memory_config(
         request: Request,
         api_key_auth: ApiKeyAuth = None,
@@ -359,6 +401,7 @@ async def update_memory_config(
         )
 
         return await memory_config_controller.update_config(
+            request=request,
             payload=mgmt_payload,
             current_user=current_user,
         )
@@ -366,6 +409,10 @@ async def update_memory_config(
 
 @router.put("/update_config_extracted")
 @require_api_key_self_db(scopes=["memory"])
+@memory_profile_proxy(
+    raw_body=True,
+    preserve_status=True,
+)
 async def update_memory_config_extracted(
         request: Request,
         api_key_auth: ApiKeyAuth = None,
@@ -393,6 +440,7 @@ async def update_memory_config_extracted(
         mgmt_payload = ConfigUpdateExtracted(**update_fields)
 
         return await memory_config_controller.update_config_extracted(
+            request=request,
             payload=mgmt_payload,
             current_user=current_user,
         )
@@ -400,6 +448,10 @@ async def update_memory_config_extracted(
 
 @router.put("/update_config_forgetting")
 @require_api_key_self_db(scopes=["memory"])
+@memory_profile_proxy(
+    raw_body=True,
+    preserve_status=True,
+)
 async def update_memory_config_forgetting(
         request: Request,
         api_key_auth: ApiKeyAuth = None,
@@ -428,6 +480,7 @@ async def update_memory_config_forgetting(
 
         # 将返回数据中UUID序列化处理
         result = await memory_config_controller.update_forgetting_config(
+            request=request,
             payload=mgmt_payload,
             current_user=current_user,
         )
@@ -436,6 +489,10 @@ async def update_memory_config_forgetting(
 
 @router.put("/update_config_emotion")
 @require_api_key_self_db(scopes=["memory"])
+@memory_profile_proxy(
+    raw_body=True,
+    preserve_status=True,
+)
 async def update_config_emotion(
         request: Request,
         api_key_auth: ApiKeyAuth = None,
@@ -461,6 +518,7 @@ async def update_config_emotion(
         update_fields = payload.model_dump(exclude_unset=True)
         mgmt_payload = EmotionConfigUpdate(**update_fields)
         return jsonable_encoder(await memory_config_controller.update_emotion_config(
+            request=request,
             config=mgmt_payload,
             current_user=current_user,
         ))
@@ -468,6 +526,10 @@ async def update_config_emotion(
 
 @router.put("/update_config_reflection")
 @require_api_key_self_db(scopes=["memory"])
+@memory_profile_proxy(
+    raw_body=True,
+    preserve_status=True,
+)
 async def update_config_reflection(
         request: Request,
         api_key_auth: ApiKeyAuth = None,
@@ -494,13 +556,18 @@ async def update_config_reflection(
         mgmt_payload = Memory_Reflection(**update_fields)
 
         return jsonable_encoder(await memory_config_controller.save_reflection_config(
-            request=mgmt_payload,
+            request=request,
+            payload=mgmt_payload,
             current_user=current_user,
         ))
 
 
 @router.delete("/delete_config")
 @require_api_key_self_db(scopes=["memory"])
+@memory_profile_proxy(
+    query_fields=('config_id',),
+    preserve_status=True,
+)
 async def delete_memory_config(
         config_id: str,
         request: Request,
@@ -523,6 +590,7 @@ async def delete_memory_config(
         current_user = await get_current_user_snapshot_from_api_key_async(auth_db, api_key_auth)
 
         return await memory_config_controller.delete_config(
+            request=request,
             config_id=config_id,
             current_user=current_user,
         )
@@ -530,6 +598,10 @@ async def delete_memory_config(
 
 @router.get("/read_config_scene")
 @require_api_key_self_db(scopes=["memory"])
+@memory_profile_proxy(
+    query_fields=("config_id",),
+    preserve_status=True,
+)
 async def read_config_scene(
     request: Request,
     config_id: str = Query(..., description="config_id"),
@@ -556,13 +628,17 @@ async def read_config_scene(
         )
     return jsonable_encoder(
         await memory_config_controller.read_config_scene(
-            config_id=config_id, current_user=current_user
+            request=request, config_id=config_id, current_user=current_user
         )
     )
 
 
 @router.put("/update_config_scene")
 @require_api_key_self_db(scopes=["memory"])
+@memory_profile_proxy(
+    raw_body=True,
+    preserve_status=True,
+)
 async def update_config_scene(
     request: Request,
     api_key_auth: ApiKeyAuth = None,
@@ -593,13 +669,17 @@ async def update_config_scene(
         )
     return jsonable_encoder(
         await memory_config_controller.update_config_scene(
-            payload=payload, current_user=current_user
+            request=request, payload=payload, current_user=current_user
         )
     )
 
 
 @router.get("/read_config_scene_community")
 @require_api_key_self_db(scopes=["memory"])
+@memory_profile_proxy(
+    query_fields=("config_id",),
+    preserve_status=True,
+)
 async def read_config_scene_community(
     request: Request,
     config_id: str = Query(..., description="config_id"),
@@ -617,6 +697,7 @@ async def read_config_scene_community(
         )
     return jsonable_encoder(
         await memory_config_controller.read_config_scene_community(
+            request=request,
             config_id=config_id,
             current_user=current_user,
         )
@@ -625,6 +706,10 @@ async def read_config_scene_community(
 
 @router.put("/update_config_scene_community")
 @require_api_key_self_db(scopes=["memory"])
+@memory_profile_proxy(
+    raw_body=True,
+    preserve_status=True,
+)
 async def update_config_scene_community(
     request: Request,
     api_key_auth: ApiKeyAuth = None,
@@ -645,6 +730,7 @@ async def update_config_scene_community(
             auth_db, api_key_auth
         )
     return await memory_config_controller.update_config_scene_community(
+        request=request,
         payload=body,
         current_user=current_user,
     )
@@ -652,6 +738,10 @@ async def update_config_scene_community(
 
 @router.get("/read_config_preference")
 @require_api_key_self_db(scopes=["memory"])
+@memory_profile_proxy(
+    query_fields=('config_id',),
+    preserve_status=True,
+)
 async def read_config_preference(
     request: Request,
     config_id: str = Query(..., description="config_id"),
@@ -678,6 +768,10 @@ async def read_config_preference(
 
 @router.put("/update_config_preference")
 @require_api_key_self_db(scopes=["memory"])
+@memory_profile_proxy(
+    raw_body=True,
+    preserve_status=True,
+)
 async def update_config_preference(
     request: Request,
     api_key_auth: ApiKeyAuth = None,

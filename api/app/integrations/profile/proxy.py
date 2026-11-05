@@ -7,7 +7,7 @@ from collections.abc import Mapping
 from functools import wraps
 from inspect import signature
 from typing import Any, ParamSpec, TypeVar
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from fastapi import Request, Response
 
@@ -64,6 +64,38 @@ def _caller_actor_id(current_user: Any, source: MemoryProfileAuthSource) -> str:
     return str(current_user.id)
 
 
+def _resolve_identity(
+    current_user: Any, source: MemoryProfileAuthSource
+) -> tuple[Any, Any, str]:
+    """Resolve ``(workspace_id, tenant_id, actor_id)`` for either face.
+
+    Handlers that run ``@require_api_key_self_db`` do not declare a
+    ``current_user`` parameter, so the principal comes from the API-key context
+    that decorator established. That context also names the actor; the two other
+    values are still required and are validated by the caller.
+    """
+
+    if current_user is not None:
+        return (
+            getattr(current_user, "current_workspace_id", None),
+            getattr(current_user, "tenant_id", None),
+            _caller_actor_id(current_user, source),
+        )
+    from app.core.api_key_auth import get_current_api_key_auth
+
+    try:
+        auth = get_current_api_key_auth()
+    except Exception as exc:  # BusinessException when no key authenticated
+        raise MemoryProfileConfigurationError(
+            "memory_profile_proxy requires current_user or an API-key context"
+        ) from exc
+    if source == MemoryProfileAuthSource.APIKEY:
+        actor_id = str(auth.api_key_id)
+    else:
+        actor_id = str(auth.created_by)
+    return auth.workspace_id, auth.tenant_id, actor_id
+
+
 async def forward_memory_profile_request(
     *,
     method: str,
@@ -108,11 +140,14 @@ def memory_profile_proxy(
     query_fields: tuple[str, ...] = (),
     body_arg: str | None = None,
     body_fields: tuple[str, ...] = (),
+    raw_body: bool = False,
     language_field: str | None = None,
     upper_bounds: dict[str, int] | None = None,
     source: MemoryProfileAuthSource | None = None,
     timeout_seconds: float | None = None,
     target_path: str | None = None,
+    principal_arg: str = "current_user",
+    preserve_status: bool = False,
 ):
     """Forward one route to memory-profile when its integration is enabled.
     The wrapped function remains the complete legacy implementation. The API-key
@@ -135,6 +170,15 @@ def memory_profile_proxy(
     differs from the one internal route that serves the capability (the admin hot-tags
     alias under ``/memory-storage``). Only the forwarded path moves; the caller's own
     path still decides the face (``x-source``) and the acting id.
+
+    ``raw_body`` forwards the request bytes instead of rebuilding a payload, so a
+    body parsed inside the handler keeps its ``exclude_unset`` semantics.
+    ``preserve_status`` returns the upstream HTTP status instead of forcing 200,
+    for endpoints whose legacy contract distinguishes 4xx/5xx.
+
+    ``principal_arg`` names the handler argument carrying the caller when it is
+    not ``current_user``; when neither is present the API-key context established
+    by ``@require_api_key_self_db`` supplies the identity.
     """
 
     bounds = dict(upper_bounds or {})
@@ -161,26 +205,48 @@ def memory_profile_proxy(
                     "memory_profile_proxy requires the handler to declare "
                     "request: Request"
                 )
-            current_user = arguments.get("current_user")
-            workspace_id = getattr(current_user, "current_workspace_id", None)
+            current_user = arguments.get(principal_arg)
+            if current_user is None:
+                current_user = arguments.get("current_user")
+            workspace_id, tenant_id, actor_id = _resolve_identity(
+                current_user,
+                _caller_source(request.scope["path"]) if source is None else source,
+            )
             if workspace_id is None:
                 return fail(
                     BizCode.INVALID_PARAMETER,
                     "请先切换到一个工作空间",
                     "current_workspace_id is None",
                 )
+            if tenant_id is None:
+                return fail(
+                    BizCode.INVALID_PARAMETER,
+                    "缺少租户上下文",
+                    "tenant_id is None",
+                )
 
             # The query is rebuilt from the declared fields rather than forwarded
             # raw: API-key callers reach the handler through merge routing, so the
             # caller's own end_user_id may still name a merged-away end user.
-            query = {field: arguments.get(field) for field in query_fields}
+            # Non-primitive values (a ``UUID`` declared by the handler) are
+            # stringified: httpx only encodes str/int/float/bool/None.
+            query: dict[str, Any] = {}
+            for field in query_fields:
+                value = arguments.get(field)
+                query[field] = str(value) if isinstance(value, UUID) else value
             for field, maximum in bounds.items():
                 value = query.get(field)
                 if value is not None and value > maximum:
                     query[field] = maximum
 
             payload = None
-            if body_fields:
+            raw_payload: bytes | None = None
+            if raw_body:
+                # Byte-for-byte passthrough: the handler on the other side parses
+                # and validates the body itself, so unset fields must not become
+                # explicit nulls here.
+                raw_payload = await request.body()
+            elif body_fields:
                 if body_arg:
                     source_model = arguments.get(body_arg)
                     if source_model is None:
@@ -219,13 +285,15 @@ def memory_profile_proxy(
                     method=request.method,
                     path=path,
                     workspace_id=str(workspace_id),
-                    tenant_id=str(current_user.tenant_id),
-                    actor_id=_caller_actor_id(current_user, caller_source),
+                    tenant_id=str(tenant_id),
+                    actor_id=actor_id,
                     source=caller_source,
                     trace_id=trace_id,
                     language_type=language_type,
                     query=query,
                     payload=payload,
+                    body=raw_payload,
+                    raw_body=raw_body,
                     raw=True,
                     timeout=timeout_seconds,
                 )
@@ -235,7 +303,7 @@ def memory_profile_proxy(
                     return Response(
                         content=result.body,
                         media_type=result.media_type,
-                        status_code=200,
+                        status_code=result.status_code if preserve_status else 200,
                     )
                 return result
             except MemoryProfileClientError as exc:
