@@ -26,6 +26,15 @@ type_mapping = {
             "Condition": "条件实体节点",
             "Numeric": "数值实体节点"
         }
+EPISODIC_TYPE_MAPPING = {
+    "conversation": "对话",
+    "project_work": "项目/工作",
+    "learning": "学习",
+    "decision": "决策",
+    "important_event": "重要事件",
+}
+
+
 class EmotionSubject(ABC):
     SUBJECT_MAPPING={
         "self":"自己",
