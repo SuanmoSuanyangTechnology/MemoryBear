@@ -24,6 +24,7 @@ from ...rag.wiki.config import (
     generation_config_hash,
     read_wiki_config,
 )
+from ...rag.wiki.identity import TOPIC_IDENTITY_VERSION
 from ...utils.datetime_utils import utcnow_naive
 from .common import (
     append_log,
@@ -145,7 +146,9 @@ def start_round(session, document, state, scope, *, source=False, reuse=False):
         state.config_hash = None
         state.input_hash = None
     else:
-        state.map_progress = {}
+        state.map_progress = {
+            "identity_version": (state.map_progress or {}).get("identity_version"),
+        }
     # Keep outstanding old cleanup targets even before the new candidate set is fixed.
     by_page = {task.page_id: task for task in old_tasks}
     for page_id in sorted(old_ids, key=str):
@@ -253,6 +256,7 @@ def admit(
             raise WikiError("WIKI_SOURCE_NOT_READY", retryable=False)
         reuse = (
             state.mapped_version == state.requested_version
+            and (state.map_progress or {}).get("identity_version") == TOPIC_IDENTITY_VERSION
             and state.config_hash
             == generation_config_hash(knowledge.llm_id, knowledge.parser_config)
         )
