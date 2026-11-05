@@ -225,7 +225,7 @@ class MarketSync(Base):
         comment="本次投稿的版本",
     )
     bundle_content_hash = Column(
-        String(64), nullable=True,
+        String(128), nullable=True,
         comment="当初投出去那份包的哈希；重试时据此复用同一份包，不重导",
     )
     status = Column(
