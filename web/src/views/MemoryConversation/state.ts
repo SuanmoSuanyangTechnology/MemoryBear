@@ -39,7 +39,7 @@ export const markIncompleteStagesFailed = (
   stages: readonly MemoryStageKey[],
 ): LogItem[] => stages.map((stage, index) => {
   const current = logs[index]
-  if (current?.status === 'completed') return current
+  if (current?.status === 'completed' || current?.status === 'skipped') return current
 
   return {
     ...current,

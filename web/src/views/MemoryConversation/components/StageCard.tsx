@@ -32,11 +32,13 @@ const StageCard: FC<StageCardProps> = ({
   onToggle,
 }) => {
   const { t } = useTranslation()
-  const canExpand = stageKey !== 'hybridRetrieval' && log?.status !== 'failed'
+  const canExpand = log?.status !== 'skipped' && stageKey !== 'hybridRetrieval' && (log?.status !== 'failed' || stageKey.startsWith('community'))
   const statusKey = !log
     ? loading ? 'running' : 'waiting'
     : log.status === 'failed'
       ? 'failed'
+      : log.status === 'skipped'
+        ? 'skipped'
       : log.status === 'completed'
         ? 'completed'
         : 'running'
@@ -50,7 +52,7 @@ const StageCard: FC<StageCardProps> = ({
         align="center"
         justify="center"
         className={clsx('rb:size-5 rb:rounded-full rb:text-[12px] rb:mt-3!', {
-          'rb:bg-gray-100 rb:text-gray-600': statusKey === 'waiting',
+          'rb:bg-gray-100 rb:text-gray-600': statusKey === 'waiting' || statusKey === 'skipped',
           'rb:bg-primary-600 rb:text-white': statusKey === 'running',
           'rb:bg-[rgba(54,159,33)] rb:text-white': statusKey === 'completed',
           'rb:bg-[rgba(255,138,76)] rb:text-white': statusKey === 'failed',
@@ -79,7 +81,7 @@ const StageCard: FC<StageCardProps> = ({
                 ? 'success'
                 : statusKey === 'failed'
                   ? 'error'
-                  : statusKey === 'waiting'
+                  : statusKey === 'waiting' || statusKey === 'skipped'
                     ? 'default'
                     : 'processing'
             }
