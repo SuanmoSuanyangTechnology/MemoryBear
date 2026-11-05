@@ -11,7 +11,7 @@ from typing import Any
 from uuid import UUID
 
 import sqlalchemy as sa
-from sqlalchemy import ColumnElement, Select, any_, bindparam, func, select, text
+from sqlalchemy import ColumnElement, Select, any_, bindparam, func, select
 from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 
@@ -93,7 +93,7 @@ def _profile_statement(end_user_ids: list[str]):
 
 
 def _scene_ids(rows) -> list[UUID]:
-    ids = set()
+    ids = []
     for row in rows:
         metadata = row.meta_data if isinstance(row.meta_data, dict) else {}
         domains = metadata.get("domain_specific_info")
@@ -101,20 +101,29 @@ def _scene_ids(rows) -> list[UUID]:
             continue
         for key in domains:
             try:
-                ids.add(UUID(key))
+                ids.append(UUID(key))
             except (ValueError, TypeError, AttributeError):
                 continue
-    return list(ids)
+    return list(set(ids))
 
 
-_SCENE_QUERY = text("""
-    SELECT scene_type_id, scene_name, tenant_id
-    FROM ontology_scene_type
-    WHERE scene_type_id IN :scene_ids
-      AND tenant_id IN :tenant_ids
-""").bindparams(
-    bindparam("scene_ids", expanding=True, type_=PGUUID(as_uuid=True)),
-    bindparam("tenant_ids", expanding=True, type_=PGUUID(as_uuid=True)),
+_SCENE_TABLE = sa.table(
+    "ontology_scene_type",
+    sa.column("scene_type_id", PGUUID(as_uuid=True)),
+    sa.column("scene_name", sa.String),
+    sa.column("tenant_id", PGUUID(as_uuid=True)),
+)
+_SCENE_QUERY = select(
+    _SCENE_TABLE.c.scene_type_id,
+    _SCENE_TABLE.c.scene_name,
+    _SCENE_TABLE.c.tenant_id,
+).where(
+    _SCENE_TABLE.c.scene_type_id.in_(
+        bindparam("scene_ids", expanding=True, type_=PGUUID(as_uuid=True))
+    ),
+    _SCENE_TABLE.c.tenant_id.in_(
+        bindparam("tenant_ids", expanding=True, type_=PGUUID(as_uuid=True))
+    ),
 )
 
 
