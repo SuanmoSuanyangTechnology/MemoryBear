@@ -2,7 +2,8 @@
 
 from elasticsearch import NotFoundError
 
-from app.core.memory.storage.enums import MemoryNodeType
+from app.core.config import settings
+from app.core.memory.storage.enums import BackendType, MemoryNodeType
 from app.core.memory.storage.provider.elasticsearch.index import get_index_name
 from app.core.memory.storage.provider.elasticsearch.client import ElasticClient
 from app.core.memory.storage.provider.neo4j.client import Neo4jClient
@@ -93,13 +94,14 @@ return Long.MIN_VALUE;
 
 
 class SceneCommunityStorage:
-    def __init__(self, elastic_client: ElasticClient, neo4j_client: Neo4jClient):
+    def __init__(self, elastic_client: ElasticClient | None, neo4j_client: Neo4jClient):
         self._elastic_client = elastic_client
         self._neo4j_client = neo4j_client
 
     async def count(self, user_ids):
         return await count_scene_communities(
-            self._elastic_client._require_client(), self._neo4j_client, user_ids,
+            self._elastic_client._require_client() if self._elastic_client is not None else None,
+            self._neo4j_client, user_ids,
         )
 
     @staticmethod
@@ -113,6 +115,8 @@ class SceneCommunityStorage:
                          'must_not': [{'exists': {'field': 'delete_at'}}]}}
 
     async def overview(self, uid, category, keyword, sort, page, pagesize):
+        if BackendType(settings.MEMORY_READ_BACKEND) == BackendType.NEO4J:
+            return await self._neo_overview(uid, category, keyword, sort, page, pagesize)
         try:
             result = await self._es_overview(self._elastic_client._require_client(), uid, category, keyword, sort, page, pagesize)
         except NotFoundError:
@@ -200,6 +204,8 @@ class SceneCommunityStorage:
         )
 
     async def details(self, uid, community_id, page=1, pagesize=20):
+        if BackendType(settings.MEMORY_READ_BACKEND) == BackendType.NEO4J:
+            return await self._neo_details(uid, community_id, page, pagesize)
         client = self._elastic_client._require_client()
         try:
             query = self._user_query(uid)
@@ -259,6 +265,9 @@ class SceneCommunityStorage:
 async def count_scene_communities(client, neo4j, user_ids):
     if not user_ids:
         return 0
+    if BackendType(settings.MEMORY_READ_BACKEND) == BackendType.NEO4J:
+        rows = await neo4j.execute_query(COMMUNITY_COUNT_QUERY, ids=user_ids)
+        return rows[0]['total'] if rows else 0
     counts = {}
     after = None
     while True:

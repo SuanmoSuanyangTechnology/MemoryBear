@@ -2,6 +2,8 @@
 import asyncio
 import logging
 from contextlib import asynccontextmanager
+from app.core.config import settings
+from app.core.memory.storage.enums import BackendType
 from app.core.utils.datetime_utils import to_timestamp_ms, convert_neo4j_datetime_to_python
 from app.core.memory.storage.custom.scene_community_storage import SceneCommunityStorage
 from app.core.memory.storage.provider.elasticsearch.client import ElasticClient
@@ -20,9 +22,11 @@ class MemoryEpisodicService:
             return
         elastic_client = None
         neo4j_client = None
+        read_backend = BackendType(settings.MEMORY_READ_BACKEND)
         try:
-            elastic_client = ElasticClient()
-            elastic_client.client = await elastic_client.connect()
+            if read_backend == BackendType.ELASTIC:
+                elastic_client = ElasticClient()
+                elastic_client.client = await elastic_client.connect()
             neo4j_client = Neo4jClient()
             neo4j_client.client = await neo4j_client.connect()
             yield SceneCommunityStorage(elastic_client, neo4j_client)
