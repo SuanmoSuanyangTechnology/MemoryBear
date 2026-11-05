@@ -243,6 +243,26 @@ HTTP_MAPPING: dict[BizCode, int] = {
     BizCode.RATE_LIMITED: 429,
 }
 
+# Reverse direction for raw HTTP exceptions raised by the framework or route
+# bodies. ``HTTP_MAPPING`` cannot be inverted: it is many-to-one and keeps
+# wire-frozen legacy values (for example NOT_FOUND -> 400).
+HTTP_STATUS_TO_BIZ_CODE: dict[int, BizCode] = {
+    400: BizCode.BAD_REQUEST,
+    401: BizCode.UNAUTHORIZED,
+    402: BizCode.QUOTA_EXCEEDED,
+    403: BizCode.FORBIDDEN,
+    404: BizCode.NOT_FOUND,
+    405: BizCode.BAD_REQUEST,
+    409: BizCode.STATE_CONFLICT,
+    413: BizCode.BAD_REQUEST,
+    422: BizCode.VALIDATION_FAILED,
+    429: BizCode.RATE_LIMIT_EXCEEDED,
+    500: BizCode.INTERNAL_ERROR,
+    502: BizCode.UPSTREAM_UNKNOWN,
+    503: BizCode.SERVICE_UNAVAILABLE,
+    504: BizCode.SERVICE_UNAVAILABLE,
+}
+
 ERROR_CODE_TO_BIZ_CODE: dict[str, BizCode] = {
     "QUOTA_EXCEEDED": BizCode.QUOTA_EXCEEDED,
     "RATE_LIMIT_EXCEEDED": BizCode.RATE_LIMIT_EXCEEDED,
@@ -330,6 +350,7 @@ def code_name(value: BizCode | int | str | None) -> str:
 __all__ = [
     "ERROR_CODE_TO_BIZ_CODE",
     "HTTP_MAPPING",
+    "HTTP_STATUS_TO_BIZ_CODE",
     "BizCode",
     "as_biz_code",
     "code_name",

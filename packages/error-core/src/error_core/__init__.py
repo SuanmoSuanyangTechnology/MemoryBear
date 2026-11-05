@@ -3,6 +3,7 @@
 from .codes import (
     ERROR_CODE_TO_BIZ_CODE,
     HTTP_MAPPING,
+    HTTP_STATUS_TO_BIZ_CODE,
     BizCode,
     as_biz_code,
     code_name,
@@ -23,6 +24,7 @@ from .supplier import (
 __all__ = [
     "ERROR_CODE_TO_BIZ_CODE",
     "HTTP_MAPPING",
+    "HTTP_STATUS_TO_BIZ_CODE",
     "AggregatedFailure",
     "BizCode",
     "ChannelFailure",

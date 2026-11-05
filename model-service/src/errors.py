@@ -14,8 +14,10 @@ from typing import Any
 from error_core.codes import (
     ERROR_CODE_TO_BIZ_CODE,
     HTTP_MAPPING,
+    HTTP_STATUS_TO_BIZ_CODE,
     BizCode,
     as_biz_code,
+    code_name,
     http_status_for,
 )
 from fastapi import HTTPException
@@ -142,10 +144,12 @@ __all__ = [
     "BusinessException",
     "ERROR_CODE_TO_BIZ_CODE",
     "HTTP_MAPPING",
+    "HTTP_STATUS_TO_BIZ_CODE",
     "I18nException",
     "InternalServerError",
     "QuotaExceededError",
     "as_biz_code",
+    "code_name",
     "filter_business_message",
     "http_status_for",
 ]

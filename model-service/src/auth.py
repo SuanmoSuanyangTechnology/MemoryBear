@@ -34,7 +34,7 @@ from .api.dependencies import (
     principal_from_headers,
 )
 from .api.schemas.common import fail
-from .errors import BizCode
+from .errors import BizCode, HTTP_STATUS_TO_BIZ_CODE, code_name
 from .i18n import resolve_locale, translate
 from .request_logging import log_request_failure, safe_failure_detail
 from .trace import TRACE_ID_HEADER
@@ -116,17 +116,22 @@ def _auth_error(
         accepted=request.headers.get("Accept-Language"),
     )
     message = translate("errors.common.unauthorized", language)
+    code = HTTP_STATUS_TO_BIZ_CODE.get(status_code)
+    if code is None:
+        code = (
+            BizCode.INTERNAL_ERROR if status_code >= 500 else BizCode.BAD_REQUEST
+        )
     log_request_failure(
         request,
         status_code=status_code,
-        response_code=status_code,
-        error_code="AUTHENTICATION_REJECTED",
+        response_code=code.value,
+        error_code=code_name(code),
         message=safe_failure_detail(detail, "Authentication rejected"),
         exception=exception,
     )
     return JSONResponse(
         status_code=status_code,
-        content=fail(code=status_code, msg=message, error=detail),
+        content=fail(code=code.value, msg=message, error=detail),
         headers={TRACE_ID_HEADER: request.state.trace_id},
     )
 
