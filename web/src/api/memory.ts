@@ -102,7 +102,7 @@ export const getNodeStatistics = (end_user_id: string) => {
 }
 // Get user alias and info
 export const getEndUserInfo = (end_user_id: string) => {
-  return request.get(`/end_user/info`, { end_user_id })
+  return request.get<EndUser>(`/end_user/info`, { end_user_id })
 }
 // Update user alias and info
 export const updatedEndUserInfo = (values: EndUser) => {
