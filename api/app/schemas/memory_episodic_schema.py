@@ -48,16 +48,16 @@ class EpisodicMemoryOverviewRequest(BaseModel):
     end_user_id: str = Field(..., description="终端用户 ID，UUID 字符串")
     category_l1: str | None = Field(None, min_length=1, description="事项类型代码，不传表示全部类型")
     keyword: str | None = Field(None, description="搜索社区名称、摘要及所属情景正文，最多 200 字符")
-    sort: Literal['scene_count_desc', 'created_at_desc', 'updated_at_desc'] = Field('scene_count_desc', description='排序：scene_count_desc 情景数优先、created_at_desc 创建时间优先、updated_at_desc 更新时间优先')
+    sort: Literal["scene_count_desc", "created_at_desc", "updated_at_desc"] = Field("scene_count_desc", description="排序：scene_count_desc 情景数优先、created_at_desc 创建时间优先、updated_at_desc 更新时间优先")
     page: int = Field(1, ge=1, description="页码，从 1 开始")
     pagesize: int = Field(20, ge=1, le=100, description="每页条数，默认 20，最大 100")
 
-    @field_validator('keyword')
+    @field_validator("keyword")
     @classmethod
     def normalize_keyword(cls, value):
         value = value.strip() if value else None
         if value and len(value) > 200:
-            raise ValueError('关键词最多 200 字符')
+            raise ValueError("关键词最多 200 字符")
         return value
 
 
@@ -70,9 +70,9 @@ class EpisodicMemoryDetailsRequest(BaseModel):
     page: int = Field(1, ge=1, description="情景页码，从 1 开始；下拉加载时递增")
     pagesize: int = Field(20, ge=1, le=100, description="每页情景数量，默认 20，最大 100")
 
-    @field_validator('scene_community_id')
+    @field_validator("scene_community_id")
     @classmethod
     def validate_community_id(cls, value):
-        if value != value.strip() or value.startswith('virtual:'):
-            raise ValueError('无效社区 ID')
+        if value != value.strip() or value.startswith("virtual:"):
+            raise ValueError("无效社区 ID")
         return value

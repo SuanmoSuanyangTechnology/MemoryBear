@@ -16,33 +16,33 @@ from app.schemas.memory_episodic_schema import EpisodicMemoryOverviewRequest, Ep
 from app.services.memory_episodic_service import memory_episodic_service
 
 api_logger = get_api_logger()
-router = APIRouter(prefix='/memory/episodic-memory', tags=['Episodic Memory'])
+router = APIRouter(prefix="/memory/episodic-memory", tags=["Episodic Memory"])
 
 
-async def _query(request, user, db, method, language='zh'):
+async def _query(request, user, db, method, language="zh"):
     if user.current_workspace_id is None:
-        return fail(BizCode.INVALID_PARAMETER, '请先切换到一个工作空间')
+        return fail(BizCode.INVALID_PARAMETER, "请先切换到一个工作空间")
     try:
         user_id = UUID(request.end_user_id)
     except ValueError:
-        return fail(BizCode.INVALID_PARAMETER, '无效终端用户 ID')
+        return fail(BizCode.INVALID_PARAMETER, "无效终端用户 ID")
     try:
         end_user = await EndUserRepository(db).get_by_id_async(user_id)
         if end_user is None or end_user.workspace_id != user.current_workspace_id:
-            return fail(BizCode.USER_NOT_FOUND, '终端用户不存在或不可访问')
+            return fail(BizCode.USER_NOT_FOUND, "终端用户不存在或不可访问")
         result = await method(request, str(end_user.id), language)
-        return success(data=result, msg='查询成功')
+        return success(data=result, msg="查询成功")
     except SceneCommunityNotFoundError as exc:
         return fail(BizCode.INVALID_PARAMETER, str(exc))
     except Exception:
         api_logger.exception(
-            'episodic community read failed: end_user_id=%s scene_community_id=%s',
-            request.end_user_id, getattr(request, 'scene_community_id', None),
+            "episodic community read failed: end_user_id=%s scene_community_id=%s",
+            request.end_user_id, getattr(request, "scene_community_id", None),
         )
-        return fail(BizCode.INTERNAL_ERROR, '情景记忆查询失败，请重试')
+        return fail(BizCode.INTERNAL_ERROR, "情景记忆查询失败，请重试")
 
 
-@router.post('/overview', response_model=ApiResponse)
+@router.post("/overview", response_model=ApiResponse)
 async def get_episodic_memory_overview_api(
     request: EpisodicMemoryOverviewRequest,
     current_user: User = Depends(get_current_user),
@@ -51,10 +51,10 @@ async def get_episodic_memory_overview_api(
     return await _query(request, current_user, db, memory_episodic_service.get_episodic_memory_overview)
 
 
-@router.post('/details', response_model=ApiResponse)
+@router.post("/details", response_model=ApiResponse)
 async def get_episodic_memory_details_api(
     request: EpisodicMemoryDetailsRequest,
-    language_type: str = Header(default=None, alias='X-Language-Type'),
+    language_type: str = Header(default=None, alias="X-Language-Type"),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_db),
 ) -> dict:

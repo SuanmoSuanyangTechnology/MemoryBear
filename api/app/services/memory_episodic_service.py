@@ -47,38 +47,38 @@ class MemoryEpisodicService:
             return await storage.count([end_user_id])
 
     def _community(self, row):
-        category = row.get('category_l1')
+        category = row.get("category_l1")
         if not isinstance(category, str) or not category.strip():
-            raise RuntimeError('SceneCommunity.category_l1 is missing')
-        result = dict(id=row['id'], topic_name=row.get('topic_name'),
-                    topic_scope=row.get('topic_scope'), category_l1=category,
-                    scene_count=row['scene_count'])
-        for field in ('created_at', 'updated_at'):
+            raise RuntimeError("SceneCommunity.category_l1 is missing")
+        result = dict(id=row["id"], topic_name=row.get("topic_name"),
+                    topic_scope=row.get("topic_scope"), category_l1=category,
+                    scene_count=row["scene_count"])
+        for field in ("created_at", "updated_at"):
             value = row.get(field)
             result[field] = (value if isinstance(value, int) else
                              to_timestamp_ms(convert_neo4j_datetime_to_python(value)))
         return result
 
-    async def get_episodic_memory_overview(self, request, end_user_id, language='zh'):
+    async def get_episodic_memory_overview(self, request, end_user_id, language="zh"):
         async with asyncio.timeout(5):
             async with self._storage() as storage:
                 result = await storage.overview(end_user_id, request.category_l1,
-                    request.keyword or '', request.sort, request.page, request.pagesize)
-            result['items'] = [self._community(row) for row in result['items']]
+                    request.keyword or "", request.sort, request.page, request.pagesize)
+            result["items"] = [self._community(row) for row in result["items"]]
             return result
 
-    async def get_episodic_memory_details(self, request, end_user_id, language='zh'):
+    async def get_episodic_memory_details(self, request, end_user_id, language="zh"):
         async with asyncio.timeout(5):
             async with self._storage() as storage:
                 row = await storage.details(
                     end_user_id, request.scene_community_id, request.page, request.pagesize,
                 )
             result = self._community(row)
-            result['summary'] = row.get('summary') or ''
-            result['page'] = row['page']
-            result['items'] = [dict(id=scene['id'], topic_scope=scene.get('topic_scope'),
-                                     content=scene.get('content') or '')
-                                for scene in row['items']]
+            result["summary"] = row.get("summary") or ""
+            result["page"] = row["page"]
+            result["items"] = [dict(id=scene["id"], topic_scope=scene.get("topic_scope"),
+                                     content=scene.get("content") or "")
+                                for scene in row["items"]]
             return result
 
 
