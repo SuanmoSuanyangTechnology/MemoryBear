@@ -10,7 +10,6 @@ service methods that bridge to MCP discovery or tool execution run through
 from __future__ import annotations
 
 import asyncio
-import uuid
 from typing import Annotated
 
 import anyio.from_thread
@@ -26,18 +25,11 @@ from ...schemas.tool_schema import (
     ToolActiveUpdate,
     ToolCreateRequest,
     ToolExecuteRequest,
+    ToolMethodsBatchRequest,
     ToolUpdateRequest,
 )
 from ...services.tool_service import ToolService
-from ...services.external_status_service import apply_external_status
-from ..dependencies import (
-    Principal,
-    SyncRedis,
-    get_principal,
-    get_runtime,
-    get_sync_db,
-    get_sync_redis,
-)
+from ..dependencies import Principal, get_principal, get_runtime, get_sync_db
 from ..schemas.common import success
 from ..schemas.response_schema import ApiResponse
 
@@ -45,7 +37,6 @@ router = APIRouter(prefix="/tools", tags=["Tool System"])
 
 DbSession = Annotated[Session, Depends(get_sync_db)]
 Caller = Annotated[Principal, Depends(get_principal)]
-CacheClient = Annotated[SyncRedis, Depends(get_sync_redis)]
 RuntimeDep = Annotated[ProcessRuntime, Depends(get_runtime)]
 
 
@@ -63,14 +54,11 @@ def get_tool_statistics(db: DbSession, principal: Caller):
 def list_tools(
         db: DbSession,
         principal: Caller,
-        cache: CacheClient,
         runtime: RuntimeDep,
         name: str | None = Query(None),
         tool_type: str | None = Query(None),
         status: str | None = Query(None),
-        include_external_status: bool = Query(
-            False, description="是否批量回填 external.status（市场来源的工具；30 秒缓存，失败降级 unknown）"
-        ),
+        include_external_status: bool = Query(False),
 ):
     """List tools"""
     try:
@@ -85,15 +73,30 @@ def list_tools(
             tool_type=ToolType(tool_type) if tool_type else None,
             status=ToolStatus(status) if status else None
         )
-        if include_external_status:
-            apply_external_status(
-                tools,
-                resource_type="tool",
-                tenant_id=principal.tenant_id,
-                market=runtime.market,
-                cache=cache,
-            )
+        tools = asyncio.run(service.enrich_tool_provenance(
+            tools,
+            principal.tenant_id,
+            runtime.market_gateway,
+            include_external_status,
+        ))
         return success(data=tools, msg="获取工具列表成功")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@router.post("/methods/batch", summary="批量获取工具方法", response_model=ApiResponse)
+def get_tool_methods_batch(request: ToolMethodsBatchRequest, db: DbSession, principal: Caller):
+    """Batch method lookup for the app tool selector."""
+    try:
+        items, missing = asyncio.run(
+            ToolService(db).get_tool_methods_batch(
+                request.tool_ids, principal.tenant_id
+            )
+        )
+        return success(
+            data={"items": items, "missing_tool_ids": missing},
+            msg="获取工具方法成功",
+        )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e)) from e
 
@@ -117,24 +120,23 @@ def get_tool(
         tool_id: str,
         db: DbSession,
         principal: Caller,
-        cache: CacheClient,
         runtime: RuntimeDep,
-        include_external_status: bool = Query(
-            False, description="是否回填 external.status（仅市场来源的工具有意义）"
-        ),
+        include_external_status: bool = Query(False),
 ):
     """Get tool details"""
-    tool = ToolService(db).get_tool_detail(tool_id, principal.tenant_id)
+    service = ToolService(db)
+    try:
+        tool = service.get_tool_detail(tool_id, principal.tenant_id)
+    except (ValueError, TypeError):
+        tool = None
     if not tool:
-        raise HTTPException(status_code=404, detail="工具不存在")
-    if include_external_status:
-        apply_external_status(
-            [tool],
-            resource_type="tool",
-            tenant_id=principal.tenant_id,
-            market=runtime.market,
-            cache=cache,
-        )
+        raise BusinessException("工具不存在", BizCode.NOT_FOUND)
+    tool = asyncio.run(service.enrich_tool_detail(
+        tool,
+        principal.tenant_id,
+        runtime.market_gateway,
+        include_external_status,
+    ))
     return success(data=tool, msg="获取工具详情成功")
 
 
@@ -171,6 +173,9 @@ def create_tool(request: ToolCreateRequest, db: DbSession, principal: Caller):
 @router.put("/{tool_id}", summary="更新工具", response_model=ApiResponse)
 def update_tool(tool_id: str, request: ToolUpdateRequest, db: DbSession, principal: Caller):
     """Update a tool"""
+    is_enabled = request.is_enabled
+    if is_enabled is None:
+        is_enabled = (request.config or {}).get("is_enabled")
     try:
         success_flag = ToolService(db).update_tool(
             tool_id=tool_id,
@@ -179,7 +184,7 @@ def update_tool(tool_id: str, request: ToolUpdateRequest, db: DbSession, princip
             description=request.description,
             icon=request.icon,
             config=request.config,
-            is_enabled=request.config.get("is_enabled", None),
+            is_enabled=is_enabled,
             tags=request.tags
         )
         if not success_flag:
@@ -263,7 +268,8 @@ def execute_tool(request: ToolExecuteRequest, db: DbSession, principal: Caller):
 
         # Hop back to the server's main loop instead of asyncio.run(): the process-wide async
         # DB pool, Redis client and HTTP clients are bound to that loop, and a fresh loop
-        # per request made calls fail intermittently ("cannot determine tenant", "Event loop is closed").
+        # per request made calls fail intermittently ("cannot determine tenant",
+        # "Event loop is closed").
         result = anyio.from_thread.run(_run)
         if not result.success:
             status_code = 400 if result.error_code == "VALIDATION_ERROR" else 500

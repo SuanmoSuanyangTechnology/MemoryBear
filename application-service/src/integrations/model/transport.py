@@ -15,7 +15,9 @@ from .errors import ModelServiceTimeoutError, ModelServiceUnavailableError
 
 logger = logging.getLogger(__name__)
 
-_REQUEST_HEADER_ALLOWLIST = frozenset({"accept", "accept-language", "content-type"})
+_REQUEST_HEADER_ALLOWLIST = frozenset(
+    {"accept", "accept-language", "content-type", "x-language-type"}
+)
 # X-Trace-Id is not allowlisted: the host TraceIdMiddleware rewrites the current request's trace_id at the outer layer
 _RESPONSE_HEADER_ALLOWLIST = frozenset(
     {

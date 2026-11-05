@@ -18,6 +18,7 @@ import type {
 } from '@/views/SelfReflectionEngine/types'
 import type { TestParams } from '@/views/MemoryConversation/types'
 import type { EndUser } from '@/views/UserMemoryDetail/types'
+import type { EpisodicOverviewQuery, EpisodicOverviewData, EpisodicDetailQuery, EpisodicMemoryDetail } from '../views/UserMemoryDetail/pages/EpisodicDetail/types'
 import { handleSSE, type SSEMessage } from '@/utils/stream'
 import type { ChatItem } from '@/components/Chat/types'
 import type { Query } from '@/views/UserMemory/types';
@@ -229,11 +230,13 @@ export const getPerceptualTimeline = (end_user_id: string) => {
   return request.get(`/memory/perceptual/${end_user_id}/timeline`)
 }
 // Episodic Memory - Overview
-export const getEpisodicOverview = (data: { end_user_id: string; time_range: string; episodic_type: string; } ) => {
-  return request.post(`/memory/episodic-memory/overview`, data)
+export const getEpisodicOverviewUrl = '/memory/episodic-memory/overview'
+export const getEpisodicOverview = (data: EpisodicOverviewQuery) => {
+  return request.post<EpisodicOverviewData>(getEpisodicOverviewUrl, data)
 }
-export const getEpisodicDetail = (data: { end_user_id: string; summary_id: string; } ) => {
-  return request.post(`/memory/episodic-memory/details`, data)
+export const getEpisodicDetailUrl = '/memory/episodic-memory/details'
+export const getEpisodicDetail = (data: EpisodicDetailQuery) => {
+  return request.post<EpisodicMemoryDetail>(getEpisodicDetailUrl, data)
 }
 
 // Emotion timeline

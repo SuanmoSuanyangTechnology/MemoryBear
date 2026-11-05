@@ -998,7 +998,7 @@ def get_workflow_node_last_run(
         raise BusinessException("source 参数无效", BizCode.INVALID_PARAMETER)
 
     result = WorkflowService(db).get_node_last_run(app_id=app_id, node_id=node_id, source=source)
-    return success(data=result)
+    return success(data=result, msg="获取节点上次运行成功")
 
 
 @router.put(
@@ -1024,7 +1024,7 @@ def update_workflow_node_cache(
     )
     if not result:
         raise BusinessException("节点缓存不存在", BizCode.NOT_FOUND)
-    return success(data=result)
+    return success(data=result, msg="节点缓存更新成功")
 
 
 @router.delete(
@@ -1044,7 +1044,7 @@ def invalidate_workflow_node_cache(
     affected = WorkflowService(db).invalidate_node_cache(app_id=app_id, node_id=node_id)
     if affected <= 0:
         raise BusinessException("节点缓存不存在", BizCode.NOT_FOUND)
-    return success(data={"affected": affected})
+    return success(data={"affected": affected}, msg="节点缓存失效成功")
 
 
 @router.post(
@@ -1118,7 +1118,7 @@ async def rerun_workflow_node(
             invalidate_cache=payload.invalidate_cache,
             bypass_cache=payload.bypass_cache,
         )
-    return success(data=result)
+    return success(data=result, msg="节点重跑成功")
 
 
 __all__ = ["router"]

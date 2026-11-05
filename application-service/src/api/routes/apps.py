@@ -9,6 +9,7 @@ decorators (``@cur_workspace_access_guard`` above ``@check_app_quota``).
 
 from __future__ import annotations
 
+import asyncio
 import io
 import logging
 from typing import Annotated, Any, Literal
@@ -67,6 +68,7 @@ logger = logging.getLogger(__name__)
 
 DbSession = Annotated[Session, Depends(get_sync_db)]
 Caller = Annotated[Principal, Depends(get_principal)]
+RuntimeDep = Annotated[ProcessRuntime, Depends(get_runtime)]
 WorkspaceId = Annotated[UUID, Depends(require_workspace_access)]
 AppQuota = Annotated[None, Depends(require_app_quota)]
 CacheClient = Annotated[SyncRedis, Depends(get_sync_redis)]
@@ -90,7 +92,7 @@ def create_app(
         data=payload,
     )
     # After creation, fetch and return the bound ontology info (no ontology_id -> default)
-    return success(data=service.to_schema_with_ontology(app, workspace_id))
+    return success(data=service.to_schema_with_ontology(app, workspace_id), msg="创建应用成功")
 
 
 @router.get("", summary="应用列表（分页）", response_model=ApiResponse)
@@ -180,10 +182,10 @@ def list_apps(
                 )
             # Return the standard paginated shape
             meta = PageMeta(page=1, pagesize=len(items), total=len(items), hasnext=False)
-            return success(data=PageData(page=meta, items=items))
+            return success(data=PageData(page=meta, items=items), msg="获取应用列表成功")
         # Empty ids: return an empty list
         meta = PageMeta(page=1, pagesize=0, total=0, hasnext=False)
-        return success(data=PageData(page=meta, items=[]))
+        return success(data=PageData(page=meta, items=[]), msg="获取应用列表成功")
 
     # Regular paginated query
     items_orm, total = service.list_apps(
@@ -212,7 +214,7 @@ def list_apps(
             cache=cache,
         )
     meta = PageMeta(page=page, pagesize=pagesize, total=total, hasnext=(page * pagesize) < total)
-    return success(data=PageData(page=meta, items=items))
+    return success(data=PageData(page=meta, items=items), msg="获取应用列表成功")
 
 
 @router.get(
@@ -293,7 +295,7 @@ def update_app(
 ):
     service = AppService(db)
     app = service.update_app(app_id=app_id, data=payload, workspace_id=workspace_id)
-    return success(data=app_schema.App.model_validate(app))
+    return success(data=app_schema.App.model_validate(app), msg="更新应用成功")
 
 
 @router.delete("/{app_id}", summary="删除应用", response_model=ApiResponse)
@@ -301,6 +303,7 @@ def delete_app(
         app_id: UUID,
         workspace_id: WorkspaceId,
         db: DbSession,
+        runtime: RuntimeDep,
         principal: Caller,
 ):
     """Delete an app
@@ -320,7 +323,23 @@ def delete_app(
     )
 
     service = AppService(db)
+    external = False
+    if runtime.settings.application_service_market_mode == "gateway":
+        app = service.get_app(app_id, workspace_id)
+        external = app.origin == "external"
     service.delete_app(app_id=app_id, workspace_id=workspace_id)
+    if external:
+        try:
+            asyncio.run(
+                runtime.market_gateway.deregister_installation(
+                    "app",
+                    str(app_id),
+                    str(principal.tenant_id),
+                    str(principal.actor_id),
+                )
+            )
+        except Exception as exc:
+            logger.warning("application deregistration failed: %s", exc)
 
     return success(msg="应用删除成功")
 
@@ -375,7 +394,7 @@ def update_agent_config(
     service = AppService(db)
     cfg = service.update_agent_config(app_id=app_id, data=payload, workspace_id=workspace_id)
     cfg = enrich_agent_config(cfg)
-    return success(data=app_schema.AgentConfig.model_validate(cfg))
+    return success(data=app_schema.AgentConfig.model_validate(cfg), msg="更新 Agent 配置成功")
 
 
 @router.get(
@@ -465,7 +484,10 @@ def update_workflow_config(
     cfg = service.update_workflow_config(
         app_id=app_id, data=payload, workspace_id=workspace_id, redis_client=cache
     )
-    return success(data=workflow_schema.WorkflowConfig.model_validate(cfg))
+    return success(
+        data=workflow_schema.WorkflowConfig.model_validate(cfg),
+        msg="更新工作流配置成功",
+    )
 
 
 @router.post("/{app_id}/publish", summary="发布应用（生成不可变快照）", response_model=ApiResponse)
@@ -886,7 +908,10 @@ def publish_workflow_as_tool(
     )
 
     detail = ToolService(db).get_tool_detail(str(tool_config.id), principal.tenant_id)
-    return success(data=detail or tool_schema.ToolDetailSchema.model_validate(tool_config))
+    return success(
+        data=detail or tool_schema.ToolDetailSchema.model_validate(tool_config),
+        msg="工作流发布为工具成功",
+    )
 
 
 @router.get(
@@ -907,7 +932,7 @@ def preview_workflow_tool_publish(
         workspace_id=workspace_id,
         release_id=release_id,
     )
-    return success(data=preview)
+    return success(data=preview, msg="获取工作流工具发布预览成功")
 
 
 # ==================== DSL / workflow import / export ====================
@@ -945,7 +970,7 @@ def import_workflow_config(
     import_service = WorkflowImportService(db)
     config = yaml.safe_load(raw_text)
     result = import_service.upload_config(platform=platform, config=config, redis_client=cache)
-    return success(data=result)
+    return success(data=result, msg="工作流兼容性分析成功")
 
 
 @router.post("/workflow/import/save", response_model=ApiResponse)

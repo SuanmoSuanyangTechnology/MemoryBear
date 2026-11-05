@@ -8,36 +8,7 @@ from .config import AppServiceSettings
 from .db import DatabaseManager
 from .infrastructure import RedisManager
 from .infrastructure.upstream import MonolithUpstream
-from .plugins import get_plugin
-from .protocols.market_gateway import (
-    MARKET_GATEWAY_FACTORY,
-    DisabledMarketGateway,
-    MarketGateway,
-)
-
-
-def build_market_gateway(settings: AppServiceSettings) -> MarketGateway:
-    """Pick the market port implementation from settings.
-
-    The community edition has no market; switch 3 then fails closed with `6020`
-    while the tenant resource center (switches 1/2) keeps working.
-
-    `http` mode resolves the implementation from the enterprise plugin registry:
-    the HTTP client is enterprise code and lives in enterprise-extensions, so
-    this module never imports it. Asking for `http` without the package is a
-    configuration error and fails at startup instead of on the first submission.
-    """
-
-    if settings.application_service_market_mode != "http":
-        return DisabledMarketGateway()
-    factory = get_plugin(MARKET_GATEWAY_FACTORY)
-    if factory is None:
-        raise RuntimeError(
-            "APPLICATION_SERVICE_MARKET_MODE=http but no market gateway is "
-            "registered; install the 'enterprise-extensions' package "
-            "(not available in open-source builds)"
-        )
-    return factory(settings)
+from .protocols.market_gateway import DisabledMarketGateway, MarketGateway
 
 
 class ProcessRuntime:
@@ -48,10 +19,9 @@ class ProcessRuntime:
         self.database = DatabaseManager(settings)
         self.redis = RedisManager(settings)
         self.upstream = MonolithUpstream.from_settings(settings)
-        self.market = build_market_gateway(settings)
+        self.market_gateway: MarketGateway = DisabledMarketGateway()
 
     def _close_sync_resources(self) -> None:
-        self.market.close()
         self.upstream.close()
         self.redis.close_sync()
         self.database.close_sync()

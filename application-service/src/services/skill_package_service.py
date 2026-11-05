@@ -33,7 +33,7 @@ import re
 import threading
 import uuid
 import zipfile
-from typing import Callable, Coroutine, Optional
+from collections.abc import Callable, Coroutine
 from urllib.parse import urlparse
 
 import httpx
@@ -49,7 +49,6 @@ from ..repositories.skill_package_repository import SkillPackageRepository
 from ..storage import StorageFactory
 from ..storage.exceptions import StorageError
 from .external_status_service import market_source_ref
-
 
 # Agent Skills spec: frontmatter name is lowercase alnum + hyphen, <=64.
 _SKILL_NAME_RE = re.compile(r"^[a-z0-9]([a-z0-9-]*[a-z0-9])?$")
@@ -107,7 +106,7 @@ def _parse_frontmatter(skill_md_text: str) -> tuple[dict, str]:
 
 
 def _build_skill_md(frontmatter: dict, body: str) -> str:
-    """Rebuild SKILL.md from a dict (legacy conversion only; standard import/export keeps the bytes)."""
+    """Rebuild SKILL.md from a dict (legacy conversion only; standard import keeps the bytes)."""
 
     fm_text = yaml.safe_dump(
         {k: v for k, v in frontmatter.items() if k not in ("_legacy",)},
@@ -116,7 +115,7 @@ def _build_skill_md(frontmatter: dict, body: str) -> str:
     return f"---\n{fm_text}\n---\n\n{body.lstrip()}"
 
 
-def _run_async(coro_factory: "Callable[[], Coroutine]"):
+def _run_async(coro_factory: Callable[[], Coroutine]):
     """Run a coroutine from sync code: direct when no loop, else a private thread."""
 
     try:
@@ -140,7 +139,7 @@ def _run_async(coro_factory: "Callable[[], Coroutine]"):
     return box.get("value")
 
 
-def _release_read_transaction(db: "Session | None", where: str) -> None:
+def _release_read_transaction(db: Session | None, where: str) -> None:
     """End the sync session's read transaction so its pooled connection goes back.
 
     Sync routes run on the threadpool, so a blocking object-storage read here does
@@ -181,7 +180,7 @@ def _detect_binary(content: bytes) -> bool:
     return False
 
 
-def _normalize_rel_path(raw: str) -> Optional[str]:
+def _normalize_rel_path(raw: str) -> str | None:
     """Normalise a pack-relative path; None when illegal (absolute / traversal / empty)."""
 
     normalized = (raw or "").replace("\\", "/").strip()
@@ -249,7 +248,7 @@ class SkillPackageService:
         return url.strip()
 
     @staticmethod
-    def _resolve_github_url(url: str) -> tuple[str, Optional[str]]:
+    def _resolve_github_url(url: str) -> tuple[str, str | None]:
         """Map a GitHub web address onto the codeload archive it should fetch.
 
         ``github.com/<owner>/<repo>``                  -> codeload ``/zip/HEAD``
@@ -281,7 +280,7 @@ class SkillPackageService:
         repo = parts[1][:-4] if parts[1].endswith(".git") else parts[1]
         rest = parts[2:]
 
-        subdir: Optional[str] = None
+        subdir: str | None = None
         if not rest:
             ref = "HEAD"
         elif rest[0] == "tree" and len(rest) >= 2:
@@ -315,7 +314,7 @@ class SkillPackageService:
         return kept
 
     @staticmethod
-    def fetch_url_zip(url: str) -> tuple[bytes, Optional[str]]:
+    def fetch_url_zip(url: str) -> tuple[bytes, str | None]:
         """Download a zip for an allow-listed GitHub address, with timeout and size caps.
 
         Returns ``(zip_bytes, subdir)``; ``subdir`` is non-null for
@@ -348,7 +347,9 @@ class SkillPackageService:
                             "导入地址发生跨域跳转，已中止（可能存在 SSRF 风险）",
                             BizCode.BAD_REQUEST,
                         )
-                    raise BusinessException("导入地址发生跳转，请直接使用最终地址", BizCode.BAD_REQUEST)
+                    raise BusinessException(
+                        "导入地址发生跳转，请直接使用最终地址", BizCode.BAD_REQUEST
+                    )
                 resp.raise_for_status()
                 body = resp.content
                 if len(body) > max_bytes:
@@ -380,7 +381,7 @@ class SkillPackageService:
         try:
             zf = zipfile.ZipFile(io.BytesIO(zip_bytes))
         except (zipfile.BadZipFile, ValueError) as e:
-            raise BusinessException(f"不是有效的 zip 文件: {e}", BizCode.BAD_REQUEST)
+            raise BusinessException(f"不是有效的 zip 文件: {e}", BizCode.BAD_REQUEST) from e
 
         names = [
             n
@@ -427,7 +428,7 @@ class SkillPackageService:
         return files
 
     @staticmethod
-    def _root_prefix(files: dict[str, bytes]) -> Optional[str]:
+    def _root_prefix(files: dict[str, bytes]) -> str | None:
         """Detect a zip wrapped in one top-level directory (common in repo exports).
 
         Returns the prefix to strip, or None when the pack root is the zip root.
@@ -564,7 +565,7 @@ class SkillPackageService:
 
     @staticmethod
     def _persist_files(rows: list[dict], tenant_id: uuid.UUID, package_id: uuid.UUID) -> None:
-        """Stage 2: upload binary / oversized files to object storage and back-fill ``storage_ref``."""
+        """Stage 2: upload binary / oversized files to storage and back-fill ``storage_ref``."""
 
         storage = StorageFactory.get_storage()
         inline_limit = current_settings().skill_package_inline_limit
@@ -577,7 +578,7 @@ class SkillPackageService:
             key = _skill_storage_key(tenant_id, package_id, rel_path)
             content_type = mimetypes.guess_type(rel_path)[0]
 
-            async def _upload() -> str:
+            async def _upload(key=key, content=content, content_type=content_type) -> str:
                 return await storage.upload(key, content, content_type)
 
             _run_async(_upload)
@@ -618,14 +619,14 @@ class SkillPackageService:
         db: Session,
         tenant_id: uuid.UUID,
         *,
-        zip_bytes: Optional[bytes] = None,
-        url: Optional[str] = None,
+        zip_bytes: bytes | None = None,
+        url: str | None = None,
         dry_run: bool = False,
-        members: Optional[list[str]] = None,
-        meta: Optional[list[dict]] = None,
-        plugin_name: Optional[str] = None,
-        plugin_description: Optional[str] = None,
-        source_ref: Optional[str] = None,
+members: list[str] | None = None,
+        meta: list[dict] | None = None,
+        plugin_name: str | None = None,
+        plugin_description: str | None = None,
+        source_ref: str | None = None,
         source_type: str = "imported",
         overwrite: bool = False,
         conflict_strategy: str = "rename",
@@ -643,7 +644,7 @@ class SkillPackageService:
         as one indivisible unit; a plugin that already exists is rejected, not re-imported.
         """
 
-        url_subdir: Optional[str] = None
+        url_subdir: str | None = None
         if url and not zip_bytes:
             zip_bytes, url_subdir = SkillPackageService.fetch_url_zip(url)
             source_ref = source_ref or url
@@ -682,7 +683,9 @@ class SkillPackageService:
 
             override = meta_by_key.get(member["key"])
             display = (override or {}).get("name") or fm["name"]
-            description = ((override or {}).get("description") or fm.get("description") or "")[:DESCRIPTION_MAX]
+            description = (
+                (override or {}).get("description") or fm.get("description") or ""
+            )[:DESCRIPTION_MAX]
             call_name = ((override or {}).get("call_name") or fm["name"])
             call_name = SkillPackageService.validate_call_name(call_name)
 
@@ -726,9 +729,11 @@ class SkillPackageService:
         # the preview already shows every overwrite/skip and a plugin row is only
         # created when at least one member is importable (no zero-member shells).
         repo = SkillPackageRepository(db) if db is not None else None
-        resolved_plugin_name: Optional[str] = None
+        resolved_plugin_name: str | None = None
         if is_plugin:
-            resolved_plugin_name = (plugin_name or "").strip() or SkillPackageService._derive_plugin_name(source_ref)
+            resolved_plugin_name = (plugin_name or "").strip() or (
+                SkillPackageService._derive_plugin_name(source_ref)
+            )
             if repo is not None and repo.get_plugin_by_name(tenant_id, resolved_plugin_name):
                 raise BusinessException(
                     f"插件 {resolved_plugin_name} 已存在；插件为整体导入，不支持重复导入"
@@ -755,7 +760,7 @@ class SkillPackageService:
         # --- commit -------------------------------------------------------------
         # Never create the plugin row when every member was skipped, otherwise the
         # bundle would persist as an unreachable zero-member shell.
-        plugin_id: Optional[uuid.UUID] = None
+        plugin_id: uuid.UUID | None = None
         if is_plugin and importable:
             plugin = repo.create_plugin(
                 tenant_id=tenant_id,
@@ -786,7 +791,7 @@ class SkillPackageService:
         else:
             db.flush()
 
-        for item, res in zip(prepared, results):
+        for _, res in zip(prepared, results, strict=False):
             if res.get("skill_id"):
                 if commit:
                     db.refresh(res["_skill"])
@@ -798,7 +803,11 @@ class SkillPackageService:
             "kind": kind,
             "plugin_id": str(plugin_id) if plugin_id else None,
             "name": (resolved_plugin_name or first["name"]) if is_plugin else first["name"],
-            "description": (plugin_description or first["description"]) if is_plugin else first["description"],
+            "description": (
+                (plugin_description or first["description"])
+                if is_plugin
+                else first["description"]
+            ),
             "source": source_ref,
             "package_id": None if is_plugin else first["package_id"],
             "skill_id": None if is_plugin else first["skill_id"],
@@ -825,13 +834,13 @@ class SkillPackageService:
                     "skipped": res.get("skipped", False),
                     "skip_reason": res.get("skip_reason"),
                 }
-                for item, res in zip(prepared, results)
+                for item, res in zip(prepared, results, strict=False)
             ],
         }
         return response
 
     @staticmethod
-    def _derive_plugin_name(source_ref: Optional[str]) -> str:
+    def _derive_plugin_name(source_ref: str | None) -> str:
         """Default plugin name from its source: ``owner/repo`` name for URLs, file stem for zips."""
 
         raw = (source_ref or "").strip()
@@ -853,9 +862,9 @@ class SkillPackageService:
         kind: str,
         is_plugin: bool,
         prepared: list[dict],
-        plugin_name: Optional[str],
-        plugin_description: Optional[str],
-        source_ref: Optional[str],
+        plugin_name: str | None,
+        plugin_description: str | None,
+        source_ref: str | None,
     ) -> dict:
         """Preview shape — identical to the committed response but with null ids."""
 
@@ -864,8 +873,16 @@ class SkillPackageService:
             "dry_run": True,
             "kind": kind,
             "plugin_id": None,
-            "name": (plugin_name or SkillPackageService._derive_plugin_name(source_ref)) if is_plugin else first["name"],
-            "description": (plugin_description or first["description"]) if is_plugin else first["description"],
+            "name": (
+                (plugin_name or SkillPackageService._derive_plugin_name(source_ref))
+                if is_plugin
+                else first["name"]
+            ),
+            "description": (
+                (plugin_description or first["description"])
+                if is_plugin
+                else first["description"]
+            ),
             "source": source_ref,
             "package_id": None,
             "skill_id": None,
@@ -915,7 +932,7 @@ class SkillPackageService:
     @staticmethod
     def _find_active_skill_by_call_name(
         db: Session, tenant_id: uuid.UUID, call_name: str
-    ) -> Optional[Skill]:
+    ) -> Skill | None:
         """The tenant's active skill owning ``call_name`` (the import identity key)."""
 
         return (
@@ -936,7 +953,7 @@ class SkillPackageService:
         prepared: list[dict],
         *,
         is_plugin: bool,
-        resolved_plugin_name: Optional[str],
+        resolved_plugin_name: str | None,
     ) -> list[dict]:
         """Plan each member against ``call_name`` (the unique skill identity).
 
@@ -967,14 +984,16 @@ class SkillPackageService:
             prior_call = seen_call.get(item["call_name"])
             if prior_call is not None:
                 dup_errors.append(
-                    f"调用名称 '{item['call_name']}' 在本次导入中重复（第 {prior_call}、{index + 1} 个成员）"
+                    f"调用名称 '{item['call_name']}' 在本次导入中重复"
+                    f"（第 {prior_call}、{index + 1} 个成员）"
                 )
             else:
                 seen_call[item["call_name"]] = index + 1
             prior_pkg = seen_pkg.get(item["pkg_name"])
             if prior_pkg is not None:
                 dup_errors.append(
-                    f"技能名 '{item['pkg_name']}' 在本次导入中重复（第 {prior_pkg}、{index + 1} 个成员）"
+                    f"技能名 '{item['pkg_name']}' 在本次导入中重复"
+                    f"（第 {prior_pkg}、{index + 1} 个成员）"
                 )
             else:
                 seen_pkg[item["pkg_name"]] = index + 1
@@ -1070,8 +1089,8 @@ class SkillPackageService:
         *,
         tenant_id: uuid.UUID,
         item: dict,
-        plugin_id: Optional[uuid.UUID],
-        source_ref: Optional[str],
+        plugin_id: uuid.UUID | None,
+        source_ref: str | None,
         source_type: str,
         overwrite: bool,
         conflict_strategy: str,
@@ -1090,9 +1109,9 @@ class SkillPackageService:
         name = item["pkg_name"]
         content_hash = item["content_hash"]
 
-        skill_row: Optional[Skill] = None
-        conflict_resolved: Optional[str] = None
-        legacy_fm: Optional[dict] = None
+        skill_row: Skill | None = None
+        conflict_resolved: str | None = None
+        legacy_fm: dict | None = None
 
         if item.get("will_overwrite"):
             # --- overwrite: reuse the active skill that owns the call_name --------
@@ -1191,8 +1210,8 @@ class SkillPackageService:
                         "will_overwrite": False, "_skill": skill,
                     }
                 raise BusinessException(
-                    f"技能 {name} 的技能包已被其他技能/插件占用且调用名称不同（预览中应标记为跳过）；"
-                    "如状态变化请重新预览后再导入",
+                    f"技能 {name} 的技能包已被其他技能/插件占用且调用名称不同"
+                    "（预览中应标记为跳过）；如状态变化请重新预览后再导入",
                     BizCode.DUPLICATE_NAME,
                 )
 
@@ -1232,8 +1251,10 @@ class SkillPackageService:
                     if conflict_strategy == "overwrite":
                         fm = dict(item["frontmatter"])
                         fm["_legacy"] = {
-                            "prompt": legacy.prompt, "keywords": (legacy.config or {}).get("keywords"),
-                            "tools": legacy.tools, "config": legacy.config,
+                            "prompt": legacy.prompt,
+                            "keywords": (legacy.config or {}).get("keywords"),
+                            "tools": legacy.tools,
+                            "config": legacy.config,
                         }
                         pkg.frontmatter_raw = fm
                         db.flush()
@@ -1561,10 +1582,10 @@ class SkillPackageService:
         db: Session,
         tenant_id: uuid.UUID,
         *,
-        search: Optional[str] = None,
-        ids: Optional[str] = None,
-        is_active: Optional[bool] = None,
-        is_public: Optional[bool] = None,
+        search: str | None = None,
+        ids: str | None = None,
+        is_active: bool | None = None,
+        is_public: bool | None = None,
         kind: str = "all",
         page: int = 1,
         pagesize: int = 10,
@@ -1636,7 +1657,7 @@ class SkillPackageService:
         return cards[start:start + pagesize], total
 
     @staticmethod
-    def _parse_ids_filter(ids: Optional[str]) -> Optional[set[uuid.UUID]]:
+    def _parse_ids_filter(ids: str | None) -> set[uuid.UUID] | None:
         """Parse the comma-separated ``ids`` filter into a set of UUIDs.
 
         Blank segments are ignored (so a trailing comma is harmless); a segment
@@ -1666,10 +1687,10 @@ class SkillPackageService:
         db: Session,
         tenant_id: uuid.UUID,
         *,
-        search: Optional[str],
-        ids: Optional[set[uuid.UUID]] = None,
-        is_active: Optional[bool],
-        is_public: Optional[bool],
+        search: str | None,
+        ids: set[uuid.UUID] | None = None,
+        is_active: bool | None,
+        is_public: bool | None,
     ) -> list[dict]:
         """Skill cards whose package is absent (legacy) or ungrouped (``plugin_id`` NULL)."""
 
@@ -1762,7 +1783,7 @@ class SkillPackageService:
 
     @staticmethod
     def _skill_card(
-        skill: Skill, pkg: Optional[SkillPackage], *, with_members: bool = False
+        skill: Skill, pkg: SkillPackage | None, *, with_members: bool = False
     ) -> dict:
         """One standalone skill card (row fields + standard-pack face).
 
@@ -1896,7 +1917,9 @@ class SkillPackageService:
                 if pkg:
                     detail = SkillPackageService._skill_card(skill, pkg)
                     files = repo.get_files(pkg.id)
-                    detail["skill_md"] = SkillPackageService._file_text(pkg.id, "SKILL.md", files, db)
+                    detail["skill_md"] = SkillPackageService._file_text(
+                        pkg.id, "SKILL.md", files, db
+                    )
                     detail["files"] = [
                         {
                             "rel_path": f.rel_path,
@@ -1964,7 +1987,7 @@ class SkillPackageService:
         rel_path: str,
         files: list,
         db: Session | None = None,
-    ) -> Optional[str]:
+    ) -> str | None:
         """Read one pack file as text for detail (object storage read back when needed).
 
         ``db`` releases the pooled connection before the storage round-trip; the detail
@@ -2012,7 +2035,7 @@ class SkillPackageService:
             # is purged; ``skills.package_id`` is the member's package id, never the
             # plugin id. Reading it after the purge would yield None (the FK has no
             # ON DELETE handler, so the pack is detached first).
-            plugin_id: Optional[uuid.UUID] = None
+            plugin_id: uuid.UUID | None = None
             if skill.package_id:
                 pkg = repo.get_by_id(skill.package_id, tenant_id)
                 plugin_id = pkg.plugin_id if pkg else None
@@ -2062,7 +2085,9 @@ class SkillPackageService:
         }
 
     @staticmethod
-    def _purge_pack(db: Session, repo: SkillPackageRepository, tenant_id: uuid.UUID, skill: Skill) -> Optional[str]:
+    def _purge_pack(
+        db: Session, repo: SkillPackageRepository, tenant_id: uuid.UUID, skill: Skill
+    ) -> str | None:
         """Hard-delete a skill's pack (object storage first) and detach ``skills.package_id``.
 
         Returns the removed package id, or None when the row had no pack.

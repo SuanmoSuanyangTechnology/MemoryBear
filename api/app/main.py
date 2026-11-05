@@ -11,6 +11,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi import HTTPException, Request
 from fastapi.exceptions import RequestValidationError
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from redbear_model import ChannelSwitchExhaustedError, NoAvailableChannelError
@@ -28,6 +29,9 @@ from app.core.error_codes import BizCode, HTTP_MAPPING
 from app.core.exceptions import BusinessException
 from app.core.logging_config import LoggingConfig, get_logger
 from app.core.response_utils import fail
+from error_core.codes import code_name, coerce_code, http_status_for
+from error_core.diagnostics import format_diagnostics
+from error_core.messages import user_message
 from app.integrations.knowledge.errors import KnowledgeClientError, KnowledgeServiceError
 from app.integrations.knowledge.validation import (
     is_retrieval_request_validation_error,
@@ -291,7 +295,7 @@ from app.core.sensitive_filter import SensitiveDataFilter
 import traceback
 
 # Import i18n exception support
-from app.i18n.exceptions import I18nException
+from app.i18n.exceptions import I18nException, get_current_locale
 from app.i18n.service import get_translation_service
 from pydantic import ValidationError as PydanticValidationError
 
@@ -387,9 +391,20 @@ async def request_validation_error_handler(
         str(error.get("msg") or "").removeprefix("Value error, ")
         for error in exc.errors()
     ) or "请求参数校验失败"
+    language = getattr(request.state, "language", settings.I18N_DEFAULT_LANGUAGE)
+    message = get_translation_service().translate(
+        "errors.common.validation_failed", language
+    )
     return JSONResponse(
         status_code=422,
-        content=fail(code=BizCode.VALIDATION_FAILED.value, msg=detail, error=detail),
+        content=fail(
+            code=BizCode.VALIDATION_FAILED.value,
+            msg=message,
+            error=format_diagnostics(
+                trace_id=getattr(request.state, "trace_id", None),
+                detail=detail,
+            ),
+        ),
     )
 
 
@@ -448,7 +463,10 @@ async def pydantic_validation_exception_handler(request: Request, exc: PydanticV
         "errors.common.validation_failed",
         language
     )
-    
+    detail = "; ".join(
+        f"{item['field']}: {item['message']}" for item in errors
+    ) or main_message
+
     logger.warning(
         f"Pydantic validation error: {len(errors)} errors",
         extra={
@@ -458,16 +476,22 @@ async def pydantic_validation_exception_handler(request: Request, exc: PydanticV
             "errors": errors
         }
     )
-    
-    return JSONResponse(
-        status_code=422,
-        content={
-            "success": False,
-            "error_code": "VALIDATION_FAILED",
-            "message": main_message,
-            "errors": errors
-        }
-    )
+
+    content = {
+        **fail(
+            code=BizCode.VALIDATION_FAILED.value,
+            msg=main_message,
+            error=format_diagnostics(
+                trace_id=getattr(request.state, "trace_id", None),
+                detail=detail,
+            ),
+        ),
+        "success": False,
+        "error_code": "VALIDATION_FAILED",
+        "message": main_message,
+        "errors": errors,
+    }
+    return JSONResponse(status_code=422, content=content)
 
 
 # 处理资源不存在异常
@@ -636,8 +660,11 @@ async def rate_limit_exception_handler(request: Request, exc: RateLimitException
 @app.exception_handler(BusinessException)
 async def business_exception_handler(request: Request, exc: BusinessException):
     """处理通用业务异常"""
-    # 过滤敏感信息
     filtered_message, filtered_context = SensitiveDataFilter.filter_message(exc.message, exc.context)
+    numeric = coerce_code(exc.code)
+    if numeric is None:
+        numeric = BizCode.BAD_REQUEST.value
+    language = getattr(request.state, "language", None) or get_current_locale()
 
     logger.error(
         f"Business error: {filtered_message}",
@@ -646,26 +673,32 @@ async def business_exception_handler(request: Request, exc: BusinessException):
             "method": request.method,
             "context": filtered_context,
             "error_code": exc.code.value if isinstance(exc.code, BizCode) else exc.code,
-            "cause": str(exc.cause) if exc.cause else None
+            "code": numeric,
+            "code_name": code_name(numeric),
+            "msg_locale": language,
+            "trace_id": getattr(request.state, "trace_id", None),
+            "source_service": "api",
+            "cause": str(exc.cause) if exc.cause else None,
         },
-        exc_info=exc.cause is not None
+        exc_info=exc.cause is not None,
     )
-    raw_code = exc.code
-    if isinstance(raw_code, BizCode):
-        biz_code = raw_code
-    elif isinstance(raw_code, int):
-        try:
-            biz_code = BizCode(raw_code)
-        except ValueError:
-            biz_code = BizCode.BAD_REQUEST
-    else:
-        biz_code = BizCode.BAD_REQUEST
-
-    status_code = HTTP_MAPPING.get(biz_code, 400)
-    return JSONResponse(
+    status_code = http_status_for(numeric)
+    display = user_message(numeric, language) or filtered_message
+    detail = format_diagnostics(
+        trace_id=getattr(request.state, "trace_id", None),
+        detail=filtered_message,
+    )
+    response = JSONResponse(
         status_code=status_code,
-        content=fail(code=biz_code.value, msg=filtered_message, error=filtered_message)
+        content=fail(numeric, display, error=detail),
     )
+
+    # 添加限流相关的响应头
+    rate_headers = exc.context.get("rate_limit_headers", {}) if exc.context else {}
+    for header_name, header_value in rate_headers.items():
+        response.headers[header_name] = str(header_value)
+
+    return response
 
 
 # 运行期渠道链异常（spec §11.2）：门面外漏的空链/耗尽 → 409 业务错误统一出口
@@ -714,8 +747,8 @@ async def knowledge_client_exception_handler(
 
 
 # 统一异常处理：将HTTPException转换为统一响应结构（支持国际化）
-@app.exception_handler(HTTPException)
-async def http_exception_handler(request: Request, exc: HTTPException):
+@app.exception_handler(StarletteHTTPException)
+async def http_exception_handler(request: Request, exc: StarletteHTTPException):
     """处理HTTP异常，支持国际化"""
     # 获取当前语言
     language = getattr(request.state, "language", settings.I18N_DEFAULT_LANGUAGE)
@@ -762,7 +795,8 @@ async def http_exception_handler(request: Request, exc: HTTPException):
     
     return JSONResponse(
         status_code=exc.status_code,
-        content=fail(code=exc.status_code, msg=translated_message, error=exc.detail)
+        content=fail(code=exc.status_code, msg=translated_message, error=exc.detail),
+        headers=exc.headers,
     )
 
 

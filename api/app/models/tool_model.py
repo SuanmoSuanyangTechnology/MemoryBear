@@ -1,14 +1,24 @@
 """工具管理相关数据模型"""
 import uuid
-from datetime import datetime
 from enum import StrEnum
 
-from sqlalchemy import Column, String, Text, DateTime, JSON, ForeignKey, Integer, Float, Boolean, text
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    Column,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    text,
+)
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 
-from app.db import Base
 from app.core.utils.datetime_utils import utcnow_naive
+from app.db import Base
 
 
 class ToolType(StrEnum):
@@ -113,9 +123,9 @@ class ToolConfig(Base):
     version = Column(String(50), default="1.0.0")
     tags = Column(JSON, default=list)  # 标签列表
 
-    # 来源列（§11.2）：只记录本地副本的来源，投稿状态由 market-service 权威持有
+# 来源列（§11.2）：只记录本地副本的来源，投稿状态由 market-service 权威持有
     origin = Column(
-        String(16), nullable=False, default="local", server_default="local",
+        String(16), nullable=False, default="local", server_default="local", index=True,
         comment="local（本租户创建）| external（从市场安装）",
     )
     external_source = Column(String(32), nullable=True, comment="本期固定 community_market")

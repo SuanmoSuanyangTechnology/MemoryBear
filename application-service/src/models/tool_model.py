@@ -113,10 +113,9 @@ class ToolConfig(Base):
     version = Column(String(50), default="1.0.0")
     tags = Column(JSON, default=list)  # Tag list
 
-    # Where this row came from (§11.2). Only the local copy's provenance lives
-    # here; publication state stays authoritative in market-service.
+# 来源列（§11.2）：只记录本地副本的来源，投稿状态由 market-service 权威持有。
     origin = Column(
-        String(16), nullable=False, default="local", server_default="local",
+        String(16), nullable=False, default="local", server_default="local", index=True,
         comment="local（本租户创建）| external（从市场安装）",
     )
     external_source = Column(String(32), nullable=True, comment="本期固定 community_market")

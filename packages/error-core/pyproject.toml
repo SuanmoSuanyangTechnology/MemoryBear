@@ -1,0 +1,20 @@
+[project]
+name = "error-core"
+version = "0.1.0"
+description = "Shared error vocabulary, catalogs, envelopes and diagnostics for MemoryBear services"
+requires-python = ">=3.12,<3.13"
+dependencies = []
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/error_core"]
+
+[dependency-groups]
+dev = ["pytest>=8.0"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

@@ -452,7 +452,9 @@ class EventStreamHandler:
                 "output": None,
                 "process": data.get("process_data"),
                 "elapsed_time": data.get("elapsed_time"),
-                "error": data.get("error")
+                "error": data.get("error"),
+                "code": data.get("error_code"),
+                "msg": data.get("error_msg"),
             }
         }
         yield self._mask(payload)

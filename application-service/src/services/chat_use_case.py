@@ -379,7 +379,7 @@ async def chat_complete(prep: ChatPreparation) -> dict:
                 workspace_id=str(prep.workspace_id),
                 files=payload.files,
             )
-        return success(data=ChatResponse(**result).model_dump(mode="json"))
+        return success(data=ChatResponse(**result).model_dump(mode="json"), msg="对话回复生成成功")
 
     if prep.app_type == AppType.MULTI_AGENT:
         async with get_async_db_context() as sdb:
@@ -396,7 +396,7 @@ async def chat_complete(prep: ChatPreparation) -> dict:
                 thinking=bool(payload.thinking),
                 files=payload.files,
             )
-        return success(data=ChatResponse(**result).model_dump(mode="json"))
+        return success(data=ChatResponse(**result).model_dump(mode="json"), msg="对话回复生成成功")
 
     if prep.app_type in (AppType.WORKFLOW, AppType.PURE_WORKFLOW):
         async with get_async_db_context() as sdb:

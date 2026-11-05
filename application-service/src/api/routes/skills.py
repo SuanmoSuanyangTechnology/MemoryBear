@@ -55,8 +55,20 @@ RuntimeDep = Annotated[ProcessRuntime, Depends(get_runtime)]
 def list_skills(
         db: DbSession,
         principal: Caller,
-        search: str | None = Query(None, description="搜索关键词（命中 id / name / description / call_name，插件额外命中插件 id 与成员）"),
-        ids: str | None = Query(None, description="按卡片 id 精确过滤，逗号分隔多个：skill id / package_id / 插件 id，命中任一即返回（并集），与其他过滤 AND"),
+        search: str | None = Query(
+            None,
+            description=(
+                "搜索关键词（命中 id / name / description / call_name，"
+                "插件额外命中插件 id 与成员）"
+            ),
+        ),
+        ids: str | None = Query(
+            None,
+            description=(
+                "按卡片 id 精确过滤，逗号分隔多个：skill id / package_id / 插件 id，"
+                "命中任一即返回（并集），与其他过滤 AND"
+            ),
+        ),
         is_active: bool | None = Query(None, description="是否激活"),
         is_public: bool | None = Query(None, description="是否公开"),
         kind: str = Query("all", description="粒度过滤：all | plugin | skill"),
@@ -131,15 +143,36 @@ def get_skill(
 def import_skill_package(
         db: DbSession,
         principal: Caller,
-        file: Annotated[UploadFile | None, File(description="标准技能包 zip（含 SKILL.md）；与 url 二选一")] = None,
-        url: Annotated[str | None, Form(description="GitHub 仓库 / 技能目录地址；与 file 二选一")] = None,
+        file: Annotated[
+            UploadFile | None,
+            File(description="标准技能包 zip（含 SKILL.md）；与 url 二选一"),
+        ] = None,
+        url: Annotated[
+            str | None,
+            Form(description="GitHub 仓库 / 技能目录地址；与 file 二选一"),
+        ] = None,
         dry_run: Annotated[bool, Form(description="true=只解析预览，不落库、不计配额")] = False,
-        members: Annotated[str | None, Form(description="JSON 数组：插件保留的成员 identifier；缺省全部保留")] = None,
-        meta: Annotated[str | None, Form(description="JSON 数组/对象：成员级元数据覆盖 [{identifier, name, description, call_name}]")] = None,
+        members: Annotated[
+            str | None,
+            Form(description="JSON 数组：插件保留的成员 identifier；缺省全部保留"),
+        ] = None,
+        meta: Annotated[
+            str | None,
+            Form(
+                description="JSON 数组/对象：成员级元数据覆盖 "
+                "[{identifier, name, description, call_name}]"
+            ),
+        ] = None,
         plugin_name: Annotated[str | None, Form(description="kind=plugin 时的插件展示名")] = None,
-        plugin_description: Annotated[str | None, Form(description="kind=plugin 时的插件描述")] = None,
+        plugin_description: Annotated[
+            str | None,
+            Form(description="kind=plugin 时的插件描述"),
+        ] = None,
         overwrite: Annotated[bool, Form(description="同名但内容不同时是否覆盖更新")] = False,
-        conflict_strategy: Annotated[str, Form(description="与同名 legacy 冲突策略：rename | overwrite")] = "rename",
+        conflict_strategy: Annotated[
+            str,
+            Form(description="与同名 legacy 冲突策略：rename | overwrite"),
+        ] = "rename",
 ):
     """Import a standard pack: fetch -> unpack -> validate -> persist (content_hash idempotent)."""
     tenant_id = principal.tenant_id
@@ -237,7 +270,10 @@ def _parse_json_form(raw: str | None, field: str, *, expect: str) -> list | None
             raise BusinessException(f"{field} 需为 JSON 数组", BizCode.BAD_REQUEST)
         for item in parsed:
             if not isinstance(item, str):
-                raise BusinessException(f"{field} 的元素需为成员 identifier 字符串", BizCode.BAD_REQUEST)
+                raise BusinessException(
+                    f"{field} 的元素需为成员 identifier 字符串",
+                    BizCode.BAD_REQUEST,
+                )
         return parsed
 
     if isinstance(parsed, list):

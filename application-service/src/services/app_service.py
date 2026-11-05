@@ -53,6 +53,7 @@ from .asset_release_resolver import AssetReleaseResolver
 from .category_service import CategoryService
 from .model_ref_gate import assert_refs_publishable, raise_model_unavailable, resolve_invoke_ref
 from .multi_agent_release_resolver import POLICY_PINNED, resolve_effective_release_id
+from .tool_service import ToolService
 from .workflow_service import WorkflowService
 
 logger = logging.getLogger(__name__)
@@ -263,7 +264,10 @@ class AppService:
             self,
             app_id: uuid.UUID,
             config_data: app_schema.AgentConfigCreate,
-            now: datetime.datetime
+            now: datetime.datetime,
+            *,
+            workspace_id: uuid.UUID | None = None,
+            tenant_id: uuid.UUID | None = None
     ) -> None:
         """Create an Agent config (internal method).
 
@@ -271,8 +275,22 @@ class AppService:
             app_id: App ID
             config_data: Agent config data
             now: Current time
+            workspace_id: Workspace ID (tenant fallback lookup)
+            tenant_id: Tenant ID (skips the workspace lookup)
         """
         storage_data = AgentConfigConverter.to_storage_format(config_data)
+        tools = storage_data.get("tools") or []
+        if tools:
+            resolved = tenant_id or (
+                cross_domain_read.get_workspace_tenant_id(self.db, workspace_id)
+                if workspace_id is not None
+                else None
+            )
+            if resolved is None:
+                raise BusinessException("应用所属工作空间不存在", BizCode.NOT_FOUND)
+            storage_data["tools"] = ToolService(self.db).validate_tool_selection(
+                resolved, tools
+            )
 
         agent_cfg = AgentConfig(
             id=uuid.uuid4(),
@@ -503,15 +521,18 @@ class AppService:
         serialized before the aggregation so a remote binder may end the
         transaction without expiring the ORM objects mid-serialization.
         """
+        app_ids = [a.id for a in apps]
         context = self._build_serialization_context(apps, current_workspace_id)
         schemas = [
             self._convert_to_schema(a, current_workspace_id, None, context)
             for a in apps
         ]
-        ontology_map = self._load_ontology_map([a.id for a in apps])
+        ontology_map = self._load_ontology_map(app_ids)
         if ontology_map is not None:
-            for app, schema in zip(apps, schemas, strict=True):
-                ontology = ontology_map.get(app.id)
+            # A remote binder ends the transaction, which expires the ORM rows;
+            # read the pre-captured ids so the fill loop issues no refresh queries.
+            for app_id, schema in zip(app_ids, schemas, strict=True):
+                ontology = ontology_map.get(app_id)
                 if ontology is not None:
                     schema.ontology = app_schema.AppOntologyInfo(**ontology)
         return schemas
@@ -696,7 +717,13 @@ class AppService:
 
             # For agent-type apps with a config payload, create the AgentConfig
             if app.type == "agent" and data.agent_config:
-                self._create_agent_config(app.id, data.agent_config, now)
+                self._create_agent_config(
+                    app.id,
+                    data.agent_config,
+                    now,
+                    workspace_id=workspace_id,
+                    tenant_id=tenant_id,
+                )
 
             # For multi_agent-type apps with a config payload, create MultiAgentConfig
             if app.type == "multi_agent" and data.multi_agent_config:
@@ -1674,6 +1701,17 @@ class AppService:
 
         # Convert to storage format
         storage_data = AgentConfigConverter.to_storage_format(data)
+
+        tools = storage_data.get("tools") or []
+        if tools:
+            tenant_id = cross_domain_read.get_workspace_tenant_id(
+                self.db, app.workspace_id
+            )
+            if tenant_id is None:
+                raise BusinessException("应用所属工作空间不存在", BizCode.NOT_FOUND)
+            storage_data["tools"] = ToolService(self.db).validate_tool_selection(
+                tenant_id, tools, agent_cfg.tools
+            )
 
         # Update fields (unconditional full overwrite: absent fields are cleared too)
         agent_cfg.system_prompt = data.system_prompt

@@ -17,6 +17,7 @@ const MODE_BY_SEARCH_SWITCH: Record<string, string> = {
   '1': 'normal',
   '2': 'quick',
   '5': 'express',
+  '6': 'community',
 }
 
 const asRecord = (value: unknown): RecordValue => (
@@ -45,7 +46,7 @@ const RequestSummaryCard: FC<RequestSummaryCardProps> = ({ log, query, searchSwi
     `mode=${mode}`,
     t('memoryConversation.requestSummary.syncResponse'),
     backend,
-    t('memoryConversation.requestSummary.defaultLimit', { limit }),
+    ...(currentSearchSwitch === '6' ? [] :[t('memoryConversation.requestSummary.defaultLimit', { limit })]),
   ]
 
   return (
