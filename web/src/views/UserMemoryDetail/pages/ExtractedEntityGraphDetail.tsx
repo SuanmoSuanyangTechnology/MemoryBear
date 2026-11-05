@@ -1,45 +1,19 @@
-import { type FC, useState, useEffect } from 'react'
+import { type FC, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useSearchParams } from 'react-router-dom'
 import { Row, Col, Flex, Skeleton, Pagination, Form, Select, DatePicker, ConfigProvider } from 'antd'
 import clsx from 'clsx'
 import dayjs from 'dayjs'
 
-import { getEntityEventTimeline } from '@/api/memory'
-import type { Node } from '../types'
+import { useEntityTimeline } from '../components/useEntityTimeline'
+import { timelineSortOptions as sortObj, type TimelineTab as TAB } from '../components/entityTimelineTypes'
+export type { Query, ExtractedEntityMemory, TypeStats, TimelineFormValues as FormValues } from '../components/entityTimelineTypes'
 import RbCard from '@/components/RbCard/Card'
 import EmotionTimeAnalysis from '../components/EmotionTimeAnalysis'
 import { formatDateTime } from '@/utils/format'
 import Tag, { type TagProps } from '@/components/Tag'
 import Empty from '@/components/Empty'
 import BtnTabs from '@/components/BtnTabs'
-
-interface PaginationConfig { pagesize?: number; page?: number; }
-
-interface ExtractedEntityMemory {
-  type: string;
-  category: string;
-  title: string;
-  text: string;
-  created_at: string | number;  
-  timetype: 'recording'
-}
-interface TypeStats {
-  type: string;
-  count: number;
-}
-type TAB = 'all' | 'key_node' | 'statement' | 'memory_summary';
-
-export interface Query extends PaginationConfig {
-  id: string;
-  type?: TAB;
-  sort?: string;
-  timeRange?: dayjs.Dayjs[];
-  from_ts?: number;
-  to_ts?: number;
-}
-
-const PAGE_SIZE = 10
 
 const tagColors: Record<string, TagProps['color']> = {
   'education_learning': 'processing',
@@ -61,103 +35,22 @@ const tagColors: Record<string, TagProps['color']> = {
 }
 
 const tabs: TAB[] = ['all', 'key_node', 'statement', 'memory_summary']
-const sortObj: Record<TAB, string[]> = {
-  all: ['time_asc', 'time_desc'],
-  key_node: ['occurred_asc', 'occurred_desc'],
-  statement: ['recorded_asc', 'recorded_desc'],
-  memory_summary: ['recorded_asc', 'recorded_desc'],
-}
-
-export interface FormValues {
-  sort?: string;
-  timeRange?: dayjs.Dayjs[];
-}
-
+/** 实体详情及其时间线展示。 */
 const ExtractedEntityGraphDetail: FC = () => {
   const { t } = useTranslation()
   const [searchParams] = useSearchParams()
-  const [vo, setVo] = useState<Node | null>(null)
-  const [timelineLoading, setTimelineLoading] = useState(false)
-  const [timelineMemories, setTimelineMemories] = useState<ExtractedEntityMemory[]>([])
-  const [typeStats, setTypeStats] = useState<TypeStats[]>([])
-  const [activeTab, setActiveTab] = useState<TAB>('all')
-  const [currentPagination, setCurrentPagination] = useState<PaginationConfig>({
-    page: 1,
-    pagesize: PAGE_SIZE,
-  });
-  const [total, setTotal] = useState(0);
-  const [totalCount, setTotalCount] = useState(0)
   const nodeId = searchParams.get('nodeId')
   const nodeLabel = searchParams.get('nodeLabel')
   const nodeName = searchParams.get('nodeName')
-  const [form] = Form.useForm<FormValues>()
-  const formValues = Form.useWatch([], form) || {};
-
-  const handleChangeTab = (key: string) => {
-    setActiveTab(key as TAB)
-    form.setFieldsValue({
-      sort: sortObj[key as TAB][0],
-      timeRange: undefined,
-    })
-  }
-
-  useEffect(() => {
-    if (nodeId && nodeLabel) {
-      const nodeFromUrl = {
-        id: nodeId,
-        label: nodeLabel,
-        name: nodeName || nodeLabel
-      } as Node
-      setVo(nodeFromUrl)
-    }
-  }, [searchParams, nodeId, nodeLabel, nodeName])
-
-  useEffect(() => {
-    getTimelineMemoriesData(vo, formValues, {
-      page: 1,
-      pagesize: currentPagination.pagesize,
-    })
-  }, [vo, activeTab, formValues])
-
-  const getTimelineMemoriesData = (vo: Node | null, values: FormValues, pagination?: PaginationConfig) => {
-    if (!vo || !vo?.id || !vo?.label) return
-    setTimelineLoading(true)
-    if (pagination) {
-      setCurrentPagination({
-        ...currentPagination,
-        ...pagination,
-      })
-    }
-    getEntityEventTimeline({
-      type: activeTab === 'all' ? undefined : activeTab,
-      id: vo.id as string,
-      ...currentPagination,
-      ...(pagination || {}),
-      sort: values?.sort,
-      from_ts: values?.timeRange?.[0].startOf('d').valueOf(),
-      to_ts: values?.timeRange?.[1].endOf('d').valueOf(),
-    })
-      .then(res => {
-        const response = res as {
-          total_count: number;
-          items: ExtractedEntityMemory[];
-          type_stats: TypeStats[]
-          page: { hasnext: boolean; pagesize: number; total: number; }
-        }
-        setTypeStats(response.type_stats || [])
-        setTotal(response.page.total)
-        setTotalCount(response.total_count)
-        setTimelineMemories(response.items)
-      })
-      .finally(() => setTimelineLoading(false))
-  }
-  const handlePageChange = (page: number, pagesize: number) => {
-    if (!vo) return
-    getTimelineMemoriesData(vo, formValues, {
-      page: page,
-      pagesize
-    })
-  }
+  const {
+    activeTab, form, loading: timelineLoading, items: timelineMemories,
+    typeStats, currentPagination, total, totalCount,
+    handleChangeTab, handleValuesChange, handlePageChange,
+  } = useEntityTimeline({
+    id: nodeId,
+    enabled: Boolean(nodeId && nodeLabel),
+    initialTab: 'all',
+  })
   const [isHasMore, setIsHasMore] = useState(true)
 
   return (
@@ -234,7 +127,7 @@ const ExtractedEntityGraphDetail: FC = () => {
                 onChange={handleChangeTab}
               />
 
-              <Form form={form} size="small" initialValues={{ sort: 'time_asc' }}>
+              <Form form={form} size="small" initialValues={{ sort: 'time_asc' }} onValuesChange={handleValuesChange}>
                 <Flex gap={12}>
                   <Form.Item name="sort" noStyle>
                     <Select

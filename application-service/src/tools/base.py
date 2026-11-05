@@ -80,6 +80,14 @@ class BaseTool(ABC):
         """Tool parameter definitions."""
         pass
 
+    def parameters_for_operation(self, operation: Optional[str] = None) -> List[ToolParameter]:
+        """Parameter definitions bound to one operation.
+
+        Multi-operation tools override this to return the selected operation's
+        arguments; the default is the whole-tool parameter list.
+        """
+        return self.parameters
+
     @property
     def tags(self) -> List[str]:
         """Tool tags."""
@@ -114,14 +122,15 @@ class BaseTool(ABC):
             Error dict; empty means validation passed
         """
         errors = {}
-        param_definitions = {p.name: p for p in self.parameters}
+        param_defs = self.parameters_for_operation(parameters.get("operation"))
+        param_definitions = {p.name: p for p in param_defs}
 
         # Required check. The workflow-node frontend submits blank strings ""
         # for unfilled fields instead of omitting the key, so an empty string
         # counts as "not filled" here too; otherwise the missing-required
         # report would be skipped and a misleading "invalid type" error raised
         # by the type check below instead.
-        for param_def in self.parameters:
+        for param_def in param_defs:
             if param_def.required and (
                 param_def.name not in parameters or parameters.get(param_def.name) in (None, "")
             ):

@@ -6,7 +6,7 @@ from typing import Any
 
 from error_core.codes import BizCode, coerce_code, code_name, http_status_for
 from error_core.diagnostics import format_diagnostics
-from error_core.messages import user_message
+from error_core.messages import fallback_message, user_message
 
 from ..errors import BusinessException
 from ..i18n import get_current_locale
@@ -36,14 +36,18 @@ def workflow_error_info(
         code = coerce_code(exc.biz_code)
         if code in (None, BizCode.OK.value):
             code = BizCode.INTERNAL_ERROR.value
-        msg = getattr(exc, "user_msg", None) or user_message(code, locale) or str(exc)
+        msg = getattr(exc, "user_msg", None) or user_message(
+            code, locale
+        ) or fallback_message(http_status_for(code), locale)
         detail = getattr(exc, "detail", "") or str(exc) or code_name(code)
         retryable = bool(exc.retryable)
     elif isinstance(exc, BusinessException):
         code = coerce_code(exc.code)
         if code in (None, BizCode.OK.value):
             code = BizCode.INTERNAL_ERROR.value
-        msg = user_message(code, locale) or exc.message
+        msg = user_message(code, locale) or fallback_message(
+            http_status_for(code), locale
+        )
         detail = exc.message or code_name(code)
         retryable = http_status_for(code) >= 500
     else:

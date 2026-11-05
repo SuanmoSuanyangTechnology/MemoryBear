@@ -11,24 +11,14 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from src.common.errors import BizCode, LocalizedProfileError, ProfileError
-from src.common.responses import ApiResponse, failure
+from src.common.responses import ApiResponse, error_response, failure, validation_error_response
 from src.i18n import get_request_language, t
-from src.middleware.request_logging import record_request_failure
 
 logger = logging.getLogger(__name__)
 
 
 def _response(request: Request, status: int, body: ApiResponse[Any]) -> JSONResponse:
-    record_request_failure(
-        request,
-        response_code=body.code,
-        error_code="REQUEST_REJECTED",
-    )
-    response = JSONResponse(status_code=status, content=body.model_dump(mode="json"))
-    trace_id = getattr(request.state, "trace_id", None)
-    if trace_id:
-        response.headers["X-Trace-Id"] = trace_id
-    return response
+    return error_response(request, status, body)
 
 
 def register_error_handlers(app: FastAPI) -> None:
@@ -49,15 +39,7 @@ def register_error_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(RequestValidationError)
     async def validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:
-        return _response(
-            request,
-            422,
-            failure(
-                BizCode.VALIDATION_FAILED,
-                t("common.validation.request_failed", get_request_language(request)),
-                str(exc.errors()),
-            ),
-        )
+        return validation_error_response(request, exc)
 
     @app.exception_handler(StarletteHTTPException)
     async def http_error(request: Request, exc: StarletteHTTPException) -> JSONResponse:

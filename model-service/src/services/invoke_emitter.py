@@ -35,10 +35,10 @@ class InvokeEvent:
 
 def error_payload(failure: InvokeFailure) -> dict[str, Any]:
     """HTTP error-frame body: numeric code, localized msg and diagnostic error."""
-    from error_core.codes import coerce_code
+    from error_core.codes import coerce_code, http_status_for
     from error_core.diagnostics import redact
     from error_core.envelope import error_frame
-    from error_core.messages import user_message
+    from error_core.messages import fallback_message, user_message
 
     from ..i18n import get_current_locale
 
@@ -46,9 +46,12 @@ def error_payload(failure: InvokeFailure) -> dict[str, Any]:
     # Error frames must never carry OK (0): treat it as an unresolved code.
     if numeric in (None, BizCode.OK.value):
         numeric = BizCode.INTERNAL_ERROR.value
+    locale = get_current_locale()
     return error_frame(
         code=numeric,
-        msg=failure.msg or user_message(numeric, get_current_locale()) or failure.message,
+        msg=failure.msg
+        or user_message(numeric, locale)
+        or fallback_message(http_status_for(numeric), locale),
         error=redact(failure.detail or failure.message),
         retryable=failure.retryable,
         attempts=failure.attempts,

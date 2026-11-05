@@ -8,6 +8,14 @@
     "invalid_parameter": "Invalid {name}",
     "invalid_uuid": "'{value}' is not a valid UUID"
   },
+  "http": {
+    "bad_request": "Bad request parameters",
+    "not_found": "Resource not found",
+    "internal_error": "Internal server error"
+  },
+  "workspace": {
+    "not_found": "Workspace not found"
+  },
   "internal_error": "Internal service error",
   "service_unavailable": "Service temporarily unavailable"
 }

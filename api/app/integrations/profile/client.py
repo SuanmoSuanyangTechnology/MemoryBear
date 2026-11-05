@@ -103,6 +103,8 @@ class MemoryProfileServiceClient:
         timezone: str | None = None,
         query: Mapping[str, Any] | None = None,
         payload: Any | None = None,
+        body: bytes | None = None,
+        raw_body: bool = False,
         raw: bool = False,
         timeout: float | None = None,
     ) -> dict[str, Any] | MemoryProfileRawResponse:
@@ -117,6 +119,11 @@ class MemoryProfileServiceClient:
         With ``raw=True`` the response body is returned as already-serialized
         bytes, after the same envelope validation. Callers that forward the
         payload (the API proxy) then skip a second encode.
+
+        ``raw_body=True`` sends ``body`` byte for byte instead of ``json=payload``.
+        Write endpoints whose body is parsed inside the handler use this so field
+        presence (``exclude_unset``) and the original validation timing survive
+        the hop.
         """
 
         path = _internal_path(path)
@@ -141,6 +148,9 @@ class MemoryProfileServiceClient:
         }
         if language_type is not None:
             headers["X-Language-Type"] = language_type
+        if raw_body:
+            # The API routes in this migration only ever carry JSON bodies.
+            headers["Content-Type"] = "application/json"
         if timezone is not None:
             headers["X-Timezone"] = timezone
 
@@ -170,7 +180,8 @@ class MemoryProfileServiceClient:
                 self._url(path),
                 headers=headers,
                 params=params,
-                json=payload,
+                content=body if raw_body else None,
+                json=None if raw_body else payload,
                 **extra,
             )
         except httpx.TimeoutException as exc:
@@ -237,6 +248,8 @@ class MemoryProfileServiceClient:
                 return MemoryProfileRawResponse(
                     body=response.content,
                     media_type=response.headers.get("content-type", "application/json"),
+                    content_language=response.headers.get("content-language"),
+                    status_code=response.status_code,
                 )
             return envelope
         finally:

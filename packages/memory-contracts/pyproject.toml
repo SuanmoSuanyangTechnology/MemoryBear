@@ -1,0 +1,18 @@
+[build-system]
+requires = ["hatchling>=1.26"]
+build-backend = "hatchling.build"
+
+[project]
+name = "memory-contracts"
+version = "0.1.0"
+description = "Shared Memory domain contracts: constants, DTOs, and pure helpers"
+requires-python = ">=3.12,<3.13"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/memory_contracts"]
+
+# Resolve through the mirror so re-locks keep every lock URL on it.
+[[tool.uv.index]]
+name = "tencent"
+url = "https://mirrors.cloud.tencent.com/pypi/simple"
+default = true

@@ -1,5 +1,4 @@
 import asyncio
-from typing import Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, Request
@@ -23,16 +22,7 @@ from app.services.memory_storage_service import (
     MemoryStorageService,
     analytics_hot_memory_tags,
     analytics_recent_activity_stats,
-    kb_type_distribution,
-    search_all_batch,
-    search_chunk,
-    search_detials,
-    search_dialogue,
-    search_edges,
-    search_entity,
-    search_statement,
 )
-
 from app.utils.config_utils import resolve_config_id, resolve_config_id_async
 from app.utils.redis_lock import RedisFairLock
 
@@ -143,122 +133,6 @@ async def trial_run_chat_stream(
         },
     )
 
-
-# ==================== Search & Analytics ====================
-
-@router.get("/search/kb_type_distribution", response_model=ApiResponse)
-async def get_kb_type_distribution(
-        end_user_id: Optional[str] = None,
-        current_user: CurrentUserSnapshot = Depends(get_current_user_async),
-) -> dict:
-    api_logger.info(f"KB type distribution requested for end_user_id: {end_user_id}")
-    try:
-        result = await kb_type_distribution(end_user_id)
-        return success(data=result, msg="查询成功")
-    except Exception as e:
-        api_logger.error(f"KB type distribution failed: {str(e)}")
-        return fail(BizCode.INTERNAL_ERROR, "知识库类型分布查询失败", str(e))
-
-
-@router.get("/search/dialogue", response_model=ApiResponse)
-async def search_dialogues_num(
-        end_user_id: Optional[str] = None,
-        current_user: CurrentUserSnapshot = Depends(get_current_user_async),
-) -> dict:
-    api_logger.info(f"Search dialogue requested for end_user_id: {end_user_id}")
-    try:
-        result = await search_dialogue(end_user_id)
-        return success(data=result, msg="查询成功")
-    except Exception as e:
-        api_logger.error(f"Search dialogue failed: {str(e)}")
-        return fail(BizCode.INTERNAL_ERROR, "对话查询失败", str(e))
-
-
-@router.get("/search/chunk", response_model=ApiResponse)
-async def search_chunks_num(
-        end_user_id: Optional[str] = None,
-        current_user: CurrentUserSnapshot = Depends(get_current_user_async),
-) -> dict:
-    api_logger.info(f"Search chunk requested for end_user_id: {end_user_id}")
-    try:
-        result = await search_chunk(end_user_id)
-        return success(data=result, msg="查询成功")
-    except Exception as e:
-        api_logger.error(f"Search chunk failed: {str(e)}")
-        return fail(BizCode.INTERNAL_ERROR, "分块查询失败", str(e))
-
-
-@router.get("/search/statement", response_model=ApiResponse)
-async def search_statements_num(
-        end_user_id: Optional[str] = None,
-        current_user: CurrentUserSnapshot = Depends(get_current_user_async),
-) -> dict:
-    api_logger.info(f"Search statement requested for end_user_id: {end_user_id}")
-    try:
-        result = await search_statement(end_user_id)
-        return success(data=result, msg="查询成功")
-    except Exception as e:
-        api_logger.error(f"Search statement failed: {str(e)}")
-        return fail(BizCode.INTERNAL_ERROR, "语句查询失败", str(e))
-
-
-@router.get("/search/entity", response_model=ApiResponse)
-async def search_entities_num(
-        end_user_id: Optional[str] = None,
-        current_user: CurrentUserSnapshot = Depends(get_current_user_async),
-) -> dict:
-    api_logger.info(f"Search entity requested for end_user_id: {end_user_id}")
-    try:
-        result = await search_entity(end_user_id)
-        return success(data=result, msg="查询成功")
-    except Exception as e:
-        api_logger.error(f"Search entity failed: {str(e)}")
-        return fail(BizCode.INTERNAL_ERROR, "实体查询失败", str(e))
-
-
-@router.get("/search", response_model=ApiResponse)
-async def search_all_num(
-        end_user_id: Optional[str] = None,
-        current_user: CurrentUserSnapshot = Depends(get_current_user_async),
-) -> dict:
-    api_logger.info(f"Search all requested for end_user_id: {end_user_id}")
-    try:
-        if not end_user_id:
-            return success(data={"total": 0}, msg="查询成功")
-        batch_result = await search_all_batch([end_user_id])
-        result = {"total": batch_result.get(end_user_id, 0)}
-        return success(data=result, msg="查询成功")
-    except Exception as e:
-        api_logger.error(f"Search all failed: {str(e)}")
-        return fail(BizCode.INTERNAL_ERROR, "全部查询失败", str(e))
-
-
-@router.get("/search/detials", response_model=ApiResponse)
-async def search_entities_detials(
-        end_user_id: Optional[str] = None,
-        current_user: CurrentUserSnapshot = Depends(get_current_user_async),
-) -> dict:
-    api_logger.info(f"Search details requested for end_user_id: {end_user_id}")
-    try:
-        result = await search_detials(end_user_id)
-        return success(data=result, msg="查询成功")
-    except Exception as e:
-        api_logger.error(f"Search details failed: {str(e)}")
-        return fail(BizCode.INTERNAL_ERROR, "详情查询失败", str(e))
-
-
-@router.get("/search/edges", response_model=ApiResponse)
-async def search_entity_edges(
-        end_user_id: Optional[str] = None,
-        current_user: CurrentUserSnapshot = Depends(get_current_user_async),
-) -> dict:
-    api_logger.info(f"Search edges requested for end_user_id: {end_user_id}")
-    try:
-        result = await search_edges(end_user_id)
-        return success(data=result, msg="查询成功")
-    except Exception as e:
-        api_logger.error(f"Search edges failed: {str(e)}")
-        return fail(BizCode.INTERNAL_ERROR, "边查询失败", str(e))
 
 @router.get("/analytics/hot_memory_tags", response_model=ApiResponse)
 @memory_profile_proxy(

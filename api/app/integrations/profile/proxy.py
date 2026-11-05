@@ -7,12 +7,11 @@ from collections.abc import Mapping
 from functools import wraps
 from inspect import signature
 from typing import Any, ParamSpec, TypeVar
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from fastapi import Request, Response
 
 from app.core.error_codes import BizCode
-from app.core.language_utils import get_language_from_header
 from app.core.response_utils import fail
 from app.core.trace import get_trace_id
 from app.i18n.dependencies import get_current_language
@@ -67,6 +66,38 @@ def _caller_actor_id(current_user: Any, source: MemoryProfileAuthSource) -> str:
     return str(current_user.id)
 
 
+def _resolve_identity(
+    current_user: Any, source: MemoryProfileAuthSource
+) -> tuple[Any, Any, str]:
+    """Resolve ``(workspace_id, tenant_id, actor_id)`` for either face.
+
+    Handlers that run ``@require_api_key_self_db`` do not declare a
+    ``current_user`` parameter, so the principal comes from the API-key context
+    that decorator established. That context also names the actor; the two other
+    values are still required and are validated by the caller.
+    """
+
+    if current_user is not None:
+        return (
+            getattr(current_user, "current_workspace_id", None),
+            getattr(current_user, "tenant_id", None),
+            _caller_actor_id(current_user, source),
+        )
+    from app.core.api_key_auth import get_current_api_key_auth
+
+    try:
+        auth = get_current_api_key_auth()
+    except Exception as exc:  # BusinessException when no key authenticated
+        raise MemoryProfileConfigurationError(
+            "memory_profile_proxy requires current_user or an API-key context"
+        ) from exc
+    if source == MemoryProfileAuthSource.APIKEY:
+        actor_id = str(auth.api_key_id)
+    else:
+        actor_id = str(auth.created_by)
+    return auth.workspace_id, auth.tenant_id, actor_id
+
+
 async def forward_memory_profile_request(
     *,
     method: str,
@@ -111,11 +142,14 @@ def memory_profile_proxy(
     query_fields: tuple[str, ...] = (),
     body_arg: str | None = None,
     body_fields: tuple[str, ...] = (),
+    raw_body: bool = False,
     language_field: str | None = None,
     upper_bounds: dict[str, int] | None = None,
     source: MemoryProfileAuthSource | None = None,
     timeout_seconds: float | None = None,
     target_path: str | None = None,
+    principal_arg: str = "current_user",
+    preserve_status: bool = False,
 ):
     """Forward a migrated route to memory-profile for every request.
     The wrapped function defines the route signature, not a local fallback. The API-key
@@ -138,6 +172,18 @@ def memory_profile_proxy(
     differs from the one internal route that serves the capability (the admin hot-tags
     alias under ``/memory-storage``). Only the forwarded path moves; the caller's own
     path still decides the face (``x-source``) and the acting id.
+
+    ``language_field`` is retained for existing decorators. Language selection
+    belongs to the host's i18n middleware, including for those routes.
+
+    ``raw_body`` forwards the request bytes instead of rebuilding a payload, so a
+    body parsed inside the handler keeps its ``exclude_unset`` semantics.
+    ``preserve_status`` returns the upstream HTTP status instead of forcing 200,
+    for endpoints whose legacy contract distinguishes 4xx/5xx.
+
+    ``principal_arg`` names the handler argument carrying the caller when it is
+    not ``current_user``; when neither is present the API-key context established
+    by ``@require_api_key_self_db`` supplies the identity.
     """
 
     bounds = dict(upper_bounds or {})
@@ -161,35 +207,43 @@ def memory_profile_proxy(
                     "memory_profile_proxy requires the handler to declare "
                     "request: Request"
                 )
-            current_user = arguments.get("current_user")
-            error_language = (
-                arguments.get(language_field)
-                if language_field
-                else request.headers.get("X-Language-Type")
+            current_user = arguments.get(principal_arg)
+            if current_user is None:
+                current_user = arguments.get("current_user")
+            language = await get_current_language(request)
+            workspace_id, tenant_id, actor_id = _resolve_identity(
+                current_user,
+                _caller_source(request.scope["path"]) if source is None else source,
             )
-            if error_language is None:
-                error_language = await get_current_language(request)
-            else:
-                error_language = get_language_from_header(error_language)
-            workspace_id = getattr(current_user, "current_workspace_id", None)
             if workspace_id is None:
                 return fail(
                     BizCode.INVALID_PARAMETER,
-                    t("memory.errors.workspace_required", error_language),
-                    t("memory.errors.current_workspace_missing", error_language),
+                    t("memory.errors.workspace_required", language),
+                    t("memory.errors.current_workspace_missing", language),
                 )
 
             # The query is rebuilt from the declared fields rather than forwarded
             # raw: API-key callers reach the handler through merge routing, so the
             # caller's own end_user_id may still name a merged-away end user.
-            query = {field: arguments.get(field) for field in query_fields}
+            # Non-primitive values (a ``UUID`` declared by the handler) are
+            # stringified: httpx only encodes str/int/float/bool/None.
+            query: dict[str, Any] = {}
+            for field in query_fields:
+                value = arguments.get(field)
+                query[field] = str(value) if isinstance(value, UUID) else value
             for field, maximum in bounds.items():
                 value = query.get(field)
                 if value is not None and value > maximum:
                     query[field] = maximum
 
             payload = None
-            if body_fields:
+            raw_payload: bytes | None = None
+            if raw_body:
+                # Byte-for-byte passthrough: the handler on the other side parses
+                # and validates the body itself, so unset fields must not become
+                # explicit nulls here.
+                raw_payload = await request.body()
+            elif body_fields:
                 if body_arg:
                     source_model = arguments.get(body_arg)
                     if source_model is None:
@@ -209,19 +263,8 @@ def memory_profile_proxy(
 
             caller_path = request.scope["path"]
             path = target_path or caller_path
-            # Language is presentation-only, so every proxied route forwards it
-            # even when the handler does not declare the header. An explicit
-            # ``language_field`` still wins for callers that carry it elsewhere.
-            if language_field is not None:
-                # Display keeps the legacy API's zh/en-only header rule. Resolve
-                # it here so the downstream middleware cannot add a fallback.
-                language_type = get_language_from_header(arguments.get(language_field))
-            else:
-                language_type = request.headers.get("X-Language-Type")
-                if language_type is None:
-                    language_type = request.headers.get("Accept-Language")
-                if language_type is None:
-                    language_type = error_language
+            # Forward the host's resolved language so local validation and the
+            # profile response follow the same query/header preference order.
             trace_id = get_trace_id() or uuid4().hex
             caller_source = (
                 _caller_source(caller_path) if source is None else source
@@ -231,14 +274,16 @@ def memory_profile_proxy(
                     method=request.method,
                     path=path,
                     workspace_id=str(workspace_id),
-                    tenant_id=str(current_user.tenant_id),
-                    actor_id=_caller_actor_id(current_user, caller_source),
+                    tenant_id=str(tenant_id),
+                    actor_id=actor_id,
                     source=caller_source,
                     trace_id=trace_id,
-                    language_type=language_type,
+                    language_type=language,
                     timezone=request.headers.get("X-Timezone"),
                     query=query,
                     payload=payload,
+                    body=raw_payload,
+                    raw_body=raw_body,
                     raw=True,
                     timeout=timeout_seconds,
                 )
@@ -248,7 +293,8 @@ def memory_profile_proxy(
                     return Response(
                         content=result.body,
                         media_type=result.media_type,
-                        status_code=200,
+                        status_code=result.status_code if preserve_status else 200,
+                        headers={"Content-Language": result.content_language or language},
                     )
                 return result
             except MemoryProfileClientError as exc:
@@ -260,8 +306,8 @@ def memory_profile_proxy(
                 )
                 return fail(
                     BizCode.SERVICE_UNAVAILABLE,
-                    t("memory.errors.profile_unavailable", error_language),
-                    t("memory.errors.profile_unavailable_detail", error_language),
+                    t("memory.errors.profile_unavailable", language),
+                    t("memory.errors.profile_unavailable_detail", language),
                 )
 
         return wrapped

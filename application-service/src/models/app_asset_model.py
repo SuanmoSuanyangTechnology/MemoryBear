@@ -227,9 +227,7 @@ class MarketSync(Base):
     )
     bundle_content_hash = Column(
         String(128), nullable=True,
-        comment="当初投出去那份包的哈希；重试时据此复用同一份包，不重导。"
-                "格式 `sha256:<64 位小写十六进制>`（71 字符），"
-                "宽度与 market-service 的 market_versions.content_hash 对齐",
+        comment="当初投出去那份包的哈希；重试时据此复用同一份包，不重导",
     )
     status = Column(
         String(16), nullable=False, default=MarketSyncStatus.PENDING_SYNC,

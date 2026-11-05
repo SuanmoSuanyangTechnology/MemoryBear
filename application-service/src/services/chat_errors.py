@@ -9,7 +9,7 @@ from typing import Any
 from error_core.codes import BizCode, code_name, coerce_code, http_status_for
 from error_core.diagnostics import format_diagnostics, redact
 from error_core.envelope import error_frame as build_error_frame
-from error_core.messages import user_message
+from error_core.messages import fallback_message, user_message
 
 from ..errors import BusinessException
 from ..integrations.model.errors import ModelInvokeFailedError
@@ -30,7 +30,11 @@ def error_payload(
         numeric = coerce_code(exc.biz_code)
         if numeric in (None, BizCode.OK.value):
             numeric = fallback_code.value
-        msg = getattr(exc, "user_msg", None) or user_message(numeric, locale) or str(exc)
+        msg = (
+            getattr(exc, "user_msg", None)
+            or user_message(numeric, locale)
+            or fallback_message(http_status_for(numeric), locale)
+        )
         # The upstream_service suffix is appended once by
         # integrations/model/invoke.py to_host_error (Task 18); do not repeat it.
         detail = redact(getattr(exc, "detail", "") or str(exc))
@@ -41,7 +45,9 @@ def error_payload(
         numeric = coerce_code(exc.code)
         if numeric in (None, BizCode.OK.value):
             numeric = fallback_code.value
-        msg = user_message(numeric, locale) or exc.message
+        msg = user_message(numeric, locale) or fallback_message(
+            http_status_for(numeric), locale
+        )
         detail = format_diagnostics(trace_id=trace_id, detail=exc.message)
         retryable = http_status_for(numeric) >= 500
         attempts = 0

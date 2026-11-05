@@ -10,10 +10,10 @@ class Conversation(ReadOnlyBase):
     __tablename__ = "conversations"
 
     id = Column(UUID(as_uuid=True), primary_key=True)
-    app_id = Column(UUID(as_uuid=True), nullable=True)
+    app_id = Column(UUID(as_uuid=True), nullable=False)
     user_id = Column(String, nullable=True)
-    write_cursor = Column(Integer, nullable=True)
-    is_active = Column(Boolean, nullable=True)
+    write_cursor = Column(Integer, nullable=False)
+    is_active = Column(Boolean, nullable=False)
 
 
 class MemoryMessage(ReadOnlyBase):
@@ -30,7 +30,7 @@ class MemoryPerceptual(ReadOnlyBase):
     __tablename__ = "memory_perceptual"
 
     id = Column(UUID(as_uuid=True), primary_key=True)
-    end_user_id = Column(UUID(as_uuid=True), nullable=False)
+    end_user_id = Column(UUID(as_uuid=True), nullable=True)
     perceptual_type = Column(Integer, nullable=False)
     storage_service = Column(Integer, nullable=True)
     file_path = Column(String, nullable=False)
@@ -64,4 +64,4 @@ class ImplicitEmotionsStorage(ReadOnlyBase):
     end_user_id = Column(String(255), nullable=False)
     implicit_profile = Column(JSONB, nullable=True)
 
-    updated_at = Column(DateTime, nullable=True)
+    updated_at = Column(DateTime, nullable=False)

@@ -22,6 +22,7 @@ dependencies = [
     "json-repair==0.64.2",
     "langchain-core==1.6.12",
     "langchain-openai==1.7.2",
+    "memory-contracts",
     "jinja2==3.1.6",
     "neo4j==6.4.0",
     "psutil==7.2.2",
@@ -44,6 +45,7 @@ dependencies = [
 
 [tool.uv.sources]
 auth-sdk = { path = "../packages/auth-sdk" }
+memory-contracts = { path = "../packages/memory-contracts" }
 redbear-model = { path = "../packages/redbear-model" }
 task-bridge-sdk = { path = "../packages/task-bridge-sdk" }
 

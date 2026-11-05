@@ -8,6 +8,7 @@ FastAPI/Starlette, which every HTTP service already installs.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
@@ -176,9 +177,18 @@ def register_error_handlers(application: FastAPI, deps: ErrorHandlerDeps) -> Non
         display = user_message(numeric, language, **context) or fallback_message(
             status_code, language
         )
+        diagnostic_detail = message
+        # Failure ``data`` never reaches the envelope; structured detail stays
+        # inspectable in the diagnostic string instead.
+        extra = getattr(exc, "data", None)
+        if extra:
+            rendered = json.dumps(
+                extra, ensure_ascii=False, separators=(",", ":"), default=str
+            )
+            diagnostic_detail = f"{message} data={deps.filter_string(rendered)}"
         detail = format_diagnostics(
             trace_id=getattr(request.state, "trace_id", None) or deps.get_trace_id(),
-            detail=message,
+            detail=diagnostic_detail,
         )
         return render_error(
             request,
@@ -188,7 +198,6 @@ def register_error_handlers(application: FastAPI, deps: ErrorHandlerDeps) -> Non
                 code=numeric,
                 msg=display,
                 error=detail,
-                data=getattr(exc, "data", None),
             ),
             error_code=code_name(numeric),
             message=display,

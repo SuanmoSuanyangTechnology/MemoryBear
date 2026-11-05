@@ -190,6 +190,8 @@ def update_tool(tool_id: str, request: ToolUpdateRequest, db: DbSession, princip
         if not success_flag:
             raise HTTPException(status_code=404, detail="工具不存在")
         return success(msg="工具更新成功")
+    except BusinessException:
+        raise
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     except HTTPException:
@@ -284,6 +286,8 @@ def execute_tool(request: ToolExecuteRequest, db: DbSession, principal: Caller):
             },
             msg="工具执行完成"
         )
+    except BusinessException:
+        raise
     except HTTPException:
         raise
     except Exception as e:

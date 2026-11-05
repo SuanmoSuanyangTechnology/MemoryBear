@@ -164,10 +164,10 @@ DEFAULT_PROJECTION = {
         fields=("id", "content", "created_at", "score")
     ),
     MemoryNodeType.STATEMENT: NodeProjection(
-        fields=("id", "statement", "created_at", "score")
+        fields=("id", "statement", "created_at", "chunk_id", "score")
     ),
     MemoryNodeType.MEMORY_SUMMARY: NodeProjection(
-        fields=("id", "name", "content", "created_at", "score")
+        fields=("id", "name", "content", "created_at", "chunk_ids", "score")
     ),
     MemoryNodeType.SCENE_SUMMARY: NodeProjection(
         fields=(

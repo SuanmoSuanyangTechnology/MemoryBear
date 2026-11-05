@@ -58,52 +58,74 @@ class CustomTool(BaseTool):
 
     @property
     def parameters(self) -> List[ToolParameter]:
-        """Tool parameter definitions."""
-        params = []
+        """Selection-level parameter definitions.
 
-        # Add the operation selection parameter
+        A multi-operation tool only exposes the operation selector here; each
+        operation's arguments come from ``parameters_for_operation``.
+        """
         if len(self._parsed_operations) > 1:
+            return [self._operation_parameter()]
+        if len(self._parsed_operations) == 1:
+            return self._parameters_for_operation(next(iter(self._parsed_operations)))
+        return []
+
+    def parameters_for_operation(self, operation: Optional[str] = None) -> List[ToolParameter]:
+        """Return one operation's arguments instead of the first method's."""
+        if operation is None:
+            if len(self._parsed_operations) > 1:
+                return [self._operation_parameter()]
+            if len(self._parsed_operations) == 1:
+                operation = next(iter(self._parsed_operations))
+            else:
+                return []
+        if operation not in self._parsed_operations:
+            raise ValueError(f"无效的操作: {operation}")
+        return self._parameters_for_operation(operation)
+
+    def _operation_parameter(self) -> ToolParameter:
+        return ToolParameter(
+            name="operation",
+            type=ParameterType.STRING,
+            description="要执行的操作",
+            required=True,
+            enum=list(self._parsed_operations.keys()),
+        )
+
+    def _parameters_for_operation(self, operation_name: str) -> List[ToolParameter]:
+        operation = self._parsed_operations[operation_name]
+        params: List[ToolParameter] = []
+
+        # path/query parameters
+        for param_name, param_info in operation.get("parameters", {}).items():
             params.append(ToolParameter(
-                name="operation",
-                type=ParameterType.STRING,
-                description="要执行的操作",
-                required=True,
-                enum=list(self._parsed_operations.keys())
+                name=param_name,
+                type=self._convert_openapi_type(param_info.get("type", "string")),
+                description=param_info.get("description", ""),
+                required=param_info.get("required", False),
+                default=param_info.get("default"),
+                enum=param_info.get("enum"),
+                minimum=param_info.get("minimum"),
+                maximum=param_info.get("maximum"),
+                pattern=param_info.get("pattern")
             ))
 
-        # Add common parameters (based on the first operation's parameters)
-        if self._parsed_operations:
-            first_operation = next(iter(self._parsed_operations.values()))
-            # path/query parameters
-            for param_name, param_info in first_operation.get("parameters", {}).items():
+        # requestBody parameters - flatten body fields into individual parameters for the model
+        request_body = operation.get("request_body")
+        if request_body:
+            body_schema = request_body.get("properties", {})
+            required_fields = request_body.get("required", [])
+            for prop_name, prop_schema in body_schema.items():
                 params.append(ToolParameter(
-                    name=param_name,
-                    type=self._convert_openapi_type(param_info.get("type", "string")),
-                    description=param_info.get("description", ""),
-                    required=param_info.get("required", False),
-                    default=param_info.get("default"),
-                    enum=param_info.get("enum"),
-                    minimum=param_info.get("minimum"),
-                    maximum=param_info.get("maximum"),
-                    pattern=param_info.get("pattern")
+                    name=prop_name,
+                    type=self._convert_openapi_type(prop_schema.get("type", "string")),
+                    description=prop_schema.get("description", ""),
+                    required=prop_name in required_fields,
+                    default=prop_schema.get("default"),
+                    enum=prop_schema.get("enum"),
+                    minimum=prop_schema.get("minimum"),
+                    maximum=prop_schema.get("maximum"),
+                    pattern=prop_schema.get("pattern")
                 ))
-            # requestBody parameters - flatten body fields into individual parameters for the model
-            request_body = first_operation.get("request_body")
-            if request_body:
-                body_schema = request_body.get("properties", {})
-                required_fields = request_body.get("required", [])
-                for prop_name, prop_schema in body_schema.items():
-                    params.append(ToolParameter(
-                        name=prop_name,
-                        type=self._convert_openapi_type(prop_schema.get("type", "string")),
-                        description=prop_schema.get("description", ""),
-                        required=prop_name in required_fields,
-                        default=prop_schema.get("default"),
-                        enum=prop_schema.get("enum"),
-                        minimum=prop_schema.get("minimum"),
-                        maximum=prop_schema.get("maximum"),
-                        pattern=prop_schema.get("pattern")
-                    ))
 
         return params
 
