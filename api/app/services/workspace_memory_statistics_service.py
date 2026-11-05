@@ -33,10 +33,11 @@ from app.core.utils.datetime_utils import (
 from app.db import get_async_db_context, get_db_read
 from app.repositories.conversation_repository import ConversationRepository
 from app.repositories.end_user_repository import EndUserRepository
+from app.repositories.end_user_info_repository import EndUserInfoRepository
 from app.repositories.forget_log_repository import ForgetLogRepository
 from app.repositories.memory_message_repository import MemoryMessageRepository
 from app.repositories.memory_perceptual_repository import MemoryPerceptualRepository
-from app.services.memory_base_service import MIN_MEMORY_SUMMARY_COUNT, count_explicit_memories
+from app.services.memory_base_service import MIN_MEMORY_SUMMARY_COUNT, count_profile_cards
 from app.services.short_term_memo_service import count_short_term_memos_for_users
 from app.repositories.implicit_emotions_storage_repository import ImplicitEmotionsStorageRepository
 
@@ -75,6 +76,10 @@ async def _get_postgresql_statistics(
     use_sync_pg: bool = False,
 ) -> dict[str, int]:
     async with asyncio.TaskGroup() as task_group:
+        permanent_task = task_group.create_task(
+            asyncio.to_thread(_get_permanent_count_sync, end_user_ids)
+            if use_sync_pg else _get_permanent_count(end_user_ids)
+        )
         perceptual_task = task_group.create_task(
             asyncio.to_thread(_get_perceptual_count_sync, end_user_ids)
             if use_sync_pg else _get_perceptual_count(end_user_ids)
@@ -97,6 +102,7 @@ async def _get_postgresql_statistics(
         )
 
     return {
+        "permanent_count": permanent_task.result(),
         "perceptual_count": perceptual_task.result(),
         "working_count": (
             active_conversation_task.result() + api_mcp_source_task.result()
@@ -104,6 +110,18 @@ async def _get_postgresql_statistics(
         "forget_count": forget_task.result(),
         "implicit_count": implicit_task.result(),
     }
+
+
+async def _get_permanent_count(end_user_ids: list[uuid.UUID]) -> int:
+    async with get_async_db_context() as db:
+        profiles = await EndUserInfoRepository(db).profiles_for_users(end_user_ids)
+    return sum(count_profile_cards(metadata, names) for _, metadata, names in profiles)
+
+
+def _get_permanent_count_sync(end_user_ids: list[uuid.UUID]) -> int:
+    with get_db_read() as db:
+        profiles = EndUserInfoRepository(db).profiles_for_users_sync(end_user_ids)
+    return sum(count_profile_cards(metadata, names) for _, metadata, names in profiles)
 
 
 async def _get_implicit_count(end_user_ids: list[uuid.UUID]) -> int:
@@ -249,11 +267,6 @@ async def get_workspace_statistics_async(
                 )
 
             async with asyncio.TaskGroup() as task_group:
-                explicit_task = task_group.create_task(
-                    count_explicit_memories(
-                        end_user_ids, connector=neo4j_client, use_sync_pg=use_sync_pg
-                    )
-                )
                 postgresql_task = task_group.create_task(
                     _get_postgresql_statistics(end_user_ids, use_sync_pg=use_sync_pg)
                 )
@@ -278,7 +291,9 @@ async def get_workspace_statistics_async(
             ]
             totals["WORKING_MEMORY"] += postgresql_statistics["working_count"]
             totals["SHORT_TERM_MEMORY"] += short_term_task.result()
-            totals["EXPLICIT_MEMORY"] += explicit_task.result()
+            totals["EXPLICIT_MEMORY"] += (
+                postgresql_statistics["permanent_count"] + graph_statistics["explicit_count"]
+            )
             totals["IMPLICIT_MEMORY"] += postgresql_statistics["implicit_count"]
             totals["EMOTIONAL_MEMORY"] += graph_statistics["emotional_count"]
             totals["EPISODIC_MEMORY"] += graph_statistics["episodic_count"]

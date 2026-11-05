@@ -3,7 +3,6 @@ Memory Base Service
 
 提供记忆服务的基础功能和共享辅助方法。
 """
-import asyncio
 import uuid
 from uuid import UUID
 from datetime import datetime
@@ -18,7 +17,7 @@ from app.core.memory.models.metadata_models import (
 from app.core.memory.emotion.emotion_buckets import normalize_emotion_type_or_raw
 from app.core.memory.pipelines.base_pipeline import ModelClientMixin
 from app.core.utils.datetime_utils import to_timestamp_ms
-from app.db import get_db_context, get_async_db_context, get_db_read
+from app.db import get_db_context, get_async_db_context
 from app.repositories.end_user_info_repository import EndUserInfoRepository
 from app.repositories.neo4j.entity_repository import EntityRepository
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
@@ -446,9 +445,17 @@ class MemoryBaseService:
         try:
             if not end_user_id:
                 return 0
-            return await count_explicit_memories(
-                [end_user_id], connector=self.neo4j_connector
+            async with get_async_db_context() as db:
+                profiles = await EndUserInfoRepository(db).profiles_for_users([end_user_id])
+            graph_rows = await EntityRepository(self.neo4j_connector).explicit_memory_rows(
+                [end_user_id]
             )
+            permanent_count = sum(
+                count_profile_cards(metadata, names) for _, metadata, names in profiles
+            )
+            timeline_count = sum(count_timeline_records(row) for row in graph_rows)
+            semantic_count = sum(row["semantic_count"] for row in graph_rows)
+            return permanent_count + timeline_count + semantic_count
         except Exception as e:
             logger.error(f"获取显性记忆数量时出错: {str(e)}", exc_info=True)
             return 0
@@ -572,35 +579,3 @@ def count_timeline_records(row: dict[str, Any]) -> int:
         if MemoryEntityService._neo4j_dt_to_ms(item.get("created_at")) is not None:
             summaries.add(text)
     return len(events) + len(summaries)
-
-
-def _profiles_sync(end_user_ids):
-    with get_db_read() as db:
-        return EndUserInfoRepository(db).profiles_for_users_sync(end_user_ids)
-
-
-async def _profiles(end_user_ids, use_sync_pg):
-    if use_sync_pg:
-        return await asyncio.to_thread(_profiles_sync, end_user_ids)
-    async with get_async_db_context() as db:
-        return await EndUserInfoRepository(db).profiles_for_users(end_user_ids)
-
-
-async def count_explicit_memories(
-    end_user_ids, *, connector=None, use_sync_pg: bool = False
-) -> int:
-    ids = list(dict.fromkeys(str(value) for value in end_user_ids))
-    if not ids:
-        return 0
-    profiles, graph_rows = await asyncio.gather(
-        _profiles(ids, use_sync_pg),
-        EntityRepository(
-            connector if connector is not None else Neo4jConnector(shared_driver=True)
-        ).explicit_memory_rows(ids),
-    )
-    profile_count = sum(
-        count_profile_cards(metadata, names) for _, metadata, names in profiles
-    )
-    return profile_count + sum(
-        count_timeline_records(row) + row["semantic_count"] for row in graph_rows
-    )

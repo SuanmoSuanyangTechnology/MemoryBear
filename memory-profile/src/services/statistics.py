@@ -21,7 +21,9 @@ from src.repositories.workspace_statistics import (
 )
 from src.runtime import ProfileRuntime
 from src.schemas.workspace import WorkspaceStatistics
-from src.services._helpers import explicit_memory_count, short_term_count
+from src.services._helpers import (
+    count_profile_cards, count_timeline_records, short_term_count,
+)
 from src.services.profile import MEMORY_TYPES
 
 logger = logging.getLogger(__name__)
@@ -331,12 +333,15 @@ class StatisticsService:
             if not end_user_ids:
                 break
             raw_ids = [str(end_user_id) for end_user_id in end_user_ids]
-            postgresql, search_result, implicit_count, short_term, explicit_count = await asyncio.gather(
+            (
+                postgresql, search_result, implicit_count, short_term, profiles, graph_rows,
+            ) = await asyncio.gather(
                 self.memory_statistics.counts_for_users(end_user_ids),
                 self.memory_search.workspace_memory_counts(raw_ids),
                 self.memory_statistics.habit_count_for_users(raw_ids),
                 short_term_count(self.memory_search, self.memory_graph, raw_ids, evaluated_at),
-                explicit_memory_count(self.memory_statistics, self.memory_graph, raw_ids),
+                self.memory_statistics.profiles_for_users(raw_ids),
+                self.memory_graph.explicit_memory_rows(raw_ids),
             )
             elastic_statistics, present_ids = search_result
             episodic_count = sum(
@@ -362,7 +367,12 @@ class StatisticsService:
                 postgresql["active_conversations"] + postgresql["direct_sources"]
             )
             totals["SHORT_TERM_MEMORY"] += short_term
-            totals["EXPLICIT_MEMORY"] += explicit_count
+            permanent_count = sum(
+                count_profile_cards(metadata, names) for _, metadata, names in profiles
+            )
+            timeline_count = sum(count_timeline_records(row) for row in graph_rows)
+            semantic_count = sum(row["semantic_count"] for row in graph_rows)
+            totals["EXPLICIT_MEMORY"] += permanent_count + timeline_count + semantic_count
             totals["IMPLICIT_MEMORY"] += implicit_count
             totals["EMOTIONAL_MEMORY"] += emotional_count
             totals["EPISODIC_MEMORY"] += episodic_count

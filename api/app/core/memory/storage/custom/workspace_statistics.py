@@ -527,12 +527,23 @@ class WorkspaceStatisticsStorage:
         self,
         end_user_ids: Sequence[str],
     ) -> dict[str, int]:
-        """Aggregate episodic and emotional memories."""
+        """Aggregate episodic, explicit timeline/semantic and emotional memories."""
         if not end_user_ids:
             return {
                 "episodic_count": 0,
+                "explicit_count": 0,
                 "emotional_count": 0,
             }
+
+        from app.repositories.neo4j.entity_repository import EntityRepository
+        from app.services.memory_base_service import count_timeline_records
+
+        graph_rows = await EntityRepository(self._neo4j_client).explicit_memory_rows(
+            list(end_user_ids)
+        )
+        explicit_count = sum(
+            count_timeline_records(row) + row["semantic_count"] for row in graph_rows
+        )
 
         elastic_statistics, present_ids = await get_elasticsearch_workspace_statistics(
             self._elastic_client,
@@ -561,5 +572,6 @@ class WorkspaceStatisticsStorage:
 
         return {
             "episodic_count": episodic_count,
+            "explicit_count": explicit_count,
             "emotional_count": emotional_count,
         }

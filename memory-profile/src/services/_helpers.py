@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import re
 from typing import Any
@@ -11,7 +10,6 @@ from collections.abc import Awaitable, Callable
 from datetime import datetime
 
 from src.repositories.graph import MemoryGraphRepository
-from src.repositories.profile import MemoryStatisticsRepository
 from src.repositories.search import MemorySearchRepository
 
 logger = logging.getLogger(__name__)
@@ -134,22 +132,3 @@ def count_timeline_records(row: dict[str, Any]) -> int:
         ):
             summaries.add(text)
     return events + len(summaries)
-
-
-async def explicit_memory_count(
-    memory_statistics: MemoryStatisticsRepository,
-    memory_graph: MemoryGraphRepository,
-    end_user_ids: list[str],
-) -> int:
-    ids = list(dict.fromkeys(end_user_ids))
-    if not ids:
-        return 0
-    profiles, graph_rows = await asyncio.gather(
-        memory_statistics.profiles_for_users(ids), memory_graph.explicit_memory_rows(ids)
-    )
-    profile_count = sum(
-        count_profile_cards(metadata, names) for _, metadata, names in profiles
-    )
-    return profile_count + sum(
-        count_timeline_records(row) + row["semantic_count"] for row in graph_rows
-    )
