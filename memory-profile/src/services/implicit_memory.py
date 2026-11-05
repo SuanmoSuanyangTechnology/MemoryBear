@@ -41,8 +41,12 @@ def implicit_read_error(
         code, message_key = BizCode.PROFILE_STORAGE_ERROR, "memory.implicit.error.storage_failed"
     else:
         code, message_key = BizCode.INTERNAL_ERROR, operation_key
+    logger.error("Implicit memory read failed: operation=%s", operation_key, exc_info=exc)
     return LocalizedProfileError(
-        code, message_key, detail=str(exc) if include_detail else "", status_code=200
+        code,
+        message_key,
+        detail_key=message_key if include_detail else None,
+        status_code=200,
     )
 
 

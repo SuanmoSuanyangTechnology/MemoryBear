@@ -21,7 +21,6 @@ from app.core.api_key_utils import (
     validate_end_user_in_workspace_async,
 )
 from app.core.error_codes import BizCode
-from app.core.language_utils import get_language_from_header
 from app.core.logging_config import get_business_logger
 from app.core.response_utils import fail
 from app.core.utils.datetime_utils import resolve_iana_timezone
@@ -77,9 +76,7 @@ async def get_written_memories(
     负责展示文案映射；name 和 content 保持记忆生成时的原始语言，不受
     X-Language-Type 影响。
     """
-    language = get_language_from_header(
-        request.headers.get("X-Language-Type") or await get_current_language(request)
-    )
+    language = await get_current_language(request)
     window_error = _time_window_error(start_time, end_time, language)
     if window_error is not None:
         return _encode_result(window_error)
@@ -135,9 +132,7 @@ async def get_retrieved_memories(
     - 不传 end_user_id：返回 API Key 所属工作空间的全部读取卡片（空间级），
       每项额外携带 end_user_id 字段区分归属。
     """
-    language = get_language_from_header(
-        request.headers.get("X-Language-Type") or await get_current_language(request)
-    )
+    language = await get_current_language(request)
     window_error = _time_window_error(start_time, end_time, language)
     if window_error is not None:
         return _encode_result(window_error)
@@ -208,9 +203,7 @@ async def get_engine_display_cards(
     前端统一传全局时区设置（useI18n().timeZone），
     保证卡片的聚合日期与前端展示 occurred_at 时使用的时区一致。
     """
-    language = get_language_from_header(
-        request.headers.get("X-Language-Type") or await get_current_language(request)
-    )
+    language = await get_current_language(request)
     window_error = _time_window_error(start_time, end_time, language)
     if window_error is not None:
         return _encode_result(window_error)
@@ -291,9 +284,7 @@ async def get_all_memory_display(
     - 不传 end_user_id：API Key 所属工作空间的统一时间线（空间级），
       每项额外携带 end_user_id 区分归属。
     """
-    language = get_language_from_header(
-        request.headers.get("X-Language-Type") or await get_current_language(request)
-    )
+    language = await get_current_language(request)
     resolved_end_user_id = None
     async with get_async_db_context() as db:
         current_user = await get_current_user_snapshot_from_api_key_async(db, api_key_auth)

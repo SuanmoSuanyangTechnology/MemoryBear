@@ -32,3 +32,4 @@ class MemoryProfileRawResponse:
 
     body: bytes
     media_type: str
+    content_language: str | None = None
