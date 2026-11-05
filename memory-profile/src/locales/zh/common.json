@@ -8,6 +8,14 @@
     "invalid_parameter": "无效的 {name}",
     "invalid_uuid": "'{value}' 不是有效的 UUID"
   },
+  "http": {
+    "bad_request": "请求参数错误",
+    "not_found": "请求的资源不存在",
+    "internal_error": "服务器内部错误"
+  },
+  "workspace": {
+    "not_found": "工作空间不存在"
+  },
   "internal_error": "内部服务错误",
   "service_unavailable": "服务暂不可用"
 }
