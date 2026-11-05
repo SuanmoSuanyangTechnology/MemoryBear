@@ -72,9 +72,9 @@ class MemoryEpisodicService:
             result = self._community(row)
             result['summary'] = row.get('summary') or ''
             result['page'] = row['page']
-            result['scenes'] = [dict(id=scene['id'], topic_scope=scene.get('topic_scope'),
+            result['items'] = [dict(id=scene['id'], topic_scope=scene.get('topic_scope'),
                                      content=scene.get('content') or '')
-                                for scene in row['scenes']]
+                                for scene in row['items']]
             return result
 
 

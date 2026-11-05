@@ -59,9 +59,9 @@ CALL {
     WITH s, coalesce(s.ended_at, s.started_at, s.created_at) AS scene_time
     ORDER BY scene_time IS NULL ASC, scene_time DESC, s.id ASC
     SKIP $skip LIMIT $limit
-    RETURN collect(properties(s)) AS scenes
+    RETURN collect(properties(s)) AS items
 }
-RETURN properties(c) AS community, scenes, scene_count
+RETURN properties(c) AS community, items, scene_count
 """
 
 COMMUNITY_COUNT_QUERY = """
@@ -192,9 +192,9 @@ class SceneCommunityStorage:
         return {'bool': {'should': should, 'minimum_should_match': 1}}
 
     @staticmethod
-    def _details_result(community, scenes, total, page, pagesize):
+    def _details_result(community, items, total, page, pagesize):
         return dict(
-            community, scenes=scenes, scene_count=total,
+            community, items=items, scene_count=total,
             page=dict(page=page, pagesize=pagesize, total=total,
                       hasnext=page * pagesize < total),
         )
@@ -226,8 +226,8 @@ class SceneCommunityStorage:
                 result = await client.search(**options)
                 self._ensure_complete_response(result)
                 total = result['hits']['total']['value']
-                scenes = [hit['_source'] for hit in result['hits']['hits']]
-                return self._details_result(community, scenes, total, page, pagesize)
+                items = [hit['_source'] for hit in result['hits']['hits']]
+                return self._details_result(community, items, total, page, pagesize)
         except NotFoundError:
             pass
         return await self._neo_details(uid, community_id, page, pagesize)
@@ -240,7 +240,7 @@ class SceneCommunityStorage:
         if not rows:
             raise ValueError('事项不存在')
         row = rows[0]
-        return self._details_result(row['community'], row['scenes'], row['scene_count'], page, pagesize)
+        return self._details_result(row['community'], row['items'], row['scene_count'], page, pagesize)
 
     async def _neo_overview(self, uid, category, keyword, sort, page, pagesize):
         rows = await self._neo4j_client.execute_query(
