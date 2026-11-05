@@ -1,6 +1,6 @@
 """Read-only mappings for API-owned end-user tables."""
 
-from sqlalchemy import Boolean, Column, DateTime, Text
+from sqlalchemy import Boolean, Column, DateTime, String, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 
 from src.models.base import ReadOnlyBase
@@ -11,7 +11,7 @@ class EndUser(ReadOnlyBase):
 
     id = Column(UUID(as_uuid=True), primary_key=True)
     workspace_id = Column(UUID(as_uuid=True), nullable=False)
-    other_name = Column(Text, nullable=True)
+    other_name = Column(String, nullable=False)
     is_active = Column(Boolean, nullable=False)
     write_time = Column(DateTime, nullable=True)
     memory_insight = Column(Text, nullable=True)

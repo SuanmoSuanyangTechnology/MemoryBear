@@ -15,5 +15,5 @@ class OntologySceneRow(ReadOnlyBase):
     scene_name = Column(String(200), nullable=False)
     scene_description = Column(Text, nullable=True)
     workspace_id = Column(UUID(as_uuid=True), nullable=False)
-    created_at = Column(DateTime, nullable=True)
-    updated_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, nullable=False)
+    updated_at = Column(DateTime, nullable=False)
