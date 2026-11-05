@@ -4890,10 +4890,24 @@ def _enterprise_ai_personality_plugin():
     return plugin
 
 
-def _ai_personality_memory_config(db, workspace_uuid: uuid.UUID):
-    config_service = MemoryConfigService(db)
-    config_id = config_service.get_workspace_active_config_id(workspace_uuid)
-    return config_service.load_memory_config(config_id)
+def _ai_personality_active_config_id(db, workspace_uuid: uuid.UUID):
+    return MemoryConfigService(db).get_workspace_active_config_id(workspace_uuid)
+
+
+def _ai_personality_enabled(db, config_id: uuid.UUID, workspace_uuid: uuid.UUID) -> bool:
+    from app.models.memory_config_model import MemoryConfig as MemoryConfigModel
+
+    enabled = db.query(MemoryConfigModel.personality_anchor_enabled).filter(
+        MemoryConfigModel.config_id == config_id,
+        MemoryConfigModel.workspace_id == workspace_uuid,
+    ).scalar()
+    if enabled is None:
+        raise ValueError(f"当前生效的记忆配置不存在: {config_id}")
+    return bool(enabled)
+
+
+def _ai_personality_memory_config(db, config_id: uuid.UUID):
+    return MemoryConfigService(db).load_memory_config(config_id)
 
 
 # ==================== AI 人格：Scan 轻量扫描 ====================
@@ -4926,10 +4940,11 @@ def scan_extract_ai_personality(self) -> Dict[str, Any]:
         "candidates": 0,
         "dispatched": 0,
         "skip_inflight": 0,
+        "skip_disabled": 0,
         "skip_no_config": 0,
         "failed": 0,
     }
-    workspace_config_available: dict[str, bool] = {}
+    workspace_config_status: dict[str, str] = {}
     # 从上次游标续扫；只记录已处理用户，避免时间预算耗尽时跳过页内候选。
     stored_cursor = redis_client.get(AI_PERSONALITY_SCAN_CURSOR_KEY)
     after_id: str | None = (
@@ -4961,23 +4976,29 @@ def scan_extract_ai_personality(self) -> Dict[str, Any]:
                     return scan_result("PARTIAL")
                 end_user_id = candidate.end_user_id
                 workspace_id = candidate.workspace_id
-                # 同一轮扫描每个 workspace 只检查一次配置和模型引用，不构造客户端。
-                if workspace_id not in workspace_config_available:
+                # 同一轮扫描每个 workspace 只检查一次人格开关、配置和模型引用。
+                if workspace_id not in workspace_config_status:
                     with get_db_context() as db:
                         try:
-                            memory_config = _ai_personality_memory_config(db, uuid.UUID(workspace_id))
-                            model_ref = ModelApiKeyService.resolve_invoke_ref(
-                                db, memory_config.llm_model_id, tenant_id=memory_config.tenant_id,
-                            )
-                            if model_ref is None:
-                                raise ValueError(f"模型配置不可用: {memory_config.llm_model_id}")
+                            workspace_uuid = uuid.UUID(workspace_id)
+                            config_id = _ai_personality_active_config_id(db, workspace_uuid)
+                            if not _ai_personality_enabled(db, config_id, workspace_uuid):
+                                logger.info("AI人格scan跳过未启用空间 workspace=%s", workspace_id)
+                                workspace_config_status[workspace_id] = "disabled"
+                            else:
+                                memory_config = _ai_personality_memory_config(db, config_id)
+                                model_ref = ModelApiKeyService.resolve_invoke_ref(
+                                    db, memory_config.llm_model_id, tenant_id=memory_config.tenant_id,
+                                )
+                                if model_ref is None:
+                                    raise ValueError(f"模型配置不可用: {memory_config.llm_model_id}")
+                                workspace_config_status[workspace_id] = "enabled"
                         except (BusinessException, ConfigurationError, ValueError) as exc:
                             logger.warning("AI人格scan跳过无可用配置 workspace=%s: %s", workspace_id, exc)
-                            workspace_config_available[workspace_id] = False
-                        else:
-                            workspace_config_available[workspace_id] = True
-                if not workspace_config_available[workspace_id]:
-                    counts["skip_no_config"] += 1
+                            workspace_config_status[workspace_id] = "invalid"
+                workspace_status = workspace_config_status[workspace_id]
+                if workspace_status != "enabled":
+                    counts["skip_disabled" if workspace_status == "disabled" else "skip_no_config"] += 1
                     last_processed_id = end_user_id
                     continue
 
@@ -5070,6 +5091,17 @@ def do_extract_ai_personality_for_user(
         return {"status": "skipped_inflight", "entry_count": 0}
 
     async def _run() -> Dict[str, Any]:
+        workspace_uuid = uuid.UUID(workspace_id)
+        with get_db_context() as db:
+            try:
+                config_id = _ai_personality_active_config_id(db, workspace_uuid)
+                if not _ai_personality_enabled(db, config_id, workspace_uuid):
+                    logger.info("AI人格do跳过未启用空间 user=%s workspace=%s", end_user_id, workspace_id)
+                    return {"status": "skipped_disabled", "entry_count": 0}
+            except (BusinessException, ValueError) as exc:
+                logger.warning("AI人格do跳过无可用配置 user=%s workspace=%s: %s", end_user_id, workspace_id, exc)
+                return {"status": "skipped_no_config", "entry_count": 0}
+
         from premium.memory.ai_personality.errors import SourceChangedError
         from premium.memory.ai_personality.schemas import PendingPublishRequest
 
@@ -5123,11 +5155,10 @@ def do_extract_ai_personality_for_user(
                 return source_changed
             return {"status": "skipped_empty", "entry_count": 0, "batch_id": batch_id}
 
-        # 排队期间配置可能变化：重新读取 workspace 配置，再构造实际使用的客户端。
-        workspace_uuid = uuid.UUID(workspace_id)
+        # 使用任务启动时确认仍启用的当前配置构造客户端。
         with get_db_context() as db:
             try:
-                memory_config = _ai_personality_memory_config(db, workspace_uuid)
+                memory_config = _ai_personality_memory_config(db, config_id)
                 llm_client = ModelClientMixin.get_llm_client(
                     db, memory_config.llm_model_id, memory_config.tenant_id,
                 )
