@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import math
 
 import httpx
@@ -17,13 +18,18 @@ class SceneContinuityClient:
     def __init__(self, settings: ProfileSettings) -> None:
         self._settings = settings
         self._client: httpx.AsyncClient | None = None
+        self._loop: asyncio.AbstractEventLoop | None = None
 
     def _get_client(self) -> httpx.AsyncClient:
+        current_loop = asyncio.get_running_loop()
+        if self._client is not None and self._loop is not current_loop:
+            raise RuntimeError("Scene continuity client cannot be shared across event loops")
         if self._client is None:
             self._client = httpx.AsyncClient(
                 timeout=self._settings.scene_continuity_timeout_seconds,
                 trust_env=False,
             )
+            self._loop = current_loop
         return self._client
 
     async def predict(self, history_user_messages: list[str], current_user_message: str) -> float:
@@ -64,6 +70,7 @@ class SceneContinuityClient:
             raise SceneContinuityError(str(exc)) from exc
 
     async def aclose(self) -> None:
-        if self._client is not None:
-            await self._client.aclose()
-            self._client = None
+        client, self._client = self._client, None
+        self._loop = None
+        if client is not None:
+            await client.aclose()
