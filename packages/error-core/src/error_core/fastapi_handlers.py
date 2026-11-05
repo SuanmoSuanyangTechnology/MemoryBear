@@ -18,7 +18,13 @@ from fastapi.responses import JSONResponse
 from pydantic import ValidationError as PydanticValidationError
 from starlette.exceptions import HTTPException
 
-from .codes import BizCode, code_name, coerce_code, http_status_for
+from .codes import (
+    HTTP_STATUS_TO_BIZ_CODE,
+    BizCode,
+    code_name,
+    coerce_code,
+    http_status_for,
+)
 from .diagnostics import format_diagnostics
 from .envelope import fail, now_ms
 from .messages import fallback_message, user_message
@@ -287,12 +293,19 @@ def register_error_handlers(application: FastAPI, deps: ErrorHandlerDeps) -> Non
             trace_id=getattr(request.state, "trace_id", None) or deps.get_trace_id(),
             detail=str(exc.detail),
         )
+        code = HTTP_STATUS_TO_BIZ_CODE.get(exc.status_code)
+        if code is None:
+            code = (
+                BizCode.INTERNAL_ERROR
+                if exc.status_code >= 500
+                else BizCode.BAD_REQUEST
+            )
         return render_error(
             request,
             deps,
             status_code=exc.status_code,
-            content=fail(code=exc.status_code, msg=message, error=diagnostic),
-            error_code=f"HTTP_{exc.status_code}",
+            content=fail(code=code.value, msg=message, error=diagnostic),
+            error_code=code_name(code),
             message=message,
             retryable=exc.status_code >= 500,
             exception=exc,
@@ -300,9 +313,9 @@ def register_error_handlers(application: FastAPI, deps: ErrorHandlerDeps) -> Non
 
     @application.exception_handler(Exception)
     async def unhandled_error_handler(request: Request, exc: Exception):
-        environment = getattr(
-            request.app.state.runtime.settings, "environment", "development"
-        )
+        runtime = getattr(request.app.state, "runtime", None)
+        settings = getattr(runtime, "settings", None)
+        environment = getattr(settings, "environment", "development")
         language = request_locale(request, deps)
         message = deps.translate("errors.common.internal_error", language)
         raw = str(exc) if environment != "production" else type(exc).__name__

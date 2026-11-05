@@ -5851,7 +5851,9 @@ class WorkflowService:
             failure_info = failure_info or workflow_error_info(
                 None, fallback_detail=stream_error or "工作流重新生成失败"
             )
-            failure_code = failure_info.get("code") or BizCode.INTERNAL_ERROR.value
+            failure_code = failure_info.get("code")
+            if failure_code in (None, BizCode.OK.value):
+                failure_code = BizCode.INTERNAL_ERROR.value
             failure_msg = failure_info["msg"]
             logger.error(
                 "workflow_regenerate_failed execution_id=%s code=%s code_name=%s "

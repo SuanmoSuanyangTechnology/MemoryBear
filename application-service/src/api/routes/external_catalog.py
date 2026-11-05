@@ -104,5 +104,7 @@ def delete_installation(
     caller: Caller,
 ):
     service = _service(db, runtime)
-    data = service.uninstall(caller.tenant_id, resource_type, local_resource_id)
+    data = service.uninstall(
+        caller.tenant_id, caller.actor_id, resource_type, local_resource_id
+    )
     return success(data=data.model_dump(mode="json"))

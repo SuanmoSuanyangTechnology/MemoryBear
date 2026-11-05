@@ -467,7 +467,7 @@ class Settings:
     
     # Supported languages (comma-separated)
     I18N_SUPPORTED_LANGUAGES: list[str] = [
-        lang.strip()
+        lang.strip().lower().split("-")[0]
         for lang in os.getenv("I18N_SUPPORTED_LANGUAGES", "zh,en").split(",")
         if lang.strip()
     ]

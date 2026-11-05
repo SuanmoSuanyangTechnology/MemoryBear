@@ -30,16 +30,18 @@ def workflow_error_info(
     locale = get_current_locale()
     trace_id = get_trace_id() or None
 
+    # A failure surface must never present OK (0): an exception carrying
+    # BizCode.OK is mislabelled and is reported as an unclassified failure.
     if isinstance(exc, ModelInvokeFailedError):
         code = coerce_code(exc.biz_code)
-        if code is None:
+        if code in (None, BizCode.OK.value):
             code = BizCode.INTERNAL_ERROR.value
         msg = getattr(exc, "user_msg", None) or user_message(code, locale) or str(exc)
         detail = getattr(exc, "detail", "") or str(exc) or code_name(code)
         retryable = bool(exc.retryable)
     elif isinstance(exc, BusinessException):
         code = coerce_code(exc.code)
-        if code is None:
+        if code in (None, BizCode.OK.value):
             code = BizCode.INTERNAL_ERROR.value
         msg = user_message(code, locale) or exc.message
         detail = exc.message or code_name(code)

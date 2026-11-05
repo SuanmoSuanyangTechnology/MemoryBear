@@ -86,7 +86,8 @@ def _business_failure(
 
     message, _context = SensitiveDataFilter.filter_message(exc.message, exc.context)
     numeric = coerce_code(exc.code)
-    if numeric is None:
+    # A failure envelope must never carry OK (0): treat it as unresolved.
+    if numeric in (None, BizCode.OK.value):
         numeric = int(BizCode.BAD_REQUEST)
     return http_status_for(numeric), fail(
         code=numeric,

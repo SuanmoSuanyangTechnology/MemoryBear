@@ -24,9 +24,11 @@ def error_payload(
     trace_id: str | None = None,
     fallback_code: BizCode = BizCode.INTERNAL_ERROR,
 ) -> dict[str, Any]:
+    # Error frames must never carry OK (0); a mislabelled code is treated as
+    # unresolved and falls back to the caller's failure code.
     if isinstance(exc, ModelInvokeFailedError):
         numeric = coerce_code(exc.biz_code)
-        if numeric is None:
+        if numeric in (None, BizCode.OK.value):
             numeric = fallback_code.value
         msg = getattr(exc, "user_msg", None) or user_message(numeric, locale) or str(exc)
         # The upstream_service suffix is appended once by
@@ -37,7 +39,7 @@ def error_payload(
         channel_id = str(exc.channel_id) if exc.channel_id else None
     elif isinstance(exc, BusinessException):
         numeric = coerce_code(exc.code)
-        if numeric is None:
+        if numeric in (None, BizCode.OK.value):
             numeric = fallback_code.value
         msg = user_message(numeric, locale) or exc.message
         detail = format_diagnostics(trace_id=trace_id, detail=exc.message)

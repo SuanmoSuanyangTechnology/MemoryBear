@@ -43,7 +43,8 @@ def error_payload(failure: InvokeFailure) -> dict[str, Any]:
     from ..i18n import get_current_locale
 
     numeric = coerce_code(failure.code)
-    if numeric is None:
+    # Error frames must never carry OK (0): treat it as an unresolved code.
+    if numeric in (None, BizCode.OK.value):
         numeric = BizCode.INTERNAL_ERROR.value
     return error_frame(
         code=numeric,
@@ -62,7 +63,7 @@ def error_info(failure: InvokeFailure) -> dict[str, Any]:
     from error_core.diagnostics import redact
 
     numeric = coerce_code(failure.code)
-    if numeric is None:
+    if numeric in (None, BizCode.OK.value):
         numeric = BizCode.INTERNAL_ERROR.value
     detail = redact(failure.detail or failure.message)
     return {

@@ -107,7 +107,10 @@ def _to_frame(event: InvokeEvent, seq: int) -> invoke_pb2.InvokeFrame | None:
         frame.usage.event_json = _json_bytes(event.payload)
     elif event.kind == EVENT_ERROR:
         payload = event.payload
-        numeric = coerce_code(payload.get("code")) or int(BizCode.INTERNAL_ERROR)
+        numeric = coerce_code(payload.get("code"))
+        # Error frames must never carry OK (0): treat it as an unresolved code.
+        if numeric in (None, BizCode.OK.value):
+            numeric = int(BizCode.INTERNAL_ERROR)
         detail = str(payload.get("error") or payload.get("message") or "")
         frame.error.code = str(numeric)
         frame.error.message = detail

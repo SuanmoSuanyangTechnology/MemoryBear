@@ -14,6 +14,7 @@ from typing import Any
 
 from ...errors import BizCode
 from ...models.tool_model import (
+    AuthType,
     CustomToolConfig,
     MCPToolConfig,
     ToolConfig,
@@ -37,6 +38,9 @@ from ..registry import default_registry
 from ..types import ResourceType
 
 _NAME_MAX_LENGTH = 255
+_MAX_URL_LENGTH = 1000
+_MIN_TIMEOUT_SECONDS = 1
+_MAX_TIMEOUT_SECONDS = 300
 _CREDENTIAL_CONFIG_KEYS = ("connection_config", "auth_config")
 
 
@@ -53,6 +57,30 @@ def _invalid(message: str, reason: str) -> ExternalCatalogError:
     )
 
 
+def _invalid_field(field: str) -> ExternalCatalogError:
+    return ExternalCatalogError(
+        BizCode.EXTERNAL_CATALOG_INVALID,
+        f"工具配置字段不合法: {field}",
+        data={"reason": "INCOMPLETE_BUNDLE", "field": field},
+    )
+
+
+def _optional_dict(value: Any, field: str) -> dict[str, Any]:
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise _invalid_field(field)
+    return value
+
+
+def _optional_url(value: Any, field: str) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str) or len(value) > _MAX_URL_LENGTH:
+        raise _invalid_field(field)
+    return value
+
+
 def _redacted_paths_for_tool(
     ctx: InstallContext, dependency: dict[str, Any] | None
 ) -> list[str]:
@@ -66,13 +94,16 @@ def _redacted_paths_for_tool(
         return [path for path in paths if path == "payload" or path.startswith("payload.")]
     items = (ctx.bundle.get("dependencies") or {}).get("tools") or []
     ref = dependency.get("ref")
-    for index, item in enumerate(items):
-        if item.get("ref") == ref:
-            prefix = f"dependencies.tools[{index}].payload"
-            return [
-                path for path in paths if path == prefix or path.startswith(f"{prefix}.")
-            ]
-    return []
+    prefixes = [
+        f"dependencies.tools[{index}].payload"
+        for index, item in enumerate(items)
+        if isinstance(item, dict) and item.get("ref") == ref
+    ]
+    return [
+        path
+        for path in paths
+        if any(path == prefix or path.startswith(f"{prefix}.") for prefix in prefixes)
+    ]
 
 
 def _needs_reconfiguration(paths: list[str]) -> bool:
@@ -249,6 +280,58 @@ class ToolAdapter:
             },
         }
 
+    @staticmethod
+    def _validated_mcp_config(config: dict[str, Any]) -> dict[str, Any]:
+        server_url = config.get("server_url")
+        if not isinstance(server_url, str) or not server_url.strip():
+            raise _invalid("MCP 配置不完整", "INCOMPLETE_BUNDLE")
+        if len(server_url) > _MAX_URL_LENGTH:
+            raise _invalid_field("server_url")
+        available_tools = config.get("available_tools")
+        if available_tools is None:
+            available_tools = []
+        elif not isinstance(available_tools, list) or any(
+            not isinstance(item, dict)
+            or any(not isinstance(info, dict) for info in item.values())
+            for item in available_tools
+        ):
+            raise _invalid_field("available_tools")
+        return {
+            "server_url": server_url,
+            "connection_config": _optional_dict(
+                config.get("connection_config"), "connection_config"
+            ),
+            "available_tools": available_tools,
+        }
+
+    @staticmethod
+    def _validated_custom_config(config: dict[str, Any]) -> dict[str, Any]:
+        schema_content = config.get("schema_content")
+        if schema_content is not None and not isinstance(schema_content, dict):
+            raise _invalid_field("schema_content")
+        auth_type = config.get("auth_type")
+        if auth_type is None:
+            auth_type = AuthType.NONE.value
+        elif auth_type not in {member.value for member in AuthType}:
+            raise _invalid_field("auth_type")
+        timeout = config.get("timeout")
+        if timeout is None:
+            timeout = 30
+        elif (
+            isinstance(timeout, bool)
+            or not isinstance(timeout, int)
+            or not _MIN_TIMEOUT_SECONDS <= timeout <= _MAX_TIMEOUT_SECONDS
+        ):
+            raise _invalid_field("timeout")
+        return {
+            "schema_url": _optional_url(config.get("schema_url"), "schema_url"),
+            "schema_content": schema_content,
+            "auth_type": auth_type,
+            "auth_config": _optional_dict(config.get("auth_config"), "auth_config"),
+            "base_url": _optional_url(config.get("base_url"), "base_url"),
+            "timeout": timeout,
+        }
+
     def _create_local_copy(
         self,
         ctx: InstallContext,
@@ -264,8 +347,12 @@ class ToolAdapter:
             raise _invalid("工具类型不合法", "SUBTYPE_INVALID")
         if not isinstance(config, dict):
             raise _invalid("工具配置不合法", "INCOMPLETE_BUNDLE")
-        if tool_type == ToolType.MCP.value and not config.get("server_url"):
-            raise _invalid("MCP 配置不完整", "INCOMPLETE_BUNDLE")
+        if tool_type == ToolType.MCP.value:
+            mcp_config = self._validated_mcp_config(config)
+            custom_config = None
+        else:
+            mcp_config = None
+            custom_config = self._validated_custom_config(config)
 
         name = self._unique_name(
             ctx,
@@ -298,27 +385,10 @@ class ToolAdapter:
             external_version=external_version if external else None,
         )
         ctx.db.add(tool_config)
-        if tool_type == ToolType.MCP.value:
-            ctx.db.add(
-                MCPToolConfig(
-                    id=tool_config.id,
-                    server_url=config["server_url"],
-                    connection_config=config.get("connection_config") or {},
-                    available_tools=config.get("available_tools") or [],
-                )
-            )
+        if mcp_config is not None:
+            ctx.db.add(MCPToolConfig(id=tool_config.id, **mcp_config))
         else:
-            ctx.db.add(
-                CustomToolConfig(
-                    id=tool_config.id,
-                    schema_url=config.get("schema_url"),
-                    schema_content=config.get("schema_content"),
-                    auth_type=config.get("auth_type") or "none",
-                    auth_config=config.get("auth_config") or {},
-                    base_url=config.get("base_url"),
-                    timeout=config.get("timeout") or 30,
-                )
-            )
+            ctx.db.add(CustomToolConfig(id=tool_config.id, **custom_config))
         ctx.db.flush()
         return InstalledResource(
             local_resource_id=str(tool_config.id), local_name=name

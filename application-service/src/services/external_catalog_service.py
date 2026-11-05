@@ -47,6 +47,10 @@ logger = logging.getLogger(__name__)
 
 _IDEMPOTENCY_KEY_MIN = 8
 _IDEMPOTENCY_KEY_MAX = 128
+_LATEST_PUBLICATION_STATUSES = frozenset(
+    {"pending", "approved", "rejected", "withdrawn"}
+)
+_RESOURCE_STATUSES = frozenset({"draft", "published", "unlisted"})
 
 
 def _run(coro):
@@ -237,6 +241,15 @@ class ExternalCatalogService:
         status = statuses[0]
         latest = None
         if status.latest_publication_status is not None:
+            if (
+                not isinstance(status.latest_publication_status, str)
+                or status.latest_publication_status not in _LATEST_PUBLICATION_STATUSES
+            ):
+                raise ExternalCatalogError(
+                    BizCode.EXTERNAL_CATALOG_INVALID,
+                    "市场返回的发布状态不合法",
+                    data={"reason": "INVALID_UPSTREAM_STATUS"},
+                )
             latest = LatestPublication(
                 id=status.resource_id or "",
                 version=status.latest_version or "",
@@ -249,7 +262,16 @@ class ExternalCatalogService:
             if status.latest_publication_status == "pending":
                 block_reason = "PENDING_REVIEW"
         resource = None
-        if status.resource_id and status.status in ("draft", "published", "unlisted"):
+        if status.resource_id:
+            if (
+                not isinstance(status.status, str)
+                or status.status not in _RESOURCE_STATUSES
+            ):
+                raise ExternalCatalogError(
+                    BizCode.EXTERNAL_CATALOG_INVALID,
+                    "市场返回的资源状态不合法",
+                    data={"reason": "INVALID_UPSTREAM_STATUS"},
+                )
             resource = PublicationResourceState(
                 id=status.resource_id,
                 status=status.status,  # type: ignore[arg-type]
@@ -288,6 +310,7 @@ class ExternalCatalogService:
             return response.model_copy(update={"idempotent_replay": True})
         self._raise_idempotency_conflict(reservation.state)
 
+        committed = False
         try:
             workspace_id = self._resolve_install_workspace(
                 tenant_id, request.workspace_id
@@ -300,7 +323,12 @@ class ExternalCatalogService:
                     str(actor_id),
                 )
             )
-            self._validate_downloaded_bundle(bundle, request.resource_type.value)
+            self._validate_downloaded_bundle(
+                bundle,
+                request.resource_type.value,
+                request.resource_id,
+                request.version,
+            )
             adapter = self.registry.get_install(request.resource_type.value)
             installed = adapter.install(
                 InstallContext(
@@ -316,13 +344,7 @@ class ExternalCatalogService:
                     redacted_secrets=bundle.bundle.get("redacted_secrets", []),
                 )
             )
-            # 先提交本地安装，再做 best-effort 登记；登记失败不回滚。
-            if self.db is not None:
-                self.db.commit()
             installed_at = int(time.time() * 1000)
-            registration_synced = self._register_installation(
-                tenant_id, actor_id, request, installed.local_resource_id, workspace_id
-            )
             response = InstallResponse(
                 resource_type=request.resource_type.value,
                 resource_id=request.resource_id,
@@ -337,30 +359,44 @@ class ExternalCatalogService:
                 ],
                 idempotent_replay=False,
             )
-            self.idempotency.complete(
-                "install",
-                str(tenant_id),
-                str(actor_id),
-                idempotency_key,
-                fingerprint,
-                response.model_dump(mode="json"),
+            # 先提交本地安装，再做 best-effort 登记；登记失败不回滚。
+            if self.db is not None:
+                self.db.commit()
+            committed = True
+            try:
+                self.idempotency.complete(
+                    "install",
+                    str(tenant_id),
+                    str(actor_id),
+                    idempotency_key,
+                    fingerprint,
+                    response.model_dump(mode="json"),
+                )
+            except Exception:
+                # The install is already committed. Leave the key in progress
+                # instead of deleting it, so a retry cannot install twice.
+                logger.exception("failed to cache install idempotency response")
+            registration_synced = self._register_installation(
+                tenant_id, actor_id, request, installed.local_resource_id, workspace_id
             )
             if not registration_synced:
                 logger.warning("market installation registration failed")
             return response
         except Exception:
-            self.idempotency.abort(
-                "install",
-                str(tenant_id),
-                str(actor_id),
-                idempotency_key,
-                fingerprint,
-            )
+            if not committed:
+                self.idempotency.abort(
+                    "install",
+                    str(tenant_id),
+                    str(actor_id),
+                    idempotency_key,
+                    fingerprint,
+                )
             raise
 
     def uninstall(
         self,
         tenant_id: uuid.UUID,
+        actor_id: uuid.UUID,
         resource_type: str,
         local_resource_id: str,
         *,
@@ -384,7 +420,7 @@ class ExternalCatalogService:
                     resource_type,
                     local_resource_id,
                     str(tenant_id),
-                    "",
+                    str(actor_id),
                 )
             )
         except Exception as exc:
@@ -416,7 +452,17 @@ class ExternalCatalogService:
         return workspace.id
 
     @staticmethod
-    def _validate_downloaded_bundle(bundle, resource_type: str) -> None:
+    def _validate_downloaded_bundle(
+        bundle, resource_type: str, resource_id: str, version: str
+    ) -> None:
+        if (bundle.resource_id and bundle.resource_id != resource_id) or (
+            bundle.version and bundle.version != version
+        ):
+            raise ExternalCatalogError(
+                BizCode.EXTERNAL_CATALOG_INVALID,
+                "bundle 与安装请求不一致",
+                data={"reason": "BUNDLE_INVALID"},
+            )
         validate_bundle_shell(bundle.bundle, resource_type)
         if bundle.content_hash != bundle.bundle.get("content_hash"):
             raise ExternalCatalogError(
