@@ -173,10 +173,8 @@ def register_error_handlers(application: FastAPI, deps: ErrorHandlerDeps) -> Non
         numeric = code if code is not None else BizCode.BAD_REQUEST.value
         status_code = http_status_for(numeric)
         language = request_locale(request, deps)
-        display = (
-            user_message(numeric, language, **context)
-            or message
-            or fallback_message(status_code, language)
+        display = user_message(numeric, language, **context) or fallback_message(
+            status_code, language
         )
         detail = format_diagnostics(
             trace_id=getattr(request.state, "trace_id", None) or deps.get_trace_id(),
