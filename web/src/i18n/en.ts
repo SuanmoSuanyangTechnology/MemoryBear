@@ -11,7 +11,7 @@ import { engine } from './en/engine'
 import { detail } from './en/detail'
 import { notificationCenter } from './en/notificationCenter'
 import { memoryConversation } from './en/memoryConversation'
-import { skills } from './en/skills';
+import { episodicDetail } from './en/episodicDetail'
 
 export const en = {
   translation: {
@@ -23,7 +23,7 @@ export const en = {
     ...userMemory,
     ...space,
     tool,
-    skills,
+    episodicDetail,
     ...workflow,
     ...engine,
     ...detail,

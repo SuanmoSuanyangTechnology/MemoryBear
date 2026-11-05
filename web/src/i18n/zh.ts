@@ -11,7 +11,7 @@ import { engine } from './zh/engine'
 import { detail } from './zh/detail'
 import { notificationCenter } from './zh/notificationCenter'
 import { memoryConversation } from './zh/memoryConversation'
-import { skills } from './zh/skills'
+import { episodicDetail } from './zh/episodicDetail'
 
 export const zh = {
   translation: {
@@ -23,7 +23,7 @@ export const zh = {
     ...userMemory,
     ...space,
     tool,
-    skills,
+    episodicDetail,
     ...workflow,
     ...engine,
     ...detail,
