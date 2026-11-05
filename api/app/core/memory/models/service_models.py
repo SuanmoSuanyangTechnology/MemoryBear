@@ -5,6 +5,7 @@ from typing import Self
 from pydantic import BaseModel, Field, field_serializer, ConfigDict, computed_field
 
 from app.core.memory.enums import Neo4jNodeType, StorageType
+from app.core.memory.models.community_retrieval_models import CommunityRetrievalTrace
 from app.core.memory.storage.enums import MemoryNodeLabel
 from app.core.memory.retrieval_trace.models import (
     RetrievalExecutionTrace,
@@ -89,6 +90,7 @@ class MemorySearchResult(BaseModel):
     memories: list[Memory]
     relations: list[RelationMemory] = Field(default_factory=list)
     content_str: str = Field(default="")
+    community_trace: CommunityRetrievalTrace | None = Field(default=None, exclude=True)
     execution_trace: RetrievalExecutionTrace | None = Field(default=None, exclude=True)
     # QUICK 在全局截断前执行的同源去重摘要，仅供日志使用，不对外输出。
     dedup_summary: dict = Field(default_factory=dict, exclude=True)

@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends, Header
 from fastapi.responses import StreamingResponse
 
 from app.core.error_codes import BizCode
+from app.core.exceptions import BusinessException
 from app.core.language_utils import get_language_from_header
 from app.core.logging_config import get_api_logger
 from app.core.memory.memory_service import MemoryService
@@ -172,15 +173,15 @@ async def read_server(
     - "1": Normal
     - "2": Quick
     - "5": Express
+    - "6": Community
     """
     request_id = str(uuid.uuid4())
 
-    def _error_stream(message: str) -> StreamingResponse:
+    def _error_stream(message: str, code=BizCode.MEMORY_READ_FAILED) -> StreamingResponse:
         async def _stream():
             yield format_sse_message("error", {
                 "request_id": request_id,
-                "code": BizCode.MEMORY_READ_FAILED,
-                "message": message,
+                "code": code, "message": message,
             })
 
         return StreamingResponse(
@@ -196,8 +197,7 @@ async def read_server(
     try:
         # 开流前完成参数和服务初始化，失败时统一返回 SSE error 事件。
         validation_service = await MemoryValidationService.create(
-            user_input,
-            request_id=request_id,
+            user_input, request_id=request_id,
         )
     except (ModelInactiveError, ModelNotFoundError) as e:
         api_logger.error(
@@ -208,6 +208,14 @@ async def read_server(
             exc_info=True,
         )
         return _error_stream(f"{e.context.get('model_type')}模型不可用")
+    except BusinessException as error:
+        reason = error.context.get("reason", "initialization_failed")
+        if reason == "invalid_input":
+            return _error_stream("记忆库不存在或无权访问", error.code)
+        if reason == "unsupported_storage":
+            return _error_stream("社区检索仅支持图存储空间", BizCode.INVALID_PARAMETER)
+        api_logger.exception("Unable to initialize memory read: request_id=%s", request_id)
+        return _error_stream("回复对话消息失败")
     except Exception as error:
         api_logger.error(
             "Unable to initialize memory read: request_id=%s, end_user=%s, error=%s",
