@@ -12,7 +12,6 @@ from uuid import uuid4
 from fastapi import Request, Response
 
 from app.core.error_codes import BizCode
-from app.core.language_utils import get_language_from_header
 from app.core.response_utils import fail
 from app.core.trace import get_trace_id
 from app.i18n.dependencies import get_current_language
@@ -138,6 +137,9 @@ def memory_profile_proxy(
     differs from the one internal route that serves the capability (the admin hot-tags
     alias under ``/memory-storage``). Only the forwarded path moves; the caller's own
     path still decides the face (``x-source``) and the acting id.
+
+    ``language_field`` is retained for existing decorators. Language selection
+    belongs to the host's i18n middleware, including for those routes.
     """
 
     bounds = dict(upper_bounds or {})
@@ -162,21 +164,13 @@ def memory_profile_proxy(
                     "request: Request"
                 )
             current_user = arguments.get("current_user")
-            error_language = (
-                arguments.get(language_field)
-                if language_field
-                else request.headers.get("X-Language-Type")
-            )
-            if error_language is None:
-                error_language = await get_current_language(request)
-            else:
-                error_language = get_language_from_header(error_language)
+            language = await get_current_language(request)
             workspace_id = getattr(current_user, "current_workspace_id", None)
             if workspace_id is None:
                 return fail(
                     BizCode.INVALID_PARAMETER,
-                    t("memory.errors.workspace_required", error_language),
-                    t("memory.errors.current_workspace_missing", error_language),
+                    t("memory.errors.workspace_required", language),
+                    t("memory.errors.current_workspace_missing", language),
                 )
 
             # The query is rebuilt from the declared fields rather than forwarded
@@ -209,19 +203,8 @@ def memory_profile_proxy(
 
             caller_path = request.scope["path"]
             path = target_path or caller_path
-            # Language is presentation-only, so every proxied route forwards it
-            # even when the handler does not declare the header. An explicit
-            # ``language_field`` still wins for callers that carry it elsewhere.
-            if language_field is not None:
-                # Display keeps the legacy API's zh/en-only header rule. Resolve
-                # it here so the downstream middleware cannot add a fallback.
-                language_type = get_language_from_header(arguments.get(language_field))
-            else:
-                language_type = request.headers.get("X-Language-Type")
-                if language_type is None:
-                    language_type = request.headers.get("Accept-Language")
-                if language_type is None:
-                    language_type = error_language
+            # Forward the host's resolved language so local validation and the
+            # profile response follow the same query/header preference order.
             trace_id = get_trace_id() or uuid4().hex
             caller_source = (
                 _caller_source(caller_path) if source is None else source
@@ -235,7 +218,7 @@ def memory_profile_proxy(
                     actor_id=_caller_actor_id(current_user, caller_source),
                     source=caller_source,
                     trace_id=trace_id,
-                    language_type=language_type,
+                    language_type=language,
                     timezone=request.headers.get("X-Timezone"),
                     query=query,
                     payload=payload,
@@ -249,6 +232,7 @@ def memory_profile_proxy(
                         content=result.body,
                         media_type=result.media_type,
                         status_code=200,
+                        headers={"Content-Language": result.content_language or language},
                     )
                 return result
             except MemoryProfileClientError as exc:
@@ -260,8 +244,8 @@ def memory_profile_proxy(
                 )
                 return fail(
                     BizCode.SERVICE_UNAVAILABLE,
-                    t("memory.errors.profile_unavailable", error_language),
-                    t("memory.errors.profile_unavailable_detail", error_language),
+                    t("memory.errors.profile_unavailable", language),
+                    t("memory.errors.profile_unavailable_detail", language),
                 )
 
         return wrapped
