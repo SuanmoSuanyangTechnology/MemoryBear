@@ -28,9 +28,18 @@ from sqlalchemy.orm import Session
 
 from ...errors import BizCode, BusinessException
 from ...quota.usage import ensure_skill_quota
+from ...runtime import ProcessRuntime
 from ...schemas import skill_schema
+from ...services.external_status_service import apply_external_status
 from ...services.skill_package_service import SkillPackageService
-from ..dependencies import Principal, get_principal, get_sync_db
+from ..dependencies import (
+    Principal,
+    SyncRedis,
+    get_principal,
+    get_runtime,
+    get_sync_db,
+    get_sync_redis,
+)
 from ..schemas.common import success
 from ..schemas.response_schema import ApiResponse, PageData, PageMeta
 
@@ -38,6 +47,8 @@ router = APIRouter(prefix="/skills", tags=["Skills"])
 
 DbSession = Annotated[Session, Depends(get_sync_db)]
 Caller = Annotated[Principal, Depends(get_principal)]
+CacheClient = Annotated[SyncRedis, Depends(get_sync_redis)]
+RuntimeDep = Annotated[ProcessRuntime, Depends(get_runtime)]
 
 
 @router.get("", summary="技能列表", response_model=ApiResponse)
@@ -63,6 +74,11 @@ def list_skills(
         kind: str = Query("all", description="粒度过滤：all | plugin | skill"),
         page: int = Query(1, ge=1, description="页码"),
         pagesize: int = Query(10, ge=1, le=100, description="每页数量"),
+        include_external_status: bool = Query(
+            False, description="是否批量回填 external.status（市场来源的技能/插件；30 秒缓存，失败降级 unknown）"
+        ),
+        cache: CacheClient = None,
+        runtime: RuntimeDep = None,
 ):
     """List entries: plugin rows and standalone skill rows (plugin members are not cards)."""
     tenant_id = principal.tenant_id
@@ -81,6 +97,14 @@ def list_skills(
         )
         for card in cards
     ]
+    if include_external_status:
+        apply_external_status(
+            items,
+            resource_type="skill_package",
+            tenant_id=tenant_id,
+            market=runtime.market_gateway,
+            cache=cache,
+        )
     meta = PageMeta(page=page, pagesize=pagesize, total=total, hasnext=(page * pagesize) < total)
     return success(data=PageData(page=meta, items=items), msg="技能市场列表获取成功")
 
@@ -90,6 +114,11 @@ def get_skill(
         skill_id: UUID,
         db: DbSession,
         principal: Caller,
+        cache: CacheClient,
+        runtime: RuntimeDep,
+        include_external_status: bool = Query(
+            False, description="是否回填 external.status（仅市场来源的技能/插件有意义）"
+        ),
 ):
     """The single detail entry point.
 
@@ -98,10 +127,16 @@ def get_skill(
     """
     tenant_id = principal.tenant_id
     detail = SkillPackageService.get_entry_detail(db, tenant_id, skill_id)
-    return success(
-        data=skill_schema.Skill.model_validate(detail).model_dump(),
-        msg="获取技能详情成功",
-    )
+    payload = skill_schema.Skill.model_validate(detail).model_dump()
+    if include_external_status:
+        apply_external_status(
+            [payload],
+            resource_type="skill_package",
+            tenant_id=tenant_id,
+            market=runtime.market_gateway,
+            cache=cache,
+        )
+    return success(data=payload, msg="获取技能详情成功")
 
 
 @router.post("/packages/import", summary="导入标准技能包（zip / URL）", response_model=ApiResponse)

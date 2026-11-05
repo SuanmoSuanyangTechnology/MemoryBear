@@ -65,6 +65,7 @@ from ..repositories.workflow_repository import (
 )
 from ..schemas import DraftRunRequest, FileInput, FileType, TransferMethod
 from .annotation_service import AnnotationService
+from .asset_release_resolver import AssetReleaseResolver
 from .conversation_service import ConversationService
 from .multi_agent_service import convert_uuids_to_str
 from ..models.annotation_model import HitLogSource
@@ -5068,17 +5069,22 @@ class WorkflowService:
             app: App,
             workspace_id: uuid.UUID,
     ) -> WorkflowConfig:
-        """Resolve the workflow config: shared apps read the published snapshot, own apps read the draft. Reuses the is_shared logic of draft_run."""
+        """Resolve the workflow config: shared apps read the pinned snapshot, own apps read the draft.
+
+        The pin comes from the catalog installation, not from
+        `app.current_release_id` — a consumer must follow the version the sharer
+        froze (§5.3).
+        """
         is_shared = app.workspace_id != workspace_id
         if is_shared:
-            if not app.current_release_id:
-                raise BusinessException("该应用尚未发布，无法使用", BizCode.AGENT_CONFIG_MISSING)
-            release = self.db.get(AppRelease, app.current_release_id)
+            from .app_service import AppService
+            release = AssetReleaseResolver(self.db).resolve_release(
+                app_id=app.id, workspace_id=workspace_id
+            )
             if not release:
-                raise BusinessException("发布版本不存在", BizCode.AGENT_CONFIG_MISSING)
+                raise BusinessException("该应用尚未发布，无法使用", BizCode.AGENT_CONFIG_MISSING)
             # Same as the shared branch of draft_run: rebuild the config via AppService
             # so the real config id is carried along
-            from .app_service import AppService
             return AppService(self.db)._workflow_config_from_release(release)
         return self.check_config(app.id)
 

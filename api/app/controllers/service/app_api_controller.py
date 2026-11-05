@@ -39,6 +39,10 @@ from app.services import workspace_service
 from app.services.agent_config_helper import enrich_agent_config
 from app.services.app_chat_service import AppChatService
 from app.services.app_service import get_app_service, AppService
+from app.services.asset_release_resolver import (
+    AsyncAssetReleaseResolver,
+    app_cache_key as build_app_cache_key,
+)
 from app.services.conversation_service import ConversationService, get_conversation_service
 from app.services.intervention_registry import submit_intervention
 from app.services.workflow_service import WorkflowService
@@ -368,8 +372,10 @@ async def chat(
     resource_id = api_key_auth.resource_id
     workspace_id = api_key_auth.workspace_id
 
-    # Try App cache before opening a DB session
-    app_cache_key = f"cache:v2:app:{resource_id}"
+    # Try App cache before opening a DB session. The key carries the workspace
+    # dimension: a shared app resolves to the release pinned for *this* workspace,
+    # so a key without it would cross-read two spaces' pinned versions (§5.3).
+    app_cache_key = build_app_cache_key(resource_id, workspace_id)
     app_cache = await get_json_async(app_cache_key)
     _app_stub = None
     _cached_release_id = None
@@ -379,8 +385,8 @@ async def chat(
             id=uuid.UUID(app_cache["id"]),
             type=app_cache["type"],
         )
-        if app_cache.get("current_release_id"):
-            _cached_release_id = uuid.UUID(app_cache["current_release_id"])
+        if app_cache.get("release_id"):
+            _cached_release_id = uuid.UUID(app_cache["release_id"])
 
     async with get_async_db_context() as db:
         app_service = AppService(db)
@@ -390,10 +396,13 @@ async def chat(
             app = _app_stub
         else:
             app = await app_service.get_app_async(resource_id, workspace_id)
+            _resolved = await AsyncAssetReleaseResolver(db).resolve(
+                app_id=app.id, workspace_id=workspace_id
+            )
             await set_json_async(app_cache_key, {
                 "id": str(app.id),
                 "type": app.type,
-                "current_release_id": str(app.current_release_id) if app.current_release_id else None,
+                "release_id": str(_resolved.release_id) if _resolved.release_id else None,
             }, ttl=60)
 
         if payload.version is not None:

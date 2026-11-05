@@ -132,7 +132,14 @@ async def _load_draft_run_app_snapshot(
         app_id: uuid.UUID,
         workspace_id: uuid.UUID | None,
 ) -> _DraftRunAppSnapshot:
-    from app.models import App, AppShare
+    """读取试运行所需的最小应用状态（本空间或共享）。
+
+    这里的 `current_release_id` 语义是**该空间应当运行的版本**：消费方读的是
+    资源中心条目钉住的版本，而不是源应用的当前版本（§5.3）。所有下游 helper
+    都以这个字段为准，因此只在这里解析一次，整条试运行路径就一致了。
+    """
+    from app.models import App
+    from app.services.asset_release_resolver import AsyncAssetReleaseResolver
 
     async with get_async_db_context() as db:
         app = await db.scalar(
@@ -141,22 +148,19 @@ async def _load_draft_run_app_snapshot(
         if not app:
             raise BusinessException("应用不存在", BizCode.NOT_FOUND)
 
+        resolved_release_id = app.current_release_id
         if workspace_id is not None and app.workspace_id != workspace_id:
-            share_exists = await db.scalar(
-                select(AppShare.id).where(
-                    AppShare.source_app_id == app.id,
-                    AppShare.target_workspace_id == workspace_id,
-                    AppShare.is_active.is_(True),
-                ).limit(1)
+            # 资源中心安装记录（未回填的历史共享由 resolver 内部兼容，§11.1 M3）
+            resolved = await AsyncAssetReleaseResolver(db).resolve(
+                app_id=app.id, workspace_id=workspace_id
             )
-            if not share_exists:
-                raise BusinessException("应用不可访问", BizCode.WORKSPACE_NO_ACCESS)
+            resolved_release_id = resolved.release_id
 
         return _DraftRunAppSnapshot(
             id=app.id,
             workspace_id=app.workspace_id,
             type=app.type,
-            current_release_id=app.current_release_id,
+            current_release_id=resolved_release_id,
         )
 
 
@@ -218,7 +222,8 @@ async def _ensure_workflow_conversation_ready(
     if not conversation_id:
         return conversation_id
 
-    from app.models import AppShare, Conversation
+    from app.models import Conversation
+    from app.services.asset_release_resolver import AsyncAssetReleaseResolver
 
     try:
         conv_uuid = uuid.UUID(conversation_id)
@@ -235,15 +240,12 @@ async def _ensure_workflow_conversation_ready(
             raise BusinessException(f"会话不存在: {conversation_id}", BizCode.NOT_FOUND)
 
         if conversation.workspace_id != workspace_id:
-            share_exists = await db.scalar(
-                select(AppShare.id).where(
-                    AppShare.source_app_id == app_id,
-                    AppShare.target_workspace_id == workspace_id,
-                    AppShare.is_active.is_(True),
-                ).limit(1)
+            # 共享判定改为资源中心安装记录（未回填的历史共享由 resolver 兼容）
+            shared_in = await AsyncAssetReleaseResolver(db).can_access(
+                app_id=app_id, workspace_id=workspace_id
             )
             same_app = conversation.app_id == app_id
-            if not share_exists and not same_app:
+            if not shared_in and not same_app:
                 raise BusinessException("会话不属于当前工作空间", BizCode.PERMISSION_DENIED)
 
     return conversation_id
@@ -756,6 +758,8 @@ def publish_app(
         release_notes=payload.release_notes,
         name=payload.name,
         icon=payload.icon,
+        usage_examples=payload.usage_examples,
+        categories=payload.categories,
     )
     return success(data=app_schema.AppRelease.model_validate(release))
 

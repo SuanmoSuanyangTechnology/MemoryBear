@@ -76,6 +76,21 @@ class App(Base):
         index=True,
     )
 
+    # 来源列（§11.2）：只记录本地副本的来源，投稿状态由 market-service 权威持有
+    origin = Column(
+        String(16), nullable=False, default="local", server_default="local",
+        comment="local（本租户创建）| external（从市场安装）",
+    )
+    external_source = Column(
+        String(32), nullable=True, comment="本期固定 community_market",
+    )
+    external_resource_id = Column(
+        String(64), nullable=True, index=True, comment="market_resources.id",
+    )
+    external_version = Column(
+        String(64), nullable=True, comment="安装时的市场版本，不随市场新版本变化",
+    )
+
     is_active = Column(Boolean, default=True, nullable=False)
     created_at = Column(DateTime, default=utcnow_naive)
     updated_at = Column(DateTime, default=utcnow_naive, onupdate=utcnow_naive)

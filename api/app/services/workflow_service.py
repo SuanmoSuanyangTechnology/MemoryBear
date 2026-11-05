@@ -4983,14 +4983,19 @@ class WorkflowService:
             app: App,
             workspace_id: uuid.UUID,
     ) -> WorkflowConfig:
-        """解析工作流配置：共享应用读发布快照，自有应用读草稿。复用 draft_run 的 is_shared 判定。"""
+        """解析工作流配置：共享应用读钉住快照，自有应用读草稿。
+
+        钉住版本来自本空间的资源中心安装记录，不是 `app.current_release_id`
+        ——消费方必须跟随分享方冻结的那一版（§5.3）。
+        """
         is_shared = app.workspace_id != workspace_id
         if is_shared:
-            if not app.current_release_id:
-                raise BusinessException("该应用尚未发布，无法使用", BizCode.AGENT_CONFIG_MISSING)
-            release = self.db.get(AppRelease, app.current_release_id)
+            from app.services.asset_release_resolver import AssetReleaseResolver
+            release = AssetReleaseResolver(self.db).resolve_release(
+                app_id=app.id, workspace_id=workspace_id
+            )
             if not release:
-                raise BusinessException("发布版本不存在", BizCode.AGENT_CONFIG_MISSING)
+                raise BusinessException("该应用尚未发布，无法使用", BizCode.AGENT_CONFIG_MISSING)
             # 与 draft_run 共享分支保持一致：用 AppService 重建配置以带出真实 config id
             from app.services.app_service import AppService
             return AppService(self.db)._workflow_config_from_release(release)

@@ -104,9 +104,16 @@ class ToolInfo(BaseModel):
     is_active: bool = Field(True, description="是否可用（False 表示已删除）")
     tags: List[str] = Field(default_factory=list, description="工具标签")
     tenant_id: Optional[str] = Field(None, description="租户ID")
+    is_placeholder: bool = Field(
+        False,
+        description="是否为跨租户共享留下的占位行：可见、可引用，但调用必然失败，需用户自行重建",
+    )
+    # 来源（§11.2）：`local` 本租户创建 / `external` 从市场安装的副本。
     origin: str = Field("local", description="本地副本来源：local / external")
     method_count: int = Field(0, description="可调用方法数，不发起网络请求")
-    external: Optional[ExternalRef] = Field(None, description="来源信息；origin=local 时为 null")
+    external: Optional[ExternalRef] = Field(
+        None, description="来源信息；origin=local 时为 null。status 仅在 include_external_status=true 时回填"
+    )
     created_at: datetime = Field(..., description="创建时间")
 
     class Config:

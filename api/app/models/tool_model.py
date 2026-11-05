@@ -123,11 +123,18 @@ class ToolConfig(Base):
     version = Column(String(50), default="1.0.0")
     tags = Column(JSON, default=list)  # 标签列表
 
-    # Market provenance: describes the local copy's origin, not publication state.
-    origin = Column(String(16), default="local", server_default="local", nullable=False, index=True)
-    external_source = Column(String(32), nullable=True)
-    external_resource_id = Column(String(64), nullable=True, index=True)
-    external_version = Column(String(64), nullable=True)
+# 来源列（§11.2）：只记录本地副本的来源，投稿状态由 market-service 权威持有
+    origin = Column(
+        String(16), nullable=False, default="local", server_default="local", index=True,
+        comment="local（本租户创建）| external（从市场安装）",
+    )
+    external_source = Column(String(32), nullable=True, comment="本期固定 community_market")
+    external_resource_id = Column(
+        String(64), nullable=True, index=True, comment="market_resources.id",
+    )
+    external_version = Column(
+        String(64), nullable=True, comment="安装时的市场版本，不随市场新版本变化",
+    )
 
     # 逻辑删除标志
     is_active = Column(Boolean, default=True, server_default='true', nullable=False, index=True, comment="是否可用，False表示已删除")

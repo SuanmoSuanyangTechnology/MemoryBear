@@ -347,6 +347,27 @@ class AppServiceSettings(BaseSettings):
         gt=0,
         validation_alias="APPLICATION_SERVICE_UPSTREAM_TIMEOUT_SECONDS",
     )
+    # Community market (market-service) linkage. `disabled` is the community
+    # edition default: switches 1/2 (tenant resource center) keep working and
+    # switch 3 (community market) fails closed with 6020 instead of silently
+    # dropping the submission. `http` requires the base URL + internal token.
+    application_service_market_mode: Literal["disabled", "http"] = Field(
+        default="disabled",
+        validation_alias="APPLICATION_SERVICE_MARKET_MODE",
+    )
+    market_service_base_url: str | None = Field(
+        default=None,
+        validation_alias="MARKET_SERVICE_BASE_URL",
+    )
+    market_internal_token: SecretStr = Field(
+        default=SecretStr(""),
+        validation_alias="MARKET_INTERNAL_TOKEN",
+    )
+    market_service_timeout_seconds: float = Field(
+        default=10.0,
+        gt=0,
+        validation_alias="MARKET_SERVICE_TIMEOUT_SECONDS",
+    )
     # East-west direct dependency on model-service (annotation embeddings),
     # never routed through the gateway; same env name as the monolith's
     # outbound knob. Unset or unreachable degrades annotation writes to a
@@ -636,6 +657,26 @@ class AppServiceSettings(BaseSettings):
             raise ValueError(
                 "APPLICATION_SERVICE_SSE_IDLE_TIMEOUT_SECONDS must stay below the "
                 "gateway's 300s idle timeout"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def check_market_settings(self) -> AppServiceSettings:
+        """`http` mode needs both the market base URL and the internal token.
+
+        Failing here turns a misconfigured deployment into a startup error
+        instead of a runtime 401/502 on the first community-market submission.
+        """
+
+        if self.application_service_market_mode != "http":
+            return self
+        if not (self.market_service_base_url or "").strip():
+            raise ValueError(
+                "MARKET_SERVICE_BASE_URL must be set when APPLICATION_SERVICE_MARKET_MODE=http"
+            )
+        if not self.market_internal_token.get_secret_value().strip():
+            raise ValueError(
+                "MARKET_INTERNAL_TOKEN must be set when APPLICATION_SERVICE_MARKET_MODE=http"
             )
         return self
 

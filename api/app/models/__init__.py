@@ -16,6 +16,16 @@ from .mcp_market_config_model import McpMarketConfig
 from .app_model import App
 from .agent_app_config_model import AgentConfig
 from .app_release_model import AppRelease
+from .app_asset_model import (
+    AppAsset,
+    AppAssetInstallation,
+    AppCategory,
+    AssetStatus,
+    InstallSource,
+    InstallStatus,
+    LinkMode,
+    ShareMode,
+)
 from .memory_increment_model import MemoryIncrement
 from .end_user_model import EndUser, EndUserMerge
 from .end_user_info_model import EndUserInfo
@@ -83,6 +93,13 @@ __all__ = [
     "App",
     "AgentConfig",
     "AppRelease",
+    "AppAsset",
+    "AppAssetInstallation",
+    "AssetStatus",
+    "InstallSource",
+    "InstallStatus",
+    "LinkMode",
+    "ShareMode",
     "MemoryIncrement",
     "EndUser",
     "EndUserMerge",
