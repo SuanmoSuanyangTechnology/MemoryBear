@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 
 from ...errors import BizCode, BusinessException
 from ...models.tool_model import AuthType, ToolStatus, ToolType
+from ...runtime import ProcessRuntime
 from ...schemas.tool_schema import (
     CustomToolTestRequest,
     ParseSchemaRequest,
@@ -28,7 +29,15 @@ from ...schemas.tool_schema import (
     ToolUpdateRequest,
 )
 from ...services.tool_service import ToolService
-from ..dependencies import Principal, get_principal, get_sync_db
+from ...services.external_status_service import apply_external_status
+from ..dependencies import (
+    Principal,
+    SyncRedis,
+    get_principal,
+    get_runtime,
+    get_sync_db,
+    get_sync_redis,
+)
 from ..schemas.common import success
 from ..schemas.response_schema import ApiResponse
 
@@ -36,6 +45,8 @@ router = APIRouter(prefix="/tools", tags=["Tool System"])
 
 DbSession = Annotated[Session, Depends(get_sync_db)]
 Caller = Annotated[Principal, Depends(get_principal)]
+CacheClient = Annotated[SyncRedis, Depends(get_sync_redis)]
+RuntimeDep = Annotated[ProcessRuntime, Depends(get_runtime)]
 
 
 @router.get("/statistics", summary="获取工具统计信息", response_model=ApiResponse)
@@ -52,9 +63,14 @@ def get_tool_statistics(db: DbSession, principal: Caller):
 def list_tools(
         db: DbSession,
         principal: Caller,
+        cache: CacheClient,
+        runtime: RuntimeDep,
         name: str | None = Query(None),
         tool_type: str | None = Query(None),
         status: str | None = Query(None),
+        include_external_status: bool = Query(
+            False, description="是否批量回填 external.status（市场来源的工具；30 秒缓存，失败降级 unknown）"
+        ),
 ):
     """List tools"""
     try:
@@ -69,6 +85,14 @@ def list_tools(
             tool_type=ToolType(tool_type) if tool_type else None,
             status=ToolStatus(status) if status else None
         )
+        if include_external_status:
+            apply_external_status(
+                tools,
+                resource_type="tool",
+                tenant_id=principal.tenant_id,
+                market=runtime.market,
+                cache=cache,
+            )
         return success(data=tools, msg="获取工具列表成功")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e)) from e
@@ -89,11 +113,28 @@ def get_tool_methods(tool_id: str, db: DbSession, principal: Caller):
 
 
 @router.get("/{tool_id}", summary="获取工具详情", response_model=ApiResponse)
-def get_tool(tool_id: str, db: DbSession, principal: Caller):
+def get_tool(
+        tool_id: str,
+        db: DbSession,
+        principal: Caller,
+        cache: CacheClient,
+        runtime: RuntimeDep,
+        include_external_status: bool = Query(
+            False, description="是否回填 external.status（仅市场来源的工具有意义）"
+        ),
+):
     """Get tool details"""
     tool = ToolService(db).get_tool_detail(tool_id, principal.tenant_id)
     if not tool:
         raise HTTPException(status_code=404, detail="工具不存在")
+    if include_external_status:
+        apply_external_status(
+            [tool],
+            resource_type="tool",
+            tenant_id=principal.tenant_id,
+            market=runtime.market,
+            cache=cache,
+        )
     return success(data=tool, msg="获取工具详情成功")
 
 

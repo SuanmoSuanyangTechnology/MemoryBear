@@ -131,7 +131,7 @@ def register_error_handlers(application: FastAPI) -> None:
         return render_error(
             request,
             status_code=status_code,
-            content=fail(code=biz_code.value, msg=message, error=message),
+            content=fail(code=biz_code.value, msg=message, error=message, data=exc.data),
             error_code=biz_code.name,
             message=message,
             params=context,

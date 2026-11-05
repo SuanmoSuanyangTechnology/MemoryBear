@@ -48,6 +48,7 @@ from ..models.skill_package_model import SkillPackage
 from ..repositories.skill_package_repository import SkillPackageRepository
 from ..storage import StorageFactory
 from ..storage.exceptions import StorageError
+from .external_status_service import market_source_ref
 
 
 # Agent Skills spec: frontmatter name is lowercase alnum + hyphen, <=64.
@@ -625,8 +626,10 @@ class SkillPackageService:
         plugin_name: Optional[str] = None,
         plugin_description: Optional[str] = None,
         source_ref: Optional[str] = None,
+        source_type: str = "imported",
         overwrite: bool = False,
         conflict_strategy: str = "rename",
+        commit: bool = True,
     ) -> dict:
         """Import one standard pack from a zip or an allow-listed URL.
 
@@ -758,7 +761,7 @@ class SkillPackageService:
                 tenant_id=tenant_id,
                 name=resolved_plugin_name,
                 description=plugin_description,
-                source_type="imported",
+                source_type=source_type,
                 source_ref=source_ref,
             )
             plugin_id = plugin.id
@@ -770,16 +773,23 @@ class SkillPackageService:
             results.append(
                 SkillPackageService._commit_member(
                     db, repo, tenant_id=tenant_id, item=item, plugin_id=plugin_id,
-                    source_ref=source_ref, overwrite=overwrite,
+                    source_ref=source_ref, source_type=source_type, overwrite=overwrite,
                     conflict_strategy=conflict_strategy,
                 )
             )
 
-        db.commit()
+        # Bundle landing (§7.5.5) owns the transaction: a cluster lands as a unit,
+        # so committing here would put already-written skills beyond the reach of
+        # the caller's rollback.
+        if commit:
+            db.commit()
+        else:
+            db.flush()
 
         for item, res in zip(prepared, results):
             if res.get("skill_id"):
-                db.refresh(res["_skill"])
+                if commit:
+                    db.refresh(res["_skill"])
                 del res["_skill"]
 
         first = results[0]
@@ -1062,6 +1072,7 @@ class SkillPackageService:
         item: dict,
         plugin_id: Optional[uuid.UUID],
         source_ref: Optional[str],
+        source_type: str,
         overwrite: bool,
         conflict_strategy: str,
     ) -> dict:
@@ -1189,7 +1200,7 @@ class SkillPackageService:
             tenant_id=tenant_id, name=name, display_name=item["name"],
             description=item["description"], content_hash=content_hash,
             plugin_id=plugin_id,
-            source_type="imported", source_ref=source_ref,
+            source_type=source_type, source_ref=source_ref,
             frontmatter_raw=item["frontmatter"],
             license=item["frontmatter"].get("license"),
             compatibility=item["frontmatter"].get("compatibility"),
@@ -1784,6 +1795,15 @@ class SkillPackageService:
             "call_name": skill.call_name,
             "source": pkg.source_ref if pkg else None,
             "has_scripts": pkg.has_scripts if pkg else None,
+            # 来源（§11.2）：技能包没有 origin 列，靠 source_type/source_ref 还原
+            **(lambda ref: {
+                "origin": "external" if ref else "local",
+                "external": ref,
+            })(
+                market_source_ref(
+                    pkg.source_type if pkg else None, pkg.source_ref if pkg else None
+                )
+            ),
         }
         if with_members:
             card["members"] = [
@@ -1822,6 +1842,21 @@ class SkillPackageService:
             "call_name": None,
             "source": plugin.source_ref,
             "has_scripts": any(pkg.has_scripts for _s, pkg in member_rows),
+            # 插件卡片成员里存在市场来源成员时整卡视为 external（§2.5）
+            **(lambda ref: {
+                "origin": "external" if ref else "local",
+                "external": ref,
+            })(
+                next(
+                    (
+                        ref
+                        for _s, pkg in member_rows
+                        for ref in [market_source_ref(pkg.source_type, pkg.source_ref)]
+                        if ref
+                    ),
+                    None,
+                )
+            ),
             "members": [
                 {
                     "id": skill.id,

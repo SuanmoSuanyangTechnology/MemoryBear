@@ -33,6 +33,8 @@ SERVICE_WRITE_TABLES = frozenset(
         "apps",
         "app_releases",
         "app_shares",
+        "app_assets",
+        "app_asset_installations",
         "release_shares",
         # agent
         "agent_configs",

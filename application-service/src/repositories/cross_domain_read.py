@@ -72,6 +72,7 @@ workspace_members = Table(
     Column("id", PgUUID(as_uuid=True), primary_key=True),
     Column("user_id", PgUUID(as_uuid=True)),
     Column("workspace_id", PgUUID(as_uuid=True)),
+    Column("role", String),
     Column("is_active", Boolean),
 )
 
@@ -258,6 +259,26 @@ def is_workspace_member(db: Session, user_id: UUID, workspace_id: UUID) -> bool:
         .limit(1)
     ).first()
     return row is not None
+
+
+def is_workspace_manager(db: Session, user_id: UUID, workspace_id: UUID) -> bool:
+    """Whether the user is an active *manager* of the workspace.
+
+    Sharing an app to the tenant catalog is a space-level decision (it exposes
+    the app to every space in the tenant), so it is limited to managers and the
+    app creator — the same rule the monolith applies to workspace-scoped writes.
+    """
+
+    row = db.execute(
+        select(workspace_members.c.role)
+        .where(
+            workspace_members.c.user_id == user_id,
+            workspace_members.c.workspace_id == workspace_id,
+            workspace_members.c.is_active.is_(True),
+        )
+        .limit(1)
+    ).first()
+    return bool(row and row.role == "manager")
 
 
 def get_active_subscription(db: Session, tenant_id: UUID) -> Row | None:
@@ -905,6 +926,7 @@ __all__ = [
     "get_workspace_tenant_id",
     "get_workspace_published_knowledge_row",
     "get_workspaces_by_ids",
+    "is_workspace_manager",
     "is_workspace_member",
     "memory_config_exists_by_legacy_id",
     "memory_config_exists_by_uuid",
