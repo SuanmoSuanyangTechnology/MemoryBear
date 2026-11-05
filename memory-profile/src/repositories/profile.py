@@ -352,7 +352,7 @@ class MemoryStatisticsRepository:
             rows = (await session.execute(_profile_statement(end_user_ids))).all()
             scene_ids = _scene_ids(rows)
             scenes = []
-            if scene_ids and self.ontology_query_enabled:
+            if scene_ids:
                 scenes = (await session.execute(_SCENE_QUERY, {
                     "scene_ids": scene_ids,
                     "tenant_ids": list({row.tenant_id for row in rows}),
