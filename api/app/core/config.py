@@ -312,15 +312,12 @@ class Settings:
     # BERT 共用服务地址（完整 /v1/rerank 路径）
     BERT_URL: str = os.getenv("BERT_URL", "")
 
-    # 消息规整：正式写入与试运行分别按进程限流；只限制新模型，不影响原 LLM。
+    # 消息规整：新模型连接配置，不影响原 LLM。
     EXTRACT_PRUNING_ENABLED: bool = os.getenv("EXTRACT_PRUNING_ENABLED", "true").strip().lower() == "true"
     EXTRACT_PRUNING_URL: str = os.getenv("EXTRACT_PRUNING_URL", "").strip()
     EXTRACT_PRUNING_API_KEY: str = os.getenv("EXTRACT_PRUNING_API_KEY", "").strip()
     EXTRACT_PRUNING_MODEL: str = os.getenv("EXTRACT_PRUNING_MODEL", "extract-pruning").strip()
-    EXTRACT_PRUNING_MAX_CONCURRENT: int = max(
-        1, int(os.getenv("EXTRACT_PRUNING_MAX_CONCURRENT", "5"))
-    )
-    # 从取得名额后的 HTTP 调用到完整响应的总预算，不含本地排队或 LLM 回退。
+    # 单次新模型 HTTP 调用到完整响应的总预算，不含业务层等待或 LLM 回退。
     EXTRACT_PRUNING_REQUEST_TIMEOUT_SECONDS: float = max(
         0.1, float(os.getenv("EXTRACT_PRUNING_REQUEST_TIMEOUT_SECONDS", "60"))
     )

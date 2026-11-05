@@ -18,7 +18,6 @@ from typing import TYPE_CHECKING, List, NamedTuple, Optional, Tuple
 
 from app.core.memory.storage_services.extraction_engine.data_preprocessing import SemanticPruner
 from app.core.memory.models.config_models import PruningConfig
-from app.services.extract_pruning_client import Entry
 
 if TYPE_CHECKING:
     from app.schemas.memory_config_schema import MemoryConfig
@@ -128,19 +127,17 @@ async def prune_messages(
                 pruner=shared_pruner,
                 content=pair,
                 user_content=content,
-                entry="formal" if persist else "pilot",
             )))
         elif role == "assistant":
             prune_tasks.append((i, "assistant", _call_llm_prune(
                 pruner=shared_pruner,
                 content=content,
                 user_content="",
-                entry="formal" if persist else "pilot",
             )))
         else:
             result[i] = msg
 
-    # Step 3: 并发执行剪枝任务（新模型请求由客户端独立限流）
+    # Step 3: 沿用原有方式并发执行本批剪枝任务，不额外限制新模型并发。
     if prune_tasks:
         coros = [coro for _, _, coro in prune_tasks]
         llm_results = await asyncio.gather(*coros, return_exceptions=True)
@@ -277,7 +274,6 @@ async def _call_llm_prune(
     pruner,
     content: str,
     user_content: str,
-    entry: Entry = "formal",
 ) -> PruneResult:
     """调用共用编排，保留原 LLM 的占位输入及返回转换。
 
@@ -295,7 +291,7 @@ async def _call_llm_prune(
     llm_user_msg = ConversationMessage(role="user", msg=user_content if user_content else "[context]")
     asst_msg = ConversationMessage(role="assistant", msg=content)
 
-    output = await pruner.normalize_messages(user_msg, asst_msg, entry=entry, llm_user_msg=llm_user_msg)
+    output = await pruner.normalize_messages(user_msg, asst_msg, llm_user_msg=llm_user_msg)
     result = output.response
 
     pruned = "" if result.assistant_memory_hint == "NULL" else result.assistant_memory_hint
