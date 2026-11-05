@@ -30,8 +30,13 @@ from app.db import get_db
 from app.models import (
     AgentConfig,
     App,
+    AppAsset,
+    AppAssetInstallation,
     AppRelease,
     AppShare,
+    AssetStatus,
+    InstallStatus,
+    LinkMode,
     MultiAgentConfig,
     WorkflowConfig,
     Workspace,
@@ -56,6 +61,34 @@ from app.utils.redis_cache import delete_json, workflow_config_key
 
 # 获取业务日志器
 logger = get_business_logger()
+
+
+def _reference_install_app_ids(workspace_id: uuid.UUID):
+    """Apps reachable in ``workspace_id`` through a **read-only** catalog install.
+
+    资源中心取代了空间到空间的共享，「共享给我」现在有两个来源：旧的
+    ``app_shares`` 行，以及 ``app_asset_installations`` 里 ``link_mode = reference``
+    的安装。只读引用**不建本地应用**（``local_app_id`` 为 NULL），不并进这条子查询，
+    这些应用对列表接口就是隐形的——而详情/对话的鉴权（``AssetReleaseResolver``）
+    早就认了安装行，于是出现「能打开但列表里没有」。
+
+    ``link_mode = copy`` 的安装**故意排除**：副本本身已是目标空间的新应用，会以自有
+    应用的身份出现在「我的应用」里，并进来会让同一个应用在两个 tab 各出一条。
+
+    ``app_assets.status = published`` 与 resolver 口径一致：取消共享后只读引用立即
+    不可读，也就不该再出现在列表里。
+    """
+
+    return (
+        select(AppAsset.source_app_id)
+        .join(AppAssetInstallation, AppAssetInstallation.asset_id == AppAsset.id)
+        .where(
+            AppAssetInstallation.target_workspace_id == workspace_id,
+            AppAssetInstallation.status == InstallStatus.ACTIVE,
+            AppAssetInstallation.link_mode == LinkMode.REFERENCE,
+            AppAsset.status == AssetStatus.PUBLISHED,
+        )
+    )
 
 
 class AppService:
@@ -153,6 +186,16 @@ class AppService:
             App.is_active.is_(True)
         ).all()}
         existing |= shared_names
+
+        # 资源中心只读引用没有 app_shares 行，但它们同样占着本空间可见的名字，
+        # 不并进来就会允许创建同名应用，列表里出现两行同名。
+        ref_names = {r[0] for r in self.db.query(App.name).filter(
+            App.id.in_(_reference_install_app_ids(workspace_id)),
+            App.type == app_type,
+            App.is_active.is_(True)
+        ).all()}
+        existing |= ref_names
+
         if name not in existing:
             return name
         counter = 1
@@ -691,6 +734,34 @@ class AppService:
                 if share.source_workspace:
                     source_workspace_name = share.source_workspace.name
                     source_workspace_icon = share.source_workspace.icon
+            else:
+                # 从资源中心拉来的应用没有 app_shares 行（只读引用甚至没有本地
+                # app），来源空间与权限只能从安装记录取，否则列表里「来源」为空。
+                install = self.db.execute(
+                    select(
+                        AppAsset.source_workspace_id,
+                        AppAssetInstallation.permission,
+                        AppAssetInstallation.created_at,
+                    )
+                    .join(AppAssetInstallation, AppAssetInstallation.asset_id == AppAsset.id)
+                    .where(
+                        AppAsset.source_app_id == app.id,
+                        AppAssetInstallation.target_workspace_id == current_workspace_id,
+                        AppAssetInstallation.status == InstallStatus.ACTIVE,
+                        # 与列表作用域同口径：只有 reference 安装会让「别人的应用」
+                        # 出现在本空间列表里，copy 的那条应用是本空间自有行。
+                        AppAssetInstallation.link_mode == LinkMode.REFERENCE,
+                        AppAsset.status == AssetStatus.PUBLISHED,
+                    )
+                    .order_by(AppAssetInstallation.created_at.desc())
+                ).first()
+                if install:
+                    share_permission = install.permission
+                    shared_at = install.created_at
+                    source_workspace = self.db.get(Workspace, install.source_workspace_id)
+                    if source_workspace:
+                        source_workspace_name = source_workspace.name
+                        source_workspace_icon = source_workspace.icon
 
         # 版本号和生效状态
         if app.current_release:
@@ -1542,17 +1613,27 @@ class AppService:
 
         # 基础查询：本工作空间的应用
         if shared_only:
-            # 只返回共享给本工作空间的应用，不含自有应用
+            # 只返回共享给本工作空间的应用，不含自有应用。
+            # 「共享来的」= 旧 app_shares 行 ∪ 资源中心只读引用安装（见
+            # `_reference_install_app_ids`）：只查 legacy 表会漏掉所有从资源中心
+            # 拉取的应用，它们的 app 属于源空间、又不在 app_shares 里。
             shared_app_ids_stmt = (
                 select(AppShare.source_app_id)
                 .where(AppShare.target_workspace_id == workspace_id, AppShare.is_active.is_(True))
+                .union(_reference_install_app_ids(workspace_id))
             )
-            stmt = select(App).where(App.id.in_(shared_app_ids_stmt))
+            stmt = select(App).where(
+                App.id.in_(shared_app_ids_stmt),
+                # 「共享给我」不含自有应用：上面的 union 里可能混入指向本空间应用
+                # 的安装行（租户把自己的应用拉到自己的空间），必须显式排除。
+                App.workspace_id != workspace_id,
+            )
         elif include_shared:
             # 查询本工作空间的应用 + 分享给本工作空间的应用
             shared_app_ids_stmt = (
                 select(AppShare.source_app_id)
                 .where(AppShare.target_workspace_id == workspace_id, AppShare.is_active.is_(True))
+                .union(_reference_install_app_ids(workspace_id))
             )
             stmt = select(App).where(
                 or_(
@@ -1607,10 +1688,12 @@ class AppService:
         except ValueError:
             return []
 
-        # 查询本工作空间的应用 + 分享给本工作空间的应用（与 list_apps 的 include_shared 口径一致）
+        # 查询本工作空间的应用 + 分享给本工作空间的应用（与 list_apps 的 include_shared 口径一致；
+        # union 保证按 id 批量取时也认资源中心只读引用）
         shared_app_ids_stmt = (
             select(AppShare.source_app_id)
             .where(AppShare.target_workspace_id == workspace_id, AppShare.is_active.is_(True))
+            .union(_reference_install_app_ids(workspace_id))
         )
         stmt = select(App).where(
             App.id.in_(uuid_ids),

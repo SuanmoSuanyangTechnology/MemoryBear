@@ -188,7 +188,10 @@ class AssetService:
                 # 仅作市场指针载体时不可见；开关 1 打开时立刻可见
                 status=AssetStatus.PUBLISHED if visible else AssetStatus.UNPUBLISHED,
                 view_count=0,
-                description=release.description,
+                # 与迁移回填口径一致（`COALESCE(r.description, a.description)`）：
+                # 版本快照是不可变的，改应用描述不会回写已发版本；用户在创建后
+                # 才补的描述只存在于 `apps.description`，这里不回退就会漏掉。
+                description=release.description or app.description,
                 display_payload=self._display_payload(release),
                 created_by=user_id,
                 created_at=now,
@@ -208,7 +211,7 @@ class AssetService:
             )
             if visible and asset.status == AssetStatus.UNPUBLISHED:
                 asset.status = AssetStatus.PUBLISHED
-            asset.description = release.description
+            asset.description = release.description or app.description
             asset.display_payload = self._display_payload(release)
             asset.updated_at = now
             asset.is_active = True
@@ -303,6 +306,55 @@ class AssetService:
             "取消共享资源中心条目",
             extra={"asset_id": str(asset_id), "tenant_id": str(tenant_id)},
         )
+        return asset
+
+    # ==================== 改共享权限 ====================
+
+    def update_share_mode(
+            self,
+            *,
+            asset_id: uuid.UUID,
+            tenant_id: uuid.UUID,
+            share_mode: str,
+            user_id: uuid.UUID,
+            workspace_id: uuid.UUID | None,
+    ) -> AppAsset:
+        """切换条目的 `share_mode`（`readonly` ↔ `editable`）。
+
+        「我的共享」那一列的权限开关就是它：之前的实现只有共享时一次性设定
+        （`_upsert_asset` 里的 `allow_editable`），之后没有任何更新入口，前端
+        开关点了不落库。
+
+        只影响**之后**的 `install_asset`：形态由条目实时读取（`install_asset`
+        里 `asset.share_mode == ShareMode.EDITABLE`），已产生的安装记录
+        `app_asset_installations.permission` 是安装当时的快照，不追溯改写。
+        """
+
+        if share_mode not in (ShareMode.READONLY, ShareMode.EDITABLE):
+            raise BusinessException(
+                "权限值无效，只允许 readonly 或 editable",
+                BizCode.INVALID_PARAMETER,
+                data={"reason": "INVALID_SHARE_MODE"},
+            )
+
+        # `_get_asset_or_404` 已经挡掉不存在 / 已取消共享（unpublished）的条目：
+        # 取消共享后列表里没有这一行，也没有可改的开关。
+        asset = self._get_asset_or_404(asset_id, tenant_id)
+        app = self.app_service._get_app_or_404(asset.source_app_id)
+        self._assert_can_share(app, user_id, workspace_id)
+
+        if asset.share_mode != share_mode:
+            asset.share_mode = share_mode
+            asset.updated_at = utcnow_naive()
+            self.db.commit()
+            logger.info(
+                "更新资源中心条目共享权限",
+                extra={
+                    "asset_id": str(asset_id),
+                    "tenant_id": str(tenant_id),
+                    "share_mode": share_mode,
+                },
+            )
         return asset
 
     # ==================== 拉取到空间 ====================

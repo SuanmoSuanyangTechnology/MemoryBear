@@ -45,6 +45,7 @@ from ...services.app_statistics_service import AppStatisticsService
 from ...services.asset_service import AssetService
 from ...services.external_status_service import apply_external_status
 from ...services.file_storage_service import FileStorageService, get_file_storage_service
+from ...services.my_shares_service import MySharesService
 from ...services.tool_service import ToolService
 from ...services.workflow_import_service import WorkflowImportService
 from ...services.workflow_service import WorkflowService
@@ -225,11 +226,39 @@ def list_apps(
 def list_my_shared_out(
         workspace_id: WorkspaceId,
         db: DbSession,
+        principal: Caller,
+        runtime: RuntimeDep,
+        page: int = Query(1, ge=1, description="页码，从 1 开始"),
+        pagesize: int = Query(20, ge=1, le=100, description="每页数量，最大 100"),
 ):
-    """List all records this workspace has actively shared out to other workspaces (my shares)"""
-    service = AppShareService(db)
-    shares = service.list_my_shared_out(workspace_id=workspace_id)
-    return success(data=service.share_schemas_with_ontology(shares))
+    """分享方视角的「我的共享」：一行 = 一个「应用 × 共享范围」。
+
+    与旧实现的差别（契约 `GET /apps/my-shared-out`，Apifox 427331831）：
+
+    - 不再是每行一条 `app_shares`（那是「共享给哪个目标空间」的老模型），而是
+      资源中心 / 社区市场两条**独立链路**各铺一行；同一应用出现两次是正常的。
+    - `data` 从数组改为 `{items, page}`：行的条数不再等于共享关系数。
+    - `total` 是**行数**，不是应用个数。
+
+    市场状态按批查一次（`market_sync` 有行的应用才会问），失败整批降 `unknown`
+    并照常返回列表——列表页可用性优先。
+    """
+
+    service = MySharesService(db)
+    rows, total = service.list_rows(
+        tenant_id=principal.tenant_id,
+        workspace_id=workspace_id,
+        market=runtime.market_gateway,
+        page=page,
+        pagesize=pagesize,
+    )
+    # 本体回填放在序列化之后：远端 binder 会先结束事务（同 AppShareService 的注释）
+    service.fill_ontology(rows)
+    meta = PageMeta(
+        page=page, pagesize=pagesize, total=total,
+        hasnext=(page * pagesize) < total,
+    )
+    return success(data=PageData(page=meta, items=rows), msg="获取我的共享成功")
 
 
 @router.delete(
