@@ -35,7 +35,10 @@ CALL {
     WITH c, coalesce(c.member_count, 0) AS scene_count
     ORDER BY
         CASE WHEN $sort = 'scene_count_desc' THEN scene_count END DESC,
+        CASE WHEN $sort IN ['scene_count_desc', 'updated_at_desc']
+             THEN c.updated_at IS NULL END ASC,
         CASE WHEN $sort IN ['scene_count_desc', 'updated_at_desc'] THEN c.updated_at END DESC,
+        CASE WHEN $sort = 'created_at_desc' THEN c.created_at IS NULL END ASC,
         CASE WHEN $sort = 'created_at_desc' THEN c.created_at END DESC,
         c.id ASC
     RETURN collect({community: properties(c), scene_count: scene_count}) AS matched
