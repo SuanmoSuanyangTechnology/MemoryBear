@@ -6,11 +6,13 @@ import logging
 import re
 from collections import defaultdict
 
+from ...tasks.observability import current_parent_task_id
 from ..chunk.token_utils import split_by_token_limit
 from .batching import optional_items, parallel
-from .config import WikiError, fingerprint, normalize_name, source_reference_key
+from .config import WikiError, fingerprint, source_reference_key
 from .contracts import Candidates, Compacted, EvidencePage
 from .diagnostics import diagnostic_json
+from .identity import merge_candidate, topic_identity
 from .model import request_tokens, tokens
 
 logger = logging.getLogger(__name__)
@@ -136,11 +138,15 @@ def extract_candidates(model, snapshot, segments):
     candidates = {}
     for segment_index, result in enumerate(results, start=1):
         for item in result["candidates"]:
-            key = (item["kind"], normalize_name(item["name"]), normalize_name(item["scope"]))
+            key = topic_identity(item["kind"], item["name"])
             if key in candidates:
-                previous = candidates[key]
-                previous["source_refs"] = sorted(set(previous["source_refs"] + item["source_refs"]))
-                previous["aliases"] = sorted(set(previous["aliases"] + item["aliases"]))
+                logger.info("Wiki 分段主题归并 %s", diagnostic_json({
+                    "stage": "wiki_candidates_v1", "task_id": current_parent_task_id(),
+                    "knowledge_id": snapshot.get("kb_id"),
+                    "document_id": snapshot.get("document_id"), "identity": key,
+                    "scopes": [candidates[key]["scope"], item["scope"]],
+                }))
+                merge_candidate(candidates[key], item)
             else:
                 candidates[key] = item
         logger.info(
@@ -151,7 +157,7 @@ def extract_candidates(model, snapshot, segments):
             len(segments),
             len(result["candidates"]),
             len(candidates),
-            len({key[:2] for key in candidates}),
+            len(candidates),
             model.settings.kb_wiki_max_topics,
         )
         if (model.settings.kb_wiki_max_topics
