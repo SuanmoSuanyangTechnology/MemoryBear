@@ -92,6 +92,17 @@ class EntityRepository(BaseNeo4jRepository[ExtractedEntityNode]):
             end_user_id=end_user_id,
         )
 
+    async def get_end_user_id_by_element_id(self, element_id: str) -> str | None:
+        rows = await self.connector.execute_query(
+            """
+            MATCH (e:ExtractedEntity)
+            WHERE elementId(e) = $element_id AND e.delete_at IS NULL
+            RETURN e.end_user_id AS end_user_id
+            """,
+            element_id=element_id,
+        )
+        return rows[0].get("end_user_id") if rows else None
+
     async def explicit_memory_rows(self, end_user_ids: list[str]) -> list[dict]:
         return await self.connector.execute_query(
             EXPLICIT_MEMORY_COUNTS, end_user_ids=end_user_ids

@@ -258,7 +258,7 @@ async def get_elasticsearch_workspace_statistics(
     client: ElasticClient,
     end_user_ids: Sequence[str],
 ) -> tuple[dict[str, dict[str, int]], set[str]]:
-    """返回每个用户的三类计数及 ES 中存在活跃节点的用户集合。"""
+    """返回每个用户的情景、情绪计数及 ES 中存在活跃节点的用户集合。"""
     if not end_user_ids:
         return {}, set()
     if client.client is None:
@@ -268,10 +268,7 @@ async def get_elasticsearch_workspace_statistics(
         _elasticsearch_search_header(MemoryNodeType.MEMORY_SUMMARY),
         _elasticsearch_search_body(end_user_ids),
         _elasticsearch_search_header(MemoryNodeType.EXTRACTED_ENTITY),
-        _elasticsearch_search_body(
-            end_user_ids,
-            ("explicit", {"filter": {"term": {"is_explicit_memory": True}}}),
-        ),
+        _elasticsearch_search_body(end_user_ids),
         _elasticsearch_search_header(MemoryNodeType.STATEMENT),
         _elasticsearch_search_body(
             end_user_ids,
@@ -295,10 +292,9 @@ async def get_elasticsearch_workspace_statistics(
         responses[0],
         "workspace episodic",
     )
-    explicit = _parse_elasticsearch_buckets(
+    entities = _parse_elasticsearch_buckets(
         responses[1],
-        "workspace explicit",
-        "explicit",
+        "workspace entities",
     )
     emotional = _parse_elasticsearch_buckets(
         responses[2],
@@ -308,12 +304,11 @@ async def get_elasticsearch_workspace_statistics(
 
     requested_ids = set(end_user_ids)
     present_ids = (
-        set(episodic) | set(explicit) | set(emotional)
+        set(episodic) | set(entities) | set(emotional)
     ) & requested_ids
     statistics = {
         end_user_id: {
             "episodic_count": episodic.get(end_user_id, (0, 0))[1],
-            "explicit_entity_count": explicit.get(end_user_id, (0, 0))[1],
             "emotional_count": emotional.get(end_user_id, (0, 0))[1],
         }
         for end_user_id in end_user_ids

@@ -457,7 +457,7 @@ class MemoryBaseService:
             semantic_count = sum(row["semantic_count"] for row in graph_rows)
             return permanent_count + timeline_count + semantic_count
         except Exception as e:
-            logger.error(f"获取显性记忆数量时出错: {str(e)}", exc_info=True)
+            logger.error(f"获取显性记忆数量时出错 (end_user_id={end_user_id}): {str(e)}", exc_info=True)
             return 0
 
     async def get_emotional_memory_count(

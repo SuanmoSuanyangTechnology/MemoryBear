@@ -200,7 +200,7 @@ class MemorySearchRepository:
     ) -> tuple[dict[str, dict[str, int]], set[str]]:
         """返回每个用户的 ES 计数，以及「在任一索引中存在有效数据」的用户集合。
 
-        一次 ``msearch`` 并发三个聚合（情景摘要 / 显性实体 / 情绪语句），避免三次
+        一次 ``msearch`` 并发三个聚合（情景摘要 / 实体存在性 / 情绪语句），避免三次
         往返；调用方据此对缺失用户回退到 Neo4j。
         """
 
@@ -211,10 +211,7 @@ class MemorySearchRepository:
             _search_header(_INDEX_MEMORY_SUMMARY),
             _search_body(end_user_ids),
             _search_header(_INDEX_EXTRACTED_ENTITY),
-            _search_body(
-                end_user_ids,
-                ("explicit", {"filter": {"term": {"is_explicit_memory": True}}}),
-            ),
+            _search_body(end_user_ids),
             _search_header(_INDEX_STATEMENT),
             _search_body(
                 end_user_ids,
@@ -232,15 +229,14 @@ class MemorySearchRepository:
                 "Elasticsearch workspace statistics returned an invalid response"
             )
         episodic = _parse_buckets(responses[0], "workspace episodic")
-        explicit = _parse_buckets(responses[1], "workspace explicit", "explicit")
+        entities = _parse_buckets(responses[1], "workspace entities")
         emotional = _parse_buckets(responses[2], "workspace emotional", "emotional")
 
         requested_ids = set(end_user_ids)
-        present_ids = (set(episodic) | set(explicit) | set(emotional)) & requested_ids
+        present_ids = (set(episodic) | set(entities) | set(emotional)) & requested_ids
         statistics = {
             end_user_id: {
                 "episodic_count": episodic.get(end_user_id, (0, 0))[1],
-                "explicit_entity_count": explicit.get(end_user_id, (0, 0))[1],
                 "emotional_count": emotional.get(end_user_id, (0, 0))[1],
             }
             for end_user_id in end_user_ids

@@ -144,7 +144,11 @@ class ProfileQueryService:
             semantic_count = sum(row["semantic_count"] for row in graph_rows)
             explicit_count = permanent_count + timeline_count + semantic_count
         except Exception:
-            logger.warning("explicit memory count degraded to zero", exc_info=True)
+            logger.warning(
+                "explicit memory count degraded to zero: end_user_id=%s",
+                end_user_id,
+                exc_info=True,
+            )
             explicit_count = 0
         counts = {
             "PERCEPTUAL_MEMORY": source_counts["perceptual"],
