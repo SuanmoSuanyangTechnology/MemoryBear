@@ -6,9 +6,15 @@ from fastapi import APIRouter
 
 from src.modules.analytics import router as analytics_router
 from src.modules.health import router as health_router
+from src.modules.memory_config import (
+    community_router as memory_config_community_router,
+)
+from src.modules.memory_config import router as memory_config_router
 
 router = APIRouter(prefix="/internal/v1")
 router.include_router(health_router)
 router.include_router(analytics_router)
+router.include_router(memory_config_router)
+router.include_router(memory_config_community_router)
 
 __all__ = ["router"]

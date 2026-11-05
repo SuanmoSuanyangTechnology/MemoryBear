@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import time
 from typing import Any
 from uuid import UUID
 
@@ -14,6 +13,7 @@ from src.common.redis_cache import (
     RedisCacheUnavailableError,
     zrange_json,
 )
+from src.common.timing import now_ms
 from src.infrastructure.redis import RedisManager
 
 #: 快照键保留 72 小时；每次成功写入时续期。刷新租约 120 秒，每 30 秒续租一次，
@@ -169,7 +169,7 @@ class WorkspaceStatisticsRepository:
     ) -> dict[str, Any]:
         """Atomically append a snapshot while the caller still owns the lease."""
 
-        generated_at = int(time.time() * 1000)
+        generated_at = now_ms()
         snapshot = {
             "statistics": statistics["statistics"],
             "total_count": statistics["total_count"],

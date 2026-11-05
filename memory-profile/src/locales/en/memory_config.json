@@ -1,0 +1,77 @@
+{
+  "model": {
+    "not_configured": "{model_type} model is not configured",
+    "not_found": "{model_type} model {model_id} not found",
+    "not_found_with_error": "{model_type} model {model_id} not found: {error}",
+    "no_api_key": "{model_type} model {model_name} has no available API key",
+    "api_verify_failed": "{model_type} model {model_name} API verification failed: {error}"
+  },
+  "config": {
+    "not_found": "Configuration not found: {config_id}",
+    "duplicate_name": "Config name already exists",
+    "duplicate_name_detail": "A config named \"{config_name}\" already exists in the current workspace. Please use a different name."
+  },
+  "workspace": {
+    "no_active_config": "No active memory configuration in the current workspace"
+  },
+  "scene_demo": {
+    "no_workspace": "Please switch to a workspace first",
+    "config_not_found": "Configuration does not exist or is not accessible",
+    "invalid_turn_range": "scene_min_turns (min protected turns) must be less than scene_max_turns (max scene turns)",
+    "model_unavailable": "The scene segmentation model is temporarily unavailable, please try again later",
+    "reason_continue": "{score} > {threshold}, the current query is highly continuous with the historical scene; keeping the current Scene.",
+    "reason_shifted": "{score} ≤ {threshold}, the current query has low semantic continuity with the historical scene; starting a new Scene.",
+    "reason_first_scene": "The current Query is the start of the first Scene (turn {turns}), so a new Scene starts and the model is not called.",
+    "reason_min_turns": "The current Scene turn count ({turns}) is below the min protected turns, so the current Scene is kept and the model is not called.",
+    "reason_max_turns": "The current Scene turn count ({turns}) has reached the max scene turns, so a new Scene starts and the model is not called.",
+    "summary_continue_text": "The current Query continues the existing Scene, which stays open; a summary is generated after a later SHIFT or session close.",
+    "summary_continue_hint": "CONTINUE does not close the Scene, so no summary model is called this turn.",
+    "summary_shifted_text": "The user discussed recent global situations, foreign policy and the impact of major-power competition on global supply chains.",
+    "summary_shifted_hint": "The summary targets the Scene before the split and excludes the Query that triggered SHIFT."
+  },
+  "success": {
+    "query": "Query successful",
+    "emotion_query": "Emotion config retrieved successfully",
+    "reflection_query": "Reflection config retrieved successfully",
+    "create": "Created successfully",
+    "update": "Update successful",
+    "emotion_update": "Emotion config updated successfully",
+    "reflection_update": "Reflection config updated successfully",
+    "delete": "Memory config deleted successfully"
+  },
+  "error": {
+    "invalid_config_id": "Invalid config_id: {config_id}",
+    "config_not_found": "Configuration not found",
+    "access_denied": "Access denied to this configuration",
+    "not_found_or_denied": "Configuration does not exist or is not accessible",
+    "query_failed": "Query failed",
+    "query_config_failed": "Failed to fetch the configuration",
+    "query_forgetting_failed": "Failed to fetch the forgetting engine configuration",
+    "query_all_failed": "Failed to fetch all configurations",
+    "query_emotion_failed": "Failed to fetch the emotion configuration: {error}",
+    "query_reflection_failed": "Failed to fetch the reflection configuration: {error}",
+    "create_failed": "Failed to create the configuration",
+    "update_failed": "Update failed",
+    "update_config_failed": "Failed to update the configuration",
+    "update_forgetting_failed": "Failed to update the forgetting engine configuration",
+    "update_emotion_failed": "Failed to update the emotion configuration: {error}",
+    "save_reflection_failed": "Failed to save the reflection configuration: {error}",
+    "delete_failed": "Failed to delete the configuration",
+    "preference_invalid": "Invalid preference configuration parameters",
+    "missing_config_id": "Missing required parameter: config_id",
+    "invalid_parameter_with_error": "Invalid parameters: {error}",
+    "no_fields_to_update": "Provide at least one field to update",
+    "no_fields_to_update_detail": "config_name, config_desc and scene_id are all empty",
+    "preview_case_invalid": "Invalid preview_case parameter",
+    "preview_case_invalid_detail": "unsupported preview_case"
+  },
+  "quota": {
+    "resource": "Memory engine",
+    "exceeded": "{resource} quota exceeded"
+  },
+  "delete": {
+    "default_not_allowed": "The default configuration cannot be deleted",
+    "in_use": "Cannot delete the memory configuration: the current workspace is using it",
+    "referenced_by_end_users": "Cannot delete the memory configuration: end users still reference it. Use force=true to force deletion"
+  }
+}

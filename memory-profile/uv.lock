@@ -893,6 +893,11 @@ wheels = [
 ]
 
 [[package]]
+name = "memory-contracts"
+version = "0.1.0"
+source = { directory = "../packages/memory-contracts" }
+
+[[package]]
 name = "memory-profile"
 version = "0.1.0"
 source = { editable = "." }
@@ -907,6 +912,7 @@ dependencies = [
     { name = "json-repair" },
     { name = "langchain-core" },
     { name = "langchain-openai" },
+    { name = "memory-contracts" },
     { name = "neo4j" },
     { name = "psutil" },
     { name = "pydantic" },
@@ -942,6 +948,7 @@ requires-dist = [
     { name = "json-repair", specifier = "==0.64.2" },
     { name = "langchain-core", specifier = "==1.6.12" },
     { name = "langchain-openai", specifier = "==1.7.2" },
+    { name = "memory-contracts", directory = "../packages/memory-contracts" },
     { name = "neo4j", specifier = "==6.4.0" },
     { name = "psutil", specifier = "==7.2.2" },
     { name = "pydantic", specifier = "==2.14.1" },

@@ -39,6 +39,19 @@ logger = logging.getLogger(__name__)
 
 #: 与 api ``MODEL_SOURCE_INTERNAL_API`` 同值：模型服务的内部调用面。
 MODEL_SOURCE_INTERNAL_API = "in_api"
+#: 与 api ``validate_backend._VALIDATE_PATH`` 同值。
+MODEL_PROBE_PATH = "/internal/v1/models/validate"
+#: api ``BizCode.MODEL_NOT_FOUND`` / ``NO_AVAILABLE_CHANNEL``.
+_NO_CREDENTIAL_CODES = frozenset({4003, 4012})
+
+
+@dataclass(frozen=True, slots=True)
+class ModelProbeOutcome:
+    """Neutral result of a stored-config liveness probe."""
+
+    kind: str
+    detail: str | None = None
+    usage: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -230,6 +243,54 @@ class ModelServiceManager:
             )
             for item in data["results"]
         ]
+
+    async def probe_stored_config(
+        self, config_id: UUID, tenant_id: UUID, model_type: str
+    ) -> ModelProbeOutcome:
+        """Ask the model service whether a stored configuration is callable.
+
+        Only the configuration id and the slot-derived model type cross the
+        wire; credentials and channel selection stay in the model service.
+        """
+
+        headers = {
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            "X-Model-Tenant-ID": str(tenant_id),
+            "X-Model-Source": MODEL_SOURCE_INTERNAL_API,
+        }
+        trace_id = get_trace_id()
+        if trace_id:
+            headers["X-Trace-Id"] = trace_id
+        try:
+            response = await (await self.client()).post(
+                MODEL_PROBE_PATH,
+                headers=headers,
+                json={"model_config_id": str(config_id), "model_type": model_type},
+            )
+        except httpx.HTTPError as exc:
+            return ModelProbeOutcome("unavailable", str(exc))
+        try:
+            envelope = response.json()
+        except ValueError:
+            return ModelProbeOutcome("unavailable", "invalid JSON response")
+        if not isinstance(envelope, dict):
+            return ModelProbeOutcome("unavailable", "invalid response envelope")
+        if response.status_code == 200:
+            data = envelope.get("data")
+            data = data if isinstance(data, dict) else {}
+            if data.get("valid"):
+                usage = data.get("usage")
+                return ModelProbeOutcome(
+                    "valid", usage=usage if isinstance(usage, dict) else None
+                )
+            return ModelProbeOutcome(
+                "probe_failed", str(data.get("error") or data.get("message") or "")
+            )
+        code = envelope.get("code")
+        kind = "no_credential" if code in _NO_CREDENTIAL_CODES else "unavailable"
+        detail = envelope.get("error") or envelope.get("msg")
+        return ModelProbeOutcome(kind, str(detail) if detail else None)
 
     async def aclose(self) -> None:
         client = self._client

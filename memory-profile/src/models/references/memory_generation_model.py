@@ -11,13 +11,6 @@ from sqlalchemy.dialects.postgresql import JSONB, UUID
 from src.models.base import ReadOnlyBase
 
 
-class MemoryConfigRow(ReadOnlyBase):
-    __tablename__ = "memory_config"
-
-    config_id = Column(UUID(as_uuid=True), primary_key=True)
-    workspace_id = Column(UUID(as_uuid=True), nullable=True)
-
-
 class WorkspaceDefaultModelPreset(ReadOnlyBase):
     __tablename__ = "workspace_default_model_presets"
 
