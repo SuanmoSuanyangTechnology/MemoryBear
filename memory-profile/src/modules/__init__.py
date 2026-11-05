@@ -7,11 +7,11 @@ from fastapi import APIRouter
 from src.modules.analytics import router as analytics_router
 from src.modules.display import router as display_router
 from src.modules.health import router as health_router
+from src.modules.implicit_memory import router as implicit_memory_router
 from src.modules.memory_config import (
     community_router as memory_config_community_router,
 )
 from src.modules.memory_config import router as memory_config_router
-from src.modules.implicit_memory import router as implicit_memory_router
 from src.modules.perceptual import router as perceptual_router
 
 router = APIRouter(prefix="/internal/v1")
