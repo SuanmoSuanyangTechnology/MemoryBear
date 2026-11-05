@@ -5,7 +5,7 @@ pruning_service — 语义剪枝编排服务
 - user: 规整（去除复制内容/长文压缩），找紧邻 assistant 配对辅助判断
 - assistant: 独立压缩为记忆摘要
 
-优先级：DB pruned_content 有值 → 直接用 → 否则调 LLM → 回写 DB。
+优先级：DB pruned_content 有值 → 直接用 → 新模型（失败回退原 LLM）→ 按原规则回写 DB。
 
 WritePipeline 只需调用 prune_messages() 即可。
 """
@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, List, NamedTuple, Optional, Tuple
 
 from app.core.memory.storage_services.extraction_engine.data_preprocessing import SemanticPruner
 from app.core.memory.models.config_models import PruningConfig
+from app.services.extract_pruning_client import Entry
 
 if TYPE_CHECKING:
     from app.schemas.memory_config_schema import MemoryConfig
@@ -26,13 +27,14 @@ logger = logging.getLogger(__name__)
 
 
 class PruneResult(NamedTuple):
-    """单条消息 LLM 剪枝结果。"""
+    """单条消息剪枝结果及来源。"""
 
     pruned_content: str
     memory_type: str
     should_process_user_msg: bool
     processed_user_msg: Optional[str]
     processed_user_topic_entity_hint: Optional[str]
+    source: str = "llm"
 
 
 async def prune_messages(
@@ -75,7 +77,7 @@ async def prune_messages(
     if persist:
         _refresh_pruned_content(messages, conversation_id, end_user_id, source)
 
-    # Step 2: 遍历消息，收集 LLM 任务
+    # Step 2: 遍历消息，收集剪枝任务
     result: List[Optional[dict]] = [None] * len(messages)
     prune_tasks: list = []
     db_updates: list = []
@@ -85,7 +87,7 @@ async def prune_messages(
         llm_client = _get_llm_client(memory_config)
 
     # 提前创建共享 PruningConfig + SemanticPruner（K 条消息复用同一实例）
-    # SemanticPruner.extract_assistant_hint() 内部仅读取 self 属性，无可变状态写入，协程并发安全
+    # 每个调用独立返回来源；统计计数不参与结果选择。
     shared_pruning_config = PruningConfig(
         pruning_switch=memory_config.pruning_enabled,
         pruning_scene=memory_config.pruning_scene or "education",
@@ -105,7 +107,7 @@ async def prune_messages(
         content = msg.get("content", "")
 
         # 已有持久化结果 → 直接使用
-        if msg.get("pruned_content") is not None:
+        if persist and msg.get("pruned_content") is not None:
             result[i] = {**msg, "content": msg["pruned_content"]}
             pruning_records.append({
                 "conversation_id": conversation_id,
@@ -126,20 +128,27 @@ async def prune_messages(
                 pruner=shared_pruner,
                 content=pair,
                 user_content=content,
+                entry="formal" if persist else "pilot",
             )))
         elif role == "assistant":
             prune_tasks.append((i, "assistant", _call_llm_prune(
                 pruner=shared_pruner,
                 content=content,
                 user_content="",
+                entry="formal" if persist else "pilot",
             )))
         else:
             result[i] = msg
 
-    # Step 3: 并发执行 LLM 任务
+    # Step 3: 并发执行剪枝任务（新模型请求由客户端独立限流）
     if prune_tasks:
         coros = [coro for _, _, coro in prune_tasks]
         llm_results = await asyncio.gather(*coros, return_exceptions=True)
+
+        # A cancelled child must not become a cached 500-character fallback.
+        for llm_result in llm_results:
+            if isinstance(llm_result, asyncio.CancelledError):
+                raise llm_result
 
         for (idx, role_type, _), llm_result in zip(prune_tasks, llm_results):
             msg = messages[idx]
@@ -163,7 +172,7 @@ async def prune_messages(
                 pruning_records.append({
                     "conversation_id": conversation_id,
                     "message_seq": seq,
-                    "source": "llm",
+                    "source": pr.source,
                     "type": "user_pruning",
                     "input": {"msgs": [
                         {"role": "User", "msg": content},
@@ -183,7 +192,7 @@ async def prune_messages(
                 pruning_records.append({
                     "conversation_id": conversation_id,
                     "message_seq": seq,
-                    "source": "llm",
+                    "source": pr.source,
                     "type": "assistant_pruning",
                     "input": {"msgs": [{"role": "Assistant", "msg": content}]},
                     "output": {
@@ -268,8 +277,9 @@ async def _call_llm_prune(
     pruner,
     content: str,
     user_content: str,
+    entry: Entry = "formal",
 ) -> PruneResult:
-    """调用 SemanticPruner 执行单条消息剪枝。
+    """调用共用编排，保留原 LLM 的占位输入及返回转换。
 
     Args:
         pruner: 共享的 SemanticPruner 实例（协程安全，无可变状态）
@@ -281,10 +291,12 @@ async def _call_llm_prune(
     """
     from app.core.memory.models.message_models import ConversationMessage
 
-    user_msg = ConversationMessage(role="user", msg=user_content if user_content else "[context]")
+    user_msg = ConversationMessage(role="user", msg=user_content)
+    llm_user_msg = ConversationMessage(role="user", msg=user_content if user_content else "[context]")
     asst_msg = ConversationMessage(role="assistant", msg=content)
 
-    result = await pruner.extract_assistant_hint(user_msg, asst_msg)
+    output = await pruner.normalize_messages(user_msg, asst_msg, entry=entry, llm_user_msg=llm_user_msg)
+    result = output.response
 
     pruned = "" if result.assistant_memory_hint == "NULL" else result.assistant_memory_hint
 
@@ -294,6 +306,7 @@ async def _call_llm_prune(
         should_process_user_msg=result.should_process_user_msg,
         processed_user_msg=result.processed_user_msg,
         processed_user_topic_entity_hint=result.processed_user_topic_entity_hint,
+        source=output.source,
     )
 
 
