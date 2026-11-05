@@ -19,6 +19,18 @@ MODEL_MODULES: dict[str, tuple[str, ...]] = {
     "app_release_model": ("AppRelease",),
     "appshare_model": ("AppShare",),
     "release_share_model": ("ReleaseShare",),
+    "app_asset_model": (
+        "AppAsset",
+        "AppAssetInstallation",
+        "AppCategory",
+        "AssetStatus",
+        "InstallSource",
+        "InstallStatus",
+        "LinkMode",
+        "MarketSync",
+        "MarketSyncStatus",
+        "ShareMode",
+    ),
     "agent_app_config_model": ("AgentConfig",),
     "agent_execution_model": ("AgentExecution",),
     "multi_agent_model": (

@@ -3,7 +3,7 @@ import uuid
 from datetime import datetime
 from enum import StrEnum
 
-from sqlalchemy import Column, String, Text, DateTime, JSON, ForeignKey, Integer, Float, Boolean, text
+from sqlalchemy import Column, String, Text, DateTime, JSON, ForeignKey, Index, Integer, Float, Boolean, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 
@@ -97,6 +97,16 @@ class ExecutionStatus(StrEnum):
 class ToolConfig(Base):
     """Base tool config model"""
     __tablename__ = "tool_configs"
+    __table_args__ = (
+        Index(
+            "ux_tool_configs_tenant_type_name_active",
+            "tenant_id",
+            "tool_type",
+            "name",
+            unique=True,
+            postgresql_where=text("is_active = TRUE"),
+        ),
+    )
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name = Column(String(255), nullable=False, index=True)
@@ -314,6 +324,9 @@ class ToolExecution(Base):
 class WorkflowToolConfig(Base):
     """Workflow tool config model"""
     __tablename__ = "workflow_tool_configs"
+    __table_args__ = (
+        Index("ux_workflow_tool_configs_app_id", "app_id", unique=True),
+    )
 
     id = Column(UUID(as_uuid=True), ForeignKey("tool_configs.id"), primary_key=True)
     app_id = Column(UUID(as_uuid=True), nullable=False, index=True)

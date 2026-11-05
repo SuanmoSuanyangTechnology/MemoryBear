@@ -1271,6 +1271,10 @@ class AgentRunService:
                         # Look up the tool instance by tool id
                         tool_instance = await tool_service.get_tool_instance_async(tool_id, tenant_id)
                         if not tool_instance:
+                            logger.warning(
+                                "tool_selection_unavailable tool_id=%s operation=%s reason=tool_not_found_or_inactive",
+                                tool_id, operation,
+                            )
                             continue
                         tool_instance.set_runtime_context(user_id=user_id, workspace_id=workspace_id)
                         instances[tool_id] = tool_instance

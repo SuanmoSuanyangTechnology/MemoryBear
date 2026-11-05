@@ -12,10 +12,12 @@ from ..base_node import BaseNode
 from .config import ToolNodeConfig
 from ...variable.base_variable import VariableType
 from ....db import get_async_db_context
+from ....errors import BizCode, BusinessException
 from ....models.workspace_model import Workspace
 from ....services.tool_service import ToolService
 from ....models.tool_model import ToolType
 from ....schemas.tool_schema import ParameterType
+from ....tools.langchain_adapter import expand_tool_selection
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +79,8 @@ class ToolNode(BaseNode):
                 info = tool_instance._get_tool_info(operation) if operation else None
                 schema = (info or {}).get("inputSchema") or {}
                 return tool_instance._generate_parameters_from_schema(schema) if schema else []
+            if tool_instance.tool_type == ToolType.CUSTOM:
+                return list(tool_instance.parameters_for_operation(operation))
             return list(tool_instance.parameters)
         except Exception as e:
             logger.warning(f"获取工具参数定义失败，跳过类型转换: {e}")
@@ -161,16 +165,29 @@ class ToolNode(BaseNode):
             tool_service = ToolService(db)
             tool_config = await tool_service.get_tool_config_async(str(self.typed_config.tool_id), tenant_id)
             if not tool_config:
-                raise ValueError(f"工具不存在或未激活: {self.typed_config.tool_id}")
+                raise BusinessException(
+                    "工具已停用或删除", BizCode.TOOL_SELECTION_INACTIVE
+                )
 
             tool_instance = await tool_service.get_tool_instance_async(str(self.typed_config.tool_id), tenant_id)
+            if not tool_instance:
+                raise BusinessException(
+                    "工具已停用或删除", BizCode.TOOL_SELECTION_INACTIVE
+                )
+            operation = rendered_parameters.get("operation")
+            if not expand_tool_selection(tool_instance, operation):
+                code = (
+                    BizCode.TOOL_METHODS_UNAVAILABLE
+                    if tool_instance.tool_type == ToolType.MCP and not operation
+                    else BizCode.TOOL_OPERATION_INVALID
+                )
+                raise BusinessException("工具方法不存在或不可用", code)
             # The UI submits object/array inputs as JSON strings; restore them to
             # the types declared by the tool parameters
-            if tool_instance:
-                self._coerce_parameter_types(
-                    rendered_parameters,
-                    self._resolve_parameter_defs(tool_instance, rendered_parameters.get("operation")),
-                )
+            self._coerce_parameter_types(
+                rendered_parameters,
+                self._resolve_parameter_defs(tool_instance, rendered_parameters.get("operation")),
+            )
             # MCP tools: map operation to tool_name and wrap the remaining parameters into arguments
             if tool_instance and tool_instance.tool_type == ToolType.MCP:
                 operation = rendered_parameters.pop("operation", None)
