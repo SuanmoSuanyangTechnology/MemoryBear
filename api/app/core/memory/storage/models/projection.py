@@ -161,10 +161,10 @@ DEFAULT_PROJECTION = {
         )
     ),
     MemoryNodeType.CHUNK: NodeProjection(
-        fields=("id", "content", "created_at", "chunk_id","score")
+        fields=("id", "content", "created_at", "score")
     ),
     MemoryNodeType.STATEMENT: NodeProjection(
-        fields=("id", "statement", "created_at", "score")
+        fields=("id", "statement", "created_at", "chunk_id", "score")
     ),
     MemoryNodeType.MEMORY_SUMMARY: NodeProjection(
         fields=("id", "name", "content", "created_at", "chunk_ids", "score")
