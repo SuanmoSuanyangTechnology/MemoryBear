@@ -26,6 +26,7 @@ from sqlalchemy.orm import Session
 from ...schemas import app_schema
 from ...services.asset_service import AssetService
 from ...services.category_service import CategoryService
+from ...utils.datetime_utils import to_timestamp_ms
 from ..dependencies import Principal, get_principal, get_sync_db
 from ..schemas.common import success
 from ..schemas.response_schema import ApiResponse, PageData, PageMeta
@@ -125,6 +126,42 @@ def install_asset(
         target_workspace_id=payload.target_workspace_id,
     )
     return success(data=result, msg="已添加到空间")
+
+
+@router.put("/{asset_id}", summary="资源中心：更新共享权限", response_model=ApiResponse)
+def update_asset_share_mode(
+        asset_id: UUID,
+        payload: app_schema.AssetShareModeRequest,
+        db: DbSession,
+        principal: Caller,
+):
+    """Switch one entry between ``readonly`` and ``editable``.
+
+    This is the permission column of 「我的共享」. It is the **only** mutable
+    share field: visibility still follows the share switches (share / unshare),
+    and the pinned version still moves by re-sharing, so no publish or
+    version-forward endpoint appears here.
+
+    Only affects installs performed **after** the change — the form is read live
+    from the entry, while existing installation rows keep the permission they
+    were created with.
+    """
+    service = AssetService(db)
+    asset = service.update_share_mode(
+        asset_id=asset_id,
+        tenant_id=principal.tenant_id,
+        share_mode=payload.share_mode,
+        user_id=principal.actor_id,
+        workspace_id=principal.workspace_id,
+    )
+    return success(
+        data={
+            "id": str(asset.id),
+            "share_mode": asset.share_mode,
+            "updated_at": to_timestamp_ms(asset.updated_at),
+        },
+        msg="已更新共享权限",
+    )
 
 
 @router.delete("/{asset_id}", summary="资源中心：取消共享", response_model=ApiResponse)
