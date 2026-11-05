@@ -33,8 +33,13 @@ from app.core.error_codes import BizCode
 from app.core.language_utils import get_language_from_header
 from app.core.logging_config import get_api_logger, get_business_logger
 from app.core.response_utils import fail, success
-from app.db import get_async_db_context, get_db
+from app.db import get_async_db, get_async_db_context, get_db
 from app.dependencies import get_current_user_async, CurrentUserSnapshot
+from app.services.preference_type_service import (
+    get_preference_type,
+    list_preference_types,
+)
+from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.memory.models.ontology_scenario_models import OntologyClass
 from app.schemas.ontology_schemas import (
     ExportBySceneRequest,
@@ -1061,6 +1066,55 @@ async def export_owl_by_scene(
         api_logger.error(f"Unexpected error in export by scene: {str(e)}", exc_info=True)
         file_type = "ttl" if (request.format and request.format.lower() == "turtle") else "owl"
         return fail(BizCode.INTERNAL_ERROR, f"{file_type}文件导出失败", str(e))
+
+
+# ==================== 偏好类型只读接口 ====================
+
+@router.get("/preference-types", response_model=ApiResponse)
+async def get_preference_type_list(
+    current_user: CurrentUserSnapshot = Depends(get_current_user_async),
+    db: AsyncSession = Depends(get_async_db),
+    x_language_type: Optional[str] = Header(None, alias="X-Language-Type"),
+):
+    """查询当前工作空间的偏好类型列表（只读）。"""
+    language = get_language_from_header(x_language_type)
+    workspace_id = current_user.current_workspace_id
+    if not workspace_id:
+        api_logger.warning(f"User {current_user.id} has no current workspace")
+        return fail(BizCode.INTERNAL_ERROR, "查询失败", "current workspace is empty")
+
+    try:
+        return success(
+            data=await list_preference_types(db, workspace_id, language),
+            msg="查询成功",
+        )
+    except Exception as e:
+        api_logger.error(f"查询偏好类型列表失败: {e}", exc_info=True)
+        return fail(BizCode.INTERNAL_ERROR, "查询失败", str(e))
+
+
+@router.get("/preference-types/{domain}", response_model=ApiResponse)
+async def get_preference_type_detail(
+    domain: str,
+    current_user: CurrentUserSnapshot = Depends(get_current_user_async),
+    db: AsyncSession = Depends(get_async_db),
+    x_language_type: Optional[str] = Header(None, alias="X-Language-Type"),
+):
+    """查询当前工作空间下指定偏好类型的详情（只读）。"""
+    language = get_language_from_header(x_language_type)
+    workspace_id = current_user.current_workspace_id
+    if not workspace_id:
+        api_logger.warning(f"User {current_user.id} has no current workspace")
+        return fail(BizCode.INTERNAL_ERROR, "查询失败", "current workspace is empty")
+
+    try:
+        data = await get_preference_type(db, workspace_id, domain, language)
+        if data is None:
+            return fail(BizCode.NOT_FOUND, "偏好类型不存在", f"domain={domain}")
+        return success(data=data, msg="查询成功")
+    except Exception as e:
+        api_logger.error(f"查询偏好类型详情失败: {e}", exc_info=True)
+        return fail(BizCode.INTERNAL_ERROR, "查询失败", str(e))
 
 
 def _is_chinese(text: str) -> bool:

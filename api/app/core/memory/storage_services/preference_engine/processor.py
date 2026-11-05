@@ -20,7 +20,7 @@ from .models import (
     PreferenceOperations,
     PreferenceProcessorResult,
 )
-from .ontology_registry import load_preference_ontology
+from .ontology_registry import load_preference_ontology_from_db
 from .prompt_runner import PreferencePromptRunner
 
 logger = logging.getLogger(__name__)
@@ -38,10 +38,13 @@ class PreferenceProcessor:
         end_user_id: str,
         llm_client: Any,
         connector: Neo4jConnector,
+        domain: str = "coding",
     ):
         self.memory_config = memory_config
         self.end_user_id = end_user_id
-        self.ontology = load_preference_ontology("coding")
+        self.ontology = load_preference_ontology_from_db(
+            str(memory_config.workspace_id), domain
+        )
         self.runner = PreferencePromptRunner(llm_client, self.ontology)
         self.connector = connector
 
