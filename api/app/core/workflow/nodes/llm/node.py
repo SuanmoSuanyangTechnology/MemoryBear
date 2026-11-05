@@ -540,6 +540,14 @@ class LLMNode(BaseNode):
         async with get_async_db_context() as db:
             await ContextEngineManager(db).after_workflow_turn(**kwargs)
 
+    def _parse_typed_config(self) -> LLMNodeConfig:
+        if not self.config.get("model_id"):
+            raise BusinessException(
+                f"节点 {self.node_id} 缺少 model_id 配置",
+                code=BizCode.CONFIG_MISSING,
+            )
+        return LLMNodeConfig(**self.config)
+
     async def _prepare_llm(
             self,
             state: WorkflowState,
@@ -560,11 +568,9 @@ class LLMNode(BaseNode):
         model_info_ms = 0.0
         history_prefix_ms = 0.0
 
-        self.typed_config = LLMNodeConfig(**self.config)
+        self.typed_config = self._parse_typed_config()
 
         model_id = self.typed_config.model_id
-        if not model_id:
-            raise ValueError(f"节点 {self.node_id} 缺少 model_id 配置")
 
         model_info_started_at = asyncio.get_running_loop().time()
         model_info = await self._load_model_info_async(model_id, variable_pool)
@@ -1089,7 +1095,7 @@ class LLMNode(BaseNode):
         Yields:
             文本片段（chunk）或完成标记
         """
-        self.typed_config = LLMNodeConfig(**self.config)
+        self.typed_config = self._parse_typed_config()
         max_attempts = self.typed_config.retry.max_attempts + 1 if self.typed_config.retry.enable else 1
         last_error = None
         # Branch-mode LLM chunks may be sent optimistically before SUCCESS/ERROR
