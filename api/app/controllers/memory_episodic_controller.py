@@ -35,7 +35,10 @@ async def _query(request, user, db, method, language='zh'):
     except SceneCommunityNotFoundError as exc:
         return fail(BizCode.INVALID_PARAMETER, str(exc))
     except Exception:
-        api_logger.exception('episodic community read failed')
+        api_logger.exception(
+            'episodic community read failed: end_user_id=%s scene_community_id=%s',
+            request.end_user_id, getattr(request, 'scene_community_id', None),
+        )
         return fail(BizCode.INTERNAL_ERROR, '情景记忆查询失败，请重试')
 
 

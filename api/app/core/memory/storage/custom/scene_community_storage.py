@@ -189,7 +189,10 @@ class SceneCommunityStorage:
             )
             self._ensure_complete_response(result)
             parents = result['aggregations']['parents']
-            parent_ids.extend(bucket['key']['community'] for bucket in parents['buckets'])
+            parent_ids.extend(
+                bucket['key']['community'] for bucket in parents['buckets']
+                if bucket['key'].get('community')
+            )
             after = parents.get('after_key')
             if not parents['buckets'] or not after:
                 break
