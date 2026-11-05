@@ -212,10 +212,7 @@ class Settings:
         os.getenv("MEM_KNOWLEDGE_HEALTH_TIMEOUT_SECONDS", "3")
     )
 
-    # Independent memory profile service routing. Disabled keeps legacy analytics.
-    # Only endpoints carrying @memory_profile_proxy are forwarded; non-equivalent
-    # generation and workspace-refresh endpoints remain local during migration.
-    ENABLE_MEMORY_PROFILE: bool = os.getenv("ENABLE_MEMORY_PROFILE", "false").lower() == "true"
+    # Migrated profile endpoints always use the independent profile service.
     MEMORY_PROFILE_BASE_URL: str = os.getenv("MEMORY_PROFILE_BASE_URL", "")
     MEMORY_PROFILE_CONNECT_TIMEOUT_SECONDS: float = float(
         os.getenv("MEMORY_PROFILE_CONNECT_TIMEOUT_SECONDS", "5")

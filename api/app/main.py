@@ -209,10 +209,10 @@ def read_root():
 
 @app.get("/ready", include_in_schema=False)
 async def readiness():
-    """Return process readiness, including enabled remote integrations.
+    """Return process readiness, including required remote integrations.
 
-    Both enabled integrations are probed independently and concurrently, so a
-    failing knowledge probe no longer prevents the memory-profile probe from
+    Enabled knowledge and mandatory profile integrations are probed concurrently.
+    A failing knowledge probe does not prevent the memory-profile probe from
     running. The HTTP response shape stays unchanged: the original
     ``{status, knowledge_mode, profile_mode}`` on success, and the original
     HTTPException 503 detail on failure.
@@ -234,10 +234,9 @@ async def readiness():
         from app.integrations.knowledge.runtime import is_remote_knowledge_ready
 
         probes.append(("knowledge", is_remote_knowledge_ready))
-    if settings.ENABLE_MEMORY_PROFILE:
-        from app.integrations.profile.runtime import is_remote_memory_profile_ready
+    from app.integrations.profile.runtime import is_remote_memory_profile_ready
 
-        probes.append(("memory_profile", is_remote_memory_profile_ready))
+    probes.append(("memory_profile", is_remote_memory_profile_ready))
 
     results = dict(
         await asyncio.gather(*(_probe(name, check) for name, check in probes))
@@ -250,14 +249,9 @@ async def readiness():
             raise HTTPException(status_code=503, detail="Knowledge service unavailable")
         knowledge_mode = "remote"
 
-    profile_mode = "legacy"
-    if settings.ENABLE_MEMORY_PROFILE:
-        if not results.get("memory_profile"):
-            raise HTTPException(
-                status_code=503,
-                detail="Memory profile service unavailable",
-            )
-        profile_mode = "remote"
+    if not results.get("memory_profile"):
+        raise HTTPException(status_code=503, detail="Memory profile service unavailable")
+    profile_mode = "remote"
 
     return {
         "status": "ready",

@@ -1,4 +1,5 @@
 import { request } from '@/utils/request'
+import type { ActivityQuery, ActivityResponse, ActivityStatisticsResponse, ActivityCompositionResponse } from '@/views/Home/types'
 import type { AxiosRequestConfig } from 'axios'
 import type {
   MemoryFormData,
@@ -35,14 +36,20 @@ export const readServiceStream = (
 export const getTotalMemoryCount = () => {
   return request.get(`/dashboard/total_memory_count`)
 }
-// Memory Dashboard - Knowledge base type distribution
-export const getKbTypes = () => {
-  return request.get(`/memory/stats/types`)
-}
 // Memory Dashboard - Hot memory tags
 export const getHotMemoryTags = () => {
   return request.get(`/memory-storage/analytics/hot_memory_tags`)
 }
+
+// Workspace dashboard - Annual memory activity trend statistics
+export const getActivityStatistics = (query: { year?: number } = {}) => {
+  return request.get<ActivityStatisticsResponse>('/memory-display/activity-statistics', query)
+}
+// Workspace dashboard - Monthly memory activity composition statistics
+export const getActivityComposition = (query: { year?: number; month?: number } | Record<string, never> = {}) => {
+  return request.get<ActivityCompositionResponse>('/memory-display/activity-composition', query)
+}
+
 // Memory Dashboard - Recent activity statistics
 export const getRecentActivityStats = () => {
   return request.get(`/memory-storage/analytics/recent_activity_stats`)

@@ -4,7 +4,9 @@
     "missing_principal": "Missing authenticated principal"
   },
   "validation": {
-    "request_failed": "Request validation failed"
+    "request_failed": "Request validation failed",
+    "invalid_parameter": "Invalid {name}",
+    "invalid_uuid": "'{value}' is not a valid UUID"
   },
   "http": {
     "bad_request": "Bad request parameters",

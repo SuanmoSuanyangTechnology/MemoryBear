@@ -100,6 +100,7 @@ class MemoryProfileServiceClient:
         source: MemoryProfileAuthSource,
         trace_id: str,
         language_type: str | None = None,
+        timezone: str | None = None,
         query: Mapping[str, Any] | None = None,
         payload: Any | None = None,
         body: bytes | None = None,
@@ -150,6 +151,8 @@ class MemoryProfileServiceClient:
         if raw_body:
             # The API routes in this migration only ever carry JSON bodies.
             headers["Content-Type"] = "application/json"
+        if timezone is not None:
+            headers["X-Timezone"] = timezone
 
         params = None
         if query:

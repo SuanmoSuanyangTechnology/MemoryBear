@@ -42,6 +42,11 @@ const searchSwitchList = [
     value: '5',
     key: 'quickReplyPlus'
   },
+  {
+    icon: <div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/conversation/community.svg')]" />,
+    value: '6',
+    key: 'community'
+  },
 ]
 
 const MemoryConversation: FC = () => {
@@ -126,7 +131,10 @@ const MemoryConversation: FC = () => {
         const incomingData = log.data && typeof log.data === 'object' && !Array.isArray(log.data)
           ? log.data as Record<string, unknown>
           : {}
-        const data = { ...currentData, ...incomingData }
+        const isCommunitySnapshot = log.stage?.startsWith('community_')
+        const data = isCommunitySnapshot
+          ? incomingData
+          : { ...currentData, ...incomingData }
         if (log.append_answer && typeof incomingData.answer === 'string') {
           data.answer = `${typeof currentData.answer === 'string' ? currentData.answer : ''}${incomingData.answer}`
         }

@@ -1,4 +1,4 @@
-"""Process-level runtime for the optional memory profile integration."""
+"""Process-level runtime for the memory profile integration."""
 
 from __future__ import annotations
 
@@ -13,25 +13,17 @@ from .errors import MemoryProfileConfigurationError
 class MemoryProfileIntegrationRuntime:
     def __init__(self) -> None:
         self._client: MemoryProfileServiceClient | None = None
-        self._enabled = False
-
-    @property
-    def enabled(self) -> bool:
-        return self._enabled
 
     @property
     def client(self) -> MemoryProfileServiceClient:
-        if not self._enabled or self._client is None:
+        if self._client is None:
             raise MemoryProfileConfigurationError(
-                "Remote memory profile integration is not enabled"
+                "Remote memory profile integration has not been initialized"
             )
         return self._client
 
-    async def start(self, *, enabled: bool, base_url: str) -> None:
+    async def start(self, *, base_url: str) -> None:
         await self.close()
-        if not enabled:
-            return
-
         normalized = base_url.strip()
         try:
             parsed = urlparse(normalized)
@@ -62,18 +54,14 @@ class MemoryProfileIntegrationRuntime:
             settings,
             base_url=normalized,
         )
-        self._enabled = True
 
     async def close(self) -> None:
         client = self._client
         self._client = None
-        self._enabled = False
         if client is not None:
             await client.aclose()
 
     async def ready(self) -> bool:
-        if not self._enabled:
-            return True
         if self._client is None:
             return False
         return await self._client.ready()
@@ -84,17 +72,12 @@ _runtime = MemoryProfileIntegrationRuntime()
 
 async def initialize_memory_profile_integration() -> None:
     await _runtime.start(
-        enabled=settings.ENABLE_MEMORY_PROFILE,
         base_url=settings.MEMORY_PROFILE_BASE_URL,
     )
 
 
 async def close_memory_profile_integration() -> None:
     await _runtime.close()
-
-
-def is_memory_profile_enabled() -> bool:
-    return _runtime.enabled
 
 
 def get_memory_profile_client() -> MemoryProfileServiceClient:

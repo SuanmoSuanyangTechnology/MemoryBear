@@ -168,7 +168,7 @@ dependencies = [
     { name = "python-multipart" },
     { name = "pytz" },
     { name = "pyyaml" },
-    { name = "redbear-model", extra = ["all"] },
+    { name = "redbear-model", extra = ["all", "grpc"] },
     { name = "redis" },
     { name = "requests" },
     { name = "simpleeval" },
@@ -228,7 +228,7 @@ requires-dist = [
     { name = "python-multipart", specifier = ">=0.0.20,<1" },
     { name = "pytz", specifier = ">=2025.2,<2027" },
     { name = "pyyaml", specifier = ">=6.0.3,<7" },
-    { name = "redbear-model", extras = ["all"], directory = "../packages/redbear-model" },
+    { name = "redbear-model", extras = ["all", "grpc"], directory = "../packages/redbear-model" },
     { name = "redis", specifier = ">=6.4,<7" },
     { name = "requests", specifier = ">=2.32,<3" },
     { name = "simpleeval", specifier = ">=1.0.3,<2" },
@@ -1757,8 +1757,10 @@ all = [
     { name = "langchain-core" },
     { name = "langchain-ollama" },
     { name = "langchain-openai" },
-    { name = "memorybear-grpc" },
     { name = "volcengine-python-sdk", extra = ["ark"] },
+]
+grpc = [
+    { name = "memorybear-grpc" },
 ]
 
 [package.metadata]
@@ -1782,14 +1784,13 @@ requires-dist = [
     { name = "langchain-ollama", marker = "extra == 'ollama'", specifier = ">=1.0,<2" },
     { name = "langchain-openai", marker = "extra == 'all'", specifier = ">=1.0,<2" },
     { name = "langchain-openai", marker = "extra == 'runtime'", specifier = ">=1.0,<2" },
-    { name = "memorybear-grpc", marker = "extra == 'all'", directory = "../packages/memorybear-grpc" },
-    { name = "memorybear-grpc", marker = "extra == 'runtime'", directory = "../packages/memorybear-grpc" },
+    { name = "memorybear-grpc", marker = "extra == 'grpc'", directory = "../packages/memorybear-grpc" },
     { name = "pydantic", specifier = ">=2.12,<3" },
     { name = "sqlalchemy", specifier = ">=2.0,<3" },
     { name = "volcengine-python-sdk", extras = ["ark"], marker = "extra == 'all'", specifier = ">=5.0.19,<6" },
     { name = "volcengine-python-sdk", extras = ["ark"], marker = "extra == 'generation'", specifier = ">=5.0.19,<6" },
 ]
-provides-extras = ["runtime", "ollama", "bedrock", "dashscope", "generation", "all"]
+provides-extras = ["runtime", "grpc", "ollama", "bedrock", "dashscope", "generation", "all"]
 
 [[package]]
 name = "redis"

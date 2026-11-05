@@ -4,7 +4,9 @@
     "missing_principal": "缺少认证主体"
   },
   "validation": {
-    "request_failed": "请求参数校验失败"
+    "request_failed": "请求参数校验失败",
+    "invalid_parameter": "无效的 {name}",
+    "invalid_uuid": "'{value}' 不是有效的 UUID"
   },
   "http": {
     "bad_request": "请求参数错误",
