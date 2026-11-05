@@ -40,6 +40,7 @@ from ....services.context_engine_manager import ContextEngineManager
 from ....services.model_service import ModelConfigService
 from ....services.published_agent_runner import PublishedAgentRunner
 from ....services.tool_service import ToolService
+from ....tools.langchain_adapter import LangchainAdapter, plan_tool_selections
 
 logger = logging.getLogger(__name__)
 
@@ -150,23 +151,30 @@ class AgentNode(BaseNode):
             else:
                 async with get_async_db_context() as db:
                     tool_service = ToolService(db)
-                    for selector in selectors:
+                    instances = {}
+                    selections = plan_tool_selections(
+                        (selector.tool_id, selector.operation)
+                        for selector in selectors
+                    )
+                    for tool_id, operation in selections:
                         try:
-                            tool_instance = await tool_service.get_tool_instance_async(str(selector.tool_id), tenant_id)
-                            if not tool_instance:
-                                logger.warning(f"节点 {self.node_id}: 工具 {selector.tool_id} 不存在或未激活，已跳过")
-                                continue
-                            tool_instance.set_runtime_context(
-                                user_id=user_id,
-                                workspace_id=workspace_id,
-                                conversation_id=conversation_id,
+                            tool_instance = instances.get(tool_id)
+                            if tool_instance is None:
+                                tool_instance = await tool_service.get_tool_instance_async(tool_id, tenant_id)
+                                if not tool_instance:
+                                    logger.warning(f"节点 {self.node_id}: 工具 {tool_id} 不存在或未激活，已跳过")
+                                    continue
+                                tool_instance.set_runtime_context(
+                                    user_id=user_id,
+                                    workspace_id=workspace_id,
+                                    conversation_id=conversation_id,
+                                )
+                                instances[tool_id] = tool_instance
+                            langchain_tools.extend(
+                                LangchainAdapter.convert_selection(tool_instance, operation)
                             )
-                            langchain_tool = tool_instance.to_langchain_tool(selector.operation)
-
-                            if langchain_tool:
-                                langchain_tools.append(langchain_tool)
                         except Exception as e:
-                            logger.error(f"节点 {self.node_id}: 加载工具 {selector.tool_id} 失败: {e}")
+                            logger.error(f"节点 {self.node_id}: 加载工具 {tool_id} 失败: {e}")
 
         # Knowledge base retrieval tool: reuses the standard retrieval adapter and
         # parameter semantics of Agent applications.

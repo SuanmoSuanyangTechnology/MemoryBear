@@ -1777,7 +1777,7 @@ def accept_workspace_invite(
         # 检查邀请状态
         if invite.status != InviteStatus.pending:
             business_logger.warning(f"邀请已被处理: status={invite.status}")
-            raise BusinessException(f"邀请已被{invite.status}", BizCode.WORKSPACE_INVITE_INVALID)
+            raise BusinessException(f"邀请已被{invite.status}", BizCode.STATE_CONFLICT)
 
         # 检查过期时间
         now = utcnow_naive()
@@ -1785,7 +1785,7 @@ def accept_workspace_invite(
             business_logger.warning("邀请已过期")
             # 标记为过期
             invite_repo.update_invite_status(invite.id, InviteStatus.expired)
-            raise BusinessException("邀请已过期", BizCode.WORKSPACE_INVITE_EXPIRED)
+            raise BusinessException("邀请已过期", BizCode.STATE_CONFLICT)
 
         # 检查邮箱是否匹配
         if invite.email != user.email:
@@ -1920,13 +1920,13 @@ def update_workspace_member_roles(
         # 检查成员是否存在
         if upd.id not in member_map:
             raise BusinessException(f"成员 {upd.id} 不存在于工作空间 {workspace_id}",
-                                    BizCode.WORKSPACE_MEMBER_NOT_FOUND)
+                                    BizCode.NOT_FOUND)
 
         member = member_map[upd.id]
 
         # 检查成员是否属于该工作空间
         if member.workspace_id != workspace_id:
-            raise BusinessException(f"成员 {upd.id} 不属于工作空间 {workspace_id}", BizCode.WORKSPACE_MEMBER_NOT_FOUND)
+            raise BusinessException(f"成员 {upd.id} 不属于工作空间 {workspace_id}", BizCode.NOT_FOUND)
 
         # 不能修改自己的角色
         if member.user_id == user.id:

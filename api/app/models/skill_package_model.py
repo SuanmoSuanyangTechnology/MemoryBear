@@ -5,16 +5,22 @@ Agent Skills 开放标准（SKILL.md 格式）的数据库承载：
 - SkillFile：包内文件（文本内联 DB，二进制/超大走对象存储）
 - SkillPlugin：插件分组（一个文件夹多技能），只承载分组与来源，无运行时内容
 """
-import datetime
 import uuid
+
 from sqlalchemy import (
-    Boolean, Column, DateTime, ForeignKey, Integer, String, Text,
+    Boolean,
+    Column,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
     UniqueConstraint,
 )
-from sqlalchemy.dialects.postgresql import UUID, JSON
+from sqlalchemy.dialects.postgresql import JSON, UUID
 
-from app.db import Base
 from app.core.utils.datetime_utils import utcnow_naive
+from app.db import Base
 
 
 class SkillPackage(Base):
@@ -51,6 +57,7 @@ class SkillPackage(Base):
     content_hash = Column(String(64), nullable=False, index=True, comment="全包内容 SHA-256（文件级 sha256 按序聚合）")
     source_type = Column(String(16), nullable=False, default="imported", comment="来源：imported | market")
     source_ref = Column(String(1024), comment="导入来源（GitHub URL / 文件名），审计用")
+    is_active = Column(Boolean, default=True, server_default="true", nullable=False, index=True, comment="是否可用（False 表示市场卸载）")
 
     # frontmatter 完整保留（license/compatibility/metadata/allowed-tools 原样）
     frontmatter_raw = Column(JSON, default=dict, comment="解析后的完整 frontmatter")
@@ -112,6 +119,7 @@ class SkillPlugin(Base):
 
     source_type = Column(String(16), nullable=False, default="imported", comment="来源：imported（URL / zip）")
     source_ref = Column(String(1024), comment="来源（GitHub 地址 / zip 文件名），审计")
+    is_active = Column(Boolean, default=True, server_default="true", nullable=False, index=True, comment="是否可用（False 表示市场卸载）")
 
     created_at = Column(DateTime, default=utcnow_naive, comment="创建时间")
     updated_at = Column(DateTime, default=utcnow_naive, onupdate=utcnow_naive, comment="更新时间")

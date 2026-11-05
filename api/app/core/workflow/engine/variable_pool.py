@@ -54,6 +54,10 @@ class LazyVariableDict:
     def __getattr__(self, key):
         if key.startswith('_'):
             raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{key}'")
+        if key not in self._source:
+            # AttributeError lets Jinja2 fall back to __getitem__ and treat the
+            # name as undefined; returning None would render a literal "None".
+            raise AttributeError(key)
         return self._resolve(key)
 
     def __contains__(self, key):

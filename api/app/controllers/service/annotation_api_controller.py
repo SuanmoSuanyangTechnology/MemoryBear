@@ -115,7 +115,7 @@ async def list_annotations(
 
     data = [annotation_schema.AnnotationListItem.model_validate(item) for item in items]
     meta = PageMeta(page=page, pagesize=pagesize, total=total or 0, hasnext=(page * pagesize) < (total or 0))
-    return success(data=PageData(page=meta, items=data).model_dump(mode="json"))
+    return success(data=PageData(page=meta, items=data).model_dump(mode="json"), msg="获取标注列表成功")
 
 
 @router.post("", summary="创建标注")
@@ -156,7 +156,7 @@ async def create_annotation(
     db.add(annotation)
     await db.commit()
     await db.refresh(annotation)
-    return success(data=annotation_schema.Annotation.model_validate(annotation).model_dump(mode="json"))
+    return success(data=annotation_schema.Annotation.model_validate(annotation).model_dump(mode="json"), msg="创建标注成功")
 
 
 # ==================== Annotation Settings ====================
@@ -180,14 +180,14 @@ async def get_annotation_settings(
             "similarity_threshold": 0.85,
             "model_config_id": None,
             "enabled": 0,
-        })
+        }, msg="获取标注设置成功")
     return success(data=annotation_schema.AnnotationSettingResponse(
         app_id=str(setting.app_id),
         workspace_id=str(setting.workspace_id),
         similarity_threshold=setting.similarity_threshold,
         model_config_id=str(setting.model_config_id) if setting.model_config_id else None,
         enabled=setting.enabled,
-    ).model_dump())
+    ).model_dump(), msg="获取标注设置成功")
 
 
 @router.put("/settings", summary="更新标注设置")
@@ -228,7 +228,7 @@ async def update_annotation_settings(
         similarity_threshold=setting.similarity_threshold,
         model_config_id=str(setting.model_config_id) if setting.model_config_id else None,
         enabled=setting.enabled,
-    ).model_dump())
+    ).model_dump(), msg="更新标注设置成功")
 
 
 @router.put("/{annotation_id}", summary="更新标注")
@@ -276,7 +276,7 @@ async def update_annotation(
 
     await db.commit()
     await db.refresh(annotation)
-    return success(data=annotation_schema.Annotation.model_validate(annotation).model_dump(mode="json"))
+    return success(data=annotation_schema.Annotation.model_validate(annotation).model_dump(mode="json"), msg="更新标注成功")
 
 
 @router.delete("/{annotation_id}", summary="删除标注")

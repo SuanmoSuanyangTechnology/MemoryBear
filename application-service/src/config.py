@@ -293,6 +293,42 @@ class AppServiceSettings(BaseSettings):
         validation_alias="ACL_RULES_CHANGED_CHANNEL",
     )
 
+    # Community market integration. disabled = community build (6020); gateway =
+    # enterprise build using the private enterprise-extensions HTTP client.
+    application_service_market_mode: Literal["disabled", "gateway"] = Field(
+        default="disabled",
+        validation_alias="APPLICATION_SERVICE_MARKET_MODE",
+    )
+    market_service_base_url: str = Field(
+        default="",
+        validation_alias="MARKET_SERVICE_BASE_URL",
+    )
+    market_service_internal_token: SecretStr = Field(
+        default=SecretStr(""),
+        validation_alias="MARKET_SERVICE_INTERNAL_TOKEN",
+    )
+    market_service_connect_timeout_seconds: float = Field(
+        default=3.0, gt=0, validation_alias="MARKET_SERVICE_CONNECT_TIMEOUT_SECONDS"
+    )
+    market_service_read_timeout_seconds: float = Field(
+        default=3.0, gt=0, validation_alias="MARKET_SERVICE_READ_TIMEOUT_SECONDS"
+    )
+    market_service_bundle_read_timeout_seconds: float = Field(
+        default=30.0, gt=0, validation_alias="MARKET_SERVICE_BUNDLE_READ_TIMEOUT_SECONDS"
+    )
+    market_service_write_timeout_seconds: float = Field(
+        default=10.0, gt=0, validation_alias="MARKET_SERVICE_WRITE_TIMEOUT_SECONDS"
+    )
+    market_service_status_cache_ttl_seconds: int = Field(
+        default=30, ge=1, validation_alias="MARKET_SERVICE_STATUS_CACHE_TTL_SECONDS"
+    )
+    market_service_circuit_failure_threshold: int = Field(
+        default=5, ge=1, validation_alias="MARKET_SERVICE_CIRCUIT_FAILURE_THRESHOLD"
+    )
+    market_service_circuit_reset_seconds: float = Field(
+        default=30.0, gt=0, validation_alias="MARKET_SERVICE_CIRCUIT_RESET_SECONDS"
+    )
+
     # Monolith upstream channel (coexistence period): cross-domain writes and
     # memory/context-engine operations are forwarded to the monolith's
     # internal callback endpoints over the internal network, authenticated
@@ -310,6 +346,27 @@ class AppServiceSettings(BaseSettings):
         default=30.0,
         gt=0,
         validation_alias="APPLICATION_SERVICE_UPSTREAM_TIMEOUT_SECONDS",
+    )
+    # Community market (market-service) linkage. `disabled` is the community
+    # edition default: switches 1/2 (tenant resource center) keep working and
+    # switch 3 (community market) fails closed with 6020 instead of silently
+    # dropping the submission. `http` requires the base URL + internal token.
+    application_service_market_mode: Literal["disabled", "http"] = Field(
+        default="disabled",
+        validation_alias="APPLICATION_SERVICE_MARKET_MODE",
+    )
+    market_service_base_url: str | None = Field(
+        default=None,
+        validation_alias="MARKET_SERVICE_BASE_URL",
+    )
+    market_internal_token: SecretStr = Field(
+        default=SecretStr(""),
+        validation_alias="MARKET_INTERNAL_TOKEN",
+    )
+    market_service_timeout_seconds: float = Field(
+        default=10.0,
+        gt=0,
+        validation_alias="MARKET_SERVICE_TIMEOUT_SECONDS",
     )
     # East-west direct dependency on model-service (annotation embeddings),
     # never routed through the gateway; same env name as the monolith's
@@ -604,6 +661,26 @@ class AppServiceSettings(BaseSettings):
         return self
 
     @model_validator(mode="after")
+    def check_market_settings(self) -> AppServiceSettings:
+        """`http` mode needs both the market base URL and the internal token.
+
+        Failing here turns a misconfigured deployment into a startup error
+        instead of a runtime 401/502 on the first community-market submission.
+        """
+
+        if self.application_service_market_mode != "http":
+            return self
+        if not (self.market_service_base_url or "").strip():
+            raise ValueError(
+                "MARKET_SERVICE_BASE_URL must be set when APPLICATION_SERVICE_MARKET_MODE=http"
+            )
+        if not self.market_internal_token.get_secret_value().strip():
+            raise ValueError(
+                "MARKET_INTERNAL_TOKEN must be set when APPLICATION_SERVICE_MARKET_MODE=http"
+            )
+        return self
+
+    @model_validator(mode="after")
     def check_grpc_invoke_settings(self) -> AppServiceSettings:
         """gRPC invoke needs a target and a margin that cannot starve the call."""
 
@@ -623,6 +700,22 @@ class AppServiceSettings(BaseSettings):
             raise ValueError(
                 "MODEL_SERVICE_INVOKE_GRPC_MARGIN_SECONDS must be smaller than "
                 "MODEL_SERVICE_INVOKE_MEDIA_CALL_BUDGET_SECONDS"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def check_market_gateway_settings(self) -> AppServiceSettings:
+        if self.application_service_market_mode != "gateway":
+            return self
+        if not self.market_service_base_url.strip():
+            raise ValueError(
+                "MARKET_SERVICE_BASE_URL must be set when "
+                "APPLICATION_SERVICE_MARKET_MODE=gateway"
+            )
+        if not self.market_service_internal_token.get_secret_value().strip():
+            raise ValueError(
+                "MARKET_SERVICE_INTERNAL_TOKEN must be set when "
+                "APPLICATION_SERVICE_MARKET_MODE=gateway"
             )
         return self
 

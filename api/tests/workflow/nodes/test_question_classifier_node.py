@@ -8,6 +8,11 @@ from app.core.workflow.nodes import QuestionClassifierNode
 from app.core.workflow.variable.base_variable import VariableType
 from tests.workflow.nodes.base import TEST_MODEL_ID, simple_state, simple_vairable_pool
 
+pytestmark = pytest.mark.skipif(
+    not TEST_MODEL_ID,
+    reason="TEST_MODEL_ID not set; these tests require a live model",
+)
+
 
 # 基础分类配置 - 两个类别
 BASIC_TWO_CATEGORIES_CONFIG = {
@@ -155,7 +160,7 @@ async def test_classify_product_inquiry():
     state = simple_state()
     variable_pool = await simple_vairable_pool("test")
     
-    result = await QuestionClassifierNode(BASIC_TWO_CATEGORIES_CONFIG, {}).execute(state, variable_pool)
+    result = await QuestionClassifierNode(BASIC_TWO_CATEGORIES_CONFIG, {}, []).execute(state, variable_pool)
     
     assert isinstance(result, dict)
     assert "class_name" in result
@@ -191,7 +196,7 @@ async def test_classify_after_sales():
         }
     }
     
-    result = await QuestionClassifierNode(config, {}).execute(state, variable_pool)
+    result = await QuestionClassifierNode(config, {}, []).execute(state, variable_pool)
     
     assert isinstance(result, dict)
     assert result["class_name"] == "售后服务"
@@ -205,7 +210,7 @@ async def test_classify_order_inquiry():
     state = simple_state()
     variable_pool = await simple_vairable_pool("test")
     
-    result = await QuestionClassifierNode(MULTI_CATEGORIES_CONFIG, {}).execute(state, variable_pool)
+    result = await QuestionClassifierNode(MULTI_CATEGORIES_CONFIG, {}, []).execute(state, variable_pool)
     
     assert isinstance(result, dict)
     assert result["class_name"] == "订单查询"
@@ -245,7 +250,7 @@ async def test_classify_complaint():
         }
     }
     
-    result = await QuestionClassifierNode(config, {}).execute(state, variable_pool)
+    result = await QuestionClassifierNode(config, {}, []).execute(state, variable_pool)
     
     assert isinstance(result, dict)
     assert result["class_name"] == "投诉建议"
@@ -259,7 +264,7 @@ async def test_classify_with_supplement_prompt():
     state = simple_state()
     variable_pool = await simple_vairable_pool("test")
     
-    result = await QuestionClassifierNode(WITH_SUPPLEMENT_PROMPT_CONFIG, {}).execute(state, variable_pool)
+    result = await QuestionClassifierNode(WITH_SUPPLEMENT_PROMPT_CONFIG, {}, []).execute(state, variable_pool)
     
     assert isinstance(result, dict)
     assert "class_name" in result
@@ -276,7 +281,7 @@ async def test_classify_with_conv_variable():
     variable_pool = await simple_vairable_pool("test")
     await variable_pool.new("conv", "user_question", "我忘记密码了", VariableType.STRING, mut=True)
     
-    result = await QuestionClassifierNode(VARIABLE_INPUT_CONFIG, {}).execute(state, variable_pool)
+    result = await QuestionClassifierNode(VARIABLE_INPUT_CONFIG, {}, []).execute(state, variable_pool)
     
     assert isinstance(result, dict)
     assert result["class_name"] == "账号问题"
@@ -289,7 +294,7 @@ async def test_classify_with_sys_message():
     state = simple_state()
     variable_pool = await simple_vairable_pool("我想了解一下你们的产品功能")
     
-    result = await QuestionClassifierNode(SYS_MESSAGE_CONFIG, {}).execute(state, variable_pool)
+    result = await QuestionClassifierNode(SYS_MESSAGE_CONFIG, {}, []).execute(state, variable_pool)
     
     assert isinstance(result, dict)
     assert result["class_name"] == "产品咨询"
@@ -303,7 +308,7 @@ async def test_classify_empty_question():
     state = simple_state()
     variable_pool = await simple_vairable_pool("test")
     
-    result = await QuestionClassifierNode(EMPTY_QUESTION_CONFIG, {}).execute(state, variable_pool)
+    result = await QuestionClassifierNode(EMPTY_QUESTION_CONFIG, {}, []).execute(state, variable_pool)
     
     assert isinstance(result, dict)
     assert "class_name" in result
@@ -337,7 +342,7 @@ async def test_classify_single_category():
         }
     }
     
-    result = await QuestionClassifierNode(config, {}).execute(state, variable_pool)
+    result = await QuestionClassifierNode(config, {}, []).execute(state, variable_pool)
     
     assert isinstance(result, dict)
     assert result["class_name"] == "通用咨询"
@@ -375,7 +380,7 @@ async def test_classify_ambiguous_question():
         }
     }
     
-    result = await QuestionClassifierNode(config, {}).execute(state, variable_pool)
+    result = await QuestionClassifierNode(config, {}, []).execute(state, variable_pool)
     
     assert isinstance(result, dict)
     assert result["class_name"] in ["产品咨询", "售后服务", "闲聊"]
@@ -409,7 +414,7 @@ async def test_classify_long_question():
         }
     }
     
-    result = await QuestionClassifierNode(config, {}).execute(state, variable_pool)
+    result = await QuestionClassifierNode(config, {}, []).execute(state, variable_pool)
     
     assert isinstance(result, dict)
     assert result["class_name"] == "售后服务"
@@ -443,7 +448,7 @@ async def test_classify_technical_support():
         }
     }
     
-    result = await QuestionClassifierNode(config, {}).execute(state, variable_pool)
+    result = await QuestionClassifierNode(config, {}, []).execute(state, variable_pool)
     
     assert isinstance(result, dict)
     assert result["class_name"] == "技术支持"
@@ -486,7 +491,7 @@ async def test_classify_multiple_categories():
         }
     }
     
-    result = await QuestionClassifierNode(config, {}).execute(state, variable_pool)
+    result = await QuestionClassifierNode(config, {}, []).execute(state, variable_pool)
     
     assert isinstance(result, dict)
     assert result["class_name"] == "退换货"
@@ -520,7 +525,7 @@ async def test_classify_with_detailed_supplement():
         }
     }
     
-    result = await QuestionClassifierNode(config, {}).execute(state, variable_pool)
+    result = await QuestionClassifierNode(config, {}, []).execute(state, variable_pool)
     
     assert isinstance(result, dict)
     assert result["class_name"] == "产品使用"
@@ -557,7 +562,7 @@ async def test_classify_chinese_categories():
         }
     }
     
-    result = await QuestionClassifierNode(config, {}).execute(state, variable_pool)
+    result = await QuestionClassifierNode(config, {}, []).execute(state, variable_pool)
     
     assert isinstance(result, dict)
     assert result["class_name"] == "投诉类"
@@ -600,7 +605,7 @@ async def test_classify_case_mapping():
         }
     }
     
-    result = await QuestionClassifierNode(config, {}).execute(state, variable_pool)
+    result = await QuestionClassifierNode(config, {}, []).execute(state, variable_pool)
     
     assert isinstance(result, dict)
     assert "class_name" in result
@@ -640,7 +645,7 @@ async def test_classify_with_special_characters():
         }
     }
     
-    result = await QuestionClassifierNode(config, {}).execute(state, variable_pool)
+    result = await QuestionClassifierNode(config, {}, []).execute(state, variable_pool)
     
     assert isinstance(result, dict)
     assert result["class_name"] in ["价格咨询", "促销活动"]
@@ -677,7 +682,7 @@ async def test_classify_with_vision_disabled():
         }
     }
     
-    result = await QuestionClassifierNode(config, {}).execute(state, variable_pool)
+    result = await QuestionClassifierNode(config, {}, []).execute(state, variable_pool)
     
     assert isinstance(result, dict)
     assert "class_name" in result
@@ -714,7 +719,7 @@ async def test_classify_with_vision_enabled_no_files():
         }
     }
     
-    result = await QuestionClassifierNode(config, {}).execute(state, variable_pool)
+    result = await QuestionClassifierNode(config, {}, []).execute(state, variable_pool)
     
     assert isinstance(result, dict)
     assert "class_name" in result

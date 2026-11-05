@@ -278,6 +278,16 @@ wheels = [
 ]
 
 [[package]]
+name = "error-core"
+version = "0.1.0"
+source = { directory = "../error-core" }
+
+[package.metadata]
+
+[package.metadata.requires-dev]
+dev = [{ name = "pytest", specifier = ">=8.0" }]
+
+[[package]]
 name = "frozenlist"
 version = "1.8.0"
 source = { registry = "https://mirrors.cloud.tencent.com/pypi/simple" }
@@ -995,6 +1005,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "cryptography" },
+    { name = "error-core" },
     { name = "pydantic" },
     { name = "sqlalchemy" },
 ]
@@ -1040,6 +1051,7 @@ requires-dist = [
     { name = "cryptography", specifier = ">=43" },
     { name = "dashscope", marker = "extra == 'all'", specifier = ">=1.25,<2" },
     { name = "dashscope", marker = "extra == 'dashscope'", specifier = ">=1.25,<2" },
+    { name = "error-core", directory = "../error-core" },
     { name = "httpx", marker = "extra == 'all'", specifier = ">=0.28,<1" },
     { name = "httpx", marker = "extra == 'runtime'", specifier = ">=0.28,<1" },
     { name = "httpx", extras = ["socks"], marker = "extra == 'all'", specifier = ">=0.28,<1" },

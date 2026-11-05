@@ -485,8 +485,8 @@ async def test_variable_selector_invalid():
     
     await pool.new("conv", "test", "value", VariableType.STRING, mut=True)
     
-    # 选择器格式错误
-    with pytest.raises(ValueError):
+    # Deep path into a scalar value
+    with pytest.raises(KeyError):
         pool.get_value("conv.test.extra")
 
 
@@ -536,17 +536,17 @@ async def test_variable_pool_different_types_same_name():
 
 @pytest.mark.asyncio
 async def test_variable_pool_update_type():
-    """测试更新变量类型"""
+    """Test that new() replaces a variable whose type changed"""
     pool = VariablePool()
-    
-    # 创建字符串变量
+
     await pool.new("conv", "data", "text", VariableType.STRING, mut=True)
     assert pool.get_value("conv.data") == "text"
-    
-    # 更新为数字类型变量类型不可变
-    with pytest.raises(TypeError):
-        await pool.new("conv", "data", 123, VariableType.NUMBER, mut=True)
-    assert pool.get_value("conv.data") == "text"
+
+    # A stale instance of another type (e.g. a placeholder restored during
+    # resume) is replaced instead of raising TypeError.
+    await pool.new("conv", "data", 123, VariableType.NUMBER, mut=True)
+    assert pool.get_value("conv.data") == 123
+    assert pool.variables["conv"]["data"].type == VariableType.NUMBER
 
 
 @pytest.mark.asyncio

@@ -18,6 +18,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from ...db import get_async_db_context
+from ...i18n import get_current_locale
 from ...schemas.prompt_optimizer_schema import (
     CreateSessionResponse,
     PromptOptMessage,
@@ -25,7 +26,9 @@ from ...schemas.prompt_optimizer_schema import (
     SessionHistoryResponse,
     SessionMessage,
 )
+from ...services.chat_errors import error_frame, error_payload
 from ...services.prompt_optimizer_service import PromptOptimizerService
+from ...trace import get_trace_id
 from ..dependencies import Principal, get_principal, get_sync_db
 from ..schemas.common import success
 from ..schemas.response_schema import ApiResponse
@@ -95,7 +98,9 @@ async def get_prompt_opt(
                 ):
                     yield f"event:message\ndata: {json.dumps(chunk, ensure_ascii=False)}\n\n"
         except Exception as e:
-            yield f"event:error\ndata: {json.dumps({'error': str(e)}, ensure_ascii=False)}\n\n"
+            yield error_frame(error_payload(
+                e, locale=get_current_locale(), trace_id=get_trace_id()
+            ))
         yield "event:end\ndata: {}\n\n"
 
     return StreamingResponse(

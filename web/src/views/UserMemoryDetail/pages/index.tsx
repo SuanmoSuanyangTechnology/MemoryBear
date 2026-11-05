@@ -22,7 +22,8 @@ const MENU_LIST = ['PERCEPTUAL_MEMORY', 'WORKING_MEMORY', 'EMOTIONAL_MEMORY', 'S
 const MENU_DESC_OBJ = {
   SHORT_TERM_MEMORY: 'memoryDetail.shortTermDescription',
   FORGET_MEMORY: 'memoryDetail.forgetDescription',
-  IMPLICIT_MEMORY: 'memoryDetail.implicitDescription'
+  IMPLICIT_MEMORY: 'memoryDetail.implicitDescription',
+  EPISODIC_MEMORY: 'memoryDetail.episodicDescription'
 }
 /**
  * Detail page for user memory - renders different memory type views

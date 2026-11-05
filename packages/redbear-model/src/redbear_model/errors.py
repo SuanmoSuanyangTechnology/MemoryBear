@@ -6,6 +6,8 @@ from collections.abc import Mapping
 from typing import TYPE_CHECKING
 from uuid import UUID
 
+from error_core.supplier import ChannelFailure
+
 if TYPE_CHECKING:
     from .media_contracts import AudioTaskRef, MediaUsage
 
@@ -208,27 +210,33 @@ class CredentialDecryptError(RedBearModelError):
 class ChannelSwitchExhaustedError(RedBearModelError):
     """候选渠道全部耗尽（spec §11.2 候选耗尽行）：聚合报错——尝试过的渠道链 + 原始错误链。
 
-    failures = [(channel_id | None, error_type), ...]，仅渠道 id 与错误类型名，
-    不含任何凭据明文/密文；原始最后错误经 __cause__ 保留堆栈。
+    ``failures`` 为结构化 ``ChannelFailure`` 列表（渠道 id、供应商、错误类型、
+    BizCode 与诊断字段），不含任何凭据明文/密文；原始最后错误经 ``__cause__``
+    保留堆栈。
     """
 
     def __init__(
         self,
-        model_config_id: UUID,
+        model_config_id: str | UUID,
         provider: str,
         model_name: str,
-        failures: list[tuple[UUID | None, str]],
-        cause: BaseException | None,
-    ):
+        failures: list[ChannelFailure],
+        cause: BaseException | None = None,
+    ) -> None:
+        self.model_config_id = model_config_id
+        self.provider = provider
+        self.model_name = model_name
         self.failures = failures
+        self.cause = cause
         if cause is not None:
             self.__cause__ = cause
         chain = ", ".join(
-            f"channel={channel_id}:{error_type}" for channel_id, error_type in failures
+            f"channel={failure.channel_id}:{failure.error_type}"
+            for failure in failures
         )
         super().__init__(
-            f"All candidate channels failed for model config {model_config_id} "
-            f"(provider {provider}, model {model_name})"
+            f"all candidates exhausted for {provider}/{model_name} "
+            f"({len(failures)} channels)"
             + ("" if not chain else f": {chain}")
         )
 
@@ -278,23 +286,29 @@ class RemoteInvokeFailedError(RemoteInvokeError):
     """Terminal failure reported by the service (``error`` frame or failure envelope).
 
     ``code`` 原样承载服务侧 BizCode（SSE 帧为名字、JSON 信封为数值），包内不做映射：
-    调用方按自己的错误词汇翻译，包不复制宿主的 BizCode 表。
+    调用方按自己的错误词汇翻译，包不复制宿主的 BizCode 表。``msg`` 是服务侧面向
+    用户的本地化文案，``detail`` 是诊断面（供应商/状态码等）；``message`` 保留为
+    ``detail`` 的兼容别名，``str(exc)`` 同样只暴露诊断面。
     """
 
     def __init__(
         self,
         *,
-        code: str | int | None,
-        message: str,
+        code: int | str | None,
+        msg: str | None = None,
+        detail: str | None = None,
+        message: str = "",
         attempts: int | None = None,
         channel_id: UUID | None = None,
         retryable: bool = False,
         http_status: int | None = None,
-    ):
+    ) -> None:
         self.code = code
-        self.message = message
+        self.msg = msg
+        self.detail = detail if detail is not None else message
+        self.message = self.detail
         self.attempts = attempts
         self.channel_id = channel_id
         self.retryable = retryable
         self.http_status = http_status
-        super().__init__(f"Remote invoke failed (code={code}): {message}")
+        super().__init__(self.detail)

@@ -18,6 +18,9 @@ packages/storage-core/
 !packages/redbear-model/
 !packages/redbear-model/pyproject.toml
 !packages/redbear-model/src/**
+!packages/error-core/
+!packages/error-core/pyproject.toml
+!packages/error-core/src/**
 !packages/memory-contracts/
 !packages/memory-contracts/pyproject.toml
 !packages/memory-contracts/src/**

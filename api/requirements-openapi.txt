@@ -230,6 +230,7 @@ zipp==3.23.0
 zstandard==0.25.0
 
 # Local workspace sources: --no-emit-local omits them, so list the paths here.
+../packages/error-core
 ../packages/redbear-model
 ../packages/task-bridge-sdk
 # Imported by the real ontology service during route registration.

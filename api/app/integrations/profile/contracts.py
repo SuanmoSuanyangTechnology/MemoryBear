@@ -35,3 +35,4 @@ class MemoryProfileRawResponse:
     #: Upstream HTTP status. Legacy analytics routes always forwarded 200; the
     #: memory-config routes preserve 4xx/5xx via ``preserve_status=True``.
     status_code: int = 200
+    content_language: str | None = None

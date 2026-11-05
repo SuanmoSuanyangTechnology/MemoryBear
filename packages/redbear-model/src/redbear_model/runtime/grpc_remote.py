@@ -196,9 +196,12 @@ class GrpcAsyncInvokeTransport(AsyncInvokeTransport):
                 )
             return InvokeDoneFrame(status=frame.done.status)
         if kind == "error":
+            # New structured fields win; legacy servers still populate only code/message.
+            detail = frame.error.detail or frame.error.message
             raise RemoteInvokeFailedError(
-                code=frame.error.code,
-                message=frame.error.message,
+                code=frame.error.biz_code or frame.error.code,
+                msg=frame.error.user_msg or None,
+                detail=detail,
                 retryable=frame.error.retryable,
             )
         raise RemoteInvokeProtocolError("invoke frame carries no payload")

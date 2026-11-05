@@ -49,11 +49,39 @@ from ..utils.model_config_refs import config_ref_ids
 from ..utils.workflow_template_loader import load_workflow_template
 from ..utils.workflow_validator import WorkflowValidator
 from .agent_config_converter import AgentConfigConverter
+from .asset_release_resolver import AssetReleaseResolver
+from .category_service import CategoryService
 from .model_ref_gate import assert_refs_publishable, raise_model_unavailable, resolve_invoke_ref
 from .multi_agent_release_resolver import POLICY_PINNED, resolve_effective_release_id
+from .tool_service import ToolService
 from .workflow_service import WorkflowService
 
 logger = logging.getLogger(__name__)
+
+
+def _store_usage_examples(items: list[str] | None) -> list[dict[str, Any]]:
+    """list[str] -> [{'order': n, 'content': s}]，对外按 order 展开（方案 §4.3）。"""
+
+    return [
+        {"order": index, "content": text}
+        for index, text in enumerate(items or [], start=1)
+    ]
+
+
+def _expand_usage_examples(value: Any) -> list[str]:
+    """展开为前端直接渲染的字符串数组；兼容历史结构体与裸字符串两种存法。"""
+
+    if not value:
+        return []
+    expanded: list[str] = []
+    for item in value:
+        if isinstance(item, dict):
+            text = item.get("content")
+            if isinstance(text, str) and text.strip():
+                expanded.append(text.strip())
+        elif isinstance(item, str) and item.strip():
+            expanded.append(item.strip())
+    return expanded
 
 
 @dataclass
@@ -110,13 +138,12 @@ class AppService:
     def _check_app_accessible(self, app: App, workspace_id: uuid.UUID | None) -> bool:
         """Check whether the app is accessible (including shared apps).
 
-        Args:
-            app: App object
-            workspace_id: Workspace ID
-
-        Returns:
-            bool: Whether the app is accessible
+        The catalog replaced workspace-to-workspace sharing: accessibility for a
+        foreign workspace now means an active catalog installation (§6.1). The
+        legacy `app_shares` row is still honoured inside
+        ``AssetReleaseResolver`` so un-backfilled history keeps working (§11.1 M3).
         """
+
         if workspace_id is None:
             return True
 
@@ -124,15 +151,10 @@ class AppService:
         if app.workspace_id == workspace_id:
             return True
 
-        # 2. Check whether it is shared to this workspace
-        stmt = select(AppShare).where(
-            AppShare.source_app_id == app.id,
-            AppShare.target_workspace_id == workspace_id,
-            AppShare.is_active.is_(True)
+        # 2. Shared into this workspace (catalog installation, then legacy share)
+        return AssetReleaseResolver(self.db).can_access(
+            app_id=app.id, workspace_id=workspace_id
         )
-        share = self.db.scalars(stmt).first()
-
-        return share is not None
 
     def _validate_app_accessible(self, app: App, workspace_id: uuid.UUID | None) -> None:
         """Validate app accessibility (including shared apps, for read-only ops).
@@ -242,7 +264,10 @@ class AppService:
             self,
             app_id: uuid.UUID,
             config_data: app_schema.AgentConfigCreate,
-            now: datetime.datetime
+            now: datetime.datetime,
+            *,
+            workspace_id: uuid.UUID | None = None,
+            tenant_id: uuid.UUID | None = None
     ) -> None:
         """Create an Agent config (internal method).
 
@@ -250,8 +275,22 @@ class AppService:
             app_id: App ID
             config_data: Agent config data
             now: Current time
+            workspace_id: Workspace ID (tenant fallback lookup)
+            tenant_id: Tenant ID (skips the workspace lookup)
         """
         storage_data = AgentConfigConverter.to_storage_format(config_data)
+        tools = storage_data.get("tools") or []
+        if tools:
+            resolved = tenant_id or (
+                cross_domain_read.get_workspace_tenant_id(self.db, workspace_id)
+                if workspace_id is not None
+                else None
+            )
+            if resolved is None:
+                raise BusinessException("应用所属工作空间不存在", BizCode.NOT_FOUND)
+            storage_data["tools"] = ToolService(self.db).validate_tool_selection(
+                resolved, tools
+            )
 
         agent_cfg = AgentConfig(
             id=uuid.uuid4(),
@@ -482,15 +521,18 @@ class AppService:
         serialized before the aggregation so a remote binder may end the
         transaction without expiring the ORM objects mid-serialization.
         """
+        app_ids = [a.id for a in apps]
         context = self._build_serialization_context(apps, current_workspace_id)
         schemas = [
             self._convert_to_schema(a, current_workspace_id, None, context)
             for a in apps
         ]
-        ontology_map = self._load_ontology_map([a.id for a in apps])
+        ontology_map = self._load_ontology_map(app_ids)
         if ontology_map is not None:
-            for app, schema in zip(apps, schemas, strict=True):
-                ontology = ontology_map.get(app.id)
+            # A remote binder ends the transaction, which expires the ORM rows;
+            # read the pre-captured ids so the fill loop issues no refresh queries.
+            for app_id, schema in zip(app_ids, schemas, strict=True):
+                ontology = ontology_map.get(app_id)
                 if ontology is not None:
                     schema.ontology = app_schema.AppOntologyInfo(**ontology)
         return schemas
@@ -579,6 +621,18 @@ class AppService:
             "shared_by_name": shared_by_name,
             "shared_at": shared_at,
             "ontology": ontology,
+            # 来源（§11.2）：只有本地副本记来源，市场状态按需回填
+            "origin": str(getattr(app, "origin", None) or "local"),
+            "external": (
+                {
+                    "source": getattr(app, "external_source", None) or "community_market",
+                    "resource_id": getattr(app, "external_resource_id", None),
+                    "version": getattr(app, "external_version", None),
+                    "status": None,
+                }
+                if str(getattr(app, "origin", None) or "local") == "external"
+                else None
+            ),
             "created_at": app.created_at,
             "updated_at": app.updated_at
         }
@@ -663,7 +717,13 @@ class AppService:
 
             # For agent-type apps with a config payload, create the AgentConfig
             if app.type == "agent" and data.agent_config:
-                self._create_agent_config(app.id, data.agent_config, now)
+                self._create_agent_config(
+                    app.id,
+                    data.agent_config,
+                    now,
+                    workspace_id=workspace_id,
+                    tenant_id=tenant_id,
+                )
 
             # For multi_agent-type apps with a config payload, create MultiAgentConfig
             if app.type == "multi_agent" and data.multi_agent_config:
@@ -1642,6 +1702,17 @@ class AppService:
         # Convert to storage format
         storage_data = AgentConfigConverter.to_storage_format(data)
 
+        tools = storage_data.get("tools") or []
+        if tools:
+            tenant_id = cross_domain_read.get_workspace_tenant_id(
+                self.db, app.workspace_id
+            )
+            if tenant_id is None:
+                raise BusinessException("应用所属工作空间不存在", BizCode.NOT_FOUND)
+            storage_data["tools"] = ToolService(self.db).validate_tool_selection(
+                tenant_id, tools, agent_cfg.tools
+            )
+
         # Update fields (unconditional full overwrite: absent fields are cleared too)
         agent_cfg.system_prompt = data.system_prompt
         agent_cfg.default_model_config_id = data.default_model_config_id
@@ -1722,13 +1793,15 @@ class AppService:
         # Read-only operation; shared apps are allowed
         self._validate_app_accessible(app, workspace_id)
 
-        # Shared app: return the latest release config snapshot instead of the draft
+        # Shared app: return the pinned release snapshot instead of the draft.
+        # The pin comes from the catalog entry this workspace installed, not the
+        # source's current release (§5.3).
         if workspace_id and app.workspace_id != workspace_id:
-            if not app.current_release_id:
-                raise BusinessException("该应用尚未发布，无法使用", BizCode.AGENT_CONFIG_MISSING)
-            release = self.db.get(AppRelease, app.current_release_id)
+            release = AssetReleaseResolver(self.db).resolve_release(
+                app_id=app.id, workspace_id=workspace_id
+            )
             if not release:
-                raise BusinessException("发布版本不存在", BizCode.AGENT_CONFIG_MISSING)
+                raise BusinessException("该应用尚未发布，无法使用", BizCode.AGENT_CONFIG_MISSING)
             return self._agent_config_from_release(release)
 
         stmt = select(AgentConfig).where(
@@ -1874,13 +1947,15 @@ class AppService:
         # Read-only operation; shared apps are allowed
         self._validate_app_accessible(app, workspace_id)
 
-        # Shared app: return the latest release config snapshot instead of the draft
+        # Shared app: return the pinned release snapshot instead of the draft.
+        # Same rule as the Agent config read: follow this workspace's
+        # installation (§5.3), not the source's current release.
         if workspace_id and app.workspace_id != workspace_id:
-            if not app.current_release_id:
-                raise BusinessException("该应用尚未发布，无法使用", BizCode.CONFIG_MISSING)
-            release = self.db.get(AppRelease, app.current_release_id)
+            release = AssetReleaseResolver(self.db).resolve_release(
+                app_id=app.id, workspace_id=workspace_id
+            )
             if not release:
-                raise BusinessException("发布版本不存在", BizCode.CONFIG_MISSING)
+                raise BusinessException("该应用尚未发布，无法使用", BizCode.CONFIG_MISSING)
             return self._workflow_config_from_release(release)
 
         repo = WorkflowConfigRepository(self.db)
@@ -2149,6 +2224,8 @@ class AppService:
             type=release.type,
             visibility=release.visibility,
             config=release.config,
+            usage_examples=_expand_usage_examples(release.usage_examples),
+            categories=list(release.categories or []),
             default_model_config_id=release.default_model_config_id,
             published_by=release.published_by,
             publisher_name=publisher_name,
@@ -2168,6 +2245,8 @@ class AppService:
             release_notes: str | None = None,
             name: str | None = None,
             icon: str | None = None,
+            usage_examples: list[str] | None = None,
+            categories: list[str] | None = None,
     ) -> AppRelease:
         """Publish an app (creates an immutable snapshot).
 
@@ -2313,6 +2392,10 @@ class AppService:
         # disabled or sunset
         self._assert_publishable_models(config, default_model_config_id)
 
+        # 功能分类必须存在且启用：枚举已删除，只能查 `app_categories`（§4.5）。
+        # 放在这里而不是 pydantic validator 里，因为 validator 拿不到 session。
+        CategoryService(self.db).assert_codes_exist(categories or [])
+
         now = utcnow_naive()
         version = self._get_next_version(app_id)
 
@@ -2329,6 +2412,8 @@ class AppService:
             type=app.type,
             visibility=app.visibility,
             config=config,
+            usage_examples=_store_usage_examples(usage_examples),
+            categories=list(categories or []),
             default_model_config_id=default_model_config_id,
             published_by=publisher_id,
             published_at=now,

@@ -312,6 +312,7 @@ class MemoryDisplayHandler:
         except ProfileError:
             raise
         except Exception as exc:
+            logger.exception("Memory display read failed: operation=%s", message_key)
             raise LocalizedProfileError(
-                BizCode.INTERNAL_ERROR, message_key, detail=str(exc), status_code=200
+                BizCode.INTERNAL_ERROR, message_key, detail_key=message_key, status_code=200
             ) from exc

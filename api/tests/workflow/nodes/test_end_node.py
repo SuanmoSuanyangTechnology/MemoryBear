@@ -22,7 +22,7 @@ async def test_end_output():
     state = simple_state()
     variable_pool = await simple_vairable_pool("test")
     await variable_pool.new("conv", "x", 1, VariableType.NUMBER, mut=True)
-    result = await EndNode(node_config, {}).execute(state, variable_pool)
+    result = await EndNode(node_config, {}, []).execute(state, variable_pool)
     assert result == "1test"
 
 
@@ -38,5 +38,5 @@ async def test_end_output_miss():
     }
     state = simple_state()
     variable_pool = await simple_vairable_pool("test")
-    result = await EndNode(node_config, {}).execute(state, variable_pool)
+    result = await EndNode(node_config, {}, []).execute(state, variable_pool)
     assert result == "test"

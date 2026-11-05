@@ -248,6 +248,7 @@ class MemoryProfileServiceClient:
                 return MemoryProfileRawResponse(
                     body=response.content,
                     media_type=response.headers.get("content-type", "application/json"),
+                    content_language=response.headers.get("content-language"),
                     status_code=response.status_code,
                 )
             return envelope
