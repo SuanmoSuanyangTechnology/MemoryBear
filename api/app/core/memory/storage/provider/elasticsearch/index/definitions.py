@@ -363,7 +363,7 @@ INDEX_DEFINITIONS: dict[MemoryNodeLabel, IndexDefinition] = {
         "scene_community",
         MemoryNodeType.SCENE_COMMUNITY,
         schema_version=2,
-        generation=1,
+        generation=2,
         prop={
             "id": {"type": "keyword"},
             "end_user_id": {"type": "keyword"},
@@ -379,7 +379,7 @@ INDEX_DEFINITIONS: dict[MemoryNodeLabel, IndexDefinition] = {
         "scene_summary",
         MemoryNodeType.SCENE_SUMMARY,
         schema_version=4,
-        generation=1,
+        generation=2,
         prop={
             "id": {"type": "keyword"},
             "end_user_id": {"type": "keyword"},
