@@ -85,7 +85,9 @@ def _business_failure(
     """Business error -> the same status + envelope the HTTP handler renders."""
 
     message, _context = SensitiveDataFilter.filter_message(exc.message, exc.context)
-    numeric = coerce_code(exc.code) or int(BizCode.BAD_REQUEST)
+    numeric = coerce_code(exc.code)
+    if numeric is None:
+        numeric = int(BizCode.BAD_REQUEST)
     return http_status_for(numeric), fail(
         code=numeric,
         msg=user_message(numeric, language) or message,

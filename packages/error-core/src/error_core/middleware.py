@@ -11,7 +11,7 @@ from starlette.requests import Request
 from starlette.responses import Response
 
 from .i18n import resolve_locale
-from .translations import set_current_locale
+from .translations import get_current_locale, set_current_locale
 
 
 class LanguageContextMiddleware(BaseHTTPMiddleware):
@@ -32,8 +32,12 @@ class LanguageContextMiddleware(BaseHTTPMiddleware):
             default=self.default_locale(),
         )
         request.state.language = language
+        previous = get_current_locale()
         set_current_locale(language)
-        response = await call_next(request)
+        try:
+            response = await call_next(request)
+        finally:
+            set_current_locale(previous)
         response.headers.setdefault("Content-Language", language)
         return response
 

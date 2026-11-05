@@ -8664,7 +8664,11 @@ class WorkflowService:
                             # Emit only the first intervention; the rest will be
                             # emitted one at a time after each cycle completes.
                             if queued_intervention_events:
-                                yield queued_intervention_events.pop(0)
+                                next_event = self._emit(
+                                    public, queued_intervention_events.pop(0)
+                                )
+                                if next_event:
+                                    yield next_event
                             break
                     else:
                         logger.error(f"unexpect workflow run status, status: {status}")
@@ -9143,7 +9147,9 @@ class WorkflowService:
                                     execution.execution_id,
                                     context=execution.context,
                                 )
-                            yield next_evt
+                            next_evt = self._emit(public, next_evt)
+                            if next_evt:
+                                yield next_evt
                             break
 
         except Exception as e:

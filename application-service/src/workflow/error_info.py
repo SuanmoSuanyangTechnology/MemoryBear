@@ -31,20 +31,26 @@ def workflow_error_info(
     trace_id = get_trace_id() or None
 
     if isinstance(exc, ModelInvokeFailedError):
-        code = coerce_code(exc.biz_code) or BizCode.INTERNAL_ERROR.value
+        code = coerce_code(exc.biz_code)
+        if code is None:
+            code = BizCode.INTERNAL_ERROR.value
         msg = getattr(exc, "user_msg", None) or user_message(code, locale) or str(exc)
-        detail = getattr(exc, "detail", "") or str(exc)
+        detail = getattr(exc, "detail", "") or str(exc) or code_name(code)
         retryable = bool(exc.retryable)
     elif isinstance(exc, BusinessException):
-        code = coerce_code(exc.code) or BizCode.INTERNAL_ERROR.value
+        code = coerce_code(exc.code)
+        if code is None:
+            code = BizCode.INTERNAL_ERROR.value
         msg = user_message(code, locale) or exc.message
-        detail = exc.message
+        detail = exc.message or code_name(code)
         retryable = http_status_for(code) >= 500
     else:
         code = BizCode.INTERNAL_ERROR.value
         msg = user_message(code, locale) or "服务内部错误，请稍后重试"
-        detail = fallback_detail or (
-            f"{type(exc).__name__}: {exc}" if exc is not None else ""
+        detail = (
+            fallback_detail
+            or (f"{type(exc).__name__}: {exc}" if exc is not None else "")
+            or code_name(code)
         )
         retryable = http_status_for(code) >= 500
 

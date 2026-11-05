@@ -224,7 +224,9 @@ class InvokeServicer(invoke_pb2_grpc.ModelInvokeServiceServicer):
                         trace_id=trace_id,
                     )
                 except InvokeFailure as failure:
-                    code = coerce_code(failure.code) or BizCode.INTERNAL_ERROR.value
+                    code = coerce_code(failure.code)
+                    if code is None:
+                        code = BizCode.INTERNAL_ERROR.value
                     await _abort_with(
                         context,
                         failure.http_status,
@@ -260,7 +262,9 @@ class InvokeServicer(invoke_pb2_grpc.ModelInvokeServiceServicer):
                                 plan.call, timeout_s=plan.total_timeout_s
                             )
                         except InvokeFailure as failure:
-                            code = coerce_code(failure.code) or BizCode.INTERNAL_ERROR.value
+                            code = coerce_code(failure.code)
+                            if code is None:
+                                code = BizCode.INTERNAL_ERROR.value
                             await _abort_with(
                                 context,
                                 failure.http_status,

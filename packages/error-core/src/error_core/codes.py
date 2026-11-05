@@ -134,6 +134,9 @@ class BizCode(IntEnum):
     RATE_LIMITED = 10004
 
 
+# Wire-frozen legacy values, kept for client compatibility: FAILED login /
+# user lookup returns HTTP 200 with a non-zero code, and *NOT_FOUND business
+# errors map to 400 (not 404). Do not "fix" these entries.
 HTTP_MAPPING: dict[BizCode, int] = {
     BizCode.OK: 200,
     BizCode.BAD_REQUEST: 400,

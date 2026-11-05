@@ -42,7 +42,9 @@ def error_payload(failure: InvokeFailure) -> dict[str, Any]:
 
     from ..i18n import get_current_locale
 
-    numeric = coerce_code(failure.code) or BizCode.INTERNAL_ERROR.value
+    numeric = coerce_code(failure.code)
+    if numeric is None:
+        numeric = BizCode.INTERNAL_ERROR.value
     return error_frame(
         code=numeric,
         msg=failure.msg or user_message(numeric, get_current_locale()) or failure.message,
@@ -59,7 +61,9 @@ def error_info(failure: InvokeFailure) -> dict[str, Any]:
     from error_core.codes import code_name, coerce_code
     from error_core.diagnostics import redact
 
-    numeric = coerce_code(failure.code) or BizCode.INTERNAL_ERROR.value
+    numeric = coerce_code(failure.code)
+    if numeric is None:
+        numeric = BizCode.INTERNAL_ERROR.value
     detail = redact(failure.detail or failure.message)
     return {
         # Legacy readers expect a string; numeric string keeps old and new clients aligned.

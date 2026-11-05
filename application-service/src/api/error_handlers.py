@@ -53,7 +53,10 @@ def auth_rejection_content(
     """The envelope HTTP and gRPC render for an authentication rejection."""
 
     return _auth_rejection_content(
-        http_status, detail, language, translate=translate
+        http_status,
+        SensitiveDataFilter.filter_string(detail),
+        language,
+        translate=translate,
     )
 
 

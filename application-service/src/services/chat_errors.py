@@ -25,7 +25,9 @@ def error_payload(
     fallback_code: BizCode = BizCode.INTERNAL_ERROR,
 ) -> dict[str, Any]:
     if isinstance(exc, ModelInvokeFailedError):
-        numeric = coerce_code(exc.biz_code) or fallback_code.value
+        numeric = coerce_code(exc.biz_code)
+        if numeric is None:
+            numeric = fallback_code.value
         msg = getattr(exc, "user_msg", None) or user_message(numeric, locale) or str(exc)
         # The upstream_service suffix is appended once by
         # integrations/model/invoke.py to_host_error (Task 18); do not repeat it.
@@ -34,7 +36,9 @@ def error_payload(
         attempts = exc.attempts or 0
         channel_id = str(exc.channel_id) if exc.channel_id else None
     elif isinstance(exc, BusinessException):
-        numeric = coerce_code(exc.code) or fallback_code.value
+        numeric = coerce_code(exc.code)
+        if numeric is None:
+            numeric = fallback_code.value
         msg = user_message(numeric, locale) or exc.message
         detail = format_diagnostics(trace_id=trace_id, detail=exc.message)
         retryable = http_status_for(numeric) >= 500

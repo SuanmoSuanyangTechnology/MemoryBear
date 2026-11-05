@@ -94,14 +94,14 @@ class LanguageMiddleware(BaseHTTPMiddleware):
         
         # 1. Check query parameter (?lang=en)
         if "lang" in request.query_params:
-            lang = request.query_params["lang"].strip().lower()
+            lang = self._normalize_language(request.query_params["lang"])
             if lang:
                 logger.debug(f"Language from query parameter: {lang}")
                 return lang
-        
+
         # 2. Check X-Language-Type header (frontend UI language)
         if "X-Language-Type" in request.headers:
-            lang = request.headers["X-Language-Type"].strip().lower()
+            lang = self._normalize_language(request.headers["X-Language-Type"])
             if lang:
                 logger.debug(f"Language from X-Language-Type header: {lang}")
                 return lang
@@ -140,6 +140,14 @@ class LanguageMiddleware(BaseHTTPMiddleware):
             f"Using system default language: {settings.I18N_DEFAULT_LANGUAGE}"
         )
         return settings.I18N_DEFAULT_LANGUAGE
+
+    @staticmethod
+    def _normalize_language(value: str) -> str | None:
+        """Base language for ``zh-CN``/``en-US``; unrecognized values fall through."""
+        from app.core.config import settings
+
+        base = value.strip().lower().split("-")[0]
+        return base if base in settings.I18N_SUPPORTED_LANGUAGES else None
 
     def _parse_accept_language(self, header: str) -> Optional[str]:
         """

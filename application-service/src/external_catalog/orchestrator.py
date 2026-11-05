@@ -109,8 +109,31 @@ def install_dependencies(
     tenant's installed builtin instance by name. Bundled copies carry no
     market resource ID, so they are created with ``origin=local``.
     """
-    pending: list[dict[str, Any]] = []
     dependencies = bundle.get("dependencies", {})
+    if not isinstance(dependencies, dict):
+        raise ExternalCatalogError(
+            BizCode.EXTERNAL_CATALOG_INVALID,
+            "bundle dependencies 结构不合法",
+            data={"reason": "DEPENDENCIES_INVALID"},
+        )
+    for kind, _resource_type in _DEPENDENCY_ORDER:
+        items = dependencies.get(kind, [])
+        if not isinstance(items, list):
+            raise ExternalCatalogError(
+                BizCode.EXTERNAL_CATALOG_INVALID,
+                f"bundle dependencies.{kind} 必须为数组",
+                data={"reason": "DEPENDENCIES_INVALID", "kind": kind},
+            )
+        for index, item in enumerate(items):
+            ref = item.get("ref") if isinstance(item, dict) else None
+            if not isinstance(ref, str) or not ref.strip():
+                raise ExternalCatalogError(
+                    BizCode.EXTERNAL_CATALOG_INVALID,
+                    f"bundle 依赖缺少 ref: {kind}[{index}]",
+                    data={"reason": "DEPENDENCY_INVALID", "kind": kind, "index": index},
+                )
+
+    pending: list[dict[str, Any]] = []
     for kind, resource_type in _DEPENDENCY_ORDER:
         adapter = registry.get_install(resource_type)
         for item in dependencies.get(kind, []):

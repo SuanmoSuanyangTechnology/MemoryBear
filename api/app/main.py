@@ -667,7 +667,9 @@ async def rate_limit_exception_handler(request: Request, exc: RateLimitException
 async def business_exception_handler(request: Request, exc: BusinessException):
     """处理通用业务异常"""
     filtered_message, filtered_context = SensitiveDataFilter.filter_message(exc.message, exc.context)
-    numeric = coerce_code(exc.code) or BizCode.BAD_REQUEST.value
+    numeric = coerce_code(exc.code)
+    if numeric is None:
+        numeric = BizCode.BAD_REQUEST.value
     language = getattr(request.state, "language", None) or get_current_locale()
 
     logger.error(

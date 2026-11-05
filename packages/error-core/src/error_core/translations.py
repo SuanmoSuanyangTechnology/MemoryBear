@@ -67,8 +67,14 @@ class TranslationCatalog:
         """Override the fallback locale from validated settings."""
 
         normalized = normalize_locale(default_locale)
-        if normalized:
+        if normalized in SUPPORTED_LOCALES:
             self._default_locale = normalized
+        elif default_locale:
+            logger.warning(
+                "Unsupported default locale %r; keeping %s",
+                default_locale,
+                self._default_locale,
+            )
 
     def resolve_locale(
         self,

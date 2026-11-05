@@ -60,7 +60,9 @@ router = APIRouter(prefix="/invoke", tags=["Invoke"])
 def _failure_response(request: Request, failure: InvokeFailure) -> JSONResponse:
     """Non-stream failure: locale-rendered msg, diagnostic error, explicit HTTP status."""
 
-    code = coerce_code(failure.code) or BizCode.INTERNAL_ERROR.value
+    code = coerce_code(failure.code)
+    if code is None:
+        code = BizCode.INTERNAL_ERROR.value
     msg = (
         failure.msg
         or user_message(code, get_current_locale())
