@@ -116,7 +116,10 @@ class ProfileQueryService:
                     self.memory_search, self.memory_graph, [str(user_id)], evaluated_at
                 ),
             ),
-            self._scene_community_count(str(user_id)),
+            safe_count(
+                "scene communities",
+                lambda: self._scene_community_count(str(user_id)),
+            ),
         )
         implicit_count, graph_counts = memory_counts
         episodic = graph_counts["episodic"]

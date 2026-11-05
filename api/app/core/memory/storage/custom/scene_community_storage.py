@@ -93,6 +93,10 @@ return Long.MIN_VALUE;
 ]
 
 
+class SceneCommunityNotFoundError(ValueError):
+    """The requested community is absent from the authorized user's data."""
+
+
 class SceneCommunityStorage:
     def __init__(self, elastic_client: ElasticClient | None, neo4j_client: Neo4jClient):
         self._elastic_client = elastic_client
@@ -172,27 +176,27 @@ class SceneCommunityStorage:
                 'value': '*' + escaped + '*', 'case_insensitive': True}}}
         scene_query = self._user_query(uid)
         scene_query['bool']['filter'].append(wildcard('content'))
-        parent_ids = set()
-        options = {
-            'index': get_index_name(MemoryNodeType.SCENE_SUMMARY),
-            'query': scene_query,
+        parent_ids = []
+        composite = {
             'size': 1000,
-            'sort': [{'id': 'asc'}],
-            'source_includes': ['scene_community_id'],
+            'sources': [{'community': {'terms': {'field': 'scene_community_id'}}}],
         }
         while True:
-            result = await client.search(**options)
+            result = await client.search(
+                index=get_index_name(MemoryNodeType.SCENE_SUMMARY),
+                query=scene_query, size=0, track_total_hits=False,
+                aggregations={'parents': {'composite': composite}},
+            )
             self._ensure_complete_response(result)
-            hits = result['hits']['hits']
-            parent_ids.update(hit['_source']['scene_community_id'] for hit in hits
-                              if hit['_source'].get('scene_community_id'))
-            if len(hits) < 1000:
+            parents = result['aggregations']['parents']
+            parent_ids.extend(bucket['key']['community'] for bucket in parents['buckets'])
+            after = parents.get('after_key')
+            if not parents['buckets'] or not after:
                 break
-            options['search_after'] = hits[-1]['sort']
-        parent_ids = sorted(parent_ids)
+            composite['after'] = after
         should = [wildcard(field) for field in ('topic_name', 'topic_scope', 'summary')]
-        for offset in range(0, len(parent_ids), 1000):
-            should.append({'terms': {'id': parent_ids[offset:offset + 1000]}})
+        for offset in range(0, len(parent_ids), 65536):
+            should.append({'terms': {'id': parent_ids[offset:offset + 65536]}})
         return {'bool': {'should': should, 'minimum_should_match': 1}}
 
     @staticmethod
@@ -244,7 +248,7 @@ class SceneCommunityStorage:
             skip=(page - 1) * pagesize, limit=pagesize,
         )
         if not rows:
-            raise ValueError('事项不存在')
+            raise SceneCommunityNotFoundError('事项不存在')
         row = rows[0]
         return self._details_result(row['community'], row['items'], row['scene_count'], page, pagesize)
 

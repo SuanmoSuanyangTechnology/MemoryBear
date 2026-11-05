@@ -1565,7 +1565,11 @@ async def _async_get_scene_community_count(end_user_id: str) -> int:
     """Delegate ES-first community counting to the episodic service."""
     from app.services.memory_episodic_service import memory_episodic_service
 
-    return await memory_episodic_service.get_scene_community_count(end_user_id)
+    try:
+        return await memory_episodic_service.get_scene_community_count(end_user_id)
+    except Exception:
+        logger.warning("获取情景社区数量失败，设为0", exc_info=True)
+        return 0
 
 
 async def analytics_memory_types_async(

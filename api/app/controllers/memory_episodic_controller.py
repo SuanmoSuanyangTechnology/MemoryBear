@@ -6,6 +6,7 @@ from app.core.error_codes import BizCode
 from app.core.logging_config import get_api_logger
 from app.core.language_utils import get_language_from_header
 from app.core.response_utils import fail, success
+from app.core.memory.storage.custom.scene_community_storage import SceneCommunityNotFoundError
 from app.db import get_async_db
 from app.dependencies import get_current_user
 from app.models.user_model import User
@@ -31,7 +32,7 @@ async def _query(request, user, db, method, language='zh'):
             return fail(BizCode.USER_NOT_FOUND, '终端用户不存在或不可访问')
         result = await method(request, str(end_user.id), language)
         return success(data=result, msg='查询成功')
-    except ValueError as exc:
+    except SceneCommunityNotFoundError as exc:
         return fail(BizCode.INVALID_PARAMETER, str(exc))
     except Exception:
         api_logger.exception('episodic community read failed')
