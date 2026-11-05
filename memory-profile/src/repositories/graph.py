@@ -183,10 +183,11 @@ CALL {
     RETURN collect(u) AS users
 }
 CALL {
-    WITH users
+    WITH user_id, users
     UNWIND users AS u
     OPTIONAL MATCH (u)--(e)--(m:MemorySummary)
     WHERE e.delete_at IS NULL AND m.delete_at IS NULL
+      AND e.end_user_id = user_id AND m.end_user_id = user_id
     RETURN collect(DISTINCT {text: m.content, created_at: m.created_at}) AS summaries
 }
 CALL {

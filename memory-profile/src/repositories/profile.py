@@ -22,11 +22,11 @@ from src.models.references import (
     Conversation,
     EndUser,
     EndUserInfo,
-    Workspace,
     ForgetAudit,
     ImplicitEmotionsStorage,
     MemoryMessage,
     MemoryPerceptual,
+    Workspace,
 )
 from src.repositories.end_user import active_users_in_workspace, scoped_end_user_select
 

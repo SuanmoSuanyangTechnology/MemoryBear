@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Any
-from uuid import UUID
 from collections.abc import Awaitable, Callable
 from datetime import datetime
+from typing import Any
+from uuid import UUID
 
 from src.repositories.graph import MemoryGraphRepository
 from src.repositories.search import MemorySearchRepository

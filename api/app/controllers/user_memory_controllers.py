@@ -16,6 +16,7 @@ from app.core.response_utils import success, fail
 from app.db import get_async_db_context
 from app.dependencies import get_current_user_async, CurrentUserSnapshot
 from app.repositories.workspace_repository import WorkspaceRepository
+from app.repositories.end_user_repository import EndUserRepository
 from app.schemas.memory_storage_schema import DeleteNodeRequest
 from app.schemas.response_schema import ApiResponse
 from app.services.memory_entity_relationship_service import MemoryEntityService, MemoryEmotion, MemoryInteraction, TimelineSort
@@ -142,6 +143,18 @@ async def memory_space_entity_timeline(
     # 校验日期区间：from_ts 必须 <= to_ts，否则返回明确错误而非空结果
     if from_ts is not None and to_ts is not None and from_ts > to_ts:
         return fail(BizCode.INVALID_PARAMETER, "from_ts 不能大于 to_ts", f"from_ts={from_ts}, to_ts={to_ts}")
+
+    if end_user_id is not None:
+        workspace_id = current_user.current_workspace_id
+        if workspace_id is None:
+            return fail(BizCode.INVALID_PARAMETER, "请先切换到一个工作空间", "current_workspace_id is None")
+        async with get_async_db_context() as db:
+            end_user = await EndUserRepository(db).get_end_user_by_id_async(UUID(end_user_id))
+            if end_user is None:
+                return fail(BizCode.USER_NOT_FOUND, "终端用户不存在", "end_user not found")
+            if str(end_user.workspace_id) != str(workspace_id):
+                return fail(BizCode.PERMISSION_DENIED, "该终端用户不属于当前工作空间", "end_user workspace mismatch")
+            end_user_id = str(end_user.id)
 
     memory_entity = MemoryEntityService(id, "ExtractedEntity")
     result = await memory_entity.get_unified_timeline(

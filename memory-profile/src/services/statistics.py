@@ -22,7 +22,9 @@ from src.repositories.workspace_statistics import (
 from src.runtime import ProfileRuntime
 from src.schemas.workspace import WorkspaceStatistics
 from src.services._helpers import (
-    count_profile_cards, count_timeline_records, short_term_count,
+    count_profile_cards,
+    count_timeline_records,
+    short_term_count,
 )
 from src.services.profile import MEMORY_TYPES
 

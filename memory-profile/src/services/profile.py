@@ -28,7 +28,10 @@ from src.repositories.search import MemorySearchRepository
 from src.runtime import ProfileRuntime
 from src.schemas.profile import MemoryInsight, UserSummary
 from src.services._helpers import (
-    count_profile_cards, count_timeline_records, safe_count, short_term_count,
+    count_profile_cards,
+    count_timeline_records,
+    safe_count,
+    short_term_count,
 )
 from src.services.end_user import EndUserService
 
