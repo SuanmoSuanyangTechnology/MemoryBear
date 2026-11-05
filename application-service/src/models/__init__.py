@@ -6,6 +6,16 @@ from . import fk_anchors  # noqa: F401  FK anchors for the five cross-domain key
 from .agent_app_config_model import AgentConfig
 from .agent_execution_model import AgentExecution
 from .annotation_model import AppAnnotation, AppAnnotationHitLog, AppAnnotationSetting, HitLogSource
+from .app_asset_model import (
+    AppAsset,
+    AppAssetInstallation,
+    AppCategory,
+    AssetStatus,
+    InstallSource,
+    InstallStatus,
+    LinkMode,
+    ShareMode,
+)
 from .app_model import App, AppStatus, AppType, AppVisibility, IconType
 from .app_release_model import AppRelease
 from .appshare_model import AppShare
@@ -87,11 +97,14 @@ __all__ = [
     "AppAnnotation",
     "AppAnnotationHitLog",
     "AppAnnotationSetting",
+    "AppAsset",
+    "AppAssetInstallation",
     "AppRelease",
     "AppShare",
     "AppStatus",
     "AppType",
     "AppVisibility",
+    "AssetStatus",
     "AuthType",
     "BuiltinToolConfig",
     "Conversation",

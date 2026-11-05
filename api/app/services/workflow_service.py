@@ -43,6 +43,7 @@ from app.core.config import settings
 from app.core.exceptions import BusinessException
 from app.core.usage_context import bind_usage
 from app.core.workflow.adapters.registry import PlatformAdapterRegistry
+from app.core.workflow.error_info import workflow_error_info
 from app.core.workflow.executor import execute_workflow, execute_workflow_stream
 from app.core.workflow.nodes.enums import NodeType
 from app.core.workflow.variable.base_variable import VariableType, DEFAULT_VALUE
@@ -4801,17 +4802,32 @@ class WorkflowService:
                     }
                 }
             case "workflow_end":
+                failure_status = payload.get("status") == "failed"
+                failure_message = payload.get("msg") or ""
+                if failure_status and not failure_message:
+                    # Legacy/raw failure events may only carry `error`; never render
+                    # diagnostics to end users, fall back to the catalog message.
+                    failure_message = workflow_error_info(
+                        None, fallback_detail=payload.get("error") or ""
+                    )["msg"]
                 data = {
                     "status": payload.get("status", "completed"),
                     "elapsed_time": payload.get("elapsed_time"),
                     "message_length": len(payload.get("output", "")),
-                    "error": payload.get("error", ""),
+                    "error": failure_message or payload.get("error", ""),
                     "output": payload.get("output", ""),
                     "execution_id": payload.get("execution_id"),
                     "total_tokens": (payload.get("token_usage") or {}).get("total_tokens", 0) or 0,
                 }
-                if payload.get("error_node_id"):
-                    data["error_node_id"] = payload["error_node_id"]
+                if failure_message:
+                    data["msg"] = failure_message
+                if payload.get("code") is not None:
+                    data["code"] = payload["code"]
+                if payload.get("retryable") is not None:
+                    data["retryable"] = bool(payload["retryable"])
+                error_node = payload.get("error_node") or payload.get("error_node_id")
+                if error_node:
+                    data["error_node_id"] = error_node
                 if "citations" in payload and payload["citations"]:
                     data["citations"] = payload["citations"]
                 return {
@@ -4967,14 +4983,19 @@ class WorkflowService:
             app: App,
             workspace_id: uuid.UUID,
     ) -> WorkflowConfig:
-        """解析工作流配置：共享应用读发布快照，自有应用读草稿。复用 draft_run 的 is_shared 判定。"""
+        """解析工作流配置：共享应用读钉住快照，自有应用读草稿。
+
+        钉住版本来自本空间的资源中心安装记录，不是 `app.current_release_id`
+        ——消费方必须跟随分享方冻结的那一版（§5.3）。
+        """
         is_shared = app.workspace_id != workspace_id
         if is_shared:
-            if not app.current_release_id:
-                raise BusinessException("该应用尚未发布，无法使用", BizCode.AGENT_CONFIG_MISSING)
-            release = self.db.get(AppRelease, app.current_release_id)
+            from app.services.asset_release_resolver import AssetReleaseResolver
+            release = AssetReleaseResolver(self.db).resolve_release(
+                app_id=app.id, workspace_id=workspace_id
+            )
             if not release:
-                raise BusinessException("发布版本不存在", BizCode.AGENT_CONFIG_MISSING)
+                raise BusinessException("该应用尚未发布，无法使用", BizCode.AGENT_CONFIG_MISSING)
             # 与 draft_run 共享分支保持一致：用 AppService 重建配置以带出真实 config id
             from app.services.app_service import AppService
             return AppService(self.db)._workflow_config_from_release(release)
@@ -5574,6 +5595,7 @@ class WorkflowService:
         )
         stream_status = "completed"
         stream_error: Optional[str] = None
+        failure_info: Optional[dict[str, Any]] = None
         paused_for_intervention = False
 
         yield {
@@ -5590,7 +5612,6 @@ class WorkflowService:
         prev_suppress = getattr(self.conversation_service, "_suppress_message_save", False)
         self.conversation_service._suppress_message_save = True
         stream_failed = False
-        failure_error: Optional[str] = None
         try:
             async for event in self.run_stream(
                     app_id=app_id,
@@ -5662,6 +5683,19 @@ class WorkflowService:
                     if event_data.get("error"):
                         stream_error = event_data.get("error")
                         stream_status = "failed"
+                        failure_msg = event_data.get("msg") or ""
+                        if not failure_msg:
+                            # Legacy failure events only carry raw diagnostics; never
+                            # surface them, fall back to the catalog message.
+                            failure_msg = workflow_error_info(
+                                None, fallback_detail=stream_error
+                            )["msg"]
+                        failure_info = {
+                            "code": event_data.get("code"),
+                            "msg": failure_msg,
+                            "error": stream_error,
+                            "retryable": bool(event_data.get("retryable")),
+                        }
                         # run_stream 的失败终止事件由本方法在回滚后统一重发，
                         # 避免前端先收到内层 workflow_end，再收到重复的失败终止事件。
                         continue
@@ -5674,7 +5708,7 @@ class WorkflowService:
         except Exception as e:
             # run_stream 抛异常：标记失败，统一在下方回滚，避免异常在流中传播导致“response already started”
             stream_failed = True
-            failure_error = str(e)
+            failure_info = workflow_error_info(e)
         finally:
             self.conversation_service._suppress_message_save = prev_suppress
 
@@ -5684,12 +5718,47 @@ class WorkflowService:
             # 避免回滚失败后原版本停留在 is_current=False、本轮无当前回复的脏状态。
             self.db.query(Message).filter(Message.id == message_id).update({"is_current": True})
             self.db.commit()
+            failure_info = failure_info or workflow_error_info(
+                None, fallback_detail=stream_error or "工作流重新生成失败"
+            )
+            failure_code = failure_info.get("code")
+            if failure_code in (None, BizCode.OK.value):
+                failure_code = BizCode.INTERNAL_ERROR.value
+            failure_msg = failure_info["msg"]
+            logger.error(
+                "workflow_regenerate_failed execution_id=%s code=%s code_name=%s "
+                "msg_locale=%s retryable=%s source_service=monolith detail=%s",
+                execution_id,
+                failure_code,
+                failure_info.get("code_name"),
+                failure_info.get("locale"),
+                failure_info["retryable"],
+                failure_info["error"],
+            )
             yield {
                 "event": "workflow_end",
                 "data": {
                     "status": "failed",
                     "execution_id": execution_id,
-                    "error": failure_error or stream_error or "工作流重新生成失败",
+                    "error": failure_info["error"],
+                    "msg": failure_msg,
+                    "code": failure_code,
+                    "retryable": failure_info["retryable"],
+                },
+            }
+            # Share-page clients only whitelist `end`; emit it explicitly so the
+            # failure path still terminates with a user-safe failure frame.
+            yield {
+                "event": "end",
+                "data": {
+                    "status": "failed",
+                    "execution_id": execution_id,
+                    "elapsed_time": elapsed_time,
+                    "message_length": len(full_content),
+                    "error": failure_msg,
+                    "msg": failure_msg,
+                    "code": failure_code,
+                    "retryable": failure_info["retryable"],
                 },
             }
             return
@@ -6861,6 +6930,9 @@ class WorkflowService:
                 logger.info(f"Workflow Run Success, "
                             f"execution_id: {execution.execution_id}, message count: {len(final_messages)}")
             else:
+                # Persist the user-facing message; raw diagnostics stay in
+                # output_data and server logs.
+                error_msg = result.get("msg") or result.get("error") or "未知错误"
                 await self._patch_execution_async(
                     execution.execution_id,
                     status="failed",
@@ -6883,7 +6955,7 @@ class WorkflowService:
                 if not regenerate_mode and not skip_save:
                     messages_finalized = True
                     await self._save_failed_conversation_async(
-                        conversation_id_uuid, message_id, human_message, human_meta, result.get("error") or ""
+                        conversation_id_uuid, message_id, human_message, human_meta, error_msg
                     )
                 filtered_citations = []
 
@@ -6895,11 +6967,15 @@ class WorkflowService:
                 "message_id": str(message_id),
                 "user_message_id": str(user_message_id) if user_message_id else None,
                 "conversation_id": result.get("conversation_id") or (str(conversation_id_uuid) if conversation_id_uuid else None),
-                "error_message": result.get("error"),
+                "error_message": (result.get("msg") or result.get("error")),
                 "elapsed_time": result.get("elapsed_time"),
                 "token_usage": result.get("token_usage"),
                 "citations": filtered_citations,
             }
+            if result.get("status") == "failed":
+                response_data["code"] = result.get("code")
+                response_data["msg"] = result.get("msg")
+                response_data["retryable"] = bool(result.get("retryable"))
 
             if result.get("status") == "waiting_human":
                 # Non-streaming execution does not support human intervention nodes.
@@ -6934,11 +7010,22 @@ class WorkflowService:
         except BusinessException:
             raise
         except Exception as e:
-            logger.error(f"工作流执行失败: execution_id={execution.execution_id}, error={e}", exc_info=True)
+            error_info = workflow_error_info(e)
+            logger.error(
+                "workflow_run_failed execution_id=%s code=%s code_name=%s "
+                "msg_locale=%s retryable=%s source_service=monolith detail=%s",
+                execution.execution_id,
+                error_info["code"],
+                error_info["code_name"],
+                error_info["locale"],
+                error_info["retryable"],
+                error_info["error"],
+                exc_info=True,
+            )
             await self._patch_execution_async(
                 execution.execution_id,
                 status="failed",
-                error_message=str(e),
+                error_message=error_info["error"],
             )
             try:
                 execution_record = await self._get_execution_async(execution.execution_id)
@@ -6950,7 +7037,9 @@ class WorkflowService:
             human_message, human_meta = self._extract_human_message_and_meta([], payload.message or "", files)
             # 若本轮消息已成功入队，不要再入队失败消息，避免重复写入
             if not skip_save and not regenerate_mode and not messages_finalized:
-                await self._save_failed_conversation_async(conversation_id_uuid, None, human_message, human_meta, str(e))
+                await self._save_failed_conversation_async(
+                    conversation_id_uuid, None, human_message, human_meta, error_info["msg"]
+                )
             raise BusinessException(
                 code=BizCode.INTERNAL_ERROR,
                 message=f"工作流执行失败: {str(e)}"
@@ -8127,13 +8216,15 @@ class WorkflowService:
                         logger.info(f"Workflow Run Success, "
                                     f"execution_id: {execution.execution_id}, message count: {len(final_messages)}")
                     elif status == "failed":
-                        error_msg = event.get("data", {}).get("error", "未知错误")
+                        _failed_output = event.get("data", {}) or {}
+                        # Persist the user-facing message; raw diagnostics stay in
+                        # output_data and server logs.
+                        error_msg = _failed_output.get("msg") or _failed_output.get("error") or "未知错误"
                         final_messages = event.get("data", {}).get("messages", [])[init_message_length:]
                         human_message, human_meta = self._extract_human_message_and_meta(
                             final_messages, payload.message or "", files
                         )
-                        _failed_output = event.get("data")
-                        _error_node_id = (_failed_output or {}).get("error_node")
+                        _error_node_id = _failed_output.get("error_node")
 
                         if not skip_save and not regenerate_mode and not messages_finalized:
                             messages_finalized = True
@@ -8796,14 +8887,22 @@ class WorkflowService:
                             break
 
         except Exception as e:
+            error_info = workflow_error_info(e)
             logger.error(
-                f"Workflow streaming execution failed: execution_id={execution.execution_id}, error={e}",
-                exc_info=True
+                "workflow_stream_failed execution_id=%s code=%s code_name=%s "
+                "msg_locale=%s retryable=%s source_service=monolith detail=%s",
+                execution.execution_id,
+                error_info["code"],
+                error_info["code_name"],
+                error_info["locale"],
+                error_info["retryable"],
+                error_info["error"],
+                exc_info=True,
             )
             execution = await self._patch_execution_async(
                 execution.execution_id,
                 status="failed",
-                error_message=str(e),
+                error_message=error_info["error"],
             )
             try:
                 execution = await self._get_execution_async(execution.execution_id)
@@ -8820,28 +8919,33 @@ class WorkflowService:
             # 否则同一 message_id 会触发 messages 主键冲突
             if not skip_save and not regenerate_mode and not messages_finalized:
                 await self._save_failed_conversation_async(
-                    conversation_id_uuid, None, human_message, human_meta, str(e)
+                    conversation_id_uuid, None, human_message, human_meta, error_info["msg"]
                 )
             # On failure, update the waiting_human message in-place:
-            # clear the flag and set content to the error message.
+            # clear the flag and set content to the user-facing message.
             if conversation_id_uuid and message_id and not skip_save:
                 await self._update_message_async(
                     message_id=message_id,
-                    content=str(e),
+                    content=error_info["msg"],
                     meta_data={
                         "waiting_human": False,
                         "execution_id": execution.execution_id,
-                        "error": str(e),
+                        "error": error_info["msg"],
                     },
                 )
-            yield {
+            end_event = self._emit(public, {
                 "event": "workflow_end",
                 "data": {
                     "status": "failed",
                     "execution_id": execution.execution_id,
-                    "error": str(e),
+                    "error": error_info["error"],
+                    "msg": error_info["msg"],
+                    "code": error_info["code"],
+                    "retryable": error_info["retryable"],
                 },
-            }
+            })
+            if end_event:
+                yield end_event
 
         finally:
             # Stop the underlying workflow generator explicitly when this stream
@@ -9792,6 +9896,7 @@ class WorkflowService:
         except Exception as e:
             elapsed = (time.time() - start_time) * 1000
             logger.error(f"单节点流式执行失败: node_id={node_id}, error={e}", exc_info=True)
+            error_info = workflow_error_info(e)
             event_payload = {
                 "event": "node_error",
                 "data": {
@@ -9800,7 +9905,9 @@ class WorkflowService:
                     "node_type": node_type,
                     "inputs": node._extract_input(state, variable_pool),
                     "elapsed_time": elapsed,
-                    "error": str(e),
+                    "error": error_info["error"],
+                    "code": error_info["code"],
+                    "msg": error_info["msg"],
                 }
             }
             self._persist_single_node_execution(
@@ -10564,8 +10671,16 @@ class WorkflowService:
                 }
 
         except Exception as e:
+            error_info = workflow_error_info(e)
             logger.error(
-                f"Resume workflow failed: execution_id={execution_id}, error={e}",
+                "workflow_resume_failed execution_id=%s code=%s code_name=%s "
+                "msg_locale=%s retryable=%s source_service=monolith detail=%s",
+                execution_id,
+                error_info["code"],
+                error_info["code_name"],
+                error_info["locale"],
+                error_info["retryable"],
+                error_info["error"],
                 exc_info=True,
             )
             try:
@@ -10596,7 +10711,7 @@ class WorkflowService:
                 execution_id,
                 status="failed",
                 output_data=execution.output_data,
-                error_message=str(e),
+                error_message=error_info["error"],
                 error_node_id=error_node_id,
             )
 
@@ -10614,7 +10729,10 @@ class WorkflowService:
                 "event": "workflow_end",
                 "data": {
                     "status": "failed",
-                    "error": str(e),
+                    "error": error_info["error"],
+                    "msg": error_info["msg"],
+                    "code": error_info["code"],
+                    "retryable": error_info["retryable"],
                     "execution_id": execution_id,
                 }
             }

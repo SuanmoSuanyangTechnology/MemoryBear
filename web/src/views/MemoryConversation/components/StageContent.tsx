@@ -7,6 +7,8 @@ import type { MemoryStageKey } from '../constants'
 import CodeBlock from '@/components/Markdown/CodeBlock'
 import ScoreMergeContent from './ScoreMergeContent'
 import UserMetadataContent from './UserMetadataContent'
+import CommunityStageContent from './CommunityStageContent'
+import Markdown from '@/components/Markdown';
 
 interface StageContentProps {
   stage: MemoryStageKey
@@ -74,7 +76,9 @@ const RequestModeContent: FC<{ log: LogItem }> = ({ log }) => {
     firstValue(data, ['search_switch', 'searchSwitch', 'mode']),
     '2',
   )
-  const modeKey = searchSwitch === '2'
+  const modeKey = searchSwitch === '6'
+    ? 'community'
+    : searchSwitch === '2'
     ? 'quick'
     : searchSwitch === '5'
       ? 'express'
@@ -97,7 +101,7 @@ const RequestModeContent: FC<{ log: LogItem }> = ({ log }) => {
           <p className="rb:text-[12px] rb:font-medium rb:text-gray-900">
             {t(`memoryConversation.requestMode.${modeKey}`)}
           </p>
-          <Flex align="center" className="rb:shrink-0 rb:rounded-sm rb:bg-gray-900 rb:h-4 rb:px-1! rb:text-[12px] rb:text-white">
+          <Flex align="center" className="rb:shrink-0 rb:rounded-sm rb:bg-primary-600 rb:h-4 rb:px-1! rb:text-[12px] rb:text-white">
             search_switch={searchSwitch}
           </Flex>
         </Flex>
@@ -241,7 +245,7 @@ const FinalAnswerContent: FC<{ log: LogItem }> = ({ log }) => {
           {t('memoryConversation.finalAnswer.answer')}
         </p>
         <p className="rb:text-[12px] rb:leading-4.5 rb:text-gray-900">
-          {textValue(firstValue(data, ['answer', 'content']))}
+          <Markdown content={textValue(firstValue(data, ['answer', 'content']))} />
         </p>
       </div>
     </Flex>
@@ -249,6 +253,7 @@ const FinalAnswerContent: FC<{ log: LogItem }> = ({ log }) => {
 }
 
 const StageContent: FC<StageContentProps> = ({ stage, log }) => {
+  if (stage.startsWith('community')) return <CommunityStageContent stage={stage} log={log} />
   if (stage === 'requestMode') return <RequestModeContent log={log} />
   if (stage === 'queryPreprocess') return <QueryPreprocessContent log={log} />
   if (stage === 'problemSplit') return <ProblemSplitContent log={log} />

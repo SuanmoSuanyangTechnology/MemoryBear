@@ -7,6 +7,10 @@
 !application-service/src/**
 
 !packages/
+!packages/redbear-model/
+!packages/redbear-model/**
+!packages/error-core/
+!packages/error-core/**
 !packages/auth-sdk/
 !packages/auth-sdk/**
 !packages/memorybear-grpc/

@@ -5,6 +5,7 @@ on:
     paths:
       - 'memory-profile/**'
       - 'packages/auth-sdk/**'
+      - 'packages/memory-contracts/**'
       - '.github/workflows/memory-profile.yml'
 
 permissions:
@@ -33,6 +34,7 @@ jobs:
             memory-profile/uv.lock
             memory-profile/pyproject.toml
             packages/auth-sdk/pyproject.toml
+            packages/memory-contracts/pyproject.toml
 
       - name: Install dependencies
         run: uv sync --frozen

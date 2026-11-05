@@ -15,6 +15,7 @@ from app.core.config import settings
 from app.core.workflow.node_cache import DEFAULT_CACHEABLE_NODE_TYPES, WorkflowNodeCacheManager
 from app.core.workflow.engine.state_manager import WorkflowState
 from app.core.workflow.engine.variable_pool import VariablePool
+from app.core.workflow.error_info import workflow_error_info
 from app.core.workflow.nodes.enums import BRANCH_NODES
 from app.core.workflow.variable.base_variable import VariableType, FileObject
 from app.db import get_async_db_context
@@ -47,11 +48,18 @@ class NodeExecutionError(Exception):
     保证 workflow_executions.output_data 里能看到失败节点的日志记录。
     """
 
-    def __init__(self, node_id: str, node_output: dict[str, Any], error_message: str):
+    def __init__(
+        self,
+        node_id: str,
+        node_output: dict[str, Any],
+        error_message: str,
+        error_info: dict[str, Any] | None = None,
+    ):
         super().__init__(f"Node {node_id} execution failed: {error_message}")
         self.node_id = node_id
         self.node_output = node_output
         self.error_message = error_message
+        self.error_info = error_info
 
 
 class BaseNode(ABC):
@@ -417,7 +425,7 @@ class BaseNode(ABC):
                 f"Node {self.node_id} execution timed out ({timeout} seconds)."
             )
             return self._wrap_error(
-                f"Node execution timed out ({timeout} seconds).",
+                TimeoutError(f"Node execution timed out ({timeout} seconds)."),
                 elapsed_time,
                 state,
                 variable_pool,
@@ -430,7 +438,7 @@ class BaseNode(ABC):
                 f"Node {self.node_id} execution failed: {e}",
                 exc_info=True,
             )
-            return self._wrap_error(str(e), elapsed_time, state, variable_pool)
+            return self._wrap_error(e, elapsed_time, state, variable_pool)
 
     async def run_stream(
             self, state: WorkflowState,
@@ -605,7 +613,7 @@ class BaseNode(ABC):
                 return
 
             error_output = self._wrap_error(
-                str(timeout_error),
+                timeout_error,
                 elapsed_time,
                 state,
                 variable_pool
@@ -624,7 +632,7 @@ class BaseNode(ABC):
             rollback_provisional("node_error")
             elapsed_time = (time.time() - start_time) * 1000
             logger.error(f"Node {self.node_id} execution failed: {e}", exc_info=True)
-            error_output = self._wrap_error(str(e), elapsed_time, state, variable_pool)
+            error_output = self._wrap_error(e, elapsed_time, state, variable_pool)
             yield error_output
 
     def _wrap_output(
@@ -678,7 +686,7 @@ class BaseNode(ABC):
 
     def _wrap_error(
             self,
-            error_message: str,
+            error: BaseException,
             elapsed_time: float,
             state: WorkflowState,
             variable_pool: VariablePool
@@ -690,7 +698,8 @@ class BaseNode(ABC):
           - If no error edge exists, the workflow is stopped by raising an exception.
 
         Args:
-            error_message: The error message describing the failure.
+            error: The exception that failed the node. It is classified once here
+                so the terminal executor keeps the same code/msg/diagnostics.
             elapsed_time: Time elapsed during node execution (in seconds).
             state: The current workflow state.
             variable_pool: The variable pool used for reading and writing variables.
@@ -702,6 +711,9 @@ class BaseNode(ABC):
         """
         # # Check if the node has an error edge defined
         # error_edge = self._find_error_edge()
+
+        error_message = str(error)
+        error_info = workflow_error_info(error)
 
         # Extract input data (for logging or audit purposes).
         # This runs in the error-handling path, so it must never mask the
@@ -727,7 +739,9 @@ class BaseNode(ABC):
             "output": None,
             "elapsed_time": elapsed_time,
             "token_usage": None,
-            "error": error_message,
+            "error": error_info["error"],
+            "error_code": error_info["code"],
+            "error_msg": error_info["msg"],
             # 单调递增序号，用于日志按执行顺序排序
             "execution_order": _next_execution_order(),
         }
@@ -756,6 +770,7 @@ class BaseNode(ABC):
             node_id=self.node_id,
             node_output=node_output,
             error_message=error_message,
+            error_info=error_info,
         )
 
     def _extract_input(self, state: WorkflowState, variable_pool: VariablePool) -> dict[str, Any]:

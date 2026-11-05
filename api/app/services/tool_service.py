@@ -250,6 +250,14 @@ class ToolService:
 
                 # 更新状态逻辑
                 self._update_tool_status(config_obj)
+            elif is_enabled is not None and config_obj.tool_type == ToolType.BUILTIN.value:
+                # 仅切换内置工具启用状态，不覆盖已有配置
+                builtin_config = self.db.query(BuiltinToolConfig).filter(
+                    BuiltinToolConfig.id == config_obj.id
+                ).first()
+                if builtin_config:
+                    builtin_config.is_enabled = is_enabled
+                self._update_tool_status(config_obj)
 
             # 清除缓存
             self._clear_tool_cache(tool_id)
@@ -1269,6 +1277,11 @@ class ToolService:
             tenant_id=str(config.tenant_id) if config.tenant_id else None,
             config_data=config_data,
             is_active=config.is_active,
+            # Placeholder rows are the residue of a cross-tenant bundle landing
+            # (§7.5.2): visible and referencable, but they carry no type-specific
+            # config, so the console must show them as "needs rebuilding" rather
+            # than as a working tool.
+            is_placeholder=bool(config_data.get("placeholder")),
             created_at=config.created_at
         )
 

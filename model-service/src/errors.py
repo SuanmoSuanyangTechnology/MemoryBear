@@ -9,164 +9,21 @@ the proxy passes the service response through unchanged.
 from __future__ import annotations
 
 import time
-from enum import IntEnum
 from typing import Any
 
+from error_core.codes import (
+    ERROR_CODE_TO_BIZ_CODE,
+    HTTP_MAPPING,
+    HTTP_STATUS_TO_BIZ_CODE,
+    BizCode,
+    as_biz_code,
+    code_name,
+    http_status_for,
+)
 from fastapi import HTTPException
 
 from .i18n import get_current_locale, get_default_locale, translate
 from .sensitive import SensitiveDataFilter
-
-
-class BizCode(IntEnum):
-    """Subset of the host BizCode covering the model domain and shared errors."""
-
-    # 通用（1xxx）
-    OK = 0
-    BAD_REQUEST = 1000
-    VALIDATION_FAILED = 1001
-    MISSING_PARAMETER = 1002
-    INVALID_PARAMETER = 1003
-    # 认证/鉴权（2xxx/3xxx）
-    UNAUTHORIZED = 2001
-    TOKEN_INVALID = 2002
-    TOKEN_EXPIRED = 2003
-    TOKEN_BLACKLISTED = 2004
-    FORBIDDEN = 3001
-    WORKSPACE_NO_ACCESS = 3003
-    WORKSPACE_ACCESS_DENIED = 3005
-    # API Key / 配额（3xxx）
-    API_KEY_NOT_FOUND = 3007
-    API_KEY_INVALID = 3009
-    API_KEY_EXPIRED = 3010
-    QUOTA_EXCEEDED = 3018
-    RATE_LIMIT_EXCEEDED = 3019
-    # 资源（4xxx）
-    NOT_FOUND = 4000
-    USER_NOT_FOUND = 4001
-    WORKSPACE_NOT_FOUND = 4002
-    MODEL_NOT_FOUND = 4003
-    FILE_NOT_FOUND = 4006
-    USER_NO_ACCESS = 4009
-    MODEL_DEPRECATED = 4010
-    CHANNEL_DISABLED = 4011
-    NO_AVAILABLE_CHANNEL = 4012
-    SPEEDBEAR_CHANNEL_MISSING = 4013
-    CREDENTIAL_DECRYPT_ERROR = 4014
-    MODEL_AVAILABLE_IN_PLAZA = 4015
-    # 冲突/状态（5xxx）
-    DUPLICATE_NAME = 5001
-    RESOURCE_ALREADY_EXISTS = 5002
-    VERSION_ALREADY_EXISTS = 5003
-    STATE_CONFLICT = 5004
-    RESOURCE_IN_USE = 5005
-    VERSION_LIMIT_EXCEEDED = 5006
-    # 应用发布（6xxx，模型域引用应用配置时使用）
-    PUBLISH_FAILED = 6001
-    NO_DRAFT_TO_PUBLISH = 6002
-    ROLLBACK_TARGET_NOT_FOUND = 6003
-    APP_TYPE_NOT_SUPPORTED = 6004
-    AGENT_CONFIG_MISSING = 6005
-    PERMISSION_DENIED = 6010
-    # 模型（7xxx）
-    MODEL_CONFIG_INVALID = 7001
-    API_KEY_MISSING = 7002
-    PROVIDER_NOT_SUPPORTED = 7003
-    LLM_ERROR = 7004
-    EMBEDDING_ERROR = 7005
-    # 系统（100xx）
-    INTERNAL_ERROR = 10001
-    DB_ERROR = 10002
-    SERVICE_UNAVAILABLE = 10003
-    RATE_LIMITED = 10004
-
-
-# 建议的HTTP状态映射（与宿主 HTTP_MAPPING 同值；未收录的码按 400 兜底）
-HTTP_MAPPING: dict[BizCode, int] = {
-    BizCode.OK: 200,
-    BizCode.BAD_REQUEST: 400,
-    BizCode.VALIDATION_FAILED: 400,
-    BizCode.MISSING_PARAMETER: 400,
-    BizCode.INVALID_PARAMETER: 400,
-    BizCode.UNAUTHORIZED: 401,
-    BizCode.TOKEN_INVALID: 401,
-    BizCode.TOKEN_EXPIRED: 401,
-    BizCode.TOKEN_BLACKLISTED: 401,
-    BizCode.FORBIDDEN: 403,
-    BizCode.WORKSPACE_NO_ACCESS: 403,
-    BizCode.WORKSPACE_ACCESS_DENIED: 403,
-    BizCode.NOT_FOUND: 400,
-    BizCode.USER_NOT_FOUND: 200,
-    BizCode.USER_NO_ACCESS: 401,
-    BizCode.WORKSPACE_NOT_FOUND: 400,
-    BizCode.MODEL_NOT_FOUND: 400,
-    BizCode.MODEL_DEPRECATED: 400,
-    BizCode.MODEL_AVAILABLE_IN_PLAZA: 400,
-    BizCode.CHANNEL_DISABLED: 409,
-    BizCode.NO_AVAILABLE_CHANNEL: 409,
-    BizCode.SPEEDBEAR_CHANNEL_MISSING: 400,
-    BizCode.CREDENTIAL_DECRYPT_ERROR: 500,
-    BizCode.FILE_NOT_FOUND: 400,
-    BizCode.DUPLICATE_NAME: 409,
-    BizCode.RESOURCE_ALREADY_EXISTS: 409,
-    BizCode.VERSION_ALREADY_EXISTS: 409,
-    BizCode.STATE_CONFLICT: 409,
-    BizCode.RESOURCE_IN_USE: 409,
-    BizCode.VERSION_LIMIT_EXCEEDED: 409,
-    BizCode.PUBLISH_FAILED: 500,
-    BizCode.NO_DRAFT_TO_PUBLISH: 400,
-    BizCode.ROLLBACK_TARGET_NOT_FOUND: 400,
-    BizCode.APP_TYPE_NOT_SUPPORTED: 400,
-    BizCode.AGENT_CONFIG_MISSING: 400,
-    BizCode.PERMISSION_DENIED: 403,
-    BizCode.API_KEY_NOT_FOUND: 400,
-    BizCode.API_KEY_INVALID: 401,
-    BizCode.API_KEY_EXPIRED: 401,
-    BizCode.QUOTA_EXCEEDED: 402,
-    BizCode.MODEL_CONFIG_INVALID: 400,
-    BizCode.API_KEY_MISSING: 400,
-    BizCode.PROVIDER_NOT_SUPPORTED: 400,
-    BizCode.LLM_ERROR: 500,
-    BizCode.EMBEDDING_ERROR: 500,
-    BizCode.INTERNAL_ERROR: 500,
-    BizCode.DB_ERROR: 500,
-    BizCode.SERVICE_UNAVAILABLE: 503,
-    BizCode.RATE_LIMITED: 429,
-    BizCode.RATE_LIMIT_EXCEEDED: 429,
-}
-
-ERROR_CODE_TO_BIZ_CODE: dict[str, BizCode] = {
-    "QUOTA_EXCEEDED": BizCode.QUOTA_EXCEEDED,
-    "RATE_LIMIT_EXCEEDED": BizCode.RATE_LIMIT_EXCEEDED,
-    "API_KEY_NOT_FOUND": BizCode.API_KEY_NOT_FOUND,
-    "API_KEY_INVALID": BizCode.API_KEY_INVALID,
-    "API_KEY_EXPIRED": BizCode.API_KEY_EXPIRED,
-    "WORKSPACE_NOT_FOUND": BizCode.WORKSPACE_NOT_FOUND,
-    "WORKSPACE_NO_ACCESS": BizCode.WORKSPACE_NO_ACCESS,
-    "PERMISSION_DENIED": BizCode.PERMISSION_DENIED,
-    "TOKEN_EXPIRED": BizCode.TOKEN_EXPIRED,
-    "TOKEN_INVALID": BizCode.TOKEN_INVALID,
-    "VALIDATION_FAILED": BizCode.VALIDATION_FAILED,
-    "INVALID_PARAMETER": BizCode.INVALID_PARAMETER,
-    "MISSING_PARAMETER": BizCode.MISSING_PARAMETER,
-}
-
-
-def as_biz_code(value: BizCode | int | None) -> BizCode:
-    """Coerce an exception code to a BizCode exactly like the host handler."""
-
-    if isinstance(value, BizCode):
-        return value
-    if isinstance(value, int):
-        try:
-            return BizCode(value)
-        except ValueError:
-            return BizCode.BAD_REQUEST
-    return BizCode.BAD_REQUEST
-
-
-def http_status_for(value: BizCode | int | None) -> int:
-    return HTTP_MAPPING.get(as_biz_code(value), 400)
 
 
 class BusinessException(Exception):
@@ -287,10 +144,12 @@ __all__ = [
     "BusinessException",
     "ERROR_CODE_TO_BIZ_CODE",
     "HTTP_MAPPING",
+    "HTTP_STATUS_TO_BIZ_CODE",
     "I18nException",
     "InternalServerError",
     "QuotaExceededError",
     "as_biz_code",
+    "code_name",
     "filter_business_message",
     "http_status_for",
 ]

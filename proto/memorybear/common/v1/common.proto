@@ -3,7 +3,11 @@ syntax = "proto3";
 package memorybear.common.v1;
 
 message ErrorInfo {
-  string code = 1;
-  string message = 2;
+  string code = 1;        // legacy: enum name or numeric string
+  string message = 2;     // legacy: diagnostic string
   bool retryable = 3;
+  int32 biz_code = 4;     // platform BizCode number
+  string user_msg = 5;    // localized user-facing message
+  string detail = 6;      // diagnostic string
+  string code_name = 7;   // enum name for troubleshooting
 }

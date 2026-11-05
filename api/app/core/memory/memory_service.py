@@ -605,11 +605,14 @@ class MemoryService:
             skip_summary: bool = False,
             enable_rerank: bool = False,
             record_display: bool = False,
+            include_metadata: bool = True,
     ) -> MemorySearchResult:
         """检索记忆。
 
         Args:
             record_display: 是否记录读取展示卡片。
+            include_metadata: 是否将用户画像 metadata 节点拼入检索结果。
+                画像仍用于拆题与摘要生成，只影响返回的 memories。
         """
         if history is None:
             history = []
@@ -625,6 +628,7 @@ class MemoryService:
             skip_summary=skip_summary,
             enable_rerank=enable_rerank,
             record_display=record_display,
+            include_metadata=include_metadata,
             retrieval_operation_id=retrieval_operation_id,
         )
 

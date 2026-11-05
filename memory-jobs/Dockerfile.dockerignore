@@ -17,6 +17,9 @@ packages/storage-core/
 !packages/redbear-model/
 !packages/redbear-model/pyproject.toml
 !packages/redbear-model/src/**
+!packages/error-core/
+!packages/error-core/pyproject.toml
+!packages/error-core/src/**
 # Never ship local bytecode
 memory-jobs/src/**/__pycache__/
 memory-jobs/src/**/__pycache__/**

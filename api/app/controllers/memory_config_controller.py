@@ -13,7 +13,7 @@
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Body, Depends, Header, HTTPException, Query, status
+from fastapi import APIRouter, Body, Depends, Header, HTTPException, Query, Request, status
 from fastapi.responses import JSONResponse
 
 from app.controllers.emotion_config_controller import EmotionConfigUpdate
@@ -24,6 +24,7 @@ from app.core.quota_stub import check_memory_engine_quota
 from app.core.response_utils import fail, success
 from app.db import get_async_db_context, get_db
 from app.dependencies import CurrentUserSnapshot, get_current_user_async
+from app.integrations.profile.proxy import memory_profile_proxy
 from app.repositories.memory_config_repository import MemoryConfigRepository
 from app.schemas.memory_reflection_schemas import Memory_Reflection
 from app.schemas.memory_storage_schema import (
@@ -72,7 +73,12 @@ community_preview_router = APIRouter(
 
 
 @router.get("/read_config_personality_anchor", response_model=ApiResponse)
+@memory_profile_proxy(
+    query_fields=("config_id",),
+    preserve_status=True,
+)
 async def read_personality_anchor_config(
+    request: Request,
     config_id: UUID,
     current_user: CurrentUserSnapshot = Depends(get_current_user_async),
 ) -> dict:
@@ -88,7 +94,12 @@ async def read_personality_anchor_config(
 
 
 @router.post("/update_config_personality_anchor", response_model=ApiResponse)
+@memory_profile_proxy(
+    raw_body=True,
+    preserve_status=True,
+)
 async def update_personality_anchor_config(
+    request: Request,
     payload: PersonalityAnchorConfigUpdate,
     current_user: CurrentUserSnapshot = Depends(get_current_user_async),
 ) -> dict:
@@ -115,7 +126,12 @@ async def update_personality_anchor_config(
 
 
 @router.get("/read_config_prediction", response_model=ApiResponse)
+@memory_profile_proxy(
+    query_fields=("config_id",),
+    preserve_status=True,
+)
 async def read_prediction_config(
+    request: Request,
     config_id: UUID,
     current_user: CurrentUserSnapshot = Depends(get_current_user_async),
 ) -> dict:
@@ -135,7 +151,12 @@ async def read_prediction_config(
 
 
 @router.post("/update_config_prediction", response_model=ApiResponse)
+@memory_profile_proxy(
+    raw_body=True,
+    preserve_status=True,
+)
 async def update_prediction_config(
+    request: Request,
     payload: PredictionConfigUpdateRequest,
     current_user: CurrentUserSnapshot = Depends(get_current_user_async),
 ) -> dict:
@@ -172,7 +193,11 @@ async def update_prediction_config(
 # ==================== 读取类 ====================
 
 @router.get("/read_all_config", response_model=ApiResponse)  # 读取所有配置文件列表
+@memory_profile_proxy(
+    preserve_status=True,
+)
 async def read_all_config(
+        request: Request,
         current_user: CurrentUserSnapshot = Depends(get_current_user_async),
 ) -> dict:
     workspace_id = current_user.current_workspace_id
@@ -195,7 +220,12 @@ async def read_all_config(
 
 
 @router.post('/active_config', response_model=ApiResponse)
+@memory_profile_proxy(
+    raw_body=True,
+    preserve_status=True,
+)
 async def active_config(
+        request: Request,
         config_id: UUID = Body(..., embed=True),
         current_user: CurrentUserSnapshot = Depends(get_current_user_async),
         language_type: Optional[str] = Header(None, alias="X-Language-Type"),
@@ -221,7 +251,11 @@ async def active_config(
 
 
 @router.get('/validate_active_config', response_model=ApiResponse)
+@memory_profile_proxy(
+    preserve_status=True,
+)
 async def validate_active_config_models(
+        request: Request,
         current_user: CurrentUserSnapshot = Depends(get_current_user_async),
         language_type: Optional[str] = Header(None, alias="X-Language-Type"),
 ) -> dict:
@@ -249,7 +283,12 @@ async def validate_active_config_models(
 
 
 @router.get("/read_config_extracted", response_model=ApiResponse)  # 读取某条抽取配置
+@memory_profile_proxy(
+    query_fields=("config_id",),
+    preserve_status=True,
+)
 async def read_config_extracted(
+        request: Request,
         config_id: UUID | int,
         current_user: CurrentUserSnapshot = Depends(get_current_user_async),
 ) -> dict:
@@ -272,7 +311,12 @@ async def read_config_extracted(
 
 
 @router.get("/read_config_forgetting", response_model=ApiResponse)
+@memory_profile_proxy(
+    query_fields=("config_id",),
+    preserve_status=True,
+)
 async def read_forgetting_config(
+        request: Request,
         config_id: UUID | int,
         current_user: CurrentUserSnapshot = Depends(get_current_user_async),
 ):
@@ -303,7 +347,12 @@ async def read_forgetting_config(
 
 
 @router.get("/read_config_emotion", response_model=ApiResponse)
+@memory_profile_proxy(
+    query_fields=("config_id",),
+    preserve_status=True,
+)
 async def get_emotion_config(
+        request: Request,
         config_id: UUID | int = Query(..., description="配置ID"),
         current_user: CurrentUserSnapshot = Depends(get_current_user_async),
 ):
@@ -334,7 +383,12 @@ async def get_emotion_config(
 
 
 @router.get("/read_config_reflection", response_model=ApiResponse)
+@memory_profile_proxy(
+    query_fields=("config_id",),
+    preserve_status=True,
+)
 async def start_reflection_configs(
+        request: Request,
         config_id: UUID | int,
         current_user: CurrentUserSnapshot = Depends(get_current_user_async),
 ) -> dict:
@@ -374,8 +428,13 @@ async def start_reflection_configs(
 # ==================== 创建 / 更新 / 删除 ====================
 
 @router.post("/create_config", response_model=ApiResponse)  # 创建配置文件，其他参数默认
+@memory_profile_proxy(
+    raw_body=True,
+    preserve_status=True,
+)
 @check_memory_engine_quota
 async def create_config(
+        request: Request,
         payload: ConfigParamsCreate,
         current_user: CurrentUserSnapshot = Depends(get_current_user_async),
         x_language_type: Optional[str] = Header(None, alias="X-Language-Type"),
@@ -427,7 +486,12 @@ async def create_config(
 
 
 @router.post("/update_config", response_model=ApiResponse)  # 更新配置文件中name和desc
+@memory_profile_proxy(
+    raw_body=True,
+    preserve_status=True,
+)
 async def update_config(
+        request: Request,
         payload: ConfigUpdate,
         current_user: CurrentUserSnapshot = Depends(get_current_user_async),
 ) -> dict:
@@ -456,7 +520,12 @@ async def update_config(
 
 
 @router.post("/update_config_extracted", response_model=ApiResponse)  # 更新抽取配置 所有业务字段均可选
+@memory_profile_proxy(
+    raw_body=True,
+    preserve_status=True,
+)
 async def update_config_extracted(
+        request: Request,
         payload: ConfigUpdateExtracted,
         current_user: CurrentUserSnapshot = Depends(get_current_user_async),
 ) -> dict:
@@ -479,7 +548,12 @@ async def update_config_extracted(
 
 
 @router.post("/update_config_forgetting", response_model=ApiResponse)
+@memory_profile_proxy(
+    raw_body=True,
+    preserve_status=True,
+)
 async def update_forgetting_config(
+        request: Request,
         payload: ForgettingConfigUpdateRequest,
         current_user: CurrentUserSnapshot = Depends(get_current_user_async),
 ):
@@ -522,7 +596,12 @@ async def update_forgetting_config(
 
 
 @router.post("/update_config_emotion", response_model=ApiResponse)
+@memory_profile_proxy(
+    raw_body=True,
+    preserve_status=True,
+)
 async def update_emotion_config(
+        request: Request,
         config: EmotionConfigUpdate,
         current_user: CurrentUserSnapshot = Depends(get_current_user_async),
 ):
@@ -558,14 +637,19 @@ async def update_emotion_config(
 
 
 @router.post("/update_config_reflection", response_model=ApiResponse)
+@memory_profile_proxy(
+    raw_body=True,
+    preserve_status=True,
+)
 async def save_reflection_config(
-        request: Memory_Reflection,
+        request: Request,
+        payload: Memory_Reflection,
         current_user: CurrentUserSnapshot = Depends(get_current_user_async),
 ) -> dict:
     """保存反思引擎配置"""
     async with get_async_db_context() as db:
         try:
-            config_id = request.config_id
+            config_id = payload.config_id
             config_id = await resolve_config_id_async(config_id, db)
             if not config_id:
                 raise HTTPException(
@@ -576,12 +660,12 @@ async def save_reflection_config(
 
             memory_config = await MemoryConfigRepository(db).update_reflection_config_async(
                 config_id=config_id,
-                enable_self_reflexion=request.reflection_enabled,
-                iteration_period=request.reflection_period_in_hours,
-                reflexion_range=request.reflexion_range,
-                baseline=request.baseline,
-                memory_verify=request.memory_verify,
-                quality_assessment=request.quality_assessment
+                enable_self_reflexion=payload.reflection_enabled,
+                iteration_period=payload.reflection_period_in_hours,
+                reflexion_range=payload.reflexion_range,
+                baseline=payload.baseline,
+                memory_verify=payload.memory_verify,
+                quality_assessment=payload.quality_assessment
             )
 
             await db.commit()
@@ -612,7 +696,12 @@ async def save_reflection_config(
 
 
 @router.delete("/delete_config", response_model=ApiResponse)  # 删除记忆配置（按配置ID）
+@memory_profile_proxy(
+    query_fields=('config_id',),
+    preserve_status=True,
+)
 async def delete_config(
+        request: Request,
         config_id: UUID | int,
         current_user: CurrentUserSnapshot = Depends(get_current_user_async),
 ) -> dict:
@@ -648,7 +737,7 @@ async def delete_config(
                 return fail(
                     code=BizCode.FORBIDDEN,
                     msg=result["message"],
-                    data={"config_id": str(config_id), "is_default": result.get("is_default", False)}
+                    error=f"config_id={config_id}, is_default={result.get('is_default', False)}",
                 )
 
             if result["status"] == "warning":
@@ -658,7 +747,7 @@ async def delete_config(
                 return fail(
                     code=BizCode.RESOURCE_IN_USE,
                     msg=result["message"],
-                    data={"config_id": str(config_id), "is_default": result.get("is_default", False)}
+                    error=f"config_id={config_id}, is_default={result.get('is_default', False)}",
                 )
 
             api_logger.info(
@@ -675,7 +764,12 @@ async def delete_config(
 
 
 @router.get("/read_config_scene", response_model=ApiResponse)
+@memory_profile_proxy(
+    query_fields=("config_id",),
+    preserve_status=True,
+)
 async def read_config_scene(
+    request: Request,
     config_id: UUID | int,
     current_user: CurrentUserSnapshot = Depends(get_current_user_async),
 ):
@@ -694,7 +788,12 @@ async def read_config_scene(
 
 
 @router.post("/update_config_scene", response_model=ApiResponse)
+@memory_profile_proxy(
+    raw_body=True,
+    preserve_status=True,
+)
 async def update_config_scene(
+    request: Request,
     payload: SceneConfigUpdate,
     current_user: CurrentUserSnapshot = Depends(get_current_user_async),
 ):
@@ -718,7 +817,12 @@ async def update_config_scene(
 
 
 @router.get("/read_config_preference", response_model=ApiResponse)
+@memory_profile_proxy(
+    query_fields=('config_id',),
+    preserve_status=True,
+)
 async def read_config_preference(
+    request: Request,
     config_id: UUID,
     current_user: CurrentUserSnapshot = Depends(get_current_user_async),
 ):
@@ -740,7 +844,12 @@ async def read_config_preference(
 
 
 @router.post("/update_config_preference", response_model=ApiResponse)
+@memory_profile_proxy(
+    raw_body=True,
+    preserve_status=True,
+)
 async def update_config_preference(
+    request: Request,
     payload: PreferenceConfigUpdate,
     current_user: CurrentUserSnapshot = Depends(get_current_user_async),
 ):
@@ -767,7 +876,12 @@ async def update_config_preference(
 
 
 @router.post("/scene/split-demo", response_model=ApiResponse)
+@memory_profile_proxy(
+    raw_body=True,
+    preserve_status=True,
+)
 async def scene_split_demo(
+    request: Request,
     payload: SceneSplitDemoRequest,
     current_user: CurrentUserSnapshot = Depends(get_current_user_async),
     language_type: Optional[str] = Header(None, alias="X-Language-Type"),
@@ -846,7 +960,12 @@ async def scene_split_demo(
 
     return success(data=result.model_dump(), msg="查询成功")
 @router.get("/read_config_scene_community", response_model=ApiResponse)
+@memory_profile_proxy(
+    query_fields=("config_id",),
+    preserve_status=True,
+)
 async def read_config_scene_community(
+    request: Request,
     config_id: UUID | int,
     current_user: CurrentUserSnapshot = Depends(get_current_user_async),
 ):
@@ -865,7 +984,12 @@ async def read_config_scene_community(
 
 
 @router.post("/update_config_scene_community", response_model=ApiResponse)
+@memory_profile_proxy(
+    raw_body=True,
+    preserve_status=True,
+)
 async def update_config_scene_community(
+    request: Request,
     payload: dict | None = Body(None),
     current_user: CurrentUserSnapshot = Depends(get_current_user_async),
 ):
@@ -885,8 +1009,13 @@ async def update_config_scene_community(
 
 
 @community_preview_router.get("/preview-cases", response_model=ApiResponse)
+@memory_profile_proxy(
+    principal_arg='current_user',
+    preserve_status=True,
+)
 async def read_scene_community_preview_cases(
-    _current_user: CurrentUserSnapshot = Depends(get_current_user_async),
+    request: Request,
+    current_user: CurrentUserSnapshot = Depends(get_current_user_async),
     language_type: Optional[str] = Header(None, alias="X-Language-Type"),
 ):
     """返回稳定的 SceneCommunity 配置预览场景列表。"""
@@ -898,7 +1027,12 @@ async def read_scene_community_preview_cases(
 
 
 @community_preview_router.post("/preview", response_model=ApiResponse)
+@memory_profile_proxy(
+    raw_body=True,
+    preserve_status=True,
+)
 async def preview_scene_community_config(
+    request: Request,
     payload: CommunityPreviewRequest,
     current_user: CurrentUserSnapshot = Depends(get_current_user_async),
     language_type: Optional[str] = Header(None, alias="X-Language-Type"),

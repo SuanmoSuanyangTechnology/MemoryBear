@@ -16,9 +16,8 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 
 from src.common.errors import BizCode
-from src.common.responses import failure
+from src.common.responses import error_response, failure
 from src.i18n import get_request_language, t
-from src.middleware.request_logging import record_request_failure
 
 logger = logging.getLogger(__name__)
 
@@ -89,18 +88,11 @@ def _auth_error(request: Request, status_code: int, detail: object) -> JSONRespo
         401: BizCode.UNAUTHORIZED,
         403: BizCode.WORKSPACE_ACCESS_DENIED,
     }.get(status_code, BizCode.INTERNAL_ERROR)
-    trace_id = getattr(request.state, "trace_id", "")
-    record_request_failure(
+    return error_response(
         request,
-        response_code=code,
+        status_code,
+        failure(code, t("common.auth.failed", get_request_language(request)), str(detail)),
         error_code="AUTHENTICATION_REJECTED",
-    )
-    return JSONResponse(
-        status_code=status_code,
-        content=failure(
-            code, t("common.auth.failed", get_request_language(request)), str(detail)
-        ).model_dump(mode="json"),
-        headers={"X-Trace-Id": trace_id} if trace_id else None,
     )
 
 

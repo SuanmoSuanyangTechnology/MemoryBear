@@ -28,7 +28,10 @@ WORKSPACE_ROOT = "/workspace"
 # 带宏的 Office 与可执行/脚本类：给模型一个明确的原因，而不是笼统的"不支持"
 _MACRO_EXTENSIONS = frozenset({".pptm", ".xlsm", ".docm", ".potm", ".xltm", ".dotm"})
 _EXECUTABLE_EXTENSIONS = frozenset(
-    {".exe", ".dll", ".bat", ".cmd", ".com", ".msi", ".scr", ".ps1", ".vbs", ".js", ".jar", ".sh", ".so"}
+    {
+        ".exe", ".dll", ".bat", ".cmd", ".com", ".msi", ".scr",
+        ".ps1", ".vbs", ".js", ".jar", ".sh", ".so",
+    }
 )
 # 扩展名 → 文件头魔数（OOXML 与 zip 都以 PK 开头）
 _MAGIC: dict[str, bytes] = {
@@ -295,7 +298,8 @@ def resolve_session_path(conversation_id: str, raw: str) -> str:
     path = posixpath.normpath(text if text.startswith("/") else f"{base}/{text}")
     if path == base or not path.startswith(base + "/"):
         raise SandboxFileError(
-            f"path 必须是文件路径，且位于当前会话目录内（{base}），可直接写相对路径如 gen_ppt.py 或 out/report.md"
+            f"path 必须是文件路径，且位于当前会话目录内（{base}），"
+            "可直接写相对路径如 gen_ppt.py 或 out/report.md"
         )
     return path
 
@@ -321,7 +325,8 @@ async def write_text_file(
     data = content.encode("utf-8")
     if len(data) > MAX_WRITE_BYTES:
         raise SandboxFileError(
-            f"内容超过 {MAX_WRITE_BYTES // (1024 * 1024)}MB 上限，请拆成多个文件或在沙箱里用代码生成"
+            f"内容超过 {MAX_WRITE_BYTES // (1024 * 1024)}MB 上限，"
+            "请拆成多个文件或在沙箱里用代码生成"
         )
 
     async def chunks() -> AsyncIterator[bytes]:
@@ -370,7 +375,10 @@ async def edit_text_file(
 
     count = text.count(old_string)
     if count == 0:
-        raise SandboxFileError("在文件中没有找到 old_string，请先用终端 cat / grep -n 确认当前内容，注意缩进和换行要完全一致")
+        raise SandboxFileError(
+            "在文件中没有找到 old_string，请先用终端 cat / grep -n 确认当前内容，"
+            "注意缩进和换行要完全一致"
+        )
     if count > 1:
         raise SandboxFileError(
             f"old_string 在文件中出现了 {count} 次，必须唯一；请带上前后几行上下文让它只匹配一处"

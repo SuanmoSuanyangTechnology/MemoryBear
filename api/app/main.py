@@ -11,6 +11,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi import HTTPException, Request
 from fastapi.exceptions import RequestValidationError
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from redbear_model import ChannelSwitchExhaustedError, NoAvailableChannelError
@@ -28,6 +29,9 @@ from app.core.error_codes import BizCode, HTTP_MAPPING
 from app.core.exceptions import BusinessException
 from app.core.logging_config import LoggingConfig, get_logger
 from app.core.response_utils import fail
+from error_core.codes import code_name, coerce_code, http_status_for
+from error_core.diagnostics import format_diagnostics
+from error_core.messages import user_message
 from app.integrations.knowledge.errors import KnowledgeClientError, KnowledgeServiceError
 from app.integrations.knowledge.validation import (
     is_retrieval_request_validation_error,
@@ -64,6 +68,21 @@ async def lifespan(app: FastAPI):
             raise
     else:
         logger.info("自动数据库升级已禁用 (DB_AUTO_UPGRADE=false)")
+
+    # 分类字典灌数：`app_categories` 为空时发布接口的分类校验会把所有 code 判成
+    # 不存在。迁移只在升级那一刻跑一次，而 `DB_AUTO_UPGRADE` 默认 false，所以这里
+    # 每次启动幂等补一次（`ON CONFLICT DO NOTHING`，缺哪行补哪行）。
+    try:
+        from app.db import SessionLocal
+        from app.services.category_service import seed_categories
+
+        _db = SessionLocal()
+        try:
+            seed_categories(_db)
+        finally:
+            _db.close()
+    except Exception:
+        logger.exception("分类字典灌数失败，发布接口的分类校验可能全部不通过")
 
     # 预定义模型（模型广场种子）加载已迁至 model-service（LOAD_MODEL 由服务侧消费）
     await create_all_indexes()
@@ -209,10 +228,10 @@ def read_root():
 
 @app.get("/ready", include_in_schema=False)
 async def readiness():
-    """Return process readiness, including enabled remote integrations.
+    """Return process readiness, including required remote integrations.
 
-    Both enabled integrations are probed independently and concurrently, so a
-    failing knowledge probe no longer prevents the memory-profile probe from
+    Enabled knowledge and mandatory profile integrations are probed concurrently.
+    A failing knowledge probe does not prevent the memory-profile probe from
     running. The HTTP response shape stays unchanged: the original
     ``{status, knowledge_mode, profile_mode}`` on success, and the original
     HTTPException 503 detail on failure.
@@ -234,10 +253,9 @@ async def readiness():
         from app.integrations.knowledge.runtime import is_remote_knowledge_ready
 
         probes.append(("knowledge", is_remote_knowledge_ready))
-    if settings.ENABLE_MEMORY_PROFILE:
-        from app.integrations.profile.runtime import is_remote_memory_profile_ready
+    from app.integrations.profile.runtime import is_remote_memory_profile_ready
 
-        probes.append(("memory_profile", is_remote_memory_profile_ready))
+    probes.append(("memory_profile", is_remote_memory_profile_ready))
 
     results = dict(
         await asyncio.gather(*(_probe(name, check) for name, check in probes))
@@ -250,14 +268,9 @@ async def readiness():
             raise HTTPException(status_code=503, detail="Knowledge service unavailable")
         knowledge_mode = "remote"
 
-    profile_mode = "legacy"
-    if settings.ENABLE_MEMORY_PROFILE:
-        if not results.get("memory_profile"):
-            raise HTTPException(
-                status_code=503,
-                detail="Memory profile service unavailable",
-            )
-        profile_mode = "remote"
+    if not results.get("memory_profile"):
+        raise HTTPException(status_code=503, detail="Memory profile service unavailable")
+    profile_mode = "remote"
 
     return {
         "status": "ready",
@@ -297,7 +310,7 @@ from app.core.sensitive_filter import SensitiveDataFilter
 import traceback
 
 # Import i18n exception support
-from app.i18n.exceptions import I18nException
+from app.i18n.exceptions import I18nException, get_current_locale
 from app.i18n.service import get_translation_service
 from pydantic import ValidationError as PydanticValidationError
 
@@ -393,9 +406,20 @@ async def request_validation_error_handler(
         str(error.get("msg") or "").removeprefix("Value error, ")
         for error in exc.errors()
     ) or "请求参数校验失败"
+    language = getattr(request.state, "language", settings.I18N_DEFAULT_LANGUAGE)
+    message = get_translation_service().translate(
+        "errors.common.validation_failed", language
+    )
     return JSONResponse(
         status_code=422,
-        content=fail(code=BizCode.VALIDATION_FAILED.value, msg=detail, error=detail),
+        content=fail(
+            code=BizCode.VALIDATION_FAILED.value,
+            msg=message,
+            error=format_diagnostics(
+                trace_id=getattr(request.state, "trace_id", None),
+                detail=detail,
+            ),
+        ),
     )
 
 
@@ -454,7 +478,10 @@ async def pydantic_validation_exception_handler(request: Request, exc: PydanticV
         "errors.common.validation_failed",
         language
     )
-    
+    detail = "; ".join(
+        f"{item['field']}: {item['message']}" for item in errors
+    ) or main_message
+
     logger.warning(
         f"Pydantic validation error: {len(errors)} errors",
         extra={
@@ -464,16 +491,22 @@ async def pydantic_validation_exception_handler(request: Request, exc: PydanticV
             "errors": errors
         }
     )
-    
-    return JSONResponse(
-        status_code=422,
-        content={
-            "success": False,
-            "error_code": "VALIDATION_FAILED",
-            "message": main_message,
-            "errors": errors
-        }
-    )
+
+    content = {
+        **fail(
+            code=BizCode.VALIDATION_FAILED.value,
+            msg=main_message,
+            error=format_diagnostics(
+                trace_id=getattr(request.state, "trace_id", None),
+                detail=detail,
+            ),
+        ),
+        "success": False,
+        "error_code": "VALIDATION_FAILED",
+        "message": main_message,
+        "errors": errors,
+    }
+    return JSONResponse(status_code=422, content=content)
 
 
 # 处理资源不存在异常
@@ -642,8 +675,11 @@ async def rate_limit_exception_handler(request: Request, exc: RateLimitException
 @app.exception_handler(BusinessException)
 async def business_exception_handler(request: Request, exc: BusinessException):
     """处理通用业务异常"""
-    # 过滤敏感信息
     filtered_message, filtered_context = SensitiveDataFilter.filter_message(exc.message, exc.context)
+    numeric = coerce_code(exc.code)
+    if numeric is None:
+        numeric = BizCode.BAD_REQUEST.value
+    language = getattr(request.state, "language", None) or get_current_locale()
 
     logger.error(
         f"Business error: {filtered_message}",
@@ -652,26 +688,32 @@ async def business_exception_handler(request: Request, exc: BusinessException):
             "method": request.method,
             "context": filtered_context,
             "error_code": exc.code.value if isinstance(exc.code, BizCode) else exc.code,
-            "cause": str(exc.cause) if exc.cause else None
+            "code": numeric,
+            "code_name": code_name(numeric),
+            "msg_locale": language,
+            "trace_id": getattr(request.state, "trace_id", None),
+            "source_service": "api",
+            "cause": str(exc.cause) if exc.cause else None,
         },
-        exc_info=exc.cause is not None
+        exc_info=exc.cause is not None,
     )
-    raw_code = exc.code
-    if isinstance(raw_code, BizCode):
-        biz_code = raw_code
-    elif isinstance(raw_code, int):
-        try:
-            biz_code = BizCode(raw_code)
-        except ValueError:
-            biz_code = BizCode.BAD_REQUEST
-    else:
-        biz_code = BizCode.BAD_REQUEST
-
-    status_code = HTTP_MAPPING.get(biz_code, 400)
-    return JSONResponse(
+    status_code = http_status_for(numeric)
+    display = user_message(numeric, language) or filtered_message
+    detail = format_diagnostics(
+        trace_id=getattr(request.state, "trace_id", None),
+        detail=filtered_message,
+    )
+    response = JSONResponse(
         status_code=status_code,
-        content=fail(code=biz_code.value, msg=filtered_message, error=filtered_message)
+        content=fail(numeric, display, error=detail),
     )
+
+    # 添加限流相关的响应头
+    rate_headers = exc.context.get("rate_limit_headers", {}) if exc.context else {}
+    for header_name, header_value in rate_headers.items():
+        response.headers[header_name] = str(header_value)
+
+    return response
 
 
 # 运行期渠道链异常（spec §11.2）：门面外漏的空链/耗尽 → 409 业务错误统一出口
@@ -720,8 +762,8 @@ async def knowledge_client_exception_handler(
 
 
 # 统一异常处理：将HTTPException转换为统一响应结构（支持国际化）
-@app.exception_handler(HTTPException)
-async def http_exception_handler(request: Request, exc: HTTPException):
+@app.exception_handler(StarletteHTTPException)
+async def http_exception_handler(request: Request, exc: StarletteHTTPException):
     """处理HTTP异常，支持国际化"""
     # 获取当前语言
     language = getattr(request.state, "language", settings.I18N_DEFAULT_LANGUAGE)
@@ -768,7 +810,8 @@ async def http_exception_handler(request: Request, exc: HTTPException):
     
     return JSONResponse(
         status_code=exc.status_code,
-        content=fail(code=exc.status_code, msg=translated_message, error=exc.detail)
+        content=fail(code=exc.status_code, msg=translated_message, error=exc.detail),
+        headers=exc.headers,
     )
 
 

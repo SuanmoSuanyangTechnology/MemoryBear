@@ -41,7 +41,7 @@ class App(Base):
     __tablename__ = "apps"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
-    workspace_id = Column(UUID(as_uuid=True), nullable=False, comment="workspaces.id")
+    workspace_id = Column(UUID(as_uuid=True), nullable=False, index=True, comment="workspaces.id")
     created_by = Column(UUID(as_uuid=True), nullable=False, comment="users.id")
 
     name = Column(String, index=True, nullable=False)
@@ -61,12 +61,34 @@ class App(Base):
     # Tags or extended metadata
     tags = Column(JSON, default=list)
 
+    # Market provenance: describes the local copy's origin, not publication state.
+    origin = Column(String(16), default="local", server_default="local", nullable=False, index=True)
+    external_source = Column(String(32), nullable=True)
+    external_resource_id = Column(String(64), nullable=True, index=True)
+    external_version = Column(String(64), nullable=True)
+
     # Current published release pointer (points to the snapshot after publish, unaffected by edits)
     current_release_id = Column(
         UUID(as_uuid=True),
         ForeignKey("app_releases.id", use_alter=True, name="fk_apps_current_release_id"),
         nullable=True,
         index=True,
+    )
+
+    # Where this row came from (§11.2). Only the *local copy's* provenance is
+    # recorded here; publication state stays authoritative in market-service.
+    origin = Column(
+        String(16), nullable=False, default="local", server_default="local",
+        comment="local（本租户创建）| external（从市场安装）",
+    )
+    external_source = Column(
+        String(32), nullable=True, comment="本期固定 community_market",
+    )
+    external_resource_id = Column(
+        String(64), nullable=True, index=True, comment="market_resources.id",
+    )
+    external_version = Column(
+        String(64), nullable=True, comment="安装时的市场版本，不随市场新版本变化",
     )
 
     is_active = Column(Boolean, default=True, nullable=False)

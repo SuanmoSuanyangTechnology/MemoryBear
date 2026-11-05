@@ -132,7 +132,14 @@ async def _load_draft_run_app_snapshot(
         app_id: uuid.UUID,
         workspace_id: uuid.UUID | None,
 ) -> _DraftRunAppSnapshot:
-    from app.models import App, AppShare
+    """读取试运行所需的最小应用状态（本空间或共享）。
+
+    这里的 `current_release_id` 语义是**该空间应当运行的版本**：消费方读的是
+    资源中心条目钉住的版本，而不是源应用的当前版本（§5.3）。所有下游 helper
+    都以这个字段为准，因此只在这里解析一次，整条试运行路径就一致了。
+    """
+    from app.models import App
+    from app.services.asset_release_resolver import AsyncAssetReleaseResolver
 
     async with get_async_db_context() as db:
         app = await db.scalar(
@@ -141,22 +148,19 @@ async def _load_draft_run_app_snapshot(
         if not app:
             raise BusinessException("应用不存在", BizCode.NOT_FOUND)
 
+        resolved_release_id = app.current_release_id
         if workspace_id is not None and app.workspace_id != workspace_id:
-            share_exists = await db.scalar(
-                select(AppShare.id).where(
-                    AppShare.source_app_id == app.id,
-                    AppShare.target_workspace_id == workspace_id,
-                    AppShare.is_active.is_(True),
-                ).limit(1)
+            # 资源中心安装记录（未回填的历史共享由 resolver 内部兼容，§11.1 M3）
+            resolved = await AsyncAssetReleaseResolver(db).resolve(
+                app_id=app.id, workspace_id=workspace_id
             )
-            if not share_exists:
-                raise BusinessException("应用不可访问", BizCode.WORKSPACE_NO_ACCESS)
+            resolved_release_id = resolved.release_id
 
         return _DraftRunAppSnapshot(
             id=app.id,
             workspace_id=app.workspace_id,
             type=app.type,
-            current_release_id=app.current_release_id,
+            current_release_id=resolved_release_id,
         )
 
 
@@ -218,7 +222,8 @@ async def _ensure_workflow_conversation_ready(
     if not conversation_id:
         return conversation_id
 
-    from app.models import AppShare, Conversation
+    from app.models import Conversation
+    from app.services.asset_release_resolver import AsyncAssetReleaseResolver
 
     try:
         conv_uuid = uuid.UUID(conversation_id)
@@ -235,15 +240,12 @@ async def _ensure_workflow_conversation_ready(
             raise BusinessException(f"会话不存在: {conversation_id}", BizCode.NOT_FOUND)
 
         if conversation.workspace_id != workspace_id:
-            share_exists = await db.scalar(
-                select(AppShare.id).where(
-                    AppShare.source_app_id == app_id,
-                    AppShare.target_workspace_id == workspace_id,
-                    AppShare.is_active.is_(True),
-                ).limit(1)
+            # 共享判定改为资源中心安装记录（未回填的历史共享由 resolver 兼容）
+            shared_in = await AsyncAssetReleaseResolver(db).can_access(
+                app_id=app_id, workspace_id=workspace_id
             )
             same_app = conversation.app_id == app_id
-            if not share_exists and not same_app:
+            if not shared_in and not same_app:
                 raise BusinessException("会话不属于当前工作空间", BizCode.PERMISSION_DENIED)
 
     return conversation_id
@@ -428,7 +430,7 @@ def create_app(
     )
     # 创建应用之后查询并返回绑定的本体信息（未输入ontolog_id绑定默认本体）
     service = app_service.AppService(db)
-    return success(data=service.to_schema_with_ontology(app, workspace_id))
+    return success(data=service.to_schema_with_ontology(app, workspace_id), msg="创建应用成功")
 
 
 @router.get("", summary="应用列表（分页）")
@@ -505,10 +507,10 @@ def list_apps(
             items = service.to_schemas_with_ontology(items_orm, workspace_id)
             # 返回标准分页格式
             meta = PageMeta(page=1, pagesize=len(items), total=len(items), hasnext=False)
-            return success(data=PageData(page=meta, items=items))
+            return success(data=PageData(page=meta, items=items), msg="获取应用列表成功")
         # ids 为空时，返回空列表
         meta = PageMeta(page=1, pagesize=0, total=0, hasnext=False)
-        return success(data=PageData(page=meta, items=[]))
+        return success(data=PageData(page=meta, items=[]), msg="获取应用列表成功")
 
     # 正常分页查询
     items_orm, total = app_service.list_apps(
@@ -530,7 +532,7 @@ def list_apps(
 
     items = service.to_schemas_with_ontology(items_orm, workspace_id)
     meta = PageMeta(page=page, pagesize=pagesize, total=total, hasnext=(page * pagesize) < total)
-    return success(data=PageData(page=meta, items=items))
+    return success(data=PageData(page=meta, items=items), msg="获取应用列表成功")
 
 
 @router.get("/my-shared-out", summary="列出本工作空间主动分享出去的记录")
@@ -594,7 +596,7 @@ def update_app(
 ):
     workspace_id = current_user.current_workspace_id
     app = app_service.update_app(db, app_id=app_id, data=payload, workspace_id=workspace_id)
-    return success(data=app_schema.App.model_validate(app))
+    return success(data=app_schema.App.model_validate(app), msg="更新应用成功")
 
 
 @router.delete("/{app_id}", summary="删除应用")
@@ -678,7 +680,7 @@ def update_agent_config(
     workspace_id = current_user.current_workspace_id
     cfg = app_service.update_agent_config(db, app_id=app_id, data=payload, workspace_id=workspace_id)
     cfg = enrich_agent_config(cfg)
-    return success(data=app_schema.AgentConfig.model_validate(cfg))
+    return success(data=app_schema.AgentConfig.model_validate(cfg), msg="更新 Agent 配置成功")
 
 
 @router.get("/{app_id}/model/parameters/default", summary="获取 Agent 模型参数默认配置")
@@ -756,6 +758,8 @@ def publish_app(
         release_notes=payload.release_notes,
         name=payload.name,
         icon=payload.icon,
+        usage_examples=payload.usage_examples,
+        categories=payload.categories,
     )
     return success(data=app_schema.AppRelease.model_validate(release))
 
@@ -1568,7 +1572,7 @@ async def get_workflow_node_last_run(
         raise BusinessException("source 参数无效", BizCode.INVALID_PARAMETER)
 
     result = workflow_service.get_node_last_run(app_id=app_id, node_id=node_id, source=source)
-    return success(data=result)
+    return success(data=result, msg="获取节点上次运行成功")
 
 
 @router.put("/{app_id}/workflow/nodes/{node_id}/cache", summary="更新节点缓存")
@@ -1593,7 +1597,7 @@ async def update_workflow_node_cache(
     )
     if not result:
         raise BusinessException("节点缓存不存在", BizCode.NOT_FOUND)
-    return success(data=result)
+    return success(data=result, msg="节点缓存更新成功")
 
 
 @router.delete("/{app_id}/workflow/nodes/{node_id}/cache", summary="失效节点缓存")
@@ -1612,7 +1616,7 @@ async def invalidate_workflow_node_cache(
     affected = workflow_service.invalidate_node_cache(app_id=app_id, node_id=node_id)
     if affected <= 0:
         raise BusinessException("节点缓存不存在", BizCode.NOT_FOUND)
-    return success(data={"affected": affected})
+    return success(data={"affected": affected}, msg="节点缓存失效成功")
 
 
 @router.post("/{app_id}/workflow/cache/reset", summary="清空工作流调试缓存")
@@ -1680,7 +1684,7 @@ async def rerun_workflow_node(
         invalidate_cache=payload.invalidate_cache,
         bypass_cache=payload.bypass_cache,
     )
-    return success(data=result)
+    return success(data=result, msg="节点重跑成功")
 
 
 @router.get("/{app_id}/workflow")
@@ -1719,7 +1723,7 @@ async def update_workflow_config(
         for var_def, resolved_def in zip(payload.variables, resolved):
             var_def.default = resolved_def.get("default", var_def.default)
     cfg = app_service.update_workflow_config(db, app_id=app_id, data=payload, workspace_id=workspace_id)
-    return success(data=WorkflowConfigSchema.model_validate(cfg))
+    return success(data=WorkflowConfigSchema.model_validate(cfg), msg="更新工作流配置成功")
 
 
 @router.get("/{app_id}/workflow/export")
@@ -1760,7 +1764,7 @@ async def import_workflow_config(
     import_service = WorkflowImportService(db)
     config = yaml.safe_load(raw_text)
     result = await import_service.upload_config(platform, config)
-    return success(data=result)
+    return success(data=result, msg="工作流兼容性分析成功")
 
 
 @router.post("/workflow/import/save")
@@ -1962,7 +1966,10 @@ async def publish_workflow_as_tool(
     )
 
     detail = ToolService(db).get_tool_detail(str(tool_config.id), current_user.tenant_id)
-    return success(data=detail or tool_schema.ToolDetailSchema.model_validate(tool_config))
+    return success(
+        data=detail or tool_schema.ToolDetailSchema.model_validate(tool_config),
+        msg="工作流发布为工具成功",
+    )
 
 
 @router.get("/{app_id}/publish_tool/preview", summary="预览工作流发布为工具的入参和出参")
@@ -1980,7 +1987,7 @@ async def preview_workflow_tool_publish(
         workspace_id=current_user.current_workspace_id,
         release_id=release_id,
     )
-    return success(data=preview)
+    return success(data=preview, msg="获取工作流工具发布预览成功")
 
 
 @router.get("/citations/{document_id}/download", summary="下载引用文档原始文件")

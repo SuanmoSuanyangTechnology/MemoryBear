@@ -9,7 +9,7 @@ from app.schemas.order_schema import CreateOrderRequest
 from app.schemas.response_schema import ApiResponse
 from app.services.order_service import get_order_service
 from app.core.logging_config import get_api_logger
-from app.core.response_utils import success, error
+from app.core.response_utils import success, fail
 
 # Get API logger
 api_logger = get_api_logger()
@@ -52,7 +52,7 @@ async def create_order(
     
     except Exception as e:
         api_logger.error(f"Failed to create order: {str(e)}", exc_info=True)
-        return error(msg=str(e), code=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        return fail(code=status.HTTP_500_INTERNAL_SERVER_ERROR, msg=str(e))
 
 
 @router.get("/{order_id}", response_model=ApiResponse)
@@ -93,5 +93,5 @@ async def get_order(
     
     except Exception as e:
         api_logger.error(f"Failed to fetch order {order_id}: {str(e)}", exc_info=True)
-        return error(msg=str(e), code=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        return fail(code=status.HTTP_500_INTERNAL_SERVER_ERROR, msg=str(e))
 

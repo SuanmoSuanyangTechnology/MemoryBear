@@ -9,12 +9,16 @@ from urllib.parse import quote
 
 import httpx
 
+from app.i18n.exceptions import get_current_locale
+
 from .contracts import ModelCallContext
 from .errors import ModelServiceTimeoutError, ModelServiceUnavailableError
 
 logger = logging.getLogger(__name__)
 
-_REQUEST_HEADER_ALLOWLIST = frozenset({"accept", "accept-language", "content-type"})
+_REQUEST_HEADER_ALLOWLIST = frozenset(
+    {"accept", "accept-language", "content-type", "x-language-type"}
+)
 # X-Trace-Id 不在白名单：宿主 TraceIdMiddleware 会在外层统一回写本次请求的 trace_id
 _RESPONSE_HEADER_ALLOWLIST = frozenset(
     {
@@ -57,6 +61,9 @@ def _request_headers(
     headers["X-Model-Source"] = context.source
     if context.trace_id:
         headers["X-Trace-Id"] = context.trace_id
+    language = get_current_locale()
+    if language and not any(name.lower() == "x-language-type" for name in headers):
+        headers["X-Language-Type"] = language
     return headers
 
 
