@@ -177,7 +177,7 @@ def list_apps(
                     items,
                     resource_type="app",
                     tenant_id=principal.tenant_id,
-                    market=runtime.market,
+                    market=runtime.market_gateway,
                     cache=cache,
                 )
             # Return the standard paginated shape
@@ -210,7 +210,7 @@ def list_apps(
             items,
             resource_type="app",
             tenant_id=principal.tenant_id,
-            market=runtime.market,
+            market=runtime.market_gateway,
             cache=cache,
         )
     meta = PageMeta(page=page, pagesize=pagesize, total=total, hasnext=(page * pagesize) < total)
@@ -280,7 +280,7 @@ def get_app(
             [app_schema_obj],
             resource_type="app",
             tenant_id=principal.tenant_id,
-            market=runtime.market,
+            market=runtime.market_gateway,
             cache=cache,
         )
     return success(data=app_schema_obj)
@@ -655,7 +655,7 @@ def share_app(
             staged_release_id = asset.published_release_id
         result["release_id"] = str(staged_release_id)
 
-        submission = submission_factory(db, market=runtime.market)
+        submission = submission_factory(db, market=runtime.market_gateway)
         prepared = submission.prepare(
             app_id=app_id,
             release_id=staged_release_id,

@@ -69,6 +69,21 @@ async def lifespan(app: FastAPI):
     else:
         logger.info("自动数据库升级已禁用 (DB_AUTO_UPGRADE=false)")
 
+    # 分类字典灌数：`app_categories` 为空时发布接口的分类校验会把所有 code 判成
+    # 不存在。迁移只在升级那一刻跑一次，而 `DB_AUTO_UPGRADE` 默认 false，所以这里
+    # 每次启动幂等补一次（`ON CONFLICT DO NOTHING`，缺哪行补哪行）。
+    try:
+        from app.db import SessionLocal
+        from app.services.category_service import seed_categories
+
+        _db = SessionLocal()
+        try:
+            seed_categories(_db)
+        finally:
+            _db.close()
+    except Exception:
+        logger.exception("分类字典灌数失败，发布接口的分类校验可能全部不通过")
+
     # 预定义模型（模型广场种子）加载已迁至 model-service（LOAD_MODEL 由服务侧消费）
     await create_all_indexes()
     logger.info("All neo4j indexes and constraints created successfully!")

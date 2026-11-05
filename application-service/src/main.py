@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -88,6 +89,22 @@ def load_market_gateway(runtime: ProcessRuntime) -> MarketGateway:
     return build_market_gateway(settings)
 
 
+def _seed_categories(runtime: ProcessRuntime) -> None:
+    """启动时补齐 `app_categories`（幂等，缺哪行补哪行）。
+
+    `seed_categories` 走同步 Session，所以由 lifespan 用 `asyncio.to_thread` 调用，
+    不阻塞事件循环。分类缺失只会让发布接口的分类校验失败，不该阻断启动，因此这里
+    兜底吞掉异常（`seed_categories` 内部已记录具体原因）。
+    """
+    from .services.category_service import seed_categories
+
+    try:
+        with runtime.database.sync_session() as session:
+            seed_categories(session)
+    except Exception:
+        logger.exception("分类字典灌数失败，发布接口的分类校验可能全部不通过")
+
+
 def create_app(settings: AppServiceSettings | None = None) -> FastAPI:
     """Construct the internal API without connecting to dependencies."""
 
@@ -155,6 +172,11 @@ def create_app(settings: AppServiceSettings | None = None) -> FastAPI:
         # / token validate, so an enabled-but-misconfigured deployment fails
         # startup instead of failing each tool call.
         await initialize_sandbox_integration()
+        # 分类字典灌数：`app_categories` 为空时发布接口的分类校验会把所有 code
+        # 判成不存在。迁移只在升级那一刻跑一次，库从别处恢复就会是空表，所以每次
+        # 启动幂等补一次（`ON CONFLICT DO NOTHING`，缺哪行补哪行，不覆盖运营改动）。
+        # 走线程执行，避免同步 DB 调用阻塞事件循环。
+        await asyncio.to_thread(_seed_categories, runtime)
         # Post-stream persistence runs in the background; enqueue calls degrade
         # to sync writes while the queue is down, so this is not fail-closed.
         await BatchPersistQueue.start()

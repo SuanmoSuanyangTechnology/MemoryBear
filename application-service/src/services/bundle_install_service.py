@@ -121,7 +121,7 @@ class BundleInstallService:
             parse_bundle(manifest)
         except BundleError as error:
             raise BusinessException(
-                str(error), BizCode.BUNDLE_INCOMPLETE, data={"reason": "INVALID_BUNDLE"}
+                str(error), BizCode.EXTERNAL_CATALOG_INVALID, data={"reason": "INVALID_BUNDLE"}
             ) from error
 
         dependencies = manifest.get("dependencies") or {}
@@ -131,7 +131,7 @@ class BundleInstallService:
         if app_type not in (AppType.AGENT, AppType.MULTI_AGENT, AppType.WORKFLOW,
                             AppType.PURE_WORKFLOW):
             raise BusinessException(
-                f"不支持的应用类型: {app_type}", BizCode.BUNDLE_INCOMPLETE,
+                f"不支持的应用类型: {app_type}", BizCode.EXTERNAL_CATALOG_INVALID,
                 data={"reason": "INVALID_BUNDLE"},
             )
 
@@ -199,7 +199,7 @@ class BundleInstallService:
             parse_bundle(manifest)
         except BundleError as error:
             raise BusinessException(
-                str(error), BizCode.BUNDLE_INCOMPLETE, data={"reason": "INVALID_BUNDLE"}
+                str(error), BizCode.EXTERNAL_CATALOG_INVALID, data={"reason": "INVALID_BUNDLE"}
             ) from error
 
         resource_type = manifest.get("resource_type")
@@ -211,7 +211,7 @@ class BundleInstallService:
         if resource_type == "tool":
             if str(payload.get("tool_type")) != str(ToolType.MCP):
                 raise BusinessException(
-                    "工具市场只提供 MCP 工具", BizCode.BUNDLE_INCOMPLETE,
+                    "工具市场只提供 MCP 工具", BizCode.EXTERNAL_CATALOG_INVALID,
                     data={"reason": "UNSUPPORTED_TOOL_TYPE"},
                 )
             entry = {
@@ -227,7 +227,7 @@ class BundleInstallService:
             )
             if not dep_map.get(entry["ref"]):
                 raise BusinessException(
-                    "工具落地失败", BizCode.BUNDLE_INCOMPLETE,
+                    "工具落地失败", BizCode.EXTERNAL_CATALOG_INVALID,
                     data={"reason": "TOOL_LANDING_FAILED", "missing": missing},
                 )
             local_id = dep_map[entry["ref"]]
@@ -245,7 +245,7 @@ class BundleInstallService:
         else:
             raise BusinessException(
                 f"该资源类型不支持单独安装: {resource_type}",
-                BizCode.BUNDLE_INCOMPLETE,
+                BizCode.EXTERNAL_CATALOG_INVALID,
                 data={"reason": "UNSUPPORTED_RESOURCE_TYPE"},
             )
 
@@ -302,7 +302,7 @@ class BundleInstallService:
         if absent:
             raise BusinessException(
                 "应用包的子 Agent 不完整，无法安装：" + "、".join(str(n) for n in absent),
-                BizCode.BUNDLE_INCOMPLETE,
+                BizCode.EXTERNAL_CATALOG_INVALID,
                 data={"reason": "CLUSTER_INCOMPLETE", "missing": absent},
             )
 
@@ -387,7 +387,7 @@ class BundleInstallService:
                 if not files:
                     raise BusinessException(
                         f"技能「{entry.get('display_name') or entry.get('name')}」没有随包文件",
-                        BizCode.BUNDLE_INCOMPLETE,
+                        BizCode.EXTERNAL_CATALOG_INVALID,
                         data={"reason": "SKILL_FILES_MISSING"},
                     )
                 for file_entry in files:
@@ -404,7 +404,7 @@ class BundleInstallService:
         key = str(object_key or "")
         if not key:
             raise BusinessException(
-                "技能文件缺少 object_key", BizCode.BUNDLE_INCOMPLETE,
+                "技能文件缺少 object_key", BizCode.EXTERNAL_CATALOG_INVALID,
                 data={"reason": "SKILL_FILES_MISSING"},
             )
         storage = StorageFactory.get_storage()

@@ -15,12 +15,14 @@
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import uuid
 from typing import Any, Callable, Iterable
 
-from ..protocols.market_gateway import MarketGateway, MarketUnavailableError
+from ..external_catalog.errors import ExternalCatalogError
+from ..protocols.market_gateway import MarketGateway
 
 logger = logging.getLogger(__name__)
 
@@ -105,21 +107,17 @@ class ExternalStatusResolver:
         if not missing:
             return resolved
 
-        if not self.market.enabled:
-            # 社区版没有市场：来源信息仍然要能展示，状态就是 unknown
-            for resource_id in missing:
-                resolved[resource_id] = UNKNOWN
-            return resolved
-
+        # 社区版的 `DisabledMarketGateway` 对每次调用抛 6020，下面统一降级
+        # `unknown`——所以这里不需要先探测 `enabled`，也不必多一个分支。
         for start in range(0, len(missing), STATUS_BATCH_LIMIT):
             chunk = missing[start:start + STATUS_BATCH_LIMIT]
             try:
-                items = self.market.get_publication_status(
-                    tenant_id=str(tenant_id),
-                    resource_type=resource_type,
-                    local_resource_ids=chunk,
+                items = asyncio.run(
+                    self.market.publication_status(
+                        resource_type, chunk, str(tenant_id)
+                    )
                 )
-            except MarketUnavailableError as error:
+            except Exception as error:  # noqa: BLE001 - 列表页可用性优先于状态准确性
                 logger.warning(
                     "市场状态查询失败，整批降级 unknown",
                     extra={"resource_type": resource_type, "error": str(error)[:200]},
@@ -127,7 +125,7 @@ class ExternalStatusResolver:
                 for resource_id in chunk:
                     resolved[resource_id] = UNKNOWN
                 continue
-            resolved.update(_map_statuses(items, chunk, resolved))
+            resolved.update(_map_statuses(items, chunk))
             for resource_id, status in resolved.items():
                 if status != UNKNOWN:
                     self._cache_set(tenant_id, resource_type, resource_id, status)
@@ -165,24 +163,27 @@ class ExternalStatusResolver:
             logger.debug("外部状态缓存写入失败", exc_info=True)
 
 
-def _map_statuses(
-        items: Any, requested: list[str], already: dict[str, str]
-) -> dict[str, str]:
-    """他的批量响应是 `{items: [{local_resource_id, status, ...}]}`。
+def _map_statuses(items: Any, requested: list[str]) -> dict[str, str]:
+    """把网关返回的 `MarketPublicationStatus` 批量结果折成本地 `id -> status`。
 
-    `local_resource_id` 在这里就是我们传进去的市场资源 ID 列表位置——为兼容他
-    两种写法（回传 `local_resource_id` 或 `resource_id`），两个键都认。
+    契约里 `local_resource_id` 就是我们传进去的资源 ID 位置；dataclass 与
+    dict 两种形态都认，缺失的一律落 `unknown`（列表页不能因此报错）。
     """
 
     looked_up: dict[str, str] = {}
     records = items.get("items") if isinstance(items, dict) else items
     for record in records or []:
-        if not isinstance(record, dict):
-            continue
-        key = record.get("local_resource_id") or record.get("resource_id")
+        if isinstance(record, dict):
+            key = record.get("local_resource_id") or record.get("resource_id")
+            status = record.get("status")
+        else:
+            key = getattr(record, "local_resource_id", None) or getattr(
+                record, "resource_id", None
+            )
+            status = getattr(record, "status", None)
         if not key:
             continue
-        looked_up[str(key)] = str(record.get("status") or UNKNOWN)
+        looked_up[str(key)] = str(status or UNKNOWN)
     return {resource_id: looked_up.get(resource_id, UNKNOWN) for resource_id in requested}
 
 

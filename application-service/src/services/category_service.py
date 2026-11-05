@@ -19,17 +19,38 @@
 """
 from __future__ import annotations
 
+import logging
 import re
 import uuid
 from typing import Any, Iterable
 
 from sqlalchemy import cast, func, select
 from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from ..errors import BizCode, BusinessException, ResourceNotFoundException
 from ..models.app_asset_model import AppCategory
 from ..models.app_release_model import AppRelease
+
+logger = logging.getLogger(__name__)
+
+# 四元组 = (code, 中文展示名, 英文展示名, sort)。
+#
+# `code` 是稳定英文短码，`app_releases.categories` 存的就是它；中文名只放 `name`。
+# 与市场侧 `market_categories` 是同一套词汇，靠
+# `tests/test_app_category_options.py` 与市场启动常量逐字比对防漂移。
+CATEGORY_OPTIONS: tuple[tuple[str, str, str, int], ...] = (
+    ("office", "办公提效", "Office Productivity", 10),
+    ("content", "内容创作", "Content Creation", 20),
+    ("knowledge", "知识检索", "Knowledge Retrieval", 30),
+    ("sales", "销售支持", "Sales Support", 40),
+    ("analytics", "数据分析", "Data Analysis", 50),
+    ("meeting", "会议协作", "Meeting Collaboration", 60),
+    ("research", "调研分析", "Research & Analysis", 70),
+    ("engineering", "研发编程", "Engineering & Coding", 80),
+)
 
 # 与市场侧 `MarketCategory.code` 的校验同一套：`^[a-z0-9][a-z0-9-]{0,31}$`
 CODE_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]{0,31}$")
@@ -322,4 +343,76 @@ class CategoryService:
         return [normalized]
 
 
-__all__ = ["CategoryService", "CODE_PATTERN", "RESOURCE_TYPES"]
+def build_category_rows() -> list[dict[str, Any]]:
+    """三套 `resource_type` × 8 项，每行自带 id。
+
+    `AppCategory.id` 是主键且没有 server_default（模型侧 `default=uuid.uuid4` 只在
+    ORM flush 时生效），走 Core insert 必须显式给值。
+    """
+
+    return [
+        {
+            "id": uuid.uuid4(),
+            "resource_type": resource_type,
+            "code": code,
+            "name": name,
+            "name_en": name_en,
+            "sort": sort,
+            "enabled": True,
+        }
+        for resource_type in RESOURCE_TYPES
+        for code, name, name_en, sort in CATEGORY_OPTIONS
+    ]
+
+
+def seed_categories(db: Session) -> int:
+    """启动时补齐分类字典，返回本次真正插入的行数。
+
+    存在的必要性：`app_categories` 一旦为空，`assert_codes_exist` 会把所有分类判成
+    不存在，发布接口直接失败；而迁移可能因为 `DB_AUTO_UPGRADE=false` 从未执行，
+    或者库是从别处恢复的。所以不能只依赖迁移里的 seed。
+
+    **幂等靠 `ON CONFLICT (resource_type, code) DO NOTHING`**（落在
+    `uq_app_categories_code` 上），不是「`count(*) > 0` 就整体跳过」：
+
+    - 已存在的行一律不动 —— 运营改过的 `name` / `sort` / `enabled` 不会被启动
+      覆盖回出厂值，也不会把运营停用的分类重新打开；
+    - 只补缺失的行，所以「被删了一行」也能自愈，后者永远补不回来；
+    - 多副本同时启动、反复重启都不打架。
+
+    失败只记日志、返回 0：分类缺失影响的是发布校验，不该让服务起不来。
+    """
+
+    rows = build_category_rows()
+    statement = (
+        pg_insert(AppCategory)
+        .values(rows)
+        .on_conflict_do_nothing(index_elements=["resource_type", "code"])
+    )
+    try:
+        result = db.execute(statement)
+        db.commit()
+        inserted = result.rowcount if result.rowcount is not None else 0
+    except SQLAlchemyError:
+        db.rollback()
+        logger.exception(
+            "分类字典灌数失败（app_categories 未创建或数据库不可用）；"
+            "发布接口的分类校验会全部失败"
+        )
+        return 0
+
+    if inserted:
+        logger.info(
+            "分类字典已补 %d 行（已存在的 %d 行未改动）", inserted, len(rows) - inserted
+        )
+    return inserted
+
+
+__all__ = [
+    "CATEGORY_OPTIONS",
+    "CategoryService",
+    "CODE_PATTERN",
+    "RESOURCE_TYPES",
+    "build_category_rows",
+    "seed_categories",
+]

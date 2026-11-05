@@ -1450,7 +1450,7 @@ class AppDslService:
             if sub_release is None or not sub_release.is_active:
                 raise BusinessException(
                     f"子 Agent「{entry.get('name') or entry.get('agent_id')}」的钉住版本不存在或已下线",
-                    BizCode.BUNDLE_INCOMPLETE,
+                    BizCode.EXTERNAL_CATALOG_INVALID,
                     data={
                         "reason": "INCOMPLETE_BUNDLE",
                         "missing": [
@@ -1468,7 +1468,7 @@ class AppDslService:
             if sub_app is None:
                 raise BusinessException(
                     f"子 Agent 应用不存在：{sub_release.app_id}",
-                    BizCode.BUNDLE_INCOMPLETE,
+                    BizCode.EXTERNAL_CATALOG_INVALID,
                     data={"reason": "INCOMPLETE_BUNDLE", "missing": []},
                 )
             members.append(

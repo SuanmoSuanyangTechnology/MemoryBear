@@ -10,6 +10,11 @@ from typing import Any, Protocol
 from ..errors import BizCode
 from ..external_catalog.errors import ExternalCatalogError
 
+# Plugin-registry keys for the enterprise implementations (enterprise-extensions
+# registers them by name so core never imports the HTTP client).
+MARKET_GATEWAY_FACTORY = "market.gateway_factory"
+MARKET_SUBMISSION_FACTORY = "market.submission_service_factory"
+
 
 @dataclass(frozen=True)
 class MarketPublicationRequest:

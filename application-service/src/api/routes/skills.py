@@ -102,7 +102,7 @@ def list_skills(
             items,
             resource_type="skill_package",
             tenant_id=tenant_id,
-            market=runtime.market,
+            market=runtime.market_gateway,
             cache=cache,
         )
     meta = PageMeta(page=page, pagesize=pagesize, total=total, hasnext=(page * pagesize) < total)
@@ -133,7 +133,7 @@ def get_skill(
             [payload],
             resource_type="skill_package",
             tenant_id=tenant_id,
-            market=runtime.market,
+            market=runtime.market_gateway,
             cache=cache,
         )
     return success(data=payload, msg="获取技能详情成功")
