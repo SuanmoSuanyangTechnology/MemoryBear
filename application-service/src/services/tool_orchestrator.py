@@ -120,10 +120,12 @@ def _build_tools_info(tools: Dict[str, Any]) -> str:
 
         param_parts = []
 
-        # 1. Prefer tool_instance.parameters (MCP/Custom tools)
+        # 1. Prefer the wrapped tool's parameter definitions (MCP/Custom tools)
         tool_instance = getattr(tool, "tool_instance", None)
-        if tool_instance and hasattr(tool_instance, "parameters"):
-            params = tool_instance.parameters
+        if tool_instance and hasattr(tool_instance, "parameters_for_operation"):
+            params = tool_instance.parameters_for_operation(
+                getattr(tool, "operation", None)
+            )
             for p in params:
                 # Filter out the operation param (already specified via the tool-name suffix)
                 if p.name == "operation":

@@ -127,7 +127,8 @@ def expand_tool_selection(tool: BaseTool, operation: Optional[str] = None) -> Li
     if normalized:
         if not _operation_bindable(tool, tool_type, normalized, enum):
             logger.warning(
-                "工具方法已不可用，跳过: tool_id=%s operation=%s", tool.tool_id, normalized
+                "tool_selection_unavailable tool_id=%s tool_type=%s operation=%s reason=operation_not_found",
+                tool.tool_id, tool_type, normalized,
             )
             return []
         return [normalized]
@@ -135,10 +136,19 @@ def expand_tool_selection(tool: BaseTool, operation: Optional[str] = None) -> Li
     if tool_type == ToolType.MCP.value:
         names = _mcp_cached_tool_names(tool)
         if not names:
-            logger.warning("MCP 工具方法缓存为空，跳过二级展开: tool_id=%s", tool.tool_id)
+            logger.warning(
+                "tool_selection_unavailable tool_id=%s tool_type=%s reason=mcp_methods_cache_empty",
+                tool.tool_id, tool_type,
+            )
         return names
     if tool_type == ToolType.CUSTOM.value:
         operations = _custom_operations(tool)
+        if not operations:
+            logger.warning(
+                "tool_selection_unavailable tool_id=%s tool_type=%s reason=custom_operations_empty",
+                tool.tool_id, tool_type,
+            )
+            return []
         return operations if len(operations) > 1 else [None]
     if tool_type == ToolType.BUILTIN.value and enum:
         return list(enum)
@@ -199,9 +209,9 @@ class LangchainToolWrapper(LangchainBaseTool):
             tool_instance: Internal tool instance
             operation: Specific operation (for custom tools)
         """
-        # Dynamically create the argument schema
+        # Dynamically create the argument schema for the bound operation
         args_schema = LangchainAdapter._create_pydantic_schema(
-            tool_instance.parameters, operation
+            tool_instance.parameters_for_operation(operation), operation
         )
         
         # Build the tool name

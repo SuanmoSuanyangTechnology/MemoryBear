@@ -24,6 +24,7 @@ from typing import Any
 
 import aiohttp
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
@@ -67,8 +68,23 @@ from ..tools.mcp.base import MCPTool
 from ..tools.serialization import serialize_tool_parameter
 from ..tools.workflow.base import WorkflowAsTool
 from ..utils.datetime_utils import to_timestamp_ms, utcnow_naive
+from ..utils.db_locks import acquire_advisory_xact_lock
 
 logger = logging.getLogger(__name__)
+
+TOOL_NAME_UNIQUE_INDEX = "ux_tool_configs_tenant_type_name_active"
+
+
+def _mcp_market_lock_key(tenant_id: uuid.UUID, config: dict[str, Any]) -> str:
+    return (
+        f"tool_mcp_market:{tenant_id}:{config.get('source_channel')}:"
+        f"{config.get('market_id')}:{config.get('market_config_id')}:"
+        f"{config.get('mcp_service_id')}"
+    )
+
+
+def _is_name_unique_violation(error: IntegrityError) -> bool:
+    return TOOL_NAME_UNIQUE_INDEX in str(getattr(error, "orig", error))
 
 # Builtin tool mapping
 BUILTIN_TOOLS = {
@@ -166,7 +182,8 @@ class ToolService:
         query = self.db.query(ToolConfig).filter(
             ToolConfig.name == name,
             ToolConfig.tool_type == tool_type,
-            ToolConfig.tenant_id == tenant_id
+            ToolConfig.tenant_id == tenant_id,
+            ToolConfig.is_active.is_(True),
         )
         if exclude_id:
             query = query.filter(ToolConfig.id != exclude_id)
@@ -197,6 +214,7 @@ class ToolService:
                 .filter(
                     ToolConfig.tenant_id == tenant_id,
                     ToolConfig.tool_type == tool_type,
+                    ToolConfig.is_active.is_(True),
                     MCPToolConfig.source_channel == source_channel,
                     MCPToolConfig.market_id == config.get("market_id"),
                     MCPToolConfig.market_config_id == config.get("market_config_id"),
@@ -206,6 +224,7 @@ class ToolService:
             )
             if exists:
                 raise BusinessException("该MCP服务已添加", BizCode.DUPLICATE_NAME)
+            self._check_name_duplicate(name, tool_type, tenant_id)
         else:
             exists = (
                 self.db.query(ToolConfig)
@@ -213,6 +232,7 @@ class ToolService:
                     ToolConfig.name == name,
                     ToolConfig.tool_type == tool_type,
                     ToolConfig.tenant_id == tenant_id,
+                    ToolConfig.is_active.is_(True),
                 )
                 .first()
             )
@@ -232,23 +252,43 @@ class ToolService:
         """Create a tool."""
         if tool_type == ToolType.BUILTIN:
             raise ValueError("内置工具不允许创建")
+        if tool_type == ToolType.WORKFLOW:
+            raise BusinessException(
+                "工作流工具只能通过工作流发布接口创建", BizCode.INVALID_PARAMETER
+            )
 
         cfg = config or {}
-        if tool_type == ToolType.MCP:
-            self._check_mcp_duplicate(name, tool_type, tenant_id, cfg)
-            # Test the connection before creating
-            test_result = await self._test_mcp_connection_by_config(cfg)
-            if not test_result["success"]:
-                raise BusinessException(
-                    f"MCP连接测试失败: {test_result['message']}", BizCode.INVALID_PARAMETER
-                )
-            # Write the discovered tool list back to config
-            if "available_tools" in test_result:
-                cfg["available_tools"] = test_result["available_tools"]
-        else:
-            self._check_name_duplicate(name, tool_type, tenant_id)
-
         try:
+            if tool_type == ToolType.MCP:
+                # Fast pre-check so obvious duplicates skip the outbound test.
+                self._check_mcp_duplicate(name, tool_type, tenant_id, cfg)
+                # Test the connection before taking the advisory lock so no
+                # lock is held across the outbound call.
+                test_result = await self._test_mcp_connection_by_config(cfg)
+                if not test_result["success"]:
+                    raise BusinessException(
+                        f"MCP连接测试失败: {test_result['message']}", BizCode.INVALID_PARAMETER
+                    )
+                # Write the discovered tool list back to config
+                if "available_tools" in test_result:
+                    cfg["available_tools"] = test_result["available_tools"]
+
+                source_channel = cfg.get("source_channel")
+                is_market_source = (
+                    source_channel is not None
+                    and source_channel != MCPSourceChannel.SELF_HOSTED
+                )
+                if is_market_source:
+                    # The market identity spans tool_configs and mcp_tool_configs,
+                    # so no single unique constraint can guard it. Re-check under
+                    # the lock: a concurrent writer may have committed meanwhile.
+                    acquire_advisory_xact_lock(
+                        self.db, _mcp_market_lock_key(tenant_id, cfg)
+                    )
+                    self._check_mcp_duplicate(name, tool_type, tenant_id, cfg)
+            else:
+                self._check_name_duplicate(name, tool_type, tenant_id)
+
             # Create the base config
             tool_config = ToolConfig(
                 name=name,
@@ -270,6 +310,14 @@ class ToolService:
             logger.info(f"工具创建成功: {tool_config.id}")
             return str(tool_config.id)
 
+        except IntegrityError as e:
+            self.db.rollback()
+            if _is_name_unique_violation(e):
+                raise BusinessException(
+                    f"工具名称 '{name}' 已存在", BizCode.DUPLICATE_NAME
+                ) from e
+            logger.error(f"创建工具失败: {e}")
+            raise
         except BusinessException:
             self.db.rollback()
             raise
@@ -332,6 +380,17 @@ class ToolService:
             self.db.commit()
             return True
 
+        except IntegrityError as e:
+            self.db.rollback()
+            if _is_name_unique_violation(e):
+                raise BusinessException(
+                    f"工具名称 '{name}' 已存在", BizCode.DUPLICATE_NAME
+                ) from e
+            logger.error(f"更新工具失败: {tool_id}, {e}")
+            return False
+        except BusinessException:
+            self.db.rollback()
+            raise
         except Exception as e:
             self.db.rollback()
             logger.error(f"更新工具失败: {tool_id}, {e}")
@@ -398,10 +457,16 @@ class ToolService:
             else:
                 tool = self.get_tool_instance(tool_id, tenant_id)
             if not tool:
-                return ToolResult.error_result(
-                    error=f"工具不存在: {tool_id}",
-                    execution_time=time.time() - start_time
-                )
+                raise BusinessException("工具已停用或删除", BizCode.TOOL_SELECTION_INACTIVE)
+
+            operation = parameters.get("operation")
+            if operation:
+                from ..tools.langchain_adapter import expand_tool_selection
+
+                if not expand_tool_selection(tool, operation):
+                    raise BusinessException(
+                        "工具方法不存在或不可用", BizCode.TOOL_OPERATION_INVALID
+                    )
 
             # Record the execution start
             if self._uses_async_session():
@@ -430,6 +495,19 @@ class ToolService:
 
             return result
 
+        except BusinessException as e:
+            if e.code in (BizCode.TOOL_SELECTION_INACTIVE, BizCode.TOOL_OPERATION_INVALID):
+                raise
+            execution_time = time.time() - start_time
+            error_result = ToolResult.error_result(
+                error=str(e),
+                execution_time=execution_time
+            )
+            if self._uses_async_session():
+                await self._record_execution_complete_async(execution_id, error_result)
+            else:
+                self._record_execution_complete(execution_id, error_result)
+            return error_result
         except Exception as e:
             execution_time = time.time() - start_time
             error_result = ToolResult.error_result(
