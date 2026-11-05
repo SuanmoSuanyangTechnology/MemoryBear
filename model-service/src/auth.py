@@ -34,7 +34,7 @@ from .api.dependencies import (
     principal_from_headers,
 )
 from .api.schemas.common import fail
-from .errors import BizCode, HTTP_STATUS_TO_BIZ_CODE, code_name
+from .errors import HTTP_STATUS_TO_BIZ_CODE, BizCode, code_name
 from .i18n import resolve_locale, translate
 from .request_logging import log_request_failure, safe_failure_detail
 from .trace import TRACE_ID_HEADER
