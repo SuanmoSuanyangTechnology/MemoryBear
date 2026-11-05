@@ -441,12 +441,12 @@ class WritePipeline:
                 # 可以直接取 dialog 节点的内容作为 UserSource 节点的内容
                 self._user_pruning_info = None
                 if pruning_records:
-                    # 优先匹配 LLM 剪枝路径（source=llm, should_process_user_msg=True）
+                    # 新模型和 LLM 的有效用户规整结果均保留原文追溯及主题关联。
                     target_pruning = next(
                         (r for r in pruning_records
                          if r.get("message_seq") == message_seq
                          and r.get("type") == "user_pruning"
-                         and r.get("source") == "llm"
+                         and r.get("source") in ("llm", "model")
                          and (r.get("output") or {}).get("should_process_user_msg")),
                         None,
                     )
