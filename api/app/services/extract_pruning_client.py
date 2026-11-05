@@ -1,20 +1,21 @@
 """负责新模型的 HTTP 请求和结果校验。
 
 本文件不处理 LLM 回退；发生错误时，由调用方执行原有 LLM 方法。
-并发由业务调用方管理；单次调用总超时使用独立模块控制。
+并发由业务调用方管理；本文件按环境配置控制单次调用总超时。
 每次调用单独创建 HTTP 客户端，并在结束时关闭。
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import math
 import time
 
 import httpx
 from pydantic import BaseModel, ConfigDict
 
 from app.core.config import settings
-from app.integrations.model.extract_pruning_timeout import extract_pruning_timeout
 
 logger = logging.getLogger(__name__)
 ASSISTANT_TYPES = frozenset({
@@ -80,8 +81,11 @@ async def predict(user_text: str, assistant_text: str) -> ExtractPruningResult:
 
     started = time.monotonic()
     try:
-        # 总超时由独立模块控制；客户端不管理业务并发或本地排队。
-        async with extract_pruning_timeout():
+        timeout = settings.EXTRACT_PRUNING_REQUEST_TIMEOUT_SECONDS
+        if not math.isfinite(timeout) or timeout <= 0:
+            raise ValueError("request timeout must be finite and positive")
+        # 统一控制单次调用总超时；客户端不管理业务并发或本地排队。
+        async with asyncio.timeout(timeout):
             async with httpx.AsyncClient(timeout=None) as client:
                 response = await client.post(
                     settings.EXTRACT_PRUNING_URL,
