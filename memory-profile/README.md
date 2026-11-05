@@ -4,12 +4,14 @@ Independent, internal-only service hosting Memory domain modules. Routes are com
 
 ## Boundary and ownership
 
-- This service reads shared PostgreSQL tables through read-only mappings, plus Neo4j, Redis, and Elasticsearch. It does not import `api` or `app` code.
-- The generation endpoints submit their work to memory-jobs, which performs the only writes to `end_users` (the two cached text groups). This service therefore reads shared PostgreSQL through read-only mappings only; the boundary script's AST checks enforce that, not a connection-level read-only setting.
-- LLM calls go to the model service over its invoke face. This process never holds provider credentials: it names a `model_configs` row and its tenant, and the model service resolves channels and failover (`src/infrastructure/model_service.py`).
+- Read modules keep HTTP adaptation in `modules`, business reads in `services`, SQL in `repositories`, and response fields/enums in `schemas`. Strict reads reuse `EndUserService.require_in_workspace`; SQL composes the shared predicates in `repositories/end_user.py`. Combined display reads check the user once before loading each source. Cached implicit profile sections remain extensible JSON; display records and perceptual envelopes use explicit models. Preference date comparisons use UTC for both numeric and ISO timestamps, and engine presentation is checked against the API's current ten event types in both languages.
+- This service accesses shared PostgreSQL tables through mappings declared in `src/models/references/`, plus Neo4j, Redis, and Elasticsearch. It does not import `api` or `app` code.
+- Reads are the default: the repositories listed in `scripts/check_import_boundaries.py` are `select`-only, and the AST check enforces it. It is a per-repository convention, not a connection-level read-only setting.
+- Writes are owned by named mutation repositories, never by a read repository. The one in use today is `src/repositories/memory_config_mutation.py`, which owns `memory_config` DML and the `workspaces.memory_config` pointer for the memory-config domain. Generation endpoints submit their work to memory-jobs, which performs the only writes to `end_users` (the two cached text groups).
+- LLM calls go to the model service over its invoke face. The one exception to "no provider credentials" is the Scene continuity BERT probe used by `scene/split-demo`: it reads `SCENE_CONTINUITY_URL` / `_API_KEY` / `_MODEL` / `_TIMEOUT_SECONDS` (`src/infrastructure/scene_continuity.py`). Credentials are never logged or echoed in error bodies. Everything else names a `model_configs` row and its tenant, and the model service resolves channels and failover (`src/infrastructure/model_service.py`).
 - PostgreSQL, Neo4j, Redis, Elasticsearch, and the model-service client each have a dedicated lifecycle manager under `src/infrastructure/`; `src/runtime.py` only composes, probes, and closes them. The model service is not part of readiness: only generation endpoints need it.
 - `src/common/redis_cache.py` provides shared JSON helpers, zset JSON reads, exact/prefix/pattern invalidation, and the async `@redis_cache` cache-aside decorator. It reuses the existing `ProfileRuntime.redis` provider and does not add cache state to runtime.
-- `src/services/` holds the cross-module services other modules call; their repositories live under `src/repositories/`. `EndUserService` owns the end-user rules: is this end user addressable from the caller's workspace? It exposes `exists_in_workspace()` for a strict one-lookup membership answer (no merge branch, no payload columns), `resolve_in_workspace()` for the merge-aware identity used by profile, summary and graph endpoints, and `active_end_user_ids()` for the batch target set; both require the user and the workspace to be active and collapse malformed/foreign/missing ids to `False`/`None`. `ModelConfigService` owns model resolution for every workspace slot (`llm`, `embedding`, `rerank`, `vision`, `audio`, `video`): workspace → active `memory_config` → preset/slot column → `model_configs` tenant/active check, with typed calls (`chat_model_for_workspace`, `embed_texts_for_workspace`, `rerank_for_workspace`) and `WorkspaceModelMemo` making the LLM a once-per-request lookup shared by every user in a batch. `WorkspaceService` owns the one workspace row (`row()`): identity, active/storage flags and all six model columns, so validation and model resolution read it once per request. Profile, interest distribution, graph and cache generation all go through these services, so neither the workspace boundary nor the model choice can drift between endpoints. The boundary predicates and the narrow-read template live in `src/repositories/end_user_scope.py` (`active_user_in_workspace`, `active_users_in_workspace`, `scoped_end_user_select`, `active_workspace_exists`); the access repository, the profile reads and the generation writes all compose them instead of repeating the conditions.
+- `src/services/` holds the cross-module services other modules call; their repositories live under `src/repositories/`. `EndUserService` owns the end-user rules: is this end user addressable from the caller's workspace? It exposes `exists_in_workspace()` for a strict one-lookup membership answer (no merge branch, no payload columns), `resolve_in_workspace()` for the merge-aware identity used by profile, summary and graph endpoints, and `active_end_user_ids()` for the batch target set; both require the user and the workspace to be active and collapse malformed/foreign/missing ids to `False`/`None`. `ModelConfigService` owns model resolution for every workspace slot (`llm`, `embedding`, `rerank`, `vision`, `audio`, `video`): workspace → active `memory_config` → preset/slot column → `model_configs` tenant/active check, with typed calls (`chat_model_for_workspace`, `embed_texts_for_workspace`, `rerank_for_workspace`) and `WorkspaceModelMemo` making the LLM a once-per-request lookup shared by every user in a batch. `WorkspaceService` owns the one workspace row (`row()`): identity, active/storage flags and all six model columns, so validation and model resolution read it once per request. Profile, interest distribution, graph and cache generation all go through these services, so neither the workspace boundary nor the model choice can drift between endpoints. The boundary predicates and the narrow-read template live in `src/repositories/end_user.py` (`active_user_in_workspace`, `active_users_in_workspace`, `scoped_end_user_select`, `active_workspace_exists`); the access repository, the profile reads and the generation writes all compose them instead of repeating the conditions.
 
 Decorator usage:
 
@@ -221,8 +223,11 @@ Generation is a later, explicitly scoped extension over the read service:
   with `PRECONDITION_FAILED`.
 - Deployments that enable `generate_cache` must grant `UPDATE` on `end_users`
   to the **memory-jobs** PostgreSQL role (all generation now runs there). This
-  service's role can stay read-only; without the grant only the generation
-  endpoints fail.
+  service's role can stay read-only for that table; without the grant only the
+  generation endpoints fail.
+- The memory-config endpoints need `SELECT/INSERT/UPDATE/DELETE` on
+  `memory_config` and `UPDATE` on `workspaces` (for `active_config`). Grant
+  them only when those endpoints are served by this deployment.
 
 ## Source layout
 
@@ -238,7 +243,7 @@ src/entry.py
   -> src/infrastructure/               # 客户端与 producer；task_bridge.py 只投递任务，不注册任务
 ```
 
-`src/modules/__init__.py` composes every domain router into the single router `src/app.py` mounts, so a new module is registered there and nowhere else. `src/modules/` is transport only: routes bind HTTP parameters, handlers translate transport contracts and response envelopes, and the module's `schemas.py` describes only the HTTP interface's input/output (request/response shapes) — no business logic and no data access. Use-case orchestration and pure logic/constants live in `src/services/`; data access lives in `src/repositories/`; response value objects (DTOs) live in `src/schemas/`. Repositories depend on shared infrastructure managers, and the workspace-boundary predicates live in `src/repositories/end_user_scope.py`. LLM prompts, pipelines and their templates live in memory-jobs, which executes the generation tasks. The full layering contract and its automated enforcement are documented in `docs/architecture.md`.
+`src/modules/__init__.py` composes every domain router into the single router `src/app.py` mounts, so a new module is registered there and nowhere else. `src/modules/` is transport only: routes bind HTTP parameters, handlers translate transport contracts and response envelopes, and the module's `schemas.py` describes only the HTTP interface's input/output (request/response shapes) — no business logic and no data access. Use-case orchestration and pure logic/constants live in `src/services/`; data access lives in `src/repositories/`; response value objects (DTOs) live in `src/schemas/`. Repositories depend on shared infrastructure managers, and the workspace-boundary predicates live in `src/repositories/end_user.py`. LLM prompts, pipelines and their templates live in memory-jobs, which executes the generation tasks. The full layering contract and its automated enforcement are documented in `docs/architecture.md`.
 
 API-owned PostgreSQL tables are mapped under `src/models/references/` with a separate `ReadOnlyBase.metadata`, no foreign keys, and no relationships. Profile-owned tables belong under `src/models/owned/`, inherit `ProfileBase`, and are the only tables exposed to Alembic. PostgreSQL read repositories use SQLAlchemy ORM/select expressions only; native `text()` SQL and ORM write methods are rejected by the boundary script. The runtime pool explicitly uses rollback-on-return and invalidates any asyncpg connection still in a transaction at checkin or checkout; Alembic uses a separate short-lived migration engine without pooling.
 
@@ -289,6 +294,14 @@ The payload matches the API service exactly:
 
 Configuration is frozen after bootstrap. Paths are derived from the source location, never the current working directory. Precedence is repository `.env`, then `memory-profile/.env`, then process environment. Existing `DATABASE_*`/`POSTGRES_*`, `NEO4J_*`, `REDIS_*`, and `ELASTICSEARCH_*` variables are reused; the model-service invoke face uses `MODEL_SERVICE_*`; service-specific settings use `PROFILE_*`. See `.env.example`.
 
+Quota limits are owned by this service: the community free plan comes from
+`QUOTA_MEMORY_ENGINE_QUOTA` / `QUOTA_END_USER_MEMORY_LIMIT` /
+`QUOTA_PRE_USER_MEMORY_WRITE_QPS_LIMIT` (same names as the API). When
+`MEMORY_ENTERPRISE_BASE_URL` points at the closed-source `memory-enterprise`
+service, the effective plan and resource-pack grants are queried over HTTP with
+`X-Internal-Token: MEMORY_ENTERPRISE_TOKEN`; an unconfigured or unreachable
+service falls back to the free plan.
+
 This service must use the same Redis logical DB as the API (the shared
 deployment uses `REDIS_DB=3`) so keys written by API workers stay visible.
 `REDIS_URL`, when set, takes precedence over
@@ -297,14 +310,30 @@ as well.
 
 ## API cutover
 
-The monolith keeps distinct public JWT (`/api`) and API-key (`/v1`) adapters. Their authentication, workspace selection, end-user validation/merge behavior, and request-body semantics are intentionally not collapsed. Contract-equivalent endpoints opt into forwarding with the API-side `@memory_profile_proxy(...)` decorator; undecorated endpoints always execute their original local implementation. It defaults to the legacy implementation. After deploying this service, enable proxying in the API process:
+The monolith keeps distinct public JWT (`/api`) and API-key (`/v1`) adapters. Their authentication, workspace selection, end-user validation/merge behavior, and request-body semantics are intentionally not collapsed. Migrated endpoints use the API-side `@memory_profile_proxy(...)` decorator and always forward to memory-profile. Configure its address in the API process:
 
 ```dotenv
-ENABLE_MEMORY_PROFILE=true
 MEMORY_PROFILE_BASE_URL=http://memory-profile:8082
 ```
 
-With the flag enabled, every endpoint carrying `@memory_profile_proxy(...)` uses the remote service; endpoints without it keep their local implementation. The API marks API-key calls `x-source: ex_api` and everything else `in_api`, the same labelling the Gateway applies on the face it terminated credentials on, and it identifies the API-key face by the key itself (`x-api-key-id`) exactly as the Gateway does. The mode is derived from the caller's own path, so it cannot drift from the forwarded path. Transport/protocol failures fail closed as `SERVICE_UNAVAILABLE`. Set the flag back to `false` for a reversible rollback.
+Every endpoint carrying `@memory_profile_proxy(...)` uses the remote service; endpoints without it keep their local implementation. The API marks API-key calls `x-source: ex_api` and everything else `in_api`, the same labelling the Gateway applies on the face it terminated credentials on, and it identifies the API-key face by the key itself (`x-api-key-id`) exactly as the Gateway does. The mode is derived from the caller's own path, so it cannot drift from the forwarded path. Transport/protocol failures return `SERVICE_UNAVAILABLE`; there is no switch or local fallback. API readiness also requires memory-profile to be ready.
+
+Display, perceptual and implicit reads retain the original API's filtering,
+field coercion, cached JSON values and business error envelopes. Display time
+filters accept seconds or milliseconds using the original magnitude rule.
+Implicit preference dates retain the original numeric-millisecond conversion
+in process-local time; deploy API and profile with the same process timezone.
+The read repositories retain workspace isolation. Display requires an active
+user in that workspace; perceptual and implicit historical reads do not add
+an activity-status requirement. Other modules keep their existing access rules.
+
+Read errors use the existing global `src.i18n` language middleware and exception
+handler. Services raise `LocalizedProfileError` with translation keys; display,
+perceptual and implicit read messages live in the shared `locales/zh/memory.json`
+and `locales/en/memory.json` catalogs. API forwarding failures and API-key
+prechecks use the API's existing `app.i18n` translation service. Business codes,
+HTTP statuses, data payloads and technical exception details retain their
+existing behavior; an intentionally empty cached-profile error stays empty.
 
 ## Scene community graph
 

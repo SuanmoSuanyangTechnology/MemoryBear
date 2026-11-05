@@ -25,14 +25,12 @@ import shlex
 import uuid
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
-from typing import Any, Optional
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import end_read_transaction
 from ..integrations.sandbox.client import SandboxPrincipal, SandboxServiceClient
-from ..integrations.sandbox.errors import SandboxServiceError
 from ..models.skill_model import Skill
 from ..models.skill_package_model import SkillFile, SkillPackage
 from ..repositories.skill_package_repository import SkillPackageRepository
@@ -89,10 +87,10 @@ class ScriptOutcome:
     pack_dir: str
     script: str
     status: str
-    exit_code: Optional[int]
+    exit_code: int | None
     stdout: str
     stderr: str
-    error: Optional[str]
+    error: str | None
     duration_ms: int
     workspace_reset: bool
     stdout_truncated: bool
@@ -108,7 +106,7 @@ def pack_dir(call_name: str, content_hash: str) -> str:
     return f"{SKILLS_ROOT}/{call_name}/{content_hash}"
 
 
-def normalize_script_path(raw: str) -> Optional[str]:
+def normalize_script_path(raw: str) -> str | None:
     """Normalize a pack-relative script path; ``None`` for absolute paths or traversal."""
 
     normalized = (raw or "").strip().replace("\\", "/")
@@ -215,7 +213,7 @@ def build_command(interpreter: str, script_rel: str, args: list[str], *, max_byt
     return command
 
 
-def _split_exit_marker(stdout: str) -> tuple[str, Optional[int]]:
+def _split_exit_marker(stdout: str) -> tuple[str, int | None]:
     """Peel the runner's trailing ``__SKILL_SCRIPT_EXIT__:<n>`` line off stdout."""
 
     marker = f"{EXIT_MARKER}:"
@@ -242,8 +240,8 @@ async def run_skill_script(
     identifier: str,
     script: str,
     interpreter: str = "python",
-    args: Optional[list[str]] = None,
-    timeout_s: Optional[float] = None,
+    args: list[str] | None = None,
+    timeout_s: float | None = None,
 ) -> ScriptOutcome:
     """Stage the pack on demand, then run one script inside the sandbox."""
 

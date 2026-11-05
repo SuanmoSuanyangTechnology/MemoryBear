@@ -39,6 +39,10 @@ from app.services import workspace_service
 from app.services.agent_config_helper import enrich_agent_config
 from app.services.app_chat_service import AppChatService
 from app.services.app_service import get_app_service, AppService
+from app.services.asset_release_resolver import (
+    AsyncAssetReleaseResolver,
+    app_cache_key as build_app_cache_key,
+)
 from app.services.conversation_service import ConversationService, get_conversation_service
 from app.services.intervention_registry import submit_intervention
 from app.services.workflow_service import WorkflowService
@@ -342,7 +346,7 @@ async def get_app_variables(
     if not release:
         raise BusinessException("应用未发布，不可用", BizCode.APP_NOT_PUBLISHED)
 
-    return success(data=_variables_from_release(release))
+    return success(data=_variables_from_release(release), msg="获取应用变量配置成功")
 
 
 @router.post("/chat")
@@ -368,8 +372,10 @@ async def chat(
     resource_id = api_key_auth.resource_id
     workspace_id = api_key_auth.workspace_id
 
-    # Try App cache before opening a DB session
-    app_cache_key = f"cache:v2:app:{resource_id}"
+    # Try App cache before opening a DB session. The key carries the workspace
+    # dimension: a shared app resolves to the release pinned for *this* workspace,
+    # so a key without it would cross-read two spaces' pinned versions (§5.3).
+    app_cache_key = build_app_cache_key(resource_id, workspace_id)
     app_cache = await get_json_async(app_cache_key)
     _app_stub = None
     _cached_release_id = None
@@ -379,8 +385,8 @@ async def chat(
             id=uuid.UUID(app_cache["id"]),
             type=app_cache["type"],
         )
-        if app_cache.get("current_release_id"):
-            _cached_release_id = uuid.UUID(app_cache["current_release_id"])
+        if app_cache.get("release_id"):
+            _cached_release_id = uuid.UUID(app_cache["release_id"])
 
     async with get_async_db_context() as db:
         app_service = AppService(db)
@@ -390,10 +396,13 @@ async def chat(
             app = _app_stub
         else:
             app = await app_service.get_app_async(resource_id, workspace_id)
+            _resolved = await AsyncAssetReleaseResolver(db).resolve(
+                app_id=app.id, workspace_id=workspace_id
+            )
             await set_json_async(app_cache_key, {
                 "id": str(app.id),
                 "type": app.type,
-                "current_release_id": str(app.current_release_id) if app.current_release_id else None,
+                "release_id": str(_resolved.release_id) if _resolved.release_id else None,
             }, ttl=60)
 
         if payload.version is not None:
@@ -530,7 +539,7 @@ async def chat(
                 workspace_id=str(workspace_id),
                 files=payload.files,
             )
-        return success(data=conversation_schema.ChatResponse(**result).model_dump(mode="json"))
+        return success(data=conversation_schema.ChatResponse(**result).model_dump(mode="json"), msg="对话回复生成成功")
     elif app_type == AppType.MULTI_AGENT:
         # 多 Agent 流式返回
         config = runtime_config
@@ -590,7 +599,7 @@ async def chat(
                 files=payload.files,
             )
 
-        return success(data=conversation_schema.ChatResponse(**result).model_dump(mode="json"))
+        return success(data=conversation_schema.ChatResponse(**result).model_dump(mode="json"), msg="对话回复生成成功")
     elif app_type in (AppType.WORKFLOW, AppType.PURE_WORKFLOW):
         config = runtime_config
         logger.info(
@@ -704,7 +713,7 @@ async def list_v1_conversations(
         total=result["total"],
         hasnext=result["hasnext"],
     )
-    return success(data=PageData(page=page_meta, items=items).model_dump(mode="json"))
+    return success(data=PageData(page=page_meta, items=items).model_dump(mode="json"), msg="获取会话列表成功")
 
 
 @router.get("/conversations/{conversation_id}/messages")
@@ -726,7 +735,7 @@ async def list_v1_conversation_messages(
             conversation_id=conversation_id,
             limit=limit,
         )
-    return success(data=conversation_schema.V1ConversationMessageListResponse(**result).model_dump(mode="json"))
+    return success(data=conversation_schema.V1ConversationMessageListResponse(**result).model_dump(mode="json"), msg="获取会话消息成功")
 
 
 @router.post(
@@ -784,7 +793,7 @@ async def submit_human_intervention_api(
         "node_id": node_id,
         "action_id": action_id,
         "form_data": form_data,
-    })
+    }, msg="人工介入提交成功")
 
 
 @router.post("/files", response_model=ApiResponse, summary="AI 对话文件上传")
@@ -832,7 +841,7 @@ async def upload_chat_file(
         f"File upload successful: {file.filename} (file_id: {upload_result['file_id']})"
     )
 
-    return success(data=upload_result, msg="File upload successful")
+    return success(data=upload_result, msg="文件上传成功")
 
 
 @router.get("/messages/{message_id}/suggested", summary="获取消息预制问题")
@@ -856,7 +865,7 @@ async def get_message_suggested_questions_v1(
         workspace_id=api_key_auth.workspace_id,
         message_id=message_id,
     )
-    return success(data=suggested_questions)
+    return success(data=suggested_questions, msg="获取预制问题成功")
 
 
 @router.get("/info", summary="获取应用基本信息")
@@ -886,4 +895,4 @@ async def get_app_basic_info_v1(
         "description": release.description,
         "icon": release.icon,
         "type": release.type,
-    })
+    }, msg="获取应用基本信息成功")

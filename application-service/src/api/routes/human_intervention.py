@@ -141,7 +141,7 @@ def submit_human_intervention_v1(
         app_id=app_id,
         workspace_id=principal.workspace_id,
     )
-    return success(data=_submit(execution_id, payload))
+    return success(data=_submit(execution_id, payload), msg="人工介入提交成功")
 
 
 __all__ = ["router", "v1_router"]

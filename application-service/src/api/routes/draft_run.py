@@ -156,7 +156,13 @@ async def _load_draft_run_app_snapshot(
         app_id: uuid.UUID,
         workspace_id: uuid.UUID | None,
 ) -> _DraftRunAppSnapshot:
-    """Read the minimal app state for a draft run (own workspace or shared)."""
+    """Read the minimal app state for a draft run (own workspace or shared).
+
+    ``current_release_id`` here means **the release this workspace should run**,
+    which for a consumer is the catalog entry's pinned release, not the source
+    app's current one (§5.3). Every downstream helper keys off this field, so
+    resolving it once here keeps the whole draft-run path consistent.
+    """
     async with get_async_db_context() as db:
         app = await db.scalar(
             select(App).where(App.id == app_id).limit(1)
@@ -164,22 +170,19 @@ async def _load_draft_run_app_snapshot(
         if not app:
             raise BusinessException("应用不存在", BizCode.NOT_FOUND)
 
+        resolved_release_id = app.current_release_id
         if workspace_id is not None and app.workspace_id != workspace_id:
-            share_exists = await db.scalar(
-                select(AppShare.id).where(
-                    AppShare.source_app_id == app.id,
-                    AppShare.target_workspace_id == workspace_id,
-                    AppShare.is_active.is_(True),
-                ).limit(1)
+            # Catalog installation (or an un-backfilled legacy share, §11.1 M3)
+            resolved = await AsyncAssetReleaseResolver(db).resolve(
+                app_id=app.id, workspace_id=workspace_id
             )
-            if not share_exists:
-                raise BusinessException("应用不可访问", BizCode.WORKSPACE_NO_ACCESS)
+            resolved_release_id = resolved.release_id
 
         return _DraftRunAppSnapshot(
             id=app.id,
             workspace_id=app.workspace_id,
             type=app.type,
-            current_release_id=app.current_release_id,
+            current_release_id=resolved_release_id,
         )
 
 
@@ -261,15 +264,13 @@ async def _ensure_workflow_conversation_ready(
             raise BusinessException(f"会话不存在: {conversation_id}", BizCode.NOT_FOUND)
 
         if conversation.workspace_id != workspace_id:
-            share_exists = await db.scalar(
-                select(AppShare.id).where(
-                    AppShare.source_app_id == app_id,
-                    AppShare.target_workspace_id == workspace_id,
-                    AppShare.is_active.is_(True),
-                ).limit(1)
+            # Sharing is now a catalog installation; the legacy share row is
+            # still accepted while history is un-backfilled (§11.1 M3).
+            shared_in = await AsyncAssetReleaseResolver(db).can_access(
+                app_id=app_id, workspace_id=workspace_id
             )
             same_app = conversation.app_id == app_id
-            if not share_exists and not same_app:
+            if not shared_in and not same_app:
                 raise BusinessException("会话不属于当前工作空间", BizCode.PERMISSION_DENIED)
 
     return conversation_id
@@ -997,7 +998,7 @@ def get_workflow_node_last_run(
         raise BusinessException("source 参数无效", BizCode.INVALID_PARAMETER)
 
     result = WorkflowService(db).get_node_last_run(app_id=app_id, node_id=node_id, source=source)
-    return success(data=result)
+    return success(data=result, msg="获取节点上次运行成功")
 
 
 @router.put(
@@ -1023,7 +1024,7 @@ def update_workflow_node_cache(
     )
     if not result:
         raise BusinessException("节点缓存不存在", BizCode.NOT_FOUND)
-    return success(data=result)
+    return success(data=result, msg="节点缓存更新成功")
 
 
 @router.delete(
@@ -1043,7 +1044,7 @@ def invalidate_workflow_node_cache(
     affected = WorkflowService(db).invalidate_node_cache(app_id=app_id, node_id=node_id)
     if affected <= 0:
         raise BusinessException("节点缓存不存在", BizCode.NOT_FOUND)
-    return success(data={"affected": affected})
+    return success(data={"affected": affected}, msg="节点缓存失效成功")
 
 
 @router.post(
@@ -1117,7 +1118,7 @@ async def rerun_workflow_node(
             invalidate_cache=payload.invalidate_cache,
             bypass_cache=payload.bypass_cache,
         )
-    return success(data=result)
+    return success(data=result, msg="节点重跑成功")
 
 
 __all__ = ["router"]

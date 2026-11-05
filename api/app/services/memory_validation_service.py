@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import html
+import re
+import time
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import suppress
@@ -12,6 +14,11 @@ from typing import Any
 from fastapi.encoders import jsonable_encoder
 
 from app.core.error_codes import BizCode
+from app.core.exceptions import BusinessException
+from app.core.memory.read_services.search_engine.community_search import COMMUNITY_DEFAULTS
+from app.core.memory.retrieval_trace.community_validation import (
+    COMMUNITY_STAGES, community_validation_collector, project_community_trace,
+)
 from app.core.logging_config import get_api_logger
 from app.core.memory.enums import Neo4jNodeType, SearchStrategy
 from app.core.memory.memory_service import MemoryService
@@ -33,12 +40,18 @@ from app.utils.tmp_session import ChatSessionCache
 DEFAULT_STORAGE_TYPE = "neo4j"
 SSE_HEARTBEAT_SECONDS = 15
 SSE_STAGE_POLL_SECONDS = 0.1
+EMPTY_MESSAGES = {
+    "no_community_hit": "未检索到相关社区，本轮未生成回答。",
+    "no_scene_hit_in_communities": "已检索到社区，但没有符合条件的场景证据。",
+    "no_valid_evidence": "候选未形成可用证据，本轮未生成回答。",
+}
 
 SEARCH_MODE_NAMES = {
     SearchStrategy.DEEP: "deep",
     SearchStrategy.NORMAL: "normal",
     SearchStrategy.QUICK: "quick",
     SearchStrategy.EXPRESS: "express",
+    SearchStrategy.COMMUNITY: "community",
 }
 VALIDATION_MEMORY_STAGE_ALLOWLIST = frozenset({
     "query_preprocessed",
@@ -159,35 +172,32 @@ class MemoryValidationService:
             request_id: str | None = None,
     ) -> MemoryValidationService:
         """在开流前完成参数校验和记忆服务初始化。"""
-        SearchStrategy(user_input.search_switch)
+        user_input.search_switch = SearchStrategy(user_input.search_switch).value
         async with get_async_db_context() as db:
+            end_user = await EndUserRepository(db).get_end_user_by_id_async(
+                uuid.UUID(user_input.end_user_id)
+            )
+            if end_user is None or not end_user.is_active:
+                raise BusinessException("记忆库不存在或无权访问", BizCode.PERMISSION_DENIED,
+                                        context={"reason": "invalid_input"})
+            storage_type = await get_workspace_storage_type_without_auth_async(db, end_user.workspace_id)
+            storage_type = storage_type or DEFAULT_STORAGE_TYPE
+            if user_input.search_switch == SearchStrategy.COMMUNITY and storage_type != "neo4j":
+                raise BusinessException("社区检索仅支持图存储空间", BizCode.INVALID_PARAMETER,
+                                        context={"reason": "unsupported_storage"})
             memory_config_id = await MemoryConfigService(db).get_config_id_by_end_user_async(
                 user_input.end_user_id
-            )
-            # 与写入/对外读取同一路由口径：RAG 空间必须显式传入 storage_type，
-            # 否则 MemoryService 默认 neo4j，验证页在 RAG 空间恒为空结果
-            end_user = await EndUserRepository(db).get_end_user_by_id_async(
-                uuid.UUID(str(user_input.end_user_id))
-            )
-            storage_type = (
-                await get_workspace_storage_type_without_auth_async(
-                    db, end_user.workspace_id
-                )
-                if end_user is not None
-                else None
             )
         memory_service = await MemoryService.create(
             memory_config_id,
             end_user_id=user_input.end_user_id,
-            storage_type=storage_type or DEFAULT_STORAGE_TYPE,
+            storage_type=storage_type,
             draft=True,
         )
+        session_cache = ChatSessionCache(user_input.session_id.hex)
         return cls(
-            user_input=user_input,
-            memory_service=memory_service,
-            session_cache=ChatSessionCache(user_input.session_id.hex),
-            request_id=request_id or str(uuid.uuid4()),
-            storage_type=storage_type or DEFAULT_STORAGE_TYPE,
+            user_input=user_input, memory_service=memory_service, session_cache=session_cache,
+            request_id=request_id or str(uuid.uuid4()), storage_type=storage_type,
         )
 
     @property
@@ -196,6 +206,10 @@ class MemoryValidationService:
 
     async def stream(self) -> AsyncIterator[str]:
         """按 start、召回阶段、详细轨迹、回答、end 顺序输出。"""
+        if self.user_input.search_switch == SearchStrategy.COMMUNITY:
+            async for event in self._stream_community():
+                yield event
+            return
         running_task: asyncio.Task[Any] | None = None
         user_input = self.user_input
         try:
@@ -318,6 +332,101 @@ class MemoryValidationService:
                 running_task.cancel()
                 with suppress(asyncio.CancelledError):
                     await running_task
+
+    async def _stream_community(self) -> AsyncIterator[str]:
+        stage = "community_searched"
+        running_task = None
+        events: list[dict] = []
+        next_event = 0
+        failure_reason = "dependency_failed"
+
+        def event(name: str, data: dict) -> str:
+            return _format_event(name, {**data, "request_id": self.request_id})
+
+        try:
+            yield event("start", {
+                "session_id": self.session_id, "search_switch": "6", "mode": "community",
+                "backend": "neo4j", "limit": COMMUNITY_DEFAULTS.evidence_top_k,
+            })
+            with community_validation_collector() as events:
+                running_task = asyncio.create_task(
+                    self.memory_service.read(self.user_input.message, SearchStrategy.COMMUNITY, history=[])
+                )
+                last_event_at = time.monotonic()
+                while True:
+                    while next_event < len(events):
+                        payload = events[next_event]
+                        next_event += 1
+                        stage = payload["stage"]
+                        last_event_at = time.monotonic()
+                        yield event("memory_stage", payload)
+                    if running_task.done():
+                        break
+                    await asyncio.wait({running_task}, timeout=SSE_STAGE_POLL_SECONDS)
+                    if time.monotonic() - last_event_at >= SSE_HEARTBEAT_SECONDS:
+                        last_event_at = time.monotonic()
+                        yield ": heartbeat\n\n"
+                result = await running_task
+                running_task = None
+            trace = project_community_trace(result.community_trace)
+            items = trace["items"]
+            yield event("retrieval_trace", {"trace": {
+                "mode": trace["kind"], "status": trace["status"], "empty_reason": trace["empty_reason"],
+                "items": [{key: item[key] for key in ("id", "community_id", "evidence_no")} for item in items],
+            }})
+            stage = "final_answer"
+            if items:
+                failure_reason = "answer_failed"
+                running_task = asyncio.create_task(
+                    self.answer_service.generate_community_answer(
+                        end_user_id=self.user_input.end_user_id, query=self.user_input.message, evidence=items,
+                    )
+                )
+                async for heartbeat in _stream_heartbeats(running_task):
+                    yield heartbeat
+                answer = await running_task
+                running_task = None
+                references = list(dict.fromkeys(int(number) for number in re.findall(r"\[(\d+)\]", answer)))
+                if not references or any(number < 1 or number > len(items) for number in references):
+                    raise BusinessException("回答引用无效，请重新验证", BizCode.MEMORY_READ_FAILED,
+                                            context={"reason": "invalid_citation"})
+                failure_reason = "dependency_failed"
+                running_task = asyncio.create_task(self.session_cache.append_many([
+                    {"role": "user", "content": self.user_input.message},
+                    {"role": "assistant", "content": answer},
+                ]))
+                async for heartbeat in _stream_heartbeats(running_task):
+                    yield heartbeat
+                await running_task
+                running_task = None
+            else:
+                answer = EMPTY_MESSAGES[trace["empty_reason"]]
+            yield event("message", {"content": answer})
+            yield event("end", {"session_id": self.session_id, "intermediate_outputs": []})
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            reason = (error.context.get("reason", "dependency_failed") if isinstance(error, BusinessException)
+                      else "scan_timeout" if isinstance(error, TimeoutError) else failure_reason)
+            logger.exception("Community validation failed: request_id=%s stage=%s reason=%s",
+                             self.request_id, stage, reason)
+            # A dependency can fail before producing a stage; retain completed snapshots.
+            for payload in events[next_event:]:
+                stage = payload["stage"]
+                yield event("memory_stage", payload)
+            completed = {payload["stage"] for payload in events if payload["status"] == "completed"}
+            if stage in COMMUNITY_STAGES and stage in completed:
+                stage = next((key for key in COMMUNITY_STAGES if key not in completed), "final_answer")
+            for key in COMMUNITY_STAGES:
+                if key not in completed:
+                    yield event("memory_stage", {"stage": key, "status": "failed" if key == stage else "skipped",
+                                                  "data": {}})
+            yield event("error", {"code": BizCode.MEMORY_READ_FAILED,
+                                  "message": "回答生成失败，请重新验证" if stage == "final_answer" else "社区检索失败，请重新验证"})
+        finally:
+            if running_task is not None:
+                running_task.cancel()
+                await asyncio.gather(running_task, return_exceptions=True)
 
     def _build_retrieval_trace(
             self,

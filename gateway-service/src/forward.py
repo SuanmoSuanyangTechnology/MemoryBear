@@ -63,6 +63,16 @@ def is_streaming_response(headers) -> bool:
     return "attachment" in headers.get("content-disposition", "").lower()
 
 
+def rewrite_internal_path(external_path: str) -> str:
+    if external_path.startswith("/internal/v1/"):
+        return external_path
+    if external_path.startswith("/api/"):
+        return "/internal/v1" + external_path[len("/api"):]
+    if external_path.startswith("/v1/"):
+        return "/internal/v1" + external_path[len("/v1"):]
+    return external_path
+
+
 class TargetRoute(BaseModel):
     path_prefix: str
     service: str
@@ -73,6 +83,9 @@ class TargetRoute(BaseModel):
     # usage declared; the pipeline denies those requests (fail-closed) instead of
     # letting a missing declaration silently widen a key's reach.
     required_scopes: tuple[str, ...] = ()
+    # internal：沿用 /api|/v1 → /internal/v1 重写（core 默认）。
+    # preserve：原样转发（企业 /api/market 直连 market-service）。
+    path_mode: Literal["internal", "preserve"] = "internal"
     # Optional gRPC dispatch: base_url stays the HTTP fallback so one route
     # entry flips transports without a second config surface.
     # None = inherit GATEWAY_APP_CHAT_PROTOCOL; an explicit value in the route
@@ -80,6 +93,11 @@ class TargetRoute(BaseModel):
     protocol: Literal["http", "grpc"] | None = None
     grpc_target: str | None = None
     grpc_method: str = ""
+
+    def target_path(self, external_path: str) -> str:
+        if self.path_mode == "preserve":
+            return external_path
+        return rewrite_internal_path(external_path)
 
 
 class TargetResolver(Protocol):
@@ -146,13 +164,7 @@ class Forwarder:
         return self._circuit_for(service)
 
     def internal_path(self, external_path: str) -> str:
-        if external_path.startswith("/internal/v1/"):
-            return external_path
-        if external_path.startswith("/api/"):
-            return "/internal/v1" + external_path[len("/api"):]
-        if external_path.startswith("/v1/"):
-            return "/internal/v1" + external_path[len("/v1"):]
-        return external_path
+        return rewrite_internal_path(external_path)
 
     def build_headers(self, request: Request) -> dict[str, str]:
         headers: dict[str, str] = {}
@@ -199,7 +211,7 @@ class Forwarder:
             return JSONResponse(status_code=502, content={"detail": "circuit open"})
         gateway_circuit_breaker_state.labels(target=route.service).set(0)
         # request.url.path 不含查询串，query 须单独拼回，否则分页/过滤等参数静默丢失
-        url = route.base_url + self.internal_path(request.url.path)
+        url = route.base_url + route.target_path(request.url.path)
         if request.url.query:
             url += "?" + request.url.query
         headers = self.build_headers(request)

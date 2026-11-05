@@ -24,6 +24,9 @@ from dataclasses import dataclass
 from typing import Generic, TypeVar
 from uuid import UUID
 
+from error_core.codes import BizCode
+from error_core.supplier import ChannelFailure
+
 from .contracts import ChannelSnapshot, ModelConfigSnapshot, ResolvedModelConfig
 from .crypto import CredentialCipher
 from .errors import (
@@ -31,6 +34,7 @@ from .errors import (
     CredentialDecryptError,
     NoAvailableChannelError,
 )
+from .providers.error_catalog import classify_provider_failure, to_channel_failure
 from .resolver import build_resolved_from_channel
 
 R = TypeVar("R")
@@ -78,6 +82,21 @@ def _http_status(exc: BaseException) -> int | None:
                 return int(status)
         except (TypeError, ValueError):
             continue
+    return None
+
+
+def _upstream_code(exc: BaseException) -> str | None:
+    """沿异常链读取供应商错误码（字符串），供逐供应商映射使用。"""
+
+    current: BaseException | None = exc
+    for _ in range(8):
+        if current is None:
+            break
+        for attr in ("code", "error_code", "type"):
+            value = getattr(current, attr, None)
+            if isinstance(value, str) and value:
+                return value
+        current = current.__cause__ or current.__context__
     return None
 
 
@@ -151,7 +170,7 @@ class FallbackOutcome(Generic[R]):
     resolved: ResolvedModelConfig
     attempts: int
     switched: bool
-    failures: tuple[tuple[UUID | None, str], ...]
+    failures: tuple[ChannelFailure, ...]
 
 
 def _notify_candidate_failure(
@@ -170,6 +189,34 @@ def _notify_candidate_failure(
             candidate.channel.id,
             exc_info=True,
         )
+
+
+def _channel_failure(
+    candidate: FailoverCandidate, exc: BaseException
+) -> ChannelFailure:
+    """放弃候选时固化归因：按渠道供应商目录分类，凭据解密失败保留自身语义。"""
+
+    if isinstance(exc, CredentialDecryptError):
+        return ChannelFailure(
+            channel_id=candidate.channel.id,
+            provider=candidate.channel.provider,
+            error_type=type(exc).__name__,
+            biz_code=int(BizCode.CREDENTIAL_DECRYPT_ERROR),
+            http_status=None,
+            upstream_code=None,
+            message=str(exc),
+            retryable=False,
+        )
+    return to_channel_failure(
+        classify_provider_failure(
+            candidate.channel.provider,
+            _http_status(exc),
+            _upstream_code(exc),
+            str(exc),
+            channel_id=candidate.channel.id,
+        ),
+        type(exc).__name__,
+    )
 
 
 def run_candidate_fallback(
@@ -197,7 +244,7 @@ def run_candidate_fallback(
         if is_candidate_available is not None
         else (lambda _candidate: True)
     )
-    failures: list[tuple[UUID | None, str]] = []
+    failures: list[ChannelFailure] = []
     last_error: BaseException | None = None
     attempted = False
     attempts = 0
@@ -228,7 +275,7 @@ def run_candidate_fallback(
                 )
             except CredentialDecryptError as exc:  # 凭据无效：立即顺延，不占瞬时重试预算
                 last_error = exc
-                failures.append((candidate.channel.id, type(exc).__name__))
+                failures.append(_channel_failure(candidate, exc))
                 _notify_candidate_failure(on_candidate_failure, candidate, exc)
                 break
             except Exception as exc:
@@ -236,11 +283,11 @@ def run_candidate_fallback(
                 if is_transient_channel_error(exc):
                     if attempt < max_attempts_per_channel - 1:
                         continue
-                    failures.append((candidate.channel.id, type(exc).__name__))
+                    failures.append(_channel_failure(candidate, exc))
                     _notify_candidate_failure(on_candidate_failure, candidate, exc)
                     break
                 if is_switchable_channel_error(exc):
-                    failures.append((candidate.channel.id, type(exc).__name__))
+                    failures.append(_channel_failure(candidate, exc))
                     _notify_candidate_failure(on_candidate_failure, candidate, exc)
                     break
                 raise  # terminal 或不可分类：原样透传
@@ -278,7 +325,7 @@ async def run_candidate_fallback_async(
         if is_candidate_available is not None
         else (lambda _candidate: True)
     )
-    failures: list[tuple[UUID | None, str]] = []
+    failures: list[ChannelFailure] = []
     last_error: BaseException | None = None
     attempted = False
     attempts = 0
@@ -309,7 +356,7 @@ async def run_candidate_fallback_async(
                 )
             except CredentialDecryptError as exc:
                 last_error = exc
-                failures.append((candidate.channel.id, type(exc).__name__))
+                failures.append(_channel_failure(candidate, exc))
                 _notify_candidate_failure(on_candidate_failure, candidate, exc)
                 break
             except Exception as exc:
@@ -317,11 +364,11 @@ async def run_candidate_fallback_async(
                 if is_transient_channel_error(exc):
                     if attempt < max_attempts_per_channel - 1:
                         continue
-                    failures.append((candidate.channel.id, type(exc).__name__))
+                    failures.append(_channel_failure(candidate, exc))
                     _notify_candidate_failure(on_candidate_failure, candidate, exc)
                     break
                 if is_switchable_channel_error(exc):
-                    failures.append((candidate.channel.id, type(exc).__name__))
+                    failures.append(_channel_failure(candidate, exc))
                     _notify_candidate_failure(on_candidate_failure, candidate, exc)
                     break
                 raise
@@ -495,7 +542,7 @@ def run_with_channel_fallback(
     membranes 组合编排成员传 model_name 锚点）。空/全被 cooldown 过滤 →
     NoAvailableChannelError；每渠道至多 max_attempts_per_channel 次（默认 3 = 1 首发
     + 2 瞬时重试，spec §11.2 "每候选重试 2 次"）；全耗尽 → ChannelSwitchExhaustedError
-    （failures = 渠道链 + 错误类型名，原始错误挂 __cause__）。
+    （failures 为结构化渠道归因，原始错误挂 __cause__）。
     """
     hook = (
         None

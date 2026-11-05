@@ -10,6 +10,17 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+
+def resolve_timezone(value: str | None) -> tuple[ZoneInfo, str]:
+    name = (value or "").strip()
+    if not name:
+        raise ValueError("timezone is required")
+    try:
+        return ZoneInfo(name), name
+    except (ZoneInfoNotFoundError, KeyError, ValueError) as exc:
+        raise ValueError(f"'{name}' is not a valid IANA timezone") from exc
 
 
 def parse_uuid(value: object) -> UUID | None:
@@ -106,3 +117,19 @@ def to_jsonable(value: Any) -> Any:
     if isinstance(value, (str, int, float, bool)) or value is None:
         return value
     return str(value)
+
+
+def as_utc_naive(value: datetime) -> datetime:
+    """Normalize a datetime to a naive UTC value for database comparisons."""
+
+    return as_utc(value).replace(tzinfo=None)
+
+
+def epoch_ms_to_datetime(value: int | float | None) -> datetime | None:
+    """Use the legacy API seconds/milliseconds rule and return naive UTC."""
+
+    if value is None:
+        return None
+    if value > 1e10:
+        value = value / 1000
+    return datetime.fromtimestamp(value, UTC).replace(tzinfo=None)

@@ -21,11 +21,14 @@ from src.common.observability.runtime_metrics import (
 )
 from src.config import ProfileSettings
 from src.infrastructure.elasticsearch import ElasticsearchManager
+from src.infrastructure.memory_enterprise import MemoryEnterpriseManager
 from src.infrastructure.model_service import ModelServiceManager
 from src.infrastructure.neo4j import Neo4jManager
 from src.infrastructure.postgres import PostgresManager
 from src.infrastructure.redis import RedisManager
+from src.infrastructure.scene_continuity import SceneContinuityClient
 from src.infrastructure.task_bridge import TaskBridgeManager
+from src.services.quota import QuotaEntitlements
 
 HealthCheck = Callable[[], Awaitable[bool]]
 
@@ -41,8 +44,13 @@ class ProfileRuntime:
         self.elasticsearch = ElasticsearchManager(settings)
         # 生成类用例专用；只读端点不会触碰它，因此它不参与 readiness 探测。
         self.model_service = ModelServiceManager(settings)
+        # 仅 scene/split-demo 使用的外部 BERT 探针；本进程唯一持有的模型凭据。
+        self.scene_continuity = SceneContinuityClient(settings)
         # 缓存生成投递到 memory-jobs 的 worker；本进程只做 producer + 结果等待。
         self.task_bridge = TaskBridgeManager(settings)
+        # 企业版配额查询：可选外部服务，未配置或不可达时按社区免费版处理。
+        self.memory_enterprise = MemoryEnterpriseManager(settings)
+        self.quota = QuotaEntitlements(settings, self.memory_enterprise)
         self.http_metrics = HttpMetrics()
         self.started_at_monotonic = time.monotonic()
         self.started_at = datetime.now(UTC)
@@ -177,5 +185,7 @@ class ProfileRuntime:
             self.redis.aclose(),
             self.elasticsearch.aclose(),
             self.model_service.aclose(),
+            self.scene_continuity.aclose(),
             self.task_bridge.aclose(),
+            self.memory_enterprise.aclose(),
         )

@@ -9,9 +9,10 @@ decorators (``@cur_workspace_access_guard`` above ``@check_app_quota``).
 
 from __future__ import annotations
 
+import asyncio
 import io
 import logging
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 from urllib.parse import quote
 from uuid import UUID
 
@@ -31,13 +32,18 @@ from ...models.document_model import Document
 from ...models.file_model import File as FileModel
 from ...quota.alerts import report_quota_change_sync
 from ...quota.usage import ensure_app_quota, require_app_quota
+from ...plugins import get_plugin
+from ...protocols.market_gateway import MARKET_SUBMISSION_FACTORY
 from ...repositories import cross_domain_read
+from ...runtime import ProcessRuntime
 from ...schemas import app_schema, tool_schema, workflow_schema
 from ...services.agent_config_helper import enrich_agent_config
 from ...services.app_dsl_service import AppDslService
 from ...services.app_service import AppService
 from ...services.app_share_service import AppShareService
 from ...services.app_statistics_service import AppStatisticsService
+from ...services.asset_service import AssetService
+from ...services.external_status_service import apply_external_status
 from ...services.file_storage_service import FileStorageService, get_file_storage_service
 from ...services.tool_service import ToolService
 from ...services.workflow_import_service import WorkflowImportService
@@ -49,6 +55,7 @@ from ..dependencies import (
     SyncRedis,
     get_async_db,
     get_principal,
+    get_runtime,
     get_sync_db,
     get_sync_redis,
 )
@@ -61,9 +68,12 @@ logger = logging.getLogger(__name__)
 
 DbSession = Annotated[Session, Depends(get_sync_db)]
 Caller = Annotated[Principal, Depends(get_principal)]
+RuntimeDep = Annotated[ProcessRuntime, Depends(get_runtime)]
 WorkspaceId = Annotated[UUID, Depends(require_workspace_access)]
 AppQuota = Annotated[None, Depends(require_app_quota)]
 CacheClient = Annotated[SyncRedis, Depends(get_sync_redis)]
+# 市场网关在当前进程的 runtime 上（`build_market_gateway`），外部状态回填要用它。
+RuntimeDep = Annotated[ProcessRuntime, Depends(get_runtime)]
 
 
 @router.post("", summary="创建应用（可选创建 Agent 配置）", response_model=ApiResponse)
@@ -82,13 +92,15 @@ def create_app(
         data=payload,
     )
     # After creation, fetch and return the bound ontology info (no ontology_id -> default)
-    return success(data=service.to_schema_with_ontology(app, workspace_id))
+    return success(data=service.to_schema_with_ontology(app, workspace_id), msg="创建应用成功")
 
 
 @router.get("", summary="应用列表（分页）", response_model=ApiResponse)
 def list_apps(
         workspace_id: WorkspaceId,
         db: DbSession,
+        cache: CacheClient,
+        runtime: RuntimeDep,
         type: str | None = Query(
             None, description="应用类型过滤，支持逗号分隔多值，如 'agent,multi_agent'"
         ),
@@ -112,6 +124,10 @@ def list_apps(
             str | None,
             Query(description="标签模式搜索：模糊匹配绑定本体的场景自定义字段展示名"),
         ] = None,
+        include_external_status: Annotated[
+            bool,
+            Query(description="是否批量回填 external.status（市场来源的应用；30 秒缓存，失败降级 unknown）"),
+        ] = False,
 ):
     """List apps
 
@@ -156,12 +172,20 @@ def list_apps(
         if app_ids:
             items_orm = service.get_apps_by_ids(app_ids, workspace_id)
             items = service.to_schemas_with_ontology(items_orm, workspace_id)
+            if include_external_status:
+                apply_external_status(
+                    items,
+                    resource_type="app",
+                    tenant_id=principal.tenant_id,
+                    market=runtime.market_gateway,
+                    cache=cache,
+                )
             # Return the standard paginated shape
             meta = PageMeta(page=1, pagesize=len(items), total=len(items), hasnext=False)
-            return success(data=PageData(page=meta, items=items))
+            return success(data=PageData(page=meta, items=items), msg="获取应用列表成功")
         # Empty ids: return an empty list
         meta = PageMeta(page=1, pagesize=0, total=0, hasnext=False)
-        return success(data=PageData(page=meta, items=[]))
+        return success(data=PageData(page=meta, items=[]), msg="获取应用列表成功")
 
     # Regular paginated query
     items_orm, total = service.list_apps(
@@ -181,8 +205,16 @@ def list_apps(
     )
 
     items = service.to_schemas_with_ontology(items_orm, workspace_id)
+    if include_external_status:
+        apply_external_status(
+            items,
+            resource_type="app",
+            tenant_id=principal.tenant_id,
+            market=runtime.market_gateway,
+            cache=cache,
+        )
     meta = PageMeta(page=page, pagesize=pagesize, total=total, hasnext=(page * pagesize) < total)
-    return success(data=PageData(page=meta, items=items))
+    return success(data=PageData(page=meta, items=items), msg="获取应用列表成功")
 
 
 @router.get(
@@ -224,17 +256,33 @@ def get_app(
         app_id: UUID,
         workspace_id: WorkspaceId,
         db: DbSession,
+        principal: Caller,
+        cache: CacheClient,
+        runtime: RuntimeDep,
+        include_external_status: Annotated[
+            bool,
+            Query(description="是否回填 external.status（仅市场来源的应用有意义）"),
+        ] = False,
 ):
     """Get app details
 
     - Supports the workspace's own apps
     - Supports apps shared into the workspace
+    - include_external_status=true 时额外回填 external.status
     """
     service = AppService(db)
     app = service.get_app(app_id, workspace_id)
 
     # Convert to the schema and set the is_shared field
     app_schema_obj = service._convert_to_schema(app, workspace_id)
+    if include_external_status:
+        apply_external_status(
+            [app_schema_obj],
+            resource_type="app",
+            tenant_id=principal.tenant_id,
+            market=runtime.market_gateway,
+            cache=cache,
+        )
     return success(data=app_schema_obj)
 
 
@@ -247,7 +295,7 @@ def update_app(
 ):
     service = AppService(db)
     app = service.update_app(app_id=app_id, data=payload, workspace_id=workspace_id)
-    return success(data=app_schema.App.model_validate(app))
+    return success(data=app_schema.App.model_validate(app), msg="更新应用成功")
 
 
 @router.delete("/{app_id}", summary="删除应用", response_model=ApiResponse)
@@ -255,6 +303,7 @@ def delete_app(
         app_id: UUID,
         workspace_id: WorkspaceId,
         db: DbSession,
+        runtime: RuntimeDep,
         principal: Caller,
 ):
     """Delete an app
@@ -274,7 +323,23 @@ def delete_app(
     )
 
     service = AppService(db)
+    external = False
+    if runtime.settings.application_service_market_mode == "gateway":
+        app = service.get_app(app_id, workspace_id)
+        external = app.origin == "external"
     service.delete_app(app_id=app_id, workspace_id=workspace_id)
+    if external:
+        try:
+            asyncio.run(
+                runtime.market_gateway.deregister_installation(
+                    "app",
+                    str(app_id),
+                    str(principal.tenant_id),
+                    str(principal.actor_id),
+                )
+            )
+        except Exception as exc:
+            logger.warning("application deregistration failed: %s", exc)
 
     return success(msg="应用删除成功")
 
@@ -329,7 +394,7 @@ def update_agent_config(
     service = AppService(db)
     cfg = service.update_agent_config(app_id=app_id, data=payload, workspace_id=workspace_id)
     cfg = enrich_agent_config(cfg)
-    return success(data=app_schema.AgentConfig.model_validate(cfg))
+    return success(data=app_schema.AgentConfig.model_validate(cfg), msg="更新 Agent 配置成功")
 
 
 @router.get(
@@ -419,7 +484,10 @@ def update_workflow_config(
     cfg = service.update_workflow_config(
         app_id=app_id, data=payload, workspace_id=workspace_id, redis_client=cache
     )
-    return success(data=workflow_schema.WorkflowConfig.model_validate(cfg))
+    return success(
+        data=workflow_schema.WorkflowConfig.model_validate(cfg),
+        msg="更新工作流配置成功",
+    )
 
 
 @router.post("/{app_id}/publish", summary="发布应用（生成不可变快照）", response_model=ApiResponse)
@@ -439,6 +507,8 @@ def publish_app(
         release_notes=payload.release_notes,
         name=payload.name,
         icon=payload.icon,
+        usage_examples=payload.usage_examples,
+        categories=payload.categories,
     )
     return success(data=service.release_schema(release))
 
@@ -500,31 +570,128 @@ def rollback(
     return success(data=service.release_schema(release))
 
 
-@router.post("/{app_id}/share", summary="分享应用到其他工作空间", response_model=ApiResponse)
+@router.post(
+    "/{app_id}/share",
+    summary="共享应用（发布弹窗三开关）",
+    response_model=ApiResponse,
+)
 def share_app(
         app_id: UUID,
-        payload: app_schema.AppShareCreate,
+        payload: app_schema.AppShareRequest,
         workspace_id: WorkspaceId,
         db: DbSession,
         principal: Caller,
+        runtime: ProcessRuntime = Depends(get_runtime),
 ):
-    """Share an app to other workspaces
+    """发布弹窗的共享入口：三个开关，一次确认（设计文档 §6.0）。
 
-    - Only apps of the caller's own workspace can be shared
-    - Cannot share to the caller's own workspace
-    - The same app cannot be shared to the same workspace twice
+    - 开关 1/2 → 租户资源中心条目（`app_assets`）
+    - 开关 3 → 跨租户社区市场投稿（独立于上面两个，可以只开它）
+
+    **单接口不等于单事务**：本地部分（条目 + `market_sync` 行）原子提交，
+    投稿的 HTTP 在提交之后才发——市场的超时上限是 10 秒，且他的契约明令
+    「禁止在数据库事务内发起 HTTP」。市场不可用时返回 `pending_sync` 而不是
+    报错：本地那半已经生效，可重试而不必让用户重填。
     """
-    service = AppShareService(db)
-    shares = service.share_app(
+
+    if not payload.resource_center.enabled and not payload.community_market.enabled:
+        raise BusinessException(
+            "至少需要打开一个共享范围",
+            BizCode.INVALID_PARAMETER,
+            data={"reason": "EMPTY_SHARE_SCOPE"},
+        )
+
+    asset_service = AssetService(db)
+    result: dict[str, Any] = {
+        "app_id": str(app_id),
+        "release_id": None,
+        "resource_center": None,
+        "community_market": None,
+    }
+
+    # ── 开关 1/2：租户资源中心 ──
+    asset = asset_service.share_to_catalog(
         app_id=app_id,
-        target_workspace_ids=payload.target_workspace_ids,
         user_id=principal.actor_id,
         workspace_id=workspace_id,
-        permission=payload.permission
+        tenant_id=principal.tenant_id,
+        release_id=payload.release_id,
+        enabled=payload.resource_center.enabled,
+        allow_editable=payload.resource_center.allow_editable,
     )
+    if asset is not None:
+        result["release_id"] = str(asset.published_release_id)
+        result["resource_center"] = {
+            "asset_id": str(asset.id),
+            "published_version": asset.published_version,
+            "share_mode": asset.share_mode,
+            "status": asset.status,
+        }
 
-    data = service.share_schemas(shares)
-    return success(data=data, msg=f"应用已分享到 {len(shares)} 个工作空间")
+    # ── 开关 3：社区市场投稿 ──
+    staged: dict[str, Any] | None = None
+    if payload.community_market.enabled:
+        # 投稿编排是社区市场业务，代码在企业扩展包内；开源版没有它，开关 3
+        # 必须在这里就失败（不落任何本地行），而不是留下一半写完的 `market_sync`。
+        submission_factory = get_plugin(MARKET_SUBMISSION_FACTORY)
+        if submission_factory is None:
+            raise BusinessException(
+                "社区市场未在当前部署中启用",
+                BizCode.FEATURE_NOT_AVAILABLE,
+                data={"reason": "MARKET_DISABLED"},
+            )
+        if asset is None:
+            # 只开开关 3：市场投稿需要一条 `app_assets` 行做外键载体，
+            # 但它以 `unpublished` 落库，不在资源中心展示。
+            asset, release = asset_service.ensure_market_carrier(
+                app_id=app_id,
+                user_id=principal.actor_id,
+                workspace_id=workspace_id,
+                tenant_id=principal.tenant_id,
+                release_id=payload.release_id,
+            )
+            staged_release_id = release.id
+        else:
+            staged_release_id = asset.published_release_id
+        result["release_id"] = str(staged_release_id)
+
+        submission = submission_factory(db, market=runtime.market_gateway)
+        prepared = submission.prepare(
+            app_id=app_id,
+            release_id=staged_release_id,
+            tenant_id=principal.tenant_id,
+        )
+        sync = submission.stage_sync(
+            asset_id=asset.id,
+            tenant_id=principal.tenant_id,
+            release_id=staged_release_id,
+            content_hash=prepared["content_hash"],
+        )
+        staged = {
+            "submission": submission,
+            "sync": sync,
+            "manifest": prepared["manifest"],
+            "release_id": staged_release_id,
+            # 依赖的独立条目（§7.5.1 双轨）：投稿时先投依赖、再投应用
+            "dependencies": prepared.get("dependencies") or [],
+        }
+
+    # 本地部分到此为止，一次提交。
+    db.commit()
+
+    if staged is not None:
+        # 事务外发 HTTP（可重试；失败不改本地结果）
+        result["community_market"] = staged["submission"].dispatch(
+            sync=staged["sync"],
+            manifest=staged["manifest"],
+            app_id=app_id,
+            release_id=staged["release_id"],
+            tenant_id=principal.tenant_id,
+            user_id=principal.actor_id,
+            dependencies=staged["dependencies"],
+        )
+
+    return success(data=result, msg="共享已完成")
 
 
 @router.delete(
@@ -741,7 +908,10 @@ def publish_workflow_as_tool(
     )
 
     detail = ToolService(db).get_tool_detail(str(tool_config.id), principal.tenant_id)
-    return success(data=detail or tool_schema.ToolDetailSchema.model_validate(tool_config))
+    return success(
+        data=detail or tool_schema.ToolDetailSchema.model_validate(tool_config),
+        msg="工作流发布为工具成功",
+    )
 
 
 @router.get(
@@ -762,7 +932,7 @@ def preview_workflow_tool_publish(
         workspace_id=workspace_id,
         release_id=release_id,
     )
-    return success(data=preview)
+    return success(data=preview, msg="获取工作流工具发布预览成功")
 
 
 # ==================== DSL / workflow import / export ====================
@@ -800,7 +970,7 @@ def import_workflow_config(
     import_service = WorkflowImportService(db)
     config = yaml.safe_load(raw_text)
     result = import_service.upload_config(platform=platform, config=config, redis_client=cache)
-    return success(data=result)
+    return success(data=result, msg="工作流兼容性分析成功")
 
 
 @router.post("/workflow/import/save", response_model=ApiResponse)

@@ -60,6 +60,7 @@ HEADER_RESOURCE_TYPE = "X-Model-Resource-Type"
 HEADER_RESOURCE_ID = "X-Model-Resource-ID"
 HEADER_TRACE_ID = "X-Trace-Id"
 HEADER_TRACEPARENT = "traceparent"
+HEADER_LANGUAGE_TYPE = "X-Language-Type"
 
 EVENT_STREAM_CONTENT_TYPE = "text/event-stream"
 
@@ -161,6 +162,7 @@ class InvokeTarget:
     resource_id: UUID | None = None
     trace_id: str | None = None
     traceparent: str | None = None
+    language: str | None = None
 
     def headers(self) -> dict[str, str]:
         headers = {
@@ -182,6 +184,8 @@ class InvokeTarget:
             headers[HEADER_TRACE_ID] = self.trace_id
         if self.traceparent:
             headers[HEADER_TRACEPARENT] = self.traceparent
+        if self.language:
+            headers[HEADER_LANGUAGE_TYPE] = self.language
         return headers
 
 
@@ -297,9 +301,15 @@ def decode_frame(event: str, data: str) -> InvokeFrame:
             raise RemoteInvokeProtocolError(f"unknown done status: {status!r}")
         return InvokeDoneFrame(status=status)
     failure = _as_dict(payload, kind="error")
+    detail = str(failure.get("error") or failure.get("message") or "")
+    msg = failure.get("msg")
+    if msg is None and "error" not in failure:
+        # 旧帧只有 message：它同时是用户文案与诊断面（双读兼容）。
+        msg = failure.get("message")
     raise RemoteInvokeFailedError(
         code=failure.get("code"),
-        message=str(failure.get("message") or ""),
+        msg=str(msg) if msg is not None else None,
+        detail=detail,
         attempts=_optional_int(failure.get("attempts")),
         channel_id=_optional_uuid(failure.get("channel_id")),
         retryable=bool(failure.get("retryable")),
@@ -327,10 +337,12 @@ def _optional_uuid(value: Any) -> UUID | None:
 def envelope_failure(payload: dict[str, Any], http_status: int) -> RemoteInvokeFailedError:
     """Failure envelope (``code != 0``) → terminal error."""
 
-    message = payload.get("msg") or payload.get("message") or ""
+    msg = payload.get("msg")
+    detail = payload.get("error") or payload.get("message") or ""
     return RemoteInvokeFailedError(
         code=payload.get("code"),
-        message=str(message),
+        msg=str(msg) if msg is not None else None,
+        detail=str(detail),
         http_status=http_status,
         retryable=http_status >= 500,
     )
@@ -990,6 +1002,7 @@ class RemoteRedBearChatModel(BaseChatModel):
 __all__ = [
     "DONE_STATUSES",
     "EVENT_STREAM_CONTENT_TYPE",
+    "HEADER_LANGUAGE_TYPE",
     "HEADER_RESOURCE_ID",
     "HEADER_RESOURCE_TYPE",
     "HEADER_SOURCE",

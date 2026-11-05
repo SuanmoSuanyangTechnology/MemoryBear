@@ -20,4 +20,4 @@ def timed_stage(trace: CommunityRetrievalTrace, stage: str):
 
 def log_community_trace(trace: CommunityRetrievalTrace, *, operation_id: str, end_user_id: str) -> None:
     logger.info("community_retrieval operation_id=%s end_user_id=%s trace=%s",
-                operation_id, end_user_id, trace.model_dump_json())
+                operation_id, end_user_id, trace.model_dump_json(exclude={"selected_communities", "members", "merged_ranking"}))

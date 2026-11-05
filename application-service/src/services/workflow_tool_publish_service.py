@@ -14,6 +14,7 @@ import logging
 import uuid
 from typing import Any
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from ..errors import BizCode, BusinessException
@@ -22,10 +23,15 @@ from ..models.app_release_model import AppRelease
 from ..models.tool_model import ToolConfig, ToolStatus, ToolType, WorkflowToolConfig
 from ..models.workflow_model import WorkflowConfig
 from ..schemas.tool_schema import WorkflowToolPublishPreviewSchema
+from ..utils.db_locks import acquire_advisory_xact_lock
 from ..utils.model_config_refs import config_ref_ids
 from .model_ref_gate import assert_refs_publishable
 
 logger = logging.getLogger(__name__)
+
+TOOL_NAME_UNIQUE_INDEX = "ux_tool_configs_tenant_type_name_active"
+WORKFLOW_APP_UNIQUE_INDEX = "ux_workflow_tool_configs_app_id"
+
 
 class WorkflowToolPublishService:
     """Workflow tool publish service."""
@@ -157,6 +163,23 @@ class WorkflowToolPublishService:
                 break
         return schema
 
+    def _check_name_duplicate(
+            self,
+            name: str,
+            tenant_id: uuid.UUID,
+            exclude_id: uuid.UUID | None = None,
+    ) -> None:
+        query = self.db.query(ToolConfig).filter(
+            ToolConfig.name == name,
+            ToolConfig.tool_type == ToolType.WORKFLOW.value,
+            ToolConfig.tenant_id == tenant_id,
+            ToolConfig.is_active.is_(True),
+        )
+        if exclude_id:
+            query = query.filter(ToolConfig.id != exclude_id)
+        if query.first():
+            raise BusinessException(f"工具名称 '{name}' 已存在", BizCode.DUPLICATE_NAME)
+
     def get_publish_preview(
             self,
             workflow_app_id: uuid.UUID,
@@ -204,58 +227,82 @@ class WorkflowToolPublishService:
         input_parameters = self._extract_input_parameters(release_config)
         output_schema = self._extract_output_schema(release_config)
 
+        # Serialize one app's publish flow: the app_id uniqueness spans two
+        # tables, and the name probe must stay paired with the write.
+        acquire_advisory_xact_lock(
+            self.db, f"workflow_tool_publish:{workflow_app_id}"
+        )
+
         # Check if already published
         existing_tool = self.db.query(WorkflowToolConfig).filter(
             WorkflowToolConfig.app_id == workflow_app_id
         ).first()
+        self._check_name_duplicate(
+            tool_name,
+            tenant_id,
+            exclude_id=existing_tool.id if existing_tool else None,
+        )
 
-        if existing_tool:
-            # Update existing tool
-            tool_config = self.db.query(ToolConfig).filter(
-                ToolConfig.id == existing_tool.id
-            ).first()
-            tool_config.name = tool_name
-            tool_config.description = tool_description
-            tool_config.is_active = True
-            tool_config.icon = icon
-            if tags is not None:
-                tool_config.tags = tags
+        try:
+            if existing_tool:
+                # Update existing tool
+                tool_config = self.db.query(ToolConfig).filter(
+                    ToolConfig.id == existing_tool.id
+                ).first()
+                tool_config.name = tool_name
+                tool_config.description = tool_description
+                tool_config.is_active = True
+                tool_config.icon = icon
+                if tags is not None:
+                    tool_config.tags = tags
 
-            existing_tool.input_parameters = input_parameters
-            existing_tool.output_schema = output_schema
-            existing_tool.timeout = timeout
-            existing_tool.workflow_config_id = workflow_config.id
-            existing_tool.release_id = release.id
+                existing_tool.input_parameters = input_parameters
+                existing_tool.output_schema = output_schema
+                existing_tool.timeout = timeout
+                existing_tool.workflow_config_id = workflow_config.id
+                existing_tool.release_id = release.id
+
+                self.db.commit()
+                self.db.refresh(tool_config)
+                return tool_config
+
+            # Create new tool
+            tool_id = uuid.uuid4()
+            tool_config = ToolConfig(
+                id=tool_id,
+                name=tool_name,
+                description=tool_description,
+                icon=icon,
+                tool_type=ToolType.WORKFLOW,
+                status=ToolStatus.AVAILABLE,
+                tags=tags or ["workflow"],
+                tenant_id=tenant_id
+            )
+            self.db.add(tool_config)
+
+            workflow_tool_config = WorkflowToolConfig(
+                id=tool_id,
+                app_id=workflow_app_id,
+                workflow_config_id=workflow_config.id,
+                release_id=release.id,
+                input_parameters=input_parameters,
+                output_schema=output_schema,
+                timeout=timeout
+            )
+            self.db.add(workflow_tool_config)
 
             self.db.commit()
             self.db.refresh(tool_config)
             return tool_config
-
-        # Create new tool
-        tool_id = uuid.uuid4()
-        tool_config = ToolConfig(
-            id=tool_id,
-            name=tool_name,
-            description=tool_description,
-            icon=icon,
-            tool_type=ToolType.WORKFLOW,
-            status=ToolStatus.AVAILABLE,
-            tags=tags or ["workflow"],
-            tenant_id=tenant_id
-        )
-        self.db.add(tool_config)
-
-        workflow_tool_config = WorkflowToolConfig(
-            id=tool_id,
-            app_id=workflow_app_id,
-            workflow_config_id=workflow_config.id,
-            release_id=release.id,
-            input_parameters=input_parameters,
-            output_schema=output_schema,
-            timeout=timeout
-        )
-        self.db.add(workflow_tool_config)
-
-        self.db.commit()
-        self.db.refresh(tool_config)
-        return tool_config
+        except IntegrityError as e:
+            self.db.rollback()
+            constraint = str(getattr(e, "orig", e))
+            if WORKFLOW_APP_UNIQUE_INDEX in constraint:
+                raise BusinessException(
+                    "该工作流已发布为工具", BizCode.DUPLICATE_NAME
+                ) from e
+            if TOOL_NAME_UNIQUE_INDEX in constraint:
+                raise BusinessException(
+                    f"工具名称 '{tool_name}' 已存在", BizCode.DUPLICATE_NAME
+                ) from e
+            raise

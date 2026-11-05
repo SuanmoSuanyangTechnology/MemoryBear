@@ -65,14 +65,22 @@ from .stream_output_coordinator import OutputContent, StreamOutputConfig
 from .variable_pool import VariablePool
 from ..nodes import NodeFactory
 from ...utils.workflow_node_types import BRANCH_NODES, HttpErrorHandle
-from ..nodes.llm import LLMNodeConfig
-from ..nodes.code import CodeNodeConfig
-from ..nodes.agent import AgentNodeConfig
 from ..utils.expression_evaluator import evaluate_condition
 from ...utils.workflow_validator import WorkflowValidator
 from ..variable.base_variable import VariableType
 
 logger = logging.getLogger(__name__)
+
+def _uses_default_error_handling(node_config: dict[str, Any]) -> bool:
+    """Read the raw error-handle method instead of parsing the whole node config.
+
+    Graph construction only needs this field; full pydantic parsing here turns
+    unrelated missing fields (e.g. an unselected model) into a build-time
+    failure that bypasses node-level error reporting.
+    """
+    error_handle = node_config.get("error_handle")
+    method = error_handle.get("method") if isinstance(error_handle, dict) else None
+    return method in (None, HttpErrorHandle.NONE.value, HttpErrorHandle.DEFAULT.value)
 
 # Regex to split output into:
 #    - variable placeholders: {{ ... }}
@@ -192,20 +200,8 @@ class GraphBuilder:
         for node_info in source_nodes:
             node_type = self.get_node_type(node_info["id"])
             node_config = self.node_map[node_info["id"]]["config"]
-            if node_type == NodeType.LLM and \
-                    LLMNodeConfig(**node_config).error_handle.method in [
-                HttpErrorHandle.NONE, HttpErrorHandle.DEFAULT
-            ]:
-                non_branch_nodes.append(node_info["id"])
-            elif node_type == NodeType.CODE and \
-                    CodeNodeConfig(**node_config).error_handle.method in [
-                HttpErrorHandle.NONE, HttpErrorHandle.DEFAULT
-            ]:
-                non_branch_nodes.append(node_info["id"])
-            elif node_type == NodeType.AGENT and \
-                    AgentNodeConfig(**node_config).error_handle.method in [
-                HttpErrorHandle.NONE, HttpErrorHandle.DEFAULT
-            ]:
+            if node_type in (NodeType.LLM, NodeType.CODE, NodeType.AGENT) and \
+                    _uses_default_error_handling(node_config):
                 non_branch_nodes.append(node_info["id"])
             elif node_type in BRANCH_NODES:
                 if node_info.get("branch") is not None:

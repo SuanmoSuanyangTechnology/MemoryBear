@@ -7,7 +7,6 @@ from typing import Any
 from urllib.parse import urlparse
 
 from ...config import current_settings
-
 from .client import SandboxServiceClient
 from .errors import SandboxConfigurationError
 
@@ -37,7 +36,9 @@ class SandboxIntegrationRuntime:
             return
         parsed = urlparse(base_url)
         if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-            raise SandboxConfigurationError("SANDBOX_SERVICE_BASE_URL must be an absolute HTTP(S) URL")
+            raise SandboxConfigurationError(
+                "SANDBOX_SERVICE_BASE_URL must be an absolute HTTP(S) URL"
+            )
         if parsed.query or parsed.fragment:
             raise SandboxConfigurationError(
                 "SANDBOX_SERVICE_BASE_URL must not contain query or fragment"

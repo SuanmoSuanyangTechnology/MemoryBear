@@ -166,7 +166,7 @@ async def submit_message_feedback(
         },
     )
     result = {"action": action, "feedback_type": feedback_type}
-    return success(data=app_schema.MessageFeedbackResponse(**result).model_dump(mode="json"))
+    return success(data=app_schema.MessageFeedbackResponse(**result).model_dump(mode="json"), msg="反馈提交成功")
 
 
 @router.get(
@@ -254,5 +254,6 @@ async def get_conversation_feedback(
     return success(
         data=conversation_schema.V1ConversationFeedbackListResponse(
             **result
-        ).model_dump(mode="json")
+        ).model_dump(mode="json"),
+        msg="获取会话反馈状态成功",
     )

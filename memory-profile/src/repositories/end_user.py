@@ -12,6 +12,10 @@ Shapes of the boundary, deliberately different:
   queries that already know the workspace. No join, no ``workspaces`` filter.
 - :func:`scoped_end_user_select` — the narrow-read template over the first
   shape, so a profile read only chooses its columns.
+- :func:`owned_user_select` — historical reads scoped to user and workspace,
+  without new activity-status rules.
+- :func:`active_owned_user_select` — adds the active-user requirement used by
+  display, matching its original API rule without an active-workspace join.
 - :func:`active_workspace_exists` — the ``EXISTS`` form for ``UPDATE``
   statements and other queries that cannot carry the workspace join.
 
@@ -88,9 +92,7 @@ def active_workspace_exists(
     )
 
 
-def scoped_end_user_select(
-    *columns: Any, end_user_id: UUID, workspace_id: UUID
-) -> Select:
+def scoped_end_user_select(*columns: Any, end_user_id: UUID, workspace_id: UUID) -> Select:
     """``SELECT <columns>`` from one active user of one active workspace.
 
     The join and ``LIMIT 1`` belong with the boundary rule, not with each narrow
@@ -108,6 +110,23 @@ def scoped_end_user_select(
             )
         )
         .limit(1)
+    )
+
+
+def owned_user_select(*columns: Any, end_user_id: UUID, workspace_id: UUID) -> Select:
+    """Scope historical reads to their workspace without filtering user activity."""
+    return (
+        select(*columns)
+        .select_from(EndUser)
+        .where(EndUser.id == end_user_id, EndUser.workspace_id == workspace_id)
+        .limit(1)
+    )
+
+
+def active_owned_user_select(*columns: Any, end_user_id: UUID, workspace_id: UUID) -> Select:
+    """The display API's shared active-user membership rule."""
+    return owned_user_select(*columns, end_user_id=end_user_id, workspace_id=workspace_id).where(
+        EndUser.is_active.is_(True)
     )
 
 
@@ -131,15 +150,13 @@ class EndUserRepository:
     def __init__(self, postgres: PostgresManager) -> None:
         self.postgres = postgres
 
-    async def user_exists_in_workspace(
-        self, end_user_id: UUID, workspace_id: UUID
-    ) -> bool:
+    async def user_exists_in_workspace(self, end_user_id: UUID, workspace_id: UUID) -> bool:
         """Strict membership check: active user of an active workspace.
 
-        No merge routing and no payload columns — callers that only need a
+              No merge routing and no payload columns — callers that only need a
         yes/no (interest distribution, statistics) pay one primary-key lookup.
-        A merged-away id is *not* an active user, so it answers ``False``; callers
-        that must route merges use :meth:`resolve_user_in_workspace`.
+              A merged-away id is *not* an active user, so it answers ``False``; callers
+              that must route merges use :meth:`resolve_user_in_workspace`.
         """
 
         statement = (
@@ -148,6 +165,14 @@ class EndUserRepository:
             .join(Workspace, Workspace.id == EndUser.workspace_id)
             .where(*active_user_in_workspace(end_user_id=end_user_id, workspace_id=workspace_id))
             .limit(1)
+        )
+        async with self.postgres.session() as session:
+            return (await session.scalar(statement)) is not None
+
+    async def display_user_exists(self, end_user_id: UUID, workspace_id: UUID) -> bool:
+        """The display API requires an active user belonging to this workspace."""
+        statement = active_owned_user_select(
+            EndUser.id, end_user_id=end_user_id, workspace_id=workspace_id
         )
         async with self.postgres.session() as session:
             return (await session.scalar(statement)) is not None
@@ -203,11 +228,7 @@ class EndUserRepository:
             .order_by(EndUserMerge.id.desc())
             .limit(1)
         )
-        statement = (
-            union_all(direct, merged)
-            .order_by(sa.literal_column("priority"))
-            .limit(1)
-        )
+        statement = union_all(direct, merged).order_by(sa.literal_column("priority")).limit(1)
         async with self.postgres.session() as session:
             row = (await session.execute(statement)).mappings().first()
         if row is None:

@@ -77,6 +77,11 @@ class InternalReadInput(BaseModel):
     limit: int = Field(default=10, description="返回的记忆数量上限", ge=1, le=100)
     skip_summary: bool = Field(default=False, description="跳过摘要")
     enable_rerank: bool = Field(default=False)
+    include_metadata: bool = Field(
+        default=True,
+        description="是否将用户画像 metadata 节点拼入检索结果（不影响拆题与摘要使用的画像上下文；"
+                    "META 策略本身即返回画像，不受该参数影响）",
+    )
 
 
 class WriteMessageItem(BaseModel):

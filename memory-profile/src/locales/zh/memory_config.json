@@ -1,0 +1,77 @@
+{
+  "model": {
+    "not_configured": "{model_type} 模型未配置",
+    "not_found": "{model_type} 模型 {model_id} 不存在",
+    "not_found_with_error": "{model_type} 模型 {model_id} 不存在: {error}",
+    "no_api_key": "{model_type} 模型 {model_name} 没有可用的 API 密钥",
+    "api_verify_failed": "{model_type} 模型 {model_name} API 验证失败: {error}"
+  },
+  "config": {
+    "not_found": "配置不存在: {config_id}",
+    "duplicate_name": "配置名称已存在",
+    "duplicate_name_detail": "当前工作空间下已存在名为「{config_name}」的记忆配置，请使用其他名称"
+  },
+  "workspace": {
+    "no_active_config": "当前工作空间无启用的记忆配置"
+  },
+  "scene_demo": {
+    "no_workspace": "请先切换到一个工作空间",
+    "config_not_found": "配置不存在或无权访问",
+    "invalid_turn_range": "scene_min_turns（最小保护轮次）必须小于 scene_max_turns（最大场景轮次）",
+    "model_unavailable": "场景切分模型暂不可用，请稍后重试",
+    "reason_continue": "{score} > {threshold}，当前 Query 与历史场景的语义连续性较高，判定为保持当前 Scene。",
+    "reason_shifted": "{score} ≤ {threshold}，当前 Query 与历史场景的语义连续性较低，判定为开启新 Scene。",
+    "reason_first_scene": "当前 Query 为首个 Scene 的起点（当前轮次 {turns}），强制开启新 Scene，未调用模型。",
+    "reason_min_turns": "当前 Scene 轮次（{turns}）低于最小保护轮次，强制保持当前 Scene，未调用模型。",
+    "reason_max_turns": "当前 Scene 轮次（{turns}）已达到最大场景轮次，强制开启新 Scene，未调用模型。",
+    "summary_continue_text": "当前 Query 延续已有场景，Scene 保持开放；待后续发生 SHIFT 或会话关闭时再生成摘要。",
+    "summary_continue_hint": "CONTINUE 不关闭 Scene，因此本轮不调用摘要模型。",
+    "summary_shifted_text": "用户围绕近期国际局势、外交政策及大国博弈对全球供应链的影响展开讨论。",
+    "summary_shifted_hint": "摘要对象为切分前的历史 Scene，不包含当前触发 SHIFT 的 Query。"
+  },
+  "success": {
+    "query": "查询成功",
+    "emotion_query": "情绪配置获取成功",
+    "reflection_query": "反思配置查询成功",
+    "create": "创建成功",
+    "update": "更新成功",
+    "emotion_update": "情绪配置更新成功",
+    "reflection_update": "反思配置成功",
+    "delete": "记忆配置删除成功"
+  },
+  "error": {
+    "invalid_config_id": "无效的配置ID: {config_id}",
+    "config_not_found": "配置不存在",
+    "access_denied": "无权访问该配置",
+    "not_found_or_denied": "配置不存在或无权访问",
+    "query_failed": "查询失败",
+    "query_config_failed": "查询配置失败",
+    "query_forgetting_failed": "查询遗忘引擎配置失败",
+    "query_all_failed": "查询所有配置失败",
+    "query_emotion_failed": "获取情绪配置失败: {error}",
+    "query_reflection_failed": "查询反思配置失败: {error}",
+    "create_failed": "创建配置失败",
+    "update_failed": "更新失败",
+    "update_config_failed": "更新配置失败",
+    "update_forgetting_failed": "更新遗忘引擎配置失败",
+    "update_emotion_failed": "更新情绪配置失败: {error}",
+    "save_reflection_failed": "反思配置保存失败: {error}",
+    "delete_failed": "删除配置失败",
+    "preference_invalid": "偏好配置参数错误",
+    "missing_config_id": "缺少必需参数: config_id",
+    "invalid_parameter_with_error": "参数错误: {error}",
+    "no_fields_to_update": "请至少提供一个需要更新的字段",
+    "no_fields_to_update_detail": "config_name, config_desc, scene_id 均为空",
+    "preview_case_invalid": "preview_case 参数不正确",
+    "preview_case_invalid_detail": "unsupported preview_case"
+  },
+  "quota": {
+    "resource": "记忆引擎",
+    "exceeded": "{resource} 配额已超限"
+  },
+  "delete": {
+    "default_not_allowed": "默认配置不允许删除",
+    "in_use": "无法删除记忆配置：当前空间正在使用此配置",
+    "referenced_by_end_users": "无法删除记忆配置：仍有终端用户引用此配置，请使用 force=true 强制删除"
+  }
+}

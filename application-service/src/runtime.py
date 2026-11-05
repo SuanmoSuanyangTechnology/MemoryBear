@@ -8,6 +8,7 @@ from .config import AppServiceSettings
 from .db import DatabaseManager
 from .infrastructure import RedisManager
 from .infrastructure.upstream import MonolithUpstream
+from .protocols.market_gateway import DisabledMarketGateway, MarketGateway
 
 
 class ProcessRuntime:
@@ -18,6 +19,7 @@ class ProcessRuntime:
         self.database = DatabaseManager(settings)
         self.redis = RedisManager(settings)
         self.upstream = MonolithUpstream.from_settings(settings)
+        self.market_gateway: MarketGateway = DisabledMarketGateway()
 
     def _close_sync_resources(self) -> None:
         self.upstream.close()

@@ -33,8 +33,11 @@ from langchain_core.tools import tool
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from ..i18n import get_current_locale
 from ..model_clients import RedBearChatModel
 from ..schemas.model_schema import ModelInfo
+from ..trace import get_trace_id
+from .chat_errors import error_frame, error_payload
 from .model_service import ModelConfigService
 from .multi_agent_variable_contract import (
     render_messages,
@@ -1135,7 +1138,9 @@ class HandoffsService:
             
         except Exception as e:
             logger.error(f"Handoffs stream error: {str(e)}")
-            yield f"event: error\ndata: {json.dumps({'error': str(e)}, ensure_ascii=False)}\n\n"
+            yield error_frame(error_payload(
+                e, locale=get_current_locale(), trace_id=get_trace_id()
+            ))
     
     def get_agents(self) -> List[Dict[str, Any]]:
         """Get the list of available agents"""

@@ -23,7 +23,8 @@ const MENU_DESC_OBJ = {
   SHORT_TERM_MEMORY: 'memoryDetail.shortTermDescription',
   FORGET_MEMORY: 'memoryDetail.forgetDescription',
   EXPLICIT_MEMORY: 'memoryDetail.explicitDescription',
-  IMPLICIT_MEMORY: 'memoryDetail.implicitDescription'
+  IMPLICIT_MEMORY: 'memoryDetail.implicitDescription',
+  EPISODIC_MEMORY: 'memoryDetail.episodicDescription'
 }
 /**
  * Detail page for user memory - renders different memory type views

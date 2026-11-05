@@ -42,18 +42,24 @@ class ModelInvokeFailedError(ModelServiceClientError):
         *,
         biz_code: BizCode,
         message: str,
+        user_msg: str | None = None,
+        detail: str | None = None,
         attempts: int | None = None,
         channel_id: UUID | None = None,
         retryable: bool = False,
         http_status: int | None = None,
     ):
         self.biz_code = biz_code
-        self.message = message
+        self.user_msg = user_msg
+        self.detail = detail if detail is not None else message
+        # ``message`` is a compatibility alias of the diagnostic surface,
+        # matching ``RemoteInvokeFailedError`` in the model package.
+        self.message = self.detail
         self.attempts = attempts
         self.channel_id = channel_id
         self.retryable = retryable
         self.http_status = http_status
-        super().__init__(f"Model invoke failed ({biz_code.name}): {message}")
+        super().__init__(f"Model invoke failed ({biz_code.name}): {self.detail}")
 
 
 _BY_NAME = {code.name: code for code in BizCode}

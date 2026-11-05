@@ -3,10 +3,11 @@ Language detection middleware for i18n system.
 
 This middleware determines the language to use for each request based on:
 1. Query parameter (?lang=en)
-2. Accept-Language HTTP header
-3. User language preference (from database)
-4. Tenant default language
-5. System default language
+2. X-Language-Type HTTP header (frontend UI language)
+3. Accept-Language HTTP header
+4. User language preference (from database)
+5. Tenant default language
+6. System default language
 
 The detected language is injected into request.state.language and
 added to the response Content-Language header.
@@ -77,10 +78,11 @@ class LanguageMiddleware(BaseHTTPMiddleware):
         
         Priority:
         1. Query parameter (?lang=en)
-        2. Accept-Language HTTP header
-        3. User language preference (from database)
-        4. Tenant default language
-        5. System default language
+        2. X-Language-Type HTTP header (frontend UI language)
+        3. Accept-Language HTTP header
+        4. User language preference (from database)
+        5. Tenant default language
+        6. System default language
         
         Args:
             request: The incoming request
@@ -92,12 +94,19 @@ class LanguageMiddleware(BaseHTTPMiddleware):
         
         # 1. Check query parameter (?lang=en)
         if "lang" in request.query_params:
-            lang = request.query_params["lang"].strip().lower()
+            lang = self._normalize_language(request.query_params["lang"])
             if lang:
                 logger.debug(f"Language from query parameter: {lang}")
                 return lang
-        
-        # 2. Check Accept-Language HTTP header
+
+        # 2. Check X-Language-Type header (frontend UI language)
+        if "X-Language-Type" in request.headers:
+            lang = self._normalize_language(request.headers["X-Language-Type"])
+            if lang:
+                logger.debug(f"Language from X-Language-Type header: {lang}")
+                return lang
+
+        # 3. Check Accept-Language HTTP header
         if "Accept-Language" in request.headers:
             lang = self._parse_accept_language(
                 request.headers["Accept-Language"]
@@ -106,7 +115,7 @@ class LanguageMiddleware(BaseHTTPMiddleware):
                 logger.debug(f"Language from Accept-Language header: {lang}")
                 return lang
         
-        # 3. Check user language preference (requires authentication)
+        # 4. Check user language preference (requires authentication)
         # Note: This assumes user is already loaded into request.state by auth middleware
         if hasattr(request.state, "user") and request.state.user:
             user = request.state.user
@@ -116,7 +125,7 @@ class LanguageMiddleware(BaseHTTPMiddleware):
                 )
                 return user.preferred_language
         
-        # 4. Check tenant default language
+        # 5. Check tenant default language
         # Note: This assumes tenant is already loaded into request.state
         if hasattr(request.state, "tenant") and request.state.tenant:
             tenant = request.state.tenant
@@ -126,11 +135,19 @@ class LanguageMiddleware(BaseHTTPMiddleware):
                 )
                 return tenant.default_language
         
-        # 5. Fall back to system default language
+        # 6. Fall back to system default language
         logger.debug(
             f"Using system default language: {settings.I18N_DEFAULT_LANGUAGE}"
         )
         return settings.I18N_DEFAULT_LANGUAGE
+
+    @staticmethod
+    def _normalize_language(value: str) -> str | None:
+        """Base language for ``zh-CN``/``en-US``; unrecognized values fall through."""
+        from app.core.config import settings
+
+        base = value.strip().lower().split("-")[0]
+        return base if base in settings.I18N_SUPPORTED_LANGUAGES else None
 
     def _parse_accept_language(self, header: str) -> Optional[str]:
         """

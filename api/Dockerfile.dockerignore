@@ -20,6 +20,8 @@
 !packages/
 !packages/redbear-model/
 !packages/redbear-model/**
+!packages/error-core/
+!packages/error-core/**
 
 **/__pycache__/**
 **/__pycache__

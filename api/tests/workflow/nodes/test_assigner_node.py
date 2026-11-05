@@ -28,7 +28,7 @@ async def test_assigner_number_add():
             ]
         }
     }
-    await AssignerNode(config, {}).execute(state, variable_pool)
+    await AssignerNode(config, {}, []).execute(state, variable_pool)
     assert variable_pool.get_value("conv.test") == 4
 
 
@@ -51,7 +51,7 @@ async def test_assigner_number_subtract():
             ]
         }
     }
-    await AssignerNode(config, {}).execute(state, variable_pool)
+    await AssignerNode(config, {}, []).execute(state, variable_pool)
     assert variable_pool.get_value("conv.test") == -2
 
 
@@ -74,7 +74,7 @@ async def test_assigner_number_multiply():
             ]
         }
     }
-    await AssignerNode(config, {}).execute(state, variable_pool)
+    await AssignerNode(config, {}, []).execute(state, variable_pool)
     assert variable_pool.get_value("conv.test") == 6
 
 
@@ -97,7 +97,7 @@ async def test_assigner_number_divide():
             ]
         }
     }
-    await AssignerNode(config, {}).execute(state, variable_pool)
+    await AssignerNode(config, {}, []).execute(state, variable_pool)
     assert variable_pool.get_value("conv.test") == 3
 
 
@@ -121,7 +121,7 @@ async def test_assigner_number_assign():
             ]
         }
     }
-    await AssignerNode(config, {}).execute(state, variable_pool)
+    await AssignerNode(config, {}, []).execute(state, variable_pool)
     assert variable_pool.get_value("conv.test") == 4
 
 
@@ -144,7 +144,7 @@ async def test_assigner_number_cover():
             ]
         }
     }
-    await AssignerNode(config, {}).execute(state, variable_pool)
+    await AssignerNode(config, {}, []).execute(state, variable_pool)
     assert variable_pool.get_value("conv.test") == 4
 
 
@@ -166,7 +166,7 @@ async def test_assigner_number_clear():
             ]
         }
     }
-    await AssignerNode(config, {}).execute(state, variable_pool)
+    await AssignerNode(config, {}, []).execute(state, variable_pool)
     assert variable_pool.get_value("conv.test") == 0
 
 
@@ -190,7 +190,7 @@ async def test_assigner_number_append():
                 ]
             }
         }
-        await AssignerNode(config, {}).execute(state, variable_pool)
+        await AssignerNode(config, {}, []).execute(state, variable_pool)
     assert "'NumberOperator' object has no attribute 'append'" in str(exc_info.value)
 
 
@@ -213,7 +213,7 @@ async def test_assigner_number_remove_last():
                 ]
             }
         }
-        await AssignerNode(config, {}).execute(state, variable_pool)
+        await AssignerNode(config, {}, []).execute(state, variable_pool)
     assert "'NumberOperator' object has no attribute 'remove_last'" in str(exc_info.value)
 
 
@@ -236,7 +236,7 @@ async def test_assigner_number_remove_first():
                 ]
             }
         }
-        await AssignerNode(config, {}).execute(state, variable_pool)
+        await AssignerNode(config, {}, []).execute(state, variable_pool)
     assert "'NumberOperator' object has no attribute 'remove_first'" in str(exc_info.value)
 
 
@@ -259,7 +259,7 @@ async def test_assigner_array_append():
             ]
         }
     }
-    await AssignerNode(config, {}).execute(state, variable_pool)
+    await AssignerNode(config, {}, []).execute(state, variable_pool)
     assert variable_pool.get_value("conv.test") == [1, 2, 3]
 
 
@@ -281,7 +281,7 @@ async def test_assigner_array_remove_last():
             ]
         }
     }
-    await AssignerNode(config, {}).execute(state, variable_pool)
+    await AssignerNode(config, {}, []).execute(state, variable_pool)
     assert variable_pool.get_value("conv.test") == [1]
 
 
@@ -303,7 +303,7 @@ async def test_assigner_array_remove_first():
             ]
         }
     }
-    await AssignerNode(config, {}).execute(state, variable_pool)
+    await AssignerNode(config, {}, []).execute(state, variable_pool)
     assert variable_pool.get_value("conv.test") == [2]
 
 
@@ -327,7 +327,7 @@ async def test_assigner_string_assign():
             ]
         }
     }
-    await AssignerNode(config, {}).execute(state, variable_pool)
+    await AssignerNode(config, {}, []).execute(state, variable_pool)
     assert variable_pool.get_value("conv.test") == "world"
 
 
@@ -350,7 +350,7 @@ async def test_assigner_string_cover():
             ]
         }
     }
-    await AssignerNode(config, {}).execute(state, variable_pool)
+    await AssignerNode(config, {}, []).execute(state, variable_pool)
     assert variable_pool.get_value("conv.test") == "world"
 
 
@@ -372,7 +372,7 @@ async def test_assigner_string_clear():
             ]
         }
     }
-    await AssignerNode(config, {}).execute(state, variable_pool)
+    await AssignerNode(config, {}, []).execute(state, variable_pool)
     assert variable_pool.get_value("conv.test") == ""
 
 
@@ -396,7 +396,7 @@ async def test_assigner_string_invalid_operation():
         }
     }
     with pytest.raises(AttributeError) as exc_info:
-        await AssignerNode(config, {}).execute(state, variable_pool)
+        await AssignerNode(config, {}, []).execute(state, variable_pool)
     assert "'StringOperator' object has no attribute 'add'" in str(exc_info.value)
 
 
@@ -420,7 +420,7 @@ async def test_assigner_boolean_assign():
             ]
         }
     }
-    await AssignerNode(config, {}).execute(state, variable_pool)
+    await AssignerNode(config, {}, []).execute(state, variable_pool)
     assert variable_pool.get_value("conv.test") is False
 
 
@@ -443,7 +443,7 @@ async def test_assigner_boolean_cover():
             ]
         }
     }
-    await AssignerNode(config, {}).execute(state, variable_pool)
+    await AssignerNode(config, {}, []).execute(state, variable_pool)
     assert variable_pool.get_value("conv.test") is True
 
 
@@ -465,7 +465,7 @@ async def test_assigner_boolean_clear():
             ]
         }
     }
-    await AssignerNode(config, {}).execute(state, variable_pool)
+    await AssignerNode(config, {}, []).execute(state, variable_pool)
     assert variable_pool.get_value("conv.test") is False
 
 
@@ -489,7 +489,7 @@ async def test_assigner_object_assign():
             ]
         }
     }
-    await AssignerNode(config, {}).execute(state, variable_pool)
+    await AssignerNode(config, {}, []).execute(state, variable_pool)
     assert variable_pool.get_value("conv.test") == {"new_key": "new_value"}
 
 
@@ -512,7 +512,7 @@ async def test_assigner_object_cover():
             ]
         }
     }
-    await AssignerNode(config, {}).execute(state, variable_pool)
+    await AssignerNode(config, {}, []).execute(state, variable_pool)
     assert variable_pool.get_value("conv.test") == {"new_key": "new_value"}
 
 
@@ -534,7 +534,7 @@ async def test_assigner_object_clear():
             ]
         }
     }
-    await AssignerNode(config, {}).execute(state, variable_pool)
+    await AssignerNode(config, {}, []).execute(state, variable_pool)
     assert variable_pool.get_value("conv.test") == {}
 
 
@@ -558,7 +558,7 @@ async def test_assigner_array_string_append():
             ]
         }
     }
-    await AssignerNode(config, {}).execute(state, variable_pool)
+    await AssignerNode(config, {}, []).execute(state, variable_pool)
     assert variable_pool.get_value("conv.test") == ["a", "b", "c"]
 
 
@@ -580,7 +580,7 @@ async def test_assigner_array_string_clear():
             ]
         }
     }
-    await AssignerNode(config, {}).execute(state, variable_pool)
+    await AssignerNode(config, {}, []).execute(state, variable_pool)
     assert variable_pool.get_value("conv.test") == []
 
 
@@ -603,7 +603,7 @@ async def test_assigner_array_object_append():
             ]
         }
     }
-    await AssignerNode(config, {}).execute(state, variable_pool)
+    await AssignerNode(config, {}, []).execute(state, variable_pool)
     assert variable_pool.get_value("conv.test") == [{"id": 1}, {"id": 2}]
 
 
@@ -626,7 +626,7 @@ async def test_assigner_array_assign():
             ]
         }
     }
-    await AssignerNode(config, {}).execute(state, variable_pool)
+    await AssignerNode(config, {}, []).execute(state, variable_pool)
     assert variable_pool.get_value("conv.test") == [3, 4, 5]
 
 
@@ -649,7 +649,7 @@ async def test_assigner_array_cover():
             ]
         }
     }
-    await AssignerNode(config, {}).execute(state, variable_pool)
+    await AssignerNode(config, {}, []).execute(state, variable_pool)
     assert variable_pool.get_value("conv.test") == [3, 4, 5]
 
 
@@ -685,7 +685,7 @@ async def test_assigner_multiple_assignments():
             ]
         }
     }
-    await AssignerNode(config, {}).execute(state, variable_pool)
+    await AssignerNode(config, {}, []).execute(state, variable_pool)
     assert variable_pool.get_value("conv.test1") == 15
     assert variable_pool.get_value("conv.test2") == "world"
     assert variable_pool.get_value("conv.test3") == [1, 2, 3]
@@ -712,7 +712,7 @@ async def test_assigner_variable_reference():
             ]
         }
     }
-    await AssignerNode(config, {}).execute(state, variable_pool)
+    await AssignerNode(config, {}, []).execute(state, variable_pool)
     assert variable_pool.get_value("conv.target") == 100
 
 
@@ -737,7 +737,7 @@ async def test_assigner_divide_by_zero():
         }
     }
     with pytest.raises(ZeroDivisionError):
-        await AssignerNode(config, {}).execute(state, variable_pool)
+        await AssignerNode(config, {}, []).execute(state, variable_pool)
 
 
 @pytest.mark.asyncio
@@ -760,7 +760,7 @@ async def test_assigner_invalid_namespace():
         }
     }
     with pytest.raises(ValueError) as exc_info:
-        await AssignerNode(config, {}).execute(state, variable_pool)
+        await AssignerNode(config, {}, []).execute(state, variable_pool)
     assert "Only conversation or cycle variables can be assigned" in str(exc_info.value)
 
 
@@ -785,7 +785,7 @@ async def test_assigner_empty_array_operations():
             ]
         }
     }
-    await AssignerNode(config, {}).execute(state, variable_pool)
+    await AssignerNode(config, {}, []).execute(state, variable_pool)
     assert variable_pool.get_value("conv.test") == [1]
 
 
@@ -807,7 +807,7 @@ async def test_assigner_remove_from_single_element_array():
             ]
         }
     }
-    await AssignerNode(config, {}).execute(state, variable_pool)
+    await AssignerNode(config, {}, []).execute(state, variable_pool)
     assert variable_pool.get_value("conv.test") == []
 
 
@@ -830,5 +830,5 @@ async def test_assigner_float_operations():
             ]
         }
     }
-    await AssignerNode(config, {}).execute(state, variable_pool)
+    await AssignerNode(config, {}, []).execute(state, variable_pool)
     assert variable_pool.get_value("conv.test") == 21.0

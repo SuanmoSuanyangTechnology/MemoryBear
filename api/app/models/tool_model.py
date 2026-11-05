@@ -1,14 +1,25 @@
 """工具管理相关数据模型"""
 import uuid
-from datetime import datetime
 from enum import StrEnum
 
-from sqlalchemy import Column, String, Text, DateTime, JSON, ForeignKey, Integer, Float, Boolean, text
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    Column,
+    DateTime,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    text,
+)
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 
-from app.db import Base
 from app.core.utils.datetime_utils import utcnow_naive
+from app.db import Base
 
 
 class ToolType(StrEnum):
@@ -97,6 +108,16 @@ class ExecutionStatus(StrEnum):
 class ToolConfig(Base):
     """工具配置基础模型"""
     __tablename__ = "tool_configs"
+    __table_args__ = (
+        Index(
+            "ux_tool_configs_tenant_type_name_active",
+            "tenant_id",
+            "tool_type",
+            "name",
+            unique=True,
+            postgresql_where=text("is_active = TRUE"),
+        ),
+    )
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name = Column(String(255), nullable=False, index=True)
@@ -112,6 +133,19 @@ class ToolConfig(Base):
     # 元数据
     version = Column(String(50), default="1.0.0")
     tags = Column(JSON, default=list)  # 标签列表
+
+# 来源列（§11.2）：只记录本地副本的来源，投稿状态由 market-service 权威持有
+    origin = Column(
+        String(16), nullable=False, default="local", server_default="local", index=True,
+        comment="local（本租户创建）| external（从市场安装）",
+    )
+    external_source = Column(String(32), nullable=True, comment="本期固定 community_market")
+    external_resource_id = Column(
+        String(64), nullable=True, index=True, comment="market_resources.id",
+    )
+    external_version = Column(
+        String(64), nullable=True, comment="安装时的市场版本，不随市场新版本变化",
+    )
 
     # 逻辑删除标志
     is_active = Column(Boolean, default=True, server_default='true', nullable=False, index=True, comment="是否可用，False表示已删除")
@@ -301,6 +335,9 @@ class ToolExecution(Base):
 class WorkflowToolConfig(Base):
     """工作流工具配置模型"""
     __tablename__ = "workflow_tool_configs"
+    __table_args__ = (
+        Index("ux_workflow_tool_configs_app_id", "app_id", unique=True),
+    )
 
     id = Column(UUID(as_uuid=True), ForeignKey("tool_configs.id"), primary_key=True)
     app_id = Column(UUID(as_uuid=True), nullable=False, index=True)

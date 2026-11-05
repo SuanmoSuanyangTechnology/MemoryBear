@@ -2,12 +2,14 @@
 import logging
 
 import json
-from typing import Dict, Any, List, Optional, Type
+from typing import Any, Dict, Iterable, List, Optional, Type
 from pydantic import BaseModel, Field
 from langchain.tools import BaseTool as LangchainBaseTool
 from langchain_core.tools import ToolException
 
+from ..models.tool_model import ToolType
 from .base import BaseTool, ToolResult, ToolParameter, ParameterType
+from .selection import normalize_tool_selection
 from .serialization import serialize_tool_parameter
 
 logger = logging.getLogger(__name__)
@@ -55,6 +57,135 @@ def format_tool_argument_error(error: Exception) -> str:
     )
 
 
+def _operation_enum(tool: BaseTool) -> Optional[List[str]]:
+    """Return the tool's operation choices, when it declares an operation parameter."""
+    for param in tool.parameters:
+        if param.name == "operation" and param.enum:
+            return list(param.enum)
+    return None
+
+
+def _mcp_cached_tool_names(tool: BaseTool) -> List[str]:
+    """Return the MCP method names from the instance's cached ``available_tools``."""
+    names: List[str] = []
+    for item in getattr(tool, "available_tools", None) or []:
+        if isinstance(item, dict):
+            candidates = [name for name in item.keys() if name]
+        elif isinstance(item, str):
+            candidates = [item]
+        else:
+            continue
+        for name in candidates:
+            if name not in names:
+                names.append(name)
+    return names
+
+
+def _custom_operations(tool: BaseTool) -> List[str]:
+    """Return the operation ids parsed from a custom tool's OpenAPI schema."""
+    parsed = getattr(tool, "_parsed_operations", None)
+    if isinstance(parsed, dict):
+        return [name for name in parsed.keys() if name]
+    return []
+
+
+def _operation_bindable(
+    tool: BaseTool,
+    tool_type: str,
+    operation: str,
+    enum: Optional[List[str]],
+) -> bool:
+    """Whether a stored operation still exists on the runtime tool instance."""
+    if tool_type == ToolType.MCP.value:
+        names = _mcp_cached_tool_names(tool)
+        return bool(names) and operation in names
+    if tool_type == ToolType.CUSTOM.value:
+        operations = _custom_operations(tool)
+        return bool(operations) and operation in operations
+    if tool_type == ToolType.BUILTIN.value:
+        return enum is None or operation in enum
+    return True
+
+
+def expand_tool_selection(tool: BaseTool, operation: Optional[str] = None) -> List[Optional[str]]:
+    """Expand one saved tool selection into the operations bound at runtime.
+
+    Runtime plane only: reads the tool instance in memory and never queries the
+    database or asks an MCP server for its live method list. ``[None]`` means a
+    whole-tool wrapper; an empty list means the selection cannot run and the
+    caller must skip it.
+    """
+    tool_type = tool.tool_type.value
+    enum = _operation_enum(tool)
+    normalized = normalize_tool_selection(
+        tool_type, operation, has_operation_enum=enum is not None
+    )
+
+    if tool_type == ToolType.WORKFLOW.value:
+        return [None]
+
+    if normalized:
+        if not _operation_bindable(tool, tool_type, normalized, enum):
+            logger.warning(
+                "tool_selection_unavailable tool_id=%s tool_type=%s operation=%s reason=operation_not_found",
+                tool.tool_id, tool_type, normalized,
+            )
+            return []
+        return [normalized]
+
+    if tool_type == ToolType.MCP.value:
+        names = _mcp_cached_tool_names(tool)
+        if not names:
+            logger.warning(
+                "tool_selection_unavailable tool_id=%s tool_type=%s reason=mcp_methods_cache_empty",
+                tool.tool_id, tool_type,
+            )
+        return names
+    if tool_type == ToolType.CUSTOM.value:
+        operations = _custom_operations(tool)
+        if not operations:
+            logger.warning(
+                "tool_selection_unavailable tool_id=%s tool_type=%s reason=custom_operations_empty",
+                tool.tool_id, tool_type,
+            )
+            return []
+        return operations if len(operations) > 1 else [None]
+    if tool_type == ToolType.BUILTIN.value and enum:
+        return list(enum)
+    return [None]
+
+
+def plan_tool_selections(
+    selections: Iterable[tuple[Any, Optional[str]]],
+) -> List[tuple[str, Optional[str]]]:
+    """Normalize a tool list before expansion.
+
+    A whole-tool selection (``operation=None``) suppresses every method-level
+    entry for the same tool, regardless of order; duplicate
+    ``(tool_id, operation)`` pairs keep the first occurrence.
+    """
+    entries: List[tuple[str, Optional[str]]] = []
+    for tool_id, operation in selections:
+        normalized_id = str(tool_id).strip() if tool_id else ""
+        if not normalized_id:
+            continue
+        entries.append((normalized_id, operation or None))
+
+    whole_tools = {tool_id for tool_id, operation in entries if operation is None}
+    planned: List[tuple[str, Optional[str]]] = []
+    seen: set[tuple[str, Optional[str]]] = set()
+    for tool_id, operation in entries:
+        if operation is not None and tool_id in whole_tools:
+            logger.debug("二级工具选择覆盖三级条目: tool_id=%s operation=%s", tool_id, operation)
+            continue
+        key = (tool_id, operation)
+        if key in seen:
+            continue
+        seen.add(key)
+        planned.append(key)
+    return planned
+
+
 class LangchainToolWrapper(LangchainBaseTool):
     """Langchain tool wrapper"""
     
@@ -78,9 +209,9 @@ class LangchainToolWrapper(LangchainBaseTool):
             tool_instance: Internal tool instance
             operation: Specific operation (for custom tools)
         """
-        # Dynamically create the argument schema
+        # Dynamically create the argument schema for the bound operation
         args_schema = LangchainAdapter._create_pydantic_schema(
-            tool_instance.parameters, operation
+            tool_instance.parameters_for_operation(operation), operation
         )
         
         # Build the tool name
@@ -221,6 +352,16 @@ class LangchainAdapter:
         new_tool = copy.deepcopy(mcp_tool)
         new_tool.set_current_tool(tool_name)
         return new_tool
+
+    @staticmethod
+    def convert_selection(
+        tool: BaseTool, operation: Optional[str] = None
+    ) -> List[LangchainToolWrapper]:
+        """Expand one saved selection and convert every expanded operation."""
+        return [
+            LangchainAdapter.convert_tool(tool, expanded)
+            for expanded in expand_tool_selection(tool, operation)
+        ]
 
     @staticmethod
     def convert_tools(tools: List[BaseTool]) -> List[LangchainToolWrapper]:

@@ -11,6 +11,7 @@ dependencies = [
     "pydantic>=2.12,<3",
     "cryptography>=43",
     "sqlalchemy>=2.0,<3",
+    "error-core",
 ]
 
 [project.optional-dependencies]
@@ -47,6 +48,7 @@ packages = ["src/redbear_model"]
 
 [tool.uv.sources]
 memorybear-grpc = { path = "../memorybear-grpc" }
+error-core = { path = "../error-core" }
 
 # Resolve through the mirror so re-locks keep every lock URL on it.
 [[tool.uv.index]]

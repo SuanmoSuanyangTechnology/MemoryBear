@@ -19,5 +19,5 @@ async def test_loop_breaker():
     }
     state = simple_state()
     variable_pool = await simple_vairable_pool("test")
-    await BreakNode(node_config, {}).execute(state, variable_pool)
+    await BreakNode(node_config, {}, []).execute(state, variable_pool)
     assert state["looping"] == 2
