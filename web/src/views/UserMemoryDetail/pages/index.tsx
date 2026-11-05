@@ -22,6 +22,7 @@ const MENU_LIST = ['PERCEPTUAL_MEMORY', 'WORKING_MEMORY', 'EMOTIONAL_MEMORY', 'S
 const MENU_DESC_OBJ = {
   SHORT_TERM_MEMORY: 'memoryDetail.shortTermDescription',
   FORGET_MEMORY: 'memoryDetail.forgetDescription',
+  EXPLICIT_MEMORY: 'memoryDetail.explicitDescription',
   IMPLICIT_MEMORY: 'memoryDetail.implicitDescription'
 }
 /**
