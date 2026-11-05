@@ -277,7 +277,6 @@ export const memoryConversation = {
         communitySearched: 'Community recall',
         communityScenesSearched: 'Scene retrieval within communities',
         communityEvidencePacked: 'Evidence preparation',
-        communityTrace: 'Retrieval trace and references',
         requestMode: 'Request and read mode',
         queryPreprocess: 'Query preprocessing',
         problemSplit: 'Problem split',

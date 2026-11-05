@@ -277,7 +277,6 @@ export const memoryConversation = {
         communitySearched: '检索相关社区',
         communityScenesSearched: '检索社区内场景',
         communityEvidencePacked: '合并去重与包装',
-        communityTrace: '检索轨迹与引用关系',
         requestMode: '请求与读取模式',
         queryPreprocess: 'Query 预处理',
         problemSplit: '问题拆分',

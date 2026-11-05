@@ -27,13 +27,11 @@ const COMMUNITY_MEMORY_STAGES = [
 
 export type MemoryStageKey = typeof SPLIT_MEMORY_STAGES[number] | typeof COMMUNITY_MEMORY_STAGES[number]
 
-export const getMemoryStages = (searchSwitch: string): readonly MemoryStageKey[] => (
-  searchSwitch === '6'
-    ? COMMUNITY_MEMORY_STAGES
-    : ['0', '1'].includes(searchSwitch)
-    ? SPLIT_MEMORY_STAGES
-    : DIRECT_MEMORY_STAGES
-)
+export const getMemoryStages = (searchSwitch: string): readonly MemoryStageKey[] => {
+  if (searchSwitch === '6') return COMMUNITY_MEMORY_STAGES
+  if (['0', '1'].includes(searchSwitch)) return SPLIT_MEMORY_STAGES
+  return DIRECT_MEMORY_STAGES
+}
 
 export const MEMORY_STAGE_ALIASES = {
   community_searched: 'communitySearched',

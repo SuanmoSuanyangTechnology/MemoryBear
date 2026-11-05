@@ -7,6 +7,11 @@ interface CommunityStageContentProps {
   stage: MemoryStageKey
   log: LogItem
 }
+const EMPTY_TEXT_KEY: Record<string, string> = {
+  skipped: 'skipped',
+  failed: 'failed',
+  running: 'running'
+}
 
 const asRecord = (value: unknown): Record<string, unknown> => (
   value && typeof value === 'object' && !Array.isArray(value)
@@ -33,7 +38,7 @@ const CommunityStageContent = ({ stage, log }: CommunityStageContentProps) => {
       )}
       {!items.length && !emptyReason && (
         <p className="rb:text-gray-500">
-          {t(`memoryConversation.${log.status === 'skipped' ? 'skipped' : log.status === 'failed' ? 'failed' : log.status === 'running' ? 'running' : 'communityAnalysis.empty'}`)}
+          {t(`memoryConversation.${EMPTY_TEXT_KEY[log.status as string] || 'communityAnalysis.empty'}`)}
         </p>
       )}
       {items.map((item, index) => (
