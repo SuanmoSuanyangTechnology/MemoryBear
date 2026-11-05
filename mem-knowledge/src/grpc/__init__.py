@@ -1,0 +1,1 @@
+"""gRPC adapter layer for the knowledge service."""
