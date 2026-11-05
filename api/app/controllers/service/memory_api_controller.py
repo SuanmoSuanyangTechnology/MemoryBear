@@ -20,8 +20,9 @@ from app.core.api_key_utils import get_current_user_snapshot_from_api_key_async,
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
 from app.core.logging_config import get_business_logger
-from app.core.memory.enums import Neo4jNodeType, SearchStrategy
+from app.core.memory.enums import SearchStrategy
 from app.core.memory.memory_service import MemoryService
+from app.core.memory.storage.enums import MemoryNodeType
 from app.core.quota_stub import check_end_user_quota
 from app.core.response_utils import success, fail
 from app.db import get_db, get_async_db_context, get_async_db
@@ -163,6 +164,9 @@ async def read_memory_internal(
     Requires API Key with 'memory' scope.
     Extended version of /read/sync that supports `include` (Neo4j node types filter)
     and `limit` (max memories to return).
+    ``include_metadata`` (default True) controls whether the user profile metadata
+    is loaded at all: when False it is excluded from both the returned memories and
+    the query-splitting / summary context.
     """
     body = await request.json()
     payload = InternalReadInput(**body)
@@ -177,10 +181,11 @@ async def read_memory_internal(
     logger.info(
         f"V1 memory read (internal) - end_user_id: {payload.end_user_id}, workspace: {api_key_auth.workspace_id}")
 
-    # Resolve include strings to Neo4jNodeType enum values
+    # Resolve include strings to storage layer labels: MemoryStorageService 的
+    # verify_label 要求 MemoryNodeLabel 子类实例，Neo4jNodeType 会被拒绝
     includes = None
     if payload.includes:
-        includes = [Neo4jNodeType(t) for t in payload.includes]
+        includes = [MemoryNodeType(t) for t in payload.includes]
 
     service = await MemoryService.create(
         config_id,
@@ -194,6 +199,7 @@ async def read_memory_internal(
         includes=includes,
         skip_summary=payload.skip_summary,
         enable_rerank=payload.enable_rerank,
+        include_metadata=payload.include_metadata,
     )
     return success(data={
         "answer": memory.content,

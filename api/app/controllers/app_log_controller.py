@@ -84,7 +84,7 @@ def list_app_logs(
 
     meta = PageMeta(page=page, pagesize=pagesize, total=total, hasnext=(page * pagesize) < total)
 
-    return success(data=PageData(page=meta, items=items))
+    return success(data=PageData(page=meta, items=items), msg="获取应用日志列表成功")
 
 
 @router.get("/{app_id}/workflow-executions", summary="应用日志 - 工作流执行列表")
@@ -120,7 +120,7 @@ def list_workflow_execution_logs(
     )
     items = [WorkflowExecutionLog.model_validate(execution) for execution in executions]
     meta = PageMeta(page=page, pagesize=pagesize, total=total, hasnext=(page * pagesize) < total)
-    return success(data=PageData(page=meta, items=items))
+    return success(data=PageData(page=meta, items=items), msg="获取工作流执行日志成功")
 
 
 @router.get("/{app_id}/workflow-executions/{execution_id}", summary="应用日志 - 工作流执行详情")
@@ -257,4 +257,4 @@ def get_app_log_detail(
         agent_execution_summary=agent_execution_summary,
     )
 
-    return success(data=detail)
+    return success(data=detail, msg="获取会话日志详情成功")

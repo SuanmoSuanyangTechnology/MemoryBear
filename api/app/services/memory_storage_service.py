@@ -1164,128 +1164,12 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
             })
 
 
-# -------------------- Neo4j Search & Analytics (fused from data_search_service.py) --------------------
-# Ensure env for connector (e.g., NEO4J_PASSWORD)
-
-
-async def search_dialogue(end_user_id: Optional[str] = None) -> Dict[str, Any]:
-    result = await _neo4j_connector.execute_query(
-        MemoryConfigRepository.SEARCH_FOR_DIALOGUE,
-        end_user_id=end_user_id,
-    )
-    data = {"search_for": "dialogue", "num": result[0]["num"]}
-    return data
-
-
-async def search_chunk(end_user_id: Optional[str] = None) -> Dict[str, Any]:
-    result = await _neo4j_connector.execute_query(
-        MemoryConfigRepository.SEARCH_FOR_CHUNK,
-        end_user_id=end_user_id,
-    )
-    data = {"search_for": "chunk", "num": result[0]["num"]}
-    return data
-
-
-async def search_statement(end_user_id: Optional[str] = None) -> Dict[str, Any]:
-    result = await _neo4j_connector.execute_query(
-        MemoryConfigRepository.SEARCH_FOR_STATEMENT,
-        end_user_id=end_user_id,
-    )
-    data = {"search_for": "statement", "num": result[0]["num"]}
-    return data
-
-
 async def search_entity(end_user_id: Optional[str] = None) -> Dict[str, Any]:
     result = await _neo4j_connector.execute_query(
         MemoryConfigRepository.SEARCH_FOR_ENTITY,
         end_user_id=end_user_id,
     )
     data = {"search_for": "entity", "num": result[0]["num"]}
-    return data
-
-
-async def kb_type_distribution(end_user_id: Optional[str] = None) -> Dict[str, Any]:
-    """统一知识库类型分布接口。
-
-    聚合 dialogue/chunk/statement/entity 四类计数，返回统一的分布结构，便于前端一次性消费。
-    """
-    result = await _neo4j_connector.execute_query(
-        MemoryConfigRepository.SEARCH_FOR_ALL,
-        end_user_id=end_user_id,
-    )
-
-    # 检查结果是否为空或长度不足
-    if not result or len(result) < 4:
-        data = {
-            "total": 0,
-            "distribution": [
-                {"type": "dialogue", "count": 0},
-                {"type": "chunk", "count": 0},
-                {"type": "statement", "count": 0},
-                {"type": "entity", "count": 0},
-            ]
-        }
-        return data
-
-    total = result[-1]["Count"]
-    distribution = [
-        {"type": "dialogue", "count": result[0]["Count"]},
-        {"type": "chunk", "count": result[1]["Count"]},
-        {"type": "statement", "count": result[2]["Count"]},
-        {"type": "entity", "count": result[3]["Count"]},
-    ]
-
-    data = {"total": total, "distribution": distribution}
-    return data
-
-
-async def search_detials(end_user_id: Optional[str] = None) -> List[Dict[str, Any]]:
-    result = await _neo4j_connector.execute_query(
-        MemoryConfigRepository.SEARCH_FOR_DETIALS,
-        end_user_id=end_user_id,
-    )
-    return result
-
-
-async def search_edges(end_user_id: Optional[str] = None) -> List[Dict[str, Any]]:
-    result = await _neo4j_connector.execute_query(
-        MemoryConfigRepository.SEARCH_FOR_EDGES,
-        end_user_id=end_user_id,
-    )
-    return result
-
-
-async def search_all_batch(end_user_ids: List[str], connector: Neo4jConnector = None) -> Dict[str, int]:
-    """批量查询多个用户的记忆数量（简化版本，只返回total）
-
-    Args:
-        end_user_ids: 用户ID列表
-        connector: 可选的 Neo4j 连接器。为 None 时使用模块级共享 connector（适用于 FastAPI）；
-                   Celery 任务中应传入独立 connector 以避免跨 event loop 问题。
-
-    Returns:
-        Dict[str, int]: 以user_id为key的记忆数量字典
-        格式: {"user_id": total_count}
-    """
-    if not end_user_ids:
-        return {}
-
-    neo4j = connector or _neo4j_connector
-    result = await neo4j.execute_query(
-        MemoryConfigRepository.SEARCH_FOR_ALL_BATCH,
-        end_user_ids=end_user_ids,
-    )
-
-    # 转换结果为字典格式，字典格式在查询中无需遍历结果集，直接返回
-    data = {}
-    for row in result:
-        data[row["user_id"]] = row["total"]
-
-    # 为没有数据的用户填充默认值，转换字典格式还为无数据填充默认值
-    for user_id in end_user_ids:
-        if user_id not in data:
-            data[user_id] = 0
-
     return data
 
 

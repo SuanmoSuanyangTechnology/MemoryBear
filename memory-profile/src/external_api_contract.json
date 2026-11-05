@@ -1,5 +1,909 @@
 {
   "routes": {
+    "DELETE /internal/v1/memory_config/delete_config": {
+      "endpoint": "delete_config",
+      "parameters": {
+        "query:config_id": {
+          "annotation": "str",
+          "constraints": [],
+          "default": null,
+          "in": "query",
+          "required": true
+        }
+      },
+      "response": {
+        "declared": [],
+        "fields": {
+          "code": {
+            "annotation": "int",
+            "constraints": [],
+            "default": 0,
+            "required": false
+          },
+          "data": {
+            "annotation": "src.schemas.memory_config.DeleteConfigResult",
+            "constraints": [],
+            "default": null,
+            "fields": {
+              "config_id": {
+                "annotation": "str",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "is_default": {
+                "annotation": "bool",
+                "constraints": [],
+                "default": null,
+                "required": true
+              }
+            },
+            "required": true
+          },
+          "error": {
+            "annotation": "str",
+            "constraints": [],
+            "default": "",
+            "required": false
+          },
+          "msg": {
+            "annotation": "str",
+            "constraints": [],
+            "default": "OK",
+            "required": false
+          },
+          "time": {
+            "annotation": "int",
+            "constraints": [],
+            "default": "<factory:now_ms#5bec5d10ddf5>",
+            "required": false
+          }
+        },
+        "model": "src.common.responses.ApiResponse[DeleteConfigResult]",
+        "status_code": 200
+      }
+    },
+    "GET /internal/v1/memory-display/all": {
+      "endpoint": "get_all",
+      "parameters": {
+        "header:language_type": {
+          "annotation": "str | None",
+          "constraints": [
+            "alias=X-Language-Type"
+          ],
+          "default": null,
+          "in": "header",
+          "required": false
+        },
+        "query:end_time": {
+          "annotation": "int | None",
+          "constraints": [],
+          "default": null,
+          "in": "query",
+          "required": false
+        },
+        "query:end_user_id": {
+          "annotation": "str | None",
+          "constraints": [],
+          "default": null,
+          "in": "query",
+          "required": false
+        },
+        "query:include_engines": {
+          "annotation": "bool",
+          "constraints": [],
+          "default": true,
+          "in": "query",
+          "required": false
+        },
+        "query:page": {
+          "annotation": "int",
+          "constraints": [
+            "Ge(ge=1)"
+          ],
+          "default": 1,
+          "in": "query",
+          "required": false
+        },
+        "query:pagesize": {
+          "annotation": "int",
+          "constraints": [
+            "Ge(ge=1)",
+            "Le(le=100)"
+          ],
+          "default": 10,
+          "in": "query",
+          "required": false
+        },
+        "query:start_time": {
+          "annotation": "int | None",
+          "constraints": [],
+          "default": null,
+          "in": "query",
+          "required": false
+        },
+        "query:timezone": {
+          "annotation": "str",
+          "constraints": [],
+          "default": null,
+          "in": "query",
+          "required": true
+        }
+      },
+      "response": {
+        "declared": [],
+        "fields": {
+          "code": {
+            "annotation": "int",
+            "constraints": [],
+            "default": 0,
+            "required": false
+          },
+          "data": {
+            "annotation": "src.common.pagination.PageData[Annotated[Union[AllWrittenItem, AllRetrievedItem, AllEngineItem], FieldInfo(annotation=NoneType, required=True, discriminator='source')]]",
+            "config": {
+              "extra": "forbid"
+            },
+            "constraints": [],
+            "default": null,
+            "fields": {
+              "items": {
+                "annotation": "list[src.schemas.display.AllWrittenItem | src.schemas.display.AllRetrievedItem | src.schemas.display.AllEngineItem]",
+                "constraints": [],
+                "default": null,
+                "required": true,
+                "variants": {
+                  "src.schemas.display.AllEngineItem": {
+                    "fields": {
+                      "content": {
+                        "annotation": "str",
+                        "constraints": [],
+                        "default": null,
+                        "required": true
+                      },
+                      "end_user_id": {
+                        "annotation": "str | None",
+                        "constraints": [],
+                        "default": null,
+                        "required": true
+                      },
+                      "engine_type": {
+                        "annotation": "str",
+                        "constraints": [],
+                        "default": null,
+                        "required": true
+                      },
+                      "id": {
+                        "annotation": "str",
+                        "constraints": [],
+                        "default": null,
+                        "required": true
+                      },
+                      "name": {
+                        "annotation": "str",
+                        "constraints": [],
+                        "default": null,
+                        "required": true
+                      },
+                      "occurred_at": {
+                        "annotation": "int",
+                        "constraints": [],
+                        "default": null,
+                        "required": true
+                      },
+                      "source": {
+                        "annotation": "Literal[engines]",
+                        "constraints": [],
+                        "default": null,
+                        "required": true
+                      }
+                    }
+                  },
+                  "src.schemas.display.AllRetrievedItem": {
+                    "fields": {
+                      "content": {
+                        "annotation": "str",
+                        "constraints": [],
+                        "default": null,
+                        "required": true
+                      },
+                      "end_user_id": {
+                        "annotation": "str",
+                        "constraints": [],
+                        "default": null,
+                        "required": true
+                      },
+                      "id": {
+                        "annotation": "str",
+                        "constraints": [],
+                        "default": null,
+                        "required": true
+                      },
+                      "occurred_at": {
+                        "annotation": "int | None",
+                        "constraints": [],
+                        "default": null,
+                        "required": true
+                      },
+                      "query": {
+                        "annotation": "str",
+                        "constraints": [],
+                        "default": null,
+                        "required": true
+                      },
+                      "search_mode": {
+                        "annotation": "str | None",
+                        "constraints": [],
+                        "default": null,
+                        "required": true
+                      },
+                      "source": {
+                        "annotation": "Literal[retrieved]",
+                        "constraints": [],
+                        "default": null,
+                        "required": true
+                      }
+                    }
+                  },
+                  "src.schemas.display.AllWrittenItem": {
+                    "fields": {
+                      "content": {
+                        "annotation": "str",
+                        "constraints": [],
+                        "default": null,
+                        "required": true
+                      },
+                      "end_user_id": {
+                        "annotation": "str",
+                        "constraints": [],
+                        "default": null,
+                        "required": true
+                      },
+                      "id": {
+                        "annotation": "str",
+                        "constraints": [],
+                        "default": null,
+                        "required": true
+                      },
+                      "memory_id": {
+                        "annotation": "str | None",
+                        "constraints": [],
+                        "default": null,
+                        "required": true
+                      },
+                      "memory_type": {
+                        "annotation": "str | None",
+                        "constraints": [],
+                        "default": null,
+                        "required": true
+                      },
+                      "name": {
+                        "annotation": "str | None",
+                        "constraints": [],
+                        "default": null,
+                        "required": true
+                      },
+                      "occurred_at": {
+                        "annotation": "int | None",
+                        "constraints": [],
+                        "default": null,
+                        "required": true
+                      },
+                      "source": {
+                        "annotation": "Literal[written]",
+                        "constraints": [],
+                        "default": null,
+                        "required": true
+                      }
+                    }
+                  }
+                }
+              },
+              "page": {
+                "annotation": "src.common.pagination.PageMeta",
+                "config": {
+                  "extra": "forbid"
+                },
+                "constraints": [],
+                "default": null,
+                "fields": {
+                  "hasnext": {
+                    "annotation": "bool",
+                    "constraints": [],
+                    "default": null,
+                    "required": true
+                  },
+                  "page": {
+                    "annotation": "int",
+                    "constraints": [
+                      "Ge(ge=1)"
+                    ],
+                    "default": null,
+                    "required": true
+                  },
+                  "pagesize": {
+                    "annotation": "int",
+                    "constraints": [
+                      "Ge(ge=0)"
+                    ],
+                    "default": null,
+                    "required": true
+                  },
+                  "total": {
+                    "annotation": "int",
+                    "constraints": [
+                      "Ge(ge=0)"
+                    ],
+                    "default": null,
+                    "required": true
+                  }
+                },
+                "required": true
+              }
+            },
+            "required": true
+          },
+          "error": {
+            "annotation": "str",
+            "constraints": [],
+            "default": "",
+            "required": false
+          },
+          "msg": {
+            "annotation": "str",
+            "constraints": [],
+            "default": "OK",
+            "required": false
+          },
+          "time": {
+            "annotation": "int",
+            "constraints": [],
+            "default": "<factory:now_ms#5bec5d10ddf5>",
+            "required": false
+          }
+        },
+        "model": "src.common.responses.ApiResponse[PageData[Annotated[Union[AllWrittenItem, AllRetrievedItem, AllEngineItem], FieldInfo(annotation=NoneType, required=True, discriminator='source')]]]",
+        "status_code": 200
+      }
+    },
+    "GET /internal/v1/memory-display/engines": {
+      "endpoint": "get_engines",
+      "parameters": {
+        "header:language_type": {
+          "annotation": "str | None",
+          "constraints": [
+            "alias=X-Language-Type"
+          ],
+          "default": null,
+          "in": "header",
+          "required": false
+        },
+        "query:end_time": {
+          "annotation": "int | None",
+          "constraints": [],
+          "default": null,
+          "in": "query",
+          "required": false
+        },
+        "query:end_user_id": {
+          "annotation": "str | None",
+          "constraints": [],
+          "default": null,
+          "in": "query",
+          "required": false
+        },
+        "query:page": {
+          "annotation": "int",
+          "constraints": [
+            "Ge(ge=1)"
+          ],
+          "default": 1,
+          "in": "query",
+          "required": false
+        },
+        "query:pagesize": {
+          "annotation": "int",
+          "constraints": [
+            "Ge(ge=1)",
+            "Le(le=100)"
+          ],
+          "default": 10,
+          "in": "query",
+          "required": false
+        },
+        "query:start_time": {
+          "annotation": "int | None",
+          "constraints": [],
+          "default": null,
+          "in": "query",
+          "required": false
+        },
+        "query:timezone": {
+          "annotation": "str",
+          "constraints": [],
+          "default": null,
+          "in": "query",
+          "required": true
+        }
+      },
+      "response": {
+        "declared": [],
+        "fields": {
+          "code": {
+            "annotation": "int",
+            "constraints": [],
+            "default": 0,
+            "required": false
+          },
+          "data": {
+            "annotation": "src.common.pagination.PageData[EngineItem]",
+            "config": {
+              "extra": "forbid"
+            },
+            "constraints": [],
+            "default": null,
+            "fields": {
+              "items": {
+                "annotation": "list[src.schemas.display.EngineItem]",
+                "constraints": [],
+                "default": null,
+                "fields": {
+                  "content": {
+                    "annotation": "str",
+                    "constraints": [],
+                    "default": null,
+                    "required": true
+                  },
+                  "end_user_id": {
+                    "annotation": "str | None",
+                    "constraints": [],
+                    "default": null,
+                    "required": true
+                  },
+                  "engine_type": {
+                    "annotation": "str",
+                    "constraints": [],
+                    "default": null,
+                    "required": true
+                  },
+                  "id": {
+                    "annotation": "str",
+                    "constraints": [],
+                    "default": null,
+                    "required": true
+                  },
+                  "name": {
+                    "annotation": "str",
+                    "constraints": [],
+                    "default": null,
+                    "required": true
+                  },
+                  "occurred_at": {
+                    "annotation": "int",
+                    "constraints": [],
+                    "default": null,
+                    "required": true
+                  }
+                },
+                "required": true
+              },
+              "page": {
+                "annotation": "src.common.pagination.PageMeta",
+                "config": {
+                  "extra": "forbid"
+                },
+                "constraints": [],
+                "default": null,
+                "fields": {
+                  "hasnext": {
+                    "annotation": "bool",
+                    "constraints": [],
+                    "default": null,
+                    "required": true
+                  },
+                  "page": {
+                    "annotation": "int",
+                    "constraints": [
+                      "Ge(ge=1)"
+                    ],
+                    "default": null,
+                    "required": true
+                  },
+                  "pagesize": {
+                    "annotation": "int",
+                    "constraints": [
+                      "Ge(ge=0)"
+                    ],
+                    "default": null,
+                    "required": true
+                  },
+                  "total": {
+                    "annotation": "int",
+                    "constraints": [
+                      "Ge(ge=0)"
+                    ],
+                    "default": null,
+                    "required": true
+                  }
+                },
+                "required": true
+              }
+            },
+            "required": true
+          },
+          "error": {
+            "annotation": "str",
+            "constraints": [],
+            "default": "",
+            "required": false
+          },
+          "msg": {
+            "annotation": "str",
+            "constraints": [],
+            "default": "OK",
+            "required": false
+          },
+          "time": {
+            "annotation": "int",
+            "constraints": [],
+            "default": "<factory:now_ms#5bec5d10ddf5>",
+            "required": false
+          }
+        },
+        "model": "src.common.responses.ApiResponse[PageData[EngineItem]]",
+        "status_code": 200
+      }
+    },
+    "GET /internal/v1/memory-display/retrieved": {
+      "endpoint": "get_retrieved",
+      "parameters": {
+        "query:end_time": {
+          "annotation": "int | None",
+          "constraints": [],
+          "default": null,
+          "in": "query",
+          "required": false
+        },
+        "query:end_user_id": {
+          "annotation": "str | None",
+          "constraints": [],
+          "default": null,
+          "in": "query",
+          "required": false
+        },
+        "query:page": {
+          "annotation": "int",
+          "constraints": [
+            "Ge(ge=1)"
+          ],
+          "default": 1,
+          "in": "query",
+          "required": false
+        },
+        "query:pagesize": {
+          "annotation": "int",
+          "constraints": [
+            "Ge(ge=1)",
+            "Le(le=100)"
+          ],
+          "default": 10,
+          "in": "query",
+          "required": false
+        },
+        "query:start_time": {
+          "annotation": "int | None",
+          "constraints": [],
+          "default": null,
+          "in": "query",
+          "required": false
+        }
+      },
+      "response": {
+        "declared": [],
+        "fields": {
+          "code": {
+            "annotation": "int",
+            "constraints": [],
+            "default": 0,
+            "required": false
+          },
+          "data": {
+            "annotation": "src.common.pagination.PageData[RetrievedItem]",
+            "config": {
+              "extra": "forbid"
+            },
+            "constraints": [],
+            "default": null,
+            "fields": {
+              "items": {
+                "annotation": "list[src.schemas.display.RetrievedItem]",
+                "constraints": [],
+                "default": null,
+                "fields": {
+                  "content": {
+                    "annotation": "str",
+                    "constraints": [],
+                    "default": null,
+                    "required": true
+                  },
+                  "end_user_id": {
+                    "annotation": "str",
+                    "constraints": [],
+                    "default": null,
+                    "required": true
+                  },
+                  "id": {
+                    "annotation": "str",
+                    "constraints": [],
+                    "default": null,
+                    "required": true
+                  },
+                  "occurred_at": {
+                    "annotation": "int | None",
+                    "constraints": [],
+                    "default": null,
+                    "required": true
+                  },
+                  "query": {
+                    "annotation": "str",
+                    "constraints": [],
+                    "default": null,
+                    "required": true
+                  },
+                  "search_mode": {
+                    "annotation": "str | None",
+                    "constraints": [],
+                    "default": null,
+                    "required": true
+                  }
+                },
+                "required": true
+              },
+              "page": {
+                "annotation": "src.common.pagination.PageMeta",
+                "config": {
+                  "extra": "forbid"
+                },
+                "constraints": [],
+                "default": null,
+                "fields": {
+                  "hasnext": {
+                    "annotation": "bool",
+                    "constraints": [],
+                    "default": null,
+                    "required": true
+                  },
+                  "page": {
+                    "annotation": "int",
+                    "constraints": [
+                      "Ge(ge=1)"
+                    ],
+                    "default": null,
+                    "required": true
+                  },
+                  "pagesize": {
+                    "annotation": "int",
+                    "constraints": [
+                      "Ge(ge=0)"
+                    ],
+                    "default": null,
+                    "required": true
+                  },
+                  "total": {
+                    "annotation": "int",
+                    "constraints": [
+                      "Ge(ge=0)"
+                    ],
+                    "default": null,
+                    "required": true
+                  }
+                },
+                "required": true
+              }
+            },
+            "required": true
+          },
+          "error": {
+            "annotation": "str",
+            "constraints": [],
+            "default": "",
+            "required": false
+          },
+          "msg": {
+            "annotation": "str",
+            "constraints": [],
+            "default": "OK",
+            "required": false
+          },
+          "time": {
+            "annotation": "int",
+            "constraints": [],
+            "default": "<factory:now_ms#5bec5d10ddf5>",
+            "required": false
+          }
+        },
+        "model": "src.common.responses.ApiResponse[PageData[RetrievedItem]]",
+        "status_code": 200
+      }
+    },
+    "GET /internal/v1/memory-display/written": {
+      "endpoint": "get_written",
+      "parameters": {
+        "query:end_time": {
+          "annotation": "int | None",
+          "constraints": [],
+          "default": null,
+          "in": "query",
+          "required": false
+        },
+        "query:end_user_id": {
+          "annotation": "str | None",
+          "constraints": [],
+          "default": null,
+          "in": "query",
+          "required": false
+        },
+        "query:page": {
+          "annotation": "int",
+          "constraints": [
+            "Ge(ge=1)"
+          ],
+          "default": 1,
+          "in": "query",
+          "required": false
+        },
+        "query:pagesize": {
+          "annotation": "int",
+          "constraints": [
+            "Ge(ge=1)",
+            "Le(le=100)"
+          ],
+          "default": 10,
+          "in": "query",
+          "required": false
+        },
+        "query:start_time": {
+          "annotation": "int | None",
+          "constraints": [],
+          "default": null,
+          "in": "query",
+          "required": false
+        }
+      },
+      "response": {
+        "declared": [],
+        "fields": {
+          "code": {
+            "annotation": "int",
+            "constraints": [],
+            "default": 0,
+            "required": false
+          },
+          "data": {
+            "annotation": "src.common.pagination.PageData[WrittenItem]",
+            "config": {
+              "extra": "forbid"
+            },
+            "constraints": [],
+            "default": null,
+            "fields": {
+              "items": {
+                "annotation": "list[src.schemas.display.WrittenItem]",
+                "constraints": [],
+                "default": null,
+                "fields": {
+                  "content": {
+                    "annotation": "str",
+                    "constraints": [],
+                    "default": null,
+                    "required": true
+                  },
+                  "end_user_id": {
+                    "annotation": "str",
+                    "constraints": [],
+                    "default": null,
+                    "required": true
+                  },
+                  "id": {
+                    "annotation": "str",
+                    "constraints": [],
+                    "default": null,
+                    "required": true
+                  },
+                  "memory_id": {
+                    "annotation": "str | None",
+                    "constraints": [],
+                    "default": null,
+                    "required": true
+                  },
+                  "memory_type": {
+                    "annotation": "str | None",
+                    "constraints": [],
+                    "default": null,
+                    "required": true
+                  },
+                  "name": {
+                    "annotation": "str | None",
+                    "constraints": [],
+                    "default": null,
+                    "required": true
+                  },
+                  "occurred_at": {
+                    "annotation": "int | None",
+                    "constraints": [],
+                    "default": null,
+                    "required": true
+                  }
+                },
+                "required": true
+              },
+              "page": {
+                "annotation": "src.common.pagination.PageMeta",
+                "config": {
+                  "extra": "forbid"
+                },
+                "constraints": [],
+                "default": null,
+                "fields": {
+                  "hasnext": {
+                    "annotation": "bool",
+                    "constraints": [],
+                    "default": null,
+                    "required": true
+                  },
+                  "page": {
+                    "annotation": "int",
+                    "constraints": [
+                      "Ge(ge=1)"
+                    ],
+                    "default": null,
+                    "required": true
+                  },
+                  "pagesize": {
+                    "annotation": "int",
+                    "constraints": [
+                      "Ge(ge=0)"
+                    ],
+                    "default": null,
+                    "required": true
+                  },
+                  "total": {
+                    "annotation": "int",
+                    "constraints": [
+                      "Ge(ge=0)"
+                    ],
+                    "default": null,
+                    "required": true
+                  }
+                },
+                "required": true
+              }
+            },
+            "required": true
+          },
+          "error": {
+            "annotation": "str",
+            "constraints": [],
+            "default": "",
+            "required": false
+          },
+          "msg": {
+            "annotation": "str",
+            "constraints": [],
+            "default": "OK",
+            "required": false
+          },
+          "time": {
+            "annotation": "int",
+            "constraints": [],
+            "default": "<factory:now_ms#5bec5d10ddf5>",
+            "required": false
+          }
+        },
+        "model": "src.common.responses.ApiResponse[PageData[WrittenItem]]",
+        "status_code": 200
+      }
+    },
     "GET /internal/v1/memory/analytics/community_graph": {
       "endpoint": "community_graph",
       "parameters": {
@@ -165,7 +1069,7 @@
           "time": {
             "annotation": "int",
             "constraints": [],
-            "default": "<factory:ApiResponse.<lambda>#7d53a03e3081>",
+            "default": "<factory:now_ms#5bec5d10ddf5>",
             "required": false
           }
         },
@@ -498,7 +1402,7 @@
           "time": {
             "annotation": "int",
             "constraints": [],
-            "default": "<factory:ApiResponse.<lambda>#7d53a03e3081>",
+            "default": "<factory:now_ms#5bec5d10ddf5>",
             "required": false
           }
         },
@@ -561,7 +1465,7 @@
           "time": {
             "annotation": "int",
             "constraints": [],
-            "default": "<factory:ApiResponse.<lambda>#7d53a03e3081>",
+            "default": "<factory:now_ms#5bec5d10ddf5>",
             "required": false
           }
         },
@@ -634,7 +1538,7 @@
           "time": {
             "annotation": "int",
             "constraints": [],
-            "default": "<factory:ApiResponse.<lambda>#7d53a03e3081>",
+            "default": "<factory:now_ms#5bec5d10ddf5>",
             "required": false
           }
         },
@@ -747,7 +1651,7 @@
           "time": {
             "annotation": "int",
             "constraints": [],
-            "default": "<factory:ApiResponse.<lambda>#7d53a03e3081>",
+            "default": "<factory:now_ms#5bec5d10ddf5>",
             "required": false
           }
         },
@@ -816,7 +1720,7 @@
           "time": {
             "annotation": "int",
             "constraints": [],
-            "default": "<factory:ApiResponse.<lambda>#7d53a03e3081>",
+            "default": "<factory:now_ms#5bec5d10ddf5>",
             "required": false
           }
         },
@@ -1695,7 +2599,7 @@
           "time": {
             "annotation": "int",
             "constraints": [],
-            "default": "<factory:ApiResponse.<lambda>#7d53a03e3081>",
+            "default": "<factory:now_ms#5bec5d10ddf5>",
             "required": false
           }
         },
@@ -1800,11 +2704,1296 @@
           "time": {
             "annotation": "int",
             "constraints": [],
-            "default": "<factory:ApiResponse.<lambda>#7d53a03e3081>",
+            "default": "<factory:now_ms#5bec5d10ddf5>",
             "required": false
           }
         },
         "model": "src.common.responses.ApiResponse[WorkspaceStatistics]",
+        "status_code": 200
+      }
+    },
+    "GET /internal/v1/memory/implicit-memory": {
+      "endpoint": "aggregate",
+      "parameters": {
+        "query:end_user_id": {
+          "annotation": "str",
+          "constraints": [],
+          "default": null,
+          "in": "query",
+          "required": true
+        }
+      },
+      "response": {
+        "declared": [],
+        "fields": {
+          "code": {
+            "annotation": "int",
+            "constraints": [],
+            "default": 0,
+            "required": false
+          },
+          "data": {
+            "annotation": "src.schemas.implicit_memory.ImplicitProfile",
+            "constraints": [],
+            "default": null,
+            "fields": {
+              "end_user_id": {
+                "annotation": "str",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "habits": {
+                "annotation": "Any",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "interest_areas": {
+                "annotation": "Any",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "portrait": {
+                "annotation": "Any",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "preferences": {
+                "annotation": "list[Any]",
+                "constraints": [],
+                "default": null,
+                "required": true
+              }
+            },
+            "required": true
+          },
+          "error": {
+            "annotation": "str",
+            "constraints": [],
+            "default": "",
+            "required": false
+          },
+          "msg": {
+            "annotation": "str",
+            "constraints": [],
+            "default": "OK",
+            "required": false
+          },
+          "time": {
+            "annotation": "int",
+            "constraints": [],
+            "default": "<factory:now_ms#5bec5d10ddf5>",
+            "required": false
+          }
+        },
+        "model": "src.common.responses.ApiResponse[ImplicitProfile]",
+        "status_code": 200
+      }
+    },
+    "GET /internal/v1/memory_config/read_all_config": {
+      "endpoint": "read_all_config",
+      "parameters": {},
+      "response": {
+        "declared": [],
+        "fields": {
+          "code": {
+            "annotation": "int",
+            "constraints": [],
+            "default": 0,
+            "required": false
+          },
+          "data": {
+            "annotation": "list[src.schemas.memory_config.ConfigSummaryData]",
+            "constraints": [],
+            "default": null,
+            "fields": {
+              "apply_id": {
+                "annotation": "str | None",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "baseline": {
+                "annotation": "str | None",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "chunker_strategy": {
+                "annotation": "str | None",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "config_desc": {
+                "annotation": "str | None",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "config_id": {
+                "annotation": "str",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "config_id_old": {
+                "annotation": "int | None",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "config_name": {
+                "annotation": "str",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "created_at": {
+                "annotation": "int | None",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "deep_retrieval": {
+                "annotation": "bool | None",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "embedding_id": {
+                "annotation": "str | None",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "enable_llm_dedup_blockwise": {
+                "annotation": "bool | None",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "enable_llm_disambiguation": {
+                "annotation": "bool | None",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "enable_self_reflexion": {
+                "annotation": "bool | None",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "end_user_id": {
+                "annotation": "str | None",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "include_dialogue_context": {
+                "annotation": "bool | None",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "is_active": {
+                "annotation": "bool",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "is_system_default": {
+                "annotation": "bool | None",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "iteration_period": {
+                "annotation": "str | None",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "lambda_mem": {
+                "annotation": "float | None",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "lambda_time": {
+                "annotation": "float | None",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "llm_id": {
+                "annotation": "str | None",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "max_context": {
+                "annotation": "int | None",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "offset": {
+                "annotation": "float | None",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "pruning_enabled": {
+                "annotation": "bool | None",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "pruning_scene": {
+                "annotation": "str | None",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "pruning_threshold": {
+                "annotation": "float | None",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "reflexion_range": {
+                "annotation": "str | None",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "rerank_id": {
+                "annotation": "str | None",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "scene_id": {
+                "annotation": "str | None",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "scene_name": {
+                "annotation": "str | None",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "state": {
+                "annotation": "bool | None",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "statement_granularity": {
+                "annotation": "int | None",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "t_name_strict": {
+                "annotation": "float | None",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "t_overall": {
+                "annotation": "float | None",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "t_type_strict": {
+                "annotation": "float | None",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "updated_at": {
+                "annotation": "int | None",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "workspace_id": {
+                "annotation": "str | None",
+                "constraints": [],
+                "default": null,
+                "required": true
+              }
+            },
+            "required": true
+          },
+          "error": {
+            "annotation": "str",
+            "constraints": [],
+            "default": "",
+            "required": false
+          },
+          "msg": {
+            "annotation": "str",
+            "constraints": [],
+            "default": "OK",
+            "required": false
+          },
+          "time": {
+            "annotation": "int",
+            "constraints": [],
+            "default": "<factory:now_ms#5bec5d10ddf5>",
+            "required": false
+          }
+        },
+        "model": "src.common.responses.ApiResponse[list[ConfigSummaryData]]",
+        "status_code": 200
+      }
+    },
+    "GET /internal/v1/memory_config/read_config_emotion": {
+      "endpoint": "read_config_emotion",
+      "parameters": {
+        "query:config_id": {
+          "annotation": "str",
+          "constraints": [],
+          "default": null,
+          "in": "query",
+          "required": true
+        }
+      },
+      "response": {
+        "declared": [],
+        "fields": {
+          "code": {
+            "annotation": "int",
+            "constraints": [],
+            "default": 0,
+            "required": false
+          },
+          "data": {
+            "annotation": "src.schemas.memory_config.EmotionConfigData",
+            "constraints": [],
+            "default": null,
+            "fields": {
+              "config_id": {
+                "annotation": "uuid.UUID",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "emotion_enable_subject": {
+                "annotation": "bool | None",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "emotion_enabled": {
+                "annotation": "bool | None",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "emotion_extract_keywords": {
+                "annotation": "bool | None",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "emotion_min_intensity": {
+                "annotation": "float | None",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "emotion_model_id": {
+                "annotation": "str | None",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "is_default": {
+                "annotation": "bool",
+                "constraints": [],
+                "default": null,
+                "required": true
+              }
+            },
+            "required": true
+          },
+          "error": {
+            "annotation": "str",
+            "constraints": [],
+            "default": "",
+            "required": false
+          },
+          "msg": {
+            "annotation": "str",
+            "constraints": [],
+            "default": "OK",
+            "required": false
+          },
+          "time": {
+            "annotation": "int",
+            "constraints": [],
+            "default": "<factory:now_ms#5bec5d10ddf5>",
+            "required": false
+          }
+        },
+        "model": "src.common.responses.ApiResponse[EmotionConfigData]",
+        "status_code": 200
+      }
+    },
+    "GET /internal/v1/memory_config/read_config_extracted": {
+      "endpoint": "read_config_extracted",
+      "parameters": {
+        "query:config_id": {
+          "annotation": "str",
+          "constraints": [],
+          "default": null,
+          "in": "query",
+          "required": true
+        }
+      },
+      "response": {
+        "declared": [],
+        "fields": {
+          "code": {
+            "annotation": "int",
+            "constraints": [],
+            "default": 0,
+            "required": false
+          },
+          "data": {
+            "annotation": "src.schemas.memory_config.ExtractedConfigData",
+            "constraints": [],
+            "default": null,
+            "fields": {
+              "audio_id": {
+                "annotation": "str | None",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "baseline": {
+                "annotation": "str | None",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "chunker_strategy": {
+                "annotation": "str | None",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "deep_retrieval": {
+                "annotation": "bool | None",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "embedding_id": {
+                "annotation": "str | None",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "enable_llm_dedup_blockwise": {
+                "annotation": "bool | None",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "enable_llm_disambiguation": {
+                "annotation": "bool | None",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "enable_self_reflexion": {
+                "annotation": "bool | None",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "include_dialogue_context": {
+                "annotation": "bool | None",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "is_default": {
+                "annotation": "bool",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "iteration_period": {
+                "annotation": "str | None",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "llm_id": {
+                "annotation": "str | None",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "max_context": {
+                "annotation": "int | None",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "pruning_enabled": {
+                "annotation": "bool | None",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "pruning_scene": {
+                "annotation": "str | None",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "pruning_threshold": {
+                "annotation": "float | None",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "reflexion_range": {
+                "annotation": "str | None",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "rerank_id": {
+                "annotation": "str | None",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "statement_granularity": {
+                "annotation": "int | None",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "t_name_strict": {
+                "annotation": "float | None",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "t_overall": {
+                "annotation": "float | None",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "t_type_strict": {
+                "annotation": "float | None",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "video_id": {
+                "annotation": "str | None",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "vision_id": {
+                "annotation": "str | None",
+                "constraints": [],
+                "default": null,
+                "required": true
+              }
+            },
+            "required": true
+          },
+          "error": {
+            "annotation": "str",
+            "constraints": [],
+            "default": "",
+            "required": false
+          },
+          "msg": {
+            "annotation": "str",
+            "constraints": [],
+            "default": "OK",
+            "required": false
+          },
+          "time": {
+            "annotation": "int",
+            "constraints": [],
+            "default": "<factory:now_ms#5bec5d10ddf5>",
+            "required": false
+          }
+        },
+        "model": "src.common.responses.ApiResponse[ExtractedConfigData]",
+        "status_code": 200
+      }
+    },
+    "GET /internal/v1/memory_config/read_config_forgetting": {
+      "endpoint": "read_config_forgetting",
+      "parameters": {
+        "query:config_id": {
+          "annotation": "str",
+          "constraints": [],
+          "default": null,
+          "in": "query",
+          "required": true
+        }
+      },
+      "response": {
+        "declared": [],
+        "fields": {
+          "code": {
+            "annotation": "int",
+            "constraints": [],
+            "default": 0,
+            "required": false
+          },
+          "data": {
+            "annotation": "src.schemas.memory_config.ForgettingConfigData",
+            "constraints": [],
+            "default": null,
+            "fields": {
+              "config_id": {
+                "annotation": "uuid.UUID",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "decay_constant": {
+                "annotation": "float",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "enable_llm_summary": {
+                "annotation": "bool",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "forgetting_interval_hours": {
+                "annotation": "int",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "forgetting_rate": {
+                "annotation": "float",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "forgetting_threshold": {
+                "annotation": "float",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "is_default": {
+                "annotation": "bool",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "lambda_mem": {
+                "annotation": "float",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "lambda_time": {
+                "annotation": "float",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "max_history_length": {
+                "annotation": "int",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "max_merge_batch_size": {
+                "annotation": "int",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "min_days_since_access": {
+                "annotation": "int",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "offset": {
+                "annotation": "float",
+                "constraints": [],
+                "default": null,
+                "required": true
+              }
+            },
+            "required": true
+          },
+          "error": {
+            "annotation": "str",
+            "constraints": [],
+            "default": "",
+            "required": false
+          },
+          "msg": {
+            "annotation": "str",
+            "constraints": [],
+            "default": "OK",
+            "required": false
+          },
+          "time": {
+            "annotation": "int",
+            "constraints": [],
+            "default": "<factory:now_ms#5bec5d10ddf5>",
+            "required": false
+          }
+        },
+        "model": "src.common.responses.ApiResponse[ForgettingConfigData]",
+        "status_code": 200
+      }
+    },
+    "GET /internal/v1/memory_config/read_config_personality_anchor": {
+      "endpoint": "read_config_personality_anchor",
+      "parameters": {
+        "query:config_id": {
+          "annotation": "uuid.UUID",
+          "constraints": [],
+          "default": null,
+          "in": "query",
+          "required": true
+        }
+      },
+      "response": {
+        "declared": [],
+        "fields": {
+          "code": {
+            "annotation": "int",
+            "constraints": [],
+            "default": 0,
+            "required": false
+          },
+          "data": {
+            "annotation": "src.schemas.memory_config.PersonalityAnchorData",
+            "config": {
+              "from_attributes": true
+            },
+            "constraints": [],
+            "default": null,
+            "fields": {
+              "config_id": {
+                "annotation": "uuid.UUID",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "is_default": {
+                "annotation": "bool",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "personality_anchor_auto_solidify": {
+                "annotation": "bool",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "personality_anchor_base_principles": {
+                "annotation": "str",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "personality_anchor_enabled": {
+                "annotation": "bool",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "personality_anchor_read_metadata": {
+                "annotation": "bool",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "personality_anchor_read_preferences": {
+                "annotation": "bool",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "personality_anchor_sync_cycle": {
+                "annotation": "Literal[daily, weekly, manual]",
+                "constraints": [],
+                "default": null,
+                "required": true
+              }
+            },
+            "required": true
+          },
+          "error": {
+            "annotation": "str",
+            "constraints": [],
+            "default": "",
+            "required": false
+          },
+          "msg": {
+            "annotation": "str",
+            "constraints": [],
+            "default": "OK",
+            "required": false
+          },
+          "time": {
+            "annotation": "int",
+            "constraints": [],
+            "default": "<factory:now_ms#5bec5d10ddf5>",
+            "required": false
+          }
+        },
+        "model": "src.common.responses.ApiResponse[PersonalityAnchorData]",
+        "status_code": 200
+      }
+    },
+    "GET /internal/v1/memory_config/read_config_preference": {
+      "endpoint": "read_config_preference",
+      "parameters": {
+        "query:config_id": {
+          "annotation": "uuid.UUID",
+          "constraints": [],
+          "default": null,
+          "in": "query",
+          "required": true
+        }
+      },
+      "response": {
+        "declared": [],
+        "fields": {
+          "code": {
+            "annotation": "int",
+            "constraints": [],
+            "default": 0,
+            "required": false
+          },
+          "data": {
+            "annotation": "src.schemas.memory_config.PreferenceConfigData",
+            "config": {
+              "extra": "forbid"
+            },
+            "constraints": [],
+            "default": null,
+            "fields": {
+              "config_id": {
+                "annotation": "uuid.UUID",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "custom_keywords": {
+                "annotation": "list[str]",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "default_keywords": {
+                "annotation": "list[str]",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "effective_keywords": {
+                "annotation": "list[str]",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "preference_engine_enabled": {
+                "annotation": "bool",
+                "constraints": [],
+                "default": null,
+                "required": true
+              }
+            },
+            "required": true
+          },
+          "error": {
+            "annotation": "str",
+            "constraints": [],
+            "default": "",
+            "required": false
+          },
+          "msg": {
+            "annotation": "str",
+            "constraints": [],
+            "default": "OK",
+            "required": false
+          },
+          "time": {
+            "annotation": "int",
+            "constraints": [],
+            "default": "<factory:now_ms#5bec5d10ddf5>",
+            "required": false
+          }
+        },
+        "model": "src.common.responses.ApiResponse[PreferenceConfigData]",
+        "status_code": 200
+      }
+    },
+    "GET /internal/v1/memory_config/read_config_reflection": {
+      "endpoint": "read_config_reflection",
+      "parameters": {
+        "query:config_id": {
+          "annotation": "str",
+          "constraints": [],
+          "default": null,
+          "in": "query",
+          "required": true
+        }
+      },
+      "response": {
+        "declared": [],
+        "fields": {
+          "code": {
+            "annotation": "int",
+            "constraints": [],
+            "default": 0,
+            "required": false
+          },
+          "data": {
+            "annotation": "src.schemas.memory_config.ReflectionConfigData",
+            "constraints": [],
+            "default": null,
+            "fields": {
+              "baseline": {
+                "annotation": "str | None",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "config_id": {
+                "annotation": "uuid.UUID",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "is_default": {
+                "annotation": "bool",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "memory_verify": {
+                "annotation": "bool | None",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "quality_assessment": {
+                "annotation": "bool | None",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "reflection_enabled": {
+                "annotation": "bool | None",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "reflection_model_id": {
+                "annotation": "str | None",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "reflection_period_in_hours": {
+                "annotation": "str | None",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "reflexion_range": {
+                "annotation": "str | None",
+                "constraints": [],
+                "default": null,
+                "required": true
+              }
+            },
+            "required": true
+          },
+          "error": {
+            "annotation": "str",
+            "constraints": [],
+            "default": "",
+            "required": false
+          },
+          "msg": {
+            "annotation": "str",
+            "constraints": [],
+            "default": "OK",
+            "required": false
+          },
+          "time": {
+            "annotation": "int",
+            "constraints": [],
+            "default": "<factory:now_ms#5bec5d10ddf5>",
+            "required": false
+          }
+        },
+        "model": "src.common.responses.ApiResponse[ReflectionConfigData]",
+        "status_code": 200
+      }
+    },
+    "GET /internal/v1/memory_config/read_config_scene": {
+      "endpoint": "read_config_scene",
+      "parameters": {
+        "query:config_id": {
+          "annotation": "str",
+          "constraints": [],
+          "default": null,
+          "in": "query",
+          "required": true
+        }
+      },
+      "response": {
+        "declared": [],
+        "fields": {
+          "code": {
+            "annotation": "int",
+            "constraints": [],
+            "default": 0,
+            "required": false
+          },
+          "data": {
+            "annotation": "src.schemas.memory_config.SceneConfigData",
+            "config": {
+              "from_attributes": true
+            },
+            "constraints": [],
+            "default": null,
+            "fields": {
+              "config_id": {
+                "annotation": "uuid.UUID",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "scene_history_window_size": {
+                "annotation": "int",
+                "constraints": [
+                  "Ge(ge=1)",
+                  "Le(le=4)"
+                ],
+                "default": null,
+                "required": true
+              },
+              "scene_idle_timeout_seconds": {
+                "annotation": "int",
+                "constraints": [
+                  "Ge(ge=60)",
+                  "Le(le=2592000)"
+                ],
+                "default": null,
+                "required": true
+              },
+              "scene_max_turns": {
+                "annotation": "int",
+                "constraints": [
+                  "Ge(ge=5)",
+                  "Le(le=100)"
+                ],
+                "default": null,
+                "required": true
+              },
+              "scene_min_chars_to_summary": {
+                "annotation": "int",
+                "constraints": [
+                  "Ge(ge=0)",
+                  "Le(le=200)"
+                ],
+                "default": null,
+                "required": true
+              },
+              "scene_min_turns": {
+                "annotation": "int",
+                "constraints": [
+                  "Ge(ge=0)",
+                  "Le(le=10)"
+                ],
+                "default": null,
+                "required": true
+              },
+              "scene_threshold": {
+                "annotation": "float",
+                "constraints": [
+                  "Ge(ge=0.5)",
+                  "Le(le=0.95)"
+                ],
+                "default": null,
+                "required": true
+              },
+              "time_decay_penalty": {
+                "annotation": "float",
+                "constraints": [
+                  "Ge(ge=0)",
+                  "Le(le=0.2)"
+                ],
+                "default": null,
+                "required": true
+              }
+            },
+            "required": true
+          },
+          "error": {
+            "annotation": "str",
+            "constraints": [],
+            "default": "",
+            "required": false
+          },
+          "msg": {
+            "annotation": "str",
+            "constraints": [],
+            "default": "OK",
+            "required": false
+          },
+          "time": {
+            "annotation": "int",
+            "constraints": [],
+            "default": "<factory:now_ms#5bec5d10ddf5>",
+            "required": false
+          }
+        },
+        "model": "src.common.responses.ApiResponse[SceneConfigData]",
+        "status_code": 200
+      }
+    },
+    "GET /internal/v1/memory_config/read_config_scene_community": {
+      "endpoint": "read_config_scene_community",
+      "parameters": {
+        "query:config_id": {
+          "annotation": "str",
+          "constraints": [],
+          "default": null,
+          "in": "query",
+          "required": true
+        }
+      },
+      "response": {
+        "declared": [],
+        "fields": {
+          "code": {
+            "annotation": "int",
+            "constraints": [],
+            "default": 0,
+            "required": false
+          },
+          "data": {
+            "annotation": "src.schemas.memory_config.SceneCommunityConfigData",
+            "config": {
+              "from_attributes": true
+            },
+            "constraints": [],
+            "default": null,
+            "fields": {
+              "batch_trigger_count": {
+                "annotation": "int",
+                "constraints": [
+                  "Ge(ge=1)",
+                  "Le(le=50)"
+                ],
+                "default": null,
+                "required": true
+              },
+              "candidate_community_limit": {
+                "annotation": "int",
+                "constraints": [
+                  "Ge(ge=1)",
+                  "Le(le=8)"
+                ],
+                "default": null,
+                "required": true
+              },
+              "compare_all_same_category_communities": {
+                "annotation": "bool",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "config_id": {
+                "annotation": "uuid.UUID",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "rebuild_interval_days": {
+                "annotation": "int",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "rebuild_interval_enabled": {
+                "annotation": "bool",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "rebuild_new_scene_community_count": {
+                "annotation": "int",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "rebuild_new_scene_community_count_enabled": {
+                "annotation": "bool",
+                "constraints": [],
+                "default": null,
+                "required": true
+              }
+            },
+            "required": true
+          },
+          "error": {
+            "annotation": "str",
+            "constraints": [],
+            "default": "",
+            "required": false
+          },
+          "msg": {
+            "annotation": "str",
+            "constraints": [],
+            "default": "OK",
+            "required": false
+          },
+          "time": {
+            "annotation": "int",
+            "constraints": [],
+            "default": "<factory:now_ms#5bec5d10ddf5>",
+            "required": false
+          }
+        },
+        "model": "src.common.responses.ApiResponse[SceneCommunityConfigData]",
         "status_code": 200
       }
     },
@@ -1919,11 +4108,1478 @@
           "time": {
             "annotation": "int",
             "constraints": [],
-            "default": "<factory:ApiResponse.<lambda>#7d53a03e3081>",
+            "default": "<factory:now_ms#5bec5d10ddf5>",
             "required": false
           }
         },
         "model": "src.common.responses.ApiResponse[Union[GenerateCacheUserResult, GenerateCacheBatchResult]]",
+        "status_code": 200
+      }
+    },
+    "POST /internal/v1/memory_config/create_config": {
+      "endpoint": "create_config",
+      "parameters": {
+        "body:body": {
+          "annotation": "src.schemas.memory_config_requests.ConfigCreateBody",
+          "config": {
+            "extra": "ignore"
+          },
+          "constraints": [],
+          "default": null,
+          "fields": {
+            "config_desc": {
+              "annotation": "str | None",
+              "constraints": [],
+              "default": "",
+              "required": false
+            },
+            "config_name": {
+              "annotation": "str",
+              "constraints": [],
+              "default": null,
+              "required": true
+            }
+          },
+          "in": "body",
+          "required": true
+        }
+      },
+      "response": {
+        "declared": [],
+        "fields": {
+          "code": {
+            "annotation": "int",
+            "constraints": [],
+            "default": 0,
+            "required": false
+          },
+          "data": {
+            "annotation": "src.schemas.memory_config.ConfigCreateResult",
+            "constraints": [],
+            "default": null,
+            "fields": {
+              "affected": {
+                "annotation": "int",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "config_id": {
+                "annotation": "str",
+                "constraints": [],
+                "default": null,
+                "required": true
+              }
+            },
+            "required": true
+          },
+          "error": {
+            "annotation": "str",
+            "constraints": [],
+            "default": "",
+            "required": false
+          },
+          "msg": {
+            "annotation": "str",
+            "constraints": [],
+            "default": "OK",
+            "required": false
+          },
+          "time": {
+            "annotation": "int",
+            "constraints": [],
+            "default": "<factory:now_ms#5bec5d10ddf5>",
+            "required": false
+          }
+        },
+        "model": "src.common.responses.ApiResponse[ConfigCreateResult]",
+        "status_code": 200
+      }
+    },
+    "POST /internal/v1/memory_config/update_config_personality_anchor": {
+      "endpoint": "update_config_personality_anchor",
+      "parameters": {
+        "body:body": {
+          "annotation": "src.schemas.memory_config_requests.PersonalityAnchorUpdate",
+          "constraints": [],
+          "default": null,
+          "fields": {
+            "config_id": {
+              "annotation": "uuid.UUID",
+              "constraints": [],
+              "default": null,
+              "required": true
+            },
+            "personality_anchor_auto_solidify": {
+              "annotation": "bool",
+              "constraints": [
+                "Strict(strict=True)"
+              ],
+              "default": null,
+              "required": true
+            },
+            "personality_anchor_base_principles": {
+              "annotation": "str",
+              "constraints": [
+                "Strict(strict=True)",
+                "MaxLen(max_length=4000)"
+              ],
+              "default": null,
+              "required": true
+            },
+            "personality_anchor_enabled": {
+              "annotation": "bool",
+              "constraints": [
+                "Strict(strict=True)"
+              ],
+              "default": null,
+              "required": true
+            },
+            "personality_anchor_read_metadata": {
+              "annotation": "bool",
+              "constraints": [
+                "Strict(strict=True)"
+              ],
+              "default": null,
+              "required": true
+            },
+            "personality_anchor_read_preferences": {
+              "annotation": "bool",
+              "constraints": [
+                "Strict(strict=True)"
+              ],
+              "default": null,
+              "required": true
+            },
+            "personality_anchor_sync_cycle": {
+              "annotation": "Literal[daily, weekly, manual]",
+              "constraints": [],
+              "default": null,
+              "required": true
+            }
+          },
+          "in": "body",
+          "required": true
+        }
+      },
+      "response": {
+        "declared": [],
+        "fields": {
+          "code": {
+            "annotation": "int",
+            "constraints": [],
+            "default": 0,
+            "required": false
+          },
+          "data": {
+            "annotation": "src.schemas.memory_config.PersonalityAnchorData",
+            "config": {
+              "from_attributes": true
+            },
+            "constraints": [],
+            "default": null,
+            "fields": {
+              "config_id": {
+                "annotation": "uuid.UUID",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "is_default": {
+                "annotation": "bool",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "personality_anchor_auto_solidify": {
+                "annotation": "bool",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "personality_anchor_base_principles": {
+                "annotation": "str",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "personality_anchor_enabled": {
+                "annotation": "bool",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "personality_anchor_read_metadata": {
+                "annotation": "bool",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "personality_anchor_read_preferences": {
+                "annotation": "bool",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "personality_anchor_sync_cycle": {
+                "annotation": "Literal[daily, weekly, manual]",
+                "constraints": [],
+                "default": null,
+                "required": true
+              }
+            },
+            "required": true
+          },
+          "error": {
+            "annotation": "str",
+            "constraints": [],
+            "default": "",
+            "required": false
+          },
+          "msg": {
+            "annotation": "str",
+            "constraints": [],
+            "default": "OK",
+            "required": false
+          },
+          "time": {
+            "annotation": "int",
+            "constraints": [],
+            "default": "<factory:now_ms#5bec5d10ddf5>",
+            "required": false
+          }
+        },
+        "model": "src.common.responses.ApiResponse[PersonalityAnchorData]",
+        "status_code": 200
+      }
+    },
+    "POST,PUT /internal/v1/memory_config/update_config": {
+      "endpoint": "update_config",
+      "parameters": {
+        "body:body": {
+          "annotation": "src.schemas.memory_config_requests.ConfigUpdateBody",
+          "constraints": [],
+          "default": null,
+          "fields": {
+            "config_desc": {
+              "annotation": "str | None",
+              "constraints": [],
+              "default": null,
+              "required": false
+            },
+            "config_id": {
+              "annotation": "uuid.UUID | str",
+              "constraints": [],
+              "default": null,
+              "required": true
+            },
+            "config_name": {
+              "annotation": "str | None",
+              "constraints": [],
+              "default": null,
+              "required": false
+            },
+            "scene_id": {
+              "annotation": "uuid.UUID | None",
+              "constraints": [],
+              "default": null,
+              "required": false
+            }
+          },
+          "in": "body",
+          "required": true
+        }
+      },
+      "response": {
+        "declared": [],
+        "fields": {
+          "code": {
+            "annotation": "int",
+            "constraints": [],
+            "default": 0,
+            "required": false
+          },
+          "data": {
+            "annotation": "src.schemas.memory_config.ConfigUpdateResult",
+            "constraints": [],
+            "default": null,
+            "fields": {
+              "affected": {
+                "annotation": "int",
+                "constraints": [],
+                "default": null,
+                "required": true
+              }
+            },
+            "required": true
+          },
+          "error": {
+            "annotation": "str",
+            "constraints": [],
+            "default": "",
+            "required": false
+          },
+          "msg": {
+            "annotation": "str",
+            "constraints": [],
+            "default": "OK",
+            "required": false
+          },
+          "time": {
+            "annotation": "int",
+            "constraints": [],
+            "default": "<factory:now_ms#5bec5d10ddf5>",
+            "required": false
+          }
+        },
+        "model": "src.common.responses.ApiResponse[ConfigUpdateResult]",
+        "status_code": 200
+      }
+    },
+    "POST,PUT /internal/v1/memory_config/update_config_emotion": {
+      "endpoint": "update_config_emotion",
+      "parameters": {
+        "body:body": {
+          "annotation": "src.schemas.memory_config_requests.EmotionUpdateBody",
+          "constraints": [],
+          "default": null,
+          "fields": {
+            "config_id": {
+              "annotation": "uuid.UUID | str",
+              "constraints": [],
+              "default": null,
+              "required": true
+            },
+            "emotion_enable_subject": {
+              "annotation": "bool",
+              "constraints": [],
+              "default": null,
+              "required": true
+            },
+            "emotion_enabled": {
+              "annotation": "bool",
+              "constraints": [],
+              "default": null,
+              "required": true
+            },
+            "emotion_extract_keywords": {
+              "annotation": "bool",
+              "constraints": [],
+              "default": null,
+              "required": true
+            },
+            "emotion_min_intensity": {
+              "annotation": "float",
+              "constraints": [
+                "Ge(ge=0.0)",
+                "Le(le=1.0)"
+              ],
+              "default": null,
+              "required": true
+            }
+          },
+          "in": "body",
+          "required": true
+        }
+      },
+      "response": {
+        "declared": [],
+        "fields": {
+          "code": {
+            "annotation": "int",
+            "constraints": [],
+            "default": 0,
+            "required": false
+          },
+          "data": {
+            "annotation": "src.schemas.memory_config.EmotionConfigData",
+            "constraints": [],
+            "default": null,
+            "fields": {
+              "config_id": {
+                "annotation": "uuid.UUID",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "emotion_enable_subject": {
+                "annotation": "bool | None",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "emotion_enabled": {
+                "annotation": "bool | None",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "emotion_extract_keywords": {
+                "annotation": "bool | None",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "emotion_min_intensity": {
+                "annotation": "float | None",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "emotion_model_id": {
+                "annotation": "str | None",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "is_default": {
+                "annotation": "bool",
+                "constraints": [],
+                "default": null,
+                "required": true
+              }
+            },
+            "required": true
+          },
+          "error": {
+            "annotation": "str",
+            "constraints": [],
+            "default": "",
+            "required": false
+          },
+          "msg": {
+            "annotation": "str",
+            "constraints": [],
+            "default": "OK",
+            "required": false
+          },
+          "time": {
+            "annotation": "int",
+            "constraints": [],
+            "default": "<factory:now_ms#5bec5d10ddf5>",
+            "required": false
+          }
+        },
+        "model": "src.common.responses.ApiResponse[EmotionConfigData]",
+        "status_code": 200
+      }
+    },
+    "POST,PUT /internal/v1/memory_config/update_config_extracted": {
+      "endpoint": "update_config_extracted",
+      "parameters": {
+        "body:body": {
+          "annotation": "src.schemas.memory_config_requests.ExtractedUpdateBody",
+          "constraints": [],
+          "default": null,
+          "fields": {
+            "baseline": {
+              "annotation": "Literal[TIME, FACT, TIME-FACT] | None",
+              "constraints": [],
+              "default": "TIME",
+              "required": false
+            },
+            "chunker_strategy": {
+              "annotation": "Literal[RecursiveChunker, TokenChunker, SentenceChunker] | None",
+              "constraints": [],
+              "default": null,
+              "required": false
+            },
+            "config_id": {
+              "annotation": "uuid.UUID | str",
+              "constraints": [],
+              "default": null,
+              "required": true
+            },
+            "deep_retrieval": {
+              "annotation": "bool | None",
+              "constraints": [],
+              "default": null,
+              "required": false
+            },
+            "enable_llm_dedup_blockwise": {
+              "annotation": "bool | None",
+              "constraints": [],
+              "default": null,
+              "required": false
+            },
+            "enable_llm_disambiguation": {
+              "annotation": "bool | None",
+              "constraints": [],
+              "default": null,
+              "required": false
+            },
+            "enable_self_reflexion": {
+              "annotation": "bool | None",
+              "constraints": [],
+              "default": null,
+              "required": false
+            },
+            "include_dialogue_context": {
+              "annotation": "bool | None",
+              "constraints": [],
+              "default": null,
+              "required": false
+            },
+            "iteration_period": {
+              "annotation": "Literal[1, 3, 6, 12, 24] | None",
+              "constraints": [],
+              "default": "3",
+              "required": false
+            },
+            "max_context": {
+              "annotation": "int | None",
+              "constraints": [
+                "Gt(gt=100)"
+              ],
+              "default": 1000,
+              "required": false
+            },
+            "pruning_enabled": {
+              "annotation": "bool | None",
+              "constraints": [],
+              "default": null,
+              "required": false
+            },
+            "pruning_scene": {
+              "annotation": "str | None",
+              "constraints": [],
+              "default": null,
+              "required": false
+            },
+            "pruning_threshold": {
+              "annotation": "float | None",
+              "constraints": [
+                "Ge(ge=0.0)",
+                "Le(le=0.9)"
+              ],
+              "default": null,
+              "required": false
+            },
+            "reflexion_range": {
+              "annotation": "Literal[partial, all] | None",
+              "constraints": [],
+              "default": "partial",
+              "required": false
+            },
+            "state": {
+              "annotation": "bool | None",
+              "constraints": [],
+              "default": null,
+              "required": false
+            },
+            "statement_granularity": {
+              "annotation": "int | None",
+              "constraints": [
+                "Ge(ge=1)",
+                "Le(le=3)"
+              ],
+              "default": 2,
+              "required": false
+            },
+            "t_name_strict": {
+              "annotation": "float | None",
+              "constraints": [
+                "Ge(ge=0.0)",
+                "Le(le=1.0)"
+              ],
+              "default": null,
+              "required": false
+            },
+            "t_overall": {
+              "annotation": "float | None",
+              "constraints": [
+                "Ge(ge=0.0)",
+                "Le(le=1.0)"
+              ],
+              "default": null,
+              "required": false
+            },
+            "t_type_strict": {
+              "annotation": "float | None",
+              "constraints": [
+                "Ge(ge=0.0)",
+                "Le(le=1.0)"
+              ],
+              "default": null,
+              "required": false
+            }
+          },
+          "in": "body",
+          "required": true
+        }
+      },
+      "response": {
+        "declared": [],
+        "fields": {
+          "code": {
+            "annotation": "int",
+            "constraints": [],
+            "default": 0,
+            "required": false
+          },
+          "data": {
+            "annotation": "src.schemas.memory_config.ConfigUpdateResult",
+            "constraints": [],
+            "default": null,
+            "fields": {
+              "affected": {
+                "annotation": "int",
+                "constraints": [],
+                "default": null,
+                "required": true
+              }
+            },
+            "required": true
+          },
+          "error": {
+            "annotation": "str",
+            "constraints": [],
+            "default": "",
+            "required": false
+          },
+          "msg": {
+            "annotation": "str",
+            "constraints": [],
+            "default": "OK",
+            "required": false
+          },
+          "time": {
+            "annotation": "int",
+            "constraints": [],
+            "default": "<factory:now_ms#5bec5d10ddf5>",
+            "required": false
+          }
+        },
+        "model": "src.common.responses.ApiResponse[ConfigUpdateResult]",
+        "status_code": 200
+      }
+    },
+    "POST,PUT /internal/v1/memory_config/update_config_forgetting": {
+      "endpoint": "update_config_forgetting",
+      "parameters": {
+        "body:body": {
+          "annotation": "src.schemas.memory_config_requests.ForgettingUpdateBody",
+          "config": {
+            "extra": "forbid"
+          },
+          "constraints": [],
+          "default": null,
+          "fields": {
+            "config_id": {
+              "annotation": "uuid.UUID | str",
+              "constraints": [],
+              "default": null,
+              "required": true
+            },
+            "decay_constant": {
+              "annotation": "float | None",
+              "constraints": [
+                "Ge(ge=0.0)",
+                "Le(le=1.0)"
+              ],
+              "default": null,
+              "required": false
+            },
+            "enable_llm_summary": {
+              "annotation": "bool | None",
+              "constraints": [],
+              "default": null,
+              "required": false
+            },
+            "forgetting_interval_hours": {
+              "annotation": "int | None",
+              "constraints": [
+                "Ge(ge=1)",
+                "Le(le=168)"
+              ],
+              "default": null,
+              "required": false
+            },
+            "forgetting_threshold": {
+              "annotation": "float | None",
+              "constraints": [
+                "Ge(ge=0.0)",
+                "Le(le=1.0)"
+              ],
+              "default": null,
+              "required": false
+            },
+            "lambda_mem": {
+              "annotation": "float | None",
+              "constraints": [
+                "Ge(ge=0.0)",
+                "Le(le=1.0)"
+              ],
+              "default": null,
+              "required": false
+            },
+            "lambda_time": {
+              "annotation": "float | None",
+              "constraints": [
+                "Ge(ge=0.0)",
+                "Le(le=1.0)"
+              ],
+              "default": null,
+              "required": false
+            },
+            "max_history_length": {
+              "annotation": "int | None",
+              "constraints": [
+                "Ge(ge=10)",
+                "Le(le=1000)"
+              ],
+              "default": null,
+              "required": false
+            },
+            "max_merge_batch_size": {
+              "annotation": "int | None",
+              "constraints": [
+                "Ge(ge=1)",
+                "Le(le=1000)"
+              ],
+              "default": null,
+              "required": false
+            },
+            "min_days_since_access": {
+              "annotation": "int | None",
+              "constraints": [
+                "Ge(ge=1)",
+                "Le(le=365)"
+              ],
+              "default": null,
+              "required": false
+            },
+            "offset": {
+              "annotation": "float | None",
+              "constraints": [
+                "Ge(ge=0.0)",
+                "Le(le=1.0)"
+              ],
+              "default": null,
+              "required": false
+            }
+          },
+          "in": "body",
+          "required": true
+        }
+      },
+      "response": {
+        "declared": [],
+        "fields": {
+          "code": {
+            "annotation": "int",
+            "constraints": [],
+            "default": 0,
+            "required": false
+          },
+          "data": {
+            "annotation": "src.schemas.memory_config.ForgettingConfigData",
+            "constraints": [],
+            "default": null,
+            "fields": {
+              "config_id": {
+                "annotation": "uuid.UUID",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "decay_constant": {
+                "annotation": "float",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "enable_llm_summary": {
+                "annotation": "bool",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "forgetting_interval_hours": {
+                "annotation": "int",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "forgetting_rate": {
+                "annotation": "float",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "forgetting_threshold": {
+                "annotation": "float",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "is_default": {
+                "annotation": "bool",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "lambda_mem": {
+                "annotation": "float",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "lambda_time": {
+                "annotation": "float",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "max_history_length": {
+                "annotation": "int",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "max_merge_batch_size": {
+                "annotation": "int",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "min_days_since_access": {
+                "annotation": "int",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "offset": {
+                "annotation": "float",
+                "constraints": [],
+                "default": null,
+                "required": true
+              }
+            },
+            "required": true
+          },
+          "error": {
+            "annotation": "str",
+            "constraints": [],
+            "default": "",
+            "required": false
+          },
+          "msg": {
+            "annotation": "str",
+            "constraints": [],
+            "default": "OK",
+            "required": false
+          },
+          "time": {
+            "annotation": "int",
+            "constraints": [],
+            "default": "<factory:now_ms#5bec5d10ddf5>",
+            "required": false
+          }
+        },
+        "model": "src.common.responses.ApiResponse[ForgettingConfigData]",
+        "status_code": 200
+      }
+    },
+    "POST,PUT /internal/v1/memory_config/update_config_preference": {
+      "endpoint": "update_config_preference",
+      "parameters": {
+        "body:body": {
+          "annotation": "src.schemas.memory_config_requests.PreferenceUpdateBody",
+          "config": {
+            "extra": "forbid"
+          },
+          "constraints": [],
+          "default": null,
+          "fields": {
+            "config_id": {
+              "annotation": "uuid.UUID",
+              "constraints": [],
+              "default": null,
+              "required": true
+            },
+            "custom_keywords": {
+              "annotation": "list[str] | None",
+              "constraints": [],
+              "default": null,
+              "required": false
+            },
+            "preference_engine_enabled": {
+              "annotation": "bool | None",
+              "constraints": [],
+              "default": null,
+              "required": false
+            }
+          },
+          "in": "body",
+          "required": true
+        }
+      },
+      "response": {
+        "declared": [],
+        "fields": {
+          "code": {
+            "annotation": "int",
+            "constraints": [],
+            "default": 0,
+            "required": false
+          },
+          "data": {
+            "annotation": "src.schemas.memory_config.PreferenceConfigData",
+            "config": {
+              "extra": "forbid"
+            },
+            "constraints": [],
+            "default": null,
+            "fields": {
+              "config_id": {
+                "annotation": "uuid.UUID",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "custom_keywords": {
+                "annotation": "list[str]",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "default_keywords": {
+                "annotation": "list[str]",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "effective_keywords": {
+                "annotation": "list[str]",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "preference_engine_enabled": {
+                "annotation": "bool",
+                "constraints": [],
+                "default": null,
+                "required": true
+              }
+            },
+            "required": true
+          },
+          "error": {
+            "annotation": "str",
+            "constraints": [],
+            "default": "",
+            "required": false
+          },
+          "msg": {
+            "annotation": "str",
+            "constraints": [],
+            "default": "OK",
+            "required": false
+          },
+          "time": {
+            "annotation": "int",
+            "constraints": [],
+            "default": "<factory:now_ms#5bec5d10ddf5>",
+            "required": false
+          }
+        },
+        "model": "src.common.responses.ApiResponse[PreferenceConfigData]",
+        "status_code": 200
+      }
+    },
+    "POST,PUT /internal/v1/memory_config/update_config_reflection": {
+      "endpoint": "update_config_reflection",
+      "parameters": {
+        "body:body": {
+          "annotation": "src.schemas.memory_config_requests.ReflectionUpdateBody",
+          "constraints": [],
+          "default": null,
+          "fields": {
+            "baseline": {
+              "annotation": "str | None",
+              "constraints": [],
+              "default": "TIME",
+              "required": false
+            },
+            "config_id": {
+              "annotation": "uuid.UUID | str | None",
+              "constraints": [],
+              "default": null,
+              "required": false
+            },
+            "memory_verify": {
+              "annotation": "bool",
+              "constraints": [],
+              "default": null,
+              "required": true
+            },
+            "quality_assessment": {
+              "annotation": "bool",
+              "constraints": [],
+              "default": null,
+              "required": true
+            },
+            "reflection_enabled": {
+              "annotation": "bool",
+              "constraints": [],
+              "default": null,
+              "required": true
+            },
+            "reflection_period_in_hours": {
+              "annotation": "str",
+              "constraints": [],
+              "default": null,
+              "required": true
+            },
+            "reflexion_range": {
+              "annotation": "str | None",
+              "constraints": [],
+              "default": "partial",
+              "required": false
+            }
+          },
+          "in": "body",
+          "required": true
+        }
+      },
+      "response": {
+        "declared": [],
+        "fields": {
+          "code": {
+            "annotation": "int",
+            "constraints": [],
+            "default": 0,
+            "required": false
+          },
+          "data": {
+            "annotation": "src.schemas.memory_config.ReflectionMutationData",
+            "constraints": [],
+            "default": null,
+            "fields": {
+              "baseline": {
+                "annotation": "str | None",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "config_id": {
+                "annotation": "uuid.UUID",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "enable_self_reflexion": {
+                "annotation": "bool",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "iteration_period": {
+                "annotation": "str",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "memory_verify": {
+                "annotation": "bool",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "quality_assessment": {
+                "annotation": "bool",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "reflexion_range": {
+                "annotation": "str | None",
+                "constraints": [],
+                "default": null,
+                "required": true
+              }
+            },
+            "required": true
+          },
+          "error": {
+            "annotation": "str",
+            "constraints": [],
+            "default": "",
+            "required": false
+          },
+          "msg": {
+            "annotation": "str",
+            "constraints": [],
+            "default": "OK",
+            "required": false
+          },
+          "time": {
+            "annotation": "int",
+            "constraints": [],
+            "default": "<factory:now_ms#5bec5d10ddf5>",
+            "required": false
+          }
+        },
+        "model": "src.common.responses.ApiResponse[ReflectionMutationData]",
+        "status_code": 200
+      }
+    },
+    "POST,PUT /internal/v1/memory_config/update_config_scene": {
+      "endpoint": "update_config_scene",
+      "parameters": {
+        "body:body": {
+          "annotation": "src.schemas.memory_config_requests.SceneUpdateBody",
+          "constraints": [],
+          "default": null,
+          "fields": {
+            "config_id": {
+              "annotation": "uuid.UUID",
+              "constraints": [],
+              "default": null,
+              "required": true
+            },
+            "scene_history_window_size": {
+              "annotation": "int",
+              "constraints": [
+                "Ge(ge=1)",
+                "Le(le=4)"
+              ],
+              "default": 4,
+              "required": false
+            },
+            "scene_idle_timeout_seconds": {
+              "annotation": "int",
+              "constraints": [
+                "Ge(ge=60)",
+                "Le(le=2592000)"
+              ],
+              "default": 86400,
+              "required": false
+            },
+            "scene_max_turns": {
+              "annotation": "int",
+              "constraints": [
+                "Ge(ge=5)",
+                "Le(le=100)"
+              ],
+              "default": 10,
+              "required": false
+            },
+            "scene_min_chars_to_summary": {
+              "annotation": "int",
+              "constraints": [
+                "Ge(ge=0)",
+                "Le(le=200)"
+              ],
+              "default": 0,
+              "required": false
+            },
+            "scene_min_turns": {
+              "annotation": "int",
+              "constraints": [
+                "Ge(ge=0)",
+                "Le(le=10)"
+              ],
+              "default": 2,
+              "required": false
+            },
+            "scene_threshold": {
+              "annotation": "float",
+              "constraints": [
+                "Ge(ge=0.5)",
+                "Le(le=0.95)"
+              ],
+              "default": 0.8,
+              "required": false
+            },
+            "time_decay_penalty": {
+              "annotation": "float",
+              "constraints": [
+                "Ge(ge=0)",
+                "Le(le=0.2)"
+              ],
+              "default": 0.1,
+              "required": false
+            }
+          },
+          "in": "body",
+          "required": true
+        }
+      },
+      "response": {
+        "declared": [],
+        "fields": {
+          "code": {
+            "annotation": "int",
+            "constraints": [],
+            "default": 0,
+            "required": false
+          },
+          "data": {
+            "annotation": "src.schemas.memory_config.SceneConfigData",
+            "config": {
+              "from_attributes": true
+            },
+            "constraints": [],
+            "default": null,
+            "fields": {
+              "config_id": {
+                "annotation": "uuid.UUID",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "scene_history_window_size": {
+                "annotation": "int",
+                "constraints": [
+                  "Ge(ge=1)",
+                  "Le(le=4)"
+                ],
+                "default": null,
+                "required": true
+              },
+              "scene_idle_timeout_seconds": {
+                "annotation": "int",
+                "constraints": [
+                  "Ge(ge=60)",
+                  "Le(le=2592000)"
+                ],
+                "default": null,
+                "required": true
+              },
+              "scene_max_turns": {
+                "annotation": "int",
+                "constraints": [
+                  "Ge(ge=5)",
+                  "Le(le=100)"
+                ],
+                "default": null,
+                "required": true
+              },
+              "scene_min_chars_to_summary": {
+                "annotation": "int",
+                "constraints": [
+                  "Ge(ge=0)",
+                  "Le(le=200)"
+                ],
+                "default": null,
+                "required": true
+              },
+              "scene_min_turns": {
+                "annotation": "int",
+                "constraints": [
+                  "Ge(ge=0)",
+                  "Le(le=10)"
+                ],
+                "default": null,
+                "required": true
+              },
+              "scene_threshold": {
+                "annotation": "float",
+                "constraints": [
+                  "Ge(ge=0.5)",
+                  "Le(le=0.95)"
+                ],
+                "default": null,
+                "required": true
+              },
+              "time_decay_penalty": {
+                "annotation": "float",
+                "constraints": [
+                  "Ge(ge=0)",
+                  "Le(le=0.2)"
+                ],
+                "default": null,
+                "required": true
+              }
+            },
+            "required": true
+          },
+          "error": {
+            "annotation": "str",
+            "constraints": [],
+            "default": "",
+            "required": false
+          },
+          "msg": {
+            "annotation": "str",
+            "constraints": [],
+            "default": "OK",
+            "required": false
+          },
+          "time": {
+            "annotation": "int",
+            "constraints": [],
+            "default": "<factory:now_ms#5bec5d10ddf5>",
+            "required": false
+          }
+        },
+        "model": "src.common.responses.ApiResponse[SceneConfigData]",
+        "status_code": 200
+      }
+    },
+    "POST,PUT /internal/v1/memory_config/update_config_scene_community": {
+      "endpoint": "update_config_scene_community",
+      "parameters": {
+        "body:body": {
+          "annotation": "src.schemas.memory_config_requests.SceneCommunityUpdateBody",
+          "constraints": [],
+          "default": null,
+          "fields": {
+            "batch_trigger_count": {
+              "annotation": "int",
+              "constraints": [
+                "Ge(ge=1)",
+                "Le(le=50)"
+              ],
+              "default": null,
+              "required": true
+            },
+            "candidate_community_limit": {
+              "annotation": "int",
+              "constraints": [
+                "Ge(ge=1)",
+                "Le(le=8)"
+              ],
+              "default": null,
+              "required": true
+            },
+            "compare_all_same_category_communities": {
+              "annotation": "bool",
+              "constraints": [],
+              "default": null,
+              "required": true
+            },
+            "config_id": {
+              "annotation": "uuid.UUID",
+              "constraints": [],
+              "default": null,
+              "required": true
+            },
+            "rebuild_interval_days": {
+              "annotation": "int",
+              "constraints": [],
+              "default": null,
+              "required": true
+            },
+            "rebuild_interval_enabled": {
+              "annotation": "bool",
+              "constraints": [],
+              "default": null,
+              "required": true
+            },
+            "rebuild_new_scene_community_count": {
+              "annotation": "int",
+              "constraints": [],
+              "default": null,
+              "required": true
+            },
+            "rebuild_new_scene_community_count_enabled": {
+              "annotation": "bool",
+              "constraints": [],
+              "default": null,
+              "required": true
+            }
+          },
+          "in": "body",
+          "required": true
+        }
+      },
+      "response": {
+        "declared": [],
+        "fields": {
+          "code": {
+            "annotation": "int",
+            "constraints": [],
+            "default": 0,
+            "required": false
+          },
+          "data": {
+            "annotation": "src.schemas.memory_config.SceneCommunityConfigData",
+            "config": {
+              "from_attributes": true
+            },
+            "constraints": [],
+            "default": null,
+            "fields": {
+              "batch_trigger_count": {
+                "annotation": "int",
+                "constraints": [
+                  "Ge(ge=1)",
+                  "Le(le=50)"
+                ],
+                "default": null,
+                "required": true
+              },
+              "candidate_community_limit": {
+                "annotation": "int",
+                "constraints": [
+                  "Ge(ge=1)",
+                  "Le(le=8)"
+                ],
+                "default": null,
+                "required": true
+              },
+              "compare_all_same_category_communities": {
+                "annotation": "bool",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "config_id": {
+                "annotation": "uuid.UUID",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "rebuild_interval_days": {
+                "annotation": "int",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "rebuild_interval_enabled": {
+                "annotation": "bool",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "rebuild_new_scene_community_count": {
+                "annotation": "int",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "rebuild_new_scene_community_count_enabled": {
+                "annotation": "bool",
+                "constraints": [],
+                "default": null,
+                "required": true
+              }
+            },
+            "required": true
+          },
+          "error": {
+            "annotation": "str",
+            "constraints": [],
+            "default": "",
+            "required": false
+          },
+          "msg": {
+            "annotation": "str",
+            "constraints": [],
+            "default": "OK",
+            "required": false
+          },
+          "time": {
+            "annotation": "int",
+            "constraints": [],
+            "default": "<factory:now_ms#5bec5d10ddf5>",
+            "required": false
+          }
+        },
+        "model": "src.common.responses.ApiResponse[SceneCommunityConfigData]",
         "status_code": 200
       }
     }

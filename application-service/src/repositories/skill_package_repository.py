@@ -14,7 +14,7 @@ its member packages through this same entry point.
 from __future__ import annotations
 
 import uuid
-from typing import Optional, Sequence
+from collections.abc import Sequence
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -38,13 +38,15 @@ class SkillPackageRepository:
         self.db.flush()
         return pkg
 
-    def get_by_id(self, package_id: uuid.UUID, tenant_id: Optional[uuid.UUID] = None) -> Optional[SkillPackage]:
+    def get_by_id(
+        self, package_id: uuid.UUID, tenant_id: uuid.UUID | None = None
+    ) -> SkillPackage | None:
         query = self.db.query(SkillPackage).filter(SkillPackage.id == package_id)
         if tenant_id:
             query = query.filter(SkillPackage.tenant_id == tenant_id)
         return query.first()
 
-    def get_by_name(self, tenant_id: uuid.UUID, name: str) -> Optional[SkillPackage]:
+    def get_by_name(self, tenant_id: uuid.UUID, name: str) -> SkillPackage | None:
         return self.db.query(SkillPackage).filter(
             SkillPackage.tenant_id == tenant_id,
             SkillPackage.name == name,
@@ -88,7 +90,7 @@ class SkillPackageRepository:
             SkillFile.package_id == package_id
         ).order_by(SkillFile.rel_path).all()
 
-    def get_file(self, package_id: uuid.UUID, rel_path: str) -> Optional[SkillFile]:
+    def get_file(self, package_id: uuid.UUID, rel_path: str) -> SkillFile | None:
         return self.db.query(SkillFile).filter(
             SkillFile.package_id == package_id,
             SkillFile.rel_path == rel_path,
@@ -111,14 +113,14 @@ class SkillPackageRepository:
         return plugin
 
     def get_plugin_by_id(
-        self, plugin_id: uuid.UUID, tenant_id: Optional[uuid.UUID] = None
-    ) -> Optional[SkillPlugin]:
+        self, plugin_id: uuid.UUID, tenant_id: uuid.UUID | None = None
+    ) -> SkillPlugin | None:
         query = self.db.query(SkillPlugin).filter(SkillPlugin.id == plugin_id)
         if tenant_id:
             query = query.filter(SkillPlugin.tenant_id == tenant_id)
         return query.first()
 
-    def get_plugin_by_name(self, tenant_id: uuid.UUID, name: str) -> Optional[SkillPlugin]:
+    def get_plugin_by_name(self, tenant_id: uuid.UUID, name: str) -> SkillPlugin | None:
         return self.db.query(SkillPlugin).filter(
             SkillPlugin.tenant_id == tenant_id,
             SkillPlugin.name == name,
@@ -142,8 +144,8 @@ class SkillPackageRepository:
 
     @staticmethod
     async def get_by_id_async(
-        db: AsyncSession, package_id: uuid.UUID, tenant_id: Optional[uuid.UUID] = None
-    ) -> Optional[SkillPackage]:
+        db: AsyncSession, package_id: uuid.UUID, tenant_id: uuid.UUID | None = None
+    ) -> SkillPackage | None:
         stmt = select(SkillPackage).where(SkillPackage.id == package_id).limit(1)
         if tenant_id:
             stmt = stmt.where(SkillPackage.tenant_id == tenant_id)
@@ -159,7 +161,7 @@ class SkillPackageRepository:
     @staticmethod
     async def get_file_async(
         db: AsyncSession, package_id: uuid.UUID, rel_path: str
-    ) -> Optional[SkillFile]:
+    ) -> SkillFile | None:
         stmt = select(SkillFile).where(
             SkillFile.package_id == package_id,
             SkillFile.rel_path == rel_path,

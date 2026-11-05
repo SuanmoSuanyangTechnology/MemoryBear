@@ -66,9 +66,7 @@ class ProfileQueryService:
     def __init__(self, runtime: ProfileRuntime) -> None:
         self.end_user_profile = EndUserProfileRepository(runtime.postgres)
         self.end_user = EndUserService.from_postgres(runtime.postgres)
-        self.memory_statistics = MemoryStatisticsRepository(
-            runtime.postgres, ontology_query_enabled=runtime.settings.edition == "enterprise"
-        )
+        self.memory_statistics = MemoryStatisticsRepository(runtime.postgres)
         self.memory_graph = MemoryGraphRepository(runtime.neo4j)
         self.memory_search = MemorySearchRepository(runtime.elasticsearch)
         self.workspace_profile = WorkspaceProfileRepository(runtime.postgres)

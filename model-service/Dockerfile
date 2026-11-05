@@ -31,6 +31,7 @@ RUN if [ "$NEED_MIRROR" == "1" ]; then \
 COPY packages/redbear-model /code/packages/redbear-model
 COPY packages/auth-sdk /code/packages/auth-sdk
 COPY packages/memorybear-grpc /code/packages/memorybear-grpc
+COPY packages/error-core /code/packages/error-core
 COPY model-service/pyproject.toml model-service/uv.lock /code/model-service/
 
 WORKDIR /code/model-service

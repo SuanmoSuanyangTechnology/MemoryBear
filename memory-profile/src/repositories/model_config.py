@@ -12,11 +12,12 @@ statement; the slot only selects which preset column is read.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from typing import Any
 from uuid import UUID
 
 import sqlalchemy as sa
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.dialects import postgresql
 
 from src.infrastructure.postgres import PostgresManager
@@ -47,6 +48,37 @@ class ModelConfigRepository:
 
     def __init__(self, postgres: PostgresManager) -> None:
         self.postgres = postgres
+
+    async def get_models(
+        self, model_ids: Iterable[UUID], tenant_id: UUID | None = None
+    ) -> dict[UUID, dict[str, Any]]:
+        """Load every requested ``model_configs`` row in one statement.
+
+        Same visibility rule as the API repository: the tenant's own rows plus
+        public ones. Ids are de-duplicated; ids that do not resolve are simply
+        absent from the result. The probe path only needs identity, name and
+        active state.
+        """
+
+        ids = list(dict.fromkeys(model_ids))
+        if not ids:
+            return {}
+        statement = select(
+            ModelConfig.id,
+            ModelConfig.tenant_id,
+            ModelConfig.name,
+            ModelConfig.is_active,
+        ).where(ModelConfig.id.in_(ids))
+        if tenant_id:
+            statement = statement.where(
+                or_(
+                    ModelConfig.tenant_id == tenant_id,
+                    ModelConfig.is_public.is_(True),
+                )
+            )
+        async with self.postgres.session() as session:
+            rows = (await session.execute(statement)).mappings().all()
+        return {row["id"]: dict(row) for row in rows}
 
     async def resolve_model(
         self,

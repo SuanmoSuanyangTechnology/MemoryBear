@@ -137,6 +137,7 @@ dependencies = [
     { name = "boto3" },
     { name = "chardet" },
     { name = "deprecated" },
+    { name = "error-core" },
     { name = "fastapi" },
     { name = "httpx" },
     { name = "jinja2" },
@@ -197,6 +198,7 @@ requires-dist = [
     { name = "boto3", specifier = ">=1.42,<2" },
     { name = "chardet", specifier = ">=5.2.0,<6" },
     { name = "deprecated", specifier = ">=1.3.1,<2" },
+    { name = "error-core", directory = "../packages/error-core" },
     { name = "fastapi", specifier = ">=0.119,<1" },
     { name = "httpx", specifier = ">=0.28,<1" },
     { name = "jinja2", specifier = ">=3.1.6,<4" },
@@ -539,6 +541,16 @@ sdist = { url = "https://mirrors.cloud.tencent.com/pypi/packages/25/ca/8de7744cb
 wheels = [
     { url = "https://mirrors.cloud.tencent.com/pypi/packages/51/79/119091c98e2bf49e24ed9f3ae69f816d715d2904aefa6a2baa039a2ba0b0/ecdsa-0.19.2-py2.py3-none-any.whl", hash = "sha256:840f5dc5e375c68f36c1a7a5b9caad28f95daa65185c9253c0c08dd952bb7399" },
 ]
+
+[[package]]
+name = "error-core"
+version = "0.1.0"
+source = { directory = "../packages/error-core" }
+
+[package.metadata]
+
+[package.metadata.requires-dev]
+dev = [{ name = "pytest", specifier = ">=8.0" }]
 
 [[package]]
 name = "et-xmlfile"
@@ -1743,6 +1755,7 @@ version = "0.1.0"
 source = { directory = "../packages/redbear-model" }
 dependencies = [
     { name = "cryptography" },
+    { name = "error-core" },
     { name = "pydantic" },
     { name = "sqlalchemy" },
 ]
@@ -1768,6 +1781,7 @@ requires-dist = [
     { name = "cryptography", specifier = ">=43" },
     { name = "dashscope", marker = "extra == 'all'", specifier = ">=1.25,<2" },
     { name = "dashscope", marker = "extra == 'dashscope'", specifier = ">=1.25,<2" },
+    { name = "error-core", directory = "../packages/error-core" },
     { name = "httpx", marker = "extra == 'all'", specifier = ">=0.28,<1" },
     { name = "httpx", marker = "extra == 'runtime'", specifier = ">=0.28,<1" },
     { name = "httpx", extras = ["socks"], marker = "extra == 'all'", specifier = ">=0.28,<1" },

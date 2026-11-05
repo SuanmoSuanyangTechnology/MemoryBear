@@ -164,20 +164,20 @@ DEFAULT_PROJECTION = {
         fields=("id", "content", "created_at", "score")
     ),
     MemoryNodeType.STATEMENT: NodeProjection(
-        fields=("id", "statement", "created_at", "score")
+        fields=("id", "statement", "created_at", "chunk_id", "score")
     ),
     MemoryNodeType.MEMORY_SUMMARY: NodeProjection(
-        fields=("id", "name", "content", "created_at", "score")
+        fields=("id", "name", "content", "created_at", "chunk_ids", "score")
     ),
     MemoryNodeType.SCENE_SUMMARY: NodeProjection(
         fields=(
-            "id", "content", "source_message_ids", "started_at", "ended_at",
+            "id", "topic_scope", "content", "source_message_ids", "started_at", "ended_at",
             "turn_count", "close_reason", "created_at", "updated_at", "score",
             "end_user_id", "delete_at", "scene_community_id", "community_status", "community_eligibility",
         )
     ),
     MemoryNodeType.SCENE_COMMUNITY: NodeProjection(
-        fields=("id", "summary", "end_user_id", "delete_at", "score")
+        fields=("id", "topic_name", "topic_scope", "summary", "end_user_id", "delete_at", "score")
     ),
     MemoryNodeType.PERCEPTUAL: NodeProjection(
         fields=(

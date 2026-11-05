@@ -12,6 +12,8 @@ from sqlalchemy.orm import Session as _Session
 from app.core.error_codes import BizCode as _BizCode
 from app.core.exceptions import BusinessException as _BusinessException
 from app.core.utils.datetime_utils import parse_timestamp_to_utc_naive, to_timestamp_ms
+from app.i18n.exceptions import get_current_locale
+from app.i18n.service import t
 from app.models.api_key_model import ApiKeyType
 from app.models.end_user_model import EndUser as _EndUser
 from app.repositories.end_user_repository import EndUserRepository as _EndUserRepository
@@ -142,12 +144,15 @@ async def validate_end_user_in_workspace_async(
         db: AsyncSession,
         end_user_id: str,
         workspace_id,
+        *,
+        locale: str | None = None,
 ) -> _EndUser:
+    locale = locale or get_current_locale()
     try:
         end_user_id = _uuid.UUID(end_user_id)
     except (ValueError, AttributeError):
         raise _BusinessException(
-            f"Invalid end_user_id format: {end_user_id}",
+            t("memory.errors.invalid_end_user_id", locale, value=end_user_id),
             _BizCode.INVALID_PARAMETER,
         )
 
@@ -156,13 +161,13 @@ async def validate_end_user_in_workspace_async(
 
     if end_user is None:
         raise _BusinessException(
-            "End user not found",
+            t("memory.errors.user_not_found", locale),
             _BizCode.USER_NOT_FOUND,
         )
 
     if str(end_user.workspace_id) != str(workspace_id):
         raise _BusinessException(
-            "End user does not belong to this workspace",
+            t("memory.errors.user_other_workspace", locale),
             _BizCode.PERMISSION_DENIED,
         )
 

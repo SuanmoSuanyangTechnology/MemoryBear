@@ -8,6 +8,11 @@ from app.core.workflow.nodes import ParameterExtractorNode
 from app.core.workflow.variable.base_variable import VariableType
 from tests.workflow.nodes.base import TEST_MODEL_ID, simple_state, simple_vairable_pool
 
+pytestmark = pytest.mark.skipif(
+    not TEST_MODEL_ID,
+    reason="TEST_MODEL_ID not set; these tests require a live model",
+)
+
 
 # 基础参数提取配置 - 单个字符串参数
 SINGLE_STRING_PARAM_CONFIG = {
@@ -213,7 +218,7 @@ async def test_extract_single_string_param():
     state = simple_state()
     variable_pool = await simple_vairable_pool("test")
     
-    result = await ParameterExtractorNode(SINGLE_STRING_PARAM_CONFIG, {}).execute(state, variable_pool)
+    result = await ParameterExtractorNode(SINGLE_STRING_PARAM_CONFIG, {}, []).execute(state, variable_pool)
     
     assert isinstance(result, dict)
     assert "name" in result
@@ -227,7 +232,7 @@ async def test_extract_multi_params():
     state = simple_state()
     variable_pool = await simple_vairable_pool("test")
     
-    result = await ParameterExtractorNode(MULTI_PARAMS_CONFIG, {}).execute(state, variable_pool)
+    result = await ParameterExtractorNode(MULTI_PARAMS_CONFIG, {}, []).execute(state, variable_pool)
     
     assert isinstance(result, dict)
     assert "name" in result
@@ -247,7 +252,7 @@ async def test_extract_number_params():
     state = simple_state()
     variable_pool = await simple_vairable_pool("test")
     
-    result = await ParameterExtractorNode(NUMBER_PARAM_CONFIG, {}).execute(state, variable_pool)
+    result = await ParameterExtractorNode(NUMBER_PARAM_CONFIG, {}, []).execute(state, variable_pool)
     
     assert isinstance(result, dict)
     assert "price" in result
@@ -265,7 +270,7 @@ async def test_extract_boolean_params():
     state = simple_state()
     variable_pool = await simple_vairable_pool("test")
     
-    result = await ParameterExtractorNode(BOOLEAN_PARAM_CONFIG, {}).execute(state, variable_pool)
+    result = await ParameterExtractorNode(BOOLEAN_PARAM_CONFIG, {}, []).execute(state, variable_pool)
     
     assert isinstance(result, dict)
     assert "verified" in result
@@ -283,7 +288,7 @@ async def test_extract_array_string_param():
     state = simple_state()
     variable_pool = await simple_vairable_pool("test")
     
-    result = await ParameterExtractorNode(ARRAY_STRING_PARAM_CONFIG, {}).execute(state, variable_pool)
+    result = await ParameterExtractorNode(ARRAY_STRING_PARAM_CONFIG, {}, []).execute(state, variable_pool)
     
     assert isinstance(result, dict)
     assert "fruits" in result
@@ -300,7 +305,7 @@ async def test_extract_array_number_param():
     state = simple_state()
     variable_pool = await simple_vairable_pool("test")
     
-    result = await ParameterExtractorNode(ARRAY_NUMBER_PARAM_CONFIG, {}).execute(state, variable_pool)
+    result = await ParameterExtractorNode(ARRAY_NUMBER_PARAM_CONFIG, {}, []).execute(state, variable_pool)
     
     assert isinstance(result, dict)
     assert "weekly_sales" in result
@@ -319,7 +324,7 @@ async def test_extract_with_custom_prompt():
     state = simple_state()
     variable_pool = await simple_vairable_pool("test")
     
-    result = await ParameterExtractorNode(CUSTOM_PROMPT_CONFIG, {}).execute(state, variable_pool)
+    result = await ParameterExtractorNode(CUSTOM_PROMPT_CONFIG, {}, []).execute(state, variable_pool)
     
     assert isinstance(result, dict)
     assert "order_id" in result
@@ -337,7 +342,7 @@ async def test_extract_with_variable_input():
     variable_pool = await simple_vairable_pool("test")
     await variable_pool.new("conv", "user_input", "我叫王五，今年28岁", VariableType.STRING, mut=True)
     
-    result = await ParameterExtractorNode(VARIABLE_INPUT_CONFIG, {}).execute(state, variable_pool)
+    result = await ParameterExtractorNode(VARIABLE_INPUT_CONFIG, {}, []).execute(state, variable_pool)
     
     assert isinstance(result, dict)
     assert "name" in result
@@ -404,7 +409,7 @@ async def test_extract_from_complex_text():
         }
     }
     
-    result = await ParameterExtractorNode(config, {}).execute(state, variable_pool)
+    result = await ParameterExtractorNode(config, {}, []).execute(state, variable_pool)
     
     assert isinstance(result, dict)
     assert "name" in result
@@ -456,7 +461,7 @@ async def test_extract_optional_params():
         }
     }
     
-    result = await ParameterExtractorNode(config, {}).execute(state, variable_pool)
+    result = await ParameterExtractorNode(config, {}, []).execute(state, variable_pool)
     
     assert isinstance(result, dict)
     assert "name" in result
@@ -495,7 +500,7 @@ async def test_extract_with_sys_message():
         }
     }
     
-    result = await ParameterExtractorNode(config, {}).execute(state, variable_pool)
+    result = await ParameterExtractorNode(config, {}, []).execute(state, variable_pool)
     
     assert isinstance(result, dict)
     assert "name" in result

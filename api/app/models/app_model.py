@@ -1,12 +1,13 @@
-import datetime
-from enum import StrEnum
-from re import LOCALE
 import uuid
-from sqlalchemy import Column, String, Boolean, DateTime, ForeignKey
-from sqlalchemy.dialects.postgresql import UUID, JSON
+from enum import StrEnum
+
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, String
+from sqlalchemy.dialects.postgresql import JSON, UUID
 from sqlalchemy.orm import relationship
-from app.db import Base
+
 from app.core.utils.datetime_utils import utcnow_naive
+from app.db import Base
+
 
 class IconType(StrEnum):
     """图标类型枚举"""
@@ -41,7 +42,7 @@ class App(Base):
     __tablename__ = "apps"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
-    workspace_id = Column(UUID(as_uuid=True), nullable=False, comment="workspaces.id")
+    workspace_id = Column(UUID(as_uuid=True), nullable=False, index=True, comment="workspaces.id")
     created_by = Column(UUID(as_uuid=True), nullable=False, comment="users.id")
 
     name = Column(String, index=True, nullable=False)
@@ -61,12 +62,33 @@ class App(Base):
     # 标签或扩展元数据
     tags = Column(JSON, default=list)
 
+    # Market provenance: describes the local copy's origin, not publication state.
+    origin = Column(String(16), default="local", server_default="local", nullable=False, index=True)
+    external_source = Column(String(32), nullable=True)
+    external_resource_id = Column(String(64), nullable=True, index=True)
+    external_version = Column(String(64), nullable=True)
+
     # 当前已发布版本指针（发布后指向快照，不受编辑影响）
     current_release_id = Column(
         UUID(as_uuid=True),
         ForeignKey("app_releases.id", use_alter=True, name="fk_apps_current_release_id"),
         nullable=True,
         index=True,
+    )
+
+    # 来源列（§11.2）：只记录本地副本的来源，投稿状态由 market-service 权威持有
+    origin = Column(
+        String(16), nullable=False, default="local", server_default="local",
+        comment="local（本租户创建）| external（从市场安装）",
+    )
+    external_source = Column(
+        String(32), nullable=True, comment="本期固定 community_market",
+    )
+    external_resource_id = Column(
+        String(64), nullable=True, index=True, comment="market_resources.id",
+    )
+    external_version = Column(
+        String(64), nullable=True, comment="安装时的市场版本，不随市场新版本变化",
     )
 
     is_active = Column(Boolean, default=True, nullable=False)

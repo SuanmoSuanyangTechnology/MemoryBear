@@ -33,6 +33,7 @@ from ..utils.app_config_utils import (
 from ..utils.redis_cache import CACHE_MISS, get_json_async, set_json_async
 from ..utils.sse_stream import with_sse_keepalive
 from .app_chat_service import AppChatService
+from .asset_release_resolver import AsyncAssetReleaseResolver, app_cache_key as _app_cache_key
 from .conversation_service import ConversationService
 from .public_chat_context import (
     _get_or_create_public_end_user_async,
@@ -67,8 +68,12 @@ def require_bound_app_id(app_id: UUID | None) -> UUID:
 async def _get_v1_chat_app_async(
     db: AsyncSession, app_id: UUID, workspace_id: UUID
 ) -> App:
-    """The active app row plus the workspace accessibility check (own
-    workspace or an active share into it)."""
+    """The active app row plus the workspace accessibility check.
+
+    Accessibility now means "own workspace, or an active catalog installation,
+    or a legacy `app_shares` row still waiting to be backfilled" — the catalog
+    replaced workspace-to-workspace sharing (§6.1 / §11.1 M3).
+    """
 
     app = await db.scalar(
         select(App).where(App.id == app_id, App.is_active.is_(True)).limit(1)
@@ -76,14 +81,10 @@ async def _get_v1_chat_app_async(
     if not app:
         raise ResourceNotFoundException("应用", str(app_id))
     if app.workspace_id != workspace_id:
-        share_exists = await db.scalar(
-            select(AppShare.id).where(
-                AppShare.source_app_id == app.id,
-                AppShare.target_workspace_id == workspace_id,
-                AppShare.is_active.is_(True),
-            ).limit(1)
+        accessible = await AsyncAssetReleaseResolver(db).can_access(
+            app_id=app.id, workspace_id=workspace_id
         )
-        if not share_exists:
+        if not accessible:
             raise BusinessException("应用不可访问", BizCode.WORKSPACE_NO_ACCESS)
     return app
 
@@ -110,13 +111,20 @@ async def _get_release_by_id_async(
 async def _get_current_release_async(
     db: AsyncSession, *, app_id: UUID, workspace_id: UUID
 ) -> AppRelease | None:
-    """Re-validate the app (a cache-hit stub carries no release pointer) and
-    return None when the app is not published."""
+    """The release this workspace should read, or None when unpublished.
 
-    app = await _get_v1_chat_app_async(db, app_id, workspace_id)
-    if not app.current_release_id:
+    Not `app.current_release_id`: a consumer of a shared app follows the entry's
+    pinned release, which may lag (or differ from) the source's current one
+    (§5.3). The resolver owns that rule; this function only maps "no pointer"
+    to `None` so the caller keeps its `APP_NOT_PUBLISHED` message.
+    """
+
+    resolved = await AsyncAssetReleaseResolver(db).resolve(
+        app_id=app_id, workspace_id=workspace_id
+    )
+    if resolved.release_id is None:
         return None
-    return await db.get(AppRelease, app.current_release_id)
+    return await db.get(AppRelease, resolved.release_id)
 
 
 def _check_app_config(release: AppRelease) -> None:
@@ -144,27 +152,32 @@ async def prepare_chat(
     failures still surface as pre-stream errors.
     """
 
-    # App cache: a hit skips the app row lookup; the cached current release id
-    # skips the release-by-current lookup too (host cache shape, 60s TTL).
-    app_cache_key = f"cache:v2:app:{app_id}"
+    # App cache: the key carries the workspace dimension. A consumer of a shared
+    # app resolves to the release pinned for *its* workspace, so a key without
+    # the workspace would let two spaces cross-read each other's pinned version
+    # (§5.3). Cached value is the resolved release id, not the source's current.
+    app_cache_key = _app_cache_key(app_id, workspace_id)
     app_cache = await get_json_async(app_cache_key)
     app_stub = None
     cached_release_id = None
     if app_cache is not CACHE_MISS:
         app_stub = SimpleNamespace(id=UUID(app_cache["id"]), type=app_cache["type"])
-        if app_cache.get("current_release_id"):
-            cached_release_id = UUID(app_cache["current_release_id"])
+        if app_cache.get("release_id"):
+            cached_release_id = UUID(app_cache["release_id"])
 
     async with get_async_db_context() as adb:
         if app_stub is not None:
             app = app_stub
         else:
             app = await _get_v1_chat_app_async(adb, app_id, workspace_id)
+            resolved = await AsyncAssetReleaseResolver(adb).resolve(
+                app_id=app.id, workspace_id=workspace_id
+            )
             await set_json_async(app_cache_key, {
                 "id": str(app.id),
                 "type": app.type,
-                "current_release_id": (
-                    str(app.current_release_id) if app.current_release_id else None
+                "release_id": (
+                    str(resolved.release_id) if resolved.release_id else None
                 ),
             }, ttl=60)
 
@@ -366,7 +379,7 @@ async def chat_complete(prep: ChatPreparation) -> dict:
                 workspace_id=str(prep.workspace_id),
                 files=payload.files,
             )
-        return success(data=ChatResponse(**result).model_dump(mode="json"))
+        return success(data=ChatResponse(**result).model_dump(mode="json"), msg="对话回复生成成功")
 
     if prep.app_type == AppType.MULTI_AGENT:
         async with get_async_db_context() as sdb:
@@ -383,7 +396,7 @@ async def chat_complete(prep: ChatPreparation) -> dict:
                 thinking=bool(payload.thinking),
                 files=payload.files,
             )
-        return success(data=ChatResponse(**result).model_dump(mode="json"))
+        return success(data=ChatResponse(**result).model_dump(mode="json"), msg="对话回复生成成功")
 
     if prep.app_type in (AppType.WORKFLOW, AppType.PURE_WORKFLOW):
         async with get_async_db_context() as sdb:

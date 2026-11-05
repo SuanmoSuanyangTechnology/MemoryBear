@@ -34,22 +34,47 @@ class InvokeEvent:
 
 
 def error_payload(failure: InvokeFailure) -> dict[str, Any]:
-    """HTTP error-frame body: code name plus attribution and retry hint."""
-    return {
-        "code": failure.code.name if isinstance(failure.code, BizCode) else str(failure.code),
-        "message": failure.message,
-        "attempts": failure.attempts,
-        "channel_id": None if failure.channel_id is None else str(failure.channel_id),
-        "retryable": failure.retryable,
-    }
+    """HTTP error-frame body: numeric code, localized msg and diagnostic error."""
+    from error_core.codes import coerce_code
+    from error_core.diagnostics import redact
+    from error_core.envelope import error_frame
+    from error_core.messages import user_message
+
+    from ..i18n import get_current_locale
+
+    numeric = coerce_code(failure.code)
+    # Error frames must never carry OK (0): treat it as an unresolved code.
+    if numeric in (None, BizCode.OK.value):
+        numeric = BizCode.INTERNAL_ERROR.value
+    return error_frame(
+        code=numeric,
+        msg=failure.msg or user_message(numeric, get_current_locale()) or failure.message,
+        error=redact(failure.detail or failure.message),
+        retryable=failure.retryable,
+        attempts=failure.attempts,
+        channel_id=None if failure.channel_id is None else str(failure.channel_id),
+        retry_after_seconds=failure.retry_after_seconds,
+    )
 
 
 def error_info(failure: InvokeFailure) -> dict[str, Any]:
     """gRPC ``ErrorInfo`` subset: the proto cannot express attempts/channel_id."""
+    from error_core.codes import code_name, coerce_code
+    from error_core.diagnostics import redact
+
+    numeric = coerce_code(failure.code)
+    if numeric in (None, BizCode.OK.value):
+        numeric = BizCode.INTERNAL_ERROR.value
+    detail = redact(failure.detail or failure.message)
     return {
-        "code": failure.code.name if isinstance(failure.code, BizCode) else str(failure.code),
-        "message": failure.message,
+        # Legacy readers expect a string; numeric string keeps old and new clients aligned.
+        "code": str(numeric),
+        "message": detail,
         "retryable": failure.retryable,
+        "biz_code": numeric,
+        "user_msg": failure.msg or "",
+        "detail": detail,
+        "code_name": code_name(numeric),
     }
 
 
@@ -82,13 +107,13 @@ def internal_error_event() -> InvokeEvent:
     """Escape hatch for facade contract breaches: a terminal error beats silence."""
     return InvokeEvent(
         EVENT_ERROR,
-        {
-            "code": BizCode.INTERNAL_ERROR.name,
-            "message": "模型调用内部错误",
-            "attempts": 0,
-            "channel_id": None,
-            "retryable": True,
-        },
+        error_payload(
+            InvokeFailure(
+                code=BizCode.INTERNAL_ERROR,
+                message="invoke facade contract breach",
+                retryable=True,
+            )
+        ),
     )
 
 

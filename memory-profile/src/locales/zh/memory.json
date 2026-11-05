@@ -1,0 +1,55 @@
+{
+  "errors": {
+    "workspace_required": "请先切换到一个工作空间",
+    "current_workspace_missing": "未选择当前工作空间",
+    "user_not_found": "终端用户不存在",
+    "user_not_in_workspace": "当前工作空间中不存在该终端用户"
+  },
+  "display": {
+    "error": {
+      "invalid_time_window": "start_time 不能大于 end_time",
+      "timezone_required": "X-Timezone 不能为空",
+      "timezone_header_required": "必须提供 X-Timezone 请求头",
+      "invalid_timezone": "无效的时区: {timezone}",
+      "invalid_iana_timezone": "'{timezone}' 不是有效的 IANA 时区",
+      "invalid_statistics_parameters": "无效的统计参数",
+      "invalid_year": "year 必须是四位自然年",
+      "year_month_required": "year 和 month 必须同时传入",
+      "invalid_month": "month 必须是 1 到 12 的整数",
+      "yearly_statistics_failed": "年度记忆活动统计失败",
+      "monthly_statistics_failed": "月度记忆活动统计失败",
+      "written_failed": "写入展示记录查询失败",
+      "retrieved_failed": "读取展示记录查询失败",
+      "engines_failed": "引擎展示记录查询失败",
+      "all_failed": "展示记录查询失败"
+    }
+  },
+  "perceptual": {
+    "error": {
+      "count_failed": "感知记忆统计查询失败",
+      "timeline_failed": "感知记忆时间线查询失败",
+      "latest_visual_failed": "最新视觉记忆查询失败",
+      "latest_audio_failed": "最新音频记忆查询失败",
+      "latest_text_failed": "最新文本记忆查询失败"
+    }
+  },
+  "implicit": {
+    "error": {
+      "invalid_user_id": "无效的用户ID",
+      "insufficient_data": "数据不足，无法进行分析",
+      "invalid_parameters": "无效的参数",
+      "missing_data": "缺少必要的数据",
+      "service_unavailable": "服务暂时不可用",
+      "analysis_failed": "分析处理失败",
+      "storage_failed": "数据存储失败",
+      "check_data_failed": "检查画像数据失败",
+      "preferences_failed": "偏好标签获取失败",
+      "portrait_failed": "四维画像获取失败",
+      "interest_areas_failed": "兴趣领域分布获取失败",
+      "habits_failed": "行为习惯获取失败",
+      "aggregate_failed": "隐性记忆查询失败",
+      "snapshot_not_ready": "隐性记忆快照尚未生成",
+      "user_id_empty": "用户ID不能为空"
+    }
+  }
+}

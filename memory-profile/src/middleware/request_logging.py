@@ -30,20 +30,6 @@ def _level(status_code: int, completion: str) -> int:
     return logging.INFO
 
 
-def record_request_failure(
-    request: Any,
-    *,
-    response_code: int | None,
-    error_code: str,
-) -> None:
-    """Attach bounded failure metadata for the outer completion record."""
-
-    request.state.memory_failure = {
-        "response_code": response_code,
-        "error_code": error_code,
-    }
-
-
 class RequestLoggingMiddleware:
     """ASGI access logger shared by all current and future Memory modules."""
 

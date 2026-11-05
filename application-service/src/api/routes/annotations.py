@@ -151,7 +151,7 @@ def create_annotation(
         answer=payload.answer,
         embedding=embedding,
     )
-    return success(data=Annotation.model_validate(annotation))
+    return success(data=Annotation.model_validate(annotation), msg="创建标注成功")
 
 
 @router.get("/{annotation_id}/hit-logs", summary="获取标注命中历史", response_model=ApiResponse)
@@ -188,7 +188,7 @@ def list_annotations(
 
     data = [AnnotationListItem.model_validate(item) for item in items]
     meta = PageMeta(page=page, pagesize=pagesize, total=total, hasnext=(page * pagesize) < total)
-    return success(data=PageData(page=meta, items=data))
+    return success(data=PageData(page=meta, items=data), msg="获取标注列表成功")
 
 
 # ==================== Annotation settings (before /{annotation_id}) ====================
@@ -210,9 +210,10 @@ def get_annotation_settings(
                 "similarity_threshold": 0.85,
                 "model_config_id": None,
                 "enabled": 0,
-            }
+            },
+            msg="获取标注设置成功",
         )
-    return success(data=_setting_response(setting))
+    return success(data=_setting_response(setting), msg="获取标注设置成功")
 
 
 @router.put("/settings", summary="更新标注设置", response_model=ApiResponse)
@@ -230,7 +231,7 @@ def update_annotation_settings(
         model_config_id=payload.model_config_id,
         enabled=payload.enabled,
     )
-    return success(data=_setting_response(setting))
+    return success(data=_setting_response(setting), msg="更新标注设置成功")
 
 
 # ==================== Batch operations (before /{annotation_id}) ====================
@@ -481,7 +482,7 @@ def v1_list_annotations(
     items, total = service.list_annotations(app_id, search, page, pagesize)
     data = [AnnotationListItem.model_validate(item) for item in items]
     meta = PageMeta(page=page, pagesize=pagesize, total=total, hasnext=(page * pagesize) < total)
-    return success(data=PageData(page=meta, items=data))
+    return success(data=PageData(page=meta, items=data), msg="获取标注列表成功")
 
 
 @v1_router.post("", summary="创建标注", response_model=ApiResponse)
@@ -515,7 +516,7 @@ def v1_create_annotation(
         answer=payload.answer,
         embedding=embedding,
     )
-    return success(data=Annotation.model_validate(annotation))
+    return success(data=Annotation.model_validate(annotation), msg="创建标注成功")
 
 
 @v1_router.get("/settings", summary="获取标注设置", response_model=ApiResponse)
@@ -536,9 +537,10 @@ def v1_get_annotation_settings(
                 "similarity_threshold": 0.85,
                 "model_config_id": None,
                 "enabled": 0,
-            }
+            },
+            msg="获取标注设置成功",
         )
-    return success(data=_setting_response(setting))
+    return success(data=_setting_response(setting), msg="获取标注设置成功")
 
 
 @v1_router.put("/settings", summary="更新标注设置", response_model=ApiResponse)
@@ -558,7 +560,7 @@ def v1_update_annotation_settings(
         model_config_id=payload.model_config_id,
         enabled=payload.enabled,
     )
-    return success(data=_setting_response(setting))
+    return success(data=_setting_response(setting), msg="更新标注设置成功")
 
 
 @v1_router.put("/{annotation_id}", summary="更新标注", response_model=ApiResponse)
@@ -595,7 +597,7 @@ def v1_update_annotation(
         answer=payload.answer,
         embedding=embedding,
     )
-    return success(data=Annotation.model_validate(annotation))
+    return success(data=Annotation.model_validate(annotation), msg="更新标注成功")
 
 
 @v1_router.delete("/{annotation_id}", summary="删除标注", response_model=ApiResponse)

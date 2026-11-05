@@ -20,8 +20,6 @@ def _as_asyncpg_url(value: str) -> str:
 class ProfileSettings(BaseSettings):
     model_config = ConfigDict(frozen=True, extra="ignore", case_sensitive=False)
 
-    edition: str = Field("community", validation_alias="EDITION")
-
     service_name: str = Field("memory-profile", validation_alias="PROFILE_SERVICE_NAME")
     host: str = Field("0.0.0.0", validation_alias="PROFILE_HOST")
     port: int = Field(8082, validation_alias="PROFILE_PORT")
@@ -77,6 +75,18 @@ class ProfileSettings(BaseSettings):
     model_service_base_url: str = Field(
         "http://127.0.0.1:8080", validation_alias="MODEL_SERVICE_BASE_URL"
     )
+    # Scene continuity BERT probe used only by the scene/split-demo endpoint.
+    # This is the single model credential this process holds; see README.
+    scene_continuity_url: str = Field("", validation_alias="SCENE_CONTINUITY_URL")
+    scene_continuity_api_key: str = Field(
+        "", validation_alias="SCENE_CONTINUITY_API_KEY"
+    )
+    scene_continuity_model: str = Field(
+        "topic-shift-detector", validation_alias="SCENE_CONTINUITY_MODEL"
+    )
+    scene_continuity_timeout_seconds: float = Field(
+        2.0, ge=0.1, validation_alias="SCENE_CONTINUITY_TIMEOUT_SECONDS"
+    )
     model_service_connect_timeout_seconds: float = Field(
         5.0, validation_alias="MODEL_SERVICE_INVOKE_CONNECT_TIMEOUT_SECONDS"
     )
@@ -94,6 +104,25 @@ class ProfileSettings(BaseSettings):
     )
     model_service_max_keepalive_connections: int = Field(
         20, validation_alias="MODEL_SERVICE_MAX_KEEPALIVE_CONNECTIONS"
+    )
+
+    # 企业版配额由闭源 memory-enterprise 服务持有（套餐/资源包表），本服务只查询
+    # 生效额度。留空 base URL 视为社区版；查询失败同样回落免费版。
+    memory_enterprise_base_url: str = Field("", validation_alias="MEMORY_ENTERPRISE_BASE_URL")
+    memory_enterprise_timeout_seconds: float = Field(
+        3.0, gt=0, validation_alias="MEMORY_ENTERPRISE_TIMEOUT_SECONDS"
+    )
+    memory_enterprise_token: str = Field("", validation_alias="MEMORY_ENTERPRISE_TOKEN")
+
+    # 免费版额度：memory-profile 自己维护，变量名与 api 的 QUOTA_* 保持一致，
+    # 一个部署值即可覆盖三个服务。企业版订阅值由 memory-enterprise 返回，
+    # 不读这里的默认值。
+    quota_memory_engine_quota: int = Field(1, ge=0, validation_alias="QUOTA_MEMORY_ENGINE_QUOTA")
+    quota_end_user_memory_limit: int = Field(
+        300, ge=0, validation_alias="QUOTA_END_USER_MEMORY_LIMIT"
+    )
+    quota_pre_user_memory_write_qps_limit: int = Field(
+        50, ge=0, validation_alias="QUOTA_PRE_USER_MEMORY_WRITE_QPS_LIMIT"
     )
 
     # 缓存生成由 memory-jobs 的 Celery worker 执行：本进程只按任务名投递并等待结果，
@@ -193,6 +222,18 @@ class ProfileSettings(BaseSettings):
             raise ValueError("MODEL_SERVICE_BASE_URL must be an absolute HTTP(S) URL")
         if parsed.query or parsed.fragment:
             raise ValueError("MODEL_SERVICE_BASE_URL must not contain query or fragment")
+        return value
+
+    @field_validator("memory_enterprise_base_url")
+    @classmethod
+    def validate_memory_enterprise_base_url(cls, value: str) -> str:
+        if not value:
+            return value
+        parsed = urlparse(value)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            raise ValueError("MEMORY_ENTERPRISE_BASE_URL must be an absolute HTTP(S) URL")
+        if parsed.query or parsed.fragment:
+            raise ValueError("MEMORY_ENTERPRISE_BASE_URL must not contain query or fragment")
         return value
 
     @field_validator("log_level", mode="before")

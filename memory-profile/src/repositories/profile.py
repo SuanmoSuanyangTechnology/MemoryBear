@@ -144,11 +144,8 @@ def _profile_data(rows, scenes) -> list[tuple[str, Any, dict[str, str]]]:
 
 
 class MemoryStatisticsRepository:
-    def __init__(
-        self, postgres: PostgresManager, *, ontology_query_enabled: bool = False
-    ) -> None:
+    def __init__(self, postgres: PostgresManager) -> None:
         self.postgres = postgres
-        self.ontology_query_enabled = ontology_query_enabled
 
     # ------------------------------------------------------------------
     # 各计数器的 SQL。单一来源：合并查询与单指标查询都从这里取语句，

@@ -1,22 +1,13 @@
-import time
 from typing import Any, Optional
 
-
-def success(data: Optional[Any] = None, msg: str = "OK") -> dict:
-    return {
-        "code": 0,
-        "msg": msg,
-        "data": data if data is not None else {},
-        "error": "",
-        "time": int(time.time() * 1000),
-    }
+from error_core.envelope import fail, now_ms
+from error_core.envelope import success as _success
 
 
-def fail(code: int, msg: str, error: str = "", data: Optional[Any] = None) -> dict:
-    return {
-        "code": code,
-        "msg": msg,
-        "data": data if data is not None else {},
-        "error": error,
-        "time": int(time.time() * 1000),
-    }
+def success(data: Optional[Any] = None, msg: Optional[str] = None) -> dict:
+    from app.i18n.exceptions import get_current_locale
+
+    return _success(data, msg, get_current_locale())
+
+
+__all__ = ["fail", "now_ms", "success"]

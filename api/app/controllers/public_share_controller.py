@@ -1435,7 +1435,7 @@ async def report_message(
         selected_text=payload.selected_text,
     )
 
-    return success(data=app_schema.MessageReportResponse(**result))
+    return success(data=app_schema.MessageReportResponse(**result), msg="举报提交成功")
 
 
 @router.post("/messages/{message_id}/regenerate", summary="重新生成回复")
@@ -1733,4 +1733,4 @@ async def switch_message_version(
         logger.warning(f"分享端切换版本构建节点明细失败（已降级为空）: {e}")
         result["node_executions_map"] = {}
 
-    return success(data=result)
+    return success(data=result, msg="消息版本切换成功")
