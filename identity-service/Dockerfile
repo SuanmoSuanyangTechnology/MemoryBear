@@ -17,17 +17,18 @@ RUN if [ "$NEED_MIRROR" == "1" ]; then \
         pip3 config set global.trusted-host pypi.tuna.tsinghua.edu.cn; \
     fi
 
-# auth-sdk 先于目标服务安装：identity pyproject 的 [tool.uv.sources] 仅 uv 识别，
-# pip 构建需 auth-sdk 已满足依赖（auth-sdk 不在 PyPI，path 安装为唯一来源）
+# auth-sdk / error-core 先于目标服务安装：identity pyproject 的 [tool.uv.sources]
+# 仅 uv 识别，pip 构建需 path 依赖已满足（均不在 PyPI，path 安装为唯一来源）
 # alembic.ini + migrations 一并拷入（prepend_sys_path=src），供 pod 内执行迁移
 COPY packages/auth-sdk /app/packages/auth-sdk
+COPY packages/error-core /app/packages/error-core
 # migrations 单独 COPY：多源 COPY 到以 / 结尾的目标会平铺目录内容，
 # 而 alembic.ini 的 script_location = migrations 需要 migrations/ 子目录
 COPY identity-service/pyproject.toml identity-service/alembic.ini /app/identity-service/
 COPY identity-service/migrations /app/identity-service/migrations
 COPY identity-service/src /app/identity-service/src
 WORKDIR /app/identity-service
-RUN pip install --no-cache-dir -e /app/packages/auth-sdk && pip install --no-cache-dir .
+RUN pip install --no-cache-dir -e /app/packages/auth-sdk && pip install --no-cache-dir -e /app/packages/error-core && pip install --no-cache-dir .
 
 EXPOSE 8001
 

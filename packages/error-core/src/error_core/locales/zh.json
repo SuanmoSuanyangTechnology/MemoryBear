@@ -46,6 +46,8 @@
     "SPEEDBEAR_CHANNEL_MISSING": "模型渠道配置缺失",
     "CREDENTIAL_DECRYPT_ERROR": "模型凭证读取失败，请联系管理员",
     "MODEL_AVAILABLE_IN_PLAZA": "广场模型不能直接调用",
+    "ACL_RULE_NOT_FOUND": "ACL 规则不存在",
+    "USER_SNAPSHOT_NOT_FOUND": "用户不存在",
     "DUPLICATE_NAME": "名称已存在",
     "RESOURCE_ALREADY_EXISTS": "资源已存在",
     "VERSION_ALREADY_EXISTS": "版本已存在",

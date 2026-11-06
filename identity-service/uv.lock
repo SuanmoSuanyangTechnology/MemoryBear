@@ -177,6 +177,16 @@ wheels = [
 ]
 
 [[package]]
+name = "error-core"
+version = "0.1.0"
+source = { directory = "../packages/error-core" }
+
+[package.metadata]
+
+[package.metadata.requires-dev]
+dev = [{ name = "pytest", specifier = ">=8.0" }]
+
+[[package]]
 name = "fakeredis"
 version = "2.37.1"
 source = { registry = "https://mirrors.cloud.tencent.com/pypi/simple" }
@@ -318,6 +328,7 @@ dependencies = [
     { name = "asyncpg" },
     { name = "auth-sdk" },
     { name = "email-validator" },
+    { name = "error-core" },
     { name = "fastapi" },
     { name = "httpx" },
     { name = "python-dotenv" },
@@ -342,6 +353,7 @@ requires-dist = [
     { name = "asyncpg", specifier = ">=0.29" },
     { name = "auth-sdk", directory = "../packages/auth-sdk" },
     { name = "email-validator", specifier = ">=2.1" },
+    { name = "error-core", directory = "../packages/error-core" },
     { name = "fastapi", specifier = ">=0.110" },
     { name = "httpx", specifier = ">=0.27" },
     { name = "python-dotenv", specifier = ">=1.0" },

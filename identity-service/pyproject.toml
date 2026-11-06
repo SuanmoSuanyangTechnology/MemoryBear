@@ -8,6 +8,7 @@ version = "0.1.0"
 requires-python = ">=3.12"
 dependencies = [
     "auth-sdk>=0.1",
+    "error-core",
     "fastapi>=0.110",
     "uvicorn>=0.29",
     "asyncpg>=0.29",
@@ -26,6 +27,7 @@ dev = ["pytest>=8", "pytest-asyncio>=0.23", "fakeredis>=2.23", "ruff>=0.16,<1"]
 
 [tool.uv.sources]
 auth-sdk = { path = "../packages/auth-sdk" }
+error-core = { path = "../packages/error-core" }
 
 # 包名即 src（src/__init__.py 在服务根下，代码平铺 + 子包并存）：显式声明全部包，
 # 使 wheel 安装产出 package src 及其子包——find where=["src"] 会把子包打成顶层包、

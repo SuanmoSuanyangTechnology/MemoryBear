@@ -46,6 +46,8 @@
     "SPEEDBEAR_CHANNEL_MISSING": "Model channel configuration is missing",
     "CREDENTIAL_DECRYPT_ERROR": "Failed to read model credentials, please contact the administrator",
     "MODEL_AVAILABLE_IN_PLAZA": "Plaza models cannot be invoked directly",
+    "ACL_RULE_NOT_FOUND": "ACL rule not found",
+    "USER_SNAPSHOT_NOT_FOUND": "User not found",
     "DUPLICATE_NAME": "Name already exists",
     "RESOURCE_ALREADY_EXISTS": "Resource already exists",
     "VERSION_ALREADY_EXISTS": "Version already exists",
