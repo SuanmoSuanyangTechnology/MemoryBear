@@ -69,12 +69,13 @@ def ensure_seeded(
                 for item in classes:
                     db.add(item)
                 db.flush()
-        except IntegrityError:
+        except IntegrityError as exc:
             # 并发首次种入：唯一约束兜底，savepoint 回滚后视为已种入。
             logger.warning(
-                "[PreferenceSeed] concurrent insert skipped workspace=%s domain=%s",
+                "[PreferenceSeed] concurrent insert skipped workspace=%s domain=%s error=%s",
                 workspace_id,
                 domain,
+                exc,
             )
             return False
         return True
@@ -85,13 +86,14 @@ def ensure_seeded(
 
     try:
         db.commit()
-    except IntegrityError:
+    except IntegrityError as exc:
         # 并发首次种入：唯一约束兜底，回滚后视为已种入。
         db.rollback()
         logger.warning(
-            "[PreferenceSeed] concurrent insert skipped workspace=%s domain=%s",
+            "[PreferenceSeed] concurrent insert skipped workspace=%s domain=%s error=%s",
             workspace_id,
             domain,
+            exc,
         )
         return False
     except Exception:
@@ -127,12 +129,13 @@ async def ensure_seeded_async(
                 for item in classes:
                     db.add(item)
                 await db.flush()
-        except IntegrityError:
+        except IntegrityError as exc:
             # 并发首次种入：唯一约束兜底，savepoint 回滚后视为已种入。
             logger.warning(
-                "[PreferenceSeed] concurrent insert skipped workspace=%s domain=%s",
+                "[PreferenceSeed] concurrent insert skipped workspace=%s domain=%s error=%s",
                 workspace_id,
                 domain,
+                exc,
             )
             return False
         return True

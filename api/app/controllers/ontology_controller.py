@@ -34,7 +34,11 @@ from app.core.language_utils import get_language_from_header
 from app.core.logging_config import get_api_logger, get_business_logger
 from app.core.response_utils import fail, success
 from app.db import get_async_db, get_async_db_context, get_db
-from app.dependencies import get_current_user_async, CurrentUserSnapshot
+from app.dependencies import (
+    cur_workspace_access_guard_async,
+    get_current_user_async,
+    CurrentUserSnapshot,
+)
 from app.services.preference_type_service import (
     get_preference_type,
     list_preference_types,
@@ -1071,6 +1075,7 @@ async def export_owl_by_scene(
 # ==================== 偏好类型只读接口 ====================
 
 @router.get("/preference-types", response_model=ApiResponse)
+@cur_workspace_access_guard_async()
 async def get_preference_type_list(
     current_user: CurrentUserSnapshot = Depends(get_current_user_async),
     db: AsyncSession = Depends(get_async_db),
@@ -1094,6 +1099,7 @@ async def get_preference_type_list(
 
 
 @router.get("/preference-types/{domain}", response_model=ApiResponse)
+@cur_workspace_access_guard_async()
 async def get_preference_type_detail(
     domain: str,
     current_user: CurrentUserSnapshot = Depends(get_current_user_async),
