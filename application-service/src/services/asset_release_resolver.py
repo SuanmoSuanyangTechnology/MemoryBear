@@ -116,8 +116,12 @@ def _pick_release_id(
         # belongs to the target workspace, so `own` wins earlier).
         return installation.installed_release_id or app.current_release_id, "copy"
 
-    if asset is None or asset.status != AssetStatus.PUBLISHED:
-        # Cancel sharing invalidates reference installs immediately (§6.1).
+    if (
+        asset is None
+        or asset.status != AssetStatus.PUBLISHED
+        or not asset.is_active
+    ):
+        # 取消共享或停用条目都会立即使 reference 安装失效。
         raise BusinessException(
             "该应用已取消共享", BizCode.WORKSPACE_NO_ACCESS
         )

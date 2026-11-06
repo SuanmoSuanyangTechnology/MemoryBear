@@ -87,6 +87,7 @@ def _reference_install_app_ids(workspace_id: uuid.UUID):
             AppAssetInstallation.status == InstallStatus.ACTIVE,
             AppAssetInstallation.link_mode == LinkMode.REFERENCE,
             AppAsset.status == AssetStatus.PUBLISHED,
+            AppAsset.is_active.is_(True),
         )
     )
 

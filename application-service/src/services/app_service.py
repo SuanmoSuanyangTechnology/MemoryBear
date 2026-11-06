@@ -88,6 +88,7 @@ def _reference_install_app_ids(workspace_id: uuid.UUID):
             AppAssetInstallation.status == InstallStatus.ACTIVE,
             AppAssetInstallation.link_mode == LinkMode.REFERENCE,
             AppAsset.status == AssetStatus.PUBLISHED,
+            AppAsset.is_active.is_(True),
         )
     )
 
@@ -125,6 +126,7 @@ def _pinned_name_app_ids(pattern: str, workspace_id: uuid.UUID):
             AppAssetInstallation.status == InstallStatus.ACTIVE,
             AppAssetInstallation.link_mode == LinkMode.REFERENCE,
             AppAsset.status == AssetStatus.PUBLISHED,
+            AppAsset.is_active.is_(True),
             AppRelease.is_active.is_(True),
             func.lower(AppRelease.name).like(pattern),
         )
@@ -293,6 +295,7 @@ class AppService:
             AppAssetInstallation.status == InstallStatus.ACTIVE,
             AppAssetInstallation.link_mode == LinkMode.REFERENCE,
             AppAsset.status == AssetStatus.PUBLISHED,
+            AppAsset.is_active.is_(True),
             # 按 `App.type` 而不是 `AppRelease.type`：占名要算的是「这一行会不会在
             # type=T 的列表里跟新应用撞名」，而列表过滤的就是 `App.type`
             # （`list_apps` 的 `App.type == type_list[0]`），展示的 type 也取
@@ -624,6 +627,7 @@ class AppService:
                         AppAssetInstallation.permission,
                         AppAssetInstallation.created_at,
                         AppAsset.description.label("asset_description"),
+                        AppAsset.display_payload.label("asset_display_payload"),
                         AppRelease,
                     )
                     .join(AppAssetInstallation, AppAssetInstallation.asset_id == AppAsset.id)
@@ -648,6 +652,7 @@ class AppService:
                         # 出现在本空间的列表里，copy 的那条应用是本空间自有行。
                         AppAssetInstallation.link_mode == LinkMode.REFERENCE,
                         AppAsset.status == AssetStatus.PUBLISHED,
+                        AppAsset.is_active.is_(True),
                     )
                     .order_by(AppAssetInstallation.created_at.desc())
                 ).all()
@@ -661,10 +666,10 @@ class AppService:
                             row.source_app_id,
                             (
                                 row.AppRelease.name,
-                                # 条目冻结的描述，与资源中心详情返回的同一份
+                                # 条目冻结的描述与图标，与资源中心详情返回的同一份。
                                 row.asset_description,
-                                row.AppRelease.icon,
-                                row.AppRelease.icon_type,
+                                (row.asset_display_payload or {}).get("icon") or None,
+                                (row.asset_display_payload or {}).get("icon_type") or None,
                             ),
                         )
 
