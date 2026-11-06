@@ -1078,8 +1078,8 @@ async def _safe_rollback(db: AsyncSession) -> None:
     """异常分支回滚：session 已失效时回滚本身也可能抛错，不能让异常逃出端点。"""
     try:
         await db.rollback()
-    except Exception:
-        api_logger.warning("偏好类型接口回滚失败", exc_info=True)
+    except Exception as exc:
+        api_logger.warning("偏好类型接口回滚失败: %s", exc, exc_info=True)
 
 
 @router.get("/preference-types", response_model=ApiResponse)

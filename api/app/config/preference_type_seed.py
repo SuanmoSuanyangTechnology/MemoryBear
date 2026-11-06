@@ -98,6 +98,13 @@ def build_seed_rows(
     if set(modes) != _ALLOWED_MODES:
         raise ValueError("Preference ontology has invalid allowed_modes")
 
+    for item in subjects:
+        if not isinstance(item, dict):
+            raise ValueError("Preference subjects contain non-object item")
+    for item in situations:
+        if not isinstance(item, dict):
+            raise ValueError("Preference situations contain non-object item")
+
     subject_keys = [str(item.get("key") or "").strip() for item in subjects]
     situation_keys = [str(item.get("key") or "").strip() for item in situations]
     if len(subject_keys) != len(set(subject_keys)):

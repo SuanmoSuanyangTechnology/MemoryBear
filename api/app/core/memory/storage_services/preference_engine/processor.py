@@ -22,10 +22,7 @@ from .models import (
     PreferenceOperations,
     PreferenceProcessorResult,
 )
-from .ontology_registry import (
-    load_preference_ontology,
-    load_preference_ontology_from_db,
-)
+from .ontology_registry import load_preference_ontology_from_db
 from .prompt_runner import PreferencePromptRunner
 
 logger = logging.getLogger(__name__)
@@ -73,28 +70,17 @@ class PreferenceProcessor:
                         str(workspace_id), domain
                     )
                 except Exception as exc:
-                    if domain != DEFAULT_PREFERENCE_DOMAIN:
-                        # 随包本体只有默认域，非默认域不能回退，直接跳过本次偏好任务
-                        logger.error(
-                            "[Preference] DB ontology load failed for non-default domain, "
-                            "skip preference task workspace=%s domain=%s error=%s",
-                            workspace_id,
-                            domain,
-                            exc,
-                            exc_info=True,
-                        )
-                        self._skip_reason = "ontology_unavailable"
-                        self.ontology = None
-                    else:
-                        logger.warning(
-                            "[Preference] ontology load failed, fallback to shipped ontology "
-                            "workspace=%s domain=%s error=%s",
-                            workspace_id,
-                            domain,
-                            exc,
-                            exc_info=True,
-                        )
-                        self.ontology = load_preference_ontology(domain)
+                    # 写路径不回退随包本体，避免用与 workspace 配置不一致的封闭集合
+                    logger.error(
+                        "[Preference] DB ontology load failed, skip preference task "
+                        "workspace=%s domain=%s error=%s",
+                        workspace_id,
+                        domain,
+                        exc,
+                        exc_info=True,
+                    )
+                    self._skip_reason = "ontology_unavailable"
+                    self.ontology = None
 
         self.runner = (
             None
