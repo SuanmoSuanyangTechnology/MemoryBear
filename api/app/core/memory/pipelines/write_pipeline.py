@@ -344,12 +344,50 @@ class WritePipeline:
 
                 # Preference 使用剪枝和文件摘要注入前的独立快照，
                 # 并与 Normal Write 六阶段并行执行。
+                preference_domain = None
                 if (
                     not is_pilot_run
-                    and getattr(self.memory_config, "preference_engine_enabled", False)
                     and target_message.get("role") == "user"
                     and target_message.get("memory_message_id")
+                    and getattr(self.memory_config, "preference_engine_enabled", False)
                 ):
+                    from app.core.memory.storage_services.preference_engine.gating import (
+                        resolve_effective_preference_domain,
+                    )
+
+                    from app.core.config import settings
+
+                    try:
+                        preference_domain = await asyncio.wait_for(
+                            asyncio.to_thread(
+                                resolve_effective_preference_domain,
+                                memory_config=self.memory_config,
+                                conversation_id=conversation_id,
+                                source=source,
+                            ),
+                            timeout=settings.PREFERENCE_GATE_TIMEOUT_SECONDS,
+                        )
+                    except asyncio.TimeoutError:
+                        # 超时与被门控规则主动跳过分开记录，便于告警区分
+                        logger.warning(
+                            "[PreferenceGate] resolve domain timeout end_user_id=%s "
+                            "reason=gate_timeout timeout=%ss",
+                            self.end_user_id,
+                            settings.PREFERENCE_GATE_TIMEOUT_SECONDS,
+                        )
+                        preference_domain = None
+                    except Exception as gate_error:
+                        # 门控/反查异常只跳过偏好任务，不阻断 Normal Write
+                        logger.error(
+                            "[PreferenceGate] resolve domain failed end_user_id=%s "
+                            "reason=gate_error error=%s",
+                            self.end_user_id,
+                            gate_error,
+                            exc_info=True,
+                        )
+                        preference_domain = None
+
+                if preference_domain:
                     preference_target, preference_history = self._build_preference_snapshot(
                         target_message=target_message,
                         context_before=context_before,
@@ -362,6 +400,7 @@ class WritePipeline:
                             self._write_preference(
                                 target_message=preference_target,
                                 history_messages=preference_history,
+                                domain=preference_domain,
                             ),
                             timeout=settings.PREFERENCE_WRITE_TIMEOUT_SECONDS,
                         )
@@ -729,16 +768,19 @@ class WritePipeline:
         *,
         target_message: dict,
         history_messages: list[dict],
+        domain: str,
     ):
         from app.core.memory.storage_services.preference_engine.processor import (
             PreferenceProcessor,
         )
 
-        processor = PreferenceProcessor(
+        processor = await asyncio.to_thread(
+            PreferenceProcessor,
             memory_config=self.memory_config,
             end_user_id=self.end_user_id,
             llm_client=self._llm_client,
             connector=self._neo4j_connector,
+            domain=domain,
         )
         return await processor.run(
             target_message=target_message,
