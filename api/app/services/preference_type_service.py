@@ -47,11 +47,19 @@ async def _ensure_seeded_in_new_session(
 ) -> None:
     """用独立会话种入并提交，不污染请求/调用方事务。
 
-    种子文件异常只记 error 日志，不阻断只读接口——已种入的 workspace 仍可正常返回。
+    种子文件异常记 error、未知域记 warning；只读接口不因种入失败中断，
+    已种入的 workspace 仍可正常返回。
     """
     try:
         async with get_async_db_context() as seed_db:
             await ensure_seeded_async(seed_db, workspace_id, domain=domain)
+    except ValueError:
+        # 未知偏好域属于客户端输入问题，用 warning 避免日志级别失真
+        logger.warning(
+            "[PreferenceType] unsupported domain workspace=%s domain=%s",
+            workspace_id,
+            domain,
+        )
     except Exception:
         logger.error(
             "[PreferenceType] lazy seed failed workspace=%s domain=%s",
