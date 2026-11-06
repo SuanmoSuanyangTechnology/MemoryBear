@@ -173,6 +173,13 @@ RETURN episodic_count, explicit_entity_count, emotional_count
 """
 
 
+SCENE_COMMUNITY_COUNT_QUERY = """
+MATCH (c:SceneCommunity)
+WHERE c.end_user_id IN $ids AND c.delete_at IS NULL
+RETURN count(c) AS total
+"""
+
+
 class MemoryGraphRepository:
     def __init__(self, neo4j: Neo4jManager) -> None:
         self.neo4j = neo4j
@@ -181,6 +188,13 @@ class MemoryGraphRepository:
         # 会话/访问模式/事务形态统一由 infra 的 Neo4jManager.read_query 决定
         # （为什么不用 driver.execute_query，见该方法的 docstring）。
         return await self.neo4j.read_query(query, **params)
+
+    async def scene_community_count(self, end_user_ids: Sequence[str]) -> int:
+        """Count communities for users missing from Elasticsearch."""
+        if not end_user_ids:
+            return 0
+        rows = await self._query(SCENE_COMMUNITY_COUNT_QUERY, ids=list(end_user_ids))
+        return int(rows[0]["total"]) if rows else 0
 
     async def nodes_by_type(
         self, end_user_id: str, node_type: str, limit: int
@@ -406,11 +420,9 @@ class MemoryGraphRepository:
         self,
         end_user_ids: list[str],
     ) -> dict[str, int]:
-        """ES 中完全无数据的用户回退到 Neo4j 统计的三类计数。
+        """Count legacy memory metrics for users selected by the service fallback.
 
-        回退条件与 api 一致：用户在三个相关 ES 索引里**都不存在**有效数据时才回退，
-        因此这里的 ``emotion_type IS NOT NULL`` 与 ES 侧的 ``exists`` 语义对齐，
-        不做 10 桶归一化（归一化只在 ``emotional_count`` 的单用户展示口径里使用）。
+        emotion_type uses the same existence filter as the ES aggregation.
         """
 
         if not end_user_ids:

@@ -101,7 +101,7 @@ class ProfileQueryService:
             return _zero_memory_statistics()
         # Fetch PG source counts, Neo4j counts and short-term memo counts concurrently.
         evaluated_at = datetime.now(UTC)
-        source_counts, memory_counts, short_term = await asyncio.gather(
+        source_counts, memory_counts, short_term, community_total = await asyncio.gather(
             self._memory_type_source_counts(user_id),
             asyncio.gather(
                 safe_count(
@@ -115,6 +115,10 @@ class ProfileQueryService:
                 lambda: short_term_count(
                     self.memory_search, self.memory_graph, [str(user_id)], evaluated_at
                 ),
+            ),
+            safe_count(
+                "scene communities",
+                lambda: self._scene_community_count(str(user_id)),
             ),
         )
         implicit_count, graph_counts = memory_counts
@@ -130,7 +134,7 @@ class ProfileQueryService:
             "EXPLICIT_MEMORY": episodic + semantic,
             "IMPLICIT_MEMORY": implicit_count,
             "EMOTIONAL_MEMORY": emotional,
-            "EPISODIC_MEMORY": episodic,
+            "EPISODIC_MEMORY": community_total,
             "FORGET_MEMORY": source_counts["forgotten"],
         }
         total = sum(counts.values())
@@ -198,6 +202,13 @@ class ProfileQueryService:
             "semantic_explicit": semantic,
             "emotional": emotional,
         }
+
+    async def _scene_community_count(self, end_user_id: str) -> int:
+        """Use ES community counts, falling back only when the user is absent."""
+        counts, present_ids = await self.memory_search.scene_community_counts([end_user_id])
+        if end_user_id in present_ids:
+            return counts[end_user_id]
+        return await self.memory_graph.scene_community_count([end_user_id])
 
     # ── 工作空间热门标签 / legacy 终端用户画像 ──────────────────────────
 

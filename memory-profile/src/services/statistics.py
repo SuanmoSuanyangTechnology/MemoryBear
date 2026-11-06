@@ -336,7 +336,14 @@ class StatisticsService:
             totals["EXPLICIT_MEMORY"] += episodic_count + explicit_entity_count
             totals["IMPLICIT_MEMORY"] += implicit_count
             totals["EMOTIONAL_MEMORY"] += emotional_count
-            totals["EPISODIC_MEMORY"] += episodic_count
+            community_total = sum(
+                item["scene_community_count"] for item in elastic_statistics.values()
+            )
+            if missing_ids:
+                community_total += await self.memory_graph.scene_community_count(
+                    missing_ids
+                )
+            totals["EPISODIC_MEMORY"] += community_total
             totals["FORGET_MEMORY"] += postgresql["forgotten"]
             total_users += len(end_user_ids)
 

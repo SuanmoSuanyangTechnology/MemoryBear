@@ -2,10 +2,9 @@
 情景记忆的请求和响应模型
 """
 from abc import ABC
-from pydantic import BaseModel, Field
-from typing import Optional
+from pydantic import BaseModel, Field, field_validator
+from typing import Literal
 
-from app.core.memory.emotion.emotion_buckets import EMOTION_NAMES_ZH, LEGACY_EMOTION_MAP
 
 type_mapping = {
             "Person": "人物实体节点",
@@ -36,28 +35,6 @@ EPISODIC_TYPE_MAPPING = {
 }
 
 
-def translate_episodic_type(episodic_type: str, language: str = "zh") -> str:
-    """
-    根据语言参数翻译情景类型
-    
-    Args:
-        episodic_type: 英文枚举值 (conversation, project_work, etc.)
-        language: 语言类型 ("zh" 中文, "en" 英文)
-        
-    Returns:
-        翻译后的类型字符串
-    """
-    if language == "en":
-        return episodic_type
-    return EPISODIC_TYPE_MAPPING.get(episodic_type, episodic_type)
-
-
-class EmotionType(ABC):
-    # 10 类中文名 + 旧值（fear→焦虑、surprise→中性），由 emotion_buckets 生成，保留给外部兼容引用
-    EMOTION_MAPPING = {
-        **dict(EMOTION_NAMES_ZH),
-        **{old: EMOTION_NAMES_ZH[new] for old, new in LEGACY_EMOTION_MAP.items()},
-    }
 class EmotionSubject(ABC):
     SUBJECT_MAPPING={
         "self":"自己",
@@ -68,23 +45,34 @@ class EmotionSubject(ABC):
 class EpisodicMemoryOverviewRequest(BaseModel):
     """情景记忆总览查询请求"""
     
-    end_user_id: str = Field(..., description="终端用户ID")
-    time_range: str = Field(
-        default="all",
-        description="时间范围筛选，可选值：all, today, this_week, this_month"
-    )
-    episodic_type: str = Field(
-        default="all",
-        description="情景类型筛选，可选值：all, conversation, project_work, learning, decision, important_event"
-    )
-    title_keyword: Optional[str] = Field(
-        default=None,
-        description="标题关键词，用于模糊搜索（可选）"
-    )
+    end_user_id: str = Field(..., description="终端用户 ID，UUID 字符串")
+    category_l1: str | None = Field(None, min_length=1, description="事项类型代码，不传表示全部类型")
+    keyword: str | None = Field(None, description="搜索社区名称、摘要及所属情景正文，最多 200 字符")
+    sort: Literal["scene_count_desc", "created_at_desc", "updated_at_desc"] = Field("scene_count_desc", description="排序：scene_count_desc 情景数优先、created_at_desc 创建时间优先、updated_at_desc 更新时间优先")
+    page: int = Field(1, ge=1, description="页码，从 1 开始")
+    pagesize: int = Field(20, ge=1, le=100, description="每页条数，默认 20，最大 100")
+
+    @field_validator("keyword")
+    @classmethod
+    def normalize_keyword(cls, value):
+        value = value.strip() if value else None
+        if value and len(value) > 200:
+            raise ValueError("关键词最多 200 字符")
+        return value
 
 
 class EpisodicMemoryDetailsRequest(BaseModel):
     """情景记忆详情查询请求"""
     
-    end_user_id: str = Field(..., description="终端用户ID")
-    summary_id: str = Field(..., description="情景记忆摘要ID")
+    end_user_id: str = Field(..., description="终端用户 ID，UUID 字符串")
+    scene_community_id: str = Field(..., min_length=1, description="overview 返回的社区业务 ID，不是 Neo4j elementId")
+
+    page: int = Field(1, ge=1, description="情景页码，从 1 开始；下拉加载时递增")
+    pagesize: int = Field(20, ge=1, le=100, description="每页情景数量，默认 20，最大 100")
+
+    @field_validator("scene_community_id")
+    @classmethod
+    def validate_community_id(cls, value):
+        if value != value.strip() or value.startswith("virtual:"):
+            raise ValueError("无效社区 ID")
+        return value
