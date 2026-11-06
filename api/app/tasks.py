@@ -5159,12 +5159,19 @@ def do_extract_ai_personality_for_user(
                 return source_changed
             return {"status": "skipped_empty", "entry_count": 0, "batch_id": batch_id}
 
-        # 使用任务启动时确认仍启用的当前配置构造客户端。
+        # 证据处理期间配置可能变化：重新读取空间当前生效配置后构造客户端。
         with get_db_context() as db:
             try:
+                config_id = _ai_personality_active_config_id(db, workspace_uuid)
                 memory_config = _ai_personality_memory_config(
                     db, config_id, workspace_uuid,
                 )
+                if memory_config is None:
+                    logger.info(
+                        "AI人格do跳过执行期间已关闭的空间 user=%s workspace=%s",
+                        end_user_id, workspace_id,
+                    )
+                    return {"status": "skipped_disabled", "entry_count": 0}
                 llm_client = ModelClientMixin.get_llm_client(
                     db, memory_config.llm_model_id, memory_config.tenant_id,
                 )
