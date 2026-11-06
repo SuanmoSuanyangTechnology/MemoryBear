@@ -65,6 +65,7 @@
     "INVALID_CONVERSATION": "会话无效",
     "CONFIG_MISSING": "应用配置缺失",
     "APP_NOT_PUBLISHED": "应用尚未发布",
+    "MODEL_NOT_CONFIGURED": "尚未配置模型，请先配置模型后重试",
     "FEATURE_NOT_AVAILABLE": "当前版本不支持该功能",
     "EXTERNAL_CATALOG_UNAVAILABLE": "社区市场暂时不可用，请稍后重试",
     "EXTERNAL_CATALOG_NOT_FOUND": "社区市场资源不存在",

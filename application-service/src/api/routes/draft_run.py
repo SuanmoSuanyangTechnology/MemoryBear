@@ -30,7 +30,6 @@ from ...models import (
     AgentConfig,
     App,
     AppRelease,
-    AppShare,
     AppType,
     Conversation,
     EndUser,
@@ -44,6 +43,7 @@ from ...repositories.end_user_repository import EndUserRepository
 from ...schemas import app_schema
 from ...schemas.multi_agent_schema import MultiAgentRunRequest
 from ...services.app_service import AppService
+from ...services.asset_release_resolver import AsyncAssetReleaseResolver
 from ...services.draft_run_service import AgentRunService
 from ...services.multi_agent_service import MultiAgentService
 from ...services.workflow_service import WorkflowService
@@ -289,12 +289,12 @@ async def _load_workflow_runtime_config(
 
     if is_shared:
         if not current_release_id:
-            raise BusinessException("该应用尚未发布，无法使用", BizCode.AGENT_CONFIG_MISSING)
+            raise BusinessException("该应用尚未发布，无法使用", BizCode.APP_NOT_PUBLISHED)
 
         async with get_async_db_context() as db:
             release = await db.get(AppRelease, current_release_id)
             if not release:
-                raise BusinessException("发布版本不存在", BizCode.AGENT_CONFIG_MISSING)
+                raise BusinessException("发布版本不存在", BizCode.RELEASE_NOT_FOUND)
             real_config_id = await db.scalar(
                 select(WorkflowConfig.id).where(
                     WorkflowConfig.app_id == release.app_id,
@@ -401,11 +401,11 @@ async def _load_agent_runtime_config(
     async with get_async_db_context() as db:
         if is_shared:
             if not current_release_id:
-                raise BusinessException("该应用尚未发布，无法使用", BizCode.AGENT_CONFIG_MISSING)
+                raise BusinessException("该应用尚未发布，无法使用", BizCode.APP_NOT_PUBLISHED)
 
             release = await db.get(AppRelease, current_release_id)
             if not release:
-                raise BusinessException("发布版本不存在", BizCode.AGENT_CONFIG_MISSING)
+                raise BusinessException("发布版本不存在", BizCode.RELEASE_NOT_FOUND)
 
             real_config = await db.scalar(
                 select(AgentConfig).where(AgentConfig.app_id == release.app_id).limit(1)
@@ -436,7 +436,7 @@ async def _load_agent_runtime_config(
                 )
 
         if not model_config:
-            raise BusinessException("模型配置不存在，无法试运行", BizCode.AGENT_CONFIG_MISSING)
+            raise BusinessException("模型配置不存在，无法试运行", BizCode.MODEL_NOT_CONFIGURED)
 
         model_config_snapshot = _build_model_config_snapshot(model_config)
 

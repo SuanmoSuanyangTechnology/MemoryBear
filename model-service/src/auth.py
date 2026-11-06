@@ -34,7 +34,13 @@ from .api.dependencies import (
     principal_from_headers,
 )
 from .api.schemas.common import fail
-from .errors import HTTP_STATUS_TO_BIZ_CODE, BizCode, code_name
+from .errors import (
+    HTTP_STATUS_TO_BIZ_CODE,
+    BizCode,
+    BusinessException,
+    code_name,
+    http_status_for,
+)
 from .i18n import resolve_locale, translate
 from .request_logging import log_request_failure, safe_failure_detail
 from .trace import TRACE_ID_HEADER
@@ -106,6 +112,7 @@ def _auth_error(
     status_code: int,
     detail: str,
     *,
+    code: BizCode | None = None,
     exception: BaseException | None = None,
 ) -> JSONResponse:
     """Record early rejections without changing authentication decisions."""
@@ -116,7 +123,8 @@ def _auth_error(
         accepted=request.headers.get("Accept-Language"),
     )
     message = translate("errors.common.unauthorized", language)
-    code = HTTP_STATUS_TO_BIZ_CODE.get(status_code)
+    if code is None:
+        code = HTTP_STATUS_TO_BIZ_CODE.get(status_code)
     if code is None:
         code = (
             BizCode.INTERNAL_ERROR if status_code >= 500 else BizCode.BAD_REQUEST
@@ -162,8 +170,14 @@ class ModelAuthMiddleware(BaseHTTPMiddleware):
         # A stray bearer without identity headers fails the header parse → 401.
         try:
             principal = _parse_principal(request)
-        except HTTPException as exc:
-            return _auth_error(request, 401, "invalid principal headers", exception=exc)
+        except BusinessException as exc:
+            return _auth_error(
+                request,
+                http_status_for(exc.code),
+                exc.message,
+                code=exc.code,
+                exception=exc,
+            )
         request.state.principal = principal
         return await call_next(request)
 

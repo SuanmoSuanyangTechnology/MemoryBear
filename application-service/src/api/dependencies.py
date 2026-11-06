@@ -6,13 +6,14 @@ from collections.abc import AsyncIterator, Iterator
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import Depends, HTTPException, Request
+from fastapi import Depends, Request
 from fastapi.security import OAuth2PasswordBearer
 from pydantic import BaseModel, ValidationError
 from redis import Redis as SyncRedis
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
+from ..errors import BizCode, BusinessException
 from ..infrastructure.upstream import MonolithUpstream
 from ..runtime import ProcessRuntime
 
@@ -99,7 +100,7 @@ def principal_from_headers(request: Request) -> Principal:
     try:
         return Principal.model_validate(_principal_payload(request))
     except ValidationError as exc:
-        raise HTTPException(status_code=401, detail="invalid principal headers") from exc
+        raise BusinessException("invalid principal headers", BizCode.UNAUTHORIZED) from exc
 
 
 async def get_principal(request: Request) -> Principal:
@@ -137,14 +138,13 @@ def get_share_user_id(
     any failure surfaces as 401.
     """
 
-    from ..errors import BusinessException
     from ..services.release_share_service import ReleaseShareService
     from ..utils.share_token import decode_access_token
 
-    credentials_exception = HTTPException(
-        status_code=401,
-        detail="Could not validate credentials",
-        headers={"WWW-Authenticate": "Bearer"},
+    credentials_exception = BusinessException(
+        "Could not validate credentials",
+        BizCode.TOKEN_INVALID,
+        context={"headers": {"WWW-Authenticate": "Bearer"}},
     )
 
     try:

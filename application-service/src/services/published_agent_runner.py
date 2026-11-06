@@ -128,7 +128,7 @@ class PublishedAgentRunner:
                     BizCode.APP_TYPE_NOT_SUPPORTED,
                 )
         if not release.default_model_config_id:
-            raise BusinessException("Agent 发布版本缺少模型配置", BizCode.AGENT_CONFIG_MISSING)
+            raise BusinessException("Agent 发布版本缺少模型配置", BizCode.MODEL_NOT_CONFIGURED)
 
         # Runtime lookup goes through ModelConfigService: missing/deprecated entries
         # raise precise error codes here, and model_base is already joinedloaded

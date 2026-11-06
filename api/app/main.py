@@ -29,7 +29,12 @@ from app.core.error_codes import BizCode, HTTP_MAPPING
 from app.core.exceptions import BusinessException
 from app.core.logging_config import LoggingConfig, get_logger
 from app.core.response_utils import fail
-from error_core.codes import code_name, coerce_code, http_status_for
+from error_core.codes import (
+    HTTP_STATUS_TO_BIZ_CODE,
+    code_name,
+    coerce_code,
+    http_status_for,
+)
 from error_core.diagnostics import format_diagnostics
 from error_core.messages import user_message
 from app.integrations.knowledge.errors import KnowledgeClientError, KnowledgeServiceError
@@ -708,6 +713,11 @@ async def business_exception_handler(request: Request, exc: BusinessException):
         content=fail(numeric, display, error=detail),
     )
 
+    # Context headers such as WWW-Authenticate are part of the auth contract.
+    context_headers = exc.context.get("headers", {}) if exc.context else {}
+    for header_name, header_value in context_headers.items():
+        response.headers[header_name] = str(header_value)
+
     # 添加限流相关的响应头
     rate_headers = exc.context.get("rate_limit_headers", {}) if exc.context else {}
     for header_name, header_value in rate_headers.items():
@@ -808,9 +818,17 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
         }
     )
     
+    # Framework-raised HTTPExceptions carry no BizCode; translate the status
+    # once at this boundary so the envelope always exposes a business code.
+    biz_code = HTTP_STATUS_TO_BIZ_CODE.get(exc.status_code)
+    if biz_code is None:
+        biz_code = (
+            BizCode.INTERNAL_ERROR if exc.status_code >= 500 else BizCode.BAD_REQUEST
+        )
+
     return JSONResponse(
         status_code=exc.status_code,
-        content=fail(code=exc.status_code, msg=translated_message, error=exc.detail),
+        content=fail(code=biz_code.value, msg=translated_message, error=exc.detail),
         headers=exc.headers,
     )
 

@@ -283,7 +283,7 @@ async def chat(
             if app_type == AppType.AGENT:
                 model_config_id = release.default_model_config_id
                 if not model_config_id:
-                    raise BusinessException("Agent 应用未配置模型", BizCode.AGENT_CONFIG_MISSING)
+                    raise BusinessException("Agent 应用未配置模型", BizCode.MODEL_NOT_CONFIGURED)
                 runtime_config = agent_config_4_app_release(release)
             elif app_type == AppType.MULTI_AGENT:
                 config = release.config or {}

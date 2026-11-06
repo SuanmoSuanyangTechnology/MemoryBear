@@ -37,6 +37,7 @@ from .api.dependencies import (
     principal_from_headers,
 )
 from .api.error_handlers import auth_rejection_content
+from .errors import BusinessException, http_status_for
 from .i18n import resolve_locale
 from .request_logging import log_request_failure, safe_failure_detail
 from .trace import TRACE_ID_HEADER
@@ -174,8 +175,10 @@ class AppAuthMiddleware(BaseHTTPMiddleware):
         # verified nor consumed here; the boundary is the NetworkPolicy.
         try:
             principal = principal_from_headers(request)
-        except HTTPException as exc:
-            return _auth_error(request, 401, "invalid principal headers", exception=exc)
+        except BusinessException as exc:
+            return _auth_error(
+                request, http_status_for(exc.code), exc.message, exception=exc
+            )
         request.state.principal = principal
         return await call_next(request)
 

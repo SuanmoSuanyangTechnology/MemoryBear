@@ -14,6 +14,7 @@ dependencies = [
     "auth-sdk",
     "certifi==2026.10.23",
     "elasticsearch[async]==8.16.0",
+    "error-core",
     "fastapi==0.156.4",
     # Pins are explicit per service: this one runs the migrated generation
     # pipelines on its own FastAPI line and may lead the API host's versions,
@@ -45,6 +46,7 @@ dependencies = [
 
 [tool.uv.sources]
 auth-sdk = { path = "../packages/auth-sdk" }
+error-core = { path = "../packages/error-core" }
 memory-contracts = { path = "../packages/memory-contracts" }
 redbear-model = { path = "../packages/redbear-model" }
 task-bridge-sdk = { path = "../packages/task-bridge-sdk" }

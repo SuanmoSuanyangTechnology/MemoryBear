@@ -2155,6 +2155,7 @@ class AgentRunService:
                 BizCode.MODEL_CONFIG_INVALID,
                 BizCode.API_KEY_MISSING,
                 BizCode.AGENT_CONFIG_MISSING,
+                BizCode.MODEL_NOT_CONFIGURED,
             ):
                 raise
             raise BusinessException(f"Agent 调用失败: {str(e)}", BizCode.INTERNAL_ERROR, cause=e)

@@ -47,7 +47,7 @@ def get_tool_statistics(db: DbSession, principal: Caller):
         stats = ToolService(db).get_tool_statistics(principal.tenant_id)
         return success(data=stats, msg="获取统计信息成功")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise BusinessException(str(e), BizCode.INTERNAL_ERROR) from e
 
 
 @router.get("", summary="获取工具列表", response_model=ApiResponse)
@@ -81,7 +81,7 @@ def list_tools(
         ))
         return success(data=tools, msg="获取工具列表成功")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise BusinessException(str(e), BizCode.INTERNAL_ERROR) from e
 
 
 @router.post("/methods/batch", summary="批量获取工具方法", response_model=ApiResponse)
@@ -98,7 +98,7 @@ def get_tool_methods_batch(request: ToolMethodsBatchRequest, db: DbSession, prin
             msg="获取工具方法成功",
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise BusinessException(str(e), BizCode.INTERNAL_ERROR) from e
 
 
 @router.get("/{tool_id}/methods", summary="获取工具的所有方法", response_model=ApiResponse)
@@ -112,7 +112,7 @@ def get_tool_methods(tool_id: str, db: DbSession, principal: Caller):
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise BusinessException(str(e), BizCode.INTERNAL_ERROR) from e
 
 
 @router.get("/{tool_id}", summary="获取工具详情", response_model=ApiResponse)
@@ -161,13 +161,15 @@ def create_tool(request: ToolCreateRequest, db: DbSession, principal: Caller):
         ))
         return success(data={"tool_id": tool_id}, msg="工具创建成功")
     except BusinessException as e:
-        raise HTTPException(status_code=400, detail=e.message) from e
+        # Legacy wire shape: every create rejection answered 400 (a duplicate
+        # name would map to 409 through its own code).
+        raise BusinessException(e.message, BizCode.BAD_REQUEST) from e
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
+        raise BusinessException(str(e), BizCode.BAD_REQUEST) from e
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise BusinessException(str(e), BizCode.INTERNAL_ERROR) from e
 
 
 @router.put("/{tool_id}", summary="更新工具", response_model=ApiResponse)
@@ -193,11 +195,11 @@ def update_tool(tool_id: str, request: ToolUpdateRequest, db: DbSession, princip
     except BusinessException:
         raise
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
+        raise BusinessException(str(e), BizCode.BAD_REQUEST) from e
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise BusinessException(str(e), BizCode.INTERNAL_ERROR) from e
 
 
 @router.delete("/{tool_id}", summary="删除工具", response_model=ApiResponse)
@@ -209,11 +211,11 @@ def delete_tool(tool_id: str, db: DbSession, principal: Caller):
             raise HTTPException(status_code=404, detail="工具不存在")
         return success(msg="工具删除成功")
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
+        raise BusinessException(str(e), BizCode.BAD_REQUEST) from e
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise BusinessException(str(e), BizCode.INTERNAL_ERROR) from e
 
 
 @router.patch("/{tool_id}/active", summary="设置工具可用状态", response_model=ApiResponse)
@@ -232,11 +234,11 @@ def set_tool_active(tool_id: str, request: ToolActiveUpdate, db: DbSession, prin
         action = "启用" if request.is_active else "禁用"
         return success(msg=f"工具已{action}")
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
+        raise BusinessException(str(e), BizCode.BAD_REQUEST) from e
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise BusinessException(str(e), BizCode.INTERNAL_ERROR) from e
 
 
 @router.post("/parse_schema", summary="解析OpenAPI schema", response_model=ApiResponse)
@@ -245,12 +247,12 @@ def parse_openapi_schema(request: ParseSchemaRequest, db: DbSession, principal: 
     try:
         result = ToolService.parse_openapi_schema(request.schema_content, request.schema_url)
         if result["success"] is False:
-            raise HTTPException(status_code=400, detail=result["message"])
+            raise BusinessException(result["message"], BizCode.BAD_REQUEST)
         return success(data=result, msg="Schema解析完成")
-    except HTTPException:
+    except BusinessException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise BusinessException(str(e), BizCode.INTERNAL_ERROR) from e
 
 
 @router.post("/execution/execute", summary="执行工具", response_model=ApiResponse)
@@ -274,8 +276,12 @@ def execute_tool(request: ToolExecuteRequest, db: DbSession, principal: Caller):
         # "Event loop is closed").
         result = anyio.from_thread.run(_run)
         if not result.success:
-            status_code = 400 if result.error_code == "VALIDATION_ERROR" else 500
-            raise HTTPException(status_code=status_code, detail=result.error)
+            code = (
+                BizCode.BAD_REQUEST
+                if result.error_code == "VALIDATION_ERROR"
+                else BizCode.INTERNAL_ERROR
+            )
+            raise BusinessException(str(result.error), code)
         return success(
             data={
                 "success": result.success,
@@ -291,7 +297,7 @@ def execute_tool(request: ToolExecuteRequest, db: DbSession, principal: Caller):
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise BusinessException(str(e), BizCode.INTERNAL_ERROR) from e
 
 
 @router.post("/{tool_id}/sync_mcp_tools", summary="同步MCP工具列表", response_model=ApiResponse)
@@ -307,7 +313,7 @@ def sync_mcp_tools(tool_id: str, db: DbSession, principal: Caller):
     except BusinessException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise BusinessException(str(e), BizCode.INTERNAL_ERROR) from e
 
 
 @router.post("/{tool_id}/test", summary="测试工具连接", response_model=ApiResponse)
@@ -337,7 +343,7 @@ def test_tool_connection(
     except BusinessException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise BusinessException(str(e), BizCode.INTERNAL_ERROR) from e
 
 
 @router.get("/enums/tool_types", summary="获取工具类型枚举", response_model=ApiResponse)

@@ -3,8 +3,9 @@
 from typing import Annotated, Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, Query, Request
 
+from ...errors import KnowledgeError
 from ...repositories.wiki_faq import read, write
 from ...runtime import ProcessRuntime
 from ...services import wiki_faq as service
@@ -27,7 +28,7 @@ def manager_principal(
     source: Annotated[KnowledgeRetrievalSource, Depends(get_source)],
 ) -> Principal:
     if source != KnowledgeRetrievalSource.MANAGER_API:
-        raise HTTPException(403, "FAQ management requires a management principal")
+        raise KnowledgeError.from_code("KB_HTTP_FORBIDDEN")
     return principal
 
 

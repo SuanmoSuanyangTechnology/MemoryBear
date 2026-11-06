@@ -15,7 +15,7 @@ from fastapi import HTTPException, Request
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 
-from src.common.errors import BizCode
+from src.common.errors import BizCode, ProfileError
 from src.common.responses import error_response, failure
 from src.i18n import get_request_language, t
 
@@ -83,11 +83,18 @@ def load_gateway_auth(config: MemoryAuthConfig):
     return provider(config)
 
 
-def _auth_error(request: Request, status_code: int, detail: object) -> JSONResponse:
-    code = {
-        401: BizCode.UNAUTHORIZED,
-        403: BizCode.WORKSPACE_ACCESS_DENIED,
-    }.get(status_code, BizCode.INTERNAL_ERROR)
+def _auth_error(
+    request: Request,
+    status_code: int,
+    detail: object,
+    *,
+    code: int | None = None,
+) -> JSONResponse:
+    if code is None:
+        code = {
+            401: BizCode.UNAUTHORIZED,
+            403: BizCode.WORKSPACE_ACCESS_DENIED,
+        }.get(status_code, BizCode.INTERNAL_ERROR)
     return error_response(
         request,
         status_code,
@@ -142,7 +149,11 @@ def _claims_principal(request: Request, context: UserContext) -> MemoryPrincipal
     if context.auth_type not in {None, "api_key"}:
         raise ValueError("invalid auth_type claim")
     if context.auth_type == "api_key" and "memory" not in context.scopes:
-        raise HTTPException(status_code=403, detail="memory scope required")
+        raise ProfileError(
+            BizCode.WORKSPACE_ACCESS_DENIED,
+            "memory scope required",
+            status_code=403,
+        )
     source: MemoryAuthSource = (
         SOURCE_EXTERNAL if context.auth_type == "api_key" else SOURCE_INTERNAL
     )
@@ -186,6 +197,8 @@ class MemoryAuthMiddleware(BaseHTTPMiddleware):
                 principal = await self._gateway_principal(request)
             else:
                 principal = _direct_principal(request)
+        except ProfileError as exc:
+            return _auth_error(request, exc.status_code, exc.message, code=exc.code)
         except HTTPException as exc:
             return _auth_error(request, exc.status_code, exc.detail)
         except (TypeError, ValueError, AttributeError) as exc:
@@ -200,7 +213,11 @@ class MemoryAuthMiddleware(BaseHTTPMiddleware):
 
     async def _gateway_principal(self, request: Request) -> MemoryPrincipal:
         if self._gateway is None:
-            raise HTTPException(status_code=500, detail="auth misconfigured")
+            raise ProfileError(
+                BizCode.INTERNAL_ERROR,
+                "auth misconfigured",
+                status_code=500,
+            )
         context = await self._gateway.authenticate(request)
         if context is None:
             return _direct_principal(request)

@@ -10,7 +10,7 @@
 import copy
 import datetime
 import uuid
-from typing import Annotated, Any, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Annotated, Any, Dict, List, Optional, Tuple
 
 from fastapi import Depends
 from sqlalchemy import and_, column, exists, func, or_, select, update as sa_update
@@ -58,6 +58,9 @@ from app.services.model_service import ModelApiKeyService, ModelConfigService
 from app.services.workflow_service import WorkflowService
 from app.utils.app_config_utils import model_parameters_to_dict
 from app.utils.redis_cache import delete_json, workflow_config_key
+
+if TYPE_CHECKING:
+    from app.schemas.app_schema import ModelParameters
 
 # 获取业务日志器
 logger = get_business_logger()
@@ -294,12 +297,12 @@ class AppService:
             raise BusinessException("Agent 配置不存在，无法试运行", BizCode.AGENT_CONFIG_MISSING)
 
         # 3. 获取模型配置
-        model_config = None
-        if agent_cfg.default_model_config_id:
-            model_config = self.db.get(ModelConfig, agent_cfg.default_model_config_id)
+        if not agent_cfg.default_model_config_id:
+            raise BusinessException("模型配置不存在，无法试运行", BizCode.MODEL_NOT_CONFIGURED)
 
+        model_config = self.db.get(ModelConfig, agent_cfg.default_model_config_id)
         if not model_config:
-            raise BusinessException("模型配置不存在，无法试运行", BizCode.AGENT_CONFIG_MISSING)
+            raise BusinessException("模型配置不存在，无法试运行", BizCode.MODEL_NOT_FOUND)
 
     def _check_agent_config(self, app_id: uuid.UUID):
         from sqlalchemy import select
@@ -313,12 +316,12 @@ class AppService:
             raise BusinessException("Agent 配置不存在，无法试运行", BizCode.AGENT_CONFIG_MISSING)
 
         # 3. 获取模型配置
-        model_config = None
-        if agent_cfg.default_model_config_id:
-            model_config = self.db.get(ModelConfig, agent_cfg.default_model_config_id)
+        if not agent_cfg.default_model_config_id:
+            raise BusinessException("模型配置不存在，无法试运行", BizCode.MODEL_NOT_CONFIGURED)
 
+        model_config = self.db.get(ModelConfig, agent_cfg.default_model_config_id)
         if not model_config:
-            raise BusinessException("模型配置不存在，无法试运行", BizCode.AGENT_CONFIG_MISSING)
+            raise BusinessException("模型配置不存在，无法试运行", BizCode.MODEL_NOT_FOUND)
 
     def _check_multi_agent_config(self, app_id: uuid.UUID):
         """检查多智能体配置的完整性
@@ -443,7 +446,7 @@ class AppService:
             else:
                 raise BusinessException(
                     f"子 Agent '{sub_agent_data.get('name', '未命名')}' 未配置模型，无法运行",
-                    BizCode.MODEL_NOT_FOUND
+                    BizCode.MODEL_NOT_CONFIGURED
                 )
 
         logger.info(
@@ -1872,7 +1875,7 @@ class AppService:
                 app_id=app.id, workspace_id=workspace_id
             )
             if not release:
-                raise BusinessException("该应用尚未发布，无法使用", BizCode.AGENT_CONFIG_MISSING)
+                raise BusinessException("该应用尚未发布，无法使用", BizCode.APP_NOT_PUBLISHED)
             return self._agent_config_from_release(release)
 
         stmt = select(AgentConfig).where(
@@ -2006,7 +2009,7 @@ class AppService:
                 app_id=app.id, workspace_id=workspace_id
             )
             if not release:
-                raise BusinessException("该应用尚未发布，无法使用", BizCode.CONFIG_MISSING)
+                raise BusinessException("该应用尚未发布，无法使用", BizCode.APP_NOT_PUBLISHED)
             return self._workflow_config_from_release(release)
 
         repo = WorkflowConfigRepository(self.db)

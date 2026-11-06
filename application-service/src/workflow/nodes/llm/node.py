@@ -544,7 +544,7 @@ class LLMNode(BaseNode):
         if not self.config.get("model_id"):
             raise BusinessException(
                 f"节点 {self.node_id} 缺少 model_id 配置",
-                code=BizCode.CONFIG_MISSING,
+                code=BizCode.MODEL_NOT_CONFIGURED,
             )
         return LLMNodeConfig(**self.config)
 

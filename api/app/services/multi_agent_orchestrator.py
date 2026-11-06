@@ -1171,14 +1171,14 @@ class MultiAgentOrchestrator:
             OrchestrationMode.SUPERVISOR_LOOP,
         ):
             if not orchestrator.default_model_config_id:
-                raise BusinessException("Supervisor 模式需要配置默认模型", BizCode.AGENT_CONFIG_MISSING)
+                raise BusinessException("Supervisor 模式需要配置默认模型", BizCode.MODEL_NOT_CONFIGURED)
 
             orchestrator.master_model_config = await orchestrator._db_get(
                 ModelConfig,
                 orchestrator.default_model_config_id,
             )
             if not orchestrator.master_model_config:
-                raise BusinessException("Master Agent 模型配置不存在", BizCode.AGENT_CONFIG_MISSING)
+                raise BusinessException("Master Agent 模型配置不存在", BizCode.MODEL_NOT_FOUND)
 
         # MasterAgentRouter 只服务三段式：supervisor_loop 的分派全权归主管 LLM，
         # 不烧路由调用（S9：循环从 supervisor 内部分支上提为独立模式后更清晰）。
@@ -2468,7 +2468,7 @@ class MultiAgentOrchestrator:
             if not self.default_model_config_id:
                 raise BusinessException(
                     "主管循环模式需要可用的主模型（默认模型未配置）",
-                    BizCode.AGENT_CONFIG_MISSING,
+                    BizCode.MODEL_NOT_CONFIGURED,
                 )
             return await ModelConfigService.get_runtime_model_view_bridge_async(
                 self.db, self.default_model_config_id, tenant_id=self.tenant_id
@@ -3784,11 +3784,13 @@ class MultiAgentOrchestrator:
 
         # 获取模型配置（并行派发时先串行建连，避免共享 session 并发建连报错）
         await self._ensure_db_connection()
+        if not agent_config.default_model_config_id:
+            raise BusinessException("Agent 未配置模型", BizCode.MODEL_NOT_CONFIGURED)
         model_config = await self._db_get(ModelConfig, agent_config.default_model_config_id)
         if not model_config:
             raise BusinessException(
                 "Agent 模型配置不存在",
-                BizCode.AGENT_CONFIG_MISSING
+                BizCode.MODEL_NOT_FOUND
             )
 
         # 流式执行 Agent
@@ -3859,11 +3861,13 @@ class MultiAgentOrchestrator:
 
         # 获取模型配置（并行派发时先串行建连，避免共享 session 并发建连报错）
         await self._ensure_db_connection()
+        if not agent_config.default_model_config_id:
+            raise BusinessException("Agent 未配置模型", BizCode.MODEL_NOT_CONFIGURED)
         model_config = await self._db_get(ModelConfig, agent_config.default_model_config_id)
         if not model_config:
             raise BusinessException(
                 "Agent 模型配置不存在",
-                BizCode.AGENT_CONFIG_MISSING
+                BizCode.MODEL_NOT_FOUND
             )
 
         # 执行 Agent
@@ -5259,7 +5263,6 @@ class MultiAgentOrchestrator:
             for result in results:
                 if "error" in result:
                     continue
-                agent_name = result.get("agent_name", "")
                 sub_question = result.get("sub_question", "")
                 message = result.get("result", {}).get("message", "")
                 if message:
