@@ -9,6 +9,7 @@
 """
 import logging
 
+from error_core import BizCode
 from fastapi import APIRouter, Depends
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
@@ -18,6 +19,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.controllers._errors import error_response
 from src.db import get_async_db
 from src.models import AclRule
 from src.services.acl_publisher import push_rules
@@ -60,11 +62,12 @@ async def _find_conflict(
 
 
 def _conflict_response(existing: AclRule) -> JSONResponse:
-    return JSONResponse(status_code=409, content={
-        "error": "acl rule already exists for this (caller_service, target_service, endpoint)",
-        "id": str(existing.id),
-        "effect": existing.effect,
-    })
+    return error_response(
+        BizCode.STATE_CONFLICT,
+        "acl rule already exists for this (caller_service, target_service, endpoint)",
+        id=str(existing.id),
+        effect=existing.effect,
+    )
 
 
 async def _rule_or_404(session, rule_id: str) -> AclRule:
@@ -89,15 +92,16 @@ async def get_rule(rule_id: str, session: AsyncSession = Depends(get_async_db)):
     try:
         rule = await _rule_or_404(session, rule_id)
     except _RuleNotFound:
-        return JSONResponse(status_code=404, content={"error": "acl rule not found"})
+        return error_response(BizCode.ACL_RULE_NOT_FOUND, "acl rule not found")
     return jsonable_encoder(rule)
 
 
 @router.post("/internal/acl-rules")
 async def create_rule(body: AclRuleIn, session: AsyncSession = Depends(get_async_db)):
     if body.effect not in ALLOWED_EFFECTS:
-        return JSONResponse(status_code=400,
-                            content={"error": f"effect must be one of {sorted(ALLOWED_EFFECTS)}"})
+        return error_response(
+            BizCode.BAD_REQUEST, f"effect must be one of {sorted(ALLOWED_EFFECTS)}"
+        )
     existing = await _find_conflict(session, body)
     if existing is not None:
         return _conflict_response(existing)
@@ -118,7 +122,7 @@ async def create_rule(body: AclRuleIn, session: AsyncSession = Depends(get_async
         await push_rules(session)
     except (SQLAlchemyError, RedisError):
         logger.exception("acl rule created but redis push failed")
-        return JSONResponse(status_code=500, content={"error": "rule saved but redis push failed"})
+        return error_response(BizCode.INTERNAL_ERROR, "rule saved but redis push failed")
     return jsonable_encoder(rule)
 
 
@@ -126,12 +130,13 @@ async def create_rule(body: AclRuleIn, session: AsyncSession = Depends(get_async
 async def update_rule(rule_id: str, body: AclRuleIn,
                       session: AsyncSession = Depends(get_async_db)):
     if body.effect not in ALLOWED_EFFECTS:
-        return JSONResponse(status_code=400,
-                            content={"error": f"effect must be one of {sorted(ALLOWED_EFFECTS)}"})
+        return error_response(
+            BizCode.BAD_REQUEST, f"effect must be one of {sorted(ALLOWED_EFFECTS)}"
+        )
     try:
         rule = await _rule_or_404(session, rule_id)
     except _RuleNotFound:
-        return JSONResponse(status_code=404, content={"error": "acl rule not found"})
+        return error_response(BizCode.ACL_RULE_NOT_FOUND, "acl rule not found")
     existing = await _find_conflict(session, body, exclude_id=rule_id)
     if existing is not None:
         return _conflict_response(existing)
@@ -152,7 +157,7 @@ async def update_rule(rule_id: str, body: AclRuleIn,
         await push_rules(session)
     except (SQLAlchemyError, RedisError):
         logger.exception("acl rule updated but redis push failed")
-        return JSONResponse(status_code=500, content={"error": "rule saved but redis push failed"})
+        return error_response(BizCode.INTERNAL_ERROR, "rule saved but redis push failed")
     return jsonable_encoder(rule)
 
 
@@ -161,14 +166,12 @@ async def delete_rule(rule_id: str, session: AsyncSession = Depends(get_async_db
     try:
         rule = await _rule_or_404(session, rule_id)
     except _RuleNotFound:
-        return JSONResponse(status_code=404, content={"error": "acl rule not found"})
+        return error_response(BizCode.ACL_RULE_NOT_FOUND, "acl rule not found")
     await session.delete(rule)
     await session.commit()
     try:
         await push_rules(session)
     except (SQLAlchemyError, RedisError):
         logger.exception("acl rule deleted but redis push failed")
-        return JSONResponse(
-            status_code=500, content={"error": "rule deleted but redis push failed"}
-        )
+        return error_response(BizCode.INTERNAL_ERROR, "rule deleted but redis push failed")
     return JSONResponse(status_code=200, content={"deleted": rule_id})

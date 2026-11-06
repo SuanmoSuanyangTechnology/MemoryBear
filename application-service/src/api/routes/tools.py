@@ -130,7 +130,7 @@ def get_tool(
     except (ValueError, TypeError):
         tool = None
     if not tool:
-        raise BusinessException("工具不存在", BizCode.NOT_FOUND)
+        raise BusinessException("工具不存在", BizCode.TOOL_NOT_FOUND)
     tool = asyncio.run(service.enrich_tool_detail(
         tool,
         principal.tenant_id,

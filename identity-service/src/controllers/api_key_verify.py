@@ -6,10 +6,11 @@
 响应 200 = 可写回 Redis 的快照 payload（含 expires_at，网关据此设置 TTL）；
 401 = key 不存在/停用/已过期。DB 故障向上抛 500，网关按不可用 fail-closed。
 """
+from error_core import BizCode
 from fastapi import APIRouter, Depends, Request
-from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.controllers._errors import error_response
 from src.db import get_async_db
 from src.services.api_keys import build_api_key_snapshot
 
@@ -30,8 +31,8 @@ async def api_key_verify(
 ):
     api_key = _bearer_token(request)
     if api_key is None:
-        return JSONResponse(status_code=401, content={"error": "missing api key"})
+        return error_response(BizCode.UNAUTHORIZED, "missing api key")
     snapshot = await build_api_key_snapshot(session, api_key)
     if snapshot is None:
-        return JSONResponse(status_code=401, content={"error": "invalid api key"})
+        return error_response(BizCode.API_KEY_INVALID, "invalid api key")
     return snapshot
