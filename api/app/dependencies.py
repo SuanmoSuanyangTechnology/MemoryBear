@@ -24,13 +24,24 @@ from app.models.workspace_model import Workspace
 from app.services.session_service import SessionService
 from app.core.logging_config import get_auth_logger, get_security_logger
 from app.core.uow import SqlAlchemyUnitOfWork, IUnitOfWork
-from app.core.exceptions import PermissionDeniedException
+from app.core.error_codes import BizCode
+from app.core.exceptions import BusinessException, PermissionDeniedException
 
 # 获取专用日志器
 auth_logger = get_auth_logger()
 security_logger = get_security_logger()
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
+
+_AUTH_CHALLENGE_HEADERS = {"WWW-Authenticate": "Bearer"}
+
+
+def _auth_exception(message: str, code: BizCode) -> BusinessException:
+    return BusinessException(
+        message,
+        code,
+        context={"headers": dict(_AUTH_CHALLENGE_HEADERS)},
+    )
 
 
 class APIKeyExtractor:
@@ -50,9 +61,9 @@ class APIKeyExtractor:
         
         Returns:
             API Key string
-        
+
         Raises:
-            HTTPException: If API Key is not found
+            BusinessException: If API Key is not found
         """
         # Try Authorization header first
         auth_header = request.headers.get("Authorization")
@@ -67,10 +78,8 @@ class APIKeyExtractor:
             return api_key
         
         # No API Key found
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="API Key not found in request headers",
-            headers={"WWW-Authenticate": "Bearer"},
+        raise _auth_exception(
+            "API Key not found in request headers", BizCode.UNAUTHORIZED
         )
 
 
@@ -139,12 +148,6 @@ async def get_current_user(
         )
         auth_last_checkpoint_at = now
 
-    credentials_exception = HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Could not validate credentials",
-        headers={"WWW-Authenticate": "Bearer"},
-    )
-
     try:
         auth_logger.debug("开始解析JWT token")
         payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
@@ -152,7 +155,7 @@ async def get_current_user(
 
         if user_id is None:
             auth_logger.warning("JWT token中缺少用户ID")
-            raise credentials_exception
+            raise _auth_exception("Could not validate credentials", BizCode.TOKEN_INVALID)
 
         token_data = token_schema.TokenData(userId=user_id)
         auth_logger.debug(f"JWT解析成功，用户ID: {user_id}")
@@ -160,7 +163,7 @@ async def get_current_user(
 
     except JWTError as e:
         auth_logger.warning(f"JWT解析失败: {str(e)}")
-        raise credentials_exception
+        raise _auth_exception("Could not validate credentials", BizCode.TOKEN_INVALID)
 
     # 检查单点登录黑名单和用户token失效
     try:
@@ -170,7 +173,7 @@ async def get_current_user(
 
         if await session_service.is_token_blacklisted(token_id):
             auth_logger.warning(f"Token已被列入黑名单: {token_id}")
-            raise credentials_exception
+            raise _auth_exception("Token has been revoked", BizCode.TOKEN_BLACKLISTED)
 
         # 检查用户是否重置了密码（所有旧token失效）
         invalidation_time_str = await session_service.get_user_token_invalidation_time(user_id)
@@ -182,16 +185,19 @@ async def get_current_user(
 
             if token_issued_at and token_issued_at < invalidation_time:
                 auth_logger.warning(f"Token在密码重置前签发，已失效: user_id={user_id}")
-                raise credentials_exception
+                raise _auth_exception(
+                    "Token was issued before the credential reset",
+                    BizCode.TOKEN_BLACKLISTED,
+                )
 
         auth_logger.debug("单点登录检查通过")
         _log_auth_timing("session_checked")
 
-    except HTTPException:
+    except (HTTPException, BusinessException):
         raise
     except Exception as e:
         auth_logger.error(f"检查token有效性时发生错误: {str(e)}")
-        raise credentials_exception
+        raise _auth_exception("Could not validate credentials", BizCode.UNAUTHORIZED)
 
     try:
         auth_logger.debug(f"查询用户信息: {token_data.userId}")
@@ -199,10 +205,10 @@ async def get_current_user(
 
         if user is None:
             auth_logger.warning(f"用户不存在: {token_data.userId}")
-            raise credentials_exception
+            raise _auth_exception("User does not exist", BizCode.USER_NO_ACCESS)
         if not user.is_active:
             auth_logger.warning(f"用户已被停用: {user.username} (ID: {user.id})")
-            raise credentials_exception
+            raise _auth_exception("User is inactive", BizCode.USER_NO_ACCESS)
 
         auth_logger.info(f"用户认证成功: {user.username} (ID: {user.id})")
         _log_auth_timing(
@@ -212,9 +218,11 @@ async def get_current_user(
         )
         return user
 
+    except BusinessException:
+        raise
     except Exception as e:
         auth_logger.error(f"查询用户信息时发生错误: {str(e)}")
-        raise credentials_exception
+        raise _auth_exception("Could not validate credentials", BizCode.UNAUTHORIZED)
 
 
 async def get_current_user_async(
@@ -242,28 +250,22 @@ async def get_current_user_async(
         )
         auth_last_checkpoint_at = now
 
-    credentials_exception = HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Could not validate credentials",
-        headers={"WWW-Authenticate": "Bearer"},
-    )
-
     try:
         payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
         user_id: str = payload.get("sub")
         if user_id is None:
-            raise credentials_exception
+            raise _auth_exception("Could not validate credentials", BizCode.TOKEN_INVALID)
         token_data = token_schema.TokenData(userId=user_id)
         _log_auth_timing("jwt_decoded", user_id=user_id)
     except JWTError:
-        raise credentials_exception
+        raise _auth_exception("Could not validate credentials", BizCode.TOKEN_INVALID)
 
     try:
         token_id = get_token_id(token)
         session_service = SessionService()
 
         if await session_service.is_token_blacklisted(token_id):
-            raise credentials_exception
+            raise _auth_exception("Token has been revoked", BizCode.TOKEN_BLACKLISTED)
 
         invalidation_time_str = await session_service.get_user_token_invalidation_time(user_id)
         if invalidation_time_str:
@@ -272,13 +274,16 @@ async def get_current_user_async(
             token_issued_at = datetime.fromtimestamp(payload.get("iat", 0), tz=timezone.utc) if payload.get(
                 "iat") else None
             if token_issued_at and token_issued_at < invalidation_time:
-                raise credentials_exception
+                raise _auth_exception(
+                    "Token was issued before the credential reset",
+                    BizCode.TOKEN_BLACKLISTED,
+                )
 
         _log_auth_timing("session_checked")
-    except HTTPException:
+    except (HTTPException, BusinessException):
         raise
     except Exception:
-        raise credentials_exception
+        raise _auth_exception("Could not validate credentials", BizCode.UNAUTHORIZED)
 
     try:
         async with get_async_db_context() as db:
@@ -303,9 +308,9 @@ async def get_current_user_async(
             )
             row = result.mappings().one_or_none()
             if row is None:
-                raise credentials_exception
+                raise _auth_exception("User does not exist", BizCode.USER_NO_ACCESS)
             if not row["tenant_is_active"]:
-                raise credentials_exception
+                raise _auth_exception("Tenant is inactive", BizCode.USER_NO_ACCESS)
             snapshot = CurrentUserSnapshot(
                 id=row["id"],
                 username=row["username"],
@@ -323,11 +328,11 @@ async def get_current_user_async(
             workspace_id=str(snapshot.current_workspace_id) if snapshot.current_workspace_id else None,
         )
         return snapshot
-    except HTTPException:
+    except (HTTPException, BusinessException):
         raise
     except Exception as e:
         auth_logger.error(f"异步查询用户信息时发生错误: {str(e)}")
-        raise credentials_exception
+        raise _auth_exception("Could not validate credentials", BizCode.UNAUTHORIZED)
 
 
 async def get_current_tenant(
@@ -356,10 +361,7 @@ async def get_current_tenant(
         raise
     except Exception as e:
         auth_logger.error(f"获取租户信息时发生错误: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="获取租户信息失败"
-        )
+        raise BusinessException("获取租户信息失败", BizCode.INTERNAL_ERROR) from e
 
 
 async def get_user_tenants(
@@ -383,10 +385,7 @@ async def get_user_tenants(
 
     except Exception as e:
         auth_logger.error(f"获取用户租户列表时发生错误: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="获取租户列表失败"
-        )
+        raise BusinessException("获取租户列表失败", BizCode.INTERNAL_ERROR) from e
 
 
 async def get_current_superuser(
@@ -399,9 +398,8 @@ async def get_current_superuser(
 
     if not current_user.is_superuser:
         auth_logger.warning(f"用户 {current_user.username} 尝试访问超管功能但不是超级管理员")
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="只有超级管理员才能执行此操作"
+        raise BusinessException(
+            "只有超级管理员才能执行此操作", BizCode.FORBIDDEN
         )
 
     auth_logger.info(f"超级管理员 {current_user.username} 访问超管功能")
@@ -488,7 +486,7 @@ def _check_workspace_access_sync(db: Session, user: User, workspace_id: uuid.UUI
             return workspace
         else:
             auth_logger.warning(f"超级用户尝试访问其他租户工作空间: workspace_id={workspace_id}, user={user.id}")
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+            raise BusinessException("Forbidden", BizCode.FORBIDDEN)
 
     # 3) 普通用户使用权限服务检查访问权限
     from app.core.permissions import permission_service, Subject, Resource, Action
@@ -519,7 +517,7 @@ def _check_workspace_access_sync(db: Session, user: User, workspace_id: uuid.UUI
         return workspace
     except PermissionDeniedException:
         auth_logger.warning(f"工作空间访问被拒绝: workspace_id={workspace_id}, user={user.id}")
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+        raise BusinessException("Forbidden", BizCode.FORBIDDEN)
 
 
 def workspace_access_guard(get_workspace_id_from_body: bool = False):
@@ -545,13 +543,14 @@ def workspace_access_guard(get_workspace_id_from_body: bool = False):
                 if get_workspace_id_from_body:
                     payload = kwargs.get("payload")
                     if not payload or not hasattr(payload, "workspace_id"):
-                        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
-                                            detail="workspace_id missing in body")
+                        raise BusinessException(
+                            "workspace_id missing in body", BizCode.MISSING_PARAMETER
+                        )
                     workspace_id = payload.workspace_id
                 else:
                     workspace_id = kwargs.get("workspace_id")
                     if workspace_id is None:
-                        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="workspace_id is required")
+                        raise BusinessException("workspace_id is required", BizCode.MISSING_PARAMETER)
 
                 _check_workspace_access_sync(db, user, workspace_id)
                 return await func(*args, **kwargs)
@@ -566,13 +565,14 @@ def workspace_access_guard(get_workspace_id_from_body: bool = False):
                 if get_workspace_id_from_body:
                     payload = kwargs.get("payload")
                     if not payload or not hasattr(payload, "workspace_id"):
-                        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
-                                            detail="workspace_id missing in body")
+                        raise BusinessException(
+                            "workspace_id missing in body", BizCode.MISSING_PARAMETER
+                        )
                     workspace_id = payload.workspace_id
                 else:
                     workspace_id = kwargs.get("workspace_id")
                     if workspace_id is None:
-                        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="workspace_id is required")
+                        raise BusinessException("workspace_id is required", BizCode.MISSING_PARAMETER)
 
                 _check_workspace_access_sync(db, user, workspace_id)
                 return func(*args, **kwargs)
@@ -614,7 +614,7 @@ def cur_workspace_access_guard():
                 user: User = kwargs.get("current_user")
                 workspace_id = user.current_workspace_id
                 if workspace_id is None:
-                    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="workspace_id is required")
+                    raise BusinessException("workspace_id is required", BizCode.MISSING_PARAMETER)
                 if db is not None:
                     _check_workspace_access_sync(db, user, workspace_id)
                 else:
@@ -637,7 +637,7 @@ def cur_workspace_access_guard():
                 user: User = kwargs.get("current_user")
                 workspace_id = user.current_workspace_id
                 if workspace_id is None:
-                    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="workspace_id is required")
+                    raise BusinessException("workspace_id is required", BizCode.MISSING_PARAMETER)
                 if db is not None:
                     _check_workspace_access_sync(db, user, workspace_id)
                 else:
@@ -674,7 +674,7 @@ def cur_workspace_access_guard_async():
             user = kwargs.get("current_user")
             workspace_id = user.current_workspace_id
             if workspace_id is None:
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="workspace_id is required")
+                raise BusinessException("workspace_id is required", BizCode.MISSING_PARAMETER)
 
             await _check_workspace_access_async(user, workspace_id)
 
@@ -711,7 +711,7 @@ async def _check_workspace_access_async(user, workspace_id: uuid.UUID):
             if user.tenant_id == workspace.tenant_id:
                 return workspace
             else:
-                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+                raise BusinessException("Forbidden", BizCode.FORBIDDEN)
 
         # 3) 普通用户检查 membership
         from app.core.permissions import permission_service, Subject, Resource, Action
@@ -739,7 +739,7 @@ async def _check_workspace_access_async(user, workspace_id: uuid.UUID):
             permission_service.require_permission(subject, Action.READ, resource, error_message="Forbidden")
             return workspace
         except PermissionDeniedException:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+            raise BusinessException("Forbidden", BizCode.FORBIDDEN)
 
 
 def cur_workspace_access_guard_self_db():
@@ -765,7 +765,7 @@ def cur_workspace_access_guard_self_db():
                 user: User = kwargs.get("current_user")
                 workspace_id = user.current_workspace_id
                 if workspace_id is None:
-                    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="workspace_id is required")
+                    raise BusinessException("workspace_id is required", BizCode.MISSING_PARAMETER)
                 with get_db_read() as db:
                     _check_workspace_access_sync(db, user, workspace_id)
                 return await func(*args, **kwargs)
@@ -777,7 +777,7 @@ def cur_workspace_access_guard_self_db():
                 user: User = kwargs.get("current_user")
                 workspace_id = user.current_workspace_id
                 if workspace_id is None:
-                    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="workspace_id is required")
+                    raise BusinessException("workspace_id is required", BizCode.MISSING_PARAMETER)
                 with get_db_read() as db:
                     _check_workspace_access_sync(db, user, workspace_id)
                 return func(*args, **kwargs)
@@ -810,12 +810,9 @@ async def get_share_user_id(
     """
     from app.services.auth_service import decode_access_token
     from app.services.release_share_service import ReleaseShareService
-    from app.core.exceptions import BusinessException
 
-    credentials_exception = HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Could not validate credentials",
-        headers={"WWW-Authenticate": "Bearer"},
+    credentials_exception = _auth_exception(
+        "Could not validate credentials", BizCode.TOKEN_INVALID
     )
 
     try:
@@ -872,10 +869,8 @@ async def get_app_or_workspace(
     from app.repositories.app_repository import get_apps_by_id
     from app.repositories.workspace_repository import get_workspace_by_id
     
-    credentials_exception = HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Could not validate API Key",
-        headers={"WWW-Authenticate": "Bearer"},
+    credentials_exception = _auth_exception(
+        "Could not validate API Key", BizCode.API_KEY_INVALID
     )
     
     try:

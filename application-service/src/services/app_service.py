@@ -1904,7 +1904,7 @@ class AppService:
                 app_id=app.id, workspace_id=workspace_id
             )
             if not release:
-                raise BusinessException("该应用尚未发布，无法使用", BizCode.AGENT_CONFIG_MISSING)
+                raise BusinessException("该应用尚未发布，无法使用", BizCode.APP_NOT_PUBLISHED)
             return self._agent_config_from_release(release)
 
         stmt = select(AgentConfig).where(
@@ -2058,7 +2058,7 @@ class AppService:
                 app_id=app.id, workspace_id=workspace_id
             )
             if not release:
-                raise BusinessException("该应用尚未发布，无法使用", BizCode.CONFIG_MISSING)
+                raise BusinessException("该应用尚未发布，无法使用", BizCode.APP_NOT_PUBLISHED)
             return self._workflow_config_from_release(release)
 
         repo = WorkflowConfigRepository(self.db)
@@ -2667,7 +2667,7 @@ class AppService:
             else:
                 raise BusinessException(
                     f"子 Agent '{sub_agent_data.get('name', '未命名')}' 未配置模型，无法运行",
-                    BizCode.MODEL_NOT_FOUND
+                    BizCode.MODEL_NOT_CONFIGURED
                 )
 
         logger.info(

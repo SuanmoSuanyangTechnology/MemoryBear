@@ -7,12 +7,12 @@ import time
 import logging
 import uuid
 from dataclasses import dataclass
-from typing import Any, Annotated, AsyncGenerator, Optional
+from typing import Any, Annotated, Optional
 
 import yaml
 from fastapi import Depends
-from sqlalchemy import delete, desc, insert, select, update
-from sqlalchemy.orm import Session, selectinload
+from sqlalchemy import desc, select, update
+from sqlalchemy.orm import Session
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.utils.datetime_utils import (
@@ -4995,7 +4995,7 @@ class WorkflowService:
                 app_id=app.id, workspace_id=workspace_id
             )
             if not release:
-                raise BusinessException("该应用尚未发布，无法使用", BizCode.AGENT_CONFIG_MISSING)
+                raise BusinessException("该应用尚未发布，无法使用", BizCode.APP_NOT_PUBLISHED)
             # 与 draft_run 共享分支保持一致：用 AppService 重建配置以带出真实 config id
             from app.services.app_service import AppService
             return AppService(self.db)._workflow_config_from_release(release)
@@ -5106,7 +5106,7 @@ class WorkflowService:
             )
         return parent_msg
 
-    def _resolve_parent_user_message(self, msg) -> Optional["MessageModel"]:
+    def _resolve_parent_user_message(self, msg) -> Optional["Message"]:
         """只读定位 assistant 消息对应的父 user 消息(找不到返回 None,不抛异常)。
 
         与 _locate_parent_user_message 同策略,但用于读路径(分支链/siblings 重建),
@@ -6147,7 +6147,6 @@ class WorkflowService:
                 # ★ 优先从 WorkflowNodeExecution 表读（由 _persist_workflow_node_executions
                 # 落库的最终态，最准）。解决 output_data 里 HITL 节点
                 # status 仍为 waiting（execution 对象 detached 未落库导致）的存量问题。
-                from app.models import WorkflowNodeExecution as _WNE
                 from app.schemas.app_log_schema import AppLogNodeExecution as _NE
                 tbl_nodes = self.node_execution_repo.get_by_execution_id(execution.id) if execution.id else []
                 if tbl_nodes:
@@ -9216,7 +9215,6 @@ class WorkflowService:
 
         current_pending_node_ids = set(pending_node_ids)
         accumulated_content = ""
-        message_id = uuid.uuid4()
 
         while True:
             next_node_id, next_action_id, next_form_data, next_interrupt_id, next_kind = \
@@ -10176,7 +10174,6 @@ class WorkflowService:
             # "streamed" would cause emit_activate_chunk to skip End node
             # variable segments that reference HITL output (e.g.
             # {{hitl.__rendered_content}}), producing no message event at all.
-            from app.core.workflow.nodes.enums import BRANCH_NODES
             for nid, ninfo in node_outputs.items():
                 if isinstance(ninfo, dict) and ninfo.get("status") == "completed":
                     raw_output = ninfo.get("output")

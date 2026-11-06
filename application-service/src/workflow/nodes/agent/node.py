@@ -397,7 +397,10 @@ class AgentNode(BaseNode):
         params = model_config.completion_params
         model_id = model_config.model_id
         if not model_id:
-            raise ValueError(f"节点 {self.node_id} 缺少 model_id 配置，请先选择模型")
+            raise BusinessException(
+                f"节点 {self.node_id} 缺少 model_id 配置，请先选择模型",
+                code=BizCode.MODEL_NOT_CONFIGURED,
+            )
 
         # 1. Render templates
         context = self._resolve_context(variable_pool)

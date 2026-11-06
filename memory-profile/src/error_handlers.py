@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from error_core.codes import HTTP_STATUS_TO_BIZ_CODE
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
@@ -43,10 +44,14 @@ def register_error_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(StarletteHTTPException)
     async def http_error(request: Request, exc: StarletteHTTPException) -> JSONResponse:
+        code = HTTP_STATUS_TO_BIZ_CODE.get(
+            exc.status_code,
+            BizCode.INTERNAL_ERROR if exc.status_code >= 500 else BizCode.BAD_REQUEST,
+        )
         return _response(
             request,
             exc.status_code,
-            failure(BizCode.INVALID_PARAMETER, str(exc.detail)),
+            failure(code, str(exc.detail)),
         )
 
     @app.exception_handler(Exception)

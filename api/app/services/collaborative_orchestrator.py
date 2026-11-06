@@ -433,7 +433,7 @@ class CollaborativeOrchestrator:
             if not model_config_id:
                 raise BusinessException(
                     f"Agent 未配置模型: {agent_id}",
-                    BizCode.AGENT_CONFIG_MISSING
+                    BizCode.MODEL_NOT_CONFIGURED
                 )
             
             # 获取模型视图（非解密视图，调用经模型服务 invoke 接缝）

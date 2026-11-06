@@ -8,7 +8,6 @@ from typing import Optional, Dict, Any, AsyncGenerator
 from deprecated import deprecated
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
-from sqlalchemy import select
 
 from app.core.config import settings
 from app.core.error_codes import BizCode
@@ -248,16 +247,12 @@ class SharedChatService:
             user_rag_memory_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """聊天（非流式）"""
-        actual_config_id = None
-        config_id = actual_config_id
         from app.core.agent.langchain_agent import LangChainAgent
         from app.services.draft_run_service import create_knowledge_retrieval_tool
         from app.core.memory.memory_service import create_long_term_memory_tool
         from app.schemas.prompt_schema import render_prompt_message, PromptMessageRole
 
         start_time = time.time()
-        actual_config_id = None
-        config_id = actual_config_id
 
         if variables is None:
             variables = {}
@@ -271,7 +266,7 @@ class SharedChatService:
         # 获取模型配置ID
         model_config_id = release.default_model_config_id
         if not model_config_id:
-            raise BusinessException("发布版本未配置模型", BizCode.AGENT_CONFIG_MISSING)
+            raise BusinessException("发布版本未配置模型", BizCode.MODEL_NOT_CONFIGURED)
 
         # 获取模型配置
         from app.models import ModelConfig
@@ -470,8 +465,6 @@ class SharedChatService:
         import json
 
         start_time = time.time()
-        actual_config_id = None
-        config_id = actual_config_id
 
         if variables is None:
             variables = {}
@@ -482,12 +475,11 @@ class SharedChatService:
 
             # 获取 Agent 配置
             config = release.config or {}
-            agent_config_data = config.get("agent_config", {})
 
             # 获取模型配置ID
             model_config_id = release.default_model_config_id
             if not model_config_id:
-                raise BusinessException("发布版本未配置模型", BizCode.AGENT_CONFIG_MISSING)
+                raise BusinessException("发布版本未配置模型", BizCode.MODEL_NOT_CONFIGURED)
 
             # 获取模型配置
             from app.models import ModelConfig
@@ -744,8 +736,6 @@ class SharedChatService:
         from app.models import MultiAgentConfig
 
         start_time = time.time()
-        actual_config_id = None
-        config_id = actual_config_id
 
         if variables is None:
             variables = {}
@@ -826,8 +816,6 @@ class SharedChatService:
         """多 Agent 聊天（流式）"""
 
         start_time = time.time()
-        actual_config_id = None
-        config_id = actual_config_id
 
         if variables is None:
             variables = {}

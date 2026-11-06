@@ -11,7 +11,7 @@ import uuid
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
-from typing import Any, AsyncGenerator, AsyncIterator, Literal
+from typing import Any, AsyncGenerator, Literal
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -122,7 +122,7 @@ class PublishedAgentRunner:
                     BizCode.APP_TYPE_NOT_SUPPORTED,
                 )
         if not release.default_model_config_id:
-            raise BusinessException("Agent 发布版本缺少模型配置", BizCode.AGENT_CONFIG_MISSING)
+            raise BusinessException("Agent 发布版本缺少模型配置", BizCode.MODEL_NOT_CONFIGURED)
 
         # 运行时读数走 ModelConfigService：不存在/已弃用在此精确报码，且 model_base 已 joinedload
         model_config = await ModelConfigService.get_model_by_id_async(

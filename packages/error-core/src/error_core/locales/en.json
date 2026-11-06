@@ -65,6 +65,7 @@
     "INVALID_CONVERSATION": "Invalid conversation",
     "CONFIG_MISSING": "Application configuration is missing",
     "APP_NOT_PUBLISHED": "Application is not published",
+    "MODEL_NOT_CONFIGURED": "No model is configured. Please configure a model and try again.",
     "FEATURE_NOT_AVAILABLE": "This feature is not available in this edition",
     "EXTERNAL_CATALOG_UNAVAILABLE": "Community market is temporarily unavailable, please try again later",
     "EXTERNAL_CATALOG_NOT_FOUND": "Community market resource not found",

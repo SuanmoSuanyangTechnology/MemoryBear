@@ -16,6 +16,7 @@ from fastapi import HTTPException, UploadFile, status
 
 from ..config import current_settings
 from ..db import get_async_db_context
+from ..errors import BizCode, BusinessException
 from ..storage import StorageFactory, StorageBackend
 from ..storage.exceptions import (
     StorageError,
@@ -430,10 +431,7 @@ async def upload_workspace_file(
     declared_size = getattr(file, "size", None)
 
     if declared_size == 0:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="The file is empty.",
-        )
+        raise BusinessException("The file is empty.", BizCode.BAD_REQUEST)
 
     if declared_size is not None and declared_size > max_file_size:
         raise HTTPException(
@@ -478,11 +476,8 @@ async def upload_workspace_file(
             content_type=file.content_type,
         )
         if total == 0:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="The file is empty.",
-            )
-    except HTTPException:
+            raise BusinessException("The file is empty.", BizCode.BAD_REQUEST)
+    except (HTTPException, BusinessException):
         await _remove_partial_upload(file_id, storage_service, file_key)
         raise
     except StorageUploadError as e:
@@ -491,19 +486,15 @@ async def upload_workspace_file(
         # A known non-zero size means the failure happened before the first
         # chunk was read, not that the client sent an empty body.
         if stream.total == 0 and declared_size is None:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="The file is empty.",
-            )
+            raise BusinessException("The file is empty.", BizCode.BAD_REQUEST)
         if isinstance(e.cause, _UploadTooLarge):
             raise HTTPException(
                 status_code=status.HTTP_413_CONTENT_TOO_LARGE,
                 detail=f"The file size exceeds the {max_file_size} byte limit",
             )
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"File storage failed: {str(e)}",
-        )
+        raise BusinessException(
+            f"File storage failed: {str(e)}", BizCode.INTERNAL_ERROR
+        ) from e
 
     async with get_async_db_context() as adb:
         record = await adb.get(FileMetadata, file_id)

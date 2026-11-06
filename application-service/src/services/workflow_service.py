@@ -5082,7 +5082,7 @@ class WorkflowService:
                 app_id=app.id, workspace_id=workspace_id
             )
             if not release:
-                raise BusinessException("该应用尚未发布，无法使用", BizCode.AGENT_CONFIG_MISSING)
+                raise BusinessException("该应用尚未发布，无法使用", BizCode.APP_NOT_PUBLISHED)
             # Same as the shared branch of draft_run: rebuild the config via AppService
             # so the real config id is carried along
             return AppService(self.db)._workflow_config_from_release(release)

@@ -2,7 +2,6 @@ import copy
 import uuid
 import io
 import json
-import time
 from dataclasses import dataclass
 from typing import Optional, Annotated, Literal
 
@@ -36,7 +35,6 @@ from app.services.workflow_import_service import WorkflowImportService
 from app.services.workflow_service import WorkflowService, get_workflow_service
 from app.services.app_dsl_service import AppDslService
 from app.core.quota_stub import check_app_quota
-from app.utils.redis_cache import delete_json_async, workflow_config_key
 
 router = APIRouter(prefix="/apps", tags=["Apps"])
 logger = get_business_logger()
@@ -267,12 +265,12 @@ async def _load_workflow_runtime_config(
 
     if is_shared:
         if not current_release_id:
-            raise BusinessException("该应用尚未发布，无法使用", BizCode.AGENT_CONFIG_MISSING)
+            raise BusinessException("该应用尚未发布，无法使用", BizCode.APP_NOT_PUBLISHED)
 
         async with get_async_db_context() as db:
             release = await db.get(AppRelease, current_release_id)
             if not release:
-                raise BusinessException("发布版本不存在", BizCode.AGENT_CONFIG_MISSING)
+                raise BusinessException("发布版本不存在", BizCode.RELEASE_NOT_FOUND)
             real_config_id = await db.scalar(
                 select(WorkflowConfig.id).where(
                     WorkflowConfig.app_id == release.app_id,
@@ -372,11 +370,11 @@ async def _load_agent_runtime_config(
     async with get_async_db_context() as db:
         if is_shared:
             if not current_release_id:
-                raise BusinessException("该应用尚未发布，无法使用", BizCode.AGENT_CONFIG_MISSING)
+                raise BusinessException("该应用尚未发布，无法使用", BizCode.APP_NOT_PUBLISHED)
 
             release = await db.get(AppRelease, current_release_id)
             if not release:
-                raise BusinessException("发布版本不存在", BizCode.AGENT_CONFIG_MISSING)
+                raise BusinessException("发布版本不存在", BizCode.RELEASE_NOT_FOUND)
 
             real_config = await db.scalar(
                 select(AgentConfig).where(AgentConfig.app_id == release.app_id).limit(1)
@@ -405,7 +403,7 @@ async def _load_agent_runtime_config(
                 raise ResourceNotFoundException("模型配置", str(agent_cfg_snapshot.default_model_config_id))
 
         if not model_config:
-            raise BusinessException("模型配置不存在，无法试运行", BizCode.AGENT_CONFIG_MISSING)
+            raise BusinessException("模型配置不存在，无法试运行", BizCode.MODEL_NOT_CONFIGURED)
 
         model_config_snapshot = _build_model_config_snapshot(model_config)
 
@@ -690,7 +688,6 @@ def get_agent_model_parameters(
         db: Session = Depends(get_db),
         current_user=Depends(get_current_user),
 ):
-    workspace_id = current_user.current_workspace_id
     service = AppService(db)
     model_parameters = service.get_default_model_parameters(app_id=app_id)
     return success(data=model_parameters, msg="获取 Agent 模型参数默认配置")

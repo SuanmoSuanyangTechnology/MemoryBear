@@ -39,9 +39,9 @@ from app.models.annotation_model import AppAnnotation, AppAnnotationHitLog, AppA
 from app.models.appshare_model import AppShare
 from app.models.file_metadata_model import FileMetadata
 from app.models.knowledgeshare_model import KnowledgeShare
-from app.models.models_model import Modality, ModelFeature, ModelType
+from app.models.models_model import Modality, ModelFeature
 from app.repositories.tool_repository import ToolRepository
-from app.schemas.app_schema import FileInput, Citation, FileType, TransferMethod
+from app.schemas.app_schema import FileInput, Citation, FileType
 from app.schemas.model_schema import ModelInfo
 from app.schemas.prompt_schema import PromptMessageRole, render_prompt_message
 from app.services.context_engine_manager import ContextEngineManager
@@ -2048,6 +2048,7 @@ class AgentRunService:
                 BizCode.MODEL_CONFIG_INVALID,
                 BizCode.API_KEY_MISSING,
                 BizCode.AGENT_CONFIG_MISSING,
+                BizCode.MODEL_NOT_CONFIGURED,
             ):
                 raise
             raise BusinessException(f"Agent 调用失败: {str(e)}", BizCode.INTERNAL_ERROR, cause=e)
@@ -4768,7 +4769,6 @@ class AgentRunService:
         if parent_msg and parent_msg.meta_data:
             meta_files = parent_msg.meta_data.get("files", [])
             if meta_files:
-                from app.schemas.app_schema import FileInput, TransferMethod
                 files = []
                 for f in meta_files:
                     try:

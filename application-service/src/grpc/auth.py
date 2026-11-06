@@ -18,6 +18,7 @@ from pydantic import ValidationError
 
 from ..api.dependencies import API_KEY_ID_HEADER, Principal, principal_from_headers
 from ..auth import AppAuthConfig, _load_gateway_auth
+from ..errors import BusinessException, http_status_for
 from ..i18n import resolve_locale
 from .envelope import abort_with, auth_rejection_content
 
@@ -67,6 +68,9 @@ def build_chat_authenticator(config: AppAuthConfig, *, gateway: object | None = 
             # and has already terminated credentials upstream.
             try:
                 principal = principal_from_headers(request)
+            except BusinessException as exc:
+                await reject(http_status_for(exc.code), exc.message)
+                raise
             except HTTPException as exc:
                 await reject(exc.status_code, str(exc.detail))
                 raise
