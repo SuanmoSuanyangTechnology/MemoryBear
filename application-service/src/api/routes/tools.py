@@ -107,9 +107,9 @@ def get_tool_methods(tool_id: str, db: DbSession, principal: Caller):
     try:
         methods = asyncio.run(ToolService(db).get_tool_methods(tool_id, principal.tenant_id))
         if methods is None:
-            raise HTTPException(status_code=404, detail="工具不存在")
+            raise BusinessException("工具不存在", BizCode.TOOL_NOT_FOUND)
         return success(data=methods, msg="获取工具方法成功")
-    except HTTPException:
+    except BusinessException:
         raise
     except Exception as e:
         raise BusinessException(str(e), BizCode.INTERNAL_ERROR) from e
@@ -190,7 +190,7 @@ def update_tool(tool_id: str, request: ToolUpdateRequest, db: DbSession, princip
             tags=request.tags
         )
         if not success_flag:
-            raise HTTPException(status_code=404, detail="工具不存在")
+            raise BusinessException("工具不存在", BizCode.TOOL_NOT_FOUND)
         return success(msg="工具更新成功")
     except BusinessException:
         raise
@@ -208,11 +208,11 @@ def delete_tool(tool_id: str, db: DbSession, principal: Caller):
     try:
         success_flag = ToolService(db).delete_tool(tool_id, principal.tenant_id)
         if not success_flag:
-            raise HTTPException(status_code=404, detail="工具不存在")
+            raise BusinessException("工具不存在", BizCode.TOOL_NOT_FOUND)
         return success(msg="工具删除成功")
     except ValueError as e:
         raise BusinessException(str(e), BizCode.BAD_REQUEST) from e
-    except HTTPException:
+    except BusinessException:
         raise
     except Exception as e:
         raise BusinessException(str(e), BizCode.INTERNAL_ERROR) from e
@@ -230,12 +230,12 @@ def set_tool_active(tool_id: str, request: ToolActiveUpdate, db: DbSession, prin
             tool_id, principal.tenant_id, request.is_active
         )
         if not success_flag:
-            raise HTTPException(status_code=404, detail="工具不存在")
+            raise BusinessException("工具不存在", BizCode.TOOL_NOT_FOUND)
         action = "启用" if request.is_active else "禁用"
         return success(msg=f"工具已{action}")
     except ValueError as e:
         raise BusinessException(str(e), BizCode.BAD_REQUEST) from e
-    except HTTPException:
+    except BusinessException:
         raise
     except Exception as e:
         raise BusinessException(str(e), BizCode.INTERNAL_ERROR) from e
