@@ -72,6 +72,7 @@ def resolve_conversation_preference_domain(
                            THEN (SELECT d.preference_domain
                                  FROM ontology d
                                  WHERE d.tenant_id IS NULL AND d.is_system_default IS TRUE
+                                 ORDER BY d.created_at ASC
                                  LIMIT 1)
                          ELSE o.preference_domain
                        END AS preference_domain,
@@ -134,9 +135,14 @@ def resolve_effective_preference_domain(
             )
             return None
         if domain is None:
+            reason = (
+                "default_ontology_missing"
+                if is_default_fallback
+                else "custom_ontology_not_configured"
+            )
             _log(
                 memory_config, conversation_id, source,
-                None, "skipped", "custom_ontology_not_configured",
+                None, "skipped", reason,
             )
             return None
 

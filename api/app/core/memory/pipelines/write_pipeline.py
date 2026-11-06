@@ -356,11 +356,16 @@ class WritePipeline:
                     )
 
                     try:
-                        preference_domain = await asyncio.to_thread(
-                            resolve_effective_preference_domain,
-                            memory_config=self.memory_config,
-                            conversation_id=conversation_id,
-                            source=source,
+                        from app.core.config import settings
+
+                        preference_domain = await asyncio.wait_for(
+                            asyncio.to_thread(
+                                resolve_effective_preference_domain,
+                                memory_config=self.memory_config,
+                                conversation_id=conversation_id,
+                                source=source,
+                            ),
+                            timeout=settings.PREFERENCE_GATE_TIMEOUT_SECONDS,
                         )
                     except Exception as gate_error:
                         # 门控/反查异常只跳过偏好任务，不阻断 Normal Write

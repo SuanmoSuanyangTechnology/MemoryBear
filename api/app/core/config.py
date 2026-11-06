@@ -293,6 +293,9 @@ class Settings:
     PREFERENCE_WRITE_TIMEOUT_SECONDS: float = float(
         os.getenv("PREFERENCE_WRITE_TIMEOUT_SECONDS", "300")
     )
+    PREFERENCE_GATE_TIMEOUT_SECONDS: float = float(
+        os.getenv("PREFERENCE_GATE_TIMEOUT_SECONDS", "3")
+    )
     PREFERENCE_RECALL_MAX_CONTEXT_MESSAGES: int = max(
         0, int(os.getenv("PREFERENCE_RECALL_MAX_CONTEXT_MESSAGES", "3"))
     )

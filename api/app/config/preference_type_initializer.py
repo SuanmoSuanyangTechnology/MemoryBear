@@ -21,7 +21,7 @@ from app.models.ontology_preference import OntologyPreferenceScene
 logger = logging.getLogger(__name__)
 
 
-def _existing_scene_id(db: Session, workspace_id: uuid.UUID, domain: str) -> bool:
+def _scene_exists(db: Session, workspace_id: uuid.UUID, domain: str) -> bool:
     row = db.execute(
         select(OntologyPreferenceScene.preference_scene_id).where(
             OntologyPreferenceScene.workspace_id == workspace_id,
@@ -31,7 +31,7 @@ def _existing_scene_id(db: Session, workspace_id: uuid.UUID, domain: str) -> boo
     return row is not None
 
 
-async def _existing_scene_id_async(
+async def _scene_exists_async(
     db: AsyncSession, workspace_id: uuid.UUID, domain: str
 ) -> bool:
     row = (
@@ -57,7 +57,7 @@ def ensure_seeded(
     Returns:
         True 表示本次发生了插入（或已交给调用方提交）；False 表示已存在 / 并发冲突。
     """
-    if _existing_scene_id(db, workspace_id, domain):
+    if _scene_exists(db, workspace_id, domain):
         return False
 
     scene, classes = build_seed_rows(workspace_id, domain)
@@ -87,12 +87,35 @@ async def ensure_seeded_async(
     workspace_id: uuid.UUID,
     *,
     domain: str = "coding",
+    commit: bool = True,
 ) -> bool:
-    """异步会话版本：供页面接口与本体绑定校验使用。"""
-    if await _existing_scene_id_async(db, workspace_id, domain):
+    """异步会话版本：供页面接口与本体绑定校验使用。
+
+    commit=False 时用 SAVEPOINT 只写入种子行，不提交调用方事务；
+    并发唯一键冲突只回滚 savepoint，调用方后续写入不受影响。
+    """
+    if await _scene_exists_async(db, workspace_id, domain):
         return False
 
     scene, classes = build_seed_rows(workspace_id, domain)
+
+    if not commit:
+        try:
+            async with db.begin_nested():
+                db.add(scene)
+                for item in classes:
+                    db.add(item)
+                await db.flush()
+        except IntegrityError:
+            # 并发首次种入：唯一约束兜底，savepoint 回滚后视为已种入。
+            logger.warning(
+                "[PreferenceSeed] concurrent insert skipped workspace=%s domain=%s",
+                workspace_id,
+                domain,
+            )
+            return False
+        return True
+
     db.add(scene)
     for item in classes:
         db.add(item)

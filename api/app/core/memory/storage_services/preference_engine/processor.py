@@ -13,6 +13,7 @@ from app.core.memory.storage.custom.preference import (
 )
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 
+from .gating import DEFAULT_PREFERENCE_DOMAIN
 from .keyword_gate import match_preference_keywords
 from .models import (
     IdentifiedPreference,
@@ -38,7 +39,7 @@ class PreferenceProcessor:
         end_user_id: str,
         llm_client: Any,
         connector: Neo4jConnector,
-        domain: str = "coding",
+        domain: str = DEFAULT_PREFERENCE_DOMAIN,
     ):
         self.memory_config = memory_config
         self.end_user_id = end_user_id

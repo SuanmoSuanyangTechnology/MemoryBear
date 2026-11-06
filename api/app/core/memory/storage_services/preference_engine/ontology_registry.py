@@ -56,12 +56,27 @@ def load_preference_ontology(domain: str = "coding") -> PreferenceOntology:
     )
 
 
-@lru_cache(maxsize=128)
 def load_preference_ontology_from_db(
+    workspace_id: str | uuid.UUID, domain: str = "coding"
+) -> PreferenceOntology:
+    """从 workspace 的偏好类型表加载封闭本体；缺失时先惰性种入。
+
+    workspace_id 统一转成 str 再做缓存键，避免 UUID / str 重复缓存。
+    """
+    return _load_preference_ontology_from_db_cached(str(workspace_id), domain)
+
+
+def clear_preference_ontology_cache() -> None:
+    """偏好类型数据变更后调用，清空进程内本体缓存。"""
+    _load_preference_ontology_from_db_cached.cache_clear()
+
+
+@lru_cache(maxsize=128)
+def _load_preference_ontology_from_db_cached(
     workspace_id: str, domain: str = "coding"
 ) -> PreferenceOntology:
-    """从 workspace 的偏好类型表加载封闭本体；缺失时先惰性种入。"""
-    workspace_uuid = uuid.UUID(str(workspace_id))
+    """缓存实现：入参 workspace_id 固定为 str。"""
+    workspace_uuid = uuid.UUID(workspace_id)
     with get_db_context() as db:
         ensure_seeded(db, workspace_uuid, domain=domain)
         scene = db.execute(

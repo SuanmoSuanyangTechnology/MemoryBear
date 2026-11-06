@@ -183,5 +183,7 @@ async def preference_domain_exists(
     """本体绑定校验：当前工作空间下是否存在该偏好域（不存在则惰性种入后重查）。"""
     if await _get_scene(db, workspace_id, domain) is not None:
         return True
-    await ensure_seeded_async(db, workspace_id)
+    # commit=False：本体编辑事务里可能已有未提交改动，种入只走 savepoint，
+    # 由调用方事务统一提交/回滚。
+    await ensure_seeded_async(db, workspace_id, domain=domain, commit=False)
     return await _get_scene(db, workspace_id, domain) is not None
