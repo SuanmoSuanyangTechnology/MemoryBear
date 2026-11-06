@@ -842,7 +842,9 @@ members: list[str] | None = None,
                     tenant_id=tenant_id,
                     name=resolved_plugin_name,
                     description=plugin_description,
-                    source_type="imported",
+                    # 与成员包同一个来源：插件行与成员包行必须一致，否则市场装进来的
+                    # 插件会被记成 imported（独立性 §11.2 靠这两列还原来源）。
+                    source_type=source_type,
                     source_ref=source_ref,
                 )
                 plugin_id = plugin.id
@@ -854,7 +856,8 @@ members: list[str] | None = None,
                 results.append(
                     SkillPackageService._commit_member(
                         db, repo, tenant_id=tenant_id, item=item, plugin_id=plugin_id,
-                        source_ref=source_ref, overwrite=overwrite,
+                        source_ref=source_ref, source_type=source_type,
+                        overwrite=overwrite,
                         conflict_strategy=conflict_strategy,
                         uploaded_keys=uploaded_keys, purge_keys=purge_keys,
                     )
