@@ -1,5 +1,5 @@
 import { forwardRef, useImperativeHandle, useState } from 'react';
-import { App, Flex, Form, Input } from 'antd';
+import { App, Flex, Form } from 'antd';
 import { useTranslation } from 'react-i18next';
 import RbModal from '@/components/RbModal';
 import SwitchFormItem from '@/components/FormItem/SwitchFormItem';
@@ -19,7 +19,7 @@ const AppSharingModal = forwardRef<AppSharingModalRef, AppSharingModalProps>(({ 
   const [loading, setLoading] = useState(false);
   const [form] = Form.useForm<AppSharingForm>();
   const catalogEnabled = Form.useWatch(['resource_center', 'enabled'], form);
-  const marketEnabled = Form.useWatch(['community_market', 'enabled'], form);
+  // const marketEnabled = Form.useWatch(['community_market', 'enabled'], form);
   const close = () => {
     setVisible(false);
     form.resetFields();
@@ -53,7 +53,10 @@ const AppSharingModal = forwardRef<AppSharingModalRef, AppSharingModalProps>(({ 
       <Form
         form={form}
         onFinish={submit}
-        initialValues={{ resource_center: { enabled: false, allow_editable: false }, community_market: { enabled: false } }}
+        initialValues={{
+          resource_center: { enabled: false, allow_editable: false },
+          // community_market: { enabled: false }
+        }}
       >
         {/* Version Info */}
         <div className="rb:rounded-lg rb:bg-gray-50 rb:p-4 rb:mb-6">
@@ -95,7 +98,7 @@ const AppSharingModal = forwardRef<AppSharingModalRef, AppSharingModalProps>(({ 
         </div>
 
         {/* Community Market */}
-        <div className="rb:border rb:border-gray-200 rb:rounded-lg rb:p-4">
+        {/* <div className="rb:border rb:border-gray-200 rb:rounded-lg rb:p-4">
           <SwitchFormItem
             title={t('resourceSharing.market')}
             desc={t('application.marketDesc')}
@@ -112,7 +115,7 @@ const AppSharingModal = forwardRef<AppSharingModalRef, AppSharingModalProps>(({ 
           >
             <Input.TextArea rows={4} placeholder={t('common.enter')} />
           </Form.Item>
-        )}
+        )} */}
       </Form>
     </RbModal>
   );
