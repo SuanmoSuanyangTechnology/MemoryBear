@@ -40,6 +40,7 @@ def create_app(settings: KnowledgeSettings | None = None) -> FastAPI:
     setup_logging(service_settings)
     runtime = ProcessRuntime(service_settings)
     from .auth import KbAuthConfig, KbAuthMiddleware, _load_gateway_auth
+    from .grpc.server import build_grpc_server
 
     kb_auth_config = KbAuthConfig(
         auth_mode=service_settings.kb_auth_mode,
@@ -64,6 +65,14 @@ def create_app(settings: KnowledgeSettings | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
+        # Built here, not in create_app: grpc.aio requires a running event loop,
+        # and create_app() runs at module import before uvicorn starts the loop.
+        grpc_server = build_grpc_server(
+            service_settings,
+            runtime,
+            auth_config=kb_auth_config,
+            gateway=gateway_auth,
+        )
         # A failed refresh start degrades hot reload only; channel-1 auth keeps
         # the rules loaded so far, so startup must not be blocked by it.
         if gateway_auth is not None and hasattr(gateway_auth, "start"):
@@ -73,12 +82,17 @@ def create_app(settings: KnowledgeSettings | None = None) -> FastAPI:
                 logger.exception("gateway auth refresh start failed")
         try:
             await upgrade_database_on_startup(runtime)
+            if grpc_server is not None:
+                await grpc_server.start()
             logger.info(
                 "Knowledge service started: %s",
                 service_settings.safe_summary(),
             )
             yield
         finally:
+            # Stop accepting RPCs before the runtime closes its resources.
+            if grpc_server is not None:
+                await grpc_server.stop(grace_s=service_settings.grpc_shutdown_grace_s)
             # Stop the subscription task before the redis pool closes.
             if gateway_auth is not None and hasattr(gateway_auth, "aclose"):
                 await gateway_auth.aclose()

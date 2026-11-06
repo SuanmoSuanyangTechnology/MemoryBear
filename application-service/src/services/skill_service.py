@@ -113,6 +113,10 @@ class SkillService:
                     for tool_id, operation in selections:
                         tool = tool_service.get_tool_instance(tool_id, tenant_id)
                         if not tool:
+                            logger.warning(
+                                "tool_selection_unavailable tool_id=%s operation=%s reason=tool_not_found_or_inactive",
+                                tool_id, operation,
+                            )
                             continue
                         if runtime_context:
                             tool.set_runtime_context(**runtime_context)
@@ -155,6 +159,10 @@ class SkillService:
                             tenant_id,
                         )
                         if not tool:
+                            logger.warning(
+                                "tool_selection_unavailable tool_id=%s operation=%s reason=tool_not_found_or_inactive",
+                                tool_id, operation,
+                            )
                             continue
                         if runtime_context:
                             tool.set_runtime_context(**runtime_context)

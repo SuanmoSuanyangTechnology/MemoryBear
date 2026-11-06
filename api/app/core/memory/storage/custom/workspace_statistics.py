@@ -565,8 +565,11 @@ class WorkspaceStatisticsStorage:
             episodic_count += fallback["episodic_count"]
             emotional_count += fallback["emotional_count"]
 
+        from app.core.memory.storage.custom.scene_community_storage import count_scene_communities
+        community_count = await count_scene_communities(
+            self._elastic_client._require_client(), self._neo4j_client, list(end_user_ids))
         return {
-            "episodic_count": episodic_count,
             "explicit_count": explicit_count,
+            "episodic_count": community_count,
             "emotional_count": emotional_count,
         }

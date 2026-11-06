@@ -33,7 +33,7 @@ const CommunityNetwork: FC<{
   const { t } = useTranslation()
   const [graphData, setGraphData] = useState<CommunityGraphData | null>(null)
   const [empty, setEmpty] = useState(false)
-  const [loading, setLoading] = useState(false)
+  const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     if (!id) return

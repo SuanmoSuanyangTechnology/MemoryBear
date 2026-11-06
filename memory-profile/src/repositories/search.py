@@ -15,6 +15,7 @@ from src.infrastructure.elasticsearch import ElasticsearchManager
 _INDEX_MEMORY_SUMMARY = "memory_summary_current"
 _INDEX_EXTRACTED_ENTITY = "extracted_entity_current"
 _INDEX_STATEMENT = "statement_current"
+_INDEX_SCENE_COMMUNITY = "scene_community_current"
 
 # Date doc values are already normalized by ES. Source text is needed because
 # statement is a text field without doc values, and blank statements are excluded.
@@ -152,6 +153,22 @@ class MemorySearchRepository:
     def __init__(self, elasticsearch: ElasticsearchManager) -> None:
         self.elasticsearch = elasticsearch
 
+    async def scene_community_counts(
+        self, end_user_ids: Sequence[str],
+    ) -> tuple[dict[str, int], set[str]]:
+        """Return community counts and users present in Elasticsearch."""
+        if not end_user_ids:
+            return {}, set()
+        client = await self.elasticsearch.client()
+        response = await client.search(
+            index=_INDEX_SCENE_COMMUNITY,
+            body=_search_body(end_user_ids),
+            allow_partial_search_results=False,
+        )
+        buckets = _parse_buckets(response, "scene communities")
+        present = set(buckets) & set(end_user_ids)
+        return {user_id: buckets[user_id][1] for user_id in present}, present
+
     async def short_term_counts(
         self, end_user_ids: Sequence[str], now: datetime,
     ) -> tuple[dict[str, int], set[str]]:
@@ -198,10 +215,9 @@ class MemorySearchRepository:
         self,
         end_user_ids: Sequence[str],
     ) -> tuple[dict[str, dict[str, int]], set[str]]:
-        """返回每个用户的 ES 计数，以及「在任一索引中存在有效数据」的用户集合。
+        """Return four ES counts and users present in any of the four indices.
 
-        一次 ``msearch`` 并发三个聚合（情景摘要 / 实体存在性 / 情绪语句），避免三次
-        往返；调用方据此对缺失用户回退到 Neo4j。
+        One msearch fetches all counts; only absent users fall back to Neo4j.
         """
 
         if not end_user_ids:
@@ -217,10 +233,12 @@ class MemorySearchRepository:
                 end_user_ids,
                 ("emotional", {"filter": {"exists": {"field": "emotion_type"}}}),
             ),
+            _search_header(_INDEX_SCENE_COMMUNITY),
+            _search_body(end_user_ids),
         ]
-        result = await client.msearch(searches=searches, max_concurrent_searches=3)
+        result = await client.msearch(searches=searches, max_concurrent_searches=4)
         responses = result.get("responses")
-        if not isinstance(responses, list) or len(responses) != 3:
+        if not isinstance(responses, list) or len(responses) != 4:
             raise RuntimeError(
                 "Elasticsearch workspace statistics returned invalid responses"
             )
@@ -231,13 +249,17 @@ class MemorySearchRepository:
         episodic = _parse_buckets(responses[0], "workspace episodic")
         entities = _parse_buckets(responses[1], "workspace entities")
         emotional = _parse_buckets(responses[2], "workspace emotional", "emotional")
+        community = _parse_buckets(responses[3], "workspace scene communities")
 
         requested_ids = set(end_user_ids)
-        present_ids = (set(episodic) | set(entities) | set(emotional)) & requested_ids
+        present_ids = (
+            set(episodic) | set(explicit) | set(emotional) | set(community)
+        ) & requested_ids
         statistics = {
             end_user_id: {
                 "episodic_count": episodic.get(end_user_id, (0, 0))[1],
                 "emotional_count": emotional.get(end_user_id, (0, 0))[1],
+                "scene_community_count": community.get(end_user_id, (0, 0))[1],
             }
             for end_user_id in end_user_ids
         }

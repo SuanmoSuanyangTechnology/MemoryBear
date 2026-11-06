@@ -452,6 +452,7 @@ class AppDslService:
         commit: bool = True,
         dep_map: dict[str, str] | None = None,
         resolve_cross_app_refs: bool = True,
+        origin_columns: dict[str, Any] | None = None,
     ) -> tuple[App, list[str]]:
         """Parse the DSL, create or overwrite the app config; returns (app, warnings).
         When app_id is set: validate type consistency then overwrite; when None: create.
@@ -471,6 +472,10 @@ class AppDslService:
           ``local_id``s resolved through ``dep_map``. Running them through
           ``_locate_agent_app`` would look for app ids that do not exist yet and
           silently drop the entries.
+        - ``origin_columns``: 来源列（``origin`` / ``external_source`` /
+          ``external_resource_id`` / ``external_version``），只有市场落地传。
+          不传就落到模型默认值 ``origin='local'``，控制台的「导入 YAML」路径
+          因此完全不受影响。
         """
         app_meta = dsl.get("app", {})
         app_type = app_meta.get("type")
@@ -507,6 +512,9 @@ class AppDslService:
             is_active=True,
             created_at=now,
             updated_at=now,
+            # 市场落地时记录「这一行是从哪个市场资源、哪个版本复制来的」；
+            # 控制台导入 YAML 不传，落到模型默认值 origin='local'（§11.2）。
+            **(origin_columns or {}),
         )
         self.db.add(new_app)
         self.db.flush()

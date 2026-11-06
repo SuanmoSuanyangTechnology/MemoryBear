@@ -26,6 +26,7 @@ dependencies = [
     "lxml>=6,<7",
     "markdown==3.8",
     "mem-storage-core",
+    "memorybear-grpc",
     "openpyxl==3.1.5",
     "pillow==12.0.0",
     "psycopg[binary]>=3.2,<4",
@@ -58,6 +59,7 @@ dev = [
 
 [tool.uv.sources]
 redbear-model = { path = "../packages/redbear-model" }
+memorybear-grpc = { path = "../packages/memorybear-grpc" }
 mem-storage-core = { path = "../packages/storage-core" }
 auth-sdk = { path = "../packages/auth-sdk" }
 

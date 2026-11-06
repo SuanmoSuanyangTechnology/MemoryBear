@@ -94,6 +94,9 @@ class BundleInstallService:
     def __init__(self, db: Session, dsl_service: AppDslService | None = None):
         self.db = db
         self.dsl_service = dsl_service or AppDslService(db)
+        # 本次安装的市场来源 `{resource_id, version}`；空字典表示不是市场安装。
+        # 两个入口都会在开头覆盖它，这里给个初值只是为了不依赖调用顺序。
+        self._origin: dict[str, str] = {}
 
     # ==================== entry ====================
 
@@ -142,7 +145,7 @@ class BundleInstallService:
         dep_map: dict[str, str] = {}
         missing: list[dict[str, Any]] = []
 
-        # ① skills / plugins
+        # ① skills / plugins（随包依赖：`_origin` 是应用的资源 id，不是技能的）
         self._land_skills(dependencies, tenant_id, dep_map, missing)
         # ② tools
         self._land_tools(dependencies, tenant_id, dep_map, missing)
@@ -233,9 +236,11 @@ class BundleInstallService:
             local_id = dep_map[entry["ref"]]
             local_name = self.db.get(ToolConfig, uuid.UUID(local_id)).name
         elif resource_type == "skill_package":
+            # 单独装的这一个技能/插件，`_origin` 指的就是它自己 → 能写全 source_ref
             self._land_skills(
                 _skill_dependencies(payload, dependencies),
                 tenant_id, dep_map, missing,
+                own_market_ref=True,
             )
             local_id, local_name = self._skill_result(
                 tenant_id=tenant_id,
@@ -314,6 +319,8 @@ class BundleInstallService:
             tenant_id: uuid.UUID,
             dep_map: dict[str, str],
             missing: list[dict[str, Any]],
+            *,
+            own_market_ref: bool = False,
     ) -> None:
         """Each plugin lands as one multi-member zip; standalone skills land alone.
 
@@ -321,7 +328,20 @@ class BundleInstallService:
         `call_name` matches (that is the whole idempotency key of the skill
         runtime); a package-name clash with a different call_name is degraded
         instead of aborting the install.
+
+        ``own_market_ref``: 技能包没有 `origin` 列，来源靠 `source_type` /
+        `source_ref` 两列表达（§11.2）。 ``True`` 只在「从市场技能/工具 tab 直接
+        装这一个技能」时为真——那时 `_origin` 里的资源 id 就是它自己的，能写全
+        `<resource_id>@<version>`。随应用包下来时包里只有 `skill:<name>` 引用，
+        市场资源 id 要等投稿时才产生，装的时候拿不到，于是只写
+        `source_type=market`（照样被「市场副本不可再投稿」拦下），不去编造一个
+        查不到的资源 id。
         """
+
+        # 市场来源（§11.2）：两列一起传，避免上次只写 source_ref 导致
+        # `market_source_ref()` 因 source_type 仍是 imported 而判成本地。
+        source_type = "market" if self._origin else "imported"
+        source_ref = self._market_source_ref() if own_market_ref else None
 
         plugin_meta = {
             str(plugin.get("ref")): plugin for plugin in (dependencies.get("plugins") or [])
@@ -343,7 +363,8 @@ class BundleInstallService:
                     zip_bytes=archive,
                     plugin_name=(plugin_row or {}).get("name"),
                     plugin_description=((plugin_row or {}).get("payload") or {}).get("description"),
-                    source_ref="community_market",
+                    source_type=source_type,
+                    source_ref=source_ref,
                     conflict_strategy="rename",
                     commit=False,
                 )
@@ -521,6 +542,14 @@ class BundleInstallService:
         self.db.flush()
         return str(row.id)
 
+    def _market_source_ref(self) -> str | None:
+        """`<market_resource_id>@<version>`（§11.2，反解按最后一个 `@` 切）。"""
+
+        resource_id = self._origin.get("resource_id")
+        if not resource_id:
+            return None
+        return f"{resource_id}@{self._origin.get('version') or ''}"
+
     def _origin_columns(self) -> dict[str, Any]:
         """Provenance columns for a row that came from the market (§11.2)."""
 
@@ -617,6 +646,9 @@ class BundleInstallService:
             dep_map=dep_map,
             display_name=display.get("name"),
             description=display.get("summary"),
+            # 只有根应用对应一个市场资源；子 Agent 是同一份包的内部成员，
+            # 没有自己的 market_resource_id，标记成 external 会让溯源指向错的行
+            origin_columns=self._origin_columns(),
         )
         missing.extend(
             _missing("app", display.get("name"), warning) for warning in warnings
@@ -638,6 +670,7 @@ class BundleInstallService:
             dep_map: dict[str, str],
             display_name: str | None,
             description: str | None,
+            origin_columns: dict[str, Any] | None = None,
     ) -> tuple[App, list[str]]:
         config = dict(member.get("config") or {})
         app_type = member.get("app_type") or AppType.AGENT
@@ -700,6 +733,7 @@ class BundleInstallService:
             commit=False,
             dep_map=dep_map,
             resolve_cross_app_refs=False,
+            origin_columns=origin_columns,
         )
 
 

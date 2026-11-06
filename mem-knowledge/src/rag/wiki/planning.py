@@ -5,6 +5,7 @@ from difflib import SequenceMatcher
 from .batching import batches, optional_items
 from .config import TAXONOMY_TYPE_LABELS, normalize_name
 from .contracts import FolderAssignments, IdentityMatches
+from .identity import same_name_target
 from .model import request_tokens, tokens
 from .pipeline import require_refs
 
@@ -21,6 +22,12 @@ def reconcile(model, snapshot, topics, context):
     pages = context["pages"]
     cases, shortlists = [], {}
     for topic in topics:
+        target = same_name_target(
+            topic, pages, kb_id=snapshot["kb_id"], document_id=snapshot["document_id"],
+        )
+        if target is not None:
+            topic["existing_page_id"] = target["page_id"]
+            continue
         names = _names(topic)
         available = [p for p in pages if p["kind"] == topic["kind"]]
         exact = [p for p in available if names & _names(p)

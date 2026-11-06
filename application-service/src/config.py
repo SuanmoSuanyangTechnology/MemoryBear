@@ -347,27 +347,6 @@ class AppServiceSettings(BaseSettings):
         gt=0,
         validation_alias="APPLICATION_SERVICE_UPSTREAM_TIMEOUT_SECONDS",
     )
-    # Community market (market-service) linkage. `disabled` is the community
-    # edition default: switches 1/2 (tenant resource center) keep working and
-    # switch 3 (community market) fails closed with 6020 instead of silently
-    # dropping the submission. `http` requires the base URL + internal token.
-    application_service_market_mode: Literal["disabled", "http"] = Field(
-        default="disabled",
-        validation_alias="APPLICATION_SERVICE_MARKET_MODE",
-    )
-    market_service_base_url: str | None = Field(
-        default=None,
-        validation_alias="MARKET_SERVICE_BASE_URL",
-    )
-    market_internal_token: SecretStr = Field(
-        default=SecretStr(""),
-        validation_alias="MARKET_INTERNAL_TOKEN",
-    )
-    market_service_timeout_seconds: float = Field(
-        default=10.0,
-        gt=0,
-        validation_alias="MARKET_SERVICE_TIMEOUT_SECONDS",
-    )
     # East-west direct dependency on model-service (annotation embeddings),
     # never routed through the gateway; same env name as the monolith's
     # outbound knob. Unset or unreachable degrades annotation writes to a
@@ -428,6 +407,31 @@ class AppServiceSettings(BaseSettings):
     )
     mem_knowledge_health_timeout_seconds: float = Field(
         default=3.0, gt=0, validation_alias="MEM_KNOWLEDGE_HEALTH_TIMEOUT_SECONDS"
+    )
+    # East-west retrieval protocol: http keeps /internal/v1/chunks/retrieval,
+    # grpc uses KnowledgeRetrievalService with the same JSON body semantics.
+    # Route forwarding, detached calls and readiness stay on the HTTP base URL.
+    mem_knowledge_protocol: Literal["http", "grpc"] = Field(
+        default="http", validation_alias="MEM_KNOWLEDGE_PROTOCOL"
+    )
+    mem_knowledge_grpc_target: str = Field(
+        # One headless Service per workload (`clusterIP: None`) exposes both
+        # 8080/http and 9090/grpc; round_robin then resolves per-Pod IPs under
+        # the unchanged service name.
+        default="dns:///mem-knowledge:9090",
+        validation_alias="MEM_KNOWLEDGE_GRPC_TARGET",
+    )
+    mem_knowledge_grpc_timeout_seconds: float = Field(
+        default=120.0,
+        gt=0,
+        validation_alias="MEM_KNOWLEDGE_GRPC_TIMEOUT_SECONDS",
+    )
+    # Deadline margin kept for the response trip and orchestration after the
+    # knowledge call returns; must stay below the call budget.
+    mem_knowledge_grpc_margin_seconds: float = Field(
+        default=5.0,
+        gt=0,
+        validation_alias="MEM_KNOWLEDGE_GRPC_MARGIN_SECONDS",
     )
     model_service_connect_timeout_seconds: float = Field(
         default=5.0, gt=0, validation_alias="MODEL_SERVICE_CONNECT_TIMEOUT_SECONDS"
@@ -661,26 +665,6 @@ class AppServiceSettings(BaseSettings):
         return self
 
     @model_validator(mode="after")
-    def check_market_settings(self) -> AppServiceSettings:
-        """`http` mode needs both the market base URL and the internal token.
-
-        Failing here turns a misconfigured deployment into a startup error
-        instead of a runtime 401/502 on the first community-market submission.
-        """
-
-        if self.application_service_market_mode != "http":
-            return self
-        if not (self.market_service_base_url or "").strip():
-            raise ValueError(
-                "MARKET_SERVICE_BASE_URL must be set when APPLICATION_SERVICE_MARKET_MODE=http"
-            )
-        if not self.market_internal_token.get_secret_value().strip():
-            raise ValueError(
-                "MARKET_INTERNAL_TOKEN must be set when APPLICATION_SERVICE_MARKET_MODE=http"
-            )
-        return self
-
-    @model_validator(mode="after")
     def check_grpc_invoke_settings(self) -> AppServiceSettings:
         """gRPC invoke needs a target and a margin that cannot starve the call."""
 
@@ -716,6 +700,26 @@ class AppServiceSettings(BaseSettings):
             raise ValueError(
                 "MARKET_SERVICE_INTERNAL_TOKEN must be set when "
                 "APPLICATION_SERVICE_MARKET_MODE=gateway"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def check_knowledge_grpc_settings(self) -> AppServiceSettings:
+        """gRPC retrieval needs a target and a margin that cannot starve the call."""
+
+        if self.mem_knowledge_protocol != "grpc":
+            return self
+        if not self.mem_knowledge_grpc_target.strip():
+            raise ValueError(
+                "MEM_KNOWLEDGE_GRPC_TARGET must be set when MEM_KNOWLEDGE_PROTOCOL=grpc"
+            )
+        if (
+            self.mem_knowledge_grpc_margin_seconds
+            >= self.mem_knowledge_grpc_timeout_seconds
+        ):
+            raise ValueError(
+                "MEM_KNOWLEDGE_GRPC_MARGIN_SECONDS must be smaller than "
+                "MEM_KNOWLEDGE_GRPC_TIMEOUT_SECONDS"
             )
         return self
 

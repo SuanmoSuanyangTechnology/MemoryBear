@@ -31,8 +31,13 @@ from ..memory.ontology_binding import ONTOLOGY_BINDING_PLUGIN, OntologyUpstreamE
 from ..models import (
     AgentConfig,
     App,
+    AppAsset,
+    AppAssetInstallation,
     AppRelease,
     AppShare,
+    AssetStatus,
+    InstallStatus,
+    LinkMode,
     MultiAgentConfig,
     WorkflowConfig,
 )
@@ -57,6 +62,34 @@ from .tool_service import ToolService
 from .workflow_service import WorkflowService
 
 logger = logging.getLogger(__name__)
+
+
+def _reference_install_app_ids(workspace_id: uuid.UUID):
+    """Apps reachable in ``workspace_id`` through a **read-only** catalog install.
+
+    资源中心取代了空间到空间的共享，所以「共享给我」现在有两个来源：旧的
+    ``app_shares`` 行，以及 ``app_asset_installations`` 里 ``link_mode = reference``
+    的安装。只读引用**不建本地应用**（``local_app_id`` 为 NULL），因此不并进这条
+    子查询，这些应用对列表接口就是隐形的——而详情/对话的鉴权
+    （``AssetReleaseResolver``）早就认了安装行，于是出现「能打开但列表里没有」。
+
+    ``link_mode = copy`` 的安装**故意排除**：副本本身已是目标空间的新应用，会以自有
+    应用的身份出现在「我的应用」里，并进来会让同一个应用在两个 tab 各出一条。
+
+    ``app_assets.status = published`` 与 resolver 的口径一致：取消共享后只读引用立即
+    不可读，也就不该再出现在列表里。
+    """
+
+    return (
+        select(AppAsset.source_app_id)
+        .join(AppAssetInstallation, AppAssetInstallation.asset_id == AppAsset.id)
+        .where(
+            AppAssetInstallation.target_workspace_id == workspace_id,
+            AppAssetInstallation.status == InstallStatus.ACTIVE,
+            AppAssetInstallation.link_mode == LinkMode.REFERENCE,
+            AppAsset.status == AssetStatus.PUBLISHED,
+        )
+    )
 
 
 def _store_usage_examples(items: list[str] | None) -> list[dict[str, Any]]:
@@ -98,6 +131,12 @@ class _AppSerializationContext:
     workspaces: dict[uuid.UUID, Any] = field(default_factory=dict)
     usernames: dict[uuid.UUID, str] = field(default_factory=dict)
     release_versions: dict[uuid.UUID, str] = field(default_factory=dict)
+    # app_id -> (source_workspace_id, permission, shared_at)；资源中心只读引用没有
+    # app_shares 行，来源空间与权限只能从安装记录取（见
+    # `_build_serialization_context`）。
+    install_sources: dict[uuid.UUID, tuple[uuid.UUID, str, Any]] = field(
+        default_factory=dict
+    )
 
 
 class AppService:
@@ -188,6 +227,16 @@ class AppService:
             App.is_active.is_(True)
         ).all()}
         existing |= shared_names
+
+        # 资源中心只读引用没有 app_shares 行，但它们同样占着本空间可见的名字，
+        # 不并进来就会允许创建同名应用，列表里出现两行同名。
+        ref_names = {r[0] for r in self.db.query(App.name).filter(
+            App.id.in_(_reference_install_app_ids(workspace_id)),
+            App.type == app_type,
+            App.is_active.is_(True)
+        ).all()}
+        existing |= ref_names
+
         if name not in existing:
             return name
         counter = 1
@@ -489,9 +538,43 @@ class AppService:
             for share in self.db.scalars(stmt).all():
                 context.shares_by_app.setdefault(share.source_app_id, share)
 
+            # 从资源中心拉来的应用没有 app_shares 行（只读引用甚至没有本地 app），
+            # 来源空间与权限只能从安装记录取，否则列表里「来源」一列是空的。
+            missing = [
+                app_id for app_id in shared_app_ids
+                if app_id not in context.shares_by_app
+            ]
+            if missing:
+                rows = self.db.execute(
+                    select(
+                        AppAsset.source_app_id,
+                        AppAsset.source_workspace_id,
+                        AppAssetInstallation.permission,
+                        AppAssetInstallation.created_at,
+                    )
+                    .join(AppAssetInstallation, AppAssetInstallation.asset_id == AppAsset.id)
+                    .where(
+                        AppAsset.source_app_id.in_(missing),
+                        AppAssetInstallation.target_workspace_id == current_workspace_id,
+                        AppAssetInstallation.status == InstallStatus.ACTIVE,
+                        # 与列表作用域同口径：只有 reference 安装会让「别人的应用」
+                        # 出现在本空间的列表里，copy 的那条应用是本空间自有行。
+                        AppAssetInstallation.link_mode == LinkMode.REFERENCE,
+                        AppAsset.status == AssetStatus.PUBLISHED,
+                    )
+                    .order_by(AppAssetInstallation.created_at.desc())
+                ).all()
+                for row in rows:
+                    context.install_sources.setdefault(
+                        row.source_app_id,
+                        (row.source_workspace_id, row.permission, row.created_at),
+                    )
+
+            source_workspace_ids = {
+                share.source_workspace_id for share in context.shares_by_app.values()
+            } | {ws_id for ws_id, _permission, _at in context.install_sources.values()}
             context.workspaces = cross_domain_read.get_workspaces_by_ids(
-                self.db,
-                {share.source_workspace_id for share in context.shares_by_app.values()}
+                self.db, source_workspace_ids
             )
             context.usernames = cross_domain_read.get_usernames_by_ids(
                 self.db,
@@ -588,6 +671,15 @@ class AppService:
                 shared_at = share.created_at
                 shared_by_name = context.usernames.get(share.shared_by)
                 source_workspace = context.workspaces.get(share.source_workspace_id)
+                if source_workspace:
+                    source_workspace_name = source_workspace.name
+                    source_workspace_icon = source_workspace.icon
+            elif app.id in context.install_sources:
+                # 资源中心只读引用：没有 share 行，来源与权限取安装记录
+                source_workspace_id, share_permission, shared_at = (
+                    context.install_sources[app.id]
+                )
+                source_workspace = context.workspaces.get(source_workspace_id)
                 if source_workspace:
                     source_workspace_name = source_workspace.name
                     source_workspace_icon = source_workspace.icon
@@ -1539,17 +1631,27 @@ class AppService:
 
         # Base scope: apps of this workspace (plus apps shared to it)
         if shared_only:
-            # Return only apps shared to this workspace, excluding own apps
+            # Return only apps shared to this workspace, excluding own apps.
+            # 「共享来的」= 旧 app_shares 行 ∪ 资源中心只读引用安装（见
+            # `_reference_install_app_ids`）：只补 legacy 表会漏掉所有从资源中心
+            # 拉取的应用，它们的 app 属于源空间、又不在 app_shares 里。
             shared_app_ids_stmt = (
                 select(AppShare.source_app_id)
                 .where(AppShare.target_workspace_id == workspace_id, AppShare.is_active.is_(True))
+                .union(_reference_install_app_ids(workspace_id))
             )
-            scope = App.id.in_(shared_app_ids_stmt)
+            scope = and_(
+                App.id.in_(shared_app_ids_stmt),
+                # 「共享给我」不含自有应用：上面的 union 里可能混入指向本空间应用
+                # 的安装行（租户把自己的应用拉到自己的空间），必须显式排除。
+                App.workspace_id != workspace_id,
+            )
         elif include_shared:
             # Query apps of this workspace plus those shared to it
             shared_app_ids_stmt = (
                 select(AppShare.source_app_id)
                 .where(AppShare.target_workspace_id == workspace_id, AppShare.is_active.is_(True))
+                .union(_reference_install_app_ids(workspace_id))
             )
             scope = or_(
                 App.workspace_id == workspace_id,
@@ -1629,10 +1731,11 @@ class AppService:
             return []
 
         # Query own-workspace apps plus apps shared to it (same scope as list_apps
-        # with include_shared)
+        # with include_shared; the union keeps ids from the catalog in sync too)
         shared_app_ids_stmt = (
             select(AppShare.source_app_id)
             .where(AppShare.target_workspace_id == workspace_id, AppShare.is_active.is_(True))
+            .union(_reference_install_app_ids(workspace_id))
         )
         stmt = select(App).where(
             App.id.in_(uuid_ids),

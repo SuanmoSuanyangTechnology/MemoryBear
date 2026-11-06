@@ -101,7 +101,9 @@ def _index_definition(
     if prop is None:
         prop = dict()
     properties: dict[str, Any] = {
-        field: {"type": "text", "analyzer": "cjk"}
+        field: {"type": "text", "analyzer": "cjk",
+                **({"fields": {"literal": {"type": "wildcard"}}}
+                   if label in (MemoryNodeType.SCENE_COMMUNITY, MemoryNodeType.SCENE_SUMMARY) else {})}
         for field in FULLTEXT_FIELDS.get(label, ())
     }
     embedding_field = EMBEDDING_FIELDS.get(label)
@@ -360,8 +362,8 @@ INDEX_DEFINITIONS: dict[MemoryNodeLabel, IndexDefinition] = {
     MemoryNodeType.SCENE_COMMUNITY: _index_definition(
         "scene_community",
         MemoryNodeType.SCENE_COMMUNITY,
-        schema_version=1,
-        generation=1,
+        schema_version=2,
+        generation=2,
         prop={
             "id": {"type": "keyword"},
             "end_user_id": {"type": "keyword"},
@@ -376,8 +378,8 @@ INDEX_DEFINITIONS: dict[MemoryNodeLabel, IndexDefinition] = {
     MemoryNodeType.SCENE_SUMMARY: _index_definition(
         "scene_summary",
         MemoryNodeType.SCENE_SUMMARY,
-        schema_version=3,
-        generation=1,
+        schema_version=4,
+        generation=2,
         prop={
             "id": {"type": "keyword"},
             "end_user_id": {"type": "keyword"},

@@ -1,6 +1,6 @@
 import datetime
 import uuid
-from typing import Optional, Any, List, Dict, Union
+from typing import Optional, Any, List, Dict, Union, Literal
 from enum import Enum, StrEnum
 from urllib.parse import urlparse
 
@@ -770,6 +770,18 @@ class AssetInstallRequest(BaseModel):
     """拉到我的空间。**不收 permission**：条目的 share_mode 已决定形态。"""
 
     target_workspace_id: uuid.UUID = Field(..., description="目标空间 ID")
+
+
+class AssetShareModeRequest(BaseModel):
+    """改条目的共享权限（「我的共享」表格里那一列开关）。
+
+    只影响**之后**的 install：形态由条目实时读取，已产生的安装记录是安装当时的
+    快照，不追溯改写。
+    """
+
+    share_mode: Literal["readonly", "editable"] = Field(
+        ..., description="readonly=只读引用，editable=可编辑副本"
+    )
 
 
 class AssetPublishRequest(BaseModel):
