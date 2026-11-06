@@ -34,5 +34,6 @@ export const zh = {
     ...detail,
     ...notificationCenter,
     ...memoryConversation,
+    skills,
   },
 }

@@ -34,5 +34,6 @@ export const en = {
     ...detail,
     ...notificationCenter,
     ...memoryConversation,
+    skills,
   },
 }
