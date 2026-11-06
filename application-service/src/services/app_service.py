@@ -92,12 +92,16 @@ def _reference_install_app_ids(workspace_id: uuid.UUID):
     )
 
 
-def _pinned_name_app_ids(pattern: str):
+def _pinned_name_app_ids(pattern: str, workspace_id: uuid.UUID):
     """Apps whose **pinned catalog name** matches ``pattern`` (already lowered/%-wrapped).
 
     列表里只读引用显示的是条目钉住版本的名字（`_convert_to_schema` 的
     `install_display` 覆盖），所以按名字搜索不能只看 `apps.name`：源应用改名后
     `apps.name` 已经是新名，而界面显示的还是快照名。这里把快照名也纳入搜索。
+
+    ``workspace_id`` 与 `_reference_install_app_ids` 同口径：只看装进**本空间**的
+    安装行。少了它这条子查询会跨所有空间扫描，别处空间钉住的名字会把本空间的应用
+    捞进搜索结果（名字与搜索词并不匹配）。
     """
 
     return (
@@ -105,6 +109,7 @@ def _pinned_name_app_ids(pattern: str):
         .join(AppAssetInstallation, AppAssetInstallation.asset_id == AppAsset.id)
         .join(AppRelease, AppRelease.id == AppAsset.published_release_id)
         .where(
+            AppAssetInstallation.target_workspace_id == workspace_id,
             AppAssetInstallation.status == InstallStatus.ACTIVE,
             AppAssetInstallation.link_mode == LinkMode.REFERENCE,
             AppAsset.status == AssetStatus.PUBLISHED,
@@ -259,16 +264,21 @@ class AppService:
         # 不并进来就会允许创建同名应用，列表里出现两行同名。注意取的是**钉住版本
         # 的名字**（`_convert_to_schema` 就是这么展示的），不是 `App.name`：源应用
         # 改名后列表里显示的还是快照名。
+        # `App.is_active` 必须保留：源应用被软删除后列表里看不到它（`list_apps`
+        # 的 base filter），再算它占名只会给新应用加无谓的后缀。
         ref_names = {r[0] for r in self.db.query(AppRelease.name).join(
             AppAsset, AppAsset.published_release_id == AppRelease.id
         ).join(
             AppAssetInstallation, AppAssetInstallation.asset_id == AppAsset.id
+        ).join(
+            App, App.id == AppAsset.source_app_id
         ).filter(
             AppAssetInstallation.target_workspace_id == workspace_id,
             AppAssetInstallation.status == InstallStatus.ACTIVE,
             AppAssetInstallation.link_mode == LinkMode.REFERENCE,
             AppAsset.status == AssetStatus.PUBLISHED,
             AppRelease.type == app_type,
+            App.is_active.is_(True),
         ).all()}
         existing |= ref_names
 
@@ -735,7 +745,12 @@ class AppService:
         # 列表叫 B」，用户按 A 搜不到。
         pinned = context.install_display.get(app.id)
         display_name = pinned.name if pinned is not None else app.name
-        display_description = pinned.description if pinned is not None else app.description
+        # 描述要回退到 `app.description`：资源中心条目建/刷新时写的是
+        # `release.description or app.description`（`asset_service._upsert_asset`），
+        # 只取 pinned 会让「钉住版本没写描述、应用有描述」时列表空、资源中心有文字。
+        display_description = (
+            (pinned.description or app.description) if pinned is not None else app.description
+        )
         display_icon = pinned.icon if pinned is not None else app.icon
         display_icon_type = pinned.icon_type if pinned is not None else app.icon_type
 
@@ -1654,7 +1669,8 @@ class AppService:
                     # 只读引用在列表里显示的是条目钉住版本的名字（见
                     # `_convert_to_schema` 的 `install_display`），所以按名字搜索
                     # 也必须命中快照名，否则用户照资源中心的名字搜会得到空列表。
-                    App.id.in_(_pinned_name_app_ids(search_pattern)),
+                    # 必须带 workspace_id：不加空间隔离会跨所有空间的安装行扫描。
+                    App.id.in_(_pinned_name_app_ids(search_pattern, workspace_id)),
                 )
             )
         if tag_search:
