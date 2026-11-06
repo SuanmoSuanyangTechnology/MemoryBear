@@ -99,12 +99,13 @@ def _log(
 
 def resolve_conversation_preference_domain(
     conversation_id: str,
-) -> Tuple[Optional[str], bool, bool]:
+) -> Tuple[Optional[str], bool, Optional[bool]]:
     """按会话反查应用当前生效本体的偏好域。
 
     Returns:
-        (domain, is_default_fallback, conversation_found)
+        (domain, is_default_fallback, conversation_state)
         - 会话不存在： (None, False, False)
+        - 查询异常：   (None, False, None)
         - 无绑定 / 悬空绑定： (默认本体 domain, True, True)
         - 绑定自定义本体： (该本体 domain 或 None, False, True)
     """
@@ -140,13 +141,13 @@ def resolve_conversation_preference_domain(
                 {"conversation_id": conversation_id},
             ).first()
     except Exception:
-        # 表缺失/连接异常统一在门控内降级，由调用方按“未知”跳过偏好任务
+        # 表缺失/连接异常统一在门控内降级，返回 None 表示“未知”，与“会话不存在”区分
         logger.error(
             "[PreferenceGate] conversation domain query failed conversation_id=%s",
             conversation_id,
             exc_info=True,
         )
-        return None, False, False
+        return None, False, None
 
     if row is None:
         return None, False, False
@@ -195,6 +196,12 @@ def resolve_effective_preference_domain(
         domain, is_default_fallback, found = resolve_conversation_preference_domain(
             conversation_id
         )
+        if found is None:
+            _log(
+                memory_config, conversation_id, source,
+                None, "skipped", "conversation_lookup_error",
+            )
+            return None
         if not found:
             _log(
                 memory_config, conversation_id, source,
