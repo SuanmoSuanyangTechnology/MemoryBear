@@ -372,6 +372,14 @@ class AssetService:
         - `readonly` → 只读引用：不产生新 app，运行时读条目钉住的 release 快照
         - `editable` → 可编辑副本：以 release 快照为源在当前空间重建 app，
           集群连同全部子 Agent 一起落地（§7.0.1）
+
+        已有安装时是幂等返回，**只有一个方向会换形态**：已装的是只读引用、条目现在
+        放开成 `editable`，则旧安装行转 `removed`、新落一条 `copy`。反方向
+        （`copy` → 条目改回 `readonly`）不动：副本是本空间的自有应用，条目改权限
+        不能把它收回或降级。
+
+        注意形态变更**只由消费者主动再次安装触发**：发布方改 `share_mode` 只写
+        条目（`update_share_mode`），不会往任何消费方的空间里写东西。
         """
 
         asset = self._get_asset_or_404(asset_id, tenant_id)
@@ -390,8 +398,26 @@ class AssetService:
                 AppAssetInstallation.status == InstallStatus.ACTIVE,
             )
         ).first()
+
+        replaced_link_mode: str | None = None
         if existing is not None:
-            return self._install_payload(existing, reused=True)
+            if not (
+                existing.link_mode == LinkMode.REFERENCE
+                and asset.share_mode == ShareMode.EDITABLE
+            ):
+                # 无形态变化（含 copy 方向）：幂等返回，不碰已有安装
+                return self._install_payload(existing, reused=True)
+
+            # 先让旧行失效再建副本，顺序不能反：
+            # 1. `_copy_from_release` 用 `_unique_app_name` 判重，而它把活跃
+            #    reference 安装的快照名算作已占用（`app_service._unique_app_name`
+            #    的 `ref_names`），先建副本会被加后缀叫成「X(1)」。
+            # 2. `uq_asset_install` 是 `WHERE status='active'` 的部分唯一索引，
+            #    旧行不先落成 `removed`，新的 copy 行插不进去。
+            replaced_link_mode = existing.link_mode
+            existing.status = InstallStatus.REMOVED
+            existing.updated_at = utcnow_naive()
+            self.db.flush()
 
         release = self.db.get(AppRelease, asset.published_release_id)
         if release is None or not release.is_active:
@@ -441,11 +467,20 @@ class AssetService:
                 "target_workspace_id": str(target_workspace_id),
                 "link_mode": link_mode,
                 "result": installation.result,
+                "replaced_link_mode": replaced_link_mode,
             },
         )
-        return self._install_payload(installation, reused=False)
+        return self._install_payload(
+            installation, reused=False, replaced_link_mode=replaced_link_mode
+        )
 
-    def _install_payload(self, installation: Any, *, reused: bool) -> dict[str, Any]:
+    def _install_payload(
+            self,
+            installation: Any,
+            *,
+            reused: bool,
+            replaced_link_mode: str | None = None,
+    ) -> dict[str, Any]:
         return {
             "id": str(installation.id),
             "asset_id": str(installation.asset_id) if installation.asset_id else None,
@@ -464,6 +499,9 @@ class AssetService:
             "needs_config": installation.result == "partial",
             "missing_dependencies": installation.missing_report or [],
             "reused": reused,
+            # 本次安装顶掉的旧形态（`reference` → `copy` 升级时非空）。前端据此
+            # 提示「已按可编辑副本重新添加」，避免用户以为点错了没反应。
+            "replaced_link_mode": replaced_link_mode,
         }
 
     # ---------- 以 release 快照为源重建副本 ----------
