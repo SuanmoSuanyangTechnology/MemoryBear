@@ -1,9 +1,3 @@
-/*
- * @Author: ZhaoYing 
- * @Date: 2026-02-02 16:35:43 
- * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-07-01 15:17:24
- */
 /**
  * Server-Sent Events (SSE) Stream Utility Module
  * 
@@ -20,7 +14,7 @@ import { refreshToken } from '@/api/user';
 import i18n from '@/i18n';
 import { message } from 'antd';
 import { clearAuthData } from './auth';
-import { cookieUtils } from './request';
+import { cookieUtils, setLastTraceId, setLastRetryAfter } from './request';
 const API_PREFIX = '/api'
 
 // Token refresh state
@@ -75,6 +69,21 @@ export interface SSEMessage {
    * Commonly used for server-sent heartbeats such as `: heartbeat` or `: connected`.
    */
   comment?: string
+}
+
+/**
+ * SSE error frame structure (unified error handling v0.5.5)
+ */
+export interface SSEErrorFrame {
+  code: number
+  msg: string
+  error: string
+  message?: string
+  attempts: number
+  channel_id?: string | null
+  retryable: boolean
+  retry_after_seconds?: number
+  time: number
 }
 
 /**
@@ -228,11 +237,14 @@ const makeSSERequest = async (
   const method = config.method ?? 'POST'
   const requestUrl = method === 'GET' ? buildSSERequestUrl(url, data) : `${API_PREFIX}${url}`
 
+  const language = localStorage.getItem('language') || 'en'
+
   return fetch(requestUrl, {
     method,
     headers: {
       ...(method === 'POST' ? { 'Content-Type': 'application/json' } : {}),
       'Authorization': `Bearer ${token}`,
+      'X-Language-Type': language,
       ...config.headers,
     },
     body: method === 'POST' ? JSON.stringify(data) : undefined,
@@ -261,45 +273,110 @@ export const handleSSE = async (
   try {
     let token = cookieUtils.get('authToken');
     let response = await makeSSERequest(url, data, token || '', config, controller.signal);
+    let hasRetried = false;
 
-    switch (response.status) {
-      case 500:
-      case 502:
-        const errorData = await response.json();
-        const errorInfo = errorData.error || errorData.msg || i18n.t('common.serviceUpgrading');
-        message.warning(errorInfo);
-        throw new Error(JSON.stringify(errorData));
-      case 400:
-        const error = await response.json();
-        const error400 = error.error || error.msg || 'Bad Request';
-        message.warning(error400);
-        throw new Error(JSON.stringify(error));
-      case 403:
-        const errors = await response.json();
-        message.warning(i18n.t('common.permissionDenied'));
-        throw new Error(JSON.stringify(errors));
-      case 504:
-        const errorJson = await response.json();
-        const errorMsg = errorJson.error || errorJson.msg || i18n.t('common.serverError');
-        message.warning(errorMsg);
-        throw new Error(JSON.stringify(errorJson));
-      case 401:
-        if (url?.includes('/public')) {
-          return message.warning(i18n.t('common.publicApiCannotRefreshToken'));
-        }
-        try {
-          const newToken = await refreshTokenForSSE();
-          response = await makeSSERequest(url, data, newToken, config, controller.signal);
-        } catch (refreshError) {
+    const sseTraceId = response.headers.get('x-trace-id') || response.headers.get('X-Trace-Id')
+    if (sseTraceId) setLastTraceId(sseTraceId)
+
+    // Loop to handle 401, support unlimited retries (except for /public paths)
+    while (response.status === 401 && !url?.includes('/public')) {
+      const errorResponse = await response.json().catch(() => ({}));
+      const errorCode = errorResponse.code;
+      
+      // Check errorCode on first 401
+      if (!hasRetried) {
+        if (errorCode === 2001) {
+          clearAuthData();
+          message.warning(errorResponse.msg);
+          if (!window.location.hash.includes('#/login')) {
+            window.location.href = `/#/login`;
+          }
           return;
         }
-        break;
+        if (errorCode === 2002) {
+          if (onMessage) {
+            onMessage([{ event: 'error', data: { msg: errorResponse.msg || i18n.t('common.invalidCredentials'), error: errorResponse.error || '', code: 2002 } }])
+          }
+          return;
+        }
+      }
+      
+      // Refresh token and retry
+      try {
+        const newToken = await refreshTokenForSSE();
+        response = await makeSSERequest(url, data, newToken, config, controller.signal);
+        hasRetried = true;
+        
+        const retryTraceId = response.headers.get('x-trace-id') || response.headers.get('X-Trace-Id')
+        if (retryTraceId) setLastTraceId(retryTraceId)
+      } catch (refreshError) {
+        return;
+      }
+    }
+
+    // Handle 401 for /public paths, pass error message via onMessage callback
+    if (response.status === 401 && url?.includes('/public')) {
+      const errorResponse = await response.json().catch(() => ({}));
+      if (onMessage) {
+        onMessage([{ event: 'error', data: { msg: errorResponse.msg || i18n.t('common.loginRequired'), error: errorResponse.error || '', code: errorResponse.code || 401 } }])
+      }
+      return;
+    }
+
+    switch (response.status) {
+      case 429: {
+        const retryAfterHeader = response.headers.get('retry-after') || response.headers.get('Retry-After')
+        if (retryAfterHeader) {
+          const seconds = parseInt(retryAfterHeader, 10)
+          if (Number.isFinite(seconds) && seconds > 0) setLastRetryAfter(seconds)
+        }
+        const rateLimitData = await response.json().catch(() => ({}))
+        if (onMessage) {
+          onMessage([{ event: 'error', data: { msg: rateLimitData.msg || i18n.t('common.tooManyRequests'), error: rateLimitData.error || '', code: rateLimitData.code || 10004 } }])
+        }
+        return
+      }
+      case 500:
+      case 502: {
+        const errorData = await response.json().catch(() => ({}));
+        const errorInfo = errorData.msg || i18n.t('common.serviceUpgrading');
+        if (onMessage) {
+          onMessage([{ event: 'error', data: { msg: errorInfo, error: errorData.error || '', code: errorData.code || 10001 } }])
+        }
+        return
+      }
+      case 400: {
+        const error = await response.json().catch(() => ({}));
+        const error400 = error.msg || 'Bad Request';
+        if (onMessage) {
+          onMessage([{ event: 'error', data: { msg: error400, error: error.error || '', code: error.code || 1003 } }])
+        }
+        return
+      }
+      case 403: {
+        const errors = await response.json().catch(() => ({}));
+        const errorMsg403 = errors.msg || i18n.t('common.permissionDenied');
+        if (onMessage) {
+          onMessage([{ event: 'error', data: { msg: errorMsg403, error: errors.error || '', code: errors.code || 3001 } }])
+        }
+        return
+      }
+      case 504: {
+        const errorJson = await response.json().catch(() => ({}));
+        const errorMsg504 = errorJson.msg || i18n.t('common.serverError');
+        if (onMessage) {
+          onMessage([{ event: 'error', data: { msg: errorMsg504, error: errorJson.error || '', code: errorJson.code || 10001 } }])
+        }
+        return
+      }
       default:
         if (!response.ok) {
           const defaultData = await response.json().catch(() => ({}));
-          const defaultMsg = defaultData.error || defaultData.msg;
-          if (defaultMsg) message.warning(defaultMsg);
-          throw new Error(defaultMsg || `HTTP ${response.status}`);
+          const defaultMsg = defaultData.msg || `HTTP ${response.status}`;
+          if (onMessage) {
+            onMessage([{ event: 'error', data: { msg: defaultMsg, error: defaultData.error || '', code: defaultData.code || response.status } }])
+          }
+          return
         }
     }
     if (!response.body) throw new Error('No response body');

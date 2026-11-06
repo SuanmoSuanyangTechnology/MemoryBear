@@ -114,7 +114,7 @@ export const createResumeStreamHandler = (deps: ResumeHandlerDeps) => {
         execution_id,
         node_id: nodeId,
         node_name,
-        content, conversation_id: curId, audio_url, citations, suggested_questions, error,
+        content, conversation_id: curId, audio_url, citations, suggested_questions, msg, error,
         rendered_content, form_fields, actions, timeout_at
       } = item.data as {
         message_id: string;
@@ -128,6 +128,7 @@ export const createResumeStreamHandler = (deps: ResumeHandlerDeps) => {
           knowledge_id: string;
           score: string;
         }[];
+        msg?: string;
         error?: string;
         suggested_questions?: string[];
         rendered_content?: string;
@@ -191,6 +192,15 @@ export const createResumeStreamHandler = (deps: ResumeHandlerDeps) => {
             }
           })
           break
+        case 'error': {
+          const errorMsg = msg || error
+          console.log('errorMsg', errorMsg)
+          if (errorMsg) {
+            updateAssistantMessage('', undefined, undefined, undefined, undefined, errorMsg)
+          }
+          setLoading(false)
+          break
+        }
         case 'reasoning':
           updateAssistantReasoningMessage(content)
           if (curId) currentConversationId = curId;
@@ -391,8 +401,9 @@ export const createResumeStreamHandler = (deps: ResumeHandlerDeps) => {
           break
         case 'end':
         case 'workflow_end': {
+          const errorMsg = msg || error
           if (audio_url) {
-            updateAssistantMessage(content, audio_url, 'pending', citations, suggested_questions, error)
+            updateAssistantMessage(content, audio_url, 'pending', citations, suggested_questions, errorMsg)
             const { file_id } = item.data as { file_id?: string }
             const idToPoll = file_id || audio_url || ''
             const fileId = audio_url.split('/').pop()
@@ -400,8 +411,8 @@ export const createResumeStreamHandler = (deps: ResumeHandlerDeps) => {
               startAudioPolling(audio_url, idToPoll)
             }
           }
-          if ((citations && citations.length > 0) || (suggested_questions && suggested_questions.length > 0) || error) {
-            updateAssistantMessage(content || '', audio_url, undefined, citations, suggested_questions, error)
+          if ((citations && citations.length > 0) || (suggested_questions && suggested_questions.length > 0) || errorMsg) {
+            updateAssistantMessage(content || '', audio_url, undefined, citations, suggested_questions, errorMsg)
           }
           setLoading(false)
           const targetConvId = currentConversationId || conversationId

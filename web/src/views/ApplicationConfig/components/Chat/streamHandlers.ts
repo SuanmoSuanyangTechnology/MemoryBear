@@ -45,10 +45,11 @@ export const createCompareStreamHandler = (deps: CompareStreamDeps) => {
 
   return (data: SSEMessage[]) => {
     data.map(item => {
-      const { model_config_id, conversation_id, content, message_length, audio_url, citations, suggested_questions, error, message_id, user_message_id } = (item.data || {}) as {
+      const { model_config_id, conversation_id, content, message_length, audio_url, citations, suggested_questions, msg, error, message_id, user_message_id } = (item.data || {}) as {
         model_config_id: string; conversation_id: string; content: string; message_length: number; audio_url: string;
         input?: any;
         output?: any;
+        msg?: string;
         error?: any;
         message_id?: string;
         user_message_id?: string;
@@ -83,8 +84,24 @@ export const createCompareStreamHandler = (deps: CompareStreamDeps) => {
           updateChatList(prev => updateAssistantMessage(prev, content, model_config_id, conversation_id, audio_url))
           break
         case 'model_error':
-          updateChatList(prev => updateErrorAssistantMessage(prev, message_length, model_config_id, error))
+          updateChatList(prev => updateErrorAssistantMessage(prev, message_length, model_config_id, typeof error === 'string' ? { msg: msg || error } : { ...error, msg: msg || error?.msg || error?.message }))
           break
+        case 'error': {
+          const errorMsg = msg || (typeof error === 'string' ? error : error?.msg || error?.message)
+          stopComparingSpinner()
+          updateChatList(prev => prev.map(chat => ({
+            ...chat,
+            list: chat.list?.map(entry => {
+              const apply = (m: ChatItem) => m.role === 'assistant' && !m.content
+                ? { ...m, status: 'failed' as const, content: errorMsg || null }
+                : m
+              return Array.isArray(entry) ? entry.map(apply) : apply(entry)
+            }),
+          })))
+          updateChatList(prev => prev.map(chat => ({ ...chat, streamLoading: false })))
+          setLoading(false)
+          break
+        }
         case 'model_end': {
           stopComparingSpinner()
           const idToPoll = `${model_config_id}_${audio_url}`
@@ -116,7 +133,7 @@ export const createCompareStreamHandler = (deps: CompareStreamDeps) => {
           if ((citations && citations.length > 0) || (suggested_questions && suggested_questions.length > 0)) {
             updateChatList(prev => updateAssistantMessage(prev, content, model_config_id, conversation_id, audio_url, citations, suggested_questions))
           }
-          updateChatList(prev => updateErrorAssistantMessage(prev, message_length, model_config_id, error))
+          updateChatList(prev => updateErrorAssistantMessage(prev, message_length, model_config_id, typeof error === 'string' ? { msg: msg || error } : { ...error, msg: msg || error?.msg || error?.message }))
           break
         }
         case 'compare_end':
@@ -157,9 +174,9 @@ export const createRegenerateStreamHandler = (deps: RegenerateStreamDeps) => {
 
   return (data: SSEMessage[]) => {
     data.map(item => {
-      const { conversation_id, content, message_length, audio_url, citations, suggested_questions, error, message_id } = item.data as {
+      const { conversation_id, content, message_length, audio_url, citations, suggested_questions, msg, error, message_id } = item.data as {
         conversation_id?: string; content?: string; message_length?: number; audio_url?: string;
-        citations?: any[]; suggested_questions?: string[]; error?: { message?: string }; message_id?: string;
+        citations?: any[]; suggested_questions?: string[]; msg?: string; error?: { message?: string; msg?: string }; message_id?: string;
       }
 
       if (message_id) updateChatList(prev => applyModelMessageId(prev, modelConfigId, message_id))
@@ -181,7 +198,7 @@ export const createRegenerateStreamHandler = (deps: RegenerateStreamDeps) => {
           updateChatList(prev => updateAssistantMessage(prev, content, modelConfigId, conversation_id, audio_url))
           break
         case 'error':
-          updateChatList(prev => updateErrorAssistantMessage(prev, message_length || 0, modelConfigId, error))
+          updateChatList(prev => updateErrorAssistantMessage(prev, message_length || 0, modelConfigId, typeof error === 'string' ? { msg: msg || error } : { ...error, msg: msg || error?.msg || error?.message }))
           updateChatList(prev => prev.map(chat => ({ ...chat, streamLoading: false })))
           break
         case 'end': {
@@ -215,7 +232,7 @@ export const createRegenerateStreamHandler = (deps: RegenerateStreamDeps) => {
           if ((citations && citations.length > 0) || (suggested_questions && suggested_questions.length > 0)) {
             updateChatList(prev => updateAssistantMessage(prev, content, modelConfigId, conversation_id, audio_url, citations, suggested_questions))
           }
-          updateChatList(prev => updateErrorAssistantMessage(prev, message_length || 0, modelConfigId, error))
+          updateChatList(prev => updateErrorAssistantMessage(prev, message_length || 0, modelConfigId, typeof error === 'string' ? { msg: msg || error } : { ...error, msg: msg || error?.msg || error?.message }))
           updateChatList(prev => prev.map(chat => ({ ...chat, streamLoading: false })))
           setLoading(false)
           break

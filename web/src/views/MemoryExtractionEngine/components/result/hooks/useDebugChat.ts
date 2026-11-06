@@ -71,13 +71,13 @@ export const useDebugChat = (
 
     const handleStreamMessage = (list: SSEMessage[]) => {
       list.forEach((item: AnyObject) => {
-        const { content, error, message } = (item.data || {}) as AnyObject
+        const { content, error, message, msg } = (item.data || {}) as AnyObject
         switch (item.event) {
           case 'message':
             updateAssistantContent(typeof content === 'string' ? content : '')
             break
           case 'error':
-            updateAssistantContent(message)
+            updateAssistantContent(msg || message)
             break;
           case 'end':
             if (error) {

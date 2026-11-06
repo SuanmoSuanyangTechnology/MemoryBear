@@ -200,7 +200,7 @@ export const createSendStreamHandler = (deps: StreamHandlerDeps) => {
         user_message_id,
         file_id,
         node_id,
-        content, conversation_id: curId, audio_url, citations, suggested_questions, error,
+        content, conversation_id: curId, audio_url, citations, suggested_questions, msg, error,
       } = item.data as StreamData;
       switch (item.event) {
         case 'start':
@@ -222,6 +222,24 @@ export const createSendStreamHandler = (deps: StreamHandlerDeps) => {
             }
             return withUserId
           })
+          break
+        }
+        case 'error': {
+          const errorMsg = msg || error
+          if (errorMsg) {
+            setChatList(prev => {
+              const lastList = [...prev]
+              const lastIndex = lastList.length - 1
+              const lastMsg = lastList[lastIndex]
+              if (lastMsg && !Array.isArray(lastMsg) && lastMsg.role === 'assistant') {
+                lastList[lastIndex] = { ...lastMsg, content: errorMsg, meta_data: { ...lastMsg.meta_data, error: errorMsg } }
+                return lastList
+              }
+              return [...prev, { role: 'assistant', content: errorMsg, created_at: Date.now(), meta_data: { error: errorMsg } }]
+            })
+          }
+          setLoading(false)
+          chatIsEnded.current = true
           break
         }
         case 'reasoning':
@@ -258,16 +276,17 @@ export const createSendStreamHandler = (deps: StreamHandlerDeps) => {
         }
         case 'end':
         case 'workflow_end': {
+          const errorMsg = msg || error
           if (audio_url) {
-            updateAssistantMessage(content, audio_url, 'pending', citations, suggested_questions, error)
+            updateAssistantMessage(content, audio_url, 'pending', citations, suggested_questions, errorMsg)
             const idToPoll = file_id || audio_url || ''
             const fileId = audio_url.split('/').pop()
             if (fileId && idToPoll) {
               startAudioPolling(audio_url, idToPoll)
             }
           }
-          if ((citations && citations.length > 0) || (suggested_questions && suggested_questions.length > 0) || error) {
-            updateAssistantMessage(content || '', audio_url, undefined, citations, suggested_questions, error)
+          if ((citations && citations.length > 0) || (suggested_questions && suggested_questions.length > 0) || errorMsg) {
+            updateAssistantMessage(content || '', audio_url, undefined, citations, suggested_questions, errorMsg)
           }
           setChatList(prev => finalizeOutputs(prev))
           setLoading(false)
@@ -299,7 +318,8 @@ export const createRegenerateStreamHandler = (deps: StreamHandlerDeps & { messag
 
   return (data: SSEMessage[]) => {
     data.forEach((item) => {
-      const { message_id, user_message_id, file_id, node_id, content, conversation_id: curId, audio_url, citations, suggested_questions, error } = item.data as StreamData;
+      const { message_id, user_message_id, file_id, node_id, content, conversation_id: curId, audio_url, citations, suggested_questions, msg, error } = item.data as StreamData;
+      
       switch (item.event) {
         case 'start':
         case 'node_start': {
@@ -330,6 +350,15 @@ export const createRegenerateStreamHandler = (deps: StreamHandlerDeps & { messag
             }
             return withUserId
           })
+          break
+        }
+        case 'error': {
+          const errorMsg = msg || error
+          if (errorMsg) {
+            updateAssistantMessage('', undefined, undefined, undefined, undefined, errorMsg, messageId)
+          }
+          setLoading(false)
+          chatIsEnded.current = true
           break
         }
         case 'reasoning':
@@ -366,16 +395,17 @@ export const createRegenerateStreamHandler = (deps: StreamHandlerDeps & { messag
         }
         case 'end':
         case 'workflow_end': {
+          const errorMsg = msg || error
           if (audio_url) {
-            updateAssistantMessage(content, audio_url, 'pending', citations, suggested_questions, error, messageId)
+            updateAssistantMessage(content, audio_url, 'pending', citations, suggested_questions, errorMsg, messageId)
             const idToPoll = file_id || audio_url || ''
             const fileId = audio_url.split('/').pop()
             if (fileId && idToPoll) {
               startAudioPolling(audio_url, idToPoll)
             }
           }
-          if ((citations && citations.length > 0) || (suggested_questions && suggested_questions.length > 0) || error) {
-            updateAssistantMessage(content || '', audio_url, undefined, citations, suggested_questions, error, messageId)
+          if ((citations && citations.length > 0) || (suggested_questions && suggested_questions.length > 0) || errorMsg) {
+            updateAssistantMessage(content || '', audio_url, undefined, citations, suggested_questions, errorMsg, messageId)
           }
           setChatList(prev => finalizeOutputs(prev))
           setLoading(false)
