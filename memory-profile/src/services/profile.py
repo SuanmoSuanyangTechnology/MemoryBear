@@ -27,7 +27,12 @@ from src.repositories.profile import (
 from src.repositories.search import MemorySearchRepository
 from src.runtime import ProfileRuntime
 from src.schemas.profile import MemoryInsight, UserSummary
-from src.services._helpers import safe_count, short_term_count
+from src.services._helpers import (
+    count_profile_cards,
+    count_timeline_records,
+    safe_count,
+    short_term_count,
+)
 from src.services.end_user import EndUserService
 
 logger = logging.getLogger(__name__)
@@ -101,7 +106,8 @@ class ProfileQueryService:
             return _zero_memory_statistics()
         # Fetch PG source counts, Neo4j counts and short-term memo counts concurrently.
         evaluated_at = datetime.now(UTC)
-        source_counts, memory_counts, short_term, community_total = await asyncio.gather(
+        source_counts, memory_counts, short_term, explicit_sources,community_total = await asyncio.gather(
+
             self._memory_type_source_counts(user_id),
             asyncio.gather(
                 safe_count(
@@ -116,6 +122,11 @@ class ProfileQueryService:
                     self.memory_search, self.memory_graph, [str(user_id)], evaluated_at
                 ),
             ),
+            asyncio.gather(
+                self.memory_statistics.profiles_for_users([str(user_id)]),
+                self.memory_graph.explicit_memory_rows([str(user_id)]),
+                return_exceptions=True,
+            ),
             safe_count(
                 "scene communities",
                 lambda: self._scene_community_count(str(user_id)),
@@ -123,15 +134,32 @@ class ProfileQueryService:
         )
         implicit_count, graph_counts = memory_counts
         episodic = graph_counts["episodic"]
-        semantic = graph_counts["semantic_explicit"]
         emotional = graph_counts["emotional"]
+        try:
+            for result in explicit_sources:
+                if isinstance(result, BaseException):
+                    raise result
+            profiles, graph_rows = explicit_sources
+            permanent_count = sum(
+                count_profile_cards(metadata, names) for _, metadata, names in profiles
+            )
+            timeline_count = sum(count_timeline_records(row) for row in graph_rows)
+            semantic_count = sum(row["semantic_count"] for row in graph_rows)
+            explicit_count = permanent_count + timeline_count + semantic_count
+        except Exception:
+            logger.warning(
+                "explicit memory count degraded to zero: end_user_id=%s",
+                end_user_id,
+                exc_info=True,
+            )
+            explicit_count = 0
         counts = {
             "PERCEPTUAL_MEMORY": source_counts["perceptual"],
             "WORKING_MEMORY": (
                 source_counts["active_conversations"] + source_counts["direct_sources"]
             ),
             "SHORT_TERM_MEMORY": short_term,
-            "EXPLICIT_MEMORY": episodic + semantic,
+            "EXPLICIT_MEMORY": explicit_count,
             "IMPLICIT_MEMORY": implicit_count,
             "EMOTIONAL_MEMORY": emotional,
             "EPISODIC_MEMORY": community_total,

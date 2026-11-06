@@ -227,10 +227,7 @@ class MemorySearchRepository:
             _search_header(_INDEX_MEMORY_SUMMARY),
             _search_body(end_user_ids),
             _search_header(_INDEX_EXTRACTED_ENTITY),
-            _search_body(
-                end_user_ids,
-                ("explicit", {"filter": {"term": {"is_explicit_memory": True}}}),
-            ),
+            _search_body(end_user_ids),
             _search_header(_INDEX_STATEMENT),
             _search_body(
                 end_user_ids,
@@ -250,7 +247,7 @@ class MemorySearchRepository:
                 "Elasticsearch workspace statistics returned an invalid response"
             )
         episodic = _parse_buckets(responses[0], "workspace episodic")
-        explicit = _parse_buckets(responses[1], "workspace explicit", "explicit")
+        entities = _parse_buckets(responses[1], "workspace entities")
         emotional = _parse_buckets(responses[2], "workspace emotional", "emotional")
         community = _parse_buckets(responses[3], "workspace scene communities")
 
@@ -261,7 +258,6 @@ class MemorySearchRepository:
         statistics = {
             end_user_id: {
                 "episodic_count": episodic.get(end_user_id, (0, 0))[1],
-                "explicit_entity_count": explicit.get(end_user_id, (0, 0))[1],
                 "emotional_count": emotional.get(end_user_id, (0, 0))[1],
                 "scene_community_count": community.get(end_user_id, (0, 0))[1],
             }
