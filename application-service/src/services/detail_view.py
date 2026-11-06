@@ -215,8 +215,11 @@ def project_cluster(config: dict[str, Any]) -> dict[str, Any]:
     return {
         "orchestration_mode": mode,
         "execution": execution,
+        # 协作模式没有主管执行主体；保留键并显式返回 null，便于前端稳定分支。
         "supervisor_name": (
-            str(supervisor_name) if supervisor_name else DEFAULT_SUPERVISOR_NAME
+            None
+            if mode == "collaboration"
+            else (str(supervisor_name) if supervisor_name else DEFAULT_SUPERVISOR_NAME)
         ),
         "sub_agents": sub_agents,
     }
