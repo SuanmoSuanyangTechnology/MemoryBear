@@ -123,6 +123,12 @@ def build_seed_rows(
         key = str(item.get("key") or "").strip()
         if not key:
             raise ValueError("Preference subject key is empty")
+        semantic_description = item.get("description")
+        semantic_boundary = item.get("boundary")
+        if not (semantic_description or "").strip():
+            raise ValueError(f"Preference subject semantic description is empty: {key}")
+        if not (semantic_boundary or "").strip():
+            raise ValueError(f"Preference subject semantic boundary is empty: {key}")
         display_item = _find_display_item(display_type, "subjects", key)
         classes.append(
             OntologyPreferenceClass(
@@ -134,9 +140,9 @@ def build_seed_rows(
                 label_en=_localized(display_item.get("label"), "en") or key,
                 display_description_zh=_localized(display_item.get("description"), "zh"),
                 display_description_en=_localized(display_item.get("description"), "en"),
-                semantic_description=item.get("description"),
+                semantic_description=semantic_description,
                 semantic_includes=item.get("includes"),
-                semantic_boundary=item.get("boundary"),
+                semantic_boundary=semantic_boundary,
                 sort_order=index,
                 is_system_default=True,
                 created_at=now,
@@ -148,6 +154,12 @@ def build_seed_rows(
         key = str(item.get("key") or "").strip()
         if not key:
             raise ValueError("Preference situation key is empty")
+        semantic_description = item.get("description")
+        semantic_boundary = item.get("boundary")
+        if not (semantic_description or "").strip():
+            raise ValueError(f"Preference situation semantic description is empty: {key}")
+        if not (semantic_boundary or "").strip():
+            raise ValueError(f"Preference situation semantic boundary is empty: {key}")
         display_item = _find_display_item(display_type, "situations", key)
         classes.append(
             OntologyPreferenceClass(
@@ -159,9 +171,9 @@ def build_seed_rows(
                 label_en=_localized(display_item.get("label"), "en") or key,
                 display_description_zh=None,
                 display_description_en=None,
-                semantic_description=item.get("description"),
+                semantic_description=semantic_description,
                 semantic_includes=None,
-                semantic_boundary=item.get("boundary"),
+                semantic_boundary=semantic_boundary,
                 sort_order=index,
                 is_system_default=True,
                 created_at=now,

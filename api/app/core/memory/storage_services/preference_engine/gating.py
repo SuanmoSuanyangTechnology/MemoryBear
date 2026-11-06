@@ -32,12 +32,12 @@ _ONTOLOGY_SUPPORT_CHECKED_AT: float = 0.0
 _ONTOLOGY_SUPPORT_NEGATIVE_TTL_SECONDS = 60.0
 
 
-def _has_ontology_support() -> bool:
-    """是否具备本体表：显式非 community，或数据库里确实有本体三件套。
+def _ontology_support_status() -> Optional[bool]:
+    """本体表探测：True=有表；False=探测成功但无表；None=探测失败/未知。
 
     仅看 DEPLOYMENT_MODE 默认值会把未显式配置环境变量的私有化部署误判为
     社区版，从而静默跳过本体反查；这里用表存在性探测兜底。
-    正结果永久缓存；负结果缓存 60s，避免“服务先启动、后跑迁移”时永久失效。
+    正结果永久缓存；负结果缓存 60s；探测失败返回 None 且不缓存。
     """
     global _ONTOLOGY_SUPPORT, _ONTOLOGY_SUPPORT_CHECKED_AT
     now = time.monotonic()
@@ -69,9 +69,9 @@ def _has_ontology_support() -> bool:
                 ).scalar()
             )
     except Exception:
-        # 探测失败不缓存，下一次请求重试
+        # 探测失败不缓存，下一次请求重试；由调用方按“未知”跳过偏好任务
         logger.warning("[PreferenceGate] ontology table probe failed", exc_info=True)
-        return False
+        return None
     _ONTOLOGY_SUPPORT = supported
     _ONTOLOGY_SUPPORT_CHECKED_AT = now
     return supported
@@ -160,7 +160,15 @@ def resolve_effective_preference_domain(
         return None
 
     # 社区版没有 ontology / app_ontology_binding 表，不执行反查，保持既有行为
-    if not _has_ontology_support():
+    ontology_support = _ontology_support_status()
+    if ontology_support is None:
+        # 探测失败时按“未知”处理：跳过偏好任务，避免用错误的本体写入
+        _log(
+            memory_config, conversation_id, source,
+            None, "skipped", "ontology_probe_failed",
+        )
+        return None
+    if ontology_support is False:
         _log(
             memory_config, conversation_id, source,
             DEFAULT_PREFERENCE_DOMAIN, "enabled", "community_default",
