@@ -4894,19 +4894,18 @@ def _ai_personality_active_config_id(db, workspace_uuid: uuid.UUID):
     return MemoryConfigService(db).get_workspace_active_config_id(workspace_uuid)
 
 
-def _ai_personality_enabled(db, config_id: uuid.UUID, workspace_uuid: uuid.UUID) -> bool:
-    from app.models.memory_config_model import MemoryConfig as MemoryConfigModel
+def _ai_personality_memory_config(
+    db, config_id: uuid.UUID, workspace_uuid: uuid.UUID,
+):
+    from app.repositories.memory_config_repository import MemoryConfigRepository
 
-    enabled = db.query(MemoryConfigModel.personality_anchor_enabled).filter(
-        MemoryConfigModel.config_id == config_id,
-        MemoryConfigModel.workspace_id == workspace_uuid,
-    ).scalar()
+    enabled = MemoryConfigRepository(db).get_personality_anchor_enabled(
+        config_id, workspace_uuid,
+    )
     if enabled is None:
         raise ValueError(f"当前生效的记忆配置不存在: {config_id}")
-    return bool(enabled)
-
-
-def _ai_personality_memory_config(db, config_id: uuid.UUID):
+    if not enabled:
+        return None
     return MemoryConfigService(db).load_memory_config(config_id)
 
 
@@ -4982,11 +4981,13 @@ def scan_extract_ai_personality(self) -> Dict[str, Any]:
                         try:
                             workspace_uuid = uuid.UUID(workspace_id)
                             config_id = _ai_personality_active_config_id(db, workspace_uuid)
-                            if not _ai_personality_enabled(db, config_id, workspace_uuid):
+                            memory_config = _ai_personality_memory_config(
+                                db, config_id, workspace_uuid,
+                            )
+                            if memory_config is None:
                                 logger.info("AI人格scan跳过未启用空间 workspace=%s", workspace_id)
                                 workspace_config_status[workspace_id] = "disabled"
                             else:
-                                memory_config = _ai_personality_memory_config(db, config_id)
                                 model_ref = ModelApiKeyService.resolve_invoke_ref(
                                     db, memory_config.llm_model_id, tenant_id=memory_config.tenant_id,
                                 )
@@ -5095,7 +5096,10 @@ def do_extract_ai_personality_for_user(
         with get_db_context() as db:
             try:
                 config_id = _ai_personality_active_config_id(db, workspace_uuid)
-                if not _ai_personality_enabled(db, config_id, workspace_uuid):
+                memory_config = _ai_personality_memory_config(
+                    db, config_id, workspace_uuid,
+                )
+                if memory_config is None:
                     logger.info("AI人格do跳过未启用空间 user=%s workspace=%s", end_user_id, workspace_id)
                     return {"status": "skipped_disabled", "entry_count": 0}
             except (BusinessException, ValueError) as exc:
@@ -5158,7 +5162,9 @@ def do_extract_ai_personality_for_user(
         # 使用任务启动时确认仍启用的当前配置构造客户端。
         with get_db_context() as db:
             try:
-                memory_config = _ai_personality_memory_config(db, config_id)
+                memory_config = _ai_personality_memory_config(
+                    db, config_id, workspace_uuid,
+                )
                 llm_client = ModelClientMixin.get_llm_client(
                     db, memory_config.llm_model_id, memory_config.tenant_id,
                 )
