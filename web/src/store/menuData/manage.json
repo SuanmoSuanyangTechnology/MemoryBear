@@ -88,21 +88,6 @@
     "type": "group",
     "subs": [
       {
-        "id": 21,
-        "parent": 2,
-        "icon": "rb:bg-[url('@/assets/images/menuNew/tool.svg')]",
-        "active_icon": "rb:bg-[url('@/assets/images/menuNew/tool_active.svg')]",
-        "code": "tool",
-        "label": "工具管理",
-        "i18nKey": "menu.toolManagement",
-        "path": "/tool",
-        "enable": true,
-        "display": true,
-        "level": 2,
-        "sort": 0,
-        "subs": []
-      },
-      {
         "id": 28,
         "parent": 2,
         "icon": "rb:bg-[url('@/assets/images/menuNew/resources.svg')]",

@@ -123,7 +123,7 @@ const Menu: FC<{
       noAuthList.push('account')
     }
     if (!isPrivateAvailable) {
-      noAuthList.push('brainMemory')
+      noAuthList.push('brainMemory', 'ontology', 'communityMarket')
     }
 
     if (noAuthList && !noAuthList?.includes('all')) {

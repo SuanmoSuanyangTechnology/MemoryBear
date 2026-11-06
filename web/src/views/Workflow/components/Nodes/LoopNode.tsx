@@ -12,12 +12,12 @@ const LoopNode: ReactShapeConfig['component'] = ({ node }) => {
 
   return (
     <div className={clsx('rb:cursor-pointer rb:group rb:relative rb:h-full rb:w-full rb:p-3 rb:border rb:rounded-2xl rb:bg-[#FCFCFD] rb:shadow-[0px_2px_4px_0px_rgba(23,23,25,0.03)]', {
-      'rb:border-[#171719]!': data.isSelected && !data.executionStatus,
+      'rb:border-gray-900!': data.isSelected && !data.executionStatus,
       'rb:border-[#FCFCFD]': !data.isSelected && !data.executionStatus,
-      'rb:border-[#369F21]!': !data.isSelected && data.executionStatus === 'completed',
-      'rb:border-[#FF5D34]!': !data.isSelected && data.executionStatus === 'failed',
+      'rb:border-green-600!': !data.isSelected && data.executionStatus === 'completed',
+      'rb:border-red-500!': !data.isSelected && data.executionStatus === 'failed',
     })}>
-      <NodeTools node={node} />
+      {!data.readOnly && <NodeTools node={node} />}
       <Flex align="center" gap={8} className="rb:flex-1">
         <div className={`rb:size-6 rb:bg-cover ${data.icon}`} />
         <div className="rb:wrap-break-word rb:line-clamp-1 rb:flex-1 rb:text-[12px]">{data.name ?? t(`workflow.${data.type}`)}</div>

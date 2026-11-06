@@ -1,11 +1,5 @@
-/*
- * @Author: ZhaoYing 
- * @Date: 2026-02-03 16:29:37 
- * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-28 12:21:17
- */
 import React, { useEffect, useState, useRef } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useLocation } from 'react-router-dom';
 import { Flex } from 'antd'
 import { useTranslation } from 'react-i18next'
 
@@ -32,6 +26,7 @@ import { useI18n } from '@/store/locale'
 const ApplicationConfig: React.FC = () => {
   // Hooks
   const { id, source } = useParams();
+  const location = useLocation();
   const { t } = useTranslation()
   const { language } = useI18n()
   
@@ -46,8 +41,15 @@ const ApplicationConfig: React.FC = () => {
   const [, setFeatures] = useState<import('./types').FeaturesConfigForm | undefined>(undefined);
 
   useEffect(() => {
-    setActiveTab(source === 'sharing' ? 'test' : 'arrangement')
-  }, [source])
+    const state = location.state as { tab?: string } | null;
+    if (state?.tab) {
+      setActiveTab(state.tab);
+    } else if (source === 'sharing') {
+      setActiveTab('test');
+    } else {
+      setActiveTab('arrangement');
+    }
+  }, [source, location.state])
 
   const [config, setConfig] = useState<Config | WorkflowConfig | null>(null)
   useEffect(() => {
@@ -138,7 +140,7 @@ const ApplicationConfig: React.FC = () => {
           />
         }
         {activeTab === 'api' && <Api application={application} />}
-        {activeTab === 'release' && <ReleasePage data={application as Application} refresh={getApplicationInfo} />}
+        {activeTab === 'release' && application && <ReleasePage data={application} refresh={getApplicationInfo} />}
         {activeTab === 'statistics' && <Statistics application={application} />}
         {activeTab === 'test' && <TestChat application={application} config={config} />}
         {activeTab === 'log' && <Logs application={application as Application} />}

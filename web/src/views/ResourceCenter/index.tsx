@@ -1,20 +1,23 @@
 import { useSearchParams } from 'react-router-dom';
 
 import Skills from '@/views/Skills';
+import Tools from '@/views/ToolManagement';
+import Applications from './Applications';
 
-type ResourceType = 'agent' | 'skills' | 'tool';
-const resourceTypes: ResourceType[] = ['agent', 'skills', 'tool'];
+type ResourceType = 'apps' | 'skills' | 'tools';
+const resourceTypes: ResourceType[] = ['apps', 'skills', 'tools'];
 function getResourceType(value: string | null): ResourceType {
-  return resourceTypes.find(type => type === value) ?? 'skills';
+  return resourceTypes.find(type => type === value) ?? 'apps';
 }
 
-/** Browse existing tenant resources; publishing awaits a backend catalog. */
+/** Browse tenant resources; applications use an isolated mock catalog. */
 const ResourceCenter = () => {
   const [params] = useSearchParams();
   const type = getResourceType(params.get('type'));
 
   if (type === 'skills') return <Skills />;
-  return null;
+  if (type === 'tools') return <Tools />;
+  return <Applications />;
 }
 
 export default ResourceCenter

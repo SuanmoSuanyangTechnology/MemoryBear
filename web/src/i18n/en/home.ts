@@ -108,6 +108,8 @@ export const home = {
       userMemoryDetail: 'UserMemory Detail',
       apiKeyManagement: 'API Key Management',
       toolManagement: 'Tool Management',
+      tools: 'Tools',
+      apps: 'Apps',
       emotionEngine: 'Emotion Engine',
       statementDetail: 'Emotion Memory',
       selfReflectionEngine: 'Self Reflection Engine',
@@ -137,6 +139,7 @@ export const home = {
       preferenceEngine: 'Preference Engine',
       sceneCommunityEngine: 'Multimodal Episodic Memory Reconstruction Engine',
       resources: 'Resource Center',
+      communityMarket: 'Community Market',
       personalityAnchor: 'Personality Anchor Engine',
     },
     dashboard: {

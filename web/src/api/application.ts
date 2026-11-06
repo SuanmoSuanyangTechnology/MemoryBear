@@ -283,19 +283,24 @@ export const appImport = (formData: FormData) => {
 
 // Share application
 export const appSharing = (app_id: string, data: AppSharingForm) => {
-  return request.post(`/apps/${app_id}/share`, data)
+  return request.post<{ community_market: { status: string; error?: string | null; retryable?: boolean } }>(`/apps/${app_id}/share`, data)
 }
 // Get my shared application records
-export const mySharedOutList = () => {
-  return request.get(`/apps/my-shared-out`)
+export const getMySharedOutListUrl = '/apps/my-shared-out'
+export const mySharedOutList = (data?: { page?: number; pagesize?: number; }) => {
+  return request.get(getMySharedOutListUrl, data)
 }
 // Get sharing records for a specific application
 export const getAppShares = (app_id: string) => {
   return request.get(`/apps/${app_id}/shares`)
 }
 // Cancel a single share (source side operation)
-export const cancelShare = (app_id: string, target_workspace_id?: string) => {
-  return request.delete(`/apps/${app_id}/share/${target_workspace_id}`)
+export const cancelShare = (asset_id: string) => {
+  return request.delete(`/apps/assets/${asset_id}`)
+}
+// Resource Center · Update Share Permission
+export const switchSharePermission = (asset_id: string, data?: { share_mode: 'readonly' | 'editable'; }) => {
+  return request.patch(`/apps/assets/${asset_id}`, data)
 }
 // Cancel all shares under a workspace (source side operation)
 export const cancelSpaceShare = (target_workspace_id?: string) => {
@@ -374,7 +379,7 @@ export const previewWorkflowToolParams = (app_id: string) => {
 export const workflowPublishAsTool = (app_id: string, data: WorkflowToolForm) => {
   return request.post(`/apps/${app_id}/publish_tool`, data)
 }
-// 查看缓存
+// Get Workflow Debug State
 export const getWorkflowDebugState = (app_id: string) => {
   return request.get(`/apps/${app_id}/workflow/debug/state`)
 }

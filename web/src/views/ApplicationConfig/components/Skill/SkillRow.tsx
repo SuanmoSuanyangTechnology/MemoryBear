@@ -2,8 +2,7 @@ import { type FC, type ReactNode, useState } from 'react'
 import { DownOutlined, RightOutlined } from '@ant-design/icons'
 
 import { Kind, type Skill, type Member } from '@/views/Skills/types'
-import pluginIcon from '@/assets/images/menuNew/plugin.svg'
-import skillIcon from '@/assets/images/menuNew/skill.svg'
+import SkillIcon from '@/views/Skills/components/SkillIcon'
 
 interface SkillRowProps {
   skill: Skill;
@@ -26,7 +25,7 @@ const SkillRow: FC<SkillRowProps> = ({ skill, leading, trailing, disabled, onCli
         onClick={disabled ? undefined : onClick}
       >
         {leading}
-        <img src={plugin ? pluginIcon : skillIcon} alt="" className="rb:size-8 rb:shrink-0 rb:rounded-lg rb:bg-gray-50 rb:p-1" />
+        <SkillIcon plugin={plugin} />
         <span className="rb:flex-1 rb:min-w-0 rb:truncate" title={skill.name}>{skill.name || skill.id}</span>
         {plugin && <button type="button" aria-label={`${expanded ? '收起' : '展开'}${skill.name}的技能`} aria-expanded={expanded}
           onClick={event => { event.stopPropagation(); setExpanded(value => !value) }} className="rb:cursor-pointer rb:text-gray-500 rb:p-2">
@@ -37,7 +36,7 @@ const SkillRow: FC<SkillRowProps> = ({ skill, leading, trailing, disabled, onCli
       {plugin && expanded && <div className="rb:pl-10">
         {(skill.members ?? []).map((member, index) => renderMember ? renderMember(member, index) : (
           <div key={member.id ?? index} className="rb:flex rb:items-center rb:gap-2 rb:min-h-11 rb:pl-2">
-            <img src={skillIcon} alt="" className="rb:size-8 rb:shrink-0 rb:rounded-lg rb:bg-gray-50 rb:p-1" />
+            <SkillIcon />
             <span className="rb:min-w-0 rb:truncate" title={member.name}>{member.name || member.id}</span>
           </div>
         ))}

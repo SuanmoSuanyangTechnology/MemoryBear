@@ -6,6 +6,7 @@ import { Flex } from 'antd';
 import { CheckCircleFilled, CloseCircleFilled, LoadingOutlined } from '@ant-design/icons';
 
 import NodeTools from './NodeTools'
+import PreviewBranches from './PreviewBranches';
 import { useVariableList } from '../Properties/hooks/useVariableList'
 import { isSubExprSet } from '../../utils'
 import { fileSubFieldOperators } from '../Properties/CaseList/constant'
@@ -65,29 +66,30 @@ const ConditionNode: ReactShapeConfig['component'] = ({ node }) => {
 
   return (
     <div className={clsx('rb:cursor-pointer rb:group rb:relative rb:h-full rb:w-full rb:p-3 rb:border rb:rounded-2xl rb:bg-[#FCFCFD] rb:shadow-[0px_2px_4px_0px_rgba(23,23,25,0.03)]', {
-      'rb:border-[#171719]!': data.isSelected && !data.executionStatus,
+      'rb:border-gray-900!': data.isSelected && !data.executionStatus,
       'rb:border-[#FCFCFD]': !data.isSelected && !data.executionStatus,
-      'rb:border-[#369F21]!': !data.isSelected && data.executionStatus === 'completed',
-      'rb:border-[#FF5D34]!': !data.isSelected && data.executionStatus === 'failed',
+      'rb:border-green-600!': !data.isSelected && data.executionStatus === 'completed',
+      'rb:border-red-500!': !data.isSelected && data.executionStatus === 'failed',
     })}>
-      <NodeTools node={node} />
+      {!data.readOnly && <NodeTools node={node} />}
       <Flex align="center" gap={8} className="rb:flex-1">
         <div className={`rb:size-6 rb:bg-cover ${data.icon}`} />
         <div className="rb:wrap-break-word rb:line-clamp-1 rb:flex-1 rb:text-[12px]">{data.name ?? t(`workflow.${data.type}`)}</div>
         {data.executionStatus === 'completed'
-          ? <CheckCircleFilled className="rb:text-[#369F21] rb:text-[16px]" />
+          ? <CheckCircleFilled className="rb:text-green-600 rb:text-[16px]" />
           : data.executionStatus === 'failed'
-            ? <CloseCircleFilled className="rb:text-[#FF5D34] rb:text-[16px]" />
+            ? <CloseCircleFilled className="rb:text-red-500 rb:text-[16px]" />
             : data.executionStatus === 'running'
-              ? <LoadingOutlined className="rb:text-[#5B6167] rb:text-[16px]" />
+              ? <LoadingOutlined className="rb:text-gray-600 rb:text-[16px]" />
               : null
         }
       </Flex>
 
-      {data.type === 'question-classifier' &&
+      {data.readOnly && <PreviewBranches branches={data.previewBranches} />}
+      {!data.readOnly && data.type === 'question-classifier' &&
         <Flex vertical gap={4} className="rb:mt-3!">
           {data.config?.categories?.defaultValue.map((item: any, index: number) => (
-            <div key={index} className="rb:bg-[#F0F3F8] rb:shadow-[0px_2px_4px_0px_rgba(23,23,25,0.03)] rb:rounded-md rb:py-1 rb:px-1.5 rb:text-[10px] rb:text-[#5B6167] rb:font-medium rb:leading-3.5">
+            <div key={index} className="rb:bg-[#F0F3F8] rb:shadow-[0px_2px_4px_0px_rgba(23,23,25,0.03)] rb:rounded-md rb:py-1 rb:px-1.5 rb:text-[10px] rb:text-gray-600 rb:font-medium rb:leading-3.5">
               <Flex justify="space-between">
                 <span>{t('workflow.config.question-classifier.class_name')} {index + 1}</span>
                 {calculateIsSet(item, 'categories') ? t(`workflow.config.${data.type}.set`) : t(`workflow.config.${data.type}.unset`)}
@@ -96,13 +98,13 @@ const ConditionNode: ReactShapeConfig['component'] = ({ node }) => {
           ))}
         </Flex>
       }
-      {data.type === 'if-else' &&
+      {!data.readOnly && data.type === 'if-else' &&
         <Flex vertical gap={4} className="rb:mt-3!">
           {data.config?.cases?.defaultValue.map((item: any, index: number) => (
             <div key={index}>
               <Flex justify={item.expressions && item.expressions.length > 0 ? "space-between" : 'end'} className="rb:mb-1! rb:leading-4">
-                {item.expressions && item.expressions.length > 0 && <span className="rb:text-[#5B6167] rb:text-[10px] rb:pl-1">CASE{index + 1}</span>}
-                <span className="rb:text-[#212332] rb:font-medium rb:text-[12px]">{index === 0 ? 'IF' : `ELIF`}</span>
+                {item.expressions && item.expressions.length > 0 && <span className="rb:text-gray-600 rb:text-[10px] rb:pl-1">CASE{index + 1}</span>}
+                <span className="rb:text-gray-800 rb:font-medium rb:text-[12px]">{index === 0 ? 'IF' : `ELIF`}</span>
               </Flex>
               {item.expressions && item.expressions?.length > 0 && <Flex vertical gap={2}>
                 {item.expressions.map((expression: any, eIndex: number) => (
@@ -111,7 +113,7 @@ const ConditionNode: ReactShapeConfig['component'] = ({ node }) => {
                       <div className="rb:absolute rb:-top-2 rb:right-2 rb:text-[10px] rb:text-[#155EEF] rb:font-medium rb:leading-3.5 rb:text-right rb:pr-0.5">{item.logical_operator?.toLocaleUpperCase()}</div>
                     }
                     <Flex vertical gap={2}
-                      className={clsx("rb:bg-[#F0F3F8] rb:shadow-[0px_2px_4px_0px_rgba(23,23,25,0.03)] rb:rounded-md rb:px-1.5! rb:text-[10px] rb:text-[#5B6167] rb:font-medium rb:leading-4", {
+                      className={clsx("rb:bg-[#F0F3F8] rb:shadow-[0px_2px_4px_0px_rgba(23,23,25,0.03)] rb:rounded-md rb:px-1.5! rb:text-[10px] rb:text-gray-600 rb:font-medium rb:leading-4", {
                         'rb:pt-1!': expression.sub_variable_condition?.conditions?.length > 0,
                         'rb:py-1!': !expression.sub_variable_condition?.conditions || !expression.sub_variable_condition?.conditions?.length
                       })}
@@ -132,7 +134,7 @@ const ConditionNode: ReactShapeConfig['component'] = ({ node }) => {
                             <div key={sIndex} className="rb:relative">
                               {expression.sub_variable_condition?.conditions.length > 1 && sIndex > 0 && <div className="rb:absolute rb:-top-2 rb:right-2 rb:text-[10px] rb:text-[#155EEF] rb:font-medium rb:leading-3.5 rb:text-right rb:pr-0.5">{expression.sub_variable_condition?.logical_operator?.toLocaleUpperCase()}</div>}
                               <Flex align="center"
-                                className={clsx("rb:px-1.5! rb:text-[10px] rb:text-[#5B6167] rb:font-medium rb:leading-3.5", {
+                                className={clsx("rb:px-1.5! rb:text-[10px] rb:text-gray-600 rb:font-medium rb:leading-3.5", {
                                   'rb:py-1!': sIndex !== 0,
                                   'rb:pb-1': sIndex === 0
                                 })}
@@ -152,7 +154,7 @@ const ConditionNode: ReactShapeConfig['component'] = ({ node }) => {
                           ))}
                         </div>
                         : expression.sub_variable_condition?.conditions?.length > 0
-                        ? <Flex align="center" className="rb:pl-2! rb:rounded-md rb:pb-1! rb:px-1.5! rb:text-[10px] rb:text-[#5B6167] rb:font-medium rb:leading-4">
+                        ? <Flex align="center" className="rb:pl-2! rb:rounded-md rb:pb-1! rb:px-1.5! rb:text-[10px] rb:text-gray-600 rb:font-medium rb:leading-4">
                           {t(`workflow.config.${data.type}.unset`)}
                         </Flex>
                         : null
@@ -163,19 +165,19 @@ const ConditionNode: ReactShapeConfig['component'] = ({ node }) => {
               </Flex>}
             </div>
           ))}
-          <Flex justify="end" className="rb:text-[#212332] rb:font-medium rb:text-[12px]">
+          <Flex justify="end" className="rb:text-gray-800 rb:font-medium rb:text-[12px]">
             ELSE
           </Flex>
         </Flex>
       }
-      {data.type === 'human-intervention' &&
+      {!data.readOnly && data.type === 'human-intervention' &&
         <Flex vertical gap={4} className="rb:mt-3!">
           {data.config?.actions?.defaultValue.map((_item: any, index: number) => (
-            <div key={index} className="rb:text-right rb:py-1 rb:px-1.5 rb:text-[10px] rb:text-[#5B6167] rb:font-medium rb:leading-3.5">
+            <div key={index} className="rb:text-right rb:py-1 rb:px-1.5 rb:text-[10px] rb:text-gray-600 rb:font-medium rb:leading-3.5">
               ACTION_{index + 1}
             </div>
           ))}
-          <div className="rb:text-right rb:py-1 rb:px-1.5 rb:text-[10px] rb:text-[#5B6167] rb:font-medium rb:leading-3.5">
+          <div className="rb:text-right rb:py-1 rb:px-1.5 rb:text-[10px] rb:text-gray-600 rb:font-medium rb:leading-3.5">
             TIMEOUT
           </div>
         </Flex>

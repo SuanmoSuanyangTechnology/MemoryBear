@@ -1,178 +1,164 @@
-/*
- * @Author: ZhaoYing 
- * @Date: 2026-02-03 16:26:03 
- * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-06-03 23:04:15
- */
-/**
- * Tool List Component
- * Manages tool configurations for the application
- * Allows adding, removing, and enabling/disabling tools
- */
-
 import { type FC, useRef, useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Space, Button, Switch, Flex } from 'antd'
+import { Button, Flex } from 'antd'
 
 import Card from '../Card'
-import type {
-  ToolModalRef,
-  ToolOption
-} from './types'
+import type { ToolModalRef, ToolEntry, ToolItem, ToolMethod } from './types'
 import Empty from '@/components/Empty'
 import ToolModal from './ToolModal'
-import { getToolMethods, getToolDetail } from '@/api/tools'
+import ToolRow from './ToolRow'
+import { getToolMethodsBatch } from '@/api/tools'
 import Tag from '@/components/Tag'
+import { groupToolEntries } from './selection'
 
-/**
- * Tool list management component
- * @param value - Current tool configurations
- * @param onChange - Callback when tools change
- */
-const ToolList: FC<{ value?: ToolOption[]; onChange?: (config: ToolOption[]) => void}> = ({value, onChange}) => {
+interface ToolListProps {
+  value?: ToolEntry[];
+  onChange?: (entries: ToolEntry[]) => void;
+}
+
+interface DisplayTool {
+  tool: ToolItem;
+  methods: ToolMethod[];
+  entries: ToolEntry[];
+}
+
+const ToolList: FC<ToolListProps> = ({ value, onChange }) => {
   const { t } = useTranslation()
   const toolModalRef = useRef<ToolModalRef>(null)
-  const [toolList, setToolList] = useState<ToolOption[]>([])
-  useEffect(() => {
-    if (value) {
-      const processedData = value.map(async (item) => {
-        if (!item.label && item.tool_id) {
-          try {
-            const [toolDetail, methods] = await Promise.all([
-              getToolDetail(item.tool_id),
-              getToolMethods(item.tool_id)
-            ])
+  const [displayTools, setDisplayTools] = useState<DisplayTool[]>([])
 
-            switch ((toolDetail as any).tool_type) {
-              case 'mcp':
-              case 'workflow':
-                const mcpFilterItem = (methods as any[]).find(vo => vo.name === item.operation)
-                return {
-                  ...item,
-                  is_active: (toolDetail as any).is_active,
-                  label: (toolDetail as any).tool_type === 'workflow' ? mcpFilterItem?.name ||mcpFilterItem?.description : mcpFilterItem?.description,
-                  method_id: mcpFilterItem?.method_id,
-                  value: mcpFilterItem?.name,
-                  description: mcpFilterItem?.description,
-                  parameters: mcpFilterItem?.parameters
-                }
-              case 'builtin':
-                if ((methods as any[]).length > 1) {
-                  const builtinFilterItem = (methods as any[]).find(vo => vo.name === item.operation)
-                  return {
-                    ...item,
-                    is_active: (toolDetail as any).is_active,
-                    label: builtinFilterItem?.description,
-                    method_id: builtinFilterItem?.method_id,
-                    value: builtinFilterItem?.name,
-                    description: builtinFilterItem?.description,
-                    parameters: builtinFilterItem?.parameters
-                  }
-                }
-                return {
-                  ...item,
-                  is_active: (toolDetail as any).is_active,
-                  label: (methods as any[])[0]?.description,
-                  method_id: (methods as any[])[0]?.method_id,
-                  value: (methods as any[])[0]?.name,
-                  description: (methods as any[])[0]?.description,
-                  parameters: (methods as any[])[0]?.parameters
-                }
-              default:
-                const customFilterItem = (methods as any[]).find(vo => vo.method_id === item.operation)
-                return {
-                  ...item,
-                  is_active: (toolDetail as any).is_active,
-                  label: (toolDetail as any).tool_type === 'workflow' ? customFilterItem?.name ||customFilterItem?.description : customFilterItem?.name,
-                  method_id: customFilterItem?.method_id,
-                  value: customFilterItem?.name,
-                  description: customFilterItem?.description,
-                  parameters: customFilterItem?.parameters
-                }
-            }
-          } catch {
-            return item
-          }
-        }
-        return item
-      })
-      
-      Promise.all(processedData).then(setToolList)
+  useEffect(() => {
+    if (!value || value.length === 0) {
+      setDisplayTools([])
+      return
     }
+
+    const toolIds = [...new Set(value.map(e => e.tool_id))]
+
+    getToolMethodsBatch(toolIds).then(res => {
+      const batchData = res as { items: Array<{ tool_id: string; name: string; tool_type: string; is_active: boolean; methods: ToolMethod[] }>; missing_tool_ids: string[] }
+      const toolMap = new Map(batchData.items.map(item => [item.tool_id, item]))
+
+      const groupedByTool = new Map<string, ToolEntry[]>()
+      for (const entry of value) {
+        const existing = groupedByTool.get(entry.tool_id) || []
+        existing.push(entry)
+        groupedByTool.set(entry.tool_id, existing)
+      }
+
+      const displayList: DisplayTool[] = []
+      for (const [toolId, entries] of groupedByTool) {
+        const batchItem = toolMap.get(toolId)
+        if (!batchItem) continue
+
+        const tool: ToolItem = {
+          id: batchItem.tool_id,
+          name: batchItem.name,
+          description: '',
+          icon: null,
+          tool_type: batchItem.tool_type as ToolItem['tool_type'],
+          method_count: batchItem.methods.length,
+          is_active: batchItem.is_active,
+        }
+
+        displayList.push({
+          tool,
+          methods: batchItem.methods,
+          entries,
+        })
+      }
+
+      setDisplayTools(displayList)
+    }).catch(() => {
+      setDisplayTools([])
+    })
   }, [value])
 
-  /** Open tool selection modal */
   const handleAddTool = () => {
     toolModalRef.current?.handleOpen()
   }
-  /** Add new tool to list */
-  const updateTools = (tool: ToolOption) => {
-    const list = [...toolList, {
-      ...tool,
-      is_active: true,
-    }]
-    setToolList(list)
-    onChange?.(list)
+
+  const handleRefresh = (newEntries: ToolEntry[]) => {
+    const currentEntries = value || []
+    const merged = groupToolEntries([...currentEntries, ...newEntries])
+    onChange?.(merged)
   }
-  /** Remove tool from list */
-  const handleDeleteTool = (index: number) => {
-    const list = toolList.filter((_item, idx) => idx !== index)
-    setToolList([...list])
-    onChange?.(list)
-  }
-  /** Toggle tool enabled state */
-  const handleChangeEnabled = (index: number) => {
-    const list = toolList.map((item, idx) => {
-      if (idx === index) {
-        return {
-          ...item,
-          enabled: !item.enabled
-        }
-      }
-      return item
+
+  const handleDeleteTool = (toolId: string, operation?: string | null) => {
+    const currentEntries = value || []
+    const filtered = currentEntries.filter(e => {
+      if (e.tool_id !== toolId) return true
+      if (operation === undefined) return false
+      return e.operation !== operation
     })
-    setToolList([...list])
-    onChange?.(list)
+    onChange?.(filtered)
   }
+
   return (
-    <Card 
+    <Card
       title={t('application.toolConfiguration')}
       extra={
-        <Button className="rb:h-6! rb:py-0! rb:px-2! rb:rounded-md! rb:text-gray-800" onClick={handleAddTool}>+ {t('application.addTool')}</Button>
+        <Button className="rb:h-6! rb:py-0! rb:px-2! rb:rounded-md! rb:text-gray-800" onClick={handleAddTool}>
+          + {t('application.addTool')}
+        </Button>
       }
     >
       <div className="rb:leading-4.5 rb:text-[12px] rb:mb-2 rb:font-medium">
         {t('application.toolManagement')}
       </div>
-      {toolList.length === 0
+      {displayTools.length === 0
         ? <div className="rb-border rb:rounded-xl rb:pt-4 rb:pb-6"><Empty size={88} /></div>
         : <Flex vertical gap={12}>
-          {toolList.map((item, index) => (
-            <Flex key={index} align="center" justify="space-between" className="rb:py-2.5! rb:pl-4! rb:pr-3! rb-border rb:rounded-lg">
-              <div>
-                <div className="rb:font-medium rb:leading-4">
-                  {item.label}
+            {displayTools.map((displayTool) => {
+              return (
+                <div key={displayTool.tool.id} className="rb:px-3 rb:py-1 rb:bg-white rb-border rb:rounded-lg">
+                  <ToolRow
+                    tool={displayTool.tool}
+                    methods={displayTool.methods}
+                    trailing={
+                      <>
+                        {displayTool.tool.is_active === false && (
+                          <Tag color="error" className="rb:shrink-0">{t('common.deleted')}</Tag>
+                        )}
+                        <div
+                          className="rb:size-4.5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/common/delete.svg')] rb:hover:bg-[url('@/assets/images/common/delete_red.svg')]"
+                          onClick={() => handleDeleteTool(displayTool.tool.id)}
+                        />
+                      </>
+                    }
+                    renderMethod={(method, methodIndex) => {
+                      const operationKey = method.operation_key
+                      const entry = displayTool.entries.find(e => e.operation === operationKey)
+                      if (!entry) return null
+
+                      return (
+                        <div key={method.method_id || methodIndex} className="rb:flex rb:items-center rb:gap-2 rb:min-h-9 rb:pl-2">
+                          <span className="rb:min-w-0 rb:flex-1 rb:truncate rb:text-sm" title={method.name}>
+                            {method.name}
+                          </span>
+                          {displayTool.tool.is_active === false && (
+                            <Tag color="error" className="rb:shrink-0">{t('common.deleted')}</Tag>
+                          )}
+                          <div
+                            className="rb:size-4.5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/common/delete.svg')] rb:hover:bg-[url('@/assets/images/common/delete_red.svg')]"
+                            onClick={() => handleDeleteTool(displayTool.tool.id, operationKey)}
+                          />
+                        </div>
+                      )
+                    }}
+                  />
                 </div>
-                <Tag color={item.is_active ? 'success' : 'error'} className="rb:mt-1">
-                  {item.is_active ? t('common.enable') : t('common.deleted')}
-                </Tag>
-              </div>
-              <Space size={12}>
-                <Switch size="small" checked={item.enabled} onChange={() => handleChangeEnabled(index)} />
-                <div
-                  className="rb:w-6 rb:h-6 rb:cursor-pointer rb:bg-[url('@/assets/images/deleteBorder.svg')] rb:hover:bg-[url('@/assets/images/deleteBg.svg')]"
-                  onClick={() => handleDeleteTool(index)}
-                ></div>
-              </Space>
-            </Flex>
-          ))}
-        </Flex>
+              )
+            })}
+          </Flex>
       }
       <ToolModal
         ref={toolModalRef}
-        refresh={updateTools}
+        existingEntries={value || []}
+        refresh={handleRefresh}
       />
     </Card>
   )
 }
+
 export default ToolList

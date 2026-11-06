@@ -7,7 +7,8 @@
 export type ToolType = 'mcp' | 'builtin' | 'custom' | 'workflow'
 export interface Query {
   name?: string;
-  tool_type: ToolType;
+  tool_type?: ToolType;
+  include_external_status?: boolean;
   status?: ToolItem['status']
 }
 
@@ -89,13 +90,17 @@ export interface WorkflowToolItem {
     output_schema: OutputSchema;
     timeout: number;
   };
-  status: 'available' | 'unavailable';
+  status: 'available' | 'unconfigured' | 'configured_disabled' | 'error';
   is_active: boolean;
   tags: string[];
   tenant_id: string;
   created_at: number;
 }
 export interface ToolItem {
+  is_active: boolean;
+  origin: 'local' | 'external';
+  method_count: number;
+  external: import('./toolContract').ExternalRef | null;
   id: string;
   name: string;
   description: string;
@@ -123,7 +128,7 @@ export interface ToolItem {
     market_config_id?: string;
     mcp_service_id?: string;
   };
-  status: 'available' | 'unavailable';
+  status: 'available' | 'unconfigured' | 'configured_disabled' | 'error';
   tags: string[];
   tenant_id: string;
   created_at: number;

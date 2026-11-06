@@ -1,210 +1,203 @@
-import { forwardRef, useImperativeHandle, useState, useEffect, useMemo, type MouseEvent } from 'react';
+import { forwardRef, useImperativeHandle, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
-import { App, Flex, Row, Col, Space } from 'antd';
-import clsx from 'clsx';
+import { useNavigate } from 'react-router-dom';
+import { App, Flex, Space, Switch, Tag, Button } from 'antd';
+import type { ColumnsType } from 'antd/es/table';
 
-import type { Application, MySharedOutItem } from './types';
-import { mySharedOutList, cancelShare, cancelSpaceShare } from '@/api/application'
-import BodyWrapper from '@/components/Empty/BodyWrapper'
-import RbCard from '@/components/RbCard/Card'
-import RbDescriptions from '@/components/RbDescriptions'
-import Tag from '@/components/Tag'
-import PrivateWrap from '@/components/PrivateWrap';
-import { AppOntology } from '@redbear/memory-brick';
+import type { Application, MySharedOutItem, ShareStatus } from './types';
+import { getMySharedOutListUrl, cancelShare, switchSharePermission } from '@/api/application'
+import Table, { type TableRef } from '@/components/Table'
 
 export interface MySharingRef {
   refresh: () => void;
 }
 
-const MySharing = forwardRef<MySharingRef, { switchOntology: (item: Application) => void; }>(({
-  switchOntology,
-}, ref) => {
+const statusColorMap: Record<string, string> = {
+  shared: 'success',
+  approved: 'success',
+  pending: 'processing',
+  pending_sync: 'processing',
+  rejected: 'error',
+  sync_failed: 'error',
+  withdrawn: 'default',
+  unknown: 'default',
+};
+
+const statusLabelMap: Record<string, string> = {
+  shared: 'application.statusShared',
+  approved: 'application.statusApproved',
+  pending: 'application.statusPending',
+  pending_sync: 'application.statusPendingSync',
+  rejected: 'application.statusRejected',
+  sync_failed: 'application.statusSyncFailed',
+  withdrawn: 'application.statusWithdrawn',
+  unknown: 'application.statusUnknown',
+};
+
+const MySharing = forwardRef<MySharingRef, { switchOntology: (item: Application) => void; }>((_props, ref) => {
   const { t } = useTranslation();
-  const { modal } = App.useApp();
-  const [loading, setLoading] = useState(false)
-  const [data, setData] = useState<MySharedOutItem[]>([])
+  const { modal, message } = App.useApp();
+  const navigate = useNavigate();
+  const tableRef = useRef<TableRef>(null)
 
-  useEffect(() => { getList() }, [])
+  useImperativeHandle(ref, () => ({ refresh: () => tableRef.current?.loadData() }))
 
-  const getList = () => {
-    setLoading(true)
-    mySharedOutList()
-      .then(res => setData(res as MySharedOutItem[]))
-      .finally(() => setLoading(false))
+  const handleCancelOne = (item: MySharedOutItem) => {
+    if (!item.asset_id) return;
+
+modal.confirm({
+      title: t('application.confirmCancelOneShareTitle', { app: item.app_name }),
+      content: item.scope === 'community_market'
+        ? t('application.confirmCancelOneShareContentMarket')
+        : t('application.confirmCancelOneShareContentResource'),
+      okText: t('application.cancelShare'),
+      cancelText: t('application.keepShare'),
+      okType: 'danger',
+      onOk: () => {
+        cancelShare(item.asset_id as string)
+          .then(() => {
+            tableRef.current?.loadData();
+            message.success(t('common.operateSuccess'))
+          })
+      }
+    });
+  };
+  const handleSwitchSharePermission = (item: MySharedOutItem) => {
+    if (!item.asset_id) return
+    switchSharePermission(item.asset_id, { share_mode: item.editable ? 'editable' : 'readonly' })
+      .then(() => {
+        tableRef.current?.loadData();
+        message.success(t('common.operateSuccess'))
+      })
   }
 
-  useImperativeHandle(ref, () => ({ refresh: getList }))
-
-  /** Group items by target_workspace_id */
-  const grouped = useMemo(() => {
-    const map = new Map<string, { workspace: Pick<MySharedOutItem, 'target_workspace_id' | 'target_workspace_name' | 'target_workspace_icon'>, items: MySharedOutItem[] }>();
-    data.forEach(item => {
-      if (!map.has(item.target_workspace_id)) {
-        map.set(item.target_workspace_id, {
-          workspace: {
-            target_workspace_id: item.target_workspace_id,
-            target_workspace_name: item.target_workspace_name,
-            target_workspace_icon: item.target_workspace_icon,
-          },
-          items: [],
-        });
-      }
-      map.get(item.target_workspace_id)!.items.push(item);
-    });
-    return Array.from(map.values());
-  }, [data]);
-
-  const handleAllCancel = (workspace: { target_workspace_name: string; target_workspace_id: string;  }) => {
+  const handleWithdraw = (item: MySharedOutItem) => {
+    if (!item.pending_publication_id) return;
     modal.confirm({
-      title: t('application.confirmWorkspaceCancelShareDesc', { workspace: workspace.target_workspace_name }),
+      title: t('application.confirmWithdrawDesc', { app: item.app_name }),
       okText: t('common.confirm'),
       cancelText: t('common.cancel'),
-      okType: 'danger',
       onOk: () => {
-        cancelSpaceShare(workspace.target_workspace_id)
-          .then(() => {
-            getList();
-          })
+        // TODO: call withdraw API
+        tableRef.current?.loadData();
+        message.success(t('common.operateSuccess'))
       }
     });
   };
 
-  const handleCancelOne = (item: MySharedOutItem, e: MouseEvent) => {
-    e.stopPropagation()
-    modal.confirm({
-      title: t('application.confirmAppCancelShareDesc', { app: item.source_app_name, workspace: item.target_workspace_name }),
-      okText: t('common.confirm'),
-      cancelText: t('common.cancel'),
-      okType: 'danger',
-      onOk: () => {
-        cancelShare(item.source_app_id, item.target_workspace_id)
-          .then(() => {
-            getList();
-          })
-      }
-    });
-  };
-    /** Navigate to application configuration page */
   const handleEdit = (item: MySharedOutItem) => {
-    window.open(`/#/application/config/${item.source_app_id}`);
+    navigate(`/application/config/${item.app_id}`, { state: { tab: 'release' } });
   }
 
-  const [selectedWorkspace, setSelectedWorkspace] = useState<string | null>(null)
-  const [appList, setAppList] = useState<MySharedOutItem[]>([])
-
-  useEffect(() => {
-    if (grouped.length === 0) {
-      setSelectedWorkspace(null)
-      setAppList([])
-      return
-    }
-    const current = grouped.find(g => g.workspace.target_workspace_id === selectedWorkspace)
-    if (current) {
-      setAppList(current.items)
-    } else {
-      setSelectedWorkspace(grouped[0].workspace.target_workspace_id)
-      setAppList(grouped[0].items)
-    }
-  }, [grouped, selectedWorkspace])
-
-  const handleSelectWorkspace = async (target_workspace_id: string) => {
-    if (target_workspace_id === selectedWorkspace) return
-    setSelectedWorkspace(target_workspace_id);
-    const filterWorkspace = grouped.find(item => item.workspace.target_workspace_id === target_workspace_id);
-
-    setAppList(filterWorkspace?.items || [])
-  };
+  const columns: ColumnsType<MySharedOutItem> = [
+    {
+      title: t('application.appName'),
+      dataIndex: 'app_name',
+      key: 'app_name',
+      width: 200,
+      render: (text: string, record: MySharedOutItem) => (
+        <Flex align="center" gap={12}>
+          {record.icon ? (
+            <img src={record.icon} alt="" className="rb:size-8 rb:rounded-lg rb:object-cover rb:shrink-0" />
+          ) : (
+            <Flex align="center" justify="center" className="rb:size-8 rb:rounded-lg rb:text-[12px] rb:text-[#ffffff] rb:shrink-0" style={{
+              backgroundColor: record.app_type === 'agent' ? '#3b82f6' : record.app_type === 'multi_agent' ? '#9C6FFF' : '#7c3aed'
+            }}>
+              {text.trim()[0]}
+            </Flex>
+          )}
+          <div>
+            <div className="rb:font-medium rb:cursor-pointer rb:hover:text-primary-600" onClick={() => handleEdit(record)}>
+              {text}
+            </div>
+            <div className="rb:text-gray-500 rb:text-[12px] rb:mt-0.5">{t(`application.${record.app_type}`)}</div>
+          </div>
+        </Flex>
+      ),
+    },
+    {
+      title: t('application.shareScope'),
+      dataIndex: 'scope',
+      key: 'scope',
+      width: 140,
+      render: (scope: string) => (
+        <Tag>{t(`application.scope_${scope}`)}</Tag>
+      ),
+    },
+    {
+      title: t('application.shareVersion'),
+      dataIndex: 'version',
+      key: 'version',
+      width: 120,
+    },
+    {
+      title: t('application.shareStatus'),
+      dataIndex: 'share_status',
+      key: 'share_status',
+      width: 120,
+      render: (status: ShareStatus) => (
+        <Tag color={statusColorMap[status] || 'default'}>
+          {t(statusLabelMap[status] || 'application.statusUnknown')}
+        </Tag>
+      ),
+    },
+    {
+      title: t('application.editPermission'),
+      dataIndex: 'editable',
+      key: 'editable',
+      width: 120,
+      render: (editable: boolean, record: MySharedOutItem) => (
+        <Switch
+          checked={editable}
+          disabled={record.scope === 'community_market'}
+          size="small"
+          onChange={() => handleSwitchSharePermission(record)}
+        />
+      ),
+    },
+    {
+      title: t('application.sharedAt'),
+      dataIndex: 'shared_at',
+      key: 'shared_at',
+      width: 180,
+      render: (ts: number) => ts ? new Date(ts).toLocaleString() : '-',
+    },
+    {
+      title: t('common.operation'),
+      key: 'operation',
+      fixed: 'right',
+      render: (_: unknown, record: MySharedOutItem) => (
+        <Space>
+          <Button type="link" onClick={() => handleEdit(record)}>{t('application.releaseManage')}</Button>
+          {record.scope === 'resource_center'
+            ? (
+              <Button type="link" danger onClick={() => handleCancelOne(record)}>
+                {t('application.cancelShare')}
+              </Button>
+            )
+            : (
+              <>
+                <Button type="link" onClick={() => {}}>{t('application.viewRecord')}</Button>
+                {record.share_status === 'pending' && record.pending_publication_id && (
+                  <Button type="link" onClick={() => handleWithdraw(record)}>{t('application.withdraw')}</Button>
+                )}
+              </>
+            )
+          }
+        </Space>
+      ),
+    },
+  ];
 
   return (
-    <BodyWrapper loading={loading} empty={data.length === 0}>
-      <Row gutter={12} wrap={false}>
-        <Col flex="384px">
-          <Flex vertical gap={12}>
-            {grouped.map(({ workspace, items }) => (
-              <Flex
-                key={workspace.target_workspace_id}
-                gap={8}
-                justify="space-between"
-                align="center"
-                className={clsx("rb:cursor-pointer rb:bg-white rb:py-3! rb:px-4! rb:rounded-2xl rb:border rb:border-white rb:group", {
-                  'rb:border-primary-600!': selectedWorkspace === workspace.target_workspace_id
-                })}
-                onClick={() => handleSelectWorkspace(workspace.target_workspace_id)}
-              >
-                <Flex align="center" gap={12}>
-                  {workspace.target_workspace_icon
-                    ? <img src={workspace.target_workspace_icon} alt={workspace.target_workspace_icon} className="rb:size-8.5 rb:rounded-lg rb:object-cover" />
-                    : <Flex align="center" justify="center" className="rb:size-8.5 rb:rounded-lg rb:bg-blue-500 rb:text-[14px] rb:text-white">
-                      {workspace.target_workspace_name[0]}
-                    </Flex>
-                  }
-                  <div>
-                    <span className="rb:font-medium rb:text-[16px] rb:leading-5.5">{workspace.target_workspace_name}</span>
-                    <div className="rb:text-gray-600 rb:text-[12px] rb:leading-4.5 rb:mt-0.5">{t('application.appCount', { count: items.length })}</div>
-                  </div>
-                </Flex>
-                <div
-                  className="rb:hidden rb:group-hover:block rb:size-7 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/common/delete.svg')] rb:hover:bg-[url('@/assets/images/common/delete_hover.svg')]"
-                  onClick={e => { e.stopPropagation(); handleAllCancel(workspace); }}
-                ></div>
-              </Flex>
-            ))}
-          </Flex>
-        </Col>
-        <Col flex="1">
-          <div className="rb:grid rb:grid-cols-2 rb:gap-3">
-            {appList.map(item => (
-              <RbCard
-                key={item.source_app_id}
-                title={item.source_app_name}
-                avatar={<Flex align="center" justify="center" className={clsx("rb:size-12 rb:rounded-lg rb:text-[24px] rb:text-[#ffffff] rb:bg-blue-500", {
-                  'rb:bg-blue-500': item.source_app_type === 'agent',
-                  'rb:bg-[#9C6FFF]!': item.source_app_type === 'multi_agent',
-                  'rb:bg-primary-600': item.source_app_type === 'workflow',
-                })}>{item.source_app_name.trim()[0]}</Flex>}
-                subTitle={<Space size={6}>
-                  <Tag color={item.source_app_type === 'agent' ? 'processing' : item.source_app_type === 'multi_agent' ? 'dark' : 'purple'}>{t(`application.${item.source_app_type}`)}</Tag>
-                  <Tag color={item.source_app_is_active ? 'success' : 'error'}>{item.source_app_is_active ? t('application.sourceActive') : t('application.sourceInactive')}</Tag>
-                </Space>}
-                extra={<div
-                  className="rb:-mt-6 rb:cursor-pointer rb:size-5.5 rb:rounded-lg rb:hover:bg-gray-100 rb:bg-[url('@/assets/images/common/close_grey.svg')] rb:bg-size-[16px_16px] rb:bg-center rb:bg-no-repeat"
-                  onClick={(e) => handleCancelOne(item, e)}
-                ></div>}
-                bodyClassName="rb:py-6! rb:px-4!"
-                className="rb:cursor-pointer"
-                onClick={() => handleEdit(item)}
-              >
-                <RbDescriptions
-                  items={[
-                    {
-                      key: 'version',
-                      label: t(`application.version`),
-                      children: item.source_app_version
-                    },
-                    {
-                      key: 'permission',
-                      label: t(`application.permission`),
-                      children: <span className={clsx('rb:font-medium', {
-                        'rb:text-green-600': item.permission === 'editable',
-                      })}>{t(`application.${item.permission}`)}</span>
-                    },
-                  ]}
-                />
-                {item.ontology &&
-                  <PrivateWrap>
-                    {() => (
-                      <div onClick={e => e.stopPropagation()}>
-                        <AppOntology app={item as unknown as Application} className="rb:mt-3!" onClick={() => switchOntology(item as unknown as Application)} />
-                      </div>
-                    )}
-                  </PrivateWrap>
-                }
-              </RbCard>
-            ))}
-          </div>
-        </Col>
-      </Row>
-    </BodyWrapper>
+    <div className="rb:flex-1! rb:overflow-hidden rb:bg-white rb:rounded-lg rb:pt-3! rb:px-3!">
+      <Table<MySharedOutItem>
+        ref={tableRef}
+        apiUrl={getMySharedOutListUrl}
+        columns={columns}
+        rowKey="app_id"
+      />
+    </div>
   )
 });
 

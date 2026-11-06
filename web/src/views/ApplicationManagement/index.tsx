@@ -30,6 +30,7 @@ import PrivateWrap from '@/components/PrivateWrap';
 import { AppOntology, GET_DEFAULT_ONTOLOGY_COMPOSITION, OntologyConfigModal, type OntologyConfigModalRef, type DefaultOntologyComposition } from '@redbear/memory-brick';
 import { request } from '@/utils/request'
 import { isPrivateAvailable } from '@/utils/private'
+import { useUser } from '@/store/user';
 
 const tabKeys = ['apps', 'sharing', 'myShare']
 /**
@@ -39,6 +40,7 @@ const ApplicationManagement: React.FC = () => {
   const { t } = useTranslation();
   const { modal } = App.useApp();
   const [searchParams] = useSearchParams()
+  const { user } = useUser()
   const applicationModalRef = useRef<ApplicationModalRef>(null);
   const scrollListRef = useRef<PageScrollListRef>(null)
   const mySharingRef = useRef<MySharingRef>(null)
@@ -142,6 +144,7 @@ const ApplicationManagement: React.FC = () => {
       ...rest,
       shared_only: activeTab === 'sharing',
       include_shared: activeTab !== 'apps',
+      // include_shared: true,
       [search_type || 'search']: search
     } as Query
   }
@@ -267,6 +270,7 @@ const ApplicationManagement: React.FC = () => {
 
       {(activeTab === 'apps' || activeTab === 'sharing') &&
         <PageScrollList<Application, Query>
+          key={activeTab}
           ref={scrollListRef}
           url={getApplicationListUrl}
           needLoading={false}
@@ -349,6 +353,7 @@ const ApplicationManagement: React.FC = () => {
             request={request}
             defaultOntology={defaultOntology}
             refresh={refreshOntology}
+            isSuperuser={user?.is_superuser}
           />
         )}
       </PrivateWrap>

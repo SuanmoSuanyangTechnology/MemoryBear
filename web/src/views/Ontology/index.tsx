@@ -9,7 +9,7 @@ import {
 import { request } from '@/utils/request'
 import PrivateWrap from '@/components/PrivateWrap'
 
-const MemoryEngine: FC = () => {
+const OntologyPage: FC = () => {
   const [scene, setScene] = useState<OntologyScene>();
   const [defaultActiveTab, setDefaultActiveTab] = useState<'ontology' | 'scene'>('ontology');
 
@@ -74,4 +74,4 @@ const MemoryEngine: FC = () => {
   )
 }
 
-export default MemoryEngine
+export default OntologyPage

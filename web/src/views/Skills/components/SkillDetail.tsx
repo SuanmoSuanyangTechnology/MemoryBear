@@ -8,8 +8,7 @@ import ToolList from './ToolList';
 import RbModal from '@/components/RbModal';
 import SkillFiles from './SkillFiles';
 import Empty from '@/components/Empty';
-import pluginIcon from '@/assets/images/menuNew/plugin.svg';
-import skillIcon from '@/assets/images/menuNew/skill.svg';
+import SkillIcon from './SkillIcon';
 
 export interface SkillDetailRef { handleOpen: (skill: Skill) => void }
 
@@ -96,10 +95,8 @@ const SkillDetail = forwardRef<SkillDetailRef>((_props, ref) => {
               {t('skills.backPrefix')} {detail?.name ?? t('skills.pluginSkills')}
             </Button>
           }
-          <Flex align="center" gap={12} className="">
-            <Flex component="span" align="center" justify="center" className={` rb:size-11 rb:flex-none rb:rounded-[10px] ${plugin && !member ? 'rb:bg-purple-50' : 'rb:bg-blue-700'}`}>
-              <img className="rb:size-9" src={plugin && !member ? pluginIcon : skillIcon} alt="" />
-            </Flex>
+          <Flex align="center" gap={12}>
+            <SkillIcon plugin={plugin && !member} className="rb:size-11" iconClassName="rb:size-7" />
             <div className="rb:min-w-0">
               <Flex align="center" gap={8} className="rb:text-[16px] rb:font-semibold">
                 <span>{heading?.name}</span>

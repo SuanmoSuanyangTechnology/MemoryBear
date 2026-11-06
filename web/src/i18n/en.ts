@@ -11,10 +11,15 @@ import { engine } from './en/engine'
 import { detail } from './en/detail'
 import { notificationCenter } from './en/notificationCenter'
 import { memoryConversation } from './en/memoryConversation'
+import { skills } from './en/skills';
+import { resourceSharing } from './en/resourceSharing'
+import { resourceCenter } from './en/resourceCenter'
 import { episodicDetail } from './en/episodicDetail'
 
 export const en = {
   translation: {
+    resourceSharing,
+    resourceCenter,
     ...home,
     ...account,
     ...model,

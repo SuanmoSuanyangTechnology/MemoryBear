@@ -11,10 +11,15 @@ import { engine } from './zh/engine'
 import { detail } from './zh/detail'
 import { notificationCenter } from './zh/notificationCenter'
 import { memoryConversation } from './zh/memoryConversation'
+import { skills } from './zh/skills'
+import { resourceSharing } from './zh/resourceSharing'
+import { resourceCenter } from './zh/resourceCenter'
 import { episodicDetail } from './zh/episodicDetail'
 
 export const zh = {
   translation: {
+    resourceSharing,
+    resourceCenter,
     ...home,
     ...account,
     ...model,

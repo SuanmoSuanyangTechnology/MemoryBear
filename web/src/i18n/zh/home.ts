@@ -108,6 +108,8 @@ export const home = {
       knowledgeDocumentDetails: '详情',
       userMemoryDetail: '记忆库详情',
       toolManagement: '工具管理',
+      tools: '工具',
+      apps: '应用',
       emotionEngine: '情感引擎',
       statementDetail: '情绪记忆',
       selfReflectionEngine: '反思引擎',
@@ -137,6 +139,7 @@ export const home = {
       preferenceEngine: '偏好引擎',
       sceneCommunityEngine: '多模态情景记忆重构引擎',
       resources: '资源中心',
+      communityMarket: '社区市场',
       personalityAnchor: '人格锚定引擎',
     },
     dashboard: {

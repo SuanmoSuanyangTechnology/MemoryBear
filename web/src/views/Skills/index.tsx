@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { App, Button, Flex, Skeleton, Tooltip } from 'antd';
+import { useRef, useState } from 'react';
+import { App, Button, Flex, Skeleton } from 'antd';
 import clsx from 'clsx';
 import { useTranslation } from 'react-i18next';
 
@@ -11,13 +11,14 @@ import SearchInput from '@/components/SearchInput';
 import { getSkillStatistics, deleteSkill, getSkillListUrl, skillExport } from '@/api/skill';
 import SkillDetail, { type SkillDetailRef } from './components/SkillDetail';
 import SkillImport from './components/SkillImport';
+import SkillIcon from './components/SkillIcon';
 import { Kind, type Skill, type SkillQuery, type Statistic } from './types';
 import { isPlugin } from './utils';
 import MoreDropdown from '@/components/MoreDropdown'
 
 type AllKind = Kind | 'all'
 
-/** 资源中心的技能列表；分页与搜索由 PageScrollList 请求接口完成。 */
+/** Skill list in resource center; pagination and search are handled by PageScrollList via API requests. */
 const Skills = () => {
   const { t } = useTranslation();
   const { message, modal } = App.useApp();
@@ -152,33 +153,31 @@ const Skills = () => {
                 )}
                 isNeedTooltip={false}
                 className="rb:h-full! rb:cursor-pointer"
-                avatarText={<div className={clsx("rb:size-6 rb:bg-cover", plugin ? "rb:bg-[url('@/assets/images/menuNew/plugin.svg')]" : "rb:bg-[url('@/assets/images/menuNew/skill.svg')]")} />}
-                avatarClassName={plugin ? 'rb:bg-[rgba(156,111,255,0.06)]!' : "rb:bg-[rgba(21,94,239,0.06)]!"}
-                extra={
-                  <MoreDropdown
-                    items={[
-                      {
-                        key: 'view',
-                        icon: <div className="rb:size-4 rb:bg-cover rb:cursor-pointer rb:bg-[url('@/assets/images/common/eye.svg')]" />,
-                        label: t('common.view'),
-                        onClick: () => handleViewDetail(item),
-                      },
-                      {
-                        key: 'export',
-                        icon: <div className="rb:size-3.5 rb:bg-cover rb:bg-[url('@/assets/images/knowledgeBase/export.svg')]" />,
-                        label: t('skills.exportPackage'),
-                        onClick: () => handleExport(item),
-                      },
-                      {
-                        key: 'delete',
-                        danger: true,
-                        icon: <div className="rb:size-4 rb:bg-cover rb:cursor-pointer rb:bg-[url('@/assets/images/common/delete_red_big.svg')]" />,
-                        label: t('common.delete'),
-                        onClick: () => handleDelete(item),
-                      },
-                    ]}
-                  />
-                }
+                avatarText={<SkillIcon plugin={plugin} className="rb:size-11" iconClassName="rb:size-7" />}
+                avatarClassName="rb:bg-transparent!"
+                extra={<MoreDropdown
+                items={[
+                    {
+                      key: 'view',
+                      icon: <div className="rb:size-4 rb:bg-cover rb:cursor-pointer rb:bg-[url('@/assets/images/common/eye.svg')]" />,
+                      label: t('common.view'),
+                      onClick: () => handleViewDetail(item),
+                    },
+                    {
+                      key: 'export',
+                      icon: <div className="rb:size-3.5 rb:bg-cover rb:bg-[url('@/assets/images/knowledgeBase/export.svg')]" />,
+                      label: t('skills.exportPackage'),
+                      onClick: () => handleExport(item),
+                    },
+                    {
+                      key: 'delete',
+                      danger: true,
+                      icon: <div className="rb:size-4 rb:bg-cover rb:cursor-pointer rb:bg-[url('@/assets/images/common/delete_red_big.svg')]" />,
+                      label: t('common.delete'),
+                      onClick: () => handleDelete(item),
+                    },
+                  ]}
+                />}
                 onClick={() => handleViewDetail(item)}
               >
                 <div className="rb:mb-3 rb:overflow-hidden rb:h-12 rb:p-2 rb:text-[12px] rb:leading-4 rb:text-gray-600 rb:bg-gray-100 rb:rounded-lg">

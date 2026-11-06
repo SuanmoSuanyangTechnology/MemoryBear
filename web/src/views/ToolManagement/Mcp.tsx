@@ -1,143 +1,119 @@
-import { useState, useRef, useEffect, forwardRef, useImperativeHandle, type ReactNode } from 'react';
-import {
-  App,
-  Space,
-  Tooltip,
-  Dropdown,
-  Flex,
-  Row, Col,
-} from 'antd';
+import { useRef, forwardRef, useImperativeHandle } from 'react';
+import { Flex, Row, Col, Tooltip, App } from 'antd';
 import { useTranslation } from 'react-i18next';
 
 import type { ToolItem, McpServiceModalRef, McpRef } from './types';
 import McpServiceModal from './components/McpServiceModal';
-import BodyWrapper from '@/components/Empty/BodyWrapper'
-import RbCard from '@/components/RbCard'
-import { getTools, deleteTool, testConnection } from '@/api/tools'
-import { formatDateTime } from '@/utils/format'
+import McpDetailModal, { type McpDetailModalRef } from './components/McpDetailModal';
+import BodyWrapper from '@/components/Empty/BodyWrapper';
+import RbCard from '@/components/RbCard';
+import MoreDropdown from '@/components/MoreDropdown';
+import { testConnection } from '@/api/tools';
+import { useToolList } from './hooks/useToolList';
+import { useToolStatus } from './hooks/useToolStatus';
+import { useToolDelete } from './hooks/useToolDelete';
+import ToolIcon from '@/assets/images/tool/tool.svg';
 
-const Mcp = forwardRef<McpRef, { getStatusTag: (status: string) => ReactNode; keyword?: string | undefined }>(({ getStatusTag, keyword }, ref) => {
+const Mcp = forwardRef<McpRef, { keyword?: string | undefined }>(({ keyword }, ref) => {
   const { t } = useTranslation();
-  const { message, modal } = App.useApp()
-  const [loading, setLoading] = useState(false);
-  const [data, setData] = useState<ToolItem[]>([]);
+  const { message } = App.useApp();
+  const getStatusTag = useToolStatus();
+  const { loading, data, getData } = useToolList<ToolItem>({ toolType: 'mcp', keyword });
+  const handleDelete = useToolDelete(getData);
+
   const addServiceModalRef = useRef<McpServiceModalRef>(null);
+  const detailModalRef = useRef<McpDetailModalRef>(null);
 
-  useEffect(() => {
-    getData()
-  }, [keyword])
-
-  const getData = () => {
-    setLoading(true)
-    getTools({
-      tool_type: 'mcp',
-      name: keyword
-    })
-      .then((res) => {
-        setData(res as ToolItem[])
-      })
-      .finally(() => {
-        setLoading(false)
-      })
-  }
-
-  useImperativeHandle(ref, () => ({ handleEdit, getData }));
-
-  // 打开添加服务弹窗
   const handleEdit = (data?: ToolItem) => {
     addServiceModalRef.current?.handleOpen(data);
   };
 
-  // 测试连接
+  useImperativeHandle(ref, () => ({ handleEdit, getData }));
+
+  const handleViewDetail = (item: ToolItem) => {
+    detailModalRef.current?.handleOpen(item);
+  };
+
   const handleTestConnection = (item: ToolItem) => {
-    if (!item.id) {
-      return
-    }
+    if (!item.id) return;
     testConnection(item.id)
       .then(() => {
         message.success(t('tool.testConnectionSuccess'));
       })
       .finally(() => {
-        getData()
-      })
-  };
-  // 删除服务
-  const handleDeleteService = (item: ToolItem) => {
-    if (!item.id) {
-      return
-    }
-    modal.confirm({
-      title: t('common.confirmDeleteDesc', { name: item.name }),
-      okText: t('common.delete'),
-      cancelText: t('common.cancel'),
-      okType: 'danger',
-      onOk: () => {
-        deleteTool(item.id as string)
-          .then(() => {
-            message.success(t('common.deleteSuccess'));
-            getData()
-          })
-      }
-    })
+        getData();
+      });
   };
 
   return (
     <>
       <BodyWrapper loading={loading} empty={data?.length === 0}>
-        <Row
-          gutter={[16, 16]}
-        >
+        <Row gutter={[16, 16]}>
           {data.map((item) => (
             <Col span={8} key={item.id}>
               <RbCard
-                title={
-                  <Flex justify="space-between" gap={16}>
-                    <Space size={8} className="rb:flex-1!">
-                      <Tooltip title={item.name}>
-                        <div className="rb:wrap-break-word rb:line-clamp-1">{item.name}</div>
-                      </Tooltip>
-                      {getStatusTag(item.status)}
-                    </Space>
-                    <Dropdown
-                      menu={{
-                        items: [
-                          {
-                            key: 'edit',
-                            icon: <div className="rb:size-4 rb:bg-cover rb:cursor-pointer rb:bg-[url('@/assets/images/common/edit_bold.svg')]" />,
-                            label: t('common.edit'),
-                            onClick: () => handleEdit(item),
-                          },
-                          {
-                            key: 'link',
-                            icon: <div className="rb:size-4 rb:bg-cover rb:cursor-pointer rb:bg-[url('@/assets/images/common/link.svg')]" />,
-                            label: t('tool.testLink'),
-                            onClick: () => handleTestConnection(item),
-                          },
-                          {
-                            key: 'delete',
-                            className: 'rb:text-[#FF5D34]!',
-                            icon: <div className="rb:size-4 rb:bg-cover rb:cursor-pointer rb:bg-[url('@/assets/images/common/delete_red_big.svg')]" />,
-                            label: t('common.delete'),
-                            onClick: () => handleDeleteService(item),
-                          },
-                        ]
-                      }}
-                      placement="bottomRight"
-                    >
-                      <div className="rb:cursor-pointer rb:size-5.5 rb:bg-[url('@/assets/images/common/more.svg')] rb:hover:bg-[url('@/assets/images/common/more_hover.svg')]"></div>
-                    </Dropdown>
-                  </Flex>
-                }
                 isNeedTooltip={false}
-              >
-                <Flex vertical gap={4} className="rb:bg-[#F6F6F6] rb:rounded-lg rb:py-2! rb:px-3! rb:text-[#5B6167] rb:leading-5">
-                  {t(`tool.server_url`)}
-                  <div className="rb:h-10 rb:break-all rb:line-clamp-2 rb:text-gray-900">
-                    {item.config_data?.server_url}
+                avatarText={
+                  <img
+                    src={ToolIcon}
+                    alt=""
+                    className="rb:size-7"
+                    style={{ filter: 'brightness(0) invert(1)' }}
+                  />
+                }
+                avatarClassName="rb:bg-[#4da8ff]!"
+                title={
+                  <div className="rb:flex-1!">
+                    <div className="rb:leading-5.5 rb:wrap-break-word rb:line-clamp-1">
+                      {item.name}
+                    </div>
+                    {item.description && (
+                      <Tooltip title={item.description}>
+                        <div className="rb:text-gray-600 rb:text-[12px] rb:font-normal! rb:leading-5 rb:wrap-break-word rb:line-clamp-1">
+                          {item.description}
+                        </div>
+                      </Tooltip>
+                    )}
                   </div>
+                }
+                extra={<div className="rb:ml-2">{getStatusTag(item.status)}</div>}
+                className="rb:group/card rb:cursor-pointer"
+                onClick={() => handleViewDetail(item)}
+              >
+                <Flex align="center" justify="space-between" gap={8}>
+                  <span className="rb:text-[12px] rb:text-gray-600">
+                    {item.parameters?.length} 个工具
+                  </span>
+                  <MoreDropdown
+                    items={[
+                      {
+                        key: 'edit',
+                        icon: (
+                          <div className="rb:size-4 rb:bg-cover rb:cursor-pointer rb:bg-[url('@/assets/images/common/edit_bold.svg')]" />
+                        ),
+                        label: t('common.edit'),
+                        onClick: () => handleEdit(item),
+                      },
+                      {
+                        key: 'link',
+                        icon: (
+                          <div className="rb:size-4 rb:bg-cover rb:cursor-pointer rb:bg-[url('@/assets/images/common/link.svg')]" />
+                        ),
+                        label: t('tool.testLink'),
+                        onClick: () => handleTestConnection(item),
+                      },
+                      {
+                        key: 'delete',
+                        className: 'rb:text-[#FF5D34]!',
+                        icon: (
+                          <div className="rb:size-4 rb:bg-cover rb:cursor-pointer rb:bg-[url('@/assets/images/common/delete_red_big.svg')]" />
+                        ),
+                        label: t('common.delete'),
+                        onClick: () => handleDelete(item),
+                      },
+                    ]}
+                  />
                 </Flex>
-                <div className="rb:text-[#5B6167] rb:leading-4.5 rb:text-[12px] rb:mt-4">{t('tool.last_health_check')}: {formatDateTime(item.config_data?.last_health_check)}</div>
-
               </RbCard>
             </Col>
           ))}
@@ -145,13 +121,18 @@ const Mcp = forwardRef<McpRef, { getStatusTag: (status: string) => ReactNode; ke
         </Row>
       </BodyWrapper>
 
-      {/* 添加服务弹窗组件 */}
-      <McpServiceModal 
-        ref={addServiceModalRef}
-        refresh={getData} 
+      <McpServiceModal ref={addServiceModalRef} refresh={getData} />
+      <McpDetailModal
+        ref={detailModalRef}
+        refresh={getData}
+        onEdit={handleEdit}
+        onDelete={handleDelete}
+        getStatusTag={getStatusTag}
       />
     </>
   );
 });
+
+Mcp.displayName = 'Mcp';
 
 export default Mcp;
