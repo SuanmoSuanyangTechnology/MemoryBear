@@ -190,4 +190,11 @@ async def preference_domain_exists(
     # commit=False：本体编辑事务里可能已有未提交改动，种入只走 savepoint，
     # 由调用方事务统一提交/回滚。
     await ensure_seeded_async(db, workspace_id, domain=domain, commit=False)
-    return await _get_scene(db, workspace_id, domain) is not None
+    scene = await _get_scene(db, workspace_id, domain)
+    if scene is None:
+        logger.warning(
+            "[PreferenceType] domain missing after seed workspace=%s domain=%s",
+            workspace_id,
+            domain,
+        )
+    return scene is not None

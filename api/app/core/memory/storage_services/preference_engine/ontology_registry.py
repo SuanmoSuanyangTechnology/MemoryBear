@@ -125,6 +125,18 @@ def _load_preference_ontology_from_db_cached(
     if not subjects or not situations or set(modes) != {"positive", "negative", "relative"}:
         raise ValueError("Preference ontology has incomplete closed sets")
 
+    missing_semantics = [
+        item["key"]
+        for item in [*subjects, *situations]
+        if not (item.get("description") or "").strip()
+        or not (item.get("boundary") or "").strip()
+    ]
+    if missing_semantics:
+        raise ValueError(
+            "Preference ontology items missing semantic description/boundary: "
+            f"{missing_semantics}"
+        )
+
     return PreferenceOntology(
         domain=domain,
         subjects=tuple(item["key"] for item in subjects),

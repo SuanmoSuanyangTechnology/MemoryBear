@@ -26,6 +26,45 @@ logger = logging.getLogger(__name__)
 DEFAULT_PREFERENCE_DOMAIN = "coding"
 _APP_SCOPED_SOURCES = {"agent", "workflow"}
 
+_ONTOLOGY_SUPPORT: Optional[bool] = None
+
+
+def _has_ontology_support() -> bool:
+    """是否具备本体表：显式非 community，或数据库里确实有本体三件套。
+
+    仅看 DEPLOYMENT_MODE 默认值会把未显式配置环境变量的私有化部署误判为
+    社区版，从而静默跳过本体反查；这里用表存在性探测兜底，成功结果缓存。
+    """
+    global _ONTOLOGY_SUPPORT
+    if _ONTOLOGY_SUPPORT is not None:
+        return _ONTOLOGY_SUPPORT
+    if settings.DEPLOYMENT_MODE != "community":
+        _ONTOLOGY_SUPPORT = True
+        return True
+    try:
+        with get_db_context() as db:
+            supported = bool(
+                db.execute(
+                    text(
+                        """
+                        SELECT to_regclass('public.ontology') IS NOT NULL
+                           AND to_regclass('public.app_ontology_binding') IS NOT NULL
+                           AND EXISTS (
+                               SELECT 1 FROM information_schema.columns
+                               WHERE table_name = 'conversations'
+                                 AND column_name = 'app_id'
+                           )
+                        """
+                    )
+                ).scalar()
+            )
+    except Exception:
+        # 探测失败不缓存，下一次请求重试
+        logger.warning("[PreferenceGate] ontology table probe failed", exc_info=True)
+        return False
+    _ONTOLOGY_SUPPORT = supported
+    return supported
+
 
 def _log(
     memory_config: Any,
@@ -110,7 +149,7 @@ def resolve_effective_preference_domain(
         return None
 
     # 社区版没有 ontology / app_ontology_binding 表，不执行反查，保持既有行为
-    if settings.DEPLOYMENT_MODE == "community":
+    if not _has_ontology_support():
         _log(
             memory_config, conversation_id, source,
             DEFAULT_PREFERENCE_DOMAIN, "enabled", "community_default",
