@@ -35,6 +35,8 @@ from ..models import (
     AppRelease,
     MultiAgentConfig,
     Skill,
+    SkillPackage,
+    SkillPlugin,
     ToolConfig,
     WorkflowConfig,
 )
@@ -967,8 +969,13 @@ class AssetService:
 
     def _linked_resources(
             self, release: AppRelease | None
-    ) -> tuple[list[str], list[str]]:
-        """该版本实际引用到的技能与工具名称（§6.1.1 口径 2）。"""
+    ) -> tuple[list[dict[str, str]], list[dict[str, Any]]]:
+        """该版本实际引用到的技能与工具。
+
+        独立技能返回 ``skill``；插件成员按所属插件归并为一个 ``plugin``，不向详情
+        页展开成员。工具在既有数组结构上保留 ``tool_type`` 与 ``icon``，供前端按
+        工具类型展示。资源中心不以市场的 MCP 准入规则过滤工具。
+        """
 
         if release is None or not release.config:
             return [], []
@@ -994,25 +1001,60 @@ class AssetService:
                     if skill_id and skill_id not in skill_ids:
                         skill_ids.append(skill_id)
 
-        skill_names: list[str] = []
+        linked_skills: list[dict[str, str]] = []
         if skill_ids:
-            skill_names = [
-                name
-                for name in self.db.scalars(
-                    select(Skill.name).where(Skill.id.in_(skill_ids))
-                ).all()
-                if name
-            ]
-        tool_names: list[str] = []
+            skill_rows = self.db.execute(
+                select(
+                    Skill.id,
+                    Skill.name,
+                    SkillPackage.plugin_id,
+                    SkillPlugin.name,
+                )
+                .outerjoin(SkillPackage, Skill.package_id == SkillPackage.id)
+                .outerjoin(SkillPlugin, SkillPackage.plugin_id == SkillPlugin.id)
+                .where(Skill.id.in_(skill_ids))
+            ).all()
+            skills_by_id = {row[0]: row for row in skill_rows}
+            displayed_plugins: set[uuid.UUID] = set()
+            for skill_id in skill_ids:
+                skill = skills_by_id.get(skill_id)
+                if skill is None:
+                    continue
+                plugin_id, plugin_name = skill[2], skill[3]
+                if plugin_id and plugin_name:
+                    if plugin_id in displayed_plugins:
+                        continue
+                    displayed_plugins.add(plugin_id)
+                    linked_skills.append({
+                        "name": str(plugin_name),
+                        "skill_type": "plugin",
+                    })
+                elif skill[1]:
+                    linked_skills.append({
+                        "name": str(skill[1]),
+                        "skill_type": "skill",
+                    })
+
+        linked_tools: list[dict[str, Any]] = []
         if tool_ids:
-            tool_names = [
-                name
-                for name in self.db.scalars(
-                    select(ToolConfig.name).where(ToolConfig.id.in_(tool_ids))
-                ).all()
-                if name
-            ]
-        return skill_names, tool_names
+            tool_rows = self.db.execute(
+                select(ToolConfig.id, ToolConfig.name, ToolConfig.tool_type,
+                       ToolConfig.icon)
+                .where(ToolConfig.id.in_(tool_ids))
+            ).all()
+            tools_by_id = {row[0]: row for row in tool_rows}
+            for tool_id in tool_ids:
+                tool = tools_by_id.get(tool_id)
+                if tool is None or not tool[1]:
+                    continue
+                icon = tool[3]
+                linked_tools.append({
+                    "name": str(tool[1]),
+                    "tool_type": str(tool[2]),
+                    # 空串归一成 None：前端拿空串渲染 <img> 会发一次坏请求
+                    "icon": str(icon) if icon and str(icon).strip() else None,
+                })
+        return linked_skills, linked_tools
 
     def _get_asset_or_404(self, asset_id: uuid.UUID, tenant_id: uuid.UUID) -> AppAsset:
         asset = self.db.scalars(
