@@ -83,6 +83,7 @@ class BizCode(IntEnum):
     CONFIG_MISSING = 6012
     APP_NOT_PUBLISHED = 6013
     MODEL_NOT_CONFIGURED = 6014
+    TOOL_NOT_FOUND = 6015
 
     # external catalog / community market (6020-6028)
     FEATURE_NOT_AVAILABLE = 6020
@@ -107,6 +108,7 @@ class BizCode(IntEnum):
     FILE_READ_ERROR = 8001
     PARSER_NOT_SUPPORTED = 8002
     CHUNKING_FAILED = 8003
+    FILE_TOO_LARGE = 8004
 
     # mem-knowledge (9xxx, reserved for the KB plan)
     INDEX_BUILD_FAILED = 9001
@@ -205,6 +207,7 @@ HTTP_MAPPING: dict[BizCode, int] = {
     BizCode.CONFIG_MISSING: 400,
     BizCode.APP_NOT_PUBLISHED: 400,
     BizCode.MODEL_NOT_CONFIGURED: 400,
+    BizCode.TOOL_NOT_FOUND: 404,
     BizCode.FEATURE_NOT_AVAILABLE: 403,
     BizCode.EXTERNAL_CATALOG_UNAVAILABLE: 503,
     BizCode.EXTERNAL_CATALOG_NOT_FOUND: 404,
@@ -223,6 +226,7 @@ HTTP_MAPPING: dict[BizCode, int] = {
     BizCode.FILE_READ_ERROR: 500,
     BizCode.PARSER_NOT_SUPPORTED: 400,
     BizCode.CHUNKING_FAILED: 500,
+    BizCode.FILE_TOO_LARGE: 413,
     BizCode.INDEX_BUILD_FAILED: 500,
     BizCode.EMBEDDING_FAILED: 500,
     BizCode.SEARCH_FAILED: 500,

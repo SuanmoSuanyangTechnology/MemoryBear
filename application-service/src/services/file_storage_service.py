@@ -12,7 +12,7 @@ import time
 import uuid
 from typing import AsyncIterator, Optional
 
-from fastapi import HTTPException, UploadFile, status
+from fastapi import UploadFile
 
 from ..config import current_settings
 from ..db import get_async_db_context
@@ -434,9 +434,9 @@ async def upload_workspace_file(
         raise BusinessException("The file is empty.", BizCode.BAD_REQUEST)
 
     if declared_size is not None and declared_size > max_file_size:
-        raise HTTPException(
-            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
-            detail=f"The file size exceeds the {max_file_size} byte limit",
+        raise BusinessException(
+            f"The file size exceeds the {max_file_size} byte limit",
+            BizCode.FILE_TOO_LARGE,
         )
 
     _, file_extension = os.path.splitext(file.filename or "")
@@ -477,7 +477,7 @@ async def upload_workspace_file(
         )
         if total == 0:
             raise BusinessException("The file is empty.", BizCode.BAD_REQUEST)
-    except (HTTPException, BusinessException):
+    except BusinessException:
         await _remove_partial_upload(file_id, storage_service, file_key)
         raise
     except StorageUploadError as e:
@@ -488,9 +488,9 @@ async def upload_workspace_file(
         if stream.total == 0 and declared_size is None:
             raise BusinessException("The file is empty.", BizCode.BAD_REQUEST)
         if isinstance(e.cause, _UploadTooLarge):
-            raise HTTPException(
-                status_code=status.HTTP_413_CONTENT_TOO_LARGE,
-                detail=f"The file size exceeds the {max_file_size} byte limit",
+            raise BusinessException(
+                f"The file size exceeds the {max_file_size} byte limit",
+                BizCode.FILE_TOO_LARGE,
             )
         raise BusinessException(
             f"File storage failed: {str(e)}", BizCode.INTERNAL_ERROR
