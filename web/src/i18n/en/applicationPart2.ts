@@ -1,6 +1,5 @@
-export const applicationPart2 = {
-      inputReply: 'Input Reply',
-      addNextAnnotation: 'Add Next Annotation',
+import type { ApplicationPart2 } from '../zh/applicationPart2'
+export const applicationPart2: ApplicationPart2 = {
       editAnnotations: 'Edit Annotations',
       hitHistory: 'Hit History',
       batchImport: 'Batch Import',
@@ -54,4 +53,10 @@ export const applicationPart2 = {
       ontologyExtra: 'An ontology includes one scenario type and a set of configured emotions. Once associated, it provides both profiling and emotion capabilities.',
       ontologyUnassociated: 'No association (default ontology fallback only)',
       ontologyEmotionCount: '{{count}} emotion types',
+      usageExamples: 'Usage Examples',
+      usageExamplesHint: 'Please provide 3–5 example tasks that users can initiate directly. Each is required.',
+      addUsageExample: 'Add Usage Example ({{count}}/5)',
+      usageExamplesMin: 'Please provide 3–5 example tasks that users can initiate directly. Each is required.',
+      usageExamplePrefix: 'Example',
+      usageExamplePlaceholder: 'Describe the task the user wants to complete',
 }

@@ -52,4 +52,12 @@ export const applicationPart2 = {
       ontologyExtra: '本体包含一个本体场景类型与若干配置好的情绪，关联后即同时获得画像与情绪能力。',
       ontologyUnassociated: '不关联（仅默认本体兜底）',
       ontologyEmotionCount: '{{count}} 类情绪',
+      usageExamples: '使用示例',
+      usageExamplesHint: '请填写 3～5 条用户可以直接发起的示例任务，每条均为必填。',
+      addUsageExample: '添加使用示例（{{count}}/5）',
+      usageExamplesMin: '请填写 3～5 条用户可以直接发起的示例任务，每条均为必填。',
+      usageExamplePrefix: '示例',
+      usageExamplePlaceholder: '描述用户希望完成的任务',
 }
+
+export type ApplicationPart2 = typeof applicationPart2

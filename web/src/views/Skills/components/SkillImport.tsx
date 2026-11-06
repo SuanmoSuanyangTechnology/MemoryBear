@@ -8,8 +8,7 @@ import RadioGroupCard from '@/components/RadioGroupCard';
 import RbModal from '@/components/RbModal';
 import RbAlert from '@/components/RbAlert';
 import UploadFiles from '@/components/Upload/UploadFiles';
-import pluginIcon from '@/assets/images/menuNew/plugin.svg';
-import skillIcon from '@/assets/images/menuNew/skill.svg';
+import SkillIcon from './SkillIcon';
 import textIcon from '@/assets/images/application/text.svg';
 import SkillFiles from './SkillFiles';
 import { skillImport } from '@/api/skill'; 
@@ -241,9 +240,7 @@ const SkillImport: FC<{ open: boolean; onClose: () => void; onImported?: () => v
               {preview.kind === Kind.Plugin && !member ? (
                 <>
                   <Flex gap={16} align="flex-end">
-                    <Flex component="span" align="center" justify="center" className="rb:size-10 rb:shrink-0 rb:rounded-lg rb:bg-purple-50" aria-hidden="true">
-                      <img src={pluginIcon} alt="" className="rb:h-6 rb:w-6" />
-                    </Flex>
+                    <SkillIcon plugin={true} className="rb:size-11" iconClassName="rb:size-7" />
                     <Form.Item name={["plugin", "name"]} label={t('skills.pluginName')} rules={[{ required: true, whitespace: true, message: t('common.pleaseEnter') }]} className="rb:min-w-0 rb:flex-1">
                       <Input />
                     </Form.Item>
@@ -285,9 +282,7 @@ const SkillImport: FC<{ open: boolean; onClose: () => void; onImported?: () => v
                     </Button>
                   }
                   <Flex align="flex-start" gap={8} className="rb:mb-3!">
-                    <Flex component="span" align="center" justify="center" className="rb:mt-4! rb:h-12 rb:w-12 rb:shrink-0 rb:rounded-lg rb:bg-blue-700" aria-hidden="true">
-                      <img src={skillIcon} alt="" className="rb:h-6 rb:w-6" />
-                    </Flex>
+                    <SkillIcon className="rb:size-11" iconClassName="rb:size-7" />
                     <div className="rb:min-w-0 rb:flex-1">
                       <div className="rb:grid rb:gap-4 rb:md:grid-cols-2">
                         <Form.Item name={selectedSkill !== null ? ['skills', selectedSkill, 'name'] : ['skill', 'name']} label={t('skills.skillName')} rules={[{ required: true, whitespace: true, message: t('common.pleaseEnter') }]} className="rb:min-w-0">

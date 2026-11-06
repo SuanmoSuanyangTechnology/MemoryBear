@@ -2,8 +2,7 @@ import { forwardRef, useImperativeHandle, useState } from 'react'
 import { Flex, Skeleton, Tree } from 'antd'
 import type { DataNode } from 'antd/es/tree'
 import { getSkillIds, getPluginMembers, groupSkills } from './selection'
-import pluginIcon from '@/assets/images/menuNew/plugin.svg'
-import skillIcon from '@/assets/images/menuNew/skill.svg'
+import SkillIcon from '@/views/Skills/components/SkillIcon'
 import { useTranslation } from 'react-i18next'
 import { DownOutlined } from '@ant-design/icons';
 
@@ -120,7 +119,7 @@ const SkillListModal = forwardRef<SkillModalRef, SkillModalProps>(({ refresh, se
                 return {
                   key, skill, parent, disableCheckbox: disabled,
                   title: <div className={`rb:flex rb:min-w-0 rb:flex-1 rb:items-center rb:gap-2 rb:min-h-11 ${disabled ? 'rb:opacity-45 rb:cursor-not-allowed' : ''}`}>
-                    <img src={plugin ? pluginIcon : skillIcon} alt="" className="rb:size-8 rb:shrink-0 rb:rounded-lg rb:bg-gray-50 rb:p-1" />
+                    <SkillIcon plugin={plugin} />
                     <span className="rb:min-w-0 rb:flex-1 rb:truncate" title={skill.name}>{skill.name || skill.id}</span>
                   </div>,
                   children: plugin ? members.map((member, index) => makeNode(member, key + ':' + index, skill)) : undefined,

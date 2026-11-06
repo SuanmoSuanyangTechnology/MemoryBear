@@ -26,9 +26,9 @@ import PrivateWrap from '../PrivateWrap';
 const { Header } = Layout;
 
 const resourceTabs = [
-  // { value: 'agent', iconClass: 'rb:bg-[url("@/assets/images/menuNew/application_gray.svg")]', activeIconClass: 'rb:bg-[url("@/assets/images/menuNew/application.svg")]' },
+  { value: 'apps', iconClass: 'rb:bg-[url("@/assets/images/menuNew/application_gray.svg")]', activeIconClass: 'rb:bg-[url("@/assets/images/menuNew/application.svg")]' },
   { value: 'skills', iconClass: 'rb:bg-[url("@/assets/images/menuNew/skills_gray.svg")]', activeIconClass: 'rb:bg-[url("@/assets/images/menuNew/skills.svg")]' },
-  // { value: 'tool', iconClass: 'rb:bg-[url("@/assets/images/menuNew/tool_gray.svg")]', activeIconClass: 'rb:bg-[url("@/assets/images/menuNew/tool.svg")]' },
+  { value: 'tools', iconClass: 'rb:bg-[url("@/assets/images/menuNew/tool_gray.svg")]', activeIconClass: 'rb:bg-[url("@/assets/images/menuNew/tool.svg")]' },
 ] as const;
 
 /**
@@ -75,13 +75,13 @@ const AppHeader: FC<{ source?: 'space' | 'manage'; }> = ({ source = 'manage' }) 
   const breadcrumbSource = getBreadcrumbSource();
   const breadcrumbs = allBreadcrumbs[breadcrumbSource] || [];
   const isResourceCenter = source === 'manage' && location.pathname === '/resources';
-  const resourceType = searchParams.get('type') || 'skills';
+  const resourceType = searchParams.get('type') || 'apps';
 
   useEffect(() => {
     if (isResourceCenter && resourceType) {
       document.title = `${t(`menu.${resourceType}`)} - ${t('memoryBear') }`
     }
-  }, [resourceType, isResourceCenter])
+  }, [resourceType, isResourceCenter, t])
 
 
   /** Handle user logout */
@@ -202,7 +202,7 @@ const AppHeader: FC<{ source?: 'space' | 'manage'; }> = ({ source = 'manage' }) 
               <Flex
                 key={tab.value}
                 align="center" justify="center" gap={4}
-                className={clsx('rb:h-9 rb:min-w-19.5 rb:px-3 rb:rounded-xl rb:text-gray-600 rb:cursor-pointer rb:whitespace-nowrap rb:hover:bg-gray-400 rb:hover:text-gray-800', {
+                className={clsx('rb:h-9 rb:min-w-19.5 rb:px-3! rb:rounded-xl rb:text-gray-600 rb:cursor-pointer rb:whitespace-nowrap rb:hover:bg-gray-400 rb:hover:text-gray-800', {
                   'rb:bg-gray-400 rb:text-gray-800 rb:font-medium': isActive,
                 })}
                 onClick={() => {

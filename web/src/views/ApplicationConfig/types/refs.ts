@@ -157,8 +157,16 @@ export interface AppSharingModalRef {
 }
 
 export interface AppSharingForm {
-  target_workspace_ids: string[];
-  permission: 'readonly' | 'editable'
+  release_id?: string | null;
+  resource_center: {
+    enabled: boolean;
+    allow_editable?: boolean;
+    tags?: string[];
+  };
+  community_market: {
+    enabled: boolean;
+    description?: string;
+  };
 }
 
 export interface EmbedWebsiteModalRef {

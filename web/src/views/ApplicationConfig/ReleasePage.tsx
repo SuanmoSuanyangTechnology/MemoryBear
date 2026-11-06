@@ -1,9 +1,3 @@
-/*
- * @Author: ZhaoYing 
- * @Date: 2026-02-03 16:29:41 
- * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-10-30 16:49:25
- */
 import { type FC, useState, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import clsx from 'clsx';
@@ -26,6 +20,8 @@ import RbButton from '@/components/RbButton';
 import EmbedWebsiteModal from './components/EmbedWebsiteModal'
 import PublishAsToolModal from '@/views/ToolManagement/components/PublishAsToolModal'
 import type { WorkflowToolItem } from '@/views/ToolManagement/types'
+import { getAppAssetsCategoriesUrl } from '@/api/resourceCenter';
+import CustomSelect from '@/components/CustomSelect';
 /**
  * Tag color mapping for release versions
  */
@@ -41,7 +37,7 @@ const tagColors: Record<Release['tagKey'], TagProps['color']> = {
  * @param refresh - Function to refresh application data
  */
 const ReleasePage: FC<{data: Application; refresh: () => void}> = ({data, refresh}) => {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const { message } = App.useApp()
   const { getCheckResults } = useWorkflowStore()
   const releaseModalRef = useRef<ReleaseModalRef>(null)
@@ -152,7 +148,7 @@ const ReleasePage: FC<{data: Application; refresh: () => void}> = ({data, refres
                   <RbButton type="primary" ghost onClick={() => embedWebsiteModalRef.current?.handleOpen()}>{t('application.embedWebsite')}</RbButton>
                 </>}
                 {/* <RbButton type="primary" ghost onClick={() => embedWebsiteModalRef.current?.handleOpen()}>{t('application.embedWebsite')}</RbButton> */}
-                {!['multi_agent', 'pure_workflow'].includes(data?.type) && <RbButton type="primary" ghost onClick={() => appSharingModalRef.current?.handleOpen()}>{t('application.sharing')}</RbButton>}
+                {!['pure_workflow'].includes(data?.type) && <RbButton type="primary" ghost onClick={() => appSharingModalRef.current?.handleOpen()}>{t('application.sharing')}</RbButton>}
               </>}
               {data?.type === 'pure_workflow'
                 ? <Dropdown
@@ -220,8 +216,41 @@ const ReleasePage: FC<{data: Application; refresh: () => void}> = ({data, refres
                       : <Input value={t('application.noIcon')} disabled />
                     }
                   </Form.Item>
+                  <Form.Item
+                    label={t('application.category')}
+                    rules={[
+                      { required: true, message: t('common.pleaseSelect') },
+                    ]}
+                    className="rb:mb-0!"
+                  >
+                    <CustomSelect
+                      value={selectedVersion.categories}
+                      url={getAppAssetsCategoriesUrl}
+                      hasAll={false}
+                      mode="multiple"
+                      valueKey="code"
+                      disabled
+                      placeholder={t('application.categoryPlaceholder')}
+                      labelKey={i18n.language === 'zh' ? 'name' : 'name_en'}
+                    />
+                  </Form.Item>
                 </div>
               </RbCard>
+
+              {selectedVersion.usage_examples && selectedVersion.usage_examples?.length > 0 &&
+                <RbCard
+                  title={t('application.usageExamples')}
+                  headerType="borderless"
+                >
+                  <Flex vertical gap={12}>
+                    {selectedVersion.usage_examples.map((example, index) => (
+                      <div key={index} className="rb:leading-4 rb:py-3! rb:px-4! rb-border rb:rounded-lg">
+                        {index + 1}. {example}
+                      </div>
+                    ))}
+                  </Flex>
+                </RbCard>
+              }
 
               {/* Logs */}
               <RbCard
