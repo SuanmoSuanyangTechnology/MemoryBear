@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import uuid
 from collections import defaultdict
 from typing import Any
 
@@ -47,13 +48,37 @@ class PreferenceProcessor:
         self.memory_config = memory_config
         self.end_user_id = end_user_id
         workspace_id = getattr(memory_config, "workspace_id", None)
-        if workspace_id:
+        if not workspace_id:
+            logger.warning(
+                "[Preference] workspace missing, use shipped ontology domain=%s", domain
+            )
+            self.ontology = load_preference_ontology(domain)
+        else:
+            try:
+                uuid.UUID(str(workspace_id))
+            except (TypeError, ValueError) as exc:
+                # 非法 workspace 不能回退随包本体，否则会用错误的封闭集合写入
+                logger.error(
+                    "[Preference] invalid workspace id, skip preference task: %s",
+                    workspace_id,
+                )
+                raise ValueError("invalid preference workspace id") from exc
             try:
                 self.ontology = load_preference_ontology_from_db(
                     str(workspace_id), domain
                 )
             except Exception as exc:
-                # DB 本体缺失/不完整时回退随包本体，偏好任务降级但不阻塞正写
+                if domain != DEFAULT_PREFERENCE_DOMAIN:
+                    # 随包本体只有默认域，非默认域不能回退，直接跳过本次偏好任务
+                    logger.error(
+                        "[Preference] DB ontology load failed for non-default domain, "
+                        "skip preference task workspace=%s domain=%s error=%s",
+                        workspace_id,
+                        domain,
+                        exc,
+                        exc_info=True,
+                    )
+                    raise
                 logger.warning(
                     "[Preference] ontology load failed, fallback to shipped ontology "
                     "workspace=%s domain=%s error=%s",
@@ -63,11 +88,6 @@ class PreferenceProcessor:
                     exc_info=True,
                 )
                 self.ontology = load_preference_ontology(domain)
-        else:
-            logger.warning(
-                "[Preference] workspace missing, use shipped ontology domain=%s", domain
-            )
-            self.ontology = load_preference_ontology(domain)
         self.runner = PreferencePromptRunner(llm_client, self.ontology)
         self.connector = connector
 
