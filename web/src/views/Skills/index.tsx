@@ -1,10 +1,9 @@
-import { useRef, useState } from 'react';
-import { App, Button, Flex, Skeleton } from 'antd';
-import clsx from 'clsx';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { App, Button, Flex, Skeleton, Tooltip } from 'antd';
 import { useTranslation } from 'react-i18next';
 
 import PageTabs from '@/components/PageTabs';
-import PageScrollList from '@/components/PageScrollList';
+import PageScrollList, { type PageScrollListRef } from '@/components/PageScrollList';
 import RbCard from '@/components/RbCard';
 import Tag from '@/components/Tag';
 import SearchInput from '@/components/SearchInput';
@@ -24,9 +23,9 @@ const Skills = () => {
   const { message, modal } = App.useApp();
   const [importOpen, setImportOpen] = useState(false);
   const detailRef = useRef<SkillDetailRef>(null);
+  const pageScrollListRef = useRef<PageScrollListRef>(null)
   const [kind, setKind] = useState<AllKind>('all');
   const [search, setSearch] = useState<string | undefined>(undefined);
-  const [version, setVersion] = useState(0);
 
   const [statistics, setStatistics] = useState<Statistic>({} as Statistic)
   const tabs: { value: AllKind; label: string; count: keyof Statistic; }[] = [
@@ -39,7 +38,7 @@ const Skills = () => {
     try {
       await deleteSkill(item.id);
       message.success(t('skills.deleteSuccess'));
-      setVersion(current => current + 1);
+      refresh()
     } catch {
       message.error(t('skills.deleteFailed'));
     }
@@ -67,6 +66,10 @@ const Skills = () => {
   }
   const handleExport = (item: Skill) => {
     skillExport(item.id, `${item.name}.zip`)
+  }
+  const refresh = () => {
+    pageScrollListRef.current?.refresh()
+    getStatistics()
   }
 
   const getStatistics = useCallback(() => {
@@ -111,7 +114,8 @@ const Skills = () => {
       </Flex>
       <Flex role="region" aria-label={t('skills.importPackageAction')} vertical className="rb:min-h-0 rb:flex-1">
         <PageScrollList<Skill, SkillQuery>
-          key={JSON.stringify([kind, search, version])}
+          key={JSON.stringify([kind, search])}
+          ref={pageScrollListRef}
           url={getSkillListUrl}
           query={{
             ...(kind !== 'all' ? { kind } : {}),
@@ -194,7 +198,7 @@ const Skills = () => {
           }}
         />
       </Flex>
-      <SkillImport open={importOpen} onClose={() => setImportOpen(false)} onImported={() => setVersion(current => current + 1)} />
+      <SkillImport open={importOpen} onClose={() => setImportOpen(false)} onImported={() => refresh()} />
       <SkillDetail ref={detailRef} />
     </Flex>
   );
