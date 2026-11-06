@@ -293,7 +293,13 @@ class AppService:
             AppAssetInstallation.status == InstallStatus.ACTIVE,
             AppAssetInstallation.link_mode == LinkMode.REFERENCE,
             AppAsset.status == AssetStatus.PUBLISHED,
-            AppRelease.type == app_type,
+            # 按 `App.type` 而不是 `AppRelease.type`：占名要算的是「这一行会不会在
+            # type=T 的列表里跟新应用撞名」，而列表过滤的就是 `App.type`
+            # （`list_apps` 的 `App.type == type_list[0]`），展示的 type 也取
+            # `app.type`。上面两个分支（自有应用、legacy 共享）同样按 `App.type`。
+            # 改用快照 type 会让三个分支口径分裂：快照 type 与 App.type 一旦不一致，
+            # 这里就漏掉一个列表里真实存在的同名行，生成出重复名字。
+            App.type == app_type,
             # 已下线的钉住版本读不出来（resolver 抛 RELEASE_NOT_FOUND），不占名
             AppRelease.is_active.is_(True),
             App.is_active.is_(True),
