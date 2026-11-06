@@ -110,6 +110,8 @@ async def ensure_seeded_async(
 ) -> bool:
     """异步会话版本：供页面接口与本体绑定校验使用。
 
+    commit=True 仅用于自有会话（请求级只读接口、初始化流程），调用前不应有
+    其它未提交改动；已有未提交改动时传 commit=False。
     commit=False 时用 SAVEPOINT 只写入种子行，不提交调用方事务；
     并发唯一键冲突只回滚 savepoint，调用方后续写入不受影响。
     """
@@ -149,4 +151,8 @@ async def ensure_seeded_async(
             domain,
         )
         return False
+    except Exception:
+        # 其它写入异常也要回滚，避免 failed session 传染后续操作
+        await db.rollback()
+        raise
     return True

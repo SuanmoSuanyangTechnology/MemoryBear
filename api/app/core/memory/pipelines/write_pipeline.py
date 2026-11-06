@@ -355,9 +355,9 @@ class WritePipeline:
                         resolve_effective_preference_domain,
                     )
 
-                    try:
-                        from app.core.config import settings
+                    from app.core.config import settings
 
+                    try:
                         preference_domain = await asyncio.wait_for(
                             asyncio.to_thread(
                                 resolve_effective_preference_domain,
@@ -367,10 +367,20 @@ class WritePipeline:
                             ),
                             timeout=settings.PREFERENCE_GATE_TIMEOUT_SECONDS,
                         )
+                    except asyncio.TimeoutError:
+                        # 超时与被门控规则主动跳过分开记录，便于告警区分
+                        logger.warning(
+                            "[PreferenceGate] resolve domain timeout end_user_id=%s "
+                            "reason=gate_timeout timeout=%ss",
+                            self.end_user_id,
+                            settings.PREFERENCE_GATE_TIMEOUT_SECONDS,
+                        )
+                        preference_domain = None
                     except Exception as gate_error:
                         # 门控/反查异常只跳过偏好任务，不阻断 Normal Write
-                        logger.warning(
-                            "[PreferenceGate] resolve domain failed end_user_id=%s: %s",
+                        logger.error(
+                            "[PreferenceGate] resolve domain failed end_user_id=%s "
+                            "reason=gate_error error=%s",
                             self.end_user_id,
                             gate_error,
                             exc_info=True,

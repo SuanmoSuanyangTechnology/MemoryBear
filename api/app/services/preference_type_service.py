@@ -157,7 +157,11 @@ async def get_preference_display_names(
     domains: Iterable[Optional[str]],
     language: str,
 ) -> dict[str, str]:
-    """批量取偏好域展示名（本体列表 / 组合摘要投影用）；不传空域。"""
+    """批量取偏好域展示名（本体列表 / 组合摘要投影用）；不传空域。
+
+    契约：调用方需先确保当前 workspace 已种入（列表、详情、组合摘要入口
+    都会先调用 ensure_seeded*）；未种入时返回空字典。
+    """
     unique_domains = [item for item in dict.fromkeys(domains) if item]
     if not unique_domains:
         return {}
