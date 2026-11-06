@@ -14,6 +14,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config.preference_type_initializer import ensure_seeded_async
+from app.db import get_async_db_context
 from app.models.ontology_preference import (
     OntologyPreferenceClass,
     OntologyPreferenceScene,
@@ -41,11 +42,19 @@ async def _get_scene(
     return result.scalars().first()
 
 
+async def _ensure_seeded_in_new_session(
+    workspace_id: uuid.UUID, domain: str = "coding"
+) -> None:
+    """用独立会话种入并提交，不污染请求/调用方事务。"""
+    async with get_async_db_context() as seed_db:
+        await ensure_seeded_async(seed_db, workspace_id, domain=domain)
+
+
 async def list_preference_types(
     db: AsyncSession, workspace_id: uuid.UUID, language: str
 ) -> dict:
     """6.2 偏好类型列表：无分页、无搜索、无筛选。"""
-    await ensure_seeded_async(db, workspace_id)
+    await _ensure_seeded_in_new_session(workspace_id)
     result = await db.execute(
         select(OntologyPreferenceScene)
         .where(OntologyPreferenceScene.workspace_id == workspace_id)
@@ -101,7 +110,7 @@ async def get_preference_type(
     language: str,
 ) -> Optional[dict]:
     """6.3 偏好类型详情；未知 domain 返回 None（由路由转 BizCode.NOT_FOUND，即 4000）。"""
-    await ensure_seeded_async(db, workspace_id)
+    await _ensure_seeded_in_new_session(workspace_id)
     scene = await _get_scene(db, workspace_id, domain)
     if scene is None:
         return None
@@ -186,14 +195,12 @@ async def preference_domain_exists(
 ) -> bool:
     """本体绑定校验：当前工作空间下是否存在该偏好域（不存在则惰性种入后重查）。
 
-    必须在可提交事务中调用（本体创建/编辑）；不要复用到只读端点，
-    否则 savepoint 内的种子行会随请求会话关闭被丢弃。
+    种子在独立会话中提交：不依赖调用方事务，也不受并发未提交窗口影响；
+    只读端点与本体编辑事务均可调用。
     """
     if await _get_scene(db, workspace_id, domain) is not None:
         return True
-    # commit=False：本体编辑事务里可能已有未提交改动，种入只走 savepoint，
-    # 由调用方事务统一提交/回滚。
-    await ensure_seeded_async(db, workspace_id, domain=domain, commit=False)
+    await _ensure_seeded_in_new_session(workspace_id, domain)
     scene = await _get_scene(db, workspace_id, domain)
     if scene is None:
         logger.warning(

@@ -98,6 +98,13 @@ def build_seed_rows(
     if set(modes) != _ALLOWED_MODES:
         raise ValueError("Preference ontology has invalid allowed_modes")
 
+    subject_keys = [str(item.get("key") or "").strip() for item in subjects]
+    situation_keys = [str(item.get("key") or "").strip() for item in situations]
+    if len(subject_keys) != len(set(subject_keys)):
+        raise ValueError("Preference subjects contain duplicate keys")
+    if len(situation_keys) != len(set(situation_keys)):
+        raise ValueError("Preference situations contain duplicate keys")
+
     display_type = _find_display_type(display_payload, domain)
     now = utcnow_naive()
     scene_id = uuid.uuid4()
@@ -125,10 +132,13 @@ def build_seed_rows(
             raise ValueError("Preference subject key is empty")
         semantic_description = item.get("description")
         semantic_boundary = item.get("boundary")
-        if not (semantic_description or "").strip():
-            raise ValueError(f"Preference subject semantic description is empty: {key}")
-        if not (semantic_boundary or "").strip():
-            raise ValueError(f"Preference subject semantic boundary is empty: {key}")
+        if not isinstance(semantic_description, str) or not semantic_description.strip():
+            raise ValueError(f"Preference subject semantic description is invalid: {key}")
+        if not isinstance(semantic_boundary, str) or not semantic_boundary.strip():
+            raise ValueError(f"Preference subject semantic boundary is invalid: {key}")
+        semantic_includes = item.get("includes")
+        if semantic_includes is not None and not isinstance(semantic_includes, str):
+            raise ValueError(f"Preference subject includes must be a string: {key}")
         display_item = _find_display_item(display_type, "subjects", key)
         classes.append(
             OntologyPreferenceClass(
@@ -141,7 +151,7 @@ def build_seed_rows(
                 display_description_zh=_localized(display_item.get("description"), "zh"),
                 display_description_en=_localized(display_item.get("description"), "en"),
                 semantic_description=semantic_description,
-                semantic_includes=item.get("includes"),
+                semantic_includes=semantic_includes,
                 semantic_boundary=semantic_boundary,
                 sort_order=index,
                 is_system_default=True,
@@ -156,10 +166,10 @@ def build_seed_rows(
             raise ValueError("Preference situation key is empty")
         semantic_description = item.get("description")
         semantic_boundary = item.get("boundary")
-        if not (semantic_description or "").strip():
-            raise ValueError(f"Preference situation semantic description is empty: {key}")
-        if not (semantic_boundary or "").strip():
-            raise ValueError(f"Preference situation semantic boundary is empty: {key}")
+        if not isinstance(semantic_description, str) or not semantic_description.strip():
+            raise ValueError(f"Preference situation semantic description is invalid: {key}")
+        if not isinstance(semantic_boundary, str) or not semantic_boundary.strip():
+            raise ValueError(f"Preference situation semantic boundary is invalid: {key}")
         display_item = _find_display_item(display_type, "situations", key)
         classes.append(
             OntologyPreferenceClass(

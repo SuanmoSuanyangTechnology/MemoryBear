@@ -1095,6 +1095,7 @@ async def get_preference_type_list(
         )
     except Exception as e:
         api_logger.error(f"查询偏好类型列表失败: {e}", exc_info=True)
+        await db.rollback()
         return fail(BizCode.INTERNAL_ERROR, "查询失败")
 
 
@@ -1113,6 +1114,9 @@ async def get_preference_type_detail(
         api_logger.warning(f"User {current_user.id} has no current workspace")
         return fail(BizCode.INVALID_PARAMETER, "请先切换到一个工作空间", "current_workspace_id is None")
 
+    if len(domain) > 50:
+        return fail(BizCode.INVALID_PARAMETER, "请求参数无效", "domain 长度超过 50")
+
     try:
         data = await get_preference_type(db, workspace_id, domain, language)
         if data is None:
@@ -1120,6 +1124,7 @@ async def get_preference_type_detail(
         return success(data=data, msg="查询成功")
     except Exception as e:
         api_logger.error(f"查询偏好类型详情失败: {e}", exc_info=True)
+        await db.rollback()
         return fail(BizCode.INTERNAL_ERROR, "查询失败")
 
 
