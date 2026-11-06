@@ -249,6 +249,7 @@ class EmotionRepository:
         query = """
         MATCH (s:Statement)
         WHERE s.end_user_id = $end_user_id
+          AND s.delete_at IS NULL
           AND s.emotion_type IS NOT NULL
           AND s.created_at IS NOT NULL
           AND datetime(s.created_at) >= datetime($start_date)
