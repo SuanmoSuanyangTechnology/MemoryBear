@@ -105,13 +105,22 @@ def _pinned_name_app_ids(pattern: str, workspace_id: uuid.UUID):
 
     ``AppRelease.is_active`` 也与 resolver 对齐：`resolve_release` 见到已下线的
     版本直接抛 `RELEASE_NOT_FOUND`，那条引用读不出来，就不该再被快照名搜到。
+
+    ``App.workspace_id != workspace_id`` 是展示口径的另一半：只有「别人的应用」
+    才会以快照名展示（`_build_serialization_context` 只收
+    `workspace_id != current_workspace_id` 的行），本空间自有应用即使被拉进本空间，
+    列表里显示的仍是 `App.name`。不排除它们就会出现「按 X 搜到一行、名字显示成
+    Y」；顺带也让这条 OR 谓词在 `include_shared=False`（scope 恰好是
+    `App.workspace_id == workspace_id`）下恒不成立，不可能把外空间应用捞进来。
     """
 
     return (
         select(AppAsset.source_app_id)
         .join(AppAssetInstallation, AppAssetInstallation.asset_id == AppAsset.id)
         .join(AppRelease, AppRelease.id == AppAsset.published_release_id)
+        .join(App, App.id == AppAsset.source_app_id)
         .where(
+            App.workspace_id != workspace_id,
             AppAssetInstallation.target_workspace_id == workspace_id,
             AppAssetInstallation.status == InstallStatus.ACTIVE,
             AppAssetInstallation.link_mode == LinkMode.REFERENCE,
