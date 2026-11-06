@@ -13,6 +13,7 @@ Agent / Workflow 按 `conversation_id` 反查 `conversations.app_id` → 有效�
 from __future__ import annotations
 
 import logging
+import time
 import uuid
 from typing import Any, Optional, Tuple
 
@@ -27,17 +28,26 @@ DEFAULT_PREFERENCE_DOMAIN = "coding"
 _APP_SCOPED_SOURCES = {"agent", "workflow"}
 
 _ONTOLOGY_SUPPORT: Optional[bool] = None
+_ONTOLOGY_SUPPORT_CHECKED_AT: float = 0.0
+_ONTOLOGY_SUPPORT_NEGATIVE_TTL_SECONDS = 60.0
 
 
 def _has_ontology_support() -> bool:
     """是否具备本体表：显式非 community，或数据库里确实有本体三件套。
 
     仅看 DEPLOYMENT_MODE 默认值会把未显式配置环境变量的私有化部署误判为
-    社区版，从而静默跳过本体反查；这里用表存在性探测兜底，成功结果缓存。
+    社区版，从而静默跳过本体反查；这里用表存在性探测兜底。
+    正结果永久缓存；负结果缓存 60s，避免“服务先启动、后跑迁移”时永久失效。
     """
-    global _ONTOLOGY_SUPPORT
-    if _ONTOLOGY_SUPPORT is not None:
-        return _ONTOLOGY_SUPPORT
+    global _ONTOLOGY_SUPPORT, _ONTOLOGY_SUPPORT_CHECKED_AT
+    now = time.monotonic()
+    if _ONTOLOGY_SUPPORT is True:
+        return True
+    if (
+        _ONTOLOGY_SUPPORT is False
+        and now - _ONTOLOGY_SUPPORT_CHECKED_AT < _ONTOLOGY_SUPPORT_NEGATIVE_TTL_SECONDS
+    ):
+        return False
     if settings.DEPLOYMENT_MODE != "community":
         _ONTOLOGY_SUPPORT = True
         return True
@@ -63,6 +73,7 @@ def _has_ontology_support() -> bool:
         logger.warning("[PreferenceGate] ontology table probe failed", exc_info=True)
         return False
     _ONTOLOGY_SUPPORT = supported
+    _ONTOLOGY_SUPPORT_CHECKED_AT = now
     return supported
 
 

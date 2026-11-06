@@ -184,7 +184,11 @@ async def get_preference_display_names(
 async def preference_domain_exists(
     db: AsyncSession, workspace_id: uuid.UUID, domain: str
 ) -> bool:
-    """本体绑定校验：当前工作空间下是否存在该偏好域（不存在则惰性种入后重查）。"""
+    """本体绑定校验：当前工作空间下是否存在该偏好域（不存在则惰性种入后重查）。
+
+    必须在可提交事务中调用（本体创建/编辑）；不要复用到只读端点，
+    否则 savepoint 内的种子行会随请求会话关闭被丢弃。
+    """
     if await _get_scene(db, workspace_id, domain) is not None:
         return True
     # commit=False：本体编辑事务里可能已有未提交改动，种入只走 savepoint，

@@ -403,11 +403,22 @@ async def execute_preference_recall(
             )
             preference_ontology = load_preference_ontology(DEFAULT_PREFERENCE_DOMAIN)
         else:
-            preference_ontology = await asyncio.to_thread(
-                load_preference_ontology_from_db,
-                str(memory_config.workspace_id),
-                DEFAULT_PREFERENCE_DOMAIN,
-            )
+            try:
+                preference_ontology = await asyncio.to_thread(
+                    load_preference_ontology_from_db,
+                    str(memory_config.workspace_id),
+                    DEFAULT_PREFERENCE_DOMAIN,
+                )
+            except Exception as exc:
+                # DB 本体加载失败时回退随包本体，避免召回整体不可用
+                logger.warning(
+                    "[PreferenceRecall] DB ontology load failed, fallback to shipped "
+                    "ontology config_id=%s error=%s",
+                    config_id,
+                    exc,
+                    exc_info=True,
+                )
+                preference_ontology = load_preference_ontology(DEFAULT_PREFERENCE_DOMAIN)
         service = PreferenceRecallService(
             configured_workspace_id=memory_config.workspace_id,
             prompt_runner=PreferencePromptRunner(llm_client, preference_ontology),
