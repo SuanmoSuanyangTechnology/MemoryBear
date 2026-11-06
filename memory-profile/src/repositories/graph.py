@@ -71,11 +71,6 @@ _COMMUNITY_NEIGHBOR_PROJECTION = variable_projection("e2", COMMUNITY_GRAPH_ENTIT
 _WORKSPACE_FALLBACK_STATISTICS_QUERY = """
 UNWIND $end_user_ids AS end_user_id
 CALL (end_user_id) {
-    OPTIONAL MATCH (summary:MemorySummary {end_user_id: end_user_id})
-    WHERE summary.delete_at IS NULL
-    RETURN count(DISTINCT summary) AS episodic_count
-}
-CALL (end_user_id) {
     OPTIONAL MATCH (entity:ExtractedEntity {end_user_id: end_user_id})
     WHERE entity.delete_at IS NULL
       AND entity.is_explicit_memory = true
@@ -87,8 +82,7 @@ CALL (end_user_id) {
       AND statement.emotion_type IS NOT NULL
     RETURN count(DISTINCT statement) AS emotional_count
 }
-RETURN sum(episodic_count) AS episodic_count,
-       sum(explicit_entity_count) AS explicit_entity_count,
+RETURN sum(explicit_entity_count) AS explicit_entity_count,
        sum(emotional_count) AS emotional_count
 """
 
@@ -454,7 +448,6 @@ class MemoryGraphRepository:
 
         if not end_user_ids:
             return {
-                "episodic_count": 0,
                 "explicit_entity_count": 0,
                 "emotional_count": 0,
             }
@@ -464,7 +457,6 @@ class MemoryGraphRepository:
         )
         row = rows[0] if rows else {}
         return {
-            "episodic_count": int(row.get("episodic_count") or 0),
             "explicit_entity_count": int(row.get("explicit_entity_count") or 0),
             "emotional_count": int(row.get("emotional_count") or 0),
         }

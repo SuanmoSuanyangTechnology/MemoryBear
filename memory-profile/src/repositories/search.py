@@ -12,8 +12,6 @@ from src.infrastructure.elasticsearch import ElasticsearchManager
 
 #: ES 别名由写侧 ``get_index_name()`` 生成（``{name}_current``）。本服务不 import
 #: api，故在此保持同名常量；契约测试见 §11.5，调整时两侧需同步。
-_INDEX_MEMORY_SUMMARY = "memory_summary_current"
-_INDEX_EXTRACTED_ENTITY = "extracted_entity_current"
 _INDEX_STATEMENT = "statement_current"
 _INDEX_SCENE_COMMUNITY = "scene_community_current"
 
@@ -215,7 +213,7 @@ class MemorySearchRepository:
         self,
         end_user_ids: Sequence[str],
     ) -> tuple[dict[str, dict[str, int]], set[str]]:
-        """Return four ES counts and users present in any of the four indices.
+        """Return emotion and community counts and users present in either index.
 
         One msearch fetches all counts; only absent users fall back to Neo4j.
         """
@@ -224,10 +222,6 @@ class MemorySearchRepository:
             return {}, set()
         client = await self.elasticsearch.client()
         searches = [
-            _search_header(_INDEX_MEMORY_SUMMARY),
-            _search_body(end_user_ids),
-            _search_header(_INDEX_EXTRACTED_ENTITY),
-            _search_body(end_user_ids),
             _search_header(_INDEX_STATEMENT),
             _search_body(
                 end_user_ids,
@@ -236,9 +230,9 @@ class MemorySearchRepository:
             _search_header(_INDEX_SCENE_COMMUNITY),
             _search_body(end_user_ids),
         ]
-        result = await client.msearch(searches=searches, max_concurrent_searches=4)
+        result = await client.msearch(searches=searches, max_concurrent_searches=2)
         responses = result.get("responses")
-        if not isinstance(responses, list) or len(responses) != 4:
+        if not isinstance(responses, list) or len(responses) != 2:
             raise RuntimeError(
                 "Elasticsearch workspace statistics returned invalid responses"
             )
@@ -246,18 +240,15 @@ class MemorySearchRepository:
             raise RuntimeError(
                 "Elasticsearch workspace statistics returned an invalid response"
             )
-        episodic = _parse_buckets(responses[0], "workspace episodic")
-        entities = _parse_buckets(responses[1], "workspace entities")
-        emotional = _parse_buckets(responses[2], "workspace emotional", "emotional")
-        community = _parse_buckets(responses[3], "workspace scene communities")
+        emotional = _parse_buckets(responses[0], "workspace emotional", "emotional")
+        community = _parse_buckets(responses[1], "workspace scene communities")
 
         requested_ids = set(end_user_ids)
         present_ids = (
-            set(episodic) | set(explicit) | set(emotional) | set(community)
+            set(emotional) | set(community)
         ) & requested_ids
         statistics = {
             end_user_id: {
-                "episodic_count": episodic.get(end_user_id, (0, 0))[1],
                 "emotional_count": emotional.get(end_user_id, (0, 0))[1],
                 "scene_community_count": community.get(end_user_id, (0, 0))[1],
             }
