@@ -113,31 +113,40 @@ def resolve_conversation_preference_domain(
     except (TypeError, ValueError):
         return None, False, False
 
-    with get_db_context() as db:
-        row = db.execute(
-            text(
-                """
-                SELECT CASE
-                         WHEN b.binding_id IS NULL OR o.ontology_id IS NULL
-                           THEN (SELECT d.preference_domain
-                                 FROM ontology d
-                                 WHERE d.tenant_id IS NULL AND d.is_system_default IS TRUE
-                                 ORDER BY d.created_at ASC
-                                 LIMIT 1)
-                         ELSE o.preference_domain
-                       END AS preference_domain,
-                       (b.binding_id IS NULL OR o.ontology_id IS NULL) AS is_default_fallback
-                FROM conversations c
-                LEFT JOIN app_ontology_binding b
-                       ON b.app_id = c.app_id AND b.is_deleted IS FALSE
-                LEFT JOIN ontology o
-                       ON o.ontology_id = b.ontology_id
-                WHERE c.id = CAST(:conversation_id AS uuid)
-                LIMIT 1
-                """
-            ),
-            {"conversation_id": conversation_id},
-        ).first()
+    try:
+        with get_db_context() as db:
+            row = db.execute(
+                text(
+                    """
+                    SELECT CASE
+                             WHEN b.binding_id IS NULL OR o.ontology_id IS NULL
+                               THEN (SELECT d.preference_domain
+                                     FROM ontology d
+                                     WHERE d.tenant_id IS NULL AND d.is_system_default IS TRUE
+                                     ORDER BY d.created_at ASC
+                                     LIMIT 1)
+                             ELSE o.preference_domain
+                           END AS preference_domain,
+                           (b.binding_id IS NULL OR o.ontology_id IS NULL) AS is_default_fallback
+                    FROM conversations c
+                    LEFT JOIN app_ontology_binding b
+                           ON b.app_id = c.app_id AND b.is_deleted IS FALSE
+                    LEFT JOIN ontology o
+                           ON o.ontology_id = b.ontology_id
+                    WHERE c.id = CAST(:conversation_id AS uuid)
+                    LIMIT 1
+                    """
+                ),
+                {"conversation_id": conversation_id},
+            ).first()
+    except Exception:
+        # 表缺失/连接异常统一在门控内降级，由调用方按“未知”跳过偏好任务
+        logger.error(
+            "[PreferenceGate] conversation domain query failed conversation_id=%s",
+            conversation_id,
+            exc_info=True,
+        )
+        return None, False, False
 
     if row is None:
         return None, False, False

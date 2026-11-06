@@ -1074,6 +1074,14 @@ async def export_owl_by_scene(
 
 # ==================== 偏好类型只读接口 ====================
 
+async def _safe_rollback(db: AsyncSession) -> None:
+    """异常分支回滚：session 已失效时回滚本身也可能抛错，不能让异常逃出端点。"""
+    try:
+        await db.rollback()
+    except Exception:
+        api_logger.warning("偏好类型接口回滚失败", exc_info=True)
+
+
 @router.get("/preference-types", response_model=ApiResponse)
 @cur_workspace_access_guard_async()
 async def get_preference_type_list(
@@ -1095,7 +1103,7 @@ async def get_preference_type_list(
         )
     except Exception as e:
         api_logger.error(f"查询偏好类型列表失败: {e}", exc_info=True)
-        await db.rollback()
+        await _safe_rollback(db)
         return fail(BizCode.INTERNAL_ERROR, "查询失败")
 
 
@@ -1124,7 +1132,7 @@ async def get_preference_type_detail(
         return success(data=data, msg="查询成功")
     except Exception as e:
         api_logger.error(f"查询偏好类型详情失败: {e}", exc_info=True)
-        await db.rollback()
+        await _safe_rollback(db)
         return fail(BizCode.INTERNAL_ERROR, "查询失败")
 
 

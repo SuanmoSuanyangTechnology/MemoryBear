@@ -45,9 +45,20 @@ async def _get_scene(
 async def _ensure_seeded_in_new_session(
     workspace_id: uuid.UUID, domain: str = "coding"
 ) -> None:
-    """用独立会话种入并提交，不污染请求/调用方事务。"""
-    async with get_async_db_context() as seed_db:
-        await ensure_seeded_async(seed_db, workspace_id, domain=domain)
+    """用独立会话种入并提交，不污染请求/调用方事务。
+
+    种子文件异常只记 error 日志，不阻断只读接口——已种入的 workspace 仍可正常返回。
+    """
+    try:
+        async with get_async_db_context() as seed_db:
+            await ensure_seeded_async(seed_db, workspace_id, domain=domain)
+    except Exception:
+        logger.error(
+            "[PreferenceType] lazy seed failed workspace=%s domain=%s",
+            workspace_id,
+            domain,
+            exc_info=True,
+        )
 
 
 async def list_preference_types(

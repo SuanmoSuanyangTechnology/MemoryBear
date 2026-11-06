@@ -46,19 +46,26 @@ class PreferenceProcessor:
     ):
         self.memory_config = memory_config
         self.end_user_id = end_user_id
-        try:
-            self.ontology = load_preference_ontology_from_db(
-                str(memory_config.workspace_id), domain
-            )
-        except Exception as exc:
-            # DB 本体缺失/不完整时回退随包本体，偏好任务降级但不阻塞正写
+        workspace_id = getattr(memory_config, "workspace_id", None)
+        if workspace_id:
+            try:
+                self.ontology = load_preference_ontology_from_db(
+                    str(workspace_id), domain
+                )
+            except Exception as exc:
+                # DB 本体缺失/不完整时回退随包本体，偏好任务降级但不阻塞正写
+                logger.warning(
+                    "[Preference] ontology load failed, fallback to shipped ontology "
+                    "workspace=%s domain=%s error=%s",
+                    workspace_id,
+                    domain,
+                    exc,
+                    exc_info=True,
+                )
+                self.ontology = load_preference_ontology(domain)
+        else:
             logger.warning(
-                "[Preference] ontology load failed, fallback to shipped ontology "
-                "workspace=%s domain=%s error=%s",
-                getattr(memory_config, "workspace_id", None),
-                domain,
-                exc,
-                exc_info=True,
+                "[Preference] workspace missing, use shipped ontology domain=%s", domain
             )
             self.ontology = load_preference_ontology(domain)
         self.runner = PreferencePromptRunner(llm_client, self.ontology)
