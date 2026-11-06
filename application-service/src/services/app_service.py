@@ -102,6 +102,9 @@ def _pinned_name_app_ids(pattern: str, workspace_id: uuid.UUID):
     ``workspace_id`` 与 `_reference_install_app_ids` 同口径：只看装进**本空间**的
     安装行。少了它这条子查询会跨所有空间扫描，别处空间钉住的名字会把本空间的应用
     捞进搜索结果（名字与搜索词并不匹配）。
+
+    ``AppRelease.is_active`` 也与 resolver 对齐：`resolve_release` 见到已下线的
+    版本直接抛 `RELEASE_NOT_FOUND`，那条引用读不出来，就不该再被快照名搜到。
     """
 
     return (
@@ -113,6 +116,7 @@ def _pinned_name_app_ids(pattern: str, workspace_id: uuid.UUID):
             AppAssetInstallation.status == InstallStatus.ACTIVE,
             AppAssetInstallation.link_mode == LinkMode.REFERENCE,
             AppAsset.status == AssetStatus.PUBLISHED,
+            AppRelease.is_active.is_(True),
             func.lower(AppRelease.name).like(pattern),
         )
     )
@@ -163,12 +167,15 @@ class _AppSerializationContext:
     install_sources: dict[uuid.UUID, tuple[uuid.UUID, str, Any]] = field(
         default_factory=dict
     )
-    # app_id -> 钉住版本（`app_assets.published_release_id`）的展示字段。
+    # app_id -> 条目钉住快照的展示字段 (name, description, icon, icon_type)。
     # 只读引用消费的是**条目钉住的快照**（`AssetReleaseResolver` 对 reference
-    # 安装返回 `asset.published_release_id`），所以列表/详情的 name、description、
-    # icon 必须取快照而不是 `apps` 当前行的值，否则会出现「资源中心叫 A、列表叫 B」
-    # （源应用改了名但条目还钉在旧版本上）。
-    install_display: dict[uuid.UUID, "AppRelease"] = field(default_factory=dict)
+    # 安装返回 `asset.published_release_id`），所以 name/icon 取快照而不是 `apps`
+    # 当前行的值；description 取 `app_assets.description`——那是上架时冻结、资源
+    # 中心详情原样返回的那一份（`get_asset` 的 `description`），不是源应用现在的
+    # 草稿描述。取错任何一项都会出现「资源中心叫 A、列表叫 B」。
+    install_display: dict[
+        uuid.UUID, tuple[str, str | None, str | None, str | None]
+    ] = field(default_factory=dict)
 
 
 class AppService:
@@ -278,6 +285,8 @@ class AppService:
             AppAssetInstallation.link_mode == LinkMode.REFERENCE,
             AppAsset.status == AssetStatus.PUBLISHED,
             AppRelease.type == app_type,
+            # 已下线的钉住版本读不出来（resolver 抛 RELEASE_NOT_FOUND），不占名
+            AppRelease.is_active.is_(True),
             App.is_active.is_(True),
         ).all()}
         existing |= ref_names
@@ -599,6 +608,7 @@ class AppService:
                         AppAsset.source_workspace_id,
                         AppAssetInstallation.permission,
                         AppAssetInstallation.created_at,
+                        AppAsset.description.label("asset_description"),
                         AppRelease,
                     )
                     .join(AppAssetInstallation, AppAssetInstallation.asset_id == AppAsset.id)
@@ -621,7 +631,14 @@ class AppService:
                     )
                     if row.AppRelease is not None:
                         context.install_display.setdefault(
-                            row.source_app_id, row.AppRelease
+                            row.source_app_id,
+                            (
+                                row.AppRelease.name,
+                                # 条目冻结的描述，与资源中心详情返回的同一份
+                                row.asset_description,
+                                row.AppRelease.icon,
+                                row.AppRelease.icon_type,
+                            ),
                         )
 
             source_workspace_ids = {
@@ -743,16 +760,17 @@ class AppService:
         # 与资源中心详情（`asset_service.get_asset` 用 release.name）保持一致。
         # 源应用改过名但条目还钉在旧版本时，不覆盖就会出现「资源中心叫 A、
         # 列表叫 B」，用户按 A 搜不到。
+        # description 取的是条目上冻结的 `app_assets.description`（资源中心详情
+        # 原样返回该字段），不要再回退到 `app.description`——那是源应用当前的草稿
+        # 值，跨空间消费它既与详情不一致，也等于读了本不该暴露的实时状态。
         pinned = context.install_display.get(app.id)
-        display_name = pinned.name if pinned is not None else app.name
-        # 描述要回退到 `app.description`：资源中心条目建/刷新时写的是
-        # `release.description or app.description`（`asset_service._upsert_asset`），
-        # 只取 pinned 会让「钉住版本没写描述、应用有描述」时列表空、资源中心有文字。
-        display_description = (
-            (pinned.description or app.description) if pinned is not None else app.description
-        )
-        display_icon = pinned.icon if pinned is not None else app.icon
-        display_icon_type = pinned.icon_type if pinned is not None else app.icon_type
+        if pinned is not None:
+            display_name, display_description, display_icon, display_icon_type = pinned
+        else:
+            display_name = app.name
+            display_description = app.description
+            display_icon = app.icon
+            display_icon_type = app.icon_type
 
         # Release version and active status
         source_app_version = context.release_versions.get(app.current_release_id)
