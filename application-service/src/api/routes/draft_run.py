@@ -40,7 +40,6 @@ from ...models import (
     ModelProvider,
     WorkflowConfig,
 )
-from ...repositories import knowledge_repository
 from ...repositories.end_user_repository import EndUserRepository
 from ...schemas import app_schema
 from ...schemas.multi_agent_schema import MultiAgentRunRequest
@@ -373,8 +372,10 @@ async def _prepare_draft_memory_context_async(
 ) -> tuple[str, str]:
     """Resolve the memory storage type and the user RAG memory knowledge id.
 
-    Workspace access is already enforced by the WorkspaceId dependency, so the
-    no-auth storage-type lookup is sufficient here.
+    RAG memory now lives in its own ES index and no longer depends on the
+    USER_RAG_MERORY knowledge base; the returned id is always an empty
+    string. Workspace access is already enforced by the WorkspaceId
+    dependency, so the no-auth storage-type lookup is sufficient here.
     """
     async with get_async_db_context() as db:
         storage_type = await get_workspace_storage_type_without_auth_async(
@@ -384,16 +385,7 @@ async def _prepare_draft_memory_context_async(
         if storage_type is None:
             storage_type = "neo4j"
 
-        user_rag_memory_id = ""
-        knowledge = await knowledge_repository.get_knowledge_by_name_async(
-            db=db,
-            name="USER_RAG_MERORY",
-            workspace_id=workspace_id,
-        )
-        if knowledge:
-            user_rag_memory_id = str(knowledge.id)
-
-    return storage_type, user_rag_memory_id
+    return storage_type, ""
 
 
 async def _load_agent_runtime_config(

@@ -146,7 +146,9 @@ INDEX_DEFINITIONS: dict[MemoryNodeLabel, IndexDefinition] = {
     MemoryNodeType.RAG_MEMORY: _index_definition(
         "rag_memory",
         MemoryNodeType.RAG_MEMORY,
-        schema_version=1,
+        # schema_version 2：新增 role_rank（展示层同 dialog_at 并列时的确定性
+        # 兜底定序，user=0/assistant=1），存量索引走 ADDITIVE_MAPPING 原地补字段
+        schema_version=2,
         generation=1,
         # 有意不设 created_at：RAG 记忆以业务时间 dialog_at 为准（索引与
         # DEFAULT_PROJECTION 投影字段保持一致）；下游 stats/list/retrieval
@@ -154,6 +156,7 @@ INDEX_DEFINITIONS: dict[MemoryNodeLabel, IndexDefinition] = {
         prop={
             "id": {"type": "keyword"},
             "role": {"type": "keyword"},
+            "role_rank": {"type": "integer"},
             "end_user_id": {"type": "keyword"},
             "config_id": {"type": "keyword"},
             "dialog_at": {"type": "date"},

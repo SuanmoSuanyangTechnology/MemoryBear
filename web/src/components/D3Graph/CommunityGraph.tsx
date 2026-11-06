@@ -124,7 +124,7 @@ const CommunityGraph: FC<CommunityGraphProps> = ({
     })
   }, [tooltip])
 
-  if (isEmpty) return <PageEmpty className="rb:h-full" />
+  if (isEmpty) return <PageEmpty />
   return (
     <div className="rb:absolute rb:inset-0">
       <div ref={containerRef} className="rb:w-full rb:h-full" />

@@ -7,6 +7,7 @@ import logging
 import time
 from collections.abc import Callable
 
+from langchain_core.messages import AIMessageChunk
 from pydantic import ValidationError
 
 from ...integrations.model.chat import RedBearChatModel
@@ -69,7 +70,9 @@ class WikiModel:
             })
         started = time.monotonic()
         try:
-            response = self.model.invoke(messages)
+            response = AIMessageChunk(content="")
+            for chunk in self.model.stream(messages):
+                response += chunk
         except Exception as exc:
             from ...error_mapping import map_model_error
 
@@ -86,8 +89,11 @@ class WikiModel:
             raise WikiError(mapped.code, retryable=mapped.retryable, diagnostics=details) from exc
         content = response.content
         if isinstance(content, list):
-            content = "".join(block.get("text", "") for block in content
-                              if isinstance(block, dict) and block.get("type") == "text")
+            content = "".join(
+                block if isinstance(block, str) else block.get("text", "")
+                for block in content
+                if isinstance(block, str) or block.get("type") == "text"
+            )
         metadata = getattr(response, "usage_metadata", None) or {}
         response_metadata = getattr(response, "response_metadata", None) or {}
         finish = response_metadata.get("finish_reason") or response_metadata.get("stop_reason")

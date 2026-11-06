@@ -154,6 +154,7 @@ class PublishedAgentRunner:
         variables: dict[str, Any],
         files: list[FileInput],
         history: list[dict[str, str]],
+        conversation_id: str | None = None,
         storage_type: str | None = None,
         user_rag_memory_id: str | None = None,
     ) -> dict[str, Any]:
@@ -186,7 +187,11 @@ class PublishedAgentRunner:
                         model_config=runtime.model_config,
                         message=message,
                         workspace_id=workspace_id,
-                        conversation_id=None,
+                        # The caller's conversation, not a new one: stateless + skip_save
+                        # still skip conversation creation and message persistence, but
+                        # the sandbox tools key their instance by conversation_id and
+                        # refuse to run without it.
+                        conversation_id=conversation_id,
                         user_id=user_id,
                         variables=variables,
                         storage_type=storage_type,
@@ -215,6 +220,7 @@ class PublishedAgentRunner:
         variables: dict[str, Any],
         files: list[FileInput],
         history: list[dict[str, str]],
+        conversation_id: str | None = None,
         storage_type: str | None = None,
         user_rag_memory_id: str | None = None,
     ) -> AsyncGenerator[dict[str, Any], None]:
@@ -247,7 +253,8 @@ class PublishedAgentRunner:
                         model_config=runtime.model_config,
                         message=message,
                         workspace_id=workspace_id,
-                        conversation_id=None,
+                        # Same as run(): the sandbox tools need the caller's conversation.
+                        conversation_id=conversation_id,
                         user_id=user_id,
                         variables=variables,
                         storage_type=storage_type,

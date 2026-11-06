@@ -553,7 +553,11 @@ class UserMemoryService:
                 }
             
             # 定义允许更新的字段白名单
-            allowed_fields = {'other_name', 'aliases', 'meta_data'}
+            allowed_fields = {'other_name', 'aliases'}
+
+            # meta_data 由抽取链路维护，本接口不接受更新：GET 返回的是展示投影，
+            # 整字典覆盖回写会把 domain_specific_info 等存储数据清空，故直接忽略。
+            update_data.pop('meta_data', None)
             
             # 用户占位名称黑名单，不允许作为 other_name 或出现在 aliases 中
             _user_placeholder_names = _USER_PLACEHOLDER_NAMES
@@ -665,7 +669,12 @@ class UserMemoryService:
                     "error": "终端用户信息记录不存在"
                 }
             
-            allowed_fields = {'other_name', 'aliases', 'meta_data'}
+            allowed_fields = {'other_name', 'aliases'}
+
+            # meta_data 由抽取链路维护，本接口不接受更新：GET 返回的是展示投影，
+            # 整字典覆盖回写会把 domain_specific_info 等存储数据清空，故直接忽略。
+            update_data.pop('meta_data', None)
+
             # other_name 规范化：None / 空串 / 纯空白 / 占位名称一律从待更新字典移除，避免清空或污染已有名称
             if 'other_name' in update_data:
                 normalized_name = _normalize_other_name(update_data['other_name'])
@@ -682,7 +691,7 @@ class UserMemoryService:
                     and (stripped := a.strip())
                     and not _is_user_placeholder_name(stripped)
                 ]
-            
+
             aliases_updated = 'aliases' in update_data and update_data['aliases'] != end_user_info_record.aliases
             other_name_updated = 'other_name' in update_data and update_data['other_name'] != end_user_info_record.other_name
             

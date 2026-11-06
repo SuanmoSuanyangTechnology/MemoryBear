@@ -136,6 +136,16 @@ class JsonTool(BuiltinTool):
                 raise ValueError(f"不支持的操作类型: {operation}")
 
             execution_time = time.time() - start_time
+            # Several operations (insert / replace / delete / parse) report a failed path
+            # lookup as {"success": False, "error": ...} instead of raising, and used to be
+            # flattened into a successful result carrying only result_data — so a mutation
+            # that never happened looked applied and the reason was dropped entirely.
+            if result.get("success") is False:
+                return ToolResult.error_result(
+                    error=str(result.get("error") or "JSON 操作未生效"),
+                    error_code="JSON_OPERATION_FAILED",
+                    execution_time=execution_time,
+                )
             return ToolResult.success_result(
                 data=result["result_data"],
                 execution_time=execution_time

@@ -43,7 +43,7 @@ const ParentChildBlockConfig: FC = () => {
             align="center"
             gap={16}
             className={clsx('rb:cursor-pointer rb:p-4! rb:border rb:rounded-xl rb:transition-all', {
-              'rb:border-[#171719] rb:bg-[#FAFAFA]': parentChunkMode === 'paragraph',
+              'rb:border-primary-600 rb:bg-[#FAFAFA]': parentChunkMode === 'paragraph',
               'rb:border-[#E5E5E5]': parentChunkMode !== 'paragraph',
             })}
             onClick={() => selectMode('paragraph')}
@@ -75,7 +75,7 @@ const ParentChildBlockConfig: FC = () => {
             align="center"
             gap={16}
             className={clsx('rb:cursor-pointer rb:p-4! rb:border rb:rounded-xl rb:transition-all', {
-              'rb:border-[#171719] rb:bg-[#FAFAFA]': parentChunkMode === 'full-doc',
+              'rb:border-primary-600 rb:bg-[#FAFAFA]': parentChunkMode === 'full-doc',
               'rb:border-[#E5E5E5]': parentChunkMode !== 'full-doc',
             })}
             onClick={() => selectMode('full-doc')}

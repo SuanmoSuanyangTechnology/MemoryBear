@@ -166,6 +166,19 @@ class ToolService:
         config = self.tool_repo.find_by_id_and_tenant_all(uuid.UUID(tool_id), tenant_id)
         return self._config_to_info(config) if config else None
 
+    def get_tool_summaries(
+            self, tool_ids: list[uuid.UUID], tenant_id: uuid.UUID
+    ) -> dict[uuid.UUID, ToolInfo]:
+        """Batch variant of :meth:`get_tool_summary`, keyed by tool id.
+
+        One ``ToolConfig`` query for the whole batch; ``_config_to_info`` still runs
+        per row because MCP/workflow rows read their side table there. Missing ids
+        (other tenant / hard-deleted / malformed) are simply absent from the map.
+        """
+
+        configs = self.tool_repo.find_by_ids_and_tenant_all(tool_ids, tenant_id)
+        return {config.id: self._config_to_info(config) for config in configs}
+
     def get_tool_detail(self, tool_id: str, tenant_id: uuid.UUID) -> ToolDetailSchema | None:
         """Get tool detail (including type-specific config)."""
         config = self.tool_repo.find_by_id_and_tenant_all(uuid.UUID(tool_id), tenant_id)

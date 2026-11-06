@@ -338,13 +338,20 @@ class SandboxWriteFileTool(_SandboxFileToolBase):
             ToolParameter(
                 name="old_string",
                 type=ParameterType.STRING,
-                description="局部替换：要被替换的原文，必须在文件中恰好出现一次，需与 new_string 一起传",
+                description=(
+                    "局部替换：要被替换的原文，必须在文件中恰好出现一次，需与 new_string 一起传。"
+                    "与 content 二选一：传了 content 就不要再传它"
+                ),
                 required=False,
             ),
             ToolParameter(
                 name="new_string",
                 type=ParameterType.STRING,
-                description="局部替换：替换后的新文本，空串表示删除 old_string",
+                description=(
+                    "局部替换：替换后的新文本，空串表示删除 old_string。"
+                    "与 content 二选一。追加内容时：old_string 放文件末尾几行，"
+                    "new_string 放「这几行 + 要追加的新内容」，不要传 content"
+                ),
                 required=False,
             ),
         ]
@@ -362,8 +369,16 @@ class SandboxWriteFileTool(_SandboxFileToolBase):
 
         if old_string not in (None, "") or new_string not in (None, ""):
             if content not in (None, ""):
+                # Both modes in one call. Say what was NOT done and how to split it, so the
+                # model does not read this as "written" and move on.
                 return ToolResult.error_result(
-                    error="局部替换（old_string/new_string）不能与 content 同时使用",
+                    error=(
+                        "参数冲突，本次没有写入任何内容：content（整文件写入）与 "
+                        "old_string/new_string（局部替换）只能二选一。"
+                        "要整份覆盖就只传 path + content；只改其中几行就只传 path + old_string + new_string；"
+                        "要追加内容就用 old_string + new_string（old_string 放文件末尾几行，"
+                        "new_string 放这几行加上新内容），不要传 content。"
+                    ),
                     error_code="INVALID_ARGUMENT",
                     execution_time=elapsed(),
                 )

@@ -55,7 +55,7 @@ def _normalize_other_name(value: Any) -> str | None:
     return normalized
 
 
-_INFO_ALLOWED_FIELDS = {"other_name", "aliases", "meta_data"}
+_INFO_ALLOWED_FIELDS = {"other_name", "aliases"}
 
 
 @dataclass(frozen=True)
@@ -170,6 +170,11 @@ class EndUserService:
                 and (stripped := alias.strip())
                 and not _is_user_placeholder_name(stripped)
             ]
+
+        # meta_data is owned by the extraction pipeline and cannot be updated through
+        # this endpoint: GET returns a display projection, and writing it back
+        # wholesale would clear stored data such as domain_specific_info.
+        update_data.pop("meta_data", None)
 
         aliases_updated = (
             "aliases" in update_data and update_data["aliases"] != record.aliases
