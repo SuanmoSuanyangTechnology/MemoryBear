@@ -61,12 +61,27 @@ def ensure_seeded(
         return False
 
     scene, classes = build_seed_rows(workspace_id, domain)
+
+    if not commit:
+        try:
+            with db.begin_nested():
+                db.add(scene)
+                for item in classes:
+                    db.add(item)
+                db.flush()
+        except IntegrityError:
+            # 并发首次种入：唯一约束兜底，savepoint 回滚后视为已种入。
+            logger.warning(
+                "[PreferenceSeed] concurrent insert skipped workspace=%s domain=%s",
+                workspace_id,
+                domain,
+            )
+            return False
+        return True
+
     db.add(scene)
     for item in classes:
         db.add(item)
-
-    if not commit:
-        return True
 
     try:
         db.commit()
@@ -79,6 +94,10 @@ def ensure_seeded(
             domain,
         )
         return False
+    except Exception:
+        # 其它写入异常也要回滚，避免 failed session 传染后续操作
+        db.rollback()
+        raise
     return True
 
 

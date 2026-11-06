@@ -1081,7 +1081,7 @@ async def get_preference_type_list(
     workspace_id = current_user.current_workspace_id
     if not workspace_id:
         api_logger.warning(f"User {current_user.id} has no current workspace")
-        return fail(BizCode.INTERNAL_ERROR, "查询失败", "current workspace is empty")
+        return fail(BizCode.INVALID_PARAMETER, "请先切换到一个工作空间", "current_workspace_id is None")
 
     try:
         return success(
@@ -1090,7 +1090,7 @@ async def get_preference_type_list(
         )
     except Exception as e:
         api_logger.error(f"查询偏好类型列表失败: {e}", exc_info=True)
-        return fail(BizCode.INTERNAL_ERROR, "查询失败", str(e))
+        return fail(BizCode.INTERNAL_ERROR, "查询失败")
 
 
 @router.get("/preference-types/{domain}", response_model=ApiResponse)
@@ -1105,7 +1105,7 @@ async def get_preference_type_detail(
     workspace_id = current_user.current_workspace_id
     if not workspace_id:
         api_logger.warning(f"User {current_user.id} has no current workspace")
-        return fail(BizCode.INTERNAL_ERROR, "查询失败", "current workspace is empty")
+        return fail(BizCode.INVALID_PARAMETER, "请先切换到一个工作空间", "current_workspace_id is None")
 
     try:
         data = await get_preference_type(db, workspace_id, domain, language)
@@ -1114,7 +1114,7 @@ async def get_preference_type_detail(
         return success(data=data, msg="查询成功")
     except Exception as e:
         api_logger.error(f"查询偏好类型详情失败: {e}", exc_info=True)
-        return fail(BizCode.INTERNAL_ERROR, "查询失败", str(e))
+        return fail(BizCode.INTERNAL_ERROR, "查询失败")
 
 
 def _is_chinese(text: str) -> bool:

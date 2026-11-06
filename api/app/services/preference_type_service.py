@@ -100,7 +100,7 @@ async def get_preference_type(
     domain: str,
     language: str,
 ) -> Optional[dict]:
-    """6.3 偏好类型详情；未知 domain 返回 None（由路由转 4000）。"""
+    """6.3 偏好类型详情；未知 domain 返回 None（由路由转 BizCode.NOT_FOUND，即 4000）。"""
     await ensure_seeded_async(db, workspace_id)
     scene = await _get_scene(db, workspace_id, domain)
     if scene is None:
