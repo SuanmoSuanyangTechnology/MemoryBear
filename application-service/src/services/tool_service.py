@@ -652,7 +652,7 @@ class ToolService:
                 parsed.append((raw, None))
 
         valid_ids = [uid for _, uid in parsed if uid is not None]
-        configs = self.tool_repo.find_by_ids(valid_ids, tenant_id)
+        configs = self.tool_repo.find_by_ids_and_tenant_all(valid_ids, tenant_id)
         by_id = {config.id: config for config in configs}
         missing = [
             raw for raw, uid in parsed if uid is None or uid not in by_id

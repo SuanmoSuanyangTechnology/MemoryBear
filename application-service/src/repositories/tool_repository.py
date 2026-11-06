@@ -145,17 +145,6 @@ class ToolRepository:
             ToolConfig.tenant_id == tenant_id
         ).all()
 
-    def find_by_ids(
-        self, tool_ids: list[uuid.UUID], tenant_id: uuid.UUID
-    ) -> list[ToolConfig]:
-        """Find tools by ID list, scoped to one tenant (includes inactive rows)."""
-        if not tool_ids:
-            return []
-        return self.db.query(ToolConfig).filter(
-            ToolConfig.id.in_(tool_ids),
-            ToolConfig.tenant_id == tenant_id,
-        ).all()
-
     def count_by_tenant(self, tenant_id: uuid.UUID) -> int:
         """Count a tenant's tools (only non-deleted records)."""
         return self.db.query(ToolConfig).filter(
