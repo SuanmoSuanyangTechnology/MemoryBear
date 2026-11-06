@@ -29,16 +29,18 @@ DEFAULT_SUPERVISOR_NAME = "主管"
 def normalise_cluster_mode(mode: Any) -> tuple[str, str]:
     """原始 `orchestration_mode` → 展示用的 `(orchestration_mode, execution)`。
 
-    四档归两档，判定顺序必须与运行时 `_normalize_orchestration_mode`
-    （`multi_agent_orchestrator.py`）一致：`supervisor_loop` 是 `supervisor` 的
-    前缀超集，先判 `supervisor` 会把它吞掉（运行时那边也为此写了回归测试）。
+    保留运行时认可的三种模式：`supervisor`、`supervisor_loop`、`collaboration`。
+    `supervisor_loop` 虽与 `supervisor` 都画成「主管 + 并行子智能体」，但详情契约
+    必须保留其原始语义，供前端标注主管循环模式。
 
     `conditional` / `sequential` / `parallel` / `loop` / `null` 都是历史值，运行时
     一律归一为协作，展示不能与运行不一致。
     """
 
     value = str(mode or "").strip().lower()
-    if value in ("supervisor_loop", "supervisor"):
+    if value == "supervisor_loop":
+        return "supervisor_loop", "parallel"
+    if value == "supervisor":
         return "supervisor", "parallel"
     return "collaboration", "sequential"
 
@@ -215,8 +217,11 @@ def project_cluster(config: dict[str, Any]) -> dict[str, Any]:
     return {
         "orchestration_mode": mode,
         "execution": execution,
+        # 协作模式没有主管执行主体；保留键并显式返回 null，便于前端稳定分支。
         "supervisor_name": (
-            str(supervisor_name) if supervisor_name else DEFAULT_SUPERVISOR_NAME
+            None
+            if mode == "collaboration"
+            else (str(supervisor_name) if supervisor_name else DEFAULT_SUPERVISOR_NAME)
         ),
         "sub_agents": sub_agents,
     }

@@ -20,9 +20,10 @@ from __future__ import annotations
 import copy
 import logging
 import uuid
+from contextlib import nullcontext
 from typing import Any
 
-from sqlalchemy import cast, func, or_, select
+from sqlalchemy import and_, cast, func, or_, select
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Session
 
@@ -35,6 +36,8 @@ from ..models import (
     AppRelease,
     MultiAgentConfig,
     Skill,
+    SkillPackage,
+    SkillPlugin,
     ToolConfig,
     WorkflowConfig,
 )
@@ -372,6 +375,14 @@ class AssetService:
         - `readonly` → 只读引用：不产生新 app，运行时读条目钉住的 release 快照
         - `editable` → 可编辑副本：以 release 快照为源在当前空间重建 app，
           集群连同全部子 Agent 一起落地（§7.0.1）
+
+        已有安装时是幂等返回，**只有一个方向会换形态**：已装的是只读引用、条目现在
+        放开成 `editable`，则旧安装行转 `removed`、新落一条 `copy`。反方向
+        （`copy` → 条目改回 `readonly`）不动：副本是本空间的自有应用，条目改权限
+        不能把它收回或降级。
+
+        注意形态变更**只由消费者主动再次安装触发**：发布方改 `share_mode` 只写
+        条目（`update_share_mode`），不会往任何消费方的空间里写东西。
         """
 
         asset = self._get_asset_or_404(asset_id, tenant_id)
@@ -390,48 +401,74 @@ class AssetService:
                 AppAssetInstallation.status == InstallStatus.ACTIVE,
             )
         ).first()
-        if existing is not None:
+
+        replaced_link_mode: str | None = None
+        # 「只读引用 → 可编辑副本」是唯一会换形态的方向；其余情况一律幂等返回。
+        upgrade = (
+            existing is not None
+            and existing.link_mode == LinkMode.REFERENCE
+            and asset.share_mode == ShareMode.EDITABLE
+        )
+        if existing is not None and not upgrade:
+            # 副本已是目标空间的独立应用，源版本下线不影响它；但 reference
+            # 仍依赖条目钉住版本，失效时不能误报为「已就绪」。
+            if existing.link_mode == LinkMode.REFERENCE:
+                pinned = self.db.get(AppRelease, asset.published_release_id)
+                if pinned is None or not pinned.is_active:
+                    raise BusinessException("条目钉住的版本已下线", BizCode.RELEASE_NOT_FOUND)
             return self._install_payload(existing, reused=True)
 
+        # 先校验钉住版本，避免升级时把仍可用的旧引用置 removed 后才发现新版本失效。
         release = self.db.get(AppRelease, asset.published_release_id)
         if release is None or not release.is_active:
             raise BusinessException("条目钉住的版本已下线", BizCode.RELEASE_NOT_FOUND)
 
-        now = utcnow_naive()
-        missing: list[dict[str, Any]] = []
-        local_app_id: uuid.UUID | None = None
-        link_mode = LinkMode.REFERENCE
+        # 升级时，旧引用失效、新副本及新安装行必须同在一个 savepoint：复制集群
+        # 或子 Agent 失败时只回滚这次升级，保留原有 reference 安装。
+        scope = self.db.begin_nested() if upgrade else nullcontext()
+        with scope:
+            if upgrade:
+                # 先让旧行失效再建副本：既避免部分唯一索引冲突，也让副本保留原名称。
+                replaced_link_mode = existing.link_mode
+                existing.status = InstallStatus.REMOVED
+                existing.updated_at = utcnow_naive()
+                self.db.flush()
 
-        if asset.share_mode == ShareMode.EDITABLE:
-            link_mode = LinkMode.COPY
-            local_app_id = self._copy_from_release(
-                release=release,
-                source_app_id=asset.source_app_id,
+            now = utcnow_naive()
+            missing: list[dict[str, Any]] = []
+            local_app_id: uuid.UUID | None = None
+            link_mode = LinkMode.REFERENCE
+
+            if asset.share_mode == ShareMode.EDITABLE:
+                link_mode = LinkMode.COPY
+                local_app_id = self._copy_from_release(
+                    release=release,
+                    source_app_id=asset.source_app_id,
+                    target_workspace_id=target_workspace_id,
+                    user_id=user_id,
+                    missing=missing,
+                )
+
+            installation = AppAssetInstallation(
+                id=uuid.uuid4(),
+                asset_id=asset.id,
+                source=InstallSource.CATALOG,
+                tenant_id=tenant_id,
                 target_workspace_id=target_workspace_id,
-                user_id=user_id,
-                missing=missing,
+                permission=asset.share_mode,
+                link_mode=link_mode,
+                installed_release_id=release.id,
+                local_app_id=local_app_id,
+                # 只读引用恒跟随条目版本；副本天生脱钩（§5.3）
+                follow_version=link_mode == LinkMode.REFERENCE,
+                status=InstallStatus.ACTIVE,
+                result="partial" if missing else "success",
+                missing_report=missing or None,
+                created_by=user_id,
+                created_at=now,
+                updated_at=now,
             )
-
-        installation = AppAssetInstallation(
-            id=uuid.uuid4(),
-            asset_id=asset.id,
-            source=InstallSource.CATALOG,
-            tenant_id=tenant_id,
-            target_workspace_id=target_workspace_id,
-            permission=asset.share_mode,
-            link_mode=link_mode,
-            installed_release_id=release.id,
-            local_app_id=local_app_id,
-            # 只读引用恒跟随条目版本；副本天生脱钩（§5.3）
-            follow_version=link_mode == LinkMode.REFERENCE,
-            status=InstallStatus.ACTIVE,
-            result="partial" if missing else "success",
-            missing_report=missing or None,
-            created_by=user_id,
-            created_at=now,
-            updated_at=now,
-        )
-        self.db.add(installation)
+            self.db.add(installation)
         self.db.commit()
 
         logger.info(
@@ -441,11 +478,20 @@ class AssetService:
                 "target_workspace_id": str(target_workspace_id),
                 "link_mode": link_mode,
                 "result": installation.result,
+                "replaced_link_mode": replaced_link_mode,
             },
         )
-        return self._install_payload(installation, reused=False)
+        return self._install_payload(
+            installation, reused=False, replaced_link_mode=replaced_link_mode
+        )
 
-    def _install_payload(self, installation: Any, *, reused: bool) -> dict[str, Any]:
+    def _install_payload(
+            self,
+            installation: Any,
+            *,
+            reused: bool,
+            replaced_link_mode: str | None = None,
+    ) -> dict[str, Any]:
         return {
             "id": str(installation.id),
             "asset_id": str(installation.asset_id) if installation.asset_id else None,
@@ -464,6 +510,9 @@ class AssetService:
             "needs_config": installation.result == "partial",
             "missing_dependencies": installation.missing_report or [],
             "reused": reused,
+            # 本次安装顶掉的旧形态（`reference` → `copy` 升级时非空）。前端据此
+            # 提示「已按可编辑副本重新添加」，避免用户以为点错了没反应。
+            "replaced_link_mode": replaced_link_mode,
         }
 
     # ---------- 以 release 快照为源重建副本 ----------
@@ -773,7 +822,7 @@ class AssetService:
         publisher = cross_domain_read.get_user_display_names_by_ids(
             self.db, {release.published_by} if release and release.published_by else set()
         )
-        linked_skills, linked_tools = self._linked_resources(release)
+        linked_skills, linked_tools = self._linked_resources(release, tenant_id)
         app_type = release.type if release else app.type
         config = payload.get("config") or {}
 
@@ -921,9 +970,23 @@ class AssetService:
         )
 
     def _linked_resources(
-            self, release: AppRelease | None
-    ) -> tuple[list[str], list[str]]:
-        """该版本实际引用到的技能与工具名称（§6.1.1 口径 2）。"""
+            self, release: AppRelease | None, tenant_id: uuid.UUID
+    ) -> tuple[list[dict[str, str]], list[dict[str, Any]]]:
+        """该版本实际引用到的技能与工具。
+
+        独立技能返回 ``skill``；插件成员按所属插件归并为一个 ``plugin``，不向详情
+        页展开成员。工具在既有数组结构上保留 ``tool_type`` 与 ``icon``，供前端按
+        工具类型展示。资源中心不以市场的 MCP 准入规则过滤工具。
+
+        工具有两个来源，必须都收：
+
+        - ``config.tools``：agent / 集群的「工具」配置块；
+        - ``config.nodes`` 里 ``type == "tool"`` 的节点：**工作流的工具是节点**，
+          不在 ``config.tools`` 里。只读前者会让所有工作流的 ``linked_tools``
+          恒为空（快照里明明挂了三个工具节点）。
+
+        技能只有一个来源 ``config.skills``：工作流没有技能概念。
+        """
 
         if release is None or not release.config:
             return [], []
@@ -948,26 +1011,106 @@ class AssetService:
                     skill_id = _coerce_uuid(raw)
                     if skill_id and skill_id not in skill_ids:
                         skill_ids.append(skill_id)
+            # 工作流的工具是节点（`type == "tool"`），工具 id 在节点的
+            # `config.tool_id`，与 `config.tools` 是两套结构。agent / 集群的快照
+            # 没有 `nodes` 键，这里扫不到东西，所以不必按 release.type 分支。
+            # 循环 / 迭代容器里的工具节点同样是平铺在 `nodes` 里的，一并收。
+            for node in cfg.get("nodes") or []:
+                if not isinstance(node, dict) or node.get("type") != "tool":
+                    continue
+                node_config = node.get("config")
+                if not isinstance(node_config, dict):
+                    continue
+                tool_id = _coerce_uuid(node_config.get("tool_id"))
+                if tool_id and tool_id not in tool_ids:
+                    tool_ids.append(tool_id)
 
-        skill_names: list[str] = []
+        linked_skills: list[dict[str, str]] = []
         if skill_ids:
-            skill_names = [
-                name
-                for name in self.db.scalars(
-                    select(Skill.name).where(Skill.id.in_(skill_ids))
-                ).all()
-                if name
-            ]
-        tool_names: list[str] = []
+            skill_rows = self.db.execute(
+                select(
+                    Skill.id,
+                    Skill.name,
+                    Skill.package_id,
+                    SkillPackage.id,
+                    SkillPackage.plugin_id,
+                    SkillPlugin.id,
+                    SkillPlugin.name,
+                )
+                .outerjoin(
+                    SkillPackage,
+                    and_(
+                        Skill.package_id == SkillPackage.id,
+                        SkillPackage.tenant_id == tenant_id,
+                        SkillPackage.is_active.is_(True),
+                    ),
+                )
+                .outerjoin(
+                    SkillPlugin,
+                    and_(
+                        SkillPackage.plugin_id == SkillPlugin.id,
+                        SkillPlugin.tenant_id == tenant_id,
+                        SkillPlugin.is_active.is_(True),
+                    ),
+                )
+                .where(
+                    Skill.id.in_(skill_ids),
+                    Skill.tenant_id == tenant_id,
+                    Skill.is_active.is_(True),
+                )
+            ).all()
+            skills_by_id = {row[0]: row for row in skill_rows}
+            displayed_plugins: set[uuid.UUID] = set()
+            for skill_id in skill_ids:
+                skill = skills_by_id.get(skill_id)
+                if skill is None:
+                    continue
+                skill_name, declared_package_id = skill[1], skill[2]
+                package_id, plugin_id, resolved_plugin_id, plugin_name = skill[3:]
+                # 有 package_id 却无法 join 到启用的包，说明它已卸载/跨租户，整项隐藏。
+                if declared_package_id and package_id is None:
+                    continue
+                if plugin_id:
+                    # 插件成员必须整体归并。关联插件不可用或异常时不能伪装成普通 skill。
+                    if resolved_plugin_id is None or not plugin_name:
+                        continue
+                    if plugin_id in displayed_plugins:
+                        continue
+                    displayed_plugins.add(plugin_id)
+                    linked_skills.append({
+                        "name": str(plugin_name),
+                        "skill_type": "plugin",
+                    })
+                elif skill_name:
+                    linked_skills.append({
+                        "name": str(skill_name),
+                        "skill_type": "skill",
+                    })
+
+        linked_tools: list[dict[str, Any]] = []
         if tool_ids:
-            tool_names = [
-                name
-                for name in self.db.scalars(
-                    select(ToolConfig.name).where(ToolConfig.id.in_(tool_ids))
-                ).all()
-                if name
-            ]
-        return skill_names, tool_names
+            tool_rows = self.db.execute(
+                select(ToolConfig.id, ToolConfig.name, ToolConfig.tool_type,
+                       ToolConfig.icon)
+                .where(
+                    ToolConfig.id.in_(tool_ids),
+                    ToolConfig.tenant_id == tenant_id,
+                    ToolConfig.is_active.is_(True),
+                )
+            ).all()
+            tools_by_id = {row[0]: row for row in tool_rows}
+            for tool_id in tool_ids:
+                tool = tools_by_id.get(tool_id)
+                if tool is None or not tool[1]:
+                    continue
+                icon = tool[3]
+                linked_tools.append({
+                    "name": str(tool[1]),
+                    "tool_type": str(tool[2]),
+                    # 空串归一成 None：前端拿空串渲染 <img> 会发一次坏请求
+                    "icon": str(icon) if icon and str(icon).strip() else None,
+                })
+        return linked_skills, linked_tools
 
     def _get_asset_or_404(self, asset_id: uuid.UUID, tenant_id: uuid.UUID) -> AppAsset:
         asset = self.db.scalars(

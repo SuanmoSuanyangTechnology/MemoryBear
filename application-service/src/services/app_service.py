@@ -88,6 +88,47 @@ def _reference_install_app_ids(workspace_id: uuid.UUID):
             AppAssetInstallation.status == InstallStatus.ACTIVE,
             AppAssetInstallation.link_mode == LinkMode.REFERENCE,
             AppAsset.status == AssetStatus.PUBLISHED,
+            AppAsset.is_active.is_(True),
+        )
+    )
+
+
+def _pinned_name_app_ids(pattern: str, workspace_id: uuid.UUID):
+    """Apps whose **pinned catalog name** matches ``pattern`` (already lowered/%-wrapped).
+
+    列表里只读引用显示的是条目钉住版本的名字（`_convert_to_schema` 的
+    `install_display` 覆盖），所以按名字搜索不能只看 `apps.name`：源应用改名后
+    `apps.name` 已经是新名，而界面显示的还是快照名。这里把快照名也纳入搜索。
+
+    ``workspace_id`` 与 `_reference_install_app_ids` 同口径：只看装进**本空间**的
+    安装行。少了它这条子查询会跨所有空间扫描，别处空间钉住的名字会把本空间的应用
+    捞进搜索结果（名字与搜索词并不匹配）。
+
+    ``AppRelease.is_active`` 也与 resolver 对齐：`resolve_release` 见到已下线的
+    版本直接抛 `RELEASE_NOT_FOUND`，那条引用读不出来，就不该再被快照名搜到。
+
+    ``App.workspace_id != workspace_id`` 是展示口径的另一半：只有「别人的应用」
+    才会以快照名展示（`_build_serialization_context` 只收
+    `workspace_id != current_workspace_id` 的行），本空间自有应用即使被拉进本空间，
+    列表里显示的仍是 `App.name`。不排除它们就会出现「按 X 搜到一行、名字显示成
+    Y」；顺带也让这条 OR 谓词在 `include_shared=False`（scope 恰好是
+    `App.workspace_id == workspace_id`）下恒不成立，不可能把外空间应用捞进来。
+    """
+
+    return (
+        select(AppAsset.source_app_id)
+        .join(AppAssetInstallation, AppAssetInstallation.asset_id == AppAsset.id)
+        .join(AppRelease, AppRelease.id == AppAsset.published_release_id)
+        .join(App, App.id == AppAsset.source_app_id)
+        .where(
+            App.workspace_id != workspace_id,
+            AppAssetInstallation.target_workspace_id == workspace_id,
+            AppAssetInstallation.status == InstallStatus.ACTIVE,
+            AppAssetInstallation.link_mode == LinkMode.REFERENCE,
+            AppAsset.status == AssetStatus.PUBLISHED,
+            AppAsset.is_active.is_(True),
+            AppRelease.is_active.is_(True),
+            func.lower(AppRelease.name).like(pattern),
         )
     )
 
@@ -137,6 +178,15 @@ class _AppSerializationContext:
     install_sources: dict[uuid.UUID, tuple[uuid.UUID, str, Any]] = field(
         default_factory=dict
     )
+    # app_id -> 条目钉住快照的展示字段 (name, description, icon, icon_type)。
+    # 只读引用消费的是**条目钉住的快照**（`AssetReleaseResolver` 对 reference
+    # 安装返回 `asset.published_release_id`），所以 name/icon 取快照而不是 `apps`
+    # 当前行的值；description 取 `app_assets.description`——那是上架时冻结、资源
+    # 中心详情原样返回的那一份（`get_asset` 的 `description`），不是源应用现在的
+    # 草稿描述。取错任何一项都会出现「资源中心叫 A、列表叫 B」。
+    install_display: dict[
+        uuid.UUID, tuple[str, str | None, str | None, str | None]
+    ] = field(default_factory=dict)
 
 
 class AppService:
@@ -229,11 +279,33 @@ class AppService:
         existing |= shared_names
 
         # 资源中心只读引用没有 app_shares 行，但它们同样占着本空间可见的名字，
-        # 不并进来就会允许创建同名应用，列表里出现两行同名。
-        ref_names = {r[0] for r in self.db.query(App.name).filter(
-            App.id.in_(_reference_install_app_ids(workspace_id)),
+        # 不并进来就会允许创建同名应用，列表里出现两行同名。注意取的是**钉住版本
+        # 的名字**（`_convert_to_schema` 就是这么展示的），不是 `App.name`：源应用
+        # 改名后列表里显示的还是快照名。
+        # `App.is_active` 必须保留：源应用被软删除后列表里看不到它（`list_apps`
+        # 的 base filter），再算它占名只会给新应用加无谓的后缀。
+        ref_names = {r[0] for r in self.db.query(AppRelease.name).join(
+            AppAsset, AppAsset.published_release_id == AppRelease.id
+        ).join(
+            AppAssetInstallation, AppAssetInstallation.asset_id == AppAsset.id
+        ).join(
+            App, App.id == AppAsset.source_app_id
+        ).filter(
+            AppAssetInstallation.target_workspace_id == workspace_id,
+            AppAssetInstallation.status == InstallStatus.ACTIVE,
+            AppAssetInstallation.link_mode == LinkMode.REFERENCE,
+            AppAsset.status == AssetStatus.PUBLISHED,
+            AppAsset.is_active.is_(True),
+            # 按 `App.type` 而不是 `AppRelease.type`：占名要算的是「这一行会不会在
+            # type=T 的列表里跟新应用撞名」，而列表过滤的就是 `App.type`
+            # （`list_apps` 的 `App.type == type_list[0]`），展示的 type 也取
+            # `app.type`。上面两个分支（自有应用、legacy 共享）同样按 `App.type`。
+            # 改用快照 type 会让三个分支口径分裂：快照 type 与 App.type 一旦不一致，
+            # 这里就漏掉一个列表里真实存在的同名行，生成出重复名字。
             App.type == app_type,
-            App.is_active.is_(True)
+            # 已下线的钉住版本读不出来（resolver 抛 RELEASE_NOT_FOUND），不占名
+            AppRelease.is_active.is_(True),
+            App.is_active.is_(True),
         ).all()}
         existing |= ref_names
 
@@ -540,6 +612,9 @@ class AppService:
 
             # 从资源中心拉来的应用没有 app_shares 行（只读引用甚至没有本地 app），
             # 来源空间与权限只能从安装记录取，否则列表里「来源」一列是空的。
+            # 同时取条目钉住版本的展示字段：只读引用读的就是这份快照
+            # （`AssetReleaseResolver` 对 reference 安装返回 `published_release_id`），
+            # 名称/图标/描述必须与资源中心一致，否则源应用改名后两边对不上。
             missing = [
                 app_id for app_id in shared_app_ids
                 if app_id not in context.shares_by_app
@@ -551,8 +626,24 @@ class AppService:
                         AppAsset.source_workspace_id,
                         AppAssetInstallation.permission,
                         AppAssetInstallation.created_at,
+                        AppAsset.description.label("asset_description"),
+                        AppAsset.display_payload.label("asset_display_payload"),
+                        AppRelease,
                     )
                     .join(AppAssetInstallation, AppAssetInstallation.asset_id == AppAsset.id)
+                    # 已下线的钉住版本读不出来（`AssetReleaseResolver.resolve_release`
+                    # 直接抛 `RELEASE_NOT_FOUND`），所以不能拿它的名字/图标当展示值——
+                    # 否则会出现「列表显示 A、按 A 搜索却搜不到（`_pinned_name_app_ids`
+                    # 有 is_active 过滤）、A 也不占名」的三处口径分裂。
+                    # 用 join 条件而不是 where：`install_sources`（来源/权限）仍需要这
+                    # 一行，只是不写 `install_display`，展示回退到 `app.name`。
+                    .outerjoin(
+                        AppRelease,
+                        and_(
+                            AppRelease.id == AppAsset.published_release_id,
+                            AppRelease.is_active.is_(True),
+                        ),
+                    )
                     .where(
                         AppAsset.source_app_id.in_(missing),
                         AppAssetInstallation.target_workspace_id == current_workspace_id,
@@ -561,6 +652,7 @@ class AppService:
                         # 出现在本空间的列表里，copy 的那条应用是本空间自有行。
                         AppAssetInstallation.link_mode == LinkMode.REFERENCE,
                         AppAsset.status == AssetStatus.PUBLISHED,
+                        AppAsset.is_active.is_(True),
                     )
                     .order_by(AppAssetInstallation.created_at.desc())
                 ).all()
@@ -569,6 +661,17 @@ class AppService:
                         row.source_app_id,
                         (row.source_workspace_id, row.permission, row.created_at),
                     )
+                    if row.AppRelease is not None:
+                        context.install_display.setdefault(
+                            row.source_app_id,
+                            (
+                                row.AppRelease.name,
+                                # 条目冻结的描述与图标，与资源中心详情返回的同一份。
+                                row.asset_description,
+                                (row.asset_display_payload or {}).get("icon") or None,
+                                (row.asset_display_payload or {}).get("icon_type") or None,
+                            ),
+                        )
 
             source_workspace_ids = {
                 share.source_workspace_id for share in context.shares_by_app.values()
@@ -684,6 +787,23 @@ class AppService:
                     source_workspace_name = source_workspace.name
                     source_workspace_icon = source_workspace.icon
 
+        # 只读引用展示的是条目钉住的那一版快照（`AssetReleaseResolver` 对
+        # reference 安装返回 `published_release_id`），所以展示字段取快照值，
+        # 与资源中心详情（`asset_service.get_asset` 用 release.name）保持一致。
+        # 源应用改过名但条目还钉在旧版本时，不覆盖就会出现「资源中心叫 A、
+        # 列表叫 B」，用户按 A 搜不到。
+        # description 取的是条目上冻结的 `app_assets.description`（资源中心详情
+        # 原样返回该字段），不要再回退到 `app.description`——那是源应用当前的草稿
+        # 值，跨空间消费它既与详情不一致，也等于读了本不该暴露的实时状态。
+        pinned = context.install_display.get(app.id)
+        if pinned is not None:
+            display_name, display_description, display_icon, display_icon_type = pinned
+        else:
+            display_name = app.name
+            display_description = app.description
+            display_icon = app.icon
+            display_icon_type = app.icon_type
+
         # Release version and active status
         source_app_version = context.release_versions.get(app.current_release_id)
         source_app_is_active = app.is_active
@@ -692,10 +812,10 @@ class AppService:
             "id": app.id,
             "workspace_id": app.workspace_id,
             "created_by": app.created_by,
-            "name": app.name,
-            "description": app.description,
-            "icon": app.icon,
-            "icon_type": app.icon_type,
+            "name": display_name,
+            "description": display_description,
+            "icon": display_icon,
+            "icon_type": display_icon_type,
             "type": app.type,
             "visibility": app.visibility,
             "status": app.status,
@@ -1594,7 +1714,14 @@ class AppService:
         if search:
             search_pattern = f"%{search.lower()}%"
             filters.append(
-                func.lower(App.name).like(search_pattern)
+                or_(
+                    func.lower(App.name).like(search_pattern),
+                    # 只读引用在列表里显示的是条目钉住版本的名字（见
+                    # `_convert_to_schema` 的 `install_display`），所以按名字搜索
+                    # 也必须命中快照名，否则用户照资源中心的名字搜会得到空列表。
+                    # 必须带 workspace_id：不加空间隔离会跨所有空间的安装行扫描。
+                    App.id.in_(_pinned_name_app_ids(search_pattern, workspace_id)),
+                )
             )
         if tag_search:
             tag_pattern = f"%{tag_search.lower()}%"
