@@ -69,10 +69,11 @@ export interface ReportModalRef {
 }
 export interface ReportMessageData {
   report_type: string;
-  report_reason: string;
+  report_reason?: string;
   text_start_offset?: number;
   text_end_offset?: number;
   selected_text: string;
+  trace_id?: string;
 }
 export interface StreamData extends MemoryTraceEventData {
   message_id?: string;
@@ -88,6 +89,7 @@ export interface StreamData extends MemoryTraceEventData {
     knowledge_id: string;
     score: string;
   }[];
+  msg?: string;
   error?: string;
   suggested_questions?: string[];
   rendered_content?: string;

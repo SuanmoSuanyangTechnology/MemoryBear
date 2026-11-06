@@ -198,6 +198,7 @@ const mergeTrace = (currentTrace: AgentTrace, incomingTrace: AgentTrace): AgentT
 const getErrorText = (error: unknown): string | undefined => {
   if (typeof error === 'string') return error
   if (!isRecord(error)) return undefined
+  if (typeof error.msg === 'string') return error.msg
   if (typeof error.message === 'string') return error.message
   if (typeof error.error === 'string') return error.error
   if (isRecord(error.error)) return getErrorText(error.error)

@@ -24,6 +24,7 @@ export interface NodeData {
   output?: any;
   process?: any;
   elapsed_time?: string;
+  msg?: string;
   error?: any;
   state: Record<string, any>;
   status?: 'completed' | 'failed';

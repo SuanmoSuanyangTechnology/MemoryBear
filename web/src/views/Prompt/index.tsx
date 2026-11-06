@@ -98,7 +98,7 @@ const Prompt: FC = () => {
 
     const handleStreamMessage = (data: SSEMessage[]) => {
       data.map(item => {
-        const { content, desc, variables, error } = item.data as { content: string; desc: string; variables: string[]; error: string };
+        const { content, desc, variables, msg, error } = item.data as { content: string; desc: string; variables: string[]; msg: string; error: string };
 
         switch (item.event) {
           case 'start':
@@ -128,7 +128,7 @@ const Prompt: FC = () => {
             break;
           case 'error':
               setChatList(prev => {
-                return [...prev, { role: 'assistant', meta_data: { error } }]
+                return [...prev, { role: 'assistant', meta_data: { error: msg || error } }]
               })
             break;
           case 'end':

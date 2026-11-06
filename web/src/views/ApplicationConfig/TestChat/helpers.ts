@@ -183,7 +183,7 @@ export const appendReasoningMessage = (prev: ChatList, content: string): ChatLis
 export const applyErrorMessage = (
   prev: ChatList,
   message_length: number,
-  error?: { message?: string; },
+  error?: { message?: string; msg?: string; },
 ): ChatList => {
   if (message_length > 0) {
     return mapLastVersion(prev, (lastMsg) => {
@@ -194,10 +194,11 @@ export const applyErrorMessage = (
   }
   return mapLastVersion(prev, (lastMsg) => {
     if (lastMsg.role !== 'assistant') return lastMsg
+    const errorMsg = error?.msg || error?.message
     return {
       ...lastMsg,
-      content: error?.message || lastMsg.content || null,
-      status: error?.message ? 'failed' : 'completed',
+      content: errorMsg || lastMsg.content || null,
+      status: errorMsg ? 'failed' : 'completed',
     }
   })
 }
