@@ -400,14 +400,25 @@ class AssetService:
         ).first()
 
         replaced_link_mode: str | None = None
-        if existing is not None:
-            if not (
-                existing.link_mode == LinkMode.REFERENCE
-                and asset.share_mode == ShareMode.EDITABLE
-            ):
-                # 无形态变化（含 copy 方向）：幂等返回，不碰已有安装
-                return self._install_payload(existing, reused=True)
+        # 「只读引用 → 可编辑副本」是唯一会换形态的方向；其余情况一律幂等返回。
+        upgrade = (
+            existing is not None
+            and existing.link_mode == LinkMode.REFERENCE
+            and asset.share_mode == ShareMode.EDITABLE
+        )
+        if existing is not None and not upgrade:
+            # 无形态变化（含 copy 方向）：幂等返回，不碰已有安装
+            return self._install_payload(existing, reused=True)
 
+        # 钉住版本校验必须留在置 removed 之前：`uq_asset_install` 只看
+        # `status='active'`，旧行一旦落库就再也拉不回来（请求级 session 会回滚，
+        # 但不该把正确性押在调用方的回滚上）。幂等分支已经提前返回，所以这里
+        # 不会改变「重复添加」的行为。
+        release = self.db.get(AppRelease, asset.published_release_id)
+        if release is None or not release.is_active:
+            raise BusinessException("条目钉住的版本已下线", BizCode.RELEASE_NOT_FOUND)
+
+        if upgrade:
             # 先让旧行失效再建副本，顺序不能反：
             # 1. `_copy_from_release` 用 `_unique_app_name` 判重，而它把活跃
             #    reference 安装的快照名算作已占用（`app_service._unique_app_name`
@@ -418,10 +429,6 @@ class AssetService:
             existing.status = InstallStatus.REMOVED
             existing.updated_at = utcnow_naive()
             self.db.flush()
-
-        release = self.db.get(AppRelease, asset.published_release_id)
-        if release is None or not release.is_active:
-            raise BusinessException("条目钉住的版本已下线", BizCode.RELEASE_NOT_FOUND)
 
         now = utcnow_naive()
         missing: list[dict[str, Any]] = []

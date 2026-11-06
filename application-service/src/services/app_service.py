@@ -621,7 +621,19 @@ class AppService:
                         AppRelease,
                     )
                     .join(AppAssetInstallation, AppAssetInstallation.asset_id == AppAsset.id)
-                    .outerjoin(AppRelease, AppRelease.id == AppAsset.published_release_id)
+                    # 已下线的钉住版本读不出来（`AssetReleaseResolver.resolve_release`
+                    # 直接抛 `RELEASE_NOT_FOUND`），所以不能拿它的名字/图标当展示值——
+                    # 否则会出现「列表显示 A、按 A 搜索却搜不到（`_pinned_name_app_ids`
+                    # 有 is_active 过滤）、A 也不占名」的三处口径分裂。
+                    # 用 join 条件而不是 where：`install_sources`（来源/权限）仍需要这
+                    # 一行，只是不写 `install_display`，展示回退到 `app.name`。
+                    .outerjoin(
+                        AppRelease,
+                        and_(
+                            AppRelease.id == AppAsset.published_release_id,
+                            AppRelease.is_active.is_(True),
+                        ),
+                    )
                     .where(
                         AppAsset.source_app_id.in_(missing),
                         AppAssetInstallation.target_workspace_id == current_workspace_id,
