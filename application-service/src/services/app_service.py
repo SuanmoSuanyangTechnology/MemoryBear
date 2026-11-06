@@ -92,6 +92,27 @@ def _reference_install_app_ids(workspace_id: uuid.UUID):
     )
 
 
+def _pinned_name_app_ids(pattern: str):
+    """Apps whose **pinned catalog name** matches ``pattern`` (already lowered/%-wrapped).
+
+    列表里只读引用显示的是条目钉住版本的名字（`_convert_to_schema` 的
+    `install_display` 覆盖），所以按名字搜索不能只看 `apps.name`：源应用改名后
+    `apps.name` 已经是新名，而界面显示的还是快照名。这里把快照名也纳入搜索。
+    """
+
+    return (
+        select(AppAsset.source_app_id)
+        .join(AppAssetInstallation, AppAssetInstallation.asset_id == AppAsset.id)
+        .join(AppRelease, AppRelease.id == AppAsset.published_release_id)
+        .where(
+            AppAssetInstallation.status == InstallStatus.ACTIVE,
+            AppAssetInstallation.link_mode == LinkMode.REFERENCE,
+            AppAsset.status == AssetStatus.PUBLISHED,
+            func.lower(AppRelease.name).like(pattern),
+        )
+    )
+
+
 def _store_usage_examples(items: list[str] | None) -> list[dict[str, Any]]:
     """list[str] -> [{'order': n, 'content': s}]，对外按 order 展开（方案 §4.3）。"""
 
@@ -137,6 +158,12 @@ class _AppSerializationContext:
     install_sources: dict[uuid.UUID, tuple[uuid.UUID, str, Any]] = field(
         default_factory=dict
     )
+    # app_id -> 钉住版本（`app_assets.published_release_id`）的展示字段。
+    # 只读引用消费的是**条目钉住的快照**（`AssetReleaseResolver` 对 reference
+    # 安装返回 `asset.published_release_id`），所以列表/详情的 name、description、
+    # icon 必须取快照而不是 `apps` 当前行的值，否则会出现「资源中心叫 A、列表叫 B」
+    # （源应用改了名但条目还钉在旧版本上）。
+    install_display: dict[uuid.UUID, "AppRelease"] = field(default_factory=dict)
 
 
 class AppService:
@@ -229,11 +256,19 @@ class AppService:
         existing |= shared_names
 
         # 资源中心只读引用没有 app_shares 行，但它们同样占着本空间可见的名字，
-        # 不并进来就会允许创建同名应用，列表里出现两行同名。
-        ref_names = {r[0] for r in self.db.query(App.name).filter(
-            App.id.in_(_reference_install_app_ids(workspace_id)),
-            App.type == app_type,
-            App.is_active.is_(True)
+        # 不并进来就会允许创建同名应用，列表里出现两行同名。注意取的是**钉住版本
+        # 的名字**（`_convert_to_schema` 就是这么展示的），不是 `App.name`：源应用
+        # 改名后列表里显示的还是快照名。
+        ref_names = {r[0] for r in self.db.query(AppRelease.name).join(
+            AppAsset, AppAsset.published_release_id == AppRelease.id
+        ).join(
+            AppAssetInstallation, AppAssetInstallation.asset_id == AppAsset.id
+        ).filter(
+            AppAssetInstallation.target_workspace_id == workspace_id,
+            AppAssetInstallation.status == InstallStatus.ACTIVE,
+            AppAssetInstallation.link_mode == LinkMode.REFERENCE,
+            AppAsset.status == AssetStatus.PUBLISHED,
+            AppRelease.type == app_type,
         ).all()}
         existing |= ref_names
 
@@ -540,6 +575,9 @@ class AppService:
 
             # 从资源中心拉来的应用没有 app_shares 行（只读引用甚至没有本地 app），
             # 来源空间与权限只能从安装记录取，否则列表里「来源」一列是空的。
+            # 同时取条目钉住版本的展示字段：只读引用读的就是这份快照
+            # （`AssetReleaseResolver` 对 reference 安装返回 `published_release_id`），
+            # 名称/图标/描述必须与资源中心一致，否则源应用改名后两边对不上。
             missing = [
                 app_id for app_id in shared_app_ids
                 if app_id not in context.shares_by_app
@@ -551,8 +589,10 @@ class AppService:
                         AppAsset.source_workspace_id,
                         AppAssetInstallation.permission,
                         AppAssetInstallation.created_at,
+                        AppRelease,
                     )
                     .join(AppAssetInstallation, AppAssetInstallation.asset_id == AppAsset.id)
+                    .outerjoin(AppRelease, AppRelease.id == AppAsset.published_release_id)
                     .where(
                         AppAsset.source_app_id.in_(missing),
                         AppAssetInstallation.target_workspace_id == current_workspace_id,
@@ -569,6 +609,10 @@ class AppService:
                         row.source_app_id,
                         (row.source_workspace_id, row.permission, row.created_at),
                     )
+                    if row.AppRelease is not None:
+                        context.install_display.setdefault(
+                            row.source_app_id, row.AppRelease
+                        )
 
             source_workspace_ids = {
                 share.source_workspace_id for share in context.shares_by_app.values()
@@ -684,6 +728,17 @@ class AppService:
                     source_workspace_name = source_workspace.name
                     source_workspace_icon = source_workspace.icon
 
+        # 只读引用展示的是条目钉住的那一版快照（`AssetReleaseResolver` 对
+        # reference 安装返回 `published_release_id`），所以展示字段取快照值，
+        # 与资源中心详情（`asset_service.get_asset` 用 release.name）保持一致。
+        # 源应用改过名但条目还钉在旧版本时，不覆盖就会出现「资源中心叫 A、
+        # 列表叫 B」，用户按 A 搜不到。
+        pinned = context.install_display.get(app.id)
+        display_name = pinned.name if pinned is not None else app.name
+        display_description = pinned.description if pinned is not None else app.description
+        display_icon = pinned.icon if pinned is not None else app.icon
+        display_icon_type = pinned.icon_type if pinned is not None else app.icon_type
+
         # Release version and active status
         source_app_version = context.release_versions.get(app.current_release_id)
         source_app_is_active = app.is_active
@@ -692,10 +747,10 @@ class AppService:
             "id": app.id,
             "workspace_id": app.workspace_id,
             "created_by": app.created_by,
-            "name": app.name,
-            "description": app.description,
-            "icon": app.icon,
-            "icon_type": app.icon_type,
+            "name": display_name,
+            "description": display_description,
+            "icon": display_icon,
+            "icon_type": display_icon_type,
             "type": app.type,
             "visibility": app.visibility,
             "status": app.status,
@@ -1594,7 +1649,13 @@ class AppService:
         if search:
             search_pattern = f"%{search.lower()}%"
             filters.append(
-                func.lower(App.name).like(search_pattern)
+                or_(
+                    func.lower(App.name).like(search_pattern),
+                    # 只读引用在列表里显示的是条目钉住版本的名字（见
+                    # `_convert_to_schema` 的 `install_display`），所以按名字搜索
+                    # 也必须命中快照名，否则用户照资源中心的名字搜会得到空列表。
+                    App.id.in_(_pinned_name_app_ids(search_pattern)),
+                )
             )
         if tag_search:
             tag_pattern = f"%{tag_search.lower()}%"
