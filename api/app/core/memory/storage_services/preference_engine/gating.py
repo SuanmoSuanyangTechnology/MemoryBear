@@ -18,6 +18,7 @@ import uuid
 from typing import Any, Optional, Tuple
 
 from sqlalchemy import text
+from sqlalchemy.exc import ProgrammingError
 
 from app.core.config import settings
 from app.db import get_db_context
@@ -27,9 +28,14 @@ logger = logging.getLogger(__name__)
 DEFAULT_PREFERENCE_DOMAIN = "coding"
 _APP_SCOPED_SOURCES = {"agent", "workflow"}
 
-_ONTOLOGY_SUPPORT: Optional[bool] = None
-_ONTOLOGY_SUPPORT_CHECKED_AT: float = 0.0
+_ONTOLOGY_SUPPORT_STATE: Optional[tuple[bool, float]] = None
 _ONTOLOGY_SUPPORT_NEGATIVE_TTL_SECONDS = 60.0
+
+
+def _mark_ontology_unsupported() -> None:
+    """表/列缺失时记录负缓存，避免同一部署每条消息重复失败探测。"""
+    global _ONTOLOGY_SUPPORT_STATE
+    _ONTOLOGY_SUPPORT_STATE = (False, time.monotonic())
 
 
 def _ontology_support_status() -> Optional[bool]:
@@ -37,19 +43,20 @@ def _ontology_support_status() -> Optional[bool]:
 
     仅看 DEPLOYMENT_MODE 默认值会把未显式配置环境变量的私有化部署误判为
     社区版，从而静默跳过本体反查；这里用表存在性探测兜底。
+    状态用单个元组赋值，避免多线程读到不一致的 support/checked_at 组合。
     正结果永久缓存；负结果缓存 60s；探测失败返回 None 且不缓存。
     """
-    global _ONTOLOGY_SUPPORT, _ONTOLOGY_SUPPORT_CHECKED_AT
+    global _ONTOLOGY_SUPPORT_STATE
+    state = _ONTOLOGY_SUPPORT_STATE
     now = time.monotonic()
-    if _ONTOLOGY_SUPPORT is True:
-        return True
-    if (
-        _ONTOLOGY_SUPPORT is False
-        and now - _ONTOLOGY_SUPPORT_CHECKED_AT < _ONTOLOGY_SUPPORT_NEGATIVE_TTL_SECONDS
-    ):
-        return False
+    if state is not None:
+        supported, checked_at = state
+        if supported:
+            return True
+        if now - checked_at < _ONTOLOGY_SUPPORT_NEGATIVE_TTL_SECONDS:
+            return False
     if settings.DEPLOYMENT_MODE != "community":
-        _ONTOLOGY_SUPPORT = True
+        _ONTOLOGY_SUPPORT_STATE = (True, now)
         return True
     try:
         with get_db_context() as db:
@@ -72,8 +79,7 @@ def _ontology_support_status() -> Optional[bool]:
         # 探测失败不缓存，下一次请求重试；由调用方按“未知”跳过偏好任务
         logger.warning("[PreferenceGate] ontology table probe failed", exc_info=True)
         return None
-    _ONTOLOGY_SUPPORT = supported
-    _ONTOLOGY_SUPPORT_CHECKED_AT = now
+    _ONTOLOGY_SUPPORT_STATE = (supported, now)
     return supported
 
 
@@ -140,8 +146,17 @@ def resolve_conversation_preference_domain(
                 ),
                 {"conversation_id": conversation_id},
             ).first()
+    except ProgrammingError:
+        # 表/列缺失：回写负缓存，避免同一部署每条消息重复失败查询
+        _mark_ontology_unsupported()
+        logger.error(
+            "[PreferenceGate] ontology schema missing conversation_id=%s",
+            conversation_id,
+            exc_info=True,
+        )
+        return None, False, None
     except Exception:
-        # 表缺失/连接异常统一在门控内降级，返回 None 表示“未知”，与“会话不存在”区分
+        # 连接类异常统一在门控内降级，返回 None 表示“未知”
         logger.error(
             "[PreferenceGate] conversation domain query failed conversation_id=%s",
             conversation_id,
