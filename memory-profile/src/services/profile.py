@@ -106,8 +106,13 @@ class ProfileQueryService:
             return _zero_memory_statistics()
         # Fetch PG source counts, Neo4j counts and short-term memo counts concurrently.
         evaluated_at = datetime.now(UTC)
-        source_counts, memory_counts, short_term, explicit_sources,community_total = await asyncio.gather(
-
+        (
+            source_counts,
+            memory_counts,
+            short_term,
+            explicit_sources,
+            community_total,
+        ) = await asyncio.gather(
             self._memory_type_source_counts(user_id),
             asyncio.gather(
                 safe_count(
@@ -133,7 +138,6 @@ class ProfileQueryService:
             ),
         )
         implicit_count, graph_counts = memory_counts
-        episodic = graph_counts["episodic"]
         emotional = graph_counts["emotional"]
         try:
             for result in explicit_sources:

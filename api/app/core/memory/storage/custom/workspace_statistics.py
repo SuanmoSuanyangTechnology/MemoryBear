@@ -123,11 +123,6 @@ if (start != null && end != null) {
 _FALLBACK_STATISTICS_QUERY = """
 UNWIND $end_user_ids AS end_user_id
 CALL (end_user_id) {
-    OPTIONAL MATCH (summary:MemorySummary {end_user_id: end_user_id})
-    WHERE summary.delete_at IS NULL
-    RETURN count(DISTINCT summary) AS episodic_count
-}
-CALL (end_user_id) {
     OPTIONAL MATCH (entity:ExtractedEntity {end_user_id: end_user_id})
     WHERE entity.delete_at IS NULL
       AND entity.is_explicit_memory = true
@@ -139,8 +134,7 @@ CALL (end_user_id) {
       AND statement.emotion_type IS NOT NULL
     RETURN count(DISTINCT statement) AS emotional_count
 }
-RETURN sum(episodic_count) AS episodic_count,
-       sum(explicit_entity_count) AS explicit_entity_count,
+RETURN sum(explicit_entity_count) AS explicit_entity_count,
        sum(emotional_count) AS emotional_count
 """
 
@@ -258,17 +252,13 @@ async def get_elasticsearch_workspace_statistics(
     client: ElasticClient,
     end_user_ids: Sequence[str],
 ) -> tuple[dict[str, dict[str, int]], set[str]]:
-    """返回每个用户的情景、情绪计数及 ES 中存在活跃节点的用户集合。"""
+    """Return emotion counts and users with active Statement documents."""
     if not end_user_ids:
         return {}, set()
     if client.client is None:
         raise RuntimeError("Elasticsearch client is not connected")
 
     searches = [
-        _elasticsearch_search_header(MemoryNodeType.MEMORY_SUMMARY),
-        _elasticsearch_search_body(end_user_ids),
-        _elasticsearch_search_header(MemoryNodeType.EXTRACTED_ENTITY),
-        _elasticsearch_search_body(end_user_ids),
         _elasticsearch_search_header(MemoryNodeType.STATEMENT),
         _elasticsearch_search_body(
             end_user_ids,
@@ -277,10 +267,10 @@ async def get_elasticsearch_workspace_statistics(
     ]
     result = await client.client.msearch(
         searches=searches,
-        max_concurrent_searches=3,
+        max_concurrent_searches=1,
     )
     responses = result.get("responses")
-    if not isinstance(responses, list) or len(responses) != 3:
+    if not isinstance(responses, list) or len(responses) != 1:
         raise RuntimeError(
             "Elasticsearch workspace statistics returned invalid responses"
         )
@@ -288,27 +278,18 @@ async def get_elasticsearch_workspace_statistics(
         raise RuntimeError(
             "Elasticsearch workspace statistics returned an invalid response"
         )
-    episodic = _parse_elasticsearch_buckets(
-        responses[0],
-        "workspace episodic",
-    )
-    entities = _parse_elasticsearch_buckets(
-        responses[1],
-        "workspace entities",
-    )
     emotional = _parse_elasticsearch_buckets(
-        responses[2],
+        responses[0],
         "workspace emotional",
         "emotional",
     )
 
     requested_ids = set(end_user_ids)
     present_ids = (
-        set(episodic) | set(entities) | set(emotional)
+        set(emotional)
     ) & requested_ids
     statistics = {
         end_user_id: {
-            "episodic_count": episodic.get(end_user_id, (0, 0))[1],
             "emotional_count": emotional.get(end_user_id, (0, 0))[1],
         }
         for end_user_id in end_user_ids
@@ -322,7 +303,6 @@ async def get_neo4j_fallback_statistics(
 ) -> dict[str, int]:
     if not end_user_ids:
         return {
-            "episodic_count": 0,
             "explicit_entity_count": 0,
             "emotional_count": 0,
         }
@@ -332,7 +312,6 @@ async def get_neo4j_fallback_statistics(
     )
     row = rows[0] if rows else {}
     return {
-        "episodic_count": int(row.get("episodic_count") or 0),
         "explicit_entity_count": int(row.get("explicit_entity_count") or 0),
         "emotional_count": int(row.get("emotional_count") or 0),
     }
@@ -545,9 +524,6 @@ class WorkspaceStatisticsStorage:
             end_user_ids,
         )
 
-        episodic_count = sum(
-            item["episodic_count"] for item in elastic_statistics.values()
-        )
         emotional_count = sum(
             item["emotional_count"] for item in elastic_statistics.values()
         )
@@ -562,7 +538,6 @@ class WorkspaceStatisticsStorage:
                 self._neo4j_client,
                 missing_ids,
             )
-            episodic_count += fallback["episodic_count"]
             emotional_count += fallback["emotional_count"]
 
         from app.core.memory.storage.custom.scene_community_storage import count_scene_communities
