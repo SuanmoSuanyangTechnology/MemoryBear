@@ -1,5 +1,9 @@
 import { forwardRef, useImperativeHandle, useState } from 'react';
 import { Form, Input, Select, App } from 'antd';
+import type { UploadFile } from 'antd';
+// import UploadImages from '@/components/Upload/UploadImages';
+import { getFileLink } from '@/api/fileStorage';
+import ToolIcon from '@/assets/images/tool/tool.svg';
 import { useTranslation } from 'react-i18next';
 
 import type { CustomToolItem, CustomToolModalRef, ToolItem } from '../types'
@@ -12,6 +16,17 @@ const FormItem = Form.Item;
 interface CustomToolModalProps {
   refresh: () => void;
 }
+
+interface CustomToolFormValues extends Omit<CustomToolItem, 'icon'> {
+  icon?: UploadFile<{ data?: { file_id?: string } }>;
+}
+
+const defaultIcon: NonNullable<CustomToolFormValues['icon']> = {
+  uid: 'default-tool-icon',
+  name: 'tool.svg',
+  status: 'done',
+  url: ToolIcon,
+};
 
 interface OperationItem {
   method: string;
@@ -37,10 +52,10 @@ const CustomToolModal = forwardRef<CustomToolModalRef, CustomToolModalProps>(({
   const { t } = useTranslation();
   const { message } = App.useApp();
   const [visible, setVisible] = useState(false);
-  const [form] = Form.useForm<CustomToolItem>();
+  const [form] = Form.useForm<CustomToolFormValues>();
+  const authType = Form.useWatch(['config', 'auth_type'], form);
   const [loading, setLoading] = useState(false);
   const [editVo, setEditVo] = useState<ToolItem | null>(null)
-  const values = Form.useWatch<CustomToolItem>([], form)
   const [parseSchemaData, setParseSchemaData] = useState<ParseSchemaData>({} as ParseSchemaData)
 
   // 封装取消方法，添加关闭弹窗逻辑
@@ -57,6 +72,9 @@ const CustomToolModal = forwardRef<CustomToolModalRef, CustomToolModalProps>(({
       const { config_data, ...rest  } = data
       form.setFieldsValue({
         ...rest,
+        icon: data.icon
+          ? { uid: data.icon, name: 'icon', status: 'done', url: data.icon }
+          : defaultIcon,
         config: {...config_data}
       })
       setEditVo(data)
@@ -71,32 +89,29 @@ const CustomToolModal = forwardRef<CustomToolModalRef, CustomToolModalProps>(({
   const handleSave = () => {
     form
       .validateFields()
-      .then(() => {
+      .then(({ icon, ...fields }) => {
         setLoading(true);
-        // 创建新服务对象
-        const { config, ...reset } = values
-        const request = editVo?.id ? updateTool(editVo?.id, {
-          ...editVo,
-          ...reset,
-          config: {
-            ...editVo.config_data,
-            ...config
-          }
-        }) : addTool({
-          ...values,
-          tool_type: 'custom'
-        })
-        request.then(() => {
+        const fileId = icon?.response?.data?.file_id;
+        const iconUrl = fileId
+          ? getFileLink(fileId).then((response: { url: string }) => response.url)
+          : Promise.resolve(icon?.url || ToolIcon);
+
+        return iconUrl.then(url => {
+          const data: CustomToolItem = { ...fields, icon: url, tool_type: 'custom' };
+          return editVo?.id
+            ? updateTool(editVo.id, {
+              ...editVo,
+              ...data,
+              config: { ...editVo.config_data, ...data.config },
+            })
+            : addTool(data);
+        }).then(() => {
           message.success(editVo?.id ? t('common.updateSuccess') : t('common.createSuccess'));
           handleClose();
-          refresh()
-        })
-          .finally(() => {
-            setLoading(false);
-          })
+          refresh();
+        });
       })
-      .catch((err) => {
-        console.log('表单验证失败:', err);
+      .finally(() => {
         setLoading(false);
       });
   };
@@ -130,6 +145,7 @@ const CustomToolModal = forwardRef<CustomToolModalRef, CustomToolModalProps>(({
         form={form}
         layout="vertical"
         initialValues={{
+          // icon: defaultIcon,
           config: {
             auth_type: 'none'
           }
@@ -146,23 +162,30 @@ const CustomToolModal = forwardRef<CustomToolModalRef, CustomToolModalProps>(({
         >
           <Input placeholder={t('tool.enterNamePlaceholder')} />
         </Form.Item>
-        {/* 名称和图标 */}
-        {/* <Form.Item label={t('tool.nameAndIcon')} required>
-          <Row gutter={8}>
-            <Col span={16}>
-              <Form.Item
-                name="name"
-                noStyle
-                rules={[{ required: true, message: t('common.pleaseEnter') }]}
-              >
-                <Input placeholder={t('common.pleaseEnter')} />
-              </Form.Item>
-            </Col>
-            <Col span={8}>
-              <Button>icon</Button>
-            </Col>
-          </Row>
+        {/* <Form.Item
+          name="icon"
+          label={t('application.customIcon')}
+          valuePropName="fileList"
+          rules={[{
+            validator: (_, icon: CustomToolFormValues['icon']) => {
+              if (icon && icon.status !== 'done') {
+                return Promise.reject(new Error(t('common.pleaseSelect')));
+              }
+              return Promise.resolve();
+            },
+          }]}
+        >
+          <UploadImages fileSize={2} disabled={loading} />
         </Form.Item> */}
+        <Form.Item
+          name="description"
+          label={t('tool.description')}
+          rules={[
+            { max: 1000 },
+          ]}
+        >
+          <Input.TextArea placeholder={t('common.pleaseEnter')} />
+        </Form.Item>
         <Form.Item
           name={['config', 'schema_content']}
           label={t('tool.schema')}
@@ -224,7 +247,7 @@ const CustomToolModal = forwardRef<CustomToolModalRef, CustomToolModalProps>(({
           </FormItem>
 
           {/* API Key: 认证方式 = api_key 展示 */}
-          {values?.config?.auth_type === 'api_key' && <>
+          {authType === 'api_key' && <>
             <FormItem
               name={['config', 'auth_config', "key_name"]}
               label={t('tool.key_name')}
@@ -241,7 +264,7 @@ const CustomToolModal = forwardRef<CustomToolModalRef, CustomToolModalProps>(({
           </>}
 
           {/* API Key: 认证方式 = bearer_token 展示 */}
-          {values?.config?.auth_type === 'bearer_token' &&
+          {authType === 'bearer_token' &&
             <FormItem
               name={['config', 'auth_config', "token"]}
               label={t('tool.bearer_token')}
@@ -252,7 +275,7 @@ const CustomToolModal = forwardRef<CustomToolModalRef, CustomToolModalProps>(({
           }
 
           {/* API Key: 认证方式 = basic_auth 展示 */}
-          {values?.config?.auth_type === 'basic_auth' &&
+          {authType === 'basic_auth' &&
             <>
               <FormItem
                 name={['config', 'auth_config', "username"]}

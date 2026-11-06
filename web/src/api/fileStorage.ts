@@ -16,7 +16,7 @@ export const fileUpload = (formData?: unknown) => {
 // Get file access URL (no token required)
 export const getFileUrl = (file_id: string) => `/storage/files/${file_id}/url`
 export const getFileLink = (fileId: string, data: { permanent?: boolean } = { permanent: true }) => {
-  return request.get(getFileUrl(fileId), data)
+  return request.get<{ url: string }>(getFileUrl(fileId), data)
 }
 
 // Get file internally

@@ -1,6 +1,10 @@
 import { forwardRef, useImperativeHandle, useState, useRef } from 'react';
 import { Form, Input, InputNumber, Select, App, Button, Tabs, Space, Flex } from 'antd';
 import { useTranslation } from 'react-i18next';
+import type { UploadFile } from 'antd';
+// import UploadImages from '@/components/Upload/UploadImages';
+import { getFileLink } from '@/api/fileStorage';
+import ToolIcon from '@/assets/images/tool/tool.svg';
 
 import type { MCPToolItem, ToolItem } from '../types'
 import RbModal from '@/components/RbModal';
@@ -16,6 +20,17 @@ const FormItem = Form.Item;
 interface McpServiceModalProps {
   refresh: () => void;
 }
+
+interface McpServiceFormValues extends Omit<MCPToolItem, 'icon'> {
+  icon?: UploadFile<{ data?: { file_id?: string } }>;
+}
+
+const defaultIcon: NonNullable<McpServiceFormValues['icon']> = {
+  uid: 'default-tool-icon',
+  name: 'tool.svg',
+  status: 'done',
+  url: ToolIcon,
+};
 
 export interface RequestHeader { 
   key: string; 
@@ -34,11 +49,11 @@ const McpServiceModal = forwardRef<McpServiceModalRef, McpServiceModalProps>(({
   const { t } = useTranslation();
   const { message } = App.useApp();
   const [visible, setVisible] = useState(false);
-  const [form] = Form.useForm<MCPToolItem>();
+  const [form] = Form.useForm<McpServiceFormValues>();
   const [loading, setLoading] = useState(false);
   const [editVo, setEditVo] = useState<ToolItem | null>(null)
   const [activeTab, setActiveTab] = useState('auth');
-  const values = Form.useWatch<MCPToolItem>([], form)
+  const values = Form.useWatch<McpServiceFormValues>([], form)
   const requestHeaderModalRef = useRef<RequestHeaderModalRef>(null)
   const [requestHeaderList, setRequestHeaderList] = useState<RequestHeader[]>([])
   const abortControllerRef = useRef<AbortController | null>(null)
@@ -73,7 +88,11 @@ const McpServiceModal = forwardRef<McpServiceModalRef, McpServiceModalProps>(({
     if (data?.id) {
       const { config_data, name, description, icon } = data
       form.setFieldsValue({
-        name, description, icon,
+        name,
+        description,
+        icon: icon
+          ? { uid: icon, name: 'icon', status: 'done', url: icon }
+          : defaultIcon,
         config: { ...config_data }
       })
 
@@ -87,7 +106,11 @@ const McpServiceModal = forwardRef<McpServiceModalRef, McpServiceModalProps>(({
     } else if (data) {
       const { config_data, name, description, icon } = data
       form.setFieldsValue({
-        name, description, icon,
+        name,
+        description,
+        icon: icon
+          ? { uid: icon, name: 'icon', status: 'done', url: icon }
+          : defaultIcon,
         ...(config_data ? { config: { ...config_data } } : {})
       })
       // 如果是从 Market 组件传来的数据（包含 market_id），保存完整的 data 用于后续提交
@@ -104,17 +127,22 @@ const McpServiceModal = forwardRef<McpServiceModalRef, McpServiceModalProps>(({
   const handleSave = () => {
     form
       .validateFields()
-      .then(() => {
+      .then(({ icon, config, ...rest }) => {
         setLoading(true);
         
         // 创建 AbortController 用于取消请求
-        abortControllerRef.current = new AbortController();
-        
+        const controller = new AbortController();
+        abortControllerRef.current = controller;
+        const fileId = icon?.response?.data?.file_id;
+        const iconUrl = fileId
+          ? getFileLink(fileId).then((response: { url: string }) => response.url)
+          : Promise.resolve(icon?.url || ToolIcon);
+
         // 创建新服务对象
-        const { config, ...rest } = values
 
         const newService: MCPToolItem = {
           ...rest,
+          icon: icon?.url || ToolIcon,
           tool_type: 'mcp',
           config: {
             ...config,
@@ -137,10 +165,13 @@ const McpServiceModal = forwardRef<McpServiceModalRef, McpServiceModalProps>(({
           (newService.config as any).mcp_service_id = (editVo as any).mcp_service_id;
         }
         
-        const request = editVo?.id 
-          ? updateTool(editVo.id, newService, { signal: abortControllerRef.current.signal }) 
-          : addTool(newService, { signal: abortControllerRef.current.signal })
-        request.then((res: any) => {
+        return iconUrl.then(url => {
+          controller.signal.throwIfAborted();
+          newService.icon = url;
+          return editVo?.id
+            ? updateTool(editVo.id, newService, { signal: controller.signal })
+            : addTool(newService, { signal: controller.signal });
+        }).then((res: any) => {
           // 清除 AbortController
           abortControllerRef.current = null;
           
@@ -199,6 +230,7 @@ const McpServiceModal = forwardRef<McpServiceModalRef, McpServiceModalProps>(({
         form={form}
         layout="vertical"
         initialValues={{
+          icon: defaultIcon,
           config: {
             connection_config: {
               auth_type: 'none',
@@ -231,29 +263,27 @@ const McpServiceModal = forwardRef<McpServiceModalRef, McpServiceModalProps>(({
         >
           <Input placeholder={t('tool.namePlaceholder')} />
         </Form.Item>
-        {/* 名称和图标 */}
-        {/* <Form.Item label={t('tool.nameAndIcon')} required>
-          <Row gutter={8}>
-            <Col span={16}>
-              <Form.Item
-                name="name"
-                noStyle
-                rules={[{ required: true, message: t('common.pleaseEnter') }]}
-              >
-                <Input placeholder={t('tool.namePlaceholder')} />
-              </Form.Item>
-            </Col>
-            <Col span={8}>
-              <Button>icon</Button>
-            </Col>
-          </Row>
-        </Form.Item> */}
 
+        {/* <Form.Item
+          name="icon"
+          label={t('application.customIcon')}
+          valuePropName="fileList"
+          rules={[{
+            validator: (_, icon: McpServiceFormValues['icon']) => {
+              if (icon && icon.status !== 'done') {
+                return Promise.reject(new Error(t('common.pleaseSelect')));
+              }
+              return Promise.resolve();
+            },
+          }]}
+        >
+          <UploadImages fileSize={2} disabled={loading} />
+        </Form.Item> */}
         {/* 描述 */}
         <FormItem
           name="description"
           label={t('tool.description')}
-          rules={[{ max: 500 }]}
+          rules={[{ max: 1000 }]}
         >
           <Input.TextArea rows={3} placeholder={t('common.inputPlaceholder', { title: t('tool.description') })}/>
         </FormItem>

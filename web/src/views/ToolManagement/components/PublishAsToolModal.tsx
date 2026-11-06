@@ -1,9 +1,3 @@
-/*
- * @Author: ZhaoYing 
- * @Date: 2026-05-28 13:41:42 
- * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-06-11 20:08:38
- */
 import { forwardRef, useImperativeHandle, useState } from 'react';
 import { Form, Input, Select, App } from 'antd';
 import { useTranslation } from 'react-i18next';
@@ -12,13 +6,15 @@ import { useParams } from 'react-router-dom';
 import RbModal from '@/components/RbModal';
 import type { WorkflowToolItem, InputParameters, OutputSchema, WorkflowToolModalRef } from '../types';
 import { previewWorkflowToolParams, workflowPublishAsTool } from '@/api/application';
+import { getFileLink } from '@/api/fileStorage';
+import UploadImages from '@/components/Upload/UploadImages';
 import Table from '@/components/Table';
 
 export interface WorkflowToolForm {
   name: string;
   description?: string;
   tags: string[];
-  icon?: string;
+  icon?: any;
   timeout: number;
   input_parameters: InputParameters[];
   output_schema: OutputSchema;
@@ -66,6 +62,7 @@ const PublishAsToolModal = forwardRef<WorkflowToolModalRef, { refresh?: () => vo
         name: tool.name,
         description: tool.description || '',
         tags: tool.tags || [],
+        icon: tool.icon ? { url: tool.icon, uid: tool.icon, status: 'done', name: 'icon' } : undefined,
       });
       setInputParameters(tool.config_data.input_parameters);
       setOutputSchema(tool.config_data.output_schema.properties);
@@ -85,14 +82,31 @@ const PublishAsToolModal = forwardRef<WorkflowToolModalRef, { refresh?: () => vo
     form.validateFields()
       .then((values) => {
         setLoading(true);
-        workflowPublishAsTool(editTool?.id ? editTool?.config_data.app_id : id as string, values)
-          .then(() => {
-            handleClose();
-            message.success(editTool?.id ? t('common.updateSuccess') : t('common.createSuccess'));
-            refresh?.();
-          }).finally(() => {
-            setLoading(false);
-          })
+        const { icon, ...rest } = values;
+        const formData: WorkflowToolForm = { ...rest };
+
+        const submitForm = (data: typeof formData) => {
+          workflowPublishAsTool(editTool?.id ? editTool?.config_data.app_id : id as string, data)
+            .then(() => {
+              handleClose();
+              message.success(editTool?.id ? t('common.updateSuccess') : t('common.createSuccess'));
+              refresh?.();
+            }).finally(() => {
+              setLoading(false);
+            })
+        };
+
+        if (icon?.response?.data.file_id) {
+          getFileLink(icon?.response?.data.file_id).then(res => {
+            const logoRes = res as { url: string };
+            formData.icon = logoRes.url;
+            submitForm(formData);
+          }).catch(() => {
+            submitForm(formData);
+          });
+        } else {
+          submitForm(formData);
+        }
       })
   };
 
@@ -108,7 +122,7 @@ const PublishAsToolModal = forwardRef<WorkflowToolModalRef, { refresh?: () => vo
       render: (name: string, record: InputParameters) => (
         <div>
           <span className="rb:font-medium">{name}</span>
-          <div className="rb:text-[#5B6167] rb:text-[12px]">{record.type}</div>
+          <div className="rb:text-gray-600 rb:text-[12px]">{record.type}</div>
         </div>
       ),
     },
@@ -149,6 +163,18 @@ const PublishAsToolModal = forwardRef<WorkflowToolModalRef, { refresh?: () => vo
           tags: [],
         }}
       >
+        {/* Icon */}
+        <Form.Item
+          name="icon"
+          label={t('tool.toolIcon')}
+          valuePropName="fileList"
+          rules={[
+            { required: true, message: t('common.pleaseSelect') },
+          ]}
+          className="rb:shrink-0!"
+        >
+          <UploadImages fileSize={2} />
+        </Form.Item>
         {/* Name */}
         <Form.Item
           name="name"
@@ -157,6 +183,7 @@ const PublishAsToolModal = forwardRef<WorkflowToolModalRef, { refresh?: () => vo
             { required: true, message: t('common.pleaseEnter') },
             { pattern: /^[a-zA-Z0-9][a-zA-Z0-9\-_]*[a-zA-Z0-9]$|^[a-zA-Z0-9]$/, message: t('tool.requestHeaderKeyInvalid') },
           ]}
+          className="rb:flex-1!"
         >
           <Input placeholder={t('common.pleaseEnter')} />
         </Form.Item>
@@ -173,7 +200,7 @@ const PublishAsToolModal = forwardRef<WorkflowToolModalRef, { refresh?: () => vo
         </Form.Item>
 
         <div className="rb:mb-4">
-          <div className="rb:text-[#212332] rb:text-sm rb:font-medium rb:mb-2">
+          <div className="rb:text-gray-800 rb:text-sm rb:font-medium rb:mb-2">
             {t('tool.inputParams')}
           </div>
           <Table<InputParameters>
@@ -181,12 +208,13 @@ const PublishAsToolModal = forwardRef<WorkflowToolModalRef, { refresh?: () => vo
             columns={inputColumns}
             rowKey="name"
             pagination={false}
+            emptySize={88}
           />
         </div>
 
         {/* Output Parameters */}
         <div className="rb:mb-4">
-          <div className="rb:text-[#212332] rb:text-sm rb:font-medium rb:mb-2">
+          <div className="rb:text-gray-800 rb:text-sm rb:font-medium rb:mb-2">
             {t('tool.outputParams')}
           </div>
           <Table<{ name: string; type: string }>
@@ -194,6 +222,7 @@ const PublishAsToolModal = forwardRef<WorkflowToolModalRef, { refresh?: () => vo
             columns={outputColumns}
             rowKey="name"
             pagination={false}
+            emptySize={88}
           />
         </div>
 
