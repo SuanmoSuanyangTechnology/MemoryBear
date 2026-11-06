@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import logging
+import uuid
 from collections import defaultdict
-from typing import Any
+from typing import Any, Optional
 
 from app.core.memory.storage.custom.preference import (
     create_preference_if_absent,
@@ -13,6 +14,7 @@ from app.core.memory.storage.custom.preference import (
 )
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 
+from .gating import DEFAULT_PREFERENCE_DOMAIN
 from .keyword_gate import match_preference_keywords
 from .models import (
     IdentifiedPreference,
@@ -20,7 +22,7 @@ from .models import (
     PreferenceOperations,
     PreferenceProcessorResult,
 )
-from .ontology_registry import load_preference_ontology
+from .ontology_registry import load_preference_ontology_from_db
 from .prompt_runner import PreferencePromptRunner
 
 logger = logging.getLogger(__name__)
@@ -38,11 +40,53 @@ class PreferenceProcessor:
         end_user_id: str,
         llm_client: Any,
         connector: Neo4jConnector,
+        domain: str = DEFAULT_PREFERENCE_DOMAIN,
     ):
         self.memory_config = memory_config
         self.end_user_id = end_user_id
-        self.ontology = load_preference_ontology("coding")
-        self.runner = PreferencePromptRunner(llm_client, self.ontology)
+        self._skip_reason: Optional[str] = None
+        workspace_id = getattr(memory_config, "workspace_id", None)
+
+        if not workspace_id:
+            logger.warning(
+                "[Preference] workspace missing, skip preference task domain=%s", domain
+            )
+            self._skip_reason = "workspace_missing"
+            self.ontology = None
+        else:
+            try:
+                uuid.UUID(str(workspace_id))
+            except (TypeError, ValueError):
+                # 非法 workspace 不能回退随包本体，否则会用错误的封闭集合写入
+                logger.error(
+                    "[Preference] invalid workspace id, skip preference task: %s",
+                    workspace_id,
+                )
+                self._skip_reason = "invalid_workspace"
+                self.ontology = None
+            else:
+                try:
+                    self.ontology = load_preference_ontology_from_db(
+                        str(workspace_id), domain
+                    )
+                except Exception as exc:
+                    # 写路径不回退随包本体，避免用与 workspace 配置不一致的封闭集合
+                    logger.error(
+                        "[Preference] DB ontology load failed, skip preference task "
+                        "workspace=%s domain=%s error=%s",
+                        workspace_id,
+                        domain,
+                        exc,
+                        exc_info=True,
+                    )
+                    self._skip_reason = "ontology_unavailable"
+                    self.ontology = None
+
+        self.runner = (
+            None
+            if self._skip_reason
+            else PreferencePromptRunner(llm_client, self.ontology)
+        )
         self.connector = connector
 
     async def run(
@@ -51,6 +95,8 @@ class PreferenceProcessor:
         target_message: dict,
         history_messages: list[dict],
     ) -> PreferenceProcessorResult:
+        if self._skip_reason:
+            return PreferenceProcessorResult(status="skipped", reason=self._skip_reason)
         gate = match_preference_keywords(
             target_message.get("content", ""),
             list(getattr(self.memory_config, "preference_custom_keywords", ())),

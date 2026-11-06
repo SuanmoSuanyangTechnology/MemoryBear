@@ -40,6 +40,7 @@ from ....services.context_engine_manager import ContextEngineManager
 from ....services.model_service import ModelConfigService
 from ....services.published_agent_runner import PublishedAgentRunner
 from ....services.tool_service import ToolService
+from ....tools.langchain_adapter import LangchainAdapter, plan_tool_selections
 
 logger = logging.getLogger(__name__)
 
@@ -129,8 +130,8 @@ class AgentNode(BaseNode):
         selectors = [s for s in (self.typed_config.tools or []) if s.enabled]
         user_id = self.get_variable("sys.user_id", variable_pool, strict=False)
         workspace_id = self.get_variable("sys.workspace_id", variable_pool, strict=False)
-        # Only conversational workflows carry a conversation id; a pure workflow (no
-        # conversation) leaves it None and the sandbox tools refuse to execute.
+        # Regular tool-library tools run under the real conversation whenever one
+        # exists; only conversational workflows carry it.
         conversation_id = self.get_variable("sys.conversation_id", variable_pool, strict=False)
         if not conversation_id:
             # Single-node dry run / conversation-less workflow: fixed sandbox directory ID
@@ -150,23 +151,30 @@ class AgentNode(BaseNode):
             else:
                 async with get_async_db_context() as db:
                     tool_service = ToolService(db)
-                    for selector in selectors:
+                    instances = {}
+                    selections = plan_tool_selections(
+                        (selector.tool_id, selector.operation)
+                        for selector in selectors
+                    )
+                    for tool_id, operation in selections:
                         try:
-                            tool_instance = await tool_service.get_tool_instance_async(str(selector.tool_id), tenant_id)
-                            if not tool_instance:
-                                logger.warning(f"节点 {self.node_id}: 工具 {selector.tool_id} 不存在或未激活，已跳过")
-                                continue
-                            tool_instance.set_runtime_context(
-                                user_id=user_id,
-                                workspace_id=workspace_id,
-                                conversation_id=conversation_id,
+                            tool_instance = instances.get(tool_id)
+                            if tool_instance is None:
+                                tool_instance = await tool_service.get_tool_instance_async(tool_id, tenant_id)
+                                if not tool_instance:
+                                    logger.warning(f"节点 {self.node_id}: 工具 {tool_id} 不存在或未激活，已跳过")
+                                    continue
+                                tool_instance.set_runtime_context(
+                                    user_id=user_id,
+                                    workspace_id=workspace_id,
+                                    conversation_id=conversation_id,
+                                )
+                                instances[tool_id] = tool_instance
+                            langchain_tools.extend(
+                                LangchainAdapter.convert_selection(tool_instance, operation)
                             )
-                            langchain_tool = tool_instance.to_langchain_tool(selector.operation)
-
-                            if langchain_tool:
-                                langchain_tools.append(langchain_tool)
                         except Exception as e:
-                            logger.error(f"节点 {self.node_id}: 加载工具 {selector.tool_id} 失败: {e}")
+                            logger.error(f"节点 {self.node_id}: 加载工具 {tool_id} 失败: {e}")
 
         # Knowledge base retrieval tool: reuses the standard retrieval adapter and
         # parameter semantics of Agent applications.
@@ -230,6 +238,14 @@ class AgentNode(BaseNode):
 
         # Sandbox tools are not configurable: with ENABLE_SANDBOX_SERVICE on, every Agent node
         # run carries the full set. Drop stale configured copies first so names never collide.
+        # In a single-node dry run the stable debug session id must win over a real
+        # conversation restored from the debug snapshot, otherwise the kernel executes under
+        # an id the finally cleanup never closes (kernel leak + cross-run state bleed).
+        sandbox_conversation_id = (
+            state.get("__debug_conversation_id")
+            or conversation_id
+            or self.get_variable("sys.sandbox_session_id", variable_pool, strict=False)
+        )
         try:
             from ....tools.builtin.sandbox_default import build_sandbox_tools, drop_sandbox_tools
 
@@ -238,7 +254,7 @@ class AgentNode(BaseNode):
                 build_sandbox_tools(
                     user_id=user_id,
                     workspace_id=workspace_id,
-                    conversation_id=conversation_id,
+                    conversation_id=sandbox_conversation_id,
                 )
             )
         except Exception as e:
@@ -381,7 +397,10 @@ class AgentNode(BaseNode):
         params = model_config.completion_params
         model_id = model_config.model_id
         if not model_id:
-            raise ValueError(f"节点 {self.node_id} 缺少 model_id 配置，请先选择模型")
+            raise BusinessException(
+                f"节点 {self.node_id} 缺少 model_id 配置，请先选择模型",
+                code=BizCode.MODEL_NOT_CONFIGURED,
+            )
 
         # 1. Render templates
         context = self._resolve_context(variable_pool)
@@ -645,12 +664,27 @@ class AgentNode(BaseNode):
             self._build_reference_history(state, message),
         )
 
-    def _reference_runtime_context(self, variable_pool: VariablePool) -> tuple[uuid.UUID, str | None]:
+    def _reference_runtime_context(
+        self, state: WorkflowState, variable_pool: VariablePool
+    ) -> tuple[uuid.UUID, str | None, str | None]:
         workspace_id = self.get_variable("sys.workspace_id", variable_pool, strict=False)
         if not workspace_id:
             raise BusinessException("引用 Agent 执行缺少 workspace_id", BizCode.WORKSPACE_NO_ACCESS)
         user_id = self.get_variable("sys.user_id", variable_pool, strict=False)
-        return uuid.UUID(str(workspace_id)), str(user_id) if user_id else None
+        # The referenced Agent's sandbox tools key their instance by conversation and
+        # refuse to run without one, so resolve it here exactly like _prepare_tools does
+        # (same fallbacks: conversation-less workflows get a stable directory id).
+        conversation_id = self.get_variable("sys.conversation_id", variable_pool, strict=False)
+        if not conversation_id:
+            conversation_id = (
+                state.get("__debug_conversation_id")
+                or self.get_variable("sys.sandbox_session_id", variable_pool, strict=False)
+            )
+        return (
+            uuid.UUID(str(workspace_id)),
+            str(user_id) if user_id else None,
+            str(conversation_id) if conversation_id else None,
+        )
 
     async def _execute_reference(
         self,
@@ -659,7 +693,7 @@ class AgentNode(BaseNode):
     ) -> dict[str, Any]:
         reference = self.typed_config.reference
         message, variables, files, history = self._prepare_reference_inputs(state, variable_pool)
-        workspace_id, user_id = self._reference_runtime_context(variable_pool)
+        workspace_id, user_id, conversation_id = self._reference_runtime_context(state, variable_pool)
         result = await PublishedAgentRunner().run(
             app_id=reference.app_id,
             release_policy=reference.release_policy,
@@ -670,6 +704,7 @@ class AgentNode(BaseNode):
             variables=variables,
             files=files,
             history=history,
+            conversation_id=conversation_id,
             storage_type=state.get("memory_storage_type"),
             user_rag_memory_id=state.get("user_rag_memory_id"),
         )
@@ -697,7 +732,7 @@ class AgentNode(BaseNode):
     ):
         reference = self.typed_config.reference
         message, variables, files, history = self._prepare_reference_inputs(state, variable_pool)
-        workspace_id, user_id = self._reference_runtime_context(variable_pool)
+        workspace_id, user_id, conversation_id = self._reference_runtime_context(state, variable_pool)
         full_response = ""
         full_reasoning = ""
         usage: dict[str, Any] = {}
@@ -714,6 +749,7 @@ class AgentNode(BaseNode):
             variables=variables,
             files=files,
             history=history,
+            conversation_id=conversation_id,
             storage_type=state.get("memory_storage_type"),
             user_rag_memory_id=state.get("user_rag_memory_id"),
         ):

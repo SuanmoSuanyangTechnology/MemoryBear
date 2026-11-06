@@ -33,6 +33,7 @@ from ..agent.langchain_agent import LangChainAgent
 from ..config import current_settings
 from ..db import end_read_transaction, get_async_db_context, get_db
 from ..errors import BizCode, BusinessException
+from ..i18n import get_current_locale
 from ..integrations.knowledge.contracts import KnowledgeRetrievalSource
 from ..memory.emotion.emotion_resolver import (
     apply_detection as apply_emotion_detection,
@@ -67,9 +68,11 @@ from ..repositories.tool_repository import ToolRepository
 from ..schemas import DraftRunRequest
 from ..schemas.app_schema import FileInput, FileType
 from ..schemas.prompt_schema import PromptMessageRole, render_prompt_message
+from ..trace import get_trace_id
 from ..usage_context import bind_usage
 from ..utils.datetime_utils import parse_timestamp_to_utc_naive
 from .annotation_service import AnnotationService
+from .chat_errors import error_frame, error_payload, legacy_end_error_frame
 from .context_assembler import (
     ContextEvidence,
     append_external_context_rule,
@@ -1867,13 +1870,21 @@ class AppChatService:
             debug_id = self.agent_service._build_debug_id()
             public_error = classify_multimodal_exception(e, debug_id=debug_id)
             if public_error is not None:
-                display_error = public_error["message"]
-            elif isinstance(e, BusinessException):
-                # Business exceptions carry user-facing text; str(e) would
-                # prefix the internal error code
-                display_error = e.message
+                code = (
+                    BizCode.CONTENT_BLOCKED
+                    if "safety" in str(public_error.get("kind", "")).lower()
+                    else BizCode.INVALID_PARAMETER
+                )
+                payload = error_payload(
+                    BusinessException(public_error["message"], code),
+                    locale=get_current_locale(),
+                    trace_id=get_trace_id(),
+                )
             else:
-                display_error = str(e)
+                # error_payload re-renders BusinessException messages from the
+                # code catalog, so the persisted text and the frame stay aligned.
+                payload = error_payload(e, locale=get_current_locale(), trace_id=get_trace_id())
+            display_error = payload["msg"]
 
             if public_error is not None:
                 logger.error(
@@ -1934,9 +1945,10 @@ class AppChatService:
                 ))
             except Exception:
                 pass  # persist failure must not block the error event
-            # Keep the share page's existing end/error string contract so the
-            # front end never renders a raw object.
-            yield f"event: end\ndata: {json.dumps({'error': display_error}, ensure_ascii=False)}\n\n"
+            # Emit the structured frame; the legacy end/error string keeps the
+            # share page working for 2 release cycles.
+            yield error_frame(payload)
+            yield legacy_end_error_frame(payload)
 
     @staticmethod
     def _format_sse_chunk(chunk: dict) -> str:
@@ -2168,7 +2180,11 @@ class AppChatService:
 
         gate = get_multi_agent_stream_gate()
         if not await gate.acquire():
-            yield f"event: error\ndata: {json.dumps({'error': BUSY_MESSAGE}, ensure_ascii=False)}\n\n"
+            yield error_frame(error_payload(
+                BusinessException(BUSY_MESSAGE, BizCode.SERVICE_UNAVAILABLE),
+                locale=get_current_locale(),
+                trace_id=get_trace_id(),
+            ))
             return
         try:
             async with aclosing(self._multi_agent_chat_stream_impl(
@@ -2464,7 +2480,9 @@ class AppChatService:
                 except Exception:
                     pass
             # Emit the error event
-            yield f"event: error\ndata: {json.dumps({'error': str(e)}, ensure_ascii=False)}\n\n"
+            yield error_frame(error_payload(
+                e, locale=get_current_locale(), trace_id=get_trace_id()
+            ))
 
     async def workflow_chat(
             self,

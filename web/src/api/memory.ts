@@ -1,4 +1,5 @@
 import { request } from '@/utils/request'
+import type { ActivityQuery, ActivityResponse, ActivityStatisticsResponse, ActivityCompositionResponse } from '@/views/Home/types'
 import type { AxiosRequestConfig } from 'axios'
 import type {
   MemoryFormData,
@@ -17,6 +18,7 @@ import type {
 } from '@/views/SelfReflectionEngine/types'
 import type { TestParams } from '@/views/MemoryConversation/types'
 import type { EndUser } from '@/views/UserMemoryDetail/types'
+import type { EpisodicOverviewQuery, EpisodicOverviewData, EpisodicDetailQuery, EpisodicMemoryDetail } from '../views/UserMemoryDetail/pages/EpisodicDetail/types'
 import { handleSSE, type SSEMessage } from '@/utils/stream'
 import type { ChatItem } from '@/components/Chat/types'
 import type { Query } from '@/views/UserMemory/types';
@@ -35,14 +37,20 @@ export const readServiceStream = (
 export const getTotalMemoryCount = () => {
   return request.get(`/dashboard/total_memory_count`)
 }
-// Memory Dashboard - Knowledge base type distribution
-export const getKbTypes = () => {
-  return request.get(`/memory/stats/types`)
-}
 // Memory Dashboard - Hot memory tags
 export const getHotMemoryTags = () => {
   return request.get(`/memory-storage/analytics/hot_memory_tags`)
 }
+
+// Workspace dashboard - Annual memory activity trend statistics
+export const getActivityStatistics = (query: { year?: number } = {}) => {
+  return request.get<ActivityStatisticsResponse>('/memory-display/activity-statistics', query)
+}
+// Workspace dashboard - Monthly memory activity composition statistics
+export const getActivityComposition = (query: { year?: number; month?: number } | Record<string, never> = {}) => {
+  return request.get<ActivityCompositionResponse>('/memory-display/activity-composition', query)
+}
+
 // Memory Dashboard - Recent activity statistics
 export const getRecentActivityStats = () => {
   return request.get(`/memory-storage/analytics/recent_activity_stats`)
@@ -94,7 +102,7 @@ export const getNodeStatistics = (end_user_id: string) => {
 }
 // Get user alias and info
 export const getEndUserInfo = (end_user_id: string) => {
-  return request.get(`/end_user/info`, { end_user_id })
+  return request.get<EndUser>(`/end_user/info`, { end_user_id })
 }
 // Update user alias and info
 export const updatedEndUserInfo = (values: EndUser) => {
@@ -222,11 +230,13 @@ export const getPerceptualTimeline = (end_user_id: string) => {
   return request.get(`/memory/perceptual/${end_user_id}/timeline`)
 }
 // Episodic Memory - Overview
-export const getEpisodicOverview = (data: { end_user_id: string; time_range: string; episodic_type: string; } ) => {
-  return request.post(`/memory/episodic-memory/overview`, data)
+export const getEpisodicOverviewUrl = '/memory/episodic-memory/overview'
+export const getEpisodicOverview = (data: EpisodicOverviewQuery) => {
+  return request.post<EpisodicOverviewData>(getEpisodicOverviewUrl, data)
 }
-export const getEpisodicDetail = (data: { end_user_id: string; summary_id: string; } ) => {
-  return request.post(`/memory/episodic-memory/details`, data)
+export const getEpisodicDetailUrl = '/memory/episodic-memory/details'
+export const getEpisodicDetail = (data: EpisodicDetailQuery) => {
+  return request.post<EpisodicMemoryDetail>(getEpisodicDetailUrl, data)
 }
 
 // Emotion timeline

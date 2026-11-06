@@ -7,11 +7,12 @@ from typing import Annotated
 from urllib.parse import unquote
 from uuid import UUID
 
-from fastapi import Header, HTTPException, Request
+from fastapi import Header, Request
 from pydantic import BaseModel, ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
+from ..errors import BizCode, BusinessException
 from ..runtime import ProcessRuntime
 
 ACTOR_ID_HEADER = "X-Model-Actor-ID"
@@ -90,7 +91,7 @@ def principal_from_headers(request: Request) -> Principal:
     try:
         return Principal.model_validate(_principal_payload(request))
     except ValidationError as exc:
-        raise HTTPException(status_code=401, detail="invalid principal headers") from exc
+        raise BusinessException("invalid principal headers", BizCode.UNAUTHORIZED) from exc
 
 
 def invoke_principal_from_headers(request: Request) -> InvokePrincipal:
@@ -99,7 +100,7 @@ def invoke_principal_from_headers(request: Request) -> InvokePrincipal:
     try:
         return InvokePrincipal.model_validate(_principal_payload(request))
     except ValidationError as exc:
-        raise HTTPException(status_code=401, detail="invalid principal headers") from exc
+        raise BusinessException("invalid principal headers", BizCode.UNAUTHORIZED) from exc
 
 
 async def get_principal(request: Request) -> Principal:

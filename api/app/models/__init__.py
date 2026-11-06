@@ -16,6 +16,16 @@ from .mcp_market_config_model import McpMarketConfig
 from .app_model import App
 from .agent_app_config_model import AgentConfig
 from .app_release_model import AppRelease
+from .app_asset_model import (
+    AppAsset,
+    AppAssetInstallation,
+    AppCategory,
+    AssetStatus,
+    InstallSource,
+    InstallStatus,
+    LinkMode,
+    ShareMode,
+)
 from .memory_increment_model import MemoryIncrement
 from .end_user_model import EndUser, EndUserMerge
 from .end_user_info_model import EndUserInfo
@@ -40,6 +50,7 @@ from .ontology_scene import OntologyScene
 from .ontology_class import OntologyClass
 from .ontology_scene import OntologyScene
 from .ontology_class import OntologyClass
+from .ontology_preference import OntologyPreferenceScene, OntologyPreferenceClass
 from .implicit_emotions_storage_model import ImplicitEmotionsStorage
 from .annotation_model import AppAnnotation, AppAnnotationSetting
 from .reflection_log_model import MemoryReflectionLog
@@ -83,6 +94,13 @@ __all__ = [
     "App",
     "AgentConfig",
     "AppRelease",
+    "AppAsset",
+    "AppAssetInstallation",
+    "AssetStatus",
+    "InstallSource",
+    "InstallStatus",
+    "LinkMode",
+    "ShareMode",
     "MemoryIncrement",
     "EndUser",
     "EndUserMerge",
@@ -144,4 +162,6 @@ __all__ = [
     "MemoryReembedJobUser",
     "ReembedJobStatus",
     "ReembedUserStatus",
+    "OntologyPreferenceScene",
+    "OntologyPreferenceClass",
 ]

@@ -31,8 +31,13 @@ from ..memory.ontology_binding import ONTOLOGY_BINDING_PLUGIN, OntologyUpstreamE
 from ..models import (
     AgentConfig,
     App,
+    AppAsset,
+    AppAssetInstallation,
     AppRelease,
     AppShare,
+    AssetStatus,
+    InstallStatus,
+    LinkMode,
     MultiAgentConfig,
     WorkflowConfig,
 )
@@ -49,11 +54,108 @@ from ..utils.model_config_refs import config_ref_ids
 from ..utils.workflow_template_loader import load_workflow_template
 from ..utils.workflow_validator import WorkflowValidator
 from .agent_config_converter import AgentConfigConverter
+from .asset_release_resolver import AssetReleaseResolver
+from .category_service import CategoryService
 from .model_ref_gate import assert_refs_publishable, raise_model_unavailable, resolve_invoke_ref
 from .multi_agent_release_resolver import POLICY_PINNED, resolve_effective_release_id
+from .tool_service import ToolService
 from .workflow_service import WorkflowService
 
 logger = logging.getLogger(__name__)
+
+
+def _reference_install_app_ids(workspace_id: uuid.UUID):
+    """Apps reachable in ``workspace_id`` through a **read-only** catalog install.
+
+    资源中心取代了空间到空间的共享，所以「共享给我」现在有两个来源：旧的
+    ``app_shares`` 行，以及 ``app_asset_installations`` 里 ``link_mode = reference``
+    的安装。只读引用**不建本地应用**（``local_app_id`` 为 NULL），因此不并进这条
+    子查询，这些应用对列表接口就是隐形的——而详情/对话的鉴权
+    （``AssetReleaseResolver``）早就认了安装行，于是出现「能打开但列表里没有」。
+
+    ``link_mode = copy`` 的安装**故意排除**：副本本身已是目标空间的新应用，会以自有
+    应用的身份出现在「我的应用」里，并进来会让同一个应用在两个 tab 各出一条。
+
+    ``app_assets.status = published`` 与 resolver 的口径一致：取消共享后只读引用立即
+    不可读，也就不该再出现在列表里。
+    """
+
+    return (
+        select(AppAsset.source_app_id)
+        .join(AppAssetInstallation, AppAssetInstallation.asset_id == AppAsset.id)
+        .where(
+            AppAssetInstallation.target_workspace_id == workspace_id,
+            AppAssetInstallation.status == InstallStatus.ACTIVE,
+            AppAssetInstallation.link_mode == LinkMode.REFERENCE,
+            AppAsset.status == AssetStatus.PUBLISHED,
+            AppAsset.is_active.is_(True),
+        )
+    )
+
+
+def _pinned_name_app_ids(pattern: str, workspace_id: uuid.UUID):
+    """Apps whose **pinned catalog name** matches ``pattern`` (already lowered/%-wrapped).
+
+    列表里只读引用显示的是条目钉住版本的名字（`_convert_to_schema` 的
+    `install_display` 覆盖），所以按名字搜索不能只看 `apps.name`：源应用改名后
+    `apps.name` 已经是新名，而界面显示的还是快照名。这里把快照名也纳入搜索。
+
+    ``workspace_id`` 与 `_reference_install_app_ids` 同口径：只看装进**本空间**的
+    安装行。少了它这条子查询会跨所有空间扫描，别处空间钉住的名字会把本空间的应用
+    捞进搜索结果（名字与搜索词并不匹配）。
+
+    ``AppRelease.is_active`` 也与 resolver 对齐：`resolve_release` 见到已下线的
+    版本直接抛 `RELEASE_NOT_FOUND`，那条引用读不出来，就不该再被快照名搜到。
+
+    ``App.workspace_id != workspace_id`` 是展示口径的另一半：只有「别人的应用」
+    才会以快照名展示（`_build_serialization_context` 只收
+    `workspace_id != current_workspace_id` 的行），本空间自有应用即使被拉进本空间，
+    列表里显示的仍是 `App.name`。不排除它们就会出现「按 X 搜到一行、名字显示成
+    Y」；顺带也让这条 OR 谓词在 `include_shared=False`（scope 恰好是
+    `App.workspace_id == workspace_id`）下恒不成立，不可能把外空间应用捞进来。
+    """
+
+    return (
+        select(AppAsset.source_app_id)
+        .join(AppAssetInstallation, AppAssetInstallation.asset_id == AppAsset.id)
+        .join(AppRelease, AppRelease.id == AppAsset.published_release_id)
+        .join(App, App.id == AppAsset.source_app_id)
+        .where(
+            App.workspace_id != workspace_id,
+            AppAssetInstallation.target_workspace_id == workspace_id,
+            AppAssetInstallation.status == InstallStatus.ACTIVE,
+            AppAssetInstallation.link_mode == LinkMode.REFERENCE,
+            AppAsset.status == AssetStatus.PUBLISHED,
+            AppAsset.is_active.is_(True),
+            AppRelease.is_active.is_(True),
+            func.lower(AppRelease.name).like(pattern),
+        )
+    )
+
+
+def _store_usage_examples(items: list[str] | None) -> list[dict[str, Any]]:
+    """list[str] -> [{'order': n, 'content': s}]，对外按 order 展开（方案 §4.3）。"""
+
+    return [
+        {"order": index, "content": text}
+        for index, text in enumerate(items or [], start=1)
+    ]
+
+
+def _expand_usage_examples(value: Any) -> list[str]:
+    """展开为前端直接渲染的字符串数组；兼容历史结构体与裸字符串两种存法。"""
+
+    if not value:
+        return []
+    expanded: list[str] = []
+    for item in value:
+        if isinstance(item, dict):
+            text = item.get("content")
+            if isinstance(text, str) and text.strip():
+                expanded.append(text.strip())
+        elif isinstance(item, str) and item.strip():
+            expanded.append(item.strip())
+    return expanded
 
 
 @dataclass
@@ -70,6 +172,21 @@ class _AppSerializationContext:
     workspaces: dict[uuid.UUID, Any] = field(default_factory=dict)
     usernames: dict[uuid.UUID, str] = field(default_factory=dict)
     release_versions: dict[uuid.UUID, str] = field(default_factory=dict)
+    # app_id -> (source_workspace_id, permission, shared_at)；资源中心只读引用没有
+    # app_shares 行，来源空间与权限只能从安装记录取（见
+    # `_build_serialization_context`）。
+    install_sources: dict[uuid.UUID, tuple[uuid.UUID, str, Any]] = field(
+        default_factory=dict
+    )
+    # app_id -> 条目钉住快照的展示字段 (name, description, icon, icon_type)。
+    # 只读引用消费的是**条目钉住的快照**（`AssetReleaseResolver` 对 reference
+    # 安装返回 `asset.published_release_id`），所以 name/icon 取快照而不是 `apps`
+    # 当前行的值；description 取 `app_assets.description`——那是上架时冻结、资源
+    # 中心详情原样返回的那一份（`get_asset` 的 `description`），不是源应用现在的
+    # 草稿描述。取错任何一项都会出现「资源中心叫 A、列表叫 B」。
+    install_display: dict[
+        uuid.UUID, tuple[str, str | None, str | None, str | None]
+    ] = field(default_factory=dict)
 
 
 class AppService:
@@ -110,13 +227,12 @@ class AppService:
     def _check_app_accessible(self, app: App, workspace_id: uuid.UUID | None) -> bool:
         """Check whether the app is accessible (including shared apps).
 
-        Args:
-            app: App object
-            workspace_id: Workspace ID
-
-        Returns:
-            bool: Whether the app is accessible
+        The catalog replaced workspace-to-workspace sharing: accessibility for a
+        foreign workspace now means an active catalog installation (§6.1). The
+        legacy `app_shares` row is still honoured inside
+        ``AssetReleaseResolver`` so un-backfilled history keeps working (§11.1 M3).
         """
+
         if workspace_id is None:
             return True
 
@@ -124,15 +240,10 @@ class AppService:
         if app.workspace_id == workspace_id:
             return True
 
-        # 2. Check whether it is shared to this workspace
-        stmt = select(AppShare).where(
-            AppShare.source_app_id == app.id,
-            AppShare.target_workspace_id == workspace_id,
-            AppShare.is_active.is_(True)
+        # 2. Shared into this workspace (catalog installation, then legacy share)
+        return AssetReleaseResolver(self.db).can_access(
+            app_id=app.id, workspace_id=workspace_id
         )
-        share = self.db.scalars(stmt).first()
-
-        return share is not None
 
     def _validate_app_accessible(self, app: App, workspace_id: uuid.UUID | None) -> None:
         """Validate app accessibility (including shared apps, for read-only ops).
@@ -166,6 +277,38 @@ class AppService:
             App.is_active.is_(True)
         ).all()}
         existing |= shared_names
+
+        # 资源中心只读引用没有 app_shares 行，但它们同样占着本空间可见的名字，
+        # 不并进来就会允许创建同名应用，列表里出现两行同名。注意取的是**钉住版本
+        # 的名字**（`_convert_to_schema` 就是这么展示的），不是 `App.name`：源应用
+        # 改名后列表里显示的还是快照名。
+        # `App.is_active` 必须保留：源应用被软删除后列表里看不到它（`list_apps`
+        # 的 base filter），再算它占名只会给新应用加无谓的后缀。
+        ref_names = {r[0] for r in self.db.query(AppRelease.name).join(
+            AppAsset, AppAsset.published_release_id == AppRelease.id
+        ).join(
+            AppAssetInstallation, AppAssetInstallation.asset_id == AppAsset.id
+        ).join(
+            App, App.id == AppAsset.source_app_id
+        ).filter(
+            AppAssetInstallation.target_workspace_id == workspace_id,
+            AppAssetInstallation.status == InstallStatus.ACTIVE,
+            AppAssetInstallation.link_mode == LinkMode.REFERENCE,
+            AppAsset.status == AssetStatus.PUBLISHED,
+            AppAsset.is_active.is_(True),
+            # 按 `App.type` 而不是 `AppRelease.type`：占名要算的是「这一行会不会在
+            # type=T 的列表里跟新应用撞名」，而列表过滤的就是 `App.type`
+            # （`list_apps` 的 `App.type == type_list[0]`），展示的 type 也取
+            # `app.type`。上面两个分支（自有应用、legacy 共享）同样按 `App.type`。
+            # 改用快照 type 会让三个分支口径分裂：快照 type 与 App.type 一旦不一致，
+            # 这里就漏掉一个列表里真实存在的同名行，生成出重复名字。
+            App.type == app_type,
+            # 已下线的钉住版本读不出来（resolver 抛 RELEASE_NOT_FOUND），不占名
+            AppRelease.is_active.is_(True),
+            App.is_active.is_(True),
+        ).all()}
+        existing |= ref_names
+
         if name not in existing:
             return name
         counter = 1
@@ -242,7 +385,10 @@ class AppService:
             self,
             app_id: uuid.UUID,
             config_data: app_schema.AgentConfigCreate,
-            now: datetime.datetime
+            now: datetime.datetime,
+            *,
+            workspace_id: uuid.UUID | None = None,
+            tenant_id: uuid.UUID | None = None
     ) -> None:
         """Create an Agent config (internal method).
 
@@ -250,8 +396,22 @@ class AppService:
             app_id: App ID
             config_data: Agent config data
             now: Current time
+            workspace_id: Workspace ID (tenant fallback lookup)
+            tenant_id: Tenant ID (skips the workspace lookup)
         """
         storage_data = AgentConfigConverter.to_storage_format(config_data)
+        tools = storage_data.get("tools") or []
+        if tools:
+            resolved = tenant_id or (
+                cross_domain_read.get_workspace_tenant_id(self.db, workspace_id)
+                if workspace_id is not None
+                else None
+            )
+            if resolved is None:
+                raise BusinessException("应用所属工作空间不存在", BizCode.NOT_FOUND)
+            storage_data["tools"] = ToolService(self.db).validate_tool_selection(
+                resolved, tools
+            )
 
         agent_cfg = AgentConfig(
             id=uuid.uuid4(),
@@ -450,9 +610,74 @@ class AppService:
             for share in self.db.scalars(stmt).all():
                 context.shares_by_app.setdefault(share.source_app_id, share)
 
+            # 从资源中心拉来的应用没有 app_shares 行（只读引用甚至没有本地 app），
+            # 来源空间与权限只能从安装记录取，否则列表里「来源」一列是空的。
+            # 同时取条目钉住版本的展示字段：只读引用读的就是这份快照
+            # （`AssetReleaseResolver` 对 reference 安装返回 `published_release_id`），
+            # 名称/图标/描述必须与资源中心一致，否则源应用改名后两边对不上。
+            missing = [
+                app_id for app_id in shared_app_ids
+                if app_id not in context.shares_by_app
+            ]
+            if missing:
+                rows = self.db.execute(
+                    select(
+                        AppAsset.source_app_id,
+                        AppAsset.source_workspace_id,
+                        AppAssetInstallation.permission,
+                        AppAssetInstallation.created_at,
+                        AppAsset.description.label("asset_description"),
+                        AppAsset.display_payload.label("asset_display_payload"),
+                        AppRelease,
+                    )
+                    .join(AppAssetInstallation, AppAssetInstallation.asset_id == AppAsset.id)
+                    # 已下线的钉住版本读不出来（`AssetReleaseResolver.resolve_release`
+                    # 直接抛 `RELEASE_NOT_FOUND`），所以不能拿它的名字/图标当展示值——
+                    # 否则会出现「列表显示 A、按 A 搜索却搜不到（`_pinned_name_app_ids`
+                    # 有 is_active 过滤）、A 也不占名」的三处口径分裂。
+                    # 用 join 条件而不是 where：`install_sources`（来源/权限）仍需要这
+                    # 一行，只是不写 `install_display`，展示回退到 `app.name`。
+                    .outerjoin(
+                        AppRelease,
+                        and_(
+                            AppRelease.id == AppAsset.published_release_id,
+                            AppRelease.is_active.is_(True),
+                        ),
+                    )
+                    .where(
+                        AppAsset.source_app_id.in_(missing),
+                        AppAssetInstallation.target_workspace_id == current_workspace_id,
+                        AppAssetInstallation.status == InstallStatus.ACTIVE,
+                        # 与列表作用域同口径：只有 reference 安装会让「别人的应用」
+                        # 出现在本空间的列表里，copy 的那条应用是本空间自有行。
+                        AppAssetInstallation.link_mode == LinkMode.REFERENCE,
+                        AppAsset.status == AssetStatus.PUBLISHED,
+                        AppAsset.is_active.is_(True),
+                    )
+                    .order_by(AppAssetInstallation.created_at.desc())
+                ).all()
+                for row in rows:
+                    context.install_sources.setdefault(
+                        row.source_app_id,
+                        (row.source_workspace_id, row.permission, row.created_at),
+                    )
+                    if row.AppRelease is not None:
+                        context.install_display.setdefault(
+                            row.source_app_id,
+                            (
+                                row.AppRelease.name,
+                                # 条目冻结的描述与图标，与资源中心详情返回的同一份。
+                                row.asset_description,
+                                (row.asset_display_payload or {}).get("icon") or None,
+                                (row.asset_display_payload or {}).get("icon_type") or None,
+                            ),
+                        )
+
+            source_workspace_ids = {
+                share.source_workspace_id for share in context.shares_by_app.values()
+            } | {ws_id for ws_id, _permission, _at in context.install_sources.values()}
             context.workspaces = cross_domain_read.get_workspaces_by_ids(
-                self.db,
-                {share.source_workspace_id for share in context.shares_by_app.values()}
+                self.db, source_workspace_ids
             )
             context.usernames = cross_domain_read.get_usernames_by_ids(
                 self.db,
@@ -482,15 +707,18 @@ class AppService:
         serialized before the aggregation so a remote binder may end the
         transaction without expiring the ORM objects mid-serialization.
         """
+        app_ids = [a.id for a in apps]
         context = self._build_serialization_context(apps, current_workspace_id)
         schemas = [
             self._convert_to_schema(a, current_workspace_id, None, context)
             for a in apps
         ]
-        ontology_map = self._load_ontology_map([a.id for a in apps])
+        ontology_map = self._load_ontology_map(app_ids)
         if ontology_map is not None:
-            for app, schema in zip(apps, schemas, strict=True):
-                ontology = ontology_map.get(app.id)
+            # A remote binder ends the transaction, which expires the ORM rows;
+            # read the pre-captured ids so the fill loop issues no refresh queries.
+            for app_id, schema in zip(app_ids, schemas, strict=True):
+                ontology = ontology_map.get(app_id)
                 if ontology is not None:
                     schema.ontology = app_schema.AppOntologyInfo(**ontology)
         return schemas
@@ -549,6 +777,32 @@ class AppService:
                 if source_workspace:
                     source_workspace_name = source_workspace.name
                     source_workspace_icon = source_workspace.icon
+            elif app.id in context.install_sources:
+                # 资源中心只读引用：没有 share 行，来源与权限取安装记录
+                source_workspace_id, share_permission, shared_at = (
+                    context.install_sources[app.id]
+                )
+                source_workspace = context.workspaces.get(source_workspace_id)
+                if source_workspace:
+                    source_workspace_name = source_workspace.name
+                    source_workspace_icon = source_workspace.icon
+
+        # 只读引用展示的是条目钉住的那一版快照（`AssetReleaseResolver` 对
+        # reference 安装返回 `published_release_id`），所以展示字段取快照值，
+        # 与资源中心详情（`asset_service.get_asset` 用 release.name）保持一致。
+        # 源应用改过名但条目还钉在旧版本时，不覆盖就会出现「资源中心叫 A、
+        # 列表叫 B」，用户按 A 搜不到。
+        # description 取的是条目上冻结的 `app_assets.description`（资源中心详情
+        # 原样返回该字段），不要再回退到 `app.description`——那是源应用当前的草稿
+        # 值，跨空间消费它既与详情不一致，也等于读了本不该暴露的实时状态。
+        pinned = context.install_display.get(app.id)
+        if pinned is not None:
+            display_name, display_description, display_icon, display_icon_type = pinned
+        else:
+            display_name = app.name
+            display_description = app.description
+            display_icon = app.icon
+            display_icon_type = app.icon_type
 
         # Release version and active status
         source_app_version = context.release_versions.get(app.current_release_id)
@@ -558,10 +812,10 @@ class AppService:
             "id": app.id,
             "workspace_id": app.workspace_id,
             "created_by": app.created_by,
-            "name": app.name,
-            "description": app.description,
-            "icon": app.icon,
-            "icon_type": app.icon_type,
+            "name": display_name,
+            "description": display_description,
+            "icon": display_icon,
+            "icon_type": display_icon_type,
             "type": app.type,
             "visibility": app.visibility,
             "status": app.status,
@@ -579,6 +833,18 @@ class AppService:
             "shared_by_name": shared_by_name,
             "shared_at": shared_at,
             "ontology": ontology,
+            # 来源（§11.2）：只有本地副本记来源，市场状态按需回填
+            "origin": str(getattr(app, "origin", None) or "local"),
+            "external": (
+                {
+                    "source": getattr(app, "external_source", None) or "community_market",
+                    "resource_id": getattr(app, "external_resource_id", None),
+                    "version": getattr(app, "external_version", None),
+                    "status": None,
+                }
+                if str(getattr(app, "origin", None) or "local") == "external"
+                else None
+            ),
             "created_at": app.created_at,
             "updated_at": app.updated_at
         }
@@ -663,7 +929,13 @@ class AppService:
 
             # For agent-type apps with a config payload, create the AgentConfig
             if app.type == "agent" and data.agent_config:
-                self._create_agent_config(app.id, data.agent_config, now)
+                self._create_agent_config(
+                    app.id,
+                    data.agent_config,
+                    now,
+                    workspace_id=workspace_id,
+                    tenant_id=tenant_id,
+                )
 
             # For multi_agent-type apps with a config payload, create MultiAgentConfig
             if app.type == "multi_agent" and data.multi_agent_config:
@@ -1442,7 +1714,14 @@ class AppService:
         if search:
             search_pattern = f"%{search.lower()}%"
             filters.append(
-                func.lower(App.name).like(search_pattern)
+                or_(
+                    func.lower(App.name).like(search_pattern),
+                    # 只读引用在列表里显示的是条目钉住版本的名字（见
+                    # `_convert_to_schema` 的 `install_display`），所以按名字搜索
+                    # 也必须命中快照名，否则用户照资源中心的名字搜会得到空列表。
+                    # 必须带 workspace_id：不加空间隔离会跨所有空间的安装行扫描。
+                    App.id.in_(_pinned_name_app_ids(search_pattern, workspace_id)),
+                )
             )
         if tag_search:
             tag_pattern = f"%{tag_search.lower()}%"
@@ -1479,17 +1758,27 @@ class AppService:
 
         # Base scope: apps of this workspace (plus apps shared to it)
         if shared_only:
-            # Return only apps shared to this workspace, excluding own apps
+            # Return only apps shared to this workspace, excluding own apps.
+            # 「共享来的」= 旧 app_shares 行 ∪ 资源中心只读引用安装（见
+            # `_reference_install_app_ids`）：只补 legacy 表会漏掉所有从资源中心
+            # 拉取的应用，它们的 app 属于源空间、又不在 app_shares 里。
             shared_app_ids_stmt = (
                 select(AppShare.source_app_id)
                 .where(AppShare.target_workspace_id == workspace_id, AppShare.is_active.is_(True))
+                .union(_reference_install_app_ids(workspace_id))
             )
-            scope = App.id.in_(shared_app_ids_stmt)
+            scope = and_(
+                App.id.in_(shared_app_ids_stmt),
+                # 「共享给我」不含自有应用：上面的 union 里可能混入指向本空间应用
+                # 的安装行（租户把自己的应用拉到自己的空间），必须显式排除。
+                App.workspace_id != workspace_id,
+            )
         elif include_shared:
             # Query apps of this workspace plus those shared to it
             shared_app_ids_stmt = (
                 select(AppShare.source_app_id)
                 .where(AppShare.target_workspace_id == workspace_id, AppShare.is_active.is_(True))
+                .union(_reference_install_app_ids(workspace_id))
             )
             scope = or_(
                 App.workspace_id == workspace_id,
@@ -1569,10 +1858,11 @@ class AppService:
             return []
 
         # Query own-workspace apps plus apps shared to it (same scope as list_apps
-        # with include_shared)
+        # with include_shared; the union keeps ids from the catalog in sync too)
         shared_app_ids_stmt = (
             select(AppShare.source_app_id)
             .where(AppShare.target_workspace_id == workspace_id, AppShare.is_active.is_(True))
+            .union(_reference_install_app_ids(workspace_id))
         )
         stmt = select(App).where(
             App.id.in_(uuid_ids),
@@ -1641,6 +1931,17 @@ class AppService:
 
         # Convert to storage format
         storage_data = AgentConfigConverter.to_storage_format(data)
+
+        tools = storage_data.get("tools") or []
+        if tools:
+            tenant_id = cross_domain_read.get_workspace_tenant_id(
+                self.db, app.workspace_id
+            )
+            if tenant_id is None:
+                raise BusinessException("应用所属工作空间不存在", BizCode.NOT_FOUND)
+            storage_data["tools"] = ToolService(self.db).validate_tool_selection(
+                tenant_id, tools, agent_cfg.tools
+            )
 
         # Update fields (unconditional full overwrite: absent fields are cleared too)
         agent_cfg.system_prompt = data.system_prompt
@@ -1722,13 +2023,15 @@ class AppService:
         # Read-only operation; shared apps are allowed
         self._validate_app_accessible(app, workspace_id)
 
-        # Shared app: return the latest release config snapshot instead of the draft
+        # Shared app: return the pinned release snapshot instead of the draft.
+        # The pin comes from the catalog entry this workspace installed, not the
+        # source's current release (§5.3).
         if workspace_id and app.workspace_id != workspace_id:
-            if not app.current_release_id:
-                raise BusinessException("该应用尚未发布，无法使用", BizCode.AGENT_CONFIG_MISSING)
-            release = self.db.get(AppRelease, app.current_release_id)
+            release = AssetReleaseResolver(self.db).resolve_release(
+                app_id=app.id, workspace_id=workspace_id
+            )
             if not release:
-                raise BusinessException("发布版本不存在", BizCode.AGENT_CONFIG_MISSING)
+                raise BusinessException("该应用尚未发布，无法使用", BizCode.APP_NOT_PUBLISHED)
             return self._agent_config_from_release(release)
 
         stmt = select(AgentConfig).where(
@@ -1874,13 +2177,15 @@ class AppService:
         # Read-only operation; shared apps are allowed
         self._validate_app_accessible(app, workspace_id)
 
-        # Shared app: return the latest release config snapshot instead of the draft
+        # Shared app: return the pinned release snapshot instead of the draft.
+        # Same rule as the Agent config read: follow this workspace's
+        # installation (§5.3), not the source's current release.
         if workspace_id and app.workspace_id != workspace_id:
-            if not app.current_release_id:
-                raise BusinessException("该应用尚未发布，无法使用", BizCode.CONFIG_MISSING)
-            release = self.db.get(AppRelease, app.current_release_id)
+            release = AssetReleaseResolver(self.db).resolve_release(
+                app_id=app.id, workspace_id=workspace_id
+            )
             if not release:
-                raise BusinessException("发布版本不存在", BizCode.CONFIG_MISSING)
+                raise BusinessException("该应用尚未发布，无法使用", BizCode.APP_NOT_PUBLISHED)
             return self._workflow_config_from_release(release)
 
         repo = WorkflowConfigRepository(self.db)
@@ -2149,6 +2454,8 @@ class AppService:
             type=release.type,
             visibility=release.visibility,
             config=release.config,
+            usage_examples=_expand_usage_examples(release.usage_examples),
+            categories=list(release.categories or []),
             default_model_config_id=release.default_model_config_id,
             published_by=release.published_by,
             publisher_name=publisher_name,
@@ -2168,6 +2475,8 @@ class AppService:
             release_notes: str | None = None,
             name: str | None = None,
             icon: str | None = None,
+            usage_examples: list[str] | None = None,
+            categories: list[str] | None = None,
     ) -> AppRelease:
         """Publish an app (creates an immutable snapshot).
 
@@ -2313,6 +2622,10 @@ class AppService:
         # disabled or sunset
         self._assert_publishable_models(config, default_model_config_id)
 
+        # 功能分类必须存在且启用：枚举已删除，只能查 `app_categories`（§4.5）。
+        # 放在这里而不是 pydantic validator 里，因为 validator 拿不到 session。
+        CategoryService(self.db).assert_codes_exist(categories or [])
+
         now = utcnow_naive()
         version = self._get_next_version(app_id)
 
@@ -2329,6 +2642,8 @@ class AppService:
             type=app.type,
             visibility=app.visibility,
             config=config,
+            usage_examples=_store_usage_examples(usage_examples),
+            categories=list(categories or []),
             default_model_config_id=default_model_config_id,
             published_by=publisher_id,
             published_at=now,
@@ -2479,7 +2794,7 @@ class AppService:
             else:
                 raise BusinessException(
                     f"子 Agent '{sub_agent_data.get('name', '未命名')}' 未配置模型，无法运行",
-                    BizCode.MODEL_NOT_FOUND
+                    BizCode.MODEL_NOT_CONFIGURED
                 )
 
         logger.info(

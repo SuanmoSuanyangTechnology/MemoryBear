@@ -14,6 +14,7 @@ import { memoryConversation } from './en/memoryConversation'
 import { skills } from './en/skills';
 import { resourceSharing } from './en/resourceSharing'
 import { resourceCenter } from './en/resourceCenter'
+import { episodicDetail } from './en/episodicDetail'
 
 export const en = {
   translation: {
@@ -27,7 +28,7 @@ export const en = {
     ...userMemory,
     ...space,
     tool,
-    skills,
+    episodicDetail,
     ...workflow,
     ...engine,
     ...detail,

@@ -6,7 +6,6 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import StreamingResponse
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
@@ -772,7 +771,7 @@ async def chat(
             if app_type == AppType.AGENT:
                 model_config_id = release.default_model_config_id
                 if not model_config_id:
-                    raise BusinessException("Agent 应用未配置模型", BizCode.AGENT_CONFIG_MISSING)
+                    raise BusinessException("Agent 应用未配置模型", BizCode.MODEL_NOT_CONFIGURED)
                 runtime_config = agent_config_4_app_release(release)
             elif app_type == AppType.MULTI_AGENT:
                 config = release.config or {}
@@ -1435,7 +1434,7 @@ async def report_message(
         selected_text=payload.selected_text,
     )
 
-    return success(data=app_schema.MessageReportResponse(**result))
+    return success(data=app_schema.MessageReportResponse(**result), msg="举报提交成功")
 
 
 @router.post("/messages/{message_id}/regenerate", summary="重新生成回复")
@@ -1733,4 +1732,4 @@ async def switch_message_version(
         logger.warning(f"分享端切换版本构建节点明细失败（已降级为空）: {e}")
         result["node_executions_map"] = {}
 
-    return success(data=result)
+    return success(data=result, msg="消息版本切换成功")

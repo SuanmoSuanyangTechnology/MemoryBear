@@ -26,6 +26,32 @@ def _read_routes_file(path: str) -> dict:
             f"TARGET_ROUTES_FILE unreadable/invalid: {path}: {exc}") from exc
 
 
+def active_routes_file() -> str | None:
+    """The file the current route source reads, or None when env/empty wins.
+
+    Only a file-backed source takes part in hot reload; TARGET_ROUTES env is
+    static for the process lifetime.
+    """
+
+    path = os.getenv("TARGET_ROUTES_FILE")
+    if path:
+        return path
+    if os.getenv("TARGET_ROUTES"):
+        return None
+    if os.path.exists(_DEFAULT_ROUTES_FILE):
+        return _DEFAULT_ROUTES_FILE
+    return None
+
+
+def read_target_routes_file(path: str) -> list:
+    """Read and validate one route file; raises instead of falling back."""
+
+    from src.forward import TargetRoute  # 延迟导入避免循环
+
+    raw = _read_routes_file(path)
+    return [TargetRoute(**item) for item in raw.get("routes", [])]
+
+
 def _target_routes_raw() -> dict:
     path = os.getenv("TARGET_ROUTES_FILE")
     if path:
@@ -125,19 +151,28 @@ class Settings:
     # 优先级：TARGET_ROUTES_FILE（部署显式指向，缺失/非法 = misconfiguration →
     # RuntimeError 启动失败）> TARGET_ROUTES env（旧行为）> 镜像内置默认
     # /etc/gateway/routes.json（Dockerfile COPY，裸部署开箱即用；存在即读）> 空路由。
-    # 路由表是静态配置，compose bind-mount / K8s ConfigMap 挂载同路径覆盖镜像默认；
-    # 新增服务只改路由文件不动代码。target_routes 仅 lifespan 消费一次。
+    # compose bind-mount / K8s ConfigMap 挂载同路径覆盖镜像默认；新增服务只改
+    # 路由文件不动代码。文件源由 RouteFileWatcher 每 5 秒轮询热加载。
     @property
     def target_routes(self) -> list:
         from src.forward import TargetRoute  # 延迟导入避免循环
         raw = _target_routes_raw()
         return [TargetRoute(**item) for item in raw.get("routes", [])]
 
+    @property
+    def route_reload_interval_s(self) -> float:
+        value = float(os.getenv("GATEWAY_ROUTE_RELOAD_INTERVAL_S", "5"))
+        if value <= 0:
+            raise RuntimeError("GATEWAY_ROUTE_RELOAD_INTERVAL_S must be > 0")
+        return value
+
     # ---- East-west gRPC (gateway -> application chat) ----
     # Lazy reads for the same reason as target_routes: deployment and tests
     # switch them at runtime.
     @property
     def app_chat_protocol(self) -> str:
+        """Default protocol for routes that do not declare one explicitly."""
+
         value = os.getenv("GATEWAY_APP_CHAT_PROTOCOL", "").strip().lower()
         if value not in ("", "http", "grpc"):
             raise RuntimeError(
@@ -147,8 +182,12 @@ class Settings:
 
     @property
     def application_service_grpc_target(self) -> str:
+        # One headless Service per workload (`clusterIP: None`) exposes both
+        # 8080/http and 9090/grpc, so round_robin resolves per-Pod IPs under the
+        # unchanged service name instead of pinning to one VIP connection.
         return os.getenv(
-            "APPLICATION_SERVICE_GRPC_TARGET", "dns:///application-service-grpc:9090"
+            "APPLICATION_SERVICE_GRPC_TARGET",
+            "dns:///application-service:9090",
         )
 
     @property

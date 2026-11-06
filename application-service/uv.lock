@@ -137,6 +137,7 @@ dependencies = [
     { name = "boto3" },
     { name = "chardet" },
     { name = "deprecated" },
+    { name = "error-core" },
     { name = "fastapi" },
     { name = "httpx" },
     { name = "jinja2" },
@@ -168,7 +169,7 @@ dependencies = [
     { name = "python-multipart" },
     { name = "pytz" },
     { name = "pyyaml" },
-    { name = "redbear-model", extra = ["all"] },
+    { name = "redbear-model", extra = ["all", "grpc"] },
     { name = "redis" },
     { name = "requests" },
     { name = "simpleeval" },
@@ -197,6 +198,7 @@ requires-dist = [
     { name = "boto3", specifier = ">=1.42,<2" },
     { name = "chardet", specifier = ">=5.2.0,<6" },
     { name = "deprecated", specifier = ">=1.3.1,<2" },
+    { name = "error-core", directory = "../packages/error-core" },
     { name = "fastapi", specifier = ">=0.119,<1" },
     { name = "httpx", specifier = ">=0.28,<1" },
     { name = "jinja2", specifier = ">=3.1.6,<4" },
@@ -228,7 +230,7 @@ requires-dist = [
     { name = "python-multipart", specifier = ">=0.0.20,<1" },
     { name = "pytz", specifier = ">=2025.2,<2027" },
     { name = "pyyaml", specifier = ">=6.0.3,<7" },
-    { name = "redbear-model", extras = ["all"], directory = "../packages/redbear-model" },
+    { name = "redbear-model", extras = ["all", "grpc"], directory = "../packages/redbear-model" },
     { name = "redis", specifier = ">=6.4,<7" },
     { name = "requests", specifier = ">=2.32,<3" },
     { name = "simpleeval", specifier = ">=1.0.3,<2" },
@@ -539,6 +541,16 @@ sdist = { url = "https://mirrors.cloud.tencent.com/pypi/packages/25/ca/8de7744cb
 wheels = [
     { url = "https://mirrors.cloud.tencent.com/pypi/packages/51/79/119091c98e2bf49e24ed9f3ae69f816d715d2904aefa6a2baa039a2ba0b0/ecdsa-0.19.2-py2.py3-none-any.whl", hash = "sha256:840f5dc5e375c68f36c1a7a5b9caad28f95daa65185c9253c0c08dd952bb7399" },
 ]
+
+[[package]]
+name = "error-core"
+version = "0.1.0"
+source = { directory = "../packages/error-core" }
+
+[package.metadata]
+
+[package.metadata.requires-dev]
+dev = [{ name = "pytest", specifier = ">=8.0" }]
 
 [[package]]
 name = "et-xmlfile"
@@ -1743,6 +1755,7 @@ version = "0.1.0"
 source = { directory = "../packages/redbear-model" }
 dependencies = [
     { name = "cryptography" },
+    { name = "error-core" },
     { name = "pydantic" },
     { name = "sqlalchemy" },
 ]
@@ -1757,8 +1770,10 @@ all = [
     { name = "langchain-core" },
     { name = "langchain-ollama" },
     { name = "langchain-openai" },
-    { name = "memorybear-grpc" },
     { name = "volcengine-python-sdk", extra = ["ark"] },
+]
+grpc = [
+    { name = "memorybear-grpc" },
 ]
 
 [package.metadata]
@@ -1766,6 +1781,7 @@ requires-dist = [
     { name = "cryptography", specifier = ">=43" },
     { name = "dashscope", marker = "extra == 'all'", specifier = ">=1.25,<2" },
     { name = "dashscope", marker = "extra == 'dashscope'", specifier = ">=1.25,<2" },
+    { name = "error-core", directory = "../packages/error-core" },
     { name = "httpx", marker = "extra == 'all'", specifier = ">=0.28,<1" },
     { name = "httpx", marker = "extra == 'runtime'", specifier = ">=0.28,<1" },
     { name = "httpx", extras = ["socks"], marker = "extra == 'all'", specifier = ">=0.28,<1" },
@@ -1782,14 +1798,13 @@ requires-dist = [
     { name = "langchain-ollama", marker = "extra == 'ollama'", specifier = ">=1.0,<2" },
     { name = "langchain-openai", marker = "extra == 'all'", specifier = ">=1.0,<2" },
     { name = "langchain-openai", marker = "extra == 'runtime'", specifier = ">=1.0,<2" },
-    { name = "memorybear-grpc", marker = "extra == 'all'", directory = "../packages/memorybear-grpc" },
-    { name = "memorybear-grpc", marker = "extra == 'runtime'", directory = "../packages/memorybear-grpc" },
+    { name = "memorybear-grpc", marker = "extra == 'grpc'", directory = "../packages/memorybear-grpc" },
     { name = "pydantic", specifier = ">=2.12,<3" },
     { name = "sqlalchemy", specifier = ">=2.0,<3" },
     { name = "volcengine-python-sdk", extras = ["ark"], marker = "extra == 'all'", specifier = ">=5.0.19,<6" },
     { name = "volcengine-python-sdk", extras = ["ark"], marker = "extra == 'generation'", specifier = ">=5.0.19,<6" },
 ]
-provides-extras = ["runtime", "ollama", "bedrock", "dashscope", "generation", "all"]
+provides-extras = ["runtime", "grpc", "ollama", "bedrock", "dashscope", "generation", "all"]
 
 [[package]]
 name = "redis"

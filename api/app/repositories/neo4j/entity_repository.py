@@ -13,6 +13,7 @@ from app.repositories.neo4j.base_neo4j_repository import BaseNeo4jRepository
 from app.core.memory.models.graph_models import ExtractedEntityNode
 from app.core.memory.utils.data.ontology import get_type_id
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
+from app.repositories.neo4j.cypher_queries import EXPLICIT_MEMORY_COUNTS
 
 
 class EntityRepository(BaseNeo4jRepository[ExtractedEntityNode]):
@@ -78,4 +79,31 @@ class EntityRepository(BaseNeo4jRepository[ExtractedEntityNode]):
             List[ExtractedEntityNode]: 实体列表
         """
         return await self.find({"entity_type": entity_type}, limit=limit)
-    
+
+    async def get_user_entities(self, end_user_id: str) -> list[dict]:
+        return await self.connector.execute_query(
+            """
+            MATCH (e:ExtractedEntity {end_user_id: $end_user_id})
+            WHERE e.delete_at IS NULL
+              AND (e.entity_type = '用户' OR toLower(e.name) IN ['用户', '我', 'user', 'i'])
+            RETURN elementId(e) AS element_id
+            LIMIT 2
+            """,
+            end_user_id=end_user_id,
+        )
+
+    async def get_end_user_id_by_element_id(self, element_id: str) -> str | None:
+        rows = await self.connector.execute_query(
+            """
+            MATCH (e:ExtractedEntity)
+            WHERE elementId(e) = $element_id AND e.delete_at IS NULL
+            RETURN e.end_user_id AS end_user_id
+            """,
+            element_id=element_id,
+        )
+        return rows[0].get("end_user_id") if rows else None
+
+    async def explicit_memory_rows(self, end_user_ids: list[str]) -> list[dict]:
+        return await self.connector.execute_query(
+            EXPLICIT_MEMORY_COUNTS, end_user_ids=end_user_ids
+        )

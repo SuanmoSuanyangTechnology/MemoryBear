@@ -172,7 +172,7 @@ export const updateErrorAssistantMessage = (
   prev: ChatData[],
   message_length: number,
   model_config_id?: string,
-  error?: { message?: string; },
+  error?: { message?: string; msg?: string; },
 ): ChatData[] => {
   if (!model_config_id && !error) return prev
   return mapModelLastVersion(prev, model_config_id, lastMsg => {
@@ -182,7 +182,8 @@ export const updateErrorAssistantMessage = (
       return { ...lastMsg, status: hasFailed ? 'failed' : 'completed' }
     }
     if (!lastMsg.meta_data?.reasoning_content || lastMsg.meta_data?.reasoning_content.length === 0) {
-      return { ...lastMsg, status: 'failed', content: error?.message || lastMsg.content }
+      const errorMsg = error?.msg || error?.message
+      return { ...lastMsg, status: 'failed', content: errorMsg || lastMsg.content }
     }
     return lastMsg
   })

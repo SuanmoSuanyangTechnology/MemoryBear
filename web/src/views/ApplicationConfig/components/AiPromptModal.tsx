@@ -117,7 +117,7 @@ const AiPromptModal = forwardRef<AiPromptModalRef, AiPromptModalProps>(({
 
     const handleStreamMessage = (data: SSEMessage[]) => {
       data.map(item => {
-        const { content, desc, variables, error } = item.data as { content: string; desc: string; variables: string[]; error: string };
+        const { content, desc, variables, msg, error } = item.data as { content: string; desc: string; variables: string[]; msg: string; error: string };
 
         switch (item.event) {
           case 'start':
@@ -147,7 +147,7 @@ const AiPromptModal = forwardRef<AiPromptModalRef, AiPromptModalProps>(({
             break;
           case 'error':
             setChatList(prev => {
-              return [...prev, { role: 'assistant', content: null, meta_data: { error: error }, status: 'error' }]
+              return [...prev, { role: 'assistant', content: null, meta_data: { error: msg || error }, status: 'error' }]
             })
             break;
           case 'end':

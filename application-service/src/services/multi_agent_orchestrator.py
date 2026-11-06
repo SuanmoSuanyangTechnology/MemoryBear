@@ -1395,14 +1395,14 @@ class MultiAgentOrchestrator:
             OrchestrationMode.SUPERVISOR_LOOP,
         ):
             if not orchestrator.default_model_config_id:
-                raise BusinessException("Supervisor 模式需要配置默认模型", BizCode.AGENT_CONFIG_MISSING)
+                raise BusinessException("Supervisor 模式需要配置默认模型", BizCode.MODEL_NOT_CONFIGURED)
 
             orchestrator.master_model_config = await orchestrator._db_get(
                 ModelConfig,
                 orchestrator.default_model_config_id,
             )
             if not orchestrator.master_model_config:
-                raise BusinessException("Master Agent 模型配置不存在", BizCode.AGENT_CONFIG_MISSING)
+                raise BusinessException("Master Agent 模型配置不存在", BizCode.MODEL_NOT_FOUND)
 
         # MasterAgentRouter only serves the three-stage path: supervisor_loop
         # delegates dispatch entirely to the supervisor LLM and burns no routing
@@ -2761,7 +2761,7 @@ class MultiAgentOrchestrator:
             if not self.default_model_config_id:
                 raise BusinessException(
                     "主管循环模式需要可用的主模型（默认模型未配置）",
-                    BizCode.AGENT_CONFIG_MISSING,
+                    BizCode.MODEL_NOT_CONFIGURED,
                 )
             return await ModelConfigService.get_runtime_model_view_bridge_async(
                 self.db, self.default_model_config_id, tenant_id=self.tenant_id
@@ -4221,13 +4221,18 @@ class MultiAgentOrchestrator:
 
         async with self._sub_agent_db() as agent_db:
             # Load the model config
+            if not agent_config.default_model_config_id:
+                raise BusinessException(
+                    "Agent 未配置模型",
+                    BizCode.MODEL_NOT_CONFIGURED
+                )
             model_config = await self._db_get(
                 ModelConfig, agent_config.default_model_config_id, db=agent_db
             )
             if not model_config:
                 raise BusinessException(
                     "Agent 模型配置不存在",
-                    BizCode.AGENT_CONFIG_MISSING
+                    BizCode.MODEL_NOT_FOUND
                 )
 
             # History convention, see _sub_agent_history: supervisor_loop sees
@@ -4305,13 +4310,18 @@ class MultiAgentOrchestrator:
 
         async with self._sub_agent_db() as agent_db:
             # Load the model config
+            if not agent_config.default_model_config_id:
+                raise BusinessException(
+                    "Agent 未配置模型",
+                    BizCode.MODEL_NOT_CONFIGURED
+                )
             model_config = await self._db_get(
                 ModelConfig, agent_config.default_model_config_id, db=agent_db
             )
             if not model_config:
                 raise BusinessException(
                     "Agent 模型配置不存在",
-                    BizCode.AGENT_CONFIG_MISSING
+                    BizCode.MODEL_NOT_FOUND
                 )
             # Same as the streaming path (see _sub_agent_history)
             history = await self._sub_agent_history(conversation_id, db=agent_db)

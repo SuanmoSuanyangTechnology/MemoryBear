@@ -95,6 +95,10 @@ class ToolInfo(BaseModel):
     is_active: bool = Field(True, description="是否可用（False 表示已删除）")
     tags: List[str] = Field(default_factory=list, description="工具标签")
     tenant_id: Optional[str] = Field(None, description="租户ID")
+    is_placeholder: bool = Field(
+        False,
+        description="是否为跨租户共享留下的占位行：可见、可引用，但调用必然失败，需用户自行重建",
+    )
     created_at: datetime = Field(..., description="创建时间")
 
     class Config:

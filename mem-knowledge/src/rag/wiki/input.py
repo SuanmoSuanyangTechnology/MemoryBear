@@ -14,7 +14,8 @@ from .model import request_tokens, tokens
 def normalize_chunks(chunks):
     by_id = {str(c.metadata.get("doc_id") or c.metadata.get("chunk_id")): c for c in chunks}
     sources, seen = [], set()
-    parents = {key: c for key, c in by_id.items() if c.metadata.get("chunk_type") == "parent"}
+    parents = {key: c.page_content.replace("\x00", "") for key, c in by_id.items()
+               if c.metadata.get("chunk_type") == "parent"}
     for chunk_id, chunk in by_id.items():
         meta = chunk.metadata
         if chunk_id in {"None", ""}:
@@ -25,10 +26,12 @@ def normalize_chunks(chunks):
             # Automatically derived QA is a retrieval aid, not an independent fact.
             continue
         parent = parents.get(str(meta.get("parent_id")))
-        text = chunk_retrieval_content(chunk).strip()
+        text = chunk_retrieval_content(chunk)
         if meta.get("chunk_type") == "qa":
-            text = f"Question: {meta.get('question', '')}\nAnswer: {meta.get('answer', '')}".strip()
-        if parent and text and text in parent.page_content:
+            text = f"Question: {meta.get('question', '')}\nAnswer: {meta.get('answer', '')}"
+        # PostgreSQL JSONB 不接受 NUL；仅清理 Wiki 快照，保留原始检索块。
+        text = text.replace("\x00", "").strip()
+        if parent and text and text in parent:
             continue
         if not text:
             continue
@@ -37,7 +40,8 @@ def normalize_chunks(chunks):
             continue
         seen.add(identity)
         sources.append(
-            {"text": text, "chunk_id": chunk_id, "heading": str(meta.get("heading") or "")}
+            {"text": text, "chunk_id": chunk_id,
+             "heading": str(meta.get("heading") or "").replace("\x00", "")}
         )
     return sources
 

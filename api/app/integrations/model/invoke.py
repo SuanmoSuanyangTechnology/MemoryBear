@@ -32,6 +32,7 @@ from redbear_model.runtime.remote import (
 from app.core.config import settings as app_settings
 from app.core.trace import get_trace_id
 from app.core.usage_context import get_usage_resource
+from app.i18n.exceptions import get_current_locale
 
 from .client import http_limits
 from .contracts import ModelCallContext
@@ -73,6 +74,7 @@ def invoke_target(context: ModelCallContext) -> InvokeTarget:
         resource_type=resource.resource_type if resource else None,
         resource_id=_uuid_or_none(resource.resource_id) if resource else None,
         trace_id=context.trace_id or get_trace_id() or None,
+        language=get_current_locale(),
     )
 
 
@@ -114,7 +116,9 @@ def to_host_error(exc: RemoteInvokeError) -> ModelServiceClientError:
     elif isinstance(exc, RemoteInvokeFailedError):
         error = ModelInvokeFailedError(
             biz_code=biz_code_from_remote(exc.code),
-            message=exc.message,
+            message=exc.detail,
+            user_msg=exc.msg,
+            detail=exc.detail,
             attempts=exc.attempts,
             channel_id=exc.channel_id,
             retryable=exc.retryable,

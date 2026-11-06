@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from collections.abc import AsyncIterator, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, NoReturn
@@ -58,6 +59,8 @@ HEADER_SOURCE = "X-Model-Source"
 HEADER_RESOURCE_TYPE = "X-Model-Resource-Type"
 HEADER_RESOURCE_ID = "X-Model-Resource-ID"
 HEADER_TRACE_ID = "X-Trace-Id"
+HEADER_TRACEPARENT = "traceparent"
+HEADER_LANGUAGE_TYPE = "X-Language-Type"
 
 EVENT_STREAM_CONTENT_TYPE = "text/event-stream"
 
@@ -100,12 +103,14 @@ InvokeFrame = (
 
 
 class InvokeTimeouts(BaseModel):
-    """Connect / inter-frame idle / write budgets.
+    """Connect / inter-frame idle / write budgets, plus an optional stream total.
 
     ``idle_s`` maps onto httpx's ``read`` timeout, which applies per read
     operation -- for a streaming response that *is* the gap between frames. The
     host management-plane ``read`` budget is a whole-response semantic and must
-    not be reused here: a long generation would trip it.
+    not be reused here: a long generation would trip it. ``total_s`` is the
+    wall-clock cap for one stream; a continuously producing stream never trips
+    ``idle_s``, so callers that can outlive their inbound deadline must set it.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -114,6 +119,7 @@ class InvokeTimeouts(BaseModel):
     idle_s: float = 60.0
     write_s: float = 60.0
     pool_s: float | None = None
+    total_s: float | None = Field(default=None, gt=0)
 
     def httpx_timeout(self) -> httpx.Timeout:
         return httpx.Timeout(
@@ -155,6 +161,8 @@ class InvokeTarget:
     resource_type: str | None = None
     resource_id: UUID | None = None
     trace_id: str | None = None
+    traceparent: str | None = None
+    language: str | None = None
 
     def headers(self) -> dict[str, str]:
         headers = {
@@ -174,6 +182,10 @@ class InvokeTarget:
             headers[HEADER_RESOURCE_ID] = str(self.resource_id)
         if self.trace_id:
             headers[HEADER_TRACE_ID] = self.trace_id
+        if self.traceparent:
+            headers[HEADER_TRACEPARENT] = self.traceparent
+        if self.language:
+            headers[HEADER_LANGUAGE_TYPE] = self.language
         return headers
 
 
@@ -289,9 +301,15 @@ def decode_frame(event: str, data: str) -> InvokeFrame:
             raise RemoteInvokeProtocolError(f"unknown done status: {status!r}")
         return InvokeDoneFrame(status=status)
     failure = _as_dict(payload, kind="error")
+    detail = str(failure.get("error") or failure.get("message") or "")
+    msg = failure.get("msg")
+    if msg is None and "error" not in failure:
+        # 旧帧只有 message：它同时是用户文案与诊断面（双读兼容）。
+        msg = failure.get("message")
     raise RemoteInvokeFailedError(
         code=failure.get("code"),
-        message=str(failure.get("message") or ""),
+        msg=str(msg) if msg is not None else None,
+        detail=detail,
         attempts=_optional_int(failure.get("attempts")),
         channel_id=_optional_uuid(failure.get("channel_id")),
         retryable=bool(failure.get("retryable")),
@@ -319,10 +337,12 @@ def _optional_uuid(value: Any) -> UUID | None:
 def envelope_failure(payload: dict[str, Any], http_status: int) -> RemoteInvokeFailedError:
     """Failure envelope (``code != 0``) → terminal error."""
 
-    message = payload.get("msg") or payload.get("message") or ""
+    msg = payload.get("msg")
+    detail = payload.get("error") or payload.get("message") or ""
     return RemoteInvokeFailedError(
         code=payload.get("code"),
-        message=str(message),
+        msg=str(msg) if msg is not None else None,
+        detail=str(detail),
         http_status=http_status,
         retryable=http_status >= 500,
     )
@@ -464,8 +484,14 @@ class AsyncInvokeTransport:
             if EVENT_STREAM_CONTENT_TYPE not in content_type.lower():
                 await self._raise_for_non_stream(response)
             state = _FrameStream()
+            total = self._timeouts.total_s
+            deadline = None if total is None else time.monotonic() + total
             try:
                 async for event, data in parse_sse_events_async(response.aiter_lines()):
+                    if deadline is not None and time.monotonic() >= deadline:
+                        raise RemoteInvokeUnavailableError(
+                            "remote invoke exceeded the total stream budget"
+                        )
                     yield state.feed(event, data)
                     if state.done:
                         return
@@ -565,8 +591,14 @@ class SyncInvokeTransport:
             if EVENT_STREAM_CONTENT_TYPE not in content_type.lower():
                 self._raise_for_non_stream(response)
             state = _FrameStream()
+            total = self._timeouts.total_s
+            deadline = None if total is None else time.monotonic() + total
             try:
                 for event, data in parse_sse_events(response.iter_lines()):
+                    if deadline is not None and time.monotonic() >= deadline:
+                        raise RemoteInvokeUnavailableError(
+                            "remote invoke exceeded the total stream budget"
+                        )
                     yield state.feed(event, data)
                     if state.done:
                         return
@@ -970,6 +1002,7 @@ class RemoteRedBearChatModel(BaseChatModel):
 __all__ = [
     "DONE_STATUSES",
     "EVENT_STREAM_CONTENT_TYPE",
+    "HEADER_LANGUAGE_TYPE",
     "HEADER_RESOURCE_ID",
     "HEADER_RESOURCE_TYPE",
     "HEADER_SOURCE",

@@ -73,7 +73,7 @@ class ModelServiceClient:
     async def forward(self, request: Request, context: ModelCallContext) -> Response:
         """Forward one management-plane request and buffer the upstream response.
 
-        管理面响应体小且需原样保真（409+impact / 422 信封 / 201 / 分页 / i18n），
+        管理面响应体小且需原样保真（409 信封 / 422 信封 / 201 / 分页 / i18n），
         缓冲返回而非流式：状态码与 body 一致，且传输失败仍可映射 503。
         """
         started_at = time.perf_counter()

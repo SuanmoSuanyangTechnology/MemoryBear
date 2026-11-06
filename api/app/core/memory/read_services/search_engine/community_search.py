@@ -11,6 +11,7 @@ import tiktoken
 from app.core.memory.exceptions import CommunityRetrievalError
 from app.core.memory.models.community_retrieval_models import CommunityEvidence, CommunityRetrievalTrace
 from app.core.memory.models.service_models import Memory, MemorySearchResult
+from app.core.memory.retrieval_trace.community_validation import emit_community_stage
 from app.core.memory.retrieval_trace.community_trace import log_community_trace, timed_stage
 from app.core.memory.retrieval_trace.models import RetrievalExecutionTrace
 from app.core.memory.storage.enums import MemoryNodeType
@@ -178,6 +179,13 @@ class CommunitySearchService:
             self._validate_node(node, scene=scene, community_id=community_id)
             if item.label != label:
                 raise CommunityRetrievalError("invalid_node_id")
+            topic_scope = node.get("topic_scope")
+            if not isinstance(topic_scope, str):
+                continue
+            topic_scope = topic_scope.strip()
+            if not topic_scope:
+                continue
+            node["topic_scope"] = topic_scope
             # Score parsing and dependency failures use the provider's default behavior.
             if not fulltext and score < threshold - 1e-6:
                 continue
@@ -190,7 +198,7 @@ class CommunitySearchService:
         if not memories:
             self.trace.final_tokens = 0
         return MemorySearchResult(
-            memories=memories or [], content_str=content,
+            memories=memories or [], content_str=content, community_trace=self.trace,
             execution_trace=RetrievalExecutionTrace(
                 keyword_status="completed" if self.semantic_degraded else "skipped",
                 semantic_status="degraded" if self.semantic_degraded else "completed",
@@ -203,33 +211,48 @@ class CommunitySearchService:
         )
 
     async def _search(self, query: str) -> MemorySearchResult:
+        emit_community_stage(self.trace, "community_searched", "running")
         with timed_stage(self.trace, "community_selection"):
             selected, recalled_community_count = await self._recall(query)
             self.trace.recalled_community_count = recalled_community_count
         self.trace.selected_communities = [
-            {"id": n["id"], "score": s, "summary": n["summary"]} for s, n in selected
+            {"id": n["id"], "score": s, "topic_scope": n["topic_scope"], "name": n.get("topic_name")} for s, n in selected
         ]
+        emit_community_stage(self.trace, "community_searched", "completed")
         if not selected:
+            emit_community_stage(self.trace, "community_scenes_searched", "skipped")
+            emit_community_stage(self.trace, "community_evidence_packed", "skipped")
             return self._result(reason="no_community_hit")
         merged: dict[str, tuple[float, dict]] = {}
+        emit_community_stage(self.trace, "community_scenes_searched", "running")
         with timed_stage(self.trace, "scene_selection"):
             for _, community in selected:
                 candidates, recalled_scene_count = await self._recall(query, community_id=community["id"])
                 self.trace.members.append({
                     "community_id": community["id"], "matched_scene_count": None,
                     "recalled_scene_count": recalled_scene_count,
-                    "candidates": [{"id": n["id"], "score": s} for s, n in candidates],
+                    "candidates": [{"id": n["id"], "score": s, "topic_scope": n["topic_scope"],
+                                    "content": n["content"]} for s, n in candidates],
                 })
+                emit_community_stage(self.trace, "community_scenes_searched", "running")
                 for score, node in candidates:
+                    if node["id"] in merged:
+                        self.trace.packing_actions.append({"node_id": node["id"], "action": "id_merged",
+                                                           "merged_into": node["id"]})
                     merged[node["id"]] = (score, node)
         ranked = sorted(merged.values(), key=lambda item: (-item[0], item[1]["id"]))
         self.trace.merged_ranking = [{"id": n["id"], "score": s} for s, n in ranked]
+        emit_community_stage(self.trace, "community_scenes_searched", "completed")
         if not ranked:
+            emit_community_stage(self.trace, "community_evidence_packed", "skipped")
             return self._result(reason="no_scene_hit_in_communities")
+        emit_community_stage(self.trace, "community_evidence_packed", "running")
         with timed_stage(self.trace, "evidence_packing"):
             records, tokens, actions = _pack_evidence(ranked)
-            self.trace.final_tokens, self.trace.packing_actions = tokens, actions
+            self.trace.final_tokens = tokens
+            self.trace.packing_actions.extend(actions)
             self.trace.evidence_ids = [r.node_id for r in records]
+        emit_community_stage(self.trace, "community_evidence_packed", "completed")
         if not records:
             return self._result(reason="no_valid_evidence")
         memories = [Memory(

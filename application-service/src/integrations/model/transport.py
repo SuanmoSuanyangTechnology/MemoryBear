@@ -9,12 +9,15 @@ from urllib.parse import quote
 
 import httpx
 
+from ...trace import get_traceparent
 from .contracts import ModelCallContext
 from .errors import ModelServiceTimeoutError, ModelServiceUnavailableError
 
 logger = logging.getLogger(__name__)
 
-_REQUEST_HEADER_ALLOWLIST = frozenset({"accept", "accept-language", "content-type"})
+_REQUEST_HEADER_ALLOWLIST = frozenset(
+    {"accept", "accept-language", "content-type", "x-language-type"}
+)
 # X-Trace-Id is not allowlisted: the host TraceIdMiddleware rewrites the current request's trace_id at the outer layer
 _RESPONSE_HEADER_ALLOWLIST = frozenset(
     {
@@ -58,6 +61,9 @@ def _request_headers(
     headers["X-Model-Source"] = context.source
     if context.trace_id:
         headers["X-Trace-Id"] = context.trace_id
+    traceparent = get_traceparent()
+    if traceparent:
+        headers["traceparent"] = traceparent
     return headers
 
 

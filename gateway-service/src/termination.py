@@ -56,10 +56,36 @@ SOURCE_EXTERNAL = "ex_api"
 SOURCE_INTERNAL = "in_api"
 
 
-def _v1_fail(code: int, msg: str) -> dict:
-    """构造 /v1 外部集成统一失败信封（对齐宿主 app.core.response_utils.fail）。"""
-    return {"code": code, "msg": msg, "data": {}, "error": msg,
+def _v1_fail(code: int, msg: str, error: str | None = None) -> dict:
+    """构造统一失败信封（对齐宿主 app.core.response_utils.fail）。"""
+    return {"code": code, "msg": msg, "data": {},
+            "error": msg if error is None else error,
             "time": int(time.time() * 1000)}
+
+
+# 认证拒绝的客户端可见文案（对齐 error-core 目录 zh/en）。
+_AUTH_MESSAGES: dict[str, dict[int, str]] = {
+    "zh": {
+        2001: "请先登录",
+        2002: "登录凭证无效",
+        2004: "登录凭证已失效",
+        4009: "无权访问该资源",
+    },
+    "en": {
+        2001: "Authentication required",
+        2002: "Invalid credentials",
+        2004: "Credentials are no longer valid",
+        4009: "No access to this resource",
+    },
+}
+
+
+def _auth_fail(request: Request, status_code: int, code: int, detail: str) -> AuthResult:
+    """认证拒绝统一信封：code 为业务码，error 保留诊断 detail。"""
+    language = request.headers.get("x-language-type", "").lower()
+    messages = _AUTH_MESSAGES["en" if language.startswith("en") else "zh"]
+    body = _v1_fail(code, messages[code], error=detail)
+    return AuthResult(status_code=status_code, detail=detail, body=body)
 
 
 def _extract_api_key(request: Request) -> str | None:
@@ -116,7 +142,7 @@ async def terminate_user(request: Request, deps: GatewayDeps) -> AuthResult:
     """
     auth = request.headers.get("authorization", "")
     if not auth.startswith("Bearer "):
-        return AuthResult(status_code=401, detail="missing token")
+        return _auth_fail(request, 401, 2001, "missing token")
     token = auth.removeprefix("Bearer ").strip()
     try:
         payload = await deps.verifier.verify_jwt(token, token_type="access")
@@ -124,20 +150,20 @@ async def terminate_user(request: Request, deps: GatewayDeps) -> AuthResult:
         # refresh-replace write token_blacklist:{jti} on the monolith side.
         jti = payload.get("jti")
         if jti is not None and await deps.reader.is_token_blacklisted(jti):
-            return AuthResult(status_code=401, detail="token blacklisted")
+            return _auth_fail(request, 401, 2004, "token blacklisted")
         snap = await deps.reader.get_user_snapshot(payload["sub"])
     except SnapshotUnavailable:
         # Snapshot/blacklist state unobtainable → reject (fail-closed); no DB
         # backfill on miss, recovery rides the invalidation-notify rebuild path.
-        return AuthResult(status_code=401, detail="auth unavailable")
+        return _auth_fail(request, 401, 2001, "auth unavailable")
     except (
         JWTError,
         ValueError,
     ) as exc:  # every verify_jwt failure: signature/aud/type/missing key
         logger.warning("token verification failed: %s", exc)
-        return AuthResult(status_code=401, detail="invalid token")
+        return _auth_fail(request, 401, 2002, "invalid token")
     if snap.disabled or not snap.tenant_active:
-        return AuthResult(status_code=401, detail="account disabled")
+        return _auth_fail(request, 401, 4009, "account disabled")
     # token_invalidated_before: tokens issued before a password reset are stale.
     # Snapshots store naive UTC (utcnow_naive); normalize to a UTC timestamp for
     # the comparison against the int iat claim.
@@ -145,7 +171,7 @@ async def terminate_user(request: Request, deps: GatewayDeps) -> AuthResult:
     if invalidated is not None:
         reset_ts = invalidated.replace(tzinfo=UTC).timestamp()
         if payload.get("iat", 0) < reset_ts:
-            return AuthResult(status_code=401, detail="token invalidated")
+            return _auth_fail(request, 401, 2004, "token invalidated")
     # Per-user fixed-window limit, counted only after verification succeeds.
     # fail-open: any Redis failure bypasses the limit (availability over
     # strictness) and is logged; over limit → 429 with rate-limit headers

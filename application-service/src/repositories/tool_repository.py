@@ -128,6 +128,23 @@ class ToolRepository:
             ToolConfig.tenant_id == tenant_id
         ).first()
 
+    def find_by_ids_and_tenant_all(
+        self, tool_ids: list[uuid.UUID], tenant_id: uuid.UUID
+    ) -> list[ToolConfig]:
+        """Batch variant of :meth:`find_by_id_and_tenant_all` (one query, deleted included).
+
+        Skill rows keep a bare ``tool_id`` list, so a detail response needs every
+        bound tool in a single round trip; an empty id list short-circuits to ``[]``
+        instead of emitting ``id IN ()``.
+        """
+
+        if not tool_ids:
+            return []
+        return self.db.query(ToolConfig).filter(
+            ToolConfig.id.in_(tool_ids),
+            ToolConfig.tenant_id == tenant_id
+        ).all()
+
     def count_by_tenant(self, tenant_id: uuid.UUID) -> int:
         """Count a tenant's tools (only non-deleted records)."""
         return self.db.query(ToolConfig).filter(
@@ -180,6 +197,16 @@ class BuiltinToolRepository:
             BuiltinToolConfig.id == tool_id
         ).first()
 
+    def find_by_tool_ids(
+        self, tool_ids: list[uuid.UUID]
+    ) -> list[BuiltinToolConfig]:
+        """Find builtin configs by tool ID list."""
+        if not tool_ids:
+            return []
+        return self.db.query(BuiltinToolConfig).filter(
+            BuiltinToolConfig.id.in_(tool_ids)
+        ).all()
+
     def get_existing_tool_classes(self, tenant_id: uuid.UUID) -> set:
         """Get the set of builtin tool classes the tenant already has."""
         rows = self.db.query(BuiltinToolConfig.tool_class).join(
@@ -203,6 +230,16 @@ class CustomToolRepository:
             CustomToolConfig.id == tool_id
         ).first()
 
+    def find_by_tool_ids(
+        self, tool_ids: list[uuid.UUID]
+    ) -> list[CustomToolConfig]:
+        """Find custom configs by tool ID list."""
+        if not tool_ids:
+            return []
+        return self.db.query(CustomToolConfig).filter(
+            CustomToolConfig.id.in_(tool_ids)
+        ).all()
+
 
 class MCPToolRepository:
     """MCP tool repository."""
@@ -216,6 +253,16 @@ class MCPToolRepository:
             MCPToolConfig.id == tool_id
         ).first()
 
+    def find_by_tool_ids(
+        self, tool_ids: list[uuid.UUID]
+    ) -> list[MCPToolConfig]:
+        """Find MCP configs by tool ID list."""
+        if not tool_ids:
+            return []
+        return self.db.query(MCPToolConfig).filter(
+            MCPToolConfig.id.in_(tool_ids)
+        ).all()
+
 
 class WorkflowToolRepository:
     """Workflow tool repository."""
@@ -228,3 +275,13 @@ class WorkflowToolRepository:
         return self.db.query(WorkflowToolConfig).filter(
             WorkflowToolConfig.id == tool_id
         ).first()
+
+    def find_by_tool_ids(
+        self, tool_ids: list[uuid.UUID]
+    ) -> list[WorkflowToolConfig]:
+        """Find workflow configs by tool ID list."""
+        if not tool_ids:
+            return []
+        return self.db.query(WorkflowToolConfig).filter(
+            WorkflowToolConfig.id.in_(tool_ids)
+        ).all()

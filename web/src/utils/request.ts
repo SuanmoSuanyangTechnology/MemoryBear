@@ -50,6 +50,36 @@ interface data {
 
 export const API_PREFIX = '/api'
 
+let lastTraceId = ''
+let lastRetryAfter = 0
+
+export const getLastTraceId = () => lastTraceId
+export const setLastTraceId = (id: string) => { lastTraceId = id }
+export const getLastRetryAfter = () => lastRetryAfter
+export const setLastRetryAfter = (seconds: number) => { lastRetryAfter = seconds }
+
+const RATE_LIMIT_CODES = new Set([3014, 3015, 3016, 3017, 10004])
+
+const parseRetryAfter = (value: unknown): number => {
+  if (!value) return 0
+  const num = typeof value === 'string' ? parseInt(value, 10) : Number(value)
+  return Number.isFinite(num) && num > 0 ? num : 0
+}
+
+const DEFAULT_BACKOFF_MS = 1000
+const MAX_BACKOFF_MS = 30000
+
+export const getRetryDelayMs = (attempt = 0): number => {
+  if (lastRetryAfter > 0) {
+    const serverDelay = lastRetryAfter * 1000
+    lastRetryAfter = 0
+    return serverDelay
+  }
+  return Math.min(DEFAULT_BACKOFF_MS * Math.pow(2, attempt), MAX_BACKOFF_MS)
+}
+
+export const isRateLimitCode = (code: number): boolean => RATE_LIMIT_CODES.has(code)
+
 // Create axios instance
 const service = axios.create({
   baseURL: API_PREFIX, // Corresponds to proxy config in vite.config.ts
@@ -128,10 +158,11 @@ const tokenRefresh = async (): Promise<string> => {
 // Response interceptor
 service.interceptors.response.use(
   (response) => {
-    // Process response data
+    const traceId = response.headers?.['x-trace-id'] || response.headers?.['X-Trace-Id']
+    if (traceId) lastTraceId = traceId
+
     const { data: responseData } = response;
 
-    // If response data is not an object, return directly
     if (!responseData || typeof responseData !== 'object') {
       return responseData;
     }
@@ -140,53 +171,104 @@ service.interceptors.response.use(
 
     switch (code) {
       case 0:
-      case 200:
         return data !== undefined ? data : responseData;
-      case 401:
-        // Handle unauthorized
+      case 2001:
+        if (response.config?.url?.includes('/public')) {
+          if (responseData.msg) {
+            message.warning(responseData.msg);
+          }
+          return Promise.reject(responseData);
+        }
+        clearAuthData();
+        message.warning(responseData.msg);
+        if (!window.location.hash.includes('#/login')) {
+          window.location.href = `/#/login`;
+        }
+        return Promise.reject(responseData);
+      case 2002:
+        if (responseData.msg) {
+          message.warning(responseData.msg);
+        }
+        return Promise.reject(responseData);
+      case 2003:
         return handle401Error(response.config);
       default:
         if (code === undefined) {
           return responseData;
         }
-        if (responseData.error || responseData.msg) {
-          message.warning(responseData.error || responseData.msg)
+        if (RATE_LIMIT_CODES.has(code)) {
+          const retryAfter = parseRetryAfter(response.headers?.['retry-after'] || response.headers?.['Retry-After'])
+          if (retryAfter) lastRetryAfter = retryAfter
+        }
+        if (responseData.msg) {
+          message.warning(responseData.msg)
         }
         return Promise.reject(responseData);
     }
   },
   async (error) => {
-    // If request was cancelled, don't show error message
     if (axios.isCancel(error) || error.name === 'AbortError' || error.code === 'ERR_CANCELED') {
       return Promise.reject(error);
     }
 
-    // Handle network errors, timeouts, etc.
-    let msg = error.response?.data?.error || error.response?.error || error.response?.data?.msg || error.response?.msg;
+    const errTraceId = error.response?.headers?.['x-trace-id'] || error.response?.headers?.['X-Trace-Id']
+    if (errTraceId) lastTraceId = errTraceId
+
+    let msg = error.response?.data?.msg || error.response?.msg;
 
     if (error.response?.data instanceof Blob) {
       try {
         const text = await error.response.data.text();
         const errorData = JSON.parse(text);
-        msg = errorData.error || errorData.msg || msg;
+        msg = errorData.msg || msg;
       } catch {
         msg = msg || i18n.t('common.unknownError');
       }
     }
     const status = error?.response ? error.response.status : error;
-    // Server responded but status code is not in 2xx range
+    const errorCode = error.response?.data?.code;
+    const isPublicApi = error.config?.url?.includes('/public');
     switch (status) {
       case 401:
-        // Handle unauthorized
+        if (error.config?.url === refreshTokenUrl) {
+          clearAuthData();
+          message.warning(error.response?.data?.msg || i18n.t('common.loginExpired'));
+          if (!window.location.hash.includes('#/login')) {
+            window.location.href = `/#/login`;
+          }
+          return Promise.reject(error);
+        }
+        if (errorCode === 2001) {
+          if (isPublicApi) {
+            message.warning(error.response?.data?.msg || i18n.t('common.loginRequired'));
+            return Promise.reject(error);
+          }
+          clearAuthData();
+          message.warning(error.response?.data?.msg || i18n.t('common.loginRequired'));
+          if (!window.location.hash.includes('#/login')) {
+            window.location.href = `/#/login`;
+          }
+          return Promise.reject(error);
+        }
+        if (errorCode === 2002) {
+          message.warning(error.response?.data?.msg || i18n.t('common.invalidCredentials'));
+          return Promise.reject(error);
+        }
+        if (isPublicApi) {
+          message.warning(error.response?.data?.msg || i18n.t('common.loginRequired'));
+          return Promise.reject(error);
+        }
         return handle401Error(error.config);
       case 403:
-        msg = i18n.t('common.permissionDenied');
+        msg = msg || i18n.t('common.permissionDenied');
         break;
       case 404:
-        msg = i18n.t('common.apiNotFound');
+        msg = msg || i18n.t('common.apiNotFound');
         break;
       case 429:
-        msg = i18n.t('common.tooManyRequests');
+        msg = msg || i18n.t('common.tooManyRequests');
+        const retryAfter = parseRetryAfter(error.response?.headers?.['retry-after'] || error.response?.headers?.['Retry-After'])
+        if (retryAfter) lastRetryAfter = retryAfter
         break;
       case 500:
       case 502:
@@ -196,9 +278,7 @@ service.interceptors.response.use(
         msg = msg || i18n.t('common.serverError');
         break;
       default:
-        if (['SYSTEM_DEFAULT_SCENE_CANNOT_DELETE', 'SYSTEM_DEFAULT_CLASS_CANNOT_DELETE', 'SYSTEM_DEFAULT_SCENE_CANNOT_UPDATE'].includes(msg)) {
-          msg = i18n.t(`common.${msg}`)
-        } else if (!msg && Array.isArray(error.response?.data?.detail)) {
+        if (!msg && Array.isArray(error.response?.data?.detail)) {
           msg = error.response?.data?.detail?.map((item: { msg: string }) => item.msg).join(';')
         } else {
           msg = msg || i18n.t('common.unknownError');

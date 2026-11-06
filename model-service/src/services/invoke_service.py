@@ -49,6 +49,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
+from error_core.supplier import ChannelFailure, ProviderFailure
 from langchain_core.messages import AIMessageChunk, BaseMessage
 from redbear_model import (
     AudioTaskStatus,
@@ -70,6 +71,7 @@ from redbear_model import (
     ResolvedModelConfig,
     SpeedbearChannelMissingError,
     TextEmbeddingContent,
+    UnsupportedModelProviderError,
     UsageEvent,
     UsageStatus,
     is_qwen3_vl_embedding,
@@ -114,6 +116,7 @@ from ..schemas.invoke_schema import (
     VideoParams,
 )
 from ..sensitive import SensitiveDataFilter
+from ..trace import get_trace_id
 from .channel_cooldown import CooldownTracker, build_availability_hook
 from .channel_registry import (
     SOURCE,
@@ -121,6 +124,7 @@ from .channel_registry import (
     resolve_config_plan_async,
 )
 from .channel_service import cipher_from_env
+from .invoke_diagnostics import current_diagnostics
 from .usage_publisher import usage_publisher
 
 logger = logging.getLogger(__name__)
@@ -132,26 +136,34 @@ _NOT_FOUND_STATUS = 404
 class InvokeFailure(Exception):
     """invoke 终态失败：码面 + 归因，供端点渲染信封或 SSE ``error`` 帧。
 
-    ``retryable`` 按宿主既有口径派生（HTTP ≥ 500），与信封渲染同源。
+    ``msg`` 是本地化用户文案（可缺省，渲染期回落到消息目录），``message``/``detail``
+    是诊断串；``retryable`` 缺省按 HTTP ≥ 500 派生，供应商映射可显式覆盖。
     """
 
     def __init__(
         self,
         *,
-        code: BizCode,
+        code: int | str | BizCode,
         message: str,
+        msg: str | None = None,
+        detail: str | None = None,
         http_status: int | None = None,
         attempts: int = 0,
         channel_id: uuid.UUID | None = None,
+        retryable: bool | None = None,
+        retry_after_seconds: int | None = None,
         usage_event: UsageEvent | None = None,
     ) -> None:
         super().__init__(message)
         self.code = code
         self.message = message
+        self.msg = msg
+        self.detail = detail if detail is not None else message
         self.http_status = http_status_for(code) if http_status is None else http_status
-        self.retryable = self.http_status >= 500
+        self.retryable = self.http_status >= 500 if retryable is None else retryable
         self.attempts = attempts
         self.channel_id = channel_id
+        self.retry_after_seconds = retry_after_seconds
         self.usage_event = usage_event
 
 
@@ -645,13 +657,19 @@ def _bound_runtime(runtime: Any, params: LLMParams) -> Any:
     """
     if not params.tools:
         return runtime
+    diagnostics = current_diagnostics()
+    if diagnostics is not None:
+        diagnostics.stage = "tool_prepare"
     bind = getattr(runtime, "bind_tools", None)
     if not callable(bind):
         raise InvokeFailure(
             code=BizCode.INVALID_PARAMETER,
             message="当前模型运行时不支持工具调用（底层 runtime 无 bind_tools）",
         )
-    return bind(params.tools, tool_choice=params.tool_choice)
+    bound = bind(params.tools, tool_choice=params.tool_choice)
+    if diagnostics is not None:
+        diagnostics.stage = "provider_call"
+    return bound
 
 
 def _chunk_payload(chunk: Any) -> dict[str, Any]:
@@ -878,6 +896,7 @@ _FAILURE_CODES: tuple[tuple[type[BaseException], BizCode], ...] = (
     (ModelConfigDeprecatedError, BizCode.MODEL_DEPRECATED),
     (ModelConfigInactiveError, BizCode.CHANNEL_DISABLED),
     (SpeedbearChannelMissingError, BizCode.SPEEDBEAR_CHANNEL_MISSING),
+    (UnsupportedModelProviderError, BizCode.PROVIDER_NOT_SUPPORTED),
     (ChannelSwitchExhaustedError, BizCode.NO_AVAILABLE_CHANNEL),
     (NoAvailableChannelError, BizCode.NO_AVAILABLE_CHANNEL),
     (CredentialDecryptError, BizCode.CREDENTIAL_DECRYPT_ERROR),
@@ -934,16 +953,145 @@ def _last_channel_id(exc: BaseException) -> uuid.UUID | None:
     failures = getattr(exc, "failures", None)
     if not failures:
         return None
-    return failures[-1][0]
+    return failures[-1].channel_id
 
 
-def _failure_from_exception(exc: BaseException, *, attempts: int) -> InvokeFailure:
+def format_failure_detail(
+    failure: ProviderFailure,
+    *,
+    channel_id: uuid.UUID | None,
+    attempts: int,
+) -> str:
+    from error_core.diagnostics import format_diagnostics
+
+    return format_diagnostics(
+        provider=failure.provider,
+        upstream_status=failure.http_status,
+        upstream_code=failure.upstream_code,
+        channel=None if channel_id is None else str(channel_id),
+        attempts=attempts,
+        trace_id=get_trace_id(),
+        detail=failure.message,
+    )
+
+
+def _channel_diagnostics(
+    failures: list[ChannelFailure], *, attempts: int
+) -> str:
+    from error_core.diagnostics import DiagnosticEntry, format_channel_diagnostics
+
+    entries = [
+        DiagnosticEntry(
+            provider=failure.provider,
+            upstream_status=failure.http_status,
+            upstream_code=failure.upstream_code,
+            channel=None if failure.channel_id is None else str(failure.channel_id),
+            attempts=attempts,
+            detail=failure.message,
+        )
+        for failure in failures
+    ]
+    return format_channel_diagnostics(entries, trace_id=get_trace_id())
+
+
+def _upstream_code(exc: BaseException) -> str | None:
+    """沿异常链读取供应商错误码（字符串），供逐供应商映射使用。"""
+
+    current: BaseException | None = exc
+    for _ in range(8):
+        if current is None:
+            break
+        for attr in ("code", "error_code", "type"):
+            value = getattr(current, attr, None)
+            if isinstance(value, str) and value:
+                return value
+        current = current.__cause__ or current.__context__
+    return None
+
+
+def _log_provider_failure(failure: ProviderFailure, *, attempts: int) -> None:
+    from error_core.codes import code_name
+
+    from ..i18n import get_current_locale
+
+    logger.log(
+        logging.ERROR if http_status_for(failure.biz_code) >= 500 else logging.WARNING,
+        "invoke_provider_failure code=%s code_name=%s msg_locale=%s provider=%s "
+        "upstream_status=%s upstream_code=%s channel_id=%s attempts=%s "
+        "retryable=%s source_service=model-service target_service=%s trace_id=%s",
+        failure.biz_code,
+        code_name(failure.biz_code),
+        get_current_locale(),
+        failure.provider,
+        failure.http_status,
+        failure.upstream_code,
+        failure.channel_id,
+        attempts,
+        failure.retryable,
+        failure.provider,
+        get_trace_id(),
+    )
+
+
+def _failure_from_exception(
+    exc: BaseException, *, attempts: int, provider: str | None = None
+) -> InvokeFailure:
     """包内错误 → 门面失败：码面透传不再发明语义，文案过敏感过滤（供应商可能回显凭据）。"""
+    from error_core.supplier import aggregate_channel_failures
+    from redbear_model.providers.error_catalog import classify_provider_failure
+
+    channel_id = _last_channel_id(exc)
+    if isinstance(exc, ChannelSwitchExhaustedError):
+        aggregated = aggregate_channel_failures(exc.failures)
+        diagnostics = _channel_diagnostics(exc.failures, attempts=attempts)
+        for failure in exc.failures:
+            logger.warning(
+                "invoke_channel_failure provider=%s upstream_status=%s upstream_code=%s "
+                "channel_id=%s retryable=%s trace_id=%s",
+                failure.provider,
+                failure.http_status,
+                failure.upstream_code,
+                failure.channel_id,
+                failure.retryable,
+                get_trace_id(),
+            )
+        return InvokeFailure(
+            code=(
+                aggregated.biz_code
+                if aggregated is not None
+                else int(BizCode.NO_AVAILABLE_CHANNEL)
+            ),
+            message=diagnostics,
+            detail=diagnostics,
+            attempts=attempts,
+            channel_id=channel_id,
+            retryable=aggregated.retryable if aggregated is not None else False,
+        )
+    status = _provider_status(exc)
+    upstream_code = _upstream_code(exc)
+    # Classify only when the exception carries a status or upstream code: internal
+    # faults on a resolved channel keep INTERNAL_ERROR instead of UPSTREAM_UNKNOWN.
+    if provider and (status is not None or upstream_code is not None):
+        failure = classify_provider_failure(
+            provider, status, upstream_code, str(exc), channel_id
+        )
+        _log_provider_failure(failure, attempts=attempts)
+        return InvokeFailure(
+            code=failure.biz_code,
+            message=SensitiveDataFilter.filter_string(failure.message),
+            detail=format_failure_detail(
+                failure, channel_id=channel_id, attempts=attempts
+            ),
+            attempts=attempts,
+            channel_id=channel_id,
+            retryable=failure.retryable,
+            http_status=http_status_for(failure.biz_code),
+        )
     return InvokeFailure(
         code=_failure_code(exc),
         message=SensitiveDataFilter.filter_string(str(exc)),
         attempts=attempts,
-        channel_id=_last_channel_id(exc),
+        channel_id=channel_id,
     )
 
 
@@ -1034,7 +1182,8 @@ async def invoke(
     ``client_pool`` = 进程级模型客户端池（端点注入 ``runtime.model_runtime.pool``）：
     缺省时各 runtime 自建 httpx 客户端，逐请求握手且绕过进程并发闸门。
 
-    ``cooldown_sessionmaker`` = 熔断冷却落库会话工厂（端点注入 ``runtime.database.async_session``）：
+    ``cooldown_sessionmaker`` = 熔断冷却落库会话工厂
+    （端点注入 ``runtime.database.async_session``）：
     缺省时不置冷。放弃决策点（解密失败/瞬时耗尽/可换渠道）经 ``on_candidate_failure``
     零 IO 收集，``finally`` 后台落库 + 失效广播（best-effort，见 channel_cooldown）。
 
@@ -1083,24 +1232,31 @@ async def invoke(
     started = time.perf_counter()
     attempts = 0
     last_resolved: ResolvedModelConfig | None = None
+    diagnostics = current_diagnostics()
 
     async def _call(resolved: ResolvedModelConfig) -> Any:
         nonlocal attempts, last_resolved
         resolved = _materialize_default_base(resolved)
         attempts += 1
         last_resolved = resolved
-        if first_result_timeout_s is None:
-            return await run_family(resolved)
-        # wait_for 取消失败的 await：llm 的原生 async 调用真取消上游，embedding/rerank 的
-        # to_thread 只能弃等（请求线程跑完自灭）；超时文案带预算供排障
+        if diagnostics is not None:
+            diagnostics.start_candidate(resolved, attempts)
         try:
-            return await asyncio.wait_for(
-                run_family(resolved), timeout=first_result_timeout_s
-            )
-        except TimeoutError as exc:
-            raise TimeoutError(
-                f"first result timeout after {first_result_timeout_s:g}s"
-            ) from exc
+            if first_result_timeout_s is None:
+                return await run_family(resolved)
+            # 保留既有候选超时边界；诊断同时捕获取消，避免总截止绕过 Exception 日志。
+            try:
+                return await asyncio.wait_for(
+                    run_family(resolved), timeout=first_result_timeout_s
+                )
+            except TimeoutError as exc:
+                raise TimeoutError(
+                    f"first result timeout after {first_result_timeout_s:g}s"
+                ) from exc
+        except Exception as exc:
+            if diagnostics is not None:
+                diagnostics.emit("model_attempt_failed", logging.WARNING, error=exc)
+            raise
 
     async def _resolve_and_call() -> Any:
         if entry.provider is ModelProvider.COMPOSITE:
@@ -1144,6 +1300,8 @@ async def invoke(
         if chunk_sink is None:
             result_data: dict[str, Any] = outcome.result
         else:
+            if diagnostics is not None:
+                diagnostics.stage = "stream_read"
             result_data = await _drain_stream(
                 outcome.result, chunk_sink, idle_timeout_s=idle_timeout_s
             )
@@ -1155,7 +1313,11 @@ async def invoke(
             request.config_id,
             request.type,
             attempts,
-            SensitiveDataFilter.filter_string(str(exc)),
+            (
+                diagnostics.failure_message(exc)
+                if diagnostics
+                else SensitiveDataFilter.filter_string(str(exc))
+            ),
         )
         if isinstance(exc, InvokeTimeout):
             failure = InvokeFailure(
@@ -1170,7 +1332,11 @@ async def invoke(
                 ),
             )
         else:
-            failure = _failure_from_exception(exc, attempts=attempts)
+            failure = _failure_from_exception(
+                exc,
+                attempts=attempts,
+                provider=last_resolved.provider.value if last_resolved is not None else None,
+            )
         if attempts and last_resolved is not None:
             # 已发起调用的失败要计数（告警面按 usage 的 failed 聚合）；零尝试失败无调用事实。
             # 归因取实际尝试的候选：入口 config 在组合链/换渠道下 provider/model_name 会落错列；

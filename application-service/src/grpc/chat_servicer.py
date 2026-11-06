@@ -13,6 +13,9 @@ import logging
 from collections.abc import AsyncIterator
 from typing import Any
 
+from error_core.codes import coerce_code
+from error_core.diagnostics import format_diagnostics
+from error_core.messages import user_message
 from memorybear.application.v1 import chat_pb2, chat_pb2_grpc
 from memorybear_grpc.interceptors import current_principal
 from memorybear_grpc.metadata import bind_upstream_remaining, reset_upstream_remaining
@@ -26,7 +29,7 @@ from ..api.routes.messages import (
     validate_chat_body,
 )
 from ..api.schemas.common import fail
-from ..errors import BizCode, BusinessException, as_biz_code, http_status_for
+from ..errors import BizCode, BusinessException, http_status_for
 from ..i18n import resolve_locale, translate
 from ..schemas.app_schema import AppChatRequest
 from ..sensitive import SensitiveDataFilter
@@ -36,7 +39,14 @@ from ..services.chat_use_case import (
     prepare_chat,
     resolve_app_for_chat,
 )
-from ..trace import TRACE_ID_HEADER, normalize_trace_id, reset_trace_id, set_trace_id
+from ..trace import (
+    get_trace_id,
+    reset_trace_id,
+    reset_traceparent,
+    resolve_trace,
+    set_trace_id,
+    set_traceparent,
+)
 from .auth import APP_CHAT_ACL_METHOD, APP_CHAT_ACL_PATH, AppChatPrincipal
 from .envelope import abort_with, auth_rejection_content, json_bytes
 
@@ -69,13 +79,20 @@ def _decode_body(body_json: bytes, *, language: str) -> AppChatRequest:
         raise _RequestRejected(422, validation_error_content(exc, language)) from exc
 
 
-def _business_failure(exc: BusinessException) -> tuple[int, dict[str, Any]]:
+def _business_failure(
+    exc: BusinessException, language: str
+) -> tuple[int, dict[str, Any]]:
     """Business error -> the same status + envelope the HTTP handler renders."""
 
     message, _context = SensitiveDataFilter.filter_message(exc.message, exc.context)
-    biz_code = as_biz_code(exc.code)
-    return http_status_for(biz_code), fail(
-        code=biz_code.value, msg=message, error=message
+    numeric = coerce_code(exc.code)
+    # A failure envelope must never carry OK (0): treat it as unresolved.
+    if numeric in (None, BizCode.OK.value):
+        numeric = int(BizCode.BAD_REQUEST)
+    return http_status_for(numeric), fail(
+        code=numeric,
+        msg=user_message(numeric, language) or message,
+        error=format_diagnostics(trace_id=get_trace_id(), detail=message),
     )
 
 
@@ -92,13 +109,17 @@ class ChatServicer(chat_pb2_grpc.AppChatServiceServicer):
                 method=APP_CHAT_ACL_METHOD,
                 path=APP_CHAT_ACL_PATH,
             )
-            language = resolve_locale(accepted=view.headers.get("accept-language"))
+            metadata = dict(context.invocation_metadata())
+            language = resolve_locale(
+                language_type=metadata.get("x-language-type"),
+                accepted=metadata.get("accept-language"),
+            )
             # Same contract as the HTTP trace middleware: a missing or
             # malformed trace id becomes a generated one, and the service
             # ContextVar stays bound for the whole stream.
-            trace_token = set_trace_id(
-                normalize_trace_id(view.headers.get(TRACE_ID_HEADER))
-            )
+            trace_id, traceparent = resolve_trace(view.headers)
+            trace_token = set_trace_id(trace_id)
+            traceparent_token = set_traceparent(traceparent) if traceparent else None
             try:
                 principal = current_principal()
                 if not isinstance(principal, AppChatPrincipal):
@@ -129,30 +150,44 @@ class ChatServicer(chat_pb2_grpc.AppChatServiceServicer):
                 except _RequestRejected as exc:
                     await abort_with(context, exc.http_status, exc.content)
                 except BusinessException as exc:
-                    http_status, content = _business_failure(exc)
+                    http_status, content = _business_failure(exc, language)
                     await abort_with(context, http_status, content)
-                except Exception:
+                except Exception as exc:
                     logger.exception("chat preparation failed")
                     message = translate("errors.common.internal_error", language)
                     await abort_with(
                         context,
                         500,
-                        fail(BizCode.INTERNAL_ERROR.value, message, error=message),
+                        fail(
+                            BizCode.INTERNAL_ERROR.value,
+                            message,
+                            error=format_diagnostics(
+                                trace_id=get_trace_id(),
+                                detail=f"{type(exc).__name__}: {exc}",
+                            ),
+                        ),
                     )
 
                 if not payload.stream:
                     try:
                         body = await chat_complete(prep)
                     except BusinessException as exc:
-                        http_status, content = _business_failure(exc)
+                        http_status, content = _business_failure(exc, language)
                         await abort_with(context, http_status, content)
-                    except Exception:
+                    except Exception as exc:
                         logger.exception("chat completion failed")
                         message = translate("errors.common.internal_error", language)
                         await abort_with(
                             context,
                             500,
-                            fail(BizCode.INTERNAL_ERROR.value, message, error=message),
+                            fail(
+                                BizCode.INTERNAL_ERROR.value,
+                                message,
+                                error=format_diagnostics(
+                                    trace_id=get_trace_id(),
+                                    detail=f"{type(exc).__name__}: {exc}",
+                                ),
+                            ),
                         )
                     yield chat_pb2.ChatFrame(
                         seq=0,
@@ -179,22 +214,31 @@ class ChatServicer(chat_pb2_grpc.AppChatServiceServicer):
                         seq += 1
                 except BusinessException as exc:
                     if not started:
-                        http_status, content = _business_failure(exc)
+                        http_status, content = _business_failure(exc, language)
                         await abort_with(context, http_status, content)
                     logger.warning("chat stream failed mid-flight: %s", exc)
-                except Exception:
+                except Exception as exc:
                     if not started:
                         logger.exception("chat stream failed before the first frame")
                         message = translate("errors.common.internal_error", language)
                         await abort_with(
                             context,
                             500,
-                            fail(BizCode.INTERNAL_ERROR.value, message, error=message),
+                            fail(
+                                BizCode.INTERNAL_ERROR.value,
+                                message,
+                                error=format_diagnostics(
+                                    trace_id=get_trace_id(),
+                                    detail=f"{type(exc).__name__}: {exc}",
+                                ),
+                            ),
                         )
                     logger.exception("chat stream failed mid-flight")
                 finally:
                     await events.aclose()
             finally:
+                if traceparent_token is not None:
+                    reset_traceparent(traceparent_token)
                 reset_trace_id(trace_token)
         finally:
             reset_upstream_remaining(token)

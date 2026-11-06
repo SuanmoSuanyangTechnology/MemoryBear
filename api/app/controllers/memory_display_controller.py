@@ -7,7 +7,7 @@
 import uuid
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Header, Query
+from fastapi import APIRouter, Depends, Header, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.error_codes import BizCode
@@ -17,6 +17,7 @@ from app.core.response_utils import fail, success
 from app.core.utils.datetime_utils import resolve_iana_timezone
 from app.db import get_async_db
 from app.dependencies import CurrentUserSnapshot, get_current_user_async
+from app.integrations.profile.proxy import memory_profile_proxy
 from app.schemas.response_schema import ApiResponse, PageData, PageMeta
 from app.services.memory_display_record_service import MemoryDisplayRecordService
 from app.services.memory_engine_display_service import MemoryEngineDisplayService
@@ -45,7 +46,43 @@ def _time_window_error(start_time: Optional[int], end_time: Optional[int]):
     return None
 
 
+@router.get("/activity-statistics", response_model=ApiResponse)
+@memory_profile_proxy(query_fields=("year",))
+async def get_yearly_activity_statistics(
+    year: str | None = Query(None),
+    timezone: str | None = Header(None, alias="X-Timezone"),
+    current_user: CurrentUserSnapshot = Depends(get_current_user_async),
+    request: Request = None,
+) -> dict:
+    return fail(BizCode.SERVICE_UNAVAILABLE, "记忆画像服务暂不可用")
+
+
+@router.get("/activity-composition", response_model=ApiResponse)
+@memory_profile_proxy(query_fields=("year", "month"))
+async def get_monthly_activity_composition(
+    year: str | None = Query(None),
+    month: str | None = Query(None),
+    timezone: str | None = Header(None, alias="X-Timezone"),
+    current_user: CurrentUserSnapshot = Depends(get_current_user_async),
+    request: Request = None,
+) -> dict:
+    return fail(BizCode.SERVICE_UNAVAILABLE, "记忆画像服务暂不可用")
+
+
 @router.get("/all", response_model=ApiResponse)
+@memory_profile_proxy(
+    query_fields=(
+        "end_user_id",
+        "page",
+        "pagesize",
+        "include_engines",
+        "start_time",
+        "end_time",
+        "timezone",
+    ),
+    language_field="language_type",
+    upper_bounds={"pagesize": 100},
+)
 async def get_all_memory_display(
     timezone: str = Header(
         ...,
@@ -65,6 +102,7 @@ async def get_all_memory_display(
     language_type: str = Header(default=None, alias="X-Language-Type"),
     current_user: CurrentUserSnapshot = Depends(get_current_user_async),
     db: AsyncSession = Depends(get_async_db),
+    request: Request = None,
 ) -> dict:
     """一次获取写入记录、读取卡片和引擎动态卡片
 
@@ -223,6 +261,16 @@ async def get_all_memory_display(
         return fail(BizCode.INTERNAL_ERROR, "展示记录查询失败", str(e))
 
 @router.get("/written", response_model=ApiResponse)
+@memory_profile_proxy(
+    query_fields=(
+        "end_user_id",
+        "page",
+        "pagesize",
+        "start_time",
+        "end_time",
+    ),
+    upper_bounds={"pagesize": 100},
+)
 async def get_written_memories(
     end_user_id: Optional[str] = Query(None, description="终端用户 ID；不传则查询整个工作空间"),
     page: int = Query(1, ge=1, description="页码，从 1 开始"),
@@ -231,6 +279,7 @@ async def get_written_memories(
     end_time: Optional[int] = Query(None, description="结束时间（毫秒 UTC，闭区间）"),
     current_user: CurrentUserSnapshot = Depends(get_current_user_async),
     db: AsyncSession = Depends(get_async_db),
+    request: Request = None,
 ) -> dict:
     """获取写入展示记录列表
 
@@ -305,6 +354,16 @@ async def get_written_memories(
         return fail(BizCode.INTERNAL_ERROR, "写入展示记录查询失败", str(e))
 
 @router.get("/retrieved", response_model=ApiResponse)
+@memory_profile_proxy(
+    query_fields=(
+        "end_user_id",
+        "page",
+        "pagesize",
+        "start_time",
+        "end_time",
+    ),
+    upper_bounds={"pagesize": 100},
+)
 async def get_retrieved_memories(
     end_user_id: Optional[str] = Query(None, description="终端用户 ID；不传则查询整个工作空间"),
     page: int = Query(1, ge=1, description="页码，从 1 开始"),
@@ -313,6 +372,7 @@ async def get_retrieved_memories(
     end_time: Optional[int] = Query(None, description="结束时间（毫秒 UTC，闭区间）"),
     current_user: CurrentUserSnapshot = Depends(get_current_user_async),
     db: AsyncSession = Depends(get_async_db),
+    request: Request = None,
 ) -> dict:
     """获取读取展示卡片列表
 
@@ -387,6 +447,18 @@ async def get_retrieved_memories(
         return fail(BizCode.INTERNAL_ERROR, "读取展示记录查询失败", str(e))
 
 @router.get("/engines", response_model=ApiResponse)
+@memory_profile_proxy(
+    query_fields=(
+        "end_user_id",
+        "page",
+        "pagesize",
+        "start_time",
+        "end_time",
+        "timezone",
+    ),
+    language_field="language_type",
+    upper_bounds={"pagesize": 100},
+)
 async def get_engine_display_cards(
     timezone: str = Header(
         ...,
@@ -401,6 +473,7 @@ async def get_engine_display_cards(
     language_type: str = Header(default=None, alias="X-Language-Type"),
     current_user: CurrentUserSnapshot = Depends(get_current_user_async),
     db: AsyncSession = Depends(get_async_db),
+    request: Request = None,
 ) -> dict:
     """获取引擎动态展示卡片列表
 

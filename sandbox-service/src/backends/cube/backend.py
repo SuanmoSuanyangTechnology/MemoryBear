@@ -13,6 +13,7 @@ Error mapping (what the scheduler relies on):
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import re
 import time
@@ -41,7 +42,7 @@ from ..base import (
     IsADirectory,
     RunResult,
 )
-from .client import CubeClient, HttpStatusError, TransportFailure
+from .client import TRUNCATED_LINE, CubeClient, HttpStatusError, TransportFailure
 from .config import CubeConfig
 
 logger = logging.getLogger(__name__)
@@ -107,36 +108,119 @@ def _status_error(exc: HttpStatusError, conflict: type[BackendError]) -> Backend
     return BackendError(f"HTTP {exc.status}")
 
 
-def fold_events(events: list[dict[str, Any]], duration_ms: int) -> RunResult:
-    """Turn the execute event stream into the backend's ``RunResult``."""
+# What one stream may hold in this process before the manager's own budget applies.
+# Same two-stage rule as ``services.shell`` (``CAPTURE_MAX_BYTES``): a bounded head+tail
+# capture here, then the configured budget in ``services.verdict``.
+STREAM_CAPTURE_MAX_BYTES = 4 * 1024 * 1024
 
-    out: list[str] = []
-    err: list[str] = []
-    error: str | None = None
-    for event in events:
+
+class _BoundedText:
+    """At most ``max_bytes`` of one output stream: the head half and the tail half.
+
+    Whatever arrives in between is counted and dropped, so a program that prints without
+    end cannot grow this process; ``total`` stays the exact number of bytes it wrote.
+    Splitting keeps both ends readable, which is where the interesting lines usually are.
+    """
+
+    __slots__ = ("_half", "_head", "_tail", "_dropped", "total")
+
+    def __init__(self, max_bytes: int) -> None:
+        if max_bytes < 2:
+            raise ValueError("max_bytes must be >= 2")
+        self._half = max_bytes // 2
+        self._head = bytearray()
+        self._tail = bytearray()
+        self._dropped = False
+        self.total = 0
+
+    def feed(self, text: str) -> None:
+        raw = text.encode("utf-8", "replace")
+        self.total += len(raw)
+        room = self._half - len(self._head)
+        if room > 0:
+            self._head += raw[:room]
+            raw = raw[room:]
+        if not raw:
+            return
+        self._tail += raw
+        overflow = len(self._tail) - self._half
+        if overflow > 0:
+            del self._tail[:overflow]
+            self._dropped = True
+
+    def skip(self, count: int) -> None:
+        """Account for bytes the transport dropped before they reached this buffer."""
+
+        if count > 0:
+            self.total += count
+            self._dropped = True
+
+    def text(self) -> str:
+        if not self._dropped:
+            return (self._head + self._tail).decode("utf-8", "replace")
+        head = self._head.decode("utf-8", "ignore")
+        tail = self._tail.decode("utf-8", "ignore")
+        omitted = self.total - len(self._head) - len(self._tail)
+        return f"{head}\n...[truncated {omitted} bytes]...\n{tail}"
+
+
+class EventFold:
+    """Build the ``RunResult`` of one exec event by event, with bounded buffers.
+
+    Events are folded as they arrive and never retained; each stream keeps at most
+    ``CAPTURE`` bytes, so peak memory no longer follows what the user printed.
+    """
+
+    def __init__(self, capture_max_bytes: int = STREAM_CAPTURE_MAX_BYTES) -> None:
+        self._out = _BoundedText(capture_max_bytes)
+        self._err = _BoundedText(capture_max_bytes)
+        self.error: str | None = None
+
+    def feed(self, event: dict[str, Any]) -> None:
         kind = event.get("type")
         if kind == "stdout":
-            out.append(str(event.get("text", "")))
+            self._out.feed(str(event.get("text", "")))
         elif kind == "stderr":
-            err.append(str(event.get("text", "")))
+            self._err.feed(str(event.get("text", "")))
         elif kind == "result":
             text = event.get("text")
             if event.get("is_main_result") and text is not None:
                 text = str(text)
-                out.append(text if text.endswith("\n") else text + "\n")
-        elif kind == "error" and error is None:
+                self._out.feed(text if text.endswith("\n") else text + "\n")
+        elif kind == TRUNCATED_LINE:
+            # The transport refused an over-long line; only its byte count survives.
+            dropped = event.get("bytes")
+            count = dropped if isinstance(dropped, int) and dropped > 0 else 0
+            (self._err if event.get("stream") == "stderr" else self._out).skip(count)
+        elif kind == "error" and self.error is None:
             name = str(event.get("name") or "Error")
             value = str(event.get("value") or "")
             if name == UNEXPECTED_END:
-                error = KERNEL_DIED
+                self.error = KERNEL_DIED
             else:
-                error = f"{name}: {value}" if value else name
+                self.error = f"{name}: {value}" if value else name
             trace = _strip_ansi(str(event.get("traceback") or ""))
             if trace:
-                err.append(trace if trace.endswith("\n") else trace + "\n")
-    return RunResult(
-        stdout="".join(out), stderr="".join(err), error=error, duration_ms=duration_ms
-    )
+                self._err.feed(trace if trace.endswith("\n") else trace + "\n")
+
+    def result(self, duration_ms: int) -> RunResult:
+        return RunResult(
+            stdout=self._out.text(),
+            stderr=self._err.text(),
+            error=self.error,
+            duration_ms=duration_ms,
+            stdout_bytes=self._out.total,
+            stderr_bytes=self._err.total,
+        )
+
+
+def fold_events(events: list[dict[str, Any]], duration_ms: int) -> RunResult:
+    """Turn an already collected execute event stream into a ``RunResult``."""
+
+    fold = EventFold()
+    for event in events:
+        fold.feed(event)
+    return fold.result(duration_ms)
 
 
 class CubeBackend:
@@ -312,17 +396,23 @@ class CubeBackend:
     ) -> RunResult:
         body = {"code": code, "context_id": context_id}
         started = time.monotonic()
+        fold = EventFold()
+        read_timeout = timeout_s + EXEC_GRACE_S + STREAM_GRACE_S
         try:
             # A TimeoutError propagates on purpose: the scheduler then restarts the kernel.
-            events = await asyncio.wait_for(
-                self._client.execute(
-                    instance_id, body, read_timeout=timeout_s + EXEC_GRACE_S + STREAM_GRACE_S
-                ),
-                timeout_s + EXEC_GRACE_S,
-            )
+            # The deadline spans the whole stream, so a chatty program cannot hold the
+            # call open by keeping the response body flowing.
+            async with asyncio.timeout(timeout_s + EXEC_GRACE_S):
+                async with contextlib.aclosing(
+                    self._client.iter_events(
+                        instance_id, body, read_timeout=read_timeout
+                    )
+                ) as events:
+                    async for event in events:
+                        fold.feed(event)
         except (HttpStatusError, TransportFailure) as exc:
             raise await self._diagnose(instance_id, exc, context_id) from exc
-        return fold_events(events, int((time.monotonic() - started) * 1000))
+        return fold.result(int((time.monotonic() - started) * 1000))
 
     async def delete_context(self, instance_id: str, context_id: str) -> None:
         await self._data(

@@ -53,10 +53,11 @@ def default_tool_call_limit() -> int:
 # Upper bound for the optional evidence-assembly step that runs after a tool returns.
 EVIDENCE_ASSEMBLY_TIMEOUT_S = 60.0
 
-# A run that called tools but ends with less text than this (or with a sentence ending
-# in a colon / ellipsis) did not answer the question — it stopped mid-narration. Such a
-# turn gets one extra tool-free closing turn; see LangChainAgent._needs_closing_answer.
-# Chosen well below a normal report and above a one-line "let me search" preamble.
+# Applies only when the last model round still asked for tools: then the accumulated text
+# is narration, and a run this short did not answer the question. A run whose last round
+# was tool-free already produced its answer and must never get a closing turn for being
+# short — that appended a second copy of the answer ("42" came back as "...```42").
+# See LangChainAgent._needs_closing_answer.
 CLOSING_ANSWER_MIN_CHARS = 200
 
 CLOSING_ANSWER_INSTRUCTION = (
@@ -634,7 +635,12 @@ class LangChainAgent:
             )
         return events
 
-    def _needs_closing_answer(self, content: str, node_executions) -> bool:
+    def _needs_closing_answer(
+        self,
+        content: str,
+        node_executions,
+        last_round_had_tool_calls: bool = True,
+    ) -> bool:
         """Whether this run ended on a narration instead of an answer.
 
         Symptom being fixed: the model writes "我将为您搜索……" (often along with tool
@@ -645,12 +651,22 @@ class LangChainAgent:
         Only runs that actually called tools are candidates: a bare agent's short reply
         is a legitimate answer, and a long reply ending in a colon is a formatted report,
         not a promise.
+
+        ``last_round_had_tool_calls`` is what separates narration from an answer. A run
+        whose last model round called no tool already finished: its text IS the answer,
+        however short ("42", "是"), and appending a closing turn there duplicates it.
+        Length is only evidence of unfinished work while the last round still wanted
+        tools, because the streamed body is then narration across rounds.
         """
         if not node_executions:
             return False
         text = (content or "").strip()
         if not text:
             return True
+        if not last_round_had_tool_calls:
+            # Finished, tool-free answer. Only an explicit promise ("让我继续搜索…")
+            # still reads as unfinished; its brevity alone does not.
+            return text.endswith(("：", ":", "…", "……"))
         if len(text) < CLOSING_ANSWER_MIN_CHARS:
             return True
         return text.endswith(("：", ":", "…", "……"))
@@ -1061,6 +1077,50 @@ class LangChainAgent:
         return None
 
     @staticmethod
+    def _tool_failure_reason(output: Any) -> Optional[str]:
+        """Return the error message when a tool returned a failure payload, else None.
+
+        Tools never raise into the agent (see ``LangchainToolWrapper._arun``): a failure is
+        handed back in band as ``{"success": false, "error": ...}`` so the model still sees
+        why and can retry. LangChain therefore emits ``on_tool_end`` for a failed call, and
+        without this check the step was recorded as completed/success — which is what
+        ``GET /apps/{app_id}/logs/{conversation_id}`` projects into ``node_executions_map``
+        (``_steps_to_node_executions``), so a dead MCP tool showed up there as a healthy
+        call with an unreadable body. Same convention already used by ``_evidence_digest``.
+        """
+
+        # on_tool_end may carry the raw return value or the wrapping ToolMessage.
+        if not isinstance(output, (str, dict)):
+            content = getattr(output, "content", None)
+            if content is not None:
+                output = content
+
+        if isinstance(output, dict):
+            payload = output
+        elif isinstance(output, str) and output.lstrip().startswith("{"):
+            try:
+                payload = json.loads(output)
+            except (TypeError, ValueError):
+                return None
+        else:
+            return None
+
+        if not isinstance(payload, dict) or payload.get("success") is not False:
+            return None
+        # Failure payloads are not uniform across the repo: ToolResult.error_result (and
+        # the adapter serialisation) uses ``error`` / ``error_code``, while several tools
+        # report the reason in ``message`` (e.g. mineru / openclaw connection payloads).
+        # Reading only the first two would turn those into the generic fallback and lose
+        # the actual cause.
+        reason = (
+            payload.get("error")
+            or payload.get("message")
+            or payload.get("error_code")
+            or ""
+        )
+        return str(reason).strip() or "工具执行失败"
+
+    @staticmethod
     def _truncate_data(data, max_length: int = 2000) -> Any:
         if data is None:
             return None
@@ -1072,22 +1132,34 @@ class LangChainAgent:
             text = str(data)
         return text[:max_length] + "...[truncated]" if len(text) > max_length else text
 
-    def _extract_tool_sources(self, tool_name: str, node: Dict[str, Any]) -> None:
-        """Extract source information from the tool instance and merge it into node["meta"]"""
+    def _extract_tool_sources(
+        self, tool_name: str, node: Dict[str, Any], attach: bool = True
+    ) -> None:
+        """Consume the tool instance's per-call state, optionally attaching it to the node.
+
+        These attributes are a hand-off between one tool call and whoever records it, so
+        they must be cleared on *every* call — a failed call that skipped this function
+        left ``_last_sources`` behind, and the next successful call would then report a
+        previous round's sources. ``attach=False`` (failures) drops the state instead of
+        writing sources onto a node that did not produce them.
+        """
+
         for t in self.tools:
             t_name = getattr(t, "name", None)
             if t_name == tool_name:
                 sources = getattr(t, "_last_sources", None)
                 context_stats = getattr(t, "_context_assembly_stats", None)
                 if sources:
-                    if not node.get("meta"):
-                        node["meta"] = {}
-                    node["meta"]["sources"] = sources
+                    if attach:
+                        if not node.get("meta"):
+                            node["meta"] = {}
+                        node["meta"]["sources"] = sources
                     t._last_sources = []
                 if context_stats:
-                    if not node.get("meta"):
-                        node["meta"] = {}
-                    node["meta"]["context_assembly"] = context_stats
+                    if attach:
+                        if not node.get("meta"):
+                            node["meta"] = {}
+                        node["meta"]["context_assembly"] = context_stats
                     t._context_assembly_stats = None
                 break
 
@@ -1142,6 +1214,9 @@ class LangChainAgent:
             total_tokens = 0
             reasoning_content = ""
             last_event = {}
+            # Default True keeps the pre-existing guard for runs where no model round is
+            # observed; it is overwritten on every on_chat_model_end.
+            last_round_had_tool_calls = True
 
             try:
                 async for event in self.agent.astream_events(
@@ -1160,6 +1235,15 @@ class LangChainAgent:
                         output_text = self._content_to_text(output_message.content) if output_message else ""
                         tokens = self._extract_tokens_from_message(output_message) if output_message else 0
                         trace.finish_llm(output=output_text, tokens=tokens)
+                        # Feeds the final-answer guard: a tool-free last round already
+                        # answered, so it must not get a closing turn for being short.
+                        # Only a parsed message may overwrite it: an unparseable event
+                        # tells us nothing, and guessing "no tool calls" there would
+                        # suppress a closing turn we cannot justify skipping.
+                        if output_message is not None:
+                            last_round_had_tool_calls = bool(
+                                getattr(output_message, "tool_calls", None)
+                            )
 
                     elif kind == "on_tool_start":
                         tool_name = event.get("name", "unknown")
@@ -1198,22 +1282,41 @@ class LangChainAgent:
                                 if n["node_name"] == tool_name and n["status"] == "running":
                                     matched_node = n
                                     break
+                        # Tools return failures in band instead of raising, so a failed
+                        # call closes here rather than on on_tool_error: settle it the
+                        # same way so the persisted step never reports a broken tool as ok.
+                        failure_reason = self._tool_failure_reason(tool_output)
                         if matched_node:
-                            matched_node["status"] = "completed"
+                            matched_node["status"] = "failed" if failure_reason else "completed"
                             matched_node["output"] = self._truncate_data(tool_output)
+                            if failure_reason:
+                                matched_node["error"] = failure_reason[:500]
                             matched_node["elapsed_time"] = round(
                                 (time.time() - matched_node.get("started_at", time.time())) * 1000, 2
                             )
-                            # Extract extra source info from the tool (e.g. knowledge base retrieval sources)
-                            self._extract_tool_sources(tool_name, matched_node)
+                            # Always consume the tool's per-call state: skipping it on a
+                            # failed call left stale sources behind for the next call to
+                            # pick up. Failures drop the state, they do not attach it.
+                            self._extract_tool_sources(
+                                tool_name, matched_node, attach=not failure_reason
+                            )
 
-                        trace.finish_tool(
-                            step_id=matched_node.get("step_id") if matched_node else None,
-                            tool_name=tool_name,
-                            status="success",
-                            output=tool_output,
-                            meta=matched_node.get("meta") if matched_node else None,
-                        )
+                        if failure_reason:
+                            trace.finish_tool(
+                                step_id=matched_node.get("step_id") if matched_node else None,
+                                tool_name=tool_name,
+                                status="error",
+                                error=failure_reason[:500],
+                                meta=matched_node.get("meta") if matched_node else None,
+                            )
+                        else:
+                            trace.finish_tool(
+                                step_id=matched_node.get("step_id") if matched_node else None,
+                                tool_name=tool_name,
+                                status="success",
+                                output=tool_output,
+                                meta=matched_node.get("meta") if matched_node else None,
+                            )
 
                     elif kind == "on_tool_error":
                         error_msg = str(event.get("data", {}).get("error", ""))
@@ -1355,7 +1458,9 @@ class LangChainAgent:
 
             # Same final-answer guard as the streaming path (see _needs_closing_answer):
             # a non-streaming run that ends on a narration gets one tool-free closing turn.
-            if self._needs_closing_answer(content, node_executions):
+            if self._needs_closing_answer(
+                content, node_executions, last_round_had_tool_calls
+            ):
                 try:
                     closing_text, closing_tokens = await self._closing_answer(messages, trace)
                 except Exception as closing_exc:  # noqa: BLE001 - keep the text we have
@@ -1476,6 +1581,10 @@ class LangChainAgent:
             final_answer_text = ''
             try:
                 last_event = {}
+                # Feeds the final-answer guard: a tool-free last round already answered, so
+                # it must not get a closing turn for being short. True by default keeps the
+                # previous behaviour for runs where no model round is observed.
+                last_round_had_tool_calls = True
                 async for event in self.agent.astream_events(
                         {"messages": messages},
                         version="v2",
@@ -1495,6 +1604,15 @@ class LangChainAgent:
                         output_text = self._content_to_text(output_message.content) if output_message else ""
                         tokens = self._extract_tokens_from_message(output_message) if output_message else 0
                         trace.finish_llm(output=output_text, tokens=tokens)
+                        # Whether the model was still asking for tools decides if the
+                        # streamed body is narration or the answer itself (see
+                        # _needs_closing_answer). Only a parsed message may overwrite it:
+                        # an unparseable event tells us nothing, and guessing "no tool
+                        # calls" there would suppress a closing turn without evidence.
+                        if output_message is not None:
+                            last_round_had_tool_calls = bool(
+                                getattr(output_message, "tool_calls", None)
+                            )
                         # The final answer is the last model message that carries text and
                         # no tool call. Intermediate narration rounds (they issue a tool
                         # call) are ignored even when they stream a preamble.
@@ -1679,25 +1797,47 @@ class LangChainAgent:
                                     matched_node = n
                                     break
                         matched_step_id = matched_node.get("step_id") if matched_node else matched_step_id
+                        # Tools return failures in band instead of raising, so a failed
+                        # call closes here rather than on on_tool_error. Settle it the
+                        # same way and tell the frontend it failed, not "completed".
+                        failure_reason = self._tool_failure_reason(tool_output)
                         if matched_node:
-                            matched_node["status"] = "completed"
+                            matched_node["status"] = "failed" if failure_reason else "completed"
                             matched_node["output"] = self._truncate_data(tool_output)
+                            if failure_reason:
+                                matched_node["error"] = failure_reason[:500]
                             matched_node["elapsed_time"] = round(
                                 (time.time() - matched_node.get("started_at", time.time())) * 1000, 2
                             )
-                            # Extract extra source info from the tool
-                            self._extract_tool_sources(tool_name, matched_node)
-                        trace.finish_tool(
-                            step_id=matched_step_id,
-                            tool_name=tool_name,
-                            status="success",
-                            output=tool_output,
-                            meta=matched_node.get("meta") if matched_node else None,
-                        )
+                            # Always consume the tool's per-call state: skipping it on a
+                            # failed call left stale sources behind for the next call to
+                            # pick up. Failures drop the state, they do not attach it.
+                            self._extract_tool_sources(
+                                tool_name, matched_node, attach=not failure_reason
+                            )
+                        if failure_reason:
+                            trace.finish_tool(
+                                step_id=matched_step_id,
+                                tool_name=tool_name,
+                                status="error",
+                                error=failure_reason[:500],
+                                meta=matched_node.get("meta") if matched_node else None,
+                            )
+                        else:
+                            trace.finish_tool(
+                                step_id=matched_step_id,
+                                tool_name=tool_name,
+                                status="success",
+                                output=tool_output,
+                                meta=matched_node.get("meta") if matched_node else None,
+                            )
                         logger.debug(f"工具调用结束: {tool_name}")
                         # Push the tool-end event in real time (with the updated meta)
                         yield {"type": "agent_log", "data": trace.to_dict()}
-                        yield {"type": "tool_end", "step_id": matched_step_id, "name": tool_name, "output": self._truncate_data(tool_output), "meta": matched_node.get("meta") if matched_node else None}
+                        if failure_reason:
+                            yield {"type": "tool_error", "step_id": matched_step_id, "name": tool_name, "error": failure_reason[:500]}
+                        else:
+                            yield {"type": "tool_end", "step_id": matched_step_id, "name": tool_name, "output": self._truncate_data(tool_output), "meta": matched_node.get("meta") if matched_node else None}
                     elif kind == "on_tool_error":
                         error_msg = str(event.get("data", {}).get("error", ""))
                         tool_name = event.get("name", "unknown")
@@ -1760,12 +1900,15 @@ class LangChainAgent:
                 # sentence gets one extra tool-free closing turn (see
                 # _needs_closing_answer). Failure of the closing turn is harmless — the
                 # text produced so far is still delivered.
-                if self._needs_closing_answer(full_content, node_executions):
+                if self._needs_closing_answer(
+                    full_content, node_executions, last_round_had_tool_calls
+                ):
                     logger.warning(
                         "Agent 以过程性语句收尾，追加一次收尾生成",
                         extra={
                             "content_length": len((full_content or '').strip()),
                             "tool_call_count": len(node_executions),
+                            "last_round_had_tool_calls": last_round_had_tool_calls,
                         },
                     )
                     closing_stats: Dict[str, Any] = {"tokens": 0}

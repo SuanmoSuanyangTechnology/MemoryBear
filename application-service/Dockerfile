@@ -29,6 +29,8 @@ RUN if [ "$NEED_MIRROR" == "1" ]; then \
     fi
 COPY packages/auth-sdk /code/packages/auth-sdk
 COPY packages/memorybear-grpc /code/packages/memorybear-grpc
+COPY packages/redbear-model /code/packages/redbear-model
+COPY packages/error-core /code/packages/error-core
 COPY application-service/pyproject.toml application-service/uv.lock /code/application-service/
 
 WORKDIR /code/application-service

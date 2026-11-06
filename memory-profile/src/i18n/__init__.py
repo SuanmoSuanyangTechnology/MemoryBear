@@ -19,9 +19,11 @@ from src.i18n.core import (
     translate_or,
 )
 from src.i18n.language import (
+    get_header_language,
     get_request_language,
     normalize_language,
     resolve_language,
+    translate_request,
 )
 from src.i18n.middleware import LanguageMiddleware
 
@@ -33,6 +35,7 @@ __all__ = [
     "configure_i18n",
     "default_language",
     "enum_labels",
+    "get_header_language",
     "get_request_language",
     "is_configured",
     "m",
@@ -46,4 +49,5 @@ __all__ = [
     "translate",
     "translate_optional",
     "translate_or",
+    "translate_request",
 ]

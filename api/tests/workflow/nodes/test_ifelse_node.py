@@ -458,7 +458,7 @@ async def test_ifelse_string_eq_true():
     state = simple_state()
     variable_pool = await simple_vairable_pool("test")
     await variable_pool.new("conv", "test", "hello", VariableType.STRING, mut=True)
-    result = await IfElseNode(STRING_EQ_CONFIG, {}).execute(state, variable_pool)
+    result = await IfElseNode(STRING_EQ_CONFIG, {}, []).execute(state, variable_pool)
     assert result == "CASE1"
 
 
@@ -468,7 +468,7 @@ async def test_ifelse_string_eq_false():
     state = simple_state()
     variable_pool = await simple_vairable_pool("test")
     await variable_pool.new("conv", "test", "world", VariableType.STRING, mut=True)
-    result = await IfElseNode(STRING_EQ_CONFIG, {}).execute(state, variable_pool)
+    result = await IfElseNode(STRING_EQ_CONFIG, {}, []).execute(state, variable_pool)
     assert result == "CASE2"
 
 
@@ -478,7 +478,7 @@ async def test_ifelse_string_contains_true():
     state = simple_state()
     variable_pool = await simple_vairable_pool("test")
     await variable_pool.new("conv", "test", "hello world", VariableType.STRING, mut=True)
-    result = await IfElseNode(STRING_CONTAINS_CONFIG, {}).execute(state, variable_pool)
+    result = await IfElseNode(STRING_CONTAINS_CONFIG, {}, []).execute(state, variable_pool)
     assert result == "CASE1"
 
 
@@ -488,7 +488,7 @@ async def test_ifelse_string_contains_false():
     state = simple_state()
     variable_pool = await simple_vairable_pool("test")
     await variable_pool.new("conv", "test", "hello", VariableType.STRING, mut=True)
-    result = await IfElseNode(STRING_CONTAINS_CONFIG, {}).execute(state, variable_pool)
+    result = await IfElseNode(STRING_CONTAINS_CONFIG, {}, []).execute(state, variable_pool)
     assert result == "CASE2"
 
 
@@ -498,7 +498,7 @@ async def test_ifelse_string_startswith_true():
     state = simple_state()
     variable_pool = await simple_vairable_pool("test")
     await variable_pool.new("conv", "test", "hello world", VariableType.STRING, mut=True)
-    result = await IfElseNode(STRING_STARTSWITH_CONFIG, {}).execute(state, variable_pool)
+    result = await IfElseNode(STRING_STARTSWITH_CONFIG, {}, []).execute(state, variable_pool)
     assert result == "CASE1"
 
 
@@ -508,7 +508,7 @@ async def test_ifelse_string_startswith_false():
     state = simple_state()
     variable_pool = await simple_vairable_pool("test")
     await variable_pool.new("conv", "test", "world hello", VariableType.STRING, mut=True)
-    result = await IfElseNode(STRING_STARTSWITH_CONFIG, {}).execute(state, variable_pool)
+    result = await IfElseNode(STRING_STARTSWITH_CONFIG, {}, []).execute(state, variable_pool)
     assert result == "CASE2"
 
 
@@ -518,7 +518,7 @@ async def test_ifelse_string_endswith_true():
     state = simple_state()
     variable_pool = await simple_vairable_pool("test")
     await variable_pool.new("conv", "test", "hello world", VariableType.STRING, mut=True)
-    result = await IfElseNode(STRING_ENDSWITH_CONFIG, {}).execute(state, variable_pool)
+    result = await IfElseNode(STRING_ENDSWITH_CONFIG, {}, []).execute(state, variable_pool)
     assert result == "CASE1"
 
 
@@ -528,7 +528,7 @@ async def test_ifelse_string_endswith_false():
     state = simple_state()
     variable_pool = await simple_vairable_pool("test")
     await variable_pool.new("conv", "test", "world hello", VariableType.STRING, mut=True)
-    result = await IfElseNode(STRING_ENDSWITH_CONFIG, {}).execute(state, variable_pool)
+    result = await IfElseNode(STRING_ENDSWITH_CONFIG, {}, []).execute(state, variable_pool)
     assert result == "CASE2"
 
 
@@ -538,7 +538,7 @@ async def test_ifelse_string_empty_true():
     state = simple_state()
     variable_pool = await simple_vairable_pool("test")
     await variable_pool.new("conv", "test", "", VariableType.STRING, mut=True)
-    result = await IfElseNode(STRING_EMPTY_CONFIG, {}).execute(state, variable_pool)
+    result = await IfElseNode(STRING_EMPTY_CONFIG, {}, []).execute(state, variable_pool)
     assert result == "CASE1"
 
 
@@ -548,7 +548,7 @@ async def test_ifelse_string_empty_false():
     state = simple_state()
     variable_pool = await simple_vairable_pool("test")
     await variable_pool.new("conv", "test", "hello", VariableType.STRING, mut=True)
-    result = await IfElseNode(STRING_EMPTY_CONFIG, {}).execute(state, variable_pool)
+    result = await IfElseNode(STRING_EMPTY_CONFIG, {}, []).execute(state, variable_pool)
     assert result == "CASE2"
 
 
@@ -558,7 +558,7 @@ async def test_ifelse_string_not_empty_true():
     state = simple_state()
     variable_pool = await simple_vairable_pool("test")
     await variable_pool.new("conv", "test", "hello", VariableType.STRING, mut=True)
-    result = await IfElseNode(STRING_NOT_EMPTY_CONFIG, {}).execute(state, variable_pool)
+    result = await IfElseNode(STRING_NOT_EMPTY_CONFIG, {}, []).execute(state, variable_pool)
     assert result == "CASE1"
 
 
@@ -568,7 +568,7 @@ async def test_ifelse_string_not_empty_false():
     state = simple_state()
     variable_pool = await simple_vairable_pool("test")
     await variable_pool.new("conv", "test", "", VariableType.STRING, mut=True)
-    result = await IfElseNode(STRING_NOT_EMPTY_CONFIG, {}).execute(state, variable_pool)
+    result = await IfElseNode(STRING_NOT_EMPTY_CONFIG, {}, []).execute(state, variable_pool)
     assert result == "CASE2"
 
 
@@ -579,7 +579,7 @@ async def test_ifelse_number_eq_true():
     state = simple_state()
     variable_pool = await simple_vairable_pool("test")
     await variable_pool.new("conv", "test", 10, VariableType.NUMBER, mut=True)
-    result = await IfElseNode(NUMBER_EQ_CONFIG, {}).execute(state, variable_pool)
+    result = await IfElseNode(NUMBER_EQ_CONFIG, {}, []).execute(state, variable_pool)
     assert result == "CASE1"
 
 
@@ -589,7 +589,7 @@ async def test_ifelse_number_eq_false():
     state = simple_state()
     variable_pool = await simple_vairable_pool("test")
     await variable_pool.new("conv", "test", 5, VariableType.NUMBER, mut=True)
-    result = await IfElseNode(NUMBER_EQ_CONFIG, {}).execute(state, variable_pool)
+    result = await IfElseNode(NUMBER_EQ_CONFIG, {}, []).execute(state, variable_pool)
     assert result == "CASE2"
 
 
@@ -599,7 +599,7 @@ async def test_ifelse_number_lt_true():
     state = simple_state()
     variable_pool = await simple_vairable_pool("test")
     await variable_pool.new("conv", "test", 5, VariableType.NUMBER, mut=True)
-    result = await IfElseNode(NUMBER_LT_CONFIG, {}).execute(state, variable_pool)
+    result = await IfElseNode(NUMBER_LT_CONFIG, {}, []).execute(state, variable_pool)
     assert result == "CASE1"
 
 
@@ -609,7 +609,7 @@ async def test_ifelse_number_lt_false():
     state = simple_state()
     variable_pool = await simple_vairable_pool("test")
     await variable_pool.new("conv", "test", 15, VariableType.NUMBER, mut=True)
-    result = await IfElseNode(NUMBER_LT_CONFIG, {}).execute(state, variable_pool)
+    result = await IfElseNode(NUMBER_LT_CONFIG, {}, []).execute(state, variable_pool)
     assert result == "CASE2"
 
 
@@ -619,7 +619,7 @@ async def test_ifelse_number_gt_true():
     state = simple_state()
     variable_pool = await simple_vairable_pool("test")
     await variable_pool.new("conv", "test", 15, VariableType.NUMBER, mut=True)
-    result = await IfElseNode(NUMBER_GT_CONFIG, {}).execute(state, variable_pool)
+    result = await IfElseNode(NUMBER_GT_CONFIG, {}, []).execute(state, variable_pool)
     assert result == "CASE1"
 
 
@@ -629,7 +629,7 @@ async def test_ifelse_number_gt_false():
     state = simple_state()
     variable_pool = await simple_vairable_pool("test")
     await variable_pool.new("conv", "test", 5, VariableType.NUMBER, mut=True)
-    result = await IfElseNode(NUMBER_GT_CONFIG, {}).execute(state, variable_pool)
+    result = await IfElseNode(NUMBER_GT_CONFIG, {}, []).execute(state, variable_pool)
     assert result == "CASE2"
 
 
@@ -639,7 +639,7 @@ async def test_ifelse_number_le_true():
     state = simple_state()
     variable_pool = await simple_vairable_pool("test")
     await variable_pool.new("conv", "test", 10, VariableType.NUMBER, mut=True)
-    result = await IfElseNode(NUMBER_LE_CONFIG, {}).execute(state, variable_pool)
+    result = await IfElseNode(NUMBER_LE_CONFIG, {}, []).execute(state, variable_pool)
     assert result == "CASE1"
 
 
@@ -649,7 +649,7 @@ async def test_ifelse_number_le_false():
     state = simple_state()
     variable_pool = await simple_vairable_pool("test")
     await variable_pool.new("conv", "test", 15, VariableType.NUMBER, mut=True)
-    result = await IfElseNode(NUMBER_LE_CONFIG, {}).execute(state, variable_pool)
+    result = await IfElseNode(NUMBER_LE_CONFIG, {}, []).execute(state, variable_pool)
     assert result == "CASE2"
 
 
@@ -659,7 +659,7 @@ async def test_ifelse_number_ge_true():
     state = simple_state()
     variable_pool = await simple_vairable_pool("test")
     await variable_pool.new("conv", "test", 10, VariableType.NUMBER, mut=True)
-    result = await IfElseNode(NUMBER_GE_CONFIG, {}).execute(state, variable_pool)
+    result = await IfElseNode(NUMBER_GE_CONFIG, {}, []).execute(state, variable_pool)
     assert result == "CASE1"
 
 
@@ -669,7 +669,7 @@ async def test_ifelse_number_ge_false():
     state = simple_state()
     variable_pool = await simple_vairable_pool("test")
     await variable_pool.new("conv", "test", 5, VariableType.NUMBER, mut=True)
-    result = await IfElseNode(NUMBER_GE_CONFIG, {}).execute(state, variable_pool)
+    result = await IfElseNode(NUMBER_GE_CONFIG, {}, []).execute(state, variable_pool)
     assert result == "CASE2"
 
 
@@ -680,7 +680,7 @@ async def test_ifelse_boolean_eq_true():
     state = simple_state()
     variable_pool = await simple_vairable_pool("test")
     await variable_pool.new("conv", "test", True, VariableType.BOOLEAN, mut=True)
-    result = await IfElseNode(BOOLEAN_EQ_CONFIG, {}).execute(state, variable_pool)
+    result = await IfElseNode(BOOLEAN_EQ_CONFIG, {}, []).execute(state, variable_pool)
     assert result == "CASE1"
 
 
@@ -690,7 +690,7 @@ async def test_ifelse_boolean_eq_false():
     state = simple_state()
     variable_pool = await simple_vairable_pool("test")
     await variable_pool.new("conv", "test", False, VariableType.BOOLEAN, mut=True)
-    result = await IfElseNode(BOOLEAN_EQ_CONFIG, {}).execute(state, variable_pool)
+    result = await IfElseNode(BOOLEAN_EQ_CONFIG, {}, []).execute(state, variable_pool)
     assert result == "CASE2"
 
 
@@ -701,7 +701,7 @@ async def test_ifelse_array_contains_true():
     state = simple_state()
     variable_pool = await simple_vairable_pool("test")
     await variable_pool.new("conv", "test", [1, 2, 3], VariableType.ARRAY_NUMBER, mut=True)
-    result = await IfElseNode(ARRAY_CONTAINS_CONFIG, {}).execute(state, variable_pool)
+    result = await IfElseNode(ARRAY_CONTAINS_CONFIG, {}, []).execute(state, variable_pool)
     assert result == "CASE1"
 
 
@@ -711,7 +711,7 @@ async def test_ifelse_array_contains_false():
     state = simple_state()
     variable_pool = await simple_vairable_pool("test")
     await variable_pool.new("conv", "test", [1, 3, 4], VariableType.ARRAY_NUMBER, mut=True)
-    result = await IfElseNode(ARRAY_CONTAINS_CONFIG, {}).execute(state, variable_pool)
+    result = await IfElseNode(ARRAY_CONTAINS_CONFIG, {}, []).execute(state, variable_pool)
     assert result == "CASE2"
 
 
@@ -721,7 +721,7 @@ async def test_ifelse_array_empty_true():
     state = simple_state()
     variable_pool = await simple_vairable_pool("test")
     await variable_pool.new("conv", "test", [], VariableType.ARRAY_NUMBER, mut=True)
-    result = await IfElseNode(ARRAY_EMPTY_CONFIG, {}).execute(state, variable_pool)
+    result = await IfElseNode(ARRAY_EMPTY_CONFIG, {}, []).execute(state, variable_pool)
     assert result == "CASE1"
 
 
@@ -731,7 +731,7 @@ async def test_ifelse_array_empty_false():
     state = simple_state()
     variable_pool = await simple_vairable_pool("test")
     await variable_pool.new("conv", "test", [1, 2], VariableType.ARRAY_NUMBER, mut=True)
-    result = await IfElseNode(ARRAY_EMPTY_CONFIG, {}).execute(state, variable_pool)
+    result = await IfElseNode(ARRAY_EMPTY_CONFIG, {}, []).execute(state, variable_pool)
     assert result == "CASE2"
 
 
@@ -742,7 +742,7 @@ async def test_ifelse_object_empty_true():
     state = simple_state()
     variable_pool = await simple_vairable_pool("test")
     await variable_pool.new("conv", "test", {}, VariableType.OBJECT, mut=True)
-    result = await IfElseNode(OBJECT_EMPTY_CONFIG, {}).execute(state, variable_pool)
+    result = await IfElseNode(OBJECT_EMPTY_CONFIG, {}, []).execute(state, variable_pool)
     assert result == "CASE1"
 
 
@@ -752,7 +752,7 @@ async def test_ifelse_object_empty_false():
     state = simple_state()
     variable_pool = await simple_vairable_pool("test")
     await variable_pool.new("conv", "test", {"key": "value"}, VariableType.OBJECT, mut=True)
-    result = await IfElseNode(OBJECT_EMPTY_CONFIG, {}).execute(state, variable_pool)
+    result = await IfElseNode(OBJECT_EMPTY_CONFIG, {}, []).execute(state, variable_pool)
     assert result == "CASE2"
 
 
@@ -764,7 +764,7 @@ async def test_ifelse_multi_condition_and_all_true():
     variable_pool = await simple_vairable_pool("test")
     await variable_pool.new("conv", "test1", 10, VariableType.NUMBER, mut=True)
     await variable_pool.new("conv", "test2", "hello", VariableType.STRING, mut=True)
-    result = await IfElseNode(MULTI_CONDITION_AND_CONFIG, {}).execute(state, variable_pool)
+    result = await IfElseNode(MULTI_CONDITION_AND_CONFIG, {}, []).execute(state, variable_pool)
     assert result == "CASE1"
 
 
@@ -775,7 +775,7 @@ async def test_ifelse_multi_condition_and_one_false():
     variable_pool = await simple_vairable_pool("test")
     await variable_pool.new("conv", "test1", 10, VariableType.NUMBER, mut=True)
     await variable_pool.new("conv", "test2", "world", VariableType.STRING, mut=True)
-    result = await IfElseNode(MULTI_CONDITION_AND_CONFIG, {}).execute(state, variable_pool)
+    result = await IfElseNode(MULTI_CONDITION_AND_CONFIG, {}, []).execute(state, variable_pool)
     assert result == "CASE2"
 
 
@@ -786,7 +786,7 @@ async def test_ifelse_multi_condition_and_all_false():
     variable_pool = await simple_vairable_pool("test")
     await variable_pool.new("conv", "test1", 5, VariableType.NUMBER, mut=True)
     await variable_pool.new("conv", "test2", "world", VariableType.STRING, mut=True)
-    result = await IfElseNode(MULTI_CONDITION_AND_CONFIG, {}).execute(state, variable_pool)
+    result = await IfElseNode(MULTI_CONDITION_AND_CONFIG, {}, []).execute(state, variable_pool)
     assert result == "CASE2"
 
 
@@ -797,7 +797,7 @@ async def test_ifelse_multi_condition_or_all_true():
     variable_pool = await simple_vairable_pool("test")
     await variable_pool.new("conv", "test1", 10, VariableType.NUMBER, mut=True)
     await variable_pool.new("conv", "test2", "hello", VariableType.STRING, mut=True)
-    result = await IfElseNode(MULTI_CONDITION_OR_CONFIG, {}).execute(state, variable_pool)
+    result = await IfElseNode(MULTI_CONDITION_OR_CONFIG, {}, []).execute(state, variable_pool)
     assert result == "CASE1"
 
 
@@ -808,7 +808,7 @@ async def test_ifelse_multi_condition_or_one_true():
     variable_pool = await simple_vairable_pool("test")
     await variable_pool.new("conv", "test1", 10, VariableType.NUMBER, mut=True)
     await variable_pool.new("conv", "test2", "world", VariableType.STRING, mut=True)
-    result = await IfElseNode(MULTI_CONDITION_OR_CONFIG, {}).execute(state, variable_pool)
+    result = await IfElseNode(MULTI_CONDITION_OR_CONFIG, {}, []).execute(state, variable_pool)
     assert result == "CASE1"
 
 
@@ -819,7 +819,7 @@ async def test_ifelse_multi_condition_or_all_false():
     variable_pool = await simple_vairable_pool("test")
     await variable_pool.new("conv", "test1", 5, VariableType.NUMBER, mut=True)
     await variable_pool.new("conv", "test2", "world", VariableType.STRING, mut=True)
-    result = await IfElseNode(MULTI_CONDITION_OR_CONFIG, {}).execute(state, variable_pool)
+    result = await IfElseNode(MULTI_CONDITION_OR_CONFIG, {}, []).execute(state, variable_pool)
     assert result == "CASE2"
 
 
@@ -830,7 +830,7 @@ async def test_ifelse_multi_branch_first():
     state = simple_state()
     variable_pool = await simple_vairable_pool("test")
     await variable_pool.new("conv", "test", 1, VariableType.NUMBER, mut=True)
-    result = await IfElseNode(MULTI_BRANCH_CONFIG, {}).execute(state, variable_pool)
+    result = await IfElseNode(MULTI_BRANCH_CONFIG, {}, []).execute(state, variable_pool)
     assert result == "CASE1"
 
 
@@ -840,7 +840,7 @@ async def test_ifelse_multi_branch_second():
     state = simple_state()
     variable_pool = await simple_vairable_pool("test")
     await variable_pool.new("conv", "test", 2, VariableType.NUMBER, mut=True)
-    result = await IfElseNode(MULTI_BRANCH_CONFIG, {}).execute(state, variable_pool)
+    result = await IfElseNode(MULTI_BRANCH_CONFIG, {}, []).execute(state, variable_pool)
     assert result == "CASE2"
 
 
@@ -850,7 +850,7 @@ async def test_ifelse_multi_branch_third():
     state = simple_state()
     variable_pool = await simple_vairable_pool("test")
     await variable_pool.new("conv", "test", 3, VariableType.NUMBER, mut=True)
-    result = await IfElseNode(MULTI_BRANCH_CONFIG, {}).execute(state, variable_pool)
+    result = await IfElseNode(MULTI_BRANCH_CONFIG, {}, []).execute(state, variable_pool)
     assert result == "CASE3"
 
 
@@ -860,7 +860,7 @@ async def test_ifelse_multi_branch_default():
     state = simple_state()
     variable_pool = await simple_vairable_pool("test")
     await variable_pool.new("conv", "test", 4, VariableType.NUMBER, mut=True)
-    result = await IfElseNode(MULTI_BRANCH_CONFIG, {}).execute(state, variable_pool)
+    result = await IfElseNode(MULTI_BRANCH_CONFIG, {}, []).execute(state, variable_pool)
     assert result == "CASE4"
 
 
@@ -872,7 +872,7 @@ async def test_ifelse_variable_reference_true():
     variable_pool = await simple_vairable_pool("test")
     await variable_pool.new("conv", "test1", 10, VariableType.NUMBER, mut=True)
     await variable_pool.new("conv", "test2", 10, VariableType.NUMBER, mut=True)
-    result = await IfElseNode(VARIABLE_REFERENCE_CONFIG, {}).execute(state, variable_pool)
+    result = await IfElseNode(VARIABLE_REFERENCE_CONFIG, {}, []).execute(state, variable_pool)
     assert result == "CASE1"
 
 
@@ -883,7 +883,7 @@ async def test_ifelse_variable_reference_false():
     variable_pool = await simple_vairable_pool("test")
     await variable_pool.new("conv", "test1", 10, VariableType.NUMBER, mut=True)
     await variable_pool.new("conv", "test2", 20, VariableType.NUMBER, mut=True)
-    result = await IfElseNode(VARIABLE_REFERENCE_CONFIG, {}).execute(state, variable_pool)
+    result = await IfElseNode(VARIABLE_REFERENCE_CONFIG, {}, []).execute(state, variable_pool)
     assert result == "CASE2"
 
 
@@ -913,7 +913,7 @@ async def test_ifelse_none_variable():
             ]
         }
     }
-    result = await IfElseNode(config, {}).execute(state, variable_pool)
+    result = await IfElseNode(config, {}, []).execute(state, variable_pool)
     assert result == "CASE2"
 
 
@@ -943,7 +943,7 @@ async def test_ifelse_float_comparison():
             ]
         }
     }
-    result = await IfElseNode(config, {}).execute(state, variable_pool)
+    result = await IfElseNode(config, {}, []).execute(state, variable_pool)
     assert result == "CASE1"
 
 
@@ -973,7 +973,7 @@ async def test_ifelse_string_ne():
             ]
         }
     }
-    result = await IfElseNode(config, {}).execute(state, variable_pool)
+    result = await IfElseNode(config, {}, []).execute(state, variable_pool)
     assert result == "CASE1"
 
 
@@ -1003,7 +1003,7 @@ async def test_ifelse_number_ne():
             ]
         }
     }
-    result = await IfElseNode(config, {}).execute(state, variable_pool)
+    result = await IfElseNode(config, {}, []).execute(state, variable_pool)
     assert result == "CASE1"
 
 
@@ -1033,7 +1033,7 @@ async def test_ifelse_array_not_contains():
             ]
         }
     }
-    result = await IfElseNode(config, {}).execute(state, variable_pool)
+    result = await IfElseNode(config, {}, []).execute(state, variable_pool)
     assert result == "CASE1"
 
 
@@ -1063,7 +1063,7 @@ async def test_ifelse_string_not_contains():
             ]
         }
     }
-    result = await IfElseNode(config, {}).execute(state, variable_pool)
+    result = await IfElseNode(config, {}, []).execute(state, variable_pool)
     assert result == "CASE1"
 
 
@@ -1093,7 +1093,7 @@ async def test_ifelse_object_not_empty():
             ]
         }
     }
-    result = await IfElseNode(config, {}).execute(state, variable_pool)
+    result = await IfElseNode(config, {}, []).execute(state, variable_pool)
     assert result == "CASE1"
 
 
@@ -1123,5 +1123,5 @@ async def test_ifelse_array_not_empty():
             ]
         }
     }
-    result = await IfElseNode(config, {}).execute(state, variable_pool)
+    result = await IfElseNode(config, {}, []).execute(state, variable_pool)
     assert result == "CASE1"

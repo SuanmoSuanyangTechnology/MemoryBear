@@ -328,7 +328,7 @@ class CollaborativeOrchestrator:
             if not agent_data:
                 raise BusinessException(
                     f"Agent 不存在: {agent_id}",
-                    BizCode.RESOURCE_NOT_FOUND
+                    BizCode.NOT_FOUND
                 )
             
             # 加载 Agent 的完整配置
@@ -422,7 +422,7 @@ class CollaborativeOrchestrator:
             if not release:
                 raise BusinessException(
                     f"Agent Release 不存在: {agent_id}",
-                    BizCode.RESOURCE_NOT_FOUND
+                    BizCode.NOT_FOUND
                 )
             
             # 获取配置
@@ -433,7 +433,7 @@ class CollaborativeOrchestrator:
             if not model_config_id:
                 raise BusinessException(
                     f"Agent 未配置模型: {agent_id}",
-                    BizCode.AGENT_CONFIG_MISSING
+                    BizCode.MODEL_NOT_CONFIGURED
                 )
             
             # 获取模型视图（非解密视图，调用经模型服务 invoke 接缝）

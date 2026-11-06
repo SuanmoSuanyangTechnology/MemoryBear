@@ -2,7 +2,7 @@
 
 构造入口两枚，各自装入一种 transport（异步流式面 / 同步阻塞面，互不混装）：
 ``for_invoke_ref(ref, pool=...)`` → 异步（``ainvoke``/``astream``）；
-``for_invoke_sync_ref(ref, pool=...)`` → 同步（``invoke``，纯 sync 站点如 celery
+``for_invoke_sync_ref(ref, pool=...)`` → 同步（``invoke``/``stream``，纯 sync 站点如 celery
 ``parse_document``）。消息序列化、wire 参数白名单与结果还原复用包内适配器
 （``RemoteRedBearChatModel``）；本层只做 km 侧三件事：把归因翻成帧头、把不过线的参数
 响亮告警、把未装 transport 的方向显式拒止——静默退化会改变调用形态。
@@ -178,8 +178,8 @@ class RedBearChatModel(RemoteRedBearChatModel):
     ) -> RedBearChatModel:
         """同步远端模式：只给纯 sync 站点（无事件循环，celery ``parse_document`` 等）。
 
-        ``invoke()`` 走阻塞信封（媒体档站点传媒体池取媒体档超时）；``stream``/异步面
-        不装（未装方向照旧响亮拒止）。
+        ``invoke()`` 走阻塞信封，``stream()`` 消费 SSE；异步面不装。
+        媒体档站点传媒体池取媒体档超时。
         """
 
         default_params = dict(params or {})
@@ -275,11 +275,7 @@ class RedBearChatModel(RemoteRedBearChatModel):
             f"{feature}不可用：本壳未装该方向的 transport（同步站点请用 for_invoke_sync_ref）"
         )
 
-    # ==================== 未装方向拒止（异步流式/工具走包实现） ====================
-
-    # 这两个覆写同时是 ``_should_stream`` 的「已实现流式」证据：基类在 async 分支要求
-    # ``_stream``/``_astream`` 至少一个被实现（「async 兜底 sync」），两个都不覆写会让
-    # 异步流式被永久判否。故拒止实现必须保留，不能改成不覆写。
+    # ==================== 同步入口委派（异步流式/工具走包实现） ====================
 
     def _generate(
         self,
@@ -301,8 +297,9 @@ class RedBearChatModel(RemoteRedBearChatModel):
         run_manager: CallbackManagerForLLMRun | None = None,
         **kwargs: Any,
     ) -> Iterator[ChatGenerationChunk]:
-        # 同步流式无消费方（km 异步流式走 _astream）：两个壳都拒止
-        raise self._unsupported("同步流式调用")
+        if not isinstance(self._resolve("_transport"), SyncInvokeTransport):
+            raise self._unsupported("同步流式调用")
+        yield from super()._stream(messages, stop, run_manager, **kwargs)
 
 
 __all__ = ["RedBearChatModel", "StructResponse", "message_text", "message_token_count"]

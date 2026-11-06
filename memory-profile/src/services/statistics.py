@@ -10,6 +10,7 @@ from typing import Any
 from uuid import UUID, uuid4
 
 from src.common.errors import BizCode, LocalizedProfileError
+from src.common.timing import utcnow_naive
 from src.repositories.graph import MemoryGraphRepository
 from src.repositories.profile import MemoryStatisticsRepository
 from src.repositories.search import MemorySearchRepository
@@ -21,7 +22,11 @@ from src.repositories.workspace_statistics import (
 )
 from src.runtime import ProfileRuntime
 from src.schemas.workspace import WorkspaceStatistics
-from src.services._helpers import short_term_count
+from src.services._helpers import (
+    count_profile_cards,
+    count_timeline_records,
+    short_term_count,
+)
 from src.services.profile import MEMORY_TYPES
 
 logger = logging.getLogger(__name__)
@@ -39,13 +44,7 @@ class WorkspaceStatisticsRefreshTimeoutError(RuntimeError):
     """请求等待预算内没有等到可用快照。"""
 
     def __init__(self, workspace_id: UUID) -> None:
-        super().__init__(
-            f"workspace statistics refresh timed out: workspace_id={workspace_id}"
-        )
-
-
-def _utcnow_naive() -> datetime:
-    return datetime.now(UTC).replace(tzinfo=None)
+        super().__init__(f"workspace statistics refresh timed out: workspace_id={workspace_id}")
 
 
 def _snapshot_age(snapshot: dict[str, Any], now: datetime) -> timedelta:
@@ -86,8 +85,7 @@ def _snapshot_version(snapshots: list[dict[str, Any]]) -> int | str | None:
 def _zero_statistics_snapshot() -> dict[str, Any]:
     return {
         "statistics": [
-            {"type": memory_type, "count": 0, "percentage": 0.0}
-            for memory_type in MEMORY_TYPES
+            {"type": memory_type, "count": 0, "percentage": 0.0} for memory_type in MEMORY_TYPES
         ],
         "total_count": 0,
         "total_users": 0,
@@ -103,7 +101,7 @@ def _fresh_cached_response(
     if len(snapshots) != 2:
         return None
     today, yesterday = snapshots
-    if _snapshot_age(today, _utcnow_naive()) > _TODAY_SNAPSHOT_MAX_AGE:
+    if _snapshot_age(today, utcnow_naive()) > _TODAY_SNAPSHOT_MAX_AGE:
         return None
     return {**today, "yesterday": yesterday}
 
@@ -123,9 +121,7 @@ class StatisticsService:
     """工作空间统计快照的读取、刷新与租约协调。"""
 
     def __init__(self, runtime: ProfileRuntime) -> None:
-        self.workspace_statistics_repository = WorkspaceStatisticsRepository(
-            runtime.redis
-        )
+        self.workspace_statistics_repository = WorkspaceStatisticsRepository(runtime.redis)
         self.memory_statistics = MemoryStatisticsRepository(runtime.postgres)
         self.memory_search = MemorySearchRepository(runtime.elasticsearch)
         self.memory_graph = MemoryGraphRepository(runtime.neo4j)
@@ -181,9 +177,7 @@ class StatisticsService:
             ) from exc
         return WorkspaceStatistics.from_refreshed(response)
 
-    async def _get_or_refresh_workspace_statistics(
-        self, workspace_id: UUID
-    ) -> dict[str, Any]:
+    async def _get_or_refresh_workspace_statistics(self, workspace_id: UUID) -> dict[str, Any]:
         """复用 25h 内的两份快照；否则抢租约刷新，抢不到则等待他人完成。"""
 
         repository = self.workspace_statistics_repository
@@ -204,9 +198,7 @@ class StatisticsService:
 
         while loop.time() < deadline:
             remaining = deadline - loop.time()
-            await asyncio.sleep(
-                min(_WORKSPACE_STATISTICS_REFRESH_POLL_INTERVAL_SECONDS, remaining)
-            )
+            await asyncio.sleep(min(_WORKSPACE_STATISTICS_REFRESH_POLL_INTERVAL_SECONDS, remaining))
             observed = await repository.workspace_snapshots(workspace_id)
             if observed and _snapshot_version(observed) != initial_version:
                 return _response_from_completed_refresh(observed)
@@ -248,9 +240,7 @@ class StatisticsService:
             return _response_from_completed_refresh(refreshed)
         finally:
             renewal_task.cancel()
-            with suppress(
-                asyncio.CancelledError, WorkspaceStatisticsRefreshLockLostError
-            ):
+            with suppress(asyncio.CancelledError, WorkspaceStatisticsRefreshLockLostError):
                 await renewal_task
             try:
                 await repository.release_refresh_lock(workspace_id, token)
@@ -260,9 +250,7 @@ class StatisticsService:
                     workspace_id,
                 )
 
-    async def _renew_workspace_statistics_lock(
-        self, workspace_id: UUID, token: str
-    ) -> None:
+    async def _renew_workspace_statistics_lock(self, workspace_id: UUID, token: str) -> None:
         """刷新期间周期性续租；失去租约立即中止本轮计算。"""
 
         while True:
@@ -277,8 +265,7 @@ class StatisticsService:
                     workspace_id,
                 )
                 raise WorkspaceStatisticsRefreshLockLostError(
-                    f"workspace statistics refresh lock renewal failed: "
-                    f"workspace_id={workspace_id}"
+                    f"workspace statistics refresh lock renewal failed: workspace_id={workspace_id}"
                 ) from exc
             if not renewed:
                 logger.warning(
@@ -296,9 +283,7 @@ class StatisticsService:
     ) -> dict[str, Any]:
         """计算与续租赛跑：续租先结束说明已失去租约，取消计算并上抛。"""
 
-        calculation_task = asyncio.create_task(
-            self._calculate_workspace_statistics(workspace_id)
-        )
+        calculation_task = asyncio.create_task(self._calculate_workspace_statistics(workspace_id))
         done, _ = await asyncio.wait(
             {calculation_task, renewal_task},
             return_when=asyncio.FIRST_COMPLETED,
@@ -309,8 +294,7 @@ class StatisticsService:
                 await calculation_task
             await renewal_task
             raise WorkspaceStatisticsRefreshLockLostError(
-                f"workspace statistics refresh lock stopped: "
-                f"workspace_id={workspace_id}"
+                f"workspace statistics refresh lock stopped: workspace_id={workspace_id}"
             )
         return calculation_task.result()
 
@@ -329,33 +313,26 @@ class StatisticsService:
             if not end_user_ids:
                 break
             raw_ids = [str(end_user_id) for end_user_id in end_user_ids]
-            postgresql, search_result, implicit_count, short_term = await asyncio.gather(
+            (
+                postgresql,
+                search_result,
+                implicit_count,
+                short_term,
+                profiles,
+                graph_rows,
+            ) = await asyncio.gather(
                 self.memory_statistics.counts_for_users(end_user_ids),
                 self.memory_search.workspace_memory_counts(raw_ids),
                 self.memory_statistics.habit_count_for_users(raw_ids),
                 short_term_count(self.memory_search, self.memory_graph, raw_ids, evaluated_at),
+                self.memory_statistics.profiles_for_users(raw_ids),
+                self.memory_graph.explicit_memory_rows(raw_ids),
             )
             elastic_statistics, present_ids = search_result
-            episodic_count = sum(
-                item["episodic_count"] for item in elastic_statistics.values()
-            )
-            explicit_entity_count = sum(
-                item["explicit_entity_count"] for item in elastic_statistics.values()
-            )
-            emotional_count = sum(
-                item["emotional_count"] for item in elastic_statistics.values()
-            )
-            missing_ids = [
-                end_user_id
-                for end_user_id in raw_ids
-                if end_user_id not in present_ids
-            ]
+            emotional_count = sum(item["emotional_count"] for item in elastic_statistics.values())
+            missing_ids = [end_user_id for end_user_id in raw_ids if end_user_id not in present_ids]
             if missing_ids:
-                fallback = await self.memory_graph.workspace_fallback_statistics(
-                    missing_ids
-                )
-                episodic_count += fallback["episodic_count"]
-                explicit_entity_count += fallback["explicit_entity_count"]
+                fallback = await self.memory_graph.workspace_fallback_statistics(missing_ids)
                 emotional_count += fallback["emotional_count"]
 
             totals["PERCEPTUAL_MEMORY"] += postgresql["perceptual"]
@@ -363,10 +340,22 @@ class StatisticsService:
                 postgresql["active_conversations"] + postgresql["direct_sources"]
             )
             totals["SHORT_TERM_MEMORY"] += short_term
-            totals["EXPLICIT_MEMORY"] += episodic_count + explicit_entity_count
+            permanent_count = sum(
+                count_profile_cards(metadata, names) for _, metadata, names in profiles
+            )
+            timeline_count = sum(count_timeline_records(row) for row in graph_rows)
+            semantic_count = sum(row["semantic_count"] for row in graph_rows)
+            totals["EXPLICIT_MEMORY"] += permanent_count + timeline_count + semantic_count
             totals["IMPLICIT_MEMORY"] += implicit_count
             totals["EMOTIONAL_MEMORY"] += emotional_count
-            totals["EPISODIC_MEMORY"] += episodic_count
+            community_total = sum(
+                item["scene_community_count"] for item in elastic_statistics.values()
+            )
+            if missing_ids:
+                community_total += await self.memory_graph.scene_community_count(
+                    missing_ids
+                )
+            totals["EPISODIC_MEMORY"] += community_total
             totals["FORGET_MEMORY"] += postgresql["forgotten"]
             total_users += len(end_user_ids)
 
@@ -380,9 +369,7 @@ class StatisticsService:
                 "type": memory_type,
                 "count": totals[memory_type],
                 "percentage": (
-                    round(totals[memory_type] / total_count * 100, 2)
-                    if total_count > 0
-                    else 0.0
+                    round(totals[memory_type] / total_count * 100, 2) if total_count > 0 else 0.0
                 ),
             }
             for memory_type in MEMORY_TYPES

@@ -1,5 +1,10 @@
 import { request } from '@/utils/request'
-import type { SkillQuery, SkillPackageImportFormData, ImportSkill } from '@/views/Skills/types'
+import type { SkillQuery, Statistic, SkillPackageImportFormData, ImportSkill } from '@/views/Skills/types'
+
+// Get skill statistics
+export const getSkillStatistics = (data?: SkillQuery) => {
+  return request.get<Statistic>('/skills/statistics', data)
+}
 
 // Get skill list
 export const getSkillListUrl = '/skills'

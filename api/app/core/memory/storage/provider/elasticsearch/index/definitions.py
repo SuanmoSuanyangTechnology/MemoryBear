@@ -101,7 +101,9 @@ def _index_definition(
     if prop is None:
         prop = dict()
     properties: dict[str, Any] = {
-        field: {"type": "text", "analyzer": "cjk"}
+        field: {"type": "text", "analyzer": "cjk",
+                **({"fields": {"literal": {"type": "wildcard"}}}
+                   if label in (MemoryNodeType.SCENE_COMMUNITY, MemoryNodeType.SCENE_SUMMARY) else {})}
         for field in FULLTEXT_FIELDS.get(label, ())
     }
     embedding_field = EMBEDDING_FIELDS.get(label)
@@ -144,7 +146,9 @@ INDEX_DEFINITIONS: dict[MemoryNodeLabel, IndexDefinition] = {
     MemoryNodeType.RAG_MEMORY: _index_definition(
         "rag_memory",
         MemoryNodeType.RAG_MEMORY,
-        schema_version=1,
+        # schema_version 2：新增 role_rank（展示层同 dialog_at 并列时的确定性
+        # 兜底定序，user=0/assistant=1），存量索引走 ADDITIVE_MAPPING 原地补字段
+        schema_version=2,
         generation=1,
         # 有意不设 created_at：RAG 记忆以业务时间 dialog_at 为准（索引与
         # DEFAULT_PROJECTION 投影字段保持一致）；下游 stats/list/retrieval
@@ -152,6 +156,7 @@ INDEX_DEFINITIONS: dict[MemoryNodeLabel, IndexDefinition] = {
         prop={
             "id": {"type": "keyword"},
             "role": {"type": "keyword"},
+            "role_rank": {"type": "integer"},
             "end_user_id": {"type": "keyword"},
             "config_id": {"type": "keyword"},
             "dialog_at": {"type": "date"},
@@ -360,8 +365,8 @@ INDEX_DEFINITIONS: dict[MemoryNodeLabel, IndexDefinition] = {
     MemoryNodeType.SCENE_COMMUNITY: _index_definition(
         "scene_community",
         MemoryNodeType.SCENE_COMMUNITY,
-        schema_version=1,
-        generation=1,
+        schema_version=2,
+        generation=2,
         prop={
             "id": {"type": "keyword"},
             "end_user_id": {"type": "keyword"},
@@ -376,8 +381,8 @@ INDEX_DEFINITIONS: dict[MemoryNodeLabel, IndexDefinition] = {
     MemoryNodeType.SCENE_SUMMARY: _index_definition(
         "scene_summary",
         MemoryNodeType.SCENE_SUMMARY,
-        schema_version=3,
-        generation=1,
+        schema_version=4,
+        generation=2,
         prop={
             "id": {"type": "keyword"},
             "end_user_id": {"type": "keyword"},

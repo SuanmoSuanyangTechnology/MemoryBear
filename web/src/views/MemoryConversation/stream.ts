@@ -207,7 +207,7 @@ export const parseStreamEvents = (events: SSEMessage[]): StreamUpdate[] => {
             code: typeof record.code === 'string' || typeof record.code === 'number'
               ? record.code
               : undefined,
-            message: typeof record.message === 'string' ? record.message : undefined,
+            message: typeof record.msg === 'string' ? record.msg : (typeof record.message === 'string' ? record.message : undefined),
           },
           log: {
             ...asLog(payload, eventName),

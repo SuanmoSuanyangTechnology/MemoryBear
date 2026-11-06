@@ -71,11 +71,6 @@ _COMMUNITY_NEIGHBOR_PROJECTION = variable_projection("e2", COMMUNITY_GRAPH_ENTIT
 _WORKSPACE_FALLBACK_STATISTICS_QUERY = """
 UNWIND $end_user_ids AS end_user_id
 CALL (end_user_id) {
-    OPTIONAL MATCH (summary:MemorySummary {end_user_id: end_user_id})
-    WHERE summary.delete_at IS NULL
-    RETURN count(DISTINCT summary) AS episodic_count
-}
-CALL (end_user_id) {
     OPTIONAL MATCH (entity:ExtractedEntity {end_user_id: end_user_id})
     WHERE entity.delete_at IS NULL
       AND entity.is_explicit_memory = true
@@ -87,8 +82,7 @@ CALL (end_user_id) {
       AND statement.emotion_type IS NOT NULL
     RETURN count(DISTINCT statement) AS emotional_count
 }
-RETURN sum(episodic_count) AS episodic_count,
-       sum(explicit_entity_count) AS explicit_entity_count,
+RETURN sum(explicit_entity_count) AS explicit_entity_count,
        sum(emotional_count) AS emotional_count
 """
 
@@ -173,6 +167,40 @@ RETURN episodic_count, explicit_entity_count, emotional_count
 """
 
 
+_EXPLICIT_MEMORY_QUERY = """
+UNWIND $end_user_ids AS user_id
+CALL {
+    WITH user_id
+    OPTIONAL MATCH (u:ExtractedEntity {end_user_id: user_id})
+    WHERE u.delete_at IS NULL
+      AND (u.entity_type = '用户' OR toLower(u.name) IN ['用户', '我', 'user', 'i'])
+    RETURN collect(u) AS users
+}
+CALL {
+    WITH user_id, users
+    UNWIND users AS u
+    OPTIONAL MATCH (u)--(e)--(m:MemorySummary)
+    WHERE e.delete_at IS NULL AND m.delete_at IS NULL
+      AND e.end_user_id = user_id AND m.end_user_id = user_id
+    RETURN collect(DISTINCT {text: m.content, created_at: m.created_at}) AS summaries
+}
+CALL {
+    WITH user_id
+    MATCH (s:ExtractedEntity {end_user_id: user_id})
+    WHERE s.is_explicit_memory = true
+    RETURN count(s) AS semantic_count
+}
+RETURN user_id AS end_user_id, size(users) AS user_entity_count,
+       head(users).event_timeline AS event_timeline, summaries, semantic_count
+"""
+
+SCENE_COMMUNITY_COUNT_QUERY = """
+MATCH (c:SceneCommunity)
+WHERE c.end_user_id IN $ids AND c.delete_at IS NULL
+RETURN count(c) AS total
+"""
+
+
 class MemoryGraphRepository:
     def __init__(self, neo4j: Neo4jManager) -> None:
         self.neo4j = neo4j
@@ -181,6 +209,13 @@ class MemoryGraphRepository:
         # 会话/访问模式/事务形态统一由 infra 的 Neo4jManager.read_query 决定
         # （为什么不用 driver.execute_query，见该方法的 docstring）。
         return await self.neo4j.read_query(query, **params)
+
+    async def scene_community_count(self, end_user_ids: Sequence[str]) -> int:
+        """Count communities for users missing from Elasticsearch."""
+        if not end_user_ids:
+            return 0
+        rows = await self._query(SCENE_COMMUNITY_COUNT_QUERY, ids=list(end_user_ids))
+        return int(rows[0]["total"]) if rows else 0
 
     async def nodes_by_type(
         self, end_user_id: str, node_type: str, limit: int
@@ -406,16 +441,13 @@ class MemoryGraphRepository:
         self,
         end_user_ids: list[str],
     ) -> dict[str, int]:
-        """ES 中完全无数据的用户回退到 Neo4j 统计的三类计数。
+        """Count legacy memory metrics for users selected by the service fallback.
 
-        回退条件与 api 一致：用户在三个相关 ES 索引里**都不存在**有效数据时才回退，
-        因此这里的 ``emotion_type IS NOT NULL`` 与 ES 侧的 ``exists`` 语义对齐，
-        不做 10 桶归一化（归一化只在 ``emotional_count`` 的单用户展示口径里使用）。
+        emotion_type uses the same existence filter as the ES aggregation.
         """
 
         if not end_user_ids:
             return {
-                "episodic_count": 0,
                 "explicit_entity_count": 0,
                 "emotional_count": 0,
             }
@@ -425,7 +457,6 @@ class MemoryGraphRepository:
         )
         row = rows[0] if rows else {}
         return {
-            "episodic_count": int(row.get("episodic_count") or 0),
             "explicit_entity_count": int(row.get("explicit_entity_count") or 0),
             "emotional_count": int(row.get("emotional_count") or 0),
         }
@@ -442,3 +473,8 @@ class MemoryGraphRepository:
             window_end=now + timedelta(hours=72),
         )
         return int(rows[0]["total"]) if rows else 0
+
+    async def explicit_memory_rows(self, end_user_ids: list[str]) -> list[dict]:
+        return await self._query(
+            _EXPLICIT_MEMORY_QUERY, end_user_ids=end_user_ids
+        )

@@ -1,6 +1,6 @@
 import datetime
 import uuid
-from typing import Optional, Any, List, Dict, Union
+from typing import Optional, Any, List, Dict, Union, Literal
 from enum import Enum, StrEnum
 from urllib.parse import urlparse
 
@@ -485,6 +485,10 @@ class App(BaseModel):
     shared_by_name: Optional[str] = None         # sharer name
     shared_at: Optional[datetime.datetime] = None  # share time
     ontology: Optional[AppOntologyInfo] = None     # currently effective ontology (None in the community edition)
+    # 来源（§11.2）：`local` 本租户创建 / `external` 从市场安装的副本。
+    # 市场状态不落库，只有请求带 include_external_status 时才回填 external.status。
+    origin: str = "local"
+    external: Optional[dict] = None
     created_at: datetime.datetime
     updated_at: datetime.datetime
 
@@ -584,12 +588,47 @@ class AgentConfig(BaseModel):
         return to_timestamp_ms(dt)
 
 
+# ---------- 发布弹窗：使用示例 / 功能分类 ----------
+# 分类字典**不再写在这里**：core 侧的存储是自己的 `app_categories` 表（社区链
+# `c8d2e5f9a617` / 企业根链 `a1c4e7d92f38`），资源中心与发布弹窗读它，写入只有
+# `POST /internal/v1/app-categories` 一处入口——加一个分类不用改代码、不用发版。
+# 社区市场另有自己的 `market_categories`，两张表互不引用、只靠 code 对齐。
+# 读写见 `services/category_service.py`。
+#
+# `code` 是**稳定英文短码**，不是中文名：它要当标识用 —— 存进
+# `app_releases.categories`、作为 `app_categories.code` 去 join、做列表筛选值。
+# 中文名是展示文案，随时可能改措辞，不能承担标识职责。
+# 投稿时把 code 原样作为 `display.categories` 传给市场，不做 name→code 映射。
+# 字段名与市场侧 `/api/market/categories` 的 `items[]` 对齐（code/name/name_en/sort），
+# 别在资源中心另造一套 value/label。
+
+
+CATEGORIES_MAX_ITEMS = 5
+USAGE_EXAMPLES_MAX_ITEMS = 5
+USAGE_EXAMPLE_MAX_CHARS = 500
+
+
 class PublishRequest(BaseModel):
     """Publish app request"""
     version_name: str = Field(..., description="版本名称，可自定义")
     release_notes: str = Field(..., description="版本说明")
     name: str = Field(..., description="公开分享标题")
     icon: Optional[str] = Field(None, description="公开分享图标，未传则使用应用图标")
+    usage_examples: List[str] = Field(
+        default_factory=list,
+        description=(
+            "使用示例，随版本冻结；0~5 条、每条 ≤500 字。"
+            "前端强制 3~5 条，后端宽松以兼容旧前端与开放 API；"
+            "提交社区市场时才要求 ≥3 条"
+        ),
+    )
+    categories: List[str] = Field(
+        default_factory=list,
+        description=(
+            "功能分类，随版本冻结；取值必须是主库 app_categories 里存在且启用的 "
+            "code（英文短码，如 office），0~5 项。提交社区市场时才要求 ≥1 项"
+        ),
+    )
 
     @field_validator("version_name")
     @classmethod
@@ -599,6 +638,38 @@ class PublishRequest(BaseModel):
         if not normalized:
             raise ValueError("版本名称不能为空")
         return normalized
+
+    @field_validator("usage_examples")
+    @classmethod
+    def _validate_usage_examples(cls, value: Optional[List[str]]) -> List[str]:
+        """宽松档：≤5 条、每条 ≤500 字；去首尾空白，空串留给市场门禁拦截。"""
+        items = [str(item).strip() for item in (value or [])]
+        if len(items) > USAGE_EXAMPLES_MAX_ITEMS:
+            raise ValueError(f"使用示例最多 {USAGE_EXAMPLES_MAX_ITEMS} 条")
+        too_long = [
+            index for index, item in enumerate(items) if len(item) > USAGE_EXAMPLE_MAX_CHARS
+        ]
+        if too_long:
+            raise ValueError(
+                f"第 {too_long[0] + 1} 条使用示例超过 {USAGE_EXAMPLE_MAX_CHARS} 字"
+            )
+        return items
+
+    @field_validator("categories")
+    @classmethod
+    def _validate_categories(cls, value: Optional[List[str]]) -> List[str]:
+        """宽松档：0~5 项、不重复、不做 name→code 映射。
+
+        「code 是否存在且启用」由服务层查 `app_categories` 判定
+        （`CategoryService.assert_codes_exist`）—— 分类是运营可维护的数据，
+        不是 pydantic 能静态校验的常量。
+        """
+        items = [str(item).strip() for item in (value or [])]
+        if len(items) > CATEGORIES_MAX_ITEMS:
+            raise ValueError(f"功能分类最多 {CATEGORIES_MAX_ITEMS} 项")
+        if len(set(items)) != len(items):
+            raise ValueError("功能分类不能重复")
+        return items
 
 
 class AppDisplayInfo(BaseModel):
@@ -622,6 +693,8 @@ class AppRelease(BaseModel):
     type: str
     visibility: str
     config: Dict[str, Any] = {}
+    usage_examples: List[str] = []
+    categories: List[str] = []
     default_model_config_id: Optional[uuid.UUID] = None
     published_by: uuid.UUID
     publisher_name: str
@@ -660,6 +733,61 @@ class AppRelease(BaseModel):
 class CopyAppRequest(BaseModel):
     """Copy app request"""
     new_name: Optional[str] = Field(None, description="新应用名称，不填则使用原名称-副本")
+
+
+# ---------- 发布弹窗：三个开关（§6.0）----------
+# 入参只有三个开关，没有任何展示字段：名称、摘要、图标、分类、使用示例、
+# 更新说明全部在发布接口录入并随 release 冻结，这里只引用 release_id。
+
+
+class ResourceCenterSwitch(BaseModel):
+    """开关 1 + 开关 2。开关 2 从属于开关 1。"""
+
+    enabled: bool = Field(..., description="开关 1：共享到租户内资源中心")
+    allow_editable: bool = Field(
+        default=False,
+        description="开关 2：是否允许被复制为可编辑副本。仅 enabled=true 时有效",
+    )
+
+
+class CommunityMarketSwitch(BaseModel):
+    """开关 3，与上面两个完全独立。"""
+
+    enabled: bool = Field(default=False, description="开关 3：同批投稿到跨租户社区市场")
+
+
+class AppShareRequest(BaseModel):
+    """共享应用：三个开关，一次确认。"""
+
+    release_id: Optional[uuid.UUID] = Field(
+        None, description="要共享的版本 ID；不传取当前发布版本"
+    )
+    resource_center: ResourceCenterSwitch
+    community_market: CommunityMarketSwitch = Field(default_factory=CommunityMarketSwitch)
+
+
+class AssetInstallRequest(BaseModel):
+    """拉到我的空间。**不收 permission**：条目的 share_mode 已决定形态。"""
+
+    target_workspace_id: uuid.UUID = Field(..., description="目标空间 ID")
+
+
+class AssetShareModeRequest(BaseModel):
+    """改条目的共享权限（「我的共享」表格里那一列开关）。
+
+    只影响**之后**的 install：形态由条目实时读取，已产生的安装记录是安装当时的
+    快照，不追溯改写。
+    """
+
+    share_mode: Literal["readonly", "editable"] = Field(
+        ..., description="readonly=只读引用，editable=可编辑副本"
+    )
+
+
+class AssetPublishRequest(BaseModel):
+    """资源中心条目版本前移：把条目改钉到一个更新的 release。"""
+
+    release_id: uuid.UUID = Field(..., description="目标版本 ID，必须属于源应用且未失效")
 
 
 # ---------- App Share Schemas ----------

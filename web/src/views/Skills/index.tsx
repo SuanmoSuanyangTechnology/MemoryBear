@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react';
 import { App, Button, Flex, Skeleton } from 'antd';
+import clsx from 'clsx';
 import { useTranslation } from 'react-i18next';
 
 import PageTabs from '@/components/PageTabs';
@@ -7,11 +8,11 @@ import PageScrollList from '@/components/PageScrollList';
 import RbCard from '@/components/RbCard';
 import Tag from '@/components/Tag';
 import SearchInput from '@/components/SearchInput';
-import { deleteSkill, getSkillListUrl, skillExport } from '@/api/skill';
+import { getSkillStatistics, deleteSkill, getSkillListUrl, skillExport } from '@/api/skill';
 import SkillDetail, { type SkillDetailRef } from './components/SkillDetail';
 import SkillImport from './components/SkillImport';
 import SkillIcon from './components/SkillIcon';
-import { Kind, type Skill, type SkillQuery } from './types';
+import { Kind, type Skill, type SkillQuery, type Statistic } from './types';
 import { isPlugin } from './utils';
 import MoreDropdown from '@/components/MoreDropdown'
 
@@ -27,10 +28,11 @@ const Skills = () => {
   const [search, setSearch] = useState<string | undefined>(undefined);
   const [version, setVersion] = useState(0);
 
-  const tabs: { value: AllKind; label: string }[] = [
-    { value: 'all', label: t('skills.all') },
-    { value: Kind.Plugin, label: t('skills.plugin') },
-    { value: Kind.Skill, label: t('skills.skill') },
+  const [statistics, setStatistics] = useState<Statistic>({} as Statistic)
+  const tabs: { value: AllKind; label: string; count: keyof Statistic; }[] = [
+    { value: 'all', label: t('skills.all'), count: 'total' },
+    { value: Kind.Plugin, label: t('skills.plugin'), count: 'plugin_count' },
+    { value: Kind.Skill, label: t('skills.skill'), count: 'skill_count' },
   ];
 
   const performDelete = async (item: Skill) => {
@@ -67,6 +69,20 @@ const Skills = () => {
     skillExport(item.id, `${item.name}.zip`)
   }
 
+  const getStatistics = useCallback(() => {
+    getSkillStatistics({
+      search: search?.trim() || undefined,
+      is_active: true
+    })
+      .then(res => {
+        setStatistics(res)
+      })
+  }, [search])
+
+  useEffect(() => {
+    getStatistics()
+  }, [search, getStatistics])
+
   return (
     <Flex vertical gap={12} className="rb:h-full rb:min-h-0">
       <header className="rb:shrink-0 rb:ml-2">
@@ -78,11 +94,10 @@ const Skills = () => {
           value={kind}
           options={tabs.map(tab => ({
             value: tab.value,
-            label: tab.label,
+            label: <>{tab.label} <span className="rb:text-[12px] rb:text-gray-600">{statistics[tab.count] ?? 0}</span></>,
           }))}
           onChange={value => {
             setKind(value as AllKind)
-            setSearch(undefined)
           }}
         />
         <Flex align="center" wrap gap={12}>
@@ -128,10 +143,14 @@ const Skills = () => {
             const plugin = isPlugin(item);
             return (
               <RbCard
-                title={<>
-                  {item.name} <br />
-                  <Tag color={plugin ? 'purple' : 'processing'}>{plugin ? t('skills.plugin') : t('skills.skill')}</Tag>
-                </>}
+                title={(
+                  <div className="rb:mr-2">
+                    <Tooltip title={item.name}>
+                      <div className="rb:whitespace-break-spaces rb:wrap-break-word rb:line-clamp-1">{item.name}</div>
+                    </Tooltip>
+                    <Tag color={plugin ? 'purple' : 'processing'}>{plugin ? t('skills.plugin') : t('skills.skill')}</Tag>
+                  </div>
+                )}
                 isNeedTooltip={false}
                 className="rb:h-full! rb:cursor-pointer"
                 avatarText={<SkillIcon plugin={plugin} className="rb:size-11" iconClassName="rb:size-7" />}

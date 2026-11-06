@@ -293,6 +293,42 @@ class AppServiceSettings(BaseSettings):
         validation_alias="ACL_RULES_CHANGED_CHANNEL",
     )
 
+    # Community market integration. disabled = community build (6020); gateway =
+    # enterprise build using the private enterprise-extensions HTTP client.
+    application_service_market_mode: Literal["disabled", "gateway"] = Field(
+        default="disabled",
+        validation_alias="APPLICATION_SERVICE_MARKET_MODE",
+    )
+    market_service_base_url: str = Field(
+        default="",
+        validation_alias="MARKET_SERVICE_BASE_URL",
+    )
+    market_service_internal_token: SecretStr = Field(
+        default=SecretStr(""),
+        validation_alias="MARKET_SERVICE_INTERNAL_TOKEN",
+    )
+    market_service_connect_timeout_seconds: float = Field(
+        default=3.0, gt=0, validation_alias="MARKET_SERVICE_CONNECT_TIMEOUT_SECONDS"
+    )
+    market_service_read_timeout_seconds: float = Field(
+        default=3.0, gt=0, validation_alias="MARKET_SERVICE_READ_TIMEOUT_SECONDS"
+    )
+    market_service_bundle_read_timeout_seconds: float = Field(
+        default=30.0, gt=0, validation_alias="MARKET_SERVICE_BUNDLE_READ_TIMEOUT_SECONDS"
+    )
+    market_service_write_timeout_seconds: float = Field(
+        default=10.0, gt=0, validation_alias="MARKET_SERVICE_WRITE_TIMEOUT_SECONDS"
+    )
+    market_service_status_cache_ttl_seconds: int = Field(
+        default=30, ge=1, validation_alias="MARKET_SERVICE_STATUS_CACHE_TTL_SECONDS"
+    )
+    market_service_circuit_failure_threshold: int = Field(
+        default=5, ge=1, validation_alias="MARKET_SERVICE_CIRCUIT_FAILURE_THRESHOLD"
+    )
+    market_service_circuit_reset_seconds: float = Field(
+        default=30.0, gt=0, validation_alias="MARKET_SERVICE_CIRCUIT_RESET_SECONDS"
+    )
+
     # Monolith upstream channel (coexistence period): cross-domain writes and
     # memory/context-engine operations are forwarded to the monolith's
     # internal callback endpoints over the internal network, authenticated
@@ -372,6 +408,31 @@ class AppServiceSettings(BaseSettings):
     mem_knowledge_health_timeout_seconds: float = Field(
         default=3.0, gt=0, validation_alias="MEM_KNOWLEDGE_HEALTH_TIMEOUT_SECONDS"
     )
+    # East-west retrieval protocol: http keeps /internal/v1/chunks/retrieval,
+    # grpc uses KnowledgeRetrievalService with the same JSON body semantics.
+    # Route forwarding, detached calls and readiness stay on the HTTP base URL.
+    mem_knowledge_protocol: Literal["http", "grpc"] = Field(
+        default="http", validation_alias="MEM_KNOWLEDGE_PROTOCOL"
+    )
+    mem_knowledge_grpc_target: str = Field(
+        # One headless Service per workload (`clusterIP: None`) exposes both
+        # 8080/http and 9090/grpc; round_robin then resolves per-Pod IPs under
+        # the unchanged service name.
+        default="dns:///mem-knowledge:9090",
+        validation_alias="MEM_KNOWLEDGE_GRPC_TARGET",
+    )
+    mem_knowledge_grpc_timeout_seconds: float = Field(
+        default=120.0,
+        gt=0,
+        validation_alias="MEM_KNOWLEDGE_GRPC_TIMEOUT_SECONDS",
+    )
+    # Deadline margin kept for the response trip and orchestration after the
+    # knowledge call returns; must stay below the call budget.
+    mem_knowledge_grpc_margin_seconds: float = Field(
+        default=5.0,
+        gt=0,
+        validation_alias="MEM_KNOWLEDGE_GRPC_MARGIN_SECONDS",
+    )
     model_service_connect_timeout_seconds: float = Field(
         default=5.0, gt=0, validation_alias="MODEL_SERVICE_CONNECT_TIMEOUT_SECONDS"
     )
@@ -402,13 +463,22 @@ class AppServiceSettings(BaseSettings):
     model_service_invoke_media_idle_timeout_seconds: float = Field(
         default=720.0, gt=0, validation_alias="MODEL_SERVICE_INVOKE_MEDIA_IDLE_TIMEOUT_SECONDS"
     )
+    # Wall-clock cap for one invoke stream. A continuously producing stream
+    # never trips the idle timeout, so entries without an inbound deadline
+    # (HTTP chat, drafts) need this explicit total.
+    model_service_invoke_stream_budget_seconds: float = Field(
+        default=3600.0, gt=0, validation_alias="MODEL_SERVICE_INVOKE_STREAM_BUDGET_SECONDS"
+    )
     # East-west runtime invoke protocol: http keeps the SSE frame contract,
     # grpc uses ModelInvokeService with the same frame semantics.
     app_model_protocol: Literal["http", "grpc"] = Field(
         default="http", validation_alias="APP_MODEL_PROTOCOL"
     )
     model_service_grpc_target: str = Field(
-        default="dns:///model-service-grpc:9090",
+        # One headless Service per workload (`clusterIP: None`) exposes both
+        # 8080/http and 9090/grpc; round_robin then resolves per-Pod IPs under
+        # the unchanged service name.
+        default="dns:///model-service:9090",
         validation_alias="MODEL_SERVICE_GRPC_TARGET",
     )
     model_service_invoke_call_budget_seconds: float = Field(
@@ -614,6 +684,42 @@ class AppServiceSettings(BaseSettings):
             raise ValueError(
                 "MODEL_SERVICE_INVOKE_GRPC_MARGIN_SECONDS must be smaller than "
                 "MODEL_SERVICE_INVOKE_MEDIA_CALL_BUDGET_SECONDS"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def check_market_gateway_settings(self) -> AppServiceSettings:
+        if self.application_service_market_mode != "gateway":
+            return self
+        if not self.market_service_base_url.strip():
+            raise ValueError(
+                "MARKET_SERVICE_BASE_URL must be set when "
+                "APPLICATION_SERVICE_MARKET_MODE=gateway"
+            )
+        if not self.market_service_internal_token.get_secret_value().strip():
+            raise ValueError(
+                "MARKET_SERVICE_INTERNAL_TOKEN must be set when "
+                "APPLICATION_SERVICE_MARKET_MODE=gateway"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def check_knowledge_grpc_settings(self) -> AppServiceSettings:
+        """gRPC retrieval needs a target and a margin that cannot starve the call."""
+
+        if self.mem_knowledge_protocol != "grpc":
+            return self
+        if not self.mem_knowledge_grpc_target.strip():
+            raise ValueError(
+                "MEM_KNOWLEDGE_GRPC_TARGET must be set when MEM_KNOWLEDGE_PROTOCOL=grpc"
+            )
+        if (
+            self.mem_knowledge_grpc_margin_seconds
+            >= self.mem_knowledge_grpc_timeout_seconds
+        ):
+            raise ValueError(
+                "MEM_KNOWLEDGE_GRPC_MARGIN_SECONDS must be smaller than "
+                "MEM_KNOWLEDGE_GRPC_TIMEOUT_SECONDS"
             )
         return self
 

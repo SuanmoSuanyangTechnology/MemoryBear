@@ -239,11 +239,11 @@ export const createWorkflowStreamHandler = (deps: WorkflowStreamDeps) => {
           }))
           break
         case 'workflow_end': {
-          const { execution_id, status, error, citations } = payload
+          const { execution_id, status, error, msg, citations } = payload
           setChatList(prev => mapLastVersion(prev, (current) => ({
             ...current,
             status,
-            error,
+            error: msg || error,
             content: current.content === '' ? null : current.content,
             meta_data: { ...(current.meta_data || {}), citations },
           })))

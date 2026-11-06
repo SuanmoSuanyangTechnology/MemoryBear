@@ -17,6 +17,7 @@ import CustomSelect from '@/components/CustomSelect'
 import type { ChatItem } from '@/components/Chat/types'
 import type { ReportModalRef } from '@/views/Conversation/types'
 import { reportTypesUrl, reportMessage, draftRunReportMessage } from '@/api/application'
+import { getLastTraceId } from '@/utils/request'
 
 /** Props for ReportModal — provide either an app id or a share token. */
 type ReportModalProps =
@@ -51,9 +52,11 @@ const ReportModal = forwardRef<ReportModalRef, ReportModalProps>((props, ref) =>
     form.validateFields()
       .then((values) => {
         if (!currentItem?.id) return
+        const traceId = getLastTraceId()
         const payload = {
           ...values,
           selected_text: currentItem.content || '',
+          ...(traceId ? { trace_id: traceId } : {}),
         }
         const request = appId
           ? draftRunReportMessage(appId, currentItem.id as string, payload)

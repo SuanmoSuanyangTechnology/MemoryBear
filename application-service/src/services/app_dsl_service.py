@@ -448,9 +448,34 @@ class AppDslService:
         user_id: uuid.UUID,
         app_id: uuid.UUID | None = None,
         redis_client: Any = None,
+        *,
+        commit: bool = True,
+        dep_map: dict[str, str] | None = None,
+        resolve_cross_app_refs: bool = True,
+        origin_columns: dict[str, Any] | None = None,
     ) -> tuple[App, list[str]]:
         """Parse the DSL, create or overwrite the app config; returns (app, warnings).
         When app_id is set: validate type consistency then overwrite; when None: create.
+
+        The three keyword-only parameters serve bundle landing (§7.5.5) and default
+        to the historical behaviour, so the console's "import a YAML file" path is
+        untouched:
+
+        - ``commit=False``: the caller owns the transaction. Otherwise a cluster
+          landing commits each app as soon as it is written, so a failure on the
+          third app leaves the first two behind and the caller's rollback cannot
+          reach them.
+        - ``dep_map``: ``local_id`` → new local id, so a packaged dependency is
+          bound to the exact row just created instead of being re-matched by name
+          (which can hit an unrelated same-named tool in the target tenant).
+        - ``resolve_cross_app_refs=False``: sub-agent entries already carry
+          ``local_id``s resolved through ``dep_map``. Running them through
+          ``_locate_agent_app`` would look for app ids that do not exist yet and
+          silently drop the entries.
+        - ``origin_columns``: 来源列（``origin`` / ``external_source`` /
+          ``external_resource_id`` / ``external_version``），只有市场落地传。
+          不传就落到模型默认值 ``origin='local'``，控制台的「导入 YAML」路径
+          因此完全不受影响。
         """
         app_meta = dsl.get("app", {})
         app_type = app_meta.get("type")
@@ -467,7 +492,9 @@ class AppDslService:
 
         if app_id is not None:
             return self._overwrite_dsl(
-                dsl, app_id, app_type, workspace_id, tenant_id, warnings, now, redis_client
+                dsl, app_id, app_type, workspace_id, tenant_id, warnings, now, redis_client,
+                commit=commit, dep_map=dep_map,
+                resolve_cross_app_refs=resolve_cross_app_refs,
             )
 
         new_app = App(
@@ -485,6 +512,9 @@ class AppDslService:
             is_active=True,
             created_at=now,
             updated_at=now,
+            # 市场落地时记录「这一行是从哪个市场资源、哪个版本复制来的」；
+            # 控制台导入 YAML 不传，落到模型默认值 origin='local'（§11.2）。
+            **(origin_columns or {}),
         )
         self.db.add(new_app)
         self.db.flush()
@@ -492,10 +522,16 @@ class AppDslService:
         self._write_config(
             new_app.id, app_type, dsl, workspace_id, tenant_id, warnings, now,
             create=True, redis_client=redis_client,
+            dep_map=dep_map, resolve_cross_app_refs=resolve_cross_app_refs,
         )
 
-        self.db.commit()
-        self.db.refresh(new_app)
+        if commit:
+            self.db.commit()
+            self.db.refresh(new_app)
+        else:
+            # The caller owns the transaction; flush only, so the app id is
+            # readable but nothing is durable yet (§7.5.5).
+            self.db.flush()
         return new_app, warnings
 
     def _overwrite_dsl(
@@ -508,6 +544,10 @@ class AppDslService:
         warnings: list,
         now: datetime.datetime,
         redis_client: Any = None,
+        *,
+        commit: bool = True,
+        dep_map: dict[str, str] | None = None,
+        resolve_cross_app_refs: bool = True,
     ) -> tuple[App, list[str]]:
         """Overwrite an existing app's config; raises on type mismatch."""
         app = self.db.query(App).filter(
@@ -526,10 +566,14 @@ class AppDslService:
         self._write_config(
             app_id, app_type, dsl, workspace_id, tenant_id, warnings, now,
             create=False, redis_client=redis_client,
+            dep_map=dep_map, resolve_cross_app_refs=resolve_cross_app_refs,
         )
 
-        self.db.commit()
-        self.db.refresh(app)
+        if commit:
+            self.db.commit()
+            self.db.refresh(app)
+        else:
+            self.db.flush()
         return app, warnings
 
     def _write_config(
@@ -543,8 +587,15 @@ class AppDslService:
         now: datetime.datetime,
         create: bool,
         redis_client: Any = None,
+        *,
+        dep_map: dict[str, str] | None = None,
+        resolve_cross_app_refs: bool = True,
     ) -> None:
-        """Write (create or overwrite) the app config."""
+        """Write (create or overwrite) the app config.
+
+        ``dep_map`` / ``resolve_cross_app_refs`` only matter on the bundle path
+        (§7.5.5); with their defaults every resolver behaves exactly as before.
+        """
         if app_type == AppType.AGENT:
             cfg = dsl.get("agent_config") or {}
             fields = dict(
@@ -558,8 +609,12 @@ class AppDslService:
                 ),
                 memory=self._resolve_memory(cfg.get("memory"), workspace_id, warnings),
                 variables=cfg.get("variables", []),
-                tools=self._resolve_tools(cfg.get("tools", []), tenant_id, warnings),
-                skills=self._resolve_skills(cfg.get("skills", {}), tenant_id, warnings),
+                tools=self._resolve_tools(
+                    cfg.get("tools", []), tenant_id, warnings, dep_map=dep_map
+                ),
+                skills=self._resolve_skills(
+                    cfg.get("skills", {}), tenant_id, warnings, dep_map=dep_map
+                ),
                 features=cfg.get("features", {}),
                 updated_at=now,
             )
@@ -588,14 +643,19 @@ class AppDslService:
                 ),
                 master_agent_id=self._resolve_release(cfg.get("master_agent_ref"), warnings),
                 sub_agents=self._resolve_sub_agents(
-                    cfg.get("sub_agents", []), warnings, workspace_id
+                    cfg.get("sub_agents", []), warnings, workspace_id,
+                    dep_map=dep_map,
+                    resolve_cross_app_refs=resolve_cross_app_refs,
                 ),
                 routing_rules=self._resolve_routing_rules(
-                    cfg.get("routing_rules"), warnings, workspace_id
+                    cfg.get("routing_rules"), warnings, workspace_id,
+                    dep_map=dep_map,
+                    resolve_cross_app_refs=resolve_cross_app_refs,
                 ),
                 execution_config=cfg.get("execution_config", {}),
                 supervisor_config=self._resolve_supervisor_config(
-                    cfg.get("supervisor_config"), workspace_id, tenant_id, warnings
+                    cfg.get("supervisor_config"), workspace_id, tenant_id, warnings,
+                    dep_map=dep_map,
                 ),
                 aggregation_strategy=cfg.get("aggregation_strategy", "merge"),
                 updated_at=now,
@@ -622,7 +682,7 @@ class AppDslService:
                 raise BusinessException("工作流配置缺失", BizCode.BAD_REQUEST)
             raw_nodes = raw_wf.get("nodes") or []
             resolved_nodes = self._resolve_workflow_nodes(
-                raw_nodes, tenant_id, workspace_id, warnings
+                raw_nodes, tenant_id, workspace_id, warnings, dep_map=dep_map
             )
             resolved_dsl = {**dsl, "workflow": {**raw_wf, "nodes": resolved_nodes}}
             adapter = MemoryBearAdapter(resolved_dsl)
@@ -833,8 +893,18 @@ class AppDslService:
         return None
 
     def _resolve_sub_agents(
-        self, sub_agents: list, warnings: list, workspace_id: uuid.UUID
+        self, sub_agents: list, warnings: list, workspace_id: uuid.UUID,
+        *, dep_map: dict[str, str] | None = None,
+        resolve_cross_app_refs: bool = True,
     ) -> list:
+        if not resolve_cross_app_refs:
+            # Bundle path: agent_id is already a `app:<源 app_id>` local_id and the
+            # sub-agent was landed moments ago. Re-locating by id would miss
+            # (or worse, match the wrong app) — resolve through dep_map only.
+            return self._resolve_bundle_members(
+                sub_agents, warnings, dep_map or {}, key="agent_id", label="子 Agent"
+            )
+
         result = []
         for s in (sub_agents or []):
             ref = s.get("_ref")
@@ -861,10 +931,17 @@ class AppDslService:
         return result
 
     def _resolve_routing_rules(
-        self, rules: list | None, warnings: list, workspace_id: uuid.UUID
+        self, rules: list | None, warnings: list, workspace_id: uuid.UUID,
+        *, dep_map: dict[str, str] | None = None,
+        resolve_cross_app_refs: bool = True,
     ) -> list | None:
         if rules is None:
             return None
+        if not resolve_cross_app_refs:
+            return self._resolve_bundle_members(
+                rules, warnings, dep_map or {}, key="target_agent_id", label="路由目标 Agent"
+            )
+
         result = []
         for r in rules:
             ref = r.get("_ref")
@@ -885,12 +962,45 @@ class AppDslService:
             result.append(entry)
         return result
 
+    def _resolve_bundle_members(
+        self, entries: list, warnings: list, dep_map: dict[str, str],
+        *, key: str, label: str,
+    ) -> list:
+        """Bundle path: bind cross-app references strictly through `dep_map`.
+
+        Entries whose ``key`` is not in the map are dropped with a warning — an
+        unmapped local_id means the referenced app was never landed, so keeping
+        the entry would leave a dangling reference. Never fall back to a name
+        lookup: that is exactly the "same name, different tool" failure §7.5.3
+        is about.
+        """
+
+        result = []
+        for entry in entries or []:
+            item = {k: v for k, v in entry.items() if k != "_ref"}
+            local_id = item.get(key)
+            mapped = dep_map.get(str(local_id)) if local_id else None
+            if mapped is None:
+                warnings.append(
+                    f"{label} '{item.get('name') or local_id}' 不在本次随包内容中，已清空"
+                )
+                continue
+            item[key] = str(mapped)
+            if key == "agent_id":
+                # Landed sub-agents are fresh drafts; they have no own release yet.
+                item["release_policy"] = "current"
+                item["release_id"] = None
+            result.append(item)
+        return result
+
     def _resolve_supervisor_config(
         self,
         sc: dict | None,
         workspace_id: uuid.UUID,
         tenant_id: uuid.UUID,
         warnings: list,
+        *,
+        dep_map: dict[str, str] | None = None,
     ) -> dict | None:
         """Import the supervisor capability surface: knowledge retrieval / tools /
         skills / memory are re-matched against the target environment; unmatched
@@ -903,9 +1013,13 @@ class AppDslService:
                 resolved["knowledge_retrieval"], workspace_id, tenant_id, warnings
             )
         if resolved.get("tools"):
-            resolved["tools"] = self._resolve_tools(resolved["tools"], tenant_id, warnings)
+            resolved["tools"] = self._resolve_tools(
+                resolved["tools"], tenant_id, warnings, dep_map=dep_map
+            )
         if resolved.get("skills"):
-            resolved["skills"] = self._resolve_skills(resolved["skills"], tenant_id, warnings)
+            resolved["skills"] = self._resolve_skills(
+                resolved["skills"], tenant_id, warnings, dep_map=dep_map
+            )
         if resolved.get("memory"):
             resolved["memory"] = self._resolve_memory(resolved["memory"], workspace_id, warnings)
         return resolved
@@ -996,7 +1110,8 @@ class AppDslService:
         return resolved_kbs
 
     def _resolve_workflow_nodes(
-        self, nodes: list, tenant_id: uuid.UUID, workspace_id: uuid.UUID, warnings: list
+        self, nodes: list, tenant_id: uuid.UUID, workspace_id: uuid.UUID, warnings: list,
+        *, dep_map: dict[str, str] | None = None,
     ) -> list:
         """Resolve tool/KB/model references in workflow nodes; clear when unmatched."""
         resolved_nodes = []
@@ -1010,6 +1125,19 @@ class AppDslService:
                     # tool_id is already empty; clear without a duplicate warning
                     config["tool_id"] = None
                     config["tool_parameters"] = {}
+                elif dep_map and isinstance(tool_id, str) and tool_id in dep_map:
+                    # Bundle path: the node reference is a `tool:` local id whose
+                    # row was just created (mcp rebuilt / custom-workflow
+                    # placeholder). Bind it or the edge disappears silently.
+                    mapped = dep_map.get(tool_id)
+                    if mapped:
+                        config["tool_id"] = str(mapped)
+                    else:
+                        warnings.append(
+                            f"[{node_label}] 工具 '{tool_id}' 不在本次随包内容中，已置空"
+                        )
+                        config["tool_id"] = None
+                        config["tool_parameters"] = {}
                 else:
                     tool_ref = {}
                     if isinstance(tool_id, str) and len(tool_id) >= 36:
@@ -1192,11 +1320,24 @@ class AppDslService:
             return {**memory, "memory_config_id": None, "enabled": memory.get("enabled", True)}
         return memory
 
-    def _resolve_skills(self, skills: dict | None, tenant_id: uuid.UUID, warnings: list) -> dict:
+    def _resolve_skills(
+        self, skills: dict | None, tenant_id: uuid.UUID, warnings: list,
+        *, dep_map: dict[str, str] | None = None,
+    ) -> dict:
         if not skills:
             return skills or {}
         resolved_ids = []
         for entry in (skills.get("skill_ids") or []):
+            # Bundle path: entries are already ``skill:<包名>`` local ids. Resolve
+            # strictly through dep_map so a same-named skill in the target tenant
+            # cannot be picked up instead (§7.5.3).
+            if dep_map and isinstance(entry, str) and entry in dep_map:
+                mapped = dep_map.get(entry)
+                if mapped:
+                    resolved_ids.append(str(mapped))
+                else:
+                    warnings.append(f"技能 '{entry}' 不在本次随包内容中，已清空")
+                continue
             # entry may be {"id": "...", "_ref": {...}} or a plain string
             if isinstance(entry, dict):
                 ref = entry.get("_ref") or (
@@ -1228,14 +1369,125 @@ class AppDslService:
         warnings.append(f"未找到技能: {ref}")
         return None
 
-    def _resolve_tools(self, tools: list, tenant_id: uuid.UUID, warnings: list) -> list:
+    def _resolve_tools(
+        self, tools: list, tenant_id: uuid.UUID, warnings: list,
+        *, dep_map: dict[str, str] | None = None,
+    ) -> list:
         result = []
         for t in (tools or []):
+            # Bundle path: ``tool_id`` is already a ``tool:<名称>`` local id. A
+            # mapped hit means the row (usually a custom/workflow placeholder) was
+            # just created — bind to it instead of dropping the edge, otherwise the
+            # Agent loses the dependency silently (§7.5.2).
+            raw_id = t.get("tool_id")
+            if dep_map and isinstance(raw_id, str) and raw_id in dep_map:
+                mapped = dep_map.get(raw_id)
+                entry = {k: v for k, v in t.items() if k != "_ref"}
+                if mapped:
+                    entry["tool_id"] = str(mapped)
+                    result.append(entry)
+                else:
+                    warnings.append(f"工具 '{raw_id}' 不在本次随包内容中，已清空")
+                continue
             ref = t.get("_ref") or ({"name": t.get("tool_id")} if t.get("tool_id") else None)
             entry = {k: v for k, v in t.items() if k != "_ref"}
             resolved_id = self._resolve_tool(ref, tenant_id, warnings)
             if resolved_id is None:
+                # Outside the bundle path an unmatched tool is dropped: there is no
+                # row to point at (the placeholder path always resolves through
+                # ``dep_map`` above).
                 continue
             entry["tool_id"] = resolved_id
             result.append(entry)
         return result
+
+    # ==================== Cluster collection (§7.1.1) ====================
+
+    def collect_cluster(
+        self, app_id: uuid.UUID, release_id: uuid.UUID | None = None
+    ) -> list[dict[str, Any]]:
+        """Collect the root plus every sub-agent, one pass, no recursion.
+
+        Reads the **raw** ``release.config.sub_agents[]``: publishing pins
+        ``{agent_id, release_policy: "pinned", release_id}`` there
+        (``app_service._pin_multi_agent_sub_agents``), whereas the enriched
+        export shape runs through ``_agent_ref`` which drops ``release_id``. Using
+        the enriched form would export each sub-agent's *current draft* instead of
+        the version the cluster pinned.
+
+        Each member carries its own pinned release; callers export that release,
+        not the sub-agent's current draft, so the bundle matches what was
+        reviewed.
+        """
+
+        app = self.db.query(App).filter(App.id == app_id, App.is_active.is_(True)).first()
+        if not app:
+            raise ResourceNotFoundException("应用", str(app_id))
+
+        target_release_id = release_id or app.current_release_id
+        if not target_release_id:
+            raise BusinessException("应用尚未发布，无法导出", BizCode.RELEASE_NOT_FOUND)
+        release = self.db.query(AppRelease).filter(
+            AppRelease.app_id == app_id,
+            AppRelease.id == target_release_id,
+            AppRelease.is_active.is_(True),
+        ).first()
+        if not release:
+            raise ResourceNotFoundException("版本", str(target_release_id))
+
+        root_local_id = f"app:{app.id}"
+        members: list[dict[str, Any]] = [
+            {
+                "role": "root",
+                "app_id": app.id,
+                "release_id": release.id,
+                "name": release.name,
+                "local_id": root_local_id,
+                "parent_local_id": None,
+                "app_type": app.type,
+            }
+        ]
+        if app.type != AppType.MULTI_AGENT:
+            return members
+
+        for entry in (release.config or {}).get("sub_agents") or []:
+            sub_release_id = entry.get("release_id")
+            sub_release = (
+                self.db.get(AppRelease, sub_release_id) if sub_release_id else None
+            )
+            if sub_release is None or not sub_release.is_active:
+                raise BusinessException(
+                    f"子 Agent「{entry.get('name') or entry.get('agent_id')}」的钉住版本不存在或已下线",
+                    BizCode.EXTERNAL_CATALOG_INVALID,
+                    data={
+                        "reason": "INCOMPLETE_BUNDLE",
+                        "missing": [
+                            {
+                                "kind": "sub_agent",
+                                "name": entry.get("name"),
+                                "reason": "pinned release missing or inactive",
+                            }
+                        ],
+                    },
+                )
+            sub_app = self.db.query(App).filter(
+                App.id == sub_release.app_id, App.is_active.is_(True)
+            ).first()
+            if sub_app is None:
+                raise BusinessException(
+                    f"子 Agent 应用不存在：{sub_release.app_id}",
+                    BizCode.EXTERNAL_CATALOG_INVALID,
+                    data={"reason": "INCOMPLETE_BUNDLE", "missing": []},
+                )
+            members.append(
+                {
+                    "role": "sub_agent",
+                    "app_id": sub_app.id,
+                    "release_id": sub_release.id,
+                    "name": sub_release.name,
+                    "local_id": f"app:{sub_app.id}",
+                    "parent_local_id": root_local_id,
+                    "app_type": sub_app.type,
+                }
+            )
+        return members

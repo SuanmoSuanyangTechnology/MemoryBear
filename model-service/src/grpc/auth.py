@@ -22,6 +22,7 @@ from ..api.dependencies import (
     invoke_principal_from_headers,
 )
 from ..auth import ModelAuthConfig, _load_gateway_auth
+from ..errors import BusinessException, http_status_for
 
 INVOKE_ACL_METHOD = "POST"
 INVOKE_ACL_PATH = "/internal/v1/invoke"
@@ -45,6 +46,10 @@ def build_authenticator(
         if handler is None:
             try:
                 return invoke_principal_from_headers(request)
+            except BusinessException as exc:
+                await context.abort(
+                    grpc_status_for_http(http_status_for(exc.code)), exc.message
+                )
             except HTTPException as exc:
                 await context.abort(grpc.StatusCode.UNAUTHENTICATED, str(exc.detail))
         try:
@@ -57,6 +62,10 @@ def build_authenticator(
             # Channel 2: trusted attribution headers, never a user credential.
             try:
                 return invoke_principal_from_headers(request)
+            except BusinessException as exc:
+                await context.abort(
+                    grpc_status_for_http(http_status_for(exc.code)), exc.message
+                )
             except HTTPException as exc:
                 await context.abort(grpc.StatusCode.UNAUTHENTICATED, str(exc.detail))
         try:

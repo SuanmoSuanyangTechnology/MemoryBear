@@ -15,6 +15,7 @@ dependencies = [
     "boto3>=1.42,<2",
     "chardet>=5.2.0,<6",
     "deprecated>=1.3.1,<2",
+    "error-core",
     "fastapi>=0.119,<1",
     "httpx>=0.28,<1",
     "jinja2>=3.1.6,<4",
@@ -46,7 +47,7 @@ dependencies = [
     "python-multipart>=0.0.20,<1",
     "pytz>=2025.2,<2027",
     "pyyaml>=6.0.3,<7",
-    "redbear-model[all]",
+    "redbear-model[all,grpc]",
     "redis>=6.4,<7",
     "requests>=2.32,<3",
     "simpleeval>=1.0.3,<2",
@@ -72,6 +73,7 @@ dev = [
 auth-sdk = { path = "../packages/auth-sdk" }
 memorybear-grpc = { path = "../packages/memorybear-grpc" }
 redbear-model = { path = "../packages/redbear-model" }
+error-core = { path = "../packages/error-core" }
 
 [tool.hatch.build.targets.wheel]
 packages = ["src"]

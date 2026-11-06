@@ -75,6 +75,12 @@ class Skill(BaseModel):
     files: Optional[List[SkillFileIn]] = Field(None, description="包内文件（二进制不含内容）")
     has_scripts: Optional[bool] = Field(None, description="是否含 scripts/ 目录")
     members: Optional[List[Dict[str, Any]]] = Field(None, description="kind=plugin 时的成员摘要")
+    # 来源（§11.2）：来源记在 skill_packages.source_type / source_ref 上，
+    # 市场状态不落库，仅 include_external_status=true 时回填 external.status。
+    origin: str = Field("local", description="local | external")
+    external: Optional[Dict[str, Any]] = Field(
+        None, description="来源信息；origin=local 时为 null"
+    )
 
     @field_serializer('created_at', 'updated_at')
     def serialize_datetime_to_timestamp(self, value: datetime) -> int:

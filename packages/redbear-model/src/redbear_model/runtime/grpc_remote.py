@@ -1,8 +1,9 @@
-"""gRPC invoke transport: the binary counterpart of the SSE frame contract.
+"""gRPC invoke transports: the binary counterpart of the SSE frame contract.
 
 The service streams typed frames over ``ModelInvokeService.Invoke``; payloads
 stay JSON so the semantics (frame order, seq, error vocabulary) have exactly
-one definition. Only the carriage changes.
+one definition. Only the carriage changes. The async and sync twins share the
+frame decoder, sequence check and RPC error mapping below.
 """
 
 from __future__ import annotations
@@ -10,12 +11,17 @@ from __future__ import annotations
 import asyncio
 import json
 import re
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterator
 from typing import Any
 
 import grpc
 from memorybear.model.v1 import invoke_pb2, invoke_pb2_grpc
-from memorybear_grpc.client import CLIENT_FRAMES, STREAM_CANCELLED, ChannelPool
+from memorybear_grpc.client import (
+    CLIENT_FRAMES,
+    STREAM_CANCELLED,
+    ChannelPool,
+    SyncChannelPool,
+)
 from memorybear_grpc.errors import http_status_for_grpc, parse_error_trailers
 from memorybear_grpc.metadata import deadline_for, upstream_remaining
 
@@ -38,6 +44,7 @@ from .remote import (
     InvokeTarget,
     InvokeTimeouts,
     InvokeUsageFrame,
+    SyncInvokeTransport,
     envelope_failure,
 )
 
@@ -69,6 +76,71 @@ def _loads_json(raw: bytes, kind: str) -> Any:
         return json.loads(raw)
     except (UnicodeDecodeError, ValueError) as exc:
         raise RemoteInvokeProtocolError(f"malformed {kind} frame JSON: {exc}") from exc
+
+
+def _rpc_error(exc: grpc.RpcError) -> RemoteInvokeError:
+    parsed = parse_error_trailers(exc.trailing_metadata() or ())
+    if parsed is not None:
+        status, raw = parsed
+        try:
+            payload = json.loads(raw)
+        except (UnicodeDecodeError, ValueError):
+            payload = None
+        if isinstance(payload, dict):
+            return envelope_failure(payload, status)
+    if exc.code() == grpc.StatusCode.DEADLINE_EXCEEDED:
+        return RemoteInvokeUnavailableError("remote invoke deadline exceeded")
+    status = http_status_for_grpc(exc.code())
+    if 400 <= status < 500:
+        # Interceptors abort without an HTTP envelope; keep 4xx failures
+        # distinguishable instead of collapsing them into 503.
+        return RemoteInvokeFailedError(
+            code=None, message=exc.details() or "", http_status=status
+        )
+    return RemoteInvokeUnavailableError(
+        f"remote invoke rpc failed: {exc.code().name}"
+    )
+
+
+def _decode_frame(frame: Any) -> InvokeFrame:
+    kind = frame.WhichOneof("payload")
+    if kind == "chunk":
+        message = _loads_json(frame.chunk.message_json, "chunk")
+        if not isinstance(message, dict):
+            raise RemoteInvokeProtocolError("chunk frame payload must be an object")
+        return InvokeChunkFrame(message=message, seq=frame.seq)
+    if kind == "result":
+        return InvokeResultFrame(data=_loads_json(frame.result.data_json, "result"))
+    if kind == "usage":
+        event = _loads_json(frame.usage.event_json, "usage")
+        if not isinstance(event, dict):
+            raise RemoteInvokeProtocolError("usage frame payload must be an object")
+        return InvokeUsageFrame(event=event)
+    if kind == "done":
+        if frame.done.status not in DONE_STATUSES:
+            raise RemoteInvokeProtocolError(
+                f"unknown done status: {frame.done.status!r}"
+            )
+        return InvokeDoneFrame(status=frame.done.status)
+    if kind == "error":
+        # New structured fields win; legacy servers still populate only code/message.
+        detail = frame.error.detail or frame.error.message
+        raise RemoteInvokeFailedError(
+            code=frame.error.biz_code or frame.error.code,
+            msg=frame.error.user_msg or None,
+            detail=detail,
+            retryable=frame.error.retryable,
+        )
+    raise RemoteInvokeProtocolError("invoke frame carries no payload")
+
+
+def _request_frame(request: InvokeRequest, *, stream: bool) -> invoke_pb2.InvokeRequest:
+    return invoke_pb2.InvokeRequest(
+        config_id=str(request.config_id),
+        type=request.type.value,
+        stream=stream,
+        params_json=_json_bytes(request.params),
+    )
 
 
 class _Sequence:
@@ -108,12 +180,14 @@ class GrpcAsyncInvokeTransport(AsyncInvokeTransport):
         self._margin_s = margin_s
 
     def _stream_deadline(self) -> float | None:
-        """Streams are idle-bounded; only an upstream deadline caps their total."""
+        """Stream total = min(configured stream budget, live upstream budget)."""
 
+        total = self._timeouts.total_s
         remaining = upstream_remaining()
         if remaining is None:
-            return None
-        return max(0.001, remaining - self._margin_s)
+            return total
+        capped = max(0.001, remaining - self._margin_s)
+        return capped if total is None else min(total, capped)
 
     def _call_deadline(self) -> float:
         return deadline_for(budget_s=self._call_budget_s, margin_s=self._margin_s)
@@ -121,15 +195,17 @@ class GrpcAsyncInvokeTransport(AsyncInvokeTransport):
     async def _open(
         self, request: InvokeRequest, target: InvokeTarget, *, stream: bool
     ) -> Any:
+        remaining = upstream_remaining()
+        if remaining is not None and remaining <= self._margin_s:
+            # The margin is reserved for the response trip/orchestration; a
+            # downstream call started with no usable budget can never succeed.
+            raise RemoteInvokeUnavailableError(
+                "upstream deadline exhausted before model invoke"
+            )
         channel = await self._pool.channel(self._target_name)
         stub = invoke_pb2_grpc.ModelInvokeServiceStub(channel)
         return stub.Invoke(
-            invoke_pb2.InvokeRequest(
-                config_id=str(request.config_id),
-                type=request.type.value,
-                stream=stream,
-                params_json=_json_bytes(request.params),
-            ),
+            _request_frame(request, stream=stream),
             metadata=_ascii_metadata(target.headers()),
             timeout=self._stream_deadline() if stream else self._call_deadline(),
             wait_for_ready=False,
@@ -141,58 +217,7 @@ class GrpcAsyncInvokeTransport(AsyncInvokeTransport):
         except TimeoutError as exc:
             raise RemoteInvokeIdleTimeoutError(self._timeouts.idle_s) from exc
         except grpc.aio.AioRpcError as exc:
-            raise self._rpc_error(exc) from exc
-
-    def _rpc_error(self, exc: grpc.aio.AioRpcError) -> RemoteInvokeError:
-        parsed = parse_error_trailers(exc.trailing_metadata() or ())
-        if parsed is not None:
-            status, raw = parsed
-            try:
-                payload = json.loads(raw)
-            except (UnicodeDecodeError, ValueError):
-                payload = None
-            if isinstance(payload, dict):
-                return envelope_failure(payload, status)
-        if exc.code() == grpc.StatusCode.DEADLINE_EXCEEDED:
-            return RemoteInvokeUnavailableError("remote invoke deadline exceeded")
-        status = http_status_for_grpc(exc.code())
-        if 400 <= status < 500:
-            # Interceptors abort without an HTTP envelope; keep 4xx failures
-            # distinguishable instead of collapsing them into 503.
-            return RemoteInvokeFailedError(
-                code=None, message=exc.details() or "", http_status=status
-            )
-        return RemoteInvokeUnavailableError(
-            f"remote invoke rpc failed: {exc.code().name}"
-        )
-
-    def _decode(self, frame: Any) -> InvokeFrame:
-        kind = frame.WhichOneof("payload")
-        if kind == "chunk":
-            message = _loads_json(frame.chunk.message_json, "chunk")
-            if not isinstance(message, dict):
-                raise RemoteInvokeProtocolError("chunk frame payload must be an object")
-            return InvokeChunkFrame(message=message, seq=frame.seq)
-        if kind == "result":
-            return InvokeResultFrame(data=_loads_json(frame.result.data_json, "result"))
-        if kind == "usage":
-            event = _loads_json(frame.usage.event_json, "usage")
-            if not isinstance(event, dict):
-                raise RemoteInvokeProtocolError("usage frame payload must be an object")
-            return InvokeUsageFrame(event=event)
-        if kind == "done":
-            if frame.done.status not in DONE_STATUSES:
-                raise RemoteInvokeProtocolError(
-                    f"unknown done status: {frame.done.status!r}"
-                )
-            return InvokeDoneFrame(status=frame.done.status)
-        if kind == "error":
-            raise RemoteInvokeFailedError(
-                code=frame.error.code,
-                message=frame.error.message,
-                retryable=frame.error.retryable,
-            )
-        raise RemoteInvokeProtocolError("invoke frame carries no payload")
+            raise _rpc_error(exc) from exc
 
     async def stream(
         self, request: InvokeRequest, target: InvokeTarget
@@ -210,7 +235,7 @@ class GrpcAsyncInvokeTransport(AsyncInvokeTransport):
                     self._target_name, frame.WhichOneof("payload") or "none"
                 ).inc()
                 sequence.check(frame)
-                decoded = self._decode(frame)
+                decoded = _decode_frame(frame)
                 yield decoded
                 if isinstance(decoded, InvokeDoneFrame):
                     return
@@ -236,7 +261,7 @@ class GrpcAsyncInvokeTransport(AsyncInvokeTransport):
                     self._target_name, frame.WhichOneof("payload") or "none"
                 ).inc()
                 sequence.check(frame)
-                decoded = self._decode(frame)
+                decoded = _decode_frame(frame)
                 if isinstance(decoded, InvokeChunkFrame):
                     raise RemoteInvokeProtocolError(
                         "non-stream invoke carried a chunk frame"
@@ -261,4 +286,127 @@ class GrpcAsyncInvokeTransport(AsyncInvokeTransport):
             call.cancel()
 
 
-__all__ = ["GrpcAsyncInvokeTransport"]
+class GrpcSyncInvokeTransport(SyncInvokeTransport):
+    """Synchronous invoke transport over a shared sync channel.
+
+    Subclasses ``SyncInvokeTransport`` for the adapter's isinstance check only;
+    no HTTP state is inherited (``__init__`` is not chained).
+
+    Knowledge-service sync call sites (embedding, rerank, ASR, sync LLM) are
+    non-streaming, so ``call`` is the hot path: it uses ``call_budget_s`` as the
+    RPC deadline, capped by the upstream budget when one is bound. ``stream``
+    keeps the shared frame contract but has no per-frame idle watchdog; sync
+    callers that need idle semantics must use the async transport.
+    """
+
+    def __init__(
+        self,
+        pool: SyncChannelPool,
+        *,
+        target_name: str,
+        timeouts: InvokeTimeouts | None = None,
+        call_budget_s: float = 180.0,
+        margin_s: float = 30.0,
+    ) -> None:
+        self._pool = pool
+        self._target_name = target_name
+        self._timeouts = timeouts or InvokeTimeouts()
+        self._call_budget_s = call_budget_s
+        self._margin_s = margin_s
+
+    def _stream_deadline(self) -> float | None:
+        total = self._timeouts.total_s
+        remaining = upstream_remaining()
+        if remaining is None:
+            return total
+        capped = max(0.001, remaining - self._margin_s)
+        return capped if total is None else min(total, capped)
+
+    def _call_deadline(self) -> float:
+        return deadline_for(budget_s=self._call_budget_s, margin_s=self._margin_s)
+
+    def _open(
+        self, request: InvokeRequest, target: InvokeTarget, *, stream: bool
+    ) -> Any:
+        remaining = upstream_remaining()
+        if remaining is not None and remaining <= self._margin_s:
+            raise RemoteInvokeUnavailableError(
+                "upstream deadline exhausted before model invoke"
+            )
+        channel = self._pool.channel(self._target_name)
+        stub = invoke_pb2_grpc.ModelInvokeServiceStub(channel)
+        return stub.Invoke(
+            _request_frame(request, stream=stream),
+            metadata=_ascii_metadata(target.headers()),
+            timeout=self._stream_deadline() if stream else self._call_deadline(),
+            wait_for_ready=False,
+        )
+
+    @staticmethod
+    def _read(call: Any) -> Any:
+        try:
+            return next(call)
+        except StopIteration as exc:
+            raise RemoteInvokeProtocolError(
+                "stream ended before the done frame"
+            ) from exc
+        except grpc.RpcError as exc:
+            raise _rpc_error(exc) from exc
+
+    def stream(
+        self, request: InvokeRequest, target: InvokeTarget
+    ) -> Iterator[InvokeFrame]:
+        call = self._open(request, target, stream=True)
+        sequence = _Sequence()
+        try:
+            while True:
+                frame = self._read(call)
+                CLIENT_FRAMES.labels(
+                    self._target_name, frame.WhichOneof("payload") or "none"
+                ).inc()
+                sequence.check(frame)
+                decoded = _decode_frame(frame)
+                yield decoded
+                if isinstance(decoded, InvokeDoneFrame):
+                    return
+        except GeneratorExit:
+            STREAM_CANCELLED.labels(self._target_name, "client").inc()
+            raise
+        finally:
+            call.cancel()
+
+    def call(self, request: InvokeRequest, target: InvokeTarget) -> Any:
+        call = self._open(request, target, stream=False)
+        sequence = _Sequence()
+        has_result = False
+        result: Any = None
+        try:
+            while True:
+                frame = self._read(call)
+                CLIENT_FRAMES.labels(
+                    self._target_name, frame.WhichOneof("payload") or "none"
+                ).inc()
+                sequence.check(frame)
+                decoded = _decode_frame(frame)
+                if isinstance(decoded, InvokeChunkFrame):
+                    raise RemoteInvokeProtocolError(
+                        "non-stream invoke carried a chunk frame"
+                    )
+                if isinstance(decoded, InvokeResultFrame):
+                    if has_result:
+                        raise RemoteInvokeProtocolError(
+                            "invoke carried more than one result frame"
+                        )
+                    result = decoded.data
+                    has_result = True
+                elif isinstance(decoded, InvokeDoneFrame):
+                    if not has_result:
+                        raise RemoteInvokeProtocolError(
+                            "done frame arrived before the result frame"
+                        )
+                    return result
+        finally:
+            call.cancel()
+
+
+__all__ = ["GrpcAsyncInvokeTransport", "GrpcSyncInvokeTransport"]

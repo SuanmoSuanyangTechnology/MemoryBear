@@ -2,7 +2,6 @@
  * Home Dashboard Page
  * Main dashboard displaying memory statistics, charts, activities, and quick operations
  */
-
 import { useEffect, useState } from 'react';
 import { Row, Col, Flex } from 'antd';
 import dayjs, { type Dayjs } from 'dayjs';
@@ -11,8 +10,7 @@ import clsx from 'clsx';
 
 import TopCardList from './components/TopCardList'
 import LineCard from './components/LineCard'
-import PieCard from './components/PieCard'
-import { getDashboardData, getMemoryIncrement, getKbTypes } from '@/api/memory';
+import { getDashboardData, getMemoryIncrement } from '@/api/memory';
 import RecentActivity from './components/RecentActivity'
 import TagList from './components/TagList'
 import QuickOperation from './components/QuickOperation'
@@ -25,11 +23,7 @@ const Home = () => {
   const { t } = useTranslation()
   const [dashboardDataLoading, setDashboardDataLoading] = useState(true);
   const [dashboardData, setDashboardData] = useState<DashboardData>({} as DashboardData);
-  const [loading, setLoading] = useState({
-    knowledgeTypeDistribution: true,
-  });
   const [workspaceStatistics, setWorkspaceStatistics] = useState<WorkspaceStatistics>({} as WorkspaceStatistics)
-  const [knowledgeTypeDistribution, setKnowledgeTypeDistribution] = useState<Array<{ name: string; value: number }>>([]);
   const [memoryIncrement, setMemoryIncrement] = useState<Array<{ date: string; total_num: number; }>>([]);
   const [dateRange, setDateRange] = useState<[Dayjs, Dayjs]>([
     dayjs().subtract(6, 'day'),
@@ -39,7 +33,6 @@ const Home = () => {
   /** Simulate API data fetch */
   useEffect(() => {
     getData()
-    getKnowledgeTypeDistribution()
   }, []);
   /** Fetch memory total, app count, knowledge base count, API call count */
   const getData = () => {
@@ -59,34 +52,6 @@ const Home = () => {
       .finally(() => {
         setDashboardDataLoading(false)
       })
-  }
-  /** Fetch knowledge base type distribution */
-  const getKnowledgeTypeDistribution = () => {
-    setLoading({
-      ...loading,
-      knowledgeTypeDistribution: true,
-    })
-
-    getKbTypes().then(res => {
-      const response = res as Record<string, number>
-      const list: Array<{ name: string; value: number }> = []
-      Object.entries(response).map(([type, count]) => {
-        if (count > 0 && type !== 'total') {
-          list.push({
-            name: type,
-            value: count
-          })
-        }
-        return null
-      })
-      setKnowledgeTypeDistribution(list)
-    })
-    .finally(() => {
-      setLoading({
-        ...loading,
-        knowledgeTypeDistribution: false,
-      })
-    })
   }
   /** Fetch memory growth trend data */
   const getMemoryIncrementData = () => {
@@ -187,20 +152,14 @@ const Home = () => {
           loading={dashboardDataLoading}
         />
       </Col>
-      <Col span={8}>
+      <Col span={16}>
         <RecentActivity />
-      </Col>
-      <Col span={8}>
-        <QuickOperation />
       </Col>
       <Col span={16}>
         <TagList />
       </Col>
       <Col span={8}>
-        <PieCard
-          loading={loading.knowledgeTypeDistribution}
-          chartData={knowledgeTypeDistribution}
-        />
+        <QuickOperation />
       </Col>
     </Row>
   );

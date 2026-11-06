@@ -6,7 +6,7 @@ import asyncio
 import uuid
 from typing import Annotated, Any, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, Query, Request
 
 from ...errors import KnowledgeError
 from ...rag.wiki.config import WikiError
@@ -45,7 +45,7 @@ def _scope(kb_id, principal):
 def _types(value):
     values = tuple(part.strip() for part in (value or "").split(",") if part.strip())
     if set(values) - {"summary", "entity", "concept"}:
-        raise HTTPException(422, "Unsupported Wiki page type")
+        raise KnowledgeError.from_code("KB_HTTP_VALIDATION_ERROR")
     return values
 
 
@@ -123,7 +123,7 @@ async def tree(
         try:
             uuid.UUID(cursor[2:])
         except ValueError:
-            raise HTTPException(422, "Invalid Wiki cursor") from None
+            raise KnowledgeError.from_code("KB_HTTP_VALIDATION_ERROR") from None
     pagesize = pagesize if "pagesize" in request.query_params else limit or pagesize
     cursor = None if "page" in request.query_params else cursor
     return _response(
@@ -164,7 +164,7 @@ async def graph(
     limit: int = Query(500, ge=1, le=5000),
 ):
     if mode == "ego" and center_page_id is None:
-        raise HTTPException(422, "center_page_id is required for ego mode")
+        raise KnowledgeError.from_code("KB_HTTP_VALIDATION_ERROR")
     return _response(
         request,
         await _read(

@@ -47,7 +47,6 @@ from ...models import (
 )
 from ...quota.alerts import report_quota_change_sync
 from ...quota.usage import check_quota
-from ...repositories import knowledge_repository
 from ...repositories.end_user_repository import EndUserRepository
 from ...repositories.workflow_repository import WorkflowConfigRepository
 from ...schemas import app_schema, conversation_schema, release_share_schema
@@ -284,7 +283,7 @@ async def chat(
             if app_type == AppType.AGENT:
                 model_config_id = release.default_model_config_id
                 if not model_config_id:
-                    raise BusinessException("Agent 应用未配置模型", BizCode.AGENT_CONFIG_MISSING)
+                    raise BusinessException("Agent 应用未配置模型", BizCode.MODEL_NOT_CONFIGURED)
                 runtime_config = agent_config_4_app_release(release)
             elif app_type == AppType.MULTI_AGENT:
                 config = release.config or {}
@@ -635,13 +634,9 @@ async def regenerate_message(
             )
             if storage_type is None:
                 storage_type = "neo4j"
+            # RAG memory now uses its own ES index; no USER_RAG_MERORY
+            # lookup (aligned with the monolith).
             user_rag_memory_id = ""
-            if storage_type == "rag" and workspace_id:
-                knowledge = knowledge_repository.get_knowledge_by_name(
-                    db=db, name="USER_RAG_MERORY", workspace_id=workspace_id
-                )
-                if knowledge:
-                    user_rag_memory_id = str(knowledge.id)
 
             # Deep thinking: requires both the snapshot's model_parameters flag and
             # the request flag; otherwise it stays off (aligns with the AGENT
@@ -708,14 +703,9 @@ async def regenerate_message(
         )
         if storage_type is None:
             storage_type = "neo4j"
+        # RAG memory now uses its own ES index; no USER_RAG_MERORY
+        # lookup (aligned with the monolith).
         user_rag_memory_id = ""
-        if storage_type == "rag":
-            if workspace_id:
-                knowledge = knowledge_repository.get_knowledge_by_name(
-                    db=db, name="USER_RAG_MERORY", workspace_id=workspace_id
-                )
-                if knowledge:
-                    user_rag_memory_id = str(knowledge.id)
 
         if payload.stream:
             async def event_generator():
@@ -1487,7 +1477,7 @@ async def report_message(
         selected_text=payload.selected_text,
     )
 
-    return success(data=app_schema.MessageReportResponse(**result))
+    return success(data=app_schema.MessageReportResponse(**result), msg="举报提交成功")
 
 
 @router.delete(
@@ -1647,4 +1637,4 @@ async def switch_message_version(
         logger.warning(f"分享端切换版本构建节点明细失败（已降级为空）: {e}")
         result["node_executions_map"] = {}
 
-    return success(data=result)
+    return success(data=result, msg="消息版本切换成功")

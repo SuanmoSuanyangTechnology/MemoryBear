@@ -33,7 +33,8 @@ from redbear_model.runtime.remote import (
 )
 
 from ...config import current_settings
-from ...trace import get_trace_id
+from ...i18n import get_current_locale
+from ...trace import get_trace_id, get_traceparent
 from ...usage_context import get_usage_resource
 
 from .client import http_limits
@@ -79,17 +80,20 @@ def invoke_target(context: ModelCallContext) -> InvokeTarget:
         resource_type=resource.resource_type if resource else None,
         resource_id=_uuid_or_none(resource.resource_id) if resource else None,
         trace_id=context.trace_id or get_trace_id() or None,
+        traceparent=get_traceparent() or None,
+        language=get_current_locale(),
     )
 
 
 def invoke_timeouts(settings: Any) -> InvokeTimeouts:
-    """Frame-stream timeouts: connect 5s / inter-chunk idle 180s / no total cap; pool wait follows the management-plane policy."""
+    """Frame-stream timeouts: connect 5s / inter-chunk idle 180s / explicit stream total; pool wait follows the management-plane policy."""
 
     return InvokeTimeouts(
         connect_s=current_settings().model_service_invoke_connect_timeout_seconds,
         idle_s=current_settings().model_service_invoke_idle_timeout_seconds,
         write_s=current_settings().model_service_invoke_write_timeout_seconds,
         pool_s=current_settings().model_service_pool_timeout_seconds,
+        total_s=current_settings().model_service_invoke_stream_budget_seconds,
     )
 
 
@@ -107,6 +111,7 @@ def invoke_media_timeouts(settings: Any) -> InvokeTimeouts:
         idle_s=current_settings().model_service_invoke_media_idle_timeout_seconds,
         write_s=current_settings().model_service_invoke_write_timeout_seconds,
         pool_s=current_settings().model_service_pool_timeout_seconds,
+        total_s=current_settings().model_service_invoke_stream_budget_seconds,
     )
 
 
@@ -122,7 +127,9 @@ def to_host_error(exc: RemoteInvokeError) -> ModelServiceClientError:
     elif isinstance(exc, RemoteInvokeFailedError):
         error = ModelInvokeFailedError(
             biz_code=biz_code_from_remote(exc.code),
-            message=exc.message,
+            message=exc.detail,
+            user_msg=exc.msg,
+            detail=f"{exc.detail} upstream_service=model-service",
             attempts=exc.attempts,
             channel_id=exc.channel_id,
             retryable=exc.retryable,

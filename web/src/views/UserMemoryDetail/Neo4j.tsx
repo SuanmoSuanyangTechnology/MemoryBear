@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:57:26 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-10-30 15:23:40
+ * @Last Modified time: 2026-11-04 10:29:29
  */
 /**
  * Neo4j User Memory Detail View
@@ -30,7 +30,8 @@ import { useI18n } from '@/store/locale'
 import PrivateWrap from '@/components/PrivateWrap'
 import { BrainView,
   ReflectMemory, ReflectMemoryPanel, type ReflectMemoryRef,
-  MemoryValueRank, MemoryValueRankPanel, type MemoryValueRankPanelRef
+  MemoryValueRank, MemoryValueRankPanel, type MemoryValueRankPanelRef,
+  AIPersonality, AIPersonalityPanel,
 } from '@redbear/memory-brick'
 import { request } from '@/utils/request'
 import MemoryActivity from './components/MemoryActivity'
@@ -183,6 +184,17 @@ const Neo4j: FC = () => {
               />
             )}
           </PrivateWrap>
+
+          <PrivateWrap>
+            {() => (
+              <AIPersonality
+                onOpenChange={(e: MouseEvent) => {
+                  onOpenChange(e, 'personality')
+                }}
+                selectedKey={selectedKey}
+              />
+            )}
+          </PrivateWrap>
         </Flex>
 
         <Flex vertical gap={24} className="rb:shrink-0!">
@@ -239,6 +251,14 @@ const Neo4j: FC = () => {
                     console.log('onSelectNode item', item)
                     setSelectNodeId(item.id)
                   }}
+                />
+              )}
+            </PrivateWrap>
+            <PrivateWrap>
+              {() => (
+                <AIPersonalityPanel
+                  request={request}
+                  selectedKey={selectedKey}
                 />
               )}
             </PrivateWrap>

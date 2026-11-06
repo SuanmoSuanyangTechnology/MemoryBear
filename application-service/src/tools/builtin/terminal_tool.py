@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import time
 from typing import Any, List, Optional
 
@@ -25,6 +26,13 @@ from .sandbox_output import sanitize_sandbox_output
 logger = logging.getLogger(__name__)
 
 _ANONYMOUS_USER_IDS = {"", "anonymous"}
+
+# Heredoc whose closing delimiter never arrived. bash feeds what it got to the command
+# and still exits 0, so exit_code alone says "success" while the file is only half
+# written; the sole signal is this warning on stderr.
+_HEREDOC_UNTERMINATED_RE = re.compile(
+    r"here-document at line \d+ delimited by end-of-file", re.IGNORECASE
+)
 
 
 class TerminalTool(BuiltinTool):
@@ -158,11 +166,31 @@ class TerminalTool(BuiltinTool):
                 execution_time=_elapsed(),
             )
 
+        stdout = sanitize_sandbox_output(result.stdout)
+        stderr = sanitize_sandbox_output(result.stderr)
+
+        # Report a truncated heredoc as a failure. The command itself exited 0, but the
+        # body was cut short, so treating it as success hands the model a half-written
+        # file it will then read back, publish, or build on.
+        if _HEREDOC_UNTERMINATED_RE.search(stderr):
+            logger.warning("sandbox_command_heredoc_unterminated exit_code=%s", result.exit_code)
+            return ToolResult.error_result(
+                error=(
+                    "命令里有未闭合的 heredoc（缺少结束标记）：bash 只把已收到的部分交给了命令，"
+                    "仍以 exit_code 0 结束，所以文件内容并不完整。"
+                    "请让结束标记（如 EOF）单独占一行放在命令末尾后重新执行；"
+                    "内容较长时改用 sandbox_write_file 先写骨架，再用 old_string/new_string 分段追加。"
+                ),
+                error_code="SANDBOX_HEREDOC_UNTERMINATED",
+                execution_time=_elapsed(),
+                metadata={"exit_code": result.exit_code, "stderr": stderr[:2000]},
+            )
+
         data: dict[str, Any] = {
             "status": result.status,
             "exit_code": result.exit_code,
-            "stdout": sanitize_sandbox_output(result.stdout),
-            "stderr": sanitize_sandbox_output(result.stderr),
+            "stdout": stdout,
+            "stderr": stderr,
             "error": sanitize_sandbox_output(result.error),
             "duration_ms": result.duration_ms,
         }
@@ -170,7 +198,35 @@ class TerminalTool(BuiltinTool):
             data["truncated"] = True
         if result.workspace_reset:
             data["notice"] = "沙箱已重建，/workspace 中的文件已丢失"
-        # 命令失败/超时是"执行成功但结果不是 ok"，交给模型自行读 exit_code 与 stderr 修正
+        # 命令失败/超时是"执行成功但结果不是 ok"，交给模型自行读 exit_code 与 stderr 修正。
+        # 但结果本身必须带上失败标记：否则工具节点永远是 completed，
+        # 失败的命令在日志/节点状态里和成功无法区分。
+        #
+        # 为什么用 data["success"] 而不直接返回 error_result：
+        # _format_result_for_langchain（langchain_adapter.py）在 ToolResult.success 为 False
+        # 时只回传 {success, error, error_code, execution_time}，data 会被整个丢掉，
+        # 模型就看不到 exit_code / stderr，无法自行修正命令。
+        # 而 agent 的 _tool_failure_reason 读的是序列化后 payload 里的 success，
+        # 所以在 data 里给出 success=False，既保住诊断信息，工具节点也能标成 failed。
+        #
+        # 注意这个折中的代价：ToolResult.success 仍是 True，而
+        # ToolService.execute_tool（tool_service.py 的 _record_execution_complete*）
+        # 按 ToolResult.success 记 COMPLETED 并且不写 error_message。
+        # 目前安全——沙箱工具不在 BUILTIN_TOOLS 里、没有 tool_id，不走 ToolService；
+        # 但若日后把沙箱工具登记进工具库或按 ID 挂到工作流工具节点，
+        # 必须改成：返回 ToolResult.error_result，并让 _format_result_for_langchain
+        # 在失败时把 data 一并回传。
+        # 沙箱只返回 ok / error / timeout / oom / cancelled 这几个终态，非零退出码已在
+        # 沙箱侧（verdict.py + shell.fold_result）归为 error，所以 status 单值即可判定，
+        # 不再叠加 exit_code 分支 —— 与 code_interpreter / skill_script 口径一致，
+        # 避免两处派生规则日后跑偏。
+        data["success"] = result.status == "ok"
+        if not data["success"] and not data["error"]:
+            data["error"] = (
+                "命令未正常结束（超时或被终止）"
+                if result.exit_code is None
+                else f"命令以退出码 {result.exit_code} 结束"
+            )
         return ToolResult.success_result(data=data, execution_time=_elapsed())
 
     @staticmethod

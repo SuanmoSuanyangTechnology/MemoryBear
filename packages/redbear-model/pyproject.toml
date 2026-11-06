@@ -11,6 +11,7 @@ dependencies = [
     "pydantic>=2.12,<3",
     "cryptography>=43",
     "sqlalchemy>=2.0,<3",
+    "error-core",
 ]
 
 [project.optional-dependencies]
@@ -20,8 +21,8 @@ runtime = [
     "langchain-core>=1.0,<2",
     "langchain-openai>=1.0,<2",
     "langchain-community>=0.3,<1",
-    "memorybear-grpc",
 ]
+grpc = ["memorybear-grpc"]
 ollama = [
     "httpx[socks]>=0.28,<1",
     "langchain-ollama>=1.0,<2",
@@ -40,7 +41,6 @@ all = [
     "langchain-aws>=1.0.0a1,<2",
     "dashscope>=1.25,<2",
     "volcengine-python-sdk[ark]>=5.0.19,<6",
-    "memorybear-grpc",
 ]
 
 [tool.hatch.build.targets.wheel]
@@ -48,6 +48,7 @@ packages = ["src/redbear_model"]
 
 [tool.uv.sources]
 memorybear-grpc = { path = "../memorybear-grpc" }
+error-core = { path = "../error-core" }
 
 # Resolve through the mirror so re-locks keep every lock URL on it.
 [[tool.uv.index]]

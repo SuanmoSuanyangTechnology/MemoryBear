@@ -339,12 +339,12 @@ async def list_messages(
         keyword: str | None = None,
         start: datetime | None = None,
         end: datetime | None = None,
-        order: str = "desc",
+        order: str = "asc",
 ) -> dict[str, Any]:
-    """按 dialog_at 分页返回消息，默认最新在前。"""
+    """按 dialog_at 分页返回消息，默认最早在前（与对话阅读顺序一致）。"""
     safe_page = max(int(page), 1)
     safe_pagesize = min(max(int(pagesize), 1), MAX_PAGE_SIZE)
-    safe_order = "asc" if str(order or "").strip().lower() == "asc" else "desc"
+    safe_order = "desc" if str(order or "").strip().lower() == "desc" else "asc"
     query = _build_query(
         end_user_ids,
         sources=sources,
@@ -379,6 +379,10 @@ async def list_messages(
             size=safe_pagesize,
             sort=[
                 {"dialog_at": {"order": safe_order, "missing": "_last"}},
+                # 同 dialog_at 并列时 user 固定排在 assistant 之前（写入侧
+                # 落 role_rank）；历史文档缺该字段按 missing 沉底、退回 id 序，
+                # 次序确定但可能不等于真实时序——真实时序由写入侧单调化保证
+                {"role_rank": {"order": "asc", "missing": "_last"}},
                 {"id": {"order": "asc"}},
             ],
             _source=["id", "role", "content", "dialog_at", "source"],

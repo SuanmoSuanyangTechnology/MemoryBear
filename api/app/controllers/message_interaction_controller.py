@@ -258,7 +258,7 @@ async def switch_message_version_with_branch(
     # 以 switch 返回的目标版本 id 为锚点取分支：即使入参 message_id 是非目标兄弟也能正确取到目标分支
     workflow_service = WorkflowService(db)
     branch = workflow_service._build_branch_view(result["message_id"], user_id=str(current_user.id))
-    return success(data=branch)
+    return success(data=branch, msg="消息版本切换成功")
 
 
 # ========== 消息版本管理 ==========
@@ -316,7 +316,7 @@ async def submit_message_feedback(
         feedback_content=payload.feedback_content,
     )
 
-    return success(data=app_schema.MessageFeedbackResponse(**result))
+    return success(data=app_schema.MessageFeedbackResponse(**result), msg="反馈提交成功")
 
 
 # ========== 消息收藏 ==========
@@ -489,13 +489,13 @@ async def report_message(
         selected_text=payload.selected_text,
     )
 
-    return success(data=app_schema.MessageReportResponse(**result))
+    return success(data=app_schema.MessageReportResponse(**result), msg="举报提交成功")
 
 
 @router.get("/enums/message_report_types", summary="获取举报类型枚举")
 async def get_message_report_types():
     """获取举报类型枚举"""
-    return success(data=MessageReportType.get_all_types_with_labels())
+    return success(data=MessageReportType.get_all_types_with_labels(), msg="获取举报类型成功")
 
 
 # ========== 删除消息 ==========

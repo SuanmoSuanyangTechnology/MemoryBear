@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass, field, replace
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from redbear_model.contracts import ModelProfile
 
@@ -12,6 +12,9 @@ from ...api.schemas.chunk import RetrieveType
 from ...api.schemas.rerank import RerankMode
 from ..knowledge_graph.config import GraphPipeline
 from ..models.chunk import DocumentChunk
+
+if TYPE_CHECKING:
+    from ..faq.index import FAQTarget
 
 
 @dataclass(frozen=True)
@@ -99,6 +102,7 @@ class RetrievalTarget:
     params: RetrievalParams
     embedding: ModelRuntimeSnapshot
     reranker: ModelRuntimeSnapshot | None
+    faq: FAQTarget | None = None
 
 
 @dataclass(frozen=True)

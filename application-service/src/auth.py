@@ -36,8 +36,9 @@ from .api.dependencies import (
     Principal,
     principal_from_headers,
 )
-from .api.schemas.common import fail
-from .i18n import resolve_locale, translate
+from .api.error_handlers import auth_rejection_content
+from .errors import BusinessException, http_status_for
+from .i18n import resolve_locale
 from .request_logging import log_request_failure, safe_failure_detail
 from .trace import TRACE_ID_HEADER
 
@@ -132,9 +133,9 @@ def _auth_error(
 
     language = resolve_locale(
         explicit=request.query_params.get("lang"),
+        language_type=request.headers.get("X-Language-Type"),
         accepted=request.headers.get("Accept-Language"),
     )
-    message = translate("errors.common.unauthorized", language)
     log_request_failure(
         request,
         status_code=status_code,
@@ -145,7 +146,7 @@ def _auth_error(
     )
     return JSONResponse(
         status_code=status_code,
-        content=fail(code=status_code, msg=message, error=detail),
+        content=auth_rejection_content(status_code, detail, language),
         headers={TRACE_ID_HEADER: request.state.trace_id},
     )
 
@@ -174,8 +175,10 @@ class AppAuthMiddleware(BaseHTTPMiddleware):
         # verified nor consumed here; the boundary is the NetworkPolicy.
         try:
             principal = principal_from_headers(request)
-        except HTTPException as exc:
-            return _auth_error(request, 401, "invalid principal headers", exception=exc)
+        except BusinessException as exc:
+            return _auth_error(
+                request, http_status_for(exc.code), exc.message, exception=exc
+            )
         request.state.principal = principal
         return await call_next(request)
 

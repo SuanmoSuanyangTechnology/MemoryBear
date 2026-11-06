@@ -2,18 +2,9 @@
 
 from __future__ import annotations
 
+from error_core.codes import BizCode
 
-class BizCode:
-    VALIDATION_FAILED = 1001
-    MISSING_PARAMETER = 1002
-    INVALID_PARAMETER = 1003
-    UNAUTHORIZED = 2001
-    WORKSPACE_ACCESS_DENIED = 3005
-    USER_NOT_FOUND = 4001
-    INVALID_USER_ID = 9601
-    INTERNAL_ERROR = 10001
-    DB_ERROR = 10002
-    SERVICE_UNAVAILABLE = 10003
+__all__ = ["BizCode", "LocalizedProfileError", "ProfileError"]
 
 
 class ProfileError(Exception):

@@ -25,14 +25,13 @@ import shlex
 import uuid
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Optional
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import end_read_transaction
 from ..integrations.sandbox.client import SandboxPrincipal, SandboxServiceClient
-from ..integrations.sandbox.errors import SandboxServiceError
 from ..models.skill_model import Skill
 from ..models.skill_package_model import SkillFile, SkillPackage
 from ..repositories.skill_package_repository import SkillPackageRepository
@@ -56,7 +55,10 @@ import os, subprocess, sys
 _pkg = {pkg!r}
 _script = {script!r}
 _args = {args!r}
-os.chdir(_pkg)
+# No os.chdir here: this code runs in the conversation's persistent kernel, so changing
+# its cwd would leak into everything the user runs afterwards (a later relative-path
+# publish would look under the skill pack instead of the session directory).
+# Only the child gets the pack as cwd.
 _proc = subprocess.run(
     [sys.executable, _script, *_args],
     cwd=_pkg, capture_output=True, text=True, errors="replace",
@@ -65,7 +67,12 @@ if _proc.stdout:
     sys.stdout.write(_proc.stdout)
 if _proc.stderr:
     sys.stderr.write(_proc.stderr)
-sys.stdout.write("\\n{marker}:%d\\n" % _proc.returncode)
+if _proc.stdout and not _proc.stdout.endswith("\\n"):
+    sys.stdout.write("\\n")
+# The marker must own a whole line, and the write result (an int the kernel would echo
+# on the next prompt) must not become the last expression: flush() returns None.
+sys.stdout.write("{marker}:%d\\n" % _proc.returncode)
+sys.stdout.flush()
 '''
 INTERPRETERS = {
     "python": ("code", "python3"),
@@ -89,10 +96,10 @@ class ScriptOutcome:
     pack_dir: str
     script: str
     status: str
-    exit_code: Optional[int]
+    exit_code: int | None
     stdout: str
     stderr: str
-    error: Optional[str]
+    error: str | None
     duration_ms: int
     workspace_reset: bool
     stdout_truncated: bool
@@ -108,7 +115,7 @@ def pack_dir(call_name: str, content_hash: str) -> str:
     return f"{SKILLS_ROOT}/{call_name}/{content_hash}"
 
 
-def normalize_script_path(raw: str) -> Optional[str]:
+def normalize_script_path(raw: str) -> str | None:
     """Normalize a pack-relative script path; ``None`` for absolute paths or traversal."""
 
     normalized = (raw or "").strip().replace("\\", "/")
@@ -216,20 +223,29 @@ def build_command(interpreter: str, script_rel: str, args: list[str], *, max_byt
 
 
 def _split_exit_marker(stdout: str) -> tuple[str, Optional[int]]:
-    """Peel the runner's trailing ``__SKILL_SCRIPT_EXIT__:<n>`` line off stdout."""
+    """Peel the runner's trailing ``__SKILL_SCRIPT_EXIT__:<n>`` line off stdout.
+
+    The code channel runs in a persistent Jupyter-style kernel, so text may follow our
+    marker (an echoed expression value, a stray prompt). Only the marker line itself is
+    parsed and the body stops at the marker, so neither junk reaches the model nor turns
+    a real exit code into ``None``.
+    """
 
     marker = f"{EXIT_MARKER}:"
     index = stdout.rfind(marker)
     if index < 0:
         return stdout, None
-    tail = stdout[index + len(marker):].strip()
+    line_end = stdout.find("\n", index)
+    tail = stdout[index + len(marker):] if line_end < 0 else stdout[index + len(marker):line_end]
+    try:
+        exit_code = int(tail.strip())
+    except ValueError:
+        # Marker cut in half by the output budget, or not ours: leave stdout untouched.
+        return stdout, None
     body = stdout[:index]
     if body.endswith("\n"):
         body = body[:-1]
-    try:
-        return body, int(tail)
-    except ValueError:
-        return stdout, None
+    return body, exit_code
 
 
 async def run_skill_script(
@@ -242,8 +258,8 @@ async def run_skill_script(
     identifier: str,
     script: str,
     interpreter: str = "python",
-    args: Optional[list[str]] = None,
-    timeout_s: Optional[float] = None,
+    args: list[str] | None = None,
+    timeout_s: float | None = None,
 ) -> ScriptOutcome:
     """Stage the pack on demand, then run one script inside the sandbox."""
 

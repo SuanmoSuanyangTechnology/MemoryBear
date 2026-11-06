@@ -58,11 +58,12 @@ export const createAgentStreamHandler = (deps: AgentStreamDeps) => {
 
   return (data: SSEMessage[]) => {
     data.map(item => {
-      const { conversation_id, content, message_length, audio_url, citations, suggested_questions, error, message_id } = item.data as {
+      const { conversation_id, content, message_length, audio_url, citations, suggested_questions, msg, error, message_id } = item.data as {
         conversation_id: string, content: string, message_length: number; audio_url?: string;
         citations?: NodeData['citations'];
         suggested_questions?: string[];
-        error?: { message?: string; };
+        msg?: string;
+        error?: { message?: string; msg?: string; };
         message_id?: string;
       };
       // Capture the draft-run message id so like/dislike/regenerate/etc. can target it
@@ -93,7 +94,7 @@ export const createAgentStreamHandler = (deps: AgentStreamDeps) => {
           syncConversationId(conversation_id)
           break
         case 'error':
-          setChatList(prev => applyErrorMessage(prev, message_length, error))
+          setChatList(prev => applyErrorMessage(prev, message_length, typeof error === 'string' ? { msg: msg || error } : { ...error, msg: msg || error?.msg || error?.message }))
           streamLoadingRef.current = false
           setLoading(false)
           break
@@ -134,7 +135,7 @@ export const createAgentStreamHandler = (deps: AgentStreamDeps) => {
           if ((citations && citations.length > 0) || (suggested_questions && suggested_questions.length > 0)) {
             setChatList(prev => appendAssistantMessage(prev, content || '', audio_url, undefined, citations, suggested_questions))
           }
-          setChatList(prev => applyErrorMessage(prev, message_length, error))
+          setChatList(prev => applyErrorMessage(prev, message_length, typeof error === 'string' ? { msg: msg || error } : { ...error, msg: msg || error?.msg || error?.message }))
           streamLoadingRef.current = false
           setStreamLoading(false)
           streamLoadingRef.current = false

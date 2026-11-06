@@ -300,7 +300,8 @@ const PrivateFileWorkspace = forwardRef<PrivateFileWorkspaceRef, PrivateFileWork
       onClick: () => createFolderModalRef.current?.handleOpen({
         kb_id: knowledgeBase.id,
         parent_id: folder.parent_id ?? knowledgeBase.id,
-      }),
+        parent_name: folderPath.find((item) => item.id === folder.parent_id)?.name,
+      }, undefined, folderPath.map((item) => item.name)),
     },
     {
       key: 'dataset',

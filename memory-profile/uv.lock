@@ -1,5 +1,5 @@
 version = 1
-revision = 5
+revision = 3
 requires-python = "==3.12.*"
 
 [[package]]
@@ -432,6 +432,16 @@ async = [
 ]
 
 [[package]]
+name = "error-core"
+version = "0.1.0"
+source = { directory = "../packages/error-core" }
+
+[package.metadata]
+
+[package.metadata.requires-dev]
+dev = [{ name = "pytest", specifier = ">=8.0" }]
+
+[[package]]
 name = "fastapi"
 version = "0.156.4"
 source = { registry = "https://mirrors.cloud.tencent.com/pypi/simple" }
@@ -489,40 +499,6 @@ wheels = [
     { url = "https://mirrors.cloud.tencent.com/pypi/packages/ef/31/9b4e140bc24d0ad7927ebd651f5608b0acc2334d061748c3b6ad19085cfa/greenlet-3.5.6-cp312-cp312-musllinux_1_2_x86_64.whl", hash = "sha256:3dbb4596a6a4e5d47121a33ff20533a81e60f302d9e67b69909a8bc21a43f0a7" },
     { url = "https://mirrors.cloud.tencent.com/pypi/packages/c3/71/d79f1791f824f8ff15c2978746640467ae932a2365e0201069f7f272395f/greenlet-3.5.6-cp312-cp312-win_amd64.whl", hash = "sha256:7ac4abb3877c43af320392c664774eef6fa2cc063c79a55fc02d844a3cbe7395" },
     { url = "https://mirrors.cloud.tencent.com/pypi/packages/63/af/42aca4d56e8cb321912203069d8d34734cb288222f10ad2ae102718cc577/greenlet-3.5.6-cp312-cp312-win_arm64.whl", hash = "sha256:301102a49120b095e72a7838792b41233975fc1c155daec6d98f81c00c9280e0" },
-]
-
-[[package]]
-name = "grpcio"
-version = "1.85.0"
-source = { registry = "https://mirrors.cloud.tencent.com/pypi/simple" }
-dependencies = [
-    { name = "typing-extensions" },
-]
-sdist = { url = "https://mirrors.cloud.tencent.com/pypi/packages/5b/34/60907c03ef43039c1e91ed5bdfae41ada5648264f013cabc3f186600e571/grpcio-1.85.0.tar.gz", hash = "sha256:8aa2647afcbe5a87783e9626a2ece6277db33c6604c21690d19b5bd15609e36d" }
-wheels = [
-    { url = "https://mirrors.cloud.tencent.com/pypi/packages/d4/67/75531891c7f21dda119186151a5d24b257d094257e6dfdf6f6fa30d44feb/grpcio-1.85.0-cp312-cp312-linux_armv7l.whl", hash = "sha256:c02d956990c55730efcca487a4eac64f8e0fcb3af7e53c9e89cd02a985669709" },
-    { url = "https://mirrors.cloud.tencent.com/pypi/packages/64/64/6dbc16efc2ff11d4b0b9c5701ab55fb03f9c45e61e2ae6896fbfb6769848/grpcio-1.85.0-cp312-cp312-macosx_11_0_universal2.whl", hash = "sha256:b10f0f0a34ce6b122dbf5dcf8226cbe41509c602af926b1e55113ad9e49cc5f7" },
-    { url = "https://mirrors.cloud.tencent.com/pypi/packages/d9/ff/be3621580c361eae4a4669580e9511f11e09bd25d2e9a034076ec1dd1525/grpcio-1.85.0-cp312-cp312-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:b1ea46f63a7a9e19ce5cc09be0a6f9b347e0dcc14c4ab47b48488f6c093b8171" },
-    { url = "https://mirrors.cloud.tencent.com/pypi/packages/b1/75/d26f7dc4d4d562aeeb82ff66107b5fee3fe69462457813e259b9d8dbdfcc/grpcio-1.85.0-cp312-cp312-manylinux2014_i686.manylinux_2_17_i686.whl", hash = "sha256:e2f1c3089ed6ae75e24529a498a6b65941fdb6856c3416d62c88da944947fc88" },
-    { url = "https://mirrors.cloud.tencent.com/pypi/packages/10/1e/4be389b352c79fc6a457ca8bfda6b0b5e8a1e0ed8eaca21f7a2d1a40a7c5/grpcio-1.85.0-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:4ddfe8b667889b9be5990ae674b13f0db0a9eb61972306038d0140a1da0f0b87" },
-    { url = "https://mirrors.cloud.tencent.com/pypi/packages/8b/ea/1dcc9f8e3439bacc95ef2198fafad97b2024f017af38353a650864780e66/grpcio-1.85.0-cp312-cp312-musllinux_1_2_aarch64.whl", hash = "sha256:17641f3a6ff3512c34e5c367805d2632a43a773d7990f1c4c55243df6bee8fbb" },
-    { url = "https://mirrors.cloud.tencent.com/pypi/packages/90/bd/a37f748e3c76e1b9314a2c28a89c80689ba18132e94c5d403ebc7fabdb9f/grpcio-1.85.0-cp312-cp312-musllinux_1_2_i686.whl", hash = "sha256:1a94f32df519cb7efe3822f7f3c2daee0b0e2f01a281e1db5dbfb0efd1635b6e" },
-    { url = "https://mirrors.cloud.tencent.com/pypi/packages/43/25/36e61d090c94108307a9eea2df00e7e2e23e3dac8b816f8ec2ce371925f0/grpcio-1.85.0-cp312-cp312-musllinux_1_2_x86_64.whl", hash = "sha256:8572f9d7282cded6b018fb0147d09bbe7e59177ba6c452f1903682a80dc0857e" },
-    { url = "https://mirrors.cloud.tencent.com/pypi/packages/c6/11/51c506bf6d104918d30cbc85b3d952e4378d038185dcf0322a93eaef7f16/grpcio-1.85.0-cp312-cp312-win32.whl", hash = "sha256:25007d0e4657dcdafa9a80677895b71de8c1d6335afb7fa6a4b35330e2d3127a" },
-    { url = "https://mirrors.cloud.tencent.com/pypi/packages/a9/48/6d62ac3a289656c83fdc10fb895ecb9a59f8ee0318d654fb4cd20ed7293c/grpcio-1.85.0-cp312-cp312-win_amd64.whl", hash = "sha256:d6c43a06a059a95f03013aa5fce9106a6a2b6b78cfff4003a53e0eb410c0e1d7" },
-]
-
-[[package]]
-name = "grpcio-health-checking"
-version = "1.81.1"
-source = { registry = "https://mirrors.cloud.tencent.com/pypi/simple" }
-dependencies = [
-    { name = "grpcio" },
-    { name = "protobuf" },
-]
-sdist = { url = "https://mirrors.cloud.tencent.com/pypi/packages/65/46/6b6678b5a922765ae7637205bb6d0618a4da8b35f2ce6116f8bcff262370/grpcio_health_checking-1.81.1.tar.gz", hash = "sha256:ecc61480e25058a4a04e11e4ab6900ad7439b32e60a8ce4ece7d9f219221c85d" }
-wheels = [
-    { url = "https://mirrors.cloud.tencent.com/pypi/packages/6e/87/174bbfb5613794862c45b5cdf567fcfb478ad5a3a7b594e11d998656b2f9/grpcio_health_checking-1.81.1-py3-none-any.whl", hash = "sha256:cbc6a4171825ec64389de2f062d296ba129a5c27eefd0dd55fa837909184bdf9" },
 ]
 
 [[package]]
@@ -893,6 +869,11 @@ wheels = [
 ]
 
 [[package]]
+name = "memory-contracts"
+version = "0.1.0"
+source = { directory = "../packages/memory-contracts" }
+
+[[package]]
 name = "memory-profile"
 version = "0.1.0"
 source = { editable = "." }
@@ -902,11 +883,13 @@ dependencies = [
     { name = "auth-sdk" },
     { name = "certifi" },
     { name = "elasticsearch", extra = ["async"] },
+    { name = "error-core" },
     { name = "fastapi" },
     { name = "jinja2" },
     { name = "json-repair" },
     { name = "langchain-core" },
     { name = "langchain-openai" },
+    { name = "memory-contracts" },
     { name = "neo4j" },
     { name = "psutil" },
     { name = "pydantic" },
@@ -937,11 +920,13 @@ requires-dist = [
     { name = "auth-sdk", directory = "../packages/auth-sdk" },
     { name = "certifi", specifier = "==2026.10.23" },
     { name = "elasticsearch", extras = ["async"], specifier = "==8.16.0" },
+    { name = "error-core", directory = "../packages/error-core" },
     { name = "fastapi", specifier = "==0.156.4" },
     { name = "jinja2", specifier = "==3.1.6" },
     { name = "json-repair", specifier = "==0.64.2" },
     { name = "langchain-core", specifier = "==1.6.12" },
     { name = "langchain-openai", specifier = "==1.7.2" },
+    { name = "memory-contracts", directory = "../packages/memory-contracts" },
     { name = "neo4j", specifier = "==6.4.0" },
     { name = "psutil", specifier = "==7.2.2" },
     { name = "pydantic", specifier = "==2.14.1" },
@@ -963,33 +948,6 @@ dev = [
     { name = "pytest", specifier = "==9.0.3" },
     { name = "pytest-asyncio", specifier = "==1.4.0" },
     { name = "ruff", specifier = "==0.16.7" },
-]
-
-[[package]]
-name = "memorybear-grpc"
-version = "0.1.0"
-source = { directory = "../packages/memorybear-grpc" }
-dependencies = [
-    { name = "grpcio" },
-    { name = "grpcio-health-checking" },
-    { name = "prometheus-client" },
-    { name = "protobuf" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "grpcio", specifier = ">=1.81.1,<2" },
-    { name = "grpcio-health-checking", specifier = ">=1.66,<2" },
-    { name = "prometheus-client", specifier = ">=0.21,<1" },
-    { name = "protobuf", specifier = ">=6.33.5,<7" },
-]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "grpcio-tools", specifier = ">=1.81.1,<1.82" },
-    { name = "pytest", specifier = ">=9,<10" },
-    { name = "pytest-asyncio", specifier = ">=1.3,<2" },
-    { name = "ruff", specifier = ">=0.16,<1" },
 ]
 
 [[package]]
@@ -1118,15 +1076,6 @@ wheels = [
 ]
 
 [[package]]
-name = "prometheus-client"
-version = "0.26.0"
-source = { registry = "https://mirrors.cloud.tencent.com/pypi/simple" }
-sdist = { url = "https://mirrors.cloud.tencent.com/pypi/packages/52/73/f1334c29c2af4cd9dba6c7817e61b611bd0215e2eb5565c6064a4de18802/prometheus_client-0.26.0.tar.gz", hash = "sha256:04a91bcf94e2cf74a44a1a874d651a2e853ed354b6e822f3b7487751465d5c2b" }
-wheels = [
-    { url = "https://mirrors.cloud.tencent.com/pypi/packages/eb/a3/b69efbf4143b5b9859b977770bbbabcc2796b702fa69dc40271e45cd5a56/prometheus_client-0.26.0-py3-none-any.whl", hash = "sha256:fa93d06737aa02bacd05794768508bb97d2fbee28cb3bca04eaae92f0ca953d6" },
-]
-
-[[package]]
 name = "prompt-toolkit"
 version = "3.0.53"
 source = { registry = "https://mirrors.cloud.tencent.com/pypi/simple" }
@@ -1162,21 +1111,6 @@ wheels = [
     { url = "https://mirrors.cloud.tencent.com/pypi/packages/58/7b/6e8ef26f6d510a7916064fec68d55fcbfbdf7eb01e377480d66a122152d8/propcache-0.5.4-cp312-cp312-win_amd64.whl", hash = "sha256:98914de2c4d7f0f9f4a8c6ea4bf05841f4175796941e3ef7d47eb718f22311fb" },
     { url = "https://mirrors.cloud.tencent.com/pypi/packages/08/b9/72028c5b56ced97f456de6aefa79435ca64d7f77af78ea8cf3c76fc5195f/propcache-0.5.4-cp312-cp312-win_arm64.whl", hash = "sha256:8876b39961e33d912afe3c1bee18ee564fdad0206f873cc15d522756b7f50737" },
     { url = "https://mirrors.cloud.tencent.com/pypi/packages/f5/cd/785c64ed382f3f04201870267b02783f63b4678c2acfddc177a3ebcc2727/propcache-0.5.4-py3-none-any.whl", hash = "sha256:62c60aec739ed00124573cce1178138fd690c7676352d67a37328c1cf51d7468" },
-]
-
-[[package]]
-name = "protobuf"
-version = "6.33.6"
-source = { registry = "https://mirrors.cloud.tencent.com/pypi/simple" }
-sdist = { url = "https://mirrors.cloud.tencent.com/pypi/packages/66/70/e908e9c5e52ef7c3a6c7902c9dfbb34c7e29c25d2f81ade3856445fd5c94/protobuf-6.33.6.tar.gz", hash = "sha256:a6768d25248312c297558af96a9f9c929e8c4cee0659cb07e780731095f38135" }
-wheels = [
-    { url = "https://mirrors.cloud.tencent.com/pypi/packages/fc/9f/2f509339e89cfa6f6a4c4ff50438db9ca488dec341f7e454adad60150b00/protobuf-6.33.6-cp310-abi3-win32.whl", hash = "sha256:7d29d9b65f8afef196f8334e80d6bc1d5d4adedb449971fefd3723824e6e77d3" },
-    { url = "https://mirrors.cloud.tencent.com/pypi/packages/76/5d/683efcd4798e0030c1bab27374fd13a89f7c2515fb1f3123efdfaa5eab57/protobuf-6.33.6-cp310-abi3-win_amd64.whl", hash = "sha256:0cd27b587afca21b7cfa59a74dcbd48a50f0a6400cfb59391340ad729d91d326" },
-    { url = "https://mirrors.cloud.tencent.com/pypi/packages/5c/01/a3c3ed5cd186f39e7880f8303cc51385a198a81469d53d0fdecf1f64d929/protobuf-6.33.6-cp39-abi3-macosx_10_9_universal2.whl", hash = "sha256:9720e6961b251bde64edfdab7d500725a2af5280f3f4c87e57c0208376aa8c3a" },
-    { url = "https://mirrors.cloud.tencent.com/pypi/packages/ee/90/b3c01fdec7d2f627b3a6884243ba328c1217ed2d978def5c12dc50d328a3/protobuf-6.33.6-cp39-abi3-manylinux2014_aarch64.whl", hash = "sha256:e2afbae9b8e1825e3529f88d514754e094278bb95eadc0e199751cdd9a2e82a2" },
-    { url = "https://mirrors.cloud.tencent.com/pypi/packages/9b/ca/25afc144934014700c52e05103c2421997482d561f3101ff352e1292fb81/protobuf-6.33.6-cp39-abi3-manylinux2014_s390x.whl", hash = "sha256:c96c37eec15086b79762ed265d59ab204dabc53056e3443e702d2681f4b39ce3" },
-    { url = "https://mirrors.cloud.tencent.com/pypi/packages/16/92/d1e32e3e0d894fe00b15ce28ad4944ab692713f2e7f0a99787405e43533a/protobuf-6.33.6-cp39-abi3-manylinux2014_x86_64.whl", hash = "sha256:e9db7e292e0ab79dd108d7f1a94fe31601ce1ee3f7b79e0692043423020b0593" },
-    { url = "https://mirrors.cloud.tencent.com/pypi/packages/c4/72/02445137af02769918a93807b2b7890047c32bfb9f90371cbc12688819eb/protobuf-6.33.6-py3-none-any.whl", hash = "sha256:77179e006c476e69bf8e8ce866640091ec42e1beb80b213c3900006ecfba6901" },
 ]
 
 [[package]]
@@ -1380,6 +1314,7 @@ version = "0.1.0"
 source = { directory = "../packages/redbear-model" }
 dependencies = [
     { name = "cryptography" },
+    { name = "error-core" },
     { name = "pydantic" },
     { name = "sqlalchemy" },
 ]
@@ -1391,7 +1326,6 @@ runtime = [
     { name = "langchain-community" },
     { name = "langchain-core" },
     { name = "langchain-openai" },
-    { name = "memorybear-grpc" },
 ]
 
 [package.metadata]
@@ -1399,6 +1333,7 @@ requires-dist = [
     { name = "cryptography", specifier = ">=43" },
     { name = "dashscope", marker = "extra == 'all'", specifier = ">=1.25,<2" },
     { name = "dashscope", marker = "extra == 'dashscope'", specifier = ">=1.25,<2" },
+    { name = "error-core", directory = "../packages/error-core" },
     { name = "httpx", marker = "extra == 'all'", specifier = ">=0.28,<1" },
     { name = "httpx", marker = "extra == 'runtime'", specifier = ">=0.28,<1" },
     { name = "httpx", extras = ["socks"], marker = "extra == 'all'", specifier = ">=0.28,<1" },
@@ -1415,14 +1350,13 @@ requires-dist = [
     { name = "langchain-ollama", marker = "extra == 'ollama'", specifier = ">=1.0,<2" },
     { name = "langchain-openai", marker = "extra == 'all'", specifier = ">=1.0,<2" },
     { name = "langchain-openai", marker = "extra == 'runtime'", specifier = ">=1.0,<2" },
-    { name = "memorybear-grpc", marker = "extra == 'all'", directory = "../packages/memorybear-grpc" },
-    { name = "memorybear-grpc", marker = "extra == 'runtime'", directory = "../packages/memorybear-grpc" },
+    { name = "memorybear-grpc", marker = "extra == 'grpc'", directory = "../packages/memorybear-grpc" },
     { name = "pydantic", specifier = ">=2.12,<3" },
     { name = "sqlalchemy", specifier = ">=2.0,<3" },
     { name = "volcengine-python-sdk", extras = ["ark"], marker = "extra == 'all'", specifier = ">=5.0.19,<6" },
     { name = "volcengine-python-sdk", extras = ["ark"], marker = "extra == 'generation'", specifier = ">=5.0.19,<6" },
 ]
-provides-extras = ["runtime", "ollama", "bedrock", "dashscope", "generation", "all"]
+provides-extras = ["runtime", "grpc", "ollama", "bedrock", "dashscope", "generation", "all"]
 
 [[package]]
 name = "redis"

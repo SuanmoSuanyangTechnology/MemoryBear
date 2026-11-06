@@ -257,7 +257,8 @@ export function useConversation() {
         setLoading(false)
       })
       .catch(err => {
-        setDisabled(err?.response?.data?.error_code === 'QUOTA_EXCEEDED')
+        const code = err?.code ?? err?.response?.data?.code;
+        setDisabled(code === 3015 || code === 3016 || code === 3017 || code === 10004)
       })
       .finally(() => setPageLoading(false))
   }

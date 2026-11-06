@@ -20,6 +20,7 @@ from .engine.runtime_schema import ExecutionContext
 from .engine.state_manager import WorkflowStateManager
 from .engine.stream_output_coordinator import StreamOutputCoordinator
 from .engine.variable_pool import VariablePool, VariablePoolInitializer
+from .error_info import workflow_error_info
 from .nodes.base_node import NodeExecutionError
 from ..utils.datetime_utils import to_timestamp_ms, utcnow_naive
 from ..utils.text_sanitize import sanitize_text, sanitize_value
@@ -155,8 +156,16 @@ class WorkflowExecutor:
         async for event in self.execute_stream(input_data):
             if event.get("event") == "workflow_end":
                 return event.get("data")
+        error_info = workflow_error_info(
+            None, fallback_detail="Workflow execution did not end as expected"
+        )
         return self.result_builder.build_final_output(
-            {"error": "Workflow execution did not end as expected"},
+            {
+                "error": error_info["error"],
+                "error_code": error_info["code"],
+                "error_msg": error_info["msg"],
+                "error_retryable": error_info["retryable"],
+            },
             self.execution_context,
             self.variable_pool,
             (utcnow_naive() - start).total_seconds(),
@@ -651,8 +660,23 @@ class WorkflowExecutor:
             end_time = utcnow_naive()
             elapsed_time = (end_time - start_time).total_seconds()
 
-            logger.error(f"Workflow execution failed: execution_id={self.execution_context.execution_id}, error={e}",
-                         exc_info=True)
+            # A node classified its own exception before the wrapper was raised;
+            # reuse that so model/business codes survive the NodeExecutionError.
+            if isinstance(e, NodeExecutionError) and e.error_info is not None:
+                error_info = e.error_info
+            else:
+                error_info = workflow_error_info(e)
+            logger.error(
+                "workflow_execution_failed execution_id=%s code=%s code_name=%s "
+                "msg_locale=%s retryable=%s source_service=application-service detail=%s",
+                self.execution_context.execution_id,
+                error_info["code"],
+                error_info["code_name"],
+                error_info["locale"],
+                error_info["retryable"],
+                error_info["error"],
+                exc_info=True,
+            )
 
             # 1) Try to recover node_outputs of already-succeeded nodes from the checkpoint
             recovered: dict[str, Any] = {}
@@ -687,7 +711,10 @@ class WorkflowExecutor:
                 # Do not overwrite an existing entry (unlikely to exist); write the failed node record defensively
                 node_outputs.setdefault(e.node_id, e.node_output)
 
-            result["error"] = str(e)
+            result["error"] = error_info["error"]
+            result["error_code"] = error_info["code"]
+            result["error_msg"] = error_info["msg"]
+            result["error_retryable"] = error_info["retryable"]
             if failed_node_id:
                 result["error_node"] = failed_node_id
 

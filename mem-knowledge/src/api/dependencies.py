@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import Header, HTTPException, Request
+from fastapi import Header, Request
 from pydantic import BaseModel, ValidationError
 
 from ..errors import KnowledgeError
@@ -79,11 +79,11 @@ async def require_knowledge_copy_principal(request: Request) -> Principal:
     """Require the legacy manager proxy trust boundary for configuration copy."""
 
     if getattr(request.state, "kb_legacy_proxy_authenticated", False) is not True:
-        raise HTTPException(status_code=403, detail="Knowledge copy source is not trusted")
+        raise KnowledgeError.from_code("KB_HTTP_FORBIDDEN")
     if request.headers.get("X-KB-Source") != KnowledgeRetrievalSource.MANAGER_API.value:
-        raise HTTPException(status_code=403, detail="Knowledge copy source is not trusted")
+        raise KnowledgeError.from_code("KB_HTTP_FORBIDDEN")
     if "authorization" in request.headers or "x-api-key" in request.headers:
-        raise HTTPException(status_code=403, detail="Knowledge copy credentials are not allowed")
+        raise KnowledgeError.from_code("KB_HTTP_FORBIDDEN")
     return await get_principal(request)
 
 

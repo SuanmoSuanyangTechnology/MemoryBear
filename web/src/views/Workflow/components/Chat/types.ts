@@ -25,6 +25,7 @@ export type StreamEventData = {
   input?: any;
   output?: any;
   elapsed_time?: string;
+  msg?: string;
   error?: any;
   state: Record<string, any>;
   status?: 'completed' | 'failed' | 'running' | 'waiting_human';
