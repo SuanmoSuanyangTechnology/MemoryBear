@@ -1,0 +1,101 @@
+{
+  "version": 1,
+  "types": [
+    {
+      "domain": "coding",
+      "display_name": {"zh": "Coding · 编码助手", "en": "Coding Assistant"},
+      "note": {
+        "zh": "「通用偏好」仅在 Coding 任务之间适用，不代表跨业务场景共享。当前用户指令与系统约束始终优先。",
+        "en": "\"General\" applies only across Coding tasks, not across business domains; user instructions and system constraints always take precedence."
+      },
+      "subjects": [
+        {
+          "key": "language",
+          "label": {"zh": "产出语言", "en": "Output Language"},
+          "description": {
+            "zh": "回复、注释、提交信息与文档的语言",
+            "en": "Language used in replies, code comments, commit messages, and documentation"
+          }
+        },
+        {
+          "key": "response_length",
+          "label": {"zh": "回复篇幅", "en": "Response Length"},
+          "description": {
+            "zh": "简短或详细、是否保留结尾总结",
+            "en": "Whether replies are brief or detailed, and whether to keep a closing summary"
+          }
+        },
+        {
+          "key": "explanation_style",
+          "label": {"zh": "解释方式", "en": "Explanation Style"},
+          "description": {
+            "zh": "原理深度、示例密度与说明顺序",
+            "en": "Depth of rationale, density of examples, and order of explanation"
+          }
+        },
+        {
+          "key": "result_presentation",
+          "label": {"zh": "结果呈现方式", "en": "Result Presentation"},
+          "description": {
+            "zh": "Markdown、JSON、表格、diff 等",
+            "en": "Markdown, JSON, tables, diffs, code blocks, and validation reports"
+          }
+        },
+        {
+          "key": "code_style",
+          "label": {"zh": "代码风格", "en": "Code Style"},
+          "description": {
+            "zh": "命名、格式、类型标注与注释",
+            "en": "Naming, formatting, type annotations, comments, and docstrings"
+          }
+        },
+        {
+          "key": "design_approach",
+          "label": {"zh": "设计取向", "en": "Design Approach"},
+          "description": {
+            "zh": "架构模式、抽象程度与依赖取舍",
+            "en": "Architecture patterns, level of abstraction, implementation strategy, and dependency trade-offs"
+          }
+        },
+        {
+          "key": "change_scope",
+          "label": {"zh": "修改范围", "en": "Change Scope"},
+          "description": {
+            "zh": "最小修改、重构边界与兼容范围",
+            "en": "Minimal edits, whether to refactor along the way, and compatibility boundaries"
+          }
+        },
+        {
+          "key": "action_mode",
+          "label": {"zh": "行动方式", "en": "Action Mode"},
+          "description": {
+            "zh": "先方案、先确认、查证与验证流程",
+            "en": "Plan first, confirm first, read-only vs direct edits, commit rules, verification requirements, and prohibited actions"
+          }
+        },
+        {
+          "key": "tool_choice",
+          "label": {"zh": "技术与工具选择", "en": "Technology & Tools"},
+          "description": {
+            "zh": "编程语言、框架、库与开发工具",
+            "en": "Programming languages, frameworks, libraries, package managers, test frameworks, formatters, and build tools"
+          }
+        }
+      ],
+      "situations": [
+        {"key": "global", "label": {"zh": "通用偏好（Coding 内）", "en": "General (within Coding)"}},
+        {"key": "code_generation", "label": {"zh": "代码生成", "en": "Code Generation"}},
+        {"key": "code_explanation", "label": {"zh": "代码解释", "en": "Code Explanation"}},
+        {"key": "design_planning", "label": {"zh": "方案规划", "en": "Design Planning"}},
+        {"key": "refactoring", "label": {"zh": "代码重构", "en": "Refactoring"}},
+        {"key": "debugging", "label": {"zh": "故障调试", "en": "Debugging"}},
+        {"key": "validation", "label": {"zh": "测试与验证", "en": "Testing & Validation"}},
+        {"key": "code_review", "label": {"zh": "代码审查", "en": "Code Review"}},
+        {"key": "commit_message", "label": {"zh": "提交信息与操作", "en": "Commit Messages & Operations"}},
+        {"key": "documentation", "label": {"zh": "文档编写", "en": "Documentation"}},
+        {"key": "environment_setup", "label": {"zh": "环境搭建", "en": "Environment Setup"}},
+        {"key": "command_execution", "label": {"zh": "命令执行", "en": "Command Execution"}}
+      ]
+    }
+  ]
+}

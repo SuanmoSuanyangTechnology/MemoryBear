@@ -62,6 +62,7 @@ export const skills = {
   chooseSource: "选择导入来源",
   sourceDescription: "选择来源后解析内容，区分插件（技能集合）与单个技能，供 Agent 编排使用。",
   githubUrl: "GitHub 地址",
+  invalidGithubUrl: "请输入有效的 GitHub 仓库或技能目录地址，例如 https://github.com/owner/repository/tree/main/skills/skill-name",
   githubDescription: "从仓库或具体技能目录导入插件或技能",
   zipFile: "ZIP 文件",
   zipDescription: "上传插件或单个技能的 ZIP 文件",

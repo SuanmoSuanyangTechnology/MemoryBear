@@ -16,6 +16,7 @@ and ``_drop_lost``.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
@@ -258,16 +259,35 @@ class FileOpsMixin:
 
             try:
                 size = await self._backend.write_stream(instance_id, path, limited())  # type: ignore[attr-defined]
+            except asyncio.CancelledError:
+                # A disconnect cancels the request in the middle of the write. The
+                # half-written file must still go: shielding lets the deletion finish
+                # even if this task is cancelled again, then the cancel propagates
+                # unchanged (``except Exception`` never sees CancelledError).
+                await asyncio.shield(self._remove_partial(instance_id, path, rec))
+                raise
             except Exception:
-                try:  # do not leave a half-written file behind
-                    await self._backend.remove(instance_id, path)  # type: ignore[attr-defined]
-                except BackendError as cleanup_exc:
-                    self._record_backend_error(  # type: ignore[attr-defined]
-                        "files_cleanup", cleanup_exc, rec
-                    )
+                await self._remove_partial(instance_id, path, rec)
                 raise
         self.metrics["files_uploaded"] += 1  # type: ignore[attr-defined]
         return size
+
+    async def _remove_partial(
+        self, instance_id: str, path: str, rec: InstanceRecord
+    ) -> None:
+        """Best effort: delete what a failed or cancelled write left behind.
+
+        Never raises. A removal that fails is recorded and the path is left for the
+        orphan cleanup, so the original error (or the cancellation) is what the caller
+        sees.
+        """
+
+        try:
+            await self._backend.remove(instance_id, path)  # type: ignore[attr-defined]
+        except BackendError as cleanup_exc:
+            self._record_backend_error(  # type: ignore[attr-defined]
+                "files_cleanup", cleanup_exc, rec
+            )
 
     async def _open_download(
         self,

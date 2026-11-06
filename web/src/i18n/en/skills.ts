@@ -64,6 +64,7 @@ export const skills: SkillsLocale = {
   chooseSource: "Choose an import source",
   sourceDescription: "Parse a plugin (a collection of skills) or an individual skill for Agent orchestration.",
   githubUrl: "GitHub URL",
+  invalidGithubUrl: "Enter a valid GitHub repository or skill directory URL, e.g. https://github.com/owner/repository/tree/main/skills/skill-name",
   githubDescription: "Import from a repository or a specific skill directory",
   zipFile: "ZIP file",
   zipDescription: "Upload a ZIP file containing a plugin or a single skill",

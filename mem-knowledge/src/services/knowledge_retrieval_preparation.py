@@ -63,6 +63,7 @@ logger = logging.getLogger(__name__)
 class _KnowledgeRef:
     knowledge: Knowledge
     config: KnowledgeBaseConfig | None
+    faq_scope: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -144,6 +145,8 @@ class KnowledgeRetrievalPreparation:
         refs = await cls._resolve_retrievable_refs(db, request, principal, require_chunks=False)
         targets = []
         for ref in refs:
+            if cls._resolve_retrieve_type(request, ref.config) is not RetrieveType.WIKI_FAQ:
+                continue
             scope = await scope_for_target(db, ref.knowledge)
             if not await has_eligible(db, scope):
                 continue
@@ -252,7 +255,7 @@ class KnowledgeRetrievalPreparation:
         request: KnowledgeRetrievalRequest,
         principal: Principal,
     ) -> RetrievalPreparation:
-        refs = await cls._resolve_retrievable_refs(db, request, principal)
+        refs = await cls._resolve_prepared_refs(db, request, principal)
         target_count = len(refs)
         local_selections = [
             cls._resolve_local_selection(request, ref.config, target_count)
@@ -297,6 +300,7 @@ class KnowledgeRetrievalPreparation:
                 )
             )
             for target in targets
+            if target.faq is None
         }
         common_metadata_defs = cls._get_common_metadata_defs(metadata_defs_by_kb)
         metadata_llm = None
@@ -392,6 +396,26 @@ class KnowledgeRetrievalPreparation:
             global_rerank=global_rerank,
             request_reranker_error_code=request_reranker_error_code,
         )
+
+    @classmethod
+    async def _resolve_prepared_refs(
+        cls,
+        db: AsyncSession,
+        request: KnowledgeRetrievalRequest,
+        principal: Principal,
+    ) -> list[_KnowledgeRef]:
+        from ..repositories.wiki_faq.retrieval import has_eligible, scope_for_target
+
+        refs = await cls._resolve_retrievable_refs(db, request, principal, require_chunks=False)
+        prepared = []
+        for ref in refs:
+            if cls._resolve_retrieve_type(request, ref.config) is RetrieveType.WIKI_FAQ:
+                scope = await scope_for_target(db, ref.knowledge)
+                if await has_eligible(db, scope):
+                    prepared.append(replace(ref, faq_scope=scope))
+            elif ref.knowledge.is_retrievable_leaf:
+                prepared.append(ref)
+        return prepared
 
     @classmethod
     async def resolve_metadata_document_ids(
@@ -607,17 +631,27 @@ class KnowledgeRetrievalPreparation:
             model=reranker if local_mode is RerankMode.RERANKING_MODEL else None,
             compatibility_fallback=local_mode is RerankMode.RERANKING_MODEL,
         )
+        params = cls._build_retrieval_params(request, ref.config, local_rerank=local_plan)
+        faq = None
+        if retrieve_type is RetrieveType.WIKI_FAQ:
+            from ..rag.faq.index import FAQTarget
+
+            faq = FAQTarget(
+                scope=ref.faq_scope,
+                embedding=embedding,
+                top_k=params.top_k,
+                score_threshold=params.vector_similarity_weight,
+            )
         return RetrievalTarget(
             knowledge_id=knowledge.id,
             workspace_id=knowledge.workspace_id,
-            index_name=collection_name_for_knowledge(knowledge.id),
-            params=cls._build_retrieval_params(
-                request,
-                ref.config,
-                local_rerank=local_plan,
+            index_name=(
+                faq.index_name if faq is not None else collection_name_for_knowledge(knowledge.id)
             ),
+            params=params,
             embedding=embedding,
             reranker=reranker,
+            faq=faq,
         )
 
     @classmethod
@@ -777,6 +811,9 @@ class KnowledgeRetrievalPreparation:
         config: KnowledgeBaseConfig | None,
         target_count: int,
     ) -> tuple[RerankMode, RerankWeightsSnapshot, bool]:
+        if cls._resolve_retrieve_type(request, config) is RetrieveType.WIKI_FAQ:
+            # FAQ 本地仍是纯向量召回；请求级重排配置仅作用于跨库汇总。
+            return RerankMode.RERANKING_MODEL, cls._resolve_weights(None), False
         if config is not None and config.rerank_mode is not None:
             return config.rerank_mode, cls._resolve_weights(config.rerank_weights), True
         if (

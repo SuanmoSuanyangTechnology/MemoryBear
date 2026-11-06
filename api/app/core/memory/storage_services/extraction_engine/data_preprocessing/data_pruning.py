@@ -11,9 +11,10 @@ import asyncio
 import hashlib
 import json
 import logging
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, NamedTuple
 
 from pydantic import BaseModel, Field
+from app.services import extract_pruning_client
 
 from app.core.memory.models.message_models import (
     DialogData,
@@ -75,6 +76,11 @@ class AssistantPruningResponse(BaseModel):
     )
 
 
+class PruningOutput(NamedTuple):
+    response: AssistantPruningResponse
+    source: str
+
+
 class SemanticPruner:
     """语义剪枝器。
 
@@ -103,9 +109,38 @@ class SemanticPruner:
         self.language = language
         self.max_concurrent = max_concurrent
         self._snapshot = snapshot
+        self.source_counts: Dict[str, int] = {}
 
         # 加载 Jinja2 模板
         self.template = prompt_env.get_template("extract_pruning.jinja2")
+
+    async def normalize_messages(
+        self,
+        user_msg: ConversationMessage,
+        asst_msg: ConversationMessage,
+        *,
+        llm_user_msg: Optional[ConversationMessage] = None,
+    ) -> PruningOutput:
+        """优先调用新模型，失败时复用原 LLM 方法及其请求内容。
+
+        来源随每次结果返回，避免并发调用之间混淆。
+        不捕获任务取消，取消时不得发起 LLM 回退。
+        """
+        if self.config.pruning_switch and extract_pruning_client.is_available():
+            try:
+                model_result = await extract_pruning_client.predict(user_msg.msg, asst_msg.msg)
+            except Exception as exc:
+                # 仅记录错误类型，不记录响应正文、请求头、异常详情或密钥。
+                logger.warning("[ExtractPruning] fallback error=%s", type(exc).__name__)
+            else:
+                self.source_counts["model"] = self.source_counts.get("model", 0) + 1
+                return PruningOutput(AssistantPruningResponse(**model_result.model_dump()), "model")
+
+        result = await self.extract_assistant_hint(
+            llm_user_msg if llm_user_msg is not None else user_msg, asst_msg,
+        )
+        self.source_counts["llm"] = self.source_counts.get("llm", 0) + 1
+        return PruningOutput(result, "llm")
 
     # ──────────────────────────────────────────────
     # 核心接口：单条 LLM 调用
@@ -218,7 +253,8 @@ class SemanticPruner:
                 if message_has_files(asst_msg):
                     return user_idx, asst_idx, asst_msg.msg, False, False, None
 
-                result = await self.extract_assistant_hint(user_msg, asst_msg)
+                output = await self.normalize_messages(user_msg, asst_msg)
+                result = output.response
 
                 if result.assistant_memory_hint == "NULL" or result.assistant_memory_hint is None:
                     return user_idx, asst_idx, None, True, False, None

@@ -1515,9 +1515,9 @@ def get_rag_content(
     end_time: Optional[int] = None,
     source: Optional[List[str]] = None,
     keyword: Optional[str] = None,
-    order: str = "desc",
+    order: str = "asc",
 ) -> dict:
-    """读取 RAG 记忆消息（分页，默认最新在前），供同步调用方使用。
+    """读取 RAG 记忆消息（分页，默认最早在前），供同步调用方使用。
 
     数据源为独立索引 `rag_memory_current`：
     - end_user_id 传值时只查该宿主；本模块内的画像生成等调用恒传值，
@@ -1565,9 +1565,9 @@ async def get_rag_content_async(
     end_time: Optional[int] = None,
     source: Optional[List[str]] = None,
     keyword: Optional[str] = None,
-    order: str = "desc",
+    order: str = "asc",
 ) -> dict:
-    """读取 RAG 记忆消息（分页，默认最新在前）。
+    """读取 RAG 记忆消息（分页，默认最早在前）。
 
     数据源为独立索引 `rag_memory_current`：
     - end_user_id 为空时回退为当前空间全部宿主；对外的 /rag_content 接口要求必填，

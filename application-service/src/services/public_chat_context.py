@@ -7,7 +7,6 @@ case never imports from a routes module.
 
 from __future__ import annotations
 
-import logging
 import uuid
 from types import SimpleNamespace
 
@@ -16,12 +15,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..models import Workspace
 from ..quota.alerts import report_quota_change
 from ..quota.usage import check_end_user_quota_async
-from ..repositories import knowledge_repository
 from ..repositories.end_user_repository import EndUserRepository
 from ..utils.redis_cache import CACHE_MISS, get_json_async, redis_cache, set_json_async
 from . import workspace_service
-
-logger = logging.getLogger(__name__)
 
 
 @redis_cache(ttl=120, prefix="storage_type", skip_args=["db"], id_arg="workspace_id")
@@ -31,8 +27,9 @@ async def _prepare_public_memory_context_async(
 ) -> tuple[str, str]:
     """Resolve (storage_type, user_rag_memory_id) for a chat request.
 
-    Only RAG workspaces hit the knowledge store; a missing USER_RAG_MERORY
-    knowledge base warns and degrades the workspace to neo4j storage.
+    RAG memory now lives in its own ES index (rag_memory_current) and no
+    longer depends on the USER_RAG_MERORY knowledge base; the returned id
+    stays an empty string only to keep downstream unpacking intact.
     """
 
     storage_type = await workspace_service.get_workspace_storage_type_without_auth_async(
@@ -42,23 +39,7 @@ async def _prepare_public_memory_context_async(
     if storage_type is None:
         storage_type = "neo4j"
 
-    user_rag_memory_id = ""
-    if storage_type == "rag":
-        knowledge = await knowledge_repository.get_knowledge_by_name_async(
-            db=db,
-            name="USER_RAG_MERORY",
-            workspace_id=workspace_id,
-        )
-        if knowledge:
-            user_rag_memory_id = str(knowledge.id)
-        else:
-            logger.warning(
-                f"未找到名为 'USER_RAG_MERORY' 的知识库，"
-                f"workspace_id: {workspace_id}，将使用 neo4j 存储"
-            )
-            storage_type = "neo4j"
-
-    return storage_type, user_rag_memory_id
+    return storage_type, ""
 
 
 async def _get_or_create_public_end_user_async(

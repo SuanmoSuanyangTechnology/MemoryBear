@@ -4,16 +4,22 @@ Memory Base Service
 提供记忆服务的基础功能和共享辅助方法。
 """
 import uuid
+from uuid import UUID
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional
 
 from pydantic import BaseModel
 
 from app.core.logging_config import get_logger
+from app.core.memory.models.metadata_models import (
+    LEGACY_METADATA_FIELDS, project_display_profile, split_metadata_entry,
+)
 from app.core.memory.emotion.emotion_buckets import normalize_emotion_type_or_raw
 from app.core.memory.pipelines.base_pipeline import ModelClientMixin
 from app.core.utils.datetime_utils import to_timestamp_ms
-from app.db import get_db_context
+from app.db import get_db_context, get_async_db_context
+from app.repositories.end_user_info_repository import EndUserInfoRepository
+from app.repositories.neo4j.entity_repository import EntityRepository
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 from app.services.emotion_analytics_service import EmotionAnalyticsService
 
@@ -435,54 +441,25 @@ class MemoryBaseService:
         self,
         end_user_id: Optional[str] = None
     ) -> int:
-        """
-        获取显性记忆数量
-        
-        显性记忆 = 情景记忆（MemorySummary）+ 语义记忆（ExtractedEntity with is_explicit_memory=true）
-        
-        Args:
-            end_user_id: 可选的终端用户ID，用于过滤特定用户的节点
-            
-        Returns:
-            显性记忆的数量
-        """
+        """Count permanent cards, key events, long-term summaries and semantic memories."""
         try:
-            # 1. 获取情景记忆数量
-            episodic_count = await self.get_episodic_memory_count(end_user_id)
-            
-            # 2. 获取语义记忆数量（ExtractedEntity 且 is_explicit_memory = true）
-            if end_user_id:
-                semantic_query = """
-                MATCH (e:ExtractedEntity)
-                WHERE e.end_user_id = $end_user_id AND e.is_explicit_memory = true
-                RETURN count(e) as count
-                """
-                semantic_result = await self.neo4j_connector.execute_query(
-                    semantic_query, 
-                    end_user_id=end_user_id
-                )
-            else:
-                semantic_query = """
-                MATCH (e:ExtractedEntity)
-                WHERE e.is_explicit_memory = true
-                RETURN count(e) as count
-                """
-                semantic_result = await self.neo4j_connector.execute_query(semantic_query)
-            
-            semantic_count = semantic_result[0]["count"] if semantic_result and len(semantic_result) > 0 else 0
-            
-            # 3. 计算总数
-            explicit_count = episodic_count + semantic_count
-            logger.debug(
-                f"显性记忆数量: {explicit_count} "
-                f"(情景={episodic_count}, 语义={semantic_count}, end_user_id={end_user_id})"
+            if not end_user_id:
+                return 0
+            async with get_async_db_context() as db:
+                profiles = await EndUserInfoRepository(db).profiles_for_users([end_user_id])
+            graph_rows = await EntityRepository(self.neo4j_connector).explicit_memory_rows(
+                [end_user_id]
             )
-            return explicit_count
-            
+            permanent_count = sum(
+                count_profile_cards(metadata, names) for _, metadata, names in profiles
+            )
+            timeline_count = sum(count_timeline_records(row) for row in graph_rows)
+            semantic_count = sum(row["semantic_count"] for row in graph_rows)
+            return permanent_count + timeline_count + semantic_count
         except Exception as e:
-            logger.error(f"获取显性记忆数量时出错: {str(e)}", exc_info=True)
+            logger.error(f"获取显性记忆数量时出错 (end_user_id={end_user_id}): {str(e)}", exc_info=True)
             return 0
-    
+
     async def get_emotional_memory_count(
         self,
         end_user_id: Optional[str] = None,
@@ -558,3 +535,47 @@ class MemoryBaseService:
         except Exception as e:
             logger.error(f"获取遗忘记忆数量时出错: {str(e)}", exc_info=True)
             return 0
+
+
+def count_profile_cards(metadata: Any, scene_names: dict[str, str]) -> int:
+    metadata = metadata if isinstance(metadata, dict) else {}
+    keys = {
+        ("default", key) for key in LEGACY_METADATA_FIELDS
+        if metadata.get(key)
+    }
+    keys.update(("default", key) for key in project_display_profile(metadata))
+    domains = metadata.get("domain_specific_info")
+    for scene, values in domains.items() if isinstance(domains, dict) else []:
+        if not isinstance(scene, str) or not scene.strip() or not isinstance(values, list):
+            continue
+        try:
+            UUID(scene)
+        except ValueError:
+            name = scene
+        else:
+            name = scene_names.get(str(UUID(scene)))
+            if not name:
+                continue
+        for value in values:
+            entry = split_metadata_entry(value)
+            if entry and entry[0] and not entry[1]:
+                keys.add(("domain", name, entry[0]))
+    return len(keys)
+
+
+def count_timeline_records(row: dict[str, Any]) -> int:
+    from app.services.memory_entity_relationship_service import MemoryEntityService
+
+    if row.get("user_entity_count", 0) > 1:
+        raise ValueError("User entity is not unique")
+    events = MemoryEntityService._parse_event_timeline(row.get("event_timeline") or "")
+    summaries = set()
+    for item in row.get("summaries") or []:
+        if not isinstance(item, dict):
+            continue
+        text = item.get("text")
+        if text is None or not str(text).strip() or "MemorySummaryChunk" in str(text):
+            continue
+        if MemoryEntityService._neo4j_dt_to_ms(item.get("created_at")) is not None:
+            summaries.add(text)
+    return len(events) + len(summaries)

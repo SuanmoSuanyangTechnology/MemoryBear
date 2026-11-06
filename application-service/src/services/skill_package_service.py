@@ -33,6 +33,7 @@ import re
 import threading
 import uuid
 import zipfile
+from typing import Optional
 from collections.abc import Callable, Coroutine
 from urllib.parse import urlparse
 
@@ -564,8 +565,19 @@ class SkillPackageService:
         return rows
 
     @staticmethod
-    def _persist_files(rows: list[dict], tenant_id: uuid.UUID, package_id: uuid.UUID) -> None:
-        """Stage 2: upload binary / oversized files to storage and back-fill ``storage_ref``."""
+    def _persist_files(
+        rows: list[dict],
+        tenant_id: uuid.UUID,
+        package_id: uuid.UUID,
+        uploaded_keys: list[str],
+    ) -> None:
+        """Stage 2: upload binary / oversized files to object storage and back-fill ``storage_ref``.
+
+        Each key is appended to ``uploaded_keys`` the moment its upload lands, not at the
+        end: a failure part-way through still lets the caller reclaim the objects that did
+        make it, since the DB rows that would own them are rolled back and nothing else
+        remembers those keys.
+        """
 
         storage = StorageFactory.get_storage()
         inline_limit = current_settings().skill_package_inline_limit
@@ -582,26 +594,37 @@ class SkillPackageService:
                 return await storage.upload(key, content, content_type)
 
             _run_async(_upload)
+            uploaded_keys.append(key)
             row["storage_ref"] = key
             row["content"] = None  # binary / oversized text is never inlined
 
     @staticmethod
-    def _delete_storage_objects(db: Session, package_id: uuid.UUID) -> None:
-        """Best-effort cleanup of one package's object-storage keys (never blocks the DB delete)."""
+    def _delete_keys(keys: list[str]) -> None:
+        """Best-effort object-storage cleanup by key (never raises).
 
-        refs = SkillPackageRepository(db).storage_refs(package_id)
-        if not refs:
+        Kept key-based on purpose: the owning ``skill_files`` rows may already be gone by the
+        time this runs (the purge deliberately happens after the DB commit, so a failure can
+        never destroy objects the database still references).
+        """
+
+        if not keys:
             return
-        storage = StorageFactory.get_storage()
+        unique = list(dict.fromkeys(keys))
 
         async def _delete_all() -> None:
-            for key in refs:
+            storage = StorageFactory.get_storage()
+            for key in unique:
                 try:
                     await storage.delete(key)
-                except StorageError:
-                    pass  # leftovers are reaped by ops
+                except Exception as exc:  # noqa: BLE001 - cleanup must never fail the caller
+                    logger.warning("skill storage object %s not deleted: %r", key, exc)
 
-        _run_async(_delete_all)
+        try:
+            _run_async(_delete_all)
+        except Exception as exc:  # noqa: BLE001 - e.g. storage unavailable/misconfigured
+            # Reached after a successful commit, so raising here would turn a completed
+            # import or delete into an error response for a purely cosmetic leak.
+            logger.warning("skill storage cleanup skipped for %d keys: %r", len(unique), exc)
 
     @staticmethod
     def _read_storage_object(key: str) -> bytes:
@@ -639,9 +662,17 @@ members: list[str] | None = None,
         the committed response share one shape, the only difference being that
         ``package_id`` / ``skill_id`` are null in previews.
 
-        Plugin handling (§6.6 / §7.8): two or more SKILL.md entries make a plugin and every
-        member is imported — ``members`` is deprecated and ignored because the bundle imports
-        as one indivisible unit; a plugin that already exists is rejected, not re-imported.
+        Plugin handling (§6.6 / §7.8): two or more SKILL.md entries make a plugin.
+        ``members`` selects which members to import (omitted = all); an identifier that is
+        not in the bundle is rejected. A selected member that cannot be imported fails the
+        whole import — a plugin is never persisted with a missing member. A plugin that
+        already exists is rejected, not re-imported.
+
+        Overwriting is consent-gated: a member whose ``call_name`` already belongs to an
+        active skill with **different** content needs ``overwrite=True`` (5001 otherwise).
+        A byte-identical re-import stays idempotent and ungated. The preview never raises
+        for either case — it annotates the members and emits warnings so the caller can
+        uncheck them or ask for confirmation before committing.
         """
 
         url_subdir: str | None = None
@@ -663,13 +694,32 @@ members: list[str] | None = None,
         kind = "plugin" if is_plugin else "skill"
 
         # --- member selection ---------------------------------------------------
-        # A plugin imports as a whole (product decision): ``members`` stays in the signature
-        # for wire compatibility but no longer filters — every member is kept.
+        # ``members`` is the set of member identifiers the caller keeps (omitted = every
+        # member). Keys are the same identifiers the preview echoes. Nested SKILL.md is
+        # both a member and a file of its outer member (_split_members): unchecking a
+        # nested member only stops it from becoming its own skill — its SKILL.md stays
+        # inside the outer member's pack, because that pack is copied verbatim.
         selected = split
+        if members is not None:
+            wanted = {str(m).strip() for m in members if str(m).strip()}
+            by_key = {m["key"]: m for m in split}
+            unknown_members = wanted - set(by_key)
+            if unknown_members:
+                raise BusinessException(
+                    f"members 含未知成员标识：{', '.join(sorted(unknown_members))}",
+                    BizCode.BAD_REQUEST,
+                )
+            if not wanted:
+                # An explicit empty selection is a caller bug: it must not silently mean
+                # "import everything". Only an omitted ``members`` means "all members".
+                raise BusinessException("members 不能为空；如需导入全部成员请省略该参数", BizCode.BAD_REQUEST)
+            selected = [m for m in split if m["key"] in wanted]
 
         # --- member-level metadata override -------------------------------------
         meta_by_key = {m["identifier"]: m for m in (meta or []) if m.get("identifier")}
-        unknown_meta = set(meta_by_key) - {m["key"] for m in selected}
+        # Validated against the whole bundle, not the selection: a caller may send metadata
+        # for members it then removed from ``members``; only truly unknown keys are an error.
+        unknown_meta = set(meta_by_key) - {m["key"] for m in split}
         if unknown_meta:
             raise BusinessException(
                 f"meta 含未知成员标识：{', '.join(sorted(unknown_meta))}", BizCode.BAD_REQUEST
@@ -684,9 +734,22 @@ members: list[str] | None = None,
             override = meta_by_key.get(member["key"])
             display = (override or {}).get("name") or fm["name"]
             description = (
-                (override or {}).get("description") or fm.get("description") or ""
+                    (override or {}).get("description") or fm.get("description") or ""
             )[:DESCRIPTION_MAX]
-            call_name = ((override or {}).get("call_name") or fm["name"])
+            # "Not provided" and "provided but empty" are different: only an absent key
+            # falls back to the frontmatter name. An explicit empty/blank override is
+            # rejected here, otherwise it silently resolves to ``fm["name"]`` and the
+            # caller gets an error about a name it never sent.
+            if override is not None and "call_name" in override:
+                call_name = override["call_name"]
+                if not str(call_name or "").strip():
+                    raise BusinessException(
+                        f"成员 {member['key']} 的 call_name 不能为空字符串；"
+                        "如需沿用 frontmatter 的名称，请省略该字段",
+                        BizCode.BAD_REQUEST,
+                    )
+            else:
+                call_name = fm["name"]
             call_name = SkillPackageService.validate_call_name(call_name)
 
             skill_md = member["files"]["SKILL.md"].decode("utf-8", errors="strict")
@@ -736,8 +799,8 @@ members: list[str] | None = None,
             )
             if repo is not None and repo.get_plugin_by_name(tenant_id, resolved_plugin_name):
                 raise BusinessException(
-                    f"插件 {resolved_plugin_name} 已存在；插件为整体导入，不支持重复导入"
-                    "（如需重装请先删除原插件）",
+                    f"插件 {resolved_plugin_name} 已存在；插件不支持增量合并成员"
+                    "（如需调整成员请先删除原插件后重新导入）",
                     BizCode.DUPLICATE_NAME,
                 )
 
@@ -748,6 +811,14 @@ members: list[str] | None = None,
             )
 
         importable = [item for item in prepared if not item.get("skipped")]
+
+        # Commit-time gates. The preview above stays advisory on purpose: it has already
+        # annotated conflicts, and the caller needs that response to uncheck members or
+        # confirm the overwrite before anything is written.
+        if not dry_run:
+            SkillPackageService._assert_import_allowed(
+                prepared, overwrite=overwrite, is_plugin=is_plugin
+            )
 
         # --- dry-run preview: no writes, no quota --------------------------------
         if dry_run:
@@ -760,36 +831,47 @@ members: list[str] | None = None,
         # --- commit -------------------------------------------------------------
         # Never create the plugin row when every member was skipped, otherwise the
         # bundle would persist as an unreachable zero-member shell.
-        plugin_id: uuid.UUID | None = None
-        if is_plugin and importable:
-            plugin = repo.create_plugin(
-                tenant_id=tenant_id,
-                name=resolved_plugin_name,
-                description=plugin_description,
-                source_type=source_type,
-                source_ref=source_ref,
-            )
-            plugin_id = plugin.id
-        results: list[dict] = []
-        for item in prepared:
-            if item.get("skipped"):
-                results.append(SkillPackageService._skipped_member_result(item))
-                continue
-            results.append(
-                SkillPackageService._commit_member(
-                    db, repo, tenant_id=tenant_id, item=item, plugin_id=plugin_id,
-                    source_ref=source_ref, source_type=source_type, overwrite=overwrite,
-                    conflict_strategy=conflict_strategy,
+        plugin_id: Optional[uuid.UUID] = None
+        # Objects written by this import (dropped again when it fails) and objects owned by
+        # the packs it replaces (dropped only once the new rows are committed).
+        uploaded_keys: list[str] = []
+        purge_keys: list[str] = []
+        try:
+            if is_plugin and importable:
+                plugin = repo.create_plugin(
+                    tenant_id=tenant_id,
+                    name=resolved_plugin_name,
+                    description=plugin_description,
+                    source_type="imported",
+                    source_ref=source_ref,
                 )
-            )
+                plugin_id = plugin.id
+            results: list[dict] = []
+            for item in prepared:
+                if item.get("skipped"):
+                    results.append(SkillPackageService._skipped_member_result(item))
+                    continue
+                results.append(
+                    SkillPackageService._commit_member(
+                        db, repo, tenant_id=tenant_id, item=item, plugin_id=plugin_id,
+                        source_ref=source_ref, overwrite=overwrite,
+                        conflict_strategy=conflict_strategy,
+                        uploaded_keys=uploaded_keys, purge_keys=purge_keys,
+                    )
+                )
 
-        # Bundle landing (§7.5.5) owns the transaction: a cluster lands as a unit,
-        # so committing here would put already-written skills beyond the reach of
-        # the caller's rollback.
-        if commit:
             db.commit()
-        else:
-            db.flush()
+        except Exception:
+            # The DB row that would have owned the new objects is gone after the rollback,
+            # so nobody else can ever find them: reclaim them here. The previous pack is
+            # untouched because its objects are only deleted after a successful commit.
+            db.rollback()
+            SkillPackageService._delete_keys(uploaded_keys)
+            raise
+
+        # Commit succeeded: the replaced packs are unreachable, so their objects can go.
+        # A failure here leaks storage but never a dangling reference (see ``_delete_keys``).
+        SkillPackageService._delete_keys(purge_keys)
 
         for _, res in zip(prepared, results, strict=False):
             if res.get("skill_id"):
@@ -917,6 +999,10 @@ members: list[str] | None = None,
                     "idempotent": False,
                     "will_overwrite": bool(item.get("will_overwrite")),
                     "overwrite_target": item.get("overwrite_target_name"),
+                    # True when committing this member would destroy different existing
+                    # content and therefore needs ``overwrite=true``. The wizard keeps
+                    # these members unchecked so nothing is replaced by default.
+                    "overwrite_blocked": bool(item.get("overwrite_blocked")),
                     "cross_plugin": bool(item.get("cross_plugin")),
                     "conflict_resolved": (
                         "skipped" if item.get("skipped")
@@ -965,6 +1051,9 @@ members: list[str] | None = None,
           attaches the freshly imported one. When the old skill belongs to another
           plugin it migrates into this import (``cross_plugin=True``). The preview
           carries a user-facing warning naming the overwritten skill;
+          when the content differs the member is additionally flagged
+          ``overwrite_blocked`` so the commit gate can demand ``overwrite=true``
+          (a byte-identical replay stays ungated and idempotent);
         - no call_name owner, but the package name is taken by a *different* skill
           (the tenant ``(tenant_id, name)`` unique constraint) -> ``skipped``, since
           it cannot overwrite another skill and cannot share the package name;
@@ -1022,6 +1111,21 @@ members: list[str] | None = None,
                 item["overwrite_skill_id"] = str(owner.id)
                 item["overwrite_target_name"] = owner.name
                 item["cross_plugin"] = cross_plugin
+                # Byte-identical replay replaces nothing, so it needs no consent. The
+                # condition mirrors ``_commit_member``'s idempotent branch exactly: a
+                # standalone, already-standard skill whose pack has the same name and
+                # hash stays in place. Everything else destroys or restructures the
+                # existing skill (legacy up-conversion, migration out of another plugin,
+                # changed bytes), so it requires an explicit overwrite.
+                identical = (
+                    not is_plugin
+                    and owner_pkg is not None
+                    and owner_pkg.plugin_id is None
+                    and owner_pkg.name == item["pkg_name"]
+                    and owner_pkg.content_hash == item["content_hash"]
+                    and owner.skill_format == "standard"
+                )
+                item["overwrite_blocked"] = not identical
 
                 if cross_plugin:
                     owner_plugin = repo.get_plugin_by_id(owner_plugin_id, tenant_id)
@@ -1036,10 +1140,17 @@ members: list[str] | None = None,
                     note = "该技能当前为 legacy 技能，覆盖后将转换为标准技能格式"
                 else:
                     note = "将用新内容就地更新该技能（保留技能 ID 与已绑定关系）"
-                item["warnings"].append(
-                    f"调用名称 '{item['call_name']}' 已存在（技能「{owner.name}」），"
-                    f"导入后将覆盖：{note}。"
-                )
+                if identical:
+                    item["warnings"].append(
+                        f"调用名称 '{item['call_name']}' 已存在（技能「{owner.name}」），"
+                        "内容与现有技能包一致，将按幂等导入复用（不删除旧内容）。"
+                    )
+                else:
+                    item["warnings"].append(
+                        f"调用名称 '{item['call_name']}' 已存在（技能「{owner.name}」），"
+                        f"导入后将覆盖：{note}。如不希望覆盖，请取消勾选该成员；"
+                        "继续导入需确认覆盖。"
+                    )
                 continue
 
             clash_pkg = repo.get_by_name(tenant_id, item["pkg_name"])
@@ -1061,6 +1172,47 @@ members: list[str] | None = None,
             )
 
         return skipped
+
+    @staticmethod
+    def _assert_import_allowed(
+        prepared: list[dict], *, overwrite: bool, is_plugin: bool
+    ) -> None:
+        """Commit-time gate: refuse partial plugins and unconsented overwrites.
+
+        The preview deliberately does not raise — it has already annotated every member
+        so the wizard can uncheck the ones it does not want. By commit time the selection
+        is final, so a member that cannot be written is a hard failure:
+
+        - a selected member whose package name belongs to a different ``call_name`` cannot
+          be created (tenant unique constraint) and cannot be overwritten either →
+          importing without it would persist a plugin missing a member, so raise;
+        - a member that would destroy different existing content needs ``overwrite=true``
+          (5001). Byte-identical replays are not flagged and stay idempotent.
+        """
+
+        skipped = [item for item in prepared if item.get("skipped")]
+        if skipped:
+            names = "、".join(item["name"] for item in skipped)
+            scope = "插件" if is_plugin else "技能"
+            raise BusinessException(
+                f"{scope}无法完整导入：成员 {names} 的技能名已被其他技能占用，"
+                "请调整调用名称或先删除占用的技能后重新导入",
+                BizCode.DUPLICATE_NAME,
+            )
+
+        if overwrite:
+            return
+
+        blocked = [item for item in prepared if item.get("overwrite_blocked")]
+        if blocked:
+            targets = "、".join(
+                f"「{item.get('overwrite_target_name') or item['name']}」" for item in blocked
+            )
+            raise BusinessException(
+                f"技能 {targets} 已存在且内容不同。传 overwrite=true 覆盖更新，"
+                "或取消勾选这些成员后重新导入",
+                BizCode.DUPLICATE_NAME,
+            )
 
     @staticmethod
     def _skipped_member_result(item: dict) -> dict:
@@ -1094,6 +1246,8 @@ members: list[str] | None = None,
         source_type: str,
         overwrite: bool,
         conflict_strategy: str,
+        uploaded_keys: list[str],
+        purge_keys: list[str],
     ) -> dict:
         """Persist one member: package + files, anchored on the existing ``skills`` row.
 
@@ -1171,9 +1325,11 @@ members: list[str] | None = None,
                     "config": skill_row.config,
                 }
 
-            # Purge the old package (object storage first; repo detaches the FK).
+            # The old pack's objects are recorded, not deleted: the purge runs only after
+            # ``db.commit()`` succeeds, so a failed import leaves the previous content
+            # readable instead of losing objects the rolled-back DB row still points at.
             if old_pkg is not None:
-                SkillPackageService._delete_storage_objects(db, old_pkg.id)
+                purge_keys.extend(repo.storage_refs(old_pkg.id))
                 repo.delete(old_pkg.id, tenant_id)
 
             skill_row.skill_format = "standard"
@@ -1227,9 +1383,10 @@ members: list[str] | None = None,
         )
         if legacy_fm is not None:
             pkg.frontmatter_raw = legacy_fm
-        SkillPackageService._persist_files(item["rows"], tenant_id, pkg.id)
+        SkillPackageService._persist_files(
+            item["rows"], tenant_id, pkg.id, uploaded_keys
+        )
         repo.add_files(pkg.id, item["rows"])
-
         if skill_row is not None:
             # Overwrite path: attach the imported package to the preserved skill row.
             skill_row.package_id = pkg.id
@@ -1610,12 +1767,73 @@ members: list[str] | None = None,
         if kind not in ("all", "plugin", "skill"):
             raise BusinessException("kind 只接受 all | plugin | skill", BizCode.BAD_REQUEST)
 
+        cards = SkillPackageService._collect_cards(
+            db, tenant_id,
+            search=search, ids=ids, is_active=is_active, is_public=is_public,
+            include_skills=kind in ("all", "skill"),
+            include_plugins=kind in ("all", "plugin"),
+        )
+        total = len(cards)
+        start = (page - 1) * pagesize
+        return cards[start:start + pagesize], total
+
+    @staticmethod
+    def get_entry_statistics(
+        db: Session,
+        tenant_id: uuid.UUID,
+        *,
+        search: Optional[str] = None,
+        is_active: Optional[bool] = None,
+        is_public: Optional[bool] = None,
+    ) -> dict:
+        """Tab counts under the shared list filters (the search box is common to
+        every tab, so statistics take the same query conditions as the list).
+
+        ``total`` is the count for the "all" tab; ``plugin_count`` / ``skill_count``
+        are the per-tab counts and always sum to ``total``.
+        """
+
+        skill_cards = SkillPackageService._collect_cards(
+            db, tenant_id,
+            search=search, is_active=is_active, is_public=is_public,
+            include_skills=True, include_plugins=False,
+        )
+        plugin_cards = SkillPackageService._collect_cards(
+            db, tenant_id,
+            search=search, is_active=is_active, is_public=is_public,
+            include_skills=False, include_plugins=True,
+        )
+        return {
+            "plugin_count": len(plugin_cards),
+            "skill_count": len(skill_cards),
+            "total": len(plugin_cards) + len(skill_cards),
+        }
+
+    @staticmethod
+    def _collect_cards(
+        db: Session,
+        tenant_id: uuid.UUID,
+        *,
+        search: Optional[str] = None,
+        ids: Optional[str] = None,
+        is_active: Optional[bool] = None,
+        is_public: Optional[bool] = None,
+        include_skills: bool = True,
+        include_plugins: bool = True,
+    ) -> list[dict]:
+        """Assemble the matching cards (skills and/or plugins), newest first.
+
+        Shared by the list and statistics paths: cards are assembled in Python
+        (plugin cards have no single SQL row), so both callers filter with the
+        exact same conditions.
+        """
+
         id_filter = SkillPackageService._parse_ids_filter(ids)
 
         repo = SkillPackageRepository(db)
         cards: list[dict] = []
 
-        if kind in ("all", "skill"):
+        if include_skills:
             cards.extend(
                 SkillPackageService._standalone_skill_cards(
                     db, tenant_id, search=search, ids=id_filter,
@@ -1623,7 +1841,11 @@ members: list[str] | None = None,
                 )
             )
 
-        if kind in ("all", "plugin"):
+        # Plugins have no public dimension: ``skill_plugins`` has no is_public
+        # column and plugin cards always report is_public=False, so an
+        # is_public=True filter excludes the whole branch (unset / False keeps
+        # them — unset = no filter, False = private-only, which every plugin is).
+        if include_plugins and is_public is not True:
             like = f"%{search}%" if search else None
             for plugin in repo.list_plugins(tenant_id):
                 members = repo.list_by_plugin(plugin.id, tenant_id)
@@ -1652,9 +1874,7 @@ members: list[str] | None = None,
                 )
 
         cards.sort(key=lambda c: c.get("created_at") or datetime.min, reverse=True)
-        total = len(cards)
-        start = (page - 1) * pagesize
-        return cards[start:start + pagesize], total
+        return cards
 
     @staticmethod
     def _parse_ids_filter(ids: str | None) -> set[uuid.UUID] | None:
@@ -1893,6 +2113,72 @@ members: list[str] | None = None,
         }
 
     @staticmethod
+    def _enrich_skill_tools(
+        db: Session, tenant_id: uuid.UUID, tool_configs: list
+    ) -> list[dict]:
+        """Expand a skill row's bare ``tool_id`` list into a renderable tool entry.
+
+        The row stores only ids, so a detail response must carry what the UI renders
+        instead of an opaque uuid. Per entry:
+
+        - resolvable on this tenant -> ``{tool_id, operation, tool_info}``;
+        - not resolvable (other tenant / hard-deleted / malformed id) ->
+          ``{tool_id, operation, tool_missing: True}``. The flag is explicit so the
+          client can say "this tool no longer exists" instead of firing
+          ``GET /tools/{id}`` and ``/tools/{id}/methods`` at a guaranteed 404, then
+          falling back to the raw uuid.
+
+        Note the monolith (``SkillService.get_skill``) silently dropped unresolved
+        tools (``if tool_info:``). Dropping hides broken references entirely, so the
+        explicit flag is preferred; ``tools`` still has one entry per stored reference.
+
+        All ids resolve in one ``ToolConfig`` query (deleted rows included, matching
+        ``find_by_id_and_tenant_all``); list cards never call this, so their shape
+        stays bare.
+        """
+
+        if not tool_configs:
+            return []
+
+        ids: list[uuid.UUID] = []
+        for tool_config in tool_configs:
+            if not isinstance(tool_config, dict):
+                continue
+            try:
+                ids.append(uuid.UUID(str(tool_config.get("tool_id"))))
+            except (ValueError, AttributeError, TypeError):
+                continue
+        if not ids:
+            return list(tool_configs)
+
+        from .tool_service import ToolService
+
+        summaries = ToolService(db).get_tool_summaries(ids, tenant_id)
+
+        enriched: list[dict] = []
+        for tool_config in tool_configs:
+            if not isinstance(tool_config, dict):
+                enriched.append(tool_config)
+                continue
+            try:
+                tool_id = uuid.UUID(str(tool_config.get("tool_id")))
+            except (ValueError, AttributeError, TypeError):
+                # Not a tool reference at all (free-form row content); leave untouched.
+                enriched.append(tool_config)
+                continue
+            info = summaries.get(tool_id)
+            entry = {"tool_id": tool_config.get("tool_id")}
+            if "operation" in tool_config:
+                entry["operation"] = tool_config["operation"]
+            if info is None:
+                # Keep the id for diagnostics, but tell the client it is gone.
+                entry["tool_missing"] = True
+            else:
+                entry["tool_info"] = info.model_dump()
+            enriched.append(entry)
+        return enriched
+
+    @staticmethod
     def get_entry_detail(
         db: Session, tenant_id: uuid.UUID, entry_id: uuid.UUID
     ) -> dict:
@@ -1932,6 +2218,9 @@ members: list[str] | None = None,
                     detail["has_scripts"] = pkg.has_scripts
                     detail["members"] = None
                     detail["content_hash"] = pkg.content_hash
+            detail["tools"] = SkillPackageService._enrich_skill_tools(
+                db, tenant_id, detail.get("tools") or []
+            )
             return detail
 
         plugin = repo.get_plugin_by_id(entry_id, tenant_id)
@@ -2016,9 +2305,12 @@ members: list[str] | None = None,
 
         Row semantics stay the historical soft delete (``is_active=False``) so
         existing callers and the skill quota keep working unchanged; the pack
-        itself is hard-deleted (files cascade + best-effort object-storage
-        cleanup) and ``skills.package_id`` is detached first, since the FK has no
-        ``ON DELETE`` handler (§7.7).
+        itself is hard-deleted (files cascade) and ``skills.package_id`` is
+        detached first, since the FK has no ``ON DELETE`` handler (§7.7).
+
+        Object-storage objects are deleted only after the commit succeeds: a DB
+        transaction cannot undo a storage delete, so removing them first would leave a
+        rolled-back pack pointing at bytes that no longer exist.
 
         ``entry_id`` accepts either a ``skills`` row id (one member) or a
         ``skill_plugins`` row id (every member + the plugin row). Removing the last
@@ -2026,6 +2318,7 @@ members: list[str] | None = None,
         """
 
         repo = SkillPackageRepository(db)
+        purge_keys: list[str] = []
         skill = db.query(Skill).filter(
             Skill.id == entry_id, Skill.tenant_id == tenant_id
         ).first()
@@ -2040,7 +2333,9 @@ members: list[str] | None = None,
                 pkg = repo.get_by_id(skill.package_id, tenant_id)
                 plugin_id = pkg.plugin_id if pkg else None
 
-            removed_package = SkillPackageService._purge_pack(db, repo, tenant_id, skill)
+            removed_package = SkillPackageService._purge_pack(
+                db, repo, tenant_id, skill, purge_keys
+            )
             skill.is_active = False
             skill.package_id = None
             db.flush()
@@ -2053,6 +2348,7 @@ members: list[str] | None = None,
                 if not remaining:
                     repo.delete_plugin(plugin_id, tenant_id)
             db.commit()
+            SkillPackageService._delete_keys(purge_keys)
             return {
                 "kind": "skill",
                 "skill_id": str(skill.id),
@@ -2073,10 +2369,11 @@ members: list[str] | None = None,
                 member_ids.append(str(row.id))
                 row.is_active = False
                 row.package_id = None
-            SkillPackageService._delete_storage_objects(db, pkg.id)
+            purge_keys.extend(repo.storage_refs(pkg.id))
             repo.delete(pkg.id, tenant_id)
         repo.delete_plugin(plugin.id, tenant_id)
         db.commit()
+        SkillPackageService._delete_keys(purge_keys)
         return {
             "kind": "plugin",
             "plugin_id": str(plugin.id),
@@ -2086,9 +2383,17 @@ members: list[str] | None = None,
 
     @staticmethod
     def _purge_pack(
-        db: Session, repo: SkillPackageRepository, tenant_id: uuid.UUID, skill: Skill
-    ) -> str | None:
-        """Hard-delete a skill's pack (object storage first) and detach ``skills.package_id``.
+        db: Session,
+        repo: SkillPackageRepository,
+        tenant_id: uuid.UUID,
+        skill: Skill,
+        purge_keys: list[str],
+    ) -> Optional[str]:
+        """Hard-delete a skill's pack and detach ``skills.package_id``.
+
+        The pack's object-storage keys are appended to ``purge_keys`` for the caller to
+        delete after its commit: deleting them here would destroy bytes the database still
+        references if the transaction later rolls back.
 
         Returns the removed package id, or None when the row had no pack.
         """
@@ -2100,6 +2405,6 @@ members: list[str] | None = None,
             skill.package_id = None
             return None
         removed = str(pkg.id)
-        SkillPackageService._delete_storage_objects(db, pkg.id)
+        purge_keys.extend(repo.storage_refs(pkg.id))
         repo.delete(pkg.id, tenant_id)
         return removed

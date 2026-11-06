@@ -11,12 +11,11 @@
  */
 
 import React, { useEffect, useState, useRef, useId, forwardRef, useImperativeHandle } from 'react';
-import { Row, Col } from 'antd';
+import { Row, Col, Skeleton } from 'antd';
 import InfiniteScroll from 'react-infinite-scroll-component';
 
 import { request } from '@/utils/request';
 import PageEmpty from '@/components/Empty/PageEmpty'
-import PageLoading from '@/components/Empty/PageLoading'
 
 /** Default page size for pagination */
 const PAGE_SIZE = 20;
@@ -188,31 +187,35 @@ const PageScrollList = forwardRef(<T, Q = Record<string, unknown>>({
       className={`rb:overflow-y-auto rb:overflow-x-hidden rb:min-h-0! ${heightClass || defaultHeightClass} ${className}`}
     >
       {header}
-      <InfiniteScroll
-        dataLength={data.length}
-        next={() => loadMoreData()}
-        hasMore={hasMore}
-        loader={loading && needLoading ? pageLoading || <PageLoading className={heightClass || defaultHeightClass} /> : false}
-        // endMessage={<Divider plain>It is all, nothing more 🤐</Divider>}
-        scrollThreshold={0.9}
-        scrollableTarget={scrollableTargetId}
-        style={{ overflow: 'visible', width: '100%' }}
-      >
-        {/* Render grid list or empty state */}
-        {data.length > 0 ? (
-          renderItems
-          ? renderItems(data)
-          : (
-            <Row gutter={gutter}>
-              {data.map((item, index) => (
-                <Col key={(item as any).id || index} span={24/column}>
-                  {renderItem?.(item, index)}
-                </Col>
-              ))}
-            </Row>
-          )
-        ) : !loading ? empty || <PageEmpty className={heightClass || defaultHeightClass} /> : null}
-      </InfiniteScroll>
+      {data.length === 0 && !loading ? (
+        empty || <PageEmpty className="rb:h-full!" />
+      ) : (
+        <InfiniteScroll
+          dataLength={data.length}
+          next={() => loadMoreData()}
+          hasMore={hasMore}
+          loader={loading && needLoading ? pageLoading || <Skeleton active className={heightClass || defaultHeightClass} /> : false}
+          // endMessage={<Divider plain>It is all, nothing more 🤐</Divider>}
+          scrollThreshold={0.9}
+          scrollableTarget={scrollableTargetId}
+          style={{ overflow: 'visible', width: '100%' }}
+        >
+          {/* Render grid list */}
+          {data.length > 0 ? (
+            renderItems
+            ? renderItems(data)
+            : (
+              <Row gutter={gutter}>
+                {data.map((item, index) => (
+                  <Col key={(item as any).id || index} span={24/column}>
+                    {renderItem?.(item, index)}
+                  </Col>
+                ))}
+              </Row>
+            )
+          ) : null}
+        </InfiniteScroll>
+      )}
     </div>
   );
 }) as <T = Record<string, unknown>, Q = Record<string, unknown>>(props: PageScrollListProps<T, Q> & { ref?: React.Ref<PageScrollListRef> }) => React.ReactElement;

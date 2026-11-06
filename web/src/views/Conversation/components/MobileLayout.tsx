@@ -83,7 +83,7 @@ const MobileLayout: FC<MobileLayoutProps> = ({ ctx }) => {
           <Flex
             justify={isFloatBtn || isSmallScreen ? "space-between" : 'end'}
             className={clsx("rb:p-3! rb:h-11.25! rb:w-full! rb-border-b", {
-              'rb:bg-[#171719] rb:text-[#FFFFFF]': isFloatBtn,
+              'rb:bg-primary-600 rb:text-[#FFFFFF]': isFloatBtn,
               'rb:text-[#171719]': !isFloatBtn,
               'rb:rounded-tl-2xl': showHistory && isFloatBtn && !isNarrowScreen,
               'rb:rounded-tl-2xl rb:rounded-tr-2xl': (!showHistory || isNarrowScreen) && isFloatBtn

@@ -21,10 +21,12 @@ from src.infrastructure.postgres import PostgresManager
 from src.models.references import (
     Conversation,
     EndUser,
+    EndUserInfo,
     ForgetAudit,
     ImplicitEmotionsStorage,
     MemoryMessage,
     MemoryPerceptual,
+    Workspace,
 )
 from src.repositories.end_user import active_users_in_workspace, scoped_end_user_select
 
@@ -79,6 +81,66 @@ class EndUserProfileRepository:
 
 #: ``MemoryMessage`` 计数里排除的应用 ID。
 _EXCLUDED_APP_ID = UUID("00000000-0000-0000-0000-000000000001")
+
+
+def _profile_statement(end_user_ids: list[str]):
+    return (
+        select(EndUserInfo.end_user_id, EndUserInfo.meta_data, Workspace.tenant_id)
+        .join(EndUser, EndUser.id == EndUserInfo.end_user_id)
+        .join(Workspace, Workspace.id == EndUser.workspace_id)
+        .where(EndUserInfo.end_user_id.in_([UUID(str(value)) for value in end_user_ids]))
+    )
+
+
+def _scene_ids(rows) -> list[UUID]:
+    ids = []
+    for row in rows:
+        metadata = row.meta_data if isinstance(row.meta_data, dict) else {}
+        domains = metadata.get("domain_specific_info")
+        if not isinstance(domains, dict):
+            continue
+        for key in domains:
+            try:
+                ids.append(UUID(key))
+            except (ValueError, TypeError, AttributeError):
+                continue
+    return list(set(ids))
+
+
+_SCENE_TABLE = sa.table(
+    "ontology_scene_type",
+    sa.column("scene_type_id", PGUUID(as_uuid=True)),
+    sa.column("scene_name", sa.String),
+    sa.column("tenant_id", PGUUID(as_uuid=True)),
+)
+_SCENE_QUERY = select(
+    _SCENE_TABLE.c.scene_type_id,
+    _SCENE_TABLE.c.scene_name,
+    _SCENE_TABLE.c.tenant_id,
+).where(
+    _SCENE_TABLE.c.scene_type_id.in_(
+        bindparam("scene_ids", expanding=True, type_=PGUUID(as_uuid=True))
+    ),
+    _SCENE_TABLE.c.tenant_id.in_(
+        bindparam("tenant_ids", expanding=True, type_=PGUUID(as_uuid=True))
+    ),
+)
+
+
+def _profile_data(rows, scenes) -> list[tuple[str, Any, dict[str, str]]]:
+    names = {}
+    for scene in scenes:
+        name = scene.scene_name
+        if not isinstance(name, str) or not name.strip():
+            continue
+        try:
+            UUID(name)
+        except ValueError:
+            names.setdefault(str(scene.tenant_id), {})[str(scene.scene_type_id)] = name
+    return [
+        (str(row.end_user_id), row.meta_data, names.get(str(row.tenant_id), {}))
+        for row in rows
+    ]
 
 
 class MemoryStatisticsRepository:
@@ -279,6 +341,21 @@ class MemoryStatisticsRepository:
                 if isinstance(habits, list):
                     count += len(habits)
         return count
+
+    async def profiles_for_users(
+        self, end_user_ids: list[str]
+    ) -> list[tuple[str, Any, dict[str, str]]]:
+        async with self.postgres.session() as session:
+            rows = (await session.execute(_profile_statement(end_user_ids))).all()
+            scene_ids = _scene_ids(rows)
+            scenes = []
+            if scene_ids:
+                scenes = (await session.execute(_SCENE_QUERY, {
+                    "scene_ids": scene_ids,
+                    "tenant_ids": list({row.tenant_id for row in rows}),
+                })).all()
+        return _profile_data(rows, scenes)
+
 
 
 class WorkspaceProfileRepository:

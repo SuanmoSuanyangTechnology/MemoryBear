@@ -10,6 +10,9 @@ Memory_Space_Associative,Memory_Space_User,Memory_Space_Entity,
 Memory_Timeline_Entity_Events,
 )
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
+from app.repositories.neo4j.entity_repository import EntityRepository
+from app.core.error_codes import BizCode
+from app.core.exceptions import BusinessException
 from typing import Dict, List, Any, Optional
 import logging
 import re
@@ -58,7 +61,7 @@ class TimelineSort(Enum):
 
 
 class MemoryEntityService:
-    def __init__(self, id: str, table: str):
+    def __init__(self, id: str | None, table: str):
         self.id = id
         self.table = table
         self.connector = Neo4jConnector()
@@ -248,6 +251,7 @@ class MemoryEntityService:
         sort: str = "time_desc",
         from_ts: int = None,
         to_ts: int = None,
+        end_user_id: str | None = None,
     ) -> dict:
         """ExtractedEntity 合并时间线（关键节点 / 来源陈述 / 长期沉淀），分页 + 按来源筛选 + 排序 + 日期过滤。
 
@@ -264,6 +268,14 @@ class MemoryEntityService:
 
         total_count / type_stats 始终基于全量，不受筛选影响。
         """
+        repository = EntityRepository(self.connector)
+        element_id = self.id
+        if element_id is None and end_user_id is not None:
+            entities = await repository.get_user_entities(end_user_id)
+            if len(entities) > 1:
+                raise BusinessException("用户自身实体定位不唯一", BizCode.INTERNAL_ERROR)
+            element_id = entities[0]["element_id"] if entities else None
+
         # 解析排序参数
         sort_mode, sort_asc = self._parse_sort(sort)
 
@@ -273,7 +285,7 @@ class MemoryEntityService:
         description_summary = None
         key_node_items = []
         kn_results = await self.connector.execute_query(
-            Memory_Timeline_Entity_Events, id=self.id
+            Memory_Timeline_Entity_Events, id=element_id
         )
         if kn_results:
             record = kn_results[0]
@@ -295,7 +307,7 @@ class MemoryEntityService:
 
         # 2. 来源陈述 + 长期沉淀：走 ExtractedEntity 图遍历查询
         graph_results = await self.connector.execute_query(
-            Memory_Timeline_ExtractedEntity, id=self.id
+            Memory_Timeline_ExtractedEntity, id=element_id
         )
 
         statement_items, summary_items = [], []
@@ -328,6 +340,12 @@ class MemoryEntityService:
         if from_ts is not None or to_ts is not None:
             all_items = [i for i in all_items if self._match_date_filter(i, from_ts, to_ts)]
 
+        filtered_counts = {
+            "key_node": sum(item["type"] == "key_node" for item in all_items),
+            "memory_summary": sum(item["type"] == "memory_summary" for item in all_items),
+        }
+        filtered_counts["total"] = sum(filtered_counts.values())
+
         # 6. 排序
         all_items.sort(key=lambda x: self._get_sort_key(x, sort_mode, sort_asc))
 
@@ -344,7 +362,7 @@ class MemoryEntityService:
         hasnext = page * pagesize < total
 
         logger.info(
-            f"合并时间线: id={self.id}, type={source_type}, sort={sort}, "
+            f"合并时间线: id={element_id}, type={source_type}, sort={sort}, "
             f"from_ts={from_ts}, to_ts={to_ts}, "
             f"key_node={len(key_node_items)}, statement={len(statement_items)}, "
             f"summary={len(summary_items)}, total={total}, page={page}, pagesize={pagesize}"
@@ -356,6 +374,7 @@ class MemoryEntityService:
             "description_summary": description_summary,
             "total_count": total_count,
             "type_stats": type_stats,
+            "filtered_counts": filtered_counts,
             "items": items,
             "page": {"page": page, "pagesize": pagesize, "total": total, "hasnext": hasnext},
         }

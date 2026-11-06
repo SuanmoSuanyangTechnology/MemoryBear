@@ -16,6 +16,7 @@ import time
 import uuid as uuid_module
 from collections import defaultdict
 from dataclasses import dataclass, field
+from datetime import timedelta
 from app.core.utils.datetime_utils import utcnow_naive
 from typing import Any, ClassVar
 
@@ -399,10 +400,6 @@ async def _bulk_persist_messages(
                 _opening_sq = args.get("opening_suggested_questions")
                 _opening_row = _row(opening_row_id, conv_id, "assistant", args["opening_statement"],
                                     {"suggested_questions": _opening_sq} if _opening_sq else None)
-                # 同批落库的行 created_at 可能因时钟精度完全相同，按时间排序会让开场白与 user 次序不定；
-                # 开场白前移 1ms，保证它严格排在本轮 user 之前
-                from datetime import timedelta as _timedelta
-                _opening_row["created_at"] = _opening_row["created_at"] - _timedelta(milliseconds=1)
                 _add_row(_opening_row, conv_id)
 
         # user message
@@ -479,6 +476,27 @@ async def _bulk_persist_messages(
             "batch_persist: dropped %d duplicate message rows within one batch",
             len(rows) - len(unique_rows),
         )
+
+    # --- 同批 created_at 强制严格递增（按会话隔离） ---
+    # _row 各自取 utcnow_naive()，时钟精度不足（Windows ~1-15ms）时同批多行会拿到
+    # 完全相同的时间戳；messages 查询仅按 created_at 排序、无次级键，PG 对相同值的
+    # 返回次序不定，对话展示便出现 user/assistant 交错。行的构造顺序即期望时序
+    # （开场白 < user < assistant < 下一轮 user…），按该顺序在同一会话内强制后一行
+    # 严格大于前一行（相同则 +1ms）。单调约束按 conversation 隔离：排序只在会话内
+    # 有意义，会话间互不影响，避免批内多会话交错时 +1ms 修正跨会话累积漂移。
+    # 原开场白单独 -1ms 的补丁即此问题的局部修复，已统一收敛至此。
+    prev_ts_by_conv = {}
+    for r in unique_rows:
+        mid = r["id"]
+        if isinstance(mid, str):
+            mid = uuid_module.UUID(mid)
+        conv_id = row_conv[mid]
+        ts = r["created_at"]
+        prev = prev_ts_by_conv.get(conv_id)
+        if prev is not None and ts <= prev:
+            ts = prev + timedelta(milliseconds=1)
+            r["created_at"] = ts
+        prev_ts_by_conv[conv_id] = ts
 
     # --- single idempotent multi-row INSERT for all messages ---
     inserted_ids: set[uuid_module.UUID] = set()

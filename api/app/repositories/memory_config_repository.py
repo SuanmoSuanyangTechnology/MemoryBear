@@ -568,6 +568,15 @@ class MemoryConfigRepository:
             db_logger.error(f"根据ID查询记忆配置失败(异步): config_id={config_id} - {str(e)}")
             raise
 
+    def get_personality_anchor_enabled(
+        self, config_id: UUID, workspace_id: UUID,
+    ) -> Optional[bool]:
+        """Read the personality-anchor switch for a workspace configuration."""
+        return self.db.query(MemoryConfig.personality_anchor_enabled).filter(
+            MemoryConfig.config_id == config_id,
+            MemoryConfig.workspace_id == workspace_id,
+        ).scalar()
+
     async def get_personality_anchor_config_async(
         self, config_id: UUID, workspace_id: UUID,
     ) -> Optional[MemoryConfig]:

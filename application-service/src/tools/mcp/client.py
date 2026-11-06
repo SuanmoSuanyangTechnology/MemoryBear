@@ -44,6 +44,19 @@ class SimpleMCPClient:
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         await self.disconnect()
 
+    def _describe_error(self, exc: BaseException) -> str:
+        """Readable error text for logs and for ``MCPConnectionError``.
+
+        ``asyncio.TimeoutError`` — what aiohttp raises for ``ClientTimeout(total=...)`` —
+        stringifies to an empty string, so a plain ``{e}`` logged connection failures as
+        "错误: " with no cause at all. Name the type whenever the message is empty.
+        """
+
+        if isinstance(exc, asyncio.TimeoutError):
+            return f"连接超时（>{self.timeout}s 未响应）"
+        detail = str(exc).strip()
+        return f"{type(exc).__name__}: {detail}" if detail else type(exc).__name__
+
     async def connect(self):
         """Establish the connection."""
         try:
@@ -53,8 +66,10 @@ class SimpleMCPClient:
                 await self._connect_http()
         except Exception as e:
             await self.disconnect()
-            logger.error(f"MCP连接失败: {self.server_url}, 错误: {e}")
-            raise MCPConnectionError(f"连接失败: {e}")
+            logger.error(
+                "MCP连接失败: %s, 错误: %s", self.server_url, self._describe_error(e)
+            )
+            raise MCPConnectionError(f"连接失败: {self._describe_error(e)}")
 
     async def disconnect(self):
         """Disconnect."""
@@ -136,8 +151,8 @@ class SimpleMCPClient:
             # Send the initialized notification
             await self._send_sse_notification({"jsonrpc": "2.0", "method": "notifications/initialized"})
 
-        except aiohttp.ClientError as e:
-            raise MCPConnectionError(f"初始化连接失败: {e}")
+        except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+            raise MCPConnectionError(f"初始化连接失败: {self._describe_error(e)}")
 
     async def _read_sse_stream(self, response):
         """Read the SSE stream."""
@@ -242,8 +257,10 @@ class SimpleMCPClient:
             async with self._session.post(self.server_url, json=notification):
                 pass
 
-        except aiohttp.ClientError as e:
-            raise MCPConnectionError(f"初始化连接失败: {e}")
+        # ``ClientTimeout(total=...)`` surfaces as asyncio.TimeoutError, not ClientError;
+        # without this branch it escaped to ``connect()`` and logged an empty message.
+        except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+            raise MCPConnectionError(f"初始化连接失败: {self._describe_error(e)}")
 
     def _build_headers(self) -> Dict[str, str]:
         """Build the request headers."""
@@ -364,8 +381,15 @@ class SimpleMCPClient:
         elif self.is_sse:
             response_data = await self._send_sse_request(request)
         else:
-            async with self._session.post(self.server_url, json=request) as response:
-                response_data = await self._parse_streamable_response(response)
+            # ``ClientTimeout(total=...)`` raises a bare asyncio.TimeoutError, whose
+            # str() is "" — it used to reach MCPTool.execute as an empty error and
+            # collapse into the generic MCP_EXECUTION_ERROR everywhere downstream.
+            # Wrap it like the SSE branch does so the cause survives.
+            try:
+                async with self._session.post(self.server_url, json=request) as response:
+                    response_data = await self._parse_streamable_response(response)
+            except asyncio.TimeoutError:
+                raise MCPConnectionError(f"工具调用超时（>{self.timeout}s 未响应）")
 
         if "error" in response_data:
             error = response_data["error"]

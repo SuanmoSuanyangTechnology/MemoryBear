@@ -86,6 +86,7 @@ from ..rag.retrieval.unit_collapse import (
 )
 from ..runtime import ProcessRuntime
 from ..usage_context import bind_usage
+from . import wiki_faq_retrieval
 from .knowledge_retrieval_preparation import KnowledgeRetrievalPreparation
 from .multimodal_image import resolve_storage_images_async, validate_image_data_uri
 
@@ -167,12 +168,14 @@ class _TimedElasticSearchRetrieval(AsyncElasticSearchRetrieval):
                         options.file_names_filter,
                         options.document_ids_include,
                         require_vector=True,
-                    ),
+                    )
+                    + list(options.extra_filters),
                 ),
                 allow_partial_search_results=False,
             )
         finally:
             _record_elapsed(self._timings, "es_vector_ms", search_started_at)
+        self._raise_on_failed_response(response, "vector search")
         return await self.resolve_parent_chunks(
             vector_hits_to_chunks(response, options.score_threshold),
             options.indices,
@@ -231,17 +234,7 @@ class KnowledgeRetrievalService:
         request: KnowledgeRetrievalRequest,
         principal: Principal,
     ) -> KnowledgeRetrievalResult:
-        if request.retrieve_type == RetrieveType.WIKI_FAQ:
-            from .wiki_faq_retrieval import retrieve
-
-            return await retrieve(runtime, request, principal)
-        if any(config.retrieve_type == RetrieveType.WIKI_FAQ for config in request.knowledge_bases):
-            logger.warning(
-                "FAQ 召回类型不能混用 stage=validate_request source=%s kb_ids=%s",
-                request.source.value,
-                [str(config.kb_id) for config in request.knowledge_bases],
-            )
-            raise KnowledgeError.from_code("KB_FAQ_MIXED_RETRIEVAL_UNSUPPORTED")
+        wiki_faq_retrieval.validate_request(request)
         image_query = cls._validated_image_query(request)
         log_id = cls._new_retrieval_log_id()
         started_at = time.perf_counter()
@@ -314,6 +307,7 @@ class KnowledgeRetrievalService:
             request,
             preparation,
             document_ids,
+            principal=principal,
             image_query=image_query,
             timings=timings,
             log_id=log_id,
@@ -352,6 +346,7 @@ class KnowledgeRetrievalService:
         preparation: RetrievalPreparation,
         document_ids: list[str] | None,
         *,
+        principal: Principal,
         image_query: ImageEmbeddingContent | None = None,
         timings: RetrievalTimings | None = None,
         log_id: str | None = None,
@@ -424,11 +419,35 @@ class KnowledgeRetrievalService:
             await asyncio.gather(*tasks, return_exceptions=True)
             raise
 
+        faq_groups = [
+            (targets[index].faq, [candidate.chunk for candidate in result.candidates])
+            for index, result in retrieved
+            if targets[index].faq is not None
+        ]
+        faq_chunks = (
+            await wiki_faq_retrieval.hydrate_results(runtime, request, principal, faq_groups)
+            if faq_groups
+            else {}
+        )
+
         candidates_by_index: list[list[RetrievalCandidate]] = [[] for _ in targets]
         entities: list[Any] = []
         relationships: list[Any] = []
         for index, result in retrieved:
-            candidates_by_index[index] = list(result.candidates)
+            target = targets[index]
+            candidates_by_index[index] = (
+                [
+                    candidate_from_chunk(
+                        chunk,
+                        target.knowledge_id,
+                        RetrievalChannel.SEMANTIC,
+                        position,
+                    )
+                    for position, chunk in enumerate(faq_chunks.get(target.knowledge_id, []))
+                ]
+                if target.faq is not None
+                else list(result.candidates)
+            )
             entities.extend(result.entities)
             relationships.extend(result.relationships)
 
@@ -501,6 +520,31 @@ class KnowledgeRetrievalService:
         params = target.params
         target_type = params.retrieve_type
         text_query = request.query_text
+        if target.faq is not None:
+            chunks = await wiki_faq_retrieval.search_target(
+                runtime,
+                client,
+                store,
+                request,
+                target.faq,
+            )
+            cls._log_target_done(
+                target,
+                len(chunks),
+                0,
+                len(chunks),
+                len(chunks),
+                started_at,
+                timings=timings,
+            )
+            return TargetRetrievalResult(
+                candidates=tuple(
+                    candidate_from_chunk(
+                        chunk, target.knowledge_id, RetrievalChannel.SEMANTIC, index
+                    )
+                    for index, chunk in enumerate(chunks)
+                )
+            )
         if target_type is RetrieveType.Graph:
             if graph_target is None:
                 cls._log_target_done(
@@ -1100,10 +1144,11 @@ class KnowledgeRetrievalService:
                 key=cls._candidate_score,
                 reverse=True,
             )
-        # A single non-hybrid target is governed by its own retrieval limit.
+        # FAQ 保留原有的库级召回上限与请求级最终上限。
         top_k = (
             targets[0].params.top_k
-            if len(targets) == 1 and targets[0].params.retrieve_type is not RetrieveType.HYBRID
+            if len(targets) == 1
+            and targets[0].params.retrieve_type not in {RetrieveType.HYBRID, RetrieveType.WIKI_FAQ}
             else request.top_k
         )
         if has_unit_candidates(ranked):

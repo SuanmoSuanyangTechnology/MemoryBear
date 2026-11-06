@@ -344,12 +344,50 @@ class WritePipeline:
 
                 # Preference 使用剪枝和文件摘要注入前的独立快照，
                 # 并与 Normal Write 六阶段并行执行。
+                preference_domain = None
                 if (
                     not is_pilot_run
-                    and getattr(self.memory_config, "preference_engine_enabled", False)
                     and target_message.get("role") == "user"
                     and target_message.get("memory_message_id")
+                    and getattr(self.memory_config, "preference_engine_enabled", False)
                 ):
+                    from app.core.memory.storage_services.preference_engine.gating import (
+                        resolve_effective_preference_domain,
+                    )
+
+                    from app.core.config import settings
+
+                    try:
+                        preference_domain = await asyncio.wait_for(
+                            asyncio.to_thread(
+                                resolve_effective_preference_domain,
+                                memory_config=self.memory_config,
+                                conversation_id=conversation_id,
+                                source=source,
+                            ),
+                            timeout=settings.PREFERENCE_GATE_TIMEOUT_SECONDS,
+                        )
+                    except asyncio.TimeoutError:
+                        # 超时与被门控规则主动跳过分开记录，便于告警区分
+                        logger.warning(
+                            "[PreferenceGate] resolve domain timeout end_user_id=%s "
+                            "reason=gate_timeout timeout=%ss",
+                            self.end_user_id,
+                            settings.PREFERENCE_GATE_TIMEOUT_SECONDS,
+                        )
+                        preference_domain = None
+                    except Exception as gate_error:
+                        # 门控/反查异常只跳过偏好任务，不阻断 Normal Write
+                        logger.error(
+                            "[PreferenceGate] resolve domain failed end_user_id=%s "
+                            "reason=gate_error error=%s",
+                            self.end_user_id,
+                            gate_error,
+                            exc_info=True,
+                        )
+                        preference_domain = None
+
+                if preference_domain:
                     preference_target, preference_history = self._build_preference_snapshot(
                         target_message=target_message,
                         context_before=context_before,
@@ -362,6 +400,7 @@ class WritePipeline:
                             self._write_preference(
                                 target_message=preference_target,
                                 history_messages=preference_history,
+                                domain=preference_domain,
                             ),
                             timeout=settings.PREFERENCE_WRITE_TIMEOUT_SECONDS,
                         )
@@ -441,12 +480,12 @@ class WritePipeline:
                 # 可以直接取 dialog 节点的内容作为 UserSource 节点的内容
                 self._user_pruning_info = None
                 if pruning_records:
-                    # 优先匹配 LLM 剪枝路径（source=llm, should_process_user_msg=True）
+                    # 新模型和 LLM 的有效用户规整结果均保留原文追溯及主题关联。
                     target_pruning = next(
                         (r for r in pruning_records
                          if r.get("message_seq") == message_seq
                          and r.get("type") == "user_pruning"
-                         and r.get("source") == "llm"
+                         and r.get("source") in ("llm", "model")
                          and (r.get("output") or {}).get("should_process_user_msg")),
                         None,
                     )
@@ -729,16 +768,19 @@ class WritePipeline:
         *,
         target_message: dict,
         history_messages: list[dict],
+        domain: str,
     ):
         from app.core.memory.storage_services.preference_engine.processor import (
             PreferenceProcessor,
         )
 
-        processor = PreferenceProcessor(
+        processor = await asyncio.to_thread(
+            PreferenceProcessor,
             memory_config=self.memory_config,
             end_user_id=self.end_user_id,
             llm_client=self._llm_client,
             connector=self._neo4j_connector,
+            domain=domain,
         )
         return await processor.run(
             target_message=target_message,

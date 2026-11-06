@@ -33,7 +33,7 @@ from ..schemas.chunk import (
     RetrieveType,
 )
 from ..schemas.common import SuccessEnvelope, success
-from ..schemas.knowledge_retrieval import KnowledgeRetrievalRequest
+from ..schemas.knowledge_retrieval import prepare_retrieval_request
 
 router = APIRouter(prefix="/chunks", tags=["chunks"])
 
@@ -430,24 +430,6 @@ async def get_retrieval_policy(
     )
 
 
-def _retrieval_request(
-    retrieve_data: ChunkRetrieve,
-    source: KnowledgeRetrievalSource,
-) -> KnowledgeRetrievalRequest:
-    payload = retrieve_data.model_dump(exclude_none=True)
-    if (
-        "vector_similarity_weight" in retrieve_data.model_fields_set
-        and retrieve_data.vector_similarity_weight is None
-    ):
-        payload["vector_similarity_weight"] = None
-    payload["knowledge_bases"] = [
-        config.model_dump(include=config.model_fields_set | {"kb_id"})
-        for config in retrieve_data.knowledge_bases
-    ]
-    payload["source"] = source
-    return KnowledgeRetrievalRequest(**payload)
-
-
 @router.post("/retrieval", response_model=SuccessEnvelope[Any])
 async def retrieve_chunks(
     request: Request,
@@ -456,7 +438,7 @@ async def retrieve_chunks(
     source: Annotated[KnowledgeRetrievalSource, Depends(get_source)],
     runtime: Annotated[ProcessRuntime, Depends(get_runtime)],
 ) -> SuccessEnvelope[Any]:
-    retrieval_request = _retrieval_request(retrieve_data, source)
+    retrieval_request = prepare_retrieval_request(retrieve_data, source)
     if retrieve_data.metadata_filters_resolved:
         retrieval_request.mark_metadata_filters_resolved()
     result = await KnowledgeRetrievalService.retrieve_async(

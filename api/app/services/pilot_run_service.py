@@ -317,7 +317,8 @@ async def _run_pruning(
     }
 
     try:
-        pruned_dialogs = await SemanticPruner(config=config, llm_client=llm_client).prune_dataset([dialog])
+        pruner = SemanticPruner(config=config, llm_client=llm_client)
+        pruned_dialogs = await pruner.prune_dataset([dialog])
 
         if not (pruned_dialogs and pruned_dialogs[0].context):
             logger.warning("[PILOT_RUN] 剪枝后对话为空，使用原始对话")
@@ -353,6 +354,7 @@ async def _run_pruning(
             "scene": config.pruning_scene,
             "threshold": config.pruning_threshold,
             "changed_count": len(user_message_changes),
+            "sources": dict(pruner.source_counts),
         }
         logger.info(
             f"[PILOT_RUN] 语义剪枝完成: "

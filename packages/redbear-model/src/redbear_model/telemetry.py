@@ -5,6 +5,9 @@ from __future__ import annotations
 import logging
 import threading
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -12,6 +15,41 @@ from .contracts import ResolvedModelConfig
 from .usage import UsageEvent
 
 logger = logging.getLogger(__name__)
+
+
+class ProviderFailureReporter(Protocol):
+    def __call__(
+        self,
+        config: ResolvedModelConfig,
+        *,
+        operation: str,
+        upstream_url: str,
+        status_code: int | None,
+        response_body: str | None,
+        error: BaseException,
+    ) -> None: ...
+
+
+_provider_failure_reporter: ContextVar[ProviderFailureReporter | None] = ContextVar(
+    "provider_failure_reporter",
+    default=None,
+)
+
+
+@contextmanager
+def provider_failure_scope(reporter: ProviderFailureReporter) -> Iterator[None]:
+    """宿主选择接收适配器已经读取的失败信息，不参与传输与业务处理。"""
+    token = _provider_failure_reporter.set(reporter)
+    try:
+        yield
+    finally:
+        _provider_failure_reporter.reset(token)
+
+
+def current_provider_failure_reporter() -> ProviderFailureReporter | None:
+    return _provider_failure_reporter.get()
+
+
 _GATEWAY_ERROR_NAMES = (
     "authentication",
     "apiconnection",

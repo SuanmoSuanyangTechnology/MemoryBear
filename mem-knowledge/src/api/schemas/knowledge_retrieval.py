@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from ...rag.models.chunk import DocumentChunk
 from .chunk import (
     IMAGE_QUERY_TOP_N,
+    ChunkRetrieve,
     ImageRetrievalQuery,
     KnowledgeBaseConfig,
     KnowledgeRetrievalSource,
@@ -103,3 +104,21 @@ class KnowledgeRetrievalResult(BaseModel):
 
     def has_graph_data(self) -> bool:
         return bool(self.entities or self.relationships)
+
+
+def prepare_retrieval_request(
+    retrieve_data: ChunkRetrieve,
+    source: KnowledgeRetrievalSource,
+) -> KnowledgeRetrievalRequest:
+    payload = retrieve_data.model_dump(exclude_none=True)
+    if (
+        "vector_similarity_weight" in retrieve_data.model_fields_set
+        and retrieve_data.vector_similarity_weight is None
+    ):
+        payload["vector_similarity_weight"] = None
+    payload["knowledge_bases"] = [
+        config.model_dump(include=config.model_fields_set | {"kb_id"})
+        for config in retrieve_data.knowledge_bases
+    ]
+    payload["source"] = source
+    return KnowledgeRetrievalRequest(**payload)

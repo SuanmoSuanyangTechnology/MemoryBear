@@ -128,15 +128,21 @@ class ToolRepository:
             ToolConfig.tenant_id == tenant_id
         ).first()
 
-    def find_by_ids(
+    def find_by_ids_and_tenant_all(
         self, tool_ids: list[uuid.UUID], tenant_id: uuid.UUID
     ) -> list[ToolConfig]:
-        """Find tools by ID list, scoped to one tenant (includes inactive rows)."""
+        """Batch variant of :meth:`find_by_id_and_tenant_all` (one query, deleted included).
+
+        Skill rows keep a bare ``tool_id`` list, so a detail response needs every
+        bound tool in a single round trip; an empty id list short-circuits to ``[]``
+        instead of emitting ``id IN ()``.
+        """
+
         if not tool_ids:
             return []
         return self.db.query(ToolConfig).filter(
             ToolConfig.id.in_(tool_ids),
-            ToolConfig.tenant_id == tenant_id,
+            ToolConfig.tenant_id == tenant_id
         ).all()
 
     def count_by_tenant(self, tenant_id: uuid.UUID) -> int:
