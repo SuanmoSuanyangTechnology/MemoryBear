@@ -677,6 +677,54 @@ class AssetService:
         )
         return asset
 
+    def remove_reference_installation(
+            self,
+            *,
+            app_id: uuid.UUID,
+            workspace_id: uuid.UUID,
+            tenant_id: uuid.UUID,
+            commit: bool = True,
+    ) -> AppAsset | None:
+        """Soft-delete this workspace's active catalog reference, if present.
+
+        ``None`` is a normal result so the shared-app endpoint can remove a
+        legacy share and a reference together in one transaction. Copies remain
+        local applications and are deliberately excluded.
+        """
+
+        row = self.db.execute(
+            select(AppAssetInstallation, AppAsset)
+            .join(AppAsset, AppAssetInstallation.asset_id == AppAsset.id)
+            .where(
+                AppAsset.source_app_id == app_id,
+                AppAsset.tenant_id == tenant_id,
+                AppAssetInstallation.tenant_id == tenant_id,
+                AppAssetInstallation.target_workspace_id == workspace_id,
+                AppAssetInstallation.source == InstallSource.CATALOG,
+                AppAssetInstallation.link_mode == LinkMode.REFERENCE,
+                AppAssetInstallation.status == InstallStatus.ACTIVE,
+            )
+        ).one_or_none()
+        if row is None:
+            return None
+
+        installation, asset = row
+        installation.status = InstallStatus.REMOVED
+        installation.updated_at = utcnow_naive()
+        if commit:
+            self.db.commit()
+            delete_json(app_cache_key(asset.source_app_id, workspace_id))
+
+        logger.info(
+            "移除资源中心仅使用应用",
+            extra={
+                "app_id": str(app_id),
+                "asset_id": str(asset.id),
+                "workspace_id": str(workspace_id),
+            },
+        )
+        return asset
+
     # ==================== 改共享权限 ====================
 
     def update_share_mode(

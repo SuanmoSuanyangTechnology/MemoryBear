@@ -25,15 +25,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from ...db import end_read_transaction
-from ...errors import BizCode, BusinessException
+from ...errors import BizCode, BusinessException, ResourceNotFoundException
 from ...guards.workspace_access import require_workspace_access
 from ...models.app_model import App, AppType
 from ...models.document_model import Document
 from ...models.file_model import File as FileModel
-from ...quota.alerts import report_quota_change_sync
-from ...quota.usage import ensure_app_quota, require_app_quota
 from ...plugins import get_plugin
 from ...protocols.market_gateway import MARKET_SUBMISSION_FACTORY
+from ...quota.alerts import report_quota_change_sync
+from ...quota.usage import ensure_app_quota, require_app_quota
 from ...repositories import cross_domain_read
 from ...runtime import ProcessRuntime
 from ...schemas import app_schema, tool_schema, workflow_schema
@@ -42,6 +42,7 @@ from ...services.app_dsl_service import AppDslService
 from ...services.app_service import AppService
 from ...services.app_share_service import AppShareService
 from ...services.app_statistics_service import AppStatisticsService
+from ...services.asset_release_resolver import app_cache_key
 from ...services.asset_service import AssetService
 from ...services.external_status_service import apply_external_status
 from ...services.file_storage_service import FileStorageService, get_file_storage_service
@@ -51,6 +52,7 @@ from ...services.workflow_import_service import WorkflowImportService
 from ...services.workflow_service import WorkflowService
 from ...services.workflow_tool_publish_service import WorkflowToolPublishService
 from ...storage.exceptions import StorageError
+from ...utils.redis_cache import delete_json
 from ..dependencies import (
     Principal,
     SyncRedis,
@@ -823,17 +825,31 @@ def remove_shared_app(
         app_id: UUID,
         workspace_id: WorkspaceId,
         db: DbSession,
+        principal: Caller,
 ):
-    """The recipient removes a shared app from its own workspace
+    """Remove a legacy share or a catalog read-only reference from this workspace.
 
-    - The source app is not deleted, only the share record
-    - Only apps shared into the caller's own workspace can be removed
+    The source app and resource-center entry remain untouched. A local editable
+    copy is not a shared reference and must use the normal app delete operation.
     """
-    service = AppShareService(db)
-    service.remove_shared_app(
+    legacy_removed = AppShareService(db).remove_shared_app(
         app_id=app_id,
-        workspace_id=workspace_id
+        workspace_id=workspace_id,
+        commit=False,
     )
+    asset_service = AssetService(db)
+    removed_asset = asset_service.remove_reference_installation(
+        app_id=app_id,
+        workspace_id=workspace_id,
+        tenant_id=principal.tenant_id,
+        commit=False,
+    )
+    if not legacy_removed and removed_asset is None:
+        raise ResourceNotFoundException("共享应用", str(app_id))
+
+    db.commit()
+    if removed_asset is not None:
+        delete_json(app_cache_key(removed_asset.source_app_id, workspace_id))
 
     return success(msg="已移除共享应用")
 
