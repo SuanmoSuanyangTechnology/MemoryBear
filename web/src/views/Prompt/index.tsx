@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:44:15 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-10-30 16:27:41
+ * @Last Modified time: 2026-11-09 13:48:34
  */
 /**
  * Prompt Editor Component
@@ -133,6 +133,11 @@ const Prompt: FC = () => {
             break;
           case 'end':
             setLoading(false)
+            if (msg || error) {
+              setChatList(prev => {
+                return [...prev, { role: 'assistant', meta_data: { error: msg || error } }]
+              })
+            }
             // Sync form values when stream ends
             form.setFieldsValue({ current_prompt: currentPromptValueRef.current })
             break
