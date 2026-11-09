@@ -237,22 +237,28 @@ class AssetService:
         )
         return asset
 
-    def invalidate_reference_runtime_caches(self, asset: AppAsset) -> int:
-        """Clear runtime release caches for active references of one catalog entry.
+    def invalidate_reference_runtime_caches(
+            self,
+            asset: AppAsset,
+            *,
+            extra_workspace_ids: set[uuid.UUID] | None = None,
+    ) -> int:
+        """Clear runtime caches for active references and just-removed references.
 
-        The runtime cache stores the resolved release id and bypasses the resolver on
-        a hit. It must therefore be cleared after a committed unshare or pin change;
-        copies are deliberately excluded because they own their local app lifecycle.
-        Redis failures are handled by ``delete_json`` and only fall back to its TTL.
+        ``extra_workspace_ids`` covers a reference-to-copy upgrade: its installation
+        is already marked removed before commit, so it no longer appears in the
+        active-reference query but its source-app cache must still be deleted.
+        Redis failures are handled by ``delete_json`` and only fall back to TTL.
         """
 
-        workspace_ids = self.db.scalars(
+        workspace_ids = set(self.db.scalars(
             select(AppAssetInstallation.target_workspace_id).where(
                 AppAssetInstallation.asset_id == asset.id,
                 AppAssetInstallation.status == InstallStatus.ACTIVE,
                 AppAssetInstallation.link_mode == LinkMode.REFERENCE,
             )
-        ).all()
+        ).all())
+        workspace_ids.update(extra_workspace_ids or set())
         for target_workspace_id in workspace_ids:
             delete_json(app_cache_key(asset.source_app_id, target_workspace_id))
         return len(workspace_ids)
@@ -763,6 +769,7 @@ class AssetService:
         ).first()
 
         replaced_link_mode: str | None = None
+        replaced_reference_workspace_ids: set[uuid.UUID] = set()
         # 「只读引用 → 可编辑副本」是唯一会换形态的方向；其余情况一律幂等返回。
         upgrade = (
             existing is not None
@@ -790,6 +797,7 @@ class AssetService:
             if upgrade:
                 # 先让旧行失效再建副本：既避免部分唯一索引冲突，也让副本保留原名称。
                 replaced_link_mode = existing.link_mode
+                replaced_reference_workspace_ids.add(existing.target_workspace_id)
                 existing.status = InstallStatus.REMOVED
                 existing.updated_at = utcnow_naive()
                 self.db.flush()
@@ -830,6 +838,9 @@ class AssetService:
             )
             self.db.add(installation)
         self.db.commit()
+        invalidated = self.invalidate_reference_runtime_caches(
+            asset, extra_workspace_ids=replaced_reference_workspace_ids
+        )
 
         logger.info(
             "从资源中心拉取",
@@ -839,6 +850,7 @@ class AssetService:
                 "link_mode": link_mode,
                 "result": installation.result,
                 "replaced_link_mode": replaced_link_mode,
+                "invalidated_reference_caches": invalidated,
             },
         )
         return self._install_payload(
@@ -1020,12 +1032,26 @@ class AssetService:
 
         if missing is not None:
             for entry in (knowledge_retrieval or {}).get("knowledge_bases", []):
-                if isinstance(entry, dict) and not self.app_service._is_kb_available(
-                    entry.get("kb_id"), available_kb_ids
-                ):
+                if not isinstance(entry, dict):
                     missing.append({
                         "kind": "knowledge_base",
-                        "name": str(entry.get("kb_id")) if entry.get("kb_id") else None,
+                        "name": None,
+                        "path": missing_scope,
+                        "reason": "知识库引用格式无效",
+                    })
+                    continue
+                kb_id = entry.get("kb_id")
+                if _coerce_uuid(kb_id) is None:
+                    missing.append({
+                        "kind": "knowledge_base",
+                        "name": str(kb_id) if kb_id is not None else None,
+                        "path": missing_scope,
+                        "reason": "知识库引用格式无效",
+                    })
+                elif not self.app_service._is_kb_available(kb_id, available_kb_ids):
+                    missing.append({
+                        "kind": "knowledge_base",
+                        "name": str(kb_id),
                         "path": missing_scope,
                         "reason": "知识库不属于目标工作空间",
                     })
@@ -1053,10 +1079,16 @@ class AssetService:
     ) -> dict[str, Any] | None:
         """Apply the same workspace boundary to a cluster supervisor's config."""
 
-        if not supervisor_config:
+        if supervisor_config is None:
             return None
         cleaned = copy.deepcopy(supervisor_config)
         if not isinstance(cleaned, dict):
+            missing.append({
+                "kind": "supervisor_config",
+                "name": None,
+                "path": "supervisor_config",
+                "reason": "主管配置格式无效，已忽略",
+            })
             return None
         knowledge_retrieval, memory = self._remap_ws_scoped(
             cleaned,
@@ -1136,12 +1168,19 @@ class AssetService:
                         })
                         continue
                     kb_id = entry.get("kb_id")
-                    if self.app_service._is_kb_available(kb_id, available_kb_ids):
+                    if _coerce_uuid(kb_id) is None:
+                        missing.append({
+                            "kind": "knowledge_base",
+                            "name": str(kb_id) if kb_id is not None else None,
+                            "path": path,
+                            "reason": "知识库引用格式无效",
+                        })
+                    elif self.app_service._is_kb_available(kb_id, available_kb_ids):
                         retained.append(clean(entry, f"{path}.knowledge_bases"))
                     else:
                         missing.append({
                             "kind": "knowledge_base",
-                            "name": str(kb_id) if kb_id is not None else None,
+                            "name": str(kb_id),
                             "path": path,
                             "reason": "知识库不属于目标工作空间",
                         })

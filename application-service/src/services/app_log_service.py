@@ -484,7 +484,7 @@ class AppLogService:
         # bounded to the earliest ten assistant messages.
         opening_msg = None
         suggested_questions: list = []
-        if not has_earlier:
+        if executions and not has_earlier:
             opening_stmt = (
                 select(Message)
                 .where(
@@ -557,8 +557,9 @@ class AppLogService:
                 legacy_candidates_by_id.setdefault(message.id, message)
 
         legacy_candidates = sorted(
-            legacy_candidates_by_id.values(),
-            key=lambda message: (message.created_at or datetime.min, message.id),
+            (message for message in legacy_candidates_by_id.values()
+             if message.created_at is not None),
+            key=lambda message: (message.created_at, message.id),
         )
 
         def _resolve_assistant_msg_id(execution: WorkflowExecution) -> uuid.UUID:
@@ -601,18 +602,19 @@ class AppLogService:
             started_at = execution.started_at or utcnow_naive()
             completed_at = execution.completed_at or started_at
 
-            # The assistant message id doubles as the node_executions_map key;
-            # resolving the real Message.id lets the frontend locate the
-            # message via the pending_intervention key.
-            assistant_msg_id = _resolve_assistant_msg_id(execution)
-
             # --- user message (input) ---
             input_data = execution.input_data or {}
             input_content = input_data.get("message") or _extract_text(input_data)
 
-            # Skip executions without user input (e.g. opening-triggered rows).
+            # Skip executions without user input (e.g. opening-triggered rows)
+            # before consuming a legacy assistant-message candidate.
             if not input_content:
                 continue
+
+            # The assistant message id doubles as the node_executions_map key;
+            # resolving the real Message.id lets the frontend locate the
+            # message via the pending_intervention key.
+            assistant_msg_id = _resolve_assistant_msg_id(execution)
 
             files = input_data.get("files") or []
             file_infos = []
@@ -777,9 +779,10 @@ class AppLogService:
         page_times = [m.created_at for m in messages if m.created_at is not None]
         window_start = min(page_times) if page_times else None
         window_end = max(page_times) if page_times else None
-        execution_window_start = (
-            window_start - timedelta(minutes=5) if window_start is not None else None
-        )
+        # A legacy execution can run longer than five minutes. Repository
+        # scoping also considers completed_at, so matching the page time range
+        # remains bounded while long-running traces are retained.
+        execution_window_start = window_start
 
         # Anchors are master records only. Sub-agent records must hang under the
         # message of their master; without the filter they would be treated as
@@ -819,8 +822,8 @@ class AppLogService:
         assistant_messages = [m for m in messages if m.role == "assistant"]
         used_message_ids: set[str] = set()
 
-        def _match_message(started_at, ignore_used: bool = False) -> str | None:
-            """Snap one execution's start time to the nearest assistant message.
+        def _match_message(target_at, ignore_used: bool = False) -> str | None:
+            """Snap one execution's completion/start time to the next assistant message.
 
             ignore_used=True lifts the "already taken" restriction: concurrent
             sub-agents of one round share the same assistant message, otherwise
@@ -828,7 +831,7 @@ class AppLogService:
 
             Returns the message id string, or None without a candidate.
             """
-            if not started_at:
+            if not target_at:
                 return None
             best_msg = None
             best_dt = None
@@ -836,12 +839,12 @@ class AppLogService:
                 msg_id_str = str(msg.id)
                 if not ignore_used and msg_id_str in used_message_ids:
                     continue
-                if msg.created_at and msg.created_at >= started_at:
-                    delta = (msg.created_at - started_at).total_seconds()
+                if msg.created_at and msg.created_at >= target_at:
+                    delta = (msg.created_at - target_at).total_seconds()
                     if best_dt is None or delta < best_dt:
                         best_dt = delta
                         best_msg = msg
-            if best_msg is None or best_dt is None or best_dt > 300:
+            if best_msg is None or best_dt is None:
                 return None
             used_message_ids.add(str(best_msg.id))
             return str(best_msg.id)
@@ -867,7 +870,7 @@ class AppLogService:
             key = (
                 str(execution.message_id)
                 if execution.message_id and execution.message_id in page_message_ids
-                else _match_message(execution.started_at)
+                else _match_message(execution.completed_at or execution.started_at)
             )
             if not key:
                 continue
@@ -884,13 +887,15 @@ class AppLogService:
             target_id = None
             if sub.message_id and sub.message_id in page_message_ids:
                 target_key = str(sub.message_id)
-            elif sub.started_at:
+            elif sub.completed_at or sub.started_at:
+                sub_target_at = sub.completed_at or sub.started_at
                 best_master = None
                 best_delta = None
                 for execution in executions:
-                    if not execution.started_at or sub.started_at < execution.started_at:
+                    execution_target_at = execution.completed_at or execution.started_at
+                    if not execution_target_at or sub_target_at < execution_target_at:
                         continue
-                    delta = (sub.started_at - execution.started_at).total_seconds()
+                    delta = (sub_target_at - execution_target_at).total_seconds()
                     if delta <= 300 and (best_delta is None or delta < best_delta):
                         best_master = execution
                         best_delta = delta
@@ -898,7 +903,9 @@ class AppLogService:
                     target_id = str(best_master.id)
                     target_key = key_by_execution.get(target_id)
             if target_key is None:
-                target_key = _match_message(sub.started_at, ignore_used=True)
+                target_key = _match_message(
+                    sub.completed_at or sub.started_at, ignore_used=True
+                )
             if target_key is None:
                 continue
 

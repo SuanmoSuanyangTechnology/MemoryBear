@@ -732,18 +732,28 @@ class ConversationService:
                     break
             if last_user_msg is None:
                 # A small newest-first page can contain only the latest assistant
-                # reply; fetch its parent round without loading older messages.
-                last_user_msg = self.db.scalars(
-                    select(Message)
-                    .where(
-                        Message.conversation_id == conversation_id,
-                        Message.role == "user",
-                        Message.is_deleted.is_not(True),
-                        Message.is_current.is_not(False),
-                    )
-                    .order_by(Message.created_at.desc(), Message.id.desc())
-                    .limit(1)
-                ).first()
+                # reply. Follow that reply's parent instead of selecting the
+                # conversation-global newest user, which may be a later round.
+                page_assistant = next(
+                    (
+                        msg
+                        for msg in reversed(current_messages)
+                        if msg.role == "assistant" and msg.parent_message_id is not None
+                    ),
+                    None,
+                )
+                if page_assistant is not None:
+                    last_user_msg = self.db.scalars(
+                        select(Message)
+                        .where(
+                            Message.id == page_assistant.parent_message_id,
+                            Message.conversation_id == conversation_id,
+                            Message.role == "user",
+                            Message.is_deleted.is_not(True),
+                            Message.is_current.is_not(False),
+                        )
+                        .limit(1)
+                    ).first()
 
         last_user_all_versions: list[Message] = []
         if last_user_msg:

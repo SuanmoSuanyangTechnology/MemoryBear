@@ -20,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_async_db_context
 from ..errors import BizCode, BusinessException, ResourceNotFoundException
-from ..models import App, AppRelease, AppShare, AppType
+from ..models import App, AppRelease, AppType
 from ..repositories import cross_domain_read
 from ..response_utils import success
 from ..schemas.app_schema import AppChatRequest
@@ -33,7 +33,8 @@ from ..utils.app_config_utils import (
 from ..utils.redis_cache import CACHE_MISS, get_json_async, set_json_async
 from ..utils.sse_stream import with_sse_keepalive
 from .app_chat_service import AppChatService
-from .asset_release_resolver import AsyncAssetReleaseResolver, app_cache_key as _app_cache_key
+from .asset_release_resolver import AsyncAssetReleaseResolver
+from .asset_release_resolver import app_cache_key as _app_cache_key
 from .conversation_service import ConversationService
 from .public_chat_context import (
     _get_or_create_public_end_user_async,
@@ -161,51 +162,33 @@ async def prepare_chat(
     app_cache = await get_json_async(app_cache_key)
     app_stub = None
     cached_release_id = None
-    cached_release_source = None
     if app_cache is not CACHE_MISS:
         app_stub = SimpleNamespace(id=UUID(app_cache["id"]), type=app_cache["type"])
         if app_cache.get("release_id"):
             cached_release_id = UUID(app_cache["release_id"])
-        if app_cache.get("release_source") in {
-            "own", "reference", "copy", "legacy_share"
-        }:
-            cached_release_source = app_cache["release_source"]
 
     async with get_async_db_context() as adb:
         if app_stub is not None:
             app = app_stub
-            if cached_release_source is None:
-                # Cache entries written before release_source was introduced
-                # cannot safely distinguish reference from own/copy access.
-                resolved = await AsyncAssetReleaseResolver(adb).resolve(
-                    app_id=app.id, workspace_id=workspace_id
-                )
-                cached_release_id = resolved.release_id
-                release_source = resolved.source
-                await set_json_async(app_cache_key, {
-                    "id": str(app.id),
-                    "type": app.type,
-                    "release_id": (
-                        str(resolved.release_id) if resolved.release_id else None
-                    ),
-                    "release_source": resolved.source,
-                }, ttl=60)
-            else:
-                release_source = cached_release_source
         else:
             app = await _get_v1_chat_app_async(adb, app_id, workspace_id)
-            resolved = await AsyncAssetReleaseResolver(adb).resolve(
-                app_id=app.id, workspace_id=workspace_id
-            )
-            release_source = resolved.source
-            await set_json_async(app_cache_key, {
-                "id": str(app.id),
-                "type": app.type,
-                "release_id": (
-                    str(resolved.release_id) if resolved.release_id else None
-                ),
-                "release_source": resolved.source,
-            }, ttl=60)
+
+        # Cache values never grant access. Re-resolve on every request so a
+        # cancellation, pin change, or reference-to-copy upgrade cannot continue
+        # serving a stale release after its cache entry has been invalidated.
+        resolved = await AsyncAssetReleaseResolver(adb).resolve(
+            app_id=app.id, workspace_id=workspace_id
+        )
+        cached_release_id = resolved.release_id
+        release_source = resolved.source
+        await set_json_async(app_cache_key, {
+            "id": str(app.id),
+            "type": app.type,
+            "release_id": (
+                str(resolved.release_id) if resolved.release_id else None
+            ),
+            "release_source": resolved.source,
+        }, ttl=60)
 
         if payload.version is not None:
             active_release = await _get_release_by_id_async(adb, app.id, payload.version)
@@ -301,7 +284,9 @@ async def chat_stream(prep: ChatPreparation) -> AsyncIterator[str]:
                     storage_type=prep.storage_type,
                     user_rag_memory_id=prep.user_rag_memory_id,
                     workspace_id=prep.workspace_id,
-                    use_source_knowledge_workspace=prep.release_source == "reference",
+                    use_source_knowledge_workspace=prep.release_source in {
+                        "reference", "legacy_share"
+                    },
                     files=payload.files,
             ):
                 yield event
@@ -405,7 +390,9 @@ async def chat_complete(prep: ChatPreparation) -> dict:
                 storage_type=prep.storage_type,
                 user_rag_memory_id=prep.user_rag_memory_id,
                 workspace_id=str(prep.workspace_id),
-                use_source_knowledge_workspace=prep.release_source == "reference",
+                use_source_knowledge_workspace=prep.release_source in {
+                    "reference", "legacy_share"
+                },
                 files=payload.files,
             )
         return success(data=ChatResponse(**result).model_dump(mode="json"), msg="对话回复生成成功")
