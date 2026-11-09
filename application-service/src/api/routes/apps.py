@@ -42,6 +42,7 @@ from ...services.app_dsl_service import AppDslService
 from ...services.app_service import AppService
 from ...services.app_share_service import AppShareService
 from ...services.app_statistics_service import AppStatisticsService
+from ...services.asset_release_resolver import app_cache_key
 from ...services.asset_service import AssetService
 from ...services.external_status_service import apply_external_status
 from ...services.file_storage_service import FileStorageService, get_file_storage_service
@@ -51,6 +52,7 @@ from ...services.workflow_import_service import WorkflowImportService
 from ...services.workflow_service import WorkflowService
 from ...services.workflow_tool_publish_service import WorkflowToolPublishService
 from ...storage.exceptions import StorageError
+from ...utils.redis_cache import delete_json
 from ..dependencies import (
     Principal,
     SyncRedis,
@@ -830,17 +832,24 @@ def remove_shared_app(
     The source app and resource-center entry remain untouched. A local editable
     copy is not a shared reference and must use the normal app delete operation.
     """
-    try:
-        AppShareService(db).remove_shared_app(
-            app_id=app_id,
-            workspace_id=workspace_id,
-        )
-    except ResourceNotFoundException:
-        AssetService(db).remove_reference_installation(
-            app_id=app_id,
-            workspace_id=workspace_id,
-            tenant_id=principal.tenant_id,
-        )
+    legacy_removed = AppShareService(db).remove_shared_app(
+        app_id=app_id,
+        workspace_id=workspace_id,
+        commit=False,
+    )
+    asset_service = AssetService(db)
+    removed_asset = asset_service.remove_reference_installation(
+        app_id=app_id,
+        workspace_id=workspace_id,
+        tenant_id=principal.tenant_id,
+        commit=False,
+    )
+    if not legacy_removed and removed_asset is None:
+        raise ResourceNotFoundException("共享应用", str(app_id))
+
+    db.commit()
+    if removed_asset is not None:
+        delete_json(app_cache_key(removed_asset.source_app_id, workspace_id))
 
     return success(msg="已移除共享应用")
 

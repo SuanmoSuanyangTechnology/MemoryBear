@@ -683,13 +683,13 @@ class AssetService:
             app_id: uuid.UUID,
             workspace_id: uuid.UUID,
             tenant_id: uuid.UUID,
-    ) -> None:
-        """Remove this workspace's active catalog reference to ``app_id``.
+            commit: bool = True,
+    ) -> AppAsset | None:
+        """Soft-delete this workspace's active catalog reference, if present.
 
-        A reference has no local ``App`` row, so recipient-side removal only
-        soft-deletes its installation. Copies remain local applications and are
-        deliberately excluded. Clearing the runtime cache immediately revokes
-        access even when a request populated it immediately before removal.
+        ``None`` is a normal result so the shared-app endpoint can remove a
+        legacy share and a reference together in one transaction. Copies remain
+        local applications and are deliberately excluded.
         """
 
         row = self.db.execute(
@@ -706,16 +706,14 @@ class AssetService:
             )
         ).one_or_none()
         if row is None:
-            raise ResourceNotFoundException(
-                "资源中心仅使用安装记录",
-                f"app_id={app_id}, workspace_id={workspace_id}",
-            )
+            return None
 
         installation, asset = row
         installation.status = InstallStatus.REMOVED
         installation.updated_at = utcnow_naive()
-        self.db.commit()
-        delete_json(app_cache_key(asset.source_app_id, workspace_id))
+        if commit:
+            self.db.commit()
+            delete_json(app_cache_key(asset.source_app_id, workspace_id))
 
         logger.info(
             "移除资源中心仅使用应用",
@@ -725,6 +723,7 @@ class AssetService:
                 "workspace_id": str(workspace_id),
             },
         )
+        return asset
 
     # ==================== 改共享权限 ====================
 

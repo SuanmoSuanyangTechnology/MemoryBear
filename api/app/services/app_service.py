@@ -35,6 +35,7 @@ from app.models import (
     AppRelease,
     AppShare,
     AssetStatus,
+    InstallSource,
     InstallStatus,
     LinkMode,
     MultiAgentConfig,
@@ -51,6 +52,7 @@ from app.services.agent_config_converter import AgentConfigConverter
 from app.services.asset_release_resolver import (
     AssetReleaseResolver,
     AsyncAssetReleaseResolver,
+    app_cache_key,
 )
 from app.services.category_service import CategoryService
 from app.services.model_impact_service import config_ref_ids
@@ -3018,46 +3020,57 @@ class AppService:
             self,
             *,
             app_id: uuid.UUID,
-            workspace_id: uuid.UUID
+            workspace_id: uuid.UUID,
+            tenant_id: uuid.UUID,
     ) -> None:
-        """被共享者从自己的工作空间移除共享应用
+        """Remove every shared-access source for one app in this workspace.
 
-        只删除共享记录，不影响源应用。
-
-        Args:
-            app_id: 应用ID
-            workspace_id: 当前工作空间ID（被共享的目标工作空间）
-
-        Raises:
-            ResourceNotFoundException: 当共享记录不存在时
+        Legacy ``AppShare`` and catalog ``reference`` records can coexist while
+        data is migrated. They must be soft-deleted together; local copies are
+        deliberately excluded and remain normal workspace applications.
         """
-        from app.models import AppShare
-
-        logger.info(
-            "移除共享应用",
-            extra={"app_id": str(app_id), "workspace_id": str(workspace_id)}
-        )
-
-        stmt = select(AppShare).where(
-            AppShare.source_app_id == app_id,
-            AppShare.target_workspace_id == workspace_id,
-            AppShare.is_active.is_(True)
-        )
-        share = self.db.scalars(stmt).first()
-
-        if not share:
-            raise ResourceNotFoundException(
-                "共享记录",
-                f"app_id={app_id}, workspace_id={workspace_id}"
+        share = self.db.scalars(
+            select(AppShare).where(
+                AppShare.source_app_id == app_id,
+                AppShare.target_workspace_id == workspace_id,
+                AppShare.is_active.is_(True),
             )
+        ).first()
+        reference_row = self.db.execute(
+            select(AppAssetInstallation, AppAsset)
+            .join(AppAsset, AppAssetInstallation.asset_id == AppAsset.id)
+            .where(
+                AppAsset.source_app_id == app_id,
+                AppAsset.tenant_id == tenant_id,
+                AppAssetInstallation.tenant_id == tenant_id,
+                AppAssetInstallation.target_workspace_id == workspace_id,
+                AppAssetInstallation.source == InstallSource.CATALOG,
+                AppAssetInstallation.link_mode == LinkMode.REFERENCE,
+                AppAssetInstallation.status == InstallStatus.ACTIVE,
+            )
+        ).one_or_none()
+        if share is None and reference_row is None:
+            raise ResourceNotFoundException("共享应用", str(app_id))
 
-        # Soft delete
-        share.is_active = False
+        if share is not None:
+            share.is_active = False
+        if reference_row is not None:
+            installation, asset = reference_row
+            installation.status = InstallStatus.REMOVED
+            installation.updated_at = utcnow_naive()
+
         self.db.commit()
+        if reference_row is not None:
+            delete_json(app_cache_key(asset.source_app_id, workspace_id))
 
         logger.info(
             "共享应用已移除",
-            extra={"app_id": str(app_id), "workspace_id": str(workspace_id)}
+            extra={
+                "app_id": str(app_id),
+                "workspace_id": str(workspace_id),
+                "legacy_removed": share is not None,
+                "reference_removed": reference_row is not None,
+            },
         )
 
     def remove_all_shared_apps_from_workspace(
