@@ -48,7 +48,6 @@ const Applications = () => {
         </div>
         <SearchInput
           allowClear
-          value={keyword}
           onSearch={value => setKeyword(value)}
           placeholder={t('resourceCenter.search')}
         />

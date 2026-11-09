@@ -181,6 +181,7 @@ export const detail = {
       conversation: '对话',
       conversationStream: '实时对话流',
       refresh: '刷新',
+      loadEarlier: '加载更早消息',
       successfulTitle: '成功经验',
       question: '踩过的坑',
       summary: '核心洞察',

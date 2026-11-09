@@ -92,8 +92,8 @@ export interface ChatItem {
   like_count?: number;
   dislike_count?: number;
   report_count?: number;
-  /** Message role: user or assistant */
-  role?: 'user' | 'assistant';
+  /** Message role: user, assistant, or system */
+  role?: 'user' | 'assistant' | 'system';
   /** Message content */
   content?: string | null;
   /** Creation time */
@@ -246,4 +246,6 @@ export interface ChatContentProps {
   handleVersionChange?: (page: number, item: ChatItem) => void;
   handleInterventionActionClick?: (actionId: string, fieldValues: Record<string, string>, execution_id?: string, node_id?: string) => void;
   handleFavorite?: (id?: string) => void;
+  loadEarlierMessages?: () => void;
+  loadingEarlier?: boolean;
 }
