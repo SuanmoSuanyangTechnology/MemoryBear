@@ -22,6 +22,8 @@ import PublishAsToolModal from '@/views/ToolManagement/components/PublishAsToolM
 import type { WorkflowToolItem } from '@/views/ToolManagement/types'
 import { getAppAssetsCategoriesUrl } from '@/api/resourceCenter';
 import CustomSelect from '@/components/CustomSelect';
+import RbMarkdown from '@/components/Markdown';
+
 /**
  * Tag color mapping for release versions
  */
@@ -160,7 +162,7 @@ const ReleasePage: FC<{data: Application; refresh: () => void}> = ({data, refres
                             message.error(t('workflow.checkListHasErrors'))
                             return
                           }
-                          releaseModalRef.current?.handleOpen()
+                          releaseModalRef.current?.handleOpen(releaseList.find(version => version.id === data.current_release_id))
                         }
                       },
                       { label: t('tool.publishAsTool'), key: 'publishAsTool',
@@ -175,7 +177,7 @@ const ReleasePage: FC<{data: Application; refresh: () => void}> = ({data, refres
                   >
                     <RbButton type="primary" >{t('application.release')}</RbButton>
                   </Dropdown>
-                : <RbButton type="primary" onClick={() => releaseModalRef.current?.handleOpen()}>{t('application.release')}</RbButton>
+                : <RbButton type="primary" onClick={() => releaseModalRef.current?.handleOpen(releaseList.find(version => version.id === data.current_release_id))}>{t('application.release')}</RbButton>
               }
             </Space>
           </Flex>
@@ -236,6 +238,15 @@ const ReleasePage: FC<{data: Application; refresh: () => void}> = ({data, refres
                   </Form.Item>
                 </div>
               </RbCard>
+
+              {selectedVersion.setup_steps &&
+                <RbCard
+                  title="设置步骤"
+                  headerType="borderless"
+                >
+                  <RbMarkdown content={selectedVersion.setup_steps} />
+                </RbCard>
+              }
 
               {selectedVersion.usage_examples && selectedVersion.usage_examples?.length > 0 &&
                 <RbCard

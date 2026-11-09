@@ -137,8 +137,8 @@ export const sendConversation = (values: QueryParams, onMessage: (data: SSEMessa
   }, onAbort)
 }
 // Get conversation details
-export const getConversationDetail = (shareToken: string, conversation_id: string) => {
-  return request.get(`/public/share/conversations/${conversation_id}`, {}, {
+export const getConversationDetail = (shareToken: string, conversation_id: string, params?: { page?: number; pagesize?: number }) => {
+  return request.get(`/public/share/conversations/${conversation_id}`, params ?? {}, {
     headers: {
       'Authorization': `Bearer ${shareToken}`
     }
@@ -310,8 +310,8 @@ export const cancelSpaceShare = (target_workspace_id?: string) => {
 export const getAppLogsUrl = (app_id: string) => `/apps/${app_id}/logs`
 export const getPureWorkflowAppLogsUrl = (app_id: string) => `/apps/${app_id}/workflow-executions`
 // Get full conversation message history
-export const getAppLogDetail = (app_id: string, conversation_id: string) => {
-  return request.get(`/apps/${app_id}/logs/${conversation_id}`)
+export const getAppLogDetail = (app_id: string, conversation_id: string, params?: { page?: number; pagesize?: number }) => {
+  return request.get(`/apps/${app_id}/logs/${conversation_id}`, params ?? {})
 }
 export const getPureWorkflowAppLogDetail = (app_id: string, execution_id: string) => {
   return request.get(`/apps/${app_id}/workflow-executions/${execution_id}`)
