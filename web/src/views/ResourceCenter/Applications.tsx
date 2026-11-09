@@ -13,6 +13,7 @@ import type { AddToWorkspaceModalRef } from './components/AddToWorkspaceModal';
 import SearchInput from '@/components/SearchInput'
 import RbCard from '@/components/RbCard';
 import type { AppAssetItem, AppAssetsQuery, Categories } from './types'
+import { typeIcons } from '@/views/ApplicationManagement/constants';
 
 /** Tenant application catalog with category filtering and progressive loading. */
 const Applications = () => {
@@ -68,17 +69,17 @@ const Applications = () => {
         renderItem={(item) => (
           <RbCard
             isNeedTooltip={false}
-            avatarUrl={item.icon}
+            avatarUrl={item.icon || typeIcons[item.source_app_type]}
             avatarText={
-              item.icon
+              item.icon || typeIcons[item.source_app_type]
               ? undefined
               : item.source_app_name.trim()[0]
             }
             avatarClassName={clsx({
-              'rb:bg-[#155EEF]': !item.icon && item.source_app_type === 'agent',
-              'rb:bg-[#9C6FFF]!': !item.icon && item.source_app_type === 'multi_agent',
-              'rb:bg-primary-600': !item.icon && item.source_app_type.includes('workflow'),
-              'rb:bg-transparent!': item.icon
+              'rb:bg-[#155EEF]': !(item.icon || typeIcons[item.source_app_type]) && item.source_app_type === 'agent',
+              'rb:bg-[#9C6FFF]!': !(item.icon || typeIcons[item.source_app_type]) && item.source_app_type === 'multi_agent',
+              'rb:bg-primary-600': !(item.icon || typeIcons[item.source_app_type]) && item.source_app_type.includes('workflow'),
+              'rb:bg-transparent!': item.icon || typeIcons[item.source_app_type]
             })}
             title={
               <div className="rb:flex-1!">
