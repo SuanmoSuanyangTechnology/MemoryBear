@@ -351,7 +351,9 @@ class ReleaseShareService:
 
         app = self.db.get(App, release.app_id)
         if not app:
-            raise ResourceNotFoundException("应用", str(release.app_id))
+            raise ResourceNotFoundException(
+                "应用", str(release.app_id), code=BizCode.APP_NOT_FOUND
+            )
 
         if app.workspace_id != workspace_id:
             raise BusinessException("无权访问该发布版本", BizCode.PERMISSION_DENIED)

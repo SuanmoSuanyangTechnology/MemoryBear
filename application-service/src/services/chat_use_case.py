@@ -79,7 +79,9 @@ async def _get_v1_chat_app_async(
         select(App).where(App.id == app_id, App.is_active.is_(True)).limit(1)
     )
     if not app:
-        raise ResourceNotFoundException("应用", str(app_id))
+        raise ResourceNotFoundException(
+            "应用", str(app_id), code=BizCode.APP_NOT_FOUND
+        )
     if app.workspace_id != workspace_id:
         accessible = await AsyncAssetReleaseResolver(db).can_access(
             app_id=app.id, workspace_id=workspace_id
