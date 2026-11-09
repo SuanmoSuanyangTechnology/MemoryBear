@@ -406,6 +406,7 @@ export const createClusterStreamProcessor = (adapter: ClusterStreamAdapter) => {
     events.forEach(item => {
       const payload = item.data as ClusterEventData
       const ownedByAgent = hasAgentOwner(payload)
+      const error = getErrorText(payload)
 
       switch (item.event) {
         case 'start':
@@ -465,11 +466,10 @@ export const createClusterStreamProcessor = (adapter: ClusterStreamAdapter) => {
               status: block.status === 'running' ? 'completed' : block.status,
             }), false)
           } else {
-            finishCluster('completed', undefined, payload)
+            finishCluster(error ? 'failed' : 'completed', error, payload)
           }
           break
         case 'error': {
-          const error = getErrorText(payload)
           if (ownedByAgent) {
             updateAgentBlock(payload, block => ({
               ...block,

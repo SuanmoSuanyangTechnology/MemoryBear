@@ -201,10 +201,17 @@ const ReleaseModal = forwardRef<ReleaseModalRef, ReleaseModalProps>(({
                       <Flex key={field.key} align="center" gap={12}>
                         <FormItem
                           {...field}
-                          rules={[{ required: true, message: t('common.pleaseEnter') }]}
+                          rules={[
+                            { required: true, message: t('common.pleaseEnter') },
+                            { max: 500, message: t('application.usageExampleMaxLength', { max: 500 }) },
+                          ]}
                           className="rb:flex-1! rb:mb-0!"
                         >
-                          <Input.TextArea placeholder={`${t('application.usageExamplePrefix')}${field.key + 1}: ${t('application.usageExamplePlaceholder')}`} />
+                          <Input.TextArea
+                            placeholder={`${t('application.usageExamplePrefix')}${field.key + 1}: ${t('application.usageExamplePlaceholder')}`}
+                            maxLength={500}
+                            showCount
+                          />
                         </FormItem>
                         <div onClick={() => fields.length > 3 && remove(field.name)}
                           className={clsx("rb:size-4.5 rb:shrink-0! rb:bg-cover rb:bg-[url('@/assets/images/common/delete.svg')]", {
