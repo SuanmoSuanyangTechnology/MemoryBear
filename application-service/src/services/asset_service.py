@@ -39,6 +39,7 @@ from ..models import (
     SkillPackage,
     SkillPlugin,
     ToolConfig,
+    ToolStatus,
     WorkflowConfig,
 )
 from ..models.app_asset_model import (
@@ -119,6 +120,7 @@ class AssetService:
             return None
 
         release = self._resolve_release(app, release_id)
+        self._assert_share_dependencies_available(release, tenant_id)
         return self._upsert_asset(
             app=app,
             release=release,
@@ -152,6 +154,7 @@ class AssetService:
         self._assert_can_share(app, user_id, workspace_id)
 
         release = self._resolve_release(app, release_id)
+        self._assert_share_dependencies_available(release, tenant_id)
         return self._upsert_asset(
             app=app,
             release=release,
@@ -290,6 +293,335 @@ class AssetService:
                 f"版本 {target_id} 不存在或已下线", BizCode.RELEASE_NOT_FOUND
             )
         return release
+
+    def _assert_share_dependencies_available(
+            self, release: AppRelease, tenant_id: uuid.UUID
+    ) -> None:
+        """Reject sharing a snapshot whose executable tools or skills are unavailable."""
+
+        tool_refs: list[dict[str, Any]] = []
+        skill_refs: list[dict[str, Any]] = []
+        unavailable: list[dict[str, Any]] = []
+        visited_releases: set[uuid.UUID] = set()
+        seen_refs: set[tuple[str, str, str]] = set()
+        seen_issues: set[tuple[str, str, str, str]] = set()
+
+        def add_ref(
+                bucket: list[dict[str, Any]], kind: str, raw_id: Any, path: str
+        ) -> None:
+            if isinstance(raw_id, dict):
+                raw_id = raw_id.get("id") or raw_id.get(f"{kind}_id")
+            text = str(raw_id).strip() if raw_id is not None else ""
+            key = (kind, text, path)
+            if key not in seen_refs:
+                seen_refs.add(key)
+                bucket.append({"id": _coerce_uuid(text), "raw_id": text or None, "path": path})
+
+        def add_issue(
+                kind: str,
+                raw_id: Any,
+                path: str,
+                reason: str,
+                name: str | None = None,
+        ) -> None:
+            text = str(raw_id).strip() if raw_id is not None else ""
+            key = (kind, text, path, reason)
+            if key in seen_issues:
+                return
+            seen_issues.add(key)
+            unavailable.append({
+                "kind": kind,
+                "id": text or None,
+                "name": name,
+                "path": path,
+                "reason": reason,
+            })
+
+        def inspect_agent_surface(
+                config: dict[str, Any], path: str, *, enabled_by_default: bool
+        ) -> None:
+            tools = config.get("tools")
+            if isinstance(tools, list):
+                for index, selector in enumerate(tools):
+                    if not isinstance(selector, dict):
+                        add_ref(tool_refs, "tool", None, f"{path}.tools[{index}]")
+                        continue
+                    if bool(selector.get("enabled", enabled_by_default)):
+                        add_ref(
+                            tool_refs,
+                            "tool",
+                            selector.get("tool_id"),
+                            f"{path}.tools[{index}]",
+                        )
+
+            skills = config.get("skills")
+            if isinstance(skills, dict):
+                skill_ids = skills.get("skill_ids") or []
+                if not isinstance(skill_ids, list):
+                    add_ref(skill_refs, "skill", None, f"{path}.skills.skill_ids")
+                else:
+                    for index, skill_id in enumerate(skill_ids):
+                        add_ref(
+                            skill_refs,
+                            "skill",
+                            skill_id,
+                            f"{path}.skills.skill_ids[{index}]",
+                        )
+
+        def inspect_nested_release(
+                raw_id: Any, path: str, expected_app_id: Any = None
+        ) -> None:
+            release_id = _coerce_uuid(raw_id)
+            expected_id = _coerce_uuid(expected_app_id)
+            if release_id is None:
+                add_issue("agent_release", raw_id, path, "引用的 Agent 版本无效")
+                return
+            if expected_app_id is not None and expected_id is None:
+                add_issue("agent_release", raw_id, path, "引用的 Agent 应用无效")
+                return
+            nested = self.db.get(AppRelease, release_id)
+            if (
+                    nested is None
+                    or not nested.is_active
+                    or nested.type != AppType.AGENT
+                    or (expected_id is not None and nested.app_id != expected_id)
+            ):
+                add_issue(
+                    "agent_release", release_id, path, "引用的 Agent 版本不存在、已下线或归属错误"
+                )
+                return
+            nested_app = self.db.get(App, nested.app_id)
+            nested_tenant_id = (
+                cross_domain_read.get_workspace_tenant_id(self.db, nested_app.workspace_id)
+                if nested_app is not None and nested_app.is_active
+                else None
+            )
+            if (
+                    nested_app is None
+                    or not nested_app.is_active
+                    or nested_app.type != AppType.AGENT
+                    or nested_tenant_id != tenant_id
+            ):
+                add_issue(
+                    "agent_release", release_id, path, "引用的 Agent 应用不存在、已停用或跨租户"
+                )
+                return
+            inspect_release(nested, path)
+
+        def inspect_workflow_nodes(value: Any, path: str) -> None:
+            if isinstance(value, list):
+                for index, child in enumerate(value):
+                    inspect_workflow_nodes(child, f"{path}[{index}]")
+                return
+            if not isinstance(value, dict):
+                return
+
+            node_type = value.get("type")
+            node_config = value.get("config")
+            config_path = f"{path}.config"
+            if not isinstance(node_config, dict):
+                data = value.get("data")
+                node_config = data.get("config") if isinstance(data, dict) else None
+                config_path = f"{path}.data.config"
+
+            if node_type == "tool":
+                add_ref(
+                    tool_refs,
+                    "tool",
+                    node_config.get("tool_id") if isinstance(node_config, dict) else None,
+                    config_path,
+                )
+            elif node_type == "agent" and isinstance(node_config, dict):
+                if node_config.get("mode", "inline") == "reference":
+                    reference = node_config.get("reference")
+                    reference = reference if isinstance(reference, dict) else {}
+                    inspect_nested_release(
+                        reference.get("release_id"),
+                        f"{config_path}.reference",
+                        reference.get("app_id"),
+                    )
+                else:
+                    inspect_agent_surface(
+                        node_config, config_path, enabled_by_default=True
+                    )
+
+            for key, child in value.items():
+                inspect_workflow_nodes(child, f"{path}.{key}")
+
+        def inspect_release(current: AppRelease, path: str) -> None:
+            if current.id in visited_releases:
+                return
+            visited_releases.add(current.id)
+            config = current.config if isinstance(current.config, dict) else {}
+
+            if current.type == AppType.AGENT:
+                inspect_agent_surface(config, path, enabled_by_default=False)
+            elif current.type in (AppType.WORKFLOW, AppType.PURE_WORKFLOW):
+                inspect_workflow_nodes(config.get("nodes") or [], f"{path}.nodes")
+            elif current.type == AppType.MULTI_AGENT:
+                supervisor = config.get("supervisor_config")
+                if isinstance(supervisor, dict):
+                    inspect_agent_surface(
+                        supervisor,
+                        f"{path}.supervisor_config",
+                        enabled_by_default=False,
+                    )
+                for index, entry in enumerate(config.get("sub_agents") or []):
+                    if not isinstance(entry, dict):
+                        add_issue(
+                            "agent_release",
+                            None,
+                            f"{path}.sub_agents[{index}]",
+                            "子 Agent 引用格式无效",
+                        )
+                        continue
+                    inspect_nested_release(
+                        entry.get("release_id"),
+                        f"{path}.sub_agents[{index}]",
+                        entry.get("agent_id"),
+                    )
+
+        inspect_release(release, "app")
+
+        valid_skill_refs: list[tuple[dict[str, Any], Skill]] = []
+        skill_ids = {ref["id"] for ref in skill_refs if ref["id"] is not None}
+        skill_rows = (
+            self.db.scalars(select(Skill).where(Skill.id.in_(skill_ids))).all()
+            if skill_ids
+            else []
+        )
+        skills_by_id = {row.id: row for row in skill_rows}
+        for ref in skill_refs:
+            skill = skills_by_id.get(ref["id"])
+            if ref["id"] is None or skill is None:
+                add_issue("skill", ref["raw_id"], ref["path"], "技能不存在")
+            elif skill.tenant_id != tenant_id and not skill.is_public:
+                add_issue("skill", ref["raw_id"], ref["path"], "无权访问该技能")
+            elif (
+                    skill.tenant_id != tenant_id
+                    and (skill.skill_format or "legacy") == "standard"
+            ):
+                add_issue(
+                    "skill",
+                    ref["raw_id"],
+                    ref["path"],
+                    "跨租户标准技能运行时不可用",
+                    skill.name,
+                )
+            elif not skill.is_active:
+                add_issue(
+                    "skill", ref["raw_id"], ref["path"], "技能已删除或停用", skill.name
+                )
+            else:
+                valid_skill_refs.append((ref, skill))
+
+        package_ids = {
+            skill.package_id
+            for _, skill in valid_skill_refs
+            if (skill.skill_format or "legacy") == "standard" and skill.package_id
+        }
+        package_rows = (
+            self.db.scalars(
+                select(SkillPackage).where(SkillPackage.id.in_(package_ids))
+            ).all()
+            if package_ids
+            else []
+        )
+        packages_by_id = {row.id: row for row in package_rows}
+        plugin_ids = {row.plugin_id for row in package_rows if row.plugin_id}
+        plugin_rows = (
+            self.db.scalars(
+                select(SkillPlugin).where(SkillPlugin.id.in_(plugin_ids))
+            ).all()
+            if plugin_ids
+            else []
+        )
+        plugins_by_id = {row.id: row for row in plugin_rows}
+
+        for ref, skill in valid_skill_refs:
+            if (skill.skill_format or "legacy") == "standard":
+                package = packages_by_id.get(skill.package_id)
+                if (
+                        skill.package_id is None
+                        or package is None
+                        or not package.is_active
+                        or package.tenant_id != skill.tenant_id
+                ):
+                    add_issue(
+                        "skill",
+                        ref["raw_id"],
+                        ref["path"],
+                        "标准技能包不存在或已停用",
+                        skill.name,
+                    )
+                    continue
+                if package.plugin_id:
+                    plugin = plugins_by_id.get(package.plugin_id)
+                    if (
+                            plugin is None
+                            or not plugin.is_active
+                            or plugin.tenant_id != package.tenant_id
+                    ):
+                        add_issue(
+                            "skill",
+                            ref["raw_id"],
+                            ref["path"],
+                            "技能所属插件不存在或已停用",
+                            skill.name,
+                        )
+                continue
+
+            for index, selector in enumerate(skill.tools or []):
+                if isinstance(selector, dict):
+                    add_ref(
+                        tool_refs,
+                        "tool",
+                        selector.get("tool_id"),
+                        f"{ref['path']}.tools[{index}]",
+                    )
+                else:
+                    add_ref(
+                        tool_refs,
+                        "tool",
+                        None,
+                        f"{ref['path']}.tools[{index}]",
+                    )
+
+        tool_ids = {ref["id"] for ref in tool_refs if ref["id"] is not None}
+        tool_rows = (
+            self.db.scalars(select(ToolConfig).where(ToolConfig.id.in_(tool_ids))).all()
+            if tool_ids
+            else []
+        )
+        tools_by_id = {row.id: row for row in tool_rows}
+        for ref in tool_refs:
+            tool = tools_by_id.get(ref["id"])
+            if ref["id"] is None or tool is None:
+                add_issue("tool", ref["raw_id"], ref["path"], "工具不存在")
+            elif tool.tenant_id != tenant_id:
+                add_issue("tool", ref["raw_id"], ref["path"], "工具不属于当前租户")
+            elif not tool.is_active:
+                add_issue(
+                    "tool", ref["raw_id"], ref["path"], "工具已删除或停用", tool.name
+                )
+            elif tool.status != ToolStatus.AVAILABLE.value:
+                add_issue(
+                    "tool",
+                    ref["raw_id"],
+                    ref["path"],
+                    f"工具状态不可用：{tool.status}",
+                    tool.name,
+                )
+
+        if unavailable:
+            raise BusinessException(
+                "应用引用了不可用的工具、技能或 Agent 版本，请先修复后再共享",
+                BizCode.INVALID_PARAMETER,
+                data={
+                    "reason": "UNAVAILABLE_DEPENDENCIES",
+                    "dependencies": unavailable,
+                },
+            )
 
     def _display_payload(self, release: AppRelease) -> dict[str, Any]:
         """同租户内无需脱敏（§7.0）：真实配置 + 全部展示字段。"""
