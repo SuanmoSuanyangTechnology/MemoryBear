@@ -33,6 +33,9 @@ class AppRelease(Base):
     # Type-specific config snapshot (stored uniformly for agent/workflow, etc.)
     config = Column(JSON, default=dict)
 
+    # Workflow/pure-workflow setup steps, frozen with the release.
+    setup_steps = Column(String(2000), nullable=True, comment="工作流设置步骤，最多 2000 字")
+
     # Display fields frozen with the release: the resource center and the
     # community market both read them off the pinned release, so every entry
     # shows the same content for a given version.

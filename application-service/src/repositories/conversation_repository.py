@@ -367,5 +367,62 @@ class MessageRepository:
 
         return list(self.db.scalars(stmt).all())
 
+    def get_messages_page(
+        self,
+        conversation_id: uuid.UUID,
+        *,
+        page: int = 1,
+        pagesize: int = 20,
+        current_only: bool = True,
+    ) -> tuple[list[Message], bool]:
+        """One offset page of a conversation's messages.
+
+        Page 1 holds the newest ``pagesize`` rows; ``page`` grows towards
+        older history. Returns ``(messages, has_earlier)`` where messages are
+        in ascending time order (the query orders DESC for paging, then the
+        page is reversed). ``pagesize + 1`` rows decide ``has_earlier``
+        without a separate count query. The query rides
+        ``idx_messages_conv_created``.
+        """
+
+        filters = [
+            Message.conversation_id == conversation_id,
+            Message.is_deleted.is_not(True),
+        ]
+        if current_only:
+            filters.append(Message.is_current.is_not(False))
+
+        offset = (page - 1) * pagesize
+        rows = list(self.db.scalars(
+            select(Message)
+            .where(*filters)
+            .order_by(Message.created_at.desc(), Message.id.desc())
+            .offset(offset)
+            .limit(pagesize + 1)
+        ).all())
+
+        has_earlier = len(rows) > pagesize
+        page_rows = rows[:pagesize]
+        page_rows.reverse()
+        return page_rows, has_earlier
+
+    def count_messages(
+        self,
+        conversation_id: uuid.UUID,
+        current_only: bool = True,
+    ) -> int:
+        """Total non-deleted messages of a conversation (current versions only
+        by default)."""
+
+        filters = [
+            Message.conversation_id == conversation_id,
+            Message.is_deleted.is_not(True),
+        ]
+        if current_only:
+            filters.append(Message.is_current.is_not(False))
+        return int(
+            self.db.scalar(select(func.count()).select_from(Message).where(*filters))
+        )
+
 
 __all__ = ["ConversationRepository", "MessageRepository"]

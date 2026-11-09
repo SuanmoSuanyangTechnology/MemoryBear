@@ -282,6 +282,7 @@ class AssetService:
             "changelog": release.release_notes,
             "categories": list(release.categories or []),
             "usage_examples": _expand_usage_examples(release.usage_examples),
+            "setup_steps": release.setup_steps,
             "config": release.config or {},
         }
 
@@ -844,6 +845,9 @@ class AssetService:
             "share_mode": asset.share_mode,
             "categories": payload.get("categories") or [],
             "usage_examples": payload.get("usage_examples") or [],
+            # 发布快照是详情字段的唯一权威来源；payload 仅兼容 setup_steps
+            # 字段上线前创建的历史资源中心条目。
+            "setup_steps": release.setup_steps if release else payload.get("setup_steps"),
             "changelog": payload.get("changelog"),
             "linked_skills": linked_skills,
             "linked_tools": linked_tools,

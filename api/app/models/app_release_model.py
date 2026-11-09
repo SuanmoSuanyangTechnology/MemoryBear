@@ -33,6 +33,9 @@ class AppRelease(Base):
     # 类型特定配置快照（针对 agent/workflow 等统一存放）
     config = Column(JSON, default=dict)
 
+    # 工作流/对话工作流的设置步骤，随发布版本冻结。
+    setup_steps = Column(String(2000), nullable=True, comment="工作流设置步骤，最多 2000 字")
+
     # 展示字段随版本冻结：资源中心与社区市场都读所钉住 release 上的这两列，
     # 保证同一版本在任何入口看到的文案一致（方案 §4.3 / §4.5）
     usage_examples = Column(

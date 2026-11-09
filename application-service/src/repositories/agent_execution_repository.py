@@ -8,7 +8,7 @@ import logging
 import uuid
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
@@ -135,6 +135,64 @@ class AgentExecutionRepository:
         if agent_role is not None:
             stmt = stmt.where(AgentExecution.agent_role == agent_role)
         stmt = stmt.order_by(AgentExecution.started_at.asc())
+        return list(self.db.scalars(stmt).all())
+
+    def get_page_scoped(
+        self,
+        conversation_id: uuid.UUID,
+        *,
+        message_ids: set[uuid.UUID],
+        window_start,
+        window_end,
+        agent_role: str,
+    ) -> list[AgentExecution]:
+        """Executions relevant to one page of messages.
+
+        Rows are kept when they either link directly to a page message
+        (``message_id``) or fall inside the page's time window (covers legacy
+        rows predating the message_id backfill, which the log view matches by
+        nearest time). Bounded on both dimensions, so a long conversation's
+        full execution history is never loaded for one page.
+        """
+
+        if not message_ids and window_start is None:
+            return []
+
+        stmt = select(AgentExecution).where(
+            AgentExecution.conversation_id == conversation_id,
+            AgentExecution.agent_role == agent_role,
+        )
+        scope_clauses = []
+        if message_ids:
+            scope_clauses.append(AgentExecution.message_id.in_(message_ids))
+        if window_start is not None:
+            window_clause = AgentExecution.started_at >= window_start
+            if window_end is not None:
+                window_clause = window_clause & (AgentExecution.started_at <= window_end)
+            scope_clauses.append(window_clause)
+        stmt = stmt.where(or_(*scope_clauses))
+        stmt = stmt.order_by(AgentExecution.started_at.asc())
+        return list(self.db.scalars(stmt).all())
+
+    def list_sub_by_parents(
+        self,
+        conversation_id: uuid.UUID,
+        parent_ids: set[uuid.UUID],
+    ) -> list[AgentExecution]:
+        """Sub-agent executions of the given parent ids in one query (the
+        paged counterpart of ``list_sub_by_conversation``)."""
+
+        if not parent_ids:
+            return []
+        stmt = (
+            select(AgentExecution)
+            .where(
+                AgentExecution.conversation_id == conversation_id,
+                AgentExecution.agent_role == "sub",
+                AgentExecution.parent_execution_id.in_(parent_ids),
+            )
+            .order_by(AgentExecution.started_at.asc())
+        )
         return list(self.db.scalars(stmt).all())
 
     def get_by_message_id(
