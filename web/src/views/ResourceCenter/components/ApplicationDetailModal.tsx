@@ -14,6 +14,7 @@ import Empty from '@/components/Empty';
 import ToolIcon from '@/views/ToolManagement/components/ToolIcon'
 import SkillIcon from '@/views/Skills/components/SkillIcon';
 import { typeIcons } from '@/views/ApplicationManagement/constants';
+import RbMarkdown from '@/components/Markdown';
 
 export interface ApplicationDetailModalRef {
   handleOpen: (id: string) => void;
@@ -115,7 +116,16 @@ const ApplicationDetailModal = forwardRef<ApplicationDetailModalRef, Application
               <div className="rb:grid rb:gap-6 rb:border-t rb:border-gray-200 rb:pt-3 rb:grid-cols-[minmax(0,1fr)_240px]">
                 <section className="rb:min-w-0">
                   {type === 'workflow' &&
-                    <WorkflowPreview payload={item.display_payload.workflow} />
+                    <>
+                      <WorkflowPreview payload={item.display_payload.workflow} />
+                      <section className="rb:mt-4">
+                        <h3 className="rb:font-semibold">设置步骤</h3>
+                        {item.setup_steps
+                          ? <RbMarkdown content={item.setup_steps} className="rb:mt-2 rb:text-gray-600" />
+                          : <div className="rb:text-gray-600 rb:mt-2">暂无设置步骤</div>
+                        }
+                      </section>
+                    </>
                   }
                   {type === 'multi_agent' && (
                     <ClusterPreview payload={item.display_payload?.cluster} name={item.source_app_name as string} />

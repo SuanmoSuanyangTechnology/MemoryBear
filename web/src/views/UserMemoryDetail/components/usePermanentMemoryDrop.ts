@@ -36,6 +36,16 @@ export default function usePermanentMemoryDrop(contentKey: string, loading: bool
     const fitSettledContent = () => {
       if (compacted || bodies.some(body => !body.isSleeping)) return
       compacted = true
+      // Remove empty horizontal bands while preserving overlapping rows and rotation.
+      const ordered = [...bodies].sort((left, right) => left.bounds.min.y - right.bounds.min.y)
+      let previousBottom = ordered[0].bounds.max.y
+      let removedSpace = 0
+      ordered.slice(1).forEach(body => {
+        const gap = body.bounds.min.y - removedSpace - previousBottom
+        removedSpace += Math.max(0, gap - 12)
+        if (removedSpace > 0) Body.translate(body, { x: 0, y: -removedSpace })
+        previousBottom = Math.max(previousBottom, body.bounds.max.y)
+      })
       const top = Math.min(...bodies.map(body => body.bounds.min.y))
       const bottom = Math.max(...bodies.map(body => body.bounds.max.y))
       contentOffset = Math.max(0, top - 12)

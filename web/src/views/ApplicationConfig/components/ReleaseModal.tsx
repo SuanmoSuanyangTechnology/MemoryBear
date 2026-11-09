@@ -8,7 +8,7 @@ import { Form, Input, Button, Flex } from 'antd';
 import { useTranslation } from 'react-i18next';
 import clsx from 'clsx';
 
-import type { ReleaseModalData, ReleaseModalRef } from '../types'
+import type { ReleaseModalData, ReleaseModalRef, Release } from '../types'
 import RbModal from '@/components/RbModal'
 import { publishRelease, getCurrentRelease } from '@/api/application'
 import { getFileLink } from '@/api/fileStorage'
@@ -17,6 +17,7 @@ import UploadImages from '@/components/Upload/UploadImages'
 import { stringRegExp } from '@/utils/validator';
 import { getAppAssetsCategoriesUrl } from '@/api/resourceCenter';
 import CustomSelect from '@/components/CustomSelect';
+import RichTextEditor from '@/components/RichTextEditor';
 
 const FormItem = Form.Item;
 
@@ -50,14 +51,17 @@ const ReleaseModal = forwardRef<ReleaseModalRef, ReleaseModalProps>(({
   };
 
   /** Open modal */
-  const handleOpen = () => {
+  const handleOpen = (release?: Release | null) => {
     setVisible(true);
     getCurrentRelease(data.id)
       .then(res => {
-        const response = res as { name: string; icon: any }
+        const response = res as { name: string; icon: any; }
         form.setFieldsValue({
           name: response.name,
           icon: response.icon ? { url: response.icon, uid: response.icon, status: 'done', name: 'icon' } : undefined,
+          categories: release?.categories || [],
+          usage_examples: release?.usage_examples,
+          setup_steps: release?.setup_steps
         })
       })
   };
@@ -79,6 +83,7 @@ const ReleaseModal = forwardRef<ReleaseModalRef, ReleaseModalProps>(({
             handleUpdate(formData)
           })
         } else {
+          formData.icon = icon.url
           handleUpdate(formData)
         }
       })
@@ -180,65 +185,83 @@ const ReleaseModal = forwardRef<ReleaseModalRef, ReleaseModalProps>(({
               labelKey={i18n.language === 'zh' ? 'name' : 'name_en'}
             />
           </FormItem>
-          <Form.List
-            name="usage_examples"
-            initialValue={['', '', '']}
-            rules={[
-              {
-                validator: async (_, value) => {
-                  if (!value || value.length < 3) {
-                    return Promise.reject(new Error(t('application.usageExamplesMin')));
-                  }
+          {(data.type === 'agent' || data.type === 'multi_agent') ? (
+            <Form.List
+              name="usage_examples"
+              initialValue={['', '', '']}
+              rules={[
+                {
+                  validator: async (_, value) => {
+                    if (!value || value.length < 3) {
+                      return Promise.reject(new Error(t('application.usageExamplesMin')));
+                    }
+                  },
                 },
-              },
-            ]}
-          >
-            {(fields, { add, remove }, { errors }) => (
-              <>
-                <FormItem label={t('application.usageExamples')} required>
-                  <Flex vertical gap={12}>
-                    {fields.map((field) => (
-                      <Flex key={field.key} align="center" gap={12}>
-                        <FormItem
-                          {...field}
-                          rules={[
-                            { required: true, message: t('common.pleaseEnter') },
-                            { max: 500, message: t('application.usageExampleMaxLength', { max: 500 }) },
-                          ]}
-                          className="rb:flex-1! rb:mb-0!"
-                        >
-                          <Input.TextArea
-                            placeholder={`${t('application.usageExamplePrefix')}${field.key + 1}: ${t('application.usageExamplePlaceholder')}`}
-                            maxLength={500}
-                            showCount
+              ]}
+            >
+              {(fields, { add, remove }, { errors }) => (
+                <>
+                  <FormItem label={t('application.usageExamples')} required>
+                    <Flex vertical gap={12}>
+                      {fields.map((field) => (
+                        <Flex key={field.key} align="center" gap={12}>
+                          <FormItem
+                            {...field}
+                            rules={[
+                              { required: true, message: t('common.pleaseEnter') },
+                              { max: 500, message: t('application.usageExampleMaxLength', { max: 500 }) },
+                            ]}
+                            className="rb:flex-1!"
+                          >
+                            <Input.TextArea
+                              placeholder={`${t('application.usageExamplePrefix')}${field.key + 1}: ${t('application.usageExamplePlaceholder')}`}
+                              maxLength={500}
+                              showCount
+                            />
+                          </FormItem>
+                          <div onClick={() => fields.length > 3 && remove(field.name)}
+                            className={clsx("rb:size-4.5 rb:shrink-0! rb:bg-cover rb:bg-[url('@/assets/images/common/delete.svg')]", {
+                              "rb:cursor-pointer rb:hover:bg-[url('@/assets/images/common/delete_red.svg')]": fields.length > 3,
+                              'rb:cursor-not-allowed rb:opacity-65': fields.length <= 3
+                            })}
                           />
-                        </FormItem>
-                        <div onClick={() => fields.length > 3 && remove(field.name)}
-                          className={clsx("rb:size-4.5 rb:shrink-0! rb:bg-cover rb:bg-[url('@/assets/images/common/delete.svg')]", {
-                            "rb:cursor-pointer rb:hover:bg-[url('@/assets/images/common/delete_red.svg')]": fields.length > 3,
-                            'rb:cursor-not-allowed rb:opacity-65': fields.length <= 3
-                          })}
-                        />
-                      </Flex>
-                    ))}
-                    {fields.length < 5 && (
-                      <Button
-                        type="dashed"
-                        onClick={() => add()}
-                        block
-                      >
-                        + {t('application.addUsageExample', { count: fields.length })}
-                      </Button>
-                    )}
-                  </Flex>
-                  <Form.ErrorList errors={errors} />
-                  <div style={{ color: '#999', fontSize: 12, marginTop: 4 }}>
-                    {t('application.usageExamplesHint')}
-                  </div>
-                </FormItem>
-              </>
-            )}
-          </Form.List>
+                        </Flex>
+                      ))}
+                      {fields.length < 5 && (
+                        <Button
+                          type="dashed"
+                          onClick={() => add()}
+                          block
+                        >
+                          + {t('application.addUsageExample', { count: fields.length })}
+                        </Button>
+                      )}
+                    </Flex>
+                    <Form.ErrorList errors={errors} />
+                    <div style={{ color: '#999', fontSize: 12, marginTop: 4 }}>
+                      {t('application.usageExamplesHint')}
+                    </div>
+                  </FormItem>
+                </>
+              )}
+            </Form.List>
+          ) : (
+            <FormItem
+              name="setup_steps"
+              label={t('application.setupSteps')}
+              rules={[
+                { required: true, message: t('application.setupStepsRequired') },
+              ]}
+              extra={t('application.setupStepsHint')}
+              // valuePropName="value"
+              // trigger="onChange"
+            >
+              <RichTextEditor
+                placeholder={t('application.setupStepsPlaceholder')}
+                maxLength={2000}
+              />
+            </FormItem>
+          )}
         </Form>
       </RbModal>
     </>
