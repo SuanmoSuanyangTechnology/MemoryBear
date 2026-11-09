@@ -677,6 +677,55 @@ class AssetService:
         )
         return asset
 
+    def remove_reference_installation(
+            self,
+            *,
+            app_id: uuid.UUID,
+            workspace_id: uuid.UUID,
+            tenant_id: uuid.UUID,
+    ) -> None:
+        """Remove this workspace's active catalog reference to ``app_id``.
+
+        A reference has no local ``App`` row, so recipient-side removal only
+        soft-deletes its installation. Copies remain local applications and are
+        deliberately excluded. Clearing the runtime cache immediately revokes
+        access even when a request populated it immediately before removal.
+        """
+
+        row = self.db.execute(
+            select(AppAssetInstallation, AppAsset)
+            .join(AppAsset, AppAssetInstallation.asset_id == AppAsset.id)
+            .where(
+                AppAsset.source_app_id == app_id,
+                AppAsset.tenant_id == tenant_id,
+                AppAssetInstallation.tenant_id == tenant_id,
+                AppAssetInstallation.target_workspace_id == workspace_id,
+                AppAssetInstallation.source == InstallSource.CATALOG,
+                AppAssetInstallation.link_mode == LinkMode.REFERENCE,
+                AppAssetInstallation.status == InstallStatus.ACTIVE,
+            )
+        ).one_or_none()
+        if row is None:
+            raise ResourceNotFoundException(
+                "资源中心仅使用安装记录",
+                f"app_id={app_id}, workspace_id={workspace_id}",
+            )
+
+        installation, asset = row
+        installation.status = InstallStatus.REMOVED
+        installation.updated_at = utcnow_naive()
+        self.db.commit()
+        delete_json(app_cache_key(asset.source_app_id, workspace_id))
+
+        logger.info(
+            "移除资源中心仅使用应用",
+            extra={
+                "app_id": str(app_id),
+                "asset_id": str(asset.id),
+                "workspace_id": str(workspace_id),
+            },
+        )
+
     # ==================== 改共享权限 ====================
 
     def update_share_mode(
