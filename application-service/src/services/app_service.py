@@ -338,28 +338,17 @@ class AppService:
     def _validate_app_writable(self, app: App, workspace_id: uuid.UUID | None) -> None:
         """Validate that the app config is writable.
 
-        - Own workspace app: allowed
-        - Shared app with editable permission: allowed
-        - Shared app with readonly permission: denied
-
-        Raises:
-            BusinessException: when app is not writable
+        Only an app owned by the request workspace may be changed. Legacy
+        ``AppShare.permission=editable`` records used to bypass this guard and
+        mutate the source app; editable resource-center sharing now creates a
+        local copy instead, so legacy shares are read-only during migration.
         """
-        if workspace_id is None:
-            return
-
-        # Own workspace app, allow
-        if app.workspace_id == workspace_id:
-            return
-
-        # Check share permission
-        permission = self._get_share_permission(app, workspace_id)
-        if permission == "editable":
+        if workspace_id is None or app.workspace_id == workspace_id:
             return
 
         logger.warning(
             "应用写操作被拒",
-            extra={"app_id": str(app.id), "workspace_id": str(workspace_id)}
+            extra={"app_id": str(app.id), "workspace_id": str(workspace_id)},
         )
         raise BusinessException("共享应用不可修改配置", BizCode.WORKSPACE_NO_ACCESS)
 
@@ -1358,10 +1347,30 @@ class AppService:
                 ).first()
 
                 if source_config:
+                    workflow_missing: list[dict[str, Any]] = []
+                    nodes = (
+                        self._remap_workflow_nodes_cross_workspace(
+                            source_config.nodes,
+                            target_tenant_id=target_tenant_id,
+                            target_workspace_id=target_workspace_id,
+                        )
+                        if is_cross_workspace
+                        else (copy.deepcopy(source_config.nodes or []), workflow_missing)
+                    )
+                    copied_nodes, workflow_missing = nodes
+                    if workflow_missing:
+                        logger.warning(
+                            "跨空间复制工作流时移除了不可用资源引用",
+                            extra={
+                                "source_app_id": str(source_app.id),
+                                "target_workspace_id": str(target_workspace_id),
+                                "missing": workflow_missing,
+                            },
+                        )
                     new_config = WorkflowConfig(
                         id=uuid.uuid4(),
                         app_id=new_app.id,
-                        nodes=copy.deepcopy(source_config.nodes) if source_config.nodes else [],
+                        nodes=copied_nodes,
                         edges=copy.deepcopy(source_config.edges) if source_config.edges else [],
                         variables=(
                             copy.deepcopy(source_config.variables)
@@ -1559,10 +1568,15 @@ class AppService:
         if mid:
             try:
                 mid_uuid = uuid.UUID(str(mid))
-            except (ValueError, AttributeError):
-                exists = cross_domain_read.memory_config_exists_by_legacy_id(
-                    self.db, int(mid), target_workspace_id
-                )
+            except (ValueError, AttributeError, TypeError):
+                try:
+                    legacy_memory_id = int(mid)
+                except (ValueError, TypeError):
+                    exists = False
+                else:
+                    exists = cross_domain_read.memory_config_exists_by_legacy_id(
+                        self.db, legacy_memory_id, target_workspace_id
+                    )
                 if not exists:
                     cleaned["memory_config_id"] = None
                     cleaned.pop("memory_content", None)
@@ -1576,6 +1590,100 @@ class AppService:
                 cleaned.pop("memory_content", None)
 
         return cleaned
+
+    def _remap_workflow_nodes_cross_workspace(
+            self,
+            nodes: list[dict[str, Any]] | None,
+            *,
+            target_tenant_id: uuid.UUID | None,
+            target_workspace_id: uuid.UUID,
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        """Remove unavailable workspace-scoped references from copied workflow nodes.
+
+        Node configuration has no common schema, so this intentionally walks nested
+        dicts. Only knowledge bases and memory configuration belong to a workspace;
+        tenant-level model, tool and skill references are left untouched.
+        """
+        copied = copy.deepcopy(nodes or [])
+        missing: list[dict[str, Any]] = []
+        knowledge_entries: list[dict[str, Any]] = []
+
+        def collect(value: Any) -> None:
+            if isinstance(value, dict):
+                for key, child in value.items():
+                    if key == "knowledge_bases" and isinstance(child, list):
+                        knowledge_entries.extend(
+                            item for item in child if isinstance(item, dict)
+                        )
+                    else:
+                        collect(child)
+            elif isinstance(value, list):
+                for child in value:
+                    collect(child)
+
+        collect(copied)
+        kb_ids = {
+            str(entry.get("kb_id"))
+            for entry in knowledge_entries
+            if entry.get("kb_id") is not None
+        }
+        _, available_kb_ids = self._preload_cross_workspace_resources(
+            target_tenant_id, target_workspace_id, set(), kb_ids
+        )
+
+        def clean(value: Any, path: str = "nodes") -> Any:
+            if isinstance(value, list):
+                return [clean(child, f"{path}[{index}]") for index, child in enumerate(value)]
+            if not isinstance(value, dict):
+                return value
+
+            result = copy.deepcopy(value)
+            if "knowledge_bases" in result and isinstance(result["knowledge_bases"], list):
+                retained = []
+                for entry in result["knowledge_bases"]:
+                    if not isinstance(entry, dict):
+                        missing.append({
+                            "kind": "knowledge_base",
+                            "name": None,
+                            "path": path,
+                            "reason": "知识库引用格式无效",
+                        })
+                        continue
+                    kb_id = entry.get("kb_id")
+                    if self._is_kb_available(kb_id, available_kb_ids):
+                        retained.append(clean(entry, f"{path}.knowledge_bases"))
+                    else:
+                        missing.append({
+                            "kind": "knowledge_base",
+                            "name": str(kb_id) if kb_id is not None else None,
+                            "path": path,
+                            "reason": "知识库不属于目标工作空间",
+                        })
+                result["knowledge_bases"] = retained
+
+            memory_id = result.get("memory_config_id") or result.get("memory_content")
+            if memory_id:
+                cleaned_memory = self._clean_memory_cross_workspace(
+                    result, target_workspace_id
+                )
+                if (
+                    cleaned_memory.get("memory_config_id") is None
+                    and "memory_content" not in cleaned_memory
+                ):
+                    missing.append({
+                        "kind": "memory_config",
+                        "name": str(memory_id),
+                        "path": path,
+                        "reason": "记忆配置不属于目标工作空间",
+                    })
+                result = cleaned_memory
+
+            for key, child in list(result.items()):
+                if key != "knowledge_bases":
+                    result[key] = clean(child, f"{path}.{key}")
+            return result
+
+        return clean(copied), missing
 
     def _clone_supervisor_config(
             self,
@@ -2528,8 +2636,11 @@ class AppService:
             setup_steps = (setup_steps or "").strip()
             if not setup_steps:
                 raise BusinessException("工作流发布必须填写设置步骤", BizCode.INVALID_PARAMETER)
-            if len(setup_steps) > 2000:
-                raise BusinessException("设置步骤最多 2000 字", BizCode.INVALID_PARAMETER)
+            if len(setup_steps) > app_schema.SETUP_STEPS_MAX_CHARS:
+                raise BusinessException(
+                    f"设置步骤最多 {app_schema.SETUP_STEPS_MAX_CHARS} 字",
+                    BizCode.INVALID_PARAMETER,
+                )
             usage_examples = []
         else:
             usage_examples = [
@@ -2537,13 +2648,25 @@ class AppService:
                 for item in (usage_examples or [])
                 if isinstance(item, str) and item.strip()
             ]
-            if not 3 <= len(usage_examples) <= 5:
+            if not (
+                app_schema.USAGE_EXAMPLES_MIN_ITEMS
+                <= len(usage_examples)
+                <= app_schema.USAGE_EXAMPLES_MAX_ITEMS
+            ):
                 raise BusinessException(
-                    "Agent 或集群发布必须填写 3～5 条使用示例",
+                    "Agent 或集群发布必须填写 "
+                    f"{app_schema.USAGE_EXAMPLES_MIN_ITEMS}～"
+                    f"{app_schema.USAGE_EXAMPLES_MAX_ITEMS} 条使用示例",
                     BizCode.INVALID_PARAMETER,
                 )
-            if any(len(item) > 500 for item in usage_examples):
-                raise BusinessException("每条使用示例最多 500 字", BizCode.INVALID_PARAMETER)
+            if any(
+                len(item) > app_schema.USAGE_EXAMPLE_MAX_CHARS
+                for item in usage_examples
+            ):
+                raise BusinessException(
+                    f"每条使用示例最多 {app_schema.USAGE_EXAMPLE_MAX_CHARS} 字",
+                    BizCode.INVALID_PARAMETER,
+                )
             setup_steps = None
 
         # Build the snapshot config

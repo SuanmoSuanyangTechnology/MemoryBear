@@ -166,9 +166,15 @@ class AgentExecutionRepository:
         if message_ids:
             scope_clauses.append(AgentExecution.message_id.in_(message_ids))
         if window_start is not None:
-            window_clause = AgentExecution.started_at >= window_start
+            # Legacy runs can span far longer than the display page's old
+            # five-minute look-back. Their assistant reply is emitted at
+            # completion, so scope unlinked rows by completion time first.
+            execution_time = func.coalesce(
+                AgentExecution.completed_at, AgentExecution.started_at
+            )
+            window_clause = execution_time >= window_start
             if window_end is not None:
-                window_clause = window_clause & (AgentExecution.started_at <= window_end)
+                window_clause = window_clause & (execution_time <= window_end)
             scope_clauses.append(window_clause)
         stmt = stmt.where(or_(*scope_clauses))
         stmt = stmt.order_by(AgentExecution.started_at.asc())
@@ -194,6 +200,50 @@ class AgentExecutionRepository:
             .order_by(AgentExecution.started_at.asc())
         )
         return list(self.db.scalars(stmt).all())
+
+    def list_orphan_sub_page_scoped(
+        self,
+        conversation_id: uuid.UUID,
+        *,
+        message_ids: set[uuid.UUID],
+        window_start,
+        window_end,
+        limit: int,
+    ) -> list[AgentExecution]:
+        """Legacy sub-agent rows without a parent, bounded to one message page."""
+
+        if not message_ids and window_start is None:
+            return []
+
+        stmt = select(AgentExecution).where(
+            AgentExecution.conversation_id == conversation_id,
+            AgentExecution.agent_role == "sub",
+            AgentExecution.parent_execution_id.is_(None),
+        )
+        scope_clauses = []
+        if message_ids:
+            scope_clauses.append(AgentExecution.message_id.in_(message_ids))
+        if window_start is not None:
+            # Orphan sub-agent rows may also outlive the old five-minute window.
+            # Their visible trace belongs to the assistant reply emitted at
+            # completion, so use the same completion-first scope as masters.
+            execution_time = func.coalesce(
+                AgentExecution.completed_at, AgentExecution.started_at
+            )
+            window_clause = execution_time >= window_start
+            if window_end is not None:
+                window_clause = window_clause & (execution_time <= window_end)
+            scope_clauses.append(window_clause)
+        # Keep the bounded query biased to the newest page-adjacent traces;
+        # reverse in memory so callers retain chronological display order.
+        stmt = (
+            stmt.where(or_(*scope_clauses))
+            .order_by(AgentExecution.started_at.desc(), AgentExecution.id.desc())
+            .limit(max(limit, 1))
+        )
+        rows = list(self.db.scalars(stmt).all())
+        rows.reverse()
+        return rows
 
     def get_by_message_id(
         self,

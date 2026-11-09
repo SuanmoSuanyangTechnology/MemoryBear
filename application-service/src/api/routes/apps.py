@@ -706,8 +706,11 @@ def share_app(
             "dependencies": prepared.get("dependencies") or [],
         }
 
-    # 本地部分到此为止，一次提交。
+    # 本地部分到此为止，一次提交。运行时缓存保存的是解析后的 release，必须在
+    # 条目 pin 前移后再失效，避免未提交事务被读到或提交失败时误删缓存。
     db.commit()
+    if asset is not None:
+        asset_service.invalidate_reference_runtime_caches(asset)
 
     if staged is not None:
         # 事务外发 HTTP（可重试；失败不改本地结果）

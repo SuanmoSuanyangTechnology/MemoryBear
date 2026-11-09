@@ -10,10 +10,10 @@ from __future__ import annotations
 import json
 import logging
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from ..models.app_model import AppType
@@ -247,7 +247,6 @@ class AppLogService:
             workspace_id=workspace_id,
         )
 
-        is_first_page = page <= 1
         page_execution_ids: set[str] = set()
         if app_type in (AppType.WORKFLOW, AppType.PURE_WORKFLOW):
             (
@@ -261,7 +260,6 @@ class AppLogService:
                 workspace_id,
                 page=page,
                 pagesize=pagesize,
-                include_opening=is_first_page,
             )
         else:
             messages, has_earlier = self.message_repository.get_messages_page(
@@ -439,7 +437,6 @@ class AppLogService:
         *,
         page: int = 1,
         pagesize: int = 20,
-        include_opening: bool = True,
     ) -> tuple[
         list[AppLogMessage],
         dict[str, list[AppLogNodeExecution]],
@@ -455,8 +452,8 @@ class AppLogService:
             files land in meta_data)
           - assistant message: from execution.output_data (error text on
             failure)
-        The opening statement's suggested_questions are merged into the first
-        assistant message's meta_data (first page only).
+        The opening statement's suggested_questions are returned only with the
+        earliest execution page, preserving chronological order when pages merge.
 
         Paging runs on executions (one round per row) via offset; only the
         page's executions and the assistant messages matching their
@@ -478,13 +475,16 @@ class AppLogService:
             conversation_id,
             statuses=list(self._WF_VISIBLE_STATUSES),
         )
-        page_execution_ids = {ex.execution_id for ex in executions}
+        page_execution_ids = {
+            str(ex.execution_id) for ex in executions if ex.execution_id
+        }
 
-        # Opening statement: only the first page renders it, so the query stays
-        # bounded (earliest 10 assistant messages).
+        # The opening statement belongs before the oldest execution. Return it
+        # only when no earlier execution page remains; the lookup itself stays
+        # bounded to the earliest ten assistant messages.
         opening_msg = None
         suggested_questions: list = []
-        if include_opening:
+        if executions and not has_earlier:
             opening_stmt = (
                 select(Message)
                 .where(
@@ -500,37 +500,86 @@ class AppLogService:
                     suggested_questions = m.meta_data.get("suggested_questions") or []
                     break
 
-        # Associate page executions with their real assistant Message.id via
-        # meta_data.execution_id. Scan the most recent messages backwards in
-        # bounded offset pages (riding idx_messages_conv_created) until every
-        # page execution is matched or the whole conversation is exhausted —
-        # never a full unbounded ORM load.
+        # New messages carry meta_data.execution_id, so one targeted query can
+        # resolve the page without walking the conversation from newest to oldest.
+        message_execution_id = Message.meta_data["execution_id"].as_string()
         exec_id_to_msg_id: dict[str, uuid.UUID] = {}
         if page_execution_ids:
-            scan_page = 1
-            scan_page_size = max(pagesize * 4, 200)
-            while True:
-                scan_rows, scan_has_earlier = self.message_repository.get_messages_page(
-                    conversation_id,
-                    page=scan_page,
-                    pagesize=scan_page_size,
-                    current_only=False,
+            exact_stmt = (
+                select(Message)
+                .where(
+                    Message.conversation_id == conversation_id,
+                    Message.role == "assistant",
+                    Message.is_deleted.is_not(True),
+                    message_execution_id.in_(sorted(page_execution_ids)),
                 )
-                for m in scan_rows:
-                    if m.role != "assistant" or not isinstance(m.meta_data, dict):
-                        continue
-                    mid = m.meta_data.get("execution_id")
-                    if mid and mid in page_execution_ids:
-                        exec_id_to_msg_id.setdefault(str(mid), m.id)
-                if not scan_has_earlier or len(exec_id_to_msg_id) == len(page_execution_ids):
-                    break
-                scan_page += 1
+                .order_by(Message.created_at.asc(), Message.id.asc())
+            )
+            for message in self.db.scalars(exact_stmt).all():
+                execution_id = (
+                    message.meta_data.get("execution_id")
+                    if isinstance(message.meta_data, dict)
+                    else None
+                )
+                if execution_id:
+                    exec_id_to_msg_id.setdefault(str(execution_id), message.id)
+
+        # Historical assistant messages may not carry execution_id. For each
+        # unmatched page execution, load at most ten candidates within five
+        # minutes of its completion/start time. Query count and loaded ORM rows
+        # are therefore bounded by the requested execution page size.
+        match_tolerance = timedelta(minutes=5)
+        legacy_candidates_by_id: dict[uuid.UUID, Message] = {}
+        for execution in executions:
+            execution_id = str(execution.execution_id) if execution.execution_id else ""
+            if execution_id in exec_id_to_msg_id:
+                continue
+            target = execution.completed_at or execution.started_at
+            if target is None:
+                continue
+            candidate_stmt = (
+                select(Message)
+                .where(
+                    Message.conversation_id == conversation_id,
+                    Message.role == "assistant",
+                    Message.is_deleted.is_not(True),
+                    Message.created_at >= target - match_tolerance,
+                    Message.created_at <= target + match_tolerance,
+                    or_(Message.meta_data.is_(None), message_execution_id.is_(None)),
+                )
+                .order_by(
+                    func.abs(func.extract("epoch", Message.created_at - target)),
+                    Message.id.asc(),
+                )
+                .limit(10)
+            )
+            for message in self.db.scalars(candidate_stmt).all():
+                legacy_candidates_by_id.setdefault(message.id, message)
+
+        legacy_candidates = sorted(
+            (message for message in legacy_candidates_by_id.values()
+             if message.created_at is not None),
+            key=lambda message: (message.created_at, message.id),
+        )
 
         def _resolve_assistant_msg_id(execution: WorkflowExecution) -> uuid.UUID:
-            """Resolve the execution's real assistant Message.id, else a
-            synthesized UUID (backward-compatible fallback)."""
-            if execution.execution_id in exec_id_to_msg_id:
-                return exec_id_to_msg_id[execution.execution_id]
+            """Resolve the real assistant Message.id, then synthesize as last resort."""
+            execution_id = str(execution.execution_id) if execution.execution_id else ""
+            if execution_id in exec_id_to_msg_id:
+                return exec_id_to_msg_id[execution_id]
+            target = execution.completed_at or execution.started_at
+            if target is not None and legacy_candidates:
+                best_idx = min(
+                    range(len(legacy_candidates)),
+                    key=lambda idx: abs(
+                        (legacy_candidates[idx].created_at - target).total_seconds()
+                    ),
+                )
+                best_diff = abs(
+                    (legacy_candidates[best_idx].created_at - target).total_seconds()
+                )
+                if best_diff <= match_tolerance.total_seconds():
+                    return legacy_candidates.pop(best_idx).id
             return uuid.uuid5(execution.id, "assistant")
 
         messages: list[AppLogMessage] = []
@@ -553,18 +602,19 @@ class AppLogService:
             started_at = execution.started_at or utcnow_naive()
             completed_at = execution.completed_at or started_at
 
-            # The assistant message id doubles as the node_executions_map key;
-            # resolving the real Message.id lets the frontend locate the
-            # message via the pending_intervention key.
-            assistant_msg_id = _resolve_assistant_msg_id(execution)
-
             # --- user message (input) ---
             input_data = execution.input_data or {}
             input_content = input_data.get("message") or _extract_text(input_data)
 
-            # Skip executions without user input (e.g. opening-triggered rows).
+            # Skip executions without user input (e.g. opening-triggered rows)
+            # before consuming a legacy assistant-message candidate.
             if not input_content:
                 continue
+
+            # The assistant message id doubles as the node_executions_map key;
+            # resolving the real Message.id lets the frontend locate the
+            # message via the pending_intervention key.
+            assistant_msg_id = _resolve_assistant_msg_id(execution)
 
             files = input_data.get("files") or []
             file_infos = []
@@ -729,6 +779,10 @@ class AppLogService:
         page_times = [m.created_at for m in messages if m.created_at is not None]
         window_start = min(page_times) if page_times else None
         window_end = max(page_times) if page_times else None
+        # A legacy execution can run longer than five minutes. Repository
+        # scoping also considers completed_at, so matching the page time range
+        # remains bounded while long-running traces are retained.
+        execution_window_start = window_start
 
         # Anchors are master records only. Sub-agent records must hang under the
         # message of their master; without the filter they would be treated as
@@ -736,7 +790,7 @@ class AppLogService:
         executions = agent_exec_repo.get_page_scoped(
             conversation_id,
             message_ids=page_message_ids,
-            window_start=window_start,
+            window_start=execution_window_start,
             window_end=window_end,
             agent_role="master",
         )
@@ -748,11 +802,17 @@ class AppLogService:
             if sub.parent_execution_id is not None:
                 subs_by_parent.setdefault(str(sub.parent_execution_id), []).append(sub)
 
-        # Legacy degraded rows (parent_execution_id=NULL) cannot be tied to a
-        # page master cheaply; the time-window scope on masters already covers
-        # the common backfill case, so orphans are skipped on paged reads
-        # rather than scanning every sub row of the conversation.
-        if not executions:
+        # Legacy degraded rows can have parent_execution_id=NULL. Keep their
+        # lookup page-scoped (direct message ids or the page's five-minute
+        # look-back window) instead of loading every sub execution in the chat.
+        orphan_subs = agent_exec_repo.list_orphan_sub_page_scoped(
+            conversation_id,
+            message_ids=page_message_ids,
+            window_start=execution_window_start,
+            window_end=window_end,
+            limit=max(len(page_message_ids) * 20, 100),
+        )
+        if not executions and not orphan_subs:
             return {}
 
         node_executions_map: dict[str, list[AppLogNodeExecution]] = {}
@@ -762,8 +822,8 @@ class AppLogService:
         assistant_messages = [m for m in messages if m.role == "assistant"]
         used_message_ids: set[str] = set()
 
-        def _match_message(started_at, ignore_used: bool = False) -> str | None:
-            """Snap one execution's start time to the nearest assistant message.
+        def _match_message(target_at, ignore_used: bool = False) -> str | None:
+            """Snap one execution's completion/start time to the next assistant message.
 
             ignore_used=True lifts the "already taken" restriction: concurrent
             sub-agents of one round share the same assistant message, otherwise
@@ -771,7 +831,7 @@ class AppLogService:
 
             Returns the message id string, or None without a candidate.
             """
-            if not started_at:
+            if not target_at:
                 return None
             best_msg = None
             best_dt = None
@@ -779,18 +839,19 @@ class AppLogService:
                 msg_id_str = str(msg.id)
                 if not ignore_used and msg_id_str in used_message_ids:
                     continue
-                if msg.created_at and msg.created_at >= started_at:
-                    delta = (msg.created_at - started_at).total_seconds()
+                if msg.created_at and msg.created_at >= target_at:
+                    delta = (msg.created_at - target_at).total_seconds()
                     if best_dt is None or delta < best_dt:
                         best_dt = delta
                         best_msg = msg
-            if best_msg is None:
+            if best_msg is None or best_dt is None:
                 return None
             used_message_ids.add(str(best_msg.id))
             return str(best_msg.id)
 
         # Resolve which page message each master record lands on.
         # message_id wins; otherwise time-based snapping within the page.
+        key_by_execution: dict[str, str] = {}
         for execution in executions:
             steps = execution.steps or []
             child_nodes: list[AppLogNodeExecution] = self._build_child_nodes(
@@ -809,13 +870,50 @@ class AppLogService:
             key = (
                 str(execution.message_id)
                 if execution.message_id and execution.message_id in page_message_ids
-                else _match_message(execution.started_at)
+                else _match_message(execution.completed_at or execution.started_at)
             )
             if not key:
                 continue
 
+            key_by_execution[str(execution.id)] = key
             # Sub-agent nodes append to the same message's node list.
             node_executions_map.setdefault(key, []).extend(execution_nodes + child_nodes)
+
+        # If the master record failed to persist, retain orphan sub-agent traces
+        # by attaching them to the nearest page master, or directly to the
+        # nearest assistant message when no master exists on this page.
+        for sub in orphan_subs:
+            target_key = None
+            target_id = None
+            if sub.message_id and sub.message_id in page_message_ids:
+                target_key = str(sub.message_id)
+            elif sub.completed_at or sub.started_at:
+                sub_target_at = sub.completed_at or sub.started_at
+                best_master = None
+                best_delta = None
+                for execution in executions:
+                    execution_target_at = execution.completed_at or execution.started_at
+                    if not execution_target_at or sub_target_at < execution_target_at:
+                        continue
+                    delta = (sub_target_at - execution_target_at).total_seconds()
+                    if delta <= 300 and (best_delta is None or delta < best_delta):
+                        best_master = execution
+                        best_delta = delta
+                if best_master is not None:
+                    target_id = str(best_master.id)
+                    target_key = key_by_execution.get(target_id)
+            if target_key is None:
+                target_key = _match_message(
+                    sub.completed_at or sub.started_at, ignore_used=True
+                )
+            if target_key is None:
+                continue
+
+            node = self._sub_execution_to_node(sub)
+            if target_id:
+                node.parent_execution_id = target_id
+                node.meta = {**(node.meta or {}), "parent_execution_id": target_id}
+            node_executions_map.setdefault(target_key, []).append(node)
 
         return node_executions_map
 
