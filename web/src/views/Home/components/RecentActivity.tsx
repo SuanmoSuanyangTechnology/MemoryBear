@@ -116,7 +116,7 @@ export default function RecentActivity() {
             maxDate={dayjs()}
             disabledDate={date => date.isBefore(ACTIVITY_START, calendar ? 'year' : 'month') || date.isAfter(dayjs(), calendar ? 'year' : 'month')}
             onChange={changeDate}
-            aria-label={t(calendar ? 'dashboard.activityYear' : 'dashboard.activityMonth')}
+            placeholder={t(calendar ? 'dashboard.activityYear' : 'dashboard.activityMonth')}
           />
         </Flex>
       }
