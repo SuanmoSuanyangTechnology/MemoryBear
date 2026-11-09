@@ -34,22 +34,17 @@ from __future__ import annotations
 import asyncio
 import io
 import logging
-import mimetypes
 import threading
 import uuid
 import zipfile
-from typing import Any, Callable, Coroutine
+from collections.abc import Callable, Coroutine
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..errors import BizCode, BusinessException
-from ..models import (
-    App,
-    MCPToolConfig,
-    SkillPackage,
-    ToolConfig,
-)
+from ..models import App, MCPToolConfig, ToolConfig
 from ..models.app_model import AppType
 from ..models.tool_model import ToolStatus, ToolType
 from ..repositories.skill_package_repository import SkillPackageRepository
@@ -64,7 +59,7 @@ logger = logging.getLogger(__name__)
 PLACEHOLDER_TOOL_TYPES = frozenset({ToolType.CUSTOM.value, ToolType.WORKFLOW.value})
 
 
-def _run_async(coro_factory: "Callable[[], Coroutine]"):
+def _run_async(coro_factory: Callable[[], Coroutine]):
     """Run a coroutine from sync code: direct when no loop, else a private thread."""
 
     try:
@@ -223,6 +218,9 @@ class BundleInstallService:
                 "name": payload.get("name"),
                 "tool_type": payload.get("tool_type"),
                 "payload": payload.get("config") or {},
+                # 将市场条目自身也走 market_ref 路径，重复安装同一版本时能
+                # 命中本租户已有 MCP，而不再创建第二个副本。
+                "market_ref": self._origin,
             }
             self._land_tools(
                 {"tools": [entry], "skills": [], "plugins": []},
@@ -338,24 +336,37 @@ class BundleInstallService:
         查不到的资源 id。
         """
 
-        # 市场来源（§11.2）：两列一起传，避免上次只写 source_ref 导致
-        # `market_source_ref()` 因 source_type 仍是 imported 而判成本地。
-        source_type = "market" if self._origin else "imported"
-        source_ref = self._market_source_ref() if own_market_ref else None
-
         plugin_meta = {
             str(plugin.get("ref")): plugin for plugin in (dependencies.get("plugins") or [])
         }
-        grouped: dict[str, list[dict[str, Any]]] = {}
+        # A plugin's members must stay together, but two market resources with the
+        # same local plugin ref must never have their provenance collapsed.
+        grouped: dict[tuple[str, str], list[dict[str, Any]]] = {}
         for entry in dependencies.get("skills") or []:
-            ref = str(entry.get("ref"))
-            plugin_ref = (entry.get("payload") or {}).get("plugin_ref")
-            grouped.setdefault(str(plugin_ref) if plugin_ref else "", []).append(entry)
+            plugin_ref = str((entry.get("payload") or {}).get("plugin_ref") or "")
+            market_ref = _market_ref_of(entry)
+            market_key = (
+                f"{market_ref['resource_id']}@{market_ref['version']}"
+                if market_ref else ""
+            )
+            grouped.setdefault((plugin_ref, market_key), []).append(entry)
 
-        for plugin_ref, entries in grouped.items():
+        for (plugin_ref, _market_key), entries in grouped.items():
             member_refs: dict[str, dict[str, Any]] = {}
+            market_ref = _market_ref_of(entries[0])
+            origin = market_ref or self._origin
+            # Every dependency with market_ref is an exact copy of that market
+            # version; persist it so a later app publication can reuse it.
+            source_type = "market" if origin else "imported"
+            source_ref = (
+                self._market_source_ref(origin)
+                if market_ref or own_market_ref
+                else None
+            )
             try:
-                archive = self._build_skill_zip(entries, nested=bool(plugin_ref), member_refs=member_refs)
+                archive = self._build_skill_zip(
+                    entries, nested=bool(plugin_ref), member_refs=member_refs
+                )
                 plugin_row = plugin_meta.get(plugin_ref) if plugin_ref else None
                 response = SkillPackageService.import_package(
                     self.db,
@@ -378,7 +389,9 @@ class BundleInstallService:
                 if entry is None:
                     continue
                 if member.get("package_id"):
-                    dep_map[str(entry.get("ref"))] = str(member.get("skill_id") or member["package_id"])
+                    dep_map[str(entry.get("ref"))] = str(
+                        member.get("skill_id") or member["package_id"]
+                    )
                 else:
                     missing.append(
                         _missing("skill", entry.get("name"), member.get("skip_reason") or "跳过")
@@ -445,18 +458,22 @@ class BundleInstallService:
         for entry in dependencies.get("tools") or []:
             ref = str(entry.get("ref"))
             tool_type = str(entry.get("tool_type") or "")
-            payload = entry.get("payload") or {}
+            market_ref = _market_ref_of(entry)
 
-            reuse = payload.get("reuse") or {}
-            if reuse:
-                # 已在目标市场装过同一资源：直接复用本地副本，不重复落地。
-                local_id = self._find_external_tool(reuse.get("market_resource_id"))
+            if market_ref:
+                # The target tenant may already have this exact market version;
+                # reuse that local row only within the same tenant and version.
+                local_id = self._find_external_tool(
+                    market_ref["resource_id"], tenant_id, market_ref["version"]
+                )
                 if local_id:
                     dep_map[ref] = local_id
                     continue
 
             if tool_type == ToolType.MCP.value:
-                dep_map[ref] = self._land_mcp(entry, tenant_id, missing)
+                dep_map[ref] = self._land_mcp(
+                    entry, tenant_id, missing, origin=market_ref or self._origin
+                )
             elif tool_type in PLACEHOLDER_TOOL_TYPES:
                 dep_map[ref] = self._land_placeholder(entry, tenant_id)
             elif tool_type == ToolType.BUILTIN.value:
@@ -470,6 +487,8 @@ class BundleInstallService:
             entry: dict[str, Any],
             tenant_id: uuid.UUID,
             missing: list[dict[str, Any]],
+            *,
+            origin: dict[str, str] | None = None,
     ) -> str:
         payload = entry.get("payload") or {}
         server_url = payload.get("server_url")
@@ -480,7 +499,9 @@ class BundleInstallService:
         now = utcnow_naive()
         row = ToolConfig(
             id=uuid.uuid4(),
-            name=self._unique_tool_name(str(entry.get("name") or "MCP 工具"), ToolType.MCP.value, tenant_id),
+            name=self._unique_tool_name(
+                str(entry.get("name") or "MCP 工具"), ToolType.MCP.value, tenant_id
+            ),
             description=None,
             # 工具按产品口径没有图标入口（§6.1.1 口径 5）
             icon=None,
@@ -497,7 +518,7 @@ class BundleInstallService:
             is_active=True,
             created_at=now,
             updated_at=now,
-            **self._origin_columns(),
+            **self._origin_columns(origin),
         )
         self.db.add(row)
         self.db.flush()
@@ -525,7 +546,9 @@ class BundleInstallService:
         tool_type = str(entry.get("tool_type"))
         row = ToolConfig(
             id=uuid.uuid4(),
-            name=self._unique_tool_name(str(entry.get("name") or "未配置工具"), tool_type, tenant_id),
+            name=self._unique_tool_name(
+                str(entry.get("name") or "未配置工具"), tool_type, tenant_id
+            ),
             description=None,
             icon=None,
             tool_type=tool_type,
@@ -542,24 +565,26 @@ class BundleInstallService:
         self.db.flush()
         return str(row.id)
 
-    def _market_source_ref(self) -> str | None:
+    @staticmethod
+    def _market_source_ref(origin: dict[str, str] | None) -> str | None:
         """`<market_resource_id>@<version>`（§11.2，反解按最后一个 `@` 切）。"""
 
-        resource_id = self._origin.get("resource_id")
+        resource_id = (origin or {}).get("resource_id")
         if not resource_id:
             return None
-        return f"{resource_id}@{self._origin.get('version') or ''}"
+        return f"{resource_id}@{(origin or {}).get('version') or ''}"
 
-    def _origin_columns(self) -> dict[str, Any]:
+    def _origin_columns(self, origin: dict[str, str] | None = None) -> dict[str, Any]:
         """Provenance columns for a row that came from the market (§11.2)."""
 
-        if not self._origin:
+        resolved = origin if origin is not None else self._origin
+        if not resolved:
             return {}
         return {
             "origin": "external",
             "external_source": "community_market",
-            "external_resource_id": self._origin.get("resource_id"),
-            "external_version": self._origin.get("version"),
+            "external_resource_id": resolved.get("resource_id"),
+            "external_version": resolved.get("version"),
         }
 
     def _unique_tool_name(self, name: str, tool_type: str, tenant_id: uuid.UUID) -> str:
@@ -582,14 +607,18 @@ class BundleInstallService:
             counter += 1
         return f"{name} ({counter})"
 
-    def _find_external_tool(self, market_resource_id: Any) -> str | None:
-        """Reuse pointer: the tool already landed from the same market resource."""
+    def _find_external_tool(
+            self, market_resource_id: Any, tenant_id: uuid.UUID, version: str
+    ) -> str | None:
+        """Return this tenant's active copy of the exact market tool version."""
 
         if not market_resource_id:
             return None
         row = self.db.execute(
             select(ToolConfig).where(
+                ToolConfig.tenant_id == tenant_id,
                 ToolConfig.external_resource_id == str(market_resource_id),
+                ToolConfig.external_version == str(version),
                 ToolConfig.is_active.is_(True),
             )
         ).scalars().first()
@@ -788,6 +817,19 @@ def _skill_dependencies(
         ],
         "plugins": [],
     }
+
+
+def _market_ref_of(entry: dict[str, Any]) -> dict[str, str] | None:
+    """Return a complete, string-normalised dependency market reference."""
+
+    raw = entry.get("market_ref")
+    if not isinstance(raw, dict):
+        return None
+    resource_id = raw.get("resource_id")
+    version = raw.get("version")
+    if not resource_id or not version:
+        return None
+    return {"resource_id": str(resource_id), "version": str(version)}
 
 
 def _missing(kind: str, name: Any, reason: Any) -> dict[str, Any]:
