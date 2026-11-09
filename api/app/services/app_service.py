@@ -2398,6 +2398,7 @@ class AppService:
             name: Optional[str] = None,
             icon: Optional[str] = None,
             usage_examples: Optional[List[str]] = None,
+            setup_steps: Optional[str] = None,
             categories: Optional[List[str]] = None,
     ) -> AppRelease:
         """发布应用（创建不可变快照）
@@ -2422,6 +2423,30 @@ class AppService:
         app = self._get_app_or_404(app_id)
         # 检查应用归属
         self._validate_workspace_access(app, workspace_id)
+
+        # 按应用类型校验并归一化发布元数据，避免开放 API 绕过前端规则。
+        workflow_types = (AppType.WORKFLOW, AppType.PURE_WORKFLOW)
+        if app.type in workflow_types:
+            setup_steps = (setup_steps or "").strip()
+            if not setup_steps:
+                raise BusinessException("工作流发布必须填写设置步骤", BizCode.INVALID_PARAMETER)
+            if len(setup_steps) > 2000:
+                raise BusinessException("设置步骤最多 2000 字", BizCode.INVALID_PARAMETER)
+            usage_examples = []
+        else:
+            usage_examples = [
+                item.strip()
+                for item in (usage_examples or [])
+                if isinstance(item, str) and item.strip()
+            ]
+            if not 3 <= len(usage_examples) <= 5:
+                raise BusinessException(
+                    "Agent 或集群发布必须填写 3～5 条使用示例",
+                    BizCode.INVALID_PARAMETER,
+                )
+            if any(len(item) > 500 for item in usage_examples):
+                raise BusinessException("每条使用示例最多 500 字", BizCode.INVALID_PARAMETER)
+            setup_steps = None
 
         # 构建快照配置
         config: Dict[str, Any] = {}
@@ -2558,6 +2583,7 @@ class AppService:
                 {"order": index, "content": text}
                 for index, text in enumerate(usage_examples or [], start=1)
             ],
+            setup_steps=setup_steps,
             categories=list(categories or []),
             default_model_config_id=default_model_config_id,
             published_by=publisher_id,
@@ -3190,13 +3216,13 @@ def get_workflow_config(db: Session, *, app_id: uuid.UUID, workspace_id: uuid.UU
 def publish(db: Session, *, app_id: uuid.UUID, publisher_id: uuid.UUID, workspace_id: uuid.UUID | None = None,
             version_name: str, release_notes: Optional[str] = None, name: Optional[str] = None,
             icon: Optional[str] = None, usage_examples: Optional[List[str]] = None,
-            categories: Optional[List[str]] = None) -> AppRelease:
+            setup_steps: Optional[str] = None, categories: Optional[List[str]] = None) -> AppRelease:
     """发布应用（向后兼容接口）"""
     service = AppService(db)
     return service.publish(app_id=app_id, publisher_id=publisher_id, version_name=version_name,
                            workspace_id=workspace_id, release_notes=release_notes,
                            name=name, icon=icon, usage_examples=usage_examples,
-                           categories=categories)
+                           setup_steps=setup_steps, categories=categories)
 
 
 def get_current_release(

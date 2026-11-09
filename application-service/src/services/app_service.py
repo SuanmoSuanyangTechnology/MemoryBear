@@ -2455,6 +2455,7 @@ class AppService:
             visibility=release.visibility,
             config=release.config,
             usage_examples=_expand_usage_examples(release.usage_examples),
+            setup_steps=release.setup_steps,
             categories=list(release.categories or []),
             default_model_config_id=release.default_model_config_id,
             published_by=release.published_by,
@@ -2476,6 +2477,7 @@ class AppService:
             name: str | None = None,
             icon: str | None = None,
             usage_examples: list[str] | None = None,
+            setup_steps: str | None = None,
             categories: list[str] | None = None,
     ) -> AppRelease:
         """Publish an app (creates an immutable snapshot).
@@ -2501,6 +2503,30 @@ class AppService:
         app = self._get_app_or_404(app_id)
         # Check app ownership
         self._validate_workspace_access(app, workspace_id)
+
+        # 按应用类型校验并归一化发布元数据，避免开放 API 绕过前端规则。
+        workflow_types = (AppType.WORKFLOW, AppType.PURE_WORKFLOW)
+        if app.type in workflow_types:
+            setup_steps = (setup_steps or "").strip()
+            if not setup_steps:
+                raise BusinessException("工作流发布必须填写设置步骤", BizCode.INVALID_PARAMETER)
+            if len(setup_steps) > 2000:
+                raise BusinessException("设置步骤最多 2000 字", BizCode.INVALID_PARAMETER)
+            usage_examples = []
+        else:
+            usage_examples = [
+                item.strip()
+                for item in (usage_examples or [])
+                if isinstance(item, str) and item.strip()
+            ]
+            if not 3 <= len(usage_examples) <= 5:
+                raise BusinessException(
+                    "Agent 或集群发布必须填写 3～5 条使用示例",
+                    BizCode.INVALID_PARAMETER,
+                )
+            if any(len(item) > 500 for item in usage_examples):
+                raise BusinessException("每条使用示例最多 500 字", BizCode.INVALID_PARAMETER)
+            setup_steps = None
 
         # Build the snapshot config
         config: dict[str, Any] = {}
@@ -2642,6 +2668,7 @@ class AppService:
             type=app.type,
             visibility=app.visibility,
             config=config,
+            setup_steps=setup_steps,
             usage_examples=_store_usage_examples(usage_examples),
             categories=list(categories or []),
             default_model_config_id=default_model_config_id,

@@ -756,6 +756,7 @@ def publish_app(
         name=payload.name,
         icon=payload.icon,
         usage_examples=payload.usage_examples,
+        setup_steps=payload.setup_steps,
         categories=payload.categories,
     )
     return success(data=app_schema.AppRelease.model_validate(release))

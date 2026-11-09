@@ -890,19 +890,22 @@ def list_conversations(
 
 @router.get(
     "/conversations/{conversation_id}",
-    summary="获取会话详情（含消息）",
+    summary="获取会话详情（含消息，分页）",
 )
 def get_conversation(
     conversation_id: uuid.UUID,
     share_data: ShareViewer,
     db: DbSession,
     password: str | None = Query(None, description="访问密码"),
+    page: int = Query(1, ge=1, description="页码，从 1 开始；第 1 页为最新一页"),
+    pagesize: int = Query(20, ge=1, le=100, description="每页消息数量，默认 20，最大 100"),
 ):
-    """Conversation detail with message history.
+    """One page of a conversation's message history.
 
-    Messages carry audio status, the viewer's feedback / favorite state, local
-    attachments resolved to accessible URLs, and the aggregated
-    human-intervention map.
+    Page 1 returns the newest ``pagesize`` messages; increment ``page`` to walk
+    towards older history. Messages carry audio status, the viewer's feedback /
+    favorite state, local attachments resolved to accessible URLs, and the
+    human-intervention map scoped to the page's workflow executions.
     """
 
     chat_service = SharedChatService(db)
@@ -912,9 +915,14 @@ def get_conversation(
         password=password,
     )
 
-    # All messages including multi-version replies.
+    # One bounded page of messages (multi-version group expanded on the first
+    # page only).
     conv_service = ConversationService(db)
-    messages = conv_service.get_conversation_with_messages(conversation_id)
+    messages, page_meta = conv_service.get_conversation_with_messages_page(
+        conversation_id,
+        page=page,
+        pagesize=pagesize,
+    )
 
     file_ids = []
     message_file_id_map = {}
@@ -1089,15 +1097,33 @@ def get_conversation(
     )
     conv_dict["messages"] = message_responses
 
-    # Human-intervention data aggregated across the conversation's executions,
+    # Page time window: human-intervention rows outside it belong to other
+    # pages and are not rendered here, so the scan stays bounded instead of
+    # loading every execution's context JSONB of a long conversation.
+    page_times = [
+        m.created_at
+        for group in messages
+        for m in (group if isinstance(group, list) else [group])
+        if m.created_at is not None
+    ]
+    window_start = min(page_times) if page_times else None
+    window_end = max(page_times) if page_times else None
+
+    # Human-intervention data aggregated across the page's executions,
     # keyed by message id: { message_id: { execution_id, status,
     # interventions } }. `interventions` is the per-node merge of
     # resolved_interventions with the pending snapshot, so several
     # intervention nodes within one waiting cycle are all preserved.
     intervention_map: dict[str, dict] = {}
-    for wf_exec in db.query(WorkflowExecution).filter(
+    wf_query = db.query(WorkflowExecution).filter(
         WorkflowExecution.conversation_id == conversation_id,
-    ).order_by(WorkflowExecution.created_at.asc()):
+    )
+    if window_start is not None:
+        wf_query = wf_query.filter(
+            WorkflowExecution.started_at >= window_start,
+            WorkflowExecution.started_at <= window_end,
+        )
+    for wf_exec in wf_query.order_by(WorkflowExecution.created_at.asc()):
         intr_ctx = (wf_exec.context or {}).get("human_intervention", {})
         if not intr_ctx:
             continue
@@ -1173,6 +1199,7 @@ def get_conversation(
         }
 
     conv_dict["pending_intervention"] = intervention_map
+    conv_dict["page"] = page_meta
 
     return success(data=conv_dict)
 

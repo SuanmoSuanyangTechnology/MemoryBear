@@ -259,6 +259,62 @@ class WorkflowExecutionRepository:
         stmt = stmt.order_by(desc(WorkflowExecution.started_at)).limit(limit_count)
         return list(self.db.execute(stmt).scalars())
 
+    def get_conversation_page(
+        self,
+        conversation_id: UUID,
+        *,
+        statuses: list[str],
+        page: int = 1,
+        pagesize: int = 20,
+    ) -> tuple[list[WorkflowExecution], bool]:
+        """One offset page of one conversation's executions.
+
+        Page 1 holds the newest ``pagesize`` executions; ``page`` grows
+        towards older history. Returns ``(executions, has_earlier)`` with
+        executions in ascending ``started_at`` order (the query orders DESC
+        for paging, then the page is reversed). ``pagesize + 1`` rows decide
+        ``has_earlier`` without a count query.
+        """
+
+        filters = [
+            WorkflowExecution.conversation_id == conversation_id,
+            WorkflowExecution.status.in_(statuses),
+        ]
+        offset = (page - 1) * pagesize
+        rows = list(self.db.scalars(
+            select(WorkflowExecution)
+            .where(*filters)
+            .order_by(
+                desc(WorkflowExecution.started_at),
+                desc(WorkflowExecution.id),
+            )
+            .offset(offset)
+            .limit(pagesize + 1)
+        ).all())
+
+        has_earlier = len(rows) > pagesize
+        page_rows = rows[:pagesize]
+        page_rows.reverse()
+        return page_rows, has_earlier
+
+    def count_by_conversation_id(
+        self,
+        conversation_id: UUID,
+        statuses: list[str] | None = None,
+    ) -> int:
+        """Total visible executions of one conversation (optionally status-scoped)."""
+
+        filters = [WorkflowExecution.conversation_id == conversation_id]
+        if statuses:
+            filters.append(WorkflowExecution.status.in_(statuses))
+        return int(
+            self.db.scalar(
+                select(func.count())
+                .select_from(WorkflowExecution)
+                .where(*filters)
+            )
+        )
+
     def count_by_app_id(self, app_id: UUID) -> int:
         """Number of executions of one app."""
 

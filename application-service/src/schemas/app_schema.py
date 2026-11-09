@@ -606,6 +606,7 @@ class AgentConfig(BaseModel):
 CATEGORIES_MAX_ITEMS = 5
 USAGE_EXAMPLES_MAX_ITEMS = 5
 USAGE_EXAMPLE_MAX_CHARS = 500
+SETUP_STEPS_MAX_CHARS = 2000
 
 
 class PublishRequest(BaseModel):
@@ -616,11 +617,11 @@ class PublishRequest(BaseModel):
     icon: Optional[str] = Field(None, description="公开分享图标，未传则使用应用图标")
     usage_examples: List[str] = Field(
         default_factory=list,
-        description=(
-            "使用示例，随版本冻结；0~5 条、每条 ≤500 字。"
-            "前端强制 3~5 条，后端宽松以兼容旧前端与开放 API；"
-            "提交社区市场时才要求 ≥3 条"
-        ),
+        description="Agent/集群使用示例；3~5 条、每条 ≤500 字。",
+    )
+    setup_steps: Optional[str] = Field(
+        None,
+        description="工作流/对话工作流设置步骤；必填，最多 2000 字。",
     )
     categories: List[str] = Field(
         default_factory=list,
@@ -654,6 +655,16 @@ class PublishRequest(BaseModel):
                 f"第 {too_long[0] + 1} 条使用示例超过 {USAGE_EXAMPLE_MAX_CHARS} 字"
             )
         return items
+
+    @field_validator("setup_steps")
+    @classmethod
+    def _validate_setup_steps(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        normalized = value.strip()
+        if len(normalized) > SETUP_STEPS_MAX_CHARS:
+            raise ValueError(f"设置步骤最多 {SETUP_STEPS_MAX_CHARS} 字")
+        return normalized
 
     @field_validator("categories")
     @classmethod
@@ -694,6 +705,7 @@ class AppRelease(BaseModel):
     visibility: str
     config: Dict[str, Any] = {}
     usage_examples: List[str] = []
+    setup_steps: Optional[str] = None
     categories: List[str] = []
     default_model_config_id: Optional[uuid.UUID] = None
     published_by: uuid.UUID
