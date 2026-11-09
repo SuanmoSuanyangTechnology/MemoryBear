@@ -1289,7 +1289,7 @@ class AgentRunService:
             user_id,
             *,
             app_id: uuid.UUID,
-            workspace_id: uuid.UUID,
+            workspace_id: uuid.UUID | None,
             source: KnowledgeRetrievalSource,
     ) -> tuple[list, list]:
         """返回 (tools, citations_collector)"""

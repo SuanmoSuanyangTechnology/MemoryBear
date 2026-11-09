@@ -730,6 +730,20 @@ class ConversationService:
                 if msg.role == "user":
                     last_user_msg = msg
                     break
+            if last_user_msg is None:
+                # A small newest-first page can contain only the latest assistant
+                # reply; fetch its parent round without loading older messages.
+                last_user_msg = self.db.scalars(
+                    select(Message)
+                    .where(
+                        Message.conversation_id == conversation_id,
+                        Message.role == "user",
+                        Message.is_deleted.is_not(True),
+                        Message.is_current.is_not(False),
+                    )
+                    .order_by(Message.created_at.desc(), Message.id.desc())
+                    .limit(1)
+                ).first()
 
         last_user_all_versions: list[Message] = []
         if last_user_msg:

@@ -195,6 +195,40 @@ class AgentExecutionRepository:
         )
         return list(self.db.scalars(stmt).all())
 
+    def list_orphan_sub_page_scoped(
+        self,
+        conversation_id: uuid.UUID,
+        *,
+        message_ids: set[uuid.UUID],
+        window_start,
+        window_end,
+        limit: int,
+    ) -> list[AgentExecution]:
+        """Legacy sub-agent rows without a parent, bounded to one message page."""
+
+        if not message_ids and window_start is None:
+            return []
+
+        stmt = select(AgentExecution).where(
+            AgentExecution.conversation_id == conversation_id,
+            AgentExecution.agent_role == "sub",
+            AgentExecution.parent_execution_id.is_(None),
+        )
+        scope_clauses = []
+        if message_ids:
+            scope_clauses.append(AgentExecution.message_id.in_(message_ids))
+        if window_start is not None:
+            window_clause = AgentExecution.started_at >= window_start
+            if window_end is not None:
+                window_clause = window_clause & (AgentExecution.started_at <= window_end)
+            scope_clauses.append(window_clause)
+        stmt = (
+            stmt.where(or_(*scope_clauses))
+            .order_by(AgentExecution.started_at.asc(), AgentExecution.id.asc())
+            .limit(max(limit, 1))
+        )
+        return list(self.db.scalars(stmt).all())
+
     def get_by_message_id(
         self,
         message_id: uuid.UUID,

@@ -51,7 +51,9 @@ from ..models.app_asset_model import (
 from ..models.app_model import AppType
 from ..repositories import cross_domain_read
 from ..utils.datetime_utils import to_timestamp_ms, utcnow_naive
+from ..utils.redis_cache import delete_json
 from .app_service import AppService, _expand_usage_examples
+from .asset_release_resolver import app_cache_key
 from .detail_view import build_display_payload
 
 logger = logging.getLogger(__name__)
@@ -232,6 +234,26 @@ class AssetService:
         )
         return asset
 
+    def invalidate_reference_runtime_caches(self, asset: AppAsset) -> int:
+        """Clear runtime release caches for active references of one catalog entry.
+
+        The runtime cache stores the resolved release id and bypasses the resolver on
+        a hit. It must therefore be cleared after a committed unshare or pin change;
+        copies are deliberately excluded because they own their local app lifecycle.
+        Redis failures are handled by ``delete_json`` and only fall back to its TTL.
+        """
+
+        workspace_ids = self.db.scalars(
+            select(AppAssetInstallation.target_workspace_id).where(
+                AppAssetInstallation.asset_id == asset.id,
+                AppAssetInstallation.status == InstallStatus.ACTIVE,
+                AppAssetInstallation.link_mode == LinkMode.REFERENCE,
+            )
+        ).all()
+        for target_workspace_id in workspace_ids:
+            delete_json(app_cache_key(asset.source_app_id, target_workspace_id))
+        return len(workspace_ids)
+
     def _assert_can_share(
             self, app: App, user_id: uuid.UUID, workspace_id: uuid.UUID | None
     ) -> None:
@@ -305,10 +327,15 @@ class AssetService:
         asset.status = AssetStatus.UNPUBLISHED
         asset.updated_at = utcnow_naive()
         self.db.commit()
+        invalidated = self.invalidate_reference_runtime_caches(asset)
 
         logger.info(
             "取消共享资源中心条目",
-            extra={"asset_id": str(asset_id), "tenant_id": str(tenant_id)},
+            extra={
+                "asset_id": str(asset_id),
+                "tenant_id": str(tenant_id),
+                "invalidated_reference_caches": invalidated,
+            },
         )
         return asset
 
@@ -551,7 +578,11 @@ class AssetService:
             type=release.type,
             visibility="private",
             status="draft",
-            tags=list(source_app.tags or []) if source_app.workspace_id == target_workspace_id else [],
+            tags=(
+                list(source_app.tags or [])
+                if source_app.workspace_id == target_workspace_id
+                else []
+            ),
             is_active=True,
             created_at=now,
             updated_at=now,
@@ -561,7 +592,11 @@ class AssetService:
 
         if new_app.type == AppType.AGENT:
             knowledge_retrieval, memory = self._remap_ws_scoped(
-                config, target_workspace_id, is_cross_workspace
+                config,
+                target_workspace_id,
+                is_cross_workspace,
+                missing=missing,
+                missing_scope="agent",
             )
             self.db.add(
                 AgentConfig(
@@ -582,12 +617,18 @@ class AssetService:
                 )
             )
         elif new_app.type in (AppType.WORKFLOW, AppType.PURE_WORKFLOW):
+            nodes = self._remap_workflow_nodes(
+                config.get("nodes") or [],
+                target_workspace_id=target_workspace_id,
+                is_cross_workspace=is_cross_workspace,
+                missing=missing,
+            )
             self.db.add(
                 WorkflowConfig(
                     id=uuid.uuid4(),
                     app_id=new_app.id,
                     workflow_type=config.get("workflow_type") or "workflow",
-                    nodes=config.get("nodes") or [],
+                    nodes=nodes,
                     edges=config.get("edges") or [],
                     variables=config.get("variables") or [],
                     environment_variables=config.get("environment_variables") or [],
@@ -618,31 +659,185 @@ class AssetService:
             config: dict[str, Any],
             target_workspace_id: uuid.UUID,
             is_cross_workspace: bool,
+            *,
+            missing: list[dict[str, Any]] | None = None,
+            missing_scope: str = "app",
     ) -> tuple[Any, Any]:
-        """知识库与记忆是**空间级**，跨空间必须重映射；租户级资源原样复用。"""
+        """Rebind workspace-scoped knowledge and memory without leaking source IDs."""
 
+        knowledge_retrieval = config.get("knowledge_retrieval")
+        memory = config.get("memory")
         if not is_cross_workspace:
-            return (
-                copy.deepcopy(config.get("knowledge_retrieval")),
-                copy.deepcopy(config.get("memory")),
-            )
+            return copy.deepcopy(knowledge_retrieval), copy.deepcopy(memory)
+
         target_tenant_id = cross_domain_read.get_workspace_tenant_id(
             self.db, target_workspace_id
         )
         _, kb_ids = self.app_service._collect_resource_ids_from_config(
-            None, config.get("knowledge_retrieval")
+            None, knowledge_retrieval
         )
         _, available_kb_ids = self.app_service._preload_cross_workspace_resources(
             target_tenant_id, target_workspace_id, set(), kb_ids
         )
-        return (
-            self.app_service._clean_knowledge_retrieval(
-                config.get("knowledge_retrieval"), available_kb_ids
-            ),
-            self.app_service._clean_memory_cross_workspace(
-                config.get("memory"), target_workspace_id
-            ),
+        cleaned_knowledge = self.app_service._clean_knowledge_retrieval(
+            knowledge_retrieval, available_kb_ids
         )
+        cleaned_memory = self.app_service._clean_memory_cross_workspace(
+            memory, target_workspace_id
+        )
+
+        if missing is not None:
+            for entry in (knowledge_retrieval or {}).get("knowledge_bases", []):
+                if isinstance(entry, dict) and not self.app_service._is_kb_available(
+                    entry.get("kb_id"), available_kb_ids
+                ):
+                    missing.append({
+                        "kind": "knowledge_base",
+                        "name": str(entry.get("kb_id")) if entry.get("kb_id") else None,
+                        "path": missing_scope,
+                        "reason": "知识库不属于目标工作空间",
+                    })
+            memory_id = (
+                (memory or {}).get("memory_config_id")
+                or (memory or {}).get("memory_content")
+            )
+            if memory_id and cleaned_memory != memory:
+                missing.append({
+                    "kind": "memory_config",
+                    "name": str(memory_id),
+                    "path": missing_scope,
+                    "reason": "记忆配置不属于目标工作空间",
+                })
+
+        return cleaned_knowledge, cleaned_memory
+
+    def _remap_supervisor_config(
+            self,
+            supervisor_config: dict[str, Any] | None,
+            *,
+            target_workspace_id: uuid.UUID,
+            is_cross_workspace: bool,
+            missing: list[dict[str, Any]],
+    ) -> dict[str, Any] | None:
+        """Apply the same workspace boundary to a cluster supervisor's config."""
+
+        if not supervisor_config:
+            return None
+        cleaned = copy.deepcopy(supervisor_config)
+        if not isinstance(cleaned, dict):
+            return None
+        knowledge_retrieval, memory = self._remap_ws_scoped(
+            cleaned,
+            target_workspace_id,
+            is_cross_workspace,
+            missing=missing,
+            missing_scope="supervisor_config",
+        )
+        cleaned["knowledge_retrieval"] = knowledge_retrieval
+        cleaned["memory"] = memory
+        return cleaned
+
+    def _remap_workflow_nodes(
+            self,
+            nodes: list[dict[str, Any]],
+            *,
+            target_workspace_id: uuid.UUID,
+            is_cross_workspace: bool,
+            missing: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Remove inaccessible workspace-scoped references from workflow nodes.
+
+        Workflow node JSON has several node-specific schemas, so this walks nested
+        dictionaries rather than coupling the catalog copy path to every node type.
+        Only knowledge-base and memory-config identifiers are workspace scoped;
+        models, tools and skills remain untouched.
+        """
+
+        copied = copy.deepcopy(nodes)
+        if not is_cross_workspace:
+            return copied
+
+        knowledge_entries: list[dict[str, Any]] = []
+
+        def collect(value: Any) -> None:
+            if isinstance(value, dict):
+                for key, child in value.items():
+                    if key == "knowledge_bases" and isinstance(child, list):
+                        knowledge_entries.extend(
+                            item for item in child if isinstance(item, dict)
+                        )
+                    else:
+                        collect(child)
+            elif isinstance(value, list):
+                for child in value:
+                    collect(child)
+
+        collect(copied)
+        kb_ids = {
+            str(entry.get("kb_id"))
+            for entry in knowledge_entries
+            if entry.get("kb_id") is not None
+        }
+        target_tenant_id = cross_domain_read.get_workspace_tenant_id(
+            self.db, target_workspace_id
+        )
+        _, available_kb_ids = self.app_service._preload_cross_workspace_resources(
+            target_tenant_id, target_workspace_id, set(), kb_ids
+        )
+
+        def clean(value: Any, path: str = "nodes") -> Any:
+            if isinstance(value, list):
+                return [clean(child, f"{path}[{index}]") for index, child in enumerate(value)]
+            if not isinstance(value, dict):
+                return value
+
+            result = copy.deepcopy(value)
+            if "knowledge_bases" in result and isinstance(result["knowledge_bases"], list):
+                retained = []
+                for entry in result["knowledge_bases"]:
+                    if not isinstance(entry, dict):
+                        missing.append({
+                            "kind": "knowledge_base",
+                            "name": None,
+                            "path": path,
+                            "reason": "知识库引用格式无效",
+                        })
+                        continue
+                    kb_id = entry.get("kb_id")
+                    if self.app_service._is_kb_available(kb_id, available_kb_ids):
+                        retained.append(clean(entry, f"{path}.knowledge_bases"))
+                    else:
+                        missing.append({
+                            "kind": "knowledge_base",
+                            "name": str(kb_id) if kb_id is not None else None,
+                            "path": path,
+                            "reason": "知识库不属于目标工作空间",
+                        })
+                result["knowledge_bases"] = retained
+
+            memory_id = result.get("memory_config_id") or result.get("memory_content")
+            if memory_id:
+                cleaned_memory = self.app_service._clean_memory_cross_workspace(
+                    result, target_workspace_id
+                )
+                if (
+                    cleaned_memory.get("memory_config_id") is None
+                    and "memory_content" not in cleaned_memory
+                ):
+                    missing.append({
+                        "kind": "memory_config",
+                        "name": str(memory_id),
+                        "path": path,
+                        "reason": "记忆配置不属于目标工作空间",
+                    })
+                result = cleaned_memory
+
+            for key, child in list(result.items()):
+                if key != "knowledge_bases":
+                    result[key] = clean(child, f"{path}.{key}")
+            return result
+
+        return clean(copied)
 
     def _copy_cluster_config(
             self,
@@ -728,7 +923,12 @@ class AssetService:
                 sub_agents=kept_sub_agents,
                 routing_rules=routing_rules or None,
                 execution_config=config.get("execution_config") or {},
-                supervisor_config=copy.deepcopy(config.get("supervisor_config")),
+                supervisor_config=self._remap_supervisor_config(
+                    config.get("supervisor_config"),
+                    target_workspace_id=target_workspace_id,
+                    is_cross_workspace=is_cross_workspace,
+                    missing=missing,
+                ),
                 aggregation_strategy=config.get("aggregation_strategy") or "merge",
                 is_active=True,
                 created_at=now,
@@ -773,10 +973,23 @@ class AssetService:
             stmt = stmt.where(AppRelease.type == app_type)
         if q:
             like = f"%{q}%"
-            stmt = stmt.where(
-                or_(
-                    AppRelease.name.ilike(like),
-                    AppRelease.description.ilike(like),
+            # 发布人是跨域 users 表，必须在分页前纳入同一条查询；否则仅命中
+            # 发布人时记录已被名称/描述条件过滤，且 total 会与列表不一致。
+            publisher_name = func.coalesce(
+                cross_domain_read.users.c.username,
+                cross_domain_read.users.c.email,
+            )
+            stmt = (
+                stmt.outerjoin(
+                    cross_domain_read.users,
+                    AppRelease.published_by == cross_domain_read.users.c.id,
+                )
+                .where(
+                    or_(
+                        AppRelease.name.ilike(like),
+                        AppRelease.description.ilike(like),
+                        publisher_name.ilike(like),
+                    )
                 )
             )
 
@@ -793,18 +1006,6 @@ class AssetService:
         items = [self._serialize_card(asset, app, release) for asset, app, release in rows]
         self._fill_publisher_names(items, rows)
         self._fill_install_counts(items, tenant_id)
-        if q:
-            # Publisher names are not filterable in SQL (users is a cross-domain
-            # table with no relation here); filter them in the page payload and
-            # keep the SQL count as the upper bound. Documented in §6.1.
-            lowered = q.lower()
-            items = [
-                item
-                for item in items
-                if lowered in (item.get("source_app_name") or "").lower()
-                or lowered in (item.get("description") or "").lower()
-                or lowered in (item.get("publisher_name") or "").lower()
-            ]
         return items, total
 
     def get_asset(
@@ -845,9 +1046,9 @@ class AssetService:
             "share_mode": asset.share_mode,
             "categories": payload.get("categories") or [],
             "usage_examples": payload.get("usage_examples") or [],
-            # 发布快照是详情字段的唯一权威来源；payload 仅兼容 setup_steps
-            # 字段上线前创建的历史资源中心条目。
-            "setup_steps": release.setup_steps if release else payload.get("setup_steps"),
+            # 发布快照优先；nullable 历史快照为空时回退资源条目中已冻结的字段。
+            "setup_steps": (release.setup_steps if release else None)
+            or payload.get("setup_steps"),
             "changelog": payload.get("changelog"),
             "linked_skills": linked_skills,
             "linked_tools": linked_tools,

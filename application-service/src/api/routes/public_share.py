@@ -26,6 +26,7 @@ import json
 import logging
 import re
 import uuid
+from datetime import timedelta
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, Request
@@ -1106,7 +1107,7 @@ def get_conversation(
         for m in (group if isinstance(group, list) else [group])
         if m.created_at is not None
     ]
-    window_start = min(page_times) if page_times else None
+    window_start = min(page_times) - timedelta(minutes=5) if page_times else None
     window_end = max(page_times) if page_times else None
 
     # Human-intervention data aggregated across the page's executions,

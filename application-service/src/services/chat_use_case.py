@@ -53,6 +53,7 @@ class ChatPreparation:
     payload: AppChatRequest
     runtime_config: Any
     release_id: UUID
+    release_source: str
     storage_type: str
     user_rag_memory_id: str
 
@@ -160,25 +161,50 @@ async def prepare_chat(
     app_cache = await get_json_async(app_cache_key)
     app_stub = None
     cached_release_id = None
+    cached_release_source = None
     if app_cache is not CACHE_MISS:
         app_stub = SimpleNamespace(id=UUID(app_cache["id"]), type=app_cache["type"])
         if app_cache.get("release_id"):
             cached_release_id = UUID(app_cache["release_id"])
+        if app_cache.get("release_source") in {
+            "own", "reference", "copy", "legacy_share"
+        }:
+            cached_release_source = app_cache["release_source"]
 
     async with get_async_db_context() as adb:
         if app_stub is not None:
             app = app_stub
+            if cached_release_source is None:
+                # Cache entries written before release_source was introduced
+                # cannot safely distinguish reference from own/copy access.
+                resolved = await AsyncAssetReleaseResolver(adb).resolve(
+                    app_id=app.id, workspace_id=workspace_id
+                )
+                cached_release_id = resolved.release_id
+                release_source = resolved.source
+                await set_json_async(app_cache_key, {
+                    "id": str(app.id),
+                    "type": app.type,
+                    "release_id": (
+                        str(resolved.release_id) if resolved.release_id else None
+                    ),
+                    "release_source": resolved.source,
+                }, ttl=60)
+            else:
+                release_source = cached_release_source
         else:
             app = await _get_v1_chat_app_async(adb, app_id, workspace_id)
             resolved = await AsyncAssetReleaseResolver(adb).resolve(
                 app_id=app.id, workspace_id=workspace_id
             )
+            release_source = resolved.source
             await set_json_async(app_cache_key, {
                 "id": str(app.id),
                 "type": app.type,
                 "release_id": (
                     str(resolved.release_id) if resolved.release_id else None
                 ),
+                "release_source": resolved.source,
             }, ttl=60)
 
         if payload.version is not None:
@@ -250,6 +276,7 @@ async def prepare_chat(
         payload=payload,
         runtime_config=runtime_config,
         release_id=release_id,
+        release_source=release_source,
         storage_type=storage_type,
         user_rag_memory_id=user_rag_memory_id,
     )
@@ -274,6 +301,7 @@ async def chat_stream(prep: ChatPreparation) -> AsyncIterator[str]:
                     storage_type=prep.storage_type,
                     user_rag_memory_id=prep.user_rag_memory_id,
                     workspace_id=prep.workspace_id,
+                    use_source_knowledge_workspace=prep.release_source == "reference",
                     files=payload.files,
             ):
                 yield event
@@ -377,6 +405,7 @@ async def chat_complete(prep: ChatPreparation) -> dict:
                 storage_type=prep.storage_type,
                 user_rag_memory_id=prep.user_rag_memory_id,
                 workspace_id=str(prep.workspace_id),
+                use_source_knowledge_workspace=prep.release_source == "reference",
                 files=payload.files,
             )
         return success(data=ChatResponse(**result).model_dump(mode="json"), msg="对话回复生成成功")

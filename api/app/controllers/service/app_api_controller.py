@@ -379,6 +379,7 @@ async def chat(
     app_cache = await get_json_async(app_cache_key)
     _app_stub = None
     _cached_release_id = None
+    _cached_release_source = None
     if app_cache is not CACHE_MISS:
         from types import SimpleNamespace
         _app_stub = SimpleNamespace(
@@ -387,6 +388,10 @@ async def chat(
         )
         if app_cache.get("release_id"):
             _cached_release_id = uuid.UUID(app_cache["release_id"])
+        if app_cache.get("release_source") in {
+            "own", "reference", "copy", "legacy_share"
+        }:
+            _cached_release_source = app_cache["release_source"]
 
     async with get_async_db_context() as db:
         app_service = AppService(db)
@@ -394,15 +399,32 @@ async def chat(
 
         if _app_stub is not None:
             app = _app_stub
+            if _cached_release_source is None:
+                # 旧缓存没有来源信息，必须重新解析，不能把 reference 误当成本空间应用。
+                _resolved = await AsyncAssetReleaseResolver(db).resolve(
+                    app_id=app.id, workspace_id=workspace_id
+                )
+                _cached_release_id = _resolved.release_id
+                release_source = _resolved.source
+                await set_json_async(app_cache_key, {
+                    "id": str(app.id),
+                    "type": app.type,
+                    "release_id": str(_resolved.release_id) if _resolved.release_id else None,
+                    "release_source": _resolved.source,
+                }, ttl=60)
+            else:
+                release_source = _cached_release_source
         else:
             app = await app_service.get_app_async(resource_id, workspace_id)
             _resolved = await AsyncAssetReleaseResolver(db).resolve(
                 app_id=app.id, workspace_id=workspace_id
             )
+            release_source = _resolved.source
             await set_json_async(app_cache_key, {
                 "id": str(app.id),
                 "type": app.type,
                 "release_id": str(_resolved.release_id) if _resolved.release_id else None,
+                "release_source": _resolved.source,
             }, ttl=60)
 
         if payload.version is not None:
@@ -507,6 +529,7 @@ async def chat(
                             storage_type=storage_type,
                             user_rag_memory_id=user_rag_memory_id,
                             workspace_id=workspace_id,
+                            use_source_knowledge_workspace=release_source == "reference",
                             files=payload.files,
                     ):
                         yield event
@@ -537,6 +560,7 @@ async def chat(
                 storage_type=storage_type,
                 user_rag_memory_id=user_rag_memory_id,
                 workspace_id=str(workspace_id),
+                use_source_knowledge_workspace=release_source == "reference",
                 files=payload.files,
             )
         return success(data=conversation_schema.ChatResponse(**result).model_dump(mode="json"), msg="对话回复生成成功")

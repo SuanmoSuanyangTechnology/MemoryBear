@@ -2430,8 +2430,11 @@ class AppService:
             setup_steps = (setup_steps or "").strip()
             if not setup_steps:
                 raise BusinessException("工作流发布必须填写设置步骤", BizCode.INVALID_PARAMETER)
-            if len(setup_steps) > 2000:
-                raise BusinessException("设置步骤最多 2000 字", BizCode.INVALID_PARAMETER)
+            if len(setup_steps) > app_schema.SETUP_STEPS_MAX_CHARS:
+                raise BusinessException(
+                    f"设置步骤最多 {app_schema.SETUP_STEPS_MAX_CHARS} 字",
+                    BizCode.INVALID_PARAMETER,
+                )
             usage_examples = []
         else:
             usage_examples = [
@@ -2439,13 +2442,25 @@ class AppService:
                 for item in (usage_examples or [])
                 if isinstance(item, str) and item.strip()
             ]
-            if not 3 <= len(usage_examples) <= 5:
+            if not (
+                app_schema.USAGE_EXAMPLES_MIN_ITEMS
+                <= len(usage_examples)
+                <= app_schema.USAGE_EXAMPLES_MAX_ITEMS
+            ):
                 raise BusinessException(
-                    "Agent 或集群发布必须填写 3～5 条使用示例",
+                    "Agent 或集群发布必须填写 "
+                    f"{app_schema.USAGE_EXAMPLES_MIN_ITEMS}～"
+                    f"{app_schema.USAGE_EXAMPLES_MAX_ITEMS} 条使用示例",
                     BizCode.INVALID_PARAMETER,
                 )
-            if any(len(item) > 500 for item in usage_examples):
-                raise BusinessException("每条使用示例最多 500 字", BizCode.INVALID_PARAMETER)
+            if any(
+                len(item) > app_schema.USAGE_EXAMPLE_MAX_CHARS
+                for item in usage_examples
+            ):
+                raise BusinessException(
+                    f"每条使用示例最多 {app_schema.USAGE_EXAMPLE_MAX_CHARS} 字",
+                    BizCode.INVALID_PARAMETER,
+                )
             setup_steps = None
 
         # 构建快照配置
