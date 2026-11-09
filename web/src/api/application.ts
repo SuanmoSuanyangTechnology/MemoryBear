@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 13:59:45 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-07-01 16:41:14
+ * @Last Modified time: 2026-11-09 21:17:51
  */
 import { request } from '@/utils/request'
 import type { ApplicationModalData } from '@/views/ApplicationManagement/types'
@@ -305,6 +305,10 @@ export const switchSharePermission = (asset_id: string, data?: { share_mode: 're
 // Cancel all shares under a workspace (source side operation)
 export const cancelSpaceShare = (target_workspace_id?: string) => {
   return request.delete(`/apps/share/${target_workspace_id}`)
+}
+// Remove shared application (recipient side operation)
+export const deleteSpaceShare = (app_id?: string) => {
+  return request.delete(`/apps/${app_id}/shared`)
 }
 // Application conversation logs
 export const getAppLogsUrl = (app_id: string) => `/apps/${app_id}/logs`

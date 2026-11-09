@@ -128,6 +128,7 @@ export const account = {
       change: 'Change',
       update: 'Update',
       delete: 'Delete',
+      remove: 'Remove',
       confirm: 'Confirm',
       cancel: 'Cancel',
       save: 'Save',

@@ -241,7 +241,7 @@ const ReleasePage: FC<{data: Application; refresh: () => void}> = ({data, refres
 
               {selectedVersion.setup_steps &&
                 <RbCard
-                  title="设置步骤"
+                  title={t('application.setupSteps')}
                   headerType="borderless"
                 >
                   <RbMarkdown content={selectedVersion.setup_steps} />
