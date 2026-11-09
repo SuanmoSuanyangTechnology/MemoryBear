@@ -13,6 +13,7 @@ import logging
 from collections.abc import AsyncIterator, Iterable
 from typing import Any
 
+import grpc
 from error_core.codes import code_name, coerce_code
 from error_core.messages import user_message
 from memorybear.model.v1 import invoke_pb2, invoke_pb2_grpc
@@ -134,6 +135,11 @@ async def _abort_with(context, http_status: int, content: dict[str, Any]) -> Non
     )
 
 
+async def _abort_silent(context) -> None:
+    """Client disconnect: cancel the RPC without business error trailers."""
+    await context.abort(grpc.StatusCode.CANCELLED, "")
+
+
 async def _emit(events: Iterable[InvokeEvent]) -> AsyncIterator[InvokeEvent]:
     for event in events:
         yield event
@@ -216,7 +222,10 @@ class InvokeServicer(invoke_pb2_grpc.ModelInvokeServiceServicer):
                         422,
                         fail(
                             BizCode.VALIDATION_FAILED.value,
-                            exc.detail,
+                            user_message(
+                                BizCode.VALIDATION_FAILED, get_current_locale()
+                            )
+                            or _VALIDATION_FALLBACK,
                             error=exc.detail,
                         ),
                     )
@@ -227,6 +236,8 @@ class InvokeServicer(invoke_pb2_grpc.ModelInvokeServiceServicer):
                         trace_id=trace_id,
                     )
                 except InvokeFailure as failure:
+                    if failure.silent:
+                        await _abort_silent(context)
                     code = coerce_code(failure.code)
                     if code is None:
                         code = BizCode.INTERNAL_ERROR.value
@@ -265,6 +276,8 @@ class InvokeServicer(invoke_pb2_grpc.ModelInvokeServiceServicer):
                                 plan.call, timeout_s=plan.total_timeout_s
                             )
                         except InvokeFailure as failure:
+                            if failure.silent:
+                                await _abort_silent(context)
                             code = coerce_code(failure.code)
                             if code is None:
                                 code = BizCode.INTERNAL_ERROR.value

@@ -13,6 +13,7 @@ import Tag from '@/components/Tag';
 import Empty from '@/components/Empty';
 import ToolIcon from '@/views/ToolManagement/components/ToolIcon'
 import SkillIcon from '@/views/Skills/components/SkillIcon';
+import { typeIcons } from '@/views/ApplicationManagement/constants';
 
 export interface ApplicationDetailModalRef {
   handleOpen: (id: string) => void;
@@ -64,13 +65,13 @@ const ApplicationDetailModal = forwardRef<ApplicationDetailModalRef, Application
             <Flex vertical gap={8} className="rb:pr-6! rb:pl-2!">
               <Flex align="start" gap={16}>
                 <div className={clsx("rb:rounded-2xl rb:bg-primary-600 rb:p-3 rb:shrink-0", {
-                  'rb:bg-[#155EEF]': !item.icon && item.source_app_type === 'agent',
-                  'rb:bg-[#9C6FFF]!': !item.icon && item.source_app_type === 'multi_agent',
-                  'rb:bg-primary-600': !item.icon && item.source_app_type?.includes('workflow'),
-                  'rb:bg-transparent!': item.icon
+                  'rb:bg-[#155EEF]': !(item.icon || typeIcons[item.source_app_type as string]) && item.source_app_type === 'agent',
+                  'rb:bg-[#9C6FFF]!': !(item.icon || typeIcons[item.source_app_type as string]) && item.source_app_type === 'multi_agent',
+                  'rb:bg-primary-600': !(item.icon || typeIcons[item.source_app_type as string]) && item.source_app_type?.includes('workflow'),
+                  'rb:bg-transparent!': (item.icon || typeIcons[item.source_app_type as string])
                 })}>
-                  {item.icon ? (
-                    <img src={item.icon} alt="" className="rb:size-8" />
+                  {(item.icon || typeIcons[item.source_app_type as string]) ? (
+                    <img src={(item.icon || typeIcons[item.source_app_type as string])} alt="" className="rb:size-8" />
                   ) : (
                     <div className="rb:size-8 rb:flex rb:items-center rb:justify-center rb:text-white rb:text-[24px]">
                       {item.source_app_name?.trim()[0]}

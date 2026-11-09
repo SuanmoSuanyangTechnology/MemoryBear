@@ -300,7 +300,9 @@ class MultiAgentService:
         # 1. Validate the app exists
         app = self.db.get(App, app_id)
         if not app:
-            raise ResourceNotFoundException("应用", str(app_id))
+            raise ResourceNotFoundException(
+                "应用", str(app_id), code=BizCode.APP_NOT_FOUND
+            )
 
         # 2. Validate the model config (when provided)
         if data.default_model_config_id:

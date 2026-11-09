@@ -17,6 +17,7 @@ class ProviderFailure:
     biz_code: int
     retryable: bool
     channel_id: UUID | None = None
+    silent: bool = False
 
 
 @dataclass(frozen=True)
@@ -29,17 +30,20 @@ class ChannelFailure:
     upstream_code: str | None
     message: str
     retryable: bool
+    silent: bool = False
 
 
 @dataclass(frozen=True)
 class AggregatedFailure:
     biz_code: int
     retryable: bool
+    silent: bool = False
 
 
 _TRANSIENT_CODES = {
     int(BizCode.RATE_LIMITED),
     int(BizCode.SERVICE_UNAVAILABLE),
+    int(BizCode.INTERNAL_ERROR),
     int(BizCode.UPSTREAM_UNKNOWN),
 }
 
@@ -57,22 +61,31 @@ def aggregate_channel_failures(
 
     if not failures:
         return None
+    silent = all(failure.silent for failure in failures)
     codes = [failure.biz_code for failure in failures if failure.biz_code is not None]
     if len(failures) == 1:
         failure = failures[0]
         if failure.biz_code is None:
-            return AggregatedFailure(biz_code=int(BizCode.NO_AVAILABLE_CHANNEL), retryable=False)
-        return AggregatedFailure(biz_code=failure.biz_code, retryable=failure.retryable)
+            return AggregatedFailure(
+                biz_code=int(BizCode.NO_AVAILABLE_CHANNEL), retryable=False, silent=silent
+            )
+        return AggregatedFailure(
+            biz_code=failure.biz_code, retryable=failure.retryable, silent=silent
+        )
     if codes and len(codes) == len(failures) and len(set(codes)) == 1:
-        return AggregatedFailure(biz_code=codes[0], retryable=all(f.retryable for f in failures))
+        return AggregatedFailure(
+            biz_code=codes[0], retryable=all(f.retryable for f in failures), silent=silent
+        )
     if all(failure.retryable and failure.biz_code in _TRANSIENT_CODES for failure in failures):
         code = (
             BizCode.RATE_LIMITED
             if any(failure.biz_code == int(BizCode.RATE_LIMITED) for failure in failures)
             else BizCode.SERVICE_UNAVAILABLE
         )
-        return AggregatedFailure(biz_code=int(code), retryable=True)
-    return AggregatedFailure(biz_code=int(BizCode.NO_AVAILABLE_CHANNEL), retryable=False)
+        return AggregatedFailure(biz_code=int(code), retryable=True, silent=silent)
+    return AggregatedFailure(
+        biz_code=int(BizCode.NO_AVAILABLE_CHANNEL), retryable=False, silent=silent
+    )
 
 
 __all__ = [

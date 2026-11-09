@@ -313,6 +313,7 @@ def decode_frame(event: str, data: str) -> InvokeFrame:
         attempts=_optional_int(failure.get("attempts")),
         channel_id=_optional_uuid(failure.get("channel_id")),
         retryable=bool(failure.get("retryable")),
+        retry_after_seconds=_optional_int(failure.get("retry_after_seconds")),
     )
 
 

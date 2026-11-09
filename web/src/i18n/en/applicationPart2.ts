@@ -59,4 +59,5 @@ export const applicationPart2: ApplicationPart2 = {
       usageExamplesMin: 'Please provide 3–5 example tasks that users can initiate directly. Each is required.',
       usageExamplePrefix: 'Example',
       usageExamplePlaceholder: 'Describe the task the user wants to complete',
+      usageExampleMaxLength: 'Maximum {{max}} characters',
 }

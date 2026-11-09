@@ -4942,7 +4942,9 @@ class MultiAgentOrchestrator:
         # Load the app info (for workspace_id)
         app = await self._db_get(App, release.app_id)
         if not app:
-            raise ResourceNotFoundException("应用", str(release.app_id))
+            raise ResourceNotFoundException(
+                "应用", str(release.app_id), code=BizCode.APP_NOT_FOUND
+            )
 
         # Create an AgentConfig-like object carrying all needed attributes
         class AgentConfigProxy:

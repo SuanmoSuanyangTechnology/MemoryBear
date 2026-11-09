@@ -57,9 +57,16 @@ Caller = Annotated[InvokePrincipal, Depends(get_invoke_principal)]
 router = APIRouter(prefix="/invoke", tags=["Invoke"])
 
 
-def _failure_response(request: Request, failure: InvokeFailure) -> JSONResponse:
+def _failure_response(request: Request, failure: InvokeFailure) -> Response:
     """Non-stream failure: locale-rendered msg, diagnostic error, explicit HTTP status."""
 
+    if failure.silent:
+        # Client disconnect: log only, no error envelope.
+        response = Response(status_code=499)
+        response.headers[TRACE_ID_HEADER] = (
+            getattr(request.state, "trace_id", "") or get_trace_id()
+        )
+        return response
     code = coerce_code(failure.code)
     if code is None:
         code = BizCode.INTERNAL_ERROR.value

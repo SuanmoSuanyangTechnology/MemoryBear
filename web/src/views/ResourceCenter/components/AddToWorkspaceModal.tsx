@@ -85,7 +85,7 @@ const AddToWorkspaceModal = forwardRef<AddToWorkspaceModalRef>(function AddToWor
       </Form>
       {item?.source_app_name &&
         <div className="rb:bg-gray-100 rb:p-3 rb:rounded-lg">
-          {t('addToWorkspaceDesc', { name: item?.source_app_name })}
+          {t('resourceCenter.addToWorkspaceDesc', { name: item?.source_app_name })}
         </div>
       }
     </RbModal>

@@ -133,6 +133,7 @@ def to_host_error(exc: RemoteInvokeError) -> ModelServiceClientError:
             attempts=exc.attempts,
             channel_id=exc.channel_id,
             retryable=exc.retryable,
+            retry_after_seconds=exc.retry_after_seconds,
             http_status=exc.http_status,
         )
     else:

@@ -367,7 +367,9 @@ class AppService:
         app = get_apps_by_id(self.db, app_id)
         if not app:
             logger.warning("应用不存在", extra={"app_id": str(app_id)})
-            raise ResourceNotFoundException("应用", str(app_id))
+            raise ResourceNotFoundException(
+                "应用", str(app_id), code=BizCode.APP_NOT_FOUND
+            )
         return app
 
     def _create_agent_config(
@@ -2010,13 +2012,28 @@ class AppService:
 
         app = self._get_app_or_404(app_id)
 
+        # Access check precedes the type branch: an invisible app must not reveal
+        # its type through a different error.
+        self._validate_app_writable(app, workspace_id)
+
         if app.type != "agent":
             raise BusinessException(
                 "只有 Agent 类型应用支持 Agent 配置",
                 BizCode.APP_TYPE_NOT_SUPPORTED,
             )
 
-        self._validate_app_writable(app, workspace_id)
+        # Validate the model reference before the row is touched; a bare FK
+        # violation would surface as a 500 carrying the SQL statement.
+        if data.default_model_config_id is not None:
+            tenant_id = cross_domain_read.get_workspace_tenant_id(
+                self.db, app.workspace_id
+            )
+            if resolve_invoke_ref(
+                self.db, data.default_model_config_id, tenant_id=tenant_id
+            ) is None:
+                raise_model_unavailable(
+                    self.db, data.default_model_config_id, tenant_id=tenant_id
+                )
 
         stmt = (
             select(AgentConfig)
@@ -2122,14 +2139,15 @@ class AppService:
 
         app = self._get_app_or_404(app_id)
 
+        # Access check precedes the type branch: an invisible app must not reveal
+        # its type through a different error.
+        self._validate_app_accessible(app, workspace_id)
+
         if app.type != "agent":
             raise BusinessException(
                 "只有 Agent 类型应用支持 Agent 配置",
                 BizCode.APP_TYPE_NOT_SUPPORTED,
             )
-
-        # Read-only operation; shared apps are allowed
-        self._validate_app_accessible(app, workspace_id)
 
         # Shared app: return the pinned release snapshot instead of the draft.
         # The pin comes from the catalog entry this workspace installed, not the

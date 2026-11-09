@@ -53,6 +53,7 @@ class ModelInvokeFailedError(ModelServiceClientError):
         attempts: int | None = None,
         channel_id: UUID | None = None,
         retryable: bool = False,
+        retry_after_seconds: int | None = None,
         http_status: int | None = None,
     ) -> None:
         self.biz_code = biz_code
@@ -64,6 +65,7 @@ class ModelInvokeFailedError(ModelServiceClientError):
         self.attempts = attempts
         self.channel_id = channel_id
         self.retryable = retryable
+        self.retry_after_seconds = retry_after_seconds
         self.http_status = http_status
         super().__init__(message)
 

@@ -1,9 +1,3 @@
-/*
- * @Author: ZhaoYing 
- * @Date: 2026-02-03 16:34:09 
- * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-07-06 16:01:16
- */
 /**
  * Application Modal
  * Modal for creating and editing applications
@@ -15,10 +9,6 @@ import { Form, Input, Select } from 'antd';
 import { useTranslation } from 'react-i18next';
 
 import RadioGroupCard from '@/components/RadioGroupCard'
-import AgentIcon from '@/assets/images/application/agent.svg'
-import ClusterIcon from '@/assets/images/application/multi_agent.svg'
-import WorkflowIcon from '@/assets/images/application/workflow.svg'
-import PureWorkflowIcon from '@/assets/images/application/pure_workflow.svg'
 import type { ApplicationModalData, ApplicationModalRef, Application } from '../types'
 import RbModal from '@/components/RbModal'
 import { addApplication, updateApplication } from '@/api/application'
@@ -30,6 +20,7 @@ import CustomSelect from '@/components/CustomSelect';
 import { types } from '../constants'
 import { ONTOLOGY_LIST } from '@redbear/memory-brick';
 import PrivateWrap from '@/components/PrivateWrap';
+import { typeIcons } from '../constants';
 
 const FormItem = Form.Item;
 
@@ -39,15 +30,6 @@ const FormItem = Form.Item;
 interface ApplicationModalProps {
   /** Callback to refresh application list */
   refresh: () => void;
-}
-/**
- * Application type icon mapping
- */
-const typeIcons: Record<string, string> = {
-  agent: AgentIcon,
-  multi_agent: ClusterIcon,
-  workflow: WorkflowIcon,
-  pure_workflow: PureWorkflowIcon,
 }
 
 /**

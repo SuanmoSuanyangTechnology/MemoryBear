@@ -254,7 +254,9 @@ async def chat(
                     .limit(1)
                 )
                 if not app:
-                    raise ResourceNotFoundException("应用", str(share.app_id))
+                    raise ResourceNotFoundException(
+                        "应用", str(share.app_id), code=BizCode.APP_NOT_FOUND
+                    )
                 workspace_id = app.workspace_id
                 app_id = app.id
                 app_type = app.type

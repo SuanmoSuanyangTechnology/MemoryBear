@@ -85,17 +85,32 @@ class I18nException(HTTPException):
 
 
 class ResourceNotFoundException(BusinessException):
-    """Port of the host ``ResourceNotFoundException`` (message shape and 4006
-    code must stay identical on the wire)."""
+    """Port of the host ``ResourceNotFoundException`` (message shape unchanged).
 
-    def __init__(self, resource_type: str, resource_id: str | None = None, **kwargs: Any):
+    ``code`` defaults to the legacy ``FILE_NOT_FOUND`` wire value; resource types
+    with a dedicated domain code (currently 应用 → ``APP_NOT_FOUND``) pass it.
+    """
+
+    def __init__(
+        self,
+        resource_type: str,
+        resource_id: str | None = None,
+        *,
+        code: BizCode | int | None = None,
+        **kwargs: Any,
+    ):
         message = f"{resource_type} 不存在"
         context: dict[str, Any] = {"resource_type": resource_type}
         if resource_id:
             context["resource_id"] = resource_id
         if "context" in kwargs:
             context.update(kwargs.pop("context"))
-        super().__init__(message, BizCode.FILE_NOT_FOUND, context, **kwargs)
+        super().__init__(
+            message,
+            code if code is not None else BizCode.FILE_NOT_FOUND,
+            context,
+            **kwargs,
+        )
 
 
 class ValidationException(BusinessException):

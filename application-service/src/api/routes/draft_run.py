@@ -26,6 +26,7 @@ from sqlalchemy.orm import Session
 from ...db import detach_instances, get_async_db_context, get_db_context
 from ...errors import BizCode, BusinessException, ResourceNotFoundException
 from ...guards.workspace_access import require_workspace_access
+from ...i18n import get_current_locale
 from ...models import (
     AgentConfig,
     App,
@@ -44,10 +45,12 @@ from ...schemas import app_schema
 from ...schemas.multi_agent_schema import MultiAgentRunRequest
 from ...services.app_service import AppService
 from ...services.asset_release_resolver import AsyncAssetReleaseResolver
+from ...services.chat_errors import error_frame, error_payload
 from ...services.draft_run_service import AgentRunService
 from ...services.multi_agent_service import MultiAgentService
 from ...services.workflow_service import WorkflowService
 from ...services.workspace_service import get_workspace_storage_type_without_auth_async
+from ...trace import get_trace_id
 from ...utils.datetime_utils import utcnow_naive
 from ...utils.sse_stream import sse_response
 from ...utils.workflow_validator import validate_workflow_config
@@ -704,15 +707,29 @@ async def draft_run(
             )
 
             async def event_generator():
-                async with get_async_db_context() as stream_db:
-                    multiservice = MultiAgentService(stream_db)
-                    async for event in multiservice.run_stream(
-                            app_id=app_id,
-                            request=multi_agent_request,
-                            storage_type=storage_type,
-                            user_rag_memory_id=user_rag_memory_id
-                    ):
-                        yield event
+                try:
+                    async with get_async_db_context() as stream_db:
+                        multiservice = MultiAgentService(stream_db)
+                        async for event in multiservice.run_stream(
+                                app_id=app_id,
+                                request=multi_agent_request,
+                                storage_type=storage_type,
+                                user_rag_memory_id=user_rag_memory_id
+                        ):
+                            yield event
+                except Exception as e:
+                    # The response is already committed as 200 once streaming
+                    # starts; without an error frame the client sees an empty
+                    # stream instead of the failure.
+                    logger.error(
+                        "多智能体流式试运行失败",
+                        extra={"app_id": str(app_id), "error": str(e)},
+                    )
+                    yield error_frame(error_payload(
+                        e,
+                        locale=get_current_locale(),
+                        trace_id=get_trace_id(),
+                    ))
 
             return sse_response(event_generator())
 

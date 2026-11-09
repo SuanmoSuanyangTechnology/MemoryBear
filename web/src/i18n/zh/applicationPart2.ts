@@ -58,6 +58,7 @@ export const applicationPart2 = {
       usageExamplesMin: '请填写 3～5 条用户可以直接发起的示例任务，每条均为必填。',
       usageExamplePrefix: '示例',
       usageExamplePlaceholder: '描述用户希望完成的任务',
+      usageExampleMaxLength: '最多{{max}}个字符',
 }
 
 export type ApplicationPart2 = typeof applicationPart2
