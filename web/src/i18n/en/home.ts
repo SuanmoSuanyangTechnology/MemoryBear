@@ -271,6 +271,8 @@ export const home = {
       total_calls: 'Total API Calls',
       app_calls: 'App API Calls',
       service_calls: 'Service API Calls',
+
+      months: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'],
     },
     table: {
       totalRecords: 'Total {{total}} Articles'

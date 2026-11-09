@@ -1,7 +1,7 @@
 import { forwardRef, useImperativeHandle, useState } from 'react';
 import { Form, Input, Select, App } from 'antd';
 import type { UploadFile } from 'antd';
-// import UploadImages from '@/components/Upload/UploadImages';
+import UploadImages from '@/components/Upload/UploadImages';
 import { getFileLink } from '@/api/fileStorage';
 import ToolIcon from '@/assets/images/tool/tool.svg';
 import { useTranslation } from 'react-i18next';
@@ -162,7 +162,7 @@ const CustomToolModal = forwardRef<CustomToolModalRef, CustomToolModalProps>(({
         >
           <Input placeholder={t('tool.enterNamePlaceholder')} />
         </Form.Item>
-        {/* <Form.Item
+        <Form.Item
           name="icon"
           label={t('application.customIcon')}
           valuePropName="fileList"
@@ -176,7 +176,7 @@ const CustomToolModal = forwardRef<CustomToolModalRef, CustomToolModalProps>(({
           }]}
         >
           <UploadImages fileSize={2} disabled={loading} />
-        </Form.Item> */}
+        </Form.Item>
         <Form.Item
           name="description"
           label={t('tool.description')}

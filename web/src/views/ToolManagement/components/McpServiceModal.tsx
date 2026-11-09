@@ -2,7 +2,7 @@ import { forwardRef, useImperativeHandle, useState, useRef } from 'react';
 import { Form, Input, InputNumber, Select, App, Button, Tabs, Space, Flex } from 'antd';
 import { useTranslation } from 'react-i18next';
 import type { UploadFile } from 'antd';
-// import UploadImages from '@/components/Upload/UploadImages';
+import UploadImages from '@/components/Upload/UploadImages';
 import { getFileLink } from '@/api/fileStorage';
 import ToolIcon from '@/assets/images/tool/tool.svg';
 
@@ -264,7 +264,7 @@ const McpServiceModal = forwardRef<McpServiceModalRef, McpServiceModalProps>(({
           <Input placeholder={t('tool.namePlaceholder')} />
         </Form.Item>
 
-        {/* <Form.Item
+        <Form.Item
           name="icon"
           label={t('application.customIcon')}
           valuePropName="fileList"
@@ -278,7 +278,7 @@ const McpServiceModal = forwardRef<McpServiceModalRef, McpServiceModalProps>(({
           }]}
         >
           <UploadImages fileSize={2} disabled={loading} />
-        </Form.Item> */}
+        </Form.Item>
         {/* 描述 */}
         <FormItem
           name="description"

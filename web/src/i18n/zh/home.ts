@@ -271,6 +271,8 @@ export const home = {
       total_calls: 'Api 总调用量',
       app_calls: '应用Api调用量',
       service_calls: '服务Api调用量',
+
+      months: ['1月', '2月', '3月', '4月', '5月', '6月', '7月', '8月', '9月', '10月', '11月', '12月'],
     },
     table: {
       totalRecords: '共 {{total}} 条记录'
