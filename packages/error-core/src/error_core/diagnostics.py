@@ -9,6 +9,18 @@ _MAX_ENTRIES = 5
 _MAX_DETAIL = 2048
 _MAX_TOTAL = 8192
 
+
+def truncate_utf8(value: str, max_bytes: int, marker: str = "…") -> str:
+    """Truncate on a UTF-8 byte budget without splitting a code point."""
+
+    encoded = value.encode("utf-8")
+    if len(encoded) <= max_bytes:
+        return value
+    marker_bytes = marker.encode("utf-8")
+    if len(marker_bytes) >= max_bytes:
+        return encoded[:max_bytes].decode("utf-8", "ignore")
+    return encoded[: max_bytes - len(marker_bytes)].decode("utf-8", "ignore") + marker
+
 _KEY_VALUE = re.compile(
     r"(?i)([\"']?(?:authorization|api[_-]?key|access[_-]?token|refresh[_-]?token|"
     r"client[_-]?secret|token|secret)[\"']?\s*[:=]\s*)([\"']?)"
@@ -61,12 +73,12 @@ class DiagnosticEntry:
         if self.trace_id:
             fields.append(f"trace_id={self.trace_id}")
         if self.detail:
-            detail = redact(self.detail)[:_MAX_DETAIL]
-            escaped = detail.replace("\\", "\\\\").replace('"', '\\"')
+            escaped = redact(self.detail).replace("\\", "\\\\").replace('"', '\\"')
+            detail = truncate_utf8(escaped, _MAX_DETAIL)
             if fields:
-                fields[-1] = f'{fields[-1]}: "{escaped}"'
+                fields[-1] = f'{fields[-1]}: "{detail}"'
             else:
-                fields.append(f'detail: "{escaped}"')
+                fields.append(f'detail: "{detail}"')
         return " ".join(fields)
 
 
@@ -89,7 +101,7 @@ def format_diagnostics(
         trace_id=trace_id,
         detail=detail,
     )
-    return entry.render()[:_MAX_TOTAL]
+    return truncate_utf8(entry.render(), _MAX_TOTAL)
 
 
 def format_channel_diagnostics(
@@ -98,15 +110,17 @@ def format_channel_diagnostics(
     trace_id: str | None = None,
     detail: str = "",
 ) -> str:
-    shown = entries[:_MAX_ENTRIES]
-    parts = [rendered for entry in shown if (rendered := entry.render())]
-    if len(entries) > _MAX_ENTRIES:
-        parts.append(f"... (+{len(entries) - _MAX_ENTRIES} more)")
+    rendered = [text for entry in entries if (text := entry.render())]
+    unique = list(dict.fromkeys(rendered))
+    parts = unique[:_MAX_ENTRIES]
+    omitted = len(unique) - len(parts)
+    if omitted > 0:
+        parts.append(f"... (+{omitted} more)")
     if detail:
-        parts.append(redact(detail)[:_MAX_DETAIL])
+        parts.append(truncate_utf8(redact(detail), _MAX_DETAIL))
     if trace_id:
         parts.append(f"trace_id={trace_id}")
-    return "; ".join(parts)[:_MAX_TOTAL]
+    return truncate_utf8("; ".join(parts), _MAX_TOTAL)
 
 
 __all__ = [
@@ -114,4 +128,5 @@ __all__ = [
     "format_channel_diagnostics",
     "format_diagnostics",
     "redact",
+    "truncate_utf8",
 ]

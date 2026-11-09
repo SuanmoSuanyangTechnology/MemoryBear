@@ -473,13 +473,15 @@ class ToolService:
                 raise BusinessException("工具已停用或删除", BizCode.TOOL_SELECTION_INACTIVE)
 
             operation = parameters.get("operation")
-            if operation:
-                from ..tools.langchain_adapter import expand_tool_selection
+            from ..tools.langchain_adapter import expand_tool_selection
 
-                if not expand_tool_selection(tool, operation):
-                    raise BusinessException(
-                        "工具方法不存在或不可用", BizCode.TOOL_OPERATION_INVALID
-                    )
+            if not expand_tool_selection(tool, operation):
+                code = (
+                    BizCode.TOOL_METHODS_UNAVAILABLE
+                    if tool.tool_type == ToolType.MCP and not operation
+                    else BizCode.TOOL_OPERATION_INVALID
+                )
+                raise BusinessException("工具方法不存在或不可用", code)
 
             # Record the execution start
             if self._uses_async_session():
@@ -509,7 +511,11 @@ class ToolService:
             return result
 
         except BusinessException as e:
-            if e.code in (BizCode.TOOL_SELECTION_INACTIVE, BizCode.TOOL_OPERATION_INVALID):
+            if e.code in (
+                BizCode.TOOL_SELECTION_INACTIVE,
+                BizCode.TOOL_OPERATION_INVALID,
+                BizCode.TOOL_METHODS_UNAVAILABLE,
+            ):
                 raise
             execution_time = time.time() - start_time
             error_result = ToolResult.error_result(

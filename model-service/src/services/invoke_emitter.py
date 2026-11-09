@@ -86,6 +86,15 @@ def failure_events(failure: InvokeFailure) -> list[InvokeEvent]:
     if failure.usage_event is not None:
         # Count only calls that actually reached a provider.
         events.append(InvokeEvent(EVENT_USAGE, failure.usage_event.to_stream_dict()))
+    if failure.silent:
+        # Client disconnect: log only, no user-facing error frame.
+        logger.info(
+            "invoke silent failure code=%s attempts=%s channel_id=%s",
+            failure.code,
+            failure.attempts,
+            failure.channel_id,
+        )
+        return events
     events.append(InvokeEvent(EVENT_ERROR, error_payload(failure)))
     return events
 

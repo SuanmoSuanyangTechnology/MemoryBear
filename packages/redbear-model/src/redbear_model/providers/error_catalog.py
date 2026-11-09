@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from uuid import UUID
 
 from error_core.codes import BizCode
-from error_core.diagnostics import redact
+from error_core.diagnostics import redact, truncate_utf8
 from error_core.supplier import ChannelFailure, ProviderFailure
 
 
@@ -142,6 +142,14 @@ def _shared_status_rule(status: int) -> Rule | None:
     return None
 
 
+def is_client_disconnect(status: int | None, upstream_code: str | None) -> bool:
+    """The caller went away; there is no one to deliver an error to."""
+
+    if status == 499:
+        return True
+    return (upstream_code or "").upper().startswith("CLIENT_DISCONNECTED")
+
+
 def classify_provider_failure(
     provider: str,
     status: int | None,
@@ -150,6 +158,18 @@ def classify_provider_failure(
     channel_id: UUID | None = None,
 ) -> ProviderFailure:
     """Exact code prefix first, then provider status-only rules, shared 4xx, unknown."""
+
+    if is_client_disconnect(status, upstream_code):
+        return ProviderFailure(
+            provider=provider,
+            http_status=status,
+            upstream_code=upstream_code,
+            message=truncate_utf8(redact(message), 2048),
+            biz_code=int(BizCode.UPSTREAM_UNKNOWN),
+            retryable=False,
+            channel_id=channel_id,
+            silent=True,
+        )
 
     rules = _CATALOGS.get(provider.lower(), ())
     normalized = upstream_code or ""
@@ -168,7 +188,7 @@ def classify_provider_failure(
         provider=provider,
         http_status=status,
         upstream_code=upstream_code,
-        message=redact(message)[:2048],
+        message=truncate_utf8(redact(message), 2048),
         biz_code=int(BizCode.UPSTREAM_UNKNOWN),
         retryable=status is not None and status >= 500,
         channel_id=channel_id,
@@ -187,7 +207,7 @@ def _failure(
         provider=provider,
         http_status=status,
         upstream_code=upstream_code,
-        message=redact(message)[:2048],
+        message=truncate_utf8(redact(message), 2048),
         biz_code=rule.biz_code,
         retryable=rule.retryable,
         channel_id=channel_id,
@@ -206,7 +226,8 @@ def to_channel_failure(failure: ProviderFailure, error_type: str) -> ChannelFail
         upstream_code=failure.upstream_code,
         message=failure.message,
         retryable=failure.retryable,
+        silent=failure.silent,
     )
 
 
-__all__ = ["Rule", "classify_provider_failure", "to_channel_failure"]
+__all__ = ["Rule", "classify_provider_failure", "is_client_disconnect", "to_channel_failure"]
