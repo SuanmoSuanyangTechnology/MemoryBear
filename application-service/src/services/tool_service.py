@@ -733,6 +733,10 @@ class ToolService:
                 "name": config.name,
                 "tool_type": config.tool_type,
                 "origin": config.origin or "local",
+                # 状态与 is_active 是两回事：`is_active=False` 是逻辑删除，
+                # `status != available` 是行还在但不可执行（未配置/被停用/报错）。
+                # 选择器只看 is_active 会把这类工具当成可用，所以一并返回。
+                "status": config.status,
                 "is_active": config.is_active,
                 "method_count": len(methods),
                 "methods": methods,
