@@ -33,7 +33,7 @@ import re
 import threading
 import uuid
 import zipfile
-from typing import Optional
+from typing import Any, Optional
 from collections.abc import Callable, Coroutine
 from urllib.parse import urlparse
 
@@ -1952,7 +1952,16 @@ members: list[str] | None = None,
         if is_public is not None:
             query = query.filter(Skill.is_public.is_(is_public))
 
-        return [SkillPackageService._skill_card(s, p, with_members=True) for s, p in query.all()]
+        rows = query.all()
+        availability = SkillPackageService._tool_availability(
+            db, tenant_id, [skill for skill, _pkg in rows]
+        )
+        return [
+            SkillPackageService._skill_card(
+                s, p, with_members=True, availability=availability.get(s.id)
+            )
+            for s, p in rows
+        ]
 
     @staticmethod
     def _plugin_matches(plugin, member_rows: list, search: str) -> bool:
@@ -2005,8 +2014,103 @@ members: list[str] | None = None,
         return skill.name
 
     @staticmethod
+    def _tool_availability(
+        db: Session, tenant_id: uuid.UUID, skills: list[Skill]
+    ) -> dict[uuid.UUID, dict]:
+        """Derive per-skill executability from the tools a legacy row binds.
+
+        ``skills.is_active`` only says the row survived; a bound tool that was
+        deleted or disabled silently makes the skill unusable at run time (the
+        share gate already rejects such releases). The flag is derived here and
+        never stored, so it recovers by itself once the tool is restored.
+
+        One ``ToolConfig`` query for the whole page, reusing the detail path's
+        ``get_tool_summaries`` so list and detail agree on what "missing" means.
+        Standard skills bind no tools (the protocol has no tool binding), so they
+        fall back to their own row state.
+        """
+
+        legacy_ids = {
+            skill.id
+            for skill in skills
+            if (skill.skill_format or "legacy") != "standard"
+        }
+        ids: list[uuid.UUID] = []
+        for skill in skills:
+            if skill.id not in legacy_ids:
+                continue
+            for selector in skill.tools or []:
+                if not isinstance(selector, dict):
+                    continue
+                try:
+                    ids.append(uuid.UUID(str(selector.get("tool_id"))))
+                except (ValueError, AttributeError, TypeError):
+                    continue
+
+        summaries: dict[uuid.UUID, Any] = {}
+        if ids:
+            from .tool_service import ToolService
+
+            summaries = ToolService(db).get_tool_summaries(ids, tenant_id)
+
+        result: dict[uuid.UUID, dict] = {}
+        for skill in skills:
+            if skill.id not in legacy_ids:
+                result[skill.id] = {"is_usable": bool(skill.is_active), "unavailable_tools": []}
+                continue
+
+            unavailable: list[dict] = []
+            for selector in skill.tools or []:
+                entry = selector if isinstance(selector, dict) else {}
+                raw_id = entry.get("tool_id")
+                try:
+                    tool_id = uuid.UUID(str(raw_id))
+                except (ValueError, AttributeError, TypeError):
+                    tool_id = None
+
+                reason: str | None = None
+                info = summaries.get(tool_id) if tool_id else None
+                if tool_id is None:
+                    reason = "工具引用格式无效"
+                elif info is None:
+                    reason = "工具不存在"
+                elif not info.is_active:
+                    reason = "工具已删除或停用"
+                else:
+                    status = getattr(info, "status", None)
+                    status_text = (
+                        status.value if hasattr(status, "value") else str(status)
+                    )
+                    if status_text != "available":
+                        reason = f"工具状态不可用：{status_text}"
+
+                if reason is None:
+                    continue
+                unavailable.append({
+                    "tool_id": str(raw_id) if raw_id is not None else None,
+                    "operation": entry.get("operation"),
+                    "name": getattr(info, "name", None) if info else None,
+                    "status": (
+                        str(getattr(info.status, "value", info.status))
+                        if info is not None and getattr(info, "status", None) is not None
+                        else None
+                    ),
+                    "reason": reason,
+                })
+
+            result[skill.id] = {
+                "is_usable": bool(skill.is_active) and not unavailable,
+                "unavailable_tools": unavailable,
+            }
+        return result
+
+    @staticmethod
     def _skill_card(
-        skill: Skill, pkg: SkillPackage | None, *, with_members: bool = False
+        skill: Skill,
+        pkg: SkillPackage | None,
+        *,
+        with_members: bool = False,
+        availability: dict | None = None,
     ) -> dict:
         """One standalone skill card (row fields + standard-pack face).
 
@@ -2020,6 +2124,7 @@ members: list[str] | None = None,
         """
 
         display_name = SkillPackageService._display_name(skill, pkg)
+        availability = availability or {"is_usable": bool(skill.is_active), "unavailable_tools": []}
         card = {
             "id": skill.id,
             "tenant_id": skill.tenant_id,
@@ -2030,6 +2135,8 @@ members: list[str] | None = None,
             "prompt": skill.prompt,
             "is_active": skill.is_active,
             "is_public": skill.is_public,
+            "is_usable": availability["is_usable"],
+            "unavailable_tools": availability["unavailable_tools"],
             "created_at": skill.created_at,
             "updated_at": skill.updated_at,
             "skill_format": skill.skill_format or "legacy",
@@ -2059,6 +2166,8 @@ members: list[str] | None = None,
                     "package_id": pkg.id if pkg else None,
                     "has_scripts": pkg.has_scripts if pkg else None,
                     "is_active": skill.is_active,
+                    "is_usable": availability["is_usable"],
+                    "unavailable_tools": availability["unavailable_tools"],
                 }
             ]
         return card
@@ -2077,6 +2186,9 @@ members: list[str] | None = None,
             "prompt": None,
             "is_active": bool(member_rows),
             "is_public": False,
+            # 插件本身不绑工具（成员均为 standard 技能），可执行性等同于"是否还有存活成员"
+            "is_usable": bool(member_rows),
+            "unavailable_tools": [],
             "created_at": plugin.created_at,
             "updated_at": plugin.updated_at,
             "skill_format": "standard",
@@ -2101,6 +2213,7 @@ members: list[str] | None = None,
                     None,
                 )
             ),
+            # 插件成员一律是 standard 技能（不绑定工具），可执行性只取决于行状态。
             "members": [
                 {
                     "id": skill.id,
@@ -2110,6 +2223,8 @@ members: list[str] | None = None,
                     "package_id": pkg.id,
                     "has_scripts": pkg.has_scripts,
                     "is_active": skill.is_active,
+                    "is_usable": bool(skill.is_active),
+                    "unavailable_tools": [],
                 }
                 for skill, pkg in member_rows
             ],
@@ -2178,8 +2293,30 @@ members: list[str] | None = None,
                 entry["tool_missing"] = True
             else:
                 entry["tool_info"] = info.model_dump()
+                # 工具行还在但已不可执行（停用 / 状态异常）：详情页据此标红，
+                # 与 `_tool_availability` 的判定口径保持一致。
+                reason = SkillPackageService._tool_unusable_reason(info)
+                if reason:
+                    entry["tool_unavailable"] = True
+                    entry["unavailable_reason"] = reason
             enriched.append(entry)
         return enriched
+
+    @staticmethod
+    def _tool_unusable_reason(info: Any) -> str | None:
+        """Why a resolved tool cannot be executed; ``None`` when it is usable.
+
+        Single source of truth for the list-level ``is_usable`` flag and the
+        detail-level ``tool_unavailable`` marker, so the two never disagree.
+        """
+
+        if not getattr(info, "is_active", True):
+            return "工具已删除或停用"
+        status = getattr(info, "status", None)
+        status_text = status.value if hasattr(status, "value") else str(status)
+        if status_text and status_text != "available":
+            return f"工具状态不可用：{status_text}"
+        return None
 
     @staticmethod
     def get_entry_detail(
@@ -2199,12 +2336,17 @@ members: list[str] | None = None,
         ).first()
 
         if skill:
-            detail = SkillPackageService._skill_card(skill, None)
+            availability = SkillPackageService._tool_availability(db, tenant_id, [skill])
+            detail = SkillPackageService._skill_card(
+                skill, None, availability=availability.get(skill.id)
+            )
             detail["plugin_id"] = None
             if (skill.skill_format or "legacy") == "standard" and skill.package_id:
                 pkg = repo.get_by_id(skill.package_id, tenant_id)
                 if pkg:
-                    detail = SkillPackageService._skill_card(skill, pkg)
+                    detail = SkillPackageService._skill_card(
+                        skill, pkg, availability=availability.get(skill.id)
+                    )
                     files = repo.get_files(pkg.id)
                     detail["skill_md"] = SkillPackageService._file_text(
                         pkg.id, "SKILL.md", files, db

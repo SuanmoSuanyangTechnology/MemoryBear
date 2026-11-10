@@ -266,7 +266,7 @@ class AssetService:
     def _assert_can_share(
             self, app: App, user_id: uuid.UUID, workspace_id: uuid.UUID | None
     ) -> None:
-        """空间级决定：管理员或应用创建者才能把它放进租户资源中心。"""
+        """空间级决定：管理员、应用创建者或同租户超管才能共享该应用。"""
 
         if workspace_id is None:
             raise BusinessException(
@@ -276,10 +276,29 @@ class AssetService:
             return
         if cross_domain_read.is_workspace_manager(self.db, user_id, workspace_id):
             return
+        if self._is_tenant_superuser(user_id, workspace_id):
+            return
         raise BusinessException(
-            "只有空间管理员或应用创建者可以共享该应用",
+            "只有空间管理员、应用创建者或租户超级管理员可以共享该应用",
             BizCode.PERMISSION_DENIED,
         )
+
+    def _is_tenant_superuser(
+            self, user_id: uuid.UUID, workspace_id: uuid.UUID
+    ) -> bool:
+        """Whether the user is a superuser of the workspace's own tenant.
+
+        Keeps this gate on the same rule as the workspace guard
+        (`guards/workspace_access.py`): a superuser may enter any workspace of
+        their tenant, so refusing them a space-level action there would be
+        self-contradictory. Cross-tenant superusers stay denied.
+        """
+
+        user = cross_domain_read.get_user(self.db, user_id)
+        if user is None or not user.is_active or not user.is_superuser:
+            return False
+        workspace = cross_domain_read.get_workspace(self.db, workspace_id)
+        return workspace is not None and workspace.tenant_id == user.tenant_id
 
     def _resolve_release(self, app: App, release_id: uuid.UUID | None) -> AppRelease:
         target_id = release_id or app.current_release_id
