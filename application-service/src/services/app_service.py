@@ -1127,23 +1127,21 @@ class AppService:
 
         # A copy installation points at this app through `local_app_id`; leaving it
         # active makes the catalog report a deleted app (`reused=true` + 4007 on
-        # read). Retire it here so the next install rebuilds a live copy. Keep the
-        # ids so a failed ontology unbind can restore them with the app.
+        # read). Retire it here so the next install rebuilds a live copy. The ids
+        # come back from the same statement (no separate SELECT, no unbounded
+        # `IN (...)`) so a failed ontology unbind can restore exactly these rows.
         installation_ids = list(self.db.scalars(
-            select(AppAssetInstallation.id).where(
+            sa_update(AppAssetInstallation)
+            .where(
                 AppAssetInstallation.local_app_id == app_id,
                 AppAssetInstallation.status == InstallStatus.ACTIVE,
             )
-        ).all())
-        if installation_ids:
-            self.db.execute(
-                sa_update(AppAssetInstallation)
-                .where(AppAssetInstallation.id.in_(installation_ids))
-                .values(
-                    status=InstallStatus.REMOVED,
-                    updated_at=utcnow_naive(),
-                )
+            .values(
+                status=InstallStatus.REMOVED,
+                updated_at=utcnow_naive(),
             )
+            .returning(AppAssetInstallation.id)
+        ).all())
 
         # Bindings belong to the memory domain: only the remote callback binder
         # can unbind them, after the local commit (no remote call inside a
@@ -1208,19 +1206,26 @@ class AppService:
                 )
             # The copy installations were retired for this delete; leaving them
             # removed would make the catalog rebuild a duplicate copy later.
-            if installation_ids:
-                self.db.execute(
-                    sa_update(AppAssetInstallation)
-                    .where(AppAssetInstallation.id.in_(installation_ids))
-                    .values(status=InstallStatus.ACTIVE, updated_at=utcnow_naive())
+            # Stay on the same predicate (still pointing at this app, still
+            # removed) so a row another flow re-pointed in the meantime is not
+            # flipped back to active.
+            restored_ids = list(self.db.scalars(
+                sa_update(AppAssetInstallation)
+                .where(
+                    AppAssetInstallation.id.in_(installation_ids),
+                    AppAssetInstallation.local_app_id == app.id,
+                    AppAssetInstallation.status == InstallStatus.REMOVED,
                 )
+                .values(status=InstallStatus.ACTIVE, updated_at=utcnow_naive())
+                .returning(AppAssetInstallation.id)
+            ).all()) if installation_ids else []
             self.db.commit()
             logger.warning(
                 "本体解绑失败，已恢复应用、共享记录与副本安装",
                 extra={
                     "app_id": str(app.id),
                     "share_count": len(share_ids),
-                    "installation_count": len(installation_ids),
+                    "installation_count": len(restored_ids),
                 },
             )
         except Exception as e:
