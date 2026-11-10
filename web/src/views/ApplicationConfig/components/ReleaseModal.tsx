@@ -251,6 +251,16 @@ const ReleaseModal = forwardRef<ReleaseModalRef, ReleaseModalProps>(({
               label={t('application.setupSteps')}
               rules={[
                 { required: true, message: t('application.setupStepsRequired') },
+                {
+                  validator: (_, value) => {
+                    if (!value) return Promise.resolve()
+                    const stripped = value.replace(/<[^>]*>/g, '').replace(/\*/g, '').trim()
+                    if (!stripped) {
+                      return Promise.reject(new Error(t('application.setupStepsInvalid')))
+                    }
+                    return Promise.resolve()
+                  },
+                },
               ]}
               extra={t('application.setupStepsHint')}
             >
