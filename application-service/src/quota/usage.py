@@ -145,18 +145,28 @@ def check_quota(
         raise
 
 
-def ensure_app_quota(db: Session, principal: Principal) -> None:
-    """Workspace-scoped app-count check (create/copy/import paths)."""
+def ensure_app_quota(db: Session, principal: Principal, extra: int = 0) -> None:
+    """Workspace-scoped app-count check (create/copy/import paths).
+
+    ``extra`` counts apps the same request is about to create on top of what is
+    already persisted — a cluster import lands its sub-agents before the root, so
+    checking only the current count would let a package blow past the limit.
+    """
 
     workspace_id = principal.workspace_id
     if workspace_id is None:
         logger.error("check_app_quota: workspace_id missing; refusing request")
         raise InternalServerError()
+
+    def usage_with_extra(session: Session, tenant_id: UUID, workspace_id: UUID) -> int:
+        return count_active_apps(session, workspace_id) + extra
+
     check_quota(
         db,
         principal.tenant_id,
         "app_quota",
         "app",
+        usage_func=usage_with_extra if extra else None,
         workspace_id=workspace_id,
     )
 

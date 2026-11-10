@@ -1049,15 +1049,20 @@ def export_app(
         workspace_id: WorkspaceId,
         db: DbSession,
         release_id: UUID | None = None,
+        include_cluster: bool = True,
 ):
     """Export agent / multi_agent / workflow app config as a YAML file stream.
     release_id: release ID to export; when omitted, the current draft config is exported.
+    include_cluster: multi-agent apps only — also export every sub-agent's config
+    under a top-level `cluster:` section (default on).
     """
     app_service = AppService(db)
     app = app_service._get_app_or_404(app_id)
     app_service._validate_app_accessible(app, workspace_id)
 
-    yaml_str, filename = AppDslService(db).export_dsl(app_id, release_id)
+    yaml_str, filename = AppDslService(db).export_dsl(
+        app_id, release_id, include_cluster=include_cluster
+    )
     encoded = quote(filename, safe=".")
     yaml_bytes = yaml_str.encode("utf-8")
     file_stream = io.BytesIO(yaml_bytes)
@@ -1083,8 +1088,10 @@ def import_app(
     When app_id is passed, the app's config is overwritten (types must match);
     otherwise a new app is created.
     On cross-workspace / cross-tenant import, resources are matched by name:
-    unmatched models / tools / knowledge bases are blanked; unmatched sub-agent /
-    routing entries are dropped outright. All of them are reported in warnings.
+    unmatched models / tools / knowledge bases are blanked. Sub-agent /
+    routing entries are rebound by id only (never by name); a cluster package
+    (`cluster:` section) also creates its members. All of it is reported in
+    warnings.
     """
     if not file.filename.lower().endswith((".yaml", ".yml")):
         return fail(code=BizCode.BAD_REQUEST.value, msg="仅支持 YAML 文件")
@@ -1095,17 +1102,40 @@ def import_app(
         return fail(code=BizCode.BAD_REQUEST.value, msg="YAML 格式无效，缺少 app 字段")
 
     target_app_id = UUID(app_id) if app_id else None
+    # A packaged cluster creates one app per member before the root lands. The
+    # quota must account for them up front; members that will be reused (same app
+    # id still present) do not consume a slot.
+    new_member_count = (
+        AppDslService(db).count_importable_cluster_members(dsl, workspace_id)
+        if target_app_id is None
+        else 0
+    )
     # Check quota only when creating a new app; overwriting an existing app skips it
     if target_app_id is None:
-        ensure_app_quota(db, principal)
-    result_app, warnings = AppDslService(db).import_dsl(
-        dsl=dsl,
-        workspace_id=workspace_id,
-        tenant_id=principal.tenant_id,
-        user_id=principal.actor_id,
-        app_id=target_app_id,
-        redis_client=cache,
-    )
+        ensure_app_quota(db, principal, extra=new_member_count)
+
+    cluster_members: list[dict[str, Any]] = []
+    is_cluster = bool(dsl.get("cluster"))
+    try:
+        result_app, warnings = AppDslService(db).import_dsl(
+            dsl=dsl,
+            workspace_id=workspace_id,
+            tenant_id=principal.tenant_id,
+            user_id=principal.actor_id,
+            app_id=target_app_id,
+            redis_client=cache,
+            # A cluster lands root + members; the route owns the transaction so a
+            # failure halfway rolls every member back instead of leaving orphans.
+            commit=not is_cluster,
+            cluster_report=cluster_members,
+        )
+        if is_cluster:
+            db.commit()
+            db.refresh(result_app)
+    except Exception:
+        if is_cluster:
+            db.rollback()
+        raise
     # import_dsl has committed the new app on return; re-evaluate the quota alert
     # from the authoritative count.
     if target_app_id is None:
@@ -1115,7 +1145,11 @@ def import_app(
             workspace_id,
         )
     return success(
-        data={"app": app_schema.App.model_validate(result_app), "warnings": warnings},
+        data={
+            "app": app_schema.App.model_validate(result_app),
+            "warnings": warnings,
+            "cluster": cluster_members,
+        },
         msg="应用导入成功" + ("，但部分资源需手动配置" if warnings else "")
     )
 

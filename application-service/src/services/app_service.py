@@ -2978,6 +2978,36 @@ class AppService:
                 BizCode.AGENT_CONFIG_MISSING
             )
 
+        # 3.5 Pre-scan every sub-agent's release and report *all* unusable ones at
+        # once. A cluster imported from a package arrives with every member
+        # unpublished; failing on the first one forces the user to retry N times
+        # before learning which ones need publishing.
+        #
+        # ``strict=False`` mirrors the per-entry resolution below on purpose: a
+        # legacy ``current`` entry whose latest release went offline still falls
+        # back to its anchor, so pre-scanning with ``strict=True`` would reject
+        # clusters that publish fine today. Entries with no anchor (the current
+        # app-id form, i.e. everything imported) raise either way.
+        unavailable = []
+        for sub_agent_data in multi_agent_config.sub_agents or []:
+            try:
+                resolve_effective_release_id(self.db, sub_agent_data, strict=False)
+            except BusinessException as error:
+                unavailable.append(error.message)
+        if unavailable:
+            raise BusinessException(
+                "以下子 Agent 尚未发布，请先发布它们："
+                + "；".join(unavailable),
+                BizCode.APP_NOT_PUBLISHED,
+                data={
+                    "reason": "SUB_AGENT_UNPUBLISHED",
+                    "missing": [
+                        {"kind": "sub_agent", "reason": message}
+                        for message in unavailable
+                    ],
+                },
+            )
+
         # 4. Validate each sub-agent and its model config
         for idx, sub_agent_data in enumerate(multi_agent_config.sub_agents):
             agent_id = sub_agent_data.get('agent_id')

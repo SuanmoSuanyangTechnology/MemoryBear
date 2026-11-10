@@ -15,6 +15,7 @@ Behavior notes:
 from __future__ import annotations
 
 import datetime
+import logging
 import uuid
 from collections.abc import Collection
 from typing import Any
@@ -51,7 +52,10 @@ from ..schemas.model_enums import LLM_FAMILY_TYPES, ModelType
 from ..utils.datetime_utils import to_iso_z, utcnow_naive
 from ..utils.workflow_node_types import NodeType
 from ..workflow.adapters.memory_bear.memory_bear_adapter import MemoryBearAdapter
+from .multi_agent_release_resolver import resolve_effective_release_id
 from .workflow_service import WorkflowService
+
+logger = logging.getLogger(__name__)
 
 
 class AppDslService:
@@ -61,8 +65,20 @@ class AppDslService:
 
     # ==================== Export ====================
 
-    def export_dsl(self, app_id: uuid.UUID, release_id: uuid.UUID | None = None) -> tuple[str, str]:
-        """Build the app DSL yaml string; returns (yaml_str, filename)."""
+    def export_dsl(
+        self,
+        app_id: uuid.UUID,
+        release_id: uuid.UUID | None = None,
+        *,
+        include_cluster: bool = True,
+    ) -> tuple[str, str]:
+        """Build the app DSL yaml string; returns (yaml_str, filename).
+
+        ``include_cluster`` (default on) adds the top-level ``cluster:`` section to a
+        multi-agent app: every sub-agent exported as a full config, so one file
+        carries the whole cluster. Old readers ignore the unknown key, and files
+        without it import exactly as before.
+        """
         app = self.db.query(App).filter(App.id == app_id, App.is_active.is_(True)).first()
         if not app:
             raise ResourceNotFoundException(
@@ -84,12 +100,15 @@ class AppDslService:
         }
 
         if release_id is not None:
-            return self._export_release(app, release_id, meta, app_meta)
+            return self._export_release(
+                app, release_id, meta, app_meta, include_cluster=include_cluster
+            )
 
-        return self._export_draft(app, meta, app_meta)
+        return self._export_draft(app, meta, app_meta, include_cluster=include_cluster)
 
     def _export_release(
-        self, app: App, release_id: uuid.UUID, meta: dict, app_meta: dict
+        self, app: App, release_id: uuid.UUID, meta: dict, app_meta: dict,
+        *, include_cluster: bool = True,
     ) -> tuple[str, str]:
         release = self.db.query(AppRelease).filter(
             AppRelease.app_id == app.id,
@@ -113,6 +132,8 @@ class AppDslService:
             app.type, release.config or {}, release.default_model_config_id
         )
         dsl = {**meta, "app": app_meta, config_key: config_data}
+        if include_cluster:
+            self._attach_cluster(dsl, app)
         return (
             yaml.dump(dsl, default_flow_style=False, allow_unicode=True),
             f"{release.name}_v{release.version_name}.yaml",
@@ -161,7 +182,9 @@ class AppDslService:
             return enriched
         return cfg
 
-    def _export_draft(self, app: App, meta: dict, app_meta: dict) -> tuple[str, str]:
+    def _export_draft(
+        self, app: App, meta: dict, app_meta: dict, *, include_cluster: bool = True
+    ) -> tuple[str, str]:
         if app.type in (AppType.WORKFLOW, AppType.PURE_WORKFLOW):
             config = self.db.query(WorkflowConfig).filter(WorkflowConfig.app_id == app.id).first()
             config_data = {
@@ -232,6 +255,8 @@ class AppDslService:
         else:
             raise BusinessException(f"不支持的应用类型: {app.type}", BizCode.BAD_REQUEST)
 
+        if include_cluster:
+            self._attach_cluster(dsl, app)
         return yaml.dump(dsl, default_flow_style=False, allow_unicode=True), f"{app.name}.yaml"
 
     def _to_dict(self, value):
@@ -440,6 +465,211 @@ class AppDslService:
             enriched["skills"] = self._enrich_skills(enriched["skills"])
         return enriched
 
+    # ==================== Cluster export ====================
+
+    def _attach_cluster(self, dsl: dict, app: App) -> None:
+        """Add the top-level ``cluster:`` section carrying every sub-agent config.
+
+        Root and members deliberately use **different sources**: the root follows
+        the caller's choice (release snapshot, or the draft when ``release_id`` is
+        omitted), while every member is exported from its *effective release* — a
+        sub-agent has no "draft is runtime" meaning, and cluster config cannot even
+        be saved with an unpublished member (``resolve_release_for_save`` requires
+        ``current_release_id``).
+        """
+        if app.type != AppType.MULTI_AGENT:
+            return
+        config = dsl.get("multi_agent_config") or {}
+        if not config.get("sub_agents"):
+            return
+
+        members, warnings = self.collect_cluster_members(app, config)
+        if not members:
+            if warnings:
+                dsl["export_warnings"] = warnings
+            return
+
+        self._rewrite_cluster_local_ids(config, members, warnings)
+        dsl["cluster"] = members
+        if warnings:
+            dsl["export_warnings"] = warnings
+
+    def collect_cluster_members(
+        self, root_app: App, config: dict
+    ) -> tuple[list[dict[str, Any]], list[str]]:
+        """Collect each referenced sub-agent's config, deduped by owning app.
+
+        Unlike ``collect_cluster`` this does **not** require the root to be
+        published — it only needs each member's effective release, which is always
+        a real release (``release_policy=pinned`` → its ``release_id``, otherwise
+        the app's ``current_release_id``).
+
+        Two kinds of member are treated differently, and the asymmetry is the
+        point: a member app that exists but belongs to another workspace is a
+        read-only catalog reference (``link_mode=reference`` builds no local app
+        row), so it is skipped with a warning — failing the whole export would
+        leave the user no way to salvage a dirty cluster. A missing or unpublished
+        member fails the export instead, because silently shipping a cluster with
+        holes is worse than an explicit error.
+        """
+        members: list[dict[str, Any]] = []
+        warnings: list[str] = []
+        seen: set[uuid.UUID] = set()
+        root_local_id = f"app:{root_app.id}"
+
+        for entry in config.get("sub_agents") or []:
+            agent_id = self._entry_agent_id(entry)
+            app, legacy_app_id = self._locate_any_app(agent_id)
+            label = entry.get("name") or (entry.get("_ref") or {}).get("name") or str(agent_id)
+
+            if app is None:
+                raise self._incomplete_cluster(
+                    f"子 Agent「{label}」的应用不存在", label, "sub-agent app not found"
+                )
+            if app.workspace_id != root_app.workspace_id:
+                warnings.append(
+                    f"子 Agent「{app.name}」是只读引用（所属空间与本应用不同），未随包导出"
+                )
+                continue
+            if app.type != AppType.AGENT:
+                raise self._incomplete_cluster(
+                    f"子 Agent「{label}」不是 Agent 类型应用",
+                    label,
+                    "sub-agent is not an agent app",
+                )
+            if not app.is_active:
+                raise self._incomplete_cluster(
+                    f"子 Agent「{label}」已被删除", label, "sub-agent app deleted"
+                )
+            if app.id in seen:
+                continue
+
+            try:
+                release_id = resolve_effective_release_id(self.db, entry, strict=True)
+            except BusinessException as error:
+                raise self._incomplete_cluster(
+                    f"子 Agent「{label}」没有可用的发布版本", label, str(error.message)
+                ) from error
+
+            release = self.db.get(AppRelease, release_id)
+            if release is None:
+                raise self._incomplete_cluster(
+                    f"子 Agent「{label}」的发布版本不存在", label, "release not found"
+                )
+
+            seen.add(app.id)
+            members.append(
+                {
+                    "local_id": f"app:{app.id}",
+                    "parent_local_id": root_local_id,
+                    "app_type": app.type,
+                    "name": app.name,
+                    "description": app.description,
+                    "config": self._enrich_release_config(
+                        AppType.AGENT, release.config or {}, release.default_model_config_id
+                    ),
+                }
+            )
+        return members, warnings
+
+    @staticmethod
+    def _entry_agent_id(entry: dict) -> Any:
+        ref = entry.get("_ref") or {}
+        return ref.get("id") or entry.get("agent_id")
+
+    def _locate_any_app(self, agent_id: Any) -> tuple[App | None, uuid.UUID | None]:
+        """Any app an entry may point at, regardless of workspace/type/status.
+
+        ``collect_cluster_members`` needs the unfiltered row to tell "missing"
+        (hard error) from "exists but another workspace's" (read-only reference,
+        skipped with a warning), so it cannot reuse ``_locate_agent_app``.
+        """
+        if not agent_id:
+            return None, None
+        try:
+            agent_uuid = uuid.UUID(str(agent_id))
+        except (ValueError, AttributeError, TypeError):
+            return None, None
+        app = self.db.query(App).filter(App.id == agent_uuid).first()
+        if app is not None:
+            return app, None
+        # Legacy shape: agent_id stores AppRelease.id.
+        release = self.db.query(AppRelease).filter(AppRelease.id == agent_uuid).first()
+        if release is None:
+            return None, None
+        return self.db.query(App).filter(App.id == release.app_id).first(), release.app_id
+
+    @staticmethod
+    def _incomplete_cluster(message: str, name: Any, reason: str) -> BusinessException:
+        return BusinessException(
+            message,
+            BizCode.EXTERNAL_CATALOG_INVALID,
+            data={
+                "reason": "INCOMPLETE_BUNDLE",
+                "missing": [{"kind": "sub_agent", "name": name, "reason": reason}],
+            },
+        )
+
+    def _rewrite_cluster_local_ids(
+        self, config: dict, members: list[dict[str, Any]], warnings: list[str]
+    ) -> None:
+        """Rewrite cross-app references to ``app:<源 app id>`` local ids.
+
+        This is what lets the import side reuse ``_resolve_bundle_members``: it
+        binds strictly through ``dep_map``, never by name. ``release_id`` is
+        dropped because release ids are meaningless across environments;
+        ``release_policy`` becomes ``current`` so the landed cluster follows each
+        member's own release.
+        """
+        local_ids = {str(member["local_id"]).removeprefix("app:"): member["local_id"]
+                     for member in members}
+
+        def to_local(value: Any) -> str | None:
+            if not value:
+                return None
+            mapped = local_ids.get(str(value))
+            if mapped is not None:
+                return mapped
+            # Legacy shape: the entry stores an AppRelease.id. Resolve it to the
+            # owning app so the id-keyed map still matches instead of silently
+            # dropping a perfectly exportable member.
+            app, _ = self._locate_any_app(value)
+            return local_ids.get(str(app.id)) if app is not None else None
+
+        # Partition *before* mutating: the rewrite replaces ``agent_id`` with an
+        # ``app:`` prefixed local id, so re-reading it afterwards would no longer
+        # match the id-keyed map and would drop every entry.
+        kept_sub_agents = []
+        for entry in config.get("sub_agents") or []:
+            if to_local(self._entry_agent_id(entry)) is None:
+                # Skipped member (read-only reference): drop the entry rather than
+                # emit a dangling reference into the package.
+                warnings.append(
+                    f"子 Agent「{entry.get('name') or entry.get('agent_id')}」"
+                    "未能导出，已从包中移除"
+                )
+                continue
+            kept_sub_agents.append(entry)
+
+        for entry in kept_sub_agents:
+            entry["agent_id"] = to_local(self._entry_agent_id(entry))
+            entry["release_policy"] = "current"
+            entry["release_id"] = None
+        config["sub_agents"] = kept_sub_agents
+
+        if config.get("routing_rules"):
+            kept_rules = []
+            for rule in config["routing_rules"]:
+                local_id = to_local(rule.get("target_agent_id"))
+                if local_id is None:
+                    continue
+                rule["target_agent_id"] = local_id
+                kept_rules.append(rule)
+            config["routing_rules"] = kept_rules
+
+        if not kept_sub_agents:
+            warnings.append("集群未包含任何可导出的子 Agent，cluster 段为空")
+
     # ==================== Import ====================
 
     def import_dsl(
@@ -455,6 +685,7 @@ class AppDslService:
         dep_map: dict[str, str] | None = None,
         resolve_cross_app_refs: bool = True,
         origin_columns: dict[str, Any] | None = None,
+        cluster_report: list[dict[str, Any]] | None = None,
     ) -> tuple[App, list[str]]:
         """Parse the DSL, create or overwrite the app config; returns (app, warnings).
         When app_id is set: validate type consistency then overwrite; when None: create.
@@ -493,11 +724,32 @@ class AppDslService:
         now = utcnow_naive()
 
         if app_id is not None:
+            # Validate the overwrite target *before* landing members: a bad app id
+            # or a type mismatch must not leave freshly created sub-agents behind.
+            target_app = self._assert_overwrite_target(app_id, app_type, workspace_id)
+            cluster_dep_map = self._land_cluster_members(
+                dsl, workspace_id, tenant_id, user_id, warnings, now, redis_client,
+                dep_map=dep_map, cluster_report=cluster_report,
+            )
+            if cluster_dep_map is not None:
+                return self._overwrite_dsl(
+                    dsl, app_id, app_type, workspace_id, tenant_id, warnings, now, redis_client,
+                    commit=commit, dep_map=cluster_dep_map,
+                    resolve_cross_app_refs=False, app=target_app,
+                )
             return self._overwrite_dsl(
                 dsl, app_id, app_type, workspace_id, tenant_id, warnings, now, redis_client,
                 commit=commit, dep_map=dep_map,
-                resolve_cross_app_refs=resolve_cross_app_refs,
+                resolve_cross_app_refs=resolve_cross_app_refs, app=target_app,
             )
+
+        cluster_dep_map = self._land_cluster_members(
+            dsl, workspace_id, tenant_id, user_id, warnings, now, redis_client,
+            dep_map=dep_map, cluster_report=cluster_report,
+        )
+        if cluster_dep_map is not None:
+            dep_map = cluster_dep_map
+            resolve_cross_app_refs = False
 
         new_app = App(
             id=uuid.uuid4(),
@@ -536,6 +788,164 @@ class AppDslService:
             self.db.flush()
         return new_app, warnings
 
+    def _land_cluster_members(
+        self,
+        dsl: dict,
+        workspace_id: uuid.UUID,
+        tenant_id: uuid.UUID,
+        user_id: uuid.UUID,
+        warnings: list[str],
+        now: datetime.datetime,
+        redis_client: Any = None,
+        *,
+        dep_map: dict[str, str] | None = None,
+        cluster_report: list[dict[str, Any]] | None = None,
+    ) -> dict[str, str] | None:
+        """Land every ``cluster[]`` member before the root app, returning dep_map.
+
+        Returns ``None`` when the DSL is not a packaged cluster, so the console's
+        ordinary single-app import keeps its historical behaviour byte for byte.
+
+        Reuse rule (deliberately **id-only**): a member whose source app id still
+        exists in the target workspace as an active agent is bound to that row and
+        left untouched. Names never decide a rebind — a same-named but different
+        agent would be silently hijacked, and two clusters would then share one
+        editable app row. An id miss creates a fresh draft copy; name collisions
+        are resolved by ``_unique_app_name`` into ``X(1)``.
+
+        Nothing here commits: the root app and every member must land in the
+        caller's single transaction, otherwise a failure on the third member
+        leaves the first two behind.
+        """
+        members = dsl.get("cluster")
+        if not isinstance(members, list) or not members:
+            return None
+
+        landed: dict[str, str] = dict(dep_map or {})
+        report = cluster_report if cluster_report is not None else []
+
+        for member in members:
+            local_id = str(member.get("local_id") or "")
+            if not local_id:
+                continue
+            name = member.get("name") or "导入子 Agent"
+
+            existing = self._find_reusable_member(local_id, workspace_id)
+            if existing is not None:
+                landed[local_id] = str(existing.id)
+                warnings.append(f"已复用目标空间已有的子 Agent「{existing.name}」，其配置未改动")
+                report.append(
+                    {
+                        "local_id": local_id,
+                        "app_id": str(existing.id),
+                        "name": existing.name,
+                        "published": existing.current_release_id is not None,
+                        "reused": True,
+                    }
+                )
+                continue
+
+            member_app = App(
+                id=uuid.uuid4(),
+                workspace_id=workspace_id,
+                created_by=user_id,
+                name=self._unique_app_name(name, workspace_id, AppType.AGENT),
+                description=member.get("description"),
+                icon=None,
+                icon_type=None,
+                type=AppType.AGENT,
+                visibility="private",
+                status="draft",
+                tags=[],
+                is_active=True,
+                created_at=now,
+                updated_at=now,
+            )
+            self.db.add(member_app)
+            self.db.flush()
+            self._write_config(
+                member_app.id,
+                AppType.AGENT,
+                {"app": {"type": AppType.AGENT}, "agent_config": member.get("config") or {}},
+                workspace_id,
+                tenant_id,
+                warnings,
+                now,
+                create=True,
+                redis_client=redis_client,
+            )
+            landed[local_id] = str(member_app.id)
+            if member_app.name != name:
+                # Id missed but a same-named agent exists: the copy got a suffix, and
+                # the user should know these are two separate apps from now on.
+                warnings.append(
+                    f"目标空间已存在同名应用「{name}」，本次已新建独立副本「{member_app.name}」"
+                )
+            report.append(
+                {
+                    "local_id": local_id,
+                    "app_id": str(member_app.id),
+                    "name": member_app.name,
+                    "published": False,
+                    "reused": False,
+                }
+            )
+
+        if dsl.get("app", {}).get("type") == AppType.MULTI_AGENT:
+            # The root is a fresh draft: any stored master-agent release reference
+            # points at the source environment and can never match here. Blank it
+            # silently — the "未匹配" warning would only be noise, since publishing
+            # re-points it at the cluster's own release.
+            dsl.setdefault("multi_agent_config", {})["master_agent_ref"] = None
+
+        unpublished = [item["name"] for item in report if not item["published"]]
+        if unpublished:
+            warnings.append(
+                f"已导入 {len(unpublished)} 个子 Agent（草稿），请先逐个发布它们，本集群才能发布："
+                + "、".join(unpublished)
+            )
+        return landed
+
+    def count_importable_cluster_members(
+        self, dsl: dict, workspace_id: uuid.UUID
+    ) -> int:
+        """How many apps a cluster import will create next to the root.
+
+        Members bound to an existing app (same id still present) are reused and
+        consume no quota slot, so the count is "members minus reusable ones".
+        Used by the route to reserve quota *before* landing anything.
+        """
+        members = dsl.get("cluster")
+        if not isinstance(members, list):
+            return 0
+        created = 0
+        for member in members:
+            local_id = str(member.get("local_id") or "")
+            if not local_id:
+                continue
+            if self._find_reusable_member(local_id, workspace_id) is None:
+                created += 1
+        return created
+
+    def _find_reusable_member(self, local_id: str, workspace_id: uuid.UUID) -> App | None:
+        """The existing sub-agent a ``cluster[].local_id`` points at, if any.
+
+        Only ``App.id`` is consulted (the id embedded in ``app:<uuid>``). Shared
+        apps are out of scope on purpose: a read-only catalog reference has no
+        local app row of its own, so it can never be a reusable member.
+        """
+        raw = local_id.removeprefix("app:")
+        try:
+            app_uuid = uuid.UUID(raw)
+        except (ValueError, AttributeError, TypeError):
+            return None
+        return self.db.query(App).filter(
+            App.id == app_uuid,
+            App.workspace_id == workspace_id,
+            App.type == AppType.AGENT,
+            App.is_active.is_(True),
+        ).first()
+
     def _overwrite_dsl(
         self,
         dsl: dict,
@@ -550,8 +960,32 @@ class AppDslService:
         commit: bool = True,
         dep_map: dict[str, str] | None = None,
         resolve_cross_app_refs: bool = True,
+        app: App | None = None,
     ) -> tuple[App, list[str]]:
-        """Overwrite an existing app's config; raises on type mismatch."""
+        """Overwrite an existing app's config; raises on type mismatch.
+
+        ``app`` lets the caller pass the target it already validated, so members
+        are landed only after the overwrite target is known to be valid.
+        """
+        app = app or self._assert_overwrite_target(app_id, app_type, workspace_id)
+
+        self._write_config(
+            app_id, app_type, dsl, workspace_id, tenant_id, warnings, now,
+            create=False, redis_client=redis_client,
+            dep_map=dep_map, resolve_cross_app_refs=resolve_cross_app_refs,
+        )
+
+        if commit:
+            self.db.commit()
+            self.db.refresh(app)
+        else:
+            self.db.flush()
+        return app, warnings
+
+    def _assert_overwrite_target(
+        self, app_id: uuid.UUID, app_type: str, workspace_id: uuid.UUID
+    ) -> App:
+        """The app an overwrite import would write into; raises if it cannot."""
         app = self.db.query(App).filter(
             App.id == app_id,
             App.workspace_id == workspace_id,
@@ -566,19 +1000,7 @@ class AppDslService:
                 f"YAML 类型 '{app_type}' 与应用类型 '{app.type}' 不一致，无法导入",
                 BizCode.BAD_REQUEST
             )
-
-        self._write_config(
-            app_id, app_type, dsl, workspace_id, tenant_id, warnings, now,
-            create=False, redis_client=redis_client,
-            dep_map=dep_map, resolve_cross_app_refs=resolve_cross_app_refs,
-        )
-
-        if commit:
-            self.db.commit()
-            self.db.refresh(app)
-        else:
-            self.db.flush()
-        return app, warnings
+        return app
 
     def _write_config(
         self,

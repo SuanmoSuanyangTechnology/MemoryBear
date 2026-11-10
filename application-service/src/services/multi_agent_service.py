@@ -324,18 +324,43 @@ class MultiAgentService:
         # agent_id always stores the sub-agent's app ID (stable identity); the
         # release is expressed by release_policy / release_id: current=follow the
         # latest with release_id cleared; pinned=the stored, validated release_id.
+        # Every problem is collected first and raised once: a cluster imported
+        # from a package starts with all members unpublished, and reporting them
+        # one per request would make the user retry N times.
+        sub_agent_errors: list[str] = []
         for sub_agent in (data.sub_agents or []):
-            agent_app_release = resolve_release_for_save(
-                self.db,
-                sub_agent.agent_id,
-                sub_agent.release_policy,
-                sub_agent.release_id,
-                label=sub_agent.name,
-            )
+            agent_app = self.db.get(App, sub_agent.agent_id)
+            if agent_app is None or agent_app.workspace_id != app.workspace_id:
+                # Read-only catalog references keep their app row in the *source*
+                # workspace (link_mode=reference builds no local row), so they can
+                # never be edited here and must not become sub-agents. Checked on
+                # App.workspace_id rather than the installation row: an editable
+                # copy is already an app of this workspace and passes naturally.
+                sub_agent_errors.append(
+                    f"子 Agent「{sub_agent.name}」不是本空间的应用，只读引用的应用不能作为子 Agent"
+                )
+                continue
+            try:
+                agent_app_release = resolve_release_for_save(
+                    self.db,
+                    sub_agent.agent_id,
+                    sub_agent.release_policy,
+                    sub_agent.release_id,
+                    label=sub_agent.name,
+                )
+            except BusinessException as error:
+                sub_agent_errors.append(str(error.message))
+                continue
             if sub_agent.release_policy == "pinned":
                 sub_agent.release_id = agent_app_release.id
             else:
                 sub_agent.release_id = None
+
+        if sub_agent_errors:
+            raise BusinessException(
+                "以下子 Agent 校验未通过：" + "；".join(sub_agent_errors),
+                BizCode.INVALID_PARAMETER,
+            )
 
         # 5. Build the config (convert UUIDs to strings for JSON serialization)
         # sub_agents=None means "keep existing" on the update branch; the create
