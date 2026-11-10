@@ -32,6 +32,7 @@ from ..llm.config import strip_unsupported_llm_params, validate_llm_param_constr
 from ...variable.base_variable import FileObject, VariableType
 from ....db import get_async_db_context, get_db_read
 from ....integrations.knowledge.contracts import KnowledgeRetrievalSource
+from ....integrations.model.errors import ModelInvokeCancelledError
 from ....models import ModelFeature
 from ....models.workspace_model import Workspace
 from ....schemas.app_schema import FileInput, TransferMethod
@@ -857,6 +858,8 @@ class AgentNode(BaseNode):
                 "param_warnings": self._param_warnings or [],
             }
 
+        except ModelInvokeCancelledError:
+            raise
         except Exception as e:
             logger.error(f"节点 {self.node_id} Agent 执行失败: {e}")
             return self._handle_agent_error(e)
@@ -962,6 +965,8 @@ class AgentNode(BaseNode):
                 }
             }
 
+        except ModelInvokeCancelledError:
+            raise
         except Exception as e:
             logger.error(f"节点 {self.node_id} Agent 流式执行失败: {e}")
             error_result = self._handle_agent_error(e)

@@ -34,6 +34,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from ..i18n import get_current_locale
+from ..integrations.model.errors import ModelInvokeCancelledError
 from ..model_clients import RedBearChatModel
 from ..schemas.model_schema import ModelInfo
 from ..trace import get_trace_id
@@ -1136,6 +1137,13 @@ class HandoffsService:
             # Emit the end event
             yield f"event: end\ndata: {json.dumps({'conversation_id': str(conversation_id), 'final_agent': current_agent, 'total_handoffs': handoff_count}, ensure_ascii=False)}\n\n"
             
+        except ModelInvokeCancelledError:
+            # 499 client-disconnect semantics: no error frame. Re-raise — this
+            # is an intermediate layer; the orchestrator finalizes the records
+            # and the outermost SSE source ends the stream silently instead of
+            # treating partial content as a completed turn.
+            logger.info("Handoffs stream cancelled")
+            raise
         except Exception as e:
             logger.error(f"Handoffs stream error: {str(e)}")
             yield error_frame(error_payload(

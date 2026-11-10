@@ -16,6 +16,7 @@ from langchain_core.messages import AIMessage
 
 from ....errors import BizCode
 from ....errors import BusinessException
+from ....integrations.model.errors import ModelInvokeCancelledError
 from ....model_clients import RedBearChatModel
 from ...engine.state_manager import WorkflowState
 from ...engine.variable_pool import VariablePool
@@ -949,6 +950,8 @@ class LLMNode(BaseNode):
                 
                 return result
                 
+            except ModelInvokeCancelledError:
+                raise
             except Exception as e:
                 last_error = e
                 logger.error(f"节点 {self.node_id} LLM 调用失败（尝试 {attempt + 1}/{max_attempts}）: {e}")
@@ -1274,6 +1277,8 @@ class LLMNode(BaseNode):
                 yield {"__final__": True, "result": result}
                 return
 
+            except ModelInvokeCancelledError:
+                raise
             except Exception as e:
                 last_error = e
                 logger.error(f"节点 {self.node_id} LLM 流式调用失败（尝试 {attempt + 1}/{max_attempts}）: {e}")

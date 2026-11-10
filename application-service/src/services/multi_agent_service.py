@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from ..errors import BizCode, BusinessException, ResourceNotFoundException
+from ..integrations.model.errors import ModelInvokeCancelledError
 from ..models import App, AppRelease
 from ..models.annotation_model import HitLogSource
 from ..models.multi_agent_model import MultiAgentConfig
@@ -1504,6 +1505,14 @@ class MultiAgentService:
             except Exception as rollback_err:
                 logger.warning("断开后回滚原版本失败", extra={"error": str(rollback_err)})
             raise
+        except ModelInvokeCancelledError:
+            # 499 client-disconnect semantics: restore the original version and
+            # end the stream silently — no error frame, no new version persisted.
+            try:
+                self._mark_message_current(original_msg.id, True)
+            except Exception as rollback_err:
+                logger.warning("取消后回滚原版本失败", extra={"error": str(rollback_err)})
+            return
         except Exception as e:
             stream_failed = True
             failure_error = str(e)
