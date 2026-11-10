@@ -140,19 +140,31 @@ MemoryBear 是红熊 AI 自主研发的新一代 AI 记忆系统，核心突破�
 
 ## 实验室指标
 
-评估指标包括 F1 分数（F1）、BLEU-1（B1）以及 LLM-as-a-Judge 分数（J），数值越高表示性能越好。
+我们在两项广泛使用的长期记忆基准上评估 MemoryBear：**LongMemEval**（ICLR 2025）和 **LoCoMo**（ACL 2024）。评估指标包括 **LLM-as-a-Judge 准确率（J）**和 **Token 级 F1 分数（F1）**，数值越高表示性能越好。
 
-MemoryBear 在四大任务类型的核心指标中，均优于行业内竞争对手 Mem0、Zep、LangMem 等现有方法：
+MemoryBear 在两项基准中均取得领先的综合表现：LongMemEval 的 LLM Judge 准确率达到 **95.00%**，LoCoMo 的 LLM Judge 准确率达到 **91.54%**、Token-F1 达到 **67.49**。MemoryBear 尤其在单跳检索、多跳推理、时序推理、知识更新和对抗性问题等任务上展现出突出的长期记忆能力。
 
-<img width="2256" height="890" alt="Benchmark Results" src="https://github.com/user-attachments/assets/163ea5b5-b51d-4941-9f6c-7ee80977cdbc" />
+<img width="2256" height="1500" alt="MemoryBear 长期记忆基准测试结果：LoCoMo Overall Judge 91.54%，Overall F1 67.49" src="./assets/benchmark-assets/memorybear-benchmark-cn.png" />
 
-**向量版本（非图谱）**：在保持高准确性的同时极大优化了检索效率，总体准确性明显高于现有最高全文检索方法（72.90 ± 0.19%），且在 Search Latency 和 Total Latency 的 p50/p95 上保持较低水平。
+> **LoCoMo 综合指标**：Overall Judge 为 **91.54%**，Overall F1 为 **67.49**。
+>
+> **评测口径**：MemoryBear 覆盖了 **446 道对抗性问题**并取得 **94.39%** 准确率；其他基线系统仅覆盖 1,540 道非对抗性问题，因此其综合成绩按四类非对抗性问题计算。
 
-<img width="2248" height="498" alt="Vector Version Metrics" src="https://github.com/user-attachments/assets/5e5dae2c-1dde-4f69-88ca-95a9b665b5b2" />
+### 评测配置与复现
 
-**图谱版本**：通过集成知识图谱架构，将总体准确性推至新高度（**75.00 ± 0.20%**），在保持准确性的同时整体指标显著优于所有其他方法。
+| 评测项目 | LongMemEval | LoCoMo |
+|---|---|---|
+| 数据集规模 | 500 道问题 | 1,986 道问题、10 段长对话 |
+| Reader 模型 | `qwen3.7-plus` | `qwen3.7-plus` |
+| Judge 模型 | `qwen3.7-plus` | `qwen3.7-plus` |
+| Temperature | 0 | 0 |
+| 主要指标 | LLM Judge 准确率 | LLM Judge 准确率 |
+| 补充指标 | — | Token 级 F1 |
+| 记忆检索 | Memory Search API | 双说话人记忆检索与重排序 |
 
-<img width="2238" height="342" alt="Graph Version Metrics" src="https://github.com/user-attachments/assets/b1eb1c05-da9b-4074-9249-7a9bbb40e9d2" />
+LoCoMo 评测会分别查询对话双方的记忆库，从每个记忆库检索 Top 50 候选，使用 `gte-rerank-v2` 重排至 Top 10 后合并。逐题召回内容、模型回答、LLM Judge 判定和汇总指标已公开在 [MemoryBear Evaluation Results](https://huggingface.co/datasets/redbearai/MemoryBear_eval_result)，评测代码与复现流程见 [MemoryBear Memory Benchmarks](https://github.com/SuanmoSuanyangTechnology/MemoryBearBenchmark)。
+
+> **数据说明**：原始 LoCoMo 数据集中存在部分错误标注的标准答案，以上结果基于修正后的标准答案计算。LLM Judge 并非完全确定，即使 Temperature 为 0，少数边界问题的判定仍可能在不同复现运行中出现小幅变化。
 
 ---
 
