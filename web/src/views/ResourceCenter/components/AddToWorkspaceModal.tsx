@@ -64,6 +64,7 @@ const AddToWorkspaceModal = forwardRef<AddToWorkspaceModalRef>(function AddToWor
                 onClick={() => {
                   switchWorkspace(space)
                     .then(() => {
+                      localStorage.removeItem('user')
                       localStorage.setItem('pendingAppTab', targetTab);
                       window.location.href = '/#/application';
                     })
