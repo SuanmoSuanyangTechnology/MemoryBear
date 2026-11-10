@@ -10,6 +10,7 @@ import ToolRow from './ToolRow'
 import { getToolMethodsBatch } from '@/api/tools'
 import Tag from '@/components/Tag'
 import { groupToolEntries } from './selection'
+import { useToolStatus } from '@/views/ToolManagement/hooks/useToolStatus'
 
 interface ToolListProps {
   value?: ToolEntry[];
@@ -26,6 +27,7 @@ const ToolList: FC<ToolListProps> = ({ value, onChange }) => {
   const { t } = useTranslation()
   const toolModalRef = useRef<ToolModalRef>(null)
   const [displayTools, setDisplayTools] = useState<DisplayTool[]>([])
+  const renderStatus = useToolStatus()
 
   useEffect(() => {
     if (!value || value.length === 0) {
@@ -59,6 +61,7 @@ const ToolList: FC<ToolListProps> = ({ value, onChange }) => {
           tool_type: batchItem.tool_type as ToolItem['tool_type'],
           method_count: batchItem.methods.length,
           is_active: batchItem.is_active,
+          status: (batchItem as any).status,
         }
 
         displayList.push({
@@ -117,9 +120,12 @@ const ToolList: FC<ToolListProps> = ({ value, onChange }) => {
                     methods={displayTool.methods}
                     trailing={
                       <>
-                        {displayTool.tool.is_active === false && (
-                          <Tag color="error" className="rb:shrink-0">{t('common.deleted')}</Tag>
-                        )}
+                        {displayTool.tool.is_active === false
+                          ? <Tag color="error" className="rb:shrink-0">{t('common.deleted')}</Tag>
+                          : displayTool.tool.status
+                          ? renderStatus(displayTool.tool.status)
+                          : null
+                        }
                         <div
                           className="rb:size-4.5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/common/delete.svg')] rb:hover:bg-[url('@/assets/images/common/delete_red.svg')]"
                           onClick={() => handleDeleteTool(displayTool.tool.id)}
@@ -136,9 +142,12 @@ const ToolList: FC<ToolListProps> = ({ value, onChange }) => {
                           <span className="rb:min-w-0 rb:flex-1 rb:truncate rb:text-sm" title={method.name}>
                             {method.name}
                           </span>
-                          {displayTool.tool.is_active === false && (
-                            <Tag color="error" className="rb:shrink-0">{t('common.deleted')}</Tag>
-                          )}
+                          {displayTool.tool.is_active === false
+                            ? <Tag color="error" className="rb:shrink-0">{t('common.deleted')}</Tag>
+                            : displayTool.tool.status
+                            ? renderStatus(displayTool.tool.status)
+                            : null
+                          }
                           <div
                             className="rb:size-4.5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/common/delete.svg')] rb:hover:bg-[url('@/assets/images/common/delete_red.svg')]"
                             onClick={() => handleDeleteTool(displayTool.tool.id, operationKey)}
