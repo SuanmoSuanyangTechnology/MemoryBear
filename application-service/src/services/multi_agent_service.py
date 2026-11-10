@@ -494,7 +494,7 @@ class MultiAgentService:
         # used the sync get_config here, which cannot run against AsyncSession).
         config = await self.get_config_async(app_id)
         if not config:
-            raise ResourceNotFoundException("多 Agent 配置", str(app_id))
+            raise BusinessException("多 Agent 配置不存在", BizCode.CONFIG_MISSING)
 
         if not config.is_active:
             # Host parity: the streaming path rejects a disabled config with
@@ -678,7 +678,7 @@ class MultiAgentService:
         # 1. Load the config
         config = await self.get_config_async(app_id)
         if not config:
-            raise ResourceNotFoundException("多 Agent 配置", str(app_id))
+            raise BusinessException("多 Agent 配置不存在", BizCode.CONFIG_MISSING)
 
         if not config.is_active:
             raise BusinessException("多 Agent 配置已禁用", BizCode.NOT_FOUND)
@@ -1071,7 +1071,7 @@ class MultiAgentService:
             return config
         resolved = await self.get_config_async(app_id)
         if not resolved:
-            raise ResourceNotFoundException("多 Agent 配置", str(app_id))
+            raise BusinessException("多 Agent 配置不存在", BizCode.CONFIG_MISSING)
         if not resolved.is_active:
             # Carve fix: the host raises with a BizCode member that does not exist
             # (AttributeError at runtime); use NOT_FOUND, same as the run entries.

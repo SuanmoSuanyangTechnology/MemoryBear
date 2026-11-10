@@ -19,6 +19,7 @@ from dataclasses import dataclass
 from typing import Annotated
 from uuid import UUID
 
+from error_core.codes import coerce_code
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
@@ -167,10 +168,12 @@ async def _load_draft_run_app_snapshot(
     """
     async with get_async_db_context() as db:
         app = await db.scalar(
-            select(App).where(App.id == app_id).limit(1)
+            select(App).where(App.id == app_id, App.is_active.is_(True)).limit(1)
         )
         if not app:
-            raise BusinessException("应用不存在", BizCode.NOT_FOUND)
+            raise ResourceNotFoundException(
+                "应用", str(app_id), code=BizCode.APP_NOT_FOUND
+            )
 
         resolved_release_id = app.current_release_id
         if workspace_id is not None and app.workspace_id != workspace_id:
@@ -551,6 +554,7 @@ async def draft_run(
                 workspace_id,
                 source=source,
                 trigger_payload=payload.trigger_payload,
+                include_failure_diagnostic=True,
             )
 
             logger.debug(
@@ -560,6 +564,15 @@ async def draft_run(
                     "has_response": "response" in result if isinstance(result, dict) else False
                 }
             )
+            if result.get("status") == "failed":
+                # A failed execution is a failure, not a successful call carrying
+                # a failed payload (§4.1): surface it as the error envelope so the
+                # HTTP status, localized msg and diagnostic follow the contract.
+                numeric = coerce_code(result.get("code")) or BizCode.INTERNAL_ERROR.value
+                raise BusinessException(
+                    result.get("error") or result.get("msg") or "工作流执行失败",
+                    numeric,
+                )
             return success(
                 data=result,
                 msg="工作流任务执行成功"

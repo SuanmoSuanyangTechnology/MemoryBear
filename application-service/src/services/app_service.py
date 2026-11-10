@@ -2338,14 +2338,16 @@ class AppService:
 
         app = self._get_app_or_404(app_id)
 
+        # Read-only operation; shared apps are allowed. Access check precedes the
+        # type branch: an invisible app must not reveal its type through a
+        # different error.
+        self._validate_app_accessible(app, workspace_id)
+
         if app.type not in (AppType.WORKFLOW, AppType.PURE_WORKFLOW):
             raise BusinessException(
                 "只有 Workflow 或 Pure_Workflow 类型应用支持 Workflow 配置",
                 BizCode.APP_TYPE_NOT_SUPPORTED,
             )
-
-        # Read-only operation; shared apps are allowed
-        self._validate_app_accessible(app, workspace_id)
 
         # Shared app: return the pinned release snapshot instead of the draft.
         # Same rule as the Agent config read: follow this workspace's
@@ -2395,13 +2397,15 @@ class AppService:
 
         app = self._get_app_or_404(app_id)
 
+        # Access check precedes the type branch: an invisible app must not reveal
+        # its type through a different error.
+        self._validate_app_writable(app, workspace_id)
+
         if app.type not in (AppType.WORKFLOW, AppType.PURE_WORKFLOW):
             raise BusinessException(
                 "只有 Workflow 或 Pure_Workflow 类型应用支持 Workflow 配置",
                 BizCode.APP_TYPE_NOT_SUPPORTED,
             )
-
-        self._validate_app_writable(app, workspace_id)
 
         # Load the existing config
         repo = WorkflowConfigRepository(self.db)

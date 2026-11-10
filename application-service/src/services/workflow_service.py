@@ -6719,6 +6719,7 @@ class WorkflowService:
             prepared_memory_storage_type: str | None = None,
             prepared_user_rag_memory_id: str | None = None,
             skip_save: bool = False,
+            include_failure_diagnostic: bool = False,
     ):
         """Run the workflow
 
@@ -6734,6 +6735,10 @@ class WorkflowService:
             regenerate_history: history context injected on regenerate
                 {"conv": {...}, "conv_messages": [...]}, overriding the default
                 history read from the latest execution.
+            include_failure_diagnostic: add the engine diagnostic (``error``) to
+                a failed ``response_data``. Off by default: the share/v1
+                surfaces expose ``response_data`` to API callers and must not
+                receive internal diagnostics.
 
         Returns:
             Execution result (non-streaming)
@@ -7192,6 +7197,8 @@ class WorkflowService:
                 response_data["code"] = result.get("code")
                 response_data["msg"] = result.get("msg")
                 response_data["retryable"] = bool(result.get("retryable"))
+                if include_failure_diagnostic:
+                    response_data["error"] = result.get("error")
 
             if result.get("status") == "waiting_human":
                 # Non-streaming execution does not support human intervention nodes.
