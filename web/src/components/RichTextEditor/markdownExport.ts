@@ -1,7 +1,7 @@
 import { $getRoot, $isElementNode, $isTextNode, type LexicalNode, type RangeSelection } from 'lexical';
 import { $isListNode } from '@lexical/list';
 
-/** 保存与选区复制共用同一套格式规则。调用时须处于编辑器读取上下文。 */
+/** Shared formatting rules for save and selection copy. Must be called within editor read context. */
 export function generateMarkdown(selection?: RangeSelection): string {
   const selected = selection ? new Set(selection.getNodes().map(node => node.getKey())) : null;
   const start = selection?.isBackward() ? selection.focus : selection?.anchor;
@@ -14,9 +14,7 @@ export function generateMarkdown(selection?: RangeSelection): string {
       const to = end?.key === node.getKey() ? end.offset : text.length;
       text = text.slice(from, to);
       if (!text) return '';
-      if (node.hasFormat('bold')) text = `**${text}**`;
-      if (node.hasFormat('italic')) text = `*${text}*`;
-      if (node.hasFormat('underline')) text = `<u>${text}</u>`;
+      // Output text content directly without adding format markers (text already contains Markdown markers)
       return text;
     }
     if ($isElementNode(node)) {

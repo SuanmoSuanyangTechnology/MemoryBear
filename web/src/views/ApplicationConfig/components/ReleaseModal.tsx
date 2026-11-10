@@ -253,8 +253,6 @@ const ReleaseModal = forwardRef<ReleaseModalRef, ReleaseModalProps>(({
                 { required: true, message: t('application.setupStepsRequired') },
               ]}
               extra={t('application.setupStepsHint')}
-              // valuePropName="value"
-              // trigger="onChange"
             >
               <RichTextEditor
                 placeholder={t('application.setupStepsPlaceholder')}

@@ -128,6 +128,7 @@ export const account = {
       change: '更改',
       update: '更新',
       delete: '删除',
+      remove: '移除',
       confirm: '确认',
       cancel: '取消',
       save: '保存',
