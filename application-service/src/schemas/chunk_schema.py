@@ -19,6 +19,19 @@ class RetrieveType(StrEnum):
     SEMANTIC = "semantic"
     Graph = "graph"
     HYBRID = "hybrid"
+    WIKI_FAQ = "wiki-faq"
+
+    @classmethod
+    def _missing_(cls, value: object) -> "RetrieveType | None":
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            return next((kind for kind in cls if kind.value == normalized), None)
+        return None
+
+    @property
+    def public_value(self) -> str:
+        """类型发现接口保留历史标识，输入和内部处理统一使用小写。"""
+        return "wiki-FAQ" if self is RetrieveType.WIKI_FAQ else self.value
 
 
 class KnowledgeBaseConfig(BaseModel):
@@ -60,6 +73,7 @@ class RetrievalPolicy(BaseModel):
     semantic: tuple[Literal["text", "image"], ...] = ("text",)
     hybrid: tuple[Literal["text", "image"], ...] = ("text",)
     graph: tuple[Literal["text", "image"], ...] = ("text",)
+    wiki_faq: tuple[Literal["text"], ...] = Field(default=("text",), alias="wiki-FAQ")
 
 
 class RetrievalPolicyResponse(ApiResponse):
