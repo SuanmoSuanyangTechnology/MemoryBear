@@ -296,45 +296,28 @@ class AppShareService:
             self,
             *,
             app_id: uuid.UUID,
-            workspace_id: uuid.UUID
-    ) -> None:
-        """Remove a shared app from the recipient's own workspace.
+            workspace_id: uuid.UUID,
+            commit: bool = True,
+    ) -> bool:
+        """Soft-delete this workspace's active legacy share, if present.
 
-        Only the share record is deleted; the source app is unaffected.
-
-        Args:
-            app_id: App ID
-            workspace_id: Current workspace ID (the target workspace of the share)
-
-        Raises:
-            ResourceNotFoundException: When the share record does not exist
+        ``False`` is a normal result: callers can combine this compatibility
+        record with a resource-center reference in one transaction instead of
+        using an exception as control flow.
         """
-        logger.info(
-            "移除共享应用",
-            extra={"app_id": str(app_id), "workspace_id": str(workspace_id)}
-        )
-
         stmt = select(AppShare).where(
             AppShare.source_app_id == app_id,
             AppShare.target_workspace_id == workspace_id,
-            AppShare.is_active.is_(True)
+            AppShare.is_active.is_(True),
         )
         share = self.db.scalars(stmt).first()
+        if share is None:
+            return False
 
-        if not share:
-            raise ResourceNotFoundException(
-                "共享记录",
-                f"app_id={app_id}, workspace_id={workspace_id}"
-            )
-
-        # Soft delete
         share.is_active = False
-        self.db.commit()
-
-        logger.info(
-            "共享应用已移除",
-            extra={"app_id": str(app_id), "workspace_id": str(workspace_id)}
-        )
+        if commit:
+            self.db.commit()
+        return True
 
     def remove_all_shared_apps_from_workspace(
             self,

@@ -16,7 +16,7 @@ export const buildSharedChatProps = (ctx: ConversationCtx) => {
     conversation_id, chatList, fileList, setFileList, toolbarRef, config, isShare,
     streamLoadingRef, chatIsEnded, loading, showMemoryRecall, setMessage, handleSend, regenerateMessages,
     deleteMessage, reportMsg, handleVersionChange, handleFeedback, handleFavorite,
-    handleInterventionActionClick,
+    handleInterventionActionClick, loadEarlierMessages, chatHasNext, loadingEarlier,
   } = ctx
 
   const isSupportTools = !!config.app_type
@@ -50,6 +50,8 @@ export const buildSharedChatProps = (ctx: ConversationCtx) => {
     regenerateMaxCount: 5,
     handleVersionChange: isSupportTools ? handleVersionChange : undefined,
     handleInterventionActionClick,
+    loadEarlierMessages: chatHasNext ? loadEarlierMessages : undefined,
+    loadingEarlier,
   } satisfies Partial<ChatProps>
 }
 

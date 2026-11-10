@@ -26,6 +26,7 @@ from memorybear_grpc.errors import http_status_for_grpc, parse_error_trailers
 from memorybear_grpc.metadata import deadline_for, upstream_remaining
 
 from redbear_model.errors import (
+    RemoteInvokeCancelledError,
     RemoteInvokeError,
     RemoteInvokeFailedError,
     RemoteInvokeIdleTimeoutError,
@@ -79,6 +80,11 @@ def _loads_json(raw: bytes, kind: str) -> Any:
 
 
 def _rpc_error(exc: grpc.RpcError) -> RemoteInvokeError:
+    if exc.code() == grpc.StatusCode.CANCELLED:
+        # Cancellation is never a business failure: the server aborts silently
+        # when the caller disconnects, and a cancelled call must stay silent
+        # even if a peer attached trailers.
+        return RemoteInvokeCancelledError("remote invoke rpc cancelled")
     parsed = parse_error_trailers(exc.trailing_metadata() or ())
     if parsed is not None:
         status, raw = parsed

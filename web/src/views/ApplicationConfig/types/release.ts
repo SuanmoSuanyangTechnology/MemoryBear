@@ -57,6 +57,10 @@ export interface Release {
    * 使用示例，随版本冻结。**纯字符串数组，按录入顺序返回**，不暴露 order/content 落库结构。
    */
   usage_examples: string[];
+  /**
+   * 设置步骤，随版本冻结。仅 workflow/pure_workflow 类型使用。
+   */
+  setup_steps?: string;
 }
 
 export interface ReleaseModalData {
@@ -66,6 +70,7 @@ export interface ReleaseModalData {
   name?: string;
   categories?: string[];
   usage_examples?: string[];
+  setup_steps?: string;
 }
 
 /**
@@ -73,7 +78,7 @@ export interface ReleaseModalData {
  */
 export interface ReleaseModalRef {
   /** Open release modal */
-  handleOpen: () => void;
+  handleOpen: (release?: Release | null) => void;
 }
 
 /**

@@ -679,6 +679,7 @@ class AppChatService:
             storage_type: Optional[str] = None,
             user_rag_memory_id: Optional[str] = None,
             workspace_id: Optional[str] = None,
+            use_source_knowledge_workspace: bool = False,
             source: str = "",
             history: Optional[List[Dict[str, Any]]] = None,
             skip_save: bool = False,
@@ -787,6 +788,7 @@ class AppChatService:
         # 并行加载工具/技能/知识库/记忆配置（各自独立 DB 会话，无相互依赖）
         tools = []
         _ws_id = uuid.UUID(workspace_id) if isinstance(workspace_id, str) else workspace_id
+        knowledge_workspace_id = None if use_source_knowledge_workspace else _ws_id
         coros = [
             self.agent_service.load_tools_config(config.tools, web_search, tenant_id, user_id, workspace_id),
             self.agent_service.load_skill_config(config.skills, message, tenant_id, user_id, workspace_id),
@@ -794,7 +796,7 @@ class AppChatService:
                 config.knowledge_retrieval,
                 user_id,
                 app_id=config.app_id,
-                workspace_id=_ws_id,
+                workspace_id=knowledge_workspace_id,
                 source=KnowledgeRetrievalSource.AGENT,
             ),
         ]
@@ -1174,6 +1176,7 @@ class AppChatService:
             storage_type: Optional[str] = None,
             user_rag_memory_id: Optional[str] = None,
             workspace_id: Optional[str] = None,
+            use_source_knowledge_workspace: bool = False,
             source: str = "",
             history: Optional[List[Dict[str, Any]]] = None,
             skip_save: bool = False,
@@ -1275,6 +1278,7 @@ class AppChatService:
             # 并行加载工具/技能/知识库/记忆配置（各自独立 DB 会话，无相互依赖）
             tools = []
             _ws_id = uuid.UUID(workspace_id) if isinstance(workspace_id, str) else workspace_id
+            knowledge_workspace_id = None if use_source_knowledge_workspace else _ws_id
             coros = [
                 self.agent_service.load_tools_config(config.tools, web_search, tenant_id, user_id, workspace_id),
                 self.agent_service.load_skill_config(config.skills, message, tenant_id, user_id, workspace_id),
@@ -1282,7 +1286,7 @@ class AppChatService:
                     config.knowledge_retrieval,
                     user_id,
                     app_id=config.app_id,
-                    workspace_id=_ws_id,
+                    workspace_id=knowledge_workspace_id,
                     source=KnowledgeRetrievalSource.AGENT,
                 ),
             ]

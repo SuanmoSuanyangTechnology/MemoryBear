@@ -128,6 +128,7 @@ export const account = {
       change: 'Change',
       update: 'Update',
       delete: 'Delete',
+      remove: 'Remove',
       confirm: 'Confirm',
       cancel: 'Cancel',
       save: 'Save',
@@ -210,7 +211,6 @@ export const account = {
       return: 'Return',
       statusEnabled: 'Available',
       statusDisabled: 'Unavailable',
-      remove: 'Remove',
 
       fileSizeTip: 'File size cannot exceed {{size}}MB',
       fileAcceptTip: 'Unsupported file type:',

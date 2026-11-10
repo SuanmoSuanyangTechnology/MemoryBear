@@ -58,6 +58,14 @@ export const applicationPart2 = {
       usageExamplesMin: '请填写 3～5 条用户可以直接发起的示例任务，每条均为必填。',
       usageExamplePrefix: '示例',
       usageExamplePlaceholder: '描述用户希望完成的任务',
+      usageExampleMaxLength: '最多{{max}}个字符',
+      setupSteps: '设置步骤',
+      setupStepsRequired: '请填写设置步骤',
+      setupStepsPlaceholder: '说明使用前需要完成的配置步骤',
+      setupStepsHint: '请说明使用前需要完成的设置，最多 2000 字。',
+      setupStepsMaxLength: '最多{{max}}个字符',
+      setupStepsInvalid: '设置步骤需包含有效文本内容',
+      noSetupSteps: '暂无设置步骤',
 }
 
 export type ApplicationPart2 = typeof applicationPart2

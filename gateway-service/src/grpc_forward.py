@@ -231,6 +231,11 @@ class GrpcForwarder:
             # the request failed (same rule as the HTTP forwarder's 4xx path).
             self._answered(route, status)
             return Response(content=raw, status_code=status, media_type="application/json")
+        if exc.code() == grpc.StatusCode.CANCELLED:
+            # 499 client-disconnect semantics: the upstream answered with no
+            # envelope; relay an empty status instead of a synthetic 500.
+            self._answered(route, 499)
+            return Response(status_code=499)
         if exc.code() == grpc.StatusCode.DEADLINE_EXCEEDED:
             return self._transport_failure(route, "timeout", 504, "upstream timeout")
         if exc.code() == grpc.StatusCode.UNAVAILABLE:

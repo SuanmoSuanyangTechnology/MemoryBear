@@ -7,6 +7,7 @@ masking helpers, and trace implementation.
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from error_core.fastapi_handlers import (
@@ -25,14 +26,17 @@ from error_core.fastapi_handlers import (
     validation_error_content as _validation_error_content,
 )
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from pydantic import ValidationError as PydanticValidationError
 
 from ..errors import BusinessException, I18nException
 from ..i18n import get_default_locale, translate
+from ..integrations.model.errors import ModelInvokeCancelledError
 from ..request_logging import log_request_failure
 from ..sensitive import SensitiveDataFilter
 from ..trace import TRACE_ID_HEADER, get_trace_id
+
+logger = logging.getLogger(__name__)
 
 _deps = ErrorHandlerDeps(
     business_exception=BusinessException,
@@ -103,6 +107,18 @@ def render_error(
 
 def register_error_handlers(application: FastAPI) -> None:
     _register_error_handlers(application, _deps)
+
+    @application.exception_handler(ModelInvokeCancelledError)
+    async def invoke_cancelled_handler(
+        request: Request, exc: ModelInvokeCancelledError
+    ) -> Response:
+        # 499 client-disconnect semantics (design §7.3 / E-02): log only, an
+        # empty status, no error envelope.
+        trace_id = getattr(request.state, "trace_id", None) or get_trace_id()
+        logger.info("model_invoke_cancelled trace_id=%s", trace_id)
+        response = Response(status_code=499)
+        response.headers[TRACE_ID_HEADER] = trace_id
+        return response
 
 
 __all__ = [

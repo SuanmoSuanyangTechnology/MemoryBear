@@ -49,7 +49,12 @@ def error_payload(
             http_status_for(numeric), locale
         )
         detail = format_diagnostics(trace_id=trace_id, detail=exc.message)
-        retryable = http_status_for(numeric) >= 500
+        # Rate limiting is transient by contract (§4.5): a 429 is retryable even
+        # though it is a 4xx. Everything else follows the 5xx rule.
+        retryable = (
+            http_status_for(numeric) >= 500
+            or numeric == BizCode.RATE_LIMITED.value
+        )
         attempts = 0
         channel_id = None
     else:

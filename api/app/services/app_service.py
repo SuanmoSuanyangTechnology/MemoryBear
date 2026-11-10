@@ -35,6 +35,7 @@ from app.models import (
     AppRelease,
     AppShare,
     AssetStatus,
+    InstallSource,
     InstallStatus,
     LinkMode,
     MultiAgentConfig,
@@ -51,6 +52,7 @@ from app.services.agent_config_converter import AgentConfigConverter
 from app.services.asset_release_resolver import (
     AssetReleaseResolver,
     AsyncAssetReleaseResolver,
+    app_cache_key,
 )
 from app.services.category_service import CategoryService
 from app.services.model_impact_service import config_ref_ids
@@ -1084,6 +1086,18 @@ class AppService:
             updated_at=utcnow_naive()
         )
         self.db.execute(stmt)
+
+        # 副本安装通过 local_app_id 指向本应用；不在这里一起失效，资源中心仍会
+        # reused=true 返回已删除的应用（读取 4007），再次添加也只拿到旧 ID。
+        self.db.execute(
+            sa_update(AppAssetInstallation).where(
+                AppAssetInstallation.local_app_id == app_id,
+                AppAssetInstallation.status == InstallStatus.ACTIVE,
+            ).values(
+                status=InstallStatus.REMOVED,
+                updated_at=utcnow_naive(),
+            )
+        )
         self._unbind_ontology_in_session(app_id)
 
         self.db.commit()
@@ -2398,6 +2412,7 @@ class AppService:
             name: Optional[str] = None,
             icon: Optional[str] = None,
             usage_examples: Optional[List[str]] = None,
+            setup_steps: Optional[str] = None,
             categories: Optional[List[str]] = None,
     ) -> AppRelease:
         """发布应用（创建不可变快照）
@@ -2422,6 +2437,50 @@ class AppService:
         app = self._get_app_or_404(app_id)
         # 检查应用归属
         self._validate_workspace_access(app, workspace_id)
+
+        # 图标与前端保持一致，都是必填：服务层再挡一次，避免内部调用绕过 schema。
+        icon = (icon or "").strip()
+        if not icon:
+            raise BusinessException("发布必须选择自定义图标", BizCode.INVALID_PARAMETER)
+
+        # 按应用类型校验并归一化发布元数据，避免开放 API 绕过前端规则。
+        workflow_types = (AppType.WORKFLOW, AppType.PURE_WORKFLOW)
+        if app.type in workflow_types:
+            setup_steps = (setup_steps or "").strip()
+            if not setup_steps:
+                raise BusinessException("工作流发布必须填写设置步骤", BizCode.INVALID_PARAMETER)
+            if len(setup_steps) > app_schema.SETUP_STEPS_MAX_CHARS:
+                raise BusinessException(
+                    f"设置步骤最多 {app_schema.SETUP_STEPS_MAX_CHARS} 字",
+                    BizCode.INVALID_PARAMETER,
+                )
+            usage_examples = []
+        else:
+            usage_examples = [
+                item.strip()
+                for item in (usage_examples or [])
+                if isinstance(item, str) and item.strip()
+            ]
+            if not (
+                app_schema.USAGE_EXAMPLES_MIN_ITEMS
+                <= len(usage_examples)
+                <= app_schema.USAGE_EXAMPLES_MAX_ITEMS
+            ):
+                raise BusinessException(
+                    "Agent 或集群发布必须填写 "
+                    f"{app_schema.USAGE_EXAMPLES_MIN_ITEMS}～"
+                    f"{app_schema.USAGE_EXAMPLES_MAX_ITEMS} 条使用示例",
+                    BizCode.INVALID_PARAMETER,
+                )
+            if any(
+                len(item) > app_schema.USAGE_EXAMPLE_MAX_CHARS
+                for item in usage_examples
+            ):
+                raise BusinessException(
+                    f"每条使用示例最多 {app_schema.USAGE_EXAMPLE_MAX_CHARS} 字",
+                    BizCode.INVALID_PARAMETER,
+                )
+            setup_steps = None
 
         # 构建快照配置
         config: Dict[str, Any] = {}
@@ -2558,6 +2617,7 @@ class AppService:
                 {"order": index, "content": text}
                 for index, text in enumerate(usage_examples or [], start=1)
             ],
+            setup_steps=setup_steps,
             categories=list(categories or []),
             default_model_config_id=default_model_config_id,
             published_by=publisher_id,
@@ -2977,46 +3037,57 @@ class AppService:
             self,
             *,
             app_id: uuid.UUID,
-            workspace_id: uuid.UUID
+            workspace_id: uuid.UUID,
+            tenant_id: uuid.UUID,
     ) -> None:
-        """被共享者从自己的工作空间移除共享应用
+        """Remove every shared-access source for one app in this workspace.
 
-        只删除共享记录，不影响源应用。
-
-        Args:
-            app_id: 应用ID
-            workspace_id: 当前工作空间ID（被共享的目标工作空间）
-
-        Raises:
-            ResourceNotFoundException: 当共享记录不存在时
+        Legacy ``AppShare`` and catalog ``reference`` records can coexist while
+        data is migrated. They must be soft-deleted together; local copies are
+        deliberately excluded and remain normal workspace applications.
         """
-        from app.models import AppShare
-
-        logger.info(
-            "移除共享应用",
-            extra={"app_id": str(app_id), "workspace_id": str(workspace_id)}
-        )
-
-        stmt = select(AppShare).where(
-            AppShare.source_app_id == app_id,
-            AppShare.target_workspace_id == workspace_id,
-            AppShare.is_active.is_(True)
-        )
-        share = self.db.scalars(stmt).first()
-
-        if not share:
-            raise ResourceNotFoundException(
-                "共享记录",
-                f"app_id={app_id}, workspace_id={workspace_id}"
+        share = self.db.scalars(
+            select(AppShare).where(
+                AppShare.source_app_id == app_id,
+                AppShare.target_workspace_id == workspace_id,
+                AppShare.is_active.is_(True),
             )
+        ).first()
+        reference_row = self.db.execute(
+            select(AppAssetInstallation, AppAsset)
+            .join(AppAsset, AppAssetInstallation.asset_id == AppAsset.id)
+            .where(
+                AppAsset.source_app_id == app_id,
+                AppAsset.tenant_id == tenant_id,
+                AppAssetInstallation.tenant_id == tenant_id,
+                AppAssetInstallation.target_workspace_id == workspace_id,
+                AppAssetInstallation.source == InstallSource.CATALOG,
+                AppAssetInstallation.link_mode == LinkMode.REFERENCE,
+                AppAssetInstallation.status == InstallStatus.ACTIVE,
+            )
+        ).one_or_none()
+        if share is None and reference_row is None:
+            raise ResourceNotFoundException("共享应用", str(app_id))
 
-        # Soft delete
-        share.is_active = False
+        if share is not None:
+            share.is_active = False
+        if reference_row is not None:
+            installation, asset = reference_row
+            installation.status = InstallStatus.REMOVED
+            installation.updated_at = utcnow_naive()
+
         self.db.commit()
+        if reference_row is not None:
+            delete_json(app_cache_key(asset.source_app_id, workspace_id))
 
         logger.info(
             "共享应用已移除",
-            extra={"app_id": str(app_id), "workspace_id": str(workspace_id)}
+            extra={
+                "app_id": str(app_id),
+                "workspace_id": str(workspace_id),
+                "legacy_removed": share is not None,
+                "reference_removed": reference_row is not None,
+            },
         )
 
     def remove_all_shared_apps_from_workspace(
@@ -3190,13 +3261,13 @@ def get_workflow_config(db: Session, *, app_id: uuid.UUID, workspace_id: uuid.UU
 def publish(db: Session, *, app_id: uuid.UUID, publisher_id: uuid.UUID, workspace_id: uuid.UUID | None = None,
             version_name: str, release_notes: Optional[str] = None, name: Optional[str] = None,
             icon: Optional[str] = None, usage_examples: Optional[List[str]] = None,
-            categories: Optional[List[str]] = None) -> AppRelease:
+            setup_steps: Optional[str] = None, categories: Optional[List[str]] = None) -> AppRelease:
     """发布应用（向后兼容接口）"""
     service = AppService(db)
     return service.publish(app_id=app_id, publisher_id=publisher_id, version_name=version_name,
                            workspace_id=workspace_id, release_notes=release_notes,
                            name=name, icon=icon, usage_examples=usage_examples,
-                           categories=categories)
+                           setup_steps=setup_steps, categories=categories)
 
 
 def get_current_release(

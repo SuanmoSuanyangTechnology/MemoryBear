@@ -65,7 +65,9 @@ class AppDslService:
         """Build the app DSL yaml string; returns (yaml_str, filename)."""
         app = self.db.query(App).filter(App.id == app_id, App.is_active.is_(True)).first()
         if not app:
-            raise ResourceNotFoundException("应用", str(app_id))
+            raise ResourceNotFoundException(
+                "应用", str(app_id), code=BizCode.APP_NOT_FOUND
+            )
 
         meta = {
             "version": current_settings().system_version,
@@ -556,7 +558,9 @@ class AppDslService:
             App.is_active.is_(True)
         ).first()
         if not app:
-            raise ResourceNotFoundException("应用", str(app_id))
+            raise ResourceNotFoundException(
+                "应用", str(app_id), code=BizCode.APP_NOT_FOUND
+            )
         if app.type != app_type:
             raise BusinessException(
                 f"YAML 类型 '{app_type}' 与应用类型 '{app.type}' 不一致，无法导入",
@@ -1422,7 +1426,9 @@ class AppDslService:
 
         app = self.db.query(App).filter(App.id == app_id, App.is_active.is_(True)).first()
         if not app:
-            raise ResourceNotFoundException("应用", str(app_id))
+            raise ResourceNotFoundException(
+                "应用", str(app_id), code=BizCode.APP_NOT_FOUND
+            )
 
         target_release_id = release_id or app.current_release_id
         if not target_release_id:

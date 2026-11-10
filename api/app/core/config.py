@@ -353,6 +353,13 @@ class Settings:
     ALIAS_RECOGNITION_CONCURRENCY: int = max(
         1, int(os.getenv("ALIAS_RECOGNITION_CONCURRENCY", "4"))
     )
+    # 反思实体去重专用模型（GPUStack /model/proxy/predict）
+    ENTITY_DEDUP_URL: str = os.getenv("ENTITY_DEDUP_URL", "")
+    ENTITY_DEDUP_API_KEY: str = os.getenv("ENTITY_DEDUP_API_KEY", "")
+    ENTITY_DEDUP_MODEL: str = os.getenv("ENTITY_DEDUP_MODEL", "entity-dedup")
+    ENTITY_DEDUP_TIMEOUT_SECONDS: float = max(
+        0.1, float(os.getenv("ENTITY_DEDUP_TIMEOUT_SECONDS", "10"))
+    )
     # Statement 三分类小模型（statement 拆分阶段 2，/v1/rerank 打分，复用 BERT_URL；Key/Model 留空则全量走备用 LLM 兜底）
     STATEMENT_CLASSIFIER_TIMEOUT_SECONDS: float = max(
         0.1, float(os.getenv("STATEMENT_CLASSIFIER_TIMEOUT_SECONDS", "10.0"))

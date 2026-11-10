@@ -34,7 +34,11 @@ from .errors import (
     CredentialDecryptError,
     NoAvailableChannelError,
 )
-from .providers.error_catalog import classify_provider_failure, to_channel_failure
+from .providers.error_catalog import (
+    classify_provider_failure,
+    is_client_disconnect,
+    to_channel_failure,
+)
 from .resolver import build_resolved_from_channel
 
 R = TypeVar("R")
@@ -280,6 +284,8 @@ def run_candidate_fallback(
                 break
             except Exception as exc:
                 last_error = exc
+                if is_client_disconnect(_http_status(exc), _upstream_code(exc)):
+                    raise  # 调用方已断开：不重试、不换渠道
                 if is_transient_channel_error(exc):
                     if attempt < max_attempts_per_channel - 1:
                         continue
@@ -361,6 +367,8 @@ async def run_candidate_fallback_async(
                 break
             except Exception as exc:
                 last_error = exc
+                if is_client_disconnect(_http_status(exc), _upstream_code(exc)):
+                    raise  # 调用方已断开：不重试、不换渠道
                 if is_transient_channel_error(exc):
                     if attempt < max_attempts_per_channel - 1:
                         continue

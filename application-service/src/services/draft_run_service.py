@@ -33,6 +33,7 @@ from ..usage_context import bind_usage
 from ..integrations.knowledge.context_factory import build_app_knowledge_context
 from ..integrations.knowledge.contracts import KnowledgeRetrievalSource
 from ..integrations.knowledge.runtime import get_knowledge_retriever
+from ..integrations.model.errors import ModelInvokeCancelledError
 from ..schemas.chunk_schema import RetrieveType
 from ..schemas.knowledge_retrieval_schema import KnowledgeRetrievalRequest
 from ..db import get_async_db_context
@@ -728,6 +729,14 @@ class AgentRunService:
             record.is_current = False
             await db.commit()
 
+    async def _mark_message_current_async(self, message_id: uuid.UUID) -> None:
+        async with get_async_db_context() as db:
+            record = await db.get(Message, message_id)
+            if not record:
+                return
+            record.is_current = True
+            await db.commit()
+
     async def _save_regenerated_message_async(
             self,
             *,
@@ -1350,7 +1359,7 @@ class AgentRunService:
             user_id,
             *,
             app_id: uuid.UUID,
-            workspace_id: uuid.UUID,
+            workspace_id: uuid.UUID | None,
             source: KnowledgeRetrievalSource,
     ) -> tuple[list, list]:
         """Return (tools, citations_collector)."""
@@ -2131,6 +2140,34 @@ class AgentRunService:
                     )
             raise
 
+        except ModelInvokeCancelledError:
+            # 499 client-disconnect semantics: mark the record terminal and
+            # re-raise so the transport boundary answers with an empty 499;
+            # never wrap it into a business failure.
+            logger.info(
+                "Agent 调用取消（客户端断开或服务端静默中止）",
+                extra={"agent_execution_id": str(agent_execution_id) if agent_execution_id else None},
+            )
+            if agent_execution_id is not None:
+                try:
+                    await self._update_agent_execution_completed_async(
+                        execution_id=agent_execution_id,
+                        steps=[],
+                        status="failed",
+                        elapsed_time=time.time() - start_time,
+                        error_message="执行被取消（客户端断开或服务端静默中止）",
+                        agent_log=_trace if sub_agent else None,
+                    )
+                except Exception as update_err:
+                    logger.error(
+                        "取消收尾：更新执行记录失败",
+                        extra={
+                            "agent_execution_id": str(agent_execution_id),
+                            "error": str(update_err),
+                        },
+                    )
+            raise
+
         except Exception as e:
             logger.error("LangChain Agent 调用失败", extra={"error": str(e), "error_type": type(e).__name__})
             # Mark the Agent execution record failed
@@ -2894,6 +2931,44 @@ class AgentRunService:
                         },
                     )
 
+            raise
+
+        except ModelInvokeCancelledError:
+            # 499 client-disconnect semantics: log only, no error frame. The
+            # execution record still needs a terminal state so the frontend
+            # block does not stay running forever (mirrors the CancelledError
+            # cleanup above; no yield — the stream just closes).
+            logger.info(
+                "流式 Agent 调用取消（客户端断开或服务端静默中止）",
+                extra={
+                    "agent_execution_id": str(_agent_execution_id) if _agent_execution_id else None,
+                    "content_length": len(full_content) if full_content else 0,
+                },
+            )
+            try:
+                await self.db.rollback()
+            except Exception:
+                pass
+            if _agent_execution_id is not None:
+                try:
+                    await self._update_agent_execution_completed_async(
+                        execution_id=_agent_execution_id,
+                        steps=orchestrator_node_executions + node_executions,
+                        status="failed",
+                        elapsed_time=time.time() - start_time,
+                        error_message="执行被取消（客户端断开或服务端静默中止）",
+                        agent_log=_trace if sub_agent else None,
+                    )
+                except Exception as update_err:
+                    logger.error(
+                        "流式执行取消收尾记录失败",
+                        extra={
+                            "execution_id": str(_agent_execution_id),
+                            "error": str(update_err),
+                        },
+                    )
+            # Re-raise so streaming consumers end the SSE silently (no error
+            # frame) instead of persisting partial content as a completed turn.
             raise
 
         except Exception as e:
@@ -4467,6 +4542,15 @@ class AgentRunService:
 
                 return result
 
+            except ModelInvokeCancelledError:
+                # 499 client-disconnect semantics: log only, no model_error /
+                # model_end frame for this model.
+                logger.info(
+                    "对比模式流式调用取消（客户端断开或服务端静默中止）",
+                    extra={"model_label": model_label, "model_index": idx},
+                )
+                return None
+
             except TimeoutError:
                 logger.warning(f"模型运行超时: {model_label}")
                 compact_error = {
@@ -5036,50 +5120,64 @@ class AgentRunService:
         })
 
         # Stream via run_stream
-        async for event_str in self.run_stream(
-                agent_config=agent_config,
-                model_config=model_config,
-                message=user_message_content,
-                workspace_id=workspace_id,
-                conversation_id=conversation_id,
-                user_id=user_id,
-                storage_type=storage_type,
-                user_rag_memory_id=user_rag_memory_id,
-                skip_save=True,
-                history=filtered_history,
-                files=files,
-                model_parameters_override=model_parameters_override,
-        ):
-            # Parse the event
-            lines = event_str.strip().split('\n')
-            event_type = None
-            event_data = None
+        try:
+            async for event_str in self.run_stream(
+                    agent_config=agent_config,
+                    model_config=model_config,
+                    message=user_message_content,
+                    workspace_id=workspace_id,
+                    conversation_id=conversation_id,
+                    user_id=user_id,
+                    storage_type=storage_type,
+                    user_rag_memory_id=user_rag_memory_id,
+                    skip_save=True,
+                    history=filtered_history,
+                    files=files,
+                    model_parameters_override=model_parameters_override,
+            ):
+                # Parse the event
+                lines = event_str.strip().split('\n')
+                event_type = None
+                event_data = None
 
-            for line in lines:
-                if line.startswith('event: '):
-                    event_type = line[7:].strip()
-                elif line.startswith('data: '):
-                    event_data = json.loads(line[6:])
+                for line in lines:
+                    if line.startswith('event: '):
+                        event_type = line[7:].strip()
+                    elif line.startswith('data: '):
+                        event_data = json.loads(line[6:])
 
-            # Accumulate content and forward the event
-            if event_type == "message" and event_data:
-                full_content += event_data.get("content", "")
-                yield event_str
-            elif event_type == "reasoning" and event_data:
-                full_reasoning += event_data.get("content", "")
-                yield event_str
-            elif event_type == "tool_start" or event_type == "tool_end" or event_type == "tool_error":
-                yield event_str
-            elif event_type in ("agent_log", "agent_log_final"):
-                # The regenerate endpoint does not return agent execution trace
-                # events to the frontend; drop them
-                continue
-            elif event_type == "end" and event_data:
-                # Extract feature outputs from the end event
-                suggested_questions = event_data.get("suggested_questions", [])
-                audio_url = event_data.get("audio_url")
-                audio_status = event_data.get("audio_status")
-                citations = event_data.get("citations", [])
+                # Accumulate content and forward the event
+                if event_type == "message" and event_data:
+                    full_content += event_data.get("content", "")
+                    yield event_str
+                elif event_type == "reasoning" and event_data:
+                    full_reasoning += event_data.get("content", "")
+                    yield event_str
+                elif event_type == "tool_start" or event_type == "tool_end" or event_type == "tool_error":
+                    yield event_str
+                elif event_type in ("agent_log", "agent_log_final"):
+                    # The regenerate endpoint does not return agent execution trace
+                    # events to the frontend; drop them
+                    continue
+                elif event_type == "end" and event_data:
+                    # Extract feature outputs from the end event
+                    suggested_questions = event_data.get("suggested_questions", [])
+                    audio_url = event_data.get("audio_url")
+                    audio_status = event_data.get("audio_status")
+                    citations = event_data.get("citations", [])
+        except ModelInvokeCancelledError:
+            # 499 client-disconnect semantics: log only, no error frame. The
+            # original version was marked non-current at the start; restore it
+            # and persist no new version.
+            logger.info(
+                "重新生成取消（客户端断开或服务端静默中止）",
+                extra={"conversation_id": conversation_id, "message_id": str(message_id)},
+            )
+            try:
+                await self._mark_message_current_async(message_id)
+            except Exception as rollback_err:
+                logger.warning(f"取消后恢复原版本失败: {rollback_err}")
+            return
 
         # 6. Save the new version message
         new_msg = await self._save_regenerated_message_async(

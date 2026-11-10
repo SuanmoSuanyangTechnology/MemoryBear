@@ -73,4 +73,8 @@ export const resourceCenter = {
   more: '向下滚动加载更多',
   noDescription: '暂无描述',
   addToWorkspaceDesc: '将「{{name}}」的共享使用入口添加到目标空间。',
+  knowledgeBaseWarning: '来源空间的知识库不会随应用添加到目标空间。添加后请重新关联目标空间的知识库，以免相关功能无法正常使用。',
+  addedToMyApps: '已添加到我的应用',
+  addedToShared: '已添加到共享',
+  goToView: '前往查看',
 }

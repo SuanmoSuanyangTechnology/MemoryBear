@@ -4,10 +4,12 @@ import { useTranslation } from 'react-i18next';
 
 import RbModal from '@/components/RbModal';
 import { appAssetInstall, getAppAssetDetail } from '@/api/resourceCenter';
-import { getWorkspacesUrl } from '@/api/workspaces';
+import { getWorkspacesUrl, switchWorkspace } from '@/api/workspaces';
 import type { AppAssetDetail } from '../types';
+import { ShareMode } from '../types';
 import CustomSelect from '@/components/CustomSelect';
 import Tag from '@/components/Tag'
+import RbAlert from '@/components/RbAlert'
 
 export interface AddToWorkspaceModalRef {
   handleOpen: (id: string) => void;
@@ -47,8 +49,34 @@ const AddToWorkspaceModal = forwardRef<AddToWorkspaceModalRef>(function AddToWor
     setSaving(true);
     appAssetInstall(item.id, { target_workspace_id: space })
       .then(() => {
-        message.success(t('resourceCenter.added'));
         close();
+        // Determine the message and target tab based on share_mode
+        const isEditable = item.share_mode === ShareMode.Editable;
+        const messageText = isEditable ? t('resourceCenter.addedToMyApps') : t('resourceCenter.addedToShared');
+        const targetTab = isEditable ? 'apps' : 'sharing';
+        
+        // Show notification with "前往查看" link
+        message.success({
+          content: (
+            <Space>
+              <span>{messageText}</span>
+              <a
+                onClick={() => {
+                  switchWorkspace(space)
+                    .then(() => {
+                      localStorage.setItem('pendingAppTab', targetTab);
+                      window.location.href = '/#/application';
+                    })
+                    .catch(() => message.error(t('resourceCenter.failed')));
+                }}
+                className="rb:text-[#155EEF] rb:cursor-pointer"
+              >
+                {t('resourceCenter.goToView')}
+              </a>
+            </Space>
+          ),
+          duration: 5,
+        });
       })
       .catch(() => message.error(t('resourceCenter.failed')))
       .finally(() => setSaving(false));
@@ -84,10 +112,13 @@ const AddToWorkspaceModal = forwardRef<AddToWorkspaceModalRef>(function AddToWor
         </Form.Item>
       </Form>
       {item?.source_app_name &&
-        <div className="rb:bg-gray-100 rb:p-3 rb:rounded-lg">
-          {t('addToWorkspaceDesc', { name: item?.source_app_name })}
+        <div className="rb:bg-gray-100 rb:p-3 rb:rounded-lg rb:mb-4">
+          {t('resourceCenter.addToWorkspaceDesc', { name: item?.source_app_name })}
         </div>
       }
+      <RbAlert color="orange" className="rb:mb-4">
+        {t('resourceCenter.knowledgeBaseWarning')}
+      </RbAlert>
     </RbModal>
   );
 });

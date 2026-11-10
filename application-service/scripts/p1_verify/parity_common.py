@@ -57,6 +57,10 @@ SEED = {
     "model_config_id": "aaaaaaa1-0000-4000-8000-000000000005",
 }
 
+# Publish now requires an icon (frontend and backend both enforce it). The
+# value is opaque to both stacks, so one constant keeps the recordings aligned.
+PARITY_ICON = "https://example.invalid/parity-icon.png"
+
 # The v1 face resolves its app from one API-key binding row; the scenario
 # seeds it inside the rollback boundary once the flow app is published. The
 # monolith sends API_KEY_VALUE on v1 requests (its real validator queries the
@@ -418,7 +422,7 @@ def run_scenario(runner) -> list[dict]:
 
     req(
         "14_publish_v1", "POST", "/apps/{flow_app_id}/publish",
-        {"version_name": "v1", "release_notes": "parity v1", "name": "parity-flow"},
+        {"version_name": "v1", "release_notes": "parity v1", "name": "parity-flow", "icon": PARITY_ICON},
         capture=[(("data", "id"), "release_v1_id")],
     )
     req("15_get_release_after_v1", "GET", "/apps/{flow_app_id}/release")
@@ -426,7 +430,7 @@ def run_scenario(runner) -> list[dict]:
 
     req(
         "17_publish_v2", "POST", "/apps/{flow_app_id}/publish",
-        {"version_name": "v2", "release_notes": "parity v2", "name": "parity-flow"},
+        {"version_name": "v2", "release_notes": "parity v2", "name": "parity-flow", "icon": PARITY_ICON},
         capture=[(("data", "id"), "release_v2_id")],
     )
     req("18_get_release_after_v2", "GET", "/apps/{flow_app_id}/release")
@@ -487,7 +491,7 @@ def run_scenario(runner) -> list[dict]:
     )
     req(
         "31_publish_master", "POST", "/apps/{master_app_id}/publish",
-        {"version_name": "v1", "release_notes": "parity master", "name": "parity-master"},
+        {"version_name": "v1", "release_notes": "parity master", "name": "parity-master", "icon": PARITY_ICON},
         capture=[(("data", "id"), "master_release_id")],
     )
 
@@ -503,7 +507,7 @@ def run_scenario(runner) -> list[dict]:
     )
     req(
         "34_publish_sub", "POST", "/apps/{sub_app_id}/publish",
-        {"version_name": "v1", "release_notes": "parity sub", "name": "parity-sub"},
+        {"version_name": "v1", "release_notes": "parity sub", "name": "parity-sub", "icon": PARITY_ICON},
         capture=[(("data", "id"), "sub_release_id")],
     )
 

@@ -604,8 +604,10 @@ class AgentConfig(BaseModel):
 
 
 CATEGORIES_MAX_ITEMS = 5
+USAGE_EXAMPLES_MIN_ITEMS = 3
 USAGE_EXAMPLES_MAX_ITEMS = 5
 USAGE_EXAMPLE_MAX_CHARS = 500
+SETUP_STEPS_MAX_CHARS = 2000
 
 
 class PublishRequest(BaseModel):
@@ -613,14 +615,14 @@ class PublishRequest(BaseModel):
     version_name: str = Field(..., description="版本名称，可自定义")
     release_notes: str = Field(..., description="版本说明")
     name: str = Field(..., description="公开分享标题")
-    icon: Optional[str] = Field(None, description="公开分享图标，未传则使用应用图标")
+    icon: str = Field(..., min_length=1, description="公开分享图标，发布必填")
     usage_examples: List[str] = Field(
         default_factory=list,
-        description=(
-            "使用示例，随版本冻结；0~5 条、每条 ≤500 字。"
-            "前端强制 3~5 条，后端宽松以兼容旧前端与开放 API；"
-            "提交社区市场时才要求 ≥3 条"
-        ),
+        description="Agent/集群发布时必填 3~5 条、每条 ≤500 字；其他类型不适用。",
+    )
+    setup_steps: Optional[str] = Field(
+        None,
+        description="工作流/对话工作流发布时必填，最多 2000 字；其他类型不适用。",
     )
     categories: List[str] = Field(
         default_factory=list,
@@ -642,7 +644,7 @@ class PublishRequest(BaseModel):
     @field_validator("usage_examples")
     @classmethod
     def _validate_usage_examples(cls, value: Optional[List[str]]) -> List[str]:
-        """宽松档：≤5 条、每条 ≤500 字；去首尾空白，空串留给市场门禁拦截。"""
+        """校验字段结构与上限；类型相关必填规则由发布服务统一校验。"""
         items = [str(item).strip() for item in (value or [])]
         if len(items) > USAGE_EXAMPLES_MAX_ITEMS:
             raise ValueError(f"使用示例最多 {USAGE_EXAMPLES_MAX_ITEMS} 条")
@@ -654,6 +656,16 @@ class PublishRequest(BaseModel):
                 f"第 {too_long[0] + 1} 条使用示例超过 {USAGE_EXAMPLE_MAX_CHARS} 字"
             )
         return items
+
+    @field_validator("setup_steps")
+    @classmethod
+    def _validate_setup_steps(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        normalized = value.strip()
+        if len(normalized) > SETUP_STEPS_MAX_CHARS:
+            raise ValueError(f"设置步骤最多 {SETUP_STEPS_MAX_CHARS} 字")
+        return normalized
 
     @field_validator("categories")
     @classmethod
@@ -694,6 +706,7 @@ class AppRelease(BaseModel):
     visibility: str
     config: Dict[str, Any] = {}
     usage_examples: List[str] = []
+    setup_steps: Optional[str] = None
     categories: List[str] = []
     default_model_config_id: Optional[uuid.UUID] = None
     published_by: uuid.UUID

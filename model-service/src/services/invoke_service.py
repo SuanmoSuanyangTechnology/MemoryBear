@@ -153,6 +153,7 @@ class InvokeFailure(Exception):
         retryable: bool | None = None,
         retry_after_seconds: int | None = None,
         usage_event: UsageEvent | None = None,
+        silent: bool = False,
     ) -> None:
         super().__init__(message)
         self.code = code
@@ -165,6 +166,7 @@ class InvokeFailure(Exception):
         self.channel_id = channel_id
         self.retry_after_seconds = retry_after_seconds
         self.usage_event = usage_event
+        self.silent = silent
 
 
 @dataclass(frozen=True)
@@ -1018,7 +1020,7 @@ def _log_provider_failure(failure: ProviderFailure, *, attempts: int) -> None:
         logging.ERROR if http_status_for(failure.biz_code) >= 500 else logging.WARNING,
         "invoke_provider_failure code=%s code_name=%s msg_locale=%s provider=%s "
         "upstream_status=%s upstream_code=%s channel_id=%s attempts=%s "
-        "retryable=%s source_service=model-service target_service=%s trace_id=%s",
+        "retryable=%s silent=%s source_service=model-service target_service=%s trace_id=%s",
         failure.biz_code,
         code_name(failure.biz_code),
         get_current_locale(),
@@ -1028,6 +1030,7 @@ def _log_provider_failure(failure: ProviderFailure, *, attempts: int) -> None:
         failure.channel_id,
         attempts,
         failure.retryable,
+        failure.silent,
         failure.provider,
         get_trace_id(),
     )
@@ -1066,6 +1069,7 @@ def _failure_from_exception(
             attempts=attempts,
             channel_id=channel_id,
             retryable=aggregated.retryable if aggregated is not None else False,
+            silent=aggregated.silent if aggregated is not None else False,
         )
     status = _provider_status(exc)
     upstream_code = _upstream_code(exc)
@@ -1086,6 +1090,7 @@ def _failure_from_exception(
             channel_id=channel_id,
             retryable=failure.retryable,
             http_status=http_status_for(failure.biz_code),
+            silent=failure.silent,
         )
     return InvokeFailure(
         code=_failure_code(exc),

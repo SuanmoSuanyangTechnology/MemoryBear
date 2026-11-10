@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 
 from ...db import get_async_db_context
 from ...i18n import get_current_locale
+from ...integrations.model.errors import ModelInvokeCancelledError
 from ...schemas.prompt_optimizer_schema import (
     CreateSessionResponse,
     PromptOptMessage,
@@ -97,6 +98,10 @@ async def get_prompt_opt(
                     skill=data.skill,
                 ):
                     yield f"event:message\ndata: {json.dumps(chunk, ensure_ascii=False)}\n\n"
+        except ModelInvokeCancelledError:
+            # 499 client-disconnect semantics: log only; no error frame and no
+            # trailing end event.
+            return
         except Exception as e:
             yield error_frame(error_payload(
                 e, locale=get_current_locale(), trace_id=get_trace_id()

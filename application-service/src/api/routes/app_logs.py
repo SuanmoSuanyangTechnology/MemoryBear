@@ -167,7 +167,7 @@ def get_workflow_execution_log_detail(
 
 @router.get(
     "/{app_id}/logs/{conversation_id}",
-    summary="应用日志 - 会话消息详情",
+    summary="应用日志 - 会话消息详情（分页）",
     response_model=ApiResponse,
 )
 def get_app_log_detail(
@@ -175,27 +175,38 @@ def get_app_log_detail(
         conversation_id: UUID,
         workspace_id: WorkspaceId,
         db: DbSession,
+        page: Annotated[int, Query(ge=1, description="页码，从 1 开始；第 1 页为最新一页")] = 1,
+        pagesize: Annotated[int, Query(ge=1, le=100, description="每页消息/轮次数量，默认 20，最大 100")] = 20,
 ):
-    """Full message record of one conversation
+    """One page of a conversation's message record.
 
-    - Returns the base conversation info + all messages (ascending time order)
+    - Page 1 returns the newest ``pagesize`` messages; increment ``page`` to
+      walk towards older history
+    - Messages stay in ascending time order within a page
     - Message meta_data carries model name, token usage etc.
-    - Everyone (including sharers and grantees) can only view their own
-      conversation details
+    - Node executions and human-intervention data are scoped to the page, so a
+      long conversation (thousands of rounds) no longer loads every JSONB row
+      into one request
     """
     # Validate app access
     app = AppService(db).get_app(app_id, workspace_id)
 
     log_service = AppLogService(db)
-    conversation, messages, node_executions_map = log_service.get_conversation_detail(
+    conversation, messages, node_executions_map, page_meta = log_service.get_conversation_detail(
         app_id=app_id,
         conversation_id=conversation_id,
         workspace_id=workspace_id,
         app_type=app.type,
+        page=page,
+        pagesize=pagesize,
     )
 
     # Base conversation info (built without ORM relationships)
     base = AppLogConversation.model_validate(conversation)
+
+    # Workflow pages carry their business execution ids in page_meta for the
+    # intervention query; agent pages have none.
+    page_execution_ids = set(page_meta.get("execution_ids") or [])
 
     # Messages are handled separately to avoid SQLAlchemy relationship checks
     if messages and isinstance(messages[0], AppLogMessage):
@@ -263,9 +274,15 @@ def get_app_log_detail(
                 created_at=m.created_at,
             ))
 
-    # Aggregate human-intervention info; same shape as the public share
-    # endpoint.
-    pending_intervention_map = log_service.build_pending_intervention_map(conversation_id)
+    # Human-intervention info, scoped to the page's workflow executions;
+    # agent conversations have no executions and get an empty map.
+    pending_intervention_map = (
+        log_service.build_pending_intervention_map(
+            conversation_id, execution_ids=page_execution_ids
+        )
+        if page_execution_ids
+        else {}
+    )
 
     # Multi-agent clusters: shallow overview of this round's agents
     # (data-only for now; not rendered by this iteration of the frontend).
@@ -283,8 +300,13 @@ def get_app_log_detail(
         pending_intervention=pending_intervention_map,
         agent_execution_summary=agent_execution_summary,
     )
+    detail_data = detail.model_dump(mode="json")
+    # execution_ids only scopes the intervention query; it is not part of the
+    # public response contract.
+    page_meta.pop("execution_ids", None)
+    detail_data["page"] = page_meta
 
-    return success(data=detail, msg="获取会话日志详情成功")
+    return success(data=detail_data, msg="获取会话日志详情成功")
 
 
 __all__ = ["router"]

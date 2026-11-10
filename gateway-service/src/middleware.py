@@ -49,6 +49,7 @@ so request.url.scheme reflects the public scheme, same as the monolith.
 
 import logging
 import re
+import uuid
 from dataclasses import dataclass
 
 from auth_sdk.audit import AuditLogger
@@ -57,6 +58,7 @@ from auth_sdk.schema import AuditEvent
 from auth_sdk.snapshot import SnapshotReader
 from auth_sdk.token import LocalTokenIssuer, TokenVerifier
 from fastapi import Request
+from memorybear_grpc.metadata import traceparent_trace_id
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 
@@ -171,6 +173,22 @@ def _sanitize_headers(headers) -> dict[str, str]:
     }
 
 
+_TRACE_ID_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
+
+
+def _resolve_trace_id(request: Request) -> str:
+    """Client trace id (or a valid W3C traceparent) kept for correlation; a
+    generated id otherwise. Locally produced rejections never reach a
+    downstream service, so the gateway must supply the trace itself."""
+    trace_id = (
+        request.headers.get("x-trace-id")
+        or traceparent_trace_id(request.headers.get("traceparent"))
+    )
+    if trace_id and _TRACE_ID_PATTERN.fullmatch(trace_id):
+        return trace_id
+    return uuid.uuid4().hex
+
+
 @dataclass
 class GatewayDeps:
     verifier: TokenVerifier
@@ -244,14 +262,18 @@ class GatewayMiddleware(BaseHTTPMiddleware):
         result = await strategy.authenticate(request, deps)
         if result.status_code is not None:
             # Rejection: 401 semantics / 429 rate limit; rate-limit headers ride
-            # the rejection response (api-key semantics preserved).
+            # the rejection response (api-key semantics preserved). The trace id
+            # is echoed/generated here because these rejections never reach a
+            # downstream service that would add it.
+            rejection_headers = dict(result.headers or {})
+            rejection_headers["X-Trace-Id"] = _resolve_trace_id(request)
             return JSONResponse(
                 status_code=result.status_code,
                 # 所有凭据拒绝统一 fail 信封：/v1 契约 3007/3009，
                 # /api 用户 JWT 拒绝 2001/2002/2004/4009
                 content=result.body if result.body is not None
                 else {"detail": result.detail},
-                headers=result.headers or None,
+                headers=rejection_headers,
             )
         # Termination path: the identity context (UserContext/ApiKeyContext) was
         # written to request.state.identity by the pipeline (/stub echo +

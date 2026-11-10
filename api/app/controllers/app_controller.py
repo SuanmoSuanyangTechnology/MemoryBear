@@ -756,6 +756,7 @@ def publish_app(
         name=payload.name,
         icon=payload.icon,
         usage_examples=payload.usage_examples,
+        setup_steps=payload.setup_steps,
         categories=payload.categories,
     )
     return success(data=app_schema.AppRelease.model_validate(release))
@@ -945,17 +946,17 @@ def remove_shared_app(
         db: Session = Depends(get_db),
         current_user=Depends(get_current_user),
 ):
-    """被共享者从自己的工作空间移除共享应用
+    """从当前空间移除旧共享或资源中心仅使用引用。
 
-    - 不会删除源应用，只删除共享记录
-    - 只能移除共享给自己工作空间的应用
+    不删除源应用；历史 AppShare 与 reference 安装同时存在时会一起移除。
     """
     workspace_id = current_user.current_workspace_id
 
     service = app_service.AppService(db)
     service.remove_shared_app(
         app_id=app_id,
-        workspace_id=workspace_id
+        workspace_id=workspace_id,
+        tenant_id=current_user.tenant_id,
     )
 
     return success(msg="已移除共享应用")

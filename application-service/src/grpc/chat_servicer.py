@@ -31,6 +31,7 @@ from ..api.routes.messages import (
 from ..api.schemas.common import fail
 from ..errors import BizCode, BusinessException, http_status_for
 from ..i18n import resolve_locale, translate
+from ..integrations.model.errors import ModelInvokeCancelledError
 from ..schemas.app_schema import AppChatRequest
 from ..sensitive import SensitiveDataFilter
 from ..services.chat_use_case import (
@@ -48,7 +49,12 @@ from ..trace import (
     set_traceparent,
 )
 from .auth import APP_CHAT_ACL_METHOD, APP_CHAT_ACL_PATH, AppChatPrincipal
-from .envelope import abort_with, auth_rejection_content, json_bytes
+from .envelope import (
+    abort_cancelled,
+    abort_with,
+    auth_rejection_content,
+    json_bytes,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -171,6 +177,9 @@ class ChatServicer(chat_pb2_grpc.AppChatServiceServicer):
                 if not payload.stream:
                     try:
                         body = await chat_complete(prep)
+                    except ModelInvokeCancelledError:
+                        # 499 client-disconnect semantics: no trailers, no error.
+                        await abort_cancelled(context)
                     except BusinessException as exc:
                         http_status, content = _business_failure(exc, language)
                         await abort_with(context, http_status, content)
@@ -212,6 +221,12 @@ class ChatServicer(chat_pb2_grpc.AppChatServiceServicer):
                             event=chat_pb2.EventFrame(event=event, data_json=data),
                         )
                         seq += 1
+                except ModelInvokeCancelledError:
+                    # 499 client-disconnect semantics: a pre-stream cancel has no
+                    # trailers to restore; a mid-stream cancel just truncates.
+                    if not started:
+                        await abort_cancelled(context)
+                    logger.info("chat stream cancelled mid-flight")
                 except BusinessException as exc:
                     if not started:
                         http_status, content = _business_failure(exc, language)

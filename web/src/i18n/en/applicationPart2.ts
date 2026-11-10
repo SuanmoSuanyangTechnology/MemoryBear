@@ -59,4 +59,12 @@ export const applicationPart2: ApplicationPart2 = {
       usageExamplesMin: 'Please provide 3–5 example tasks that users can initiate directly. Each is required.',
       usageExamplePrefix: 'Example',
       usageExamplePlaceholder: 'Describe the task the user wants to complete',
+      usageExampleMaxLength: 'Maximum {{max}} characters',
+      setupSteps: 'Setup Steps',
+      setupStepsRequired: 'Please enter setup steps',
+      setupStepsPlaceholder: 'Describe the configuration steps required before use',
+      setupStepsHint: 'Please describe the setup required before use, maximum 2000 characters.',
+      setupStepsMaxLength: 'Maximum {{max}} characters',
+      setupStepsInvalid: 'Setup steps must contain valid text content',
+      noSetupSteps: 'No setup steps',
 }

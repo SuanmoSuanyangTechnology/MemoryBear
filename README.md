@@ -143,19 +143,31 @@ Additional task queues such as `graphrag_tasks`, `reflection_tasks`, and `memory
 
 ## Benchmarks
 
-Evaluation metrics include F1 score (F1), BLEU-1 (B1), and LLM-as-a-Judge score (J) — higher values indicate better performance.
+We evaluate MemoryBear on two widely used long-term memory benchmarks: **LongMemEval** (ICLR 2025) and **LoCoMo** (ACL 2024). Evaluation metrics include **LLM-as-a-Judge accuracy (J)** and **token-level F1 (F1)** — higher values indicate better performance.
 
-MemoryBear consistently outperforms competing systems including Mem0, Zep, and LangMem across all four task categories:
+MemoryBear achieves state-of-the-art overall performance on both benchmarks, reaching **95.00%** LLM-judge accuracy on LongMemEval and **91.54%** LLM-judge accuracy with **67.49** token-F1 on LoCoMo. It demonstrates particularly strong long-term memory capabilities in single-hop retrieval, multi-hop reasoning, temporal reasoning, knowledge updates, and adversarial robustness.
 
-<img width="2256" height="890" alt="Benchmark Results" src="https://github.com/user-attachments/assets/163ea5b5-b51d-4941-9f6c-7ee80977cdbc" />
+<img width="2256" height="1500" alt="MemoryBear Long-Term Memory Benchmark Results: LoCoMo Overall Judge 91.54% and Overall F1 67.49" src="./assets/benchmark-assets/memorybear-benchmark-en.png" />
 
-**Vector version (non-graph)**: Achieves substantially improved retrieval efficiency while maintaining high accuracy. Overall accuracy surpasses the best existing full-text retrieval methods (72.90 ± 0.19%), while maintaining low latency at both p50 and p95 for Search Latency and Total Latency.
+> **LoCoMo overall metrics**: Overall Judge is **91.54%**, and Overall F1 is **67.49**.
+>
+> **Evaluation scope**: MemoryBear is evaluated on **446 adversarial questions**, achieving **94.39%** accuracy. The other baselines cover 1,540 non-adversarial questions, so their overall scores are calculated over the four non-adversarial categories.
 
-<img width="2248" height="498" alt="Vector Version Metrics" src="https://github.com/user-attachments/assets/5e5dae2c-1dde-4f69-88ca-95a9b665b5b2" />
+### Evaluation Setup and Reproduction
 
-**Graph version**: Integrating the knowledge graph architecture pushes overall accuracy to a new benchmark (**75.00 ± 0.20%**), delivering performance metrics that significantly surpass all other methods.
+| Item | LongMemEval | LoCoMo |
+|---|---|---|
+| Dataset size | 500 questions | 1,986 questions across 10 conversations |
+| Reader model | `qwen3.7-plus` | `qwen3.7-plus` |
+| Judge model | `qwen3.7-plus` | `qwen3.7-plus` |
+| Temperature | 0 | 0 |
+| Primary metric | LLM-judge accuracy | LLM-judge accuracy |
+| Additional metric | — | Token-level F1 |
+| Memory retrieval | Memory Search API | Two-speaker memory retrieval with reranking |
 
-<img width="2238" height="342" alt="Graph Version Metrics" src="https://github.com/user-attachments/assets/b1eb1c05-da9b-4074-9249-7a9bbb40e9d2" />
+For LoCoMo, MemoryBear queries both speakers' memory stores, retrieves the top 50 candidates from each store, reranks them to the top 10 with `gte-rerank-v2`, and merges the results. Per-question retrieved memories, generated answers, LLM-judge decisions, and aggregate metrics are available in [MemoryBear Evaluation Results](https://huggingface.co/datasets/redbearai/MemoryBear_eval_result). Evaluation code and reproduction instructions are available in [MemoryBear Memory Benchmarks](https://github.com/SuanmoSuanyangTechnology/MemoryBearBenchmark).
+
+> **Data note**: The original LoCoMo dataset contains several mislabeled golden answers. The results above use corrected golden answers. LLM judges are not perfectly deterministic; even at temperature 0, a small number of borderline decisions may vary slightly between reproduction runs.
 
 ---
 

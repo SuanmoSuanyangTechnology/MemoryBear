@@ -18,6 +18,7 @@ from uuid import UUID
 
 import httpx
 from redbear_model.errors import (
+    RemoteInvokeCancelledError,
     RemoteInvokeError,
     RemoteInvokeFailedError,
     RemoteInvokeIdleTimeoutError,
@@ -40,6 +41,7 @@ from ...usage_context import get_usage_resource
 from .client import http_limits
 from .contracts import ModelCallContext
 from .errors import (
+    ModelInvokeCancelledError,
     ModelInvokeFailedError,
     ModelServiceClientError,
     ModelServiceProtocolError,
@@ -118,6 +120,9 @@ def invoke_media_timeouts(settings: Any) -> InvokeTimeouts:
 def to_host_error(exc: RemoteInvokeError) -> ModelServiceClientError:
     """In-package error -> host error vocabulary; the only translation point, codes pass through un-re-encoded."""
 
+    if isinstance(exc, RemoteInvokeCancelledError):
+        logger.info("model_invoke_cancelled remote=%s detail=%s", type(exc).__name__, exc)
+        return ModelInvokeCancelledError(str(exc))
     if isinstance(exc, RemoteInvokeIdleTimeoutError):
         error: ModelServiceClientError = ModelServiceTimeoutError(
             f"Model invoke produced no frame within {exc.idle_seconds:g}s"
@@ -133,6 +138,7 @@ def to_host_error(exc: RemoteInvokeError) -> ModelServiceClientError:
             attempts=exc.attempts,
             channel_id=exc.channel_id,
             retryable=exc.retryable,
+            retry_after_seconds=exc.retry_after_seconds,
             http_status=exc.http_status,
         )
     else:

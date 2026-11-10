@@ -694,6 +694,107 @@ class ConversationService:
             pagesize=pagesize,
         )
 
+    def get_conversation_with_messages_page(
+        self,
+        conversation_id: uuid.UUID,
+        *,
+        page: int = 1,
+        pagesize: int = 20,
+    ) -> tuple[list[Message | list[Message]], dict]:
+        """One offset page of a conversation's messages.
+
+        Same multi-version shape as ``get_conversation_with_messages`` but
+        bounded: page 1 holds the newest ``pagesize`` current-version rows and
+        ``page`` grows towards older history. The version group of the
+        conversation's latest user message is expanded on the first page; on
+        later pages every row stays flat so the page size stays predictable.
+
+        Returns:
+            (messages, page_meta) where page_meta uses the project-standard
+            PageMeta keys (page / pagesize / total / hasnext).
+        """
+
+        current_messages, has_earlier = self.message_repo.get_messages_page(
+            conversation_id,
+            page=page,
+            pagesize=pagesize,
+            current_only=True,
+        )
+        total = self.message_repo.count_messages(conversation_id, current_only=True)
+
+        # The version group only makes sense for the conversation's latest user
+        # message (new regenerations attach there). Later pages render flat.
+        last_user_msg = None
+        if page <= 1:
+            for msg in reversed(current_messages):
+                if msg.role == "user":
+                    last_user_msg = msg
+                    break
+            if last_user_msg is None:
+                # A small newest-first page can contain only the latest assistant
+                # reply. Follow that reply's parent instead of selecting the
+                # conversation-global newest user, which may be a later round.
+                page_assistant = next(
+                    (
+                        msg
+                        for msg in reversed(current_messages)
+                        if msg.role == "assistant" and msg.parent_message_id is not None
+                    ),
+                    None,
+                )
+                if page_assistant is not None:
+                    last_user_msg = self.db.scalars(
+                        select(Message)
+                        .where(
+                            Message.id == page_assistant.parent_message_id,
+                            Message.conversation_id == conversation_id,
+                            Message.role == "user",
+                            Message.is_deleted.is_not(True),
+                            Message.is_current.is_not(False),
+                        )
+                        .limit(1)
+                    ).first()
+
+        last_user_all_versions: list[Message] = []
+        if last_user_msg:
+            last_user_all_versions = list(
+                self.db.scalars(
+                    select(Message)
+                    .where(
+                        Message.conversation_id == conversation_id,
+                        Message.role == "assistant",
+                        Message.parent_message_id == last_user_msg.id,
+                        Message.is_deleted.is_not(True),
+                    )
+                    .order_by(Message.version)
+                ).all()
+            )
+
+        result_messages: list[Message | list[Message]] = []
+        for msg in current_messages:
+            if msg.role == "user":
+                result_messages.append(msg)
+            elif msg.role == "assistant":
+                if last_user_msg and msg.parent_message_id == last_user_msg.id:
+                    continue
+                result_messages.append(msg)
+
+        if last_user_all_versions:
+            if len(last_user_all_versions) == 1:
+                result_messages.append(last_user_all_versions[0])
+            else:
+                result_messages.append(last_user_all_versions)
+
+        page_meta = {
+            "page": page,
+            "pagesize": pagesize,
+            "total": total,
+            # Page 1 is the newest page; hasnext signals an older page exists.
+            "hasnext": bool(has_earlier),
+        }
+
+        return result_messages, page_meta
+
     def get_conversation_with_messages(
         self,
         conversation_id: uuid.UUID,

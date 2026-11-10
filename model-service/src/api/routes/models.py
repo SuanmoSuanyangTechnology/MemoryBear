@@ -49,6 +49,20 @@ router = APIRouter(
 )
 
 
+def _parse_model_types(raw: list[str] | None) -> list[ModelType]:
+    """``type`` query values (repeated / comma-separated) → enums; unknown values are a 400, not a 500."""
+    if not raw:
+        return []
+    flat = [part.strip() for item in raw for part in item.split(",") if part.strip()]
+    unique = list(dict.fromkeys(flat))
+    try:
+        return [ModelType(value.lower()) for value in unique]
+    except ValueError as exc:
+        raise BusinessException(
+            f"未知的模型类型: {exc}", BizCode.INVALID_PARAMETER
+        ) from exc
+
+
 def _model_in_use_response(exc: BusinessException) -> JSONResponse | None:
     """模型被业务引用（RESOURCE_IN_USE）时渲染 409 信封；其他业务异常返回 None。
 
@@ -112,16 +126,7 @@ def get_model_list(
         f"获取模型配置列表请求: type={type}, provider={provider}, is_available={is_available}, tenant_id={principal.tenant_id}")
 
     try:
-        # 解析 type 参数（支持逗号分隔）
-        type_list = []
-        if type is not None:
-            flat_type = []
-            for item in type:
-                split_items = [t.strip() for t in item.split(',') if t.strip()]
-                flat_type.extend(split_items)
-
-            unique_flat_type = list(dict.fromkeys(flat_type))
-            type_list = [ModelType(t.lower()) for t in unique_flat_type]
+        type_list = _parse_model_types(type)
 
         logger.info(f"获取模型type_list: {type_list}")
         query = model_schema.ModelConfigQuery(
@@ -165,16 +170,7 @@ def get_model_list_new(
     logger.info(f"获取模型配置列表请求: type={type}, provider={provider}, tenant_id={principal.tenant_id}")
 
     try:
-        # 解析 type 参数（支持逗号分隔）
-        type_list = []
-        if type is not None:
-            flat_type = []
-            for item in type:
-                split_items = [t.strip() for t in item.split(',') if t.strip()]
-                flat_type.extend(split_items)
-
-            unique_flat_type = list(dict.fromkeys(flat_type))
-            type_list = [ModelType(t.lower()) for t in unique_flat_type]
+        type_list = _parse_model_types(type)
 
         logger.info(f"获取模型type_list: {type_list}")
         query = model_schema.ModelConfigQueryNew(
