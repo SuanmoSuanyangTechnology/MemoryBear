@@ -1086,6 +1086,18 @@ class AppService:
             updated_at=utcnow_naive()
         )
         self.db.execute(stmt)
+
+        # 副本安装通过 local_app_id 指向本应用；不在这里一起失效，资源中心仍会
+        # reused=true 返回已删除的应用（读取 4007），再次添加也只拿到旧 ID。
+        self.db.execute(
+            sa_update(AppAssetInstallation).where(
+                AppAssetInstallation.local_app_id == app_id,
+                AppAssetInstallation.status == InstallStatus.ACTIVE,
+            ).values(
+                status=InstallStatus.REMOVED,
+                updated_at=utcnow_naive(),
+            )
+        )
         self._unbind_ontology_in_session(app_id)
 
         self.db.commit()
@@ -2425,6 +2437,11 @@ class AppService:
         app = self._get_app_or_404(app_id)
         # 检查应用归属
         self._validate_workspace_access(app, workspace_id)
+
+        # 图标与前端保持一致，都是必填：服务层再挡一次，避免内部调用绕过 schema。
+        icon = (icon or "").strip()
+        if not icon:
+            raise BusinessException("发布必须选择自定义图标", BizCode.INVALID_PARAMETER)
 
         # 按应用类型校验并归一化发布元数据，避免开放 API 绕过前端规则。
         workflow_types = (AppType.WORKFLOW, AppType.PURE_WORKFLOW)

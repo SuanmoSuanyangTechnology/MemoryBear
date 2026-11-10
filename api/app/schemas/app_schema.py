@@ -605,7 +605,7 @@ class PublishRequest(BaseModel):
     version_name: str = Field(..., description="版本名称，可自定义")
     release_notes: str = Field(..., description="版本说明")
     name: str = Field(..., description="公开分享标题")
-    icon: Optional[str] = Field(None, description="公开分享图标，未传则使用应用图标")
+    icon: str = Field(..., min_length=1, description="公开分享图标，发布必填")
     usage_examples: List[str] = Field(
         default_factory=list,
         description="Agent/集群发布时必填 3~5 条、每条 ≤500 字；其他类型不适用。",

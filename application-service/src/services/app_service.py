@@ -1125,6 +1125,24 @@ class AppService:
         )
         self.db.execute(stmt)
 
+        # A copy installation points at this app through `local_app_id`; leaving it
+        # active makes the catalog report a deleted app (`reused=true` + 4007 on
+        # read). Retire it here so the next install rebuilds a live copy. The ids
+        # come back from the same statement (no separate SELECT, no unbounded
+        # `IN (...)`) so a failed ontology unbind can restore exactly these rows.
+        installation_ids = list(self.db.scalars(
+            sa_update(AppAssetInstallation)
+            .where(
+                AppAssetInstallation.local_app_id == app_id,
+                AppAssetInstallation.status == InstallStatus.ACTIVE,
+            )
+            .values(
+                status=InstallStatus.REMOVED,
+                updated_at=utcnow_naive(),
+            )
+            .returning(AppAssetInstallation.id)
+        ).all())
+
         # Bindings belong to the memory domain: only the remote callback binder
         # can unbind them, after the local commit (no remote call inside a
         # transaction). The in-process binder lives in the monolith and runs its
@@ -1135,7 +1153,7 @@ class AppService:
         self.db.commit()
 
         if remote_unbind:
-            self._unbind_ontology_remote(binder, app, share_ids)
+            self._unbind_ontology_remote(binder, app, share_ids, installation_ids)
 
         logger.info(
             "应用删除成功",
@@ -1151,25 +1169,32 @@ class AppService:
             binder: Any,
             app: App,
             share_ids: list[uuid.UUID],
+            installation_ids: list[uuid.UUID],
     ) -> None:
         """Unbind after the local commit; restore the app when the callback fails.
 
         A soft-deleted app can no longer be looked up (the repository filters on
         is_active), so the delete cannot be retried once the local commit lands:
-        the compensation restores the app and its shares first, then the failure
-        is surfaced to the caller as a whole-delete failure it can retry.
+        the compensation restores the app, its shares and the copy installations
+        first, then the failure is surfaced to the caller as a whole-delete
+        failure it can retry.
         """
         try:
             binder.unbind_app(app.id)
         except OntologyUpstreamError as exc:
-            self._compensate_failed_delete(app, share_ids)
+            self._compensate_failed_delete(app, share_ids, installation_ids)
             raise BusinessException(
                 str(exc),
                 exc.code if exc.code is not None else BizCode.SERVICE_UNAVAILABLE,
                 cause=exc,
             ) from exc
 
-    def _compensate_failed_delete(self, app: App, share_ids: list[uuid.UUID]) -> None:
+    def _compensate_failed_delete(
+            self,
+            app: App,
+            share_ids: list[uuid.UUID],
+            installation_ids: list[uuid.UUID],
+    ) -> None:
         try:
             app.is_active = True
             app.updated_at = utcnow_naive()
@@ -1179,10 +1204,29 @@ class AppService:
                     .where(AppShare.id.in_(share_ids))
                     .values(is_active=True, updated_at=utcnow_naive())
                 )
+            # The copy installations were retired for this delete; leaving them
+            # removed would make the catalog rebuild a duplicate copy later.
+            # Stay on the same predicate (still pointing at this app, still
+            # removed) so a row another flow re-pointed in the meantime is not
+            # flipped back to active.
+            restored_ids = list(self.db.scalars(
+                sa_update(AppAssetInstallation)
+                .where(
+                    AppAssetInstallation.id.in_(installation_ids),
+                    AppAssetInstallation.local_app_id == app.id,
+                    AppAssetInstallation.status == InstallStatus.REMOVED,
+                )
+                .values(status=InstallStatus.ACTIVE, updated_at=utcnow_naive())
+                .returning(AppAssetInstallation.id)
+            ).all()) if installation_ids else []
             self.db.commit()
             logger.warning(
-                "本体解绑失败，已恢复应用与共享记录",
-                extra={"app_id": str(app.id), "share_count": len(share_ids)},
+                "本体解绑失败，已恢复应用、共享记录与副本安装",
+                extra={
+                    "app_id": str(app.id),
+                    "share_count": len(share_ids),
+                    "installation_count": len(restored_ids),
+                },
             )
         except Exception as e:
             self.db.rollback()
@@ -2629,6 +2673,11 @@ class AppService:
         app = self._get_app_or_404(app_id)
         # Check app ownership
         self._validate_workspace_access(app, workspace_id)
+
+        # 图标与前端保持一致，都是必填：服务层再挡一次，避免内部调用绕过 schema。
+        icon = (icon or "").strip()
+        if not icon:
+            raise BusinessException("发布必须选择自定义图标", BizCode.INVALID_PARAMETER)
 
         # 按应用类型校验并归一化发布元数据，避免开放 API 绕过前端规则。
         workflow_types = (AppType.WORKFLOW, AppType.PURE_WORKFLOW)
