@@ -65,5 +65,6 @@ export const applicationPart2: ApplicationPart2 = {
       setupStepsPlaceholder: 'Describe the configuration steps required before use',
       setupStepsHint: 'Please describe the setup required before use, maximum 2000 characters.',
       setupStepsMaxLength: 'Maximum {{max}} characters',
+      setupStepsInvalid: 'Setup steps must contain valid text content',
       noSetupSteps: 'No setup steps',
 }

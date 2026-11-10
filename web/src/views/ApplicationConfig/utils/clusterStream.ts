@@ -461,12 +461,27 @@ export const createClusterStreamProcessor = (adapter: ClusterStreamAdapter) => {
           break
         case 'end':
           if (ownedByAgent) {
+            const agentError = getErrorText(payload.error) || error
             updateAgentBlock(payload, block => ({
               ...block,
-              status: block.status === 'running' ? 'completed' : block.status,
+              status: agentError
+                ? 'failed'
+                : block.status === 'running'
+                  ? 'completed'
+                  : block.status,
+              content: agentError
+                ? { ...block.content, error: agentError }
+                : block.content,
             }), false)
           } else {
-            finishCluster(error ? 'failed' : 'completed', error, payload)
+            const endError = getErrorText(payload.error) || error
+            if (endError) {
+              finishCluster('failed', endError, payload)
+            } else if (payload.status === 'failed') {
+              finishCluster('failed', undefined, payload)
+            } else {
+              finishCluster('completed', undefined, payload)
+            }
           }
           break
         case 'error': {

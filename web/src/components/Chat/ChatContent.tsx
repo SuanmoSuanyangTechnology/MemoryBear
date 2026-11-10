@@ -188,6 +188,10 @@ const ChatContent: FC<ChatContentProps> = ({
     onSend?.(JSON.stringify(values))
   }
 
+  const escapeHtml = (text: string) => {
+    return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;')
+  }
+
   const formatContent = (item: ChatItem) => {
     return renderRuntime && item.meta_data?.outputs && item.meta_data?.outputs?.length > 1
       ? item.meta_data?.outputs.map(vo => vo.content).join('\n')
@@ -196,7 +200,7 @@ const ChatContent: FC<ChatContentProps> = ({
       : renderRuntime && item.subContent
       ? ''
       : item.meta_data?.error && item.meta_data?.error.length > 0
-      ? item.meta_data?.error
+      ? escapeHtml(item.meta_data?.error)
       : item.meta_data?.outputs && item.meta_data?.outputs?.length > 1
       ? item.meta_data?.outputs.map(vo => vo.content).join('\n')
       : item.content && item.content.length > 0

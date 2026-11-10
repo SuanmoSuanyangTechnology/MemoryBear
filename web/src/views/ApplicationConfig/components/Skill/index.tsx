@@ -103,7 +103,7 @@ const SkillList: FC<SkillListProps> = ({
                         skill={skill}
                         trailing={
                           <>
-                            {skill.is_active === false && <Tag color="default" className="rb:shrink-0">{t('skills.unavailable')}</Tag>}
+                            {!skill.is_usable && <Tag color="default" className="rb:shrink-0">{t('skills.unavailable')}</Tag>}
                             <div onClick={() => remove(field.name)}
                               className="rb:size-4.5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/common/delete.svg')] rb:hover:bg-[url('@/assets/images/common/delete_red.svg')]" />
                           </>

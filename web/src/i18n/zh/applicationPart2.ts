@@ -64,6 +64,7 @@ export const applicationPart2 = {
       setupStepsPlaceholder: '说明使用前需要完成的配置步骤',
       setupStepsHint: '请说明使用前需要完成的设置，最多 2000 字。',
       setupStepsMaxLength: '最多{{max}}个字符',
+      setupStepsInvalid: '设置步骤需包含有效文本内容',
       noSetupSteps: '暂无设置步骤',
 }
 

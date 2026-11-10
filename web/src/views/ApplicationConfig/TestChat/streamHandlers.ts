@@ -215,6 +215,35 @@ export const createWorkflowStreamHandler = (deps: WorkflowStreamDeps) => {
         case 'agent_log':
           setChatList(prev => mergeWorkflowAgentLog(prev, node_id, agent_log))
           break
+        case 'error': {
+          const errorMsg = (item.data as NodeData).msg || (item.data as NodeData).error || (item.data as NodeData).message
+          setChatList(prev => mapLastVersion(prev, (current) => ({
+            ...current,
+            status: 'failed',
+            content: errorMsg || current.content || null,
+            meta_data: { ...(current.meta_data || {}), error: errorMsg },
+          })))
+          streamLoadingRef.current = false
+          setStreamLoading(false)
+          setLoading(false)
+          break
+        }
+        case 'end': {
+          const endData = item.data as NodeData
+          const endError = endData.msg || endData.error || endData.message
+          if (endError) {
+            setChatList(prev => mapLastVersion(prev, (current) => ({
+              ...current,
+              status: 'failed',
+              content: endError || current.content || null,
+              meta_data: { ...(current.meta_data || {}), error: endError },
+            })))
+            streamLoadingRef.current = false
+            setStreamLoading(false)
+            setLoading(false)
+          }
+          break
+        }
         // Mark workflow as complete
         case 'workflow_end':
           setChatList(prev => updateWorkflowEnd(prev, item.data as NodeData))
