@@ -1,5 +1,5 @@
 import { useEffect, useImperativeHandle, useRef, useState, type ForwardedRef } from 'react';
-import { $getRoot, type LexicalEditor, type EditorState } from 'lexical';
+import { type LexicalEditor, type EditorState } from 'lexical';
 import { generateMarkdown } from './markdownExport';
 import { $setMarkdownValue } from './markdownValue';
 import type { RichTextEditorRef } from './index';
@@ -10,7 +10,7 @@ interface UseRichTextEditorOptions {
   maxLength: number;
 }
 
-/** 管理 Markdown 回填、受控同步、字符计数和命令式接口。 */
+/** Manages Markdown backfill, controlled sync, character counting, and imperative interface. */
 export function useRichTextEditor(
   { value, onChange, maxLength }: UseRichTextEditorOptions,
   ref: ForwardedRef<RichTextEditorRef>,
@@ -48,6 +48,7 @@ export function useRichTextEditor(
         editorRef.current.update(() => {
           $setMarkdownValue(newValue);
         });
+        // Calculate character count including format markers
         setCharCount(newValue.length);
         if (onChange) {
           onChange(newValue);
@@ -72,7 +73,7 @@ export function useRichTextEditor(
   useEffect(() => {
     const editor = editorRef.current;
     if (editor && isInitialized) {
-      // 如果 value 等于最后一次内部产生的值，说明是 onChange 回调产生的，跳过
+      // If value equals the last internally produced value, it's from onChange callback, skip
       if (value === lastInternalValue.current) {
         return;
       }
@@ -91,22 +92,17 @@ export function useRichTextEditor(
 
   const handleChange = (editorState: EditorState) => {
     editorState.read(() => {
-      // 获取纯文本内容用于字符计数
-      const root = $getRoot();
-      const textContent = root.getTextContent();
-      
-      // 计算纯文本字符数（不包括 Markdown 标记）
-      const cleanedContent = textContent.replace(/\n/g, '').trim();
-      const charCount = cleanedContent.length;
-      setCharCount(charCount);
-      
-      // 生成 Markdown 内容用于保存
+      // Generate Markdown content (including format marker characters)
       const markdown = generateMarkdown();
       
-      // 记录最后一次内部产生的值
+      // Calculate character count including format markers
+      const charCount = markdown.length;
+      setCharCount(charCount);
+      
+      // Record the last internally produced value
       lastInternalValue.current = markdown;
       
-      // 如果内容为空，传递空字符串
+      // If content is empty, pass empty string
       if (charCount === 0) {
         if (onChange) {
           onChange('');
@@ -114,7 +110,7 @@ export function useRichTextEditor(
         return;
       }
       
-      // 只有纯文本长度在限制内才传递
+      // Only pass if text length including format markers is within limit
       if (charCount <= maxLength) {
         if (onChange) {
           onChange(markdown);

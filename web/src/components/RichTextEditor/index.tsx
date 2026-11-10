@@ -16,17 +16,26 @@ import { Toolbar } from './Toolbar';
 import { useRichTextEditor } from './useRichTextEditor';
 
 interface RichTextEditorProps {
+  /** Current value */
   value?: string;
+  /** Change callback */
   onChange?: (value: string) => void;
+  /** Placeholder text */
   placeholder?: string;
+  /** Maximum character count */
   maxLength?: number;
+  /** Additional CSS classes */
   className?: string;
+  /** Whether the editor is disabled */
   disabled?: boolean;
 }
 
 export interface RichTextEditorRef {
+  /** Clear editor content */
   clear: () => void;
+  /** Get current Markdown value */
   getValue: () => string;
+  /** Set editor value */
   setValue: (value: string) => void;
 }
 
@@ -43,11 +52,6 @@ const RichTextEditor = forwardRef<RichTextEditorRef, RichTextEditorProps>(({
   const initialConfig = {
     namespace: 'RichTextEditor',
     theme: {
-      text: {
-        bold: 'rb:font-bold',
-        italic: 'rb:italic',
-        underline: 'rb:underline rb:decoration-1 rb:underline-offset-2',
-      },
       list: {
         ul: 'rb:list-disc rb:pl-6 rb:my-2',
         ol: 'rb:list-decimal rb:pl-6 rb:my-2',
