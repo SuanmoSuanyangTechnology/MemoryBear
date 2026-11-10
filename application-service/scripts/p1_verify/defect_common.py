@@ -105,7 +105,8 @@ def run_defect_scenario(runner) -> list[dict]:
     )
     req(
         "08_publish_sub_app", "POST", "/apps/{sub_app_id}/publish",
-        {"version_name": "v1", "release_notes": "defect battery", "name": "defect-sub"},
+        {"version_name": "v1", "release_notes": "defect battery", "name": "defect-sub",
+         "icon": "https://example.invalid/defect-icon.png"},
         capture=[(("data", "id"), "sub_release_id")],
     )
     req(

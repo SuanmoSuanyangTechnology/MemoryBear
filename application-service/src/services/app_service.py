@@ -1125,6 +1125,26 @@ class AppService:
         )
         self.db.execute(stmt)
 
+        # A copy installation points at this app through `local_app_id`; leaving it
+        # active makes the catalog report a deleted app (`reused=true` + 4007 on
+        # read). Retire it here so the next install rebuilds a live copy. Keep the
+        # ids so a failed ontology unbind can restore them with the app.
+        installation_ids = list(self.db.scalars(
+            select(AppAssetInstallation.id).where(
+                AppAssetInstallation.local_app_id == app_id,
+                AppAssetInstallation.status == InstallStatus.ACTIVE,
+            )
+        ).all())
+        if installation_ids:
+            self.db.execute(
+                sa_update(AppAssetInstallation)
+                .where(AppAssetInstallation.id.in_(installation_ids))
+                .values(
+                    status=InstallStatus.REMOVED,
+                    updated_at=utcnow_naive(),
+                )
+            )
+
         # Bindings belong to the memory domain: only the remote callback binder
         # can unbind them, after the local commit (no remote call inside a
         # transaction). The in-process binder lives in the monolith and runs its
@@ -2629,6 +2649,11 @@ class AppService:
         app = self._get_app_or_404(app_id)
         # Check app ownership
         self._validate_workspace_access(app, workspace_id)
+
+        # 图标与前端保持一致，都是必填：服务层再挡一次，避免内部调用绕过 schema。
+        icon = (icon or "").strip()
+        if not icon:
+            raise BusinessException("发布必须选择自定义图标", BizCode.INVALID_PARAMETER)
 
         # 按应用类型校验并归一化发布元数据，避免开放 API 绕过前端规则。
         workflow_types = (AppType.WORKFLOW, AppType.PURE_WORKFLOW)

@@ -17,6 +17,7 @@ change what consumers see.
 """
 from __future__ import annotations
 
+import asyncio
 import copy
 import logging
 import uuid
@@ -313,15 +314,26 @@ class AssetService:
         seen_issues: set[tuple[str, str, str, str]] = set()
 
         def add_ref(
-                bucket: list[dict[str, Any]], kind: str, raw_id: Any, path: str
+                bucket: list[dict[str, Any]],
+                kind: str,
+                raw_id: Any,
+                path: str,
+                operation: Any = None,
         ) -> None:
             if isinstance(raw_id, dict):
                 raw_id = raw_id.get("id") or raw_id.get(f"{kind}_id")
             text = str(raw_id).strip() if raw_id is not None else ""
+            method = str(operation).strip() if operation is not None else ""
             key = (kind, text, path)
             if key not in seen_refs:
                 seen_refs.add(key)
-                bucket.append({"id": _coerce_uuid(text), "raw_id": text or None, "path": path})
+                bucket.append({
+                    "id": _coerce_uuid(text),
+                    "raw_id": text or None,
+                    "path": path,
+                    # 选中具体方法时的 operation_key；整工具选择为 None
+                    "operation": method or None,
+                })
 
         def add_issue(
                 kind: str,
@@ -358,6 +370,7 @@ class AssetService:
                             "tool",
                             selector.get("tool_id"),
                             f"{path}.tools[{index}]",
+                            selector.get("operation"),
                         )
 
             skills = config.get("skills")
@@ -431,11 +444,19 @@ class AssetService:
                 config_path = f"{path}.data.config"
 
             if node_type == "tool":
+                node_parameters = (
+                    node_config.get("tool_parameters")
+                    if isinstance(node_config, dict)
+                    else None
+                )
                 add_ref(
                     tool_refs,
                     "tool",
                     node_config.get("tool_id") if isinstance(node_config, dict) else None,
                     config_path,
+                    node_parameters.get("operation")
+                    if isinstance(node_parameters, dict)
+                    else None,
                 )
             elif node_type == "agent" and isinstance(node_config, dict):
                 if node_config.get("mode", "inline") == "reference":
@@ -584,6 +605,7 @@ class AssetService:
                         "tool",
                         selector.get("tool_id"),
                         f"{ref['path']}.tools[{index}]",
+                        selector.get("operation"),
                     )
                 else:
                     add_ref(
@@ -600,6 +622,31 @@ class AssetService:
             else []
         )
         tools_by_id = {row.id: row for row in tool_rows}
+        # 方法级校验：工具整行还在、但选中的 operation 从 schema 里删掉时，
+        # 快照里的 (tool_id, operation) 已经无法执行，必须在共享前拦下。
+        methods_checked: set[uuid.UUID] = set()
+        methods_by_tool: dict[str, set[str]] = {}
+        operation_refs = {
+            ref["id"] for ref in tool_refs if ref["id"] is not None and ref["operation"]
+        }
+        if operation_refs:
+            from .tool_service import ToolService
+
+            items, _missing = asyncio.run(
+                ToolService(self.db).get_tool_methods_batch(
+                    [str(tool_id) for tool_id in operation_refs], tenant_id
+                )
+            )
+            methods_by_tool = {
+                item["tool_id"]: {
+                    str(method.get("operation_key"))
+                    for method in item.get("methods") or []
+                    if method.get("operation_key") is not None
+                }
+                for item in items
+            }
+            methods_checked = set(operation_refs)
+
         for ref in tool_refs:
             tool = tools_by_id.get(ref["id"])
             if ref["id"] is None or tool is None:
@@ -616,6 +663,21 @@ class AssetService:
                     ref["raw_id"],
                     ref["path"],
                     f"工具状态不可用：{tool.status}",
+                    tool.name,
+                )
+            elif (
+                    ref["operation"]
+                    and ref["id"] in methods_checked
+                    # 方法列表为空（如 MCP 缓存尚未同步）无法判定，按不可校验放行，
+                    # 避免把「查不到方法」误报成「方法被删」
+                    and methods_by_tool.get(str(ref["id"]))
+                    and ref["operation"] not in methods_by_tool[str(ref["id"])]
+            ):
+                add_issue(
+                    "tool_method",
+                    ref["raw_id"],
+                    ref["path"],
+                    f"工具方法不存在：{ref['operation']}",
                     tool.name,
                 )
 
@@ -824,7 +886,15 @@ class AssetService:
             and existing.link_mode == LinkMode.REFERENCE
             and asset.share_mode == ShareMode.EDITABLE
         )
-        if existing is not None and not upgrade:
+        # 副本被删除后安装行仍停在 active：副本是独立应用，删除只软删 app，
+        # 不碰安装行。再次添加若直接复用，会返回一个已 4007 的 local_app_id，
+        # 所以这里把「目标应用已不在」的副本行当作失效行重建。
+        stale_copy = (
+            existing is not None
+            and existing.link_mode == LinkMode.COPY
+            and not self._local_copy_alive(existing)
+        )
+        if existing is not None and not upgrade and not stale_copy:
             # 副本已是目标空间的独立应用，源版本下线不影响它；但 reference
             # 仍依赖条目钉住版本，失效时不能误报为「已就绪」。
             if existing.link_mode == LinkMode.REFERENCE:
@@ -838,14 +908,16 @@ class AssetService:
         if release is None or not release.is_active:
             raise BusinessException("条目钉住的版本已下线", BizCode.RELEASE_NOT_FOUND)
 
-        # 升级时，旧引用失效、新副本及新安装行必须同在一个 savepoint：复制集群
-        # 或子 Agent 失败时只回滚这次升级，保留原有 reference 安装。
-        scope = self.db.begin_nested() if upgrade else nullcontext()
+        # 升级或重建失效副本时，旧安装行与新副本必须在同一个 savepoint：复制集群
+        # 或子 Agent 失败时只回滚这次操作，保留原有安装行。
+        rebuild = upgrade or stale_copy
+        scope = self.db.begin_nested() if rebuild else nullcontext()
         with scope:
-            if upgrade:
+            if existing is not None and rebuild:
                 # 先让旧行失效再建副本：既避免部分唯一索引冲突，也让副本保留原名称。
                 replaced_link_mode = existing.link_mode
-                replaced_reference_workspace_ids.add(existing.target_workspace_id)
+                if existing.link_mode == LinkMode.REFERENCE:
+                    replaced_reference_workspace_ids.add(existing.target_workspace_id)
                 existing.status = InstallStatus.REMOVED
                 existing.updated_at = utcnow_naive()
                 self.db.flush()
@@ -930,12 +1002,29 @@ class AssetService:
             "needs_config": installation.result == "partial",
             "missing_dependencies": installation.missing_report or [],
             "reused": reused,
-            # 本次安装顶掉的旧形态（`reference` → `copy` 升级时非空）。前端据此
-            # 提示「已按可编辑副本重新添加」，避免用户以为点错了没反应。
+            # 本次安装顶掉的旧形态：`reference` → `copy` 升级、或副本被删后重建时非空。
+            # 前端据此提示「已重新添加」，避免用户以为点错了没反应。
             "replaced_link_mode": replaced_link_mode,
         }
 
     # ---------- 以 release 快照为源重建副本 ----------
+
+    def _local_copy_alive(self, installation: AppAssetInstallation) -> bool:
+        """副本 installation 是否仍指向一个存活的本地应用。
+
+        副本是目标空间自己的独立应用，删除走普通应用删除（软删 `App`），
+        安装行不会被联动改写；所以安装行 active 不等于副本可用，必须回查
+        `local_app_id` 对应的应用还在不在。
+        """
+
+        if installation.local_app_id is None:
+            return False
+        local_app = self.db.get(App, installation.local_app_id)
+        return bool(
+            local_app is not None
+            and local_app.is_active
+            and local_app.workspace_id == installation.target_workspace_id
+        )
 
     def _copy_from_release(
             self,
