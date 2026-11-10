@@ -1,5 +1,6 @@
 import type { ChatItem } from '@/components/Chat/types'
 import type { SSEMessage } from '@/utils/stream'
+import i18n from '@/i18n'
 
 export interface AgentToolCall extends Record<string, unknown> {
   step_id?: string;
@@ -205,6 +206,18 @@ const getErrorText = (error: unknown): string | undefined => {
   return undefined
 }
 
+const getEndFailure = (payload: ClusterEventData, forceFailure = false): string | undefined => {
+  const code = payload.code
+  const failed = forceFailure || payload.status === 'failed' || payload.status === 'error'
+    || (code !== undefined && code !== null && code !== 0 && code !== 200 && code !== '0' && code !== '200')
+    || Boolean(getErrorText(payload.error))
+  if (!failed) return undefined
+
+  const msg = typeof payload.msg === 'string' ? payload.msg.trim() : ''
+  const codeName = typeof payload.code_name === 'string' ? payload.code_name.trim() : ''
+  return msg || codeName || i18n.t('common.unknownError')
+}
+
 const getTraceOutput = (trace: AgentTrace): unknown => {
   for (let index = trace.iterations.length - 1; index >= 0; index--) {
     const output = trace.iterations[index]?.llm?.output
@@ -263,6 +276,7 @@ const keepAssistantStatus = (message: ChatItem) =>
 
 export const createClusterStreamProcessor = (adapter: ClusterStreamAdapter) => {
   let placeholderIndex = 0
+  let finished = false
 
   const updateAgentBlock = (
     payload: ClusterEventData,
@@ -371,6 +385,8 @@ export const createClusterStreamProcessor = (adapter: ClusterStreamAdapter) => {
     error?: string,
     endPayload?: ClusterEventData,
   ) => {
+    if (finished) return
+    finished = true
     const audioUrl = endPayload?.audio_url
     const audioStatus = endPayload?.audio_status ?? (audioUrl ? 'pending' : undefined)
 
@@ -404,10 +420,9 @@ export const createClusterStreamProcessor = (adapter: ClusterStreamAdapter) => {
 
   return (events: SSEMessage[]) => {
     events.forEach(item => {
+      if (finished) return
       const payload = item.data as ClusterEventData
       const ownedByAgent = hasAgentOwner(payload)
-      const error = getErrorText(payload)
-
       switch (item.event) {
         case 'start':
           if (ownedByAgent) break
@@ -428,7 +443,7 @@ export const createClusterStreamProcessor = (adapter: ClusterStreamAdapter) => {
         case 'agent_dispatch':
           updateAgentBlock(payload, block => ({
             ...block,
-            status: 'running',
+            status: block.status === 'failed' ? 'failed' : 'running',
             content: { ...block.content, input: payload.task },
           }))
           break
@@ -440,16 +455,16 @@ export const createClusterStreamProcessor = (adapter: ClusterStreamAdapter) => {
           }))
           break
         case 'agent_complete': {
-          const error = getErrorText(payload.error)
+          const error = getEndFailure(payload)
           updateAgentBlock(payload, block => ({
             ...block,
-            status: normalizeAgentStatus(payload.status, payload.error),
+            status: block.status === 'failed' || error ? 'failed' : normalizeAgentStatus(payload.status),
             ...(typeof payload.elapsed_time === 'number' ? { elapsed_time: payload.elapsed_time } : {}),
             ...(payload.token_usage ? { token_usage: payload.token_usage } : {}),
             content: {
               ...block.content,
               output: payload.output ?? getTraceOutput(block.agent_log),
-              ...(error ? { error } : {}),
+              ...(error ? { error: block.content.error || error } : {}),
             },
           }))
           break
@@ -461,7 +476,7 @@ export const createClusterStreamProcessor = (adapter: ClusterStreamAdapter) => {
           break
         case 'end':
           if (ownedByAgent) {
-            const agentError = getErrorText(payload.error) || error
+            const agentError = getEndFailure(payload)
             updateAgentBlock(payload, block => ({
               ...block,
               status: agentError
@@ -470,29 +485,28 @@ export const createClusterStreamProcessor = (adapter: ClusterStreamAdapter) => {
                   ? 'completed'
                   : block.status,
               content: agentError
-                ? { ...block.content, error: agentError }
+                ? { ...block.content, error: block.content.error || agentError }
                 : block.content,
             }), false)
           } else {
-            const endError = getErrorText(payload.error) || error
+            const endError = getEndFailure(payload)
             if (endError) {
               finishCluster('failed', endError, payload)
-            } else if (payload.status === 'failed') {
-              finishCluster('failed', undefined, payload)
             } else {
               finishCluster('completed', undefined, payload)
             }
           }
           break
         case 'error': {
+          const errorText = getEndFailure(payload, true)
           if (ownedByAgent) {
             updateAgentBlock(payload, block => ({
               ...block,
               status: 'failed',
-              content: { ...block.content, ...(error ? { error } : {}) },
+              content: { ...block.content, error: block.content.error || errorText },
             }), false)
           } else {
-            finishCluster('failed', error)
+            finishCluster('failed', errorText)
           }
           break
         }
