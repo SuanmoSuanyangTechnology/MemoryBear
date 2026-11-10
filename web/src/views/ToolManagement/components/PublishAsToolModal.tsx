@@ -105,6 +105,7 @@ const PublishAsToolModal = forwardRef<WorkflowToolModalRef, { refresh?: () => vo
             submitForm(formData);
           });
         } else {
+          formData.icon = icon.url
           submitForm(formData);
         }
       })

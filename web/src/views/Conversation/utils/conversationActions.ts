@@ -73,6 +73,7 @@ export interface ConversationActionDeps {
   upsertHistory: (conversationId: string, title?: string) => void
   getHistory: (flag?: boolean) => void
   getChatDetail: () => void
+  loadEarlierMessages: () => void
 }
 
 export function createConversationActions(deps: ConversationActionDeps) {
@@ -83,7 +84,7 @@ export function createConversationActions(deps: ConversationActionDeps) {
     skipChatDetailRef, shareModalRef, reportModalRef, addUserMessage, addAssistantMessage,
     updateAssistantMessage, updateAssistantReasoningMessage, updateAssistantMemoryRetrieval,
     startAudioPolling, upsertHistory,
-    getHistory, getChatDetail,
+    getHistory, getChatDetail, loadEarlierMessages,
   } = deps
 
   /** Validate toolbar variables; returns whether sending is allowed and the params */
@@ -414,5 +415,6 @@ export function createConversationActions(deps: ConversationActionDeps) {
     handleShare,
     handleFeedback,
     handleFavorite,
+    loadEarlierMessages,
   }
 }

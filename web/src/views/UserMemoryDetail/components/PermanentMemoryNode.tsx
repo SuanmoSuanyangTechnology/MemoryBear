@@ -27,7 +27,7 @@ export default function PermanentMemoryNode({ fact, onOpen }: PermanentMemoryNod
       data-profile-tag={fact.id}
       type="button"
       onClick={() => onOpen(fact)}
-      className={`rb:absolute rb:left-0 rb:top-0 rb:max-w-[85%] rb:shrink-0 rb:cursor-pointer rb:rounded-full rb:border rb:border-solid rb:px-3 rb:py-2.5 rb:text-center rb:text-xs rb:font-medium rb:leading-3.5 rb:wrap-break-word rb:shadow-xs rb:transition-shadow rb:hover:shadow-md rb:focus-visible:outline-2 rb:focus-visible:outline-primary-600 ${color}`}
+      className={`rb:absolute rb:left-0 rb:top-0 rb:max-w-[85%] rb:shrink-0 rb:cursor-pointer rb:rounded-2xl rb:border rb:border-solid rb:px-3 rb:py-2.5 rb:text-center rb:text-xs rb:font-medium rb:leading-3.5 rb:wrap-break-word rb:shadow-xs rb:transition-shadow rb:hover:shadow-md rb:focus-visible:outline-2 rb:focus-visible:outline-primary-600 ${color}`}
     >
       {fact.title}
     </button>
