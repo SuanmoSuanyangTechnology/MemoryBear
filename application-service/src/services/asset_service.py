@@ -17,7 +17,6 @@ change what consumers see.
 """
 from __future__ import annotations
 
-import asyncio
 import copy
 import logging
 import uuid
@@ -324,7 +323,10 @@ class AssetService:
                 raw_id = raw_id.get("id") or raw_id.get(f"{kind}_id")
             text = str(raw_id).strip() if raw_id is not None else ""
             method = str(operation).strip() if operation is not None else ""
-            key = (kind, text, path)
+            # `method` is part of the key: the same tool can be referenced twice
+            # under one path with different (or no) operation, and dropping the
+            # method-bearing entry would silently skip method-level validation.
+            key = (kind, text, path, method)
             if key not in seen_refs:
                 seen_refs.add(key)
                 bucket.append({
@@ -630,13 +632,25 @@ class AssetService:
             ref["id"] for ref in tool_refs if ref["id"] is not None and ref["operation"]
         }
         if operation_refs:
+            from .bundle_install_service import _run_async
             from .tool_service import ToolService
 
-            items, _missing = asyncio.run(
-                ToolService(self.db).get_tool_methods_batch(
+            items, missing_tools = _run_async(
+                lambda: ToolService(self.db).get_tool_methods_batch(
                     [str(tool_id) for tool_id in operation_refs], tenant_id
                 )
             )
+            if missing_tools:
+                # A tool that cannot be looked up has no method list, so its
+                # operations pass the check below. Record it to keep「为何放行」
+                # diagnosable instead of failing the share silently.
+                logger.warning(
+                    "共享校验：部分工具查不到，方法级校验被跳过",
+                    extra={
+                        "tool_ids": missing_tools,
+                        "tenant_id": str(tenant_id),
+                    },
+                )
             methods_by_tool = {
                 item["tool_id"]: {
                     str(method.get("operation_key"))
