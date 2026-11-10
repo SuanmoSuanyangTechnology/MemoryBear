@@ -38,10 +38,19 @@ export function virtualMemoryBrickPlugin(options: VirtualMemoryBrickOptions = {}
   const packageDir = resolve(root, 'node_modules', packageId)
   const entry = resolve(packageDir, options.entry ?? 'dist/index.js')
   const virtualId = '\0' + packageId
+  // MEMORYBEAR_FRONTEND_EDITION=community forces the open-source fallback even
+  // when the private package happens to be installed in this worktree.
+  const forcedEdition = (process.env.MEMORYBEAR_FRONTEND_EDITION ?? '').trim().toLowerCase()
   // Whether the package is installed is fixed at build time; determine it once to avoid re-checking on every import resolution
-  const packageInstalled = existsSync(packageDir)
+  const packageInstalled = forcedEdition === 'community' ? false : existsSync(packageDir)
   console.log(
-    `[virtual-memory-brick] ${packageId} ${packageInstalled ? 'installed, using the real private package' : 'missing, using the virtual fallback module'}`,
+    `[virtual-memory-brick] ${packageId} ${
+      forcedEdition === 'community'
+        ? 'community edition, using the virtual fallback module'
+        : packageInstalled
+          ? 'installed, using the real private package'
+          : 'missing, using the virtual fallback module'
+    }`,
   )
 
   return {
