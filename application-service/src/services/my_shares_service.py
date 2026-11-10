@@ -232,11 +232,28 @@ class MySharesService:
         return latest
 
     def _load_apps(self, app_ids: set[uuid.UUID]) -> dict[uuid.UUID, App]:
+        """批量取应用行，**只取未软删的**。
+
+        `delete_app` 只软删 `apps.is_active`，不碰 `app_assets`：条目仍是
+        `published`，`_base_row` 的字段也全都来自 `app_releases` 快照。所以这里
+        不过滤就会把已删应用照常铺成「我的共享」的一行，而资源中心列表、应用
+        列表、详情/安装鉴权都各自用 `App.is_active` 或 `_get_app_or_404` 挡住了
+        它——同一份数据在不同页面上给出不同答案。
+
+        过滤放在取数处而不是 `list_rows` 的行循环里：`market_sync` 行与资源中心行
+        复用同一个 `app`，漏到循环里会连市场行一起漏出去。
+        """
+
         if not app_ids:
             return {}
         return {
             app.id: app
-            for app in self.db.scalars(select(App).where(App.id.in_(app_ids))).all()
+            for app in self.db.scalars(
+                select(App).where(
+                    App.id.in_(app_ids),
+                    App.is_active.is_(True),
+                )
+            ).all()
         }
 
     def _load_releases(self, release_ids: set[uuid.UUID]) -> dict[uuid.UUID, AppRelease]:
