@@ -147,8 +147,10 @@ We evaluate MemoryBear on two widely used long-term memory benchmarks: **LongMem
 
 MemoryBear achieves state-of-the-art overall performance on both benchmarks, reaching **95.00%** LLM-judge accuracy on LongMemEval and **91.54%** LLM-judge accuracy with **67.49** token-F1 on LoCoMo. It demonstrates particularly strong long-term memory capabilities in single-hop retrieval, multi-hop reasoning, temporal reasoning, knowledge updates, and adversarial robustness.
 
-<img width="2256" height="1500" alt="MemoryBear Long-Term Memory Benchmark Results" src="./benchmark-assets/memorybear-benchmark-en.png" />
+<img width="2256" height="1500" alt="MemoryBear Long-Term Memory Benchmark Results: LoCoMo Overall Judge 91.54% and Overall F1 67.49" src="./assets/benchmark-assets/memorybear-benchmark-en.png" />
 
+> **LoCoMo overall metrics**: Overall Judge is **91.54%**, and Overall F1 is **67.49**.
+>
 > **Evaluation scope**: MemoryBear is evaluated on **446 adversarial questions**, achieving **94.39%** accuracy. The other baselines cover 1,540 non-adversarial questions, so their overall scores are calculated over the four non-adversarial categories.
 
 ### Evaluation Setup and Reproduction

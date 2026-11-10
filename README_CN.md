@@ -144,8 +144,10 @@ MemoryBear 是红熊 AI 自主研发的新一代 AI 记忆系统，核心突破�
 
 MemoryBear 在两项基准中均取得领先的综合表现：LongMemEval 的 LLM Judge 准确率达到 **95.00%**，LoCoMo 的 LLM Judge 准确率达到 **91.54%**、Token-F1 达到 **67.49**。MemoryBear 尤其在单跳检索、多跳推理、时序推理、知识更新和对抗性问题等任务上展现出突出的长期记忆能力。
 
-<img width="2256" height="1500" alt="MemoryBear 长期记忆基准测试结果" src="./benchmark-assets/memorybear-benchmark-cn.png" />
+<img width="2256" height="1500" alt="MemoryBear 长期记忆基准测试结果：LoCoMo Overall Judge 91.54%，Overall F1 67.49" src="./assets/benchmark-assets/memorybear-benchmark-cn.png" />
 
+> **LoCoMo 综合指标**：Overall Judge 为 **91.54%**，Overall F1 为 **67.49**。
+>
 > **评测口径**：MemoryBear 覆盖了 **446 道对抗性问题**并取得 **94.39%** 准确率；其他基线系统仅覆盖 1,540 道非对抗性问题，因此其综合成绩按四类非对抗性问题计算。
 
 ### 评测配置与复现
