@@ -211,7 +211,6 @@ export const account = {
       return: 'Return',
       statusEnabled: 'Available',
       statusDisabled: 'Unavailable',
-      remove: 'Remove',
 
       fileSizeTip: 'File size cannot exceed {{size}}MB',
       fileAcceptTip: 'Unsupported file type:',

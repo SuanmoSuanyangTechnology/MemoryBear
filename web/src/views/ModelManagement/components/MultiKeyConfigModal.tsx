@@ -165,7 +165,7 @@ const MultiKeyConfigModal = forwardRef<MultiKeyConfigModalRef, MultiKeyConfigMod
               </div>
 
               <Space size={12}>
-                <Button type="primary" danger ghost onClick={() => handleDelete(key.id)}>{t('common.remove')}</Button>
+                <Button type="primary" danger ghost onClick={() => handleDelete(key.id)}>{t('common.delete')}</Button>
               </Space>
             </Flex>
           ))}

@@ -441,11 +441,11 @@ export const updateWorkflowEnd = (prev: ChatList, data: NodeData, citations?: No
   return mapLastVersion(prev, (current) => ({
     ...current,
     status,
-    error,
     content: current.content === '' ? null : current.content,
     meta_data: {
       ...current.meta_data || {},
-      citations
+      citations,
+      error,
     }
   }))
 }

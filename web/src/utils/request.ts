@@ -266,10 +266,12 @@ service.interceptors.response.use(
         msg = msg || i18n.t('common.apiNotFound');
         break;
       case 429:
-        msg = msg || i18n.t('common.tooManyRequests');
+      case 503: {
+        msg = msg || (status === 429 ? i18n.t('common.tooManyRequests') : i18n.t('common.serviceUpgrading'));
         const retryAfter = parseRetryAfter(error.response?.headers?.['retry-after'] || error.response?.headers?.['Retry-After'])
         if (retryAfter) lastRetryAfter = retryAfter
         break;
+      }
       case 500:
       case 502:
         msg = msg || i18n.t('common.serviceUpgrading');

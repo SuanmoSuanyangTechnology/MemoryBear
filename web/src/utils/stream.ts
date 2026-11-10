@@ -324,15 +324,17 @@ export const handleSSE = async (
     }
 
     switch (response.status) {
-      case 429: {
+      case 429:
+      case 503: {
         const retryAfterHeader = response.headers.get('retry-after') || response.headers.get('Retry-After')
         if (retryAfterHeader) {
           const seconds = parseInt(retryAfterHeader, 10)
           if (Number.isFinite(seconds) && seconds > 0) setLastRetryAfter(seconds)
         }
-        const rateLimitData = await response.json().catch(() => ({}))
+        const errorData = await response.json().catch(() => ({}))
+        const errorMsg = errorData.msg || (response.status === 429 ? i18n.t('common.tooManyRequests') : i18n.t('common.serviceUpgrading'))
         if (onMessage) {
-          onMessage([{ event: 'error', data: { msg: rateLimitData.msg || i18n.t('common.tooManyRequests'), error: rateLimitData.error || '', code: rateLimitData.code || 10004 } }])
+          onMessage([{ event: 'error', data: { msg: errorMsg, error: errorData.error || '', code: errorData.code || (response.status === 429 ? 10004 : 10003) } }])
         }
         return
       }
@@ -387,7 +389,10 @@ export const handleSSE = async (
 
     try {
       while (true) {
-        const { done, value } = await reader.read();
+        const { done, value } = await reader.read().catch((err) => {
+          if (err?.name === 'AbortError') return { done: true, value: undefined }
+          throw err
+        });
         if (done || controller.signal.aborted) break;
 
         const chunk = decoder.decode(value, { stream: true });
@@ -409,7 +414,7 @@ export const handleSSE = async (
         onMessage(parseSSEToJSON(buffer) ?? {});
       }
     } finally {
-      reader.cancel();
+      reader.cancel().catch(() => {})
     }
   } catch (error: any) {
     if (error?.name !== 'AbortError') {
