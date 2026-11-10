@@ -1746,6 +1746,7 @@ members: list[str] | None = None,
         ids: str | None = None,
         is_active: bool | None = None,
         is_public: bool | None = None,
+        is_usable: bool | None = None,
         kind: str = "all",
         page: int = 1,
         pagesize: int = 10,
@@ -1765,6 +1766,13 @@ members: list[str] | None = None,
         Cards are assembled in Python and paginated together, which keeps the
         plugin/standalone merge readable at this scale (skill quota is counted in
         units, not thousands).
+
+        ``is_usable`` filters on the derived executability flag (see
+        ``_tool_availability``): the application skill picker passes ``true`` so a
+        legacy skill whose bound tool is gone cannot be added, while the skill
+        management page leaves it unset so broken skills stay visible and fixable.
+        It must filter here — before the slice — because the cards are paginated in
+        Python; hiding them client-side would break ``total`` and page sizes.
         """
 
         if kind not in ("all", "plugin", "skill"):
@@ -1773,6 +1781,7 @@ members: list[str] | None = None,
         cards = SkillPackageService._collect_cards(
             db, tenant_id,
             search=search, ids=ids, is_active=is_active, is_public=is_public,
+            is_usable=is_usable,
             include_skills=kind in ("all", "skill"),
             include_plugins=kind in ("all", "plugin"),
         )
@@ -1821,6 +1830,7 @@ members: list[str] | None = None,
         ids: Optional[str] = None,
         is_active: Optional[bool] = None,
         is_public: Optional[bool] = None,
+        is_usable: Optional[bool] = None,
         include_skills: bool = True,
         include_plugins: bool = True,
     ) -> list[dict]:
@@ -1840,7 +1850,7 @@ members: list[str] | None = None,
             cards.extend(
                 SkillPackageService._standalone_skill_cards(
                     db, tenant_id, search=search, ids=id_filter,
-                    is_active=is_active, is_public=is_public
+                    is_active=is_active, is_public=is_public, is_usable=is_usable
                 )
             )
 
@@ -1914,8 +1924,15 @@ members: list[str] | None = None,
         ids: set[uuid.UUID] | None = None,
         is_active: bool | None,
         is_public: bool | None,
+        is_usable: bool | None = None,
     ) -> list[dict]:
-        """Skill cards whose package is absent (legacy) or ungrouped (``plugin_id`` NULL)."""
+        """Skill cards whose package is absent (legacy) or ungrouped (``plugin_id`` NULL).
+
+        ``is_usable`` drops cards whose derived executability does not match. The
+        plugin branch needs no equivalent filter: plugin members are standard skills,
+        so their ``is_usable`` already equals ``is_active``, which is what
+        ``active_members`` filters on.
+        """
 
         query = (
             db.query(Skill, SkillPackage)
@@ -1956,12 +1973,17 @@ members: list[str] | None = None,
         availability = SkillPackageService._tool_availability(
             db, tenant_id, [skill for skill, _pkg in rows]
         )
-        return [
-            SkillPackageService._skill_card(
-                s, p, with_members=True, availability=availability.get(s.id)
+        cards: list[dict] = []
+        for skill, pkg in rows:
+            derived = availability[skill.id]
+            if is_usable is not None and bool(derived["is_usable"]) != is_usable:
+                continue
+            cards.append(
+                SkillPackageService._skill_card(
+                    skill, pkg, with_members=True, availability=derived
+                )
             )
-            for s, p in rows
-        ]
+        return cards
 
     @staticmethod
     def _plugin_matches(plugin, member_rows: list, search: str) -> bool:

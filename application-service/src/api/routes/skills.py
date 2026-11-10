@@ -71,6 +71,13 @@ def list_skills(
             ),
         ),
         is_active: bool | None = Query(None, description="是否激活"),
+        is_usable: bool | None = Query(
+            None,
+            description=(
+                "是否可执行（派生值：行存活且关联工具全部可用）。应用内选技能传 true；"
+                "技能管理页不传，以保留待修复的失效技能"
+            ),
+        ),
         is_public: bool | None = Query(None, description="是否公开"),
         kind: str = Query("all", description="粒度过滤：all | plugin | skill"),
         page: int = Query(1, ge=1, description="页码"),
@@ -86,7 +93,7 @@ def list_skills(
     cards, total = SkillPackageService.list_entries(
         db, tenant_id,
         search=search, ids=ids, is_active=is_active, is_public=is_public,
-        kind=kind, page=page, pagesize=pagesize,
+        is_usable=is_usable, kind=kind, page=page, pagesize=pagesize,
     )
     # List cards stay lean: ``files`` / ``skill_md`` are only ever filled by the
     # detail path (``get_entry_detail``), so on list cards they were nothing but
