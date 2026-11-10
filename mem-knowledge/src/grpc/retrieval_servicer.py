@@ -125,7 +125,7 @@ def _log_failure(
     principal: Principal | None,
     source: KnowledgeRetrievalSource | None = None,
 ) -> None:
-    diagnostics, nodes, sensitive_chain = failure_diagnostics(error)
+    diagnostics, nodes, bounded_chain = failure_diagnostics(error)
     details = {
         "operation": operation,
         "stage": stage,
@@ -143,7 +143,7 @@ def _log_failure(
         "knowledge_grpc_failed %s",
         json.dumps(details, ensure_ascii=False, default=str),
         exc_info=(type(error), error, error.__traceback__)
-        if not sensitive_chain and len(nodes) > 1 else None,
+        if not bounded_chain and len(nodes) > 1 else None,
     )
 
 
