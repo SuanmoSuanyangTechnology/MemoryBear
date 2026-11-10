@@ -19,6 +19,7 @@ from collections import defaultdict
 from datetime import date, datetime
 from typing import Any, Dict, List, Optional
 
+from billiard.exceptions import SoftTimeLimitExceeded
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.memory.emotion.emotion_buckets import (
@@ -378,6 +379,25 @@ class MemoryEngineDisplayService:
             return
         await _persist_events(end_user_id, [event])
 
+    @staticmethod
+    async def save_personality_anchor_event(
+        end_user_id: str,
+        batch_id: str,
+        candidate_count: int,
+    ) -> None:
+        """首次发布待确认候选后，按批次写入活动展示事件。"""
+        operation_id = uuid.uuid5(
+            _ENGINE_EVENT_NAMESPACE, f"personality_anchor:{end_user_id}:{batch_id}"
+        )
+        await _persist_events(
+            end_user_id,
+            [{
+                "engine_type": "PERSONALITY_ANCHOR",
+                "details": {"candidate_count": candidate_count},
+            }],
+            operation_id=operation_id,
+        )
+
     # ──────────────────────────────────────────────
     # 查询侧：聚合事件并生成卡片
     # ──────────────────────────────────────────────
@@ -505,6 +525,13 @@ async def _persist_events(
             f"operation_ids={[str(r.operation_id) for r in records]}, "
             f"engines={[d['engine_type'] for d in events_data]}"
         )
+    except SoftTimeLimitExceeded:
+        logger.warning(
+            "[EngineDisplay] PG 展示写入期间收到任务软超时: end_user_id=%s, engines=%s",
+            end_user_id,
+            [event["engine_type"] for event in events_data],
+        )
+        raise
     except Exception as e:
         logger.error(
             f"[EngineDisplay] PG 写入失败: end_user_id={end_user_id}, error={e}",
@@ -1256,6 +1283,9 @@ def _merge_event_details(
             "grounded_memory_count": grounded_memory_count,
         }
 
+    elif engine_type == "PERSONALITY_ANCHOR":
+        return {"candidate_count": sum(event.details["candidate_count"] for event in events)}
+
     return {}
 
 
@@ -1495,6 +1525,10 @@ def _generate_card_text_zh(
                 f"最近一次模拟了 {rounds} 轮情景、结合了 {grounded} 条历史记忆。"
             )
         return name, content
+
+    elif engine_type == "PERSONALITY_ANCHOR":
+        count = merged["candidate_count"]
+        return "我生成了待确认的人格候选", f"这一天共生成了 {count} 条人格候选，供你确认。"
 
     return ("", "")
 
@@ -1786,6 +1820,13 @@ def _generate_card_text_en(
                 f"{_pluralize('memory', grounded, 'memories')}."
             )
         return name, content
+
+    if engine_type == "PERSONALITY_ANCHOR":
+        count = merged["candidate_count"]
+        return (
+            "I generated personality candidates for review",
+            f"I generated {count} personality {_pluralize('candidate', count)} for review that day.",
+        )
 
     return ("", "")
 
