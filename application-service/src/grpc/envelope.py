@@ -8,6 +8,8 @@ from typing import Any, NoReturn
 from fastapi.encoders import jsonable_encoder
 from memorybear_grpc.errors import error_trailers, grpc_status_for_http
 
+import grpc
+
 from ..api.error_handlers import auth_rejection_content
 
 
@@ -33,4 +35,11 @@ async def abort_with(context, http_status: int, content: dict[str, Any]) -> NoRe
     raise AssertionError("grpc abort returned")
 
 
-__all__ = ["abort_with", "auth_rejection_content", "json_bytes"]
+async def abort_cancelled(context) -> NoReturn:
+    """Terminate the RPC as CANCELLED with no trailers (499, client disconnect)."""
+
+    await context.abort(grpc.StatusCode.CANCELLED, "")
+    raise AssertionError("grpc abort returned")
+
+
+__all__ = ["abort_cancelled", "abort_with", "auth_rejection_content", "json_bytes"]

@@ -21,6 +21,7 @@ from .conversation_state_manager import (
 )
 from ..errors import BusinessException, ResourceNotFoundException
 from ..errors import BizCode
+from ..integrations.model.errors import ModelInvokeCancelledError
 from ..utils.datetime_utils import utcnow_naive
 from ..repositories.tool_repository import ToolRepository
 from .model_service import ModelApiKeyService, ModelConfigService
@@ -1683,6 +1684,20 @@ class MultiAgentOrchestrator:
                 }
             )
 
+        except ModelInvokeCancelledError:
+            # 499 client-disconnect semantics: no error frame. Finalize the
+            # master execution record and re-raise so the streaming consumer
+            # can end the SSE cleanly instead of persisting partial content.
+            logger.info(
+                "多 Agent 任务取消（客户端断开或服务端静默中止）",
+                extra={"mode": self._normalized_mode},
+            )
+            await self._finalize_master_execution(
+                status="failed",
+                elapsed_time=time.time() - start_time,
+                error_message="执行被取消（客户端断开或服务端静默中止）",
+            )
+            raise
         except Exception as e:
             logger.error(
                 "多 Agent 任务执行失败（流式）",
@@ -4017,16 +4032,26 @@ class MultiAgentOrchestrator:
     def _is_retryable(exc: BaseException) -> bool:
         """Only **transient** failures are worth retrying.
 
-        Three classes are not retried:
+        Four classes are not retried:
         1. `BusinessException` — missing config / validation failure; a rerun fails the
            same way and only burns quota;
         2. `asyncio.CancelledError` — cancellation is external intent; swallowing it
            would break graceful shutdown;
-        3. Timeout (`TimeoutError`) — the LLM was too slow; a retry usually just waits
+        3. `ModelInvokeCancelledError` — the caller is gone or the service aborted the
+           RPC (499); there is nobody left to consume a retry;
+        4. Timeout (`TimeoutError`) — the LLM was too slow; a retry usually just waits
            for another timeout, and making a request that already waited 60s wait
            another 60s feels like a total freeze to the user.
         """
-        if isinstance(exc, (asyncio.CancelledError, TimeoutError, asyncio.TimeoutError)):
+        if isinstance(
+            exc,
+            (
+                asyncio.CancelledError,
+                TimeoutError,
+                asyncio.TimeoutError,
+                ModelInvokeCancelledError,
+            ),
+        ):
             return False
         if isinstance(exc, BusinessException):
             return False
@@ -4690,6 +4715,23 @@ class MultiAgentOrchestrator:
                     )
                     active_execution_id = None
 
+        except ModelInvokeCancelledError:
+            # 499 client-disconnect semantics: no error frame. Close the active
+            # sub-agent record, then re-raise so the consumer ends the SSE
+            # cleanly instead of persisting partial content.
+            logger.info("Collaboration 模式执行取消（客户端断开或服务端静默中止）")
+            try:
+                if active_execution_id is not None:
+                    await self._close_collaboration_activation(
+                        active_execution_id,
+                        "failed",
+                        time.time() - active_started_at,
+                        token_usage={"total_tokens": active_tokens},
+                        error_message="执行被取消（客户端断开或服务端静默中止）",
+                    )
+            except Exception:
+                pass
+            raise
         except Exception as e:
             logger.error(f"Collaboration 模式执行失败: {str(e)}", exc_info=True)
             # Close any sub-agent record still "activating" so its status never stays

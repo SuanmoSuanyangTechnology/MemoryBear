@@ -26,6 +26,7 @@ import json
 import logging
 import re
 import uuid
+from datetime import timedelta
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, Request
@@ -1108,8 +1109,13 @@ def get_conversation(
         for m in (group if isinstance(group, list) else [group])
         if m.created_at is not None
     ]
-    window_start = min(page_times) if page_times else None
+    window_start = min(page_times) - timedelta(minutes=5) if page_times else None
     window_end = max(page_times) if page_times else None
+    page_message_ids = {
+        str(m.id)
+        for group in messages
+        for m in (group if isinstance(group, list) else [group])
+    }
 
     # Human-intervention data aggregated across the page's executions,
     # keyed by message id: { message_id: { execution_id, status,
@@ -1130,7 +1136,7 @@ def get_conversation(
         if not intr_ctx:
             continue
         message_id = intr_ctx.get("message_id")
-        if not message_id:
+        if not message_id or str(message_id) not in page_message_ids:
             continue
 
         resolved_list = intr_ctx.get("resolved_interventions") or []

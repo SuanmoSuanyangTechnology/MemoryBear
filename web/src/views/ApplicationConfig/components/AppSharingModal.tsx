@@ -54,7 +54,7 @@ const AppSharingModal = forwardRef<AppSharingModalRef, AppSharingModalProps>(({ 
         form={form}
         onFinish={submit}
         initialValues={{
-          resource_center: { enabled: false, allow_editable: false },
+          resource_center: { enabled: true, allow_editable: false },
           // community_market: { enabled: false }
         }}
       >
@@ -87,6 +87,7 @@ const AppSharingModal = forwardRef<AppSharingModalRef, AppSharingModalProps>(({ 
             title={t('resourceSharing.catalog')}
             desc={t('application.catalogDesc')}
             name={['resource_center', 'enabled']}
+            disabled={true}
           />
           <div className="rb:border-t rb:border-gray-100 rb:my-3" />
           <SwitchFormItem

@@ -84,7 +84,13 @@ export enum SkillFormat {
     Legacy = "legacy",
     Standard = "standard",
 }
-
+export interface UnavailableTool {
+  tool_id: string;
+  operation: string | null;
+  name: string | null;
+  status: string | null;
+  reason: string | null;
+}
 
 // List
 export interface LegacySkill {
@@ -118,6 +124,8 @@ export interface LegacySkill {
   is_active: boolean;
   /** Whether the skill is publicly accessible */
   is_public: boolean;
+  is_usable: boolean;
+  unavailable_tools?: UnavailableTool[];
 }
 export interface Skill extends LegacySkill {
   /**
@@ -168,7 +176,6 @@ export interface Skill extends LegacySkill {
    * Update time (millisecond timestamp)
    */
   updated_at?: number;
-
 }
 
 

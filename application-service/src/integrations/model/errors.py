@@ -20,6 +20,14 @@ class ModelServiceUnavailableError(ModelServiceClientError):
     """The model service could not be reached."""
 
 
+class ModelInvokeCancelledError(ModelServiceClientError):
+    """The invoke was cancelled: the caller went away or the service aborted the RPC.
+
+    Not a failure. Boundaries must follow the 499 client-disconnect semantics:
+    log only, never emit an error frame or retry.
+    """
+
+
 class ModelServiceTimeoutError(ModelServiceClientError):
     """The model service did not respond before the configured timeout."""
 

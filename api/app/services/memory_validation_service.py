@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import html
-import re
 import time
 import uuid
 from collections.abc import AsyncIterator
@@ -386,10 +385,8 @@ class MemoryValidationService:
                     yield heartbeat
                 answer = await running_task
                 running_task = None
-                references = list(dict.fromkeys(int(number) for number in re.findall(r"\[(\d+)\]", answer)))
-                if not references or any(number < 1 or number > len(items) for number in references):
-                    raise BusinessException("回答引用无效，请重新验证", BizCode.MEMORY_READ_FAILED,
-                                            context={"reason": "invalid_citation"})
+                if not answer.strip():
+                    raise ValueError("Community answer is empty")
                 failure_reason = "dependency_failed"
                 running_task = asyncio.create_task(self.session_cache.append_many([
                     {"role": "user", "content": self.user_input.message},

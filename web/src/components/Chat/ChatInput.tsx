@@ -75,6 +75,7 @@ const ChatInput: FC<ChatInputProps> = ({
           value={inputValue}
           className="rb:m-[10px_12px_10px_12px]! rb:p-0! rb:w-[calc(100%-24px)]! rb:flex-[1_1_auto] rb:h-15! rb:resize-none! rb:rounded-none!"
           variant="borderless"
+          aria-label="Chat message input"
           onChange={(e) => {
             setInputValue(e.target.value)
             onChange?.(e.target.value)

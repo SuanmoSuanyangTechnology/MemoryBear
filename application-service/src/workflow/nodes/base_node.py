@@ -19,6 +19,7 @@ from ..error_info import workflow_error_info
 from ...utils.workflow_node_types import BRANCH_NODES
 from ..variable.base_variable import VariableType, FileObject
 from ...db import get_async_db_context
+from ...integrations.model.errors import ModelInvokeCancelledError
 from ...repositories.tool_repository import ToolRepository
 from ...schemas import FileInput
 from ...schemas.model_schema import ModelInfo
@@ -433,6 +434,8 @@ class BaseNode(ABC):
             )
         except GraphInterrupt:
             raise
+        except ModelInvokeCancelledError:
+            raise
         except Exception as e:
             elapsed_time = (time.time() - start_time) * 1000
             logger.error(
@@ -628,6 +631,9 @@ class BaseNode(ABC):
             raise
         except GeneratorExit:
             rollback_provisional("generator_exit")
+            raise
+        except ModelInvokeCancelledError:
+            rollback_provisional("cancelled")
             raise
         except Exception as e:
             rollback_provisional("node_error")

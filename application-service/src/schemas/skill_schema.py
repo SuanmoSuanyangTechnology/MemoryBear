@@ -59,6 +59,17 @@ class Skill(BaseModel):
     prompt: Optional[str] = None
     is_active: bool = True
     is_public: bool = False
+    # 派生可用性（不落库）：`is_active` 只表示技能行本身存活，关联工具被删/停用后
+    # 技能实际已不可执行，但行状态不会跟着变。由服务层按 tool_id 实时回查工具状态，
+    # 工具恢复后自动跟随，不会出现库里说不可用、实际已修好的不一致。
+    is_usable: bool = Field(True, description="是否可执行：is_active 且关联工具全部可用")
+    unavailable_tools: List[Dict[str, Any]] = Field(
+        default_factory=list,
+        description=(
+            "导致技能不可用的关联工具明细；每项含 tool_id / operation / name / "
+            "status / reason。standard 技能不绑定工具，恒为空"
+        ),
+    )
     created_at: datetime
     updated_at: datetime
 

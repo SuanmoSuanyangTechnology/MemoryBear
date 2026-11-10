@@ -19,6 +19,7 @@ from dataclasses import dataclass
 from typing import Annotated
 from uuid import UUID
 
+from error_core.codes import coerce_code
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
@@ -27,6 +28,7 @@ from ...db import detach_instances, get_async_db_context, get_db_context
 from ...errors import BizCode, BusinessException, ResourceNotFoundException
 from ...guards.workspace_access import require_workspace_access
 from ...i18n import get_current_locale
+from ...integrations.model.errors import ModelInvokeCancelledError
 from ...models import (
     AgentConfig,
     App,
@@ -167,10 +169,12 @@ async def _load_draft_run_app_snapshot(
     """
     async with get_async_db_context() as db:
         app = await db.scalar(
-            select(App).where(App.id == app_id).limit(1)
+            select(App).where(App.id == app_id, App.is_active.is_(True)).limit(1)
         )
         if not app:
-            raise BusinessException("应用不存在", BizCode.NOT_FOUND)
+            raise ResourceNotFoundException(
+                "应用", str(app_id), code=BizCode.APP_NOT_FOUND
+            )
 
         resolved_release_id = app.current_release_id
         if workspace_id is not None and app.workspace_id != workspace_id:
@@ -517,18 +521,26 @@ async def draft_run(
 
             async def event_generator():
                 _wf_service = WorkflowService()
-                async for event in _wf_service.run_stream(
-                        app_id=app_id,
-                        payload=payload,
-                        config=config,
-                        workspace_id=workspace_id,
-                        source=source,
-                        trigger_payload=payload.trigger_payload
-                ):
-                    event_type = event.get("event", "message")
-                    event_data = event.get("data", {})
-                    sse_message = f"event: {event_type}\ndata: {json.dumps(event_data)}\n\n"
-                    yield sse_message
+                try:
+                    async for event in _wf_service.run_stream(
+                            app_id=app_id,
+                            payload=payload,
+                            config=config,
+                            workspace_id=workspace_id,
+                            source=source,
+                            trigger_payload=payload.trigger_payload
+                    ):
+                        event_type = event.get("event", "message")
+                        event_data = event.get("data", {})
+                        sse_message = f"event: {event_type}\ndata: {json.dumps(event_data)}\n\n"
+                        yield sse_message
+                except ModelInvokeCancelledError:
+                    # 499 client-disconnect semantics: log only; the execution
+                    # is already marked cancelled, no error frame is emitted.
+                    logger.info(
+                        "工作流流式试运行取消",
+                        extra={"app_id": str(app_id)},
+                    )
 
             return sse_response(event_generator())
 
@@ -551,6 +563,7 @@ async def draft_run(
                 workspace_id,
                 source=source,
                 trigger_payload=payload.trigger_payload,
+                include_failure_diagnostic=True,
             )
 
             logger.debug(
@@ -560,6 +573,15 @@ async def draft_run(
                     "has_response": "response" in result if isinstance(result, dict) else False
                 }
             )
+            if result.get("status") == "failed":
+                # A failed execution is a failure, not a successful call carrying
+                # a failed payload (§4.1): surface it as the error envelope so the
+                # HTTP status, localized msg and diagnostic follow the contract.
+                numeric = coerce_code(result.get("code")) or BizCode.INTERNAL_ERROR.value
+                raise BusinessException(
+                    result.get("error") or result.get("msg") or "工作流执行失败",
+                    numeric,
+                )
             return success(
                 data=result,
                 msg="工作流任务执行成功"
@@ -591,22 +613,30 @@ async def draft_run(
             source = HitLogSource.EXTERNAL if is_shared else HitLogSource.CONSOLE
 
             async def event_generator():
-                async with get_async_db_context() as stream_db:
-                    _draft_service = AgentRunService(stream_db)
-                    async for event in _draft_service.run_stream(
-                            agent_config=agent_cfg,
-                            model_config=model_config,
-                            message=payload.message,
-                            workspace_id=workspace_id,
-                            conversation_id=payload.conversation_id,
-                            user_id=payload.user_id or current_user_id,
-                            variables=payload.variables,
-                            storage_type=storage_type,
-                            user_rag_memory_id=user_rag_memory_id,
-                            files=payload.files,
-                            source=source,
-                    ):
-                        yield event
+                try:
+                    async with get_async_db_context() as stream_db:
+                        _draft_service = AgentRunService(stream_db)
+                        async for event in _draft_service.run_stream(
+                                agent_config=agent_cfg,
+                                model_config=model_config,
+                                message=payload.message,
+                                workspace_id=workspace_id,
+                                conversation_id=payload.conversation_id,
+                                user_id=payload.user_id or current_user_id,
+                                variables=payload.variables,
+                                storage_type=storage_type,
+                                user_rag_memory_id=user_rag_memory_id,
+                                files=payload.files,
+                                source=source,
+                        ):
+                            yield event
+                except ModelInvokeCancelledError:
+                    # 499 client-disconnect semantics: log only; the stream
+                    # closes without an error frame.
+                    logger.info(
+                        "Agent 流式试运行取消",
+                        extra={"app_id": str(app_id)},
+                    )
 
             return sse_response(event_generator())
 
@@ -717,6 +747,13 @@ async def draft_run(
                                 user_rag_memory_id=user_rag_memory_id
                         ):
                             yield event
+                except ModelInvokeCancelledError:
+                    # 499 client-disconnect semantics: log only; the stream
+                    # closes without an error frame.
+                    logger.info(
+                        "多智能体流式试运行取消",
+                        extra={"app_id": str(app_id)},
+                    )
                 except Exception as e:
                     # The response is already committed as 200 once streaming
                     # starts; without an error frame the client sees an empty

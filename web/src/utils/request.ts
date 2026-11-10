@@ -1,9 +1,3 @@
-/*
- * @Author: ZhaoYing 
- * @Date: 2026-02-02 16:35:15 
- * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-08 16:12:25
- */
 /**
  * HTTP Request Utility Module
  * 
@@ -18,11 +12,24 @@
  */
 
 import axios from 'axios';
-import type { AxiosRequestConfig } from 'axios';
+import type { AxiosRequestConfig, InternalAxiosRequestConfig } from 'axios';
 import { clearAuthData } from './auth';
 import { message } from 'antd';
 import { refreshTokenUrl, refreshToken, loginUrl, logoutUrl } from '@/api/user'
 import i18n from '@/i18n'
+
+/**
+ * Handle logout: clear auth data, show warning message, redirect to login page
+ */
+export const handleLogout = (msg?: string) => {
+  clearAuthData();
+  if (msg) {
+    message.warning(msg);
+  }
+  if (!window.location.hash.includes('#/login')) {
+    window.location.href = `/#/login`;
+  }
+};
 
 /**
  * Standard API response structure
@@ -58,7 +65,7 @@ export const setLastTraceId = (id: string) => { lastTraceId = id }
 export const getLastRetryAfter = () => lastRetryAfter
 export const setLastRetryAfter = (seconds: number) => { lastRetryAfter = seconds }
 
-const RATE_LIMIT_CODES = new Set([3014, 3015, 3016, 3017, 10004])
+const RATE_LIMIT_CODES = new Set([3014, 3015, 3016, 3017, 3019, 10004])
 
 const parseRetryAfter = (value: unknown): number => {
   if (!value) return 0
@@ -104,15 +111,58 @@ let requests: RequestQueueItem[] = [];
 // Request interceptor
 service.interceptors.request.use(
   (config) => {
-    if (!config.headers.Authorization) {
+    if (!config.headers.Authorization && !config.url?.includes('/public') && !config.url?.includes('/storage/files')) {
       const token = cookieUtils.get('authToken');
+      const refresh_token = cookieUtils.get('refreshToken');
       if (token) {
         config.headers.Authorization = `Bearer ${token}`;
+      } else if (refresh_token) {
+        if (config.url === refreshTokenUrl || config.url === loginUrl || config.url === logoutUrl || config.url?.includes('/public')) {
+          return config;
+        }
+        if (isRefreshing) {
+          return new Promise<InternalAxiosRequestConfig>((resolve) => {
+            requests.push({
+              config,
+              resolve: (newToken: string) => {
+                config.headers = config.headers || {};
+                config.headers.Authorization = `Bearer ${newToken}`;
+                resolve(config);
+              },
+              reject: () => resolve(config),
+            });
+          });
+        }
+        isRefreshing = true;
+        return tokenRefresh().then((newToken) => {
+          requests.forEach(({ config: queuedConfig, resolve }) => {
+            queuedConfig.headers = queuedConfig.headers || {};
+            queuedConfig.headers.Authorization = `Bearer ${newToken}`;
+            resolve(newToken);
+          });
+          requests = [];
+          config.headers = config.headers || {};
+          config.headers.Authorization = `Bearer ${newToken}`;
+          return config;
+        }).catch(() => {
+          requests.forEach(({ reject }) => reject(new Error('refresh failed')));
+          requests = [];
+          return config;
+        }).finally(() => {
+          isRefreshing = false;
+        });
+      } else {
+        if (config.url === refreshTokenUrl || config.url === loginUrl || config.url === logoutUrl || config.url?.includes('/public')) {
+          return config;
+        }
+        handleLogout();
+        return Promise.reject({ msg: i18n.t('common.loginExpired') });
       }
     }
     const language = localStorage.getItem('language')
     const timeZone = localStorage.getItem('timeZone')
     config.headers['X-Language-Type'] = language || 'en';
+    config.headers['Accept-Language'] = language || 'en';
     config.headers['X-Timezone'] = timeZone || 'Asia/Shanghai'
     config.headers.Cookie = undefined
     return config;
@@ -143,11 +193,12 @@ const tokenRefresh = async (): Promise<string> => {
     cookieUtils.set('authToken', newToken);
     cookieUtils.set('refreshToken', response.refresh_token);
     return newToken;
-  } catch (error) {
-    // If refresh API also returns 401, logout
+  } catch (error: any) {
+    if (error?.code === 2001 || error?.response?.data?.code === 2001) {
+      throw error;
+    }
     clearAuthData();
     message.warning(i18n.t('common.loginExpired'));
-    // Redirect to login page
     if (!window.location.hash.includes('#/login')) {
       window.location.href = `/#/login`;
     }
@@ -179,24 +230,32 @@ service.interceptors.response.use(
           }
           return Promise.reject(responseData);
         }
+        if (response.config?.url === refreshTokenUrl) {
+          return Promise.reject(responseData);
+        }
+        return handle401Error(response.config);
+      case 2002:
+      case 2003:
+        return handle401Error(response.config);
+      case 2004:
         clearAuthData();
-        message.warning(responseData.msg);
+        message.warning(responseData.msg || i18n.t('common.loginExpired'));
         if (!window.location.hash.includes('#/login')) {
           window.location.href = `/#/login`;
         }
         return Promise.reject(responseData);
-      case 2002:
-        if (responseData.msg) {
-          message.warning(responseData.msg);
+      case 4009:
+        clearAuthData();
+        message.warning(responseData.msg || i18n.t('common.permissionDenied'));
+        if (!window.location.hash.includes('#/login')) {
+          window.location.href = `/#/login`;
         }
         return Promise.reject(responseData);
-      case 2003:
-        return handle401Error(response.config);
       default:
         if (code === undefined) {
           return responseData;
         }
-        if (RATE_LIMIT_CODES.has(code)) {
+        if (isRateLimitCode(code)) {
           const retryAfter = parseRetryAfter(response.headers?.['retry-after'] || response.headers?.['Retry-After'])
           if (retryAfter) lastRetryAfter = retryAfter
         }
@@ -214,7 +273,7 @@ service.interceptors.response.use(
     const errTraceId = error.response?.headers?.['x-trace-id'] || error.response?.headers?.['X-Trace-Id']
     if (errTraceId) lastTraceId = errTraceId
 
-    let msg = error.response?.data?.msg || error.response?.msg;
+    let msg = error.response?.data?.msg || error.response?.msg || error.msg;
 
     if (error.response?.data instanceof Blob) {
       try {
@@ -231,11 +290,11 @@ service.interceptors.response.use(
     switch (status) {
       case 401:
         if (error.config?.url === refreshTokenUrl) {
-          clearAuthData();
-          message.warning(error.response?.data?.msg || i18n.t('common.loginExpired'));
-          if (!window.location.hash.includes('#/login')) {
-            window.location.href = `/#/login`;
+          if (errorCode === 2001) {
+            message.warning(error.response?.data?.msg || i18n.t('common.serviceUpgrading'));
+            return Promise.reject(error);
           }
+          handleLogout(error.response?.data?.msg || i18n.t('common.loginExpired'));
           return Promise.reject(error);
         }
         if (errorCode === 2001) {
@@ -243,15 +302,25 @@ service.interceptors.response.use(
             message.warning(error.response?.data?.msg || i18n.t('common.loginRequired'));
             return Promise.reject(error);
           }
-          clearAuthData();
-          message.warning(error.response?.data?.msg || i18n.t('common.loginRequired'));
-          if (!window.location.hash.includes('#/login')) {
-            window.location.href = `/#/login`;
-          }
-          return Promise.reject(error);
+          return handle401Error(error.config);
         }
         if (errorCode === 2002) {
-          message.warning(error.response?.data?.msg || i18n.t('common.invalidCredentials'));
+          return handle401Error(error.config);
+        }
+        if (errorCode === 2004) {
+          if (isPublicApi) {
+            message.warning(error.response?.data?.msg || i18n.t('common.loginExpired'));
+            return Promise.reject(error);
+          }
+          handleLogout(error.response?.data?.msg || i18n.t('common.loginExpired'));
+          return Promise.reject(error);
+        }
+        if (errorCode === 4009) {
+          if (isPublicApi) {
+            message.warning(error.response?.data?.msg || i18n.t('common.permissionDenied'));
+            return Promise.reject(error);
+          }
+          handleLogout(error.response?.data?.msg || i18n.t('common.permissionDenied'));
           return Promise.reject(error);
         }
         if (isPublicApi) {
@@ -266,16 +335,18 @@ service.interceptors.response.use(
         msg = msg || i18n.t('common.apiNotFound');
         break;
       case 429:
-        msg = msg || i18n.t('common.tooManyRequests');
+      case 503: {
+        msg = msg || (status === 429 ? i18n.t('common.tooManyRequests') : i18n.t('common.serviceUpgrading'));
         const retryAfter = parseRetryAfter(error.response?.headers?.['retry-after'] || error.response?.headers?.['Retry-After'])
         if (retryAfter) lastRetryAfter = retryAfter
         break;
+      }
       case 500:
       case 502:
         msg = msg || i18n.t('common.serviceUpgrading');
         break;
       case 504:
-        msg = msg || i18n.t('common.serverError');
+        msg = msg || i18n.t('common.serviceUpgrading');
         break;
       default:
         if (!msg && Array.isArray(error.response?.data?.detail)) {
@@ -344,12 +415,14 @@ const handle401Error = async (config: AxiosRequestConfig): Promise<unknown> => {
     config.headers = config.headers || {};
     config.headers.Authorization = `Bearer ${newToken}`;
     return service(config);
-  } catch (error) {
-    // Token refresh failed, clear queue and reject all requests
+  } catch (error: any) {
     requests.forEach(({ reject }) => {
       reject(error as Error);
     });
     requests = [];
+    if (error?.code === 2001 || error?.response?.data?.code === 2001) {
+      message.warning(error?.msg || error?.response?.data?.msg || i18n.t('common.serviceUpgrading'));
+    }
     return Promise.reject(error);
   } finally {
     isRefreshing = false;

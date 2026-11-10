@@ -389,6 +389,70 @@ export function useChatMessages() {
     }))
   }
 
+  /** 合并更早的消息到列表头部 */
+  const applyEarlierMessages = (response: { messages: ChatItem[]; pending_intervention?: Record<string, any> }) => {
+    const messages = response?.messages || []
+    const historyAudioUrls = new Set(messages.map(m => m.meta_data?.audio_url).filter(Boolean))
+    audioPollingRef.current.forEach((timer, key) => {
+      if (!historyAudioUrls.has(key)) {
+        clearInterval(timer)
+        audioPollingRef.current.delete(key)
+      }
+    })
+    messages.forEach(msg => {
+      if (Array.isArray(msg)
+        ? msg.some(item => item.is_current && item.role === 'assistant' && item.meta_data?.audio_url && item.meta_data?.audio_status === 'pending')
+        : msg.role === 'assistant' && msg.meta_data?.audio_url && msg.meta_data?.audio_status === 'pending'
+      ) {
+        const audio_url = Array.isArray(msg) ? msg.find(item => item.is_current)?.meta_data?.audio_url : msg.meta_data?.audio_url
+        startAudioPolling(audio_url, audio_url)
+      }
+    })
+    const processedMessages = messages.map(msg => {
+      if (Array.isArray(msg)) {
+        return msg.map(item => {
+          if (item.role === 'assistant' && item.meta_data?.audio_url && audioPollingRef.current.has(item.meta_data.audio_url)) {
+            const pendingIntervention = item.id ? response?.pending_intervention?.[item.id] || {} : {}
+            item.interventions = (pendingIntervention.interventions || []).map((intervention: Intervention) => ({
+              ...intervention,
+              execution_id: pendingIntervention.execution_id,
+            }))
+            return { ...item, meta_data: { ...item.meta_data } }
+          }
+          return item
+        })
+      } else if (msg.role === 'assistant' && msg.meta_data?.audio_url && audioPollingRef.current.has(msg.meta_data.audio_url)) {
+        const pendingIntervention = msg.id ? response?.pending_intervention?.[msg.id] || {} : {}
+        msg.interventions = (pendingIntervention.interventions || []).map((intervention: Intervention) => ({
+          ...intervention,
+          execution_id: pendingIntervention.execution_id,
+        }))
+        return { ...msg, meta_data: { ...msg.meta_data } }
+      } else if (msg.role === 'assistant') {
+        const pendingIntervention = msg.id ? response?.pending_intervention?.[msg.id] || {} : {}
+        msg.interventions = (pendingIntervention.interventions || []).map((intervention: Intervention) => ({
+          ...intervention,
+          execution_id: pendingIntervention.execution_id,
+        }))
+        return { ...msg, meta_data: { ...msg.meta_data } }
+      }
+      msg.status = msg.role === 'user' ? undefined : msg.status
+      return msg
+    })
+    setChatList(prev => {
+      // Keep opening statement messages at the beginning
+      const openingMessages = prev.filter(item => {
+        const msg = Array.isArray(item) ? item.find(i => i.is_current) : item
+        return msg?.role === 'system' && msg?.content?.includes('opening')
+      })
+      const currentMessages = prev.filter(item => {
+        const msg = Array.isArray(item) ? item.find(i => i.is_current) : item
+        return !(msg?.role === 'system' && msg?.content?.includes('opening'))
+      })
+      return [...openingMessages, ...processedMessages, ...currentMessages]
+    })
+  }
+
   return {
     chatList,
     setChatList,
@@ -401,5 +465,6 @@ export function useChatMessages() {
     updateAssistantReasoningMessage,
     updateAssistantMemoryRetrieval,
     applyChatDetail,
+    applyEarlierMessages,
   }
 }

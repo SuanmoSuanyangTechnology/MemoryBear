@@ -6,14 +6,14 @@
 
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Button, App, Select, Space, Dropdown, type SegmentedProps, Flex, Form } from 'antd';
+import { Button, App, Select, Space, Dropdown, type SegmentedProps, Flex, Form, message } from 'antd';
 import clsx from 'clsx';
 import { useSearchParams } from 'react-router-dom'
 
 import ApplicationModal from './components/ApplicationModal';
 import type { Application, ApplicationModalRef, Query, UploadWorkflowModalRef } from './types';
 import SearchInput from '@/components/SearchInput'
-import { getApplicationListUrl, deleteApplication, copyApplication } from '@/api/application'
+import { getApplicationListUrl, deleteApplication, deleteSpaceShare } from '@/api/application'
 import PageScrollList, { type PageScrollListRef } from '@/components/PageScrollList'
 import { formatDateTime } from '@/utils/format';
 import UploadWorkflowModal from './components/UploadWorkflowModal'
@@ -48,13 +48,27 @@ const ApplicationManagement: React.FC = () => {
   const uploadModalRef = useRef<UploadWorkflowModalRef>(null);
   const [form] = Form.useForm<Query>()
   const query = Form.useWatch([], form)
-  const [activeTab, setActiveTab] = useState('apps');
+  const [activeTab, setActiveTab] = useState(() => {
+    const pendingTab = localStorage.getItem('pendingAppTab');
+    if (pendingTab && tabKeys.includes(pendingTab)) {
+      localStorage.removeItem('pendingAppTab');
+      return pendingTab;
+    }
+    return 'apps';
+  });
 
   useEffect(() => {
     // Convert URLSearchParams to a plain object for easier access
     const data = Object.fromEntries(searchParams)
     const { type } = data
     form.setFieldValue('type', type || undefined)
+    
+    // Check for pending tab from localStorage (set after workspace switch)
+    const pendingTab = localStorage.getItem('pendingAppTab');
+    if (pendingTab && tabKeys.includes(pendingTab)) {
+      localStorage.removeItem('pendingAppTab');
+      setActiveTab(pendingTab);
+    }
   }, [searchParams])
 
   /** Refresh application list */
@@ -89,8 +103,12 @@ const ApplicationManagement: React.FC = () => {
       cancelText: t('common.cancel'),
       okType: 'danger',
       onOk: () => {
-      deleteApplication(item.id)
+        const request = activeTab === 'sharing'
+          ? deleteSpaceShare(item.id)
+          : deleteApplication(item.id)
+      request
         .then(() => {
+          message.success(t('common.deleteSuccess'))
           refresh();
         })
         .catch(() => {
@@ -122,19 +140,6 @@ const ApplicationManagement: React.FC = () => {
   const handleChangeTab = (value: SegmentedProps['value']) => {
     setActiveTab(value as string);
     form.resetFields()
-  }
-  const handleCopy = (item: Application) => {
-    modal.confirm({
-      title: t('application.confirmCopyDesc', { app: item.name }),
-      okText: t('common.copy'),
-      cancelText: t('common.cancel'),
-      onOk: () => {
-        copyApplication(item.id)
-          .then(() => {
-            setActiveTab('apps')
-          })
-      }
-    });
   }
   const [focus, setFocus] = useState(false)
 
@@ -290,7 +295,7 @@ const ApplicationManagement: React.FC = () => {
                 item.is_shared
                   ? <Flex justify="space-between" gap={12}>
                     <RbButton block onClick={() => handleEdit(item)}>{t('common.view')}</RbButton>
-                    {item.share_permission === 'editable' && <RbButton type="primary" ghost className="rb:w-[calc(100%-46px)]" onClick={() => handleCopy(item)}>{t('common.copy')}</RbButton>}
+                    <RbButton danger block onClick={() => handleDelete(item)}>{t('common.remove')}</RbButton>
                   </Flex>
                   : <div className="rb:grid rb:grid-cols-2 rb:gap-3">
                     <RbButton danger block onClick={() => handleDelete(item)}>{t('common.delete')}</RbButton>

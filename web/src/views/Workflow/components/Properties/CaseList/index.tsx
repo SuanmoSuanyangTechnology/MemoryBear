@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-09 18:24:53 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-07-13 18:07:14
+ * @Last Modified time: 2026-11-10 14:09:37
  */
 import { useMemo, type FC } from 'react'
 import clsx from 'clsx'
@@ -379,7 +379,7 @@ const CaseList: FC<CaseListProps> = ({
                                 icon={<div className="rb:size-4 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/workflow/delete.svg')] rb:group-hover:bg-[url('@/assets/images/workflow/delete_hover.svg')]"></div>}
                                 onClick={() => handleRemoveCase(removeCase, caseField.name, caseIndex)}
                               >
-                                {t('common.remove')}
+                                {t('common.delete')}
                               </RbButton>
                             </Col>}
                           </Row>

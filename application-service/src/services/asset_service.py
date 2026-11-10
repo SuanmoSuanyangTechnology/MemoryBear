@@ -39,6 +39,7 @@ from ..models import (
     SkillPackage,
     SkillPlugin,
     ToolConfig,
+    ToolStatus,
     WorkflowConfig,
 )
 from ..models.app_asset_model import (
@@ -51,7 +52,9 @@ from ..models.app_asset_model import (
 from ..models.app_model import AppType
 from ..repositories import cross_domain_read
 from ..utils.datetime_utils import to_timestamp_ms, utcnow_naive
+from ..utils.redis_cache import delete_json
 from .app_service import AppService, _expand_usage_examples
+from .asset_release_resolver import app_cache_key
 from .detail_view import build_display_payload
 
 logger = logging.getLogger(__name__)
@@ -117,6 +120,7 @@ class AssetService:
             return None
 
         release = self._resolve_release(app, release_id)
+        self._assert_share_dependencies_available(release, tenant_id)
         return self._upsert_asset(
             app=app,
             release=release,
@@ -150,6 +154,7 @@ class AssetService:
         self._assert_can_share(app, user_id, workspace_id)
 
         release = self._resolve_release(app, release_id)
+        self._assert_share_dependencies_available(release, tenant_id)
         return self._upsert_asset(
             app=app,
             release=release,
@@ -232,10 +237,36 @@ class AssetService:
         )
         return asset
 
+    def invalidate_reference_runtime_caches(
+            self,
+            asset: AppAsset,
+            *,
+            extra_workspace_ids: set[uuid.UUID] | None = None,
+    ) -> int:
+        """Clear runtime caches for active references and just-removed references.
+
+        ``extra_workspace_ids`` covers a reference-to-copy upgrade: its installation
+        is already marked removed before commit, so it no longer appears in the
+        active-reference query but its source-app cache must still be deleted.
+        Redis failures are handled by ``delete_json`` and only fall back to TTL.
+        """
+
+        workspace_ids = set(self.db.scalars(
+            select(AppAssetInstallation.target_workspace_id).where(
+                AppAssetInstallation.asset_id == asset.id,
+                AppAssetInstallation.status == InstallStatus.ACTIVE,
+                AppAssetInstallation.link_mode == LinkMode.REFERENCE,
+            )
+        ).all())
+        workspace_ids.update(extra_workspace_ids or set())
+        for target_workspace_id in workspace_ids:
+            delete_json(app_cache_key(asset.source_app_id, target_workspace_id))
+        return len(workspace_ids)
+
     def _assert_can_share(
             self, app: App, user_id: uuid.UUID, workspace_id: uuid.UUID | None
     ) -> None:
-        """空间级决定：管理员或应用创建者才能把它放进租户资源中心。"""
+        """空间级决定：管理员、应用创建者或同租户超管才能共享该应用。"""
 
         if workspace_id is None:
             raise BusinessException(
@@ -245,10 +276,29 @@ class AssetService:
             return
         if cross_domain_read.is_workspace_manager(self.db, user_id, workspace_id):
             return
+        if self._is_tenant_superuser(user_id, workspace_id):
+            return
         raise BusinessException(
-            "只有空间管理员或应用创建者可以共享该应用",
+            "只有空间管理员、应用创建者或租户超级管理员可以共享该应用",
             BizCode.PERMISSION_DENIED,
         )
+
+    def _is_tenant_superuser(
+            self, user_id: uuid.UUID, workspace_id: uuid.UUID
+    ) -> bool:
+        """Whether the user is a superuser of the workspace's own tenant.
+
+        Keeps this gate on the same rule as the workspace guard
+        (`guards/workspace_access.py`): a superuser may enter any workspace of
+        their tenant, so refusing them a space-level action there would be
+        self-contradictory. Cross-tenant superusers stay denied.
+        """
+
+        user = cross_domain_read.get_user(self.db, user_id)
+        if user is None or not user.is_active or not user.is_superuser:
+            return False
+        workspace = cross_domain_read.get_workspace(self.db, workspace_id)
+        return workspace is not None and workspace.tenant_id == user.tenant_id
 
     def _resolve_release(self, app: App, release_id: uuid.UUID | None) -> AppRelease:
         target_id = release_id or app.current_release_id
@@ -268,6 +318,411 @@ class AssetService:
                 f"版本 {target_id} 不存在或已下线", BizCode.RELEASE_NOT_FOUND
             )
         return release
+
+    def _assert_share_dependencies_available(
+            self, release: AppRelease, tenant_id: uuid.UUID
+    ) -> None:
+        """Reject sharing a snapshot whose executable tools or skills are unavailable."""
+
+        tool_refs: list[dict[str, Any]] = []
+        skill_refs: list[dict[str, Any]] = []
+        unavailable: list[dict[str, Any]] = []
+        visited_releases: set[uuid.UUID] = set()
+        seen_refs: set[tuple[str, str, str]] = set()
+        seen_issues: set[tuple[str, str, str, str]] = set()
+
+        def add_ref(
+                bucket: list[dict[str, Any]],
+                kind: str,
+                raw_id: Any,
+                path: str,
+                operation: Any = None,
+        ) -> None:
+            if isinstance(raw_id, dict):
+                raw_id = raw_id.get("id") or raw_id.get(f"{kind}_id")
+            text = str(raw_id).strip() if raw_id is not None else ""
+            method = str(operation).strip() if operation is not None else ""
+            # `method` is part of the key: the same tool can be referenced twice
+            # under one path with different (or no) operation, and dropping the
+            # method-bearing entry would silently skip method-level validation.
+            key = (kind, text, path, method)
+            if key not in seen_refs:
+                seen_refs.add(key)
+                bucket.append({
+                    "id": _coerce_uuid(text),
+                    "raw_id": text or None,
+                    "path": path,
+                    # 选中具体方法时的 operation_key；整工具选择为 None
+                    "operation": method or None,
+                })
+
+        def add_issue(
+                kind: str,
+                raw_id: Any,
+                path: str,
+                reason: str,
+                name: str | None = None,
+        ) -> None:
+            text = str(raw_id).strip() if raw_id is not None else ""
+            key = (kind, text, path, reason)
+            if key in seen_issues:
+                return
+            seen_issues.add(key)
+            unavailable.append({
+                "kind": kind,
+                "id": text or None,
+                "name": name,
+                "path": path,
+                "reason": reason,
+            })
+
+        def inspect_agent_surface(
+                config: dict[str, Any], path: str, *, enabled_by_default: bool
+        ) -> None:
+            tools = config.get("tools")
+            if isinstance(tools, list):
+                for index, selector in enumerate(tools):
+                    if not isinstance(selector, dict):
+                        add_ref(tool_refs, "tool", None, f"{path}.tools[{index}]")
+                        continue
+                    if bool(selector.get("enabled", enabled_by_default)):
+                        add_ref(
+                            tool_refs,
+                            "tool",
+                            selector.get("tool_id"),
+                            f"{path}.tools[{index}]",
+                            selector.get("operation"),
+                        )
+
+            skills = config.get("skills")
+            if isinstance(skills, dict):
+                skill_ids = skills.get("skill_ids") or []
+                if not isinstance(skill_ids, list):
+                    add_ref(skill_refs, "skill", None, f"{path}.skills.skill_ids")
+                else:
+                    for index, skill_id in enumerate(skill_ids):
+                        add_ref(
+                            skill_refs,
+                            "skill",
+                            skill_id,
+                            f"{path}.skills.skill_ids[{index}]",
+                        )
+
+        def inspect_nested_release(
+                raw_id: Any, path: str, expected_app_id: Any = None
+        ) -> None:
+            release_id = _coerce_uuid(raw_id)
+            expected_id = _coerce_uuid(expected_app_id)
+            if release_id is None:
+                add_issue("agent_release", raw_id, path, "引用的 Agent 版本无效")
+                return
+            if expected_app_id is not None and expected_id is None:
+                add_issue("agent_release", raw_id, path, "引用的 Agent 应用无效")
+                return
+            nested = self.db.get(AppRelease, release_id)
+            if (
+                    nested is None
+                    or not nested.is_active
+                    or nested.type != AppType.AGENT
+                    or (expected_id is not None and nested.app_id != expected_id)
+            ):
+                add_issue(
+                    "agent_release", release_id, path, "引用的 Agent 版本不存在、已下线或归属错误"
+                )
+                return
+            nested_app = self.db.get(App, nested.app_id)
+            nested_tenant_id = (
+                cross_domain_read.get_workspace_tenant_id(self.db, nested_app.workspace_id)
+                if nested_app is not None and nested_app.is_active
+                else None
+            )
+            if (
+                    nested_app is None
+                    or not nested_app.is_active
+                    or nested_app.type != AppType.AGENT
+                    or nested_tenant_id != tenant_id
+            ):
+                add_issue(
+                    "agent_release", release_id, path, "引用的 Agent 应用不存在、已停用或跨租户"
+                )
+                return
+            inspect_release(nested, path)
+
+        def inspect_workflow_nodes(value: Any, path: str) -> None:
+            if isinstance(value, list):
+                for index, child in enumerate(value):
+                    inspect_workflow_nodes(child, f"{path}[{index}]")
+                return
+            if not isinstance(value, dict):
+                return
+
+            node_type = value.get("type")
+            node_config = value.get("config")
+            config_path = f"{path}.config"
+            if not isinstance(node_config, dict):
+                data = value.get("data")
+                node_config = data.get("config") if isinstance(data, dict) else None
+                config_path = f"{path}.data.config"
+
+            if node_type == "tool":
+                node_parameters = (
+                    node_config.get("tool_parameters")
+                    if isinstance(node_config, dict)
+                    else None
+                )
+                add_ref(
+                    tool_refs,
+                    "tool",
+                    node_config.get("tool_id") if isinstance(node_config, dict) else None,
+                    config_path,
+                    node_parameters.get("operation")
+                    if isinstance(node_parameters, dict)
+                    else None,
+                )
+            elif node_type == "agent" and isinstance(node_config, dict):
+                if node_config.get("mode", "inline") == "reference":
+                    reference = node_config.get("reference")
+                    reference = reference if isinstance(reference, dict) else {}
+                    inspect_nested_release(
+                        reference.get("release_id"),
+                        f"{config_path}.reference",
+                        reference.get("app_id"),
+                    )
+                else:
+                    inspect_agent_surface(
+                        node_config, config_path, enabled_by_default=True
+                    )
+
+            for key, child in value.items():
+                inspect_workflow_nodes(child, f"{path}.{key}")
+
+        def inspect_release(current: AppRelease, path: str) -> None:
+            if current.id in visited_releases:
+                return
+            visited_releases.add(current.id)
+            config = current.config if isinstance(current.config, dict) else {}
+
+            if current.type == AppType.AGENT:
+                inspect_agent_surface(config, path, enabled_by_default=False)
+            elif current.type in (AppType.WORKFLOW, AppType.PURE_WORKFLOW):
+                inspect_workflow_nodes(config.get("nodes") or [], f"{path}.nodes")
+            elif current.type == AppType.MULTI_AGENT:
+                supervisor = config.get("supervisor_config")
+                if isinstance(supervisor, dict):
+                    inspect_agent_surface(
+                        supervisor,
+                        f"{path}.supervisor_config",
+                        enabled_by_default=False,
+                    )
+                for index, entry in enumerate(config.get("sub_agents") or []):
+                    if not isinstance(entry, dict):
+                        add_issue(
+                            "agent_release",
+                            None,
+                            f"{path}.sub_agents[{index}]",
+                            "子 Agent 引用格式无效",
+                        )
+                        continue
+                    inspect_nested_release(
+                        entry.get("release_id"),
+                        f"{path}.sub_agents[{index}]",
+                        entry.get("agent_id"),
+                    )
+
+        inspect_release(release, "app")
+
+        valid_skill_refs: list[tuple[dict[str, Any], Skill]] = []
+        skill_ids = {ref["id"] for ref in skill_refs if ref["id"] is not None}
+        skill_rows = (
+            self.db.scalars(select(Skill).where(Skill.id.in_(skill_ids))).all()
+            if skill_ids
+            else []
+        )
+        skills_by_id = {row.id: row for row in skill_rows}
+        for ref in skill_refs:
+            skill = skills_by_id.get(ref["id"])
+            if ref["id"] is None or skill is None:
+                add_issue("skill", ref["raw_id"], ref["path"], "技能不存在")
+            elif skill.tenant_id != tenant_id and not skill.is_public:
+                add_issue("skill", ref["raw_id"], ref["path"], "无权访问该技能")
+            elif (
+                    skill.tenant_id != tenant_id
+                    and (skill.skill_format or "legacy") == "standard"
+            ):
+                add_issue(
+                    "skill",
+                    ref["raw_id"],
+                    ref["path"],
+                    "跨租户标准技能运行时不可用",
+                    skill.name,
+                )
+            elif not skill.is_active:
+                add_issue(
+                    "skill", ref["raw_id"], ref["path"], "技能已删除或停用", skill.name
+                )
+            else:
+                valid_skill_refs.append((ref, skill))
+
+        package_ids = {
+            skill.package_id
+            for _, skill in valid_skill_refs
+            if (skill.skill_format or "legacy") == "standard" and skill.package_id
+        }
+        package_rows = (
+            self.db.scalars(
+                select(SkillPackage).where(SkillPackage.id.in_(package_ids))
+            ).all()
+            if package_ids
+            else []
+        )
+        packages_by_id = {row.id: row for row in package_rows}
+        plugin_ids = {row.plugin_id for row in package_rows if row.plugin_id}
+        plugin_rows = (
+            self.db.scalars(
+                select(SkillPlugin).where(SkillPlugin.id.in_(plugin_ids))
+            ).all()
+            if plugin_ids
+            else []
+        )
+        plugins_by_id = {row.id: row for row in plugin_rows}
+
+        for ref, skill in valid_skill_refs:
+            if (skill.skill_format or "legacy") == "standard":
+                package = packages_by_id.get(skill.package_id)
+                if (
+                        skill.package_id is None
+                        or package is None
+                        or not package.is_active
+                        or package.tenant_id != skill.tenant_id
+                ):
+                    add_issue(
+                        "skill",
+                        ref["raw_id"],
+                        ref["path"],
+                        "标准技能包不存在或已停用",
+                        skill.name,
+                    )
+                    continue
+                if package.plugin_id:
+                    plugin = plugins_by_id.get(package.plugin_id)
+                    if (
+                            plugin is None
+                            or not plugin.is_active
+                            or plugin.tenant_id != package.tenant_id
+                    ):
+                        add_issue(
+                            "skill",
+                            ref["raw_id"],
+                            ref["path"],
+                            "技能所属插件不存在或已停用",
+                            skill.name,
+                        )
+                continue
+
+            for index, selector in enumerate(skill.tools or []):
+                if isinstance(selector, dict):
+                    add_ref(
+                        tool_refs,
+                        "tool",
+                        selector.get("tool_id"),
+                        f"{ref['path']}.tools[{index}]",
+                        selector.get("operation"),
+                    )
+                else:
+                    add_ref(
+                        tool_refs,
+                        "tool",
+                        None,
+                        f"{ref['path']}.tools[{index}]",
+                    )
+
+        tool_ids = {ref["id"] for ref in tool_refs if ref["id"] is not None}
+        tool_rows = (
+            self.db.scalars(select(ToolConfig).where(ToolConfig.id.in_(tool_ids))).all()
+            if tool_ids
+            else []
+        )
+        tools_by_id = {row.id: row for row in tool_rows}
+        # 方法级校验：工具整行还在、但选中的 operation 从 schema 里删掉时，
+        # 快照里的 (tool_id, operation) 已经无法执行，必须在共享前拦下。
+        methods_checked: set[uuid.UUID] = set()
+        methods_by_tool: dict[str, set[str]] = {}
+        operation_refs = {
+            ref["id"] for ref in tool_refs if ref["id"] is not None and ref["operation"]
+        }
+        if operation_refs:
+            from .bundle_install_service import _run_async
+            from .tool_service import ToolService
+
+            items, missing_tools = _run_async(
+                lambda: ToolService(self.db).get_tool_methods_batch(
+                    [str(tool_id) for tool_id in operation_refs], tenant_id
+                )
+            )
+            if missing_tools:
+                # A tool that cannot be looked up has no method list, so its
+                # operations pass the check below. Record it to keep「为何放行」
+                # diagnosable instead of failing the share silently.
+                logger.warning(
+                    "共享校验：部分工具查不到，方法级校验被跳过",
+                    extra={
+                        "tool_ids": missing_tools,
+                        "tenant_id": str(tenant_id),
+                    },
+                )
+            methods_by_tool = {
+                item["tool_id"]: {
+                    str(method.get("operation_key"))
+                    for method in item.get("methods") or []
+                    if method.get("operation_key") is not None
+                }
+                for item in items
+            }
+            methods_checked = set(operation_refs)
+
+        for ref in tool_refs:
+            tool = tools_by_id.get(ref["id"])
+            if ref["id"] is None or tool is None:
+                add_issue("tool", ref["raw_id"], ref["path"], "工具不存在")
+            elif tool.tenant_id != tenant_id:
+                add_issue("tool", ref["raw_id"], ref["path"], "工具不属于当前租户")
+            elif not tool.is_active:
+                add_issue(
+                    "tool", ref["raw_id"], ref["path"], "工具已删除或停用", tool.name
+                )
+            elif tool.status != ToolStatus.AVAILABLE.value:
+                add_issue(
+                    "tool",
+                    ref["raw_id"],
+                    ref["path"],
+                    f"工具状态不可用：{tool.status}",
+                    tool.name,
+                )
+            elif (
+                    ref["operation"]
+                    and ref["id"] in methods_checked
+                    # 方法列表为空（如 MCP 缓存尚未同步）无法判定，按不可校验放行，
+                    # 避免把「查不到方法」误报成「方法被删」
+                    and methods_by_tool.get(str(ref["id"]))
+                    and ref["operation"] not in methods_by_tool[str(ref["id"])]
+            ):
+                add_issue(
+                    "tool_method",
+                    ref["raw_id"],
+                    ref["path"],
+                    f"工具方法不存在：{ref['operation']}",
+                    tool.name,
+                )
+
+        if unavailable:
+            raise BusinessException(
+                "应用引用了不可用的工具、技能或 Agent 版本，请先修复后再共享",
+                BizCode.INVALID_PARAMETER,
+                data={
+                    "reason": "UNAVAILABLE_DEPENDENCIES",
+                    "dependencies": unavailable,
+                },
+            )
 
     def _display_payload(self, release: AppRelease) -> dict[str, Any]:
         """同租户内无需脱敏（§7.0）：真实配置 + 全部展示字段。"""
@@ -305,10 +760,63 @@ class AssetService:
         asset.status = AssetStatus.UNPUBLISHED
         asset.updated_at = utcnow_naive()
         self.db.commit()
+        invalidated = self.invalidate_reference_runtime_caches(asset)
 
         logger.info(
             "取消共享资源中心条目",
-            extra={"asset_id": str(asset_id), "tenant_id": str(tenant_id)},
+            extra={
+                "asset_id": str(asset_id),
+                "tenant_id": str(tenant_id),
+                "invalidated_reference_caches": invalidated,
+            },
+        )
+        return asset
+
+    def remove_reference_installation(
+            self,
+            *,
+            app_id: uuid.UUID,
+            workspace_id: uuid.UUID,
+            tenant_id: uuid.UUID,
+            commit: bool = True,
+    ) -> AppAsset | None:
+        """Soft-delete this workspace's active catalog reference, if present.
+
+        ``None`` is a normal result so the shared-app endpoint can remove a
+        legacy share and a reference together in one transaction. Copies remain
+        local applications and are deliberately excluded.
+        """
+
+        row = self.db.execute(
+            select(AppAssetInstallation, AppAsset)
+            .join(AppAsset, AppAssetInstallation.asset_id == AppAsset.id)
+            .where(
+                AppAsset.source_app_id == app_id,
+                AppAsset.tenant_id == tenant_id,
+                AppAssetInstallation.tenant_id == tenant_id,
+                AppAssetInstallation.target_workspace_id == workspace_id,
+                AppAssetInstallation.source == InstallSource.CATALOG,
+                AppAssetInstallation.link_mode == LinkMode.REFERENCE,
+                AppAssetInstallation.status == InstallStatus.ACTIVE,
+            )
+        ).one_or_none()
+        if row is None:
+            return None
+
+        installation, asset = row
+        installation.status = InstallStatus.REMOVED
+        installation.updated_at = utcnow_naive()
+        if commit:
+            self.db.commit()
+            delete_json(app_cache_key(asset.source_app_id, workspace_id))
+
+        logger.info(
+            "移除资源中心仅使用应用",
+            extra={
+                "app_id": str(app_id),
+                "asset_id": str(asset.id),
+                "workspace_id": str(workspace_id),
+            },
         )
         return asset
 
@@ -404,13 +912,22 @@ class AssetService:
         ).first()
 
         replaced_link_mode: str | None = None
+        replaced_reference_workspace_ids: set[uuid.UUID] = set()
         # 「只读引用 → 可编辑副本」是唯一会换形态的方向；其余情况一律幂等返回。
         upgrade = (
             existing is not None
             and existing.link_mode == LinkMode.REFERENCE
             and asset.share_mode == ShareMode.EDITABLE
         )
-        if existing is not None and not upgrade:
+        # 副本被删除后安装行仍停在 active：副本是独立应用，删除只软删 app，
+        # 不碰安装行。再次添加若直接复用，会返回一个已 4007 的 local_app_id，
+        # 所以这里把「目标应用已不在」的副本行当作失效行重建。
+        stale_copy = (
+            existing is not None
+            and existing.link_mode == LinkMode.COPY
+            and not self._local_copy_alive(existing)
+        )
+        if existing is not None and not upgrade and not stale_copy:
             # 副本已是目标空间的独立应用，源版本下线不影响它；但 reference
             # 仍依赖条目钉住版本，失效时不能误报为「已就绪」。
             if existing.link_mode == LinkMode.REFERENCE:
@@ -424,13 +941,16 @@ class AssetService:
         if release is None or not release.is_active:
             raise BusinessException("条目钉住的版本已下线", BizCode.RELEASE_NOT_FOUND)
 
-        # 升级时，旧引用失效、新副本及新安装行必须同在一个 savepoint：复制集群
-        # 或子 Agent 失败时只回滚这次升级，保留原有 reference 安装。
-        scope = self.db.begin_nested() if upgrade else nullcontext()
+        # 升级或重建失效副本时，旧安装行与新副本必须在同一个 savepoint：复制集群
+        # 或子 Agent 失败时只回滚这次操作，保留原有安装行。
+        rebuild = upgrade or stale_copy
+        scope = self.db.begin_nested() if rebuild else nullcontext()
         with scope:
-            if upgrade:
+            if existing is not None and rebuild:
                 # 先让旧行失效再建副本：既避免部分唯一索引冲突，也让副本保留原名称。
                 replaced_link_mode = existing.link_mode
+                if existing.link_mode == LinkMode.REFERENCE:
+                    replaced_reference_workspace_ids.add(existing.target_workspace_id)
                 existing.status = InstallStatus.REMOVED
                 existing.updated_at = utcnow_naive()
                 self.db.flush()
@@ -471,6 +991,9 @@ class AssetService:
             )
             self.db.add(installation)
         self.db.commit()
+        invalidated = self.invalidate_reference_runtime_caches(
+            asset, extra_workspace_ids=replaced_reference_workspace_ids
+        )
 
         logger.info(
             "从资源中心拉取",
@@ -480,6 +1003,7 @@ class AssetService:
                 "link_mode": link_mode,
                 "result": installation.result,
                 "replaced_link_mode": replaced_link_mode,
+                "invalidated_reference_caches": invalidated,
             },
         )
         return self._install_payload(
@@ -511,12 +1035,29 @@ class AssetService:
             "needs_config": installation.result == "partial",
             "missing_dependencies": installation.missing_report or [],
             "reused": reused,
-            # 本次安装顶掉的旧形态（`reference` → `copy` 升级时非空）。前端据此
-            # 提示「已按可编辑副本重新添加」，避免用户以为点错了没反应。
+            # 本次安装顶掉的旧形态：`reference` → `copy` 升级、或副本被删后重建时非空。
+            # 前端据此提示「已重新添加」，避免用户以为点错了没反应。
             "replaced_link_mode": replaced_link_mode,
         }
 
     # ---------- 以 release 快照为源重建副本 ----------
+
+    def _local_copy_alive(self, installation: AppAssetInstallation) -> bool:
+        """副本 installation 是否仍指向一个存活的本地应用。
+
+        副本是目标空间自己的独立应用，删除走普通应用删除（软删 `App`），
+        安装行不会被联动改写；所以安装行 active 不等于副本可用，必须回查
+        `local_app_id` 对应的应用还在不在。
+        """
+
+        if installation.local_app_id is None:
+            return False
+        local_app = self.db.get(App, installation.local_app_id)
+        return bool(
+            local_app is not None
+            and local_app.is_active
+            and local_app.workspace_id == installation.target_workspace_id
+        )
 
     def _copy_from_release(
             self,
@@ -551,7 +1092,11 @@ class AssetService:
             type=release.type,
             visibility="private",
             status="draft",
-            tags=list(source_app.tags or []) if source_app.workspace_id == target_workspace_id else [],
+            tags=(
+                list(source_app.tags or [])
+                if source_app.workspace_id == target_workspace_id
+                else []
+            ),
             is_active=True,
             created_at=now,
             updated_at=now,
@@ -561,7 +1106,11 @@ class AssetService:
 
         if new_app.type == AppType.AGENT:
             knowledge_retrieval, memory = self._remap_ws_scoped(
-                config, target_workspace_id, is_cross_workspace
+                config,
+                target_workspace_id,
+                is_cross_workspace,
+                missing=missing,
+                missing_scope="agent",
             )
             self.db.add(
                 AgentConfig(
@@ -582,12 +1131,18 @@ class AssetService:
                 )
             )
         elif new_app.type in (AppType.WORKFLOW, AppType.PURE_WORKFLOW):
+            nodes = self._remap_workflow_nodes(
+                config.get("nodes") or [],
+                target_workspace_id=target_workspace_id,
+                is_cross_workspace=is_cross_workspace,
+                missing=missing,
+            )
             self.db.add(
                 WorkflowConfig(
                     id=uuid.uuid4(),
                     app_id=new_app.id,
                     workflow_type=config.get("workflow_type") or "workflow",
-                    nodes=config.get("nodes") or [],
+                    nodes=nodes,
                     edges=config.get("edges") or [],
                     variables=config.get("variables") or [],
                     environment_variables=config.get("environment_variables") or [],
@@ -618,31 +1173,212 @@ class AssetService:
             config: dict[str, Any],
             target_workspace_id: uuid.UUID,
             is_cross_workspace: bool,
+            *,
+            missing: list[dict[str, Any]] | None = None,
+            missing_scope: str = "app",
     ) -> tuple[Any, Any]:
-        """知识库与记忆是**空间级**，跨空间必须重映射；租户级资源原样复用。"""
+        """Rebind workspace-scoped knowledge and memory without leaking source IDs."""
 
+        knowledge_retrieval = config.get("knowledge_retrieval")
+        memory = config.get("memory")
         if not is_cross_workspace:
-            return (
-                copy.deepcopy(config.get("knowledge_retrieval")),
-                copy.deepcopy(config.get("memory")),
-            )
+            return copy.deepcopy(knowledge_retrieval), copy.deepcopy(memory)
+
         target_tenant_id = cross_domain_read.get_workspace_tenant_id(
             self.db, target_workspace_id
         )
         _, kb_ids = self.app_service._collect_resource_ids_from_config(
-            None, config.get("knowledge_retrieval")
+            None, knowledge_retrieval
         )
         _, available_kb_ids = self.app_service._preload_cross_workspace_resources(
             target_tenant_id, target_workspace_id, set(), kb_ids
         )
-        return (
-            self.app_service._clean_knowledge_retrieval(
-                config.get("knowledge_retrieval"), available_kb_ids
-            ),
-            self.app_service._clean_memory_cross_workspace(
-                config.get("memory"), target_workspace_id
-            ),
+        cleaned_knowledge = self.app_service._clean_knowledge_retrieval(
+            knowledge_retrieval, available_kb_ids
         )
+        cleaned_memory = self.app_service._clean_memory_cross_workspace(
+            memory, target_workspace_id
+        )
+
+        if missing is not None:
+            for entry in (knowledge_retrieval or {}).get("knowledge_bases", []):
+                if not isinstance(entry, dict):
+                    missing.append({
+                        "kind": "knowledge_base",
+                        "name": None,
+                        "path": missing_scope,
+                        "reason": "知识库引用格式无效",
+                    })
+                    continue
+                kb_id = entry.get("kb_id")
+                if _coerce_uuid(kb_id) is None:
+                    missing.append({
+                        "kind": "knowledge_base",
+                        "name": str(kb_id) if kb_id is not None else None,
+                        "path": missing_scope,
+                        "reason": "知识库引用格式无效",
+                    })
+                elif not self.app_service._is_kb_available(kb_id, available_kb_ids):
+                    missing.append({
+                        "kind": "knowledge_base",
+                        "name": str(kb_id),
+                        "path": missing_scope,
+                        "reason": "知识库不属于目标工作空间",
+                    })
+            memory_id = (
+                (memory or {}).get("memory_config_id")
+                or (memory or {}).get("memory_content")
+            )
+            if memory_id and cleaned_memory != memory:
+                missing.append({
+                    "kind": "memory_config",
+                    "name": str(memory_id),
+                    "path": missing_scope,
+                    "reason": "记忆配置不属于目标工作空间",
+                })
+
+        return cleaned_knowledge, cleaned_memory
+
+    def _remap_supervisor_config(
+            self,
+            supervisor_config: dict[str, Any] | None,
+            *,
+            target_workspace_id: uuid.UUID,
+            is_cross_workspace: bool,
+            missing: list[dict[str, Any]],
+    ) -> dict[str, Any] | None:
+        """Apply the same workspace boundary to a cluster supervisor's config."""
+
+        if supervisor_config is None:
+            return None
+        cleaned = copy.deepcopy(supervisor_config)
+        if not isinstance(cleaned, dict):
+            missing.append({
+                "kind": "supervisor_config",
+                "name": None,
+                "path": "supervisor_config",
+                "reason": "主管配置格式无效，已忽略",
+            })
+            return None
+        knowledge_retrieval, memory = self._remap_ws_scoped(
+            cleaned,
+            target_workspace_id,
+            is_cross_workspace,
+            missing=missing,
+            missing_scope="supervisor_config",
+        )
+        cleaned["knowledge_retrieval"] = knowledge_retrieval
+        cleaned["memory"] = memory
+        return cleaned
+
+    def _remap_workflow_nodes(
+            self,
+            nodes: list[dict[str, Any]],
+            *,
+            target_workspace_id: uuid.UUID,
+            is_cross_workspace: bool,
+            missing: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Remove inaccessible workspace-scoped references from workflow nodes.
+
+        Workflow node JSON has several node-specific schemas, so this walks nested
+        dictionaries rather than coupling the catalog copy path to every node type.
+        Only knowledge-base and memory-config identifiers are workspace scoped;
+        models, tools and skills remain untouched.
+        """
+
+        copied = copy.deepcopy(nodes)
+        if not is_cross_workspace:
+            return copied
+
+        knowledge_entries: list[dict[str, Any]] = []
+
+        def collect(value: Any) -> None:
+            if isinstance(value, dict):
+                for key, child in value.items():
+                    if key == "knowledge_bases" and isinstance(child, list):
+                        knowledge_entries.extend(
+                            item for item in child if isinstance(item, dict)
+                        )
+                    else:
+                        collect(child)
+            elif isinstance(value, list):
+                for child in value:
+                    collect(child)
+
+        collect(copied)
+        kb_ids = {
+            str(entry.get("kb_id"))
+            for entry in knowledge_entries
+            if entry.get("kb_id") is not None
+        }
+        target_tenant_id = cross_domain_read.get_workspace_tenant_id(
+            self.db, target_workspace_id
+        )
+        _, available_kb_ids = self.app_service._preload_cross_workspace_resources(
+            target_tenant_id, target_workspace_id, set(), kb_ids
+        )
+
+        def clean(value: Any, path: str = "nodes") -> Any:
+            if isinstance(value, list):
+                return [clean(child, f"{path}[{index}]") for index, child in enumerate(value)]
+            if not isinstance(value, dict):
+                return value
+
+            result = copy.deepcopy(value)
+            if "knowledge_bases" in result and isinstance(result["knowledge_bases"], list):
+                retained = []
+                for entry in result["knowledge_bases"]:
+                    if not isinstance(entry, dict):
+                        missing.append({
+                            "kind": "knowledge_base",
+                            "name": None,
+                            "path": path,
+                            "reason": "知识库引用格式无效",
+                        })
+                        continue
+                    kb_id = entry.get("kb_id")
+                    if _coerce_uuid(kb_id) is None:
+                        missing.append({
+                            "kind": "knowledge_base",
+                            "name": str(kb_id) if kb_id is not None else None,
+                            "path": path,
+                            "reason": "知识库引用格式无效",
+                        })
+                    elif self.app_service._is_kb_available(kb_id, available_kb_ids):
+                        retained.append(clean(entry, f"{path}.knowledge_bases"))
+                    else:
+                        missing.append({
+                            "kind": "knowledge_base",
+                            "name": str(kb_id),
+                            "path": path,
+                            "reason": "知识库不属于目标工作空间",
+                        })
+                result["knowledge_bases"] = retained
+
+            memory_id = result.get("memory_config_id") or result.get("memory_content")
+            if memory_id:
+                cleaned_memory = self.app_service._clean_memory_cross_workspace(
+                    result, target_workspace_id
+                )
+                if (
+                    cleaned_memory.get("memory_config_id") is None
+                    and "memory_content" not in cleaned_memory
+                ):
+                    missing.append({
+                        "kind": "memory_config",
+                        "name": str(memory_id),
+                        "path": path,
+                        "reason": "记忆配置不属于目标工作空间",
+                    })
+                result = cleaned_memory
+
+            for key, child in list(result.items()):
+                if key != "knowledge_bases":
+                    result[key] = clean(child, f"{path}.{key}")
+            return result
+
+        return clean(copied)
 
     def _copy_cluster_config(
             self,
@@ -728,7 +1464,12 @@ class AssetService:
                 sub_agents=kept_sub_agents,
                 routing_rules=routing_rules or None,
                 execution_config=config.get("execution_config") or {},
-                supervisor_config=copy.deepcopy(config.get("supervisor_config")),
+                supervisor_config=self._remap_supervisor_config(
+                    config.get("supervisor_config"),
+                    target_workspace_id=target_workspace_id,
+                    is_cross_workspace=is_cross_workspace,
+                    missing=missing,
+                ),
                 aggregation_strategy=config.get("aggregation_strategy") or "merge",
                 is_active=True,
                 created_at=now,
@@ -773,10 +1514,23 @@ class AssetService:
             stmt = stmt.where(AppRelease.type == app_type)
         if q:
             like = f"%{q}%"
-            stmt = stmt.where(
-                or_(
-                    AppRelease.name.ilike(like),
-                    AppRelease.description.ilike(like),
+            # 发布人是跨域 users 表，必须在分页前纳入同一条查询；否则仅命中
+            # 发布人时记录已被名称/描述条件过滤，且 total 会与列表不一致。
+            publisher_name = func.coalesce(
+                cross_domain_read.users.c.username,
+                cross_domain_read.users.c.email,
+            )
+            stmt = (
+                stmt.outerjoin(
+                    cross_domain_read.users,
+                    AppRelease.published_by == cross_domain_read.users.c.id,
+                )
+                .where(
+                    or_(
+                        AppRelease.name.ilike(like),
+                        AppRelease.description.ilike(like),
+                        publisher_name.ilike(like),
+                    )
                 )
             )
 
@@ -793,18 +1547,6 @@ class AssetService:
         items = [self._serialize_card(asset, app, release) for asset, app, release in rows]
         self._fill_publisher_names(items, rows)
         self._fill_install_counts(items, tenant_id)
-        if q:
-            # Publisher names are not filterable in SQL (users is a cross-domain
-            # table with no relation here); filter them in the page payload and
-            # keep the SQL count as the upper bound. Documented in §6.1.
-            lowered = q.lower()
-            items = [
-                item
-                for item in items
-                if lowered in (item.get("source_app_name") or "").lower()
-                or lowered in (item.get("description") or "").lower()
-                or lowered in (item.get("publisher_name") or "").lower()
-            ]
         return items, total
 
     def get_asset(
@@ -845,9 +1587,9 @@ class AssetService:
             "share_mode": asset.share_mode,
             "categories": payload.get("categories") or [],
             "usage_examples": payload.get("usage_examples") or [],
-            # 发布快照是详情字段的唯一权威来源；payload 仅兼容 setup_steps
-            # 字段上线前创建的历史资源中心条目。
-            "setup_steps": release.setup_steps if release else payload.get("setup_steps"),
+            # 发布快照优先；nullable 历史快照为空时回退资源条目中已冻结的字段。
+            "setup_steps": (release.setup_steps if release else None)
+            or payload.get("setup_steps"),
             "changelog": payload.get("changelog"),
             "linked_skills": linked_skills,
             "linked_tools": linked_tools,

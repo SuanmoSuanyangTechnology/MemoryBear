@@ -73,4 +73,8 @@ export const resourceCenter = {
   more: 'Scroll down to load more',
   noDescription: 'No description',
   addToWorkspaceDesc: 'Add the shared access entry for "{{name}}" to the target workspace.',
+  knowledgeBaseWarning: 'Knowledge bases from the source workspace will not be added to the target workspace with the application. Please re-associate the target workspace\'s knowledge bases after adding to ensure related functions work properly.',
+  addedToMyApps: 'Added to my apps',
+  addedToShared: 'Added to shared',
+  goToView: 'Go to view',
 }

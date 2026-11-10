@@ -22,6 +22,7 @@ from .engine.stream_output_coordinator import StreamOutputCoordinator
 from .engine.variable_pool import VariablePool, VariablePoolInitializer
 from .error_info import workflow_error_info
 from .nodes.base_node import NodeExecutionError
+from ..integrations.model.errors import ModelInvokeCancelledError
 from ..utils.datetime_utils import to_timestamp_ms, utcnow_naive
 from ..utils.text_sanitize import sanitize_text, sanitize_value
 
@@ -656,6 +657,8 @@ class WorkflowExecutor:
                 "data": final_data,
             }
 
+        except ModelInvokeCancelledError:
+            raise
         except Exception as e:
             end_time = utcnow_naive()
             elapsed_time = (end_time - start_time).total_seconds()

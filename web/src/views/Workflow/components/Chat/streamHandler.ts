@@ -238,14 +238,44 @@ export const createWorkflowStreamHandler = (deps: WorkflowStreamDeps) => {
             return { ...current, subContent }
           }))
           break
+        case 'error': {
+          const errorMsg = payload.msg || payload.error
+          setChatList(prev => mapLastVersion(prev, (current) => ({
+            ...current,
+            status: 'failed',
+            content: errorMsg || current.content || null,
+            meta_data: { ...(current.meta_data || {}), error: errorMsg },
+          })))
+          setStreamLoading(false)
+          setLoading(false)
+          chatIsEnded.current = true
+          break
+        }
+        case 'end': {
+          const endError = payload.msg || payload.error
+          if (endError) {
+            setChatList(prev => mapLastVersion(prev, (current) => ({
+              ...current,
+              status: 'failed',
+              content: endError || current.content || null,
+              meta_data: { ...(current.meta_data || {}), error: endError },
+            })))
+            setStreamLoading(false)
+            setLoading(false)
+            chatIsEnded.current = true
+          }
+          break
+        }
         case 'workflow_end': {
           const { execution_id, status, error, msg, citations } = payload
+          const workflowError = msg || error
           setChatList(prev => mapLastVersion(prev, (current) => ({
             ...current,
             status,
-            error: msg || error,
-            content: current.content === '' ? null : current.content,
-            meta_data: { ...(current.meta_data || {}), citations },
+            content: workflowError
+              ? (workflowError || (current.content === '' ? null : current.content))
+              : (current.content === '' ? null : current.content),
+            meta_data: { ...(current.meta_data || {}), citations, error: workflowError },
           })))
           setChatList(prev => finalizeOutputs(prev))
           setStreamLoading(false)

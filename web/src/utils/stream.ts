@@ -13,8 +13,7 @@
 import { refreshToken } from '@/api/user';
 import i18n from '@/i18n';
 import { message } from 'antd';
-import { clearAuthData } from './auth';
-import { cookieUtils, setLastTraceId, setLastRetryAfter } from './request';
+import { cookieUtils, setLastTraceId, setLastRetryAfter, handleLogout } from './request';
 const API_PREFIX = '/api'
 
 // Token refresh state
@@ -42,12 +41,11 @@ const refreshTokenForSSE = async (): Promise<string> => {
       const newToken = response.access_token;
       cookieUtils.set('authToken', newToken);
       return newToken;
-    } catch (error) {
-      clearAuthData();
-      message.warning(i18n.t('common.loginExpired'));
-      if (!window.location.hash.includes('#/login')) {
-        window.location.href = `/#/login`;
+    } catch (error: any) {
+      if (error?.code === 2001 || error?.response?.data?.code === 2001) {
+        throw error;
       }
+      handleLogout(i18n.t('common.loginExpired'));
       throw error;
     } finally {
       isRefreshing = false;
@@ -114,7 +112,6 @@ export function parseSSEToJSON(sseString: string) {
 
   let currentEvent: SSEMessage = {}
   let dataContent = ''
-  console.log('lines', sseString)
 
   for (const line of lines) {
     // SSE comment line (`: heartbeat`, `: connected`, ...) — emit as a comment event.
@@ -138,7 +135,6 @@ export function parseSSEToJSON(sseString: string) {
   }
 
   flushCurrent(currentEvent, dataContent)
-  console.log('events', events)
   return events
 }
 
@@ -150,7 +146,7 @@ export function parseSSEToJSON(sseString: string) {
 function parseDataContent(dataContent: string): string | object {
   try {
     // First layer: HTML entity decoding
-    let unescaped = dataContent
+    const unescaped = dataContent
       .replace(/&quot;/g, '"')
       .replace(/&amp;/g, '&')
       .replace(/&lt;/g, '<')
@@ -243,8 +239,9 @@ const makeSSERequest = async (
     method,
     headers: {
       ...(method === 'POST' ? { 'Content-Type': 'application/json' } : {}),
-      'Authorization': `Bearer ${token}`,
+      ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
       'X-Language-Type': language,
+      'Accept-Language': language,
       ...config.headers,
     },
     body: method === 'POST' ? JSON.stringify(data) : undefined,
@@ -272,44 +269,62 @@ export const handleSSE = async (
 
   try {
     let token = cookieUtils.get('authToken');
+    if (!token && !url?.includes('/public')) {
+      const refreshTokenValue = cookieUtils.get('refreshToken');
+      if (refreshTokenValue) {
+        try {
+          token = await refreshTokenForSSE();
+        } catch (refreshError: any) {
+          if (refreshError?.code === 2001 || refreshError?.response?.data?.code === 2001) {
+            message.warning(refreshError?.response?.data?.msg || i18n.t('common.serviceUpgrading'));
+          }
+          return;
+        }
+      } else {
+        handleLogout(i18n.t('common.loginExpired'));
+        return;
+      }
+    }
+    
     let response = await makeSSERequest(url, data, token || '', config, controller.signal);
     let hasRetried = false;
 
     const sseTraceId = response.headers.get('x-trace-id') || response.headers.get('X-Trace-Id')
     if (sseTraceId) setLastTraceId(sseTraceId)
 
-    // Loop to handle 401, support unlimited retries (except for /public paths)
+    // Loop to handle 401 with single retry (except for /public paths)
     while (response.status === 401 && !url?.includes('/public')) {
       const errorResponse = await response.json().catch(() => ({}));
       const errorCode = errorResponse.code;
-      
-      // Check errorCode on first 401
-      if (!hasRetried) {
-        if (errorCode === 2001) {
-          clearAuthData();
-          message.warning(errorResponse.msg);
-          if (!window.location.hash.includes('#/login')) {
-            window.location.href = `/#/login`;
-          }
-          return;
-        }
-        if (errorCode === 2002) {
-          if (onMessage) {
-            onMessage([{ event: 'error', data: { msg: errorResponse.msg || i18n.t('common.invalidCredentials'), error: errorResponse.error || '', code: 2002 } }])
-          }
-          return;
-        }
+
+      if (errorCode === 2004 || errorCode === 4009) {
+        handleLogout(errorResponse.msg || (errorCode === 4009 ? i18n.t('common.permissionDenied') : i18n.t('common.loginExpired')));
+        return;
       }
-      
-      // Refresh token and retry
+
+      if (hasRetried) {
+        if (errorCode === 2001) {
+          message.warning(errorResponse.msg || i18n.t('common.serviceUpgrading'));
+          return;
+        }
+        if (errorCode === 2002 || errorCode === 2003) {
+          handleLogout(errorResponse.msg || i18n.t('common.invalidCredentials'));
+          return;
+        }
+        break;
+      }
+
       try {
         const newToken = await refreshTokenForSSE();
         response = await makeSSERequest(url, data, newToken, config, controller.signal);
         hasRetried = true;
-        
+
         const retryTraceId = response.headers.get('x-trace-id') || response.headers.get('X-Trace-Id')
         if (retryTraceId) setLastTraceId(retryTraceId)
-      } catch (refreshError) {
+      } catch (refreshError: any) {
+        if (refreshError?.code === 2001 || refreshError?.response?.data?.code === 2001) {
+          message.warning(refreshError?.response?.data?.msg || i18n.t('common.serviceUpgrading'));
+        }
         return;
       }
     }
@@ -324,24 +339,33 @@ export const handleSSE = async (
     }
 
     switch (response.status) {
-      case 429: {
+      case 429:
+      case 503: {
         const retryAfterHeader = response.headers.get('retry-after') || response.headers.get('Retry-After')
         if (retryAfterHeader) {
           const seconds = parseInt(retryAfterHeader, 10)
           if (Number.isFinite(seconds) && seconds > 0) setLastRetryAfter(seconds)
         }
-        const rateLimitData = await response.json().catch(() => ({}))
+        const errorData = await response.json().catch(() => ({}))
+        const errorMsg = errorData.msg || (response.status === 429 ? i18n.t('common.tooManyRequests') : i18n.t('common.serviceUpgrading'))
         if (onMessage) {
-          onMessage([{ event: 'error', data: { msg: rateLimitData.msg || i18n.t('common.tooManyRequests'), error: rateLimitData.error || '', code: rateLimitData.code || 10004 } }])
+          onMessage([{ event: 'error', data: { msg: errorMsg, error: errorData.error || '', code: errorData.code || (response.status === 429 ? 10004 : 10003) } }])
         }
         return
       }
-      case 500:
-      case 502: {
+      case 500: {
         const errorData = await response.json().catch(() => ({}));
         const errorInfo = errorData.msg || i18n.t('common.serviceUpgrading');
         if (onMessage) {
           onMessage([{ event: 'error', data: { msg: errorInfo, error: errorData.error || '', code: errorData.code || 10001 } }])
+        }
+        return
+      }
+      case 502: {
+        const errorData = await response.json().catch(() => ({}));
+        const errorInfo = errorData.msg || i18n.t('common.serviceUpgrading');
+        if (onMessage) {
+          onMessage([{ event: 'error', data: { msg: errorInfo, error: errorData.error || '', code: errorData.code || 7006 } }])
         }
         return
       }
@@ -363,9 +387,9 @@ export const handleSSE = async (
       }
       case 504: {
         const errorJson = await response.json().catch(() => ({}));
-        const errorMsg504 = errorJson.msg || i18n.t('common.serverError');
+        const errorMsg504 = errorJson.msg || i18n.t('common.serviceUpgrading');
         if (onMessage) {
-          onMessage([{ event: 'error', data: { msg: errorMsg504, error: errorJson.error || '', code: errorJson.code || 10001 } }])
+          onMessage([{ event: 'error', data: { msg: errorMsg504, error: errorJson.error || '', code: errorJson.code || 10003 } }])
         }
         return
       }
@@ -387,7 +411,10 @@ export const handleSSE = async (
 
     try {
       while (true) {
-        const { done, value } = await reader.read();
+        const { done, value } = await reader.read().catch((err) => {
+          if (err?.name === 'AbortError') return { done: true, value: undefined }
+          throw err
+        });
         if (done || controller.signal.aborted) break;
 
         const chunk = decoder.decode(value, { stream: true });
@@ -409,7 +436,7 @@ export const handleSSE = async (
         onMessage(parseSSEToJSON(buffer) ?? {});
       }
     } finally {
-      reader.cancel();
+      reader.cancel().catch(() => {})
     }
   } catch (error: any) {
     if (error?.name !== 'AbortError') {

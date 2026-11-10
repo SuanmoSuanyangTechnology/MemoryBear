@@ -290,6 +290,7 @@ export interface AppAssetDetail {
      * 使用示例，随版本冻结。**纯字符串数组，按录入顺序返回**，不暴露 order/content 落库结构。空数组表示未录入，前端不渲染该区块。
      */
     usage_examples: string[];
+    setup_steps: string;
     /**
      * 浏览次数：打开详情页次数，详情页眼睛图标后的数字。与 installations_summary 不是同一指标。
      */

@@ -264,9 +264,10 @@ def is_workspace_member(db: Session, user_id: UUID, workspace_id: UUID) -> bool:
 def is_workspace_manager(db: Session, user_id: UUID, workspace_id: UUID) -> bool:
     """Whether the user is an active *manager* of the workspace.
 
-    Sharing an app to the tenant catalog is a space-level decision (it exposes
-    the app to every space in the tenant), so it is limited to managers and the
-    app creator — the same rule the monolith applies to workspace-scoped writes.
+    Only answers the membership-role question. Sharing an app to the tenant
+    catalog additionally admits the app creator and a superuser of the
+    workspace's own tenant — that composite gate lives in
+    ``AssetService._assert_can_share``, not here.
     """
 
     row = db.execute(

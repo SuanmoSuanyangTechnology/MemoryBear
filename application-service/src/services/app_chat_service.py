@@ -35,6 +35,7 @@ from ..db import end_read_transaction, get_async_db_context, get_db
 from ..errors import BizCode, BusinessException
 from ..i18n import get_current_locale
 from ..integrations.knowledge.contracts import KnowledgeRetrievalSource
+from ..integrations.model.errors import ModelInvokeCancelledError
 from ..memory.emotion.emotion_resolver import (
     apply_detection as apply_emotion_detection,
 )
@@ -732,6 +733,7 @@ class AppChatService:
             storage_type: Optional[str] = None,
             user_rag_memory_id: Optional[str] = None,
             workspace_id: Optional[str] = None,
+            use_source_knowledge_workspace: bool = False,
             source: str = "",
             history: Optional[List[Dict[str, Any]]] = None,
             skip_save: bool = False,
@@ -843,6 +845,7 @@ class AppChatService:
         # opens its own DB session; no cross dependencies)
         tools = []
         _ws_id = uuid.UUID(workspace_id) if isinstance(workspace_id, str) else workspace_id
+        knowledge_workspace_id = None if use_source_knowledge_workspace else _ws_id
         coros = [
             self.agent_service.load_tools_config(config.tools, web_search, tenant_id, user_id, workspace_id),
             self.agent_service.load_skill_config(config.skills, message, tenant_id, user_id, workspace_id),
@@ -850,7 +853,7 @@ class AppChatService:
                 config.knowledge_retrieval,
                 user_id,
                 app_id=config.app_id,
-                workspace_id=_ws_id,
+                workspace_id=knowledge_workspace_id,
                 source=KnowledgeRetrievalSource.AGENT,
             ),
         ]
@@ -1241,6 +1244,7 @@ class AppChatService:
             storage_type: Optional[str] = None,
             user_rag_memory_id: Optional[str] = None,
             workspace_id: Optional[str] = None,
+            use_source_knowledge_workspace: bool = False,
             source: str = "",
             history: Optional[List[Dict[str, Any]]] = None,
             skip_save: bool = False,
@@ -1346,6 +1350,7 @@ class AppChatService:
             # own DB session, no cross-dependence)
             tools = []
             _ws_id = uuid.UUID(workspace_id) if isinstance(workspace_id, str) else workspace_id
+            knowledge_workspace_id = None if use_source_knowledge_workspace else _ws_id
             coros = [
                 self.agent_service.load_tools_config(config.tools, web_search, tenant_id, user_id, workspace_id),
                 self.agent_service.load_skill_config(config.skills, message, tenant_id, user_id, workspace_id),
@@ -1353,7 +1358,7 @@ class AppChatService:
                     config.knowledge_retrieval,
                     user_id,
                     app_id=config.app_id,
-                    workspace_id=_ws_id,
+                    workspace_id=knowledge_workspace_id,
                     source=KnowledgeRetrievalSource.AGENT,
                 ),
             ]
@@ -1861,6 +1866,12 @@ class AppChatService:
             # Generator closed or task cancelled — normal exit
             logger.debug("流式聊天被中断")
             raise
+        except ModelInvokeCancelledError:
+            # 499 client-disconnect semantics: log only, no error frame.
+            logger.info(
+                "流式聊天取消（客户端断开或服务端静默中止）",
+                extra={"conversation_id": str(conversation_id) if 'conversation_id' in locals() else None},
+            )
         except Exception as e:
             # The share-chat Agent stream does not go through
             # AgentRunService.run_stream, so multimodal error classification is
@@ -2457,6 +2468,12 @@ class AppChatService:
             # Generator closed or task cancelled — normal exit
             logger.debug("多 Agent 流式聊天被中断")
             raise
+        except ModelInvokeCancelledError:
+            # 499 client-disconnect semantics: log only, no error frame.
+            logger.info(
+                "多 Agent 流式聊天取消（客户端断开或服务端静默中止）",
+                extra={"conversation_id": str(conversation_id) if 'conversation_id' in locals() else None},
+            )
         except Exception as e:
             logger.error(f"多 Agent 流式聊天失败: {str(e)}", exc_info=True)
             # Once save_messages is enqueued, do not enqueue
@@ -2549,18 +2566,26 @@ class AppChatService:
             user_id=user_id,
             files=files
         )
-        async for event in self.workflow_service.run_stream(
-                app_id=app_id,
-                payload=payload,
-                config=config,
-                workspace_id=workspace_id,
-                release_id=release_id,
-                public=public,
-                source=source,
-                prepared_memory_storage_type=storage_type,
-                prepared_user_rag_memory_id=user_rag_memory_id,
-        ):
-            yield event
+        try:
+            async for event in self.workflow_service.run_stream(
+                    app_id=app_id,
+                    payload=payload,
+                    config=config,
+                    workspace_id=workspace_id,
+                    release_id=release_id,
+                    public=public,
+                    source=source,
+                    prepared_memory_storage_type=storage_type,
+                    prepared_user_rag_memory_id=user_rag_memory_id,
+            ):
+                yield event
+        except ModelInvokeCancelledError:
+            # 499 client-disconnect semantics: run_stream already marked the
+            # execution cancelled; end the SSE with no error frame.
+            logger.info(
+                "工作流流式聊天取消（客户端断开或服务端静默中止）",
+                extra={"app_id": str(app_id)},
+            )
 
     async def workflow_resume_intervention_stream(
             self,

@@ -39,6 +39,8 @@ const groupHistoryByDate = (items: HistoryItem[]): Record<string, HistoryItem[]>
   }, {})
 }
 
+const PAGE_SIZE = 20
+
 export function useConversation() {
   const { t } = useTranslation()
   const { message: messageApi, modal } = App.useApp()
@@ -88,6 +90,9 @@ export function useConversation() {
   /** Set to true when a new conversation is created via streaming; skips getChatDetail in useEffect */
   const skipChatDetailRef = useRef(false)
   const [disabled, setDisabled] = useState(false)
+  const [chatPage, setChatPage] = useState(1)
+  const [chatHasNext, setChatHasNext] = useState(false)
+  const [loadingEarlier, setLoadingEarlier] = useState(false)
 
   const {
     chatList,
@@ -100,6 +105,7 @@ export function useConversation() {
     updateAssistantReasoningMessage,
     updateAssistantMemoryRetrieval,
     applyChatDetail,
+    applyEarlierMessages,
   } = useChatMessages()
 
   useEffect(() => {
@@ -236,7 +242,7 @@ export function useConversation() {
   const getHistory = (flag: boolean = false) => {
     if (!shareToken || shareToken === '' || (pageLoading || !hasMore) && !flag) return
     setPageLoading(true)
-    getConversationHistory(shareToken, { page: flag ? 1 : page, pagesize: 20 })
+    getConversationHistory(shareToken, { page: flag ? 1 : page, pagesize: PAGE_SIZE })
       .then(res => {
         const response = res as { items: HistoryItem[], page: { hasnext: boolean; page: number; pagesize: number; total: number } }
         const results = response?.items || []
@@ -265,9 +271,40 @@ export function useConversation() {
 
   const getChatDetail = () => {
     if (!conversation_id || !shareToken || shareToken === '') return
-    getConversationDetail(shareToken, conversation_id)
+    getConversationDetail(shareToken, conversation_id, { page: 1, pagesize: PAGE_SIZE })
       .then(res => {
-        applyChatDetail(res as { messages: ChatItem[]; pending_intervention?: Record<string, any> })
+        const response = res as { 
+          messages: ChatItem[]; 
+          pending_intervention?: Record<string, any>;
+          page?: { page: number; pagesize: number; total: number; hasnext: boolean }
+        }
+        applyChatDetail({ messages: response.messages, pending_intervention: response.pending_intervention })
+        if (response.page) {
+          setChatPage(response.page.page)
+          setChatHasNext(response.page.hasnext)
+        }
+      })
+  }
+
+  const loadEarlierMessages = () => {
+    if (!conversation_id || !shareToken || loadingEarlier || !chatHasNext) return
+    setLoadingEarlier(true)
+    const nextPage = chatPage + 1
+    getConversationDetail(shareToken, conversation_id, { page: nextPage, pagesize: PAGE_SIZE })
+      .then(res => {
+        const response = res as { 
+          messages: ChatItem[]; 
+          pending_intervention?: Record<string, any>;
+          page?: { page: number; pagesize: number; total: number; hasnext: boolean }
+        }
+        applyEarlierMessages({ messages: response.messages || [], pending_intervention: response.pending_intervention })
+        if (response.page) {
+          setChatPage(response.page.page)
+          setChatHasNext(response.page.hasnext)
+        }
+      })
+      .finally(() => {
+        setLoadingEarlier(false)
       })
   }
 
@@ -297,7 +334,7 @@ export function useConversation() {
     skipChatDetailRef, shareModalRef, reportModalRef, addUserMessage, addAssistantMessage,
     updateAssistantMessage, updateAssistantReasoningMessage, updateAssistantMemoryRetrieval,
     startAudioPolling, upsertHistory,
-    getHistory, getChatDetail,
+    getHistory, getChatDetail, loadEarlierMessages,
   })
 
   const chatTitle = useMemo(() => {
@@ -314,6 +351,8 @@ export function useConversation() {
     groupHistoryList,
     chatList,
     hasMore,
+    chatHasNext,
+    loadingEarlier,
     scrollRef,
     toolbarRef,
     toolbarCallbackRef,
