@@ -43,6 +43,7 @@ from app.models import (
     Workspace,
 )
 from app.models.app_model import AppStatus, AppType
+from app.models.tool_model import ToolConfig, WorkflowToolConfig
 from app.plugins import get_plugin
 from app.repositories.app_repository import get_apps_by_id, AppRepository
 from app.repositories.workflow_repository import WorkflowConfigRepository
@@ -1095,6 +1096,22 @@ class AppService:
                 AppAssetInstallation.status == InstallStatus.ACTIVE,
             ).values(
                 status=InstallStatus.REMOVED,
+                updated_at=utcnow_naive(),
+            )
+        )
+
+        # 工作流工具派生自来源应用：应用删除后工具既不能执行也不能重新发布，
+        # 在同一事务内一并停用；`workflow_tool_configs` 行保留用于追溯。
+        self.db.execute(
+            sa_update(ToolConfig).where(
+                ToolConfig.is_active.is_(True),
+                ToolConfig.id.in_(
+                    select(WorkflowToolConfig.id).where(
+                        WorkflowToolConfig.app_id == app_id
+                    )
+                ),
+            ).values(
+                is_active=False,
                 updated_at=utcnow_naive(),
             )
         )
@@ -2414,6 +2431,7 @@ class AppService:
             usage_examples: Optional[List[str]] = None,
             setup_steps: Optional[str] = None,
             categories: Optional[List[str]] = None,
+            enforce_metadata: bool = True,
     ) -> AppRelease:
         """发布应用（创建不可变快照）
 
@@ -2439,21 +2457,26 @@ class AppService:
         self._validate_workspace_access(app, workspace_id)
 
         # 图标与前端保持一致，都是必填：服务层再挡一次，避免内部调用绕过 schema。
+        # `enforce_metadata=False` 只给 SSO 开放接口用：icon / usage_examples /
+        # setup_steps 的必填自 v0.5.5 起只做预告，留 4 周缓冲期，v0.5.9 才真正
+        # 转为必填（届时删除 SSO 侧的 False 传参即可，本函数不用再改）。
         icon = (icon or "").strip()
-        if not icon:
+        if enforce_metadata and not icon:
             raise BusinessException("发布必须选择自定义图标", BizCode.INVALID_PARAMETER)
 
         # 按应用类型校验并归一化发布元数据，避免开放 API 绕过前端规则。
         workflow_types = (AppType.WORKFLOW, AppType.PURE_WORKFLOW)
         if app.type in workflow_types:
             setup_steps = (setup_steps or "").strip()
-            if not setup_steps:
+            if enforce_metadata and not setup_steps:
                 raise BusinessException("工作流发布必须填写设置步骤", BizCode.INVALID_PARAMETER)
             if len(setup_steps) > app_schema.SETUP_STEPS_MAX_CHARS:
                 raise BusinessException(
                     f"设置步骤最多 {app_schema.SETUP_STEPS_MAX_CHARS} 字",
                     BizCode.INVALID_PARAMETER,
                 )
+            # 缓冲期内允许不传：落库为 NULL 而不是空串，与转必填前的快照形态一致。
+            setup_steps = setup_steps or None
             usage_examples = []
         else:
             usage_examples = [
@@ -2461,10 +2484,14 @@ class AppService:
                 for item in (usage_examples or [])
                 if isinstance(item, str) and item.strip()
             ]
-            if not (
-                app_schema.USAGE_EXAMPLES_MIN_ITEMS
-                <= len(usage_examples)
-                <= app_schema.USAGE_EXAMPLES_MAX_ITEMS
+            if len(usage_examples) > app_schema.USAGE_EXAMPLES_MAX_ITEMS:
+                raise BusinessException(
+                    f"使用示例最多 {app_schema.USAGE_EXAMPLES_MAX_ITEMS} 条",
+                    BizCode.INVALID_PARAMETER,
+                )
+            if (
+                enforce_metadata
+                and len(usage_examples) < app_schema.USAGE_EXAMPLES_MIN_ITEMS
             ):
                 raise BusinessException(
                     "Agent 或集群发布必须填写 "

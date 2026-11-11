@@ -39,7 +39,9 @@ from ..models import (
     InstallStatus,
     LinkMode,
     MultiAgentConfig,
+    ToolConfig,
     WorkflowConfig,
+    WorkflowToolConfig,
 )
 from ..models.app_model import AppStatus, AppType
 from ..plugins import get_plugin
@@ -1143,6 +1145,27 @@ class AppService:
             .returning(AppAssetInstallation.id)
         ).all())
 
+        # Workflow tools are derivatives of this app: once the app is gone they
+        # can neither run nor be re-published, so disable them in the same
+        # transaction. The `workflow_tool_configs` row stays for traceability.
+        # Ids are collected so a failed ontology unbind can restore them.
+        workflow_tool_ids = list(self.db.scalars(
+            sa_update(ToolConfig)
+            .where(
+                ToolConfig.is_active.is_(True),
+                ToolConfig.id.in_(
+                    select(WorkflowToolConfig.id).where(
+                        WorkflowToolConfig.app_id == app_id
+                    )
+                ),
+            )
+            .values(
+                is_active=False,
+                updated_at=utcnow_naive(),
+            )
+            .returning(ToolConfig.id)
+        ).all())
+
         # Bindings belong to the memory domain: only the remote callback binder
         # can unbind them, after the local commit (no remote call inside a
         # transaction). The in-process binder lives in the monolith and runs its
@@ -1153,7 +1176,9 @@ class AppService:
         self.db.commit()
 
         if remote_unbind:
-            self._unbind_ontology_remote(binder, app, share_ids, installation_ids)
+            self._unbind_ontology_remote(
+                binder, app, share_ids, installation_ids, workflow_tool_ids
+            )
 
         logger.info(
             "应用删除成功",
@@ -1170,19 +1195,22 @@ class AppService:
             app: App,
             share_ids: list[uuid.UUID],
             installation_ids: list[uuid.UUID],
+            workflow_tool_ids: list[uuid.UUID],
     ) -> None:
         """Unbind after the local commit; restore the app when the callback fails.
 
         A soft-deleted app can no longer be looked up (the repository filters on
         is_active), so the delete cannot be retried once the local commit lands:
-        the compensation restores the app, its shares and the copy installations
-        first, then the failure is surfaced to the caller as a whole-delete
-        failure it can retry.
+        the compensation restores the app, its shares, the copy installations
+        and the derived workflow tools first, then the failure is surfaced to
+        the caller as a whole-delete failure it can retry.
         """
         try:
             binder.unbind_app(app.id)
         except OntologyUpstreamError as exc:
-            self._compensate_failed_delete(app, share_ids, installation_ids)
+            self._compensate_failed_delete(
+                app, share_ids, installation_ids, workflow_tool_ids
+            )
             raise BusinessException(
                 str(exc),
                 exc.code if exc.code is not None else BizCode.SERVICE_UNAVAILABLE,
@@ -1194,6 +1222,7 @@ class AppService:
             app: App,
             share_ids: list[uuid.UUID],
             installation_ids: list[uuid.UUID],
+            workflow_tool_ids: list[uuid.UUID],
     ) -> None:
         try:
             app.is_active = True
@@ -1202,6 +1231,12 @@ class AppService:
                 self.db.execute(
                     sa_update(AppShare)
                     .where(AppShare.id.in_(share_ids))
+                    .values(is_active=True, updated_at=utcnow_naive())
+                )
+            if workflow_tool_ids:
+                self.db.execute(
+                    sa_update(ToolConfig)
+                    .where(ToolConfig.id.in_(workflow_tool_ids))
                     .values(is_active=True, updated_at=utcnow_naive())
                 )
             # The copy installations were retired for this delete; leaving them
@@ -1221,11 +1256,12 @@ class AppService:
             ).all()) if installation_ids else []
             self.db.commit()
             logger.warning(
-                "本体解绑失败，已恢复应用、共享记录与副本安装",
+                "本体解绑失败，已恢复应用、共享记录、副本安装与工作流工具",
                 extra={
                     "app_id": str(app.id),
                     "share_count": len(share_ids),
                     "installation_count": len(restored_ids),
+                    "workflow_tool_count": len(workflow_tool_ids),
                 },
             )
         except Exception as e:
