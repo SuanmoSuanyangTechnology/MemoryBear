@@ -10,6 +10,7 @@ service methods that bridge to MCP discovery or tool execution run through
 from __future__ import annotations
 
 import asyncio
+import uuid
 from typing import Annotated
 
 import anyio.from_thread
@@ -104,6 +105,14 @@ def get_tool_methods_batch(request: ToolMethodsBatchRequest, db: DbSession, prin
 @router.get("/{tool_id}/methods", summary="获取工具的所有方法", response_model=ApiResponse)
 def get_tool_methods(tool_id: str, db: DbSession, principal: Caller):
     """Get all methods of a tool"""
+    # A malformed path id is a caller error and answers like an absent tool. Only
+    # the parse is guarded: anything failing later (service construction, MCP
+    # discovery) is a genuine fault and must stay a 500 instead of being
+    # mislabelled "not found".
+    try:
+        uuid.UUID(tool_id)
+    except (ValueError, TypeError):
+        raise BusinessException("工具不存在", BizCode.TOOL_NOT_FOUND)
     try:
         methods = asyncio.run(ToolService(db).get_tool_methods(tool_id, principal.tenant_id))
         if methods is None:
@@ -111,11 +120,6 @@ def get_tool_methods(tool_id: str, db: DbSession, principal: Caller):
         return success(data=methods, msg="获取工具方法成功")
     except BusinessException:
         raise
-    # A malformed path id fails the same way an absent tool does (host parity
-    # with the detail route below): ``uuid.UUID(tool_id)`` raises ValueError
-    # before any lookup, and that is a caller error, never a server fault.
-    except (ValueError, TypeError):
-        raise BusinessException("工具不存在", BizCode.TOOL_NOT_FOUND)
     except Exception as e:
         raise BusinessException(str(e), BizCode.INTERNAL_ERROR) from e
 
