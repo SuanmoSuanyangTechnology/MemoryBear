@@ -10,14 +10,6 @@ import type { ActivityDay, ActivityCategories } from '../types'
 // Calendar heatmap color tiers based on activity count
 const CALENDAR_COLORS = ['#E7EAF0', '#D4E2FF', '#9BBCFF', '#5C8EF5', '#155EEF']
 
-function getColorIndex(count: number): number {
-  if (count === 0) return 0
-  if (count <= 24) return 1
-  if (count <= 64) return 2
-  if (count <= 120) return 3
-  return 4
-}
-
 const CELL_SIZE = 19
 
 interface ActivityChartProps {
@@ -134,33 +126,11 @@ const ActivityChart: FC<ActivityChartProps> = ({ days, calendar, year, month, ca
       },
       series: [{
         name: t('dashboard.activityTotal'),
-        type: 'custom',
+        type: 'heatmap',
         coordinateSystem: 'calendar',
         data: fullYearData,
-        renderItem: (_params, api) => {
-          const point = api.coord([api.value(0), api.value(1)])
-          const value = api.value(1) as number
-          const colorIndex = getColorIndex(value)
-          return {
-            type: 'rect',
-            shape: {
-              x: point[0] - CELL_SIZE / 2 + 1,
-              y: point[1] - CELL_SIZE / 2 + 1,
-              width: CELL_SIZE - 2,
-              height: CELL_SIZE - 2,
-              r: 3,
-            },
-            style: {
-              fill: CALENDAR_COLORS[colorIndex],
-            },
-            emphasis: {
-              style: {
-                stroke: '#171719',
-                lineWidth: 2,
-              },
-            },
-          }
-        },
+        itemStyle: { borderRadius: 3, borderColor: '#FFFFFF', borderWidth: 2 },
+        emphasis: { itemStyle: { borderColor: '#171719', borderWidth: 2 } },
       }],
     }
     : {

@@ -26,6 +26,7 @@ export interface ToolItem {
   tool_type: 'builtin' | 'custom' | 'mcp' | 'workflow';
   method_count: number;
   is_active: boolean;
+  status?: string;
 }
 
 export interface ToolEntry {
