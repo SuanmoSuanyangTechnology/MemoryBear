@@ -14,6 +14,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from starlette.background import BackgroundTask
 
+from ...error_mapping import map_storage_error
 from ...errors import KnowledgeError
 from ...infrastructure.streaming import ClosingStreamingResponse
 from ...models.owned import FILE_ROLE_SOURCE, File, Knowledge
@@ -35,6 +36,8 @@ from ..schemas.file import (
     CustomTextFileCreate,
     FileUpdate,
 )
+from ..schemas.parser_config import NonblankText
+from ..schemas.query import FileOrder
 
 router = APIRouter(prefix="/files", tags=["files"])
 
@@ -111,7 +114,7 @@ async def get_files(
     runtime: Annotated[ProcessRuntime, Depends(get_runtime)],
     page: Annotated[int, Query(gt=0)] = 1,
     pagesize: Annotated[int, Query(gt=0, le=100)] = 20,
-    orderby: Annotated[str | None, Query()] = None,
+    orderby: Annotated[FileOrder | None, Query()] = None,
     desc: Annotated[bool, Query()] = False,
     keywords: Annotated[str | None, Query()] = None,
 ) -> SuccessEnvelope[dict[str, Any]]:
@@ -149,7 +152,7 @@ async def create_folder(
     runtime: Annotated[ProcessRuntime, Depends(get_runtime)],
     kb_id: uuid.UUID,
     parent_id: uuid.UUID,
-    folder_name: str = "/",
+    folder_name: NonblankText = "/",
 ) -> SuccessEnvelope[dict[str, Any]]:
     async with runtime.database.async_session() as db:
         folder = await file_service.create_folder(
@@ -275,11 +278,14 @@ async def get_file(
     if not file_key:
         raise file_service._not_found("KB_FILE_STORAGE_KEY_MISSING")
     media_type = mimetypes.guess_type(file_name)[0] or "application/octet-stream"
-    return ClosingStreamingResponse(
-        KnowledgeFileStorage(runtime.storage).download_stream(file_key),
-        media_type=media_type,
-        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(file_name)}"},
-    )
+    try:
+        return await ClosingStreamingResponse.with_first_chunk(
+            KnowledgeFileStorage(runtime.storage).download_stream(file_key),
+            media_type=media_type,
+            headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(file_name)}"},
+        )
+    except Exception as exc:
+        raise map_storage_error(exc) from exc
 
 
 @router.post("/batch-download")

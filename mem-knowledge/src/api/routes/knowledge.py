@@ -14,7 +14,9 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from starlette.background import BackgroundTask
 
+from ...error_mapping import map_connector_error, map_model_error
 from ...errors import KnowledgeError
+from ...model_errors import ModelRole
 from ...models.owned import FILE_ROLE_SOURCE, File, KnowledgeType, ParserType, PermissionType
 from ...rag.integrations.feishu import FeishuAPIClient
 from ...rag.integrations.yuque import YuqueAPIClient
@@ -57,7 +59,6 @@ from ..dependencies import (
     get_source,
     require_knowledge_copy_principal,
 )
-from ..error_handlers import render_error
 from ..schemas.chunk import KnowledgeRetrievalSource
 from ..schemas.common import SuccessEnvelope, success
 from ..schemas.file import KBBatchDownloadRequest
@@ -66,6 +67,7 @@ from ..schemas.knowledge import (
     KnowledgeUpdate,
     project_public_knowledge_data,
 )
+from ..schemas.query import CsvUUIDs, KnowledgeOrder
 
 router = APIRouter(prefix="/knowledges", tags=["knowledges"])
 
@@ -145,7 +147,7 @@ async def get_knowledge_graph_entity_types(
             principal.tenant_id,
         )
     if config is None:
-        raise KnowledgeError.from_code("KB_MODEL_CONFIG_NOT_FOUND")
+        raise KnowledgeError.from_code("KB_GRAPH_ENTITY_MODEL_CONFIG_INVALID")
     try:
         result = await graph_service.graph_entity_types(
             runtime,
@@ -163,7 +165,7 @@ async def get_knowledge_graph_entity_types(
             type(exc).__name__,
             _provider_status_code(exc),
         )
-        raise KnowledgeError.from_code("KB_GRAPH_ENTITY_TYPES_UNAVAILABLE") from exc
+        raise map_model_error(exc, model_role=ModelRole.GRAPH_ENTITY) from exc
     return _success(
         request,
         result,
@@ -178,13 +180,11 @@ async def check_yuque_auth(
     yuque_token: str,
     _principal: Annotated[Principal, Depends(get_principal)],
 ) -> SuccessEnvelope[None]:
-    async with YuqueAPIClient(yuque_user_id, yuque_token) as client:
-        repositories = await client.get_user_repos()
-    if not repositories:
-        return render_error(
-            request,
-            KnowledgeError.from_code("KB_YUQUE_AUTH_INVALID"),
-        )
+    try:
+        async with YuqueAPIClient(yuque_user_id, yuque_token) as client:
+            await client.get_user_repos()
+    except Exception as exc:
+        raise map_connector_error(exc) from exc
     return _success(request, msg="Successfully auth yuque info")
 
 
@@ -196,16 +196,11 @@ async def check_feishu_auth(
     feishu_folder_token: str,
     _principal: Annotated[Principal, Depends(get_principal)],
 ) -> SuccessEnvelope[None]:
-    async with FeishuAPIClient(feishu_app_id, feishu_app_secret) as client:
-        files = await client.list_all_folder_files(
-            feishu_folder_token,
-            recursive=True,
-        )
-    if not files:
-        return render_error(
-            request,
-            KnowledgeError.from_code("KB_FEISHU_AUTH_INVALID"),
-        )
+    try:
+        async with FeishuAPIClient(feishu_app_id, feishu_app_secret) as client:
+            await client.list_all_folder_files(feishu_folder_token, recursive=True)
+    except Exception as exc:
+        raise map_connector_error(exc) from exc
     return _success(request, msg="Successfully auth feishu info")
 
 
@@ -218,10 +213,10 @@ async def get_knowledges(
     parent_id: Annotated[uuid.UUID | None, Query(description="parent folder id")] = None,
     page: Annotated[int, Query(gt=0)] = 1,
     pagesize: Annotated[int, Query(gt=0, le=100)] = 20,
-    orderby: Annotated[str | None, Query()] = None,
+    orderby: Annotated[KnowledgeOrder | None, Query()] = None,
     desc: Annotated[bool, Query()] = False,
     keywords: Annotated[str | None, Query()] = None,
-    kb_ids: Annotated[str | None, Query()] = None,
+    kb_ids: Annotated[CsvUUIDs | None, Query()] = None,
 ) -> SuccessEnvelope[dict[str, Any]]:
     async with runtime.database.async_session() as db:
         total, items = await knowledge_service.list_knowledges(
@@ -380,6 +375,7 @@ async def update_knowledge(
             outcome.invalidate_workspace_id,
         )
     dispatcher = TaskDispatcher(runtime=runtime)
+    post_save_failed = False
     if outcome.wiki_backfill_required:
         from ...rag.wiki.config import BACKFILL_REGISTERED_HEADER, BACKFILL_TASK, WIKI_QUEUE
         from ...rag.wiki.diagnostics import diagnostic_json, exception_details
@@ -411,9 +407,7 @@ async def update_knowledge(
                     knowledge_id, outcome.wiki_backfill_task_id,
                     diagnostic_json(exception_details(state_exc)),
                 )
-            raise KnowledgeError.from_code(
-                "KB_WIKI_BACKFILL_DISPATCH_FAILED"
-            ) from exc
+            post_save_failed = True
     if plan.graph_enabled_before is not None:
         try:
             await dispatch_graph_transition(
@@ -423,7 +417,8 @@ async def update_knowledge(
                 outcome.parser_config,
             )
         except Exception:
-            logger.error(
+            post_save_failed = True
+            logger.exception(
                 "Failed to dispatch graph transition knowledge_id=%s",
                 knowledge_id,
             )
@@ -438,18 +433,25 @@ async def update_knowledge(
                 skipped=skipped,
             )
         except Exception:
-            logger.error(
+            post_save_failed = True
+            logger.exception(
                 "Failed to dispatch reparse tasks knowledge_id=%s",
                 knowledge_id,
             )
     response_data = outcome.response_data
     if source is KnowledgeRetrievalSource.EXTERNAL_API and response_data is not None:
         response_data = project_public_knowledge_data(response_data)
-    return _success(
-        request,
-        response_data,
-        "The knowledge base information has been successfully updated",
-    )
+    message = "The knowledge base information has been successfully updated"
+    if post_save_failed:
+        from ..error_handlers import request_locale
+
+        message = (
+            ("The knowledge base configuration was saved, "
+             "but background processing could not start. Check the task status.")
+            if request_locale(request) == "en"
+            else "知识库配置已保存，但后续处理任务未能启动，请查看任务状态。"
+        )
+    return _success(request, response_data, message)
 
 
 @router.delete("/{knowledge_id}", response_model=SuccessEnvelope[None])

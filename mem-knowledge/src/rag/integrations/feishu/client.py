@@ -65,9 +65,12 @@ class FeishuAPIClient:
             )
         except httpx.HTTPError as exc:
             raise FeishuAuthError("Feishu authentication request failed") from exc
+        response.raise_for_status()
         body = response.json()
         if body.get("code") != 0 or not body.get("tenant_access_token"):
-            raise FeishuAuthError("Feishu authentication failed", str(body.get("code")))
+            raise FeishuAuthError(
+                "Feishu authentication failed", str(body.get("code")), response=response
+            )
         self._access_token = str(body["tenant_access_token"])
         return self._access_token
 
@@ -90,9 +93,12 @@ class FeishuAPIClient:
             )
         except httpx.HTTPError as exc:
             raise FeishuAPIError("Feishu folder request failed") from exc
+        response.raise_for_status()
         body = response.json()
         if body.get("code") != 0:
-            raise FeishuAPIError("Feishu API request failed", str(body.get("code")))
+            raise FeishuAPIError(
+                "Feishu API request failed", str(body.get("code")), response=response
+            )
         data = body.get("data") or {}
         files = [
             FileInfo(

@@ -8,6 +8,7 @@ from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, Query, Request
 
+from ...error_mapping import map_wiki_error
 from ...errors import KnowledgeError
 from ...rag.wiki.config import WikiError
 from ...repositories.wiki import read
@@ -15,23 +16,11 @@ from ...runtime import ProcessRuntime
 from ...services.wiki.runtime import transaction
 from ..dependencies import Principal, get_principal, get_runtime
 from ..schemas.common import SuccessEnvelope, success
+from ..schemas.query import WikiPageTypes
 
 router = APIRouter(prefix="/knowledges/{kb_id}/wiki", tags=["wiki"])
 PrincipalDep = Annotated[Principal, Depends(get_principal)]
 RuntimeDep = Annotated[ProcessRuntime, Depends(get_runtime)]
-
-
-def _business_error(error):
-    codes = {
-        "WIKI_NOT_FOUND": "KB_WIKI_NOT_FOUND",
-        "WIKI_KNOWLEDGE_UNAVAILABLE": "KB_WIKI_NOT_FOUND",
-        "WIKI_DOCUMENT_UNAVAILABLE": "KB_WIKI_NOT_FOUND",
-        "WIKI_SCOPE_MISMATCH": "KB_WIKI_NOT_FOUND",
-        "WIKI_DISABLED": "KB_WIKI_DISABLED",
-        "WIKI_SOURCE_NOT_READY": "KB_WIKI_SOURCE_NOT_READY",
-        "WIKI_MODEL_REQUIRED": "KB_WIKI_MODEL_REQUIRED",
-    }
-    return KnowledgeError.from_code(codes.get(error.code, "KB_CONFLICT"))
 
 
 def _scope(kb_id, principal):
@@ -44,8 +33,6 @@ def _scope(kb_id, principal):
 
 def _types(value):
     values = tuple(part.strip() for part in (value or "").split(",") if part.strip())
-    if set(values) - {"summary", "entity", "concept"}:
-        raise KnowledgeError.from_code("KB_HTTP_VALIDATION_ERROR")
     return values
 
 
@@ -53,7 +40,7 @@ async def _read(runtime, operation, scope, **kwargs):
     try:
         return await asyncio.to_thread(transaction, runtime, operation, scope, **kwargs)
     except WikiError as exc:
-        raise _business_error(exc) from None
+        raise map_wiki_error(exc) from exc
 
 
 def _response(request, data):
@@ -66,7 +53,7 @@ async def list_pages(
     kb_id: uuid.UUID,
     principal: PrincipalDep,
     runtime: RuntimeDep,
-    page_types: str | None = None,
+    page_types: WikiPageTypes | None = None,
     keyword: str | None = Query(
         None, description="搜索 Wiki 标题、摘要和正文，不区分大小写的字面包含匹配；"
         "忽略首尾空白，空白不过滤，% 和 _ 按普通字符匹配。",
@@ -111,7 +98,7 @@ async def tree(
     principal: PrincipalDep,
     runtime: RuntimeDep,
     folder_id: uuid.UUID | None = None,
-    page_types: str | None = None,
+    page_types: WikiPageTypes | None = None,
     page: int = Query(1, ge=1),
     pagesize: int = Query(50, ge=1, le=200),
     cursor: str | None = Query(
@@ -159,7 +146,7 @@ async def graph(
     runtime: RuntimeDep,
     mode: Literal["overview", "ego"] = "overview",
     center_page_id: uuid.UUID | None = None,
-    types: str | None = None,
+    types: WikiPageTypes | None = None,
     depth: int = Query(1, ge=1, le=2),
     limit: int = Query(500, ge=1, le=5000),
 ):

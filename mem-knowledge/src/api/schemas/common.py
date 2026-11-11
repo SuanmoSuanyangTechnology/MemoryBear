@@ -33,7 +33,7 @@ def success(data: Any = None, msg: str = "OK") -> dict[str, Any]:
 def fail(
     code: int,
     msg: str,
-    error: Any = "",
+    error: str = "",
     data: Any = None,
 ) -> dict[str, Any]:
     """Return the exact legacy failure envelope."""

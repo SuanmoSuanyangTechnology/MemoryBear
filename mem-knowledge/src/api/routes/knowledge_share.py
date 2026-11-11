@@ -12,6 +12,7 @@ from ...services import knowledge_share as share_service
 from ..dependencies import Principal, get_principal, get_runtime
 from ..schemas.common import SuccessEnvelope, success
 from ..schemas.knowledge_share import KnowledgeShareCreate
+from ..schemas.query import ShareOrder
 
 router = APIRouter(
     prefix="/knowledgeshares",
@@ -36,7 +37,7 @@ async def get_knowledgeshares(
     runtime: Annotated[ProcessRuntime, Depends(get_runtime)],
     page: Annotated[int, Query(gt=0)] = 1,
     pagesize: Annotated[int, Query(gt=0, le=100)] = 20,
-    orderby: Annotated[str | None, Query()] = None,
+    orderby: Annotated[ShareOrder | None, Query()] = None,
     desc: Annotated[bool, Query()] = False,
 ) -> SuccessEnvelope[dict[str, Any]]:
     async with runtime.database.async_session() as db:

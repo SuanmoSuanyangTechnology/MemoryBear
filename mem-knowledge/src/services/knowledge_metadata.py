@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import json
 import uuid
 from typing import Any
 
+from error_core.diagnostics import redact
 from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
@@ -387,7 +389,10 @@ class KnowledgeMetadataService:
                         }
                     )
         if failed_items:
-            return {"success_count": 0, "failed_items": failed_items}
+            raise KnowledgeError.from_code(
+                "KB_METADATA_VALIDATION_ERROR",
+                diagnostic=redact(json.dumps(failed_items, ensure_ascii=False)),
+            )
 
         try:
             for item in items:

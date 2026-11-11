@@ -21,16 +21,16 @@ import os
 import re
 from dataclasses import dataclass
 
+import httpx
 from auth_sdk.schema import UserContext
 from fastapi import HTTPException, Request
 from pydantic import ValidationError
+from redis.exceptions import ConnectionError as RedisConnectionError
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 
 from .api.dependencies import Principal, _principal_from_headers
 from .errors import KnowledgeError
-from .request_logging import log_request_failure, safe_failure_detail
-from .trace import TRACE_ID_HEADER
 
 logger = logging.getLogger(__name__)
 
@@ -108,19 +108,16 @@ def _load_gateway_auth(kb_auth: KbAuthConfig):
 
 def _auth_error(
     request: Request, status_code: int, detail: object, *, exception: BaseException | None = None,
+    error_code: str | None = None,
 ) -> JSONResponse:
     """Record early rejections without changing authentication decisions."""
-    log_request_failure(
-        request, status_code=status_code, response_code=None,
-        error_code="AUTHENTICATION_REJECTED",
-        message=safe_failure_detail(detail, "Authentication rejected"),
-        exception=exception,
-        validation_errors=exception.errors() if isinstance(exception, ValidationError) else None,
-    )
-    return JSONResponse(
-        status_code=status_code, content={"detail": detail},
-        headers={TRACE_ID_HEADER: request.state.trace_id},
-    )
+    from .api.error_handlers import _HTTP_ERRORS, render_error
+
+    key = error_code or _HTTP_ERRORS.get(status_code, "KB_INTERNAL_ERROR")
+    error = KnowledgeError.from_code(key, status_code=status_code)
+    return render_error(request, error, exception=exception,
+                        headers=getattr(exception, "headers", None))
+
 
 
 class KbAuthMiddleware(BaseHTTPMiddleware):
@@ -180,6 +177,9 @@ class KbAuthMiddleware(BaseHTTPMiddleware):
         except HTTPException as exc:
             # 验签失败 401 / ACL 拒绝 403 / 配置缺失 500，按 SDK 语义原样返回
             return _auth_error(request, exc.status_code, exc.detail, exception=exc)
+        except (httpx.RequestError, RedisConnectionError, TimeoutError, ConnectionError) as exc:
+            return _auth_error(request, 401, "authentication dependency unavailable", exception=exc,
+                               error_code="KB_AUTH_DEPENDENCY_UNAVAILABLE")
         except Exception as exc:
             return _auth_error(request, 401, "invalid token", exception=exc)
         if ctx is None:

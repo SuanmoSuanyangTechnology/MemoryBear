@@ -18,7 +18,7 @@ def scoped(model, scope):
 
 
 def missing():
-    raise KnowledgeError.from_code("KB_RESOURCE_NOT_FOUND")
+    raise KnowledgeError.from_code("KB_FAQ_NOT_FOUND")
 
 
 def conflict(code="KB_FAQ_CONFLICT"):
@@ -52,7 +52,7 @@ def get_version(session, scope, version_id):
         )
     )
     if row is None:
-        missing()
+        raise KnowledgeError.from_code("KB_FAQ_SOURCE_SNAPSHOT_UNAVAILABLE")
     return row
 
 

@@ -156,6 +156,28 @@ def failure_diagnostics(
         context["exception_chain_truncated"] = True
     if frames_truncated:
         context["exception_frames_truncated"] = True
+    upstream = []
+    for node in nodes:
+        response = getattr(node, "response", None)
+        if response is None:
+            continue
+        details = {"exception_type": type(node).__name__,
+                   "status": getattr(response, "status_code", None),
+                   "code": getattr(node, "error_code", None)}
+        if hasattr(response, "headers"):
+            details["request_id"] = response.headers.get("x-request-id")
+            details["trace_id"] = response.headers.get("x-trace-id")
+        try:
+            if getattr(response, "_content_consumed", True) is False:
+                raw = "<response body not read>"
+            else:
+                raw = response.text if hasattr(response, "text") else response
+            details["response"] = redact_for_log(raw)
+        except (RuntimeError, UnicodeError):
+            details["response"] = "<response body unavailable>"
+        upstream.append(details)
+    if upstream:
+        context["upstream_failures"] = upstream
     if nodes:
         context["exception_type"] = type(nodes[0]).__name__
         if not sensitive_chain:

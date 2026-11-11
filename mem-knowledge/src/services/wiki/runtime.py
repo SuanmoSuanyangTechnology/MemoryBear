@@ -27,8 +27,9 @@ def make_model(runtime, snapshot):
         view = TaskModelFactory(runtime).resolve_chat(model_id, tenant_id)
     except Exception as exc:
         from ...error_mapping import map_model_error
+        from ...model_errors import ModelRole
 
-        mapped = map_model_error(exc)
+        mapped = map_model_error(exc, model_role=ModelRole.LLM)
         raise WikiError(mapped.code, retryable=mapped.retryable, diagnostics={
             "stage": "model_resolve", "model_id": str(model_id),
         }) from exc

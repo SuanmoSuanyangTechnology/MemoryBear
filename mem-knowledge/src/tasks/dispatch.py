@@ -60,12 +60,12 @@ class TaskDispatcher:
         expected_queue = PUBLISHABLE_KNOWLEDGE_TASK_ROUTES.get(name)
         if expected_queue is None:
             raise KnowledgeError.from_code(
-                "KB_VALIDATION_ERROR",
+                "KB_TASK_NAME_CONFIG_INVALID",
                 f"Unknown knowledge task: {name}",
             )
         if queue is not None and queue != expected_queue:
             raise KnowledgeError.from_code(
-                "KB_VALIDATION_ERROR",
+                "KB_TASK_QUEUE_CONFIG_INVALID",
                 f"Invalid queue for knowledge task: {name}",
             )
         if self._runtime is not None and name in {
@@ -105,6 +105,8 @@ class TaskDispatcher:
             )
         except KnowledgeError:
             raise
+        except (TypeError, ValueError) as exc:
+            raise KnowledgeError.from_code("KB_TASK_DISPATCH_CONFIG_INVALID") from exc
         except Exception as exc:
             raise KnowledgeError.from_code(
                 "KB_TASK_DISPATCH_FAILED",
@@ -113,7 +115,7 @@ class TaskDispatcher:
         task_id = getattr(result, "id", None)
         if not task_id:
             raise KnowledgeError.from_code(
-                "KB_TASK_DISPATCH_FAILED",
+                "KB_TASK_DISPATCH_CONFIG_INVALID",
                 f"Knowledge task did not return an id: {name}",
             )
         return str(task_id)

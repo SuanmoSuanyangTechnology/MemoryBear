@@ -1056,6 +1056,11 @@ class KnowledgeRetrievalService:
                 type(exc).__name__,
                 cls._elapsed_ms(started_at),
             )
+            if target.params.retrieve_type is RetrieveType.Graph:
+                if isinstance(exc, KnowledgeError):
+                    raise
+                code = "KB_HTTP_TIMEOUT" if isinstance(exc, TimeoutError) else "KB_INTERNAL_ERROR"
+                raise KnowledgeError.from_code(code) from exc
             return KnowledgeRetrievalResult()
         finally:
             cls._record_timing(timings, "graph_ms", started_at)

@@ -14,6 +14,7 @@ import logging
 import time
 from typing import Any
 
+from error_core.knowledge import validation_diagnostic
 from memorybear.knowledge.v1 import retrieval_pb2, retrieval_pb2_grpc
 from memorybear_grpc.interceptors import current_principal
 from memorybear_grpc.metadata import (
@@ -43,37 +44,40 @@ logger = logging.getLogger(__name__)
 _RERANK_FIELDS = frozenset({"rerank_mode", "rerank_weights"})
 
 
-def _decode_json_object(body_json: bytes, *, error_code: str) -> dict[str, Any]:
+def _decode_json(body_json: bytes) -> Any:
     try:
         body = json.loads(body_json)
     except (UnicodeDecodeError, ValueError) as exc:
-        raise KnowledgeError.from_code(error_code) from exc
-    if not isinstance(body, dict):
-        raise KnowledgeError.from_code(error_code)
+        raise KnowledgeError.from_code("KB_REQUEST_MALFORMED") from exc
     return body
 
 
 def _decode_retrieval_request(
     body_json: bytes, source: KnowledgeRetrievalSource
 ) -> KnowledgeRetrievalRequest:
-    body = _decode_json_object(body_json, error_code="KB_RETRIEVAL_REQUEST_INVALID")
+    body = _decode_json(body_json)
     try:
         return prepare_retrieval_request(ChunkRetrieve.model_validate(body), source)
     except ValidationError as exc:
         if any(
-            any(part in _RERANK_FIELDS for part in error.get("loc", ()))
-            for error in exc.errors()
+            any(part in _RERANK_FIELDS for part in error.get("loc", ())) for error in exc.errors()
         ):
-            raise KnowledgeError.from_code("KB_RERANK_CONFIG_INVALID") from exc
-        raise KnowledgeError.from_code("KB_RETRIEVAL_REQUEST_INVALID") from exc
+            raise KnowledgeError.from_code(
+                "KB_RERANK_CONFIG_INVALID", diagnostic=validation_diagnostic(exc.errors())
+            ) from exc
+        raise KnowledgeError.from_code(
+            "KB_RETRIEVAL_REQUEST_INVALID", diagnostic=validation_diagnostic(exc.errors())
+        ) from exc
 
 
 def _decode_policy_request(body_json: bytes) -> RetrievalPolicyRequest:
-    body = _decode_json_object(body_json, error_code="KB_HTTP_VALIDATION_ERROR")
+    body = _decode_json(body_json)
     try:
         return RetrievalPolicyRequest.model_validate(body)
     except ValidationError as exc:
-        raise KnowledgeError.from_code("KB_HTTP_VALIDATION_ERROR") from exc
+        raise KnowledgeError.from_code(
+            "KB_HTTP_VALIDATION_ERROR", diagnostic=validation_diagnostic(exc.errors())
+        ) from exc
 
 
 def _principal() -> Principal:
@@ -92,7 +96,7 @@ def _source(context) -> KnowledgeRetrievalSource:
             headers.get("x-kb-source") or KnowledgeRetrievalSource.GENERAL
         )
     except ValueError as exc:
-        raise KnowledgeError.from_code("KB_PRINCIPAL_INVALID") from exc
+        raise KnowledgeError.from_code("KB_SOURCE_HEADER_INVALID") from exc
 
 
 def _language(context) -> str:
@@ -143,13 +147,12 @@ def _log_failure(
         "knowledge_grpc_failed %s",
         json.dumps(details, ensure_ascii=False, default=str),
         exc_info=(type(error), error, error.__traceback__)
-        if not bounded_chain and len(nodes) > 1 else None,
+        if not bounded_chain and len(nodes) > 1
+        else None,
     )
 
 
-class KnowledgeRetrievalServicer(
-    retrieval_pb2_grpc.KnowledgeRetrievalServiceServicer
-):
+class KnowledgeRetrievalServicer(retrieval_pb2_grpc.KnowledgeRetrievalServiceServicer):
     """Stateless adapter: the pipeline resolves everything per call."""
 
     def __init__(self, runtime: ProcessRuntime) -> None:
@@ -179,12 +182,14 @@ class KnowledgeRetrievalServicer(
                 body = success_body(_retrieval_data(result), "retrieval successful")
             except KnowledgeError as exc:
                 _log_failure(
-                    exc, operation="Retrieve", stage=stage, trace_id=trace_id,
-                    principal=principal, source=source,
+                    exc,
+                    operation="Retrieve",
+                    stage=stage,
+                    trace_id=trace_id,
+                    principal=principal,
+                    source=source,
                 )
-                await abort_with_error(
-                    context, exc, language=language, trace_id=trace_id
-                )
+                await abort_with_error(context, exc, language=language, trace_id=trace_id)
             except Exception:
                 logger.exception(
                     "knowledge_grpc_retrieval_error source=%s elapsed_ms=%.2f trace_id=%s",
@@ -240,12 +245,13 @@ class KnowledgeRetrievalServicer(
                 )
             except KnowledgeError as exc:
                 _log_failure(
-                    exc, operation="RetrievalPolicy", stage=stage, trace_id=trace_id,
+                    exc,
+                    operation="RetrievalPolicy",
+                    stage=stage,
+                    trace_id=trace_id,
                     principal=principal,
                 )
-                await abort_with_error(
-                    context, exc, language=language, trace_id=trace_id
-                )
+                await abort_with_error(context, exc, language=language, trace_id=trace_id)
             except Exception:
                 logger.exception(
                     "knowledge_grpc_retrieval_policy_error elapsed_ms=%.2f trace_id=%s",

@@ -11,8 +11,9 @@ from ..api.dependencies import Principal
 from ..api.schemas.chunk import ImageRetrievalQuery, RetrieveType
 from ..api.schemas.knowledge_metadata import MetadataFilterMode
 from ..api.schemas.knowledge_retrieval import KnowledgeRetrievalRequest
-from ..error_mapping import map_text_embedding_error
+from ..error_mapping import map_text_embedding_error, map_wiki_error
 from ..errors import KnowledgeError
+from ..model_errors import ModelRole
 from ..rag.faq.index import (
     FAQ_ID_BATCH_SIZE,
     FAQ_SYNC_CONCURRENCY,
@@ -81,7 +82,9 @@ async def _target_for_sync(runtime, scope, row):
     if row["embedding_id"] is None:
         raise KnowledgeError.from_code("KB_RETRIEVAL_EMBEDDING_MODEL_NOT_CONFIGURED")
     async with runtime.database.async_session() as db:
-        model = await Preparation._snapshot_model(db, row["embedding_id"], scope["tenant_id"])
+        model = await Preparation._snapshot_model(
+            db, row["embedding_id"], scope["tenant_id"], model_role=ModelRole.EMBEDDING
+        )
     return FAQTarget(scope=scope, embedding=model, top_k=1, score_threshold=None)
 
 
@@ -91,7 +94,7 @@ async def _load_sync_row(runtime, scope, faq_id, expected_row_version=None):
             transaction, runtime, repository.load_for_sync, scope, faq_id, expected_row_version
         )
     except WikiError as exc:
-        raise KnowledgeError.from_code("KB_RESOURCE_NOT_FOUND") from exc
+        raise map_wiki_error(exc, faq=True) from exc
 
 
 async def cleanup_deleted_projection(runtime, scope, faq_id):

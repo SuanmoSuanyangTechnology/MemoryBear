@@ -9,6 +9,7 @@ from ...utils.datetime_utils import (
     normalize_progress_message_timestamps,
     to_timestamp_ms,
 )
+from .parser_config import DocumentParserConfig
 
 
 class DocumentBase(BaseModel):
@@ -34,7 +35,7 @@ class DocumentUpdate(BaseModel):
     file_size: int | None = Field(None)
     file_meta: dict | None = Field(None)
     parser_id: str | None = Field(None)
-    parser_config: dict | None = Field(None)
+    parser_config: DocumentParserConfig = Field(default=None)
     chunk_num: int | None = Field(None)
     progress: float | None = Field(None)
     progress_msg: str | None = Field(None)
