@@ -730,6 +730,10 @@ class AppDslService:
             cluster_dep_map = self._land_cluster_members(
                 dsl, workspace_id, tenant_id, user_id, warnings, now, redis_client,
                 dep_map=dep_map, cluster_report=cluster_report,
+                # Overwrite target already exists: keep its master-agent binding
+                # instead of clearing it just because the incoming YAML carries a
+                # source-environment ref.
+                create_root=False,
             )
             if cluster_dep_map is not None:
                 return self._overwrite_dsl(
@@ -746,6 +750,7 @@ class AppDslService:
         cluster_dep_map = self._land_cluster_members(
             dsl, workspace_id, tenant_id, user_id, warnings, now, redis_client,
             dep_map=dep_map, cluster_report=cluster_report,
+            create_root=True,
         )
         if cluster_dep_map is not None:
             dep_map = cluster_dep_map
@@ -800,6 +805,7 @@ class AppDslService:
         *,
         dep_map: dict[str, str] | None = None,
         cluster_report: list[dict[str, Any]] | None = None,
+        create_root: bool = False,
     ) -> dict[str, str] | None:
         """Land every ``cluster[]`` member before the root app, returning dep_map.
 
@@ -891,11 +897,16 @@ class AppDslService:
                 }
             )
 
-        if dsl.get("app", {}).get("type") == AppType.MULTI_AGENT:
-            # The root is a fresh draft: any stored master-agent release reference
-            # points at the source environment and can never match here. Blank it
-            # silently — the "未匹配" warning would only be noise, since publishing
-            # re-points it at the cluster's own release.
+        if create_root and dsl.get("app", {}).get("type") == AppType.MULTI_AGENT:
+            # Only when the root is a *fresh* draft: its stored master-agent release
+            # reference points at the source environment and can never match here.
+            # Blank it silently — the "未匹配" warning would only be noise, since
+            # publishing re-points it at the cluster's own release.
+            #
+            # Overwrite import (``create_root=False``) must NOT take this branch: the
+            # root already exists and may hold a valid binding in this tenant. Blanking
+            # it there silently drops that binding, and `_resolve_release(None)` then
+            # writes ``master_agent_id=None`` without even a warning.
             dsl.setdefault("multi_agent_config", {})["master_agent_ref"] = None
 
         # 复用成员没有「导入」，只是绑定到空间里已有的应用；两者都未发布时

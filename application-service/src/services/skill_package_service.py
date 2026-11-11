@@ -1315,10 +1315,15 @@ members: list[str] | None = None,
                 old_pkg.description = item["description"]
                 # A byte-identical market dependency must retain the market
                 # reference even when its local skill/package row is reused.
-                # Never downgrade an existing market origin on a local replay.
+                # Never downgrade an existing market origin on a local replay:
+                # a skill shipped inside an app package has no market_ref of its
+                # own (`source_ref` is None), so writing it here would wipe the
+                # `"<resource_id>@<version>"` that is the only origin=external
+                # evidence and the key `_find_market_skill_copy` reuses on.
                 if source_type == "market":
                     old_pkg.source_type = source_type
-                    old_pkg.source_ref = source_ref
+                    if source_ref:
+                        old_pkg.source_ref = source_ref
                 skill_row.description = item["description"]
                 db.flush()
                 return {
@@ -1368,10 +1373,12 @@ members: list[str] | None = None,
                     existing.display_name = item["name"]
                     existing.description = item["description"]
                     # See the overwrite branch above: identical market content
-                    # reuses the local package but adopts its market provenance.
+                    # reuses the local package but adopts its market provenance —
+                    # only when this import actually knows the market reference.
                     if source_type == "market":
                         existing.source_type = source_type
-                        existing.source_ref = source_ref
+                        if source_ref:
+                            existing.source_ref = source_ref
                     if skill is not None:
                         skill.description = item["description"]
                     db.flush()
