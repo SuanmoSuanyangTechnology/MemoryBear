@@ -18,7 +18,7 @@ from src.middleware.auth import MemoryPrincipal
 
 if TYPE_CHECKING:
     from src.runtime import ProfileRuntime
-from src.schemas.short_term_memo import MemoDateType, MemoScope
+from src.schemas.short_memory import MemoDateType, MemoScope
 from src.services.short.short import ShortService
 from src.services.short.short_term_memo import ShortTermMemoService
 

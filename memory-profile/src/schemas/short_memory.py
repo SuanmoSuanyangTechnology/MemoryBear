@@ -1,6 +1,6 @@
-"""Management memo API contracts, using UTC Unix milliseconds."""
+"""Short-term memory API contracts, using UTC Unix milliseconds."""
 
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -47,4 +47,33 @@ class ShortTermMemoList(BaseModel):
 
 class ShortTermMemoResponse(ApiResponse[ShortTermMemoList]):
     data: ShortTermMemoList
+    time: TimestampMs
+
+
+class ShortTermRetrievalItem(BaseModel):
+    query: str
+    retrieval: Any
+    source: str
+
+
+class ShortTermItem(BaseModel):
+    retrieval: list[ShortTermRetrievalItem]
+    message: str
+    answer: str | None
+
+
+class LongTermItem(BaseModel):
+    query: str
+    retrieval: str
+
+
+class ShortTermData(BaseModel):
+    short_term: list[ShortTermItem]
+    long_term: list[LongTermItem]
+    entity: int
+    retrieval_number: int
+    long_term_number: int
+
+
+class ShortTermResponse(ApiResponse[ShortTermData]):
     time: TimestampMs

@@ -10,11 +10,11 @@ from typing import TYPE_CHECKING, Any
 
 from src.common.normalization import as_utc as as_utc_aware
 from src.common.normalization import datetime_to_epoch_ms as to_timestamp_ms
-from src.repositories.short_term_memo import ShortTermMemoRepository
+from src.repositories.short_memory import ShortTermMemoRepository
 
 if TYPE_CHECKING:
     from src.runtime import ProfileRuntime
-from src.schemas.short_term_memo import (
+from src.schemas.short_memory import (
     MemoDateType,
     MemoScope,
     MemoStatus,

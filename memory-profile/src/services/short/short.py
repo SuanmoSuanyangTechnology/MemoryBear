@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from src.repositories.short import ShortRepository
+from src.repositories.short_memory import ShortRepository
 
 if TYPE_CHECKING:
     from src.runtime import ProfileRuntime

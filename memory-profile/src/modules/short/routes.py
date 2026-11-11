@@ -9,7 +9,12 @@ from fastapi.responses import JSONResponse
 from src.middleware.auth import MemoryPrincipal
 from src.middleware.identity import require_memory_context
 from src.modules.short.handler import ShortMemoryHandler
-from src.schemas.short_term_memo import MemoDateType, MemoScope, ShortTermMemoResponse
+from src.schemas.short_memory import (
+    MemoDateType,
+    MemoScope,
+    ShortTermMemoResponse,
+    ShortTermResponse,
+)
 
 router = APIRouter(prefix="/memory/short", tags=["Memory"])
 Context = Annotated[MemoryPrincipal, Depends(require_memory_context)]
@@ -40,7 +45,7 @@ async def list_short_term_memos(
     )
 
 
-@router.get("/short_term")
+@router.get("/short_term", response_model=ShortTermResponse)
 async def short_term_configs(
     request: Request,
     context: Context,
