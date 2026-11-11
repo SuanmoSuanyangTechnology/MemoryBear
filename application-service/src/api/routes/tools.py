@@ -111,6 +111,11 @@ def get_tool_methods(tool_id: str, db: DbSession, principal: Caller):
         return success(data=methods, msg="获取工具方法成功")
     except BusinessException:
         raise
+    # A malformed path id fails the same way an absent tool does (host parity
+    # with the detail route below): ``uuid.UUID(tool_id)`` raises ValueError
+    # before any lookup, and that is a caller error, never a server fault.
+    except (ValueError, TypeError):
+        raise BusinessException("工具不存在", BizCode.TOOL_NOT_FOUND)
     except Exception as e:
         raise BusinessException(str(e), BizCode.INTERNAL_ERROR) from e
 

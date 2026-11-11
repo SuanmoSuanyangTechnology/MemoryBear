@@ -78,6 +78,10 @@ async def get_tool_methods(
         return success(data=methods, msg="获取工具方法成功")
     except HTTPException:
         raise
+    # 非法 tool_id 在 uuid.UUID() 处就失败，属调用方错误；与工具详情接口保持
+    # 一致的「工具不存在」，不能落到 500。
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=404, detail="工具不存在")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
