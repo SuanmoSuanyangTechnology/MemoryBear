@@ -9,6 +9,7 @@ from app.models.app_model import App, AppType
 from app.models.app_release_model import AppRelease
 from app.models.tool_model import ToolConfig, WorkflowToolConfig, ToolStatus, ToolType
 from app.models.workflow_model import WorkflowConfig
+from app.models.workspace_model import Workspace
 from app.schemas.tool_schema import WorkflowToolPublishPreviewSchema
 from app.services.model_impact_service import config_ref_ids
 from app.services.model_service import ModelConfigService
@@ -21,11 +22,18 @@ class WorkflowToolPublishService:
     def __init__(self, db: Session):
         self.db = db
 
-    def _validate_workflow_app(self, app_id: uuid.UUID, workspace_id: uuid.UUID) -> App:
-        app = self.db.query(App).filter(
-            App.id == app_id,
-            App.workspace_id == workspace_id,
-        ).first()
+    def _validate_workflow_app(self, app_id: uuid.UUID, tenant_id: uuid.UUID) -> App:
+        # 工具是租户级资源：资源中心列表跨工作空间展示工具，重新发布不应要求
+        # 操作者位于来源应用的工作空间，归属校验下沉到租户。
+        app = (
+            self.db.query(App)
+            .join(Workspace, Workspace.id == App.workspace_id)
+            .filter(
+                App.id == app_id,
+                Workspace.tenant_id == tenant_id,
+            )
+            .first()
+        )
 
         if not app:
             raise BusinessException(f"应用不存在或无权访问: {app_id}", BizCode.NOT_FOUND)
@@ -153,10 +161,10 @@ class WorkflowToolPublishService:
     def get_publish_preview(
             self,
             workflow_app_id: uuid.UUID,
-            workspace_id: uuid.UUID,
+            tenant_id: uuid.UUID,
             release_id: Optional[uuid.UUID] = None,
     ) -> WorkflowToolPublishPreviewSchema:
-        app = self._validate_workflow_app(workflow_app_id, workspace_id)
+        app = self._validate_workflow_app(workflow_app_id, tenant_id)
         release = self._get_release(app, release_id)
         release_config = release.config or {}
         self._validate_no_human_intervention(release_config)
@@ -176,13 +184,12 @@ class WorkflowToolPublishService:
         tool_name: str,
         tool_description: str,
         tenant_id: uuid.UUID,
-        workspace_id: uuid.UUID,
         icon: Optional[str] = None,
         timeout: int = 300,
         tags: Optional[List[str]] = None,
         release_id: Optional[uuid.UUID] = None,
     ) -> ToolConfig | None:
-        app = self._validate_workflow_app(workflow_app_id, workspace_id)
+        app = self._validate_workflow_app(workflow_app_id, tenant_id)
         release = self._get_release(app, release_id)
         # 生效门禁：工具按绑定的 release_id 重建工作流，可绑定历史版本 → 绑定前校验快照模型可用（2026-09-20）
         ModelConfigService.assert_refs_publishable(
