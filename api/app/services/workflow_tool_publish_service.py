@@ -25,12 +25,19 @@ class WorkflowToolPublishService:
         app = self.db.query(App).filter(
             App.id == app_id,
             App.workspace_id == workspace_id,
-            App.is_active.is_(True)
         ).first()
-        
+
         if not app:
             raise BusinessException(f"应用不存在或无权访问: {app_id}", BizCode.NOT_FOUND)
-        
+
+        # 来源应用已删除时工具行可能仍在（历史数据），给出明确原因而不是笼统的 404。
+        if not app.is_active:
+            raise BusinessException(
+                "来源应用已删除，该工具已不可用",
+                BizCode.TOOL_SELECTION_INACTIVE,
+                context={"reason": "SOURCE_APP_DELETED", "app_id": str(app_id)},
+            )
+
         if app.type != AppType.PURE_WORKFLOW:
             raise BusinessException(
                 f"只有 Workflow(纯工作流) 类型可以发布为工具，当前类型: {app.type}。",

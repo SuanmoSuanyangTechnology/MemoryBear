@@ -4,7 +4,9 @@ import time
 import json
 import importlib
 from typing import Dict, Any, List, Optional
-from sqlalchemy import select
+from sqlalchemy import and_, select
+from sqlalchemy import update as sa_update
+from sqlalchemy.exc import SQLAlchemyError
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
@@ -82,6 +84,7 @@ class ToolService:
     ) -> List[ToolInfo]:
         """获取工具列表"""
         try:
+            self._disable_orphaned_workflow_tools(tenant_id)
             configs = self.tool_repo.find_by_tenant(
                 db=self.db,
                 tenant_id=tenant_id,
@@ -94,6 +97,52 @@ class ToolService:
             logger.error(f"获取工具列表失败: {e}")
             return []
 
+    def _disable_orphaned_workflow_tools(self, tenant_id: uuid.UUID) -> None:
+        """停用来源应用已删除的工作流工具。
+
+        `AppService.delete_app` 新删除会级联停用；这里兜底处理级联上线前
+        遗留的孤儿行，使列表、查重和工具选择器口径一致。失败不阻断读取。
+        """
+        try:
+            orphan_ids = list(self.db.scalars(
+                select(WorkflowToolConfig.id)
+                .join(ToolConfig, ToolConfig.id == WorkflowToolConfig.id)
+                .outerjoin(
+                    App,
+                    and_(
+                        App.id == WorkflowToolConfig.app_id,
+                        App.is_active.is_(True),
+                    ),
+                )
+                .where(
+                    ToolConfig.tenant_id == tenant_id,
+                    ToolConfig.tool_type == ToolType.WORKFLOW.value,
+                    ToolConfig.is_active.is_(True),
+                    App.id.is_(None),
+                )
+            ).all())
+            if not orphan_ids:
+                return
+            self.db.execute(
+                sa_update(ToolConfig)
+                .where(
+                    ToolConfig.id.in_(orphan_ids),
+                    ToolConfig.is_active.is_(True),
+                )
+                .values(is_active=False, updated_at=utcnow_naive())
+            )
+            self.db.commit()
+            logger.warning(
+                "已停用来源应用被删除的工作流工具",
+                extra={
+                    "tenant_id": str(tenant_id),
+                    "tool_ids": [str(item) for item in orphan_ids],
+                },
+            )
+        except SQLAlchemyError as e:
+            self.db.rollback()
+            logger.error(f"停用孤儿工作流工具失败: {e}")
+
     def get_tool_summary(self, tool_id: str, tenant_id: uuid.UUID) -> Optional[ToolInfo]:
         """获取工具基础信息"""
         config = self.tool_repo.find_by_id_and_tenant_all(self.db, uuid.UUID(tool_id), tenant_id)
@@ -101,6 +150,7 @@ class ToolService:
 
     def get_tool_detail(self, tool_id: str, tenant_id: uuid.UUID) -> Optional[ToolDetailSchema]:
         """获取工具详情（包含类型特定配置）"""
+        self._disable_orphaned_workflow_tools(tenant_id)
         config = self.tool_repo.find_by_id_and_tenant_all(self.db, uuid.UUID(tool_id), tenant_id)
         return self._config_to_detail(config) if config else None
 

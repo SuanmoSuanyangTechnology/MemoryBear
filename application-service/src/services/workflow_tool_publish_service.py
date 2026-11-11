@@ -43,11 +43,19 @@ class WorkflowToolPublishService:
         app = self.db.query(App).filter(
             App.id == app_id,
             App.workspace_id == workspace_id,
-            App.is_active.is_(True)
         ).first()
 
         if not app:
             raise BusinessException(f"应用不存在或无权访问: {app_id}", BizCode.NOT_FOUND)
+
+        # A deleted source app leaves the tool row visible in older installs;
+        # report the real reason instead of the tool silently going stale.
+        if not app.is_active:
+            raise BusinessException(
+                "来源应用已删除，该工具已不可用",
+                BizCode.TOOL_SELECTION_INACTIVE,
+                data={"reason": "SOURCE_APP_DELETED", "app_id": str(app_id)},
+            )
 
         if app.type != AppType.PURE_WORKFLOW:
             raise BusinessException(

@@ -43,6 +43,7 @@ from app.models import (
     Workspace,
 )
 from app.models.app_model import AppStatus, AppType
+from app.models.tool_model import ToolConfig, WorkflowToolConfig
 from app.plugins import get_plugin
 from app.repositories.app_repository import get_apps_by_id, AppRepository
 from app.repositories.workflow_repository import WorkflowConfigRepository
@@ -1095,6 +1096,22 @@ class AppService:
                 AppAssetInstallation.status == InstallStatus.ACTIVE,
             ).values(
                 status=InstallStatus.REMOVED,
+                updated_at=utcnow_naive(),
+            )
+        )
+
+        # 工作流工具派生自来源应用：应用删除后工具既不能执行也不能重新发布，
+        # 在同一事务内一并停用；`workflow_tool_configs` 行保留用于追溯。
+        self.db.execute(
+            sa_update(ToolConfig).where(
+                ToolConfig.is_active.is_(True),
+                ToolConfig.id.in_(
+                    select(WorkflowToolConfig.id).where(
+                        WorkflowToolConfig.app_id == app_id
+                    )
+                ),
+            ).values(
+                is_active=False,
                 updated_at=utcnow_naive(),
             )
         )
