@@ -6,7 +6,7 @@
 
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 
 from app.core.logging_config import get_api_logger
 from app.core.response_utils import success, fail
@@ -18,6 +18,7 @@ from app.schemas.memory_explicit_schema import (
     ExplicitMemoryDetailsRequest,
 )
 from app.dependencies import get_current_user
+from app.integrations.profile.proxy import memory_profile_proxy
 from app.models.user_model import User
 
 # Get API logger
@@ -33,8 +34,10 @@ router = APIRouter(
 
 
 @router.post("/overview", response_model=ApiResponse)
+@memory_profile_proxy(body_arg="body", body_fields=("end_user_id", "language_type"))
 async def get_explicit_memory_overview_api(
-    request: ExplicitMemoryOverviewRequest,
+    request: Request,
+    body: ExplicitMemoryOverviewRequest,
     current_user: User = Depends(get_current_user),
 ) -> dict:
     """
@@ -50,29 +53,33 @@ async def get_explicit_memory_overview_api(
         return fail(BizCode.INVALID_PARAMETER, "请先切换到一个工作空间", "current_workspace_id is None")
     
     api_logger.info(
-        f"显性记忆总览查询请求: end_user_id={request.end_user_id}, user={current_user.username}, "
+        f"显性记忆总览查询请求: end_user_id={body.end_user_id}, user={current_user.username}, "
         f"workspace={workspace_id}"
     )
     
     try:
         # 调用Service层方法
         result = await memory_explicit_service.get_explicit_memory_overview(
-            request.end_user_id
+            body.end_user_id
         )
         
         api_logger.info(
-            f"成功获取显性记忆总览: end_user_id={request.end_user_id}, "
+            f"成功获取显性记忆总览: end_user_id={body.end_user_id}, "
             f"total={result['total']}"
         )
         return success(data=result, msg="查询成功")
         
     except Exception as e:
-        api_logger.error(f"显性记忆总览查询失败: end_user_id={request.end_user_id}, error={str(e)}")
+        api_logger.error(f"显性记忆总览查询失败: end_user_id={body.end_user_id}, error={str(e)}")
         return fail(BizCode.INTERNAL_ERROR, "显性记忆总览查询失败", str(e))
 
 
 @router.get("/episodics", response_model=ApiResponse)
+@memory_profile_proxy(
+    query_fields=("end_user_id", "page", "pagesize", "start_date", "end_date", "episodic_type")
+)
 async def get_episodic_memory_list_api(
+    request: Request,
     end_user_id: str = Query(..., description="end user ID"),
     page: int = Query(1, gt=0, description="page number, starting from 1"),
     pagesize: int = Query(10, gt=0, le=100, description="number of items per page, max 100"),
@@ -165,7 +172,9 @@ async def get_episodic_memory_list_api(
     return success(data=result, msg="查询成功")
 
 @router.get("/semantics", response_model=ApiResponse)
+@memory_profile_proxy(query_fields=("end_user_id",))
 async def get_semantic_memory_list_api(
+    request: Request,
     end_user_id: str = Query(..., description="终端用户ID"),
     current_user: User = Depends(get_current_user),
 ) -> dict:
@@ -206,8 +215,10 @@ async def get_semantic_memory_list_api(
 
 
 @router.post("/details", response_model=ApiResponse)
+@memory_profile_proxy(body_arg="body", body_fields=("end_user_id", "memory_id", "language_type"))
 async def get_explicit_memory_details_api(
-    request: ExplicitMemoryDetailsRequest,
+    request: Request,
+    body: ExplicitMemoryDetailsRequest,
     current_user: User = Depends(get_current_user),
 ) -> dict:
     """
@@ -225,27 +236,27 @@ async def get_explicit_memory_details_api(
         return fail(BizCode.INVALID_PARAMETER, "请先切换到一个工作空间", "current_workspace_id is None")
     
     api_logger.info(
-        f"显性记忆详情查询请求: end_user_id={request.end_user_id}, memory_id={request.memory_id}, "
+        f"显性记忆详情查询请求: end_user_id={body.end_user_id}, memory_id={body.memory_id}, "
         f"user={current_user.username}, workspace={workspace_id}"
     )
     
     try:
         # 调用Service层方法
         result = await memory_explicit_service.get_explicit_memory_details(
-            end_user_id=request.end_user_id,
-            memory_id=request.memory_id
+            end_user_id=body.end_user_id,
+            memory_id=body.memory_id
         )
         
         api_logger.info(
-            f"成功获取显性记忆详情: end_user_id={request.end_user_id}, memory_id={request.memory_id}, "
+            f"成功获取显性记忆详情: end_user_id={body.end_user_id}, memory_id={body.memory_id}, "
             f"memory_type={result.get('memory_type')}"
         )
         return success(data=result, msg="查询成功")
         
     except ValueError as e:
         # 处理记忆不存在的情况
-        api_logger.warning(f"显性记忆不存在: end_user_id={request.end_user_id}, memory_id={request.memory_id}, error={str(e)}")
+        api_logger.warning(f"显性记忆不存在: end_user_id={body.end_user_id}, memory_id={body.memory_id}, error={str(e)}")
         return fail(BizCode.INVALID_PARAMETER, "显性记忆不存在", str(e))
     except Exception as e:
-        api_logger.error(f"显性记忆详情查询失败: end_user_id={request.end_user_id}, memory_id={request.memory_id}, error={str(e)}")
+        api_logger.error(f"显性记忆详情查询失败: end_user_id={body.end_user_id}, memory_id={body.memory_id}, error={str(e)}")
         return fail(BizCode.INTERNAL_ERROR, "显性记忆详情查询失败", str(e))

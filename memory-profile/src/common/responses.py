@@ -67,6 +67,17 @@ def failure(
     )
 
 
+def legacy_fail_response(code: int, msg: str, error: str = "") -> JSONResponse:
+    """Monolith ``fail(...)`` returned from a handler: HTTP 200 + envelope.
+
+    Migrated read endpoints raise ``ProfileError`` in the service layer and
+    convert it here, so proxied responses keep the legacy wire contract
+    (HTTP 200 with a non-zero ``code``) instead of becoming transport errors.
+    """
+
+    return JSONResponse(status_code=200, content=failure(code, msg, error).model_dump())
+
+
 def error_response(
     request: Request,
     status_code: int,

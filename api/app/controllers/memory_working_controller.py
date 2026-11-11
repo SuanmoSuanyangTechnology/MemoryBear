@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, timedelta
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
@@ -11,6 +11,7 @@ from app.core.response_utils import success
 from app.core.utils.datetime_utils import parse_timestamp_to_utc_naive, to_timestamp_ms
 from app.db import get_async_db_context
 from app.dependencies import get_current_user_async, CurrentUserSnapshot
+from app.integrations.profile.proxy import memory_profile_proxy
 from app.repositories.memory_message_repository import MemoryMessageRepository
 from app.schemas import conversation_schema
 from app.schemas.response_schema import ApiResponse
@@ -26,7 +27,9 @@ router = APIRouter(
 
 
 @router.get("/{end_user_id}/conversations", response_model=ApiResponse)
+@memory_profile_proxy(query_fields=("end_user_id", "page", "pagesize"), upper_bounds={"pagesize": 100})
 async def get_conversations(
+        request: Request,
         end_user_id: uuid.UUID,
         page: int = 1,
         pagesize: int = 20,
@@ -72,7 +75,11 @@ async def get_conversations(
 
 
 @router.get("/{end_user_id}/messages", response_model=ApiResponse)
+@memory_profile_proxy(
+    query_fields=("conversation_id", "page", "pagesize", "keyword", "start_date", "end_date"),
+)
 async def get_messages(
+        request: Request,
         conversation_id: uuid.UUID,
         page: int = Query(default=1, ge=1, description="页码，从 1 开始"),
         pagesize: int = Query(default=20, ge=1, le=100, description="每页数量，最大 100"),
@@ -217,7 +224,9 @@ def _normalize_message_filters(
 
 
 @router.get("/{end_user_id}/sources", response_model=ApiResponse)
+@memory_profile_proxy(query_fields=("end_user_id",))
 async def get_sources(
+        request: Request,
         end_user_id: uuid.UUID,
         current_user: CurrentUserSnapshot = Depends(get_current_user_async),
 ):
@@ -241,7 +250,11 @@ async def get_sources(
 
 
 @router.get("/{end_user_id}/source_messages", response_model=ApiResponse)
+@memory_profile_proxy(
+    query_fields=("end_user_id", "source", "page", "pagesize", "keyword", "start_date", "end_date"),
+)
 async def get_source_messages(
+        request: Request,
         end_user_id: uuid.UUID,
         source: str = Query(..., description="来源：service_api 或 mcp"),
         page: int = Query(default=1, ge=1, description="页码，从 1 开始"),
