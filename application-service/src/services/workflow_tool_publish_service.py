@@ -22,6 +22,7 @@ from ..models.app_model import App, AppType
 from ..models.app_release_model import AppRelease
 from ..models.tool_model import ToolConfig, ToolStatus, ToolType, WorkflowToolConfig
 from ..models.workflow_model import WorkflowConfig
+from ..models.workspace_model import Workspace
 from ..schemas.tool_schema import WorkflowToolPublishPreviewSchema
 from ..utils.db_locks import acquire_advisory_xact_lock
 from ..utils.model_config_refs import config_ref_ids
@@ -39,11 +40,19 @@ class WorkflowToolPublishService:
     def __init__(self, db: Session):
         self.db = db
 
-    def _validate_workflow_app(self, app_id: uuid.UUID, workspace_id: uuid.UUID) -> App:
-        app = self.db.query(App).filter(
-            App.id == app_id,
-            App.workspace_id == workspace_id,
-        ).first()
+    def _validate_workflow_app(self, app_id: uuid.UUID, tenant_id: uuid.UUID) -> App:
+        # Tools are tenant-scoped: the resource-center list shows tools from
+        # every workspace, so republishing must not require the operator to be
+        # in the source app's workspace. Ownership is enforced at the tenant.
+        app = (
+            self.db.query(App)
+            .join(Workspace, Workspace.id == App.workspace_id)
+            .filter(
+                App.id == app_id,
+                Workspace.tenant_id == tenant_id,
+            )
+            .first()
+        )
 
         if not app:
             raise BusinessException(f"应用不存在或无权访问: {app_id}", BizCode.NOT_FOUND)
@@ -191,10 +200,10 @@ class WorkflowToolPublishService:
     def get_publish_preview(
             self,
             workflow_app_id: uuid.UUID,
-            workspace_id: uuid.UUID,
+            tenant_id: uuid.UUID,
             release_id: uuid.UUID | None = None,
     ) -> WorkflowToolPublishPreviewSchema:
-        app = self._validate_workflow_app(workflow_app_id, workspace_id)
+        app = self._validate_workflow_app(workflow_app_id, tenant_id)
         release = self._get_release(app, release_id)
         release_config = release.config or {}
         self._validate_no_human_intervention(release_config)
@@ -214,13 +223,12 @@ class WorkflowToolPublishService:
         tool_name: str,
         tool_description: str,
         tenant_id: uuid.UUID,
-        workspace_id: uuid.UUID,
         icon: str | None = None,
         timeout: int = 300,
         tags: list[str] | None = None,
         release_id: uuid.UUID | None = None,
     ) -> ToolConfig | None:
-        app = self._validate_workflow_app(workflow_app_id, workspace_id)
+        app = self._validate_workflow_app(workflow_app_id, tenant_id)
         release = self._get_release(app, release_id)
         # Effective-reference gate: a tool rebuilds the workflow from its bound
         # release_id and may bind a historical release, so the snapshot models
