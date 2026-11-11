@@ -370,6 +370,7 @@ export const userMemory = {
       normal_mode: "标准检索",
       quick_mode: "快速检索",
       express_mode: "极速检索",
+      community_mode: '社区检索',
 
       time_asc: '时间正序',
       time_desc: '时间倒序',

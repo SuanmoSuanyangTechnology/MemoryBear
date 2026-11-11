@@ -8,7 +8,7 @@ export type MemoryType = 'conversation' | 'dialogue' | 'project_work' | 'learnin
 
 export type EngineType = 'EXTRACTION' | 'CROSS_MODAL' | 'EMOTION' | 'FORGETTING' | 'REFLECTION' | 'SCENE_SUMMARY' | 'MEMORY_VALUE' | 'PREDICTION' | 'PERSONALITY_ANCHOR';
 
-export type SearchMode = 'deep' | 'normal' | 'quick' | 'express'
+export type SearchMode = 'deep' | 'normal' | 'quick' | 'express' | 'community'
 export interface MemoryActivityProps {
   className?: string
   id: string;
