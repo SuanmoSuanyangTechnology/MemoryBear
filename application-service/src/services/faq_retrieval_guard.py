@@ -34,8 +34,12 @@ from ..schemas.knowledge_metadata_schema import MetadataFilterMode
 logger = logging.getLogger(__name__)
 
 # Word-for-word identical to mem-knowledge/src/locales/zh.json.
+# `image_retrieval_guard` 也要用这一条（FAQ 知识库的图片检索拒绝），两边原本各
+# 硬编码一份，改一处就悄悄不一致；统一从这里取。
+FAQ_IMAGE_QUERY_UNSUPPORTED_MESSAGE = "FAQ 检索暂不支持图片检索，请使用文本查询。"
+
 _FAQ_BOUNDARY_MESSAGES: dict[str, str] = {
-    "KB_FAQ_IMAGE_QUERY_UNSUPPORTED": "FAQ 检索暂不支持图片检索，请使用文本查询。",
+    "KB_FAQ_IMAGE_QUERY_UNSUPPORTED": FAQ_IMAGE_QUERY_UNSUPPORTED_MESSAGE,
     "KB_FAQ_FILE_FILTER_UNSUPPORTED": "FAQ 检索暂不支持文件名过滤，请移除文件名过滤条件。",
     "KB_FAQ_AUTO_METADATA_UNSUPPORTED": "FAQ 检索暂不支持自动元数据过滤，请关闭自动过滤后重试。",
     "KB_FAQ_METADATA_FILTER_UNSUPPORTED": "FAQ 检索暂不支持生效的元数据过滤表达式，请禁用元数据过滤或清空过滤条件。",

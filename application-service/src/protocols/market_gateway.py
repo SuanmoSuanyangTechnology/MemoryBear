@@ -5,7 +5,7 @@ enterprise-extensions package and is loaded lazily by ``main.create_app``."""
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 
 from ..errors import BizCode
 from ..external_catalog.errors import ExternalCatalogError
@@ -14,6 +14,12 @@ from ..external_catalog.errors import ExternalCatalogError
 # registers them by name so core never imports the HTTP client).
 MARKET_GATEWAY_FACTORY = "market.gateway_factory"
 MARKET_SUBMISSION_FACTORY = "market.submission_service_factory"
+
+# 契约 v0.13 §6.6：`dependency` 只要求版本 `approved`，不看资源的
+# `listing_status`；`top_level` 仍要求资源在架。用 Literal 收敛取值——拼写差异
+# （"top-level"、"top_level "）会让市场侧的判定静默失效，表现成「依赖已下架却
+# 装不上」这种很难联想的原因。
+InstallContext = Literal["top_level", "dependency"]
 
 
 @dataclass(frozen=True)
@@ -58,6 +64,14 @@ class MarketPublicationStatus:
     # 回填到本地 `external` 的只有这两个字段。
     listing_status: str | None = None
     delist_actor: str | None = None
+    # 契约 §6.4 的批量状态接口还带这些字段，`external_catalog_service` 会读它们：
+    # 下架时间/原因、能否下架/重新上架、本次申请类型。缺了就只能靠
+    # `getattr(..., None)` 静默兜底，协议与读取方不一致却没有任何提示。
+    delisted_at: int | None = None
+    delist_reason: str | None = None
+    can_delist: bool | None = None
+    can_relist: bool | None = None
+    latest_request_type: str | None = None
 
 
 @dataclass(frozen=True)
@@ -80,7 +94,7 @@ class MarketInstallationRequest:
     installed_by: str
     # 契约 v0.13 §6.6：`dependency` 只要求版本 `approved`，不看 `listing_status`；
     # `top_level` 仍要求资源在架。
-    context: str = "top_level"
+    context: InstallContext = "top_level"
 
 
 @dataclass(frozen=True)
@@ -111,7 +125,7 @@ class MarketGateway(Protocol):
         version: str,
         tenant_id: str,
         actor_id: str,
-        context: str = "top_level",
+        context: InstallContext = "top_level",
     ) -> MarketBundle: ...
 
     async def register_installation(
@@ -157,7 +171,7 @@ class DisabledMarketGateway:
         version: str,
         tenant_id: str,
         actor_id: str,
-        context: str = "top_level",
+        context: InstallContext = "top_level",
     ):
         _disabled()
 

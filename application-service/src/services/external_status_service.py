@@ -137,8 +137,12 @@ class ExternalStatusResolver:
                 for resource_id in chunk:
                     resolved[resource_id] = {}
                 continue
-            resolved.update(_map_statuses(items, chunk))
-            for resource_id, record in resolved.items():
+            # 只写本 chunk 的结果：`resolved` 是累计值，含缓存命中的条目和之前
+            # chunk 的结果，遍历它会在第 N 个 chunk 把前面全部再 setex 一遍
+            # （chunk 越多写放大越接近平方级，还会无谓刷新别人的 TTL）。
+            chunk_records = _map_statuses(items, chunk)
+            resolved.update(chunk_records)
+            for resource_id, record in chunk_records.items():
                 if record:
                     self._cache_set(tenant_id, resource_type, resource_id, record)
 
