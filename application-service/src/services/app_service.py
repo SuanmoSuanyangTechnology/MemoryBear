@@ -829,14 +829,17 @@ class AppService:
             "shared_by_name": shared_by_name,
             "shared_at": shared_at,
             "ontology": ontology,
-            # 来源（§11.2）：只有本地副本记来源，市场状态按需回填
+            # 来源（§11.2）：只有本地副本记来源，市场状态按需回填。
+            # 结构按契约 v0.10 §1.1：`status` 摘要字段已删除，只有
+            # `listing_status` / `delist_actor`，两者默认 `null`。
             "origin": str(getattr(app, "origin", None) or "local"),
             "external": (
                 {
                     "source": getattr(app, "external_source", None) or "community_market",
                     "resource_id": getattr(app, "external_resource_id", None),
                     "version": getattr(app, "external_version", None),
-                    "status": None,
+                    "listing_status": None,
+                    "delist_actor": None,
                 }
                 if str(getattr(app, "origin", None) or "local") == "external"
                 else None

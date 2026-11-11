@@ -129,7 +129,7 @@ def list_apps(
         ] = None,
         include_external_status: Annotated[
             bool,
-            Query(description="是否批量回填 external.status（市场来源的应用；30 秒缓存，失败降级 unknown）"),
+            Query(description="是否批量回填 external.listing_status / delist_actor；失败为 null"),
         ] = False,
 ):
     """List apps
@@ -292,14 +292,14 @@ def get_app(
         runtime: RuntimeDep,
         include_external_status: Annotated[
             bool,
-            Query(description="是否回填 external.status（仅市场来源的应用有意义）"),
+            Query(description="是否回填 external.listing_status / delist_actor；仅市场来源有意义"),
         ] = False,
 ):
     """Get app details
 
     - Supports the workspace's own apps
     - Supports apps shared into the workspace
-    - include_external_status=true 时额外回填 external.status
+    - include_external_status=true 时额外回填 external.listing_status / delist_actor
     """
     service = AppService(db)
     app = service.get_app(app_id, workspace_id)

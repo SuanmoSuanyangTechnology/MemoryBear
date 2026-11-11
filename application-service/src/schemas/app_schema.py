@@ -489,7 +489,8 @@ class App(BaseModel):
     shared_at: Optional[datetime.datetime] = None  # share time
     ontology: Optional[AppOntologyInfo] = None     # currently effective ontology (None in the community edition)
     # 来源（§11.2）：`local` 本租户创建 / `external` 从市场安装的副本。
-    # 市场状态不落库，只有请求带 include_external_status 时才回填 external.status。
+    # 市场状态不落库，只有请求带 include_external_status 时才回填
+    # external.listing_status / delist_actor（契约 v0.10 已删除 external.status）。
     origin: str = "local"
     external: Optional[dict] = None
     created_at: datetime.datetime

@@ -54,6 +54,10 @@ class MarketPublicationStatus:
     latest_version: str | None
     latest_publication_status: str | None
     updated_at: int | None
+    # v0.10 起市场侧的精确状态口径；`status` 只用于推导 review/未上架等旧语义，
+    # 回填到本地 `external` 的只有这两个字段。
+    listing_status: str | None = None
+    delist_actor: str | None = None
 
 
 @dataclass(frozen=True)
@@ -74,6 +78,9 @@ class MarketInstallationRequest:
     local_resource_id: str
     workspace_id: str | None
     installed_by: str
+    # 契约 v0.13 §6.6：`dependency` 只要求版本 `approved`，不看 `listing_status`；
+    # `top_level` 仍要求资源在架。
+    context: str = "top_level"
 
 
 @dataclass(frozen=True)
@@ -104,6 +111,7 @@ class MarketGateway(Protocol):
         version: str,
         tenant_id: str,
         actor_id: str,
+        context: str = "top_level",
     ) -> MarketBundle: ...
 
     async def register_installation(
@@ -144,7 +152,12 @@ class DisabledMarketGateway:
         _disabled()
 
     async def download_bundle(
-        self, resource_id: str, version: str, tenant_id: str, actor_id: str
+        self,
+        resource_id: str,
+        version: str,
+        tenant_id: str,
+        actor_id: str,
+        context: str = "top_level",
     ):
         _disabled()
 

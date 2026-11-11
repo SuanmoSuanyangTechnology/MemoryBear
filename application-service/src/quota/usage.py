@@ -171,10 +171,24 @@ def ensure_app_quota(db: Session, principal: Principal, extra: int = 0) -> None:
     )
 
 
-def ensure_skill_quota(db: Session, principal: Principal) -> None:
-    """Tenant-scoped skill-count check."""
+def ensure_skill_quota(db: Session, principal: Principal, extra: int = 0) -> None:
+    """Tenant-scoped skill-count check.
 
-    check_quota(db, principal.tenant_id, "skill_quota", "skill")
+    ``extra`` 与 ``ensure_app_quota`` 同理：一次市场安装会同时落地多个技能包
+    （插件包 + 随包依赖），只看已持久化的计数会让整包越过上限。按接口文档
+    §3.4 的口径，一个技能包/插件包计 1 个单位，插件成员不重复计数。
+    """
+
+    if not extra:
+        check_quota(db, principal.tenant_id, "skill_quota", "skill")
+        return
+
+    def usage_with_extra(session: Session, tenant_id: UUID) -> int:
+        return count_active_skills(session, tenant_id) + extra
+
+    check_quota(
+        db, principal.tenant_id, "skill_quota", "skill", usage_func=usage_with_extra
+    )
 
 
 def ensure_end_user_quota(db: Session, principal: Principal) -> None:
