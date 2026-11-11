@@ -13,7 +13,14 @@ class ExternalRef(BaseModel):
     source: Literal["community_market"] = "community_market"
     resource_id: str
     version: str
+    # 摘要状态，保留给只认旧枚举的调用方（§1.1）
     status: Literal["published", "unlisted", "unknown"] | None = None
+    # 精确上架状态与下架主体：与 `status` 同一回填条件（`include_external_status=true`），
+    # 旧客户端忽略即可。`status` 的映射固定为 listed→published、其余→unlisted。
+    listing_status: Literal[
+        "not_listed", "listed", "pending_listing", "delisted"
+    ] | None = None
+    delist_actor: Literal["publisher", "operator"] | None = None
 
 
 class DisplayPayload(BaseModel):

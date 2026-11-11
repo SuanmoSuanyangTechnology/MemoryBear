@@ -26,7 +26,12 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Session
 
 from ..cache.workflow_cache import delete_workflow_config
-from ..errors import BizCode, BusinessException, ResourceNotFoundException
+from ..errors import (
+    BizCode,
+    BusinessException,
+    ResourceNotFoundException,
+    SubAgentUnpublishedError,
+)
 from ..memory.ontology_binding import ONTOLOGY_BINDING_PLUGIN, OntologyUpstreamError
 from ..models import (
     AgentConfig,
@@ -2995,18 +3000,7 @@ class AppService:
             except BusinessException as error:
                 unavailable.append(error.message)
         if unavailable:
-            raise BusinessException(
-                "以下子 Agent 尚未发布，请先发布它们："
-                + "；".join(unavailable),
-                BizCode.APP_NOT_PUBLISHED,
-                data={
-                    "reason": "SUB_AGENT_UNPUBLISHED",
-                    "missing": [
-                        {"kind": "sub_agent", "reason": message}
-                        for message in unavailable
-                    ],
-                },
-            )
+            raise SubAgentUnpublishedError(details="；".join(unavailable))
 
         # 4. Validate each sub-agent and its model config
         for idx, sub_agent_data in enumerate(multi_agent_config.sub_agents):

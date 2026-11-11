@@ -27,7 +27,12 @@ from sqlalchemy import and_, cast, func, or_, select
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Session
 
-from ..errors import BizCode, BusinessException, ResourceNotFoundException
+from ..errors import (
+    BizCode,
+    BusinessException,
+    ResourceNotFoundException,
+    ShareDependencyUnavailableError,
+)
 from ..models import (
     AgentConfig,
     App,
@@ -68,6 +73,40 @@ def _share_scope_error(reason: str, message: str) -> BusinessException:
         BizCode.INVALID_PARAMETER,
         data={"reason": reason},
     )
+
+
+def _describe_unavailable_dependencies(issues: list[dict[str, Any]]) -> str:
+    """把逐项不可用原因压成一句用户能照着改的话。
+
+    只保留「谁 + 为什么」：`kind` 转成中文名，优先用 `name`（用户认识它），没有
+    名字才退回 id；`path`（`app.tools[0]` 这类内部坐标）只在前两者都缺失时使用。
+    超过 5 项截断并给出剩余数量，避免一条 `msg` 被几十项撑爆。
+    """
+
+    kind_labels = {
+        "tool": "工具",
+        "tool_method": "工具方法",
+        "skill": "技能",
+        "agent_release": "Agent 版本",
+    }
+    rendered: list[str] = []
+    for issue in issues:
+        label = kind_labels.get(str(issue.get("kind")), "依赖")
+        subject = issue.get("name") or issue.get("id") or issue.get("path")
+        reason = str(issue.get("reason") or "").strip()
+        if subject and reason:
+            rendered.append(f"{label}「{subject}」（{reason}）")
+        elif subject:
+            rendered.append(f"{label}「{subject}」")
+        elif reason:
+            rendered.append(f"{label}：{reason}")
+
+    if not rendered:
+        return "存在不可用的依赖"
+    shown = rendered[:5]
+    if len(rendered) > len(shown):
+        shown.append(f"等 {len(rendered)} 项")
+    return "；".join(shown)
 
 
 def _coerce_uuid(value: Any) -> uuid.UUID | None:
@@ -715,13 +754,10 @@ class AssetService:
                 )
 
         if unavailable:
-            raise BusinessException(
-                "应用引用了不可用的工具、技能或 Agent 版本，请先修复后再共享",
-                BizCode.INVALID_PARAMETER,
-                data={
-                    "reason": "UNAVAILABLE_DEPENDENCIES",
-                    "dependencies": unavailable,
-                },
+            # `data` 恒为 `{}`（统一错误契约 §4.1）——逐项原因只能进 `msg`，
+            # 否则前端拿到的是通用「请求参数无效」，用户不知道该改哪个工具。
+            raise ShareDependencyUnavailableError(
+                details=_describe_unavailable_dependencies(unavailable)
             )
 
     def _display_payload(self, release: AppRelease) -> dict[str, Any]:

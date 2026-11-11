@@ -214,6 +214,12 @@ class MarketSync(Base):
 
     __tablename__ = "market_sync"
 
+    # 迁移链（migrations/env.py 的 target_metadata 读这棵树）要看到这条约束，
+    # 否则 autogenerate 会把 application-service 那份唯一索引判成多余而 drop。
+    __table_args__ = (
+        UniqueConstraint("asset_id", "release_id", name="uq_market_sync_asset_release"),
+    )
+
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
     tenant_id = Column(UUID(as_uuid=True), nullable=False, index=True)
     asset_id = Column(

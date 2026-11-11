@@ -17,7 +17,12 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
-from ..errors import BizCode, BusinessException, ResourceNotFoundException
+from ..errors import (
+    BizCode,
+    BusinessException,
+    ResourceNotFoundException,
+    SubAgentValidationError,
+)
 from ..integrations.model.errors import ModelInvokeCancelledError
 from ..models import App, AppRelease
 from ..models.annotation_model import HitLogSource
@@ -357,10 +362,7 @@ class MultiAgentService:
                 sub_agent.release_id = None
 
         if sub_agent_errors:
-            raise BusinessException(
-                "以下子 Agent 校验未通过：" + "；".join(sub_agent_errors),
-                BizCode.INVALID_PARAMETER,
-            )
+            raise SubAgentValidationError(details="；".join(sub_agent_errors))
 
         # 5. Build the config (convert UUIDs to strings for JSON serialization)
         # sub_agents=None means "keep existing" on the update branch; the create

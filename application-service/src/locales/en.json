@@ -17,7 +17,10 @@
       "file_operation_error": "File operation failed"
     },
     "api": {
-      "quota_exceeded": "{resource} quota exceeded"
+      "quota_exceeded": "{resource} quota exceeded",
+      "sub_agent_invalid": "The following sub-agents failed validation: {details}",
+      "sub_agent_unpublished": "The following sub-agents are not published yet; publish them first: {details}",
+      "share_dependencies_unavailable": "This app references tools, skills or agent versions that are unavailable; fix them before sharing: {details}"
     },
     "validation": {
       "missing_field": "Missing required field: {field}",

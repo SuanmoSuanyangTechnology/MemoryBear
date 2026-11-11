@@ -125,7 +125,14 @@ class BundleInstallService:
         dependencies = manifest.get("dependencies") or {}
         bindings = manifest.get("bindings") or []
         payload = manifest.get("payload") or {}
-        app_type = payload.get("app_type")
+        # §8.2 两种应用包：`release_snapshot`（租户投稿）与 `app_dsl`（运营导入
+        # YAML）。按内容判断而不是只看 `format`：`format` 是后加的键，运营侧当前
+        # 产物还没有它，而它已经是 DSL 结构了。`app_dsl` 的类型在 DSL 里，不在
+        # payload 顶层。
+        dsl = payload.get("dsl") if isinstance(payload.get("dsl"), dict) else None
+        app_type = payload.get("app_type") or (
+            (dsl.get("app") or {}).get("type") if dsl else None
+        )
         if app_type not in (AppType.AGENT, AppType.MULTI_AGENT, AppType.WORKFLOW,
                             AppType.PURE_WORKFLOW):
             raise BusinessException(
@@ -134,7 +141,9 @@ class BundleInstallService:
             )
 
         apps = dependencies.get("apps") or []
-        if app_type == AppType.MULTI_AGENT:
+        if app_type == AppType.MULTI_AGENT and dsl is None:
+            # 集群完整性只对 release 快照包有意义：`app_dsl` 的成员在 `cluster[]`
+            # 里，由 `import_dsl` 自己落地并复用，不走 `dependencies.apps[]`。
             self._assert_cluster_complete(payload.get("config") or {}, apps)
 
         dep_map: dict[str, str] = {}
@@ -649,6 +658,22 @@ class BundleInstallService:
         display = manifest.get("display") or {}
         owner_id = user_id or uuid.uuid4()
 
+        # §8.2 两种应用包：`release_snapshot`（租户投稿，下面按 release 快照复制）
+        # 与 `app_dsl`（运营导入 YAML，安装走 `import_dsl`）。按内容而不是只按
+        # `format` 分支：`format` 是同事侧新加的键，存量包与运营侧当前产物都没有
+        # 它，光看它会把结构不一样的包送进错误路径。
+        if isinstance(payload.get("dsl"), dict):
+            return self._land_app_dsl(
+                dsl=payload["dsl"],
+                payload=payload,
+                tenant_id=tenant_id,
+                workspace_id=workspace_id,
+                user_id=owner_id,
+                dep_map=dep_map,
+                missing=missing,
+                display=display,
+            )
+
         for member in dependencies.get("apps") or []:
             app, _warnings = self._import_member(
                 member=member,
@@ -678,6 +703,67 @@ class BundleInstallService:
             # 只有根应用对应一个市场资源；子 Agent 是同一份包的内部成员，
             # 没有自己的 market_resource_id，标记成 external 会让溯源指向错的行
             origin_columns=self._origin_columns(),
+        )
+        missing.extend(
+            _missing("app", display.get("name"), warning) for warning in warnings
+        )
+        return {
+            "id": str(root.id),
+            "name": root.name,
+            "app_type": root.type,
+            "workspace_id": str(root.workspace_id),
+        }
+
+    def _land_app_dsl(
+            self,
+            *,
+            dsl: dict[str, Any],
+            payload: dict[str, Any],
+            tenant_id: uuid.UUID,
+            workspace_id: uuid.UUID,
+            user_id: uuid.UUID,
+            dep_map: dict[str, str],
+            missing: list[dict[str, Any]],
+            display: dict[str, Any],
+    ) -> dict[str, Any]:
+        """落一个 `format=app_dsl` 的应用包（运营导入 YAML，§8.2）。
+
+        `dsl` 是应用 YAML 的结构，安装时按 `import_dsl` 走，与「控制台导入
+        YAML」同一条路径 —— 市场安装不该有第二套落地语义。三个约束与
+        `bundle_install_service` 顶部那段注释一致：
+
+        * `commit=False`：整个安装是外层一个事务；
+        * `dep_map`：随包的技能/工具 ref 已在本事务里落到目标空间，按 id 绑定；
+        * `resolve_cross_app_refs=False`：DSL 里的子 Agent 由 `cluster[]` 带进来
+          并由 `import_dsl` 自己落地/复用，不能再按名字去目标空间里找。
+
+        `payload.config` 在这条路径上是空的：DSL 自己带配置。
+        """
+
+        warnings: list[str] = []
+        member = dsl.get("app") or {}
+        if not isinstance(member, dict) or not member.get("name"):
+            # 运营导入的包可能没写 app.name（用了 display.name）：补一份最小的
+            # app 元信息，而不是让 import_dsl 直接报「不支持的应用类型」。
+            dsl = {
+                **dsl,
+                "app": {
+                    **(member if isinstance(member, dict) else {}),
+                    "name": display.get("name") or "导入应用",
+                    "description": display.get("summary"),
+                    "type": (member or {}).get("type") or payload.get("app_type"),
+                },
+            }
+        root, warnings = self.dsl_service.import_dsl(
+            dsl,
+            workspace_id,
+            tenant_id,
+            user_id,
+            commit=False,
+            dep_map=dep_map,
+            resolve_cross_app_refs=False,
+            origin_columns=self._origin_columns(),
+            cluster_report=[],
         )
         missing.extend(
             _missing("app", display.get("name"), warning) for warning in warnings
