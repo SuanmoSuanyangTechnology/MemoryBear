@@ -12,7 +12,7 @@ import { testConnection } from '@/api/tools';
 import { useToolList } from './hooks/useToolList';
 import { useToolStatus } from './hooks/useToolStatus';
 import { useToolDelete } from './hooks/useToolDelete';
-import ToolIcon from '@/assets/images/tool/tool.svg';
+import ToolIcon from './components/ToolIcon'
 
 const Mcp = forwardRef<McpRef, { keyword?: string | undefined }>(({ keyword }, ref) => {
   const { t } = useTranslation();
@@ -53,15 +53,8 @@ const Mcp = forwardRef<McpRef, { keyword?: string | undefined }>(({ keyword }, r
             <Col span={8} key={item.id}>
               <RbCard
                 isNeedTooltip={false}
-                avatarText={
-                  <img
-                    src={ToolIcon}
-                    alt=""
-                    className="rb:size-7"
-                    style={{ filter: 'brightness(0) invert(1)' }}
-                  />
-                }
-                avatarClassName="rb:bg-[#4da8ff]!"
+                avatarText={<ToolIcon className="rb:size-11" iconClassName="rb:size-7" iconUrl={item.icon} />}
+                avatarClassName="rb:bg-transparent!"
                 title={
                   <div className="rb:flex-1!">
                     <div className="rb:leading-5.5 rb:wrap-break-word rb:line-clamp-1">
