@@ -76,9 +76,13 @@ def map_model_error(
         raise exc
     if isinstance(exc, KnowledgeError):
         return exc
+    from sqlalchemy.exc import SQLAlchemyError
+
     failure = ModelFailure.PROCESSING_FAILED
     ark_timeouts, ark_connections, _ = _ark_embedding_errors()
     for cause in _exception_chain(exc):
+        if isinstance(cause, SQLAlchemyError):
+            return map_database_error(cause)
         if isinstance(
             cause,
             (
