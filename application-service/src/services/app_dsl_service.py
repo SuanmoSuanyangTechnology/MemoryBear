@@ -898,11 +898,26 @@ class AppDslService:
             # re-points it at the cluster's own release.
             dsl.setdefault("multi_agent_config", {})["master_agent_ref"] = None
 
-        unpublished = [item["name"] for item in report if not item["published"]]
-        if unpublished:
+        # 复用成员没有「导入」，只是绑定到空间里已有的应用；两者都未发布时
+        # 都会挡住集群发布，但混在一句「已导入 N 个子 Agent（草稿）」里会让用户
+        # 以为本次新建了它们，因此分开报，且都保留，避免漏掉阻塞发布的那一项。
+        created_unpublished = [
+            item["name"] for item in report
+            if not item["published"] and not item.get("reused")
+        ]
+        reused_unpublished = [
+            item["name"] for item in report
+            if not item["published"] and item.get("reused")
+        ]
+        if created_unpublished:
             warnings.append(
-                f"已导入 {len(unpublished)} 个子 Agent（草稿），请先逐个发布它们，本集群才能发布："
-                + "、".join(unpublished)
+                f"已导入 {len(created_unpublished)} 个子 Agent（草稿），请先逐个发布它们，"
+                "本集群才能发布：" + "、".join(created_unpublished)
+            )
+        if reused_unpublished:
+            warnings.append(
+                f"另有 {len(reused_unpublished)} 个复用的子 Agent 尚未发布，"
+                "需先发布它们本集群才能发布：" + "、".join(reused_unpublished)
             )
         return landed
 

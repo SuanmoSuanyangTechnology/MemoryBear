@@ -1159,7 +1159,10 @@ class BundleInstallService:
                     **(member if isinstance(member, dict) else {}),
                     "name": display.get("name") or "导入应用",
                     "description": display.get("summary"),
-                    "type": (member or {}).get("type") or payload.get("app_type"),
+                    # `dsl["app"]` 的类型没有上游保证（install 只校验 dsl 是 dict），
+                    # 非 dict 的真值（list/str）也会走进这个分支，不能直接 .get。
+                    "type": (member.get("type") if isinstance(member, dict) else None)
+                    or payload.get("app_type"),
                 },
             }
         root, warnings = self.dsl_service.import_dsl(
