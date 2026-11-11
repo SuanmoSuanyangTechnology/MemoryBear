@@ -1956,7 +1956,6 @@ async def publish_workflow_as_tool(
         tool_name=payload.name,
         tool_description=payload.description or "",
         tenant_id=current_user.tenant_id,
-        workspace_id=current_user.current_workspace_id,
         icon=payload.icon,
         timeout=payload.timeout,
         tags=payload.tags,
@@ -1982,7 +1981,7 @@ async def preview_workflow_tool_publish(
 
     preview = WorkflowToolPublishService(db).get_publish_preview(
         workflow_app_id=app_id,
-        workspace_id=current_user.current_workspace_id,
+        tenant_id=current_user.tenant_id,
         release_id=release_id,
     )
     return success(data=preview, msg="获取工作流工具发布预览成功")
