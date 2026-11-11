@@ -19,7 +19,7 @@ from starlette.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
 from pydantic import ValidationError
 from starlette.datastructures import UploadFile
-from starlette.responses import StreamingResponse
+from starlette.responses import Response, StreamingResponse
 
 from ...schemas.chunk_schema import ApiChunkRetrieve, V1ChunkRetrieve
 from ...schemas.knowledge_retrieval_schema import (
@@ -109,7 +109,7 @@ class KnowledgeServiceClient:
         context: KnowledgeCallContext,
         *,
         profile: CallProfile = CallProfile.JSON,
-    ) -> StreamingResponse:
+    ) -> Response:
         started_at = time.perf_counter()
         path = self._transport.internal_path(request.url.path)
         url = self._transport.internal_url(path, request.scope.get("query_string", b""))
