@@ -64,7 +64,7 @@ modal.confirm({
   };
   const handleSwitchSharePermission = (item: MySharedOutItem) => {
     if (!item.asset_id) return
-    switchSharePermission(item.asset_id, { share_mode: item.editable ? 'editable' : 'readonly' })
+    switchSharePermission(item.asset_id, { share_mode: !item.editable ? 'editable' : 'readonly' })
       .then(() => {
         tableRef.current?.loadData();
         message.success(t('common.operateSuccess'))
