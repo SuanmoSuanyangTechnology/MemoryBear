@@ -1,52 +1,26 @@
 """JWT management APIs for permanent memories in memory value ranking."""
 
-import logging
 import uuid
+from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request, Response
 from fastapi.responses import JSONResponse
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.error_codes import BizCode
-from app.core.response_utils import fail, success
-from app.db import get_async_db
+from app.core.response_utils import fail
 from app.dependencies import CurrentUserSnapshot, get_current_user_async
+from app.integrations.profile.proxy import memory_profile_proxy
 from app.schemas.memory_value_ranking_schema import (
     PermanentMemoryListApiResponse,
     PermanentMemoryQuotaApiResponse,
     PermanentMemoryUnmarkApiResponse,
     PermanentMemoryUnmarkRequest,
 )
-from app.services.memory_value_ranking_service import (
-    MemoryValueRankingService,
-    PermanentMemoryNotFound,
-    PermanentMemoryUnavailable,
-)
-
-logger = logging.getLogger(__name__)
 
 router = APIRouter(
     prefix="/memory/value-ranking",
     tags=["Memory Value Ranking"],
 )
-
-
-def _error_response(exc: Exception) -> JSONResponse:
-    if isinstance(exc, PermanentMemoryNotFound):
-        return JSONResponse(
-            status_code=404,
-            content=fail(BizCode.NOT_FOUND, "终端用户或记忆不存在", "resource not found"),
-        )
-    if isinstance(exc, PermanentMemoryUnavailable):
-        return JSONResponse(
-            status_code=503,
-            content=fail(BizCode.SERVICE_UNAVAILABLE, "永久记忆服务暂时不可用", str(exc)),
-        )
-    logger.exception("Unexpected permanent-memory API failure", exc_info=exc)
-    return JSONResponse(
-        status_code=500,
-        content=fail(BizCode.INTERNAL_ERROR, "永久记忆操作失败", "internal error"),
-    )
 
 
 def _workspace_id(current_user: CurrentUserSnapshot) -> uuid.UUID | None:
@@ -59,50 +33,84 @@ def _workspace_id(current_user: CurrentUserSnapshot) -> uuid.UUID | None:
         return None
 
 
+def _workspace_required() -> JSONResponse:
+    return JSONResponse(
+        status_code=400,
+        content=fail(BizCode.INVALID_PARAMETER, "请先切换到一个工作空间"),
+    )
+
+
+def _proxy_response(result: dict | Response) -> Response:
+    # Proxy failures carry empty data, outside the success response model.
+    return result if isinstance(result, Response) else JSONResponse(content=result)
+
+
+@memory_profile_proxy(query_fields=("end_user_id",), preserve_status=True)
+async def _forward_quota(
+    request: Request, current_user: CurrentUserSnapshot, end_user_id: str
+):
+    """Forward the validated quota request."""
+
+
+@memory_profile_proxy(
+    query_fields=("end_user_id", "page", "pagesize"),
+    preserve_status=True,
+)
+async def _forward_list(
+    request: Request,
+    current_user: CurrentUserSnapshot,
+    end_user_id: str,
+    page: int,
+    pagesize: int,
+):
+    """Forward the validated list request."""
+
+
+@memory_profile_proxy(
+    body_arg="payload",
+    body_fields=("end_user_id",),
+    preserve_status=True,
+)
+async def _forward_unmark(
+    request: Request,
+    current_user: CurrentUserSnapshot,
+    payload: PermanentMemoryUnmarkRequest,
+):
+    """Forward the validated body and the path containing the element id."""
+
+
 @router.get("/permanent-memories/quota", response_model=PermanentMemoryQuotaApiResponse)
 async def get_permanent_memory_quota(
-    end_user_id: str = Query(...),
-    current_user: CurrentUserSnapshot = Depends(get_current_user_async),
-    db: AsyncSession = Depends(get_async_db),
-) -> dict | JSONResponse:
-    workspace_id = _workspace_id(current_user)
-    if workspace_id is None:
-        return JSONResponse(
-            status_code=400,
-            content=fail(BizCode.INVALID_PARAMETER, "请先切换到一个工作空间"),
-        )
-    try:
-        quota = await MemoryValueRankingService(db).get_quota(end_user_id, workspace_id)
-        return success(data=quota.model_dump(), msg="查询成功")
-    except Exception as exc:
-        return _error_response(exc)
+    request: Request,
+    current_user: Annotated[CurrentUserSnapshot, Depends(get_current_user_async)],
+    end_user_id: Annotated[str, Query()],
+) -> Response:
+    if _workspace_id(current_user) is None:
+        return _workspace_required()
+    result = await _forward_quota(
+        request=request, current_user=current_user, end_user_id=end_user_id
+    )
+    return _proxy_response(result)
 
 
 @router.get("/permanent-memories", response_model=PermanentMemoryListApiResponse)
 async def list_permanent_memories(
-    end_user_id: str = Query(...),
-    page: int = Query(1, ge=1),
-    pagesize: int = Query(20, ge=1, le=100),
-    current_user: CurrentUserSnapshot = Depends(get_current_user_async),
-    db: AsyncSession = Depends(get_async_db),
-) -> dict | JSONResponse:
-    workspace_id = _workspace_id(current_user)
-    if workspace_id is None:
-        return JSONResponse(
-            status_code=400,
-            content=fail(BizCode.INVALID_PARAMETER, "请先切换到一个工作空间"),
-        )
-    try:
-        result = await MemoryValueRankingService(db).list_permanent_memories(
-            end_user_id,
-            workspace_id,
-            page,
-            pagesize,
-        )
-        return success(data=result.model_dump(), msg="查询成功")
-    except Exception as exc:
-        logger.exception("Unexpected permanent-memory API failure", exc_info=exc)
-        return _error_response(exc)
+    request: Request,
+    current_user: Annotated[CurrentUserSnapshot, Depends(get_current_user_async)],
+    end_user_id: Annotated[str, Query()],
+    page: Annotated[int, Query(ge=1)] = 1,
+    pagesize: Annotated[int, Query(ge=1, le=100)] = 20,
+) -> Response:
+    if _workspace_id(current_user) is None:
+        return _workspace_required()
+    result = await _forward_list(
+        request=request,
+        current_user=current_user,
+        end_user_id=end_user_id,
+        page=page,
+        pagesize=pagesize,
+    )
+    return _proxy_response(result)
 
 
 @router.patch(
@@ -114,23 +122,14 @@ async def list_permanent_memories(
     ),
 )
 async def unmark_permanent_memory(
+    request: Request,
     node_id: str,
-    request: PermanentMemoryUnmarkRequest,
-    current_user: CurrentUserSnapshot = Depends(get_current_user_async),
-    db: AsyncSession = Depends(get_async_db),
-) -> dict | JSONResponse:
-    workspace_id = _workspace_id(current_user)
-    if workspace_id is None:
-        return JSONResponse(
-            status_code=400,
-            content=fail(BizCode.INVALID_PARAMETER, "请先切换到一个工作空间"),
-        )
-    try:
-        result = await MemoryValueRankingService(db).unmark_permanent_memory(
-            node_id,
-            request.end_user_id,
-            workspace_id,
-        )
-        return success(data=result.model_dump(), msg="已取消永久记忆标识")
-    except Exception as exc:
-        return _error_response(exc)
+    payload: PermanentMemoryUnmarkRequest,
+    current_user: Annotated[CurrentUserSnapshot, Depends(get_current_user_async)],
+) -> Response:
+    if _workspace_id(current_user) is None:
+        return _workspace_required()
+    result = await _forward_unmark(
+        request=request, current_user=current_user, payload=payload
+    )
+    return _proxy_response(result)
