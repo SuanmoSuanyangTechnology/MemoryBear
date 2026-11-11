@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
 from numbers import Integral
@@ -20,6 +21,8 @@ from src.repositories.search import _INDEX_STATEMENT, _short_term_body, _validat
 
 if TYPE_CHECKING:
     from src.runtime import ProfileRuntime
+
+logger = logging.getLogger(__name__)
 
 _SHORT_TERM_MEMO_BATCH_SIZE = 500
 _SHORT_TERM_MEMOS_QUERY = (
@@ -206,5 +209,8 @@ class ShortTermMemoRepository:
                     raise RuntimeError("Elasticsearch returned no short-term search position")
                 body["search_after"] = list(position)
         finally:
-            await client.close_point_in_time(id=pit_id)
+            try:
+                await client.close_point_in_time(id=pit_id)
+            except Exception:
+                logger.warning("Failed to close short-term memo PIT", exc_info=True)
         return rows, present

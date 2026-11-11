@@ -51,5 +51,5 @@ async def short_term_configs(
     context: Context,
     end_user_id: str,
     language_type: str | None = Header(default=None, alias="X-Language-Type"),
-) -> dict:
-    return await _handler(request).short_term(end_user_id)
+) -> dict | JSONResponse:
+    return await _handler(request).short_term(context, end_user_id)

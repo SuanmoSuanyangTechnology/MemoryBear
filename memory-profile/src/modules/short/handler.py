@@ -13,6 +13,7 @@ from neo4j.exceptions import ServiceUnavailable, SessionExpired, TransientError
 from sqlalchemy.exc import SQLAlchemyError
 
 from src.common.errors import BizCode
+from src.common.normalization import parse_uuid
 from src.i18n import get_request_language
 from src.middleware.auth import MemoryPrincipal
 
@@ -29,8 +30,22 @@ class ShortMemoryHandler:
         self.service = ShortService(runtime)
         self.memo_service = ShortTermMemoService(runtime)
 
-    async def short_term(self, end_user_id: str) -> dict:
-        result = await self.service.short_term(end_user_id)
+    async def short_term(
+        self,
+        context: MemoryPrincipal,
+        end_user_id: str,
+    ) -> dict | JSONResponse:
+        user_id = parse_uuid(end_user_id)
+        if user_id is None or await self.service.active_user(user_id, context.workspace_id) is None:
+            return JSONResponse(
+                status_code=404,
+                content=fail(
+                    BizCode.NOT_FOUND,
+                    "终端用户不存在或不可访问",
+                    "resource not found",
+                ),
+            )
+        result = await self.service.short_term(str(user_id))
         return success(data=result, msg="短期记忆系统数据获取成功")
 
     async def memos(
