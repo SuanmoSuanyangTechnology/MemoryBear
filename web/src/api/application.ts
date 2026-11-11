@@ -1,9 +1,3 @@
-/*
- * @Author: ZhaoYing 
- * @Date: 2026-02-03 13:59:45 
- * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-11-09 21:17:51
- */
 import { request } from '@/utils/request'
 import type { ApplicationModalData } from '@/views/ApplicationManagement/types'
 import type {
@@ -300,7 +294,7 @@ export const cancelShare = (asset_id: string) => {
 }
 // Resource Center · Update Share Permission
 export const switchSharePermission = (asset_id: string, data?: { share_mode: 'readonly' | 'editable'; }) => {
-  return request.patch(`/apps/assets/${asset_id}`, data)
+  return request.put(`/apps/assets/${asset_id}`, data)
 }
 // Cancel all shares under a workspace (source side operation)
 export const cancelSpaceShare = (target_workspace_id?: string) => {
