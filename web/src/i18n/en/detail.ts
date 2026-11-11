@@ -184,6 +184,7 @@ export const detail = {
       conversation: 'Conversation',
       conversationStream: 'Real-time Conversation Stream',
       refresh: 'Refresh',
+      loadEarlier: 'Load Earlier Messages',
       successfulTitle: 'Successful Experience',
       question: 'Lessons Learned',
       summary: 'Core Insights',

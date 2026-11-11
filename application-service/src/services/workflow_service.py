@@ -41,6 +41,7 @@ from ..utils.workflow_triggers import (
 from ..errors import BizCode
 from ..config import current_settings
 from ..errors import BusinessException
+from ..integrations.model.errors import ModelInvokeCancelledError
 from ..usage_context import bind_usage
 from ..workflow.adapters.registry import PlatformAdapterRegistry
 from ..workflow.error_info import workflow_error_info
@@ -5839,6 +5840,17 @@ class WorkflowService:
                     execution_id = event_data.get("execution_id") or execution_id
                     paused_for_intervention = True
                 yield event
+        except ModelInvokeCancelledError:
+            # 499 client-disconnect semantics: restore the original version and
+            # end silently — no failed frames, no new version persisted.
+            logger.info(
+                "workflow_regenerate_cancelled execution_id=%s message_id=%s",
+                execution_id,
+                message_id,
+            )
+            self.db.query(Message).filter(Message.id == message_id).update({"is_current": True})
+            self.db.commit()
+            return
         except Exception as e:
             # run_stream raised: mark failure and roll back below uniformly,
             # avoiding an in-stream exception that triggers "response already started"
@@ -6719,6 +6731,7 @@ class WorkflowService:
             prepared_memory_storage_type: str | None = None,
             prepared_user_rag_memory_id: str | None = None,
             skip_save: bool = False,
+            include_failure_diagnostic: bool = False,
     ):
         """Run the workflow
 
@@ -6734,6 +6747,10 @@ class WorkflowService:
             regenerate_history: history context injected on regenerate
                 {"conv": {...}, "conv_messages": [...]}, overriding the default
                 history read from the latest execution.
+            include_failure_diagnostic: add the engine diagnostic (``error``) to
+                a failed ``response_data``. Off by default: the share/v1
+                surfaces expose ``response_data`` to API callers and must not
+                receive internal diagnostics.
 
         Returns:
             Execution result (non-streaming)
@@ -7192,6 +7209,8 @@ class WorkflowService:
                 response_data["code"] = result.get("code")
                 response_data["msg"] = result.get("msg")
                 response_data["retryable"] = bool(result.get("retryable"))
+                if include_failure_diagnostic:
+                    response_data["error"] = result.get("error")
 
             if result.get("status") == "waiting_human":
                 # Non-streaming execution does not support human intervention nodes.
@@ -7224,6 +7243,15 @@ class WorkflowService:
             return response_data
 
         except BusinessException:
+            raise
+        except ModelInvokeCancelledError:
+            # 499 client-disconnect semantics: mark the record terminal and
+            # re-raise so the transport boundary answers with an empty 499;
+            # no failure conversation is persisted.
+            await self._patch_execution_async(
+                execution.execution_id,
+                status="cancelled",
+            )
             raise
         except Exception as e:
             error_info = workflow_error_info(e)
@@ -9160,6 +9188,16 @@ class WorkflowService:
                                 yield next_evt
                             break
 
+        except ModelInvokeCancelledError:
+            # Client-disconnect semantics (499): the finally block persists the
+            # last complete snapshot, marks the execution cancelled and releases
+            # the lock; re-raise so callers that persist after a normal end
+            # (regenerate) do not treat partial content as a completed turn.
+            logger.info(
+                "workflow_stream_cancelled execution_id=%s",
+                execution.execution_id if execution else None,
+            )
+            raise
         except Exception as e:
             error_info = workflow_error_info(e)
             logger.error(
@@ -10206,6 +10244,8 @@ class WorkflowService:
                 variable_pool=variable_pool,
             )
             yield self._mask_runtime_secrets(event_payload, variable_pool)
+        except ModelInvokeCancelledError:
+            logger.info("单节点流式执行取消: node_id=%s", node_id)
         except Exception as e:
             elapsed = (time.time() - start_time) * 1000
             logger.error(f"单节点流式执行失败: node_id={node_id}, error={e}", exc_info=True)
@@ -10996,6 +11036,18 @@ class WorkflowService:
                     "data": formatted_output
                 }
 
+        except ModelInvokeCancelledError:
+            logger.info("workflow_resume_cancelled execution_id=%s", execution_id)
+            try:
+                await self._patch_execution_async(execution_id, status="cancelled")
+            except Exception as persist_err:
+                logger.warning(
+                    "Failed to mark execution cancelled on resume cancel: execution_id=%s error=%s",
+                    execution_id, persist_err,
+                )
+            from ..workflow.nodes.human_intervention.node import InterventionRegistry
+            InterventionRegistry.cleanup(execution_id)
+            InterventionRegistry.remove_timeout(execution_id)
         except Exception as e:
             error_info = workflow_error_info(e)
             logger.error(

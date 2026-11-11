@@ -1,9 +1,3 @@
-/*
- * @Author: ZhaoYing 
- * @Date: 2025-12-10 16:46:17 
- * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-08-13 11:50:53
- */
 import { type FC, useRef, useEffect, useState } from 'react'
 import clsx from 'clsx'
 import { Spin, Flex, Button, Pagination, Tooltip, App } from 'antd'
@@ -53,6 +47,8 @@ const ChatContent: FC<ChatContentProps> = ({
   handleInterventionActionClick,
   handleFavorite,
   isAlwaysShowAssistantTools = false,
+  loadEarlierMessages,
+  loadingEarlier = false,
 }) => {
   const { t } = useTranslation()
   const { message: messageApi } = App.useApp()
@@ -192,6 +188,10 @@ const ChatContent: FC<ChatContentProps> = ({
     onSend?.(JSON.stringify(values))
   }
 
+  const escapeHtml = (text: string) => {
+    return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;')
+  }
+
   const formatContent = (item: ChatItem) => {
     return renderRuntime && item.meta_data?.outputs && item.meta_data?.outputs?.length > 1
       ? item.meta_data?.outputs.map(vo => vo.content).join('\n')
@@ -200,7 +200,7 @@ const ChatContent: FC<ChatContentProps> = ({
       : renderRuntime && item.subContent
       ? ''
       : item.meta_data?.error && item.meta_data?.error.length > 0
-      ? item.meta_data?.error
+      ? escapeHtml(item.meta_data?.error)
       : item.meta_data?.outputs && item.meta_data?.outputs?.length > 1
       ? item.meta_data?.outputs.map(vo => vo.content).join('\n')
       : item.content && item.content.length > 0
@@ -247,6 +247,19 @@ const ChatContent: FC<ChatContentProps> = ({
   }
   return (
     <div ref={scrollContainerRef} className={clsx("rb:relative rb:h-full! rb:min-h-0! rb:overflow-y-auto", classNames)}>
+      {loadEarlierMessages && (
+        <Flex justify="center" className="rb:py-4">
+          <Button
+            color="default" variant="filled"
+            className="rb:h-6! rb:text-[12px]! rb:text-gray-600! rb:mb-3!" 
+            onClick={loadEarlierMessages}
+            loading={loadingEarlier}
+            disabled={loadingEarlier}
+          >
+            {t('workingDetail.loadEarlier')}
+          </Button>
+        </Flex>
+      )}
       {data.length === 0
         ? <div className="rb:h-full! rb:min-h-0! rb:overflow-y-auto">{empty}</div> // Display empty state, ensure it fills ChatContent height and stays scrollable on overflow
         : data.map((vo, index) => {

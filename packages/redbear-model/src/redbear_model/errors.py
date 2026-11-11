@@ -258,6 +258,17 @@ class RemoteInvokeError(RedBearModelError):
     """Base class for remote invoke transport failures."""
 
 
+class RemoteInvokeCancelledError(RemoteInvokeError):
+    """The call was cancelled: caller went away or the service aborted the RPC.
+
+    The counterpart of ``grpc.StatusCode.CANCELLED``. It is not a business or
+    provider failure; callers must not surface an error for it.
+    """
+
+    def __init__(self, detail: str = "remote invoke cancelled"):
+        super().__init__(detail)
+
+
 class RemoteInvokeUnavailableError(RemoteInvokeError):
     """The model service could not be reached, or the connection dropped mid-stream."""
 

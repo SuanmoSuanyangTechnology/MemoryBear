@@ -34,8 +34,10 @@ class QuotaEntitlements:
     def free_limits(self) -> dict[str, int]:
         return free_plan_limits(self._settings)
 
-    async def effective_limits(self, tenant_id: UUID) -> dict[str, int | float]:
-        """Plan (or free) limits plus every active resource-pack grant."""
+    async def effective_limits(
+        self, tenant_id: UUID, *, fallback_on_error: bool = True
+    ) -> dict[str, int | float]:
+        """Resolve plan and resource-pack limits with the caller's fallback policy."""
 
         free = self.free_limits
         if not self._enterprise.enabled:
@@ -43,6 +45,8 @@ class QuotaEntitlements:
         try:
             data = await self._enterprise.memory_limits(tenant_id)
         except Exception:
+            if not fallback_on_error:
+                raise
             # A quota lookup must not take down a write path, and an unavailable
             # enterprise service is indistinguishable from "no subscription" to
             # the caller: both answer with the community free plan.

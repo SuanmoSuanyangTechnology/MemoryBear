@@ -128,6 +128,7 @@ export const account = {
       change: '更改',
       update: '更新',
       delete: '删除',
+      remove: '移除',
       confirm: '确认',
       cancel: '取消',
       save: '保存',
@@ -210,7 +211,6 @@ export const account = {
       return: '返回',
       statusEnabled: '可用',
       statusDisabled: '不可用',
-      remove: '删除',
 
       fileSizeTip: '文件大小不能超过 {{size}}MB',
       fileAcceptTip: '不支持的文件类型:',

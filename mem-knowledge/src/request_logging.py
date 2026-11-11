@@ -128,6 +128,10 @@ def _safe_exception_chain(nodes: list[BaseException]) -> list[dict]:
     return result
 
 
+def _traceback_frame_count(exception: BaseException) -> int:
+    return sum(1 for _ in traceback.walk_tb(exception.__traceback__))
+
+
 def failure_diagnostics(
     exception: BaseException | None,
     validation_errors: list[dict] | None = None,
@@ -139,23 +143,29 @@ def failure_diagnostics(
         context["validation_error_count"] = len(validation_errors)
     nodes = _exception_nodes(exception)
     chain_truncated = len(nodes) >= MAX_FAILURE_FIELDS
+    frames_truncated = any(
+        _traceback_frame_count(item) > MAX_FAILURE_FIELDS for item in nodes
+    )
     sensitive_chain = (
         validation_errors is not None
         or chain_truncated
         or any(_sensitive_exception(e) for e in nodes)
     )
+    bounded_chain = sensitive_chain or frames_truncated
     if chain_truncated:
         context["exception_chain_truncated"] = True
+    if frames_truncated:
+        context["exception_frames_truncated"] = True
     if nodes:
         context["exception_type"] = type(nodes[0]).__name__
-        if sensitive_chain:
-            context["exception_chain"] = _safe_exception_chain(nodes)
-        else:
+        if not sensitive_chain:
             context["exception_message"] = _bounded(nodes[0])
             if len(nodes) > 1:
                 context["cause_type"] = type(nodes[1]).__name__
                 context["cause_message"] = _bounded(nodes[1])
-    return context, nodes, sensitive_chain
+        if bounded_chain:
+            context["exception_chain"] = _safe_exception_chain(nodes)
+    return context, nodes, bounded_chain
 
 
 def log_request_failure(
@@ -197,11 +207,11 @@ def log_request_failure(
     }
     if context["route"] == "<unresolved>":
         context["path"] = _bounded(request.url.path)
-    diagnostics, nodes, sensitive_chain = failure_diagnostics(exception, validation_errors)
+    diagnostics, nodes, bounded_chain = failure_diagnostics(exception, validation_errors)
     context.update(diagnostics)
     dependency_failure = status_code >= 500 or response_code == DEPENDENCY_FAILURE_RESPONSE_CODE
     with_stack = (
-        exception is not None and not sensitive_chain and (dependency_failure or len(nodes) > 1)
+        exception is not None and not bounded_chain and (dependency_failure or len(nodes) > 1)
     )
     try:
         logger.log(
@@ -295,8 +305,13 @@ class RequestLoggingMiddleware:
             sensitive_transport = len(transport_nodes) >= MAX_FAILURE_FIELDS or any(
                 _sensitive_exception(item) for item in transport_nodes
             )
+            frames_truncated = any(
+                _traceback_frame_count(item) > MAX_FAILURE_FIELDS
+                for item in transport_nodes
+            )
+            bounded_transport = sensitive_transport or frames_truncated
             transport_diagnostics = (
-                _safe_exception_chain(transport_nodes) if sensitive_transport else None
+                _safe_exception_chain(transport_nodes) if bounded_transport else None
             )
             outcome = (
                 "failure"
@@ -336,7 +351,7 @@ class RequestLoggingMiddleware:
                         unreported_error,
                         unreported_error.__traceback__,
                     )
-                    if unreported_error is not None and not sensitive_transport
+                    if unreported_error is not None and not bounded_transport
                     else None,
                     extra={"trace_id": trace_id},
                 )

@@ -75,6 +75,19 @@ def _snap_trunc_text(s: Optional[str], limit: int = _SNAP_DESC_MAXLEN) -> str:
     return s if len(s) <= limit else s[:limit] + f"…(+{len(s) - limit} chars)"
 
 
+def _dedup_decision_extra(decision) -> Dict[str, Any]:
+    """判定来源、耗时与失败原因，写入 ReflectionLog trigger_detail。"""
+    extra: Dict[str, Any] = {
+        "judge_backend": decision.backend,
+        "request_ms": decision.request_ms,
+    }
+    for key in ("fallback_reason", "reason_code"):
+        value = getattr(decision, key)
+        if value is not None:
+            extra[key] = value
+    return extra
+
+
 class DescriptionMergeConfig(BaseModel):
     """子问题 6 实体描述合并配置"""
     min_fragments: int = 5              # 碎片数阈值（≥此值才触发合并）
@@ -372,7 +385,7 @@ class Layer2Inspector:
                     f"PG同步={alias.get('pg_synced', False)}"
                 )
 
-            # 复杂去重消歧：两路召回候选 + LLM 判定后合并重复实体
+            # 复杂去重消歧：两路召回候选 + 专用模型优先判定，异常时由 LLM 兜底。
             dedup = await self._run_step(
                 "实体去重", end_user_id,
                 self._run_entity_dedup(end_user_id, baseline), remaining(),
@@ -381,8 +394,12 @@ class Layer2Inspector:
             if dedup.get("status") not in ("timeout", "skipped"):
                 logger.info(
                     f"[Layer2 高频] 实体去重完成 end_user_id={end_user_id}, "
-                    f"候选={dedup.get('candidate_count', 0)}, LLM判定={dedup.get('llm_pool', 0)}, "
-                    f"合并={dedup.get('merged_count', 0)}, 记录未合并={dedup.get('recorded_count', 0)}"
+                    f"候选={dedup.get('candidate_count', 0)}, "
+                    f"专用模型判定={dedup.get('model_decision_count', 0)}, "
+                    f"LLM兜底={dedup.get('llm_decision_count', 0)}, "
+                    f"合并={dedup.get('merged_count', 0)}, "
+                    f"记录未合并={dedup.get('recorded_count', 0)}, "
+                    f"暂缓={dedup.get('deferred_count', 0)}"
                 )
 
             # 元数据提取：输入是 description 原始碎片，必须在 description_merge（会清空碎片）之前
@@ -441,7 +458,7 @@ class Layer2Inspector:
         from .deterministic.alias_merger import (
             merge_alias_belongs_to, collect_alias_candidates, drop_alias_edges,
         )
-        from .bert.alias_belongs_judge import AliasRecognitionClient
+        from .bert.alias_belongs_client import AliasRecognitionClient
         from .llm.alias_belongs_judge import apply_llm_fallback
 
         cfg = self.config.alias_merge
@@ -741,7 +758,7 @@ class Layer2Inspector:
         )
         from .deterministic.discard_cache import filter_discarded, cache_discarded
         from .llm.entity_dedup_judge import judge_batch
-        from .deterministic.cypher_merger import choose_keeper, execute_merge, build_merged_aliases
+        from .bert.entity_dedup_client import EntityDedupClient
 
         self._embedding_errors = []
         config = self.dedup_config
@@ -834,7 +851,7 @@ class Layer2Inspector:
             if c.a_id not in removed_ids and c.b_id not in removed_ids
         ]
 
-        # 4. 两档分流（去掉自动合并，全部走 LLM）
+        # 4. 两档分流：低分丢弃，其余交给专用模型 / LLM 判定。
         llm_pool, discard_pool = partition_by_probability(
             candidates, config.theta_low)
         await cache_discarded(end_user_id, discard_pool)
@@ -851,9 +868,23 @@ class Layer2Inspector:
         # 每块判完立即逐对合并并提交，中断（软超时/熔断 wait_for 取消）时已提交的块保住，多轮可收敛。
         # merged_count 已在 3.5 直合池处初始化，与直合共享上限。
         recorded_count = 0
+        deferred_count = 0
+        model_decision_count = 0
+        llm_decision_count = 0
+        deferred_reasons: List[str] = []
+        # 本轮内已成功合并的实体：后续重叠候选基于旧快照，跳过并留待下轮重读。
+        changed_ids: set = set()
         chunk_size = max(config.merge_concurrency, 1)   # 块大小=并发数，每块一个并发波
         n = max(len(llm_pool), 1)                       # 均摊 recall/score 计时用，近似即可
         snap_decisions: list = []                       # 2_llm_raw 裁决按块累积，出循环统一落
+        # 本轮高频去重共享的专用模型客户端；无候选时不会建立连接。
+        # 外层 _run_step 的剩余预算会取消整步，实际超时取配置值与剩余预算的较小值。
+        dedup_client = EntityDedupClient(
+            url=settings.ENTITY_DEDUP_URL,
+            api_key=settings.ENTITY_DEDUP_API_KEY,
+            model=settings.ENTITY_DEDUP_MODEL,
+            timeout=settings.ENTITY_DEDUP_TIMEOUT_SECONDS,
+        )
         try:
             for start in range(0, len(llm_pool), chunk_size):
                 if merged_count >= config.max_merges_per_run:
@@ -864,6 +895,7 @@ class Layer2Inspector:
                 t0 = time.perf_counter()
                 chunk_results = await judge_batch(
                     self.llm_client, chunk, config.merge_concurrency,
+                    dedup_client=dedup_client,
                 )
                 llm_ms = int((time.perf_counter() - t0) * 1000)
                 step_timing = {
@@ -875,70 +907,111 @@ class Layer2Inspector:
                 # 判完立刻合并 + 提交这一块（每对 _apply_dedup_merge 内部自带 commit + 写 ReflectionLog）
                 rejected_pairs = []
                 for pair, decision in chunk_results:
+                    if decision.backend == "entity_dedup_model":
+                        model_decision_count += 1
+                    else:
+                        llm_decision_count += 1
+
+                    # 专用模型直接采用 should_merge；LLM 兜底仍走原置信度阈值。
+                    outcome = decision.outcome
+                    if (outcome == "merge" and decision.backend == "llm"
+                            and decision.confidence < config.llm_merge_threshold):
+                        outcome = "deferred"
+                    if pair.a_id in changed_ids or pair.b_id in changed_ids:
+                        outcome = "skipped"
+
                     if snap_on:
                         snap_decisions.append({
                             "pair": f"{pair.a_name} ↔ {pair.b_name}",
                             "a_id": pair.a_id, "b_id": pair.b_id,
-                            "same_entity": bool(decision and decision.same_entity),
-                            "confidence": (decision.confidence if decision else 0.0),
-                            "winner_id": (decision.winner_id if decision else "a"),
-                            "merged_name": (decision.merged_name if decision else ""),
-                            "new_aliases": (decision.new_aliases if decision else []),
-                            "reason": (decision.reason if decision else ""),
+                            "same_entity": decision.same_entity,
+                            "confidence": decision.confidence,
+                            "winner_id": decision.winner_id,
+                            "merged_name": decision.merged_name,
+                            "new_aliases": decision.new_aliases,
+                            "reason": decision.reason,
+                            "outcome": outcome,
+                            "backend": decision.backend,
+                            "fallback_reason": decision.fallback_reason,
                         })
                     if merged_count >= config.max_merges_per_run:
                         break
-                    if decision and decision.same_entity and decision.confidence >= config.llm_merge_threshold:
+                    if outcome == "skipped":
+                        continue
+
+                    if outcome == "merge":
                         success = await self._apply_dedup_merge(
                             pair, end_user_id, baseline,
                             llm_decision=decision, step_timing=step_timing,
                             keeper_state_overrides=keeper_state_overrides)
                         if success:
                             merged_count += 1
-                            # 快照：LLM 确认合并
+                            changed_ids.update((pair.a_id, pair.b_id))
+                            # 快照：确认合并
                             snap_changes.append(change(
                                 "entity", "merge", target_id=pair.a_id, target_name=pair.a_name,
                                 extra={"loser_id": pair.b_id, "confidence": decision.confidence,
-                                       "source": "llm"},
+                                       "source": decision.backend},
                             ))
+                        continue
+
+                    # reject 写拒绝缓存；deferred 保留实体、只记录原因，不写缓存。
+                    is_deferred = outcome == "deferred"
+                    entity_a = {"entity_id": pair.a_id, "name": pair.a_name, "entity_type": pair.entity_type,
+                                "description": pair.a_desc, "aliases": pair.a_aliases}
+                    entity_b = {"entity_id": pair.b_id, "name": pair.b_name, "entity_type": pair.entity_type,
+                                "description": pair.b_desc, "aliases": pair.b_aliases}
+                    if is_deferred:
+                        deferred_count += 1
+                        if decision.reason_code:
+                            deferred_reasons.append(
+                                f"{decision.reason_code}:"
+                                f"{decision.fallback_reason or 'llm_call_failed'}"
+                            )
+                        else:
+                            deferred_reasons.append("llm_low_confidence")
                     else:
-                        # LLM 拒绝或 confidence 不够 → 收集待写缓存 + 写 recorded 日志
                         rejected_pairs.append(pair)
-                        reason = decision.reason if decision else "LLM 判定失败"
-                        conf = decision.confidence if decision else 0.0
-                        entity_a = {"entity_id": pair.a_id, "name": pair.a_name, "entity_type": pair.entity_type,
-                                    "description": pair.a_desc, "aliases": pair.a_aliases}
-                        entity_b = {"entity_id": pair.b_id, "name": pair.b_name, "entity_type": pair.entity_type,
-                                    "description": pair.b_desc, "aliases": pair.b_aliases}
-                        self._write_dedup_log(
-                            end_user_id=end_user_id,
-                            keeper=entity_a, loser=entity_b,
-                            entity_type=pair.entity_type,
-                            merged_name="", merged_aliases=[],
-                            confidence=conf,
-                            execution_detail={
-                                "steps": [
-                                    {"name": "候选召回", "type": "prompt", "duration_ms": step_timing.get("recall_ms"),
-                                     "output": f"sim_name={pair.sim_name:.2f}, sim_embed={pair.sim_embed:.2f}", "success": True},
-                                    {"name": "综合打分", "type": "decide", "duration_ms": step_timing.get("score_ms"),
-                                     "output": f"P={pair.probability:.2f}", "success": True},
-                                    {"name": "LLM 判定", "type": "llm", "duration_ms": step_timing.get("llm_ms"),
-                                     "output": f"same_entity=False, confidence={conf:.2f}", "success": True},
-                                ],
-                                "total_ms": sum(v for v in step_timing.values() if v),
-                                "model": getattr(self.llm_client, "model_name", ""),
-                            },
-                            reason=reason,
-                            status="recorded", strategy="NO_OP",
-                            baseline=baseline,
-                        )
                         recorded_count += 1
-                        # 快照：LLM 拒绝（NO_OP）
-                        snap_changes.append(change(
-                            "entity", "merge", target_id=pair.a_id, target_name=pair.a_name,
-                            status="rejected", reason="llm_no_op",
-                            extra={"loser_id": pair.b_id, "confidence": conf},
-                        ))
+                    self._write_dedup_log(
+                        end_user_id=end_user_id,
+                        keeper=entity_a, loser=entity_b,
+                        entity_type=pair.entity_type,
+                        merged_name="", merged_aliases=[],
+                        confidence=decision.confidence,
+                        execution_detail={
+                            "steps": [
+                                {"name": "候选召回", "type": "prompt", "duration_ms": step_timing.get("recall_ms"),
+                                 "output": f"sim_name={pair.sim_name:.2f}, sim_embed={pair.sim_embed:.2f}", "success": True},
+                                {"name": "综合打分", "type": "decide", "duration_ms": step_timing.get("score_ms"),
+                                 "output": f"P={pair.probability:.2f}", "success": True},
+                                {"name": ("专用模型判定" if decision.backend == "entity_dedup_model"
+                                          else "LLM 判定"),
+                                 "type": "llm",
+                                 "duration_ms": decision.request_ms or step_timing.get("llm_ms"),
+                                 "output": f"outcome={outcome}, source={decision.backend}",
+                                 "success": not is_deferred},
+                            ],
+                            "total_ms": sum(v for v in step_timing.values() if v),
+                            "model": (settings.ENTITY_DEDUP_MODEL
+                                      if decision.backend == "entity_dedup_model"
+                                      else getattr(self.llm_client, "model_name", "")),
+                        },
+                        reason=decision.reason,
+                        status="recorded", strategy="NO_OP",
+                        baseline=baseline,
+                        source=decision.backend,
+                        deferred=is_deferred,
+                        trigger_extra=_dedup_decision_extra(decision),
+                    )
+                    # 快照：拒绝 / 暂缓（NO_OP）
+                    snap_changes.append(change(
+                        "entity", "merge", target_id=pair.a_id, target_name=pair.a_name,
+                        status="skipped" if is_deferred else "rejected",
+                        reason=(f"deferred:{decision.fallback_reason or decision.reason}"
+                                if is_deferred else f"{decision.backend}_no_op"),
+                        extra={"loser_id": pair.b_id, "confidence": decision.confidence},
+                    ))
 
                 # 丢弃缓存按块写（中断不丢本块缓存；缓存是优化项，丢失不影响正确性）
                 if rejected_pairs:
@@ -952,6 +1025,8 @@ class Layer2Inspector:
                     "decisions": snap_decisions,
                 })
                 self._snap_changes("entity_dedup", snap_changes)
+            # 本轮去重结束关闭专用模型连接池；取消/异常同样释放。
+            await dedup_client.close()
 
         embedding_failed = bool(self._embedding_errors)
         return {
@@ -962,6 +1037,10 @@ class Layer2Inspector:
             "merged_count": merged_count,
             "direct_merged_count": direct_merged_count,
             "recorded_count": recorded_count,
+            "deferred_count": deferred_count,
+            "deferred_reasons": list(dict.fromkeys(deferred_reasons)),
+            "model_decision_count": model_decision_count,
+            "llm_decision_count": llm_decision_count,
             "business_failure_count": len(self._embedding_errors),
             "reason_codes": (
                 [ReflectionFailureReason.MODEL_CALL_FAILED.value]
@@ -1287,14 +1366,18 @@ class Layer2Inspector:
 
     def _write_dedup_log(self, end_user_id: str, keeper: Dict, loser: Dict,
                          entity_type: str, merged_name: str, merged_aliases: List,
-                         confidence: float, execution_detail: Dict, reason: str = "",
+                         confidence: Optional[float], execution_detail: Dict, reason: str = "",
                          status: str = "resolved", strategy: str = "MERGE",
-                         baseline: str = "HYBRID", source: str = "llm"):
+                         baseline: str = "HYBRID", source: str = "llm",
+                         deferred: bool = False,
+                         trigger_extra: Optional[Dict[str, Any]] = None):
         """写去重 ReflectionLog（方案A和B共用，支持 resolved/recorded）
 
         Args:
-            source: 合并来源；"llm"=LLM 确认合并，"deterministic"=同名同类型确定性合并。
-                title 显示按此区分，不依赖 reason 字符串硬编码。
+            source: "llm"=LLM 判定，"entity_dedup_model"=专用模型判定，
+                "deterministic"=同名同类型确定性合并。title 显示按此区分，不依赖 reason 字符串硬编码。
+            deferred: 暂缓结果（不合并、不写拒绝缓存）。
+            trigger_extra: 追加到 trigger_detail 的判定来源、耗时与失败原因。
         """
         if status == "resolved":
             merged_desc = self._merged_description(
@@ -1311,12 +1394,25 @@ class Layer2Inspector:
             summary = f'"{keeper["name"]}" ≈ "{loser["name"]}" → 合并'
             if source == "deterministic":
                 title = "MERGE — 同名同类型确定性合并"
+            elif source == "entity_dedup_model":
+                title = "MERGE — 专用模型判定"
+            elif confidence is None:
+                title = "MERGE"
             else:
-                title = f"MERGE — LLM确认（confidence={confidence:.2f}）" if confidence else "MERGE"
+                title = f"MERGE — LLM确认（confidence={confidence:.2f}）"
         else:
             changes = []
-            summary = f'"{keeper["name"]}" ≈ "{loser["name"]}" → 未合并'
-            title = f"NO_OP — LLM判定不合并（confidence={confidence:.2f}）"
+            summary = (f'"{keeper["name"]}" ≈ "{loser["name"]}" → 暂缓判定'
+                       if deferred
+                       else f'"{keeper["name"]}" ≈ "{loser["name"]}" → 未合并')
+            if deferred:
+                title = "NO_OP — 暂缓判定"
+            elif source == "entity_dedup_model":
+                title = "NO_OP — 专用模型判定不合并"
+            elif confidence is None:
+                title = "NO_OP — LLM判定不合并"
+            else:
+                title = f"NO_OP — LLM判定不合并（confidence={confidence:.2f}）"
 
         trigger = {
             "entity_a": {"entity_id": keeper.get("entity_id") or keeper.get("id"),
@@ -1330,6 +1426,8 @@ class Layer2Inspector:
         }
         if reason:
             trigger["reason"] = reason[:200]
+        if trigger_extra:
+            trigger.update(trigger_extra)
 
         log_repo = self.log_repo_factory()
         log_repo.create(
@@ -1465,7 +1563,7 @@ class Layer2Inspector:
         )
 
     async def _apply_dedup_merge(self, pair, end_user_id: str, baseline: str,
-                                llm_decision=None, step_timing=None,
+                                llm_decision, step_timing=None,
                                 keeper_state_overrides: Optional[Dict[str, Dict[str, Any]]] = None) -> bool:
         """执行单对合并 + 写 ReflectionLog
 
@@ -1478,7 +1576,11 @@ class Layer2Inspector:
             # fetch_degrees,  # 暂时关闭度数优先,下版打开
         )
 
-        tracker = ExecutionTracker(model=getattr(self.llm_client, "model_name", ""))
+        tracker = ExecutionTracker(model=(
+            settings.ENTITY_DEDUP_MODEL
+            if llm_decision.backend == "entity_dedup_model"
+            else getattr(self.llm_client, "model_name", "")
+        ))
         timing = step_timing or {}
 
         # Step 1: 候选召回（均摊耗时）
@@ -1493,11 +1595,22 @@ class Layer2Inspector:
             output=f"P={pair.probability:.2f}", success=True,
         ))
 
-        # Step 3: LLM 调用（均摊耗时）
+        # Step 3: 专用模型 / LLM 调用（优先用该对的真实耗时，缺失时用块内均摊）
+        if llm_decision.confidence is not None:
+            decision_output = (
+                f"same_entity={llm_decision.same_entity}, "
+                f"confidence={llm_decision.confidence:.2f}"
+            )
+        else:
+            decision_output = (
+                f"same_entity={llm_decision.same_entity}, source={llm_decision.backend}"
+            )
         tracker.steps.append(ExecutionStep(
-            name="LLM 判定", type="llm", duration_ms=timing.get("llm_ms"),
-            output=f"same_entity={llm_decision.same_entity}, confidence={llm_decision.confidence:.2f}" if llm_decision else "跳过",
-            success=bool(llm_decision and llm_decision.same_entity),
+            name=("专用模型判定" if llm_decision.backend == "entity_dedup_model" else "LLM 判定"),
+            type="llm",
+            duration_ms=llm_decision.request_ms or timing.get("llm_ms"),
+            output=decision_output,
+            success=llm_decision.same_entity,
         ))
 
         # Step 4: 策略决策（选择 keeper）
@@ -1514,7 +1627,7 @@ class Layer2Inspector:
                 if ov:
                     ent["description"] = ov.get("description", ent.get("description", ""))
                     ent["aliases"] = ov.get("aliases", ent.get("aliases", []))
-        winner = llm_decision.winner_id if llm_decision else None
+        winner = llm_decision.winner_id
 
         # 度数查询：用于 keeper 选择 + 超级节点保护
         degree_a, degree_b = 0, 0
@@ -1525,9 +1638,8 @@ class Layer2Inspector:
         keeper, loser = choose_keeper(entity_a, entity_b, winner, degree_a, degree_b)
         loser_degree = degree_b if loser is entity_b else degree_a
 
-        merged_name = llm_decision.merged_name if llm_decision and llm_decision.merged_name else keeper["name"]
-        new_aliases = llm_decision.new_aliases if llm_decision else None
-        merged_aliases = build_merged_aliases(keeper, loser, merged_name, new_aliases)
+        merged_name = llm_decision.merged_name or keeper["name"]
+        merged_aliases = build_merged_aliases(keeper, loser, merged_name, llm_decision.new_aliases)
         tracker.end_step(f"keeper={keeper['name']}")
 
         # Step 5: 写入
@@ -1568,10 +1680,12 @@ class Layer2Inspector:
             entity_type=pair.entity_type,
             merged_name=merged_name,
             merged_aliases=merged_aliases,
-            confidence=llm_decision.confidence if llm_decision else pair.probability,
+            confidence=llm_decision.confidence,
             execution_detail=tracker.to_dict(),
-            reason=llm_decision.reason if llm_decision else "",
+            reason=llm_decision.reason,
             baseline=baseline,
+            source=llm_decision.backend,
+            trigger_extra=_dedup_decision_extra(llm_decision),
         )
         return True
 

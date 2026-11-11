@@ -153,7 +153,12 @@ def create_and_publish(client: TestClient, ids: dict) -> dict:
 
     published = client.post(
         f"/internal/v1/apps/{app_id}/publish",
-        json={"version_name": "v1", "release_notes": "beat acceptance", "name": app_name},
+        json={
+            "version_name": "v1",
+            "release_notes": "beat acceptance",
+            "name": app_name,
+            "icon": "https://example.invalid/beat-icon.png",
+        },
         headers=headers,
     )
     if published.status_code != 200 or published.json().get("code") != 0:

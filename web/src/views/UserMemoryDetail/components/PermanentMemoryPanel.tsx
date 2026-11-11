@@ -95,7 +95,7 @@ export default function PermanentMemoryPanel({ userId, onVisibilityChange }: Per
         ? <Skeleton active />
         : facts.length
         ? (
-          <div ref={viewportRef} className="rb:overflow-x-hidden rb:overflow-y-auto rb:[overflow-anchor:none] rb:[scrollbar-gutter:stable]">
+          <div ref={viewportRef} className="rb:overflow-x-hidden rb:overflow-y-auto rb:[overflow-anchor:none] rb:scrollbar-gutter-stable">
             <div
               ref={stageRef}
               className="rb:relative rb:w-full"
