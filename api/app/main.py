@@ -39,8 +39,7 @@ from error_core.diagnostics import format_diagnostics
 from error_core.messages import user_message
 from app.integrations.knowledge.errors import KnowledgeClientError, KnowledgeServiceError
 from app.integrations.knowledge.validation import (
-    is_retrieval_request_validation_error,
-    safe_retrieval_validation_response,
+    is_knowledge_request_validation_error,
 )
 from app.core.models.failover import channel_error_to_business
 
@@ -399,13 +398,24 @@ async def request_validation_error_handler(
     request: Request,
     exc: RequestValidationError,
 ):
-    if is_retrieval_request_validation_error(request.url.path, exc.errors()):
-        logger.warning(
-            "Knowledge retrieval request validation failed path=%s method=%s",
-            request.url.path,
-            request.method,
+    if is_knowledge_request_validation_error(request.url.path):
+        from error_core.knowledge import knowledge_message, validation_diagnostic
+
+        language = getattr(request.state, "language", settings.I18N_DEFAULT_LANGUAGE)
+        malformed = any(item["type"] == "json_invalid" for item in exc.errors())
+        code = 1000 if malformed else 1001
+        return JSONResponse(
+            status_code=400 if malformed else 422,
+            content=fail(
+                code,
+                knowledge_message(code, language),
+                error=validation_diagnostic(exc.errors()),
+            ),
+            headers={
+                "X-Trace-Id": getattr(request.state, "trace_id", ""),
+                "Content-Language": language,
+            },
         )
-        return safe_retrieval_validation_response()
     # 请求体/参数校验失败统一走响应体（状态码保持 422）
     detail = "; ".join(
         str(error.get("msg") or "").removeprefix("Value error, ")
@@ -740,32 +750,42 @@ async def knowledge_client_exception_handler(
 ):
     """Preserve upstream business errors and normalize transport failures."""
 
-    if isinstance(exc, KnowledgeServiceError):
-        status_code = exc.status_code if 400 <= exc.status_code <= 599 else 503
-        code = exc.code
-        message = SensitiveDataFilter.filter_string(str(exc))
-        trace_id = exc.trace_id
-    else:
-        status_code = 503
-        code = BizCode.SERVICE_UNAVAILABLE.value
-        message = "Knowledge service unavailable"
-        trace_id = None
+    from error_core.diagnostics import format_diagnostics
+    from error_core.knowledge import knowledge_message
+    from error_core.codes import is_known_code
 
+    if isinstance(exc, KnowledgeServiceError):
+        status_code, code = exc.status_code, exc.code
+        diagnostic = SensitiveDataFilter.filter_string(exc.diagnostic)
+        trace_id = exc.trace_id
+        headers = exc.headers
+    else:
+        status_code, code = exc.status_code, exc.code
+        diagnostic = format_diagnostics(detail=type(exc).__name__)
+        trace_id = getattr(request.state, "trace_id", None)
+        headers = {}
+    locale = getattr(request.state, "language", settings.I18N_DEFAULT_LANGUAGE)
+    message = knowledge_message(code, locale, legacy_message=getattr(exc, "user_message", None))
     logger.error(
-        "Knowledge client error: %s",
+        "Knowledge client error type=%s status=%s code=%s trace_id=%s diagnostic=%s",
         type(exc).__name__,
-        extra={
-            "path": request.url.path,
-            "method": request.method,
-            "status_code": status_code,
-            "error_code": code,
-            "trace_id": trace_id,
-        },
+        status_code,
+        code,
+        trace_id,
+        diagnostic,
+        exc_info=exc,
     )
     response = JSONResponse(
         status_code=status_code,
-        content=fail(code=code, msg=message, error=message),
+        content=fail(code=code, msg=message, error=diagnostic),
+        headers={
+            key: value
+            for key, value in headers.items()
+            if key.lower() not in {"content-length", "content-type"}
+        },
     )
+    if is_known_code(code):
+        response.headers["Content-Language"] = locale
     if trace_id:
         response.headers["X-Trace-Id"] = trace_id
     return response

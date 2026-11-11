@@ -33,6 +33,9 @@ _RESPONSE_HEADER_ALLOWLIST = frozenset(
         "last-modified",
         "x-total-files",
         "x-trace-id",
+        "www-authenticate",
+        "allow",
+        "retry-after",
     }
 )
 _END_OF_STREAM = object()

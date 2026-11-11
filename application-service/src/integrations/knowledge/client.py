@@ -11,7 +11,11 @@ from typing import Any
 from urllib.parse import unquote, urlencode
 
 import httpx
+from error_core.knowledge import knowledge_message
+from error_core.codes import is_known_code
+from error_core.i18n import resolve_locale
 from fastapi import Request
+from starlette.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
 from pydantic import ValidationError
 from starlette.datastructures import UploadFile
@@ -145,6 +149,38 @@ class KnowledgeServiceClient:
             **send_kwargs,
         )
         headers_at = time.perf_counter()
+        if (
+            upstream.status_code != 204
+            and "application/json" in upstream.headers.get("content-type", "")
+            and (upstream.status_code >= 400 or profile is CallProfile.JSON)
+        ):
+            try:
+                raw_error = await upstream.aread()
+                payload = json.loads(raw_error)
+            except ValueError as exc:
+                raise KnowledgeProtocolError("Knowledge service returned invalid JSON") from exc
+            finally:
+                await upstream.aclose()
+            response_headers = self._transport.response_headers(upstream.headers)
+            response_headers = {
+                k: v
+                for k, v in response_headers.items()
+                if k.lower() not in {"content-length", "content-type"}
+            }
+            if (
+                isinstance(payload, dict)
+                and isinstance(payload.get("code"), int)
+                and payload["code"] != 0
+            ):
+                locale = resolve_locale(
+                    explicit=getattr(request.state, "language", None)
+                    or request.headers.get("x-language-type"),
+                    accepted=request.headers.get("accept-language"),
+                )
+                payload["msg"] = knowledge_message(payload["code"], locale, legacy_message=payload.get("msg"))
+                if is_known_code(payload["code"]):
+                    response_headers["content-language"] = locale
+            return JSONResponse(payload, status_code=upstream.status_code, headers=response_headers)
 
         async def body_iterator() -> AsyncIterator[bytes]:
             bytes_forwarded = 0
@@ -272,6 +308,7 @@ class KnowledgeServiceClient:
                 raw,
                 status_code=upstream.status_code,
                 trace_id=trace_id,
+                headers=self._transport.response_headers(upstream.headers),
             )
             code = envelope["code"]
             result = retrieval_result_from_data(envelope.get("data"))
@@ -409,9 +446,16 @@ class KnowledgeServiceClient:
         code = envelope.get("code")
         if not isinstance(code, int):
             raise KnowledgeProtocolError("Knowledge service envelope code must be an integer")
-        message = str(envelope.get("error") or envelope.get("msg") or "Knowledge error")
+        message = str(envelope.get("msg") or "Knowledge error")
         if not 200 <= status_code < 300 or code != 0:
-            raise KnowledgeServiceError(status_code, code, message, trace_id)
+            raise KnowledgeServiceError(
+                status_code,
+                code,
+                message,
+                trace_id,
+                diagnostic=str(envelope.get("error") or ""),
+                headers=self._transport.response_headers(upstream.headers),
+            )
         envelope["time"] = int(time.time() * 1000)
         logger.info(
             "knowledge_detached_call_completed method=%s path=%s status=%s code=%s "

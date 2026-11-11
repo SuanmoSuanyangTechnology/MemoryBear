@@ -51,7 +51,7 @@ class FileUpdate(BaseModel):
     parent_id: uuid.UUID | None = Field(None)
     file_name: str | None = Field(None)
     file_ext: str | None = Field(None)
-    file_size: str | None = Field(None)
+    file_size: int | None = Field(None, ge=0)
     file_url: str | None = Field(None)
 
 

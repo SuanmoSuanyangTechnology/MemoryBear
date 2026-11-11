@@ -9,9 +9,11 @@ from typing import Any
 from error_core.codes import BizCode, code_name, coerce_code, http_status_for
 from error_core.diagnostics import format_diagnostics, redact
 from error_core.envelope import error_frame as build_error_frame
+from error_core.knowledge import knowledge_message
 from error_core.messages import fallback_message, user_message
 
 from ..errors import BusinessException
+from ..integrations.knowledge.errors import KnowledgeServiceError
 from ..integrations.model.errors import ModelInvokeFailedError
 
 logger = logging.getLogger(__name__)
@@ -26,7 +28,14 @@ def error_payload(
 ) -> dict[str, Any]:
     # Error frames must never carry OK (0); a mislabelled code is treated as
     # unresolved and falls back to the caller's failure code.
-    if isinstance(exc, ModelInvokeFailedError):
+    if isinstance(exc, KnowledgeServiceError):
+        numeric = coerce_code(exc.code) or fallback_code.value
+        msg = knowledge_message(numeric, locale or "zh", legacy_message=exc.user_message)
+        detail = format_diagnostics(trace_id=exc.trace_id or trace_id, detail=exc.diagnostic)
+        retryable = False
+        attempts = 0
+        channel_id = None
+    elif isinstance(exc, ModelInvokeFailedError):
         numeric = coerce_code(exc.biz_code)
         if numeric in (None, BizCode.OK.value):
             numeric = fallback_code.value
