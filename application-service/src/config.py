@@ -328,6 +328,18 @@ class AppServiceSettings(BaseSettings):
     market_service_circuit_reset_seconds: float = Field(
         default=30.0, gt=0, validation_alias="MARKET_SERVICE_CIRCUIT_RESET_SECONDS"
     )
+    # Operator import preview (`content_preview`, interface doc §5.12): per-file
+    # cap applies first, then the remaining total budget (UTF-8 boundary truncation).
+    market_operator_import_content_max_file_bytes: int = Field(
+        default=131072,
+        gt=0,
+        validation_alias="MARKET_OPERATOR_IMPORT_CONTENT_MAX_FILE_BYTES",
+    )
+    market_operator_import_content_max_total_bytes: int = Field(
+        default=1048576,
+        gt=0,
+        validation_alias="MARKET_OPERATOR_IMPORT_CONTENT_MAX_TOTAL_BYTES",
+    )
     # Operator MCP availability probes (interface doc §8.8): loopback, link-local,
     # metadata and unspecified targets are always rejected; private ranges are
     # rejected unless listed here. Comma-separated CIDRs; empty means deny all
