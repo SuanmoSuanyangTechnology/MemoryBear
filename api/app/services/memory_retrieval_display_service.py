@@ -14,7 +14,7 @@ from __future__ import annotations
 import logging
 import re
 import uuid
-from typing import Any, List
+from typing import TYPE_CHECKING, Any, List
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -24,16 +24,22 @@ from app.repositories.memory_display_record_repository import (
     MemoryDisplayRecordRepository,
 )
 
+if TYPE_CHECKING:
+    from app.core.memory.models.community_retrieval_models import CommunityRetrievalTrace
+    from app.core.memory.models.service_models import MemorySearchResult
+
 logger = logging.getLogger(__name__)
 
 # 展示文本上限（字符）
 QUERY_MAX_LENGTH = 200
 SUMMARY_MAX_LENGTH = 200
 ENTITY_MAX_LENGTH = 100
+TOPIC_SCOPE_MAX_LENGTH = 100
 
 # 单张卡片最多展示的节点数
 MAX_SUMMARY_COUNT = 3
 MAX_ENTITY_COUNT = 3
+MAX_TOPIC_SCOPE_COUNT = 3
 
 _TRUNCATE_SUFFIX = "…"
 _FILE_SUMMARY_TAG_RE = re.compile(
@@ -96,10 +102,28 @@ def aggregate_display_content(
     return "\n".join(parts)
 
 
+def _community_topic_scopes(trace: CommunityRetrievalTrace) -> list[str]:
+    scope_by_id = {
+        scene["id"]: scene.get("topic_scope")
+        for member in trace.members
+        for scene in member["candidates"]
+    }
+    scopes: dict[str, None] = {}
+    for evidence_id in trace.evidence_ids:
+        scope = normalize_display_text(scope_by_id.get(evidence_id), TOPIC_SCOPE_MAX_LENGTH)
+        if scope:
+            scopes[scope] = None
+            if len(scopes) == MAX_TOPIC_SCOPE_COUNT:
+                break
+    return list(scopes)
+
+
 def build_retrieve_snapshot(
-    result: Any,
+    result: MemorySearchResult,
     query: str,
     language: str,
+    *,
+    search_mode: str,
 ) -> dict | None:
     """从最终检索结果构造一条可直接入库的 RETRIEVE 快照。
 
@@ -107,10 +131,18 @@ def build_retrieve_snapshot(
         result: 最终 MemorySearchResult（不会被修改）
         query: 已清洗的主检索问题
         language: 检索发生时的 MemoryContext.language
+        search_mode: 读取卡片使用的检索模式
 
     Returns:
         ``{"query": ..., "content": ...}``；没有可展示节点时返回 None。
     """
+    if search_mode == "community":
+        trace = result.community_trace
+        if trace is None:
+            return None
+        content = aggregate_display_content(_community_topic_scopes(trace), [], language)
+        return {"query": query, "content": content} if content else None
+
     from app.core.memory.enums import Neo4jNodeType
 
     memories = getattr(result, "memories", None) or []

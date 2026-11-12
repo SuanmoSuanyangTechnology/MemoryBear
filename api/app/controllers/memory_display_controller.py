@@ -110,6 +110,7 @@ async def get_all_memory_display(
     一条按 occurred_at 倒序的列表统一分页，total 是各类条数之和。
     每项新增 source 字段（written / retrieved / engines）标识来源，
     其余字段与对应单接口逐字一致。
+    社区检索卡片使用 source="retrieved" 和 search_mode="community"。
 
     include_engines=false 时完全跳过引擎动态查询，返回的列表和 total 只含
     written 和 retrieved；written 和 retrieved 无法排除，它们是本接口的基本内容。
@@ -383,6 +384,7 @@ async def get_retrieved_memories(
     一次用户可见的记忆检索对应一条记录，按 occurred_at 倒序分页。
     search_mode 始终返回稳定英文枚举，由前端负责展示文案映射；content
     是检索发生时按当时记忆语言聚合的快照，查询时不再翻译。
+    社区检索卡片的 search_mode 为 "community"，content 展示入选场景的主题范围。
     """
     workspace_id = current_user.current_workspace_id
     if workspace_id is None:
