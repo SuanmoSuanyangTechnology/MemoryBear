@@ -131,6 +131,7 @@ async def get_retrieved_memories(
     - 传 end_user_id：返回指定用户的读取展示卡片；
     - 不传 end_user_id：返回 API Key 所属工作空间的全部读取卡片（空间级），
       每项额外携带 end_user_id 字段区分归属。
+    社区检索卡片的 search_mode 为 "community"，content 展示入选场景的主题范围。
     """
     language = await get_current_language(request)
     window_error = _time_window_error(start_time, end_time, language)
@@ -282,6 +283,7 @@ async def get_all_memory_display(
     - 传 end_user_id：指定用户的统一时间线；
     - 不传 end_user_id：API Key 所属工作空间的统一时间线（空间级），
       每项额外携带 end_user_id 区分归属。
+    社区检索卡片使用 source="retrieved" 和 search_mode="community"。
     """
     language = await get_current_language(request)
     resolved_end_user_id = None
