@@ -270,7 +270,7 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
                 "pruning_enabled": config.pruning_enabled,
                 # Compatibility-only response value; do not derive it from a retired scene.
                 # 在v0.5.11实现这些契约变更和字段收缩。
-                "pruning_scene": None,
+                "pruning_scene": "",
                 "pruning_threshold": config.pruning_threshold,
                 "enable_self_reflexion": config.enable_self_reflexion,
                 "iteration_period": config.iteration_period,

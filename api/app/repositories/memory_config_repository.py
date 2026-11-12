@@ -486,7 +486,7 @@ class MemoryConfigRepository:
                 # read_config_extracted was not listed in the compatibility notice.
                 # Preserve its response key without querying the retired ontology.
                 # 在v0.5.11实现这些契约变更和字段收缩。
-                "pruning_scene": None,
+                "pruning_scene": "",
                 "pruning_threshold": db_config.pruning_threshold,
                 "enable_self_reflexion": db_config.enable_self_reflexion,
                 "iteration_period": db_config.iteration_period,
