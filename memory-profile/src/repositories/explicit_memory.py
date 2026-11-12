@@ -53,7 +53,6 @@ class ExplicitMemoryRepository:
         MATCH (e:ExtractedEntity)
         WHERE e.end_user_id = $end_user_id
           AND e.is_explicit_memory = true
-          AND e.delete_at IS NULL
         RETURN elementId(e) AS id,
                e.name AS name,
                e.entity_type AS entity_type,
@@ -170,7 +169,6 @@ class ExplicitMemoryRepository:
         WHERE elementId(e) = $memory_id
           AND e.end_user_id = $end_user_id
           AND e.is_explicit_memory = true
-          AND e.delete_at IS NULL
         RETURN e.name AS name,
                e.description AS core_definition,
                e.example AS detailed_notes,
