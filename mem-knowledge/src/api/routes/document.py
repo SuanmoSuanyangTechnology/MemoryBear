@@ -23,7 +23,6 @@ from ..schemas.knowledge_metadata import (
     DocumentMetadataDeleteRequest,
     DocumentMetadataUpdateRequest,
 )
-from ..schemas.query import CsvUUIDs, DocumentOrder
 
 router = APIRouter(
     prefix="/documents",
@@ -59,10 +58,10 @@ async def get_documents(
     parent_id: Annotated[uuid.UUID | None, Query()] = None,
     page: Annotated[int, Query(gt=0)] = 1,
     pagesize: Annotated[int, Query(gt=0, le=100)] = 20,
-    orderby: Annotated[DocumentOrder | None, Query()] = None,
+    orderby: Annotated[str | None, Query()] = None,
     desc: Annotated[bool, Query()] = False,
     keywords: Annotated[str | None, Query()] = None,
-    document_ids: Annotated[CsvUUIDs | None, Query()] = None,
+    document_ids: Annotated[str | None, Query()] = None,
 ) -> SuccessEnvelope[dict[str, Any]]:
     async with runtime.database.async_session() as db:
         total, items = await document_service.list_documents(

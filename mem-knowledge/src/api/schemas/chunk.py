@@ -127,12 +127,6 @@ class ChunkCreate(BaseModel):
     chunk_type: ChunkType = ChunkType.CHUNK
     parent_id: str | None = None
 
-    @model_validator(mode="after")
-    def require_child_parent(self):
-        if self.chunk_type is ChunkType.CHILD and not self.parent_id:
-            raise ValueError("子分块必须指定父分块 parent_id")
-        return self
-
     @property
     def chunk_content(self) -> str:
         if isinstance(self.content, QAChunk):

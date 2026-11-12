@@ -39,7 +39,8 @@ from error_core.diagnostics import format_diagnostics
 from error_core.messages import user_message
 from app.integrations.knowledge.errors import KnowledgeClientError, KnowledgeServiceError
 from app.integrations.knowledge.validation import (
-    is_knowledge_request_validation_error,
+    is_retrieval_request_validation_error,
+    safe_retrieval_validation_response,
 )
 from app.core.models.failover import channel_error_to_business
 
@@ -398,24 +399,13 @@ async def request_validation_error_handler(
     request: Request,
     exc: RequestValidationError,
 ):
-    if is_knowledge_request_validation_error(request.url.path):
-        from error_core.knowledge import knowledge_message, validation_diagnostic
-
-        language = getattr(request.state, "language", settings.I18N_DEFAULT_LANGUAGE)
-        malformed = any(item["type"] == "json_invalid" for item in exc.errors())
-        code = 1000 if malformed else 1001
-        return JSONResponse(
-            status_code=400 if malformed else 422,
-            content=fail(
-                code,
-                knowledge_message(code, language),
-                error=validation_diagnostic(exc.errors()),
-            ),
-            headers={
-                "X-Trace-Id": getattr(request.state, "trace_id", ""),
-                "Content-Language": language,
-            },
+    if is_retrieval_request_validation_error(request.url.path, exc.errors()):
+        logger.warning(
+            "Knowledge retrieval request validation failed path=%s method=%s",
+            request.url.path,
+            request.method,
         )
+        return safe_retrieval_validation_response()
     # 请求体/参数校验失败统一走响应体（状态码保持 422）
     detail = "; ".join(
         str(error.get("msg") or "").removeprefix("Value error, ")
@@ -750,22 +740,37 @@ async def knowledge_client_exception_handler(
 ):
     """Preserve upstream business errors and normalize transport failures."""
 
+    from error_core.codes import is_known_code
     from error_core.diagnostics import format_diagnostics
     from error_core.knowledge import knowledge_message
-    from error_core.codes import is_known_code
 
     if isinstance(exc, KnowledgeServiceError):
-        status_code, code = exc.status_code, exc.code
+        status_code = exc.status_code if 400 <= exc.status_code <= 599 else 503
+        code = exc.code
         diagnostic = SensitiveDataFilter.filter_string(exc.diagnostic)
         trace_id = exc.trace_id
         headers = exc.headers
     else:
-        status_code, code = exc.status_code, exc.code
+        from app.integrations.knowledge.errors import (
+            KnowledgeProtocolError,
+            KnowledgeTimeoutError,
+        )
+
+        status_code = 503
+        code = (
+            BizCode.KB_UPSTREAM_RESPONSE_INVALID if isinstance(exc, KnowledgeProtocolError)
+            else BizCode.KB_REQUEST_TIMEOUT if isinstance(exc, KnowledgeTimeoutError)
+            else BizCode.KB_HTTP_SERVICE_UNAVAILABLE
+        )
         diagnostic = format_diagnostics(detail=type(exc).__name__)
         trace_id = getattr(request.state, "trace_id", None)
         headers = {}
     locale = getattr(request.state, "language", settings.I18N_DEFAULT_LANGUAGE)
-    message = knowledge_message(code, locale, legacy_message=getattr(exc, "user_message", None))
+    message = (
+        exc.user_message
+        if isinstance(exc, KnowledgeServiceError) and exc.status_code < 400
+        else knowledge_message(code, locale, legacy_message=getattr(exc, "user_message", None))
+    )
     logger.error(
         "Knowledge client error type=%s status=%s code=%s trace_id=%s diagnostic=%s",
         type(exc).__name__,

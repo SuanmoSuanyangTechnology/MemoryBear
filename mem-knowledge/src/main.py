@@ -23,12 +23,12 @@ from .trace import TraceIdMiddleware
 
 logger = logging.getLogger(__name__)
 
-_ERROR_RESPONSES = {
+_LEGACY_ERROR_RESPONSES = {
     status_code: {
         "model": ApiResponse[Any],
-        "description": "Knowledge error: code, localized msg, data, diagnostic error and time",
+        "description": "Legacy-compatible error response",
     }
-    for status_code in (400, 401, 403, 404, 405, 409, 413, 415, 422, 429, 500, 503)
+    for status_code in (400, 404, 409, 500)
 }
 
 
@@ -105,7 +105,7 @@ def create_app(settings: KnowledgeSettings | None = None) -> FastAPI:
         version="0.1.0",
         docs_url=None,
         redoc_url=None,
-        responses=_ERROR_RESPONSES,
+        responses=_LEGACY_ERROR_RESPONSES,
         lifespan=lifespan,
     )
     application.state.runtime = runtime

@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from error_core.codes import is_known_code
+from error_core.codes import BizCode, is_known_code
 from error_core.envelope import fail
 from error_core.fastapi_handlers import (
     ErrorHandlerDeps,
@@ -27,16 +27,14 @@ from error_core.fastapi_handlers import (
 from error_core.fastapi_handlers import (
     validation_error_content as _validation_error_content,
 )
-from error_core.knowledge import knowledge_message, validation_diagnostic
+from error_core.knowledge import knowledge_message
 from fastapi import FastAPI, Request
-from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response
 from pydantic import ValidationError as PydanticValidationError
 
 from ..errors import BusinessException, I18nException
 from ..i18n import get_default_locale, translate
 from ..integrations.knowledge.errors import KnowledgeClientError, KnowledgeServiceError
-from ..integrations.knowledge.validation import is_knowledge_request_validation_error
 from ..integrations.model.errors import ModelInvokeCancelledError
 from ..request_logging import log_request_failure
 from ..sensitive import SensitiveDataFilter
@@ -109,30 +107,16 @@ def render_error(
 
 def register_error_handlers(application: FastAPI) -> None:
     _register_error_handlers(application, _deps)
-    original_validation_handler = application.exception_handlers[RequestValidationError]
+    original_unhandled_handler = application.exception_handlers[Exception]
 
-    @application.exception_handler(RequestValidationError)
-    async def knowledge_validation_handler(request: Request, exc: RequestValidationError):
-        if not is_knowledge_request_validation_error(request.url.path):
-            return await original_validation_handler(request, exc)
-        malformed = any(item["type"] == "json_invalid" for item in exc.errors())
-        code = 1000 if malformed else 1001
-        locale = getattr(request.state, "language", None) or get_default_locale()
-        message = knowledge_message(code, locale)
-        return render_error(
-            request,
-            status_code=400 if malformed else 422,
-            content=fail(code, message, validation_diagnostic(exc.errors())),
-            error_code=str(code),
-            message=message,
-            exception=exc,
-            validation_errors=exc.errors(),
-        )
-
-    @application.exception_handler(KnowledgeClientError)
-    async def knowledge_error_handler(request: Request, exc: KnowledgeClientError):
+    @application.exception_handler(Exception)
+    async def knowledge_error_handler(request: Request, exc: Exception):
+        if not isinstance(exc, KnowledgeClientError) or (
+            isinstance(exc, KnowledgeServiceError) and exc.status_code < 400
+        ):
+            return await original_unhandled_handler(request, exc)
         if isinstance(exc, KnowledgeServiceError):
-            status, code, detail = exc.status_code, exc.code, exc.diagnostic
+            status, code, detail = 500, exc.code, exc.diagnostic
             headers = {
                 key: value
                 for key, value in exc.headers.items()
@@ -140,7 +124,18 @@ def register_error_handlers(application: FastAPI) -> None:
             }
             trace_id = exc.trace_id
         else:
-            status, code, detail = exc.status_code, exc.code, type(exc).__name__
+            from ..integrations.knowledge.errors import (
+                KnowledgeProtocolError,
+                KnowledgeTimeoutError,
+            )
+
+            status = 500
+            code = (
+                BizCode.KB_UPSTREAM_RESPONSE_INVALID if isinstance(exc, KnowledgeProtocolError)
+                else BizCode.KB_REQUEST_TIMEOUT if isinstance(exc, KnowledgeTimeoutError)
+                else BizCode.KB_HTTP_SERVICE_UNAVAILABLE
+            )
+            detail = type(exc).__name__
             headers = {}
             trace_id = getattr(request.state, "trace_id", None) or get_trace_id()
         locale = getattr(request.state, "language", None) or get_default_locale()

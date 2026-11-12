@@ -12,7 +12,6 @@ from pydantic import ValidationError
 
 from ...integrations.model.chat import RedBearChatModel
 from ...integrations.model.invoke_backend import RemoteInvokeRef
-from ...model_errors import ModelRole
 from ..chunk.token_utils import get_encoder
 from .config import WikiError
 from .diagnostics import diagnostic_json, exception_details
@@ -46,7 +45,7 @@ class WikiModel:
             except Exception as exc:
                 from ...error_mapping import map_model_error
 
-                mapped = map_model_error(exc, model_role=ModelRole.LLM)
+                mapped = map_model_error(exc)
                 raise WikiError(
                     mapped.code, retryable=mapped.retryable,
                     diagnostics={"stage": "model_init", "model_id": str(ref.config_id)},
@@ -77,7 +76,7 @@ class WikiModel:
         except Exception as exc:
             from ...error_mapping import map_model_error
 
-            mapped = map_model_error(exc, model_role=ModelRole.LLM)
+            mapped = map_model_error(exc)
             details = {
                 **exception_details(exc), "stage": stage, "model_id": self.model_id,
                 "model_attempt": attempt, "continuation": continuation,

@@ -12,6 +12,7 @@ import json
 from typing import Any, NoReturn
 
 from error_core.diagnostics import format_diagnostics
+from error_core.knowledge import knowledge_message
 from memorybear_grpc.errors import error_trailers, grpc_status_for_http
 
 import grpc
@@ -48,7 +49,7 @@ def success_body(data: Any, msg: str) -> bytes:
 def error_content(error: KnowledgeError, language: str) -> dict[str, Any]:
     """The body the HTTP error handler renders for the same failure."""
 
-    message = translate(error.code, language, error.params)
+    message = knowledge_message(error.response_code, language)
     return fail(
         code=error.response_code,
         msg=message,
@@ -73,7 +74,7 @@ async def abort_with_error(
     content = error_content(error, language)
     message = str(content.get("msg") or "knowledge request failed")
     await context.abort(
-        grpc.StatusCode[error.grpc_status],
+        grpc_status_for_http(error.status_code),
         message,
         trailing_metadata=_trailers(error.status_code, content, trace_id),
     )

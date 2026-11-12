@@ -2,19 +2,23 @@
 
 import datetime
 import uuid
+from typing import Annotated
 
 from pydantic import (
     BaseModel,
+    BeforeValidator,
     ConfigDict,
     Field,
+    TypeAdapter,
     field_serializer,
     field_validator,
 )
+from typing_extensions import TypedDict
 
 from ...models.owned import KnowledgeType, PermissionType
 from ...models.references import LoadBalanceStrategy, ModelType
+from ...rag.wiki.config import MAX_EXTRACT_PROMPT_LENGTH, MAX_LANGUAGE_LENGTH
 from ...utils.datetime_utils import to_timestamp_ms
-from .parser_config import KnowledgeCreateParserConfig, KnowledgeUpdateParserConfig
 
 
 class UserSummary(BaseModel):
@@ -96,8 +100,33 @@ class KnowledgeBase(BaseModel):
     external_id: str | None = Field(None, min_length=1, max_length=36)
 
 
+class _LegacyWikiFields(TypedDict, total=False):
+    __pydantic_config__ = ConfigDict(extra="allow")
+    enabled: Annotated[bool, Field(strict=True)]
+    language: Annotated[
+        str,
+        BeforeValidator(lambda value: value.strip() if isinstance(value, str) else value),
+        Field(strict=True, min_length=1, max_length=MAX_LANGUAGE_LENGTH),
+    ]
+    extract_prompt: Annotated[str, Field(strict=True, max_length=MAX_EXTRACT_PROMPT_LENGTH)]
+
+
+class _LegacyWikiValidation(TypedDict, total=False):
+    __pydantic_config__ = ConfigDict(extra="allow")
+    wiki: _LegacyWikiFields | None
+
+
+_LEGACY_WIKI_VALIDATOR = TypeAdapter(_LegacyWikiValidation)
+
+
 class KnowledgeCreate(KnowledgeBase):
-    parser_config: KnowledgeCreateParserConfig | None = None
+    @field_validator("parser_config")
+    @classmethod
+    def _validate_wiki_config(cls, value: dict | None) -> dict | None:
+        # 只验证已有 Wiki 约束，返回原字典；共享旧配置不能被新建规则重写。
+        if value is not None:
+            _LEGACY_WIKI_VALIDATOR.validate_python(value)
+        return value
 
     image2text_id: uuid.UUID | None = Field(
         None,
@@ -141,7 +170,7 @@ class KnowledgeUpdate(BaseModel):
     doc_num: int | None = Field(None)
     chunk_num: int | None = Field(None)
     parser_id: str | None = Field(None)
-    parser_config: KnowledgeUpdateParserConfig = Field(default=None)
+    parser_config: dict | None = Field(None)
     status: int | None = Field(None)
 
 

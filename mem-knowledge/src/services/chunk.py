@@ -114,6 +114,10 @@ def validate_chunk_create(
             raise KnowledgeError.from_code(
                 "KB_PARENT_CHILD_CHUNK_TYPE_REQUIRED",
             )
+        if create_data.chunk_type is ChunkType.CHILD and not create_data.parent_id:
+            raise KnowledgeError.from_code(
+                "KB_CHILD_PARENT_ID_REQUIRED",
+            )
         return
     if create_data.chunk_type in {ChunkType.PARENT, ChunkType.CHILD}:
         raise KnowledgeError.from_code(

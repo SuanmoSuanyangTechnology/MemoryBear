@@ -13,19 +13,17 @@ from __future__ import annotations
 import os
 from collections.abc import Awaitable, Callable
 
-import httpx
 from fastapi import HTTPException
 from memorybear_grpc.interceptors import Authenticator
 from memorybear_grpc.request import MetadataRequest
 from pydantic import ValidationError
-from redis.exceptions import ConnectionError as RedisConnectionError
 
 from ..api.dependencies import Principal, _principal_from_headers
 from ..auth import KbAuthConfig, _load_gateway_auth
 from ..errors import KnowledgeError
 from ..i18n import resolve_locale
 from ..trace import get_trace_id, normalize_trace_id
-from .envelope import abort_with_error, abort_with_status
+from .envelope import abort_with_status
 
 RETRIEVAL_ACL_PATH = "/internal/v1/chunks/retrieval"
 POLICY_ACL_PATH = "/internal/v1/chunks/retrieval-policy"
@@ -92,11 +90,6 @@ def build_authenticator(
             claims = await handler.authenticate(request)
         except HTTPException as exc:
             await reject(exc.status_code, str(exc.detail))
-            raise
-        except (httpx.RequestError, RedisConnectionError, TimeoutError, ConnectionError) as exc:
-            error = KnowledgeError.from_code("KB_AUTH_DEPENDENCY_UNAVAILABLE")
-            error.__cause__ = exc
-            await abort_with_error(context, error, language=language, trace_id=_trace_id())
             raise
         except Exception:
             await reject(401, "invalid token")

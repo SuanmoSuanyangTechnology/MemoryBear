@@ -1,5 +1,6 @@
 """FAQ 作用域、状态投影及权限一致的来源读取。"""
 
+from error_core.codes import BizCode
 from sqlalchemy import select
 
 from ...errors import KnowledgeError
@@ -18,7 +19,7 @@ def scoped(model, scope):
 
 
 def missing():
-    raise KnowledgeError.from_code("KB_FAQ_NOT_FOUND")
+    raise KnowledgeError.from_code("KB_RESOURCE_NOT_FOUND")
 
 
 def conflict(code="KB_FAQ_CONFLICT"):
@@ -52,7 +53,9 @@ def get_version(session, scope, version_id):
         )
     )
     if row is None:
-        raise KnowledgeError.from_code("KB_FAQ_SOURCE_SNAPSHOT_UNAVAILABLE")
+        raise KnowledgeError.from_code(
+            "KB_RESOURCE_NOT_FOUND", response_code=BizCode.KB_WIKI_SNAPSHOT_UNAVAILABLE
+        )
     return row
 
 

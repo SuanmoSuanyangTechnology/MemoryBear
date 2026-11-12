@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Iterator
 from functools import lru_cache
+from http import HTTPStatus
 from typing import Literal
 
 import httpx
@@ -65,7 +66,7 @@ _REMOTE_CODE_MODEL_ERRORS: dict[str | int, str] = {
 }
 
 
-def map_model_error(
+def _classify_model_error(
     exc: BaseException,
     *,
     model_role: ModelRole,
@@ -177,41 +178,40 @@ def _ark_embedding_errors() -> tuple[tuple[type[BaseException], ...], ...]:
     return (ArkAPITimeoutError,), (ArkAPIConnectionError,), (ArkAPIStatusError,)
 
 
-def map_text_embedding_error(exc: BaseException) -> KnowledgeError | None:
-    """Keep unexpected program errors distinct from recognized embedding failures."""
-    if isinstance(exc, KnowledgeError):
-        return exc
-    ark_timeouts, ark_connections, ark_statuses = _ark_embedding_errors()
-    known = (
-        (
-            APIStatusError,
-            httpx.HTTPError,
-            requests.RequestException,
-            TimeoutError,
-            ConnectionError,
-            APIConnectionError,
-            ModelInvokeTimeoutError,
-            ModelInvokeUnavailableError,
-            ModelInvokeFailedError,
-            ModelInvokeProtocolError,
-            ChannelSwitchExhaustedError,
-            NoAvailableChannelError,
-            CredentialDecryptError,
-            ModelCredentialNotFoundError,
-            PublicCredentialUnavailableError,
-            InvalidProviderResponseError,
-            ModelConfigNotFoundError,
-            ModelAccessDeniedError,
-            ModelConfigInactiveError,
-            MultimodalInputLimitError,
-        )
-        + ark_timeouts
-        + ark_connections
-        + ark_statuses
+def _with_public_code(
+    legacy: KnowledgeError,
+    response_code: int,
+    cause: BaseException,
+) -> KnowledgeError:
+    error = KnowledgeError.from_code(
+        legacy.code,
+        params=legacy.params,
+        status_code=legacy.status_code,
+        response_code=response_code,
     )
-    if any(isinstance(cause, known) for cause in _exception_chain(exc)):
-        return map_model_error(exc, model_role=ModelRole.EMBEDDING)
-    return None
+    error.__cause__ = cause
+    return error
+
+
+def map_model_error(
+    exc: BaseException,
+    *,
+    model_role: ModelRole | None = None,
+    visibility_proven: bool = False,
+) -> KnowledgeError:
+    legacy = _legacy_model_error(exc, visibility_proven=visibility_proven)
+    if model_role is None or isinstance(exc, KnowledgeError):
+        return legacy
+    public = _classify_model_error(exc, model_role=model_role, visibility_proven=visibility_proven)
+    return _with_public_code(legacy, public.response_code, exc)
+
+
+def map_text_embedding_error(exc: BaseException) -> KnowledgeError | None:
+    legacy = _legacy_embedding_error(exc)
+    if legacy is None or isinstance(exc, KnowledgeError):
+        return legacy
+    public = _classify_model_error(exc, model_role=ModelRole.EMBEDDING)
+    return _with_public_code(legacy, public.response_code, exc)
 
 
 def map_multimodal_error(
@@ -219,8 +219,12 @@ def map_multimodal_error(
     *,
     operation: Literal["embedding", "rerank"],
 ) -> KnowledgeError:
+    legacy = _legacy_multimodal_error(exc, operation=operation)
+    if isinstance(exc, KnowledgeError):
+        return legacy
     role = ModelRole.IMAGE_EMBEDDING if operation == "embedding" else ModelRole.IMAGE_RERANK
-    return map_model_error(exc, model_role=role)
+    public = _classify_model_error(exc, model_role=role)
+    return _with_public_code(legacy, public.response_code, exc)
 
 
 def map_storage_error(exc: BaseException) -> KnowledgeError:
@@ -287,11 +291,11 @@ def map_connector_error(exc: BaseException) -> KnowledgeError:
         if status == 404:
             return _with_cause("KB_CONNECTOR_SOURCE_INVALID", exc)
         if status in {401, 403}:
-            return _with_cause("KB_FEISHU_AUTH_INVALID", exc)
+            return _with_cause("KB_CONNECTOR_CREDENTIAL_INVALID", exc)
         if status == 429 or isinstance(status, int) and status >= 500:
             return _with_cause("KB_HTTP_UNAVAILABLE", exc)
     if isinstance(exc, (FeishuAuthError, YuqueAuthError)):
-        return _with_cause("KB_FEISHU_AUTH_INVALID", exc)
+        return _with_cause("KB_CONNECTOR_CREDENTIAL_INVALID", exc)
     return _with_cause("KB_HTTP_BAD_GATEWAY", exc)
 
 
@@ -324,11 +328,191 @@ def map_wiki_error(exc, *, faq: bool = False) -> KnowledgeError:
 
     code = exc.code if exc.code in ERROR_DEFINITIONS else _WIKI_CAUSES.get(exc.code)
     code = code or ("KB_FAQ_LOAD_FAILED" if faq else "KB_WIKI_UNMAPPED_ERROR")
-    error = KnowledgeError.from_code(code)
-    if error.grpc_status in {"INTERNAL", "UNAVAILABLE"}:
-        error = KnowledgeError.from_code(code, status_code=400 if faq else 409)
+    legacy = (
+        "KB_RESOURCE_NOT_FOUND"
+        if faq
+        else {
+            "WIKI_NOT_FOUND": "KB_WIKI_NOT_FOUND",
+            "WIKI_KNOWLEDGE_UNAVAILABLE": "KB_WIKI_NOT_FOUND",
+            "WIKI_DOCUMENT_UNAVAILABLE": "KB_WIKI_NOT_FOUND",
+            "WIKI_SCOPE_MISMATCH": "KB_WIKI_NOT_FOUND",
+            "WIKI_DISABLED": "KB_WIKI_DISABLED",
+            "WIKI_SOURCE_NOT_READY": "KB_WIKI_SOURCE_NOT_READY",
+            "WIKI_MODEL_REQUIRED": "KB_WIKI_MODEL_REQUIRED",
+        }.get(exc.code, "KB_CONFLICT")
+    )
+    error = KnowledgeError.from_code(legacy, response_code=ERROR_DEFINITIONS[code].response_code)
     error.__cause__ = exc
     return error
+
+
+# 内部原因键和重试策略已有任务/部分结果消费者，按旧契约保留。
+def _is_remote_rate_limited(exc: ModelInvokeFailedError) -> bool:
+    if exc.remote_code in ("RATE_LIMITED", 10004):
+        return True
+    return exc.http_status == HTTPStatus.TOO_MANY_REQUESTS
+
+
+def _embedding_invoke_failure_code(exc: ModelInvokeFailedError) -> str:
+    if _is_remote_rate_limited(exc):
+        return "KB_EMBEDDING_RATE_LIMITED"
+    code = _REMOTE_CODE_MODEL_ERRORS.get(exc.remote_code)
+    if code is not None:
+        return code
+    status = exc.http_status
+    if status is not None and HTTPStatus.INTERNAL_SERVER_ERROR <= status <= 599:
+        return "KB_EMBEDDING_SERVICE_UNAVAILABLE"
+    return "KB_EMBEDDING_REQUEST_FAILED"
+
+
+def _exception_matches(
+    exc: BaseException,
+    types: tuple[type[BaseException], ...],
+) -> bool:
+    return any(isinstance(item, types) for item in _exception_chain(exc))
+
+
+def _legacy_model_error(
+    exc: BaseException,
+    *,
+    visibility_proven: bool = False,
+) -> KnowledgeError:
+    """Classify model failures without exposing provider or resource details."""
+
+    if isinstance(exc, asyncio.CancelledError):
+        raise exc
+    if isinstance(exc, KnowledgeError):
+        return exc
+    if isinstance(exc, ModelConfigNotFoundError):
+        return _with_cause("KB_RETRIEVAL_MODEL_NOT_FOUND", exc)
+    if isinstance(exc, ModelAccessDeniedError):
+        return _with_cause("KB_RETRIEVAL_MODEL_NOT_FOUND", exc)
+    if isinstance(exc, ModelConfigInactiveError):
+        code = (
+            "KB_RETRIEVAL_MODEL_INACTIVE" if visibility_proven else "KB_RETRIEVAL_MODEL_NOT_FOUND"
+        )
+        return _with_cause(code, exc)
+    if isinstance(
+        exc,
+        (ModelCredentialNotFoundError, PublicCredentialUnavailableError),
+    ):
+        return _with_cause("KB_RETRIEVAL_MODEL_CREDENTIAL_UNAVAILABLE", exc)
+    if isinstance(exc, ChannelSwitchExhaustedError):
+        return _with_cause("KB_RETRIEVAL_MODEL_CHANNEL_EXHAUSTED", exc)
+    if isinstance(exc, NoAvailableChannelError):
+        return _with_cause("KB_RETRIEVAL_MODEL_CHANNEL_UNAVAILABLE", exc)
+    if isinstance(exc, CredentialDecryptError):
+        return _with_cause("KB_RETRIEVAL_MODEL_CREDENTIAL_INVALID", exc)
+    if isinstance(exc, MultimodalInputLimitError):
+        return _with_cause("KB_MULTIMODAL_INPUT_LIMIT", exc)
+    if isinstance(exc, InvalidProviderResponseError):
+        return _with_cause("KB_MODEL_PROVIDER_RESPONSE_INVALID", exc)
+    if isinstance(exc, ModelInvokeFailedError):
+        code = _REMOTE_CODE_MODEL_ERRORS.get(exc.remote_code)
+        return _with_cause(code or "KB_MODEL_UNAVAILABLE", exc)
+    return _with_cause("KB_MODEL_UNAVAILABLE", exc)
+
+
+def _legacy_embedding_error(exc: BaseException) -> KnowledgeError | None:
+    """Classify known provider failures; leave unknown program errors untouched."""
+    if isinstance(exc, KnowledgeError):
+        return exc
+    ark_timeouts, ark_connections, ark_statuses = _ark_embedding_errors()
+    for cause in _exception_chain(exc):
+        if isinstance(
+            cause,
+            (APITimeoutError, TimeoutError, httpx.TimeoutException, requests.Timeout)
+            + ark_timeouts,
+        ):
+            return _with_cause("KB_EMBEDDING_TIMEOUT", exc)
+        if isinstance(
+            cause,
+            (
+                APIConnectionError,
+                ConnectionError,
+                httpx.NetworkError,
+                httpx.RemoteProtocolError,
+                requests.ConnectionError,
+            )
+            + ark_connections,
+        ):
+            return _with_cause("KB_EMBEDDING_CONNECTION_FAILED", exc)
+        if isinstance(
+            cause, (APIStatusError, httpx.HTTPStatusError, requests.HTTPError) + ark_statuses
+        ):
+            response = getattr(cause, "response", None)
+            status = getattr(cause, "status_code", None) or getattr(response, "status_code", None)
+            if status == HTTPStatus.TOO_MANY_REQUESTS:
+                return _with_cause("KB_EMBEDDING_RATE_LIMITED", exc)
+            if status is not None and HTTPStatus.INTERNAL_SERVER_ERROR <= status <= 599:
+                return _with_cause("KB_EMBEDDING_SERVICE_UNAVAILABLE", exc)
+            return _with_cause("KB_EMBEDDING_REQUEST_FAILED", exc)
+        if isinstance(cause, ModelInvokeTimeoutError):
+            return _with_cause("KB_EMBEDDING_TIMEOUT", exc)
+        if isinstance(cause, ModelInvokeUnavailableError):
+            return _with_cause("KB_EMBEDDING_CONNECTION_FAILED", exc)
+        if isinstance(cause, ModelInvokeFailedError):
+            return _with_cause(_embedding_invoke_failure_code(cause), exc)
+        if isinstance(
+            cause,
+            (
+                ChannelSwitchExhaustedError,
+                NoAvailableChannelError,
+                CredentialDecryptError,
+                ModelCredentialNotFoundError,
+                PublicCredentialUnavailableError,
+                InvalidProviderResponseError,
+                ModelConfigNotFoundError,
+                ModelAccessDeniedError,
+                ModelConfigInactiveError,
+                MultimodalInputLimitError,
+            ),
+        ):
+            return _legacy_model_error(cause)
+    return None
+
+
+def _legacy_multimodal_error(
+    exc: BaseException,
+    *,
+    operation: Literal["embedding", "rerank"],
+) -> KnowledgeError:
+    """Classify image model failures while retaining the legacy transport."""
+
+    if isinstance(exc, asyncio.CancelledError):
+        raise exc
+    if isinstance(exc, KnowledgeError):
+        return exc
+    if isinstance(exc, MultimodalInputLimitError):
+        return _with_cause("KB_MULTIMODAL_INPUT_LIMIT", exc)
+
+    prefix = f"KB_MULTIMODAL_{operation.upper()}"
+    if isinstance(exc, InvalidProviderResponseError):
+        return _with_cause(f"{prefix}_RESPONSE_INVALID", exc)
+    if isinstance(exc, ModelInvokeProtocolError):
+        return _with_cause(f"{prefix}_RESPONSE_INVALID", exc)
+    if isinstance(exc, ModelInvokeTimeoutError):
+        return _with_cause(f"{prefix}_TIMEOUT", exc)
+    if isinstance(exc, ModelInvokeUnavailableError):
+        return _with_cause(f"{prefix}_CONNECTION_FAILED", exc)
+    if isinstance(exc, ModelInvokeFailedError):
+        if _is_remote_rate_limited(exc):
+            return _with_cause(f"{prefix}_RATE_LIMITED", exc)
+        code = _REMOTE_CODE_MODEL_ERRORS.get(exc.remote_code)
+        return _with_cause(code or f"{prefix}_FAILED", exc)
+    if is_provider_rate_limit_error(exc):
+        return _with_cause(f"{prefix}_RATE_LIMITED", exc)
+    if _exception_matches(
+        exc,
+        (TimeoutError, httpx.TimeoutException, requests.Timeout),
+    ):
+        return _with_cause(f"{prefix}_TIMEOUT", exc)
+    if _exception_matches(
+        exc,
+        (ConnectionError, httpx.ConnectError, requests.ConnectionError),
+    ):
+        return _with_cause(f"{prefix}_CONNECTION_FAILED", exc)
+    return _with_cause(f"{prefix}_FAILED", exc)
 
 
 __all__ = [

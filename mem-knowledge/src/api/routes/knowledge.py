@@ -59,6 +59,7 @@ from ..dependencies import (
     get_source,
     require_knowledge_copy_principal,
 )
+from ..error_handlers import render_error
 from ..schemas.chunk import KnowledgeRetrievalSource
 from ..schemas.common import SuccessEnvelope, success
 from ..schemas.file import KBBatchDownloadRequest
@@ -67,7 +68,6 @@ from ..schemas.knowledge import (
     KnowledgeUpdate,
     project_public_knowledge_data,
 )
-from ..schemas.query import CsvUUIDs, KnowledgeOrder
 
 router = APIRouter(prefix="/knowledges", tags=["knowledges"])
 
@@ -182,9 +182,12 @@ async def check_yuque_auth(
 ) -> SuccessEnvelope[None]:
     try:
         async with YuqueAPIClient(yuque_user_id, yuque_token) as client:
-            await client.get_user_repos()
+            repositories = await client.get_user_repos()
     except Exception as exc:
-        raise map_connector_error(exc) from exc
+        mapped = map_connector_error(exc)
+        raise KnowledgeError.from_code(mapped.code, status_code=500) from exc
+    if not repositories:
+        return render_error(request, KnowledgeError.from_code("KB_YUQUE_AUTH_INVALID"))
     return _success(request, msg="Successfully auth yuque info")
 
 
@@ -198,9 +201,12 @@ async def check_feishu_auth(
 ) -> SuccessEnvelope[None]:
     try:
         async with FeishuAPIClient(feishu_app_id, feishu_app_secret) as client:
-            await client.list_all_folder_files(feishu_folder_token, recursive=True)
+            files = await client.list_all_folder_files(feishu_folder_token, recursive=True)
     except Exception as exc:
-        raise map_connector_error(exc) from exc
+        mapped = map_connector_error(exc)
+        raise KnowledgeError.from_code(mapped.code, status_code=500) from exc
+    if not files:
+        return render_error(request, KnowledgeError.from_code("KB_FEISHU_AUTH_INVALID"))
     return _success(request, msg="Successfully auth feishu info")
 
 
@@ -213,10 +219,10 @@ async def get_knowledges(
     parent_id: Annotated[uuid.UUID | None, Query(description="parent folder id")] = None,
     page: Annotated[int, Query(gt=0)] = 1,
     pagesize: Annotated[int, Query(gt=0, le=100)] = 20,
-    orderby: Annotated[KnowledgeOrder | None, Query()] = None,
+    orderby: Annotated[str | None, Query()] = None,
     desc: Annotated[bool, Query()] = False,
     keywords: Annotated[str | None, Query()] = None,
-    kb_ids: Annotated[CsvUUIDs | None, Query()] = None,
+    kb_ids: Annotated[str | None, Query()] = None,
 ) -> SuccessEnvelope[dict[str, Any]]:
     async with runtime.database.async_session() as db:
         total, items = await knowledge_service.list_knowledges(
@@ -375,7 +381,8 @@ async def update_knowledge(
             outcome.invalidate_workspace_id,
         )
     dispatcher = TaskDispatcher(runtime=runtime)
-    post_save_failed = False
+    graph_dispatch_failed = False
+    reparse_dispatch_failed = False
     if outcome.wiki_backfill_required:
         from ...rag.wiki.config import BACKFILL_REGISTERED_HEADER, BACKFILL_TASK, WIKI_QUEUE
         from ...rag.wiki.diagnostics import diagnostic_json, exception_details
@@ -407,7 +414,7 @@ async def update_knowledge(
                     knowledge_id, outcome.wiki_backfill_task_id,
                     diagnostic_json(exception_details(state_exc)),
                 )
-            post_save_failed = True
+            raise KnowledgeError.from_code("KB_WIKI_BACKFILL_DISPATCH_FAILED") from exc
     if plan.graph_enabled_before is not None:
         try:
             await dispatch_graph_transition(
@@ -417,7 +424,7 @@ async def update_knowledge(
                 outcome.parser_config,
             )
         except Exception:
-            post_save_failed = True
+            graph_dispatch_failed = True
             logger.exception(
                 "Failed to dispatch graph transition knowledge_id=%s",
                 knowledge_id,
@@ -433,7 +440,7 @@ async def update_knowledge(
                 skipped=skipped,
             )
         except Exception:
-            post_save_failed = True
+            reparse_dispatch_failed = True
             logger.exception(
                 "Failed to dispatch reparse tasks knowledge_id=%s",
                 knowledge_id,
@@ -442,15 +449,29 @@ async def update_knowledge(
     if source is KnowledgeRetrievalSource.EXTERNAL_API and response_data is not None:
         response_data = project_public_knowledge_data(response_data)
     message = "The knowledge base information has been successfully updated"
-    if post_save_failed:
+    if graph_dispatch_failed or reparse_dispatch_failed:
         from ..error_handlers import request_locale
 
-        message = (
-            ("The knowledge base configuration was saved, "
-             "but background processing could not start. Check the task status.")
-            if request_locale(request) == "en"
-            else "知识库配置已保存，但后续处理任务未能启动，请查看任务状态。"
-        )
+        notices = {
+            (True, False): (
+                "配置已保存，图谱任务派发未完成，请查看文档处理状态。",
+                "The configuration was saved, but graph task dispatch was not completed. "
+                "Check document processing status.",
+            ),
+            (False, True): (
+                "配置已保存，文档重解析任务派发未完成，请查看文档处理状态。",
+                "The configuration was saved, but document reprocessing task dispatch was not "
+                "completed. Check document processing status.",
+            ),
+            (True, True): (
+                "配置已保存，图谱和文档重解析任务派发未完成，请查看文档处理状态。",
+                "The configuration was saved, but graph and document reprocessing task dispatch "
+                "was not completed. Check document processing status.",
+            ),
+        }
+        message = notices[(graph_dispatch_failed, reparse_dispatch_failed)][
+            1 if request_locale(request) == "en" else 0
+        ]
     return _success(request, response_data, message)
 
 

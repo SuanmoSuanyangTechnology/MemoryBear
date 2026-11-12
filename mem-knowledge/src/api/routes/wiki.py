@@ -16,7 +16,6 @@ from ...runtime import ProcessRuntime
 from ...services.wiki.runtime import transaction
 from ..dependencies import Principal, get_principal, get_runtime
 from ..schemas.common import SuccessEnvelope, success
-from ..schemas.query import WikiPageTypes
 
 router = APIRouter(prefix="/knowledges/{kb_id}/wiki", tags=["wiki"])
 PrincipalDep = Annotated[Principal, Depends(get_principal)]
@@ -33,6 +32,8 @@ def _scope(kb_id, principal):
 
 def _types(value):
     values = tuple(part.strip() for part in (value or "").split(",") if part.strip())
+    if set(values) - {"summary", "entity", "concept"}:
+        raise KnowledgeError.from_code("KB_HTTP_VALIDATION_ERROR")
     return values
 
 
@@ -53,7 +54,7 @@ async def list_pages(
     kb_id: uuid.UUID,
     principal: PrincipalDep,
     runtime: RuntimeDep,
-    page_types: WikiPageTypes | None = None,
+    page_types: str | None = None,
     keyword: str | None = Query(
         None, description="搜索 Wiki 标题、摘要和正文，不区分大小写的字面包含匹配；"
         "忽略首尾空白，空白不过滤，% 和 _ 按普通字符匹配。",
@@ -98,7 +99,7 @@ async def tree(
     principal: PrincipalDep,
     runtime: RuntimeDep,
     folder_id: uuid.UUID | None = None,
-    page_types: WikiPageTypes | None = None,
+    page_types: str | None = None,
     page: int = Query(1, ge=1),
     pagesize: int = Query(50, ge=1, le=200),
     cursor: str | None = Query(
@@ -146,7 +147,7 @@ async def graph(
     runtime: RuntimeDep,
     mode: Literal["overview", "ego"] = "overview",
     center_page_id: uuid.UUID | None = None,
-    types: WikiPageTypes | None = None,
+    types: str | None = None,
     depth: int = Query(1, ge=1, le=2),
     limit: int = Query(500, ge=1, le=5000),
 ):

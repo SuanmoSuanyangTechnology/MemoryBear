@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import math
 import re
 from collections.abc import Mapping
 from functools import lru_cache
+from importlib.resources import files
 from types import MappingProxyType
 
 from error_core.knowledge import knowledge_message
@@ -79,3 +81,29 @@ def translate(
     # 旧参数仅保留给诊断；本期用户提示不插值。
     definition = ERROR_DEFINITIONS.get(key, ERROR_DEFINITIONS["KB_INTERNAL_ERROR"])
     return knowledge_message(definition.response_code, normalize_locale(locale) or "zh")
+
+
+@lru_cache(maxsize=1)
+def legacy_catalogs() -> Mapping[str, Mapping[str, str]]:
+    """Existing task progress and successful business refusals keep their message contract."""
+    return MappingProxyType(
+        {
+            locale: MappingProxyType(
+                json.loads(
+                    files(__package__)
+                    .joinpath("locales", f"{locale}.json")
+                    .read_text(encoding="utf-8")
+                )
+            )
+            for locale in SUPPORTED_LOCALES
+        }
+    )
+
+
+def translate_legacy(key: str, locale: str, params: Mapping | None = None) -> str:
+    catalog = legacy_catalogs()[normalize_locale(locale) or "zh"]
+    template = catalog.get(key, catalog["KB_INTERNAL_ERROR"])
+    try:
+        return template.format_map(params or {})
+    except (KeyError, ValueError, TypeError):
+        return catalog["KB_INTERNAL_ERROR"]

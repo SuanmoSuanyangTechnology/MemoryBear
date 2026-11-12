@@ -3,6 +3,7 @@
 import logging
 import uuid
 
+from error_core.codes import BizCode
 from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -86,11 +87,15 @@ def edit(session, scope, faq_id, actor_id, payload):
             type(exc).__name__,
             exc.errors(include_input=False, include_url=False, include_context=False),
         )
-        raise KnowledgeError.from_code("KB_FAQ_STORED_CONTENT_INVALID") from exc
+        raise KnowledgeError.from_code(
+            "KB_FAQ_CONTENT_INVALID", response_code=BizCode.KB_FAQ_STORED_DATA_INVALID
+        ) from exc
     try:
         merged = edit_content(current, payload["standard_question"], payload["standard_answer"])
     except ValidationError as exc:
-        raise KnowledgeError.from_code("KB_FAQ_CONTENT_CONFLICT") from exc
+        raise KnowledgeError.from_code(
+            "KB_FAQ_CONTENT_INVALID", response_code=BizCode.KB_FAQ_CONTENT_CONFLICT
+        ) from exc
     target = None
     if row.review_state == "approved" and row.wiki_page_id is not None:
         info = source(session, scope, row)
@@ -169,7 +174,9 @@ def _latest_snapshot(
             row.wiki_page_id,
             wiki_version,
         )
-        conflict("KB_FAQ_SOURCE_SNAPSHOT_UNAVAILABLE")
+        raise KnowledgeError.from_code(
+            "KB_FAQ_SOURCE_CHANGED", response_code=BizCode.KB_WIKI_SNAPSHOT_UNAVAILABLE
+        )
     return target
 
 

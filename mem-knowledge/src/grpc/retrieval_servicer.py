@@ -44,23 +44,26 @@ logger = logging.getLogger(__name__)
 _RERANK_FIELDS = frozenset({"rerank_mode", "rerank_weights"})
 
 
-def _decode_json(body_json: bytes) -> Any:
+def _decode_json_object(body_json: bytes, *, error_code: str) -> dict[str, Any]:
     try:
         body = json.loads(body_json)
     except (UnicodeDecodeError, ValueError) as exc:
-        raise KnowledgeError.from_code("KB_REQUEST_MALFORMED") from exc
+        raise KnowledgeError.from_code(error_code) from exc
+    if not isinstance(body, dict):
+        raise KnowledgeError.from_code(error_code)
     return body
 
 
 def _decode_retrieval_request(
     body_json: bytes, source: KnowledgeRetrievalSource
 ) -> KnowledgeRetrievalRequest:
-    body = _decode_json(body_json)
+    body = _decode_json_object(body_json, error_code="KB_RETRIEVAL_REQUEST_INVALID")
     try:
         return prepare_retrieval_request(ChunkRetrieve.model_validate(body), source)
     except ValidationError as exc:
         if any(
-            any(part in _RERANK_FIELDS for part in error.get("loc", ())) for error in exc.errors()
+            any(part in _RERANK_FIELDS for part in error.get("loc", ()))
+            for error in exc.errors()
         ):
             raise KnowledgeError.from_code(
                 "KB_RERANK_CONFIG_INVALID", diagnostic=validation_diagnostic(exc.errors())
@@ -71,7 +74,7 @@ def _decode_retrieval_request(
 
 
 def _decode_policy_request(body_json: bytes) -> RetrievalPolicyRequest:
-    body = _decode_json(body_json)
+    body = _decode_json_object(body_json, error_code="KB_HTTP_VALIDATION_ERROR")
     try:
         return RetrievalPolicyRequest.model_validate(body)
     except ValidationError as exc:

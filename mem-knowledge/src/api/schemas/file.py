@@ -2,11 +2,11 @@
 
 import datetime
 import uuid
+from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field, field_serializer
 
 from ...utils.datetime_utils import to_timestamp_ms
-from .parser_config import NonblankText
 
 
 class BatchDownloadRequest(BaseModel):
@@ -41,14 +41,14 @@ class FileCreate(FileBase):
 
 class CustomTextFileCreate(BaseModel):
     title: str
-    content: NonblankText
+    content: str
 
 
 class FileUpdate(BaseModel):
     parent_id: uuid.UUID | None = Field(None)
     file_name: str | None = Field(None)
     file_ext: str | None = Field(None)
-    file_size: int | None = Field(None, ge=0)
+    file_size: str | Annotated[int, Field(strict=True, ge=0)] | None = Field(None)
     file_url: str | None = Field(None)
 
 
