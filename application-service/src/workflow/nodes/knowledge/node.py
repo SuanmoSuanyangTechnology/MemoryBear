@@ -22,6 +22,7 @@ from ....models.models_model import ModelFeature
 from ....schemas.knowledge_metadata_schema import FilterCondition, FilterGroup, MetadataFilterMode
 from ....schemas.knowledge_retrieval_schema import KnowledgeRetrievalRequest
 from ....schemas.model_schema import ModelInfo
+from ....services.faq_retrieval_guard import faq_conflict_message
 from ....services.file_content_service import FileReference, resolve_image_retrieval_query
 from ....services.knowledge_metadata_service import KnowledgeMetadataService
 from ....services.knowledge_retrieval_preparation import KnowledgeRetrievalPreparation
@@ -424,7 +425,23 @@ class KnowledgeRetrievalNode(BaseNode):
             else 0
         )
 
-        # 4. Resolve the application owner before calling the selected adapter.
+        # 4. FAQ pre-check: FAQ retrieval is text-only and cannot honor any filter, so
+        #    refuse those combinations with the knowledge service's own wording instead of
+        #    silently dropping the conflicting configuration or switching retrieval type.
+        #    Checked before AUTO extraction so a doomed configuration does not cost an
+        #    LLM round trip.
+        faq_conflict = faq_conflict_message(
+            configured=self.typed_config.knowledge_bases,
+            retrieve_type=first_kb.retrieve_type,
+            has_image_query=image_reference is not None,
+            metadata_filter_mode=self.typed_config.metadata_filter_mode,
+            metadata_filter_groups=[rendered_filters] if rendered_filters else [],
+            metadata_filters_resolved=False,
+        )
+        if faq_conflict is not None:
+            raise BusinessException(faq_conflict, BizCode.INVALID_PARAMETER)
+
+        # 5. Resolve the application owner before calling the selected adapter.
         context = await build_app_knowledge_context(
             self.workflow_config.get("app_id"),
             source=KnowledgeRetrievalSource.WORKFLOW,
@@ -432,7 +449,7 @@ class KnowledgeRetrievalNode(BaseNode):
         )
         retriever = get_knowledge_retriever()
 
-        # 5. Determine the final query and metadata filters. The request model requires a
+        # 6. Determine the final query and metadata filters. The request model requires a
         #    non-empty query (after strip), so image mode must first encode the image into
         #    a non-empty data URI before building the request; blank placeholders are not allowed.
         metadata_filters: list = []
@@ -503,7 +520,7 @@ class KnowledgeRetrievalNode(BaseNode):
             elif rendered_filters:
                 metadata_filters = [rendered_filters]
 
-        # 6. Build the retrieval request (query is guaranteed non-empty here: an image
+        # 7. Build the retrieval request (query is guaranteed non-empty here: an image
         #    data URI or the rendered text)
         request = KnowledgeRetrievalRequest(
             query=final_query,
@@ -526,7 +543,7 @@ class KnowledgeRetrievalNode(BaseNode):
 
         result = await retriever.retrieve(request, context)
 
-        # 5. Assemble return format
+        # 8. Assemble return format
         chunks = result.chunks
         citations = self._build_citations(chunks)
 

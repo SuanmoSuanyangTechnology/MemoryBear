@@ -76,7 +76,7 @@ def list_skills(
         page: int = Query(1, ge=1, description="页码"),
         pagesize: int = Query(10, ge=1, le=100, description="每页数量"),
         include_external_status: bool = Query(
-            False, description="是否批量回填 external.status（市场来源的技能/插件；30 秒缓存，失败降级 unknown）"
+            False, description="是否批量回填 external.listing_status / delist_actor；失败为 null"
         ),
         cache: CacheClient = None,
         runtime: RuntimeDep = None,
@@ -139,7 +139,7 @@ def get_skill(
         cache: CacheClient,
         runtime: RuntimeDep,
         include_external_status: bool = Query(
-            False, description="是否回填 external.status（仅市场来源的技能/插件有意义）"
+            False, description="是否回填 external.listing_status / delist_actor；仅市场来源有意义"
         ),
 ):
     """The single detail entry point.

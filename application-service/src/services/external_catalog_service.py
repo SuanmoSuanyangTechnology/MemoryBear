@@ -11,6 +11,7 @@ import asyncio
 import logging
 import time
 import uuid
+from typing import Any
 
 from sqlalchemy.orm import Session
 
@@ -50,7 +51,67 @@ _IDEMPOTENCY_KEY_MAX = 128
 _LATEST_PUBLICATION_STATUSES = frozenset(
     {"pending", "approved", "rejected", "withdrawn"}
 )
-_RESOURCE_STATUSES = frozenset({"draft", "published", "unlisted"})
+# 摘要枚举（旧客户端的 `status`）→ 精确上架状态（§1.1 固定映射）。
+_STATUS_TO_LISTING = {
+    "published": "listed",
+    "unlisted": "pending_listing",
+    "draft": "not_listed",
+}
+
+
+def _field(status: Any, name: str) -> Any:
+    """网关结果可能是 dataclass 也可能是 dict（业界两种实现都见过）。"""
+
+    if isinstance(status, dict):
+        return status.get(name)
+    return getattr(status, name, None)
+
+
+def _listing_status_of(status: Any) -> str | None:
+    """精确上架状态：市场直接给就用，只给摘要枚举时按固定映射推导。
+
+    v0.5 之后 `status` 已从市场契约移除，这里只是兼容尚未升级的市场服务：
+    映射是 §1.1 规定的那一条，不做额外推断（「待上架」到底是发布方自己下架
+    还是运营仅保存，只有 `delist_actor` 能回答，缺它就留空）。
+    """
+
+    listing_status = _field(status, "listing_status")
+    if isinstance(listing_status, str) and listing_status:
+        return listing_status
+    return _STATUS_TO_LISTING.get(str(_field(status, "status") or ""))
+
+
+def _request_type_of(status: Any) -> str | None:
+    # 市场 §6.4 的批量状态接口字段名是 `latest_request_type`，早期实现叫
+    # `request_type`，两个都认。
+    request_type = _field(status, "latest_request_type") or _field(status, "request_type")
+    if request_type == "new_listing":
+        # 契约 v0.9 把首次上架改名为 `first_publish`，旧市场仍可能回旧枚举。
+        request_type = "first_publish"
+    if request_type in ("first_publish", "version_update"):
+        return request_type
+    if not _field(status, "latest_publication_status"):
+        return None
+    # 兜底推导：资源已经有在架版本 → 这次是新版本；否则是首次上架。
+    return "version_update" if _field(status, "current_version") else "first_publish"
+
+
+def _can_delist(status: Any) -> bool:
+    value = _field(status, "can_delist")
+    if value is not None:
+        return bool(value)
+    # 市场没给判定时按契约自行推导（§3.3）：在架即可下架，发布者身份由市场校验。
+    return _listing_status_of(status) == "listed"
+
+
+def _can_relist(status: Any) -> bool:
+    value = _field(status, "can_relist")
+    if value is not None:
+        return bool(value)
+    return (
+        _listing_status_of(status) == "pending_listing"
+        and _field(status, "delist_actor") == "publisher"
+    )
 
 
 def _run(coro):
@@ -258,23 +319,22 @@ class ExternalCatalogService:
                 reviewed_at=None,
                 review_note=None,
                 reject_reason=None,
+                # `request_type` 决定审核通过后的上架效果（§5.3）。市场侧的目标
+                # 契约会直接给；给不出时按「资源已上架过 → 版本更新」推导，
+                # 首次投稿（资源尚无 current_version）按 `new_listing`。
+                request_type=_request_type_of(status),
             )
             if status.latest_publication_status == "pending":
                 block_reason = "PENDING_REVIEW"
         resource = None
         if status.resource_id:
-            if (
-                not isinstance(status.status, str)
-                or status.status not in _RESOURCE_STATUSES
-            ):
-                raise ExternalCatalogError(
-                    BizCode.EXTERNAL_CATALOG_INVALID,
-                    "市场返回的资源状态不合法",
-                    data={"reason": "INVALID_UPSTREAM_STATUS"},
-                )
+            listing_status = _listing_status_of(status)
             resource = PublicationResourceState(
                 id=status.resource_id,
-                status=status.status,  # type: ignore[arg-type]
+                listing_status=listing_status,
+                delist_actor=getattr(status, "delist_actor", None),
+                delisted_at=getattr(status, "delisted_at", None),
+                delist_reason=getattr(status, "delist_reason", None),
                 current_version=status.current_version,
                 install_count=0,
                 updated_at=status.updated_at or 0,
@@ -285,6 +345,8 @@ class ExternalCatalogService:
             resource=resource,
             latest_publication=latest,
             can_publish=block_reason is None,
+            can_delist=_can_delist(status),
+            can_relist=_can_relist(status),
             block_reason=block_reason,  # type: ignore[arg-type]
         )
 

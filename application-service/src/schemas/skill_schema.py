@@ -87,7 +87,8 @@ class Skill(BaseModel):
     has_scripts: Optional[bool] = Field(None, description="是否含 scripts/ 目录")
     members: Optional[List[Dict[str, Any]]] = Field(None, description="kind=plugin 时的成员摘要")
     # 来源（§11.2）：来源记在 skill_packages.source_type / source_ref 上，
-    # 市场状态不落库，仅 include_external_status=true 时回填 external.status。
+    # 市场状态不落库，仅 include_external_status=true 时回填
+    # external.listing_status / delist_actor。
     origin: str = Field("local", description="local | external")
     external: Optional[Dict[str, Any]] = Field(
         None, description="来源信息；origin=local 时为 null"

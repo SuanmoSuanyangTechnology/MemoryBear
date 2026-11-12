@@ -36,6 +36,9 @@ def _image_query_is_compatible(
     enable_graph_retrieval: int = 0,
 ) -> bool:
     """Reject combinations the knowledge service documents as text-only."""
+    if retrieve_type is RetrieveType.WIKI_FAQ:
+        # FAQ retrieval is text-only; never probe the policy for an image query.
+        return False
     if retrieve_type is not RetrieveType.HYBRID:
         return True
     if str(rerank_mode) == "weighted_score":

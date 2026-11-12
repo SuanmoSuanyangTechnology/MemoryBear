@@ -4,14 +4,15 @@
 `external_resource_id` / `external_version`。**市场状态不落库**：它是市场的
 真相，落一份到主库立刻就有两个可能不同的值。
 
-所以列表/详情默认返回 `external.status = null`，只有请求带
+所以列表/详情默认返回 `external.listing_status = null`，只有请求带
 `include_external_status=true` 时才批量去问一次。三条约束：
 
 1. **一次批量，不 N+1**：按 `resource_type` 分组，每组一次调用（他的上限 100 个）。
 2. **缓存 30 秒**：状态不是强一致数据，运营刚点通过就刷新列表不该打出一次 HTTP。
-3. **失败整批降级 `unknown`**：市场挂了不能让「我的应用列表」跟着 500，这是
-   列表页最重要的可用性约束（他的 §1.1「查询失败时整批降级为 unknown，列表
-   正常返回」）。
+3. **失败整批为 `null`**：市场挂了不能让「我的应用列表」跟着 500，这是列表页
+   最重要的可用性约束（接口文档 v0.10 §1.1「查询失败整批为 `null`，列表正常
+   返回」）。`external.status` 摘要字段已在 v0.10 删除，`listing_status` /
+   `delist_actor` 是唯一状态口径。
 """
 from __future__ import annotations
 
@@ -27,28 +28,33 @@ from ..protocols.market_gateway import MarketGateway
 logger = logging.getLogger(__name__)
 
 STATUS_CACHE_TTL_SECONDS = 30
-STATUS_CACHE_NAMESPACE = "cache:external-status:v1"
+# v2 起缓存的是状态三元组 JSON，与 v1 的裸字符串不同格式，换命名空间避免读串。
+STATUS_CACHE_NAMESPACE = "cache:external-status:v2"
 STATUS_BATCH_LIMIT = 100
 
-UNKNOWN = "unknown"
-
-# 已安装副本只可能是这三种（他的 §1.1 状态口径）
-INSTALLED_STATUSES = frozenset({"published", "unlisted", UNKNOWN})
+LISTING_STATUSES = frozenset(
+    {"not_listed", "listed", "pending_listing", "delisted"}
+)
+DELIST_ACTORS = frozenset({"publisher", "operator"})
 
 
 def build_external_ref(
         *,
         resource_id: Any,
         version: Any,
-        status: str | None = None,
 ) -> dict[str, Any]:
-    """`ExternalRef`（他的 §1.1）。`source` 本期固定 `community_market`。"""
+    """`ExternalRef`（契约 v0.10 §1.1）。`source` 本期固定 `community_market`。
+
+    `listing_status` / `delist_actor` 只在 `include_external_status=true` 时回填，
+    否则都是 `null`。这里把键写全，让前端不必区分「字段不存在」与「还没回填」。
+    """
 
     return {
         "source": "community_market",
         "resource_id": str(resource_id) if resource_id else None,
         "version": version,
-        "status": status,
+        "listing_status": None,
+        "delist_actor": None,
     }
 
 
@@ -72,18 +78,24 @@ class ExternalStatusResolver:
             resource_type: str,
             tenant_id: uuid.UUID,
     ) -> None:
-        """就地回填 `refs` 里每个 `ExternalRef.status`；不可用时全部 `unknown`。"""
+        """就地回填 `refs` 的 `listing_status` / `delist_actor`。
 
-        live = [ref for ref in refs if ref and ref.get("resource_id") and not ref.get("status")]
+        不可用时整批为 `null`（市场挂了不代表资源被下架，也不能凭空给一个
+        `unknown` 之外的枚举——v0.10 已没有摘要状态字段）。
+        """
+
+        live = [ref for ref in refs if ref and _needs_fill(ref)]
         if not live:
             return
-        statuses = self._resolve(
+        records = self._resolve(
             [str(ref["resource_id"]) for ref in live],
             resource_type=resource_type,
             tenant_id=tenant_id,
         )
         for ref in live:
-            ref["status"] = statuses.get(str(ref["resource_id"]), UNKNOWN)
+            record = records.get(str(ref["resource_id"])) or {}
+            ref["listing_status"] = record.get("listing_status")
+            ref["delist_actor"] = record.get("delist_actor")
 
     # ==================== 内部 ====================
 
@@ -93,8 +105,8 @@ class ExternalStatusResolver:
             *,
             resource_type: str,
             tenant_id: uuid.UUID,
-    ) -> dict[str, str]:
-        resolved: dict[str, str] = {}
+    ) -> dict[str, dict[str, Any]]:
+        resolved: dict[str, dict[str, Any]] = {}
         missing: list[str] = []
 
         for resource_id in dict.fromkeys(resource_ids):
@@ -107,8 +119,8 @@ class ExternalStatusResolver:
         if not missing:
             return resolved
 
-        # 社区版的 `DisabledMarketGateway` 对每次调用抛 6020，下面统一降级
-        # `unknown`——所以这里不需要先探测 `enabled`，也不必多一个分支。
+        # 社区版的 `DisabledMarketGateway` 对每次调用抛 6020，下面统一降级为
+        # `null`——所以这里不需要先探测 `enabled`，也不必多一个分支。
         for start in range(0, len(missing), STATUS_BATCH_LIMIT):
             chunk = missing[start:start + STATUS_BATCH_LIMIT]
             try:
@@ -119,19 +131,23 @@ class ExternalStatusResolver:
                 )
             except Exception as error:  # noqa: BLE001 - 列表页可用性优先于状态准确性
                 logger.warning(
-                    "市场状态查询失败，整批降级 unknown",
+                    "市场状态查询失败，整批为 null",
                     extra={"resource_type": resource_type, "error": str(error)[:200]},
                 )
                 for resource_id in chunk:
-                    resolved[resource_id] = UNKNOWN
+                    resolved[resource_id] = {}
                 continue
-            resolved.update(_map_statuses(items, chunk))
-            for resource_id, status in resolved.items():
-                if status != UNKNOWN:
-                    self._cache_set(tenant_id, resource_type, resource_id, status)
+            # 只写本 chunk 的结果：`resolved` 是累计值，含缓存命中的条目和之前
+            # chunk 的结果，遍历它会在第 N 个 chunk 把前面全部再 setex 一遍
+            # （chunk 越多写放大越接近平方级，还会无谓刷新别人的 TTL）。
+            chunk_records = _map_statuses(items, chunk)
+            resolved.update(chunk_records)
+            for resource_id, record in chunk_records.items():
+                if record:
+                    self._cache_set(tenant_id, resource_type, resource_id, record)
 
         for resource_id in missing:
-            resolved.setdefault(resource_id, UNKNOWN)
+            resolved.setdefault(resource_id, {})
         return resolved
 
     def _cache_key(self, tenant_id: uuid.UUID, resource_type: str, resource_id: str) -> str:
@@ -139,17 +155,29 @@ class ExternalStatusResolver:
 
     def _cache_get(
             self, tenant_id: uuid.UUID, resource_type: str, resource_id: str
-    ) -> str | None:
+    ) -> dict[str, Any] | None:
         if self.cache is None:
             return None
         try:
             raw = self.cache.get(self._cache_key(tenant_id, resource_type, resource_id))
         except Exception:  # noqa: BLE001 - 缓存挂了不该影响列表
             return None
-        return raw.decode() if isinstance(raw, bytes) else raw
+        if isinstance(raw, bytes):
+            raw = raw.decode()
+        if not isinstance(raw, str):
+            return None
+        try:
+            record = json.loads(raw)
+        except ValueError:
+            return None
+        return record if isinstance(record, dict) else None
 
     def _cache_set(
-            self, tenant_id: uuid.UUID, resource_type: str, resource_id: str, status: str
+            self,
+            tenant_id: uuid.UUID,
+            resource_type: str,
+            resource_id: str,
+            record: dict[str, Any],
     ) -> None:
         if self.cache is None:
             return
@@ -157,34 +185,58 @@ class ExternalStatusResolver:
             self.cache.setex(
                 self._cache_key(tenant_id, resource_type, resource_id),
                 STATUS_CACHE_TTL_SECONDS,
-                status,
+                json.dumps(record, ensure_ascii=False),
             )
         except Exception:  # noqa: BLE001
             logger.debug("外部状态缓存写入失败", exc_info=True)
 
 
-def _map_statuses(items: Any, requested: list[str]) -> dict[str, str]:
-    """把网关返回的 `MarketPublicationStatus` 批量结果折成本地 `id -> status`。
+def _needs_fill(ref: dict[str, Any]) -> bool:
+    """`listing_status` 缺失就要回填。
 
-    契约里 `local_resource_id` 就是我们传进去的资源 ID 位置；dataclass 与
-    dict 两种形态都认，缺失的一律落 `unknown`（列表页不能因此报错）。
+    v0.10 起 `external` 只有 `listing_status` / `delist_actor` 两个状态字段；
+    `delist_actor` 在 `listed` / `not_listed` 下本来就该是 `null`，所以不能拿它
+    做判断依据。
     """
 
-    looked_up: dict[str, str] = {}
+    if not ref.get("resource_id"):
+        return False
+    return ref.get("listing_status") is None
+
+
+def _map_statuses(items: Any, requested: list[str]) -> dict[str, dict[str, Any]]:
+    """把网关返回的 `MarketPublicationStatus` 批量结果折成本地 `id -> 状态二元组`。
+
+    契约里 `local_resource_id` 就是我们传进去的资源 ID 位置；dataclass 与
+    dict 两种形态都认。没查到的留空 dict（整批 `null`），列表页不能因此报错。
+
+    `listing_status` / `delist_actor` 是 v0.10 之后唯一的状态口径：市场侧返回
+    了就取，没返回（旧版本市场服务）就留 `None`。
+    """
+
+    looked_up: dict[str, dict[str, Any]] = {}
     records = items.get("items") if isinstance(items, dict) else items
     for record in records or []:
         if isinstance(record, dict):
             key = record.get("local_resource_id") or record.get("resource_id")
-            status = record.get("status")
+            listing_status = record.get("listing_status")
+            delist_actor = record.get("delist_actor")
         else:
             key = getattr(record, "local_resource_id", None) or getattr(
                 record, "resource_id", None
             )
-            status = getattr(record, "status", None)
+            listing_status = getattr(record, "listing_status", None)
+            delist_actor = getattr(record, "delist_actor", None)
         if not key:
             continue
-        looked_up[str(key)] = str(status or UNKNOWN)
-    return {resource_id: looked_up.get(resource_id, UNKNOWN) for resource_id in requested}
+        looked_up[str(key)] = {
+            "listing_status": str(listing_status) if listing_status else None,
+            "delist_actor": str(delist_actor) if delist_actor else None,
+        }
+    return {
+        resource_id: looked_up.get(resource_id) or {}
+        for resource_id in requested
+    }
 
 
 def market_source_ref(source_type: Any, source_ref: Any) -> dict[str, Any] | None:
@@ -235,7 +287,7 @@ def apply_external_status(
         market: MarketGateway,
         cache: Any | None = None,
 ) -> None:
-    """就地回填一批已序列化条目的 `external.status`。
+    """就地回填一批已序列化条目的 `external.listing_status`。
 
     同时接受 pydantic 模型（`App` / `ToolInfo`）与裸 dict（技能卡片直接是
     `model_dump()` 的结果）：前者改属性，后者改键。Pydantic v2 校验时会复制
@@ -267,10 +319,10 @@ def _set_external(item: Any, ref: dict[str, Any]) -> None:
 
 
 __all__ = [
+    "DELIST_ACTORS",
     "ExternalStatusResolver",
-    "INSTALLED_STATUSES",
+    "LISTING_STATUSES",
     "STATUS_CACHE_TTL_SECONDS",
-    "UNKNOWN",
     "build_external_ref",
     "collect_external_refs",
     "origin_of",

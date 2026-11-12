@@ -17,7 +17,7 @@ import uuid
 from typing import Optional
 
 from dotenv import load_dotenv
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
 from fastapi.responses import JSONResponse
 from neo4j.exceptions import ServiceUnavailable, SessionExpired, TransientError
 from sqlalchemy.exc import SQLAlchemyError
@@ -30,6 +30,7 @@ from app.core.error_codes import BizCode
 from app.core.response_utils import fail, success
 from app.db import get_async_db, get_db
 from app.dependencies import CurrentUserSnapshot, get_current_user, get_current_user_async
+from app.integrations.profile.proxy import memory_profile_proxy
 from app.models.user_model import User
 from app.services.memory_short_service import LongService, ShortService
 from app.services.memory_storage_service import search_entity
@@ -51,7 +52,12 @@ router = APIRouter(
 
 
 @router.get("/memos", response_model=ShortTermMemoResponse)
+@memory_profile_proxy(
+    query_fields=("end_user_id", "scope", "date_type", "page", "pagesize"),
+    preserve_status=True,
+)
 async def list_short_term_memos(
+    request: Request,
     end_user_id: uuid.UUID,
     scope: MemoScope = Query("current"),
     date_type: MemoDateType = Query("all"),
@@ -99,7 +105,9 @@ async def list_short_term_memos(
 
 
 @router.get("/short_term")
+@memory_profile_proxy(query_fields=("end_user_id",), preserve_status=True)
 async def short_term_configs(
+        request: Request,
         end_user_id: str,
         language_type:str = Header(default=None, alias="X-Language-Type"),
         current_user: User = Depends(get_current_user),

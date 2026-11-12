@@ -130,7 +130,10 @@ class KnowledgeBaseConfig(BaseModel):
     # strategy: str = Field(default="hybrid", description="检索策略: hybrid | bm25 | dense")
     # weight: float = Field(default=1.0, ge=0.0, le=1.0, description="知识库权重（用于多知识库融合）")
     vector_similarity_weight: float | None = Field(default=0.5, ge=0.0, le=1.0, description="向量相似度权重（语义/混合/图谱检索使用，分词检索不使用）")
-    retrieve_type: str = Field(default="hybrid", description="检索方式participle｜ semantic｜hybrid")
+    retrieve_type: str = Field(
+        default="hybrid",
+        description="检索方式participle｜ semantic｜hybrid｜graph｜wiki-faq（FAQ 仅文本检索）",
+    )
     # Whether to enable the evidence-graph channel for hybrid retrieval (only
     # effective for hybrid type); 1=enabled, 0=disabled, None=request-level fallback
     enable_graph_retrieval: Optional[int] = Field(default=None, ge=0, le=1, description="混合检索下是否启用证据图谱通道")
@@ -486,7 +489,8 @@ class App(BaseModel):
     shared_at: Optional[datetime.datetime] = None  # share time
     ontology: Optional[AppOntologyInfo] = None     # currently effective ontology (None in the community edition)
     # 来源（§11.2）：`local` 本租户创建 / `external` 从市场安装的副本。
-    # 市场状态不落库，只有请求带 include_external_status 时才回填 external.status。
+    # 市场状态不落库，只有请求带 include_external_status 时才回填
+    # external.listing_status / delist_actor（契约 v0.10 已删除 external.status）。
     origin: str = "local"
     external: Optional[dict] = None
     created_at: datetime.datetime

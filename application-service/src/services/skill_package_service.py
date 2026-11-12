@@ -863,18 +863,24 @@ members: list[str] | None = None,
                     )
                 )
 
-            db.commit()
+            if commit:
+                db.commit()
+            else:
+                db.flush()
         except Exception:
-            # The DB row that would have owned the new objects is gone after the rollback,
-            # so nobody else can ever find them: reclaim them here. The previous pack is
-            # untouched because its objects are only deleted after a successful commit.
-            db.rollback()
+            # `commit=False` participates in the caller's transaction.  Rolling it
+            # back here would also discard its application/install rows; the outer
+            # owner will roll back the whole bundle instead.
+            if commit:
+                db.rollback()
             SkillPackageService._delete_keys(uploaded_keys)
             raise
 
-        # Commit succeeded: the replaced packs are unreachable, so their objects can go.
-        # A failure here leaks storage but never a dangling reference (see ``_delete_keys``).
-        SkillPackageService._delete_keys(purge_keys)
+        # Only a committed replacement can make the former storage objects
+        # unreachable. With `commit=False` retain them rather than deleting bytes
+        # that a later outer rollback may still reference.
+        if commit:
+            SkillPackageService._delete_keys(purge_keys)
 
         for _, res in zip(prepared, results, strict=False):
             if res.get("skill_id"):
@@ -1307,6 +1313,17 @@ members: list[str] | None = None,
                 # SKILL.md or the runtime call_name identity.
                 old_pkg.display_name = item["name"]
                 old_pkg.description = item["description"]
+                # A byte-identical market dependency must retain the market
+                # reference even when its local skill/package row is reused.
+                # Never downgrade an existing market origin on a local replay:
+                # a skill shipped inside an app package has no market_ref of its
+                # own (`source_ref` is None), so writing it here would wipe the
+                # `"<resource_id>@<version>"` that is the only origin=external
+                # evidence and the key `_find_market_skill_copy` reuses on.
+                if source_type == "market":
+                    old_pkg.source_type = source_type
+                    if source_ref:
+                        old_pkg.source_ref = source_ref
                 skill_row.description = item["description"]
                 db.flush()
                 return {
@@ -1355,6 +1372,13 @@ members: list[str] | None = None,
                     # pack bytes, SKILL.md or the call_name identity.
                     existing.display_name = item["name"]
                     existing.description = item["description"]
+                    # See the overwrite branch above: identical market content
+                    # reuses the local package but adopts its market provenance —
+                    # only when this import actually knows the market reference.
+                    if source_type == "market":
+                        existing.source_type = source_type
+                        if source_ref:
+                            existing.source_ref = source_ref
                     if skill is not None:
                         skill.description = item["description"]
                     db.flush()

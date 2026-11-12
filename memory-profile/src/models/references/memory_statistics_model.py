@@ -1,6 +1,6 @@
 """Read-only mappings for API-owned memory statistics tables."""
 
-from sqlalchemy import Boolean, Column, DateTime, Integer, String
+from sqlalchemy import JSON, Boolean, Column, DateTime, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 
 from src.models.base import ReadOnlyBase
@@ -12,6 +12,7 @@ class Conversation(ReadOnlyBase):
     id = Column(UUID(as_uuid=True), primary_key=True)
     app_id = Column(UUID(as_uuid=True), nullable=False)
     user_id = Column(String, nullable=True)
+    updated_at = Column(DateTime, nullable=True)
     write_cursor = Column(Integer, nullable=False)
     is_active = Column(Boolean, nullable=False)
 
@@ -24,6 +25,8 @@ class MemoryMessage(ReadOnlyBase):
     end_user_id = Column(String, nullable=False)
     source = Column(String(32), nullable=False)
     message_seq = Column(Integer, nullable=False)
+    role = Column(String, nullable=False)
+    content = Column(Text, nullable=False)
 
 
 class MemoryPerceptual(ReadOnlyBase):
@@ -46,6 +49,10 @@ class ShortTermMemory(ReadOnlyBase):
 
     id = Column(UUID(as_uuid=True), primary_key=True)
     end_user_id = Column(String(255), nullable=False)
+    messages = Column(Text, nullable=False)
+    aimessages = Column(Text, nullable=True)
+    retrieved_content = Column(JSON, nullable=True)
+    created_at = Column(DateTime, nullable=False)
 
 
 class ForgetAudit(ReadOnlyBase):
