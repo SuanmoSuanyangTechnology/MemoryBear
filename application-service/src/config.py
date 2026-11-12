@@ -328,6 +328,13 @@ class AppServiceSettings(BaseSettings):
     market_service_circuit_reset_seconds: float = Field(
         default=30.0, gt=0, validation_alias="MARKET_SERVICE_CIRCUIT_RESET_SECONDS"
     )
+    # Operator MCP availability probes (interface doc §8.8): loopback, link-local,
+    # metadata and unspecified targets are always rejected; private ranges are
+    # rejected unless listed here. Comma-separated CIDRs; empty means deny all
+    # private ranges.
+    mcp_test_allowed_cidrs: str = Field(
+        default="", validation_alias="MCP_TEST_ALLOWED_CIDRS"
+    )
 
     # Monolith upstream channel (coexistence period): cross-domain writes and
     # memory/context-engine operations are forwarded to the monolith's

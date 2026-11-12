@@ -44,9 +44,15 @@ def code_catalog(locale: str | None = None) -> Mapping[str, str]:
 def user_message(
     code: BizCode | int | str | None,
     locale: str | None = None,
+    /,
     **params: object,
 ) -> str | None:
-    """Render ``codes.<NAME>``; unknown codes or bad params return ``None``."""
+    """Render ``codes.<NAME>``; unknown codes or bad params return ``None``.
+
+    ``code`` and ``locale`` are positional-only so a call site splatting an
+    error context (``**context``) can still carry template params with those
+    names instead of raising ``TypeError``.
+    """
 
     numeric = coerce_code(code)
     name = code_name(numeric)
