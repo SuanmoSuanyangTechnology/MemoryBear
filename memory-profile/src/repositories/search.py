@@ -145,6 +145,34 @@ def _parse_buckets(
     return parsed
 
 
+def _short_term_body(end_user_ids: Sequence[str], now: datetime) -> dict[str, Any]:
+    eligible_filter = {
+        "bool": {
+            "filter": [
+                {"term": {"speaker": "user"}},
+                {"term": {"is_permanent": False}},
+                {"exists": {"field": "id"}},
+                {"term": {"memo_eligible": True}},
+            ],
+        },
+    }
+    body = _search_body(end_user_ids, ("short_term", {"filter": eligible_filter}))
+    body["runtime_mappings"] = {
+        "memo_eligible": {
+            "type": "boolean",
+            "script": {
+                "source": _SHORT_TERM_ELIGIBLE_SCRIPT,
+                "params": {
+                    "now": datetime_to_epoch_ms(now),
+                    "proximity": 72 * 60 * 60 * 1000,
+                    "max_span": 168 * 60 * 60 * 1000,
+                },
+            },
+        },
+    }
+    return body
+
+
 class MemorySearchRepository:
     """Aggregate episodic, explicit, emotional and short-term counts from ES."""
 
@@ -177,30 +205,7 @@ class MemorySearchRepository:
         """
         if not end_user_ids:
             return {}, set()
-        eligible_filter = {
-            "bool": {
-                "filter": [
-                    {"term": {"speaker": "user"}},
-                    {"term": {"is_permanent": False}},
-                    {"exists": {"field": "id"}},
-                    {"term": {"memo_eligible": True}},
-                ],
-            },
-        }
-        body = _search_body(end_user_ids, ("short_term", {"filter": eligible_filter}))
-        body["runtime_mappings"] = {
-            "memo_eligible": {
-                "type": "boolean",
-                "script": {
-                    "source": _SHORT_TERM_ELIGIBLE_SCRIPT,
-                    "params": {
-                        "now": datetime_to_epoch_ms(now),
-                        "proximity": 72 * 60 * 60 * 1000,
-                        "max_span": 168 * 60 * 60 * 1000,
-                    },
-                },
-            },
-        }
+        body = _short_term_body(end_user_ids, now)
         client = await self.elasticsearch.client()
         response = await client.search(
             index=_INDEX_STATEMENT, body=body, allow_partial_search_results=False,
