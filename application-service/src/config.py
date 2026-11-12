@@ -132,6 +132,13 @@ class AppServiceSettings(BaseSettings):
     skill_read_max_chars: int = Field(
         default=16000, ge=1, validation_alias="SKILL_READ_MAX_CHARS"
     )
+    # 详情页内联正文的展示上限（**字符**，不是字节）。技能包单个文件可以很大，
+    # 详情是同步接口，全文下发会让响应体失控；超过就截断并给 `truncated=true`，
+    # 前端据此提示「已截断」，而不是把半截内容当成完整正文。
+    # 与 `skill_read_max_chars` 同值同口径：详情展示与运行时读取看到的是同一段长度。
+    skill_detail_inline_max_chars: int = Field(
+        default=16000, ge=1, validation_alias="SKILL_DETAIL_INLINE_MAX_CHARS"
+    )
     skill_desc_index_chars: int = Field(
         default=200, ge=1, validation_alias="SKILL_DESC_INDEX_CHARS"
     )

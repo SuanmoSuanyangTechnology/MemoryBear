@@ -134,6 +134,7 @@ class AppDslService:
         dsl = {**meta, "app": app_meta, config_key: config_data}
         if include_cluster:
             self._attach_cluster(dsl, app)
+            self._attach_workflow_members(dsl, app)
         return (
             yaml.dump(dsl, default_flow_style=False, allow_unicode=True),
             f"{release.name}_v{release.version_name}.yaml",
@@ -257,6 +258,7 @@ class AppDslService:
 
         if include_cluster:
             self._attach_cluster(dsl, app)
+            self._attach_workflow_members(dsl, app)
         return yaml.dump(dsl, default_flow_style=False, allow_unicode=True), f"{app.name}.yaml"
 
     def _to_dict(self, value):
@@ -493,6 +495,165 @@ class AppDslService:
         dsl["cluster"] = members
         if warnings:
             dsl["export_warnings"] = warnings
+
+    def _attach_workflow_members(self, dsl: dict, app: App) -> None:
+        """Add the ``cluster:`` section for a workflow's referenced Agent apps.
+
+        工作流与集群共用同一个随包载体：被引用的 Agent 应用各出一份完整配置，
+        装到目标环境时由 `import_dsl` 落地并按 `dep_map` 绑定。节点里的
+        `reference.app_id` 改写成 `app:<源 app id>` local id，安装侧只认这个前缀
+        串，绝不拿源环境的裸 id 去目标空间里碰运气。
+
+        与 `collect_cluster_members` 的两处差别都是刻意的：
+
+        * 引用不可用（应用已删 / 不是 Agent / 跨空间 / 没有可用版本）只跳过并
+          告警，不让整个导出失败 —— 工作流里一个脏引用把整份 YAML 打回去，
+          用户没有任何自救路径；
+        * 节点引用**无条件**改写成本地 id，即使该应用没能收进 `cluster[]`。
+          留着源环境的裸 UUID 更危险：它长得像真的 id，导入侧会当成目标空间的
+          应用去查，可能绑到别人的同名应用上。改写后 `dep_map` 查不到，落地方
+          走既有的 inline 降级 + 告警，节点和连线都还在。
+        """
+
+        if app.type not in (AppType.WORKFLOW, AppType.PURE_WORKFLOW):
+            return
+        workflow = dsl.get("workflow")
+        if not isinstance(workflow, dict):
+            return
+        nodes = workflow.get("nodes")
+        if not isinstance(nodes, list) or not nodes:
+            return
+
+        members: list[dict[str, Any]] = []
+        warnings: list[str] = []
+        seen: set[uuid.UUID] = set()
+
+        for node in nodes:
+            if not isinstance(node, dict) or node.get("type") != NodeType.AGENT.value:
+                continue
+            config = node.get("config")
+            if not isinstance(config, dict) or config.get("mode") != "reference":
+                continue
+            reference = config.get("reference")
+            if not isinstance(reference, dict):
+                continue
+
+            label = node.get("name") or node.get("id")
+            ref = reference.get("_ref") if isinstance(reference.get("_ref"), dict) else {}
+            raw_id = ref.get("id") or reference.get("app_id")
+            # `_ref.id` 可能是历史形态的 AppRelease.id，统一问一次真实应用行。
+            target_app, _ = self._locate_any_app(raw_id)
+
+            policy = str(reference.get("release_policy") or "current")
+            pinned_release_id = reference.get("release_id")
+
+            # 引用改写放在可用性判断**之前**，且不看能否随包：源环境的裸 UUID
+            # 长得就像目标空间的应用 id，留着会被 `_locate_agent_app` 当成真 id
+            # 去查，可能绑到别人的同名应用上。改成本地 id 后，`dep_map` 查不到就
+            # 走既有的 inline 降级 + 告警，节点与连线都还在。
+            reference = dict(reference)
+            reference["app_id"] = (
+                f"app:{target_app.id}" if target_app is not None
+                else self._app_local_id(raw_id)
+            )
+            reference["release_policy"] = "current"
+            reference["release_id"] = None
+            config["reference"] = reference
+            node["config"] = config
+
+            if target_app is None:
+                warnings.append(f"[{label}] 引用的 Agent 应用不存在，未随包导出")
+                continue
+            if target_app.id in seen:
+                continue
+            if not target_app.is_active or target_app.type != AppType.AGENT:
+                warnings.append(
+                    f"Agent 节点引用的「{target_app.name}」不是可用的 Agent 应用，未随包导出"
+                )
+                continue
+            if target_app.workspace_id != app.workspace_id:
+                warnings.append(
+                    f"Agent 节点引用的「{target_app.name}」是只读引用"
+                    "（所属空间与本应用不同），未随包导出"
+                )
+                continue
+
+            release = self._referenced_agent_release(
+                target_app, policy=policy, release_id=pinned_release_id
+            )
+            if release is None:
+                warnings.append(
+                    f"Agent 节点引用的「{target_app.name}」没有可用的发布版本，未随包导出"
+                )
+                continue
+
+            seen.add(target_app.id)
+            members.append(
+                {
+                    "local_id": f"app:{target_app.id}",
+                    # 工作流引用不是集群子 Agent，节点之间没有从属关系。
+                    "parent_local_id": None,
+                    "app_type": target_app.type,
+                    "name": target_app.name,
+                    "description": target_app.description,
+                    "config": self._enrich_release_config(
+                        AppType.AGENT,
+                        release.config or {},
+                        release.default_model_config_id,
+                    ),
+                }
+            )
+
+        if members:
+            dsl["cluster"] = members
+        if warnings:
+            existing = dsl.get("export_warnings")
+            dsl["export_warnings"] = (
+                list(existing) if isinstance(existing, list) else []
+            ) + warnings
+
+    @staticmethod
+    def _app_local_id(value: Any) -> str:
+        """`app:<uuid>` local id for a reference we could not resolve to a row.
+
+        Falls back to `"app:"` + the raw string when the value is not a UUID, so
+        the install side still sees a namespaced local id instead of a bare source
+        id (or `None`) and routes it through the inline downgrade.
+        """
+
+        try:
+            return f"app:{uuid.UUID(str(value))}"
+        except (ValueError, AttributeError, TypeError):
+            return f"app:{value}"
+
+    def _referenced_agent_release(
+        self, app: App, *, policy: str, release_id: Any
+    ) -> AppRelease | None:
+        """The release a workflow node's `reference` resolves to, or None.
+
+        `pinned` 指向具体版本；其余（含缺省）跟随被引用应用自己的当前版本 ——
+        与市场投稿侧 `_workflow_ref_release` 同一口径，两个入口不能导出不同的版本。
+        """
+
+        if policy == "pinned" and release_id:
+            try:
+                release = self.db.get(AppRelease, uuid.UUID(str(release_id)))
+            except (ValueError, AttributeError, TypeError):
+                release = None
+            if (
+                release is not None
+                and release.is_active
+                and release.app_id == app.id
+            ):
+                return release
+
+        current = app.current_release_id
+        if not current:
+            return None
+        release = self.db.get(AppRelease, current)
+        if release is None or not release.is_active or release.app_id != app.id:
+            return None
+        return release
 
     def collect_cluster_members(
         self, root_app: App, config: dict
@@ -920,15 +1081,22 @@ class AppDslService:
             item["name"] for item in report
             if not item["published"] and item.get("reused")
         ]
+        # 工作流与集群共用这套落地逻辑，措辞按根应用类型区分，否则用户会看到
+        # 「本集群才能发布」出现在一个工作流上。
+        container = (
+            "本集群"
+            if (dsl.get("app") or {}).get("type") == AppType.MULTI_AGENT
+            else "本工作流"
+        )
         if created_unpublished:
             warnings.append(
                 f"已导入 {len(created_unpublished)} 个子 Agent（草稿），请先逐个发布它们，"
-                "本集群才能发布：" + "、".join(created_unpublished)
+                f"{container}才能发布：" + "、".join(created_unpublished)
             )
         if reused_unpublished:
             warnings.append(
                 f"另有 {len(reused_unpublished)} 个复用的子 Agent 尚未发布，"
-                "需先发布它们本集群才能发布：" + "、".join(reused_unpublished)
+                f"需先发布它们{container}才能发布：" + "、".join(reused_unpublished)
             )
         return landed
 
@@ -1152,6 +1320,11 @@ class AppDslService:
                     "检测到 secret 类型环境变量，导入时其值已清空，请在导入后重新配置。"
                 )
             environment_variables = self._clear_imported_secret_environment_variables(raw_env_vars)
+            # `workflow_type` 决定这份配置是对话工作流还是纯工作流
+            # （`WorkflowService._supports_conversation`）。DSL 没写时按应用类型补齐：
+            # 不传会落到 `create_workflow_config` 的默认值 `"workflow"`，纯工作流
+            # 装到目标空间后会变成「可对话」，行为和源空间不一致。
+            workflow_type = raw_wf.get("workflow_type") or app_type or AppType.WORKFLOW
             if create:
                 wf_service.create_workflow_config(
                     app_id=app_id,
@@ -1162,6 +1335,7 @@ class AppDslService:
                     execution_config=raw_wf.get("execution_config", {}),
                     features=raw_wf.get("features", {}),
                     triggers=raw_wf.get("triggers", []),
+                    workflow_type=workflow_type,
                     validate=False,
                     redis_client=redis_client,
                 )
@@ -1177,6 +1351,7 @@ class AppDslService:
                     existing.execution_config = raw_wf.get("execution_config", {})
                     existing.features = raw_wf.get("features", {})
                     existing.triggers = raw_wf.get("triggers", [])
+                    existing.workflow_type = workflow_type
                     existing.updated_at = now
                     # Overwrite imports also invalidate the shared cache
                     delete_workflow_config(redis_client, app_id)
@@ -1190,6 +1365,7 @@ class AppDslService:
                         execution_config=raw_wf.get("execution_config", {}),
                         features=raw_wf.get("features", {}),
                         triggers=raw_wf.get("triggers", []),
+                        workflow_type=workflow_type,
                         validate=False,
                         redis_client=redis_client,
                     )
@@ -1638,17 +1814,28 @@ class AppDslService:
                         )
                     config["model"] = model
 
-                # Reference mode: locate the referenced Agent app by ID in the
-                # target workspace (_ref.id, or legacy reference.app_id). When the
-                # ID misses (cross-environment), fall back to inline mode and clear
-                # the reference; nodes and edges are kept for manual re-configuration.
+                # Reference mode: locate the referenced Agent app in the target
+                # workspace. The bundle path rewrites `reference.app_id` to an
+                # `app:<源 app id>` local id and lands that app in
+                # `dependencies.apps[]`, so `dep_map` decides; only the console /
+                # legacy paths look the id up directly. A miss (cross-environment,
+                # reference not bundled) falls back to inline mode and clears the
+                # reference; nodes and edges are kept for manual re-configuration.
                 if config.get("mode") == "reference":
                     reference = dict(config.get("reference") or {})
                     ref = reference.pop("_ref", None)
                     ref_id = ref.get("id") if isinstance(ref, dict) else None
                     ref_name = ref.get("name") if isinstance(ref, dict) else None
-                    target_app = self._locate_agent_app(
-                        ref_id or reference.get("app_id"), workspace_id
+                    raw_app_id = reference.get("app_id")
+                    mapped = (
+                        dep_map.get(str(raw_app_id))
+                        if dep_map and isinstance(raw_app_id, str)
+                        else None
+                    )
+                    target_app = (
+                        self._locate_agent_app(mapped, workspace_id)
+                        if mapped
+                        else self._locate_agent_app(ref_id or raw_app_id, workspace_id)
                     )
                     if target_app:
                         reference["app_id"] = str(target_app.id)
@@ -1656,7 +1843,7 @@ class AppDslService:
                         reference["release_id"] = None
                         config["reference"] = reference
                     else:
-                        _ref_label = ref_name or ref_id or reference.get("app_id")
+                        _ref_label = ref_name or ref_id or raw_app_id
                         warnings.append(
                             f"[{node_label}] 引用的 Agent 应用 '{_ref_label}' "
                             "在目标工作空间不存在，已回退为内置模式，请导入后手动配置"

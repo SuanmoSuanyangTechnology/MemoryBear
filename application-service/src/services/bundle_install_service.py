@@ -4,11 +4,12 @@ One transaction, one order, no half-landed cluster:
 
 ```
 ① plugins / skills   (zip → import_package(commit=False))
-② tools              (mcp rebuilt with cleared credentials;
-                      custom / workflow → placeholder row only)
+② tools              (mcp rebuilt with cleared credentials; custom →
+                      placeholder row only; workflow → dropped + reported)
 ③ record local_dep_map: bundle ref → new local id
-④ apps               (sub-agents first, then root, import_dsl(commit=False,
-                      dep_map=…, resolve_cross_app_refs=False))
+④ apps               (sub-agents / workflow-referenced Agents first, then root,
+                      import_dsl(commit=False, dep_map=…,
+                      resolve_cross_app_refs=False))
 ⑤ back-fill builtin tool mapping / cluster references
 ⑥ commit
 ```
@@ -24,10 +25,15 @@ Why this shape:
 * **`resolve_cross_app_refs=False`.** Sub-agents are landed moments earlier in
   this same transaction; `_locate_agent_app` would look them up by workspace and
   drop every entry it cannot see, turning a cluster into an empty shell.
-* **Placeholders are rows, not absences.** `custom` / `workflow` tools carry no
+* **Placeholders are rows, not absences.** A `custom` tool carries no
   configuration across tenants, but the dependency edge must still exist, so the
   Agent gets a `ToolConfig(status=unconfigured)` to point at instead of losing
   the tool silently.
+* **`workflow` tools are the opposite.** They are not configuration-free — they
+  are a pointer at one source-tenant workflow (`workflow_tool_configs.app_id` +
+  `release_id`), and the target tenant has no way to fill that in. A row would be
+  permanently unusable, so nothing is created and the reference is reported in
+  `missing` instead.
 """
 from __future__ import annotations
 
@@ -63,7 +69,10 @@ from .skill_package_service import SkillPackageService
 
 logger = logging.getLogger(__name__)
 
-PLACEHOLDER_TOOL_TYPES = frozenset({ToolType.CUSTOM.value, ToolType.WORKFLOW.value})
+# 只 `custom` 落占位行：`workflow` 是「源租户某个纯工作流」的指针
+# （`workflow_tool_configs.app_id` + `release_id`），目标租户没有可填的落点，
+# 建出来的行永远配不好，所以导出侧就剔除、落地侧只报 `missing`。
+PLACEHOLDER_TOOL_TYPES = frozenset({ToolType.CUSTOM.value})
 
 # `(resource_type, market_resource_id, version) -> manifest`。随包内容不可用时按
 # 引用从市场取那一版（接口文档 §3.4「依赖解析」）。用回调而不是直接持有 gateway，
@@ -110,6 +119,7 @@ class BundleInstallService:
         # 本次安装的市场来源 `{resource_id, version}`；空字典表示不是市场安装。
         # 两个入口都会在开头覆盖它，这里给个初值只是为了不依赖调用顺序。
         self._origin: dict[str, str] = {}
+        self._submission_index: dict[str, dict[str, str]] = {}
         # 按市场引用补依赖内容的回调；社区构建不传 = 只认包内内容。
         self._dependency_fetcher = dependency_fetcher
         # 本次安装解析到的市场依赖，供安装响应的 `dependencies[]` 使用。
@@ -119,6 +129,50 @@ class BundleInstallService:
         self._dependency_cache: dict[str, dict[str, Any]] = {}
         # 本次安装落地的子 Agent 与它们的待绑定项（§3.4 `pending_agents[]`）。
         self._pending_agents: list[dict[str, Any]] = []
+
+    def _index_dependency_submissions(
+            self, manifest: dict[str, Any]
+    ) -> dict[str, dict[str, str]]:
+        """把投稿账本里的依赖解成 `submission_id` / 本地 ref → 市场引用。
+
+        父包在审核前只写 `submission_id`。整包合并会改写 `market_sync` 里的
+        指向，但不会改已经封口的父包，所以安装以账本为准。
+        """
+
+        origin_id = (self._origin or {}).get("resource_id")
+        if not origin_id:
+            return {}
+        from ..models.app_asset_model import MarketSync
+
+        origin_uuid = _coerce_uuid(origin_id)
+        if origin_uuid is None:
+            return {}
+        rows = self.db.scalars(
+            select(MarketSync).where(MarketSync.market_resource_id == origin_uuid)
+        ).all()
+        content_hash = manifest.get("content_hash")
+        chosen = [
+            row for row in rows
+            if content_hash and row.bundle_content_hash == content_hash
+        ] or list(rows)
+        index: dict[str, dict[str, str]] = {}
+        for row in chosen:
+            for record in row.dependency_submissions or []:
+                if not isinstance(record, dict):
+                    continue
+                resource_id = record.get("resource_id")
+                version = record.get("version")
+                if not resource_id or not version:
+                    continue
+                ref = {"resource_id": str(resource_id), "version": str(version)}
+                if record.get("content_hash"):
+                    ref["content_hash"] = str(record["content_hash"])
+                submission_id = record.get("submission_id")
+                if submission_id:
+                    index[str(submission_id)] = ref
+                for local_ref in record.get("refs") or []:
+                    index[str(local_ref)] = ref
+        return index
 
     # ==================== entry ====================
 
@@ -141,6 +195,7 @@ class BundleInstallService:
         """
 
         self._origin = market_origin or {}
+        self._submission_index = self._index_dependency_submissions(manifest)
 
         try:
             parse_bundle(manifest)
@@ -354,6 +409,7 @@ class BundleInstallService:
     @staticmethod
     def _group_skill_entries(
             dependencies: dict[str, Any],
+            index: dict[str, dict[str, str]] | None = None,
     ) -> dict[tuple[str, str], list[dict[str, Any]]]:
         """按 `(插件 ref, 市场引用)` 分组。
 
@@ -363,8 +419,12 @@ class BundleInstallService:
 
         grouped: dict[tuple[str, str], list[dict[str, Any]]] = {}
         for entry in dependencies.get("skills") or []:
-            plugin_ref = str((entry.get("payload") or {}).get("plugin_ref") or "")
-            market_ref = _market_ref_of(entry)
+            plugin_ref = str(
+                entry.get("plugin_ref")
+                or (entry.get("payload") or {}).get("plugin_ref")
+                or ""
+            )
+            market_ref = _market_ref_of(entry, index)
             market_key = (
                 f"{market_ref['resource_id']}@{market_ref['version']}"
                 if market_ref else ""
@@ -396,8 +456,8 @@ class BundleInstallService:
             dependencies = _skill_dependencies(payload, dependencies)
 
         units = 0
-        for entries in self._group_skill_entries(dependencies).values():
-            market_ref = _market_ref_of(entries[0])
+        for entries in self._group_skill_entries(dependencies, self._submission_index).values():
+            market_ref = _market_ref_of(entries[0], self._submission_index)
             if market_ref and not own_market_ref:
                 if self._find_market_skill_copy(market_ref, tenant_id, entries) is not None:
                     continue
@@ -432,9 +492,11 @@ class BundleInstallService:
         plugin_meta = {
             str(plugin.get("ref")): plugin for plugin in (dependencies.get("plugins") or [])
         }
-        for (plugin_ref, _market_key), entries in self._group_skill_entries(dependencies).items():
+        for (plugin_ref, _market_key), entries in self._group_skill_entries(
+                dependencies, getattr(self, "_submission_index", None)
+        ).items():
             member_refs: dict[str, dict[str, Any]] = {}
-            market_ref = _market_ref_of(entries[0])
+            market_ref = _market_ref_of(entries[0], getattr(self, "_submission_index", None))
             origin = market_ref or self._origin
             # Every dependency with market_ref is an exact copy of that market
             # version; persist it so a later app publication can reuse it.
@@ -556,12 +618,16 @@ class BundleInstallService:
             dep_map: dict[str, str],
             missing: list[dict[str, Any]],
     ) -> None:
-        """`mcp` is rebuilt (credentials cleared); `custom` / `workflow` get a row only."""
+        """`mcp` is rebuilt (credentials cleared); `custom` gets a placeholder row.
+
+        `workflow` tools are dropped: they only point at a workflow in the source
+        tenant, so no row is created and the reference is reported as missing.
+        """
 
         for entry in dependencies.get("tools") or []:
             ref = str(entry.get("ref"))
             tool_type = str(entry.get("tool_type") or "")
-            market_ref = _market_ref_of(entry)
+            market_ref = _market_ref_of(entry, getattr(self, "_submission_index", None))
 
             if market_ref:
                 # 目标租户已有该市场资源就复用：版本不同也不自动升级（§3.4），
@@ -595,6 +661,19 @@ class BundleInstallService:
                     )
             elif tool_type in PLACEHOLDER_TOOL_TYPES:
                 dep_map[ref] = self._land_placeholder(entry, tenant_id)
+            elif tool_type == ToolType.WORKFLOW.value:
+                # 工作流工具没有可填的落点（它指向源租户的某个纯工作流），建占位
+                # 行只会留下一行永远配不好的工具。导出侧已把它从引用里摘掉，
+                # 这里把 dep_map 记成空串，让 `_resolve_tools` 走「不在随包内容中
+                # → 清空引用」那条分支，并让用户知道少了什么。
+                dep_map[ref] = ""
+                missing.append(
+                    _missing(
+                        "tool",
+                        entry.get("name"),
+                        "工作流工具不支持跨租户携带，已移除",
+                    )
+                )
             elif tool_type == ToolType.BUILTIN.value:
                 # builtin 不随包：落地时按 tool_class 在目标租户找同类，找不到就置空
                 continue
@@ -1279,7 +1358,9 @@ class BundleInstallService:
                     "execution_config": config.get("execution_config") or {},
                     "features": config.get("features") or {},
                     "triggers": config.get("triggers") or [],
-                    "workflow_type": config.get("workflow_type") or AppType.WORKFLOW,
+                    # 纯工作流不能兜成 `workflow`：类型丢了会让落地后的应用变成
+                    # 可对话工作流。优先用包里的值，其次按应用类型。
+                    "workflow_type": config.get("workflow_type") or app_type,
                 },
             }
 
@@ -1348,25 +1429,49 @@ def _skill_dependencies(
     }
 
 
-def _market_ref_of(entry: dict[str, Any]) -> dict[str, str] | None:
-    """Return a complete, string-normalised dependency market reference.
+def _market_ref_of(
+        entry: dict[str, Any],
+        index: dict[str, dict[str, str]] | None = None,
+) -> dict[str, str] | None:
+    """市场引用。扁平字段优先，旧包的嵌套 `market_ref` 仍可读。
 
-    `content_hash` 是 v0.7 之后父包随引用一起冻结的依赖包指纹（§8.3）。缺失时
-    只表示这是旧包；从市场取回内容后仍会用自己的 `content_hash` 自校验。
+    `submission_id` 在父包里只是审核前的占位。整包合并后真正的资源 id 写在
+    `market_sync.dependency_submissions` 里，由 `index` 传进来。合并结果优先于
+    父包里冻结的引用。
     """
 
-    raw = entry.get("market_ref")
-    if not isinstance(raw, dict):
-        return None
-    resource_id = raw.get("resource_id")
-    version = raw.get("version")
-    if not resource_id or not version:
-        return None
-    ref = {"resource_id": str(resource_id), "version": str(version)}
-    content_hash = raw.get("content_hash")
-    if isinstance(content_hash, str) and content_hash:
-        ref["content_hash"] = content_hash
-    return ref
+    index = index or {}
+
+    def complete(raw: dict[str, Any] | None) -> dict[str, str] | None:
+        if not isinstance(raw, dict):
+            return None
+        resource_id = raw.get("resource_id") or raw.get("market_resource_id")
+        version = raw.get("version")
+        if not resource_id or not version:
+            return None
+        ref = {"resource_id": str(resource_id), "version": str(version)}
+        content_hash = raw.get("content_hash")
+        if isinstance(content_hash, str) and content_hash:
+            ref["content_hash"] = content_hash
+        return ref
+
+    submission_id = entry.get("submission_id")
+    if submission_id and str(submission_id) in index:
+        resolved = complete(index[str(submission_id)])
+        if resolved:
+            return resolved
+    local_ref = entry.get("ref")
+    if local_ref and str(local_ref) in index:
+        resolved = complete(index[str(local_ref)])
+        if resolved:
+            return resolved
+    direct = complete(entry)
+    if direct:
+        return direct
+    legacy = entry.get("market_ref")
+    if isinstance(legacy, dict):
+        return complete(legacy)
+    return None
 
 
 def _missing(kind: str, name: Any, reason: Any) -> dict[str, Any]:

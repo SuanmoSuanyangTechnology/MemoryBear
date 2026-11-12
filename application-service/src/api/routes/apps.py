@@ -264,6 +264,49 @@ def list_my_shared_out(
     return success(data=PageData(page=meta, items=rows), msg="获取我的共享成功")
 
 
+@router.get(
+    "/{app_id}/share/preview",
+    summary="共享弹窗与共享确认页的只读预览",
+    response_model=ApiResponse,
+)
+def share_preview(
+        app_id: UUID,
+        workspace_id: WorkspaceId,
+        db: DbSession,
+        principal: Caller,
+        release_id: UUID | None = Query(
+            None, description="要预览的发布版本；不传取当前生效版本"
+        ),
+):
+    """打开「共享应用」弹窗时取一次，用来回显三开关并渲染共享确认页。
+
+    只读：不写库、不发外部 HTTP、不上传文件。特别是**不复用**投稿编排的
+    `prepare()`——那条路径会把技能包文件重新导出到对象存储，放在 GET 里意味着
+    每开一次弹窗就重传一遍。
+
+    数据全部来自本库：发布版本快照 + `app_assets` / `market_sync`（开关回显）+
+    `app_categories`（市场分类白名单）。市场审核状态不在这里推导，前端用「我的
+    共享」列表取。
+
+    `resource_center.shared` 按 `status=published` 判断，不是「有没有 app_assets
+    行」：只投社区市场时后端会建一条 `unpublished` 载体行做外键占位，它不在资源
+    中心展示。
+
+    `blockers` 是前置阻断项，文案与提交接口失败时同源；确认页据此提示，别让用户
+    点了「确认并提交审核」才吃错误。
+    """
+
+    service = AssetService(db)
+    data = service.collect_share_preview(
+        app_id=app_id,
+        user_id=principal.actor_id,
+        workspace_id=workspace_id,
+        tenant_id=principal.tenant_id,
+        release_id=release_id,
+    )
+    return success(data=data, msg="获取共享预览成功")
+
+
 @router.delete(
     "/share/{target_workspace_id}",
     summary="取消对某工作空间的所有应用分享",
