@@ -34,19 +34,21 @@ from __future__ import annotations
 import asyncio
 import io
 import logging
-import mimetypes
 import threading
 import uuid
 import zipfile
-from typing import Any, Callable, Coroutine
+from collections.abc import Callable, Coroutine
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..errors import BizCode, BusinessException
 from ..models import (
+    AgentConfig,
     App,
     MCPToolConfig,
+    Skill,
     SkillPackage,
     ToolConfig,
 )
@@ -63,8 +65,13 @@ logger = logging.getLogger(__name__)
 
 PLACEHOLDER_TOOL_TYPES = frozenset({ToolType.CUSTOM.value, ToolType.WORKFLOW.value})
 
+# `(resource_type, market_resource_id, version) -> manifest`。随包内容不可用时按
+# 引用从市场取那一版（接口文档 §3.4「依赖解析」）。用回调而不是直接持有 gateway，
+# 是为了让本模块保持「不认识市场 HTTP」：企业扩展装配时注入，社区构建不传。
+DependencyFetcher = Callable[[str, str, str], dict[str, Any]]
 
-def _run_async(coro_factory: "Callable[[], Coroutine]"):
+
+def _run_async(coro_factory: Callable[[], Coroutine]):
     """Run a coroutine from sync code: direct when no loop, else a private thread."""
 
     try:
@@ -91,12 +98,27 @@ def _run_async(coro_factory: "Callable[[], Coroutine]"):
 class BundleInstallService:
     """Land one verified bundle into a tenant / workspace."""
 
-    def __init__(self, db: Session, dsl_service: AppDslService | None = None):
+    def __init__(
+            self,
+            db: Session,
+            dsl_service: AppDslService | None = None,
+            *,
+            dependency_fetcher: DependencyFetcher | None = None,
+    ):
         self.db = db
         self.dsl_service = dsl_service or AppDslService(db)
         # 本次安装的市场来源 `{resource_id, version}`；空字典表示不是市场安装。
         # 两个入口都会在开头覆盖它，这里给个初值只是为了不依赖调用顺序。
         self._origin: dict[str, str] = {}
+        # 按市场引用补依赖内容的回调；社区构建不传 = 只认包内内容。
+        self._dependency_fetcher = dependency_fetcher
+        # 本次安装解析到的市场依赖，供安装响应的 `dependencies[]` 使用。
+        self._resolved_dependencies: list[dict[str, Any]] = []
+        # `(resource_type, resource_id@version)` → 展开后的依赖段，避免同一份
+        # 依赖被多个子 Agent 引用时重复下载。
+        self._dependency_cache: dict[str, dict[str, Any]] = {}
+        # 本次安装落地的子 Agent 与它们的待绑定项（§3.4 `pending_agents[]`）。
+        self._pending_agents: list[dict[str, Any]] = []
 
     # ==================== entry ====================
 
@@ -130,7 +152,14 @@ class BundleInstallService:
         dependencies = manifest.get("dependencies") or {}
         bindings = manifest.get("bindings") or []
         payload = manifest.get("payload") or {}
-        app_type = payload.get("app_type")
+        # §8.2 两种应用包：`release_snapshot`（租户投稿）与 `app_dsl`（运营导入
+        # YAML）。按内容判断而不是只看 `format`：`format` 是后加的键，运营侧当前
+        # 产物还没有它，而它已经是 DSL 结构了。`app_dsl` 的类型在 DSL 里，不在
+        # payload 顶层。
+        dsl = payload.get("dsl") if isinstance(payload.get("dsl"), dict) else None
+        app_type = payload.get("app_type") or (
+            (dsl.get("app") or {}).get("type") if dsl else None
+        )
         if app_type not in (AppType.AGENT, AppType.MULTI_AGENT, AppType.WORKFLOW,
                             AppType.PURE_WORKFLOW):
             raise BusinessException(
@@ -139,7 +168,9 @@ class BundleInstallService:
             )
 
         apps = dependencies.get("apps") or []
-        if app_type == AppType.MULTI_AGENT:
+        if app_type == AppType.MULTI_AGENT and dsl is None:
+            # 集群完整性只对 release 快照包有意义：`app_dsl` 的成员在 `cluster[]`
+            # 里，由 `import_dsl` 自己落地并复用，不走 `dependencies.apps[]`。
             self._assert_cluster_complete(payload.get("config") or {}, apps)
 
         dep_map: dict[str, str] = {}
@@ -179,6 +210,10 @@ class BundleInstallService:
             "local_dep_map": dep_map,
             "missing_report": missing,
             "pending_bindings": pending_bindings,
+            # 本次解析到的市场依赖（复用 / 新装），以及全部落成草稿的子 Agent。
+            # 子 Agent 没发布前集群无法发布，用户必须先补齐绑定再逐个发布。
+            "dependencies": list(self._resolved_dependencies),
+            "pending_agents": list(self._pending_agents),
             "result": "partial" if missing else "success",
         }
 
@@ -223,6 +258,9 @@ class BundleInstallService:
                 "name": payload.get("name"),
                 "tool_type": payload.get("tool_type"),
                 "payload": payload.get("config") or {},
+                # 将市场条目自身也走 market_ref 路径，重复安装同一版本时能
+                # 命中本租户已有 MCP，而不再创建第二个副本。
+                "market_ref": self._origin,
             }
             self._land_tools(
                 {"tools": [entry], "skills": [], "plugins": []},
@@ -313,6 +351,59 @@ class BundleInstallService:
 
     # ==================== ① skills / plugins ====================
 
+    @staticmethod
+    def _group_skill_entries(
+            dependencies: dict[str, Any],
+    ) -> dict[tuple[str, str], list[dict[str, Any]]]:
+        """按 `(插件 ref, 市场引用)` 分组。
+
+        插件成员必须一起落地成一个 multi-member 包；两个同 `plugin_ref` 但来自
+        不同市场资源的技能，也不能把来源折叠成一处。
+        """
+
+        grouped: dict[tuple[str, str], list[dict[str, Any]]] = {}
+        for entry in dependencies.get("skills") or []:
+            plugin_ref = str((entry.get("payload") or {}).get("plugin_ref") or "")
+            market_ref = _market_ref_of(entry)
+            market_key = (
+                f"{market_ref['resource_id']}@{market_ref['version']}"
+                if market_ref else ""
+            )
+            grouped.setdefault((plugin_ref, market_key), []).append(entry)
+        return grouped
+
+    def count_new_skill_units(
+            self,
+            manifest: dict[str, Any],
+            tenant_id: uuid.UUID,
+    ) -> int:
+        """这次安装会新建多少个技能包单位（§3.4 的配额口径）。
+
+        口径是**包**而不是 `skills` 行：插件包算 1 个单位、成员技能不重复计数，
+        独立技能包也算 1 个单位；本租户已有同一市场资源的副本时复用、不占额度。
+        与 `_land_skills` 共用 `_group_skill_entries` 和 `_find_market_skill_copy`，
+        保证「预检算出来的数」和「真正会新建的包」是同一件事。
+
+        调用方要在写库之前拿它补一次 `ensure_skill_quota(extra=...)`：只按当前
+        计数校验的话，一个带技能依赖的整包会让用量越过上限。
+        """
+
+        payload = manifest.get("payload") or {}
+        dependencies = manifest.get("dependencies") or {}
+        # 单独装的技能/插件，`_origin` 指的就是它自己，不吃 `market_ref` 复用路径。
+        own_market_ref = manifest.get("resource_type") == "skill_package"
+        if own_market_ref:
+            dependencies = _skill_dependencies(payload, dependencies)
+
+        units = 0
+        for entries in self._group_skill_entries(dependencies).values():
+            market_ref = _market_ref_of(entries[0])
+            if market_ref and not own_market_ref:
+                if self._find_market_skill_copy(market_ref, tenant_id, entries) is not None:
+                    continue
+            units += 1
+        return units
+
     def _land_skills(
             self,
             dependencies: dict[str, Any],
@@ -338,24 +429,47 @@ class BundleInstallService:
         查不到的资源 id。
         """
 
-        # 市场来源（§11.2）：两列一起传，避免上次只写 source_ref 导致
-        # `market_source_ref()` 因 source_type 仍是 imported 而判成本地。
-        source_type = "market" if self._origin else "imported"
-        source_ref = self._market_source_ref() if own_market_ref else None
-
         plugin_meta = {
             str(plugin.get("ref")): plugin for plugin in (dependencies.get("plugins") or [])
         }
-        grouped: dict[str, list[dict[str, Any]]] = {}
-        for entry in dependencies.get("skills") or []:
-            ref = str(entry.get("ref"))
-            plugin_ref = (entry.get("payload") or {}).get("plugin_ref")
-            grouped.setdefault(str(plugin_ref) if plugin_ref else "", []).append(entry)
-
-        for plugin_ref, entries in grouped.items():
+        for (plugin_ref, _market_key), entries in self._group_skill_entries(dependencies).items():
             member_refs: dict[str, dict[str, Any]] = {}
+            market_ref = _market_ref_of(entries[0])
+            origin = market_ref or self._origin
+            # Every dependency with market_ref is an exact copy of that market
+            # version; persist it so a later app publication can reuse it.
+            source_type = "market" if origin else "imported"
+            source_ref = (
+                self._market_source_ref(origin)
+                if market_ref or own_market_ref
+                else None
+            )
+            if market_ref and not own_market_ref:
+                # 同一市场技能/插件版本已在本租户 → 只补 dep_map，不重复导入。
+                local = self._find_market_skill_copy(market_ref, tenant_id, entries)
+                if local is not None:
+                    for entry in entries:
+                        skill_id = local["members"].get(
+                            str((entry.get("payload") or {}).get("call_name") or entry.get("name"))
+                        )
+                        if skill_id:
+                            dep_map[str(entry.get("ref"))] = skill_id
+                    if plugin_ref and local["plugin_id"]:
+                        dep_map[plugin_ref] = local["plugin_id"]
+                    self._record_dependency(
+                        "skill_package", market_ref,
+                        local["plugin_id"] or local["package_id"],
+                        reused=True,
+                        version_mismatch=local["version"] != market_ref["version"],
+                    )
+                    continue
+                entries = self._enrich_skill_entries(entries, market_ref, missing)
+                if not entries:
+                    continue
             try:
-                archive = self._build_skill_zip(entries, nested=bool(plugin_ref), member_refs=member_refs)
+                archive = self._build_skill_zip(
+                    entries, nested=bool(plugin_ref), member_refs=member_refs
+                )
                 plugin_row = plugin_meta.get(plugin_ref) if plugin_ref else None
                 response = SkillPackageService.import_package(
                     self.db,
@@ -378,7 +492,9 @@ class BundleInstallService:
                 if entry is None:
                     continue
                 if member.get("package_id"):
-                    dep_map[str(entry.get("ref"))] = str(member.get("skill_id") or member["package_id"])
+                    dep_map[str(entry.get("ref"))] = str(
+                        member.get("skill_id") or member["package_id"]
+                    )
                 else:
                     missing.append(
                         _missing("skill", entry.get("name"), member.get("skip_reason") or "跳过")
@@ -445,18 +561,38 @@ class BundleInstallService:
         for entry in dependencies.get("tools") or []:
             ref = str(entry.get("ref"))
             tool_type = str(entry.get("tool_type") or "")
-            payload = entry.get("payload") or {}
+            market_ref = _market_ref_of(entry)
 
-            reuse = payload.get("reuse") or {}
-            if reuse:
-                # 已在目标市场装过同一资源：直接复用本地副本，不重复落地。
-                local_id = self._find_external_tool(reuse.get("market_resource_id"))
-                if local_id:
+            if market_ref:
+                # 目标租户已有该市场资源就复用：版本不同也不自动升级（§3.4），
+                # 只是把 `version_mismatch` 报给调用方，避免静默改写用户空间。
+                local = self._find_external_tool_copy(
+                    market_ref["resource_id"], tenant_id
+                )
+                if local is not None:
+                    local_id, local_version = local
                     dep_map[ref] = local_id
+                    self._record_dependency(
+                        "tool", market_ref, local_id,
+                        reused=True,
+                        version_mismatch=local_version != market_ref["version"],
+                    )
                     continue
+                # B6-b 之后父包只存市场引用，内容得按引用去取；已内嵌内容的存量
+                # 包走原路径，不额外发一次 HTTP。
+                entry = self._enrich_tool_entry(entry, market_ref, missing)
+                tool_type = str(entry.get("tool_type") or tool_type)
 
             if tool_type == ToolType.MCP.value:
-                dep_map[ref] = self._land_mcp(entry, tenant_id, missing)
+                landed_id = self._land_mcp(
+                    entry, tenant_id, missing, origin=market_ref or self._origin
+                )
+                dep_map[ref] = landed_id
+                if market_ref:
+                    self._record_dependency(
+                        "tool", market_ref, landed_id,
+                        reused=False, version_mismatch=False,
+                    )
             elif tool_type in PLACEHOLDER_TOOL_TYPES:
                 dep_map[ref] = self._land_placeholder(entry, tenant_id)
             elif tool_type == ToolType.BUILTIN.value:
@@ -470,6 +606,8 @@ class BundleInstallService:
             entry: dict[str, Any],
             tenant_id: uuid.UUID,
             missing: list[dict[str, Any]],
+            *,
+            origin: dict[str, str] | None = None,
     ) -> str:
         payload = entry.get("payload") or {}
         server_url = payload.get("server_url")
@@ -480,7 +618,9 @@ class BundleInstallService:
         now = utcnow_naive()
         row = ToolConfig(
             id=uuid.uuid4(),
-            name=self._unique_tool_name(str(entry.get("name") or "MCP 工具"), ToolType.MCP.value, tenant_id),
+            name=self._unique_tool_name(
+                str(entry.get("name") or "MCP 工具"), ToolType.MCP.value, tenant_id
+            ),
             description=None,
             # 工具按产品口径没有图标入口（§6.1.1 口径 5）
             icon=None,
@@ -497,7 +637,7 @@ class BundleInstallService:
             is_active=True,
             created_at=now,
             updated_at=now,
-            **self._origin_columns(),
+            **self._origin_columns(origin),
         )
         self.db.add(row)
         self.db.flush()
@@ -525,7 +665,9 @@ class BundleInstallService:
         tool_type = str(entry.get("tool_type"))
         row = ToolConfig(
             id=uuid.uuid4(),
-            name=self._unique_tool_name(str(entry.get("name") or "未配置工具"), tool_type, tenant_id),
+            name=self._unique_tool_name(
+                str(entry.get("name") or "未配置工具"), tool_type, tenant_id
+            ),
             description=None,
             icon=None,
             tool_type=tool_type,
@@ -542,24 +684,26 @@ class BundleInstallService:
         self.db.flush()
         return str(row.id)
 
-    def _market_source_ref(self) -> str | None:
+    @staticmethod
+    def _market_source_ref(origin: dict[str, str] | None) -> str | None:
         """`<market_resource_id>@<version>`（§11.2，反解按最后一个 `@` 切）。"""
 
-        resource_id = self._origin.get("resource_id")
+        resource_id = (origin or {}).get("resource_id")
         if not resource_id:
             return None
-        return f"{resource_id}@{self._origin.get('version') or ''}"
+        return f"{resource_id}@{(origin or {}).get('version') or ''}"
 
-    def _origin_columns(self) -> dict[str, Any]:
+    def _origin_columns(self, origin: dict[str, str] | None = None) -> dict[str, Any]:
         """Provenance columns for a row that came from the market (§11.2)."""
 
-        if not self._origin:
+        resolved = origin if origin is not None else self._origin
+        if not resolved:
             return {}
         return {
             "origin": "external",
             "external_source": "community_market",
-            "external_resource_id": self._origin.get("resource_id"),
-            "external_version": self._origin.get("version"),
+            "external_resource_id": resolved.get("resource_id"),
+            "external_version": resolved.get("version"),
         }
 
     def _unique_tool_name(self, name: str, tool_type: str, tenant_id: uuid.UUID) -> str:
@@ -582,18 +726,305 @@ class BundleInstallService:
             counter += 1
         return f"{name} ({counter})"
 
-    def _find_external_tool(self, market_resource_id: Any) -> str | None:
-        """Reuse pointer: the tool already landed from the same market resource."""
+    def _find_external_tool(
+            self, market_resource_id: Any, tenant_id: uuid.UUID, version: str
+    ) -> str | None:
+        """Return this tenant's active copy of the exact market tool version."""
 
         if not market_resource_id:
             return None
         row = self.db.execute(
             select(ToolConfig).where(
+                ToolConfig.tenant_id == tenant_id,
                 ToolConfig.external_resource_id == str(market_resource_id),
+                ToolConfig.external_version == str(version),
                 ToolConfig.is_active.is_(True),
             )
         ).scalars().first()
         return str(row.id) if row is not None else None
+
+    def _find_external_tool_copy(
+            self, market_resource_id: Any, tenant_id: uuid.UUID
+    ) -> tuple[str, str] | None:
+        """本租户已落地的同一市场工具（**不限版本**）+ 它当时的版本。
+
+        §3.4 要求「本地已有版本与引用版本不一致时复用本地版本，不自动升级」,
+        所以复用判定只能按 `external_resource_id`，版本差异通过
+        `version_mismatch` 告诉调用方。
+        """
+
+        if not market_resource_id:
+            return None
+        row = self.db.execute(
+            select(ToolConfig)
+            .where(
+                ToolConfig.tenant_id == tenant_id,
+                ToolConfig.external_resource_id == str(market_resource_id),
+                ToolConfig.is_active.is_(True),
+            )
+            .order_by(ToolConfig.created_at.desc())
+        ).scalars().first()
+        if row is None:
+            return None
+        return str(row.id), str(row.external_version or "")
+
+    def _find_market_skill_copy(
+            self,
+            market_ref: dict[str, str],
+            tenant_id: uuid.UUID,
+            entries: list[dict[str, Any]],
+    ) -> dict[str, Any] | None:
+        """本租户已落地的同一市场技能/插件（不限版本）。
+
+        技能包没有 `origin` 列，来源记在 `source_type='market'` +
+        `source_ref='<resource_id>@<version>'`（§11.2），所以复用只能按前缀匹配
+        资源 id，版本差异同样只体现在 `version_mismatch`。
+        """
+
+        resource_id = market_ref["resource_id"]
+        packages = self.db.execute(
+            select(SkillPackage)
+            .where(
+                SkillPackage.tenant_id == tenant_id,
+                SkillPackage.source_type == "market",
+                SkillPackage.source_ref.like(f"{resource_id}@%"),
+                SkillPackage.is_active.is_(True),
+            )
+            .order_by(SkillPackage.created_at.desc())
+        ).scalars().all()
+        if not packages:
+            return None
+
+        wanted = {
+            str((entry.get("payload") or {}).get("call_name") or entry.get("name"))
+            for entry in entries
+        }
+        members: dict[str, str] = {}
+        for package in packages:
+            rows = self.db.execute(
+                select(Skill).where(
+                    Skill.package_id == package.id, Skill.is_active.is_(True)
+                )
+            ).scalars().all()
+            for row in rows:
+                if wanted and str(row.name) not in wanted:
+                    continue
+                members.setdefault(str(row.name), str(row.id))
+        if not members:
+            return None
+
+        first = packages[0]
+        version = ""
+        if first.source_ref and "@" in str(first.source_ref):
+            version = str(first.source_ref).rsplit("@", 1)[1]
+        return {
+            "package_id": str(first.id),
+            "plugin_id": str(first.plugin_id) if first.plugin_id else None,
+            "version": version,
+            "members": members,
+        }
+
+    def _record_dependency(
+            self,
+            resource_type: str,
+            market_ref: dict[str, str] | None,
+            local_id: Any,
+            *,
+            reused: bool,
+            version_mismatch: bool,
+    ) -> None:
+        """把一条已解析的依赖记进安装响应（§3.4 `dependencies[]`）。
+
+        同一 `(resource_type, resource_id, version)` 只记一次：多个子 Agent 引用
+        同一依赖时，响应里不应该出现两条一模一样的行。
+        """
+
+        if not market_ref or not local_id:
+            return
+        key = (resource_type, str(market_ref["resource_id"]), str(market_ref["version"]))
+        for item in self._resolved_dependencies:
+            if (
+                item["resource_type"],
+                item["market_resource_id"],
+                item["version"],
+            ) == key:
+                return
+        self._resolved_dependencies.append(
+            {
+                "resource_type": resource_type,
+                "market_resource_id": str(market_ref["resource_id"]),
+                "version": str(market_ref["version"]),
+                "local_resource_id": str(local_id),
+                "reused": bool(reused),
+                "version_mismatch": bool(version_mismatch),
+            }
+        )
+
+    def _fetch_dependency_manifest(
+            self,
+            resource_type: str,
+            market_ref: dict[str, str],
+            missing: list[dict[str, Any]],
+            *,
+            name: Any = None,
+    ) -> dict[str, Any] | None:
+        """按市场引用取那一版的包并校验（§3.4「依赖解析」）。
+
+        取数失败一律降级成 `missing` 里的一条，不中断整单安装：依赖坏掉不该让
+        用户连主应用都装不进去。真正的阻断条件（依赖版本未通过审核）由市场侧在
+        取包时用 `6024` 拒绝，那个错误会被调用方按 6024 抛出。
+        """
+
+        key = f"{resource_type}:{market_ref['resource_id']}@{market_ref['version']}"
+        if key in self._dependency_cache:
+            return self._dependency_cache[key]
+        kind = "tool" if resource_type == "tool" else "skill"
+        if self._dependency_fetcher is None:
+            missing.append(
+                _missing(kind, name, "包内未携带该依赖内容，且当前部署无法从市场补齐")
+            )
+            return None
+        try:
+            manifest = self._dependency_fetcher(
+                resource_type, market_ref["resource_id"], market_ref["version"]
+            )
+        except BusinessException:
+            raise
+        except Exception as error:
+            missing.append(_missing(kind, name, f"依赖从市场获取失败：{error}"))
+            return None
+        try:
+            parse_bundle(manifest)
+        except BundleError as error:
+            missing.append(_missing(kind, name, f"依赖包校验失败：{error}"))
+            return None
+        # 父包随引用冻结了依赖指纹：取回的内容对不上就是内容被换过，按数据非法
+        # （6024）整单拒绝，而不是装一份来路不明的副本。
+        expected_hash = market_ref.get("content_hash")
+        if expected_hash and expected_hash != manifest.get("content_hash"):
+            raise BusinessException(
+                f"依赖「{name or market_ref['resource_id']}」的内容与父包记录不一致",
+                BizCode.EXTERNAL_CATALOG_INVALID,
+                data={"reason": "INVALID_BUNDLE"},
+            )
+        self._dependency_cache[key] = manifest
+        return manifest
+
+    def _enrich_tool_entry(
+            self,
+            entry: dict[str, Any],
+            market_ref: dict[str, str],
+            missing: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        """包内没带工具内容时，用市场那一版的 `payload.config` 补上。"""
+
+        payload = entry.get("payload") if isinstance(entry.get("payload"), dict) else {}
+        if payload.get("server_url"):
+            return entry
+        manifest = self._fetch_dependency_manifest(
+            "tool", market_ref, missing, name=entry.get("name")
+        )
+        if manifest is None:
+            return entry
+        fetched = manifest.get("payload") or {}
+        merged = {**(fetched.get("config") or {}), **payload}
+        if not merged.get("server_url"):
+            missing.append(_missing("tool", entry.get("name"), "依赖包缺少 server_url"))
+            return entry
+        return {**entry, "payload": merged}
+
+    def _enrich_skill_entries(
+            self,
+            entries: list[dict[str, Any]],
+            market_ref: dict[str, str],
+            missing: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """包内没带技能文件时，用市场那一版的 `payload` / `dependencies` 补上。"""
+
+        if all(entry.get("files") for entry in entries):
+            return entries
+        manifest = self._fetch_dependency_manifest(
+            "skill_package",
+            market_ref,
+            missing,
+            name=entries[0].get("name") if entries else None,
+        )
+        if manifest is None:
+            return entries
+        payload = manifest.get("payload") or {}
+        if payload.get("kind") == "plugin":
+            members = [
+                item
+                for item in ((manifest.get("dependencies") or {}).get("skills") or [])
+                if isinstance(item, dict)
+            ]
+            return members or entries
+        name = payload.get("name")
+        return [
+            {
+                "ref": entries[0].get("ref") if entries else f"skill:{name}",
+                "name": name,
+                "display_name": payload.get("display_name"),
+                "payload": {
+                    "call_name": name,
+                    "content_hash": payload.get("content_hash"),
+                    "frontmatter_raw": payload.get("frontmatter_raw") or {},
+                },
+                "files": payload.get("files") or [],
+            }
+        ]
+
+    def _unresolved_bindings(
+            self, app_id: Any, member_config: dict[str, Any]
+    ) -> list[dict[str, Any]]:
+        """子 Agent 落地后仍然缺的绑定（模型 / 知识库 / 记忆）。
+
+        判定方式是「拿源配置的意图和落地行的实际值比」而不是解析 warning 文本：
+        跨租户的东西（模型、知识库）本来就不可能按 id 命中，落地会置空，这里把
+        置空的那些逐条报给用户去补。
+        """
+
+        app_uuid = _coerce_uuid(app_id)
+        if app_uuid is None:
+            return []
+        cfg = self.db.execute(
+            select(AgentConfig).where(
+                AgentConfig.app_id == app_uuid, AgentConfig.is_active.is_(True)
+            )
+        ).scalars().first()
+        if cfg is None:
+            return []
+
+        pending: list[dict[str, Any]] = []
+        model_ref = member_config.get("default_model_config_ref")
+        if isinstance(model_ref, dict) and model_ref and not cfg.default_model_config_id:
+            pending.append(
+                {
+                    "kind": "model",
+                    "name": model_ref.get("name"),
+                    "ref": str(model_ref.get("id") or model_ref.get("name") or ""),
+                    "required": True,
+                }
+            )
+
+        # 知识库只按 id 解析（`_resolve_kb`），跨租户必然置空；只要源配置里有
+        # 知识库而落地行一个都没留下，就整项报给用户，不去猜哪些「其实是同名的
+        # 另一个库」。
+        source_kb = _kb_labels(member_config.get("knowledge_retrieval"))
+        if source_kb and not _kb_ids(cfg.knowledge_retrieval):
+            pending.extend(
+                {"kind": "knowledge_base", "name": label, "ref": label, "required": True}
+                for label in source_kb
+            )
+
+        memory = member_config.get("memory") or {}
+        if isinstance(memory, dict) and memory.get("memory_config_id"):
+            if not (cfg.memory or {}).get("memory_config_id"):
+                ref = str(memory.get("memory_config_id"))
+                pending.append(
+                    {"kind": "memory", "name": ref, "ref": ref, "required": True}
+                )
+        return pending
 
     # ==================== ③ apps ====================
 
@@ -620,6 +1051,22 @@ class BundleInstallService:
         display = manifest.get("display") or {}
         owner_id = user_id or uuid.uuid4()
 
+        # §8.2 两种应用包：`release_snapshot`（租户投稿，下面按 release 快照复制）
+        # 与 `app_dsl`（运营导入 YAML，安装走 `import_dsl`）。按内容而不是只按
+        # `format` 分支：`format` 是同事侧新加的键，存量包与运营侧当前产物都没有
+        # 它，光看它会把结构不一样的包送进错误路径。
+        if isinstance(payload.get("dsl"), dict):
+            return self._land_app_dsl(
+                dsl=payload["dsl"],
+                payload=payload,
+                tenant_id=tenant_id,
+                workspace_id=workspace_id,
+                user_id=owner_id,
+                dep_map=dep_map,
+                missing=missing,
+                display=display,
+            )
+
         for member in dependencies.get("apps") or []:
             app, _warnings = self._import_member(
                 member=member,
@@ -631,6 +1078,18 @@ class BundleInstallService:
                 description=None,
             )
             dep_map[str(member.get("local_id"))] = str(app.id)
+            # 子 Agent 是草稿落地（没有 release），集群在它们发布前不能发布；
+            # 把每个子 Agent 和它落地后仍缺的绑定一起回给用户（§3.4）。
+            self._pending_agents.append(
+                {
+                    "local_resource_id": str(app.id),
+                    "name": app.name,
+                    "publish_required": app.current_release_id is None,
+                    "pending_bindings": self._unresolved_bindings(
+                        app.id, member.get("config") or {}
+                    ),
+                }
+            )
 
         root, warnings = self._import_member(
             member={
@@ -659,6 +1118,105 @@ class BundleInstallService:
             "app_type": root.type,
             "workspace_id": str(root.workspace_id),
         }
+
+    def _land_app_dsl(
+            self,
+            *,
+            dsl: dict[str, Any],
+            payload: dict[str, Any],
+            tenant_id: uuid.UUID,
+            workspace_id: uuid.UUID,
+            user_id: uuid.UUID,
+            dep_map: dict[str, str],
+            missing: list[dict[str, Any]],
+            display: dict[str, Any],
+    ) -> dict[str, Any]:
+        """落一个 `format=app_dsl` 的应用包（运营导入 YAML，§8.2）。
+
+        `dsl` 是应用 YAML 的结构，安装时按 `import_dsl` 走，与「控制台导入
+        YAML」同一条路径 —— 市场安装不该有第二套落地语义。三个约束与
+        `bundle_install_service` 顶部那段注释一致：
+
+        * `commit=False`：整个安装是外层一个事务；
+        * `dep_map`：随包的技能/工具 ref 已在本事务里落到目标空间，按 id 绑定；
+        * `resolve_cross_app_refs=False`：DSL 里的子 Agent 由 `cluster[]` 带进来
+          并由 `import_dsl` 自己落地/复用，不能再按名字去目标空间里找。
+
+        `payload.config` 在这条路径上是空的：DSL 自己带配置。
+        """
+
+        warnings: list[str] = []
+        # `import_dsl` 把 `cluster[]` 的落地结果（复用/新建/是否需要发布）写进这里，
+        # 安装响应据此组装 `pending_agents[]`。
+        cluster_report: list[dict[str, Any]] = []
+        member = dsl.get("app") or {}
+        if not isinstance(member, dict) or not member.get("name"):
+            # 运营导入的包可能没写 app.name（用了 display.name）：补一份最小的
+            # app 元信息，而不是让 import_dsl 直接报「不支持的应用类型」。
+            dsl = {
+                **dsl,
+                "app": {
+                    **(member if isinstance(member, dict) else {}),
+                    "name": display.get("name") or "导入应用",
+                    "description": display.get("summary"),
+                    # `dsl["app"]` 的类型没有上游保证（install 只校验 dsl 是 dict），
+                    # 非 dict 的真值（list/str）也会走进这个分支，不能直接 .get。
+                    "type": (member.get("type") if isinstance(member, dict) else None)
+                    or payload.get("app_type"),
+                },
+            }
+        root, warnings = self.dsl_service.import_dsl(
+            dsl,
+            workspace_id,
+            tenant_id,
+            user_id,
+            commit=False,
+            dep_map=dep_map,
+            resolve_cross_app_refs=False,
+            origin_columns=self._origin_columns(),
+            cluster_report=cluster_report,
+        )
+        missing.extend(
+            _missing("app", display.get("name"), warning) for warning in warnings
+        )
+        self._record_dsl_pending_agents(dsl, cluster_report)
+        return {
+            "id": str(root.id),
+            "name": root.name,
+            "app_type": root.type,
+            "workspace_id": str(root.workspace_id),
+        }
+
+    def _record_dsl_pending_agents(
+            self, dsl: dict[str, Any], cluster_report: list[dict[str, Any]]
+    ) -> None:
+        """把 `import_dsl` 落地的 `cluster[]` 成员折进 `pending_agents[]`。
+
+        `cluster_report` 只记「哪个 local_id 落成了哪个 app_id、是否复用、有没有
+        release」；用户真正要补的是每个子 Agent 缺的模型/知识库，所以按
+        `local_id` 回 `dsl["cluster"]` 里取源配置，再和落地行比对。复用已有
+        app 的成员不报待绑定（配置未改动，缺什么本来就缺着，不属于本次安装引入）。
+        """
+
+        members = {
+            str(member.get("local_id")): member
+            for member in (dsl.get("cluster") or [])
+            if isinstance(member, dict)
+        }
+        for item in cluster_report:
+            if item.get("reused"):
+                continue
+            member = members.get(str(item.get("local_id"))) or {}
+            self._pending_agents.append(
+                {
+                    "local_resource_id": item.get("app_id"),
+                    "name": item.get("name"),
+                    "publish_required": not item.get("published"),
+                    "pending_bindings": self._unresolved_bindings(
+                        item.get("app_id"), member.get("config") or {}
+                    ),
+                }
+            )
 
     def _import_member(
             self,
@@ -790,8 +1348,66 @@ def _skill_dependencies(
     }
 
 
+def _market_ref_of(entry: dict[str, Any]) -> dict[str, str] | None:
+    """Return a complete, string-normalised dependency market reference.
+
+    `content_hash` 是 v0.7 之后父包随引用一起冻结的依赖包指纹（§8.3）。缺失时
+    只表示这是旧包；从市场取回内容后仍会用自己的 `content_hash` 自校验。
+    """
+
+    raw = entry.get("market_ref")
+    if not isinstance(raw, dict):
+        return None
+    resource_id = raw.get("resource_id")
+    version = raw.get("version")
+    if not resource_id or not version:
+        return None
+    ref = {"resource_id": str(resource_id), "version": str(version)}
+    content_hash = raw.get("content_hash")
+    if isinstance(content_hash, str) and content_hash:
+        ref["content_hash"] = content_hash
+    return ref
+
+
 def _missing(kind: str, name: Any, reason: Any) -> dict[str, Any]:
     return {"kind": kind, "name": name, "reason": str(reason)}
+
+
+def _coerce_uuid(value: Any) -> uuid.UUID | None:
+    if value is None or isinstance(value, uuid.UUID):
+        return value
+    try:
+        return uuid.UUID(str(value))
+    except (ValueError, AttributeError, TypeError):
+        return None
+
+
+def _kb_labels(kr: Any) -> list[str]:
+    """源配置里声明的知识库展示名（优先 `_ref.name`，退回 id）。"""
+
+    if not isinstance(kr, dict):
+        return []
+    labels: list[str] = []
+    for kb in kr.get("knowledge_bases") or []:
+        if not isinstance(kb, dict):
+            continue
+        ref = kb.get("_ref") if isinstance(kb.get("_ref"), dict) else {}
+        label = ref.get("name") or kb.get("kb_id") or ref.get("id")
+        if label:
+            labels.append(str(label))
+    return labels
+
+
+def _kb_ids(kr: Any) -> list[str]:
+    """落地行实际留下的知识库 id；空列表 = 一个都没匹配上。"""
+
+    if not isinstance(kr, dict):
+        return []
+    return [
+        str(kb.get("kb_id"))
+        for kb in (kr.get("knowledge_bases") or [])
+        if isinstance(kb, dict) and kb.get("kb_id")
+    ]
 
 
 def _slug(value: str) -> str:

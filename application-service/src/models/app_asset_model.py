@@ -215,6 +215,13 @@ class MarketSync(Base):
 
     __tablename__ = "market_sync"
 
+    # 一个资源的一个发布版本只应有一条投稿中间态：重复行会让整包审核从
+    # `dependency_submissions` 取到不确定的那一条（§5.2.4）。并发投稿由
+    # `stage_sync` 的 UniqueViolation 回退兜住，不靠调用方串行。
+    __table_args__ = (
+        UniqueConstraint("asset_id", "release_id", name="uq_market_sync_asset_release"),
+    )
+
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
     tenant_id = Column(UUID(as_uuid=True), nullable=False, index=True)
     asset_id = Column(

@@ -162,6 +162,63 @@ class QuotaExceededError(I18nException):
         )
 
 
+class SubAgentValidationError(I18nException):
+    """Cluster save rejected because at least one sub-agent is unusable (1003).
+
+    ``BizCode.INVALID_PARAMETER`` alone would render as the generic copy
+    "请求参数无效", which tells the user nothing about *which* member is wrong.
+    Carrying the collected reasons in the message keeps the wire code unchanged
+    while making the failure actionable.
+    """
+
+    def __init__(self, details: str, **params: Any):
+        super().__init__(
+            error_key="errors.api.sub_agent_invalid",
+            status_code=400,
+            error_code="INVALID_PARAMETER",
+            details=details,
+            **params,
+        )
+
+
+class SubAgentUnpublishedError(I18nException):
+    """Cluster publish pre-scan found unpublished sub-agents (wire code 1003).
+
+    The code is deliberately ``INVALID_PARAMETER`` rather than
+    ``APP_NOT_PUBLISHED``: see ``SubAgentValidationError`` — a domain code with
+    generic copy hides the member list the user needs to fix it.
+    """
+
+    def __init__(self, details: str, **params: Any):
+        super().__init__(
+            error_key="errors.api.sub_agent_unpublished",
+            status_code=400,
+            error_code="INVALID_PARAMETER",
+            details=details,
+            **params,
+        )
+
+
+class ShareDependencyUnavailableError(I18nException):
+    """Sharing rejected because the snapshot references unusable dependencies (1003).
+
+    Same reasoning as ``SubAgentValidationError``: the wire code stays
+    ``INVALID_PARAMETER``, but the copy must name *which* tool / skill / agent
+    version is broken and why — the generic "请求参数无效" leaves the user with
+    nothing to fix. ``data`` stays ``{}`` on the wire (unified error contract);
+    the itemised list travels inside ``msg``.
+    """
+
+    def __init__(self, details: str, **params: Any):
+        super().__init__(
+            error_key="errors.api.share_dependencies_unavailable",
+            status_code=400,
+            error_code="INVALID_PARAMETER",
+            details=details,
+            **params,
+        )
+
+
 class InternalServerError(I18nException):
     """Internal server error (500); host parity keeps code 1000 on the wire."""
 
@@ -189,6 +246,9 @@ __all__ = [
     "InternalServerError",
     "QuotaExceededError",
     "ResourceNotFoundException",
+    "ShareDependencyUnavailableError",
+    "SubAgentUnpublishedError",
+    "SubAgentValidationError",
     "ValidationException",
     "as_biz_code",
     "http_status_for",

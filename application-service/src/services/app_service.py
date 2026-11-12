@@ -26,7 +26,12 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Session
 
 from ..cache.workflow_cache import delete_workflow_config
-from ..errors import BizCode, BusinessException, ResourceNotFoundException
+from ..errors import (
+    BizCode,
+    BusinessException,
+    ResourceNotFoundException,
+    SubAgentUnpublishedError,
+)
 from ..memory.ontology_binding import ONTOLOGY_BINDING_PLUGIN, OntologyUpstreamError
 from ..models import (
     AgentConfig,
@@ -826,14 +831,17 @@ class AppService:
             "shared_by_name": shared_by_name,
             "shared_at": shared_at,
             "ontology": ontology,
-            # 来源（§11.2）：只有本地副本记来源，市场状态按需回填
+            # 来源（§11.2）：只有本地副本记来源，市场状态按需回填。
+            # 结构按契约 v0.10 §1.1：`status` 摘要字段已删除，只有
+            # `listing_status` / `delist_actor`，两者默认 `null`。
             "origin": str(getattr(app, "origin", None) or "local"),
             "external": (
                 {
                     "source": getattr(app, "external_source", None) or "community_market",
                     "resource_id": getattr(app, "external_resource_id", None),
                     "version": getattr(app, "external_version", None),
-                    "status": None,
+                    "listing_status": None,
+                    "delist_actor": None,
                 }
                 if str(getattr(app, "origin", None) or "local") == "external"
                 else None
@@ -3013,6 +3021,25 @@ class AppService:
                 "未配置子 Agent，无法运行",
                 BizCode.AGENT_CONFIG_MISSING
             )
+
+        # 3.5 Pre-scan every sub-agent's release and report *all* unusable ones at
+        # once. A cluster imported from a package arrives with every member
+        # unpublished; failing on the first one forces the user to retry N times
+        # before learning which ones need publishing.
+        #
+        # ``strict=False`` mirrors the per-entry resolution below on purpose: a
+        # legacy ``current`` entry whose latest release went offline still falls
+        # back to its anchor, so pre-scanning with ``strict=True`` would reject
+        # clusters that publish fine today. Entries with no anchor (the current
+        # app-id form, i.e. everything imported) raise either way.
+        unavailable = []
+        for sub_agent_data in multi_agent_config.sub_agents or []:
+            try:
+                resolve_effective_release_id(self.db, sub_agent_data, strict=False)
+            except BusinessException as error:
+                unavailable.append(error.message)
+        if unavailable:
+            raise SubAgentUnpublishedError(details="；".join(unavailable))
 
         # 4. Validate each sub-agent and its model config
         for idx, sub_agent_data in enumerate(multi_agent_config.sub_agents):

@@ -145,26 +145,50 @@ def check_quota(
         raise
 
 
-def ensure_app_quota(db: Session, principal: Principal) -> None:
-    """Workspace-scoped app-count check (create/copy/import paths)."""
+def ensure_app_quota(db: Session, principal: Principal, extra: int = 0) -> None:
+    """Workspace-scoped app-count check (create/copy/import paths).
+
+    ``extra`` counts apps the same request is about to create on top of what is
+    already persisted — a cluster import lands its sub-agents before the root, so
+    checking only the current count would let a package blow past the limit.
+    """
 
     workspace_id = principal.workspace_id
     if workspace_id is None:
         logger.error("check_app_quota: workspace_id missing; refusing request")
         raise InternalServerError()
+
+    def usage_with_extra(session: Session, tenant_id: UUID, workspace_id: UUID) -> int:
+        return count_active_apps(session, workspace_id) + extra
+
     check_quota(
         db,
         principal.tenant_id,
         "app_quota",
         "app",
+        usage_func=usage_with_extra if extra else None,
         workspace_id=workspace_id,
     )
 
 
-def ensure_skill_quota(db: Session, principal: Principal) -> None:
-    """Tenant-scoped skill-count check."""
+def ensure_skill_quota(db: Session, principal: Principal, extra: int = 0) -> None:
+    """Tenant-scoped skill-count check.
 
-    check_quota(db, principal.tenant_id, "skill_quota", "skill")
+    ``extra`` 与 ``ensure_app_quota`` 同理：一次市场安装会同时落地多个技能包
+    （插件包 + 随包依赖），只看已持久化的计数会让整包越过上限。按接口文档
+    §3.4 的口径，一个技能包/插件包计 1 个单位，插件成员不重复计数。
+    """
+
+    if not extra:
+        check_quota(db, principal.tenant_id, "skill_quota", "skill")
+        return
+
+    def usage_with_extra(session: Session, tenant_id: UUID) -> int:
+        return count_active_skills(session, tenant_id) + extra
+
+    check_quota(
+        db, principal.tenant_id, "skill_quota", "skill", usage_func=usage_with_extra
+    )
 
 
 def ensure_end_user_quota(db: Session, principal: Principal) -> None:

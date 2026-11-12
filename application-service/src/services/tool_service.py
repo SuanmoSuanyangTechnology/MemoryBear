@@ -1702,17 +1702,18 @@ class ToolService:
             version=config.external_version or "",
         )
 
-    @staticmethod
-    def _normalize_external_status(value: str | None) -> str:
-        return value if value in ("published", "unlisted") else "unknown"
-
     async def _market_status_map(
             self,
             gateway: MarketGateway | None,
             local_ids: list[str],
             tenant_id: uuid.UUID,
-    ) -> dict[str, str | None]:
-        """Best-effort installed-copy status lookup; failures degrade to unknown."""
+    ) -> dict[str, dict[str, str | None]]:
+        """Best-effort installed-copy status lookup; failures degrade to `null`.
+
+        v0.10 起 `external` 只有 `listing_status` / `delist_actor` 两个状态字段：
+        查询失败时返回空映射，调用方因此不写这两个键（前端读到 `null`），等价于
+        「本次未回填」——契约明确两者不可区分。
+        """
         if gateway is None or not local_ids:
             return {}
         try:
@@ -1722,7 +1723,21 @@ class ToolService:
         except Exception as exc:
             logger.warning("查询市场安装状态失败: %s", exc)
             return {}
-        return {item.local_resource_id: item.status for item in statuses}
+        # 网关结果可能是 `MarketPublicationStatus`（dataclass）也可能是企业侧
+        # HTTP 实现回的裸 dict，两种形态都认。
+        def field(item: Any, name: str) -> Any:
+            if isinstance(item, dict):
+                return item.get(name)
+            return getattr(item, name, None)
+
+        return {
+            str(field(item, "local_resource_id")): {
+                "listing_status": field(item, "listing_status"),
+                "delist_actor": field(item, "delist_actor"),
+            }
+            for item in statuses
+            if field(item, "local_resource_id")
+        }
 
     async def enrich_tool_provenance(
             self,
@@ -1750,9 +1765,9 @@ class ToolService:
         statuses = await self._market_status_map(gateway, installed, tenant_id)
         return [
             tool.model_copy(update={
-                "external": tool.external.model_copy(update={
-                    "status": self._normalize_external_status(statuses.get(tool.id))
-                })
+                "external": tool.external.model_copy(
+                    update=statuses.get(tool.id, {})
+                )
             }) if tool.external is not None else tool
             for tool in tools
         ]
@@ -1771,9 +1786,9 @@ class ToolService:
         }
         if include_external_status and detail.external is not None:
             statuses = await self._market_status_map(gateway, [detail.id], tenant_id)
-            updates["external"] = detail.external.model_copy(update={
-                "status": self._normalize_external_status(statuses.get(detail.id))
-            })
+            updates["external"] = detail.external.model_copy(
+                update=statuses.get(detail.id, {})
+            )
         return detail.model_copy(update=updates)
 
     def _config_to_detail(self, config: ToolConfig) -> ToolDetailSchema:

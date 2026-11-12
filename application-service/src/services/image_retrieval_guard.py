@@ -64,6 +64,7 @@ from ..models.models_model import ModelConfig
 from ..schemas.chunk_schema import RetrieveType
 from ..schemas.knowledge_metadata_schema import MetadataFilterMode
 from ..schemas.rerank_schema import RerankMode
+from .faq_retrieval_guard import FAQ_IMAGE_QUERY_UNSUPPORTED_MESSAGE
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +78,9 @@ _IMAGE_BOUNDARY_MESSAGES: dict[str, str] = {
     "KB_IMAGE_RERANK_MODEL_UNSUPPORTED": "所选重排模型不支持图片检索，请选择兼容的图片重排模型",
     "KB_IMAGE_WEIGHTED_GLOBAL_RERANK_UNSUPPORTED": "图片检索不支持全局加权重排",
     "KB_IMAGE_GLOBAL_RERANK_MODEL_UNSUPPORTED": "所选全局重排模型不支持图片检索，请选择兼容的图片重排模型",
+    # FAQ 侧边界：FAQ 知识库只能文本检索。文案与 `faq_retrieval_guard` 共用同一个
+    # 常量 —— 两处各写一份时改一处就会给出措辞不同的提示，且没有任何测试会报警。
+    "KB_FAQ_IMAGE_QUERY_UNSUPPORTED": FAQ_IMAGE_QUERY_UNSUPPORTED_MESSAGE,
 }
 
 
@@ -502,6 +506,10 @@ def _validate_target(
     kb_label = f"知识库 {target.kb_id}"
 
     # Boundaries 2/3/4: only the semantic and hybrid modes support image queries
+    if target.retrieve_type is RetrieveType.WIKI_FAQ:
+        # FAQ retrieval is text-only on the knowledge side; report the same sentence
+        # it would return instead of the generic "config unsupported" wording.
+        _reject("KB_FAQ_IMAGE_QUERY_UNSUPPORTED", detail=kb_label)
     if target.retrieve_type is not RetrieveType.SEMANTIC and (
         target.retrieve_type is not RetrieveType.HYBRID
     ):
