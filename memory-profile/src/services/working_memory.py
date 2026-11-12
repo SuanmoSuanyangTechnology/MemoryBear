@@ -182,9 +182,9 @@ class WorkingMemoryService:
         "unsupported source", so the handler owns that payload.
         """
 
+        _validate_date_window(start_date, end_date)
         if source not in API_MCP_SOURCES:
             return None
-        _validate_date_window(start_date, end_date)
         start_at = epoch_ms_to_datetime(start_date)
         end_at = epoch_ms_to_datetime(end_date)
         end_at_exclusive = end_at + timedelta(milliseconds=1) if end_at is not None else None
