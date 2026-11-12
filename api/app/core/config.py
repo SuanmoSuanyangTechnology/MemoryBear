@@ -64,6 +64,24 @@ class Settings:
     # 服务间凭证；必须与 LiteSkill 侧 INTERNAL_ADMIN_TOKEN 一致
     LITESKILL_INTERNAL_TOKEN: str = os.getenv("LITESKILL_INTERNAL_TOKEN", "")
     LITESKILL_TIMEOUT: float = float(os.getenv("LITESKILL_TIMEOUT", "10"))
+
+    # 社区市场运营后台（/sys/market 转发到 market-service / application-service）
+    MARKET_SERVICE_BASE_URL: str = os.getenv(
+        "MARKET_SERVICE_BASE_URL", "http://market-service:8080"
+    )
+    # 服务间凭证；market-service 与 application-service 两侧同值
+    MARKET_SERVICE_INTERNAL_TOKEN: str = os.getenv("MARKET_SERVICE_INTERNAL_TOKEN", "")
+    MARKET_SERVICE_TIMEOUT: float = float(os.getenv("MARKET_SERVICE_TIMEOUT", "10"))
+    MARKET_SERVICE_WRITE_TIMEOUT: float = float(
+        os.getenv("MARKET_SERVICE_WRITE_TIMEOUT", "60")
+    )
+    # 运营导入解析与整包审核编排；含文件上传与 MCP 可用性测试，需长超时
+    APPLICATION_SERVICE_BASE_URL: str = os.getenv(
+        "APPLICATION_SERVICE_BASE_URL", "http://application-service:8080"
+    )
+    APPLICATION_SERVICE_OPERATOR_TIMEOUT: float = float(
+        os.getenv("APPLICATION_SERVICE_OPERATOR_TIMEOUT", "120")
+    )
     # SSO 新租户绑定 SpeedBear 失败时的策略（轮询重试后仍失败时生效）：
     #   true  = 严格模式：物理回滚本次新建的租户及其临时数据，本次登录失败
     #   false = 宽松模式：保留租户，返回「未绑定成功，请联系管理员」提示

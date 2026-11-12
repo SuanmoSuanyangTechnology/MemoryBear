@@ -84,6 +84,7 @@
     "RESOURCE_DELISTED_BY_PLATFORM": "资源已由平台下架，需平台恢复或发布新版本",
     "IDEMPOTENCY_IN_PROGRESS": "相同请求正在处理中，请稍后重试",
     "IDEMPOTENCY_KEY_REUSED": "幂等键已用于不同请求，请更换后重试",
+    "MCP_NOT_VERIFIED": "MCP 工具连通性验证未通过",
     "MODEL_CONFIG_INVALID": "模型配置无效",
     "API_KEY_MISSING": "缺少模型 API Key",
     "PROVIDER_NOT_SUPPORTED": "不支持该模型供应商",

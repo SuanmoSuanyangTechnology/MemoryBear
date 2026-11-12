@@ -41,8 +41,12 @@ from .stream_gate import StreamGate
 
 logger = logging.getLogger(__name__)
 
-# 透传白名单：网关只透传这些请求头（对齐老单体 transport.request_headers 语义）
-_FORWARD_HEADERS = ("accept", "accept-language", "content-type", "content-length", "range")
+# 透传白名单：网关只透传这些请求头（对齐老单体 transport.request_headers 语义）。
+# Idempotency-Key 是契约要求的幂等键（外部目录安装等写接口），非凭据，必须透传。
+_FORWARD_HEADERS = (
+    "accept", "accept-language", "content-type", "content-length", "range",
+    "idempotency-key",
+)
 # 回包剥除的逐跳/长度头：由转发层按块重建（与 Task 3 原逻辑一致）
 _DROP_HEADERS = ("content-length", "transfer-encoding", "connection")
 # 流式内容类型：命中即逐块透传。KB 现状流式响应即下载/导出
