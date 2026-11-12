@@ -9,6 +9,12 @@
   1. 本地 `market_sync.status = pending_sync | sync_failed` 优先（市场还没收到，问它没意义）
   2. 其余问市场一次（`MarketGateway.publication_status`，一次批量，最多 100 个）
 
+两层之外还有**上架状态**：`share_status` 只表达投稿申请的审核结果，同一个
+`approved` 资源可能是「在架」「发布方下架待自助上架」「平台下架」三种。所以市场行额外
+透出 `listing_status` / `delist_actor` / `can_delist` / `can_relist`（契约 v0.14 §3.3 同口径），
+让前端按 `can_*` 画按钮，不再从 `share_status` 推一遍。资源中心没有上下架概念——
+下架就是取消共享，这四个字段恒 `null` / `null` / `false` / `false`。
+
 为什么不能只按 `app_shares` 出：`app_shares` 是「共享给哪个空间」的老模型，资源中心
 与社区市场都不是空间维度（`app_assets` 一个应用在一个租户内只有一条，见
 `models/app_asset_model.py::uq_app_asset_tenant_app`），按目标空间铺行会同一件事出现多行。
@@ -49,6 +55,16 @@ SCOPE_COMMUNITY_MARKET = "community_market"
 _MARKET_STATUSES = frozenset({"pending", "approved", "rejected", "withdrawn"})
 UNKNOWN = "unknown"
 
+# 拿不到市场数据时（本地待同步 / 市场不可用）的四个上架字段：
+# 不报错误、不伪装成「已下架」——前端据此隐藏「下架 / 自助上架」按钮。
+_EMPTY_MARKET_STATE: dict[str, Any] = {
+    "listing_status": None,
+    "delist_actor": None,
+    "can_delist": False,
+    "can_relist": False,
+}
+_UNKNOWN_MARKET_ROW: dict[str, Any] = {"status": UNKNOWN, **_EMPTY_MARKET_STATE}
+
 # 市场批量查询上限（他的 `/internal/v1/catalog/publications/status` 一次最多 100 个）
 STATUS_BATCH_LIMIT = 100
 
@@ -59,6 +75,33 @@ def _record_get(record: Any, key: str) -> Any:
     if isinstance(record, dict):
         return record.get(key)
     return getattr(record, key, None)
+
+
+def _can_delist(record: Any, listing_status: str | None) -> bool:
+    """§3.3：市场给了 `can_delist` 就用它，没给时按「在架即可下架」推导。
+
+    发布者身份由市场在校验阶段负责，本地不重复判定——与
+    `external_catalog_service._can_delist` 同一口径，两个入口不能给出不同按钮。
+    """
+
+    value = _record_get(record, "can_delist")
+    if value is not None:
+        return bool(value)
+    return listing_status == "listed"
+
+
+def _can_relist(
+        record: Any, listing_status: str | None, delist_actor: str | None
+) -> bool:
+    """§3.3：只有发布方自己下架的 `pending_listing` 能自助上架。
+
+    运营仅保存的 `pending_listing`（`delist_actor=null`）与平台 `delisted` 都不可。
+    """
+
+    value = _record_get(record, "can_relist")
+    if value is not None:
+        return bool(value)
+    return listing_status == "pending_listing" and delist_actor == "publisher"
 
 
 class MySharesService:
@@ -98,7 +141,7 @@ class MySharesService:
             {asset.published_release_id for asset in assets}
             | {sync.release_id for sync in syncs.values()}
         )
-        market_status = self._market_status(
+        market_state = self._market_status(
             [str(asset.source_app_id) for asset in assets if asset.id in syncs],
             tenant_id=tenant_id,
             market=market,
@@ -133,7 +176,8 @@ class MySharesService:
                 continue
 
             market_version = releases.get(sync.release_id) or pinned
-            status = self._market_row_status(sync, market_status.get(str(app.id)))
+            state = market_state.get(str(app.id)) or dict(_UNKNOWN_MARKET_ROW)
+            status = self._market_row_status(sync, state.get("status"))
             rows.append({
                 **legacy,
                 "version": market_version.version_name,
@@ -153,6 +197,12 @@ class MySharesService:
                     sync.market_submission_id
                     if status == "pending" and sync.market_submission_id else None
                 ),
+                # 上架状态与两个自助动作的可用性，直接取市场判定（§3.3 同口径）。
+                # `share_status=approved` 不代表在架：可能已被发布方下架或平台下架。
+                "listing_status": state.get("listing_status"),
+                "delist_actor": state.get("delist_actor"),
+                "can_delist": state.get("can_delist", False),
+                "can_relist": state.get("can_relist", False),
             })
 
         # `shared_at` 倒序；同一时刻同一应用的两行让资源中心在前，保证翻页稳定。
@@ -274,18 +324,19 @@ class MySharesService:
             *,
             tenant_id: uuid.UUID,
             market: Any | None,
-    ) -> dict[str, str]:
-        """批量问市场「这个应用最新投稿是什么状态」；失败整批 `unknown`。
+    ) -> dict[str, dict[str, Any]]:
+        """批量问市场「这个应用现在什么状态」；失败整批 `unknown`。
 
+        每个应用一份状态字典（`status` + 四个上架字段），行里直接铺开。
         只查**已投稿**的应用（`market_sync` 有行的），没投过的不会出现在这里。
         """
 
         if not local_resource_ids:
             return {}
         if market is None:
-            return {resource_id: UNKNOWN for resource_id in local_resource_ids}
+            return {resource_id: dict(_UNKNOWN_MARKET_ROW) for resource_id in local_resource_ids}
 
-        resolved: dict[str, str] = {}
+        resolved: dict[str, dict[str, Any]] = {}
         unique_ids = list(dict.fromkeys(local_resource_ids))
         for start in range(0, len(unique_ids), STATUS_BATCH_LIMIT):
             chunk = unique_ids[start:start + STATUS_BATCH_LIMIT]
@@ -298,24 +349,47 @@ class MySharesService:
                     "我的共享：市场状态批量查询失败，整批降级 unknown",
                     extra={"count": len(chunk), "error": str(error)[:200]},
                 )
-                resolved.update({resource_id: UNKNOWN for resource_id in chunk})
+                resolved.update(
+                    {resource_id: dict(_UNKNOWN_MARKET_ROW) for resource_id in chunk}
+                )
                 continue
             resolved.update(self._fold_statuses(records, chunk))
         return resolved
 
     @staticmethod
-    def _fold_statuses(records: Any, requested: list[str]) -> dict[str, str]:
-        folded: dict[str, str] = {}
+    def _fold_statuses(records: Any, requested: list[str]) -> dict[str, dict[str, Any]]:
+        """把市场返回的一条记录折成行可用的状态字典。
+
+        `status` 取最新一次投稿的审核状态（列表要的是这个，不是资源整体状态）；
+        缺记录或状态不合法时整行降 `unknown`，四个上架字段一并置空——
+        不能拿半份数据画按钮，否则会出现「状态未知但能点下架」。
+        """
+
+        folded: dict[str, dict[str, Any]] = {}
         items = records.get("items") if isinstance(records, dict) else records
         for record in items or []:
             key = _record_get(record, "local_resource_id") or _record_get(record, "resource_id")
+            if not key:
+                continue
             # 列表要的是「最新一次投稿」的状态，不是资源整体上下架状态
             status = _record_get(record, "latest_publication_status") or _record_get(
                 record, "status"
             )
-            if key:
-                folded[str(key)] = str(status or UNKNOWN)
-        return {resource_id: folded.get(resource_id, UNKNOWN) for resource_id in requested}
+            if status not in _MARKET_STATUSES:
+                status = UNKNOWN
+            listing_status = _record_get(record, "listing_status")
+            delist_actor = _record_get(record, "delist_actor")
+            folded[str(key)] = {
+                "status": status,
+                "listing_status": listing_status,
+                "delist_actor": delist_actor,
+                "can_delist": _can_delist(record, listing_status),
+                "can_relist": _can_relist(record, listing_status, delist_actor),
+            }
+        return {
+            resource_id: folded.get(resource_id) or dict(_UNKNOWN_MARKET_ROW)
+            for resource_id in requested
+        }
 
     @staticmethod
     def _market_row_status(sync: MarketSync, market_status: str | None) -> str:
@@ -349,6 +423,12 @@ class MySharesService:
             "asset_id": str(asset.id),
             "market_resource_id": None,
             "pending_publication_id": None,
+            # 资源中心没有上下架：下架就是取消共享（`DELETE /apps/assets/{asset_id}`），
+            # 市场侧的四个字段在这里恒空。市场行会覆盖它们。
+            "listing_status": None,
+            "delist_actor": None,
+            "can_delist": False,
+            "can_relist": False,
             "ontology": None,
         }
 

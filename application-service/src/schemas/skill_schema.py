@@ -26,9 +26,18 @@ class SkillFileIn(BaseModel):
     over-long paths are rejected upstream (design doc §9.1).
     """
     rel_path: str = Field(..., description="包内相对路径，如 SKILL.md、references/faq.md")
-    content: Optional[str] = Field(None, description="文本内容；二进制文件为 None")
+    content: Optional[str] = Field(
+        None,
+        description="文本内容；二进制文件为 None。超过展示上限时只给前缀，见 truncated",
+    )
     size: int = Field(0, description="字节数")
     is_binary: bool = Field(False, description="是否二进制")
+    truncated: bool = Field(
+        False, description="content 是否被截断（只给了前 N 个字符）"
+    )
+    content_total_chars: Optional[int] = Field(
+        None, description="未截断时的完整字符数；二进制或无正文时为 None"
+    )
 
     class Config:
         from_attributes = True
@@ -82,7 +91,10 @@ class Skill(BaseModel):
     call_name: Optional[str] = Field(None, description="运行时调用名（read_skill / discovery 索引标识）")
     source: Optional[str] = Field(None, description="来源展示（GitHub 地址 / zip 文件名）")
     # Detail-only (standard skills and plugin rows); the list leaves them None/empty.
-    skill_md: Optional[str] = Field(None, description="SKILL.md 全文")
+    skill_md: Optional[str] = Field(None, description="SKILL.md 全文（超限时为前缀）")
+    skill_md_truncated: Optional[bool] = Field(
+        None, description="skill_md 是否被截断（只给了前 N 个字符）"
+    )
     files: Optional[List[SkillFileIn]] = Field(None, description="包内文件（二进制不含内容）")
     has_scripts: Optional[bool] = Field(None, description="是否含 scripts/ 目录")
     members: Optional[List[Dict[str, Any]]] = Field(None, description="kind=plugin 时的成员摘要")

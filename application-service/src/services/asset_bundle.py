@@ -18,6 +18,7 @@ Three rules baked in here, each of which had a concrete failure mode:
 """
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 from typing import Any
@@ -69,6 +70,85 @@ def compute_content_hash(manifest: dict[str, Any]) -> str:
 
     body = {k: v for k, v in manifest.items() if k != "content_hash"}
     digest = hashlib.sha256(canonical_json(body).encode("utf-8")).hexdigest()
+    return f"sha256:{digest}"
+
+
+# 展示名不参与依赖复用（接口文档 §8.3）。`display` 整段已被排除，payload 里再
+# 带一份同名的 name / display_name 会让「只改了名字」变成另一条市场依赖。
+_FINGERPRINT_NAME_KEYS = frozenset({"name", "display_name"})
+
+
+def _fingerprint_payload(payload: Any) -> dict[str, Any]:
+    """Payload copy used for dedup: drop transport file lists and display names."""
+
+    if not isinstance(payload, dict):
+        return {}
+    copied = copy.deepcopy(payload)
+    copied.pop("files", None)
+    for key in _FINGERPRINT_NAME_KEYS:
+        copied.pop(key, None)
+    return copied
+
+
+def _fingerprint_files(*groups: Any) -> list[dict[str, str]]:
+    """File identity is `path + sha256` only, sorted by path (§8.9)."""
+
+    found: dict[str, dict[str, str]] = {}
+    for group in groups:
+        if not isinstance(group, list):
+            continue
+        for item in group:
+            if not isinstance(item, dict):
+                continue
+            path = item.get("path")
+            digest = item.get("sha256")
+            if not path or not digest:
+                continue
+            found[str(path)] = {"path": str(path), "sha256": str(digest)}
+    return [found[path] for path in sorted(found)]
+
+
+def _member_digest(member: dict[str, Any]) -> str:
+    """Stable hash of one plugin member. Members are not sealed bundles of their own."""
+
+    payload = member.get("payload") if isinstance(member.get("payload"), dict) else {}
+    return compute_content_hash(
+        {
+            "payload": _fingerprint_payload(payload),
+            "files": _fingerprint_files(member.get("files"), payload.get("files")),
+            "plugin_members": [],
+        }
+    )
+
+
+def compute_content_fingerprint(manifest: dict[str, Any]) -> str:
+    """Dependency dedup key (§8.9). Not interchangeable with `content_hash`.
+
+    The hashed object is `{payload, files, plugin_members}` only. `display`,
+    `source` (including the version string) and `bindings` are excluded, so the
+    same content published under another version or another name still matches.
+    File object keys are transport addresses and are not part of the identity.
+    """
+
+    payload = manifest.get("payload") if isinstance(manifest.get("payload"), dict) else {}
+    dependencies = (
+        manifest.get("dependencies") if isinstance(manifest.get("dependencies"), dict) else {}
+    )
+    members: list[dict[str, str]] = []
+    for skill in dependencies.get("skills") or []:
+        if not isinstance(skill, dict):
+            continue
+        ref = str(skill.get("ref") or "")
+        if not ref:
+            continue
+        members.append({"ref": ref, "sha256": _member_digest(skill)})
+    members.sort(key=lambda item: item["ref"])
+    canonical = {
+        "payload": _fingerprint_payload(payload),
+        "files": _fingerprint_files(manifest.get("files"), payload.get("files")),
+        "plugin_members": members,
+    }
+    digest = hashlib.sha256(canonical_json(canonical).encode("utf-8")).hexdigest()
     return f"sha256:{digest}"
 
 
@@ -183,7 +263,8 @@ def build_app_manifest(
         "tools": [],
         "skills": [],
         "plugins": [],
-        # 我们的扩展：集群子 Agent 随包，不建市场条目（§7.2.1）
+        # 我们的扩展：集群子 Agent、工作流 agent 节点引用的 Agent 都随包，
+        # 不建自己的市场条目（§7.2.1）
         "apps": [],
     }
     if dependencies:

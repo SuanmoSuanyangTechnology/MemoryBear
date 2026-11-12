@@ -2372,16 +2372,15 @@ members: list[str] | None = None,
                         skill, pkg, availability=availability.get(skill.id)
                     )
                     files = repo.get_files(pkg.id)
-                    detail["skill_md"] = SkillPackageService._file_text(
-                        pkg.id, "SKILL.md", files, db
+                    max_chars = current_settings().skill_detail_inline_max_chars
+                    (
+                        detail["skill_md"],
+                        detail["skill_md_truncated"],
+                    ) = SkillPackageService._file_text(
+                        pkg.id, "SKILL.md", files, db, max_chars
                     )
                     detail["files"] = [
-                        {
-                            "rel_path": f.rel_path,
-                            "content": f.content,
-                            "size": f.size,
-                            "is_binary": f.is_binary,
-                        }
+                        SkillPackageService._file_detail_row(f, max_chars)
                         for f in files
                     ]
                     detail["has_scripts"] = pkg.has_scripts
@@ -2409,9 +2408,13 @@ members: list[str] | None = None,
         # count, SKILL.md text and the file list. Text content comes from the
         # inline column (binary / over-size rows stored in object storage keep
         # content=null, mirroring the standalone-skill detail response).
+        max_chars = current_settings().skill_detail_inline_max_chars
         member_payloads: list[dict] = []
         for skill, pkg in members:
             pkg_files = repo.get_files(pkg.id)
+            skill_md, skill_md_truncated = SkillPackageService._file_text(
+                pkg.id, "SKILL.md", pkg_files, db, max_chars
+            )
             member_payloads.append(
                 {
                     "id": skill.id,
@@ -2422,16 +2425,10 @@ members: list[str] | None = None,
                     "has_scripts": pkg.has_scripts,
                     "is_active": skill.is_active,
                     "files_count": len(pkg_files),
-                    "skill_md": SkillPackageService._file_text(
-                        pkg.id, "SKILL.md", pkg_files, db
-                    ),
+                    "skill_md": skill_md,
+                    "skill_md_truncated": skill_md_truncated,
                     "files": [
-                        {
-                            "rel_path": f.rel_path,
-                            "content": f.content,
-                            "size": f.size,
-                            "is_binary": f.is_binary,
-                        }
+                        SkillPackageService._file_detail_row(f, max_chars)
                         for f in pkg_files
                     ],
                 }
@@ -2440,31 +2437,79 @@ members: list[str] | None = None,
         return detail
 
     @staticmethod
+    def _truncate_detail_text(
+        text: str | None, max_chars: int
+    ) -> tuple[str | None, bool, int | None]:
+        """详情展示用截断：返回 `(前缀, 是否截断, 完整字符数)`。
+
+        技能包单文件可以很大（入库阈值 `SKILL_PACKAGE_INLINE_LIMIT` 只决定存哪儿，
+        不是展示上限），详情是同步接口，整份下发会让响应体失控。截断而不是置空，
+        是因为「看前 16000 字」比「什么都看不到」有用得多；调用方靠 `truncated`
+        区分「这是全文」和「这是前缀」。
+        """
+
+        if text is None:
+            return None, False, None
+        if max_chars <= 0 or len(text) <= max_chars:
+            return text, False, len(text)
+        return text[:max_chars], True, len(text)
+
+    @staticmethod
+    def _file_detail_row(f: Any, max_chars: int) -> dict:
+        """文件条目：正文按展示上限截断，元数据保持完整。"""
+
+        content, truncated, total = SkillPackageService._truncate_detail_text(
+            f.content, max_chars
+        )
+        row = {
+            "rel_path": f.rel_path,
+            "content": content,
+            "size": f.size,
+            "is_binary": f.is_binary,
+            "truncated": truncated,
+            "content_total_chars": total,
+        }
+        # 二进制文件不内联正文，`size` 才是有效信息；此时 `content_total_chars`
+        # 没有意义，保持 None 而不是上报 0。
+        return row
+
+    @staticmethod
     def _file_text(
         package_id: uuid.UUID,
         rel_path: str,
         files: list,
         db: Session | None = None,
-    ) -> str | None:
+        max_chars: int | None = None,
+    ) -> tuple[str | None, bool]:
         """Read one pack file as text for detail (object storage read back when needed).
 
         ``db`` releases the pooled connection before the storage round-trip; the detail
         response otherwise has no write to protect, so this is the only place the
         request's read transaction needs to end.
+
+        返回 `(正文, 是否截断)`：`SKILL.md` 同样受展示上限约束，否则一个超长
+        SKILL.md 就能单独撑爆详情响应。
         """
 
+        if max_chars is None:
+            max_chars = current_settings().skill_detail_inline_max_chars
         for f in files:
             if f.rel_path != rel_path:
                 continue
             if f.content is not None:
-                return f.content
-            if f.storage_ref:
+                text = f.content
+            elif f.storage_ref:
                 _release_read_transaction(db, "skill.detail")
-                return SkillPackageService._read_storage_object(f.storage_ref).decode(
+                text = SkillPackageService._read_storage_object(f.storage_ref).decode(
                     "utf-8", errors="replace"
                 )
-            return None
-        return None
+            else:
+                return None, False
+            text, truncated, _total = SkillPackageService._truncate_detail_text(
+                text, max_chars
+            )
+            return text, truncated
+        return None, False
 
     # ==================== delete ====================
 

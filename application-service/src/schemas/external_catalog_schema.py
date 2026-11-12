@@ -173,11 +173,15 @@ class ResolvedDependency(BaseModel):
 
 
 class PendingAgent(BaseModel):
-    """集群子 Agent 的落地结果：草稿状态 + 用户需要补的绑定（§3.4）。"""
+    """随包落地的 Agent 草稿 + 用户需要补的绑定（§3.4）。
+
+    两个来源：集群的子 Agent，以及工作流 agent 节点 `reference` 引用的 Agent。
+    两者的落地形态相同 —— 都是草稿、都没有自己的 release。
+    """
 
     local_resource_id: str
     name: str
-    # 子 Agent 没有 release，必须先发布它，集群才能发布
+    # 草稿没有 release，必须先发布它，引用方（集群 / 工作流）才能发布
     publish_required: bool = True
     pending_bindings: list[PendingBinding] = Field(default_factory=list)
 
