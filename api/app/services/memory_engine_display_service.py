@@ -1284,7 +1284,12 @@ def _merge_event_details(
         }
 
     elif engine_type == "PERSONALITY_ANCHOR":
-        return {"candidate_count": sum(event.details["candidate_count"] for event in events)}
+        return {
+            "candidate_count": sum(
+                _as_count((event.details or {}).get("candidate_count"))
+                for event in events
+            )
+        }
 
     return {}
 
