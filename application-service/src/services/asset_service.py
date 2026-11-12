@@ -23,7 +23,7 @@ import uuid
 from contextlib import nullcontext
 from typing import Any
 
-from sqlalchemy import and_, cast, func, or_, select
+from sqlalchemy import and_, cast, func, or_, select, update
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Session
 
@@ -39,12 +39,14 @@ from ..models import (
     AppAsset,
     AppAssetInstallation,
     AppRelease,
+    BuiltinToolConfig,
     MultiAgentConfig,
     Skill,
     SkillPackage,
     SkillPlugin,
     ToolConfig,
     ToolStatus,
+    ToolType,
     WorkflowConfig,
 )
 from ..models.app_asset_model import (
@@ -52,6 +54,7 @@ from ..models.app_asset_model import (
     InstallSource,
     InstallStatus,
     LinkMode,
+    MarketSync,
     ShareMode,
 )
 from ..models.app_model import AppType
@@ -117,6 +120,21 @@ def _coerce_uuid(value: Any) -> uuid.UUID | None:
         return uuid.UUID(str(value))
     except (ValueError, AttributeError, TypeError):
         return None
+
+
+def _node_label(node: dict[str, Any], node_config: Any) -> str | None:
+    """工作流节点/内联 Agent 的名称：只在共享预览里当展示用，取不到就不填。"""
+
+    if isinstance(node_config, dict):
+        for key in ("name", "label"):
+            value = node_config.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+    for key in ("name", "label", "id"):
+        value = node.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
 
 
 class AssetService:
@@ -361,8 +379,8 @@ class AssetService:
             )
         return release
 
-    def _assert_share_metadata_complete(self, release: AppRelease) -> None:
-        """共享前确认快照填齐「实际必填」的展示字段。
+    def _metadata_gaps(self, release: AppRelease) -> list[dict[str, Any]]:
+        """快照里「实际必填」的展示字段还缺哪些（不抛错，供预览复用）。
 
         图标、功能分类、使用示例、设置步骤的必填是随发布弹窗逐步落地的，
         SSO 发布入口至今仍允许缺省（预告期，4 周缓冲），因此库里会存在缺字段
@@ -391,6 +409,12 @@ class AssetService:
             if not (release.setup_steps or "").strip():
                 missing.append({"field": "setup_steps", "reason": "未填写设置步骤"})
 
+        return missing
+
+    def _assert_share_metadata_complete(self, release: AppRelease) -> None:
+        """共享入口的硬拦：缺字段就 400 + 1003（`msg` 里点名要补什么）。"""
+
+        missing = self._metadata_gaps(release)
         if missing:
             # 字段名必须写进 message：错误信封不向前端透出 `data`（见
             # error_core/fastapi_handlers.py 的 business_error_handler），
@@ -402,10 +426,16 @@ class AssetService:
                 data={"reason": "INCOMPLETE_METADATA", "missing": missing},
             )
 
-    def _assert_share_dependencies_available(
+    def _collect_dependency_inventory(
             self, release: AppRelease, tenant_id: uuid.UUID
-    ) -> None:
-        """Reject sharing a snapshot whose executable tools or skills are unavailable."""
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
+        """快照引用的工具/技能是否可用（返回清单与问题，不抛错）。
+
+        返回 ``(tool_refs, skill_refs, unavailable)``：前两项是收齐的引用（含集群
+        子 Agent 递归过来的），第三项是「这个快照投不出去」的原因。共享入口用第三
+        项抛错，共享预览把它翻成 ``blockers``——两处共用同一份遍历，避免「预览说
+        能投、提交却报错」。
+        """
 
         tool_refs: list[dict[str, Any]] = []
         skill_refs: list[dict[str, Any]] = []
@@ -420,6 +450,9 @@ class AssetService:
                 raw_id: Any,
                 path: str,
                 operation: Any = None,
+                *,
+                source: str | None = None,
+                source_name: str | None = None,
         ) -> None:
             if isinstance(raw_id, dict):
                 raw_id = raw_id.get("id") or raw_id.get(f"{kind}_id")
@@ -437,6 +470,11 @@ class AssetService:
                     "path": path,
                     # 选中具体方法时的 operation_key；整工具选择为 None
                     "operation": method or None,
+                    # 谁引用的：self / supervisor / workflow_node / sub_agent。共享
+                    # 校验用不到，共享预览要按它分组展示（同一工具被主管和子 Agent
+                    # 各引一次是两条，不能去重掉）。
+                    "source": source,
+                    "source_name": source_name,
                 })
 
         def add_issue(
@@ -460,13 +498,21 @@ class AssetService:
             })
 
         def inspect_agent_surface(
-                config: dict[str, Any], path: str, *, enabled_by_default: bool
+                config: dict[str, Any],
+                path: str,
+                *,
+                enabled_by_default: bool,
+                source: str,
+                source_name: str | None = None,
         ) -> None:
             tools = config.get("tools")
             if isinstance(tools, list):
                 for index, selector in enumerate(tools):
                     if not isinstance(selector, dict):
-                        add_ref(tool_refs, "tool", None, f"{path}.tools[{index}]")
+                        add_ref(
+                            tool_refs, "tool", None, f"{path}.tools[{index}]",
+                            source=source, source_name=source_name,
+                        )
                         continue
                     if bool(selector.get("enabled", enabled_by_default)):
                         add_ref(
@@ -475,6 +521,8 @@ class AssetService:
                             selector.get("tool_id"),
                             f"{path}.tools[{index}]",
                             selector.get("operation"),
+                            source=source,
+                            source_name=source_name,
                         )
 
             skills = config.get("skills")
@@ -492,7 +540,10 @@ class AssetService:
                         )
 
         def inspect_nested_release(
-                raw_id: Any, path: str, expected_app_id: Any = None
+                raw_id: Any,
+                path: str,
+                expected_app_id: Any = None,
+                source_name: str | None = None,
         ) -> None:
             release_id = _coerce_uuid(raw_id)
             expected_id = _coerce_uuid(expected_app_id)
@@ -529,7 +580,10 @@ class AssetService:
                     "agent_release", release_id, path, "引用的 Agent 应用不存在、已停用或跨租户"
                 )
                 return
-            inspect_release(nested, path)
+            inspect_release(
+                nested, path,
+                source="sub_agent", source_name=source_name or nested.name,
+            )
 
         def inspect_workflow_nodes(value: Any, path: str) -> None:
             if isinstance(value, list):
@@ -561,6 +615,8 @@ class AssetService:
                     node_parameters.get("operation")
                     if isinstance(node_parameters, dict)
                     else None,
+                    source="workflow_node",
+                    source_name=_node_label(value, node_config),
                 )
             elif node_type == "agent" and isinstance(node_config, dict):
                 if node_config.get("mode", "inline") == "reference":
@@ -573,20 +629,33 @@ class AssetService:
                     )
                 else:
                     inspect_agent_surface(
-                        node_config, config_path, enabled_by_default=True
+                        node_config,
+                        config_path,
+                        enabled_by_default=True,
+                        source="workflow_node",
+                        source_name=_node_label(value, node_config),
                     )
 
             for key, child in value.items():
                 inspect_workflow_nodes(child, f"{path}.{key}")
 
-        def inspect_release(current: AppRelease, path: str) -> None:
+        def inspect_release(
+                current: AppRelease,
+                path: str,
+                *,
+                source: str = "self",
+                source_name: str | None = None,
+        ) -> None:
             if current.id in visited_releases:
                 return
             visited_releases.add(current.id)
             config = current.config if isinstance(current.config, dict) else {}
 
             if current.type == AppType.AGENT:
-                inspect_agent_surface(config, path, enabled_by_default=False)
+                inspect_agent_surface(
+                    config, path, enabled_by_default=False,
+                    source=source, source_name=source_name,
+                )
             elif current.type in (AppType.WORKFLOW, AppType.PURE_WORKFLOW):
                 inspect_workflow_nodes(config.get("nodes") or [], f"{path}.nodes")
             elif current.type == AppType.MULTI_AGENT:
@@ -596,6 +665,7 @@ class AssetService:
                         supervisor,
                         f"{path}.supervisor_config",
                         enabled_by_default=False,
+                        source="supervisor",
                     )
                 for index, entry in enumerate(config.get("sub_agents") or []):
                     if not isinstance(entry, dict):
@@ -610,6 +680,7 @@ class AssetService:
                         entry.get("release_id"),
                         f"{path}.sub_agents[{index}]",
                         entry.get("agent_id"),
+                        source_name=entry.get("name"),
                     )
 
         inspect_release(release, "app")
@@ -797,12 +868,418 @@ class AssetService:
                     tool.name,
                 )
 
+        return tool_refs, skill_refs, unavailable
+
+    def _assert_share_dependencies_available(
+            self, release: AppRelease, tenant_id: uuid.UUID
+    ) -> None:
+        """Reject sharing a snapshot whose executable tools or skills are unavailable."""
+
+        _tools, _skills, unavailable = self._collect_dependency_inventory(
+            release, tenant_id
+        )
         if unavailable:
             # `data` 恒为 `{}`（统一错误契约 §4.1）——逐项原因只能进 `msg`，
             # 否则前端拿到的是通用「请求参数无效」，用户不知道该改哪个工具。
             raise ShareDependencyUnavailableError(
                 details=_describe_unavailable_dependencies(unavailable)
             )
+
+    # ==================== 共享预览（弹窗回显 + 确认页） ====================
+
+    def collect_share_preview(
+            self,
+            *,
+            app_id: uuid.UUID,
+            user_id: uuid.UUID,
+            workspace_id: uuid.UUID | None,
+            tenant_id: uuid.UUID,
+            release_id: uuid.UUID | None = None,
+    ) -> dict[str, Any]:
+        """共享弹窗与共享确认页要用的只读快照（契约 `GET /apps/{app_id}/share/preview`）。
+
+        三件事刻意不做，每件都有具体代价：
+
+        - **不调 `MarketSubmissionService.prepare()`**。那条路径会走
+          `_export_skill_files` 把技能包文件重新导出到对象存储，放进 GET 意味着每开
+          一次弹窗就重传一遍。
+        - **不写库**。`ensure_market_carrier` 会建 `unpublished` 载体行，那是提交时的
+          副作用；预览只看现状。
+        - **不碰市场服务**。预览要的数据全在本库（`app_releases` 快照 +
+          `apps.origin` + `app_categories` + `market_sync`），市场侧只回显本地已有的
+          投稿记录，审核状态不在这里推导。
+
+        「是否已在资源中心」的判据是 ``status == published``，**不是「有没有条目行」**：
+        只开开关 3 时后端会为投稿建一条 `unpublished` 载体行做外键占位，它不在资源
+        中心展示（`ensure_market_carrier`）。
+        """
+
+        app = self.app_service._get_app_or_404(app_id)
+        self.app_service._validate_workspace_access(app, workspace_id)
+        self._assert_can_share(app, user_id, workspace_id)
+
+        release = self._resolve_release(app, release_id)
+        asset = self.db.scalars(
+            select(AppAsset).where(
+                AppAsset.tenant_id == tenant_id,
+                AppAsset.source_app_id == app.id,
+                AppAsset.is_active.is_(True),
+            )
+        ).first()
+        sync = None
+        if asset is not None:
+            sync = self.db.scalars(
+                select(MarketSync)
+                .where(MarketSync.asset_id == asset.id)
+                .order_by(MarketSync.updated_at.desc())
+            ).first()
+
+        tool_refs, skill_refs, unavailable = self._collect_dependency_inventory(
+            release, tenant_id
+        )
+        builtin_tools, tool_dependencies = self._preview_tools(tool_refs, tenant_id)
+        skill_dependencies = self._preview_skills(skill_refs, tenant_id)
+
+        blockers = self._preview_blockers(release, tenant_id, unavailable)
+        market_blockers = self._preview_market_blockers(app=app, release=release)
+        blockers.extend(market_blockers)
+
+        published = asset is not None and asset.status == AssetStatus.PUBLISHED
+        publisher_names = cross_domain_read.get_user_display_names_by_ids(
+            self.db, {release.published_by} if release.published_by else set()
+        )
+        block_reason = next(
+            (item["reason"] for item in market_blockers), None
+        )
+
+        return {
+            "app_id": str(app.id),
+            "app_type": release.type,
+            "release": {
+                "id": str(release.id),
+                "version": release.version,
+                "version_name": release.version_name,
+                "published_at": to_timestamp_ms(release.published_at),
+                "publisher_name": publisher_names.get(release.published_by) or "未知用户",
+                "name": release.name,
+                "icon": release.icon,
+            },
+            "resource_center": {
+                "shared": published,
+                "allow_editable": bool(
+                    published and asset.share_mode == ShareMode.EDITABLE
+                ),
+                "asset_id": str(asset.id) if asset is not None else None,
+                "pinned_release_id": (
+                    str(asset.published_release_id)
+                    if asset is not None and asset.published_release_id
+                    else None
+                ),
+                "pinned_version": (
+                    asset.published_version if asset is not None else None
+                ),
+                "status": (
+                    asset.status if asset is not None else AssetStatus.UNPUBLISHED
+                ),
+            },
+            "community_market": {
+                "submitted": sync is not None,
+                "sync_status": sync.status if sync is not None else None,
+                # 市场审核状态不在这里推导（见方法注释）
+                "publication_status": None,
+                "market_resource_id": (
+                    str(sync.market_resource_id)
+                    if sync is not None and sync.market_resource_id
+                    else None
+                ),
+                "can_submit": not market_blockers,
+                "block_reason": block_reason,
+            },
+            "builtin_tools": builtin_tools,
+            "carried_dependencies": tool_dependencies + skill_dependencies,
+            "bindings": self._preview_knowledge_bindings(release),
+            "cluster_agents": self._preview_cluster_agents(app, release),
+            "blockers": blockers,
+            "can_submit_market": not market_blockers,
+        }
+
+    def _preview_tools(
+            self, tool_refs: list[dict[str, Any]], tenant_id: uuid.UUID
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        """把工具引用拆成「内置（按 tool_class 关联）」与「随包/占位」两桶。
+
+        分桶规则与市场投稿的 `classify_tool` 一致（§7.5.2）：`builtin` → 目标企业
+        天然就有；`mcp` → 随包并建条目；`custom` → 只留占位行；`workflow` → 直接
+        剔除（它只指向源租户的某个工作流，目标租户没有可填的落点）。这里不 import
+        市场包（开源版没有它），所以规则写在两边——但它只是分类，不是准入判定，
+        漂移的后果是展示分组不同，不会让提交行为不一致。
+        """
+
+        ids = {ref["id"] for ref in tool_refs if ref["id"] is not None}
+        if not ids:
+            return [], []
+        rows = self.db.execute(
+            select(ToolConfig.id, ToolConfig.name, ToolConfig.tool_type)
+            .where(
+                ToolConfig.id.in_(ids),
+                ToolConfig.tenant_id == tenant_id,
+                ToolConfig.is_active.is_(True),
+            )
+        ).all()
+        by_id = {row[0]: row for row in rows}
+
+        builtin_ids = [row[0] for row in rows if row[2] == ToolType.BUILTIN]
+        class_by_id: dict[uuid.UUID, str | None] = {}
+        if builtin_ids:
+            class_by_id = {
+                row.id: row.tool_class
+                for row in self.db.scalars(
+                    select(BuiltinToolConfig).where(
+                        BuiltinToolConfig.id.in_(builtin_ids)
+                    )
+                ).all()
+            }
+
+        builtin_tools: list[dict[str, Any]] = []
+        dependencies: list[dict[str, Any]] = []
+        seen_builtin: set[tuple[Any, Any, Any]] = set()
+        seen_dependency: set[tuple[str, str]] = set()
+        for ref in tool_refs:
+            row = by_id.get(ref["id"])
+            if row is None:
+                # 查不到行的引用由 blockers 负责说明，这里不返回半条记录
+                continue
+            name = str(row[1]) if row[1] else None
+            tool_type = str(row[2])
+            if tool_type == ToolType.BUILTIN:
+                key = (row[0], ref["source"], ref["source_name"])
+                if key in seen_builtin:
+                    continue
+                seen_builtin.add(key)
+                builtin_tools.append({
+                    "name": name,
+                    "tool_class": class_by_id.get(row[0]),
+                    "source": ref["source"] or "self",
+                    "source_name": ref["source_name"],
+                })
+                continue
+
+            if tool_type == ToolType.MCP:
+                kind, disposition = "mcp_tool", "bundled"
+            elif tool_type == ToolType.WORKFLOW:
+                # 工作流工具只指向源租户的某个纯工作流，落地时既不建条目也不建行
+                # （见 `bundle_install_service._land_tools`），预览必须同样标 dropped，
+                # 否则会在共享前告诉用户「会随包」，装完却什么都没留下。
+                kind, disposition = "workflow_tool", "dropped"
+            else:
+                kind, disposition = "custom_tool", "placeholder"
+            key = (kind, name or str(row[0]))
+            if key in seen_dependency:
+                continue
+            seen_dependency.add(key)
+            dependencies.append({
+                "kind": kind,
+                "name": name,
+                "disposition": disposition,
+            })
+        return builtin_tools, dependencies
+
+    def _preview_skills(
+            self, skill_refs: list[dict[str, Any]], tenant_id: uuid.UUID
+    ) -> list[dict[str, Any]]:
+        """技能/插件：随包并各自建市场条目（`bundled`）。插件按行归并，不展开成员。"""
+
+        ids = {ref["id"] for ref in skill_refs if ref["id"] is not None}
+        if not ids:
+            return []
+        rows = self.db.execute(
+            select(
+                Skill.id,
+                Skill.name,
+                SkillPlugin.id,
+                SkillPlugin.name,
+            )
+            .outerjoin(
+                SkillPackage,
+                and_(
+                    Skill.package_id == SkillPackage.id,
+                    SkillPackage.tenant_id == tenant_id,
+                    SkillPackage.is_active.is_(True),
+                ),
+            )
+            .outerjoin(
+                SkillPlugin,
+                and_(
+                    SkillPackage.plugin_id == SkillPlugin.id,
+                    SkillPlugin.tenant_id == tenant_id,
+                    SkillPlugin.is_active.is_(True),
+                ),
+            )
+            .where(
+                Skill.id.in_(ids),
+                Skill.is_active.is_(True),
+            )
+        ).all()
+        by_id = {row[0]: row for row in rows}
+
+        entries: list[dict[str, Any]] = []
+        seen: set[tuple[str, str]] = set()
+        for ref in skill_refs:
+            row = by_id.get(ref["id"])
+            if row is None:
+                continue
+            if row[2] is not None:
+                kind, name = "plugin", str(row[3]) if row[3] else None
+            else:
+                kind, name = "skill", str(row[1]) if row[1] else None
+            key = (kind, name or str(row[0]))
+            if key in seen:
+                continue
+            seen.add(key)
+            entries.append({"kind": kind, "name": name, "disposition": "bundled"})
+        return entries
+
+    def _preview_knowledge_bindings(self, release: AppRelease) -> list[dict[str, Any]]:
+        """知识库只声明「需重新绑定」，文档与向量不跨租户复制（§7.5.3）。
+
+        只扫主配置与集群主管配置，与 `MarketSubmissionService._collect_knowledge_bindings`
+        同口径；子 Agent 的知识库在安装侧按它自己的快照重绑。
+        """
+
+        config = release.config if isinstance(release.config, dict) else {}
+        holders = [config]
+        supervisor = config.get("supervisor_config")
+        if isinstance(supervisor, dict):
+            holders.append(supervisor)
+
+        bindings: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for holder in holders:
+            retrieval = holder.get("knowledge_retrieval")
+            if not isinstance(retrieval, dict):
+                continue
+            for entry in retrieval.get("knowledge_bases") or []:
+                if not isinstance(entry, dict) or not entry.get("enabled", True):
+                    continue
+                kb_id = entry.get("kb_id")
+                if not kb_id or str(kb_id) in seen:
+                    continue
+                seen.add(str(kb_id))
+                row = cross_domain_read.get_knowledge_row(
+                    self.db, _coerce_uuid(kb_id)
+                )
+                bindings.append({
+                    "kind": "knowledge_base",
+                    "name": getattr(row, "name", None) if row is not None else None,
+                })
+        return bindings
+
+    def _preview_cluster_agents(
+            self, app: App, release: AppRelease
+    ) -> list[dict[str, Any]]:
+        """随包的集群子 Agent（不单独建市场条目，§7.2.1）。
+
+        读的是快照里**钉住**的 `release_id`（`_pin_multi_agent_sub_agents` 写进去
+        的那份），不是子 Agent 的当前草稿——用户看到的就是提交时会带走的版本。
+        """
+
+        if app.type != AppType.MULTI_AGENT:
+            return []
+        config = release.config if isinstance(release.config, dict) else {}
+        members: list[dict[str, Any]] = []
+        for entry in config.get("sub_agents") or []:
+            if not isinstance(entry, dict):
+                continue
+            sub_release = self.db.get(AppRelease, _coerce_uuid(entry.get("release_id")))
+            if sub_release is None or not sub_release.is_active:
+                continue
+            sub_app = self.db.get(App, sub_release.app_id)
+            members.append({
+                "agent_id": str(sub_release.app_id),
+                "name": (
+                    (sub_app.name if sub_app is not None else None)
+                    or entry.get("name")
+                    or sub_release.name
+                ),
+                "release_id": str(sub_release.id),
+                "version_name": sub_release.version_name,
+            })
+        return members
+
+    def _preview_blockers(
+            self,
+            release: AppRelease,
+            tenant_id: uuid.UUID,
+            unavailable: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """资源中心侧的前置阻断项：与提交时的 400 + 1003 同源。
+
+        提交路径靠抛异常替用户挡住，预览必须改成「列出来」，否则确认页要么什么都
+        不提示、要么只能自己去猜一套规则。
+        """
+
+        blockers: list[dict[str, Any]] = []
+        for gap in self._metadata_gaps(release):
+            blockers.append({
+                "scope": "resource_center",
+                "reason": "INCOMPLETE_METADATA",
+                "message": f"该版本{gap['reason']}，请重新发布补齐后再共享",
+            })
+        for issue in unavailable:
+            blockers.append({
+                "scope": "resource_center",
+                "reason": "DEPENDENCY_UNAVAILABLE",
+                "message": _describe_unavailable_dependencies([issue]),
+            })
+        return blockers
+
+    def _preview_market_blockers(
+            self, *, app: App, release: AppRelease
+    ) -> list[dict[str, Any]]:
+        """社区市场侧的前置阻断项：只看应用自己的行与版本快照。
+
+        三条判定与投稿入口一一对应（`market_submission_service` 的
+        `gate_market_origin` / `gate_usage_examples` / `gate_categories`），`reason`
+        取值逐字相同，前端按它分支。这里不调用投稿服务，也不发任何外部请求——预览
+        是「打开弹窗时看一眼」，不该依赖市场在线。
+
+        代价是规则有两份实现：改这里的数字或文案时必须同步投稿入口，否则会出现
+        「预览说能投、提交被拒」。判定只涉及三个本地字段（`apps.origin`、
+        `app_releases.usage_examples`、`app_releases.categories`），漂移面很小。
+        """
+
+        blockers: list[dict[str, Any]] = []
+
+        # 市场来源的副本不能再投回去（产品定案，见 `gate_market_origin`）
+        if str(app.origin or "").strip().lower() in ("external", "market"):
+            blockers.append({
+                "scope": "community_market",
+                "reason": "ORIGIN_FROM_MARKET",
+                # 与投稿入口的报错文案同一句：确认页提示和提交被拒看到的是同一段话
+                "message": "应用是从社区市场复制来的副本，不能再投稿到社区市场",
+            })
+
+        examples = [
+            item for item in _expand_usage_examples(release.usage_examples)
+            if isinstance(item, str) and item.strip()
+        ]
+        minimum = 3
+        if len(examples) < minimum:
+            blockers.append({
+                "scope": "community_market",
+                "reason": "USAGE_EXAMPLES_INSUFFICIENT",
+                "message": f"投稿社区市场需要至少 {minimum} 条使用示例，当前 {len(examples)} 条",
+            })
+
+        from .category_service import CategoryService
+
+        if not CategoryService(self.db).existing_codes(release.categories or []):
+            blockers.append({
+                "scope": "community_market",
+                "reason": "CATEGORY_REQUIRED",
+                "message": "投稿社区市场需要至少选择 1 个功能分类",
+            })
+        return blockers
 
     def _display_payload(self, release: AppRelease) -> dict[str, Any]:
         """同租户内无需脱敏（§7.0）：真实配置 + 全部展示字段。"""
@@ -1215,6 +1692,7 @@ class AssetService:
                 config.get("nodes") or [],
                 target_workspace_id=target_workspace_id,
                 is_cross_workspace=is_cross_workspace,
+                user_id=user_id,
                 missing=missing,
             )
             self.db.add(
@@ -1357,19 +1835,33 @@ class AssetService:
             *,
             target_workspace_id: uuid.UUID,
             is_cross_workspace: bool,
+            user_id: uuid.UUID,
             missing: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
-        """Remove inaccessible workspace-scoped references from workflow nodes.
+        """Rebind or copy the workspace-scoped references inside workflow nodes.
 
         Workflow node JSON has several node-specific schemas, so this walks nested
         dictionaries rather than coupling the catalog copy path to every node type.
-        Only knowledge-base and memory-config identifiers are workspace scoped;
-        models, tools and skills remain untouched.
+
+        Three kinds of reference are handled, and the reason differs per kind:
+
+        * **knowledge base / memory config** — cleaned. Their content is
+          workspace-owned, so a copy must not inherit it (`_remap_ws_scoped`).
+        * **agent nodes in `reference` mode** — the referenced Agent app is a real
+          app row; leaving the source id in place yields a copy whose node can never
+          be published (`_pin_workflow_agent_references` rejects a foreign
+          workspace). It is copied into the target space instead, exactly like a
+          cluster sub-agent.
+        * **models / tools / skills** — untouched. They are *tenant*-scoped, and the
+          resource center never crosses a tenant, so their ids stay valid.
         """
 
         copied = copy.deepcopy(nodes)
         if not is_cross_workspace:
             return copied
+
+        # One copy per referenced Agent app, however many nodes point at it.
+        copied_agents: dict[uuid.UUID, str] = {}
 
         knowledge_entries: list[dict[str, Any]] = []
 
@@ -1453,12 +1945,132 @@ class AssetService:
                     })
                 result = cleaned_memory
 
+            result = self._remap_workflow_agent_reference(
+                result, path, target_workspace_id, user_id, copied_agents, missing
+            )
+
             for key, child in list(result.items()):
                 if key != "knowledge_bases":
                     result[key] = clean(child, f"{path}.{key}")
             return result
 
         return clean(copied)
+
+    def _remap_workflow_agent_reference(
+            self,
+            node: dict[str, Any],
+            path: str,
+            target_workspace_id: uuid.UUID,
+            user_id: uuid.UUID,
+            copied_agents: dict[uuid.UUID, str],
+            missing: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        """Copy the Agent an `agent` node references, then repoint the node at it.
+
+        Mirrors `_copy_cluster_config` for sub-agents: the referenced member lands as
+        a draft in the target space, and the node is rewired to `release_policy=current`
+        / `release_id=None` because release ids are meaningless in another space.
+
+        A reference that cannot be honoured degrades to inline mode with a `missing`
+        entry rather than keeping a dangling `app_id` — the market install path
+        (`app_dsl_service._resolve_workflow_nodes`) does the same, and a dangling id
+        would only surface later as a publish-time `WORKSPACE_NO_ACCESS`.
+        """
+
+        if node.get("type") != "agent":
+            return node
+        config = node.get("config")
+        if not isinstance(config, dict) or config.get("mode") != "reference":
+            return node
+        reference = config.get("reference")
+        if not isinstance(reference, dict):
+            return node
+
+        reference_path = f"{path}.config.reference"
+        source_app_id = _coerce_uuid(reference.get("app_id"))
+        if source_app_id is None:
+            missing.append({
+                "kind": "agent_ref",
+                "name": None,
+                "path": reference_path,
+                "reason": "Agent 节点引用的应用 id 无效",
+            })
+            return self._degrade_agent_node(node, config)
+
+        source_app = self.db.get(App, source_app_id)
+        if source_app is None or not source_app.is_active:
+            missing.append({
+                "kind": "agent_ref",
+                "name": None,
+                "path": reference_path,
+                "reason": "Agent 节点引用的应用不存在或已停用",
+            })
+            return self._degrade_agent_node(node, config)
+        if source_app.type != AppType.AGENT:
+            missing.append({
+                "kind": "agent_ref",
+                "name": source_app.name,
+                "path": reference_path,
+                "reason": "Agent 节点引用的应用不是 Agent 类型",
+            })
+            return self._degrade_agent_node(node, config)
+        if source_app.workspace_id == target_workspace_id:
+            # Already local to the target space: the reference stays valid as is.
+            return node
+
+        policy = reference.get("release_policy") or "current"
+        pinned_release_id = (
+            _coerce_uuid(reference.get("release_id"))
+            if policy == "pinned"
+            else source_app.current_release_id
+        )
+        release = self.db.get(AppRelease, pinned_release_id) if pinned_release_id else None
+        if release is None or not release.is_active or release.app_id != source_app.id:
+            missing.append({
+                "kind": "agent_ref",
+                "name": source_app.name,
+                "path": reference_path,
+                "reason": "Agent 节点引用的应用没有可用的发布版本",
+            })
+            return self._degrade_agent_node(node, config)
+
+        new_app_id = copied_agents.get(source_app.id)
+        if new_app_id is None:
+            new_app_id = str(
+                self._copy_from_release(
+                    release=release,
+                    source_app_id=source_app.id,
+                    target_workspace_id=target_workspace_id,
+                    user_id=user_id,
+                    missing=missing,
+                )
+            )
+            copied_agents[source_app.id] = new_app_id
+            # No `missing` entry on success: that list means "缺失", and the cluster
+            # copy path behaves the same way for sub-agents. The copy lands as a
+            # draft, so the workflow cannot publish until the user publishes this
+            # Agent first — the publish gate (`_pin_workflow_agent_references`)
+            # reports that with an actionable message.
+
+        node["config"] = {
+            **config,
+            "reference": {
+                **reference,
+                "app_id": new_app_id,
+                "release_policy": "current",
+                "release_id": None,
+            },
+        }
+        return node
+
+    @staticmethod
+    def _degrade_agent_node(
+            node: dict[str, Any], config: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Fall back an unresolvable agent reference to an inline node."""
+
+        node["config"] = {**config, "mode": "inline", "reference": None}
+        return node
 
     def _copy_cluster_config(
             self,
@@ -1638,7 +2250,19 @@ class AssetService:
         app = self.app_service._get_app_or_404(asset.source_app_id)
         release = self.db.get(AppRelease, asset.published_release_id)
 
-        asset.view_count = (asset.view_count or 0) + 1
+        # 浏览数是展示指标，不是资源内容更新：显式把 `updated_at` 写成自身，
+        # 压掉列上的 `onupdate`。否则每打开一次详情，条目就被刷成「刚更新」——
+        # 列表按 `updated_at` 倒序会把刚被点开的排到最前，「我的共享」的
+        # `shared_at` 也会变成刚才。同一句还顺手消掉 SELECT 后 +1 的竞态。
+        view_count = self.db.execute(
+            update(AppAsset)
+            .where(AppAsset.id == asset.id)
+            .values(
+                view_count=AppAsset.view_count + 1,
+                updated_at=AppAsset.updated_at,
+            )
+            .returning(AppAsset.view_count)
+        ).scalar_one()
         self.db.commit()
 
         payload = asset.display_payload or {}
@@ -1662,7 +2286,7 @@ class AssetService:
             "published_version_name": payload.get("version_name"),
             "source_app_version": self._source_app_version(app),
             "has_newer_version": self._has_newer_version(asset, app),
-            "view_count": asset.view_count,
+            "view_count": view_count,
             "publisher_name": next(iter(publisher.values()), None),
             "share_mode": asset.share_mode,
             "categories": payload.get("categories") or [],
