@@ -25,13 +25,6 @@ interface McpServiceFormValues extends Omit<MCPToolItem, 'icon'> {
   icon?: UploadFile<{ data?: { file_id?: string } }>;
 }
 
-const defaultIcon: NonNullable<McpServiceFormValues['icon']> = {
-  uid: 'default-tool-icon',
-  name: 'tool.svg',
-  status: 'done',
-  url: ToolIcon,
-};
-
 export interface RequestHeader { 
   key: string; 
   value: string;
@@ -92,7 +85,7 @@ const McpServiceModal = forwardRef<McpServiceModalRef, McpServiceModalProps>(({
         description,
         icon: icon
           ? { uid: icon, name: 'icon', status: 'done', url: icon }
-          : defaultIcon,
+          : undefined,
         config: { ...config_data }
       })
 
@@ -110,7 +103,7 @@ const McpServiceModal = forwardRef<McpServiceModalRef, McpServiceModalProps>(({
         description,
         icon: icon
           ? { uid: icon, name: 'icon', status: 'done', url: icon }
-          : defaultIcon,
+          : undefined,
         ...(config_data ? { config: { ...config_data } } : {})
       })
       // 如果是从 Market 组件传来的数据（包含 market_id），保存完整的 data 用于后续提交
@@ -230,7 +223,6 @@ const McpServiceModal = forwardRef<McpServiceModalRef, McpServiceModalProps>(({
         form={form}
         layout="vertical"
         initialValues={{
-          icon: defaultIcon,
           config: {
             connection_config: {
               auth_type: 'none',
@@ -268,14 +260,17 @@ const McpServiceModal = forwardRef<McpServiceModalRef, McpServiceModalProps>(({
           name="icon"
           label={t('application.customIcon')}
           valuePropName="fileList"
-          rules={[{
-            validator: (_, icon: McpServiceFormValues['icon']) => {
-              if (icon && icon.status !== 'done') {
-                return Promise.reject(new Error(t('common.pleaseSelect')));
-              }
-              return Promise.resolve();
-            },
-          }]}
+          rules={[
+            { required: true, message:t('common.pleaseSelect')},
+            {
+              validator: (_, icon: McpServiceFormValues['icon']) => {
+                if (icon && icon.status !== 'done') {
+                  return Promise.reject(new Error(t('common.pleaseSelect')));
+                }
+                return Promise.resolve();
+              },
+            }
+          ]}
         >
           <UploadImages fileSize={2} disabled={loading} />
         </Form.Item>

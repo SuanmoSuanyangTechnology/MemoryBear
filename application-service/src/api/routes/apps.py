@@ -104,6 +104,7 @@ def list_apps(
         db: DbSession,
         cache: CacheClient,
         runtime: RuntimeDep,
+        principal: Caller,
         type: str | None = Query(
             None, description="应用类型过滤，支持逗号分隔多值，如 'agent,multi_agent'"
         ),
@@ -949,7 +950,6 @@ def publish_workflow_as_tool(
         tool_name=payload.name,
         tool_description=payload.description or "",
         tenant_id=principal.tenant_id,
-        workspace_id=workspace_id,
         icon=payload.icon,
         timeout=payload.timeout,
         tags=payload.tags,
@@ -972,13 +972,14 @@ def preview_workflow_tool_publish(
         app_id: UUID,
         workspace_id: WorkspaceId,
         db: DbSession,
+        principal: Caller,
         release_id: Annotated[
             UUID | None, Query(description="指定工作流发布版本ID，不传则使用当前发布版本")
         ] = None,
 ):
     preview = WorkflowToolPublishService(db).get_publish_preview(
         workflow_app_id=app_id,
-        workspace_id=workspace_id,
+        tenant_id=principal.tenant_id,
         release_id=release_id,
     )
     return success(data=preview, msg="获取工作流工具发布预览成功")

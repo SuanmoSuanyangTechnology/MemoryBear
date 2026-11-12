@@ -21,13 +21,6 @@ interface CustomToolFormValues extends Omit<CustomToolItem, 'icon'> {
   icon?: UploadFile<{ data?: { file_id?: string } }>;
 }
 
-const defaultIcon: NonNullable<CustomToolFormValues['icon']> = {
-  uid: 'default-tool-icon',
-  name: 'tool.svg',
-  status: 'done',
-  url: ToolIcon,
-};
-
 interface OperationItem {
   method: string;
   path: string;
@@ -74,7 +67,7 @@ const CustomToolModal = forwardRef<CustomToolModalRef, CustomToolModalProps>(({
         ...rest,
         icon: data.icon
           ? { uid: data.icon, name: 'icon', status: 'done', url: data.icon }
-          : defaultIcon,
+          : undefined,
         config: {...config_data}
       })
       setEditVo(data)
@@ -145,7 +138,6 @@ const CustomToolModal = forwardRef<CustomToolModalRef, CustomToolModalProps>(({
         form={form}
         layout="vertical"
         initialValues={{
-          // icon: defaultIcon,
           config: {
             auth_type: 'none'
           }
@@ -166,14 +158,17 @@ const CustomToolModal = forwardRef<CustomToolModalRef, CustomToolModalProps>(({
           name="icon"
           label={t('application.customIcon')}
           valuePropName="fileList"
-          rules={[{
-            validator: (_, icon: CustomToolFormValues['icon']) => {
-              if (icon && icon.status !== 'done') {
-                return Promise.reject(new Error(t('common.pleaseSelect')));
-              }
-              return Promise.resolve();
-            },
-          }]}
+          rules={[
+            { required: true, message:t('common.pleaseSelect')},
+            {
+              validator: (_, icon: CustomToolFormValues['icon']) => {
+                if (icon && icon.status !== 'done') {
+                  return Promise.reject(new Error(t('common.pleaseSelect')));
+                }
+                return Promise.resolve();
+              },
+            }
+          ]}
         >
           <UploadImages fileSize={2} disabled={loading} />
         </Form.Item>

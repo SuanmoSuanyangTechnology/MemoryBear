@@ -1,4 +1,5 @@
 """工具控制器 - 简化统一的工具管理接口"""
+import uuid
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -71,6 +72,12 @@ async def get_tool_methods(
         service: ToolService = Depends(get_tool_service)
 ):
     """获取工具的所有方法"""
+    # 非法 tool_id 属于调用方错误，与「工具不存在」同口径返回 404；只守住 UUID
+    # 解析这一步，后续服务构造/MCP 发现等真实故障仍走 500，不被误标成缺失。
+    try:
+        uuid.UUID(tool_id)
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=404, detail="工具不存在")
     try:
         methods = await service.get_tool_methods(tool_id, current_user.tenant_id)
         if methods is None:
@@ -89,6 +96,12 @@ async def get_tool(
         service: ToolService = Depends(get_tool_service)
 ):
     """获取工具详情"""
+    # 非法 tool_id：属调用方错误，与「工具不存在」同口径返回 404。只守住解析这
+    # 一步，后续仓储/配置读取的真实故障继续走 500，不被误标成缺失。
+    try:
+        uuid.UUID(tool_id)
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=404, detail="工具不存在")
     tool = service.get_tool_detail(tool_id, current_user.tenant_id)
     if not tool:
         raise HTTPException(status_code=404, detail="工具不存在")

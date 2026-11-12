@@ -56,6 +56,7 @@ from ..models.app_asset_model import (
 )
 from ..models.app_model import AppType
 from ..repositories import cross_domain_read
+from ..schemas import app_schema
 from ..utils.datetime_utils import to_timestamp_ms, utcnow_naive
 from ..utils.redis_cache import delete_json
 from .app_service import AppService, _expand_usage_examples
@@ -159,6 +160,7 @@ class AssetService:
             return None
 
         release = self._resolve_release(app, release_id)
+        self._assert_share_metadata_complete(release)
         self._assert_share_dependencies_available(release, tenant_id)
         return self._upsert_asset(
             app=app,
@@ -193,6 +195,7 @@ class AssetService:
         self._assert_can_share(app, user_id, workspace_id)
 
         release = self._resolve_release(app, release_id)
+        self._assert_share_metadata_complete(release)
         self._assert_share_dependencies_available(release, tenant_id)
         return self._upsert_asset(
             app=app,
@@ -357,6 +360,47 @@ class AssetService:
                 f"版本 {target_id} 不存在或已下线", BizCode.RELEASE_NOT_FOUND
             )
         return release
+
+    def _assert_share_metadata_complete(self, release: AppRelease) -> None:
+        """共享前确认快照填齐「实际必填」的展示字段。
+
+        图标、功能分类、使用示例、设置步骤的必填是随发布弹窗逐步落地的，
+        SSO 发布入口至今仍允许缺省（预告期，4 周缓冲），因此库里会存在缺字段
+        的版本快照。这类版本进资源中心后展示为空，消费方无从判断用途与用法，
+        所以统一在共享入口拦住，要求重新发布补齐——旧版本与 SSO 发布的版本
+        都走这一道，不需要回改历史数据。
+        """
+
+        missing: list[dict[str, Any]] = []
+        if not (release.icon or "").strip():
+            missing.append({"field": "icon", "reason": "未填写图标"})
+        if not (release.categories or []):
+            missing.append({"field": "categories", "reason": "未选择功能分类"})
+
+        if release.type in (AppType.AGENT, AppType.MULTI_AGENT):
+            examples = _expand_usage_examples(release.usage_examples)
+            if len(examples) < app_schema.USAGE_EXAMPLES_MIN_ITEMS:
+                missing.append({
+                    "field": "usage_examples",
+                    "reason": (
+                        "使用示例少于 "
+                        f"{app_schema.USAGE_EXAMPLES_MIN_ITEMS} 条"
+                    ),
+                })
+        elif release.type in (AppType.WORKFLOW, AppType.PURE_WORKFLOW):
+            if not (release.setup_steps or "").strip():
+                missing.append({"field": "setup_steps", "reason": "未填写设置步骤"})
+
+        if missing:
+            # 字段名必须写进 message：错误信封不向前端透出 `data`（见
+            # error_core/fastapi_handlers.py 的 business_error_handler），
+            # 只说「缺少展示信息」会让用户不知道该补哪一项。
+            fields = "、".join(item["reason"] for item in missing)
+            raise BusinessException(
+                f"该版本{fields}，请重新发布补齐后再共享",
+                BizCode.INVALID_PARAMETER,
+                data={"reason": "INCOMPLETE_METADATA", "missing": missing},
+            )
 
     def _assert_share_dependencies_available(
             self, release: AppRelease, tenant_id: uuid.UUID
