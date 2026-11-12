@@ -15,7 +15,7 @@ from uuid import UUID
 from sqlalchemy import desc, select
 
 from src.infrastructure.postgres import PostgresManager
-from src.models.references import MemoryConfigRow, OntologySceneRow, Workspace
+from src.models.references import MemoryConfigRow, Workspace
 
 
 def _columns(*keys: str) -> tuple[Any, ...]:
@@ -34,6 +34,9 @@ _SUMMARY_COLUMNS = _columns(
     "workspace_id",
     "end_user_id",
     "apply_id",
+    # read_all compatibility fields are projected from the existing config row;
+    # no retired ontology table is joined.
+    # 在v0.5.11实现这些契约变更和字段收缩。
     "scene_id",
     "is_default",
     "state",
@@ -278,20 +281,14 @@ class MemoryConfigReadRepository:
             )
             return dict(row) if row is not None else None
 
-    async def list_by_workspace(
-        self, workspace_id: UUID
-    ) -> list[tuple[dict[str, Any], str | None]]:
-        """List a workspace's configurations with their ontology scene name."""
+    async def list_by_workspace(self, workspace_id: UUID) -> list[dict[str, Any]]:
+        """List a workspace's configurations."""
 
         async with self.postgres.session() as session:
             rows = (
                 (
                     await session.execute(
-                        select(*_SUMMARY_COLUMNS, OntologySceneRow.scene_name)
-                        .outerjoin(
-                            OntologySceneRow,
-                            MemoryConfigRow.scene_id == OntologySceneRow.scene_id,
-                        )
+                        select(*_SUMMARY_COLUMNS)
                         .where(MemoryConfigRow.workspace_id == workspace_id)
                         .order_by(desc(MemoryConfigRow.updated_at))
                     )
@@ -299,13 +296,7 @@ class MemoryConfigReadRepository:
                 .mappings()
                 .all()
             )
-
-        result: list[tuple[dict[str, Any], str | None]] = []
-        for row in rows:
-            config = dict(row)
-            scene_name = config.pop("scene_name")
-            result.append((config, scene_name))
-        return result
+        return [dict(row) for row in rows]
 
     async def get_workspace_active_config_id(self, workspace_id: UUID) -> UUID | None:
         """The active workspace row's ``memory_config`` pointer."""

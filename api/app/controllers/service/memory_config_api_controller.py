@@ -8,7 +8,6 @@ from fastapi.encoders import jsonable_encoder
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.controllers import memory_config_controller
-from app.controllers import ontology_controller
 from app.controllers.emotion_config_controller import EmotionConfigUpdate
 from app.core.api_key_auth import get_current_api_key_auth, require_api_key_self_db
 from app.core.api_key_utils import get_current_user_snapshot_from_api_key_async
@@ -169,28 +168,6 @@ async def read_all_config(
         )
 
 
-@router.get("/scenes/simple")
-@require_api_key_self_db(scopes=["memory"])
-async def get_ontology_scenes(
-        request: Request,
-        api_key_auth: ApiKeyAuth = None,
-):
-    """
-    Get available ontology scenes for the workspace.
-
-    Returns a simple list of scene_id and scene_name for dropdown selection.
-    Used before creating a memory config to choose which ontology scene to associate.
-    """
-    logger.info(f"V1 get scenes - workspace: {api_key_auth.workspace_id}")
-
-    async with get_async_db_context() as auth_db:
-        current_user = await get_current_user_snapshot_from_api_key_async(auth_db, api_key_auth)
-
-        return await ontology_controller.get_scenes_simple(
-            current_user=current_user,
-        )
-
-
 @router.get("/read_config_extracted")
 @require_api_key_self_db(scopes=["memory"])
 @memory_profile_proxy(
@@ -346,6 +323,9 @@ async def create_memory_config(
     mgmt_payload = ConfigParamsCreate(
         config_name=payload.config_name,
         config_desc=payload.config_desc or "",
+        # Compatibility-only: accepted because create_config was not announced for
+        # field removal, but downstream code deliberately does not persist it.
+        # 在v0.5.11实现这些契约变更和字段收缩。
         scene_id=payload.scene_id,
         llm_id=payload.llm_id,
         embedding_id=payload.embedding_id,
@@ -397,6 +377,8 @@ async def update_memory_config(
             config_id=payload.config_id,
             config_name=payload.config_name,
             config_desc=payload.config_desc,
+            # Compatibility-only no-op; do not restore writes to the retired ontology.
+            # 在v0.5.11实现这些契约变更和字段收缩。
             scene_id=payload.scene_id,
         )
 

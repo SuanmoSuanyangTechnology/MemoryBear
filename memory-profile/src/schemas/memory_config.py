@@ -49,6 +49,9 @@ class ExtractedConfigData(BaseModel):
     include_dialogue_context: bool | None
     max_context: int | None
     pruning_enabled: bool | None
+    # read_config_extracted is not in the announced removal list. The field is
+    # retained for response compatibility without reading the retired ontology.
+    # 在v0.5.11实现这些契约变更和字段收缩。
     pruning_scene: str | None
     pruning_threshold: float | None
     enable_self_reflexion: bool | None
@@ -84,9 +87,6 @@ class EmotionConfigData(BaseModel):
     config_id: UUID
     emotion_enabled: bool | None
     emotion_model_id: str | None
-    emotion_extract_keywords: bool | None
-    emotion_min_intensity: float | None
-    emotion_enable_subject: bool | None
     is_default: bool
 
 
@@ -221,6 +221,9 @@ class ConfigSummaryData(BaseModel):
     end_user_id: str | None
     config_id_old: int | None
     apply_id: str | None
+    # read_all_config is not in the announced removal list. Preserve its legacy
+    # response keys while the service stops querying/writing retired ontology data.
+    # 在v0.5.11实现这些契约变更和字段收缩。
     scene_id: str | None
     scene_name: str | None
     is_system_default: bool | None

@@ -30,9 +30,6 @@ class EmotionConfigUpdate(BaseModel):
     """情绪配置更新请求模型"""
     config_id: Union[uuid.UUID, int, str]= Field(..., description="配置ID")
     emotion_enabled: bool = Field(..., description="是否启用情绪提取")
-    emotion_extract_keywords: bool = Field(..., description="是否提取情绪关键词")
-    emotion_min_intensity: float = Field(..., ge=0.0, le=1.0, description="最小情绪强度阈值（0.0-1.0）")
-    emotion_enable_subject: bool = Field(..., description="是否启用主体分类")
 
 # ==================== 记忆配置接口已迁移 ====================
 # get_emotion_config / update_emotion_config 已迁移至 memory_config_controller

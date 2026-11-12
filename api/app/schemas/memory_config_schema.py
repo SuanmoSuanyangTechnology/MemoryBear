@@ -434,7 +434,6 @@ class MemoryConfig(BaseModel):
 
     # Pipeline config: Pruning
     pruning_enabled: bool = True
-    pruning_scene: Optional[str] = "education"
     pruning_threshold: float = 0.5
 
     # Pipeline config: Scene boundary and SceneSummary
@@ -468,10 +467,6 @@ class MemoryConfig(BaseModel):
     # Pipeline config: Coding Agent preference extension
     preference_engine_enabled: bool = False
     preference_custom_keywords: tuple[str, ...] = ()
-
-    # Ontology scene association
-    scene_id: Optional[UUID] = None
-    ontology_class_infos: list[dict] = Field(default_factory=list)
 
     @model_validator(mode='after')
     def _validate_required_fields(self):

@@ -29,7 +29,6 @@ from app.models.app_model import AppType
 from app.models.memory_config_model import MemoryConfig as MemoryConfigModel
 from app.repositories.end_user_repository import get_end_user_by_id, get_end_user_by_id_async
 from app.repositories.memory_config_repository import MemoryConfigRepository
-from app.repositories.ontology_class_repository import OntologyClassRepository
 from app.repositories.workspace_repository import get_workspace_memory_config_id, get_workspace_memory_config_id_async
 from app.schemas.memory_config_schema import (
     ConfigurationError,
@@ -131,46 +130,6 @@ def _validate_config_id(config_id, db: Session):
         field_name="config_id",
         invalid_value=config_id,
     )
-
-
-def _load_ontology_class_infos(db: Session, scene_id) -> list:
-    """从 ontology_class 表加载完整本体类型信息（name + description），用于注入剪枝提示词。
-
-    Args:
-        db: 数据库会话
-        scene_id: 本体场景 UUID
-
-    Returns:
-        [{"class_name": ..., "class_description": ...}, ...] 或空列表
-    """
-    if not scene_id:
-        return []
-    try:
-        repo = OntologyClassRepository(db)
-        classes = repo.get_classes_by_scene(scene_id)
-        return [
-            {"class_name": c.class_name, "class_description": c.class_description or ""}
-            for c in classes if c.class_name
-        ]
-    except Exception as e:
-        logger.warning(f"Failed to load ontology class infos for scene_id={scene_id}: {e}")
-        return []
-
-
-async def _load_ontology_class_infos_async(db: AsyncSession, scene_id) -> list:
-    """Async version of _load_ontology_class_infos — delegates to OntologyClassRepository."""
-    if not scene_id:
-        return []
-    try:
-        repo = OntologyClassRepository(db)
-        classes = await repo.get_classes_by_scene_async(scene_id)
-        return [
-            {"class_name": c.class_name, "class_description": c.class_description or ""}
-            for c in classes if c.class_name
-        ]
-    except Exception as e:
-        logger.warning(f"Failed to load ontology class infos for scene_id={scene_id}: {e}")
-        return []
 
 
 def _get_default_model_preset(db: Session):
@@ -326,7 +285,6 @@ def _build_memory_config(
         vision_uuid, vision_name,
         audio_uuid, audio_name,
         video_uuid, video_name,
-        ontology_class_infos,
 ) -> MemoryConfig:
     """Construct a MemoryConfig from validated models — shared by sync and async paths."""
     return MemoryConfig(
@@ -383,7 +341,6 @@ def _build_memory_config(
         # Pipeline config: Pruning
         pruning_enabled=bool(
             memory_config_row.pruning_enabled) if memory_config_row.pruning_enabled is not None else False,
-        pruning_scene=memory_config_row.pruning_scene or "education",
         pruning_threshold=float(
             memory_config_row.pruning_threshold) if memory_config_row.pruning_threshold is not None else 0.5,
         # Pipeline config: Scene boundary and SceneSummary
@@ -427,9 +384,6 @@ def _build_memory_config(
         preference_custom_keywords=tuple(
             getattr(memory_config_row, "preference_custom_keywords", None) or []
         ),
-        # Ontology scene association
-        scene_id=memory_config_row.scene_id,
-        ontology_class_infos=ontology_class_infos,
     )
 
 
@@ -879,7 +833,6 @@ class MemoryConfigService:
                 vision_uuid=vision_uuid, vision_name=vision_name,
                 audio_uuid=audio_uuid, audio_name=audio_name,
                 video_uuid=video_uuid, video_name=video_name,
-                ontology_class_infos=_load_ontology_class_infos(self.db, memory_config.scene_id),
             )
 
             elapsed_ms = (time.time() - start_time) * 1000
@@ -958,11 +911,8 @@ class MemoryConfigService:
                 self.db, models, workspace.tenant_id,
                 memory_config_row.config_id, workspace.id,
             )
-            ontology_class_infos = await _load_ontology_class_infos_async(
-                self.db, memory_config_row.scene_id
-            )
             v_time = time.time() - v_start
-            logger.info(f"[PERF] All model validations + ontology load: {v_time:.4f}s (batch)")
+            logger.info(f"[PERF] All model validations: {v_time:.4f}s (batch)")
 
             embedding_uuid, embedding_name = model_results["embedding"]
             llm_uuid, llm_name = model_results["llm"]
@@ -981,7 +931,6 @@ class MemoryConfigService:
                 vision_uuid=vision_uuid, vision_name=vision_name,
                 audio_uuid=audio_uuid, audio_name=audio_name,
                 video_uuid=video_uuid, video_name=video_name,
-                ontology_class_infos=ontology_class_infos,
             )
 
             elapsed_ms = (time.perf_counter() - start_time) * 1000
@@ -1078,60 +1027,14 @@ class MemoryConfigService:
         Returns:
             Dict suitable for PruningConfig.model_validate with keys:
             - pruning_switch: bool
-            - pruning_scene: str
             - pruning_threshold: float
-            - ontology_class_infos: list of {class_name, class_description} dicts
         """
         return {
             "pruning_switch": memory_config.pruning_enabled,
-            "pruning_scene": memory_config.pruning_scene,
             "pruning_threshold": memory_config.pruning_threshold,
-            "ontology_class_infos": memory_config.ontology_class_infos or [],
         }
 
-    def get_ontology_types(self, memory_config: MemoryConfig):
-        """Fetch ontology types for the memory configuration's scene.
-        
-        Args:
-            memory_config: MemoryConfig object containing scene_id
-            
-        Returns:
-            OntologyTypeList if scene_id is valid and has types, None otherwise
-        """
-        from app.core.memory.models.ontology_extraction_models import OntologyTypeList
-        from app.repositories.ontology_class_repository import OntologyClassRepository
-
-        if not memory_config.scene_id:
-            logger.debug("No scene_id configured, skipping ontology type fetch")
-            return None
-
-        try:
-            ontology_repo = OntologyClassRepository(self.db)
-            ontology_classes = ontology_repo.get_classes_by_scene(memory_config.scene_id)
-
-            if not ontology_classes:
-                logger.info(f"No ontology classes found for scene_id: {memory_config.scene_id}")
-                return None
-
-            ontology_types = OntologyTypeList.from_db_models(ontology_classes)
-            logger.info(
-                f"Loaded {len(ontology_types.types)} ontology types for scene_id: {memory_config.scene_id}"
-            )
-            return ontology_types
-
-        except Exception as e:
-            logger.warning(
-                f"Failed to fetch ontology types for scene_id {memory_config.scene_id}: {e}",
-                exc_info=True
-            )
-            return None
-
-    def create_workspace_default_config(
-            self,
-            workspace: Workspace,
-            scene_id: uuid.UUID | None = None,
-            pruing_scene_name: str | None = None,
-    ):
+    def create_workspace_default_config(self, workspace: Workspace):
         from app.models.memory_config_model import MemoryConfig as DBMemoryConfig
         config_id = uuid.uuid4()
 
@@ -1147,8 +1050,6 @@ class MemoryConfigService:
             vision_id=str(workspace.vision) if workspace.vision else None,
             audio_id=str(workspace.audio) if workspace.audio else None,
             video_id=str(workspace.video) if workspace.video else None,
-            scene_id=scene_id,  # 关联本体场景ID（默认为"在线教育"场景）
-            pruning_scene=pruing_scene_name,  # 语义剪枝场景直接使用 scene_name
             state=True,  # Active by default
             is_default=True,  # Mark as workspace default
         )
@@ -1162,7 +1063,6 @@ class MemoryConfigService:
                 "workspace_id": str(workspace.id),
                 "config_id": str(config_id),
                 "config_name": default_config.config_name,
-                "scene_id": str(scene_id) if scene_id else None,
             }
         )
         return config_id

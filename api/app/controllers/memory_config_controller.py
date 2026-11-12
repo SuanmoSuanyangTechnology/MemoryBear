@@ -501,7 +501,10 @@ async def update_config(
         api_logger.warning(f"用户 {current_user.username} 尝试更新配置但未选择工作空间")
         return fail(BizCode.INVALID_PARAMETER, "请先切换到一个工作空间", "current_workspace_id is None")
 
-    # 校验至少有一个字段需要更新
+    # scene_id remains an accepted compatibility field, although the retired ontology
+    # association is no longer written. A scene_id-only request therefore stays a
+    # successful no-op instead of becoming a new validation error for existing callers.
+    # 在v0.5.11实现这些契约变更和字段收缩。
     if payload.config_name is None and payload.config_desc is None and payload.scene_id is None:
         api_logger.warning(f"用户 {current_user.username} 尝试更新配置但未提供任何更新字段")
         return fail(BizCode.INVALID_PARAMETER, "请至少提供一个需要更新的字段",
@@ -613,8 +616,7 @@ async def update_emotion_config(
                 f"用户 {current_user.username} 请求更新情绪配置",
                 extra={
                     "config_id": config.config_id,
-                    "emotion_enabled": config.emotion_enabled,
-                    "emotion_min_intensity": config.emotion_min_intensity
+                    "emotion_enabled": config.emotion_enabled
                 }
             )
             config_service = EmotionConfigService(db)

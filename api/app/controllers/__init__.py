@@ -59,7 +59,6 @@ from . import (
     wiki_faq_controller,
     workflow_trigger_controller,
     workspace_controller,
-    ontology_controller,
     skill_controller,
     tenant_quota_controller,
     tenant_subscription_controller,
@@ -121,7 +120,6 @@ manager_router.include_router(implicit_memory_controller.router)
 manager_router.include_router(memory_perceptual_controller.router)
 manager_router.include_router(memory_working_controller.router)
 manager_router.include_router(file_storage_controller.router)
-manager_router.include_router(ontology_controller.router)
 manager_router.include_router(skill_controller.router)
 manager_router.include_router(i18n_controller.router)
 manager_router.include_router(tenant_quota_controller.router)

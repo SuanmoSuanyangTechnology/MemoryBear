@@ -484,7 +484,6 @@ class MemoryBaseService:
                 
                 emotion_data = await emotion_service.get_emotion_tags(
                     end_user_id=end_user_id,
-                    emotion_type=None,
                     start_date=None,
                     end_date=None,
                     limit=10

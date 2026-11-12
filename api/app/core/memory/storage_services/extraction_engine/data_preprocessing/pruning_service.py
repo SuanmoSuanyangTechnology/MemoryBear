@@ -89,10 +89,7 @@ async def prune_messages(
     # 每个调用独立返回来源；统计计数不参与结果选择。
     shared_pruning_config = PruningConfig(
         pruning_switch=memory_config.pruning_enabled,
-        pruning_scene=memory_config.pruning_scene or "education",
         pruning_threshold=memory_config.pruning_threshold,
-        scene_id=str(memory_config.scene_id) if memory_config.scene_id else None,
-        ontology_class_infos=memory_config.ontology_class_infos,
     )
     shared_pruner = SemanticPruner(
         config=shared_pruning_config,
