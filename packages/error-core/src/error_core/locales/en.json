@@ -84,6 +84,7 @@
     "RESOURCE_DELISTED_BY_PLATFORM": "The resource was delisted by the platform; restore it via the platform or publish a new version",
     "IDEMPOTENCY_IN_PROGRESS": "An identical request is still being processed, please try again later",
     "IDEMPOTENCY_KEY_REUSED": "The idempotency key was already used for a different request, please use a new key",
+    "MCP_NOT_VERIFIED": "MCP tool connectivity verification failed",
     "MODEL_CONFIG_INVALID": "Invalid model configuration",
     "API_KEY_MISSING": "Model API key is missing",
     "PROVIDER_NOT_SUPPORTED": "Unsupported model provider",

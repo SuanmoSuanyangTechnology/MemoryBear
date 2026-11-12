@@ -77,6 +77,13 @@ _PUBLIC_PATH_PATTERNS = (
         re.compile(r"^/internal/v1/apps/citations/[0-9a-fA-F-]{36}/download$"),
         ("GET",),
     ),
+    # Operator face (market import orchestration / package approve): calls come
+    # from the platform-admin BFF with the service credential only, so there is
+    # no user bearer for this middleware to verify. The route dependency
+    # `require_operator` validates `X-Market-Internal-Token`, the platform role
+    # and the actor UUID, which is the authoritative gate on this cross-tenant
+    # surface. POST only.
+    (re.compile(r"^/internal/v1/operator/"), ("POST",)),
 )
 
 
