@@ -41,6 +41,14 @@ from .state import affected_page_ids, dirty_pages
 logger = logging.getLogger(__name__)
 
 
+def _can_reuse_plan(state):
+    return state.plan_ready and (
+        state.operation == "retract"
+        or state.mapped_version == state.requested_version
+        or (state.map_progress or {}).get("identity_version") == TOPIC_IDENTITY_VERSION
+    )
+
+
 def load_map(session, delivery, *, failure_limit=None):
     knowledge, scope = lock_knowledge(session, delivery["kb_id"])
     document, state = lock_document(session, delivery["kb_id"], delivery["document_id"])
@@ -84,7 +92,7 @@ def load_map(session, delivery, *, failure_limit=None):
         "extract_prompt": config.extract_prompt,
         "config_hash": config_hash,
         "input_hash": state.input_hash,
-        "plan_ready": state.plan_ready,
+        "plan_ready": _can_reuse_plan(state),
         "plan": load_plan(session, state),
         "reuse_candidate": bool(
             state.input_hash and not state.plan_ready
@@ -223,9 +231,9 @@ def fix_plan(
     knowledge, scope = lock_knowledge(session, delivery["kb_id"])
     document, state = lock_document(session, delivery["kb_id"], delivery["document_id"])
     require_round(document, state, delivery["requested_version"])
-    if state.plan_ready:
-        if state.input_hash != input_hash:
-            raise WikiError("WIKI_SOURCE_CHANGED", retryable=False)
+    if state.plan_ready and state.input_hash != input_hash:
+        raise WikiError("WIKI_SOURCE_CHANGED", retryable=False)
+    if _can_reuse_plan(state):
         plan = load_plan(session, state)
         mapping = {}
         for candidate in candidates:

@@ -55,6 +55,7 @@ async def dispatch_qa_import(
     content: bytes | None = None,
     *,
     file_key: str | None = None,
+    connect_before_publish: bool = False,
 ) -> str:
     await _persist_qa_dispatch_state(runtime, document_id, state="queued")
     try:
@@ -63,6 +64,7 @@ async def dispatch_qa_import(
             args=[str(kb_id), str(document_id), filename],
             kwargs={"file_key": file_key} if file_key is not None else {"contents": content},
             queue="qa_import",
+            **({"connect_before_publish": True} if connect_before_publish else {}),
         )
     except Exception:
         try:
@@ -126,6 +128,7 @@ async def prepare_qa_import_resources(
         inherit_parser_config=False,
         parser_id="qa",
         parser_config={"doc_type": "qa", "auto_questions": 0},
+        record_fingerprint=True,
     )
 
 

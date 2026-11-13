@@ -1,6 +1,7 @@
 import asyncio
 import os
 import subprocess
+from uuid import uuid4
 
 # 必须在导入任何使用 DashScope SDK 的模块之前应用补丁
 import app.utils.dashscope_patch  # noqa: F401
@@ -34,10 +35,15 @@ from error_core.codes import (
     code_name,
     coerce_code,
     http_status_for,
+    is_known_code,
 )
 from error_core.diagnostics import format_diagnostics
+from error_core.knowledge import knowledge_message
+from error_core.knowledge_upload import is_versioned_upload, upload_error_response
 from error_core.messages import user_message
+from sqlalchemy.exc import OperationalError
 from app.integrations.knowledge.errors import KnowledgeClientError, KnowledgeServiceError
+from app.integrations.knowledge.contracts import KnowledgeContextError
 from app.integrations.knowledge.validation import (
     is_retrieval_request_validation_error,
     safe_retrieval_validation_response,
@@ -320,10 +326,34 @@ from app.i18n.service import get_translation_service
 from pydantic import ValidationError as PydanticValidationError
 
 
+def _upload_rejection(
+    request: Request,
+    exc: Exception,
+    status: int,
+    *,
+    code: int | None = None,
+    headers: dict | None = None,
+    validation_errors: list[dict] | None = None,
+) -> JSONResponse:
+    trace_id = getattr(request.state, "trace_id", None) or uuid4().hex
+    cause = code_name(code) if code is not None else type(exc).__name__
+    logger.warning(
+        "知识库新版上传请求失败 path=%s status=%s cause=%s trace_id=%s",
+        request.url.path, status, cause, trace_id,
+        exc_info=exc if status >= 500 else None,
+    )
+    return upload_error_response(
+        request, status, cause=cause, trace_id=trace_id, code=code,
+        headers=headers, validation_errors=validation_errors,
+    )
+
+
 # 处理验证异常
 @app.exception_handler(ValidationException)
 async def validation_exception_handler(request: Request, exc: ValidationException):
     """处理验证异常"""
+    if is_versioned_upload(request):
+        return _upload_rejection(request, exc, 422, code=BizCode.VALIDATION_FAILED)
     # 过滤敏感信息
     filtered_message, filtered_context = SensitiveDataFilter.filter_message(exc.message, exc.context)
 
@@ -354,6 +384,11 @@ async def i18n_exception_handler(request: Request, exc: I18nException):
     
     I18nException 已经自动翻译了错误消息，直接返回即可
     """
+    if is_versioned_upload(request):
+        detail = exc.detail if isinstance(exc.detail, dict) else {}
+        return _upload_rejection(
+            request, exc, exc.status_code, code=coerce_code(detail.get("code")), headers=exc.headers,
+        )
     # 获取当前语言
     language = getattr(request.state, "language", settings.I18N_DEFAULT_LANGUAGE)
     
@@ -399,6 +434,8 @@ async def request_validation_error_handler(
     request: Request,
     exc: RequestValidationError,
 ):
+    if is_versioned_upload(request):
+        return _upload_rejection(request, exc, 422, validation_errors=exc.errors())
     if is_retrieval_request_validation_error(request.url.path, exc.errors()):
         logger.warning(
             "Knowledge retrieval request validation failed path=%s method=%s",
@@ -433,6 +470,8 @@ async def pydantic_validation_exception_handler(request: Request, exc: PydanticV
     """
     处理 Pydantic 验证错误，支持国际化
     """
+    if is_versioned_upload(request):
+        return _upload_rejection(request, exc, 422, validation_errors=exc.errors())
     # 获取当前语言
     language = getattr(request.state, "language", settings.I18N_DEFAULT_LANGUAGE)
     
@@ -518,6 +557,8 @@ async def pydantic_validation_exception_handler(request: Request, exc: PydanticV
 @app.exception_handler(ResourceNotFoundException)
 async def not_found_exception_handler(request: Request, exc: ResourceNotFoundException):
     """处理资源不存在异常"""
+    if is_versioned_upload(request):
+        return _upload_rejection(request, exc, 404)
     # 过滤敏感信息
     filtered_message, filtered_context = SensitiveDataFilter.filter_message(exc.message, exc.context)
 
@@ -543,6 +584,8 @@ async def not_found_exception_handler(request: Request, exc: ResourceNotFoundExc
 @app.exception_handler(PermissionDeniedException)
 async def permission_denied_handler(request: Request, exc: PermissionDeniedException):
     """处理权限拒绝异常"""
+    if is_versioned_upload(request):
+        return _upload_rejection(request, exc, 403)
     # 过滤敏感信息
     filtered_message, filtered_context = SensitiveDataFilter.filter_message(exc.message, exc.context)
 
@@ -569,6 +612,8 @@ async def permission_denied_handler(request: Request, exc: PermissionDeniedExcep
 @app.exception_handler(AuthenticationException)
 async def authentication_exception_handler(request: Request, exc: AuthenticationException):
     """处理认证异常"""
+    if is_versioned_upload(request):
+        return _upload_rejection(request, exc, 401, headers={"WWW-Authenticate": "Bearer"})
     # 过滤敏感信息
     filtered_message, filtered_context = SensitiveDataFilter.filter_message(exc.message, exc.context)
 
@@ -594,6 +639,8 @@ async def authentication_exception_handler(request: Request, exc: Authentication
 @app.exception_handler(AuthorizationException)
 async def authorization_exception_handler(request: Request, exc: AuthorizationException):
     """处理授权异常"""
+    if is_versioned_upload(request):
+        return _upload_rejection(request, exc, 403)
     # 过滤敏感信息
     filtered_message, filtered_context = SensitiveDataFilter.filter_message(exc.message, exc.context)
 
@@ -619,6 +666,8 @@ async def authorization_exception_handler(request: Request, exc: AuthorizationEx
 @app.exception_handler(FileUploadException)
 async def file_upload_exception_handler(request: Request, exc: FileUploadException):
     """处理文件上传异常"""
+    if is_versioned_upload(request):
+        return _upload_rejection(request, exc, 400)
     # 过滤敏感信息
     filtered_message, filtered_context = SensitiveDataFilter.filter_message(exc.message, exc.context)
 
@@ -645,6 +694,13 @@ async def file_upload_exception_handler(request: Request, exc: FileUploadExcepti
 @app.exception_handler(RateLimitException)
 async def rate_limit_exception_handler(request: Request, exc: RateLimitException):
     """处理限流异常"""
+    if is_versioned_upload(request):
+        code = coerce_code(exc.code) or BizCode.RATE_LIMIT_EXCEEDED
+        return _upload_rejection(
+            request, exc, http_status_for(code), code=code,
+            headers={name: str(value) for name, value in
+                     (exc.context.get("rate_limit_headers") or {}).items()},
+        )
     # 过滤敏感信息
     filtered_message, filtered_context = SensitiveDataFilter.filter_message(exc.message, exc.context)
 
@@ -680,6 +736,23 @@ async def rate_limit_exception_handler(request: Request, exc: RateLimitException
 @app.exception_handler(BusinessException)
 async def business_exception_handler(request: Request, exc: BusinessException):
     """处理通用业务异常"""
+    if is_versioned_upload(request):
+        numeric = coerce_code(exc.code) or BizCode.BAD_REQUEST
+        status = 401 if numeric == BizCode.API_KEY_NOT_FOUND else http_status_for(numeric)
+        if numeric in {BizCode.API_KEY_NOT_FOUND, BizCode.DB_ERROR} and isinstance(
+            exc.cause or exc.__cause__ or exc.__context__,
+            (OperationalError, ConnectionError, TimeoutError),
+        ):
+            return _upload_rejection(request, exc, 503)
+        headers = {
+            name: str(value)
+            for name, value in (
+                (exc.context.get("headers") or {}) | (exc.context.get("rate_limit_headers") or {})
+            ).items()
+        }
+        if status == 401 and "x-api-key" not in request.headers:
+            headers.setdefault("WWW-Authenticate", "Bearer")
+        return _upload_rejection(request, exc, status, code=numeric, headers=headers)
     filtered_message, filtered_context = SensitiveDataFilter.filter_message(exc.message, exc.context)
     numeric = coerce_code(exc.code)
     if numeric is None:
@@ -739,33 +812,58 @@ async def knowledge_client_exception_handler(
     exc: KnowledgeClientError,
 ):
     """Preserve upstream business errors and normalize transport failures."""
+    if is_versioned_upload(request):
+        return _upload_rejection(request, exc, 503)
 
     if isinstance(exc, KnowledgeServiceError):
         status_code = exc.status_code if 400 <= exc.status_code <= 599 else 503
         code = exc.code
-        message = SensitiveDataFilter.filter_string(str(exc))
+        diagnostic = SensitiveDataFilter.filter_string(exc.diagnostic)
         trace_id = exc.trace_id
+        headers = exc.headers
+        legacy_message = exc.user_message
     else:
-        status_code = 503
-        code = BizCode.SERVICE_UNAVAILABLE.value
-        message = "Knowledge service unavailable"
-        trace_id = None
+        from app.integrations.knowledge.errors import (
+            KnowledgeProtocolError,
+            KnowledgeTimeoutError,
+        )
 
+        status_code = 503
+        code = (
+            BizCode.KB_UPSTREAM_RESPONSE_INVALID if isinstance(exc, KnowledgeProtocolError)
+            else BizCode.KB_REQUEST_TIMEOUT if isinstance(exc, KnowledgeTimeoutError)
+            else BizCode.KB_HTTP_SERVICE_UNAVAILABLE
+        )
+        diagnostic = format_diagnostics(detail=type(exc).__name__)
+        trace_id = getattr(request.state, "trace_id", None)
+        headers = {}
+        legacy_message = None
+    locale = getattr(request.state, "language", settings.I18N_DEFAULT_LANGUAGE)
+    message = (
+        legacy_message
+        if isinstance(exc, KnowledgeServiceError) and 200 <= exc.status_code < 300
+        else knowledge_message(code, locale, legacy_message=legacy_message)
+    )
     logger.error(
-        "Knowledge client error: %s",
+        "Knowledge client error type=%s status=%s code=%s trace_id=%s diagnostic=%s",
         type(exc).__name__,
-        extra={
-            "path": request.url.path,
-            "method": request.method,
-            "status_code": status_code,
-            "error_code": code,
-            "trace_id": trace_id,
-        },
+        status_code,
+        code,
+        trace_id,
+        diagnostic,
+        exc_info=exc,
     )
     response = JSONResponse(
         status_code=status_code,
-        content=fail(code=code, msg=message, error=message),
+        content=fail(code=code, msg=message, error=diagnostic),
+        headers={
+            key: value
+            for key, value in headers.items()
+            if key.lower() not in {"content-length", "content-type"}
+        },
     )
+    if is_known_code(code):
+        response.headers["Content-Language"] = locale
     if trace_id:
         response.headers["X-Trace-Id"] = trace_id
     return response
@@ -775,6 +873,8 @@ async def knowledge_client_exception_handler(
 @app.exception_handler(StarletteHTTPException)
 async def http_exception_handler(request: Request, exc: StarletteHTTPException):
     """处理HTTP异常，支持国际化"""
+    if is_versioned_upload(request):
+        return _upload_rejection(request, exc, exc.status_code, headers=exc.headers)
     # 获取当前语言
     language = getattr(request.state, "language", settings.I18N_DEFAULT_LANGUAGE)
     
@@ -837,6 +937,10 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(request: Request, exc: Exception):
     """处理未捕获的异常，支持国际化"""
+    if is_versioned_upload(request):
+        if isinstance(exc, KnowledgeContextError):
+            return _upload_rejection(request, exc, 403)
+        return _upload_rejection(request, exc, 503 if isinstance(exc, OperationalError) else 500)
     # 获取当前语言
     language = getattr(request.state, "language", settings.I18N_DEFAULT_LANGUAGE)
     

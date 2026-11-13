@@ -11,6 +11,8 @@ from __future__ import annotations
 import json
 from typing import Any, NoReturn
 
+from error_core.diagnostics import format_diagnostics
+from error_core.knowledge import knowledge_message
 from memorybear_grpc.errors import error_trailers, grpc_status_for_http
 
 import grpc
@@ -47,8 +49,12 @@ def success_body(data: Any, msg: str) -> bytes:
 def error_content(error: KnowledgeError, language: str) -> dict[str, Any]:
     """The body the HTTP error handler renders for the same failure."""
 
-    message = translate(error.code, language, error.params)
-    return fail(code=error.response_code, msg=message, error=message)
+    message = knowledge_message(error.response_code, language)
+    return fail(
+        code=error.response_code,
+        msg=message,
+        error=format_diagnostics(detail=error.diagnostic or f"cause={error.code}"),
+    )
 
 
 def _trailers(http_status: int, content: dict[str, Any], trace_id: str) -> tuple:
@@ -86,7 +92,12 @@ async def abort_with_status(
     """Reject a call before routing with the HTTP-equivalent status and envelope."""
 
     key = _AUTH_ERROR_CODES.get(http_status, "KB_PRINCIPAL_INVALID")
-    content = fail(code=http_status, msg=translate(key, language), error=detail)
+    error = KnowledgeError.from_code(key, status_code=http_status)
+    content = fail(
+        code=error.response_code,
+        msg=translate(key, language),
+        error=format_diagnostics(trace_id=trace_id, detail=detail),
+    )
     await context.abort(
         grpc_status_for_http(http_status),
         detail,

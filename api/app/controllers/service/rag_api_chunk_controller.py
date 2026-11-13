@@ -3,17 +3,20 @@
 from typing import Any, Optional, Union
 import uuid
 
-from fastapi import APIRouter, Body, Depends, File, HTTPException, Request, status, Query, UploadFile
+from fastapi import APIRouter, Body, Depends, File, HTTPException, Request, status, Query, UploadFile, Security
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from error_core.knowledge_upload import UploadCreated, UploadedQA, upload_responses
+
 from app.controllers import chunk_controller
-from app.core.api_key_auth import get_current_api_key_auth, require_api_key_self_db
+from app.core.api_key_auth import get_current_api_key_auth, require_api_key_self_db, knowledge_upload_api_key, knowledge_upload_bearer
 from app.core.logging_config import get_business_logger
 from app.core.rag.models.chunk import QAChunk
 from app.core.response_utils import success
 from app.db import get_async_db
 from app.integrations.knowledge.call_profile import CallProfile
 from app.integrations.knowledge.contracts import KnowledgeRetrievalSource
+from app.integrations.knowledge.errors import KnowledgeUnavailableError
 from app.integrations.knowledge.route_proxy import route_through_knowledge_service
 from app.schemas import chunk_schema
 from app.schemas.api_key_schema import ApiKeyAuth
@@ -269,6 +272,28 @@ async def retrieve_chunks(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=str(exc),
         ) from exc
+
+
+@router.post(
+    "/v1/{kb_id}/import_qa", status_code=201,
+    response_model=UploadCreated[UploadedQA],
+    responses=upload_responses(qa=True, outer_status=429),
+    dependencies=[Security(knowledge_upload_api_key), Security(knowledge_upload_bearer)],
+)
+@require_api_key_self_db(scopes=["rag"])
+@route_through_knowledge_service(
+    source=KnowledgeRetrievalSource.EXTERNAL_API,
+    profile=CallProfile.MULTIPART_UPLOAD,
+    require_remote=True,
+)
+async def import_qa_v1(
+    request: Request,
+    kb_id: uuid.UUID,
+    parent_id: uuid.UUID | None = Query(None, description="目标目录，省略为根目录"),
+    file: UploadFile = File(...),
+    api_key_auth: ApiKeyAuth = None,
+):
+    raise KnowledgeUnavailableError("Knowledge upload requires the remote service")
 
 
 @router.post("/{kb_id}/import_qa", response_model=ApiResponse)

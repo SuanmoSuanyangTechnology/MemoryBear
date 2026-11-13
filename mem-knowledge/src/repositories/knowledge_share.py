@@ -8,6 +8,7 @@ import uuid
 from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..api.query_validation import execute_list_page
 from ..api.schemas.knowledge_share import KnowledgeShareCreate
 from ..models.owned import KnowledgeShare
 
@@ -27,11 +28,10 @@ async def get_knowledgeshares_paginated_async(
         stmt = stmt.where(filter_cond)
     total_result = await db.execute(select(func.count()).select_from(stmt.subquery()))
     total = total_result.scalar_one()
-    if orderby:
-        order_attr = getattr(KnowledgeShare, orderby, None)
-        if order_attr is not None:
-            stmt = stmt.order_by(order_attr.desc() if desc else order_attr.asc())
-    result = await db.execute(stmt.offset((page - 1) * pagesize).limit(pagesize))
+    result = await execute_list_page(
+        db, stmt.offset((page - 1) * pagesize).limit(pagesize), KnowledgeShare,
+        orderby=orderby, desc=desc,
+    )
     return total, list(result.scalars().all())
 
 

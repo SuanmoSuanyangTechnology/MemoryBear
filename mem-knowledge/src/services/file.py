@@ -6,10 +6,12 @@ import logging
 import struct
 import uuid
 import zlib
+from asyncio import to_thread
 from collections.abc import AsyncIterator
 from contextlib import aclosing
 from copy import deepcopy
 from dataclasses import dataclass
+from hashlib import sha256
 from pathlib import Path
 from typing import Any
 
@@ -28,6 +30,7 @@ from ..models.owned import (
     Document,
     File,
     Knowledge,
+    UploadFingerprint,
 )
 from ..rag.knowledge_graph import GraphPipelineConfigError
 from ..rag.parser_config import normalize_document_parser_config
@@ -36,6 +39,7 @@ from ..repositories import file as file_repository
 from . import knowledge as knowledge_service
 from .knowledge_file_storage import KnowledgeFileStorage, generate_kb_file_key
 from .qa_export import cleanup_export_file, iter_export_file
+from .write_validation import validate_file_size_text, validate_write_fields
 
 logger = logging.getLogger(__name__)
 ZIP_STREAM_CHUNK_SIZE = 1024 * 1024
@@ -68,6 +72,7 @@ class UploadPlan:
     file_size: int
     parser_id: str
     parser_config: dict[str, Any]
+    digest: str | None = None
 
 
 @dataclass(frozen=True)
@@ -227,6 +232,7 @@ async def upload_content(
     inherit_parser_config: bool,
     parser_id: str = "naive",
     parser_config: dict[str, Any] | None = None,
+    record_fingerprint: bool = False,
 ) -> UploadPlan:
     """Validate an upload and return a scalar plan without writing rows."""
 
@@ -244,6 +250,7 @@ async def upload_content(
         raise KnowledgeError.from_code("KB_DOCUMENT_PARSER_CONFIG_INVALID") from exc
     await require_parent_folder(db, kb_id, parent_id, principal)
     file_id = uuid.uuid4()
+    digest = (await to_thread(sha256, content)).hexdigest() if record_fingerprint else None
     return UploadPlan(
         file_id=file_id,
         file_key=generate_kb_file_key(kb_id, file_id, file_ext),
@@ -255,6 +262,7 @@ async def upload_content(
         file_size=len(content),
         parser_id=parser_id,
         parser_config=deepcopy(normalized_parser_config),
+        digest=digest,
     )
 
 
@@ -262,6 +270,8 @@ async def persist_uploaded_content(
     db: AsyncSession,
     plan: UploadPlan,
     principal: Principal,
+    *,
+    commit: bool = True,
 ) -> UploadOutcome:
     """Revalidate ownership and atomically persist a planned upload."""
 
@@ -298,13 +308,16 @@ async def persist_uploaded_content(
                 parser_config=deepcopy(plan.parser_config),
             ),
         )
+        if plan.digest is not None:
+            db.add(UploadFingerprint(file_id=db_file.id, kb_id=plan.kb_id, digest=plan.digest))
         await db.refresh(document)
         outcome = UploadOutcome(
             file_id=db_file.id,
             document_id=document.id,
             document_data=document_to_data(document),
         )
-        await db.commit()
+        if commit:
+            await db.commit()
         return outcome
     except Exception:
         await db.rollback()
@@ -416,6 +429,12 @@ async def update_file(
     update_fields = update_data.model_dump(exclude_unset=True)
     if "parent_id" in update_fields:
         await require_parent_folder(db, file.kb_id, update_fields["parent_id"], principal)
+    validate_write_fields(update_fields, non_nullable=("file_name", "file_ext", "file_size"))
+    size = update_fields.get("file_size")
+    if isinstance(size, str):
+        validate_file_size_text(size)
+    else:
+        validate_write_fields(update_fields, integers=("file_size",))
     for field, value in update_fields.items():
         if hasattr(file, field):
             setattr(file, field, value)

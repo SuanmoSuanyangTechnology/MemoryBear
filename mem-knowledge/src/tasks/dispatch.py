@@ -7,7 +7,10 @@ import logging
 import time
 import uuid
 from collections.abc import Mapping, Sequence
+from contextlib import ExitStack
 from typing import Any
+
+from kombu.exceptions import OperationalError
 
 from ..bootstrap import get_settings
 from ..errors import KnowledgeError
@@ -16,6 +19,13 @@ from .celery_app import PUBLISHABLE_KNOWLEDGE_TASK_ROUTES, celery_app
 from .observability import current_parent_task_id
 
 logger = logging.getLogger(__name__)
+
+
+class TaskNotPublishedError(KnowledgeError):
+    """The producer failed before send_task was called."""
+
+    def __init__(self) -> None:
+        super().__init__(code="KB_TASK_DISPATCH_FAILED")
 
 
 class TaskDispatcher:
@@ -34,6 +44,7 @@ class TaskDispatcher:
         queue: str | None = None,
         task_id: str | None = None,
         headers: Mapping[str, Any] | None = None,
+        connect_before_publish: bool = False,
     ) -> str:
         return await asyncio.to_thread(
             self.send_sync,
@@ -43,6 +54,7 @@ class TaskDispatcher:
             queue=queue,
             task_id=task_id,
             headers=dict(headers) if headers is not None else None,
+            connect_before_publish=connect_before_publish,
         )
 
     def send_sync(
@@ -54,18 +66,19 @@ class TaskDispatcher:
         queue: str | None = None,
         task_id: str | None = None,
         headers: Mapping[str, Any] | None = None,
+        connect_before_publish: bool = False,
     ) -> str:
         """Validate and publish a task from a synchronous execution context."""
 
         expected_queue = PUBLISHABLE_KNOWLEDGE_TASK_ROUTES.get(name)
         if expected_queue is None:
             raise KnowledgeError.from_code(
-                "KB_VALIDATION_ERROR",
+                "KB_TASK_NAME_CONFIG_INVALID",
                 f"Unknown knowledge task: {name}",
             )
         if queue is not None and queue != expected_queue:
             raise KnowledgeError.from_code(
-                "KB_VALIDATION_ERROR",
+                "KB_TASK_QUEUE_CONFIG_INVALID",
                 f"Invalid queue for knowledge task: {name}",
             )
         if self._runtime is not None and name in {
@@ -99,12 +112,19 @@ class TaskDispatcher:
             }
             if task_id:
                 send_task_kwargs["task_id"] = task_id
-            result = self._application.send_task(
-                name,
-                **send_task_kwargs,
-            )
+            with ExitStack() as stack:
+                if connect_before_publish:
+                    try:
+                        producer = stack.enter_context(self._application.producer_or_acquire())
+                        producer.connection.ensure_connection(max_retries=0)
+                    except (OperationalError, OSError) as exc:
+                        raise TaskNotPublishedError() from exc
+                    send_task_kwargs["producer"] = producer
+                result = self._application.send_task(name, **send_task_kwargs)
         except KnowledgeError:
             raise
+        except (TypeError, ValueError) as exc:
+            raise KnowledgeError.from_code("KB_TASK_DISPATCH_CONFIG_INVALID") from exc
         except Exception as exc:
             raise KnowledgeError.from_code(
                 "KB_TASK_DISPATCH_FAILED",
@@ -113,7 +133,7 @@ class TaskDispatcher:
         task_id = getattr(result, "id", None)
         if not task_id:
             raise KnowledgeError.from_code(
-                "KB_TASK_DISPATCH_FAILED",
+                "KB_TASK_DISPATCH_CONFIG_INVALID",
                 f"Knowledge task did not return an id: {name}",
             )
         return str(task_id)
@@ -131,4 +151,4 @@ class TaskDispatcher:
             return False
 
 
-__all__ = ["TaskDispatcher"]
+__all__ = ["TaskDispatcher", "TaskNotPublishedError"]

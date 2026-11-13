@@ -22,8 +22,10 @@ import re
 from dataclasses import dataclass
 
 from auth_sdk.schema import UserContext
+from error_core.knowledge_upload import is_versioned_upload
 from fastapi import HTTPException, Request
 from pydantic import ValidationError
+from sqlalchemy.exc import OperationalError
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 
@@ -110,6 +112,16 @@ def _auth_error(
     request: Request, status_code: int, detail: object, *, exception: BaseException | None = None,
 ) -> JSONResponse:
     """Record early rejections without changing authentication decisions."""
+    if is_versioned_upload(request, internal=True):
+        from .api.error_handlers import render_upload_error
+
+        headers = dict(exception.headers or {}) if isinstance(exception, HTTPException) else {}
+        if status_code == 401:
+            headers.setdefault("WWW-Authenticate", "Bearer")
+        return render_upload_error(
+            request, exception or HTTPException(status_code, detail),
+            status=status_code, cause="AUTHENTICATION_REJECTED", headers=headers,
+        )
     log_request_failure(
         request, status_code=status_code, response_code=None,
         error_code="AUTHENTICATION_REJECTED",
@@ -181,6 +193,10 @@ class KbAuthMiddleware(BaseHTTPMiddleware):
             # 验签失败 401 / ACL 拒绝 403 / 配置缺失 500，按 SDK 语义原样返回
             return _auth_error(request, exc.status_code, exc.detail, exception=exc)
         except Exception as exc:
+            if is_versioned_upload(request, internal=True):
+                transient = isinstance(exc, (ConnectionError, TimeoutError, OperationalError))
+                status = 503 if transient else 500
+                return _auth_error(request, status, "auth dependency failed", exception=exc)
             return _auth_error(request, 401, "invalid token", exception=exc)
         if ctx is None:
             # 通道 2：老单体直连豁免（过渡态，NetworkPolicy 兜底受信来源）

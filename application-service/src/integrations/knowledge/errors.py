@@ -10,8 +10,13 @@ class KnowledgeClientError(Exception):
 class KnowledgeServiceError(KnowledgeClientError):
     """The knowledge service returned an explicit business failure."""
 
-    def __init__(self, status_code: int, code: int, message: str, trace_id: str):
+    def __init__(self, status_code: int, code: int, message: str, trace_id: str,
+                 *, diagnostic: str = "", headers: dict[str, str] | None = None):
+        # 旧调用方把异常字符串当用户提示；诊断不改变该语义或异常继承。
         super().__init__(message)
+        self.user_message = message
+        self.diagnostic = diagnostic
+        self.headers = dict(headers or {})
         self.status_code = status_code
         self.code = code
         self.trace_id = trace_id

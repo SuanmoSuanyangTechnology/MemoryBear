@@ -46,7 +46,9 @@ def retrieval_wire_payload(
     return payload
 
 
-def parse_envelope(raw: bytes, *, status_code: int, trace_id: str) -> dict[str, Any]:
+def parse_envelope(
+    raw: bytes, *, status_code: int, trace_id: str, headers: dict[str, str] | None = None
+) -> dict[str, Any]:
     """Validate the legacy envelope and raise the transport-neutral failure."""
 
     try:
@@ -61,8 +63,15 @@ def parse_envelope(raw: bytes, *, status_code: int, trace_id: str) -> dict[str, 
             "Knowledge service envelope code must be an integer"
         )
     if not 200 <= status_code < 300 or code != 0:
-        message = str(envelope.get("error") or envelope.get("msg") or "Knowledge error")
-        raise KnowledgeServiceError(status_code, code, message, trace_id)
+        message = str(envelope.get("msg") or "Knowledge error")
+        raise KnowledgeServiceError(
+            status_code,
+            code,
+            message,
+            trace_id,
+            diagnostic=str(envelope.get("error") or ""),
+            headers=headers,
+        )
     return envelope
 
 

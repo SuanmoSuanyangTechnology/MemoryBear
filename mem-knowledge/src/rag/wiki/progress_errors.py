@@ -1,6 +1,7 @@
 """Wiki 失败进度的用户文案；原始异常与模型输出仅保留在诊断日志。"""
 
-from ...i18n import load_catalogs, translate
+from ...i18n import legacy_catalogs as load_catalogs
+from ...i18n import translate_legacy as translate
 from .config import WikiError
 
 _REASONS = {

@@ -10,6 +10,7 @@ from typing import Protocol
 from fastapi import Request, Response
 
 from .call_profile import CallProfile
+from .errors import KnowledgeUnavailableError
 from .contracts import (
     KnowledgeCallContext,
     KnowledgeContextError,
@@ -34,6 +35,7 @@ def route_through_knowledge_service(
     source: KnowledgeRetrievalSource = KnowledgeRetrievalSource.MANAGER_API,
     profile: CallProfile = CallProfile.JSON,
     public: bool = False,
+    require_remote: bool = False,
 ):
     """Use the remote route proxy when the process runtime enabled it."""
 
@@ -44,6 +46,8 @@ def route_through_knowledge_service(
 
             proxy = get_knowledge_route_proxy()
             if proxy is None:
+                if require_remote:
+                    raise KnowledgeUnavailableError("Knowledge upload requires the remote service")
                 result = handler(*args, **kwargs)
                 return await result if inspect.isawaitable(result) else result
             request = kwargs.get("request")

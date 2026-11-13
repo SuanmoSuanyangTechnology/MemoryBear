@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
 
 from ..api.dependencies import Principal
+from ..api.query_validation import parse_uuid_filter
 from ..api.schemas.document import Document as DocumentSchema
 from ..api.schemas.document import DocumentCreate, DocumentUpdate
 from ..errors import KnowledgeError
@@ -41,6 +42,7 @@ from .document_mutation_guard import (
 )
 from .knowledge_file_storage import KnowledgeFileStorage
 from .qa_export import collection_name_for_knowledge
+from .write_validation import validate_write_fields
 
 logger = logging.getLogger(__name__)
 
@@ -108,8 +110,9 @@ async def list_documents(
         filters.append(Document.file_id.in_(list(result.scalars().all())))
     if keywords:
         filters.append(Document.file_name.ilike(f"%{keywords}%"))
-    if document_ids:
-        filters.append(Document.id.in_(document_ids.split(",")))
+    parsed_ids = parse_uuid_filter(document_ids, field="document_ids")
+    if parsed_ids:
+        filters.append(Document.id.in_(parsed_ids))
 
     total, documents = await document_repository.get_documents_paginated_async(
         db,
@@ -143,6 +146,7 @@ async def create_document(
         parser_config = normalize_document_parser_config(create_data.parser_config)
     except (ValueError, GraphPipelineConfigError) as exc:
         raise KnowledgeError.from_code("KB_DOCUMENT_PARSER_CONFIG_INVALID") from exc
+    validate_write_fields(create_data.model_dump(), integers=("file_size",))
     payload = create_data.model_copy(
         update={"created_by": principal.actor_id, "parser_config": parser_config}
     )
@@ -206,6 +210,16 @@ async def prepare_document_update(
         if chunk_mode == 0:
             graph_parser_config.update(parser_config)
 
+    validate_write_fields(
+        update_fields,
+        integers=("file_size", "chunk_num", "run", "status"),
+        non_nullable=(
+            "file_id", "file_name", "file_ext", "file_size", "file_meta", "parser_id",
+            "chunk_num", "progress", "progress_msg", "process_begin_at", "process_duration",
+            "run", "status",
+        ),
+        finite=("progress", "process_duration"),
+    )
     status_changed = (
         "status" in update_fields and update_fields["status"] != document.status
     )

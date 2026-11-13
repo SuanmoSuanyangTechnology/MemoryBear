@@ -6,14 +6,20 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, status, File, UploadFile, Query, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import Response, StreamingResponse
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 from starlette.background import BackgroundTask
+
+from error_core.knowledge_upload import UploadCreated, UploadedDocument, upload_responses
 
 from app.core.config import settings
 from app.core.logging_config import get_api_logger
 from app.core.response_utils import success
-from app.db import get_db
-from app.dependencies import cur_workspace_access_guard, get_current_user
+from app.db import get_async_db, get_db
+from app.dependencies import (
+    CurrentUserSnapshot, cur_workspace_access_guard, cur_workspace_access_guard_async,
+    get_current_user, get_current_user_async,
+)
 from app.models import document_model, file_model
 from app.core.rag.chunk.parser.image_storage import cleanup_mineru_v3_images
 from app.models.knowledge_model import Knowledge
@@ -36,6 +42,7 @@ from app.core.quota_manager import report_quota_change
 from app.core.quota_stub import check_knowledge_capacity_quota
 from app.integrations.knowledge.call_profile import CallProfile
 from app.integrations.knowledge.contracts import KnowledgeRetrievalSource
+from app.integrations.knowledge.errors import KnowledgeUnavailableError
 from app.integrations.knowledge.route_proxy import route_through_knowledge_service
 
 api_logger = get_api_logger()
@@ -161,6 +168,29 @@ async def create_folder(
     except Exception as e:
         api_logger.error(f"Folder creation failed: {folder_name} - {str(e)}")
         raise
+
+
+@router.post(
+    "/v1/file", status_code=201,
+    response_model=UploadCreated[UploadedDocument],
+    responses=upload_responses(outer_status=402),
+)
+@cur_workspace_access_guard_async()
+@check_knowledge_capacity_quota
+@route_through_knowledge_service(
+    source=KnowledgeRetrievalSource.MANAGER_API,
+    profile=CallProfile.MULTIPART_UPLOAD,
+    require_remote=True,
+)
+async def upload_file_v1(
+    request: Request,
+    kb_id: uuid.UUID,
+    parent_id: uuid.UUID,
+    file: UploadFile = File(...),
+    current_user: CurrentUserSnapshot = Depends(get_current_user_async),
+    db: AsyncSession = Depends(get_async_db),
+):
+    raise KnowledgeUnavailableError("Knowledge upload requires the remote service")
 
 
 @router.post("/file", response_model=ApiResponse)

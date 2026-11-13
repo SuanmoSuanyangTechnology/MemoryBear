@@ -96,7 +96,7 @@ async def get_source(
         return KnowledgeRetrievalSource(value or KnowledgeRetrievalSource.GENERAL)
     except ValueError as exc:
         raise KnowledgeError.from_code(
-            "KB_PRINCIPAL_INVALID",
+            "KB_SOURCE_HEADER_INVALID",
         ) from exc
 
 

@@ -2,16 +2,18 @@
 
 import datetime
 import uuid
-from collections.abc import Mapping
+from typing import Annotated
 
 from pydantic import (
     BaseModel,
+    BeforeValidator,
     ConfigDict,
     Field,
-    ValidationError,
+    TypeAdapter,
     field_serializer,
     field_validator,
 )
+from typing_extensions import TypedDict
 
 from ...models.owned import KnowledgeType, PermissionType
 from ...models.references import LoadBalanceStrategy, ModelType
@@ -98,43 +100,32 @@ class KnowledgeBase(BaseModel):
     external_id: str | None = Field(None, min_length=1, max_length=36)
 
 
+class _LegacyWikiFields(TypedDict, total=False):
+    __pydantic_config__ = ConfigDict(extra="allow")
+    enabled: Annotated[bool, Field(strict=True)]
+    language: Annotated[
+        str,
+        BeforeValidator(lambda value: value.strip() if isinstance(value, str) else value),
+        Field(strict=True, min_length=1, max_length=MAX_LANGUAGE_LENGTH),
+    ]
+    extract_prompt: Annotated[str, Field(strict=True, max_length=MAX_EXTRACT_PROMPT_LENGTH)]
+
+
+class _LegacyWikiValidation(TypedDict, total=False):
+    __pydantic_config__ = ConfigDict(extra="allow")
+    wiki: _LegacyWikiFields | None
+
+
+_LEGACY_WIKI_VALIDATOR = TypeAdapter(_LegacyWikiValidation)
+
+
 class KnowledgeCreate(KnowledgeBase):
     @field_validator("parser_config")
     @classmethod
     def _validate_wiki_config(cls, value: dict | None) -> dict | None:
-        wiki = value.get("wiki") if value is not None else None
-        # 创建时省略或传 null 仍沿用默认配置；只校验，不改写原始配置。
-        if wiki is None:
-            return value
-        errors = []
-        if not isinstance(wiki, Mapping):
-            errors.append({"type": "dict_type", "loc": ("wiki",), "input": wiki})
-        else:
-            if "enabled" in wiki and not isinstance(wiki["enabled"], bool):
-                errors.append(
-                    {"type": "bool_type", "loc": ("wiki", "enabled"), "input": wiki["enabled"]}
-                )
-            for field, max_length in (
-                ("language", MAX_LANGUAGE_LENGTH),
-                ("extract_prompt", MAX_EXTRACT_PROMPT_LENGTH),
-            ):
-                if field not in wiki:
-                    continue
-                item = wiki[field]
-                error = {"loc": ("wiki", field), "input": item}
-                if not isinstance(item, str):
-                    errors.append({**error, "type": "string_type"})
-                    continue
-                # 与内部解析一致：语言按去空白后长度校验，提示词按原始长度校验。
-                length = len(item.strip()) if field == "language" else len(item)
-                if field == "language" and length == 0:
-                    errors.append({**error, "type": "string_too_short", "ctx": {"min_length": 1}})
-                elif length > max_length:
-                    errors.append(
-                        {**error, "type": "string_too_long", "ctx": {"max_length": max_length}}
-                    )
-        if errors:
-            raise ValidationError.from_exception_data(cls.__name__, errors)
+        # 只验证已有 Wiki 约束，返回原字典；共享旧配置不能被新建规则重写。
+        if value is not None:
+            _LEGACY_WIKI_VALIDATOR.validate_python(value)
         return value
 
     image2text_id: uuid.UUID | None = Field(

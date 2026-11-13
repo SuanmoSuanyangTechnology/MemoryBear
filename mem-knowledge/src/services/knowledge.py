@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
 
 from ..api.dependencies import Principal
+from ..api.query_validation import parse_uuid_filter
 from ..api.schemas.knowledge import (
     KnowledgeCreate,
     KnowledgeUpdate,
@@ -36,6 +37,7 @@ from ..repositories.knowledge_share import (
 from ..repositories.reference import ReferenceRepository
 from ..utils.datetime_utils import to_timestamp_ms, utcnow_naive
 from .knowledge_model_validation import validate_requested_knowledge_models
+from .write_validation import validate_write_fields
 
 logger = logging.getLogger(__name__)
 
@@ -197,8 +199,9 @@ def build_knowledge_list_filters(
                 Knowledge.description.ilike(f"%{keywords}%"),
             )
         )
-    if kb_ids:
-        filters.append(Knowledge.id.in_(kb_ids.split(",")))
+    parsed_ids = parse_uuid_filter(kb_ids, field="kb_ids")
+    if parsed_ids:
+        filters.append(Knowledge.id.in_(parsed_ids))
     else:
         filters.append(Knowledge.status != 2)
         filters.append(
@@ -585,6 +588,7 @@ async def create_knowledge(
         await validate_requested_knowledge_models(
             db, {"llm_id": knowledge.llm_id}, principal.tenant_id
         )
+    validate_write_fields(knowledge.model_dump(), integers=("doc_num", "chunk_num"))
     return await knowledge_repository.create_knowledge_async(db, knowledge)
 
 
@@ -631,6 +635,7 @@ class KnowledgeUpdatePlan:
     delete_vector_index: bool
     graph_enabled_before: bool | None
     parser_config_update: dict[str, Any] | None = None
+    write_input_error: KnowledgeError | None = None
 
 
 @dataclass(frozen=True)
@@ -688,6 +693,16 @@ async def prepare_knowledge_update(
     embedding_changed = (
         "embedding_id" in update_dict and update_dict["embedding_id"] != knowledge.embedding_id
     )
+    write_input_error = None
+    try:
+        validate_write_fields(
+            update_dict,
+            integers=("doc_num", "chunk_num", "status"),
+            non_nullable=("name", "status"),
+        )
+    except KnowledgeError as exc:
+        # An old model or Wiki rejection still takes precedence over a write error.
+        write_input_error = exc
     return KnowledgeUpdatePlan(
         knowledge_id=knowledge.id,
         update_fields=update_dict,
@@ -696,6 +711,7 @@ async def prepare_knowledge_update(
             embedding_changed and knowledge.embedding_id and knowledge.reranker_id
         ),
         graph_enabled_before=graph_enabled_before,
+        write_input_error=write_input_error,
         parser_config_update=(
             update_data.parser_config if "parser_config" in update_data.model_fields_set else None
         ),
@@ -738,6 +754,8 @@ async def apply_knowledge_update(
         if llm_id is None:
             raise KnowledgeError.from_code("KB_WIKI_MODEL_REQUIRED")
         await validate_requested_knowledge_models(db, {"llm_id": llm_id}, principal.tenant_id)
+    if plan.write_input_error is not None:
+        raise plan.write_input_error
     if plan.embedding_changed:
         from ..repositories.document import stage_reset_documents_progress_by_kb_id_async
 

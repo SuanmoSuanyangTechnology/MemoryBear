@@ -6,6 +6,8 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
+from ...error_mapping import map_model_error
+from ...model_errors import ModelRole
 from ..models.chunk import DocumentChunk
 from ..retrieval.elasticsearch_queries import normalize_vector
 from .models import (
@@ -581,6 +583,8 @@ class KnowledgeGraphRetrievalPipeline:
                 type(exc).__name__,
                 self._elapsed_ms(started_at),
             )
+            if stage == "query_embedding":
+                raise map_model_error(exc, model_role=ModelRole.EMBEDDING) from exc
             raise
 
     async def _embed_query_plan(

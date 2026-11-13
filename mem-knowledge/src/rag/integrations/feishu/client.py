@@ -13,8 +13,10 @@ from typing import Any
 import httpx
 
 from ....utils.datetime_utils import parse_timestamp_to_utc_naive
-from .exceptions import FeishuAPIError, FeishuAuthError
+from .exceptions import FeishuAPIError, FeishuAuthError, FeishuFolderNotFoundError
 from .models import FileInfo
+
+_FOLDER_NOT_FOUND_CODES = {"404", "230005"}
 
 
 def _timestamp(value: Any) -> datetime | None:
@@ -67,7 +69,9 @@ class FeishuAPIClient:
             raise FeishuAuthError("Feishu authentication request failed") from exc
         body = response.json()
         if body.get("code") != 0 or not body.get("tenant_access_token"):
-            raise FeishuAuthError("Feishu authentication failed", str(body.get("code")))
+            raise FeishuAuthError(
+                "Feishu authentication failed", str(body.get("code")), response=response
+            )
         self._access_token = str(body["tenant_access_token"])
         return self._access_token
 
@@ -92,7 +96,9 @@ class FeishuAPIClient:
             raise FeishuAPIError("Feishu folder request failed") from exc
         body = response.json()
         if body.get("code") != 0:
-            raise FeishuAPIError("Feishu API request failed", str(body.get("code")))
+            raise FeishuAPIError(
+                "Feishu API request failed", str(body.get("code")), response=response
+            )
         data = body.get("data") or {}
         files = [
             FileInfo(
@@ -113,11 +119,25 @@ class FeishuAPIClient:
         self,
         folder_token: str,
         recursive: bool = True,
+        *,
+        validate_root_folder: bool = False,
     ) -> list[FileInfo]:
         result = []
         page_token = None
         while True:
-            files, page_token = await self.list_folder_files(folder_token, page_token)
+            try:
+                files, page_token = await self.list_folder_files(folder_token, page_token)
+            except FeishuAPIError as exc:
+                if (
+                    validate_root_folder
+                    and page_token is None
+                    and getattr(exc.response, "status_code", None) in {200, 400, 404}
+                    and exc.error_code in _FOLDER_NOT_FOUND_CODES
+                ):
+                    raise FeishuFolderNotFoundError(
+                        "Feishu folder not found", exc.error_code, response=exc.response
+                    ) from exc
+                raise
             result.extend(files)
             if not page_token:
                 break
