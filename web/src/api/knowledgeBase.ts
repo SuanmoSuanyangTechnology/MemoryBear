@@ -200,7 +200,7 @@ export const uploadFile = async (data: FormData, options?: UploadFileOptions) =>
   const params: Record<string, string> = {};
   if (kb_id) params.kb_id = kb_id;
   if (parent_id) params.parent_id = parent_id;
-  const response = await request.uploadFile(`/files/file`, data, {
+  const response = await request.uploadFile(`/files/v1/file`, data, {
     params,
     onUploadProgress,
     signal,
@@ -213,7 +213,7 @@ export const uploadQaFile = async (data: FormData, options?: UploadFileOptions) 
   const params: Record<string, string> = {};
   if (kb_id) params.kb_id = kb_id;
   if (parent_id) params.parent_id = parent_id;
-  const response = await request.uploadFile(`/chunks/${kb_id}/import_qa`, data, {
+  const response = await request.uploadFile(`/chunks/v1/${kb_id}/import_qa`, data, {
     params,
     onUploadProgress,
     signal,
