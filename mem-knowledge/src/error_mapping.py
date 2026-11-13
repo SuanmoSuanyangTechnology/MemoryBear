@@ -6,7 +6,7 @@ import asyncio
 from collections.abc import Iterator
 from functools import lru_cache
 from http import HTTPStatus
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 import httpx
 import requests
@@ -37,6 +37,9 @@ from .integrations.model.errors import (
     ModelInvokeUnavailableError,
 )
 from .model_errors import ModelFailure, ModelRole, model_error
+
+if TYPE_CHECKING:
+    from .rag.wiki.config import WikiError
 
 
 def _with_cause(code: str, exc: BaseException) -> KnowledgeError:
@@ -349,7 +352,7 @@ _WIKI_CAUSES = {
 }
 
 
-def map_wiki_error(exc, *, faq: bool = False) -> KnowledgeError:
+def map_wiki_error(exc: WikiError, *, faq: bool = False) -> KnowledgeError:
     from .errors import ERROR_DEFINITIONS
 
     code = exc.code if exc.code in ERROR_DEFINITIONS else _WIKI_CAUSES.get(exc.code)

@@ -30,6 +30,7 @@ class _RequestValidationResponse(BaseModel):
     detail: list[_ValidationIssue]
 
 
+# OpenAPI only: legacy request validation and business errors use different bodies.
 INPUT_422_RESPONSES = {
     422: {
         "model": ApiResponse[Any] | _RequestValidationResponse,

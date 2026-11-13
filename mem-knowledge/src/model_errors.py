@@ -2,7 +2,7 @@
 
 from enum import StrEnum
 
-from .errors import KnowledgeError
+from .errors import ERROR_DEFINITIONS, KnowledgeError
 
 
 class ModelRole(StrEnum):
@@ -22,6 +22,16 @@ class ModelFailure(StrEnum):
     CAPABILITY_MISMATCH = "CAPABILITY_MISMATCH"
     TEMPORARILY_UNAVAILABLE = "TEMPORARILY_UNAVAILABLE"
     PROCESSING_FAILED = "PROCESSING_FAILED"
+
+
+_MODEL_ERROR_CODES = {
+    (role, failure): f"KB_{role.value.upper()}_MODEL_{failure.value}"
+    for role in ModelRole
+    for failure in ModelFailure
+}
+_missing_codes = set(_MODEL_ERROR_CODES.values()) - ERROR_DEFINITIONS.keys()
+if _missing_codes:
+    raise RuntimeError(f"Unregistered model error codes: {sorted(_missing_codes)}")
 
 
 MODEL_FIELD_ROLES = {
@@ -51,6 +61,6 @@ def model_error(
         else None
     )
     return KnowledgeError.from_code(
-        f"KB_{role.value.upper()}_MODEL_{failure.value}",
+        _MODEL_ERROR_CODES[role, failure],
         status_code=held_status,
     )

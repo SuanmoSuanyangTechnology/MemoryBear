@@ -487,9 +487,6 @@ _DEFINITIONS = {
     ),
     "KB_FAQ_NOT_FOUND": ErrorDefinition(400, False, 4000, "business", {}, "NOT_FOUND"),
     "KB_FAQ_VERSION_CONFLICT": ErrorDefinition(400, False, 9425, "business", {}, "ABORTED"),
-    "KB_FAQ_SOURCE_UNAVAILABLE_FROM_WRAPPER": ErrorDefinition(
-        400, False, 9423, "business", {}, "FAILED_PRECONDITION"
-    ),
     "KB_FAQ_LOAD_FAILED": ErrorDefinition(400, False, 9441, "business", {}, "INTERNAL"),
     "KB_STATE_CONFLICT": ErrorDefinition(409, False, 5004, "business", {}, "FAILED_PRECONDITION"),
     "KB_WIKI_SOURCE_CHANGED": ErrorDefinition(
@@ -726,7 +723,11 @@ class KnowledgeError(Exception):
 
     @property
     def status_code(self) -> int:
-        return self._status_code or ERROR_DEFINITIONS[self.code].status_code
+        return (
+            self._status_code
+            if self._status_code is not None
+            else ERROR_DEFINITIONS[self.code].status_code
+        )
 
     @property
     def grpc_status(self) -> str:

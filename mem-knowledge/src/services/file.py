@@ -270,6 +270,8 @@ async def persist_uploaded_content(
     db: AsyncSession,
     plan: UploadPlan,
     principal: Principal,
+    *,
+    commit: bool = True,
 ) -> UploadOutcome:
     """Revalidate ownership and atomically persist a planned upload."""
 
@@ -314,7 +316,8 @@ async def persist_uploaded_content(
             document_id=document.id,
             document_data=document_to_data(document),
         )
-        await db.commit()
+        if commit:
+            await db.commit()
         return outcome
     except Exception:
         await db.rollback()

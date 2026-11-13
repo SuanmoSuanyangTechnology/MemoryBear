@@ -20,8 +20,8 @@ from ...runtime import ProcessRuntime
 from ...services import file as file_service
 from ...services.knowledge_file_storage import KnowledgeFileStorage
 from ...services.qa_import import dispatch_qa_import, prepare_qa_import_resources
-from ...services.upload_deduplication import save_new_upload
-from ...tasks.dispatch import TaskDispatcher
+from ...services.upload_deduplication import discard_unpublished_qa_upload, save_new_upload
+from ...tasks.dispatch import TaskDispatcher, TaskNotPublishedError
 from ..dependencies import Principal, get_principal, get_runtime
 
 router = APIRouter(tags=["knowledge-upload-v2"])
@@ -83,10 +83,14 @@ async def upload_qa(
             content=content, content_type=file.content_type, principal=principal,
         )
     outcome = await save_new_upload(runtime, storage, plan, principal, content, file.content_type)
-    task_id = await dispatch_qa_import(
-        runtime, TaskDispatcher(runtime=runtime), kb_id, outcome.document_id, filename,
-        file_key=plan.file_key,
-    )
+    try:
+        task_id = await dispatch_qa_import(
+            runtime, TaskDispatcher(runtime=runtime), kb_id, outcome.document_id, filename,
+            file_key=plan.file_key, connect_before_publish=True,
+        )
+    except TaskNotPublishedError:
+        await discard_unpublished_qa_upload(runtime, storage, plan, outcome)
+        raise
     return success(
         {"task_id": task_id, "document_id": outcome.document_id, "file_id": outcome.file_id},
         locale=upload_locale(request),

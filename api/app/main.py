@@ -35,10 +35,12 @@ from error_core.codes import (
     code_name,
     coerce_code,
     http_status_for,
+    is_known_code,
 )
 from error_core.diagnostics import format_diagnostics
-from error_core.messages import user_message
+from error_core.knowledge import knowledge_message
 from error_core.knowledge_upload import is_versioned_upload, upload_error_response
+from error_core.messages import user_message
 from sqlalchemy.exc import OperationalError
 from app.integrations.knowledge.errors import KnowledgeClientError, KnowledgeServiceError
 from app.integrations.knowledge.contracts import KnowledgeContextError
@@ -737,8 +739,9 @@ async def business_exception_handler(request: Request, exc: BusinessException):
     if is_versioned_upload(request):
         numeric = coerce_code(exc.code) or BizCode.BAD_REQUEST
         status = 401 if numeric == BizCode.API_KEY_NOT_FOUND else http_status_for(numeric)
-        if status == 401 and isinstance(
-            exc.cause or exc.__context__, (OperationalError, ConnectionError, TimeoutError),
+        if numeric in {BizCode.API_KEY_NOT_FOUND, BizCode.DB_ERROR} and isinstance(
+            exc.cause or exc.__cause__ or exc.__context__,
+            (OperationalError, ConnectionError, TimeoutError),
         ):
             return _upload_rejection(request, exc, 503)
         headers = {
@@ -747,7 +750,7 @@ async def business_exception_handler(request: Request, exc: BusinessException):
                 (exc.context.get("headers") or {}) | (exc.context.get("rate_limit_headers") or {})
             ).items()
         }
-        if status == 401:
+        if status == 401 and "x-api-key" not in request.headers:
             headers.setdefault("WWW-Authenticate", "Bearer")
         return _upload_rejection(request, exc, status, code=numeric, headers=headers)
     filtered_message, filtered_context = SensitiveDataFilter.filter_message(exc.message, exc.context)
@@ -812,16 +815,13 @@ async def knowledge_client_exception_handler(
     if is_versioned_upload(request):
         return _upload_rejection(request, exc, 503)
 
-    from error_core.codes import is_known_code
-    from error_core.diagnostics import format_diagnostics
-    from error_core.knowledge import knowledge_message
-
     if isinstance(exc, KnowledgeServiceError):
         status_code = exc.status_code if 400 <= exc.status_code <= 599 else 503
         code = exc.code
         diagnostic = SensitiveDataFilter.filter_string(exc.diagnostic)
         trace_id = exc.trace_id
         headers = exc.headers
+        legacy_message = exc.user_message
     else:
         from app.integrations.knowledge.errors import (
             KnowledgeProtocolError,
@@ -837,11 +837,12 @@ async def knowledge_client_exception_handler(
         diagnostic = format_diagnostics(detail=type(exc).__name__)
         trace_id = getattr(request.state, "trace_id", None)
         headers = {}
+        legacy_message = None
     locale = getattr(request.state, "language", settings.I18N_DEFAULT_LANGUAGE)
     message = (
-        exc.user_message
-        if isinstance(exc, KnowledgeServiceError) and exc.status_code < 400
-        else knowledge_message(code, locale, legacy_message=getattr(exc, "user_message", None))
+        legacy_message
+        if isinstance(exc, KnowledgeServiceError) and 200 <= exc.status_code < 300
+        else knowledge_message(code, locale, legacy_message=legacy_message)
     )
     logger.error(
         "Knowledge client error type=%s status=%s code=%s trace_id=%s diagnostic=%s",

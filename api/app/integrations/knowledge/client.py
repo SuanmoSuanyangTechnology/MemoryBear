@@ -217,10 +217,6 @@ class KnowledgeServiceClient:
         response_headers = self._transport.response_headers(
             upstream.headers, status_code=upstream.status_code
         )
-        if path.startswith("/internal/v2/"):
-            for name in ("www-authenticate", "allow", "retry-after"):
-                if name in upstream.headers:
-                    response_headers[name] = upstream.headers[name]
         return StreamingResponse(
             body_iterator(),
             status_code=upstream.status_code,
