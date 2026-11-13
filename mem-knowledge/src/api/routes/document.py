@@ -16,7 +16,7 @@ from ...services.knowledge_file_storage import KnowledgeFileStorage
 from ...services.knowledge_metadata import KnowledgeMetadataService
 from ...tasks.dispatch import TaskDispatcher
 from ..dependencies import Principal, get_principal, get_runtime
-from ..schemas.common import SuccessEnvelope, success
+from ..schemas.common import SERVICE_UNAVAILABLE_RESPONSE, SuccessEnvelope, success
 from ..schemas.document import DocumentCreate, DocumentUpdate
 from ..schemas.knowledge_metadata import (
     BatchUpdateMetadataRequest,
@@ -182,7 +182,11 @@ async def update_document(
     )
 
 
-@router.delete("/{document_id}", response_model=SuccessEnvelope[None])
+@router.delete(
+    "/{document_id}",
+    response_model=SuccessEnvelope[None],
+    responses=SERVICE_UNAVAILABLE_RESPONSE,
+)
 async def delete_document(
     request: Request,
     document_id: uuid.UUID,

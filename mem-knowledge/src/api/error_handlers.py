@@ -19,6 +19,7 @@ from starlette.exceptions import HTTPException
 from ..error_mapping import map_storage_error
 from ..errors import KnowledgeError
 from ..i18n import normalize_locale, resolve_locale, translate_legacy
+from ..integrations.model.errors import ModelInvokeProtocolError
 from ..request_logging import log_request_failure
 from ..services.upload_deduplication import DuplicateUploadError
 from ..trace import TRACE_ID_HEADER, get_trace_id, normalize_trace_id
@@ -176,12 +177,18 @@ def render_error(
         return render_legacy_business_error(request, error, exception=exception)
     status_code = _business_http_status(request, error)
     response_code = error.upstream_response_code or error.response_code
+    if error.code == "KB_TASK_DISPATCH_FAILED":
+        message = translate_legacy(error.code, request_locale(request))
+        log_message = translate_legacy(error.code, "en")
+    else:
+        message = knowledge_message(response_code, request_locale(request))
+        log_message = knowledge_message(response_code, "en")
     log_request_failure(
         request,
         status_code=status_code,
         response_code=response_code,
         error_code=error.code,
-        message=knowledge_message(response_code, "en"),
+        message=log_message,
         params=dict(error.params),
         retryable=error.retryable,
         exception=exception if exception is not None else error,
@@ -191,7 +198,7 @@ def render_error(
         request,
         status_code=status_code,
         response_code=response_code,
-        message=knowledge_message(response_code, request_locale(request)),
+        message=message,
         headers=headers,
         diagnostic=format_diagnostics(
             trace_id=getattr(request.state, "trace_id", get_trace_id()),
@@ -327,4 +334,8 @@ def register_error_handlers(application: FastAPI) -> None:
                     request, exc, status=503, cause="KB_DATABASE_UNAVAILABLE",
                 )
             return render_upload_error(request, exc, status=500, cause="KB_INTERNAL_ERROR")
+        if isinstance(exc, ModelInvokeProtocolError) and exc.http_status in {429, 503, 504}:
+            return render_error(
+                request, KnowledgeError.from_code("KB_HTTP_UNAVAILABLE"), exception=exc,
+            )
         return render_error(request, KnowledgeError.from_code("KB_INTERNAL_ERROR"), exception=exc)

@@ -187,6 +187,8 @@ def _ark_embedding_errors() -> tuple[tuple[type[BaseException], ...], ...]:
 
 def _model_service_http_status(failure: ModelInvokeFailedError, code: int | None) -> int | None:
     status = failure.http_status
+    if code == BizCode.CREDENTIAL_DECRYPT_ERROR:
+        return 500
     if code in {BizCode.NO_AVAILABLE_CHANNEL, BizCode.SPEEDBEAR_CHANNEL_MISSING}:
         return 503 if failure.retryable else 400
     if status in {429, 503, 504} or code in {
@@ -210,6 +212,11 @@ def _model_service_http_status(failure: ModelInvokeFailedError, code: int | None
 def _model_http_status(public: KnowledgeError, exc: BaseException) -> int | None:
     if public.http_status_override is not None:
         return public.http_status_override
+    if any(
+        isinstance(cause, ModelInvokeProtocolError) and cause.http_status in {429, 503, 504}
+        for cause in _exception_chain(exc)
+    ):
+        return 503
     if public.code.endswith("_PROCESSING_FAILED"):
         # An explicit provider 4xx with an unknown cause does not prove an internal failure.
         for cause in _exception_chain(exc):

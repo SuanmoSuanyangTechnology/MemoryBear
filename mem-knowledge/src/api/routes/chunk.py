@@ -33,7 +33,7 @@ from ..schemas.chunk import (
     RetrievalPolicyRequest,
     RetrieveType,
 )
-from ..schemas.common import SuccessEnvelope, success
+from ..schemas.common import SERVICE_UNAVAILABLE_RESPONSE, SuccessEnvelope, success
 from ..schemas.knowledge_retrieval import prepare_retrieval_request
 
 router = APIRouter(prefix="/chunks", tags=["chunks"])
@@ -429,7 +429,11 @@ async def get_retrieval_policy(
     )
 
 
-@router.post("/retrieval", response_model=SuccessEnvelope[Any])
+@router.post(
+    "/retrieval",
+    response_model=SuccessEnvelope[Any],
+    responses=SERVICE_UNAVAILABLE_RESPONSE,
+)
 async def retrieve_chunks(
     request: Request,
     retrieve_data: ChunkRetrieve,

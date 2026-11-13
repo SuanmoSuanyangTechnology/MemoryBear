@@ -315,24 +315,30 @@ class ModelInvokeClient:
             )
         except httpx.HTTPError as exc:
             raise ModelInvokeUnavailableError("Model availability lookup failed") from exc
+        # This endpoint validates a requested binding, not a model invocation.
+        if response.status_code in (400, 404):
+            return False
+        try:
+            response.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            try:
+                payload = response.json()
+            except ValueError:
+                payload = None
+            if isinstance(payload, dict) and coerce_code(payload.get("code")):
+                raise to_invoke_error(envelope_failure(payload, response.status_code)) from exc
+            if response.status_code in (429, 503, 504):
+                raise ModelInvokeUnavailableError("Model availability lookup failed") from exc
+            raise ModelInvokeProtocolError("Invalid model availability response") from exc
         try:
             payload = response.json()
         except ValueError as exc:
-            if response.status_code in (400, 404):
-                return False
-            if response.status_code in (429, 503, 504):
-                raise ModelInvokeUnavailableError("Model availability lookup failed") from exc
             raise ModelInvokeProtocolError("Invalid model availability response") from exc
         if isinstance(payload, dict) and coerce_code(payload.get("code")):
             remote = envelope_failure(payload, response.status_code)
             raise to_invoke_error(remote) from remote
-        if response.status_code in (400, 404):
-            return False
-        if response.status_code in (429, 503, 504):
-            raise ModelInvokeUnavailableError("Model availability lookup failed")
         if (
-            not response.is_success
-            or not isinstance(payload, dict)
+            not isinstance(payload, dict)
             or payload.get("code") != 0
             or not isinstance(payload.get("data"), dict)
         ):

@@ -18,6 +18,18 @@ class ApiResponse[DataT](BaseModel):
     time: int = Field(default_factory=lambda: int(time.time() * 1000))
 
 
+class _AuthDependencyError(BaseModel):
+    detail: str
+
+
+SERVICE_UNAVAILABLE_RESPONSE = {
+    503: {
+        "model": ApiResponse[Any] | _AuthDependencyError,
+        "description": "A required dependency is temporarily unavailable",
+    },
+}
+
+
 def success(data: Any = None, msg: str = "OK") -> dict[str, Any]:
     """Return the exact legacy success envelope."""
 

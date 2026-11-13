@@ -39,6 +39,10 @@ class ModelInvokeConfigurationError(ModelInvokeClientError):
 class ModelInvokeProtocolError(ModelInvokeClientError):
     """The model service violated the response contract (malformed or truncated stream)."""
 
+    def __init__(self, message: str, *, http_status: int | None = None):
+        super().__init__(message)
+        self.http_status = http_status
+
 
 class ModelInvokeFailedError(ModelInvokeClientError):
     """The model service ran the invoke and reported a terminal failure.
@@ -80,7 +84,7 @@ def to_invoke_error(exc: RemoteInvokeError) -> ModelInvokeClientError:
             f"Model invoke produced no frame within {exc.idle_seconds:g}s"
         )
     elif isinstance(exc, RemoteInvokeProtocolError):
-        error = ModelInvokeProtocolError(str(exc))
+        error = ModelInvokeProtocolError(str(exc), http_status=exc.http_status)
     elif isinstance(exc, RemoteInvokeFailedError):
         error = ModelInvokeFailedError(
             remote_code=exc.code,
