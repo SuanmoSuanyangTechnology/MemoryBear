@@ -68,6 +68,7 @@ from .model_ref_gate import assert_refs_publishable, raise_model_unavailable, re
 from .multi_agent_release_resolver import (
     POLICY_CURRENT,
     POLICY_PINNED,
+    get_policy,
     resolve_effective_release_id,
 )
 from .tool_service import ToolService
@@ -3110,20 +3111,32 @@ class AppService:
         members up front. This brings the workflow save to the same standard.
 
         Scope is deliberately narrow: **only** "the reference has no usable release"
-        is enforced. A wrong app type, a cross-workspace id or a dangling reference
-        keep their current save-time behaviour and stay a publish-time error; folding
-        those in would make this a second copy of the publish gate and start rejecting
-        saves that work today.
+        is enforced. For a pinned reference that means the row must exist, be active
+        *and* belong to the referenced app — a release whose ``app_id`` points
+        elsewhere is a stale pointer left by a manual re-bind, and publishing rejects
+        it anyway (``_pin_workflow_agent_references`` requires
+        ``release.app_id == referenced_app.id``). A wrong app type, a cross-workspace
+        id or a nonexistent app keep their current save-time behaviour and stay a
+        publish-time error; folding those in would make this a second copy of the
+        publish gate and start rejecting saves that work today.
 
         Every offender is collected and raised once — failing on the first one would
         force the user to retry N times to learn which Agents need publishing.
         """
 
         def _active_release(raw: Any) -> AppRelease | None:
+            """Resolve an active release; only the *parse* is guarded.
+
+            A malformed id means "there is no such release", but a DB failure must
+            surface: swallowing it would report a broken query to the user as
+            "the reference is gone" and hide the real problem behind a 400.
+            """
+
             try:
-                candidate = self.db.get(AppRelease, uuid.UUID(str(raw)))
+                release_id = uuid.UUID(str(raw))
             except (TypeError, ValueError, AttributeError):
                 return None
+            candidate = self.db.get(AppRelease, release_id)
             return candidate if candidate is not None and candidate.is_active else None
 
         unavailable: list[str] = []
@@ -3137,13 +3150,14 @@ class AppService:
             reference = reference if isinstance(reference, dict) else {}
             label = node.get("name") or node.get("id") or "未命名节点"
 
-            referenced_app = None
+            # 同样只护住解析：非法/缺失的 app_id 落到下面的「不存在」，DB 异常照抛。
             try:
-                referenced_app = self.db.get(
-                    App, uuid.UUID(str(reference.get("app_id")))
-                )
+                referenced_app_id = uuid.UUID(str(reference.get("app_id")))
             except (TypeError, ValueError, AttributeError):
-                pass
+                referenced_app_id = None
+            referenced_app = (
+                self.db.get(App, referenced_app_id) if referenced_app_id else None
+            )
             if referenced_app is None:
                 unavailable.append(f"Agent 节点「{label}」引用的应用不存在")
                 continue
@@ -3153,13 +3167,20 @@ class AppService:
                 )
                 continue
 
-            if (reference.get("release_policy") or POLICY_PINNED) == POLICY_CURRENT:
+            # 走权威解析器，而不是手写缺省：发布侧
+            # `_pin_workflow_agent_references` 与运行时都在这个口径上
+            # （`get_policy`：非 current 一律按 pinned，覆盖缺字段/非法值的历史数据）。
+            if get_policy(reference) == POLICY_CURRENT:
                 if _active_release(referenced_app.current_release_id) is None:
                     unavailable.append(
                         f"Agent 节点「{label}」引用的应用「{referenced_app.name}」尚未发布"
                     )
                 continue
-            if _active_release(reference.get("release_id")) is None:
+            # 归属也查：发布侧要求 ``release.app_id == referenced_app.id``，只查
+            # ``is_active`` 会让「钉住的版本其实属于别的应用」这种历史残留保存成功、
+            # 发布才报错。type 不查 —— 那是 docstring 明确留给发布侧的范围。
+            pinned_release = _active_release(reference.get("release_id"))
+            if pinned_release is None or pinned_release.app_id != referenced_app.id:
                 unavailable.append(
                     f"Agent 节点「{label}」引用的应用「{referenced_app.name}」"
                     "钉住的发布版本不可用"
