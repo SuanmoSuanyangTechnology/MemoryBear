@@ -53,6 +53,16 @@ def _as_uuid(value: Any) -> uuid.UUID | None:
         return None
 
 
+def parse_uuid(value: Any) -> uuid.UUID | None:
+    """Public form of ``_as_uuid``: the id-parsing rule shared with callers outside
+    this module (workflow agent references, for instance).
+
+    "Malformed id means absent" must not drift between the save gate and the
+    release resolver, so both sides call this instead of hand-rolling the guard.
+    """
+    return _as_uuid(value)
+
+
 def _label(entry: dict[str, Any]) -> str:
     return str((entry or {}).get("name") or (entry or {}).get("agent_id") or "未命名")
 
@@ -283,6 +293,7 @@ __all__ = [
     "aresolve_effective_release_id",
     "describe_release_state",
     "get_policy",
+    "parse_uuid",
     "resolve_effective_release_id",
     "resolve_release_for_save",
 ]

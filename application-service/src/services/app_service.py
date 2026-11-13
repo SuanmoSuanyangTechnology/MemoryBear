@@ -69,6 +69,7 @@ from .multi_agent_release_resolver import (
     POLICY_CURRENT,
     POLICY_PINNED,
     get_policy,
+    parse_uuid,
     resolve_effective_release_id,
 )
 from .tool_service import ToolService
@@ -3132,9 +3133,8 @@ class AppService:
             "the reference is gone" and hide the real problem behind a 400.
             """
 
-            try:
-                release_id = uuid.UUID(str(raw))
-            except (TypeError, ValueError, AttributeError):
+            release_id = parse_uuid(raw)
+            if release_id is None:
                 return None
             candidate = self.db.get(AppRelease, release_id)
             return candidate if candidate is not None and candidate.is_active else None
@@ -3151,10 +3151,7 @@ class AppService:
             label = node.get("name") or node.get("id") or "未命名节点"
 
             # 同样只护住解析：非法/缺失的 app_id 落到下面的「不存在」，DB 异常照抛。
-            try:
-                referenced_app_id = uuid.UUID(str(reference.get("app_id")))
-            except (TypeError, ValueError, AttributeError):
-                referenced_app_id = None
+            referenced_app_id = parse_uuid(reference.get("app_id"))
             referenced_app = (
                 self.db.get(App, referenced_app_id) if referenced_app_id else None
             )
@@ -3167,9 +3164,9 @@ class AppService:
                 )
                 continue
 
-            # 走权威解析器，而不是手写缺省：发布侧
-            # `_pin_workflow_agent_references` 与运行时都在这个口径上
-            # （`get_policy`：非 current 一律按 pinned，覆盖缺字段/非法值的历史数据）。
+            # 缺字段/非法值一律按 pinned（`get_policy`），与运行时同一口径；
+            # 发布侧 `_pin_workflow_agent_references` 也走它，不要在这里手写
+            # `== "current"`——非法值的归属会随写法漂移。
             if get_policy(reference) == POLICY_CURRENT:
                 if _active_release(referenced_app.current_release_id) is None:
                     unavailable.append(
@@ -3228,10 +3225,9 @@ class AppService:
                     "引用的 Agent 应用尚未发布或已归档", BizCode.APP_NOT_PUBLISHED
                 )
 
-            release_policy = reference.get("release_policy", "pinned")
             effective_release_id = (
                 referenced_app.current_release_id
-                if release_policy == "current"
+                if get_policy(reference) == POLICY_CURRENT
                 else reference.get("release_id")
             )
             try:
@@ -3265,7 +3261,7 @@ class AppService:
                 node_config.pop("files", None)
 
             reference["app_id"] = str(referenced_app.id)
-            reference["release_policy"] = "pinned"
+            reference["release_policy"] = POLICY_PINNED
             reference["release_id"] = str(referenced_release.id)
             node_config["reference"] = reference
             node["config"] = node_config
