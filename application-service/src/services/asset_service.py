@@ -137,18 +137,6 @@ def _node_label(node: dict[str, Any], node_config: Any) -> str | None:
     return None
 
 
-def _workflow_node_config(node: dict[str, Any]) -> dict[str, Any] | None:
-    """节点配置的两种存法：新结构直接放 ``config``，旧结构在 ``data.config``。"""
-
-    config = node.get("config")
-    if isinstance(config, dict):
-        return config
-    data = node.get("data")
-    if isinstance(data, dict) and isinstance(data.get("config"), dict):
-        return data["config"]
-    return None
-
-
 class AssetService:
     """Catalog entries (switches 1/2) for the tenant resource center."""
 
@@ -1252,14 +1240,19 @@ class AssetService:
     ) -> list[dict[str, Any]]:
         """社区市场侧的前置阻断项：只看应用自己的行与版本快照。
 
-        三条判定与投稿入口一一对应（`market_submission_service` 的
-        `gate_market_origin` / `gate_usage_examples` / `gate_categories`），`reason`
+        判定与投稿入口一一对应（`market_submission_service` 的
+        `gate_market_origin` / `gate_market_metadata` / `gate_categories`），`reason`
         取值逐字相同，前端按它分支。这里不调用投稿服务，也不发任何外部请求——预览
         是「打开弹窗时看一眼」，不该依赖市场在线。
 
+        必填元数据按应用类型分流，与 `AppService.publish`（app_service.py:2730-2767）
+        以及 `_metadata_gaps` 同一口径：工作流/纯工作流查「设置步骤」，Agent/集群查
+        「使用示例」。不分流会让工作流永远投不出去——发布时 `usage_examples` 已被强制
+        清空，按 Agent 规则判就恒为 0 条。
+
         代价是规则有两份实现：改这里的数字或文案时必须同步投稿入口，否则会出现
-        「预览说能投、提交被拒」。判定只涉及三个本地字段（`apps.origin`、
-        `app_releases.usage_examples`、`app_releases.categories`），漂移面很小。
+        「预览说能投、提交被拒」。判定只涉及四个本地字段（`apps.origin`、
+        `app_releases.type` / `usage_examples` / `setup_steps` / `categories`），漂移面很小。
         """
 
         blockers: list[dict[str, Any]] = []
@@ -1273,17 +1266,27 @@ class AssetService:
                 "message": "应用是从社区市场复制来的副本，不能再投稿到社区市场",
             })
 
-        examples = [
-            item for item in _expand_usage_examples(release.usage_examples)
-            if isinstance(item, str) and item.strip()
-        ]
-        minimum = 3
-        if len(examples) < minimum:
-            blockers.append({
-                "scope": "community_market",
-                "reason": "USAGE_EXAMPLES_INSUFFICIENT",
-                "message": f"投稿社区市场需要至少 {minimum} 条使用示例，当前 {len(examples)} 条",
-            })
+        workflow_types = (AppType.WORKFLOW, AppType.PURE_WORKFLOW)
+        if release.type in workflow_types:
+            # 工作流只要求设置步骤，使用示例在发布时已被清空、不参与判定。
+            if not (release.setup_steps or "").strip():
+                blockers.append({
+                    "scope": "community_market",
+                    "reason": "SETUP_STEPS_REQUIRED",
+                    "message": "投稿社区市场需要填写设置步骤",
+                })
+        else:
+            examples = [
+                item for item in _expand_usage_examples(release.usage_examples)
+                if isinstance(item, str) and item.strip()
+            ]
+            minimum = app_schema.USAGE_EXAMPLES_MIN_ITEMS
+            if len(examples) < minimum:
+                blockers.append({
+                    "scope": "community_market",
+                    "reason": "USAGE_EXAMPLES_INSUFFICIENT",
+                    "message": f"投稿社区市场需要至少 {minimum} 条使用示例，当前 {len(examples)} 条",
+                })
 
         from .category_service import CategoryService
 
@@ -1904,45 +1907,6 @@ class AssetService:
         _, available_kb_ids = self.app_service._preload_cross_workspace_resources(
             target_tenant_id, target_workspace_id, set(), kb_ids
         )
-
-        # Agent 节点「引用已发布 Agent 应用」里的 app_id 是 workspace 级的：副本落在
-        # 目标空间后本地没有这个应用，运行时会按本空间解析，直接 workspace mismatch。
-        # 所以目标空间不存在的引用要整段清掉，节点退回 inline 交给用户重新配置。
-        agent_reference_ids: set[uuid.UUID] = set()
-
-        def collect_agent_references(value: Any) -> None:
-            if isinstance(value, list):
-                for child in value:
-                    collect_agent_references(child)
-                return
-            if not isinstance(value, dict):
-                return
-            node_config = _workflow_node_config(value)
-            reference = (
-                node_config.get("reference")
-                if isinstance(node_config, dict)
-                and node_config.get("mode") == "reference"
-                else None
-            )
-            if isinstance(reference, dict):
-                app_id = _coerce_uuid(reference.get("app_id"))
-                if app_id is not None:
-                    agent_reference_ids.add(app_id)
-            for child in value.values():
-                collect_agent_references(child)
-
-        collect_agent_references(copied)
-        available_agent_app_ids: set[uuid.UUID] = set()
-        if agent_reference_ids:
-            available_agent_app_ids = set(
-                self.db.scalars(
-                    select(App.id).where(
-                        App.id.in_(agent_reference_ids),
-                        App.workspace_id == target_workspace_id,
-                        App.is_active.is_(True),
-                    )
-                ).all()
-            )
 
         def clean(value: Any, path: str = "nodes") -> Any:
             if isinstance(value, list):

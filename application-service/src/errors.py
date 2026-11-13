@@ -199,6 +199,31 @@ class SubAgentUnpublishedError(I18nException):
         )
 
 
+class WorkflowAgentUnpublishedError(I18nException):
+    """Workflow save rejected because an ``agent`` node references an unusable Agent.
+
+    A workflow copied out of the resource center takes its referenced Agents along
+    as *drafts* (``asset_service._remap_workflow_nodes``), so the node points at an
+    app that has no release yet. Publishing already refuses that
+    (``_pin_workflow_agent_references``), but only after the user has finished
+    editing; the cluster config does the same check on save, and the workflow side
+    should not be looser.
+
+    Wire code stays ``INVALID_PARAMETER`` for the same reason as
+    ``SubAgentValidationError``: the enumerated node/app names must survive to the
+    user, and the generic "请求参数无效" copy would swallow them.
+    """
+
+    def __init__(self, details: str, **params: Any):
+        super().__init__(
+            error_key="errors.api.workflow_agent_unpublished",
+            status_code=400,
+            error_code="INVALID_PARAMETER",
+            details=details,
+            **params,
+        )
+
+
 class ShareDependencyUnavailableError(I18nException):
     """Sharing rejected because the snapshot references unusable dependencies (1003).
 
@@ -250,6 +275,7 @@ __all__ = [
     "SubAgentUnpublishedError",
     "SubAgentValidationError",
     "ValidationException",
+    "WorkflowAgentUnpublishedError",
     "as_biz_code",
     "http_status_for",
 ]
