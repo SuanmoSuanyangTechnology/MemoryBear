@@ -218,6 +218,7 @@ export const knowledgeBase = {
       returnToList: 'Return to List',
       stayOnPage: 'Stay on Page',
       uploadSuccess: 'Upload Success',
+      uploadFailed: 'Upload Failed',
       datasetName: 'Dataset Name',
       pleaseEnterDatasetName: 'Please enter dataset name',
       uploadImages: 'Upload Images',
