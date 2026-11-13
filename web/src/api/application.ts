@@ -269,7 +269,7 @@ export const getWorkspaceApiStatistics = (data: { start_date: number; end_date: 
 }
 // Export application
 export const appExport = (app_id: string, appName: string, data?: { release_id: string }) => {
-  return request.getDownloadFile(`/apps/${app_id}/export`, `${appName}.yml`, data)
+  return request.getDownloadFile(`/apps/${app_id}/export`, `${appName}.yaml`, data)
 }
 // Import application
 export const appImport = (formData: FormData) => {
