@@ -383,8 +383,7 @@ async def update_knowledge(
     await validate_requested_knowledge_model_availability(
         update_data.model_dump(exclude_unset=True), principal, runtime.model_runtime
     )
-    knowledge_service.validate_knowledge_update_fields(plan)
-    if plan.delete_vector_index:
+    if plan.delete_vector_index and plan.write_input_error is None:
         await (await runtime.elasticsearch.client()).indices.delete(
             index=collection_name_for_knowledge(knowledge_id),
             ignore_unavailable=True,

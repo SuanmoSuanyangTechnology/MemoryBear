@@ -624,7 +624,6 @@ async def update_knowledge(
         update_data,
         principal,
     )
-    validate_knowledge_update_fields(plan)
     return await apply_knowledge_update(db, plan, principal)
 
 
@@ -636,6 +635,7 @@ class KnowledgeUpdatePlan:
     delete_vector_index: bool
     graph_enabled_before: bool | None
     parser_config_update: dict[str, Any] | None = None
+    write_input_error: KnowledgeError | None = None
 
 
 @dataclass(frozen=True)
@@ -693,6 +693,16 @@ async def prepare_knowledge_update(
     embedding_changed = (
         "embedding_id" in update_dict and update_dict["embedding_id"] != knowledge.embedding_id
     )
+    write_input_error = None
+    try:
+        validate_write_fields(
+            update_dict,
+            integers=("doc_num", "chunk_num", "status"),
+            non_nullable=("name", "status"),
+        )
+    except KnowledgeError as exc:
+        # An old model or Wiki rejection still takes precedence over a write error.
+        write_input_error = exc
     return KnowledgeUpdatePlan(
         knowledge_id=knowledge.id,
         update_fields=update_dict,
@@ -701,17 +711,10 @@ async def prepare_knowledge_update(
             embedding_changed and knowledge.embedding_id and knowledge.reranker_id
         ),
         graph_enabled_before=graph_enabled_before,
+        write_input_error=write_input_error,
         parser_config_update=(
             update_data.parser_config if "parser_config" in update_data.model_fields_set else None
         ),
-    )
-
-
-def validate_knowledge_update_fields(plan: KnowledgeUpdatePlan) -> None:
-    validate_write_fields(
-        plan.update_fields,
-        integers=("doc_num", "chunk_num", "status"),
-        non_nullable=("name", "status"),
     )
 
 
@@ -751,6 +754,8 @@ async def apply_knowledge_update(
         if llm_id is None:
             raise KnowledgeError.from_code("KB_WIKI_MODEL_REQUIRED")
         await validate_requested_knowledge_models(db, {"llm_id": llm_id}, principal.tenant_id)
+    if plan.write_input_error is not None:
+        raise plan.write_input_error
     if plan.embedding_changed:
         from ..repositories.document import stage_reset_documents_progress_by_kb_id_async
 
