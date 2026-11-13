@@ -2679,12 +2679,6 @@
                 "constraints": [],
                 "default": null,
                 "required": true
-              },
-              "update": {
-                "annotation": "int",
-                "constraints": [],
-                "default": null,
-                "required": true
               }
             },
             "required": true
@@ -3921,26 +3915,8 @@
                 "default": null,
                 "required": true
               },
-              "emotion_enable_subject": {
-                "annotation": "bool | None",
-                "constraints": [],
-                "default": null,
-                "required": true
-              },
               "emotion_enabled": {
                 "annotation": "bool | None",
-                "constraints": [],
-                "default": null,
-                "required": true
-              },
-              "emotion_extract_keywords": {
-                "annotation": "bool | None",
-                "constraints": [],
-                "default": null,
-                "required": true
-              },
-              "emotion_min_intensity": {
-                "annotation": "float | None",
                 "constraints": [],
                 "default": null,
                 "required": true
@@ -5556,30 +5532,9 @@
               "default": null,
               "required": true
             },
-            "emotion_enable_subject": {
-              "annotation": "bool",
-              "constraints": [],
-              "default": null,
-              "required": true
-            },
             "emotion_enabled": {
               "annotation": "bool",
               "constraints": [],
-              "default": null,
-              "required": true
-            },
-            "emotion_extract_keywords": {
-              "annotation": "bool",
-              "constraints": [],
-              "default": null,
-              "required": true
-            },
-            "emotion_min_intensity": {
-              "annotation": "float",
-              "constraints": [
-                "Ge(ge=0.0)",
-                "Le(le=1.0)"
-              ],
               "default": null,
               "required": true
             }
@@ -5608,26 +5563,8 @@
                 "default": null,
                 "required": true
               },
-              "emotion_enable_subject": {
-                "annotation": "bool | None",
-                "constraints": [],
-                "default": null,
-                "required": true
-              },
               "emotion_enabled": {
                 "annotation": "bool | None",
-                "constraints": [],
-                "default": null,
-                "required": true
-              },
-              "emotion_extract_keywords": {
-                "annotation": "bool | None",
-                "constraints": [],
-                "default": null,
-                "required": true
-              },
-              "emotion_min_intensity": {
-                "annotation": "float | None",
                 "constraints": [],
                 "default": null,
                 "required": true

@@ -119,9 +119,6 @@ class EmotionConfigService:
                 "config_id": config.config_id,
                 "emotion_enabled": config.emotion_enabled,
                 "emotion_model_id": workspace.llm,
-                "emotion_extract_keywords": config.emotion_extract_keywords,
-                "emotion_min_intensity": config.emotion_min_intensity,
-                "emotion_enable_subject": config.emotion_enable_subject,
                 "is_default": bool(config.is_default)
             }
 

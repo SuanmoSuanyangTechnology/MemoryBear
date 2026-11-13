@@ -191,8 +191,11 @@ class MemoryConfigMutationService:
             values["config_name"] = body.config_name
         if body.config_desc is not None:
             values["config_desc"] = body.config_desc
-        if body.scene_id is not None:
-            values["scene_id"] = body.scene_id
+        # scene_id is compatibility-only: accepting it must not restore writes to
+        # the retired ontology project. A scene_id-only request is a successful no-op.
+        # 在v0.5.11实现这些契约变更和字段收缩。
+        if not values:
+            return ConfigUpdateResult(affected=1)
         if not await self.mutations.update_owned(config_id, workspace_id, values):
             raise ConfigNotFoundError(str(config_id))
         return ConfigUpdateResult(affected=1)
@@ -204,6 +207,12 @@ class MemoryConfigMutationService:
         await require_owned_config_exists(self.repository, config_id, workspace_id)
         values = body.model_dump(exclude_unset=True)
         values.pop("config_id", None)
+        # Compatibility-only request field; keep accepting it without persisting
+        # legacy ontology-derived configuration.
+        # 在v0.5.11实现这些契约变更和字段收缩。
+        values.pop("pruning_scene", None)
+        if not values:
+            return ConfigUpdateResult(affected=1)
         if not await self.mutations.update_owned(config_id, workspace_id, values):
             raise ConfigQueryError("配置不存在")
         return ConfigUpdateResult(affected=1)

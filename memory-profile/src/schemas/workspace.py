@@ -40,7 +40,6 @@ class WorkspaceStatistics(BaseModel):
     #: 当前快照写的是 epoch 毫秒；旧快照在校验里允许 ISO-8601 字符串。
     generated_at: int | str | None
     total_count_change: float | None
-    update: int
 
     @classmethod
     def from_refreshed(cls, response: Mapping[str, Any]) -> WorkspaceStatistics:
@@ -66,5 +65,4 @@ class WorkspaceStatistics(BaseModel):
             total_count_change=_change_ratio(
                 response["total_count"], yesterday["total_count"]
             ),
-            update=response["total_count"] - yesterday["total_count"],
         )

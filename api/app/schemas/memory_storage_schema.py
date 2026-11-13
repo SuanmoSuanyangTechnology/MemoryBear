@@ -224,16 +224,15 @@ class ConfigParams(ConfigKey):  # 创建配置参数模型  旧
 
 
 class ConfigParamsCreate(BaseModel):  # 创建配置参数模型（仅 body，去除主键）
-    model_config = ConfigDict(populate_by_name=True, extra="forbid")
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
     config_name: str = Field("配置名称", description="配置名称（字符串）")
     config_desc: str = Field("配置描述", description="配置描述（字符串）")
     workspace_id: Optional[uuid.UUID] = Field(None, description="工作空间ID（UUID）")
 
-    # 本体场景关联（可选）
-    scene_id: Optional[uuid.UUID] = Field(None, description="本体场景ID（UUID），关联ontology_scene表")
-
-    # 语义剪枝场景（由 service 层根据 scene_id 自动推导，值为关联场景的 scene_name，前端无需传入）
-    pruning_scene: Optional[str] = Field(None, description="语义剪枝场景，由 scene_id 对应的 scene_name 自动填充")
+    # 兼容公告未下线 create_config 的旧字段。旧本体已停止使用，字段仅保留入参兼容，不再读写旧表。
+    # 在v0.5.11实现这些契约变更和字段收缩。
+    scene_id: Optional[uuid.UUID] = Field(None, description="兼容字段；本版本不再生效")
+    pruning_scene: Optional[str] = Field(None, description="兼容字段；本版本不再生效")
 
     # 模型配置字段（可选，用于手动指定或自动填充）
     llm_id: Optional[str] = Field(None, description="LLM模型配置ID")
@@ -256,7 +255,9 @@ class ConfigUpdate(BaseModel):  # 更新记忆萃取引擎配置参数时使用�
     config_id: Union[uuid.UUID, int, str] = None
     config_name: Optional[str] = Field(None, description="配置名称（字符串）")
     config_desc: Optional[str] = Field(None, description="配置描述（字符串）")
-    scene_id: Optional[uuid.UUID] = Field(None, description="本体场景ID")
+    # 兼容公告未下线 update_config 的旧字段；接受但不再写入旧本体关联。
+    # 在v0.5.11实现这些契约变更和字段收缩。
+    scene_id: Optional[uuid.UUID] = Field(None, description="兼容字段；本版本不再生效")
 
 
 class ConfigUpdateExtracted(BaseModel):  # 更新记忆萃取引擎配置参数时使用的模型
@@ -277,9 +278,9 @@ class ConfigUpdateExtracted(BaseModel):  # 更新记忆萃取引擎配置参数�
 
     # 剪枝配置：与 runtime.json 中 pruning 段对应
     pruning_enabled: Optional[bool] = Field(None, description="是否启动智能语义剪枝")
-    pruning_scene: Optional[str] = Field(
-        None, description="智能剪枝场景：education/online_service/outbound 或本体工程自定义场景"
-    )
+    # 兼容公告未下线 update_config_extracted 的旧字段；接受但不再参与旧本体场景处理。
+    # 在v0.5.11实现这些契约变更和字段收缩。
+    pruning_scene: Optional[str] = Field(None, description="兼容字段；本版本不再生效")
     pruning_threshold: Optional[float] = Field(
         None, ge=0.0, le=0.9, description="智能语义剪枝阈值（0-0.9）"
     )

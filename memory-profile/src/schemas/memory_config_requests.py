@@ -66,6 +66,9 @@ class ConfigUpdateBody(BaseModel):
     config_id: UUID | str
     config_name: str | None = None
     config_desc: str | None = None
+    # Compatibility notice does not retire update_config.scene_id. Accept it as
+    # a no-op so existing callers are not broken by the ontology retirement.
+    # 在v0.5.11实现这些契约变更和字段收缩。
     scene_id: UUID | None = None
 
 
@@ -90,6 +93,9 @@ class ExtractedUpdateBody(BaseModel):
     include_dialogue_context: bool | None = None
     max_context: int | None = Field(1000, gt=100)
     pruning_enabled: bool | None = None
+    # update_config_extracted was not announced for removal. Keep its old field
+    # in the request contract while treating it as a no-op in the mutation layer.
+    # 在v0.5.11实现这些契约变更和字段收缩。
     pruning_scene: str | None = None
     pruning_threshold: float | None = Field(None, ge=0.0, le=0.9)
     enable_self_reflexion: bool | None = None
@@ -125,9 +131,6 @@ class ForgettingUpdateBody(BaseModel):
 class EmotionUpdateBody(BaseModel):
     config_id: UUID | str
     emotion_enabled: bool
-    emotion_extract_keywords: bool
-    emotion_min_intensity: float = Field(..., ge=0.0, le=1.0)
-    emotion_enable_subject: bool
 
 
 class ReflectionUpdateBody(BaseModel):

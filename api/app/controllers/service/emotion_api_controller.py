@@ -97,7 +97,6 @@ async def get_emotion_tags(
         language = get_language_from_header(language_type)
         data = await emotion_service.get_emotion_tags(
             end_user_id=end_user_id,
-            emotion_type=payload.emotion_type,
             start_date=payload.start_date,
             end_date=payload.end_date,
             limit=payload.limit,
@@ -130,7 +129,6 @@ async def get_emotion_wordcloud(
         get_language_from_header(language_type)
         data = await emotion_service.get_emotion_wordcloud(
             end_user_id=end_user_id,
-            emotion_type=payload.emotion_type,
             limit=payload.limit,
         )
         return success(data=data, msg="情绪词云获取成功")

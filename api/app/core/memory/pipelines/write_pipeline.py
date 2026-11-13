@@ -877,7 +877,6 @@ class WritePipeline:
         )
 
         pipeline_config = get_pipeline_config(self.memory_config)
-        ontology_types = self._load_ontology_types()
 
         # 复用 run() 中已创建的 recorder（剪枝阶段已使用同一实例）
         recorder = getattr(self, "_recorder", None) or WriteSnapshotRecorder(self.end_user_id)
@@ -889,7 +888,6 @@ class WritePipeline:
             embedder_client=self._embedder_client,
             config=pipeline_config,
             embedding_id=str(self.memory_config.embedding_model_id),
-            ontology_types=ontology_types,
             language=self.language,
             is_pilot_run=is_pilot_run,
             progress_callback=self.progress_callback,
@@ -1630,42 +1628,6 @@ class WritePipeline:
         from app.core.memory.storage.service import MemoryStorageService
 
         self._storage_service = await MemoryStorageService.create_graph_write_only()
-
-    def _load_ontology_types(self):
-        """
-        加载本体类型配置。
-
-        如果 memory_config 中配置了 scene_id，则从数据库加载
-        该场景关联的本体类型列表，用于指导三元组提取。
-        """
-        if not self.memory_config.scene_id:
-            return None
-
-        try:
-            from app.core.memory.ontology_services.ontology_type_loader import (
-                load_ontology_types_for_scene,
-            )
-            from app.db import get_db_context
-
-            with get_db_context() as db:
-                ontology_types = load_ontology_types_for_scene(
-                    scene_id=self.memory_config.scene_id,
-                    workspace_id=self.memory_config.workspace_id,
-                    db=db,
-                )
-            if ontology_types:
-                logger.info(
-                    f"Loaded {len(ontology_types.types)} ontology types "
-                    f"for scene_id: {self.memory_config.scene_id}"
-                )
-            return ontology_types
-        except Exception as e:
-            logger.warning(
-                f"Failed to load ontology types for scene_id "
-                f"{self.memory_config.scene_id}: {e}",
-                exc_info=True,
-            )
-            return None
 
     async def _clean_cross_role_aliases(
         self, entity_nodes: List[ExtractedEntityNode]

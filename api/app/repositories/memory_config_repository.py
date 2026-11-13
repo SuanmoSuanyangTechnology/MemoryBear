@@ -232,8 +232,6 @@ class MemoryConfigRepository:
                 config_name=params.config_name,
                 config_desc=params.config_desc,
                 workspace_id=params.workspace_id,
-                scene_id=params.scene_id,
-                pruning_scene=params.pruning_scene,
                 llm_id=params.llm_id,
                 embedding_id=params.embedding_id,
                 rerank_id=params.rerank_id,
@@ -262,8 +260,6 @@ class MemoryConfigRepository:
                 config_name=params.config_name,
                 config_desc=params.config_desc,
                 workspace_id=params.workspace_id,
-                scene_id=params.scene_id,
-                pruning_scene=params.pruning_scene,
                 llm_id=params.llm_id,
                 embedding_id=params.embedding_id,
                 rerank_id=params.rerank_id,
@@ -310,9 +306,6 @@ class MemoryConfigRepository:
             if update.config_desc is not None:
                 db_config.config_desc = update.config_desc
                 has_update = True
-            if update.scene_id is not None:
-                db_config.scene_id = update.scene_id
-                has_update = True
 
             if not has_update:
                 raise ValueError("No fields to update")
@@ -343,9 +336,6 @@ class MemoryConfigRepository:
                 has_update = True
             if update.config_desc is not None:
                 db_config.config_desc = update.config_desc
-                has_update = True
-            if update.scene_id is not None:
-                db_config.scene_id = update.scene_id
                 has_update = True
             if not has_update:
                 raise ValueError("No fields to update")
@@ -378,6 +368,10 @@ class MemoryConfigRepository:
             #TODO：部分更新没有用patch请求，是在Repository层中用先查再部分更新的方式实现的，后续可以考虑改成patch请求更符合RESTful设计原则
             update_data = update.model_dump(exclude_unset=True)
             update_data.pop("config_id", None)
+            # pruning_scene remains accepted for unannounced callers, but must not
+            # reintroduce writes derived from the retired ontology project.
+            # 在v0.5.11实现这些契约变更和字段收缩。
+            update_data.pop("pruning_scene", None)
 
             for field, value in update_data.items():
                 setattr(db_config, field, value)
@@ -404,6 +398,10 @@ class MemoryConfigRepository:
                 return None
             update_data = update.model_dump(exclude_unset=True)
             update_data.pop("config_id", None)
+            # Compatibility-only field; accepting it must not restore writes to
+            # legacy ontology-derived configuration.
+            # 在v0.5.11实现这些契约变更和字段收缩。
+            update_data.pop("pruning_scene", None)
             for field, value in update_data.items():
                 setattr(db_config, field, value)
             await self.db.commit()
@@ -485,7 +483,10 @@ class MemoryConfigRepository:
                 "include_dialogue_context": db_config.include_dialogue_context,
                 "max_context": db_config.max_context,
                 "pruning_enabled": db_config.pruning_enabled,
-                "pruning_scene": db_config.pruning_scene,
+                # read_config_extracted was not listed in the compatibility notice.
+                # Preserve its response key without querying the retired ontology.
+                # 在v0.5.11实现这些契约变更和字段收缩。
+                "pruning_scene": "",
                 "pruning_threshold": db_config.pruning_threshold,
                 "enable_self_reflexion": db_config.enable_self_reflexion,
                 "iteration_period": db_config.iteration_period,
@@ -911,19 +912,16 @@ class MemoryConfigRepository:
         Returns:
             List[Tuple[MemoryConfig, Optional[str]]]: 配置列表，每项为 (配置对象, 场景名称)
         """
-        from app.models.ontology_scene import OntologyScene
-
         db_logger.debug(f"查询所有配置: workspace_id={workspace_id}")
 
         try:
-            query = self.db.query(MemoryConfig, OntologyScene.scene_name).outerjoin(
-                OntologyScene, MemoryConfig.scene_id == OntologyScene.scene_id
-            )
+            query = self.db.query(MemoryConfig)
 
             if workspace_id:
                 query = query.filter(MemoryConfig.workspace_id == workspace_id)
 
-            results = query.order_by(desc(MemoryConfig.updated_at)).all()
+            configs = query.order_by(desc(MemoryConfig.updated_at)).all()
+            results = [(config, None) for config in configs]
 
             db_logger.debug(f"配置列表查询成功: 数量={len(results)}")
             return results
@@ -933,17 +931,14 @@ class MemoryConfigRepository:
             raise
 
     async def get_all_async(self, workspace_id: Optional[uuid.UUID] = None) -> List[Tuple[MemoryConfig, Optional[str]]]:
-        from app.models.ontology_scene import OntologyScene
         db_logger.debug(f"查询所有配置(异步): workspace_id={workspace_id}")
         try:
-            stmt = select(MemoryConfig, OntologyScene.scene_name).outerjoin(
-                OntologyScene, MemoryConfig.scene_id == OntologyScene.scene_id
-            )
+            stmt = select(MemoryConfig)
             if workspace_id:
                 stmt = stmt.where(MemoryConfig.workspace_id == workspace_id)
             stmt = stmt.order_by(desc(MemoryConfig.updated_at))
             result = await self.db.execute(stmt)
-            results = result.all()
+            results = [(config, None) for config in result.scalars().all()]
             db_logger.debug(f"配置列表查询成功(异步): 数量={len(results)}")
             return results
         except Exception as e:
