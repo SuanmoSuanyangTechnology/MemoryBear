@@ -131,6 +131,7 @@ async def get_retrieved_memories(
     - 传 end_user_id：返回指定用户的读取展示卡片；
     - 不传 end_user_id：返回 API Key 所属工作空间的全部读取卡片（空间级），
       每项额外携带 end_user_id 字段区分归属。
+    社区检索卡片的 search_mode 为 "community"，content 展示入选场景的主题范围。
     """
     language = await get_current_language(request)
     window_error = _time_window_error(start_time, end_time, language)
@@ -194,10 +195,9 @@ async def get_engine_display_cards(
     - 不传 end_user_id：返回 API Key 所属工作空间的全部引擎卡片（空间级，
       仍按用户维度拆分），每张卡片额外携带 end_user_id。
 
-    按"指定时区下的自然日 + 引擎类型"聚合事件并返回卡片。engine_type 为
-    EXTRACTION、CROSS_MODAL、EMOTION、FORGETTING、REFLECTION、SCENE_SUMMARY
-    或 MEMORY_VALUE，由前端负责展示文案映射；X-Language-Type
-    仅控制 name/content 文案。
+    按"指定时区下的自然日 + 引擎类型"聚合事件并返回卡片。
+    engine_type 包含人格锚定引擎（PERSONALITY_ANCHOR）等，由前端映射分类标签。
+    X-Language-Type 控制 name/content 文案。
 
     聚合边界必须在服务端确定，因此 X-Timezone 为必传请求头，
     前端统一传全局时区设置（useI18n().timeZone），
@@ -283,6 +283,7 @@ async def get_all_memory_display(
     - 传 end_user_id：指定用户的统一时间线；
     - 不传 end_user_id：API Key 所属工作空间的统一时间线（空间级），
       每项额外携带 end_user_id 区分归属。
+    社区检索卡片使用 source="retrieved" 和 search_mode="community"。
     """
     language = await get_current_language(request)
     resolved_end_user_id = None

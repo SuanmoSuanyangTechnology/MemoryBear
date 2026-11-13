@@ -217,6 +217,7 @@ export const knowledgeBase = {
       returnToList: '返回列表页',
       stayOnPage: '停留在此页',
       uploadSuccess: '上传成功',
+      uploadFailed: '上传失败',
       datasetName: '数据集名称',
       pleaseEnterDatasetName: '请输入数据集名称',
       uploadImages: '上传图片',
