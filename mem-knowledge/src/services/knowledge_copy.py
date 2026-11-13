@@ -94,15 +94,15 @@ async def _validate_principal_references(
     principal: Principal,
 ) -> None:
     workspace = await ReferenceRepository.get_workspace(db, principal.workspace_id)
-    if workspace is None:
-        raise KnowledgeError.from_code("KB_PRINCIPAL_REFERENCE_INVALID", http_status_override=500)
-    if workspace.is_active is not True or workspace.tenant_id != principal.tenant_id:
+    if (
+        workspace is None
+        or workspace.is_active is not True
+        or workspace.tenant_id != principal.tenant_id
+    ):
         raise KnowledgeError.from_code("KB_PRINCIPAL_REFERENCE_INVALID")
 
     user = await ReferenceRepository.get_user(db, principal.actor_id)
-    if user is None:
-        raise KnowledgeError.from_code("KB_PRINCIPAL_REFERENCE_INVALID", http_status_override=500)
-    if user.is_active is not True or user.tenant_id != principal.tenant_id:
+    if user is None or user.is_active is not True or user.tenant_id != principal.tenant_id:
         raise KnowledgeError.from_code("KB_PRINCIPAL_REFERENCE_INVALID")
 
 
