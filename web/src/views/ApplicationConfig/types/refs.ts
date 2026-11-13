@@ -172,3 +172,77 @@ export interface AppSharingForm {
 export interface EmbedWebsiteModalRef {
   handleOpen: () => void;
 }
+
+export interface SharePreviewRelease {
+  id: string;
+  version: number;
+  version_name: string;
+  published_at: number;
+  publisher_name: string;
+  name: string;
+  icon: string | null;
+}
+
+export interface SharePreviewResourceCenter {
+  shared: boolean;
+  allow_editable: boolean;
+  asset_id: string | null;
+  pinned_release_id: string | null;
+  pinned_version: number | null;
+  status: 'published' | 'unpublished';
+}
+
+export interface SharePreviewCommunityMarket {
+  submitted: boolean;
+  sync_status: 'pending_sync' | 'synced' | 'sync_failed' | null;
+  publication_status: string | null;
+  market_resource_id: string | null;
+  can_submit: boolean;
+  block_reason: string | null;
+}
+
+export interface SharePreviewBuiltinTool {
+  name: string;
+  tool_class: string | null;
+  source: 'self' | 'supervisor' | 'workflow_node' | 'sub_agent';
+  source_name: string | null;
+}
+
+export interface SharePreviewCarriedDependency {
+  kind: 'mcp_tool' | 'custom_tool' | 'workflow_tool' | 'skill' | 'plugin';
+  name: string;
+  disposition: 'bundled' | 'placeholder' | 'dropped';
+  methods?: string[];
+}
+
+export interface SharePreviewBinding {
+  kind: 'knowledge_base';
+  name: string | null;
+}
+
+export interface SharePreviewClusterAgent {
+  agent_id: string;
+  name: string;
+  release_id: string;
+  version_name: string;
+}
+
+export interface SharePreviewBlocker {
+  scope: 'resource_center' | 'community_market';
+  reason: string;
+  message: string;
+}
+
+export interface SharePreviewData {
+  app_id: string;
+  app_type: string;
+  release: SharePreviewRelease;
+  resource_center: SharePreviewResourceCenter;
+  community_market: SharePreviewCommunityMarket;
+  builtin_tools: SharePreviewBuiltinTool[];
+  carried_dependencies: SharePreviewCarriedDependency[];
+  bindings: SharePreviewBinding[];
+  cluster_agents: SharePreviewClusterAgent[];
+  blockers: SharePreviewBlocker[];
+  can_submit_market: boolean;
+}

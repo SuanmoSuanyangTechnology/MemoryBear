@@ -2,7 +2,7 @@
  * @Author: ZhaoYing
  * @Date: 2026-02-03 16:29:21
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-08-13 10:47:30
+ * @Last Modified time: 2026-11-13 13:43:38
  */
 import { forwardRef } from 'react';
 import { useTranslation } from 'react-i18next'
@@ -67,7 +67,7 @@ const Agent = forwardRef<AgentRef, { onFeaturesLoad?: (features: FeaturesConfigF
                   {modelLogo
                     ? <img src={modelLogo} className="rb:size-4 rb:rounded-md" alt={modelLogo} />
                     : defaultModel?.name
-                    ? <div className="rb:size-4 rb:bg-[url('@/assets/images/application/model.svg')]"></div> : null}
+                    ? <div className="rb:size-4 rb:bg-[url('@/assets/images/application/model_blue.svg')]"></div> : null}
                   {defaultModel?.name || t('application.chooseModel')}
                   {defaultModel && <ModelStatusTag model={defaultModel} />}
                 </Button>

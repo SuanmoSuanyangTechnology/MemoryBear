@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:30:06 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-06-30 10:07:16
+ * @Last Modified time: 2026-11-13 13:59:13
  */
 /**
  * Memory Extraction Engine Configuration Constants
@@ -134,13 +134,13 @@ export const configList: ConfigVo[] = [
             meaning: 'intelligentSemanticPruningFunctionDesc',
           },
           // Intelligent semantic pruning scene
-          {
-            label: 'intelligentSemanticPruningScene',
-            variableName: 'pruning_scene',
-            control: 'text',
-            type: 'enum',
-            meaning: 'intelligentSemanticPruningSceneDesc',
-          },
+          // {
+          //   label: 'intelligentSemanticPruningScene',
+          //   variableName: 'pruning_scene',
+          //   control: 'text',
+          //   type: 'enum',
+          //   meaning: 'intelligentSemanticPruningSceneDesc',
+          // },
           // Intelligent semantic pruning threshold
           {
             label: 'intelligentSemanticPruningThreshold',

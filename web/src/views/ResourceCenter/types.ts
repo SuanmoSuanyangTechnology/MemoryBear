@@ -1,26 +1,26 @@
 export interface AppAssetsQuery {
     /**
-     * 按功能分类过滤，单值。命中该应用 `categories[]` 中任一元素即匹配。取值见方案 §4.5 的 8 项枚举。
+     * Filter by function category, single value. Matches if any element in application `categories[]` matches. Values from 8-item enum in spec §4.5.
      */
     category?: string;
     /**
-     * 页码，从 1 开始。
+     * Page number, starting from 1.
      */
     page?: number;
     /**
-     * 每页条数，默认 20，最大 100。
+     * Items per page, default 20, max 100.
      */
     pagesize?: number;
     /**
-     * 关键词，匹配应用名称、描述与发布人名称（对应截图搜索框「搜索应用名称、描述或发布人」）。
+     * Keyword, matches application name, description and publisher name (corresponds to search box "Search application name, description or publisher" in screenshot).
      */
     q?: string;
     /**
-     * 标签过滤，逗号分隔，命中任一即可。
+     * Tag filter, comma-separated, matches any one.
      */
     tags?: string;
     /**
-     * 应用类型过滤：agent | workflow | multi_agent。
+     * Application type filter: agent | workflow | pure_workflow | multi_agent.
      */
     type?: string;
 }
@@ -31,122 +31,122 @@ export interface AppAssetsResponse {
 
 export interface AppAssetItem {
     /**
-     * 功能分类，1~5 项，取值来自固定枚举（见方案 §4.5）。随版本冻结，不是运营临时补。
+     * Function categories, 1~5 items, values from fixed enum (see spec §4.5). Frozen with version, not added by operations temporarily.
      */
     categories: Category[];
     /**
-     * 社区市场用的横版封面地址；不是卡片图标，图标见 icon。
+     * Horizontal cover image URL for community market; not card icon, icon see `icon`.
      */
     cover?: string;
     /**
-     * Unix 毫秒。
+     * Unix milliseconds.
      */
     created_at?: number;
     /**
-     * 条目创建者用户 ID（分享方）。
+     * Entry creator user ID (sharer).
      */
     created_by?: string;
     /**
-     * 应用描述，**创建应用时填写的描述**（随版本快照冻结）。列表卡片描述区文案。
+     * Application description, **description filled when creating application** (frozen with version snapshot). List card description area text.
      */
     description?: string;
     /**
-     * 源应用是否已有更新版本。共享跟版本走：源应用发新版不会自动前移，只在此提示。
+     * Whether source application has newer version. Share follows version: source application releasing new version does not automatically advance, only prompts here.
      */
     has_newer_version?: boolean;
     /**
-     * 应用图标地址，卡片左侧方形图标。可为空，空时前端按 source_app_type 兜底。
+     * Application icon URL, square icon on left side of card. Can be empty, when empty frontend falls back to `source_app_type`.
      */
     icon?: null | string;
     /**
-     * 图标类型：locale | remote。
+     * Icon type: locale | remote.
      */
     icon_type?: null | string;
     /**
-     * 资源中心条目 ID。
+     * Resource center entry ID.
      */
     id: string;
     /**
-     * 被拉取次数：有多少人把它添加到自己的空间。
+     * Pull count: how many people added it to their workspace.
      */
     install_count: number;
     /**
-     * 已提交社区市场时的市场资源 ID；未提交为 null。
+     * Market resource ID when submitted to community market; null when not submitted.
      */
     market_resource_id?: string;
     /**
-     * 条目钉住的版本；消费方跟这个走。
+     * Entry pinned version; consumer follows this.
      */
     published_release_id: string;
     /**
-     * 条目钉住的版本号，冗余字段，免 join。
+     * Entry pinned version number, redundant field to avoid join.
      */
     published_version: number;
     /**
-     * 发布人展示名，卡片上「发布人」旁的文案。服务端按 created_by join 用户取展示名。
+     * Publisher display name, text next to "publisher" on card. Server joins user by `created_by` to get display name.
      */
     publisher_name: string;
     /**
-     * 共享模式：readonly（只读引用）/ editable（可复制为独立副本）。决定 install 的行为，调用方无法提权。
+     * Share mode: readonly (read-only reference) / editable (can copy as independent copy). Determines install behavior, caller cannot escalate permission.
      */
     share_mode: ShareMode;
     /**
-     * 源应用 ID。
+     * Source application ID.
      */
     source_app_id: string;
     /**
-     * 应用名称，卡片标题。
+     * Application name, card title.
      */
     source_app_name: string;
     /**
-     * 应用类型：agent | workflow | multi_agent。卡片图标按此着色（agent 蓝 / workflow 蓝链 / multi_agent 绿群）。
+     * Application type: agent | workflow | pure_workflow | multi_agent. Card icon is colored by this (agent blue / workflow, pure_workflow blue chain / multi_agent green group).
      */
     source_app_type: SourceAppType;
     /**
-     * 派生值：源应用 latest 版本号。与 published_version 比对得出 has_newer_version。
+     * Derived value: source application latest version number. Compared with `published_version` to get `has_newer_version`.
      */
     source_app_version?: string;
     /**
-     * 条目上架时快照的来源空间 ID。
+     * Source workspace ID snapshot when entry listed.
      */
     source_workspace_id?: string;
     /**
-     * 来源空间名称，副标题「来自哪个空间」。
+     * Source workspace name, subtitle "from which workspace".
      */
     source_workspace_name?: string;
     /**
-     * 条目状态：draft | published | unpublished。列表只返回 published。
+     * Entry status: draft | published | unpublished. List only returns published.
      */
     status: Status;
     /**
-     * 标签数组。
+     * Tag array.
      */
     tags?: string[];
     /**
-     * Unix 毫秒。
+     * Unix milliseconds.
      */
     updated_at?: number;
     /**
-     * 浏览次数：被多少人看过。卡片上眼睛图标后的数字。与 install_count 是两个不同指标。
+     * View count: how many people viewed it. Number after eye icon on card. Different metric from `install_count`.
      */
     view_count: number;
 }
 
 export interface Categories {
     /**
-     * 分类 code（英文短码），稳定标识。投稿时作为 `display.categories` 的值。
+     * Category code (English short code), stable identifier. Used as `display.categories` value when submitting.
      */
     code: string;
     /**
-     * 中文展示名。
+     * Chinese display name.
      */
     name: string;
     /**
-     * 英文展示名，仅用于 en 界面。不参与校验与匹配。
+     * English display name, only used for en interface. Not involved in validation and matching.
      */
     name_en: string;
     /**
-     * 排序，升序。前端按此渲染，不硬编码顺序。
+     * Sort order, ascending. Frontend renders by this, do not hardcode order.
      */
     sort: number;
 }
@@ -171,16 +171,17 @@ export enum ShareMode {
 }
 
 /**
- * 应用类型：agent | workflow | multi_agent。卡片图标按此着色（agent 蓝 / workflow 蓝链 / multi_agent 绿群）。
+ * Application type: agent | workflow | multi_agent. Card icon is colored by this (agent blue / workflow blue chain / multi_agent green group).
  */
 export enum SourceAppType {
     Agent = "agent",
     MultiAgent = "multi_agent",
     Workflow = "workflow",
+    PureWorkflow = "pure_workflow",
 }
 
 /**
- * 条目状态：draft | published | unpublished。列表只返回 published。
+ * Item status: draft | published | unpublished. List only returns published.
  */
 export enum Status {
     Draft = "draft",
@@ -190,46 +191,44 @@ export enum Status {
 
 export interface Page {
     /**
-     * 是否有下一页
+     * Whether there is a next page.
      */
     hasnext: boolean;
     /**
-     * 当前页码
+     * Current page number.
      */
     page: number;
     /**
-     * 每页条数
+     * Items per page.
      */
     pagesize: number;
     /**
-     * 符合条件的总记录数
+     * Total number of records matching the criteria.
      */
     total: number;
 }
 
 export interface AppAssetDetail {
     /**
-     * 功能分类，1~5 项，取值来自固定枚举（见方案 §4.5）。随版本冻结，不是运营临时补。
+     * Function categories, 1~5 items, values from fixed enum (see spec §4.5). Frozen with version, not added by operations temporarily.
      */
     categories: Category[];
     /**
-     * 更新说明，取条目钉住版本的 `app_releases.release_notes`，随版本冻结。为空时前端渲染「暂无更新说明」。
+     * Changelog, from pinned version's `app_releases.release_notes`, frozen with version. When empty, frontend renders "No changelog".
      */
     changelog: null | string;
     cover?: string;
     /**
-     * Unix 毫秒。
+     * Unix milliseconds.
      */
     created_at?: number;
     created_by?: string;
     /**
-     * 应用描述，**创建应用时填写的描述**（`apps.description`，发布时冻结进
-     * `app_releases.description`）。详情页名称下方那段正文就渲染这个字段。空值前端不渲染该行。
+     * Application description, **description filled when creating application** (`apps.description`, frozen into `app_releases.description` at publish). Detail page renders this field as body text below name. When empty, frontend does not render this row.
      */
     description: string;
     /**
-     * 完整配置快照。同租户内不脱敏。agent 含 system_prompt / model_config_ref / tools / skills /
-     * knowledge_retrieval；multi_agent 另含 sub_agents / routing_rules。
+     * Complete configuration snapshot. Not desensitized within same tenant. agent includes system_prompt / model_config_ref / tools / skills / knowledge_retrieval; multi_agent additionally includes sub_agents / routing_rules.
      */
     display_payload: { [key: string]: any };
     detail_view?: {
@@ -239,35 +238,35 @@ export interface AppAssetDetail {
     }; 
     has_newer_version?: boolean;
     /**
-     * 应用图标地址，详情页左上角方形图标。可为空，空时前端按 source_app_type 兜底。
+     * Application icon URL, square icon at top-left of detail page. Can be empty, when empty frontend falls back to `source_app_type`.
      */
     icon: null | string;
     /**
-     * 图标类型：locale | remote。
+     * Icon type: locale | remote.
      */
     icon_type: null | string;
     id: string;
     /**
-     * 拉取情况汇总（分享方视角）。
+     * Installation summary (sharer's perspective).
      */
     installations_summary?: InstallationsSummary;
     /**
-     * 该版本实际引用到的技能包（来自钉住版本的快照，不是 resource_mapping）。空数组渲染「未关联」。
+     * Skills actually referenced by this version (from pinned version snapshot, not resource_mapping). Empty array renders "Not linked".
      */
     linked_skills: LinkedSkill[];
     /**
-     * 该版本实际引用到的工具（来自钉住版本的快照，不是 resource_mapping）。空数组渲染「未关联」。
+     * Tools actually referenced by this version (from pinned version snapshot, not resource_mapping). Empty array renders "Not linked".
      */
     linked_tools: LinkedTool[];
     published_release_id: string;
     published_version?: number;
     published_version_name?: string;
     /**
-     * 发布人展示名，详情页名称下方「发布人」。服务端按 created_by join 用户取展示名。
+     * Publisher display name, "publisher" below name on detail page. Server joins user by `created_by` to get display name.
      */
     publisher_name: string;
     /**
-     * 空间级资源映射结果。同租户内模型/工具/skill 原样复用 id；知识库与记忆按空间重映射。
+     * Workspace-level resource mapping result. Models/tools/skill reuse id as-is within same tenant; knowledge bases and memory are remapped by workspace.
      */
     resource_mapping?: ResourceMapping[];
     share_mode: ShareMode;
@@ -275,7 +274,7 @@ export interface AppAssetDetail {
     source_app_name?: string;
     source_app_type?: SourceAppType;
     /**
-     * 源应用最新版本号（派生值）。
+     * Source application latest version number (derived value).
      */
     source_app_version?: string;
     source_workspace_id?: string;
@@ -283,22 +282,22 @@ export interface AppAssetDetail {
     status: Status;
     tags?: string[];
     /**
-     * Unix 毫秒。
+     * Unix milliseconds.
      */
     updated_at?: number;
     /**
-     * 使用示例，随版本冻结。**纯字符串数组，按录入顺序返回**，不暴露 order/content 落库结构。空数组表示未录入，前端不渲染该区块。
+     * Usage examples, frozen with version. **Pure string array, returned in entry order**, does not expose order/content storage structure. Empty array means not entered, frontend does not render this section.
      */
     usage_examples: string[];
     setup_steps: string;
     /**
-     * 浏览次数：打开详情页次数，详情页眼睛图标后的数字。与 installations_summary 不是同一指标。
+     * View count: number of times detail page opened, number after eye icon on detail page. Different metric from `installations_summary`.
      */
     view_count: number;
 }
 
 /**
- * 拉取情况汇总（分享方视角）。
+ * Installation summary (sharer's perspective).
  */
 export interface InstallationsSummary {
     copy?: number;
@@ -323,13 +322,13 @@ export interface LinkedTool {
 export interface ResourceMapping {
     kind?: Kind;
     /**
-     * 在本空间映射到的资源 ID；未映射为 null。
+     * Resource ID mapped in this workspace; null when not mapped.
      */
     local_id?: string;
     local_name?: string;
     ref_name?: string;
     /**
-     * 是否已自动命中。
+     * Whether automatically matched.
      */
     resolved?: boolean;
 }

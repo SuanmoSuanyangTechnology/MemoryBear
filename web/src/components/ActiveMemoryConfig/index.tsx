@@ -54,9 +54,6 @@ const ActiveMemoryConfig: FC<ActiveMemoryConfigProps> = ({
             })}
           >{t('memory.onlineActiveTag')}</Tag>
         }
-        <span className="rb:text-[12px] rb:text-[#5B6167]">
-          {t('memory.scene')}: {activeMemoryConfig?.scene_name || t('memory.defaultScene')}
-        </span>
       </Flex>
       {activeMemoryConfig?.is_system_default
         ? <div className="rb:mt-2 rb:text-[12px] rb:text-[#5B6167]">

@@ -62,6 +62,7 @@ export const resourceCenter = {
   tools: 'Tools',
   agent: 'Agent',
   workflow: 'Workflow',
+  pure_workflow: 'Pure Workflow',
   space: 'Target workspace',
   selectSpace: 'Select a workspace',
   mockNotice: 'Demo data only. Additions last for this page session and do not create real applications.',
