@@ -9,8 +9,11 @@ from typing import Any
 from sqlalchemy import delete, func, null, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..api.query_validation import list_order_clause
 from ..api.schemas.knowledge import KnowledgeCreate
+from ..errors import KnowledgeError
 from ..models.owned import Document, Knowledge, KnowledgeMetadata, PermissionType
+from ..rag.knowledge_graph.config import GraphPipelineConfigError
 from ..rag.parser_config import (
     build_default_knowledge_parser_config,
     normalize_new_knowledge_parser_config,
@@ -149,9 +152,16 @@ def _knowledge_values(
         if values.get("parser_config") is None:
             values["parser_config"] = build_default_knowledge_parser_config()
     else:
-        values["parser_config"] = normalize_new_knowledge_parser_config(
-            values.get("parser_config")
-        )
+        try:
+            values["parser_config"] = normalize_new_knowledge_parser_config(
+                values.get("parser_config")
+            )
+        except GraphPipelineConfigError as exc:
+            raise KnowledgeError.from_code(
+                "KB_KNOWLEDGE_PARSER_CONFIG_INVALID",
+                status_code=422,
+                diagnostic="body.parser_config.graphrag: invalid graph pipeline configuration",
+            ) from exc
     return values
 
 
@@ -169,10 +179,9 @@ async def get_knowledges_paginated_async(
 
     total_result = await db.execute(select(func.count()).select_from(stmt.subquery()))
     total = total_result.scalar_one()
-    if orderby:
-        order_attr = getattr(Knowledge, orderby, None)
-        if order_attr is not None:
-            stmt = stmt.order_by(order_attr.desc() if desc else order_attr.asc())
+    order = list_order_clause(Knowledge, orderby, desc=desc)
+    if order is not None:
+        stmt = stmt.order_by(order)
 
     result = await db.execute(stmt.offset((page - 1) * pagesize).limit(pagesize))
     return total, list(result.scalars().all())

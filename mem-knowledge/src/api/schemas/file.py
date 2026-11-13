@@ -1,12 +1,14 @@
 """Knowledge file request and response schemas copied from the legacy API."""
 
 import datetime
+import re
 import uuid
 from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict, Field, field_serializer
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, field_serializer
 
 from ...utils.datetime_utils import to_timestamp_ms
+from .storage_fields import INT32_MAX, INT32_MIN, NonNullUpdate
 
 
 class BatchDownloadRequest(BaseModel):
@@ -44,11 +46,27 @@ class CustomTextFileCreate(BaseModel):
     content: str
 
 
+def _validate_file_size_text(value: str) -> str:
+    if not re.fullmatch(r"[+-]?[0-9]+", value.strip()):
+        raise ValueError("file size must be an integer")
+    if not INT32_MIN <= int(value) <= INT32_MAX:
+        raise ValueError("file size exceeds the supported integer range")
+    return value
+
+
+FileSizeInput = (
+    Annotated[
+        str, AfterValidator(_validate_file_size_text), Field(description="Legacy integer text")
+    ]
+    | Annotated[int, Field(strict=True, ge=0, le=INT32_MAX)]
+)
+
+
 class FileUpdate(BaseModel):
     parent_id: uuid.UUID | None = Field(None)
-    file_name: str | None = Field(None)
-    file_ext: str | None = Field(None)
-    file_size: str | Annotated[int, Field(strict=True, ge=0)] | None = Field(None)
+    file_name: NonNullUpdate[str]
+    file_ext: NonNullUpdate[str]
+    file_size: NonNullUpdate[FileSizeInput]
     file_url: str | None = Field(None)
 
 

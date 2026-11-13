@@ -161,7 +161,15 @@ def register_error_handlers(application: FastAPI) -> None:
                 message="Request validation failed",
                 validation_errors=exc.errors(),
             )
-            return await request_validation_exception_handler(request, exc)
+            try:
+                return await request_validation_exception_handler(request, exc)
+            except ValueError:
+                # Invalid JSON values such as Infinity cannot be echoed by JSONResponse.
+                detail = [
+                    {key: error[key] for key in ("loc", "msg", "type")}
+                    for error in exc.errors()
+                ]
+                return JSONResponse(status_code=422, content={"detail": detail})
         if any(
             any(part in _RERANK_FIELDS for part in error.get("loc", ())) for error in exc.errors()
         ):

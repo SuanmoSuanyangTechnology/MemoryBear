@@ -597,6 +597,12 @@ class KnowledgeMetadataService:
         if field_type == "time":
             try:
                 return parse_metadata_time_to_utc_naive(value) is not None
+            except (OverflowError, OSError) as exc:
+                raise KnowledgeError.from_code(
+                    "KB_METADATA_VALUE_TYPE_MISMATCH",
+                    status_code=422,
+                    diagnostic="body.metadata: timestamp is outside the supported range",
+                ) from exc
             except (TypeError, ValueError):
                 return False
         return False

@@ -13,8 +13,10 @@ from typing import Any
 import httpx
 
 from ....utils.datetime_utils import parse_timestamp_to_utc_naive
-from .exceptions import FeishuAPIError, FeishuAuthError
+from .exceptions import FeishuAPIError, FeishuAuthError, FeishuFolderNotFoundError
 from .models import FileInfo
+
+_FOLDER_NOT_FOUND_CODES = {"404", "230005"}
 
 
 def _timestamp(value: Any) -> datetime | None:
@@ -94,9 +96,16 @@ class FeishuAPIClient:
             raise FeishuAPIError("Feishu folder request failed") from exc
         body = response.json()
         if body.get("code") != 0:
-            raise FeishuAPIError(
-                "Feishu API request failed", str(body.get("code")), response=response
-            )
+            error_code = str(body.get("code"))
+            if (
+                page_token is None
+                and response.status_code in {200, 400, 404}
+                and error_code in _FOLDER_NOT_FOUND_CODES
+            ):
+                raise FeishuFolderNotFoundError(
+                    error_code, folder_token=folder_token, response=response
+                )
+            raise FeishuAPIError("Feishu API request failed", error_code, response=response)
         data = body.get("data") or {}
         files = [
             FileInfo(

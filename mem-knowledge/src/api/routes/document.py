@@ -16,7 +16,7 @@ from ...services.knowledge_file_storage import KnowledgeFileStorage
 from ...services.knowledge_metadata import KnowledgeMetadataService
 from ...tasks.dispatch import TaskDispatcher
 from ..dependencies import Principal, get_principal, get_runtime
-from ..schemas.common import SuccessEnvelope, success
+from ..schemas.common import INPUT_422_RESPONSES, SuccessEnvelope, success
 from ..schemas.document import DocumentCreate, DocumentUpdate
 from ..schemas.knowledge_metadata import (
     BatchUpdateMetadataRequest,
@@ -49,7 +49,11 @@ async def _require_document(
         raise document_service._not_found()
 
 
-@router.get("/{kb_id}/documents", response_model=SuccessEnvelope[dict[str, Any]])
+@router.get(
+    "/{kb_id}/documents",
+    response_model=SuccessEnvelope[dict[str, Any]],
+    responses=INPUT_422_RESPONSES,
+)
 async def get_documents(
     request: Request,
     kb_id: uuid.UUID,
@@ -265,7 +269,11 @@ async def parse_documents(
     )
 
 
-@router.post("/metadata/batch", response_model=SuccessEnvelope[dict[str, Any]])
+@router.post(
+    "/metadata/batch",
+    response_model=SuccessEnvelope[dict[str, Any]],
+    responses=INPUT_422_RESPONSES,
+)
 async def batch_update_document_metadata(
     request: Request,
     data: BatchUpdateMetadataRequest,
@@ -287,7 +295,11 @@ async def batch_update_document_metadata(
     return _success(request, result, "批量更新完成")
 
 
-@router.put("/{document_id}/metadata", response_model=SuccessEnvelope[dict[str, Any]])
+@router.put(
+    "/{document_id}/metadata",
+    response_model=SuccessEnvelope[dict[str, Any]],
+    responses=INPUT_422_RESPONSES,
+)
 async def update_document_metadata(
     request: Request,
     document_id: uuid.UUID,

@@ -8,6 +8,7 @@ import uuid
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..api.query_validation import list_order_clause
 from ..api.schemas.file import FileCreate
 from ..models.owned import File, Knowledge
 
@@ -27,10 +28,10 @@ async def get_files_paginated_async(
         stmt = stmt.where(filter_cond)
     total_result = await db.execute(select(func.count()).select_from(stmt.subquery()))
     total = total_result.scalar_one()
-    if orderby:
-        order_attr = getattr(File, orderby, None)
-        if order_attr is not None:
-            stmt = stmt.order_by(order_attr.desc() if desc else order_attr.asc())
+    order = list_order_clause(File, orderby, desc=desc)
+    if order is not None:
+        stmt = stmt.order_by(order)
+
     result = await db.execute(stmt.offset((page - 1) * pagesize).limit(pagesize))
     return total, list(result.scalars().all())
 

@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
 
 from ..api.dependencies import Principal
+from ..api.query_validation import parse_uuid_filter
 from ..api.schemas.document import Document as DocumentSchema
 from ..api.schemas.document import DocumentCreate, DocumentUpdate
 from ..errors import KnowledgeError
@@ -108,8 +109,9 @@ async def list_documents(
         filters.append(Document.file_id.in_(list(result.scalars().all())))
     if keywords:
         filters.append(Document.file_name.ilike(f"%{keywords}%"))
-    if document_ids:
-        filters.append(Document.id.in_(document_ids.split(",")))
+    parsed_ids = parse_uuid_filter(document_ids, field="document_ids")
+    if parsed_ids:
+        filters.append(Document.id.in_(parsed_ids))
 
     total, documents = await document_repository.get_documents_paginated_async(
         db,

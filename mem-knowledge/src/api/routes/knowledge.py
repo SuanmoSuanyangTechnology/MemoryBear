@@ -14,7 +14,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from starlette.background import BackgroundTask
 
-from ...error_mapping import map_connector_error, map_model_error
+from ...error_mapping import map_connector_check_error, map_model_error
 from ...errors import KnowledgeError
 from ...model_errors import ModelRole
 from ...models.owned import FILE_ROLE_SOURCE, File, KnowledgeType, ParserType, PermissionType
@@ -61,7 +61,7 @@ from ..dependencies import (
 )
 from ..error_handlers import render_error
 from ..schemas.chunk import KnowledgeRetrievalSource
-from ..schemas.common import SuccessEnvelope, success
+from ..schemas.common import INPUT_422_RESPONSES, SuccessEnvelope, success
 from ..schemas.file import KBBatchDownloadRequest
 from ..schemas.knowledge import (
     KnowledgeCreate,
@@ -173,7 +173,11 @@ async def get_knowledge_graph_entity_types(
     )
 
 
-@router.get("/check/yuque/auth", response_model=SuccessEnvelope[None])
+@router.get(
+    "/check/yuque/auth",
+    response_model=SuccessEnvelope[None],
+    responses=INPUT_422_RESPONSES,
+)
 async def check_yuque_auth(
     request: Request,
     yuque_user_id: str,
@@ -184,14 +188,17 @@ async def check_yuque_auth(
         async with YuqueAPIClient(yuque_user_id, yuque_token) as client:
             repositories = await client.get_user_repos()
     except Exception as exc:
-        mapped = map_connector_error(exc)
-        raise KnowledgeError.from_code(mapped.code, status_code=500) from exc
+        raise map_connector_check_error(exc) from exc
     if not repositories:
         return render_error(request, KnowledgeError.from_code("KB_YUQUE_AUTH_INVALID"))
     return _success(request, msg="Successfully auth yuque info")
 
 
-@router.get("/check/feishu/auth", response_model=SuccessEnvelope[None])
+@router.get(
+    "/check/feishu/auth",
+    response_model=SuccessEnvelope[None],
+    responses=INPUT_422_RESPONSES,
+)
 async def check_feishu_auth(
     request: Request,
     feishu_app_id: str,
@@ -203,14 +210,17 @@ async def check_feishu_auth(
         async with FeishuAPIClient(feishu_app_id, feishu_app_secret) as client:
             files = await client.list_all_folder_files(feishu_folder_token, recursive=True)
     except Exception as exc:
-        mapped = map_connector_error(exc)
-        raise KnowledgeError.from_code(mapped.code, status_code=500) from exc
+        raise map_connector_check_error(exc, feishu_folder_token=feishu_folder_token) from exc
     if not files:
         return render_error(request, KnowledgeError.from_code("KB_FEISHU_AUTH_INVALID"))
     return _success(request, msg="Successfully auth feishu info")
 
 
-@router.get("/knowledges", response_model=SuccessEnvelope[dict[str, Any]])
+@router.get(
+    "/knowledges",
+    response_model=SuccessEnvelope[dict[str, Any]],
+    responses=INPUT_422_RESPONSES,
+)
 async def get_knowledges(
     request: Request,
     principal: Annotated[Principal, Depends(get_principal)],
@@ -253,7 +263,11 @@ async def get_knowledges(
     )
 
 
-@router.post("/knowledge", response_model=SuccessEnvelope[dict[str, Any]])
+@router.post(
+    "/knowledge",
+    response_model=SuccessEnvelope[dict[str, Any]],
+    responses=INPUT_422_RESPONSES,
+)
 async def create_knowledge(
     request: Request,
     create_data: KnowledgeCreate,

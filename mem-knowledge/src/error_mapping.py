@@ -299,6 +299,34 @@ def map_connector_error(exc: BaseException) -> KnowledgeError:
     return _with_cause("KB_HTTP_BAD_GATEWAY", exc)
 
 
+_FEISHU_INVALID_CREDENTIAL_CODES = {"10003", "10015", "20002"}
+
+
+def map_connector_check_error(
+    exc: Exception, *, feishu_folder_token: str | None = None,
+) -> KnowledgeError:
+    """Only reclassify evidence that refers to inputs supplied by this caller."""
+    from .rag.integrations.feishu.exceptions import FeishuAuthError, FeishuFolderNotFoundError
+    from .rag.integrations.yuque.exceptions import YuqueAPIError, YuqueAuthError
+
+    status = getattr(getattr(exc, "response", None), "status_code", None)
+    if isinstance(exc, YuqueAuthError) and status == 401:
+        code = "KB_CONNECTOR_CREDENTIAL_INVALID"
+    elif isinstance(exc, YuqueAPIError) and status == 404:
+        code = "KB_CONNECTOR_SOURCE_INVALID"
+    elif (
+        isinstance(exc, FeishuAuthError)
+        and status in {200, 400, 401}
+        and exc.error_code in _FEISHU_INVALID_CREDENTIAL_CODES
+    ):
+        code = "KB_CONNECTOR_CREDENTIAL_INVALID"
+    elif isinstance(exc, FeishuFolderNotFoundError) and exc.folder_token == feishu_folder_token:
+        code = "KB_CONNECTOR_SOURCE_INVALID"
+    else:
+        return KnowledgeError.from_code(map_connector_error(exc).code, status_code=500)
+    return KnowledgeError.from_code(code, status_code=422)
+
+
 _WIKI_CAUSES = {
     "WIKI_NOT_FOUND": "KB_WIKI_NOT_FOUND",
     "WIKI_KNOWLEDGE_UNAVAILABLE": "KB_KNOWLEDGE_NOT_FOUND",

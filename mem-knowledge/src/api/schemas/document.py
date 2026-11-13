@@ -3,12 +3,13 @@
 import datetime
 import uuid
 
-from pydantic import BaseModel, ConfigDict, Field, field_serializer
+from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, field_serializer
 
 from ...utils.datetime_utils import (
     normalize_progress_message_timestamps,
     to_timestamp_ms,
 )
+from .storage_fields import DatabaseInt, NonNullUpdate
 
 
 class DocumentBase(BaseModel):
@@ -24,24 +25,24 @@ class DocumentBase(BaseModel):
 
 
 class DocumentCreate(DocumentBase):
-    pass
+    file_size: DatabaseInt
 
 
 class DocumentUpdate(BaseModel):
-    file_id: uuid.UUID | None = Field(None)
-    file_name: str | None = Field(None)
-    file_ext: str | None = Field(None)
-    file_size: int | None = Field(None)
-    file_meta: dict | None = Field(None)
-    parser_id: str | None = Field(None)
+    file_id: NonNullUpdate[uuid.UUID]
+    file_name: NonNullUpdate[str]
+    file_ext: NonNullUpdate[str]
+    file_size: NonNullUpdate[DatabaseInt]
+    file_meta: NonNullUpdate[dict]
+    parser_id: NonNullUpdate[str]
     parser_config: dict | None = Field(None)
-    chunk_num: int | None = Field(None)
-    progress: float | None = Field(None)
-    progress_msg: str | None = Field(None)
-    process_begin_at: datetime.datetime | None = Field(None)
-    process_duration: float | None = Field(None)
-    run: int | None = Field(None)
-    status: int | None = Field(None)
+    chunk_num: NonNullUpdate[DatabaseInt]
+    progress: NonNullUpdate[FiniteFloat]
+    progress_msg: NonNullUpdate[str]
+    process_begin_at: NonNullUpdate[datetime.datetime]
+    process_duration: NonNullUpdate[FiniteFloat]
+    run: NonNullUpdate[DatabaseInt]
+    status: NonNullUpdate[DatabaseInt]
 
 
 class Document(DocumentBase):
