@@ -14,7 +14,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..api.dependencies import Principal
 from ..api.schemas.common import SuccessEnvelope
 from ..api.schemas.knowledge_metadata import KnowledgeMetadataCreate
+from ..error_mapping import map_database_error
 from ..errors import KnowledgeError, public_text
+from ..model_errors import MODEL_FIELD_ROLES, ModelFailure, model_error
 from ..models.owned import Knowledge, KnowledgeType, PermissionType
 from ..models.references import ModelConfig
 from ..rag.knowledge_graph import (
@@ -84,14 +86,11 @@ def _resource_not_found() -> KnowledgeError:
 
 
 def _principal_invalid() -> KnowledgeError:
-    return KnowledgeError.from_code("KB_PRINCIPAL_INVALID")
+    return KnowledgeError.from_code("KB_PRINCIPAL_REFERENCE_INVALID")
 
 
 def _model_unavailable(field_name: str) -> KnowledgeError:
-    return KnowledgeError.from_code(
-        "KB_KNOWLEDGE_COPY_MODEL_UNAVAILABLE",
-        params={"model_field": public_text(field_name)},
-    )
+    return model_error(MODEL_FIELD_ROLES[field_name], ModelFailure.CONFIG_INVALID)
 
 
 async def _validate_principal_references(
@@ -346,9 +345,7 @@ async def copy_knowledge_configuration(
         raise
     except SQLAlchemyError as exc:
         await db.rollback()
-        raise KnowledgeError.from_code(
-            "KB_DATABASE_UNAVAILABLE",
-        ) from exc
+        raise map_database_error(exc) from exc
     except BaseException:
         await db.rollback()
         raise

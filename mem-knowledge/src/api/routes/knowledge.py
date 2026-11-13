@@ -14,7 +14,9 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from starlette.background import BackgroundTask
 
+from ...error_mapping import map_connector_check_error, map_model_error
 from ...errors import KnowledgeError
+from ...model_errors import ModelRole
 from ...models.owned import FILE_ROLE_SOURCE, File, KnowledgeType, ParserType, PermissionType
 from ...rag.integrations.feishu import FeishuAPIClient
 from ...rag.integrations.yuque import YuqueAPIClient
@@ -59,7 +61,7 @@ from ..dependencies import (
 )
 from ..error_handlers import render_error
 from ..schemas.chunk import KnowledgeRetrievalSource
-from ..schemas.common import SuccessEnvelope, success
+from ..schemas.common import INPUT_422_RESPONSES, SuccessEnvelope, success
 from ..schemas.file import KBBatchDownloadRequest
 from ..schemas.knowledge import (
     KnowledgeCreate,
@@ -145,7 +147,7 @@ async def get_knowledge_graph_entity_types(
             principal.tenant_id,
         )
     if config is None:
-        raise KnowledgeError.from_code("KB_MODEL_CONFIG_NOT_FOUND")
+        raise KnowledgeError.from_code("KB_GRAPH_ENTITY_MODEL_CONFIG_INVALID")
     try:
         result = await graph_service.graph_entity_types(
             runtime,
@@ -163,7 +165,7 @@ async def get_knowledge_graph_entity_types(
             type(exc).__name__,
             _provider_status_code(exc),
         )
-        raise KnowledgeError.from_code("KB_GRAPH_ENTITY_TYPES_UNAVAILABLE") from exc
+        raise map_model_error(exc, model_role=ModelRole.GRAPH_ENTITY) from exc
     return _success(
         request,
         result,
@@ -171,24 +173,32 @@ async def get_knowledge_graph_entity_types(
     )
 
 
-@router.get("/check/yuque/auth", response_model=SuccessEnvelope[None])
+@router.get(
+    "/check/yuque/auth",
+    response_model=SuccessEnvelope[None],
+    responses=INPUT_422_RESPONSES,
+)
 async def check_yuque_auth(
     request: Request,
     yuque_user_id: str,
     yuque_token: str,
     _principal: Annotated[Principal, Depends(get_principal)],
 ) -> SuccessEnvelope[None]:
-    async with YuqueAPIClient(yuque_user_id, yuque_token) as client:
-        repositories = await client.get_user_repos()
+    try:
+        async with YuqueAPIClient(yuque_user_id, yuque_token) as client:
+            repositories = await client.get_user_repos()
+    except Exception as exc:
+        raise map_connector_check_error(exc) from exc
     if not repositories:
-        return render_error(
-            request,
-            KnowledgeError.from_code("KB_YUQUE_AUTH_INVALID"),
-        )
+        return render_error(request, KnowledgeError.from_code("KB_YUQUE_AUTH_INVALID"))
     return _success(request, msg="Successfully auth yuque info")
 
 
-@router.get("/check/feishu/auth", response_model=SuccessEnvelope[None])
+@router.get(
+    "/check/feishu/auth",
+    response_model=SuccessEnvelope[None],
+    responses=INPUT_422_RESPONSES,
+)
 async def check_feishu_auth(
     request: Request,
     feishu_app_id: str,
@@ -196,20 +206,23 @@ async def check_feishu_auth(
     feishu_folder_token: str,
     _principal: Annotated[Principal, Depends(get_principal)],
 ) -> SuccessEnvelope[None]:
-    async with FeishuAPIClient(feishu_app_id, feishu_app_secret) as client:
-        files = await client.list_all_folder_files(
-            feishu_folder_token,
-            recursive=True,
-        )
+    try:
+        async with FeishuAPIClient(feishu_app_id, feishu_app_secret) as client:
+            files = await client.list_all_folder_files(
+                feishu_folder_token, recursive=True, validate_root_folder=True
+            )
+    except Exception as exc:
+        raise map_connector_check_error(exc) from exc
     if not files:
-        return render_error(
-            request,
-            KnowledgeError.from_code("KB_FEISHU_AUTH_INVALID"),
-        )
+        return render_error(request, KnowledgeError.from_code("KB_FEISHU_AUTH_INVALID"))
     return _success(request, msg="Successfully auth feishu info")
 
 
-@router.get("/knowledges", response_model=SuccessEnvelope[dict[str, Any]])
+@router.get(
+    "/knowledges",
+    response_model=SuccessEnvelope[dict[str, Any]],
+    responses=INPUT_422_RESPONSES,
+)
 async def get_knowledges(
     request: Request,
     principal: Annotated[Principal, Depends(get_principal)],
@@ -252,7 +265,11 @@ async def get_knowledges(
     )
 
 
-@router.post("/knowledge", response_model=SuccessEnvelope[dict[str, Any]])
+@router.post(
+    "/knowledge",
+    response_model=SuccessEnvelope[dict[str, Any]],
+    responses=INPUT_422_RESPONSES,
+)
 async def create_knowledge(
     request: Request,
     create_data: KnowledgeCreate,
@@ -343,7 +360,11 @@ async def get_knowledge_chunk_policy(
     )
 
 
-@router.put("/{knowledge_id}", response_model=SuccessEnvelope[dict[str, Any]])
+@router.put(
+    "/{knowledge_id}",
+    response_model=SuccessEnvelope[dict[str, Any]],
+    responses=INPUT_422_RESPONSES,
+)
 async def update_knowledge(
     request: Request,
     knowledge_id: uuid.UUID,
@@ -362,7 +383,7 @@ async def update_knowledge(
     await validate_requested_knowledge_model_availability(
         update_data.model_dump(exclude_unset=True), principal, runtime.model_runtime
     )
-    if plan.delete_vector_index:
+    if plan.delete_vector_index and plan.write_input_error is None:
         await (await runtime.elasticsearch.client()).indices.delete(
             index=collection_name_for_knowledge(knowledge_id),
             ignore_unavailable=True,
@@ -380,6 +401,8 @@ async def update_knowledge(
             outcome.invalidate_workspace_id,
         )
     dispatcher = TaskDispatcher(runtime=runtime)
+    graph_dispatch_failed = False
+    reparse_dispatch_failed = False
     if outcome.wiki_backfill_required:
         from ...rag.wiki.config import BACKFILL_REGISTERED_HEADER, BACKFILL_TASK, WIKI_QUEUE
         from ...rag.wiki.diagnostics import diagnostic_json, exception_details
@@ -411,9 +434,7 @@ async def update_knowledge(
                     knowledge_id, outcome.wiki_backfill_task_id,
                     diagnostic_json(exception_details(state_exc)),
                 )
-            raise KnowledgeError.from_code(
-                "KB_WIKI_BACKFILL_DISPATCH_FAILED"
-            ) from exc
+            raise KnowledgeError.from_code("KB_WIKI_BACKFILL_DISPATCH_FAILED") from exc
     if plan.graph_enabled_before is not None:
         try:
             await dispatch_graph_transition(
@@ -423,7 +444,8 @@ async def update_knowledge(
                 outcome.parser_config,
             )
         except Exception:
-            logger.error(
+            graph_dispatch_failed = True
+            logger.exception(
                 "Failed to dispatch graph transition knowledge_id=%s",
                 knowledge_id,
             )
@@ -438,18 +460,39 @@ async def update_knowledge(
                 skipped=skipped,
             )
         except Exception:
-            logger.error(
+            reparse_dispatch_failed = True
+            logger.exception(
                 "Failed to dispatch reparse tasks knowledge_id=%s",
                 knowledge_id,
             )
     response_data = outcome.response_data
     if source is KnowledgeRetrievalSource.EXTERNAL_API and response_data is not None:
         response_data = project_public_knowledge_data(response_data)
-    return _success(
-        request,
-        response_data,
-        "The knowledge base information has been successfully updated",
-    )
+    message = "The knowledge base information has been successfully updated"
+    if graph_dispatch_failed or reparse_dispatch_failed:
+        from ..error_handlers import request_locale
+
+        notices = {
+            (True, False): (
+                "配置已保存，图谱任务派发未完成，请查看文档处理状态。",
+                "The configuration was saved, but graph task dispatch was not completed. "
+                "Check document processing status.",
+            ),
+            (False, True): (
+                "配置已保存，文档重解析任务派发未完成，请查看文档处理状态。",
+                "The configuration was saved, but document reprocessing task dispatch was not "
+                "completed. Check document processing status.",
+            ),
+            (True, True): (
+                "配置已保存，图谱和文档重解析任务派发未完成，请查看文档处理状态。",
+                "The configuration was saved, but graph and document reprocessing task dispatch "
+                "was not completed. Check document processing status.",
+            ),
+        }
+        message = notices[(graph_dispatch_failed, reparse_dispatch_failed)][
+            1 if request_locale(request) == "en" else 0
+        ]
+    return _success(request, response_data, message)
 
 
 @router.delete("/{knowledge_id}", response_model=SuccessEnvelope[None])

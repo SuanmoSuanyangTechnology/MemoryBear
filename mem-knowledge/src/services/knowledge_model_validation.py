@@ -13,10 +13,11 @@ from redbear_model import (
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..api.dependencies import Principal
-from ..errors import KnowledgeError
+from ..error_mapping import map_model_error
 from ..integrations.model.errors import ModelInvokeClientError
 from ..integrations.model.invoke import ModelCallContext
 from ..integrations.model.runtime import ModelInvokeRuntime
+from ..model_errors import MODEL_FIELD_ROLES, ModelFailure, model_error
 from ..repositories.model_registry import AsyncSQLModelRegistry
 
 _MODEL_FIELD_TYPES = {
@@ -54,11 +55,13 @@ async def validate_requested_knowledge_model_availability(
         try:
             available = await model_runtime.invoke_client.is_model_available(model_id, context)
         except ModelInvokeClientError as exc:
-            raise KnowledgeError.from_code("KB_HTTP_UNAVAILABLE") from exc
+            raise model_error(
+                MODEL_FIELD_ROLES[field_name],
+                ModelFailure.TEMPORARILY_UNAVAILABLE,
+                previous_status=503,
+            ) from exc
         if not available:
-            raise KnowledgeError.from_code(
-                "KB_KNOWLEDGE_MODEL_UNAVAILABLE", params={"model_field": field_name}
-            )
+            raise model_error(MODEL_FIELD_ROLES[field_name], ModelFailure.CONFIG_INVALID)
         checked.add(model_id)
 
 
@@ -93,18 +96,12 @@ async def validate_requested_knowledge_models(
             try:
                 config = await registry.get_model_config(model_id, tenant_id)
             except Exception as exc:
-                raise KnowledgeError.from_code(
-                    "KB_KNOWLEDGE_MODEL_UNAVAILABLE", params={"model_field": field_name}
-                ) from exc
+                raise map_model_error(exc, model_role=MODEL_FIELD_ROLES[field_name]) from exc
             # Fold missing, invisible, deprecated and inactive configs into one public
             # error to avoid disclosing model state.
             if config is None or config.is_deprecated or not config.is_active:
-                raise KnowledgeError.from_code(
-                    "KB_KNOWLEDGE_MODEL_UNAVAILABLE", params={"model_field": field_name}
-                )
+                raise model_error(MODEL_FIELD_ROLES[field_name], ModelFailure.CONFIG_INVALID)
             configs[model_id] = config
         model = configs[model_id]
         if not _matches_knowledge_model_field(field_name, model):
-            raise KnowledgeError.from_code(
-                "KB_KNOWLEDGE_MODEL_CAPABILITY_MISMATCH", params={"model_field": field_name}
-            )
+            raise model_error(MODEL_FIELD_ROLES[field_name], ModelFailure.CAPABILITY_MISMATCH)

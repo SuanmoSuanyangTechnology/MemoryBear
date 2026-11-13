@@ -8,6 +8,7 @@ import uuid
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..api.query_validation import execute_list_page
 from ..api.schemas.document import DocumentCreate
 from ..models.owned import Document, Knowledge
 from ..utils.datetime_utils import to_iso_z, utcnow, utcnow_naive
@@ -32,11 +33,10 @@ async def get_documents_paginated_async(
         stmt = stmt.where(filter_cond)
     total_result = await db.execute(select(func.count()).select_from(stmt.subquery()))
     total = total_result.scalar_one()
-    if orderby:
-        order_attr = getattr(Document, orderby, None)
-        if order_attr is not None:
-            stmt = stmt.order_by(order_attr.desc() if desc else order_attr.asc())
-    result = await db.execute(stmt.offset((page - 1) * pagesize).limit(pagesize))
+    result = await execute_list_page(
+        db, stmt.offset((page - 1) * pagesize).limit(pagesize), Document,
+        orderby=orderby, desc=desc,
+    )
     return total, list(result.scalars().all())
 
 

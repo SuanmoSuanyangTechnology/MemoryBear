@@ -8,6 +8,7 @@ from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, Query, Request
 
+from ...error_mapping import map_wiki_error
 from ...errors import KnowledgeError
 from ...rag.wiki.config import WikiError
 from ...repositories.wiki import read
@@ -19,19 +20,6 @@ from ..schemas.common import SuccessEnvelope, success
 router = APIRouter(prefix="/knowledges/{kb_id}/wiki", tags=["wiki"])
 PrincipalDep = Annotated[Principal, Depends(get_principal)]
 RuntimeDep = Annotated[ProcessRuntime, Depends(get_runtime)]
-
-
-def _business_error(error):
-    codes = {
-        "WIKI_NOT_FOUND": "KB_WIKI_NOT_FOUND",
-        "WIKI_KNOWLEDGE_UNAVAILABLE": "KB_WIKI_NOT_FOUND",
-        "WIKI_DOCUMENT_UNAVAILABLE": "KB_WIKI_NOT_FOUND",
-        "WIKI_SCOPE_MISMATCH": "KB_WIKI_NOT_FOUND",
-        "WIKI_DISABLED": "KB_WIKI_DISABLED",
-        "WIKI_SOURCE_NOT_READY": "KB_WIKI_SOURCE_NOT_READY",
-        "WIKI_MODEL_REQUIRED": "KB_WIKI_MODEL_REQUIRED",
-    }
-    return KnowledgeError.from_code(codes.get(error.code, "KB_CONFLICT"))
 
 
 def _scope(kb_id, principal):
@@ -53,7 +41,7 @@ async def _read(runtime, operation, scope, **kwargs):
     try:
         return await asyncio.to_thread(transaction, runtime, operation, scope, **kwargs)
     except WikiError as exc:
-        raise _business_error(exc) from None
+        raise map_wiki_error(exc) from exc
 
 
 def _response(request, data):

@@ -7,6 +7,7 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, File, Query, Request, UploadFile
 
+from ...error_mapping import map_storage_error
 from ...errors import KnowledgeError
 from ...runtime import ProcessRuntime
 from ...services import chunk as chunk_service
@@ -76,9 +77,7 @@ async def get_preview_chunks(
     try:
         binary = await KnowledgeFileStorage(runtime.storage).download(snapshot.file_key or "")
     except Exception as exc:
-        raise KnowledgeError.from_code(
-            "KB_STORAGE_FILE_NOT_FOUND",
-        ) from exc
+        raise map_storage_error(exc) from exc
     parsed = await chunk_service.preview_with_vision(
         runtime,
         snapshot,

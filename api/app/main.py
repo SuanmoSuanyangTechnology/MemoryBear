@@ -812,32 +812,57 @@ async def knowledge_client_exception_handler(
     if is_versioned_upload(request):
         return _upload_rejection(request, exc, 503)
 
+    from error_core.codes import is_known_code
+    from error_core.diagnostics import format_diagnostics
+    from error_core.knowledge import knowledge_message
+
     if isinstance(exc, KnowledgeServiceError):
         status_code = exc.status_code if 400 <= exc.status_code <= 599 else 503
         code = exc.code
-        message = SensitiveDataFilter.filter_string(str(exc))
+        diagnostic = SensitiveDataFilter.filter_string(exc.diagnostic)
         trace_id = exc.trace_id
+        headers = exc.headers
     else:
-        status_code = 503
-        code = BizCode.SERVICE_UNAVAILABLE.value
-        message = "Knowledge service unavailable"
-        trace_id = None
+        from app.integrations.knowledge.errors import (
+            KnowledgeProtocolError,
+            KnowledgeTimeoutError,
+        )
 
+        status_code = 503
+        code = (
+            BizCode.KB_UPSTREAM_RESPONSE_INVALID if isinstance(exc, KnowledgeProtocolError)
+            else BizCode.KB_REQUEST_TIMEOUT if isinstance(exc, KnowledgeTimeoutError)
+            else BizCode.KB_HTTP_SERVICE_UNAVAILABLE
+        )
+        diagnostic = format_diagnostics(detail=type(exc).__name__)
+        trace_id = getattr(request.state, "trace_id", None)
+        headers = {}
+    locale = getattr(request.state, "language", settings.I18N_DEFAULT_LANGUAGE)
+    message = (
+        exc.user_message
+        if isinstance(exc, KnowledgeServiceError) and exc.status_code < 400
+        else knowledge_message(code, locale, legacy_message=getattr(exc, "user_message", None))
+    )
     logger.error(
-        "Knowledge client error: %s",
+        "Knowledge client error type=%s status=%s code=%s trace_id=%s diagnostic=%s",
         type(exc).__name__,
-        extra={
-            "path": request.url.path,
-            "method": request.method,
-            "status_code": status_code,
-            "error_code": code,
-            "trace_id": trace_id,
-        },
+        status_code,
+        code,
+        trace_id,
+        diagnostic,
+        exc_info=exc,
     )
     response = JSONResponse(
         status_code=status_code,
-        content=fail(code=code, msg=message, error=message),
+        content=fail(code=code, msg=message, error=diagnostic),
+        headers={
+            key: value
+            for key, value in headers.items()
+            if key.lower() not in {"content-length", "content-type"}
+        },
     )
+    if is_known_code(code):
+        response.headers["Content-Language"] = locale
     if trace_id:
         response.headers["X-Trace-Id"] = trace_id
     return response

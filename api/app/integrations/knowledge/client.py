@@ -214,7 +214,9 @@ class KnowledgeServiceClient:
                     context.trace_id,
                 )
 
-        response_headers = self._transport.response_headers(upstream.headers)
+        response_headers = self._transport.response_headers(
+            upstream.headers, status_code=upstream.status_code
+        )
         if path.startswith("/internal/v2/"):
             for name in ("www-authenticate", "allow", "retry-after"):
                 if name in upstream.headers:
@@ -317,8 +319,15 @@ class KnowledgeServiceClient:
             if not isinstance(code, int):
                 raise KnowledgeProtocolError("Knowledge service envelope code must be an integer")
             if not 200 <= upstream.status_code < 300 or code != 0:
-                message = str(envelope.get("error") or envelope.get("msg") or "Knowledge error")
-                raise KnowledgeServiceError(upstream.status_code, code, message, trace_id)
+                message = str(envelope.get("msg") or "Knowledge error")
+                raise KnowledgeServiceError(
+                    upstream.status_code,
+                    code,
+                    message,
+                    trace_id,
+                    diagnostic=str(envelope.get("error") or ""),
+                    headers=self._transport.response_headers(upstream.headers, status_code=upstream.status_code),
+                )
             data = envelope.get("data")
             try:
                 if isinstance(data, list):
@@ -467,9 +476,16 @@ class KnowledgeServiceClient:
         code = envelope.get("code")
         if not isinstance(code, int):
             raise KnowledgeProtocolError("Knowledge service envelope code must be an integer")
-        message = str(envelope.get("error") or envelope.get("msg") or "Knowledge error")
+        message = str(envelope.get("msg") or "Knowledge error")
         if not 200 <= status_code < 300 or code != 0:
-            raise KnowledgeServiceError(status_code, code, message, trace_id)
+            raise KnowledgeServiceError(
+                status_code,
+                code,
+                message,
+                trace_id,
+                diagnostic=str(envelope.get("error") or ""),
+                headers=self._transport.response_headers(upstream.headers, status_code=upstream.status_code),
+            )
         envelope["time"] = int(time.time() * 1000)
         logger.info(
             "knowledge_detached_call_completed method=%s path=%s status=%s code=%s "

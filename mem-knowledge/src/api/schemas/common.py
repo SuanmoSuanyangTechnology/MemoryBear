@@ -5,7 +5,7 @@ from __future__ import annotations
 import time
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class ApiResponse[DataT](BaseModel):
@@ -16,6 +16,26 @@ class ApiResponse[DataT](BaseModel):
     data: DataT | dict[str, Any] = Field(default_factory=dict)
     error: str = ""
     time: int = Field(default_factory=lambda: int(time.time() * 1000))
+
+
+class _ValidationIssue(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    loc: list[str | int]
+    msg: str
+    type: str
+
+
+class _RequestValidationResponse(BaseModel):
+    detail: list[_ValidationIssue]
+
+
+INPUT_422_RESPONSES = {
+    422: {
+        "model": ApiResponse[Any] | _RequestValidationResponse,
+        "description": "Invalid request field or business input",
+    },
+}
 
 
 def success(data: Any = None, msg: str = "OK") -> dict[str, Any]:
@@ -33,7 +53,7 @@ def success(data: Any = None, msg: str = "OK") -> dict[str, Any]:
 def fail(
     code: int,
     msg: str,
-    error: Any = "",
+    error: str = "",
     data: Any = None,
 ) -> dict[str, Any]:
     """Return the exact legacy failure envelope."""
@@ -51,4 +71,4 @@ def fail(
 SuccessEnvelope = ApiResponse
 
 
-__all__ = ["ApiResponse", "SuccessEnvelope", "fail", "success"]
+__all__ = ["INPUT_422_RESPONSES", "ApiResponse", "SuccessEnvelope", "fail", "success"]

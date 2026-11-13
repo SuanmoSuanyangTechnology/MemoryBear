@@ -1,8 +1,9 @@
-from typing import List, Optional
-
-from pydantic import BaseModel, Field, field_serializer, ConfigDict
 import datetime
 import uuid
+from typing import Annotated, List, Optional
+
+from pydantic import BaseModel, ConfigDict, Field, field_serializer
+
 from app.core.utils.datetime_utils import to_timestamp_ms
 
 
@@ -51,7 +52,7 @@ class FileUpdate(BaseModel):
     parent_id: uuid.UUID | None = Field(None)
     file_name: str | None = Field(None)
     file_ext: str | None = Field(None)
-    file_size: str | None = Field(None)
+    file_size: str | Annotated[int, Field(strict=True, ge=0)] | None = Field(None)
     file_url: str | None = Field(None)
 
 

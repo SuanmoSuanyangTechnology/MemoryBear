@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, Query, Request
 from ...runtime import ProcessRuntime
 from ...services import knowledge_share as share_service
 from ..dependencies import Principal, get_principal, get_runtime
-from ..schemas.common import SuccessEnvelope, success
+from ..schemas.common import INPUT_422_RESPONSES, SuccessEnvelope, success
 from ..schemas.knowledge_share import KnowledgeShareCreate
 
 router = APIRouter(
@@ -28,7 +28,11 @@ def _success(
     return success(data=data, msg=msg)
 
 
-@router.get("/{kb_id}/knowledgeshares", response_model=SuccessEnvelope[dict[str, Any]])
+@router.get(
+    "/{kb_id}/knowledgeshares",
+    response_model=SuccessEnvelope[dict[str, Any]],
+    responses=INPUT_422_RESPONSES,
+)
 async def get_knowledgeshares(
     request: Request,
     kb_id: uuid.UUID,

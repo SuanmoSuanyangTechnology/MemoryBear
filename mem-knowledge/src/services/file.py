@@ -39,6 +39,7 @@ from ..repositories import file as file_repository
 from . import knowledge as knowledge_service
 from .knowledge_file_storage import KnowledgeFileStorage, generate_kb_file_key
 from .qa_export import cleanup_export_file, iter_export_file
+from .write_validation import validate_file_size_text, validate_write_fields
 
 logger = logging.getLogger(__name__)
 ZIP_STREAM_CHUNK_SIZE = 1024 * 1024
@@ -425,6 +426,12 @@ async def update_file(
     update_fields = update_data.model_dump(exclude_unset=True)
     if "parent_id" in update_fields:
         await require_parent_folder(db, file.kb_id, update_fields["parent_id"], principal)
+    validate_write_fields(update_fields, non_nullable=("file_name", "file_ext", "file_size"))
+    size = update_fields.get("file_size")
+    if isinstance(size, str):
+        validate_file_size_text(size)
+    else:
+        validate_write_fields(update_fields, integers=("file_size",))
     for field, value in update_fields.items():
         if hasattr(file, field):
             setattr(file, field, value)
