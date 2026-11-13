@@ -10,6 +10,8 @@ from typing import Any
 
 import httpx
 
+from error_core.knowledge_upload import FILE_UPLOAD_PATH, INTERNAL_UPLOAD_PREFIX, UploadKind
+
 from .call_profile import CallProfile
 from .contracts import KnowledgeCallContext
 from .errors import KnowledgeTimeoutError, KnowledgeUnavailableError
@@ -88,7 +90,18 @@ class KnowledgeHttpTransport:
         return self._client.base_url.copy_with(path=path, query=query)
 
     @staticmethod
-    def internal_path(external_path: str) -> str:
+    def internal_path(external_path: str, *, method: str = "GET") -> str:
+        if method == "POST":
+            for prefix in ("/api", "/v1"):
+                suffix = external_path.removeprefix(prefix)
+                if suffix == external_path:
+                    continue
+                if suffix == FILE_UPLOAD_PATH:
+                    return INTERNAL_UPLOAD_PREFIX + UploadKind.DOCUMENT
+                parts = suffix.split("/")
+                if (len(parts) == 5 and parts[:3] == ["", "chunks", "v1"]
+                        and parts[3] and parts[4] == "import_qa"):
+                    return INTERNAL_UPLOAD_PREFIX + UploadKind.QA.format(kb_id=parts[3])
         for prefix in ("/api", "/v1"):
             if external_path == prefix or external_path.startswith(prefix + "/"):
                 suffix = external_path[len(prefix) :]

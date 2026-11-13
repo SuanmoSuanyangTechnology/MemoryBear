@@ -6,10 +6,12 @@ import logging
 import struct
 import uuid
 import zlib
+from asyncio import to_thread
 from collections.abc import AsyncIterator
 from contextlib import aclosing
 from copy import deepcopy
 from dataclasses import dataclass
+from hashlib import sha256
 from pathlib import Path
 from typing import Any
 
@@ -28,6 +30,7 @@ from ..models.owned import (
     Document,
     File,
     Knowledge,
+    UploadFingerprint,
 )
 from ..rag.knowledge_graph import GraphPipelineConfigError
 from ..rag.parser_config import normalize_document_parser_config
@@ -68,6 +71,7 @@ class UploadPlan:
     file_size: int
     parser_id: str
     parser_config: dict[str, Any]
+    digest: str | None = None
 
 
 @dataclass(frozen=True)
@@ -227,6 +231,7 @@ async def upload_content(
     inherit_parser_config: bool,
     parser_id: str = "naive",
     parser_config: dict[str, Any] | None = None,
+    record_fingerprint: bool = False,
 ) -> UploadPlan:
     """Validate an upload and return a scalar plan without writing rows."""
 
@@ -244,6 +249,7 @@ async def upload_content(
         raise KnowledgeError.from_code("KB_DOCUMENT_PARSER_CONFIG_INVALID") from exc
     await require_parent_folder(db, kb_id, parent_id, principal)
     file_id = uuid.uuid4()
+    digest = (await to_thread(sha256, content)).hexdigest() if record_fingerprint else None
     return UploadPlan(
         file_id=file_id,
         file_key=generate_kb_file_key(kb_id, file_id, file_ext),
@@ -255,6 +261,7 @@ async def upload_content(
         file_size=len(content),
         parser_id=parser_id,
         parser_config=deepcopy(normalized_parser_config),
+        digest=digest,
     )
 
 
@@ -298,6 +305,8 @@ async def persist_uploaded_content(
                 parser_config=deepcopy(plan.parser_config),
             ),
         )
+        if plan.digest is not None:
+            db.add(UploadFingerprint(file_id=db_file.id, kb_id=plan.kb_id, digest=plan.digest))
         await db.refresh(document)
         outcome = UploadOutcome(
             file_id=db_file.id,

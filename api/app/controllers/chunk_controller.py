@@ -11,6 +11,8 @@ from fastapi.encoders import jsonable_encoder
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from error_core.knowledge_upload import UploadCreated, UploadedQA, upload_responses
+
 from app.core.config import settings
 from app.core.logging_config import get_api_logger
 from app.core.rag.chunk.hierarchy import GroupedChildChunks, validate_parent_child_result
@@ -27,6 +29,7 @@ from app.core.rag.vdb.elasticsearch.elasticsearch_vector import ElasticSearchVec
 from app.core.quota_manager import report_quota_change
 from app.core.response_utils import success
 from app.db import get_async_db
+from app.dependencies import CurrentUserSnapshot
 from app.dependencies import cur_workspace_access_guard_async, get_current_user_async
 from app.models.document_model import Document
 from app.models.file_model import File as FileModel
@@ -45,6 +48,7 @@ from app.integrations.knowledge.contracts import (
     KnowledgePrincipal,
     KnowledgeRetrievalSource,
 )
+from app.integrations.knowledge.errors import KnowledgeUnavailableError
 from app.integrations.knowledge.route_proxy import route_through_knowledge_service
 from app.integrations.knowledge.runtime import get_knowledge_retriever
 
@@ -696,6 +700,27 @@ async def create_chunks_batch(
     )
 
     return success(data=jsonable_encoder(chunks), msg=f"Batch created {len(chunks)} chunks successfully")
+
+
+@router.post(
+    "/v1/{kb_id}/import_qa", status_code=201,
+    response_model=UploadCreated[UploadedQA],
+    responses=upload_responses(qa=True),
+)
+@cur_workspace_access_guard_async()
+@route_through_knowledge_service(
+    source=KnowledgeRetrievalSource.MANAGER_API,
+    profile=CallProfile.MULTIPART_UPLOAD,
+    require_remote=True,
+)
+async def import_qa_v1(
+    request: Request,
+    kb_id: uuid.UUID,
+    parent_id: uuid.UUID | None = Query(None, description="目标目录，省略为根目录"),
+    file: UploadFile = File(...),
+    current_user: CurrentUserSnapshot = Depends(get_current_user_async),
+):
+    raise KnowledgeUnavailableError("Knowledge upload requires the remote service")
 
 
 @router.post("/{kb_id}/import_qa", response_model=ApiResponse)

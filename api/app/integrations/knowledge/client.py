@@ -125,7 +125,7 @@ class KnowledgeServiceClient:
         profile: CallProfile = CallProfile.JSON,
     ) -> StreamingResponse:
         started_at = time.perf_counter()
-        path = self._transport.internal_path(request.url.path)
+        path = self._transport.internal_path(request.url.path, method=request.method)
         url = self._transport.internal_url(path, request.scope.get("query_string", b""))
         headers = self._transport.request_headers(request.headers, context, profile)
         send_kwargs: dict[str, Any] = {}
@@ -214,10 +214,15 @@ class KnowledgeServiceClient:
                     context.trace_id,
                 )
 
+        response_headers = self._transport.response_headers(upstream.headers)
+        if path.startswith("/internal/v2/"):
+            for name in ("www-authenticate", "allow", "retry-after"):
+                if name in upstream.headers:
+                    response_headers[name] = upstream.headers[name]
         return StreamingResponse(
             body_iterator(),
             status_code=upstream.status_code,
-            headers=self._transport.response_headers(upstream.headers),
+            headers=response_headers,
         )
 
     async def retrieval_policy(

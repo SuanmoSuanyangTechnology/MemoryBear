@@ -74,6 +74,7 @@ async def _persist_upload(
     content: bytes,
     content_type: str | None,
     inherit_parser_config: bool,
+    record_fingerprint: bool = False,
 ) -> file_service.UploadOutcome:
     storage = KnowledgeFileStorage(runtime.storage)
     async with runtime.database.async_session() as db:
@@ -88,6 +89,7 @@ async def _persist_upload(
             content_type=content_type,
             principal=principal,
             inherit_parser_config=inherit_parser_config,
+            record_fingerprint=record_fingerprint,
         )
     await storage.upload(plan.file_key, content, content_type)
     persistence_succeeded = False
@@ -193,6 +195,7 @@ async def upload_file(
         content=contents,
         content_type=file.content_type,
         inherit_parser_config=True,
+        record_fingerprint=True,
     )
     return _success(
         request,

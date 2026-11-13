@@ -1,5 +1,6 @@
 {
   "codes": {
+    "KB_FILE_DUPLICATE": "The knowledge base already contains an identical file.",
     "OK": "Success",
     "BAD_REQUEST": "Invalid request",
     "VALIDATION_FAILED": "Request validation failed",

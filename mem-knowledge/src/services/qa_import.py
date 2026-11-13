@@ -126,6 +126,7 @@ async def prepare_qa_import_resources(
         inherit_parser_config=False,
         parser_id="qa",
         parser_config={"doc_type": "qa", "auto_questions": 0},
+        record_fingerprint=True,
     )
 
 

@@ -17,6 +17,7 @@ dependencies = [
     "celery==5.5.3",
     "chardet==5.2.0",
     "elasticsearch>=8.17,<9",
+    "error-core",
     "fastapi>=0.119,<1",
     "httpx>=0.28,<1",
     "html5lib==1.1",
@@ -58,6 +59,7 @@ dev = [
 ]
 
 [tool.uv.sources]
+error-core = { path = "../packages/error-core" }
 redbear-model = { path = "../packages/redbear-model" }
 memorybear-grpc = { path = "../packages/memorybear-grpc" }
 mem-storage-core = { path = "../packages/storage-core" }

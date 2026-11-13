@@ -10,6 +10,7 @@ from typing import Optional, List
 
 from fastapi import Request, Response
 from fastapi.responses import JSONResponse
+from fastapi.security import APIKeyHeader, HTTPBearer
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
@@ -436,6 +437,11 @@ def extract_api_key_from_request(request: Request) -> Optional[str]:
             "endpoint": str(request.url)
         })
         return None
+
+
+# OpenAPI alternatives only; require_api_key_self_db performs actual authentication.
+knowledge_upload_api_key = APIKeyHeader(name="X-API-Key", auto_error=False)
+knowledge_upload_bearer = HTTPBearer(scheme_name="KnowledgeUploadApiKeyBearer", auto_error=False)
 
 
 def require_api_key_self_db(

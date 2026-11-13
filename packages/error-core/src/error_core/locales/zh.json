@@ -1,5 +1,6 @@
 {
   "codes": {
+    "KB_FILE_DUPLICATE": "检测到库中已存在相同文件",
     "OK": "成功",
     "BAD_REQUEST": "请求无效",
     "VALIDATION_FAILED": "请求参数校验失败",

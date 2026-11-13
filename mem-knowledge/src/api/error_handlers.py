@@ -4,18 +4,22 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
+from error_core.codes import BizCode
+from error_core.knowledge_upload import is_versioned_upload, upload_error_response
 from fastapi import FastAPI, Request
 from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from mem_storage import StorageError
+from sqlalchemy.exc import OperationalError
 from starlette.exceptions import HTTPException
 
 from ..error_mapping import map_storage_error
 from ..errors import KnowledgeError
 from ..i18n import normalize_locale, translate
 from ..request_logging import log_request_failure, safe_failure_detail
-from ..trace import TRACE_ID_HEADER, get_trace_id
+from ..services.upload_deduplication import DuplicateUploadError
+from ..trace import TRACE_ID_HEADER, get_trace_id, normalize_trace_id
 from .schemas.common import fail
 
 _HTTP_ERRORS = {
@@ -98,13 +102,71 @@ def render_error(
     )
 
 
+_UPLOAD_ERROR_STATUSES = {
+    "KB_PRINCIPAL_INVALID": 401,
+    "KB_KNOWLEDGE_NOT_FOUND": 404,
+    "KB_PARENT_FOLDER_NOT_FOUND": 404,
+    "KB_UPLOAD_FILE_EMPTY": 422,
+    "KB_QA_IMPORT_FILE_EMPTY": 422,
+    "KB_QA_IMPORT_FILE_TYPE_UNSUPPORTED": 415,
+    "KB_UPLOAD_FILE_SIZE_LIMIT": 413,
+    "KB_TASK_DISPATCH_FAILED": 503,
+    "KB_DATABASE_UNAVAILABLE": 503,
+    "KB_STORAGE_UNAVAILABLE": 503,
+    "KB_STORAGE_UPLOAD_TIMEOUT": 503,
+    "KB_STORAGE_CONFIG_INVALID": 500,
+    "KB_STORAGE_OPERATION_FAILED": 500,
+    "KB_STORAGE_UPLOAD_FAILED": 500,
+    "KB_DOCUMENT_PARSER_CONFIG_INVALID": 500,
+}
+
+
+def render_upload_error(
+    request: Request, exc: Exception, *, status: int, cause: str,
+    validation_errors: list[dict] | None = None,
+    data: dict[str, str] | None = None,
+    code: int | None = None,
+    headers: Mapping[str, str] | None = None,
+) -> JSONResponse:
+    trace_id = getattr(request.state, "trace_id", None)
+    if not trace_id:
+        trace_id = normalize_trace_id(request.headers.get(TRACE_ID_HEADER))
+        request.state.trace_id = trace_id
+    response = upload_error_response(
+        request, status, cause=cause, trace_id=trace_id, validation_errors=validation_errors,
+        data=data, code=code, headers=dict(headers or {}),
+    )
+    log_request_failure(
+        request, status_code=status, response_code=code, error_code=cause,
+        message=cause, exception=exc, validation_errors=validation_errors,
+    )
+    return response
+
+
 def register_error_handlers(application: FastAPI) -> None:
+    @application.exception_handler(DuplicateUploadError)
+    async def duplicate_upload_handler(request: Request, exc: DuplicateUploadError):
+        return render_upload_error(
+            request, exc, status=409, cause="KB_FILE_DUPLICATE",
+            code=BizCode.KB_FILE_DUPLICATE, data={"existing_file_name": exc.existing_file_name},
+        )
+
     @application.exception_handler(StorageError)
     async def storage_error_handler(request: Request, exc: StorageError):
-        return render_error(request, map_storage_error(exc))
+        mapped = map_storage_error(exc)
+        if is_versioned_upload(request, internal=True):
+            return render_upload_error(
+                request, exc, status=_UPLOAD_ERROR_STATUSES.get(mapped.code, 500),
+                cause=mapped.code,
+            )
+        return render_error(request, mapped)
 
     @application.exception_handler(RequestValidationError)
     async def validation_error_handler(request: Request, exc: RequestValidationError):
+        if is_versioned_upload(request, internal=True):
+            return render_upload_error(
+                request, exc, status=422, cause="VALIDATION_FAILED", validation_errors=exc.errors(),
+            )
         endpoint = request.scope.get("endpoint")
         identity = (getattr(endpoint, "__module__", ""), getattr(endpoint, "__name__", ""))
         code = _VALIDATION_CONTRACTS.get(identity)
@@ -126,10 +188,19 @@ def register_error_handlers(application: FastAPI) -> None:
 
     @application.exception_handler(KnowledgeError)
     async def knowledge_error_handler(request: Request, exc: KnowledgeError):
+        if is_versioned_upload(request, internal=True):
+            status = _UPLOAD_ERROR_STATUSES.get(exc.code, exc.status_code)
+            return render_upload_error(request, exc, status=status, cause=exc.code)
         return render_error(request, exc)
 
     @application.exception_handler(HTTPException)
     async def http_error_handler(request: Request, exc: HTTPException):
+        if is_versioned_upload(request, internal=True):
+            return render_upload_error(
+                request, exc, status=exc.status_code,
+                cause=_HTTP_ERRORS.get(exc.status_code, "KB_UPLOAD_HTTP_ERROR"),
+                headers=exc.headers,
+            )
         key = _HTTP_ERRORS.get(exc.status_code, "KB_INTERNAL_ERROR")
         log_request_failure(
             request,
@@ -149,4 +220,10 @@ def register_error_handlers(application: FastAPI) -> None:
 
     @application.exception_handler(Exception)
     async def unhandled_error_handler(request: Request, exc: Exception):
+        if is_versioned_upload(request, internal=True):
+            if isinstance(exc, OperationalError):
+                return render_upload_error(
+                    request, exc, status=503, cause="KB_DATABASE_UNAVAILABLE",
+                )
+            return render_upload_error(request, exc, status=500, cause="KB_INTERNAL_ERROR")
         return render_error(request, KnowledgeError.from_code("KB_INTERNAL_ERROR"), exception=exc)
