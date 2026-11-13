@@ -137,6 +137,18 @@ def _node_label(node: dict[str, Any], node_config: Any) -> str | None:
     return None
 
 
+def _workflow_node_config(node: dict[str, Any]) -> dict[str, Any] | None:
+    """节点配置的两种存法：新结构直接放 ``config``，旧结构在 ``data.config``。"""
+
+    config = node.get("config")
+    if isinstance(config, dict):
+        return config
+    data = node.get("data")
+    if isinstance(data, dict) and isinstance(data.get("config"), dict):
+        return data["config"]
+    return None
+
+
 class AssetService:
     """Catalog entries (switches 1/2) for the tenant resource center."""
 
@@ -382,18 +394,20 @@ class AssetService:
     def _metadata_gaps(self, release: AppRelease) -> list[dict[str, Any]]:
         """快照里「实际必填」的展示字段还缺哪些（不抛错，供预览复用）。
 
-        图标、功能分类、使用示例、设置步骤的必填是随发布弹窗逐步落地的，
-        SSO 发布入口至今仍允许缺省（预告期，4 周缓冲），因此库里会存在缺字段
-        的版本快照。这类版本进资源中心后展示为空，消费方无从判断用途与用法，
-        所以统一在共享入口拦住，要求重新发布补齐——旧版本与 SSO 发布的版本
-        都走这一道，不需要回改历史数据。
+        图标、使用示例、设置步骤的必填是随发布弹窗逐步落地的，SSO 发布入口
+        在预告期内仍允许缺省（4 周缓冲），因此库里会存在缺字段的版本快照。
+        这类版本进资源中心后展示为空，消费方无从判断用途与用法，所以统一在
+        共享入口拦住，要求重新发布补齐——旧版本与 SSO 发布的版本都走这一道，
+        不需要回改历史数据。
+
+        功能分类（`categories`）**不在**这道门禁里：它从来不是发布的必填项
+        （仅投稿社区市场才要求 ≥1 项），SSO 发布接口至今也没有该字段，
+        v0.5.9 补齐后才纳入校验。
         """
 
         missing: list[dict[str, Any]] = []
         if not (release.icon or "").strip():
             missing.append({"field": "icon", "reason": "未填写图标"})
-        if not (release.categories or []):
-            missing.append({"field": "categories", "reason": "未选择功能分类"})
 
         if release.type in (AppType.AGENT, AppType.MULTI_AGENT):
             examples = _expand_usage_examples(release.usage_examples)
@@ -1890,6 +1904,45 @@ class AssetService:
         _, available_kb_ids = self.app_service._preload_cross_workspace_resources(
             target_tenant_id, target_workspace_id, set(), kb_ids
         )
+
+        # Agent 节点「引用已发布 Agent 应用」里的 app_id 是 workspace 级的：副本落在
+        # 目标空间后本地没有这个应用，运行时会按本空间解析，直接 workspace mismatch。
+        # 所以目标空间不存在的引用要整段清掉，节点退回 inline 交给用户重新配置。
+        agent_reference_ids: set[uuid.UUID] = set()
+
+        def collect_agent_references(value: Any) -> None:
+            if isinstance(value, list):
+                for child in value:
+                    collect_agent_references(child)
+                return
+            if not isinstance(value, dict):
+                return
+            node_config = _workflow_node_config(value)
+            reference = (
+                node_config.get("reference")
+                if isinstance(node_config, dict)
+                and node_config.get("mode") == "reference"
+                else None
+            )
+            if isinstance(reference, dict):
+                app_id = _coerce_uuid(reference.get("app_id"))
+                if app_id is not None:
+                    agent_reference_ids.add(app_id)
+            for child in value.values():
+                collect_agent_references(child)
+
+        collect_agent_references(copied)
+        available_agent_app_ids: set[uuid.UUID] = set()
+        if agent_reference_ids:
+            available_agent_app_ids = set(
+                self.db.scalars(
+                    select(App.id).where(
+                        App.id.in_(agent_reference_ids),
+                        App.workspace_id == target_workspace_id,
+                        App.is_active.is_(True),
+                    )
+                ).all()
+            )
 
         def clean(value: Any, path: str = "nodes") -> Any:
             if isinstance(value, list):
