@@ -44,7 +44,7 @@ class ModelInvokeFailedError(ModelInvokeClientError):
     """The model service ran the invoke and reported a terminal failure.
 
     ``remote_code`` 为服务侧原样码（SSE 帧 = ``BizCode`` 名、JSON 信封 = 数值）；
-    HTTP 出口保留原码，知识库按模型用途选择提示与 HTTP 状态。
+    HTTP 出口保留原码并按该码取提示，知识库只包装 HTTP 状态。
     """
 
     def __init__(

@@ -243,8 +243,6 @@ def _with_public_error(
     legacy: KnowledgeError,
     public: KnowledgeError,
     cause: BaseException,
-    *,
-    role: ModelRole,
 ) -> KnowledgeError:
     remote = next(
         (item for item in _exception_chain(cause) if isinstance(item, ModelInvokeFailedError)),
@@ -252,13 +250,6 @@ def _with_public_error(
     )
     upstream_code = (coerce_code(remote.remote_code) or None) if remote else None
     remote_status = _model_service_http_status(remote, upstream_code) if remote else None
-    http_message_code = None
-    if remote_status in {500, 503}:
-        failure = (
-            ModelFailure.TEMPORARILY_UNAVAILABLE if remote_status == 503
-            else ModelFailure.PROCESSING_FAILED
-        )
-        http_message_code = model_error(role, failure).response_code
     error = KnowledgeError.from_code(
         legacy.code,
         params=legacy.params,
@@ -266,7 +257,6 @@ def _with_public_error(
         response_code=public.response_code,
         http_status_override=remote_status or _model_http_status(public, cause),
         upstream_response_code=upstream_code,
-        http_message_code=http_message_code,
     )
     error.__cause__ = cause
     return error
@@ -282,7 +272,7 @@ def map_model_error(
     if model_role is None or isinstance(exc, KnowledgeError):
         return legacy
     public = _classify_model_error(exc, model_role=model_role, visibility_proven=visibility_proven)
-    return _with_public_error(legacy, public, exc, role=model_role)
+    return _with_public_error(legacy, public, exc)
 
 
 def map_text_embedding_error(exc: BaseException) -> KnowledgeError | None:
@@ -290,7 +280,7 @@ def map_text_embedding_error(exc: BaseException) -> KnowledgeError | None:
     if legacy is None or isinstance(exc, KnowledgeError):
         return legacy
     public = _classify_model_error(exc, model_role=ModelRole.EMBEDDING)
-    return _with_public_error(legacy, public, exc, role=ModelRole.EMBEDDING)
+    return _with_public_error(legacy, public, exc)
 
 
 def map_multimodal_error(
@@ -303,7 +293,7 @@ def map_multimodal_error(
         return legacy
     role = ModelRole.IMAGE_EMBEDDING if operation == "embedding" else ModelRole.IMAGE_RERANK
     public = _classify_model_error(exc, model_role=role)
-    return _with_public_error(legacy, public, exc, role=role)
+    return _with_public_error(legacy, public, exc)
 
 
 def map_storage_error(exc: BaseException) -> KnowledgeError:
