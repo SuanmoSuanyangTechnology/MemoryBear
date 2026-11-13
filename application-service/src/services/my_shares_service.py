@@ -182,6 +182,12 @@ class MySharesService:
                 **legacy,
                 "version": market_version.version_name,
                 "version_number": market_version.version,
+                # 与市场 versions 接口的 item.release_id 同源（都是 `AppRelease.id`），
+                # 前端据此把「我的共享」这一行对到该资源的版本记录上。不能按
+                # `version` 字符串匹配：市场只列已通过版本，本行取最近一次投稿，
+                # 审核中的那一版在版本记录里根本不存在；而 `version_name` 本身
+                # 在 `app_releases` 上也没有唯一约束。
+                "release_id": str(sync.release_id),
                 "scope": SCOPE_COMMUNITY_MARKET,
                 "share_status": status,
                 # 市场只有「复制为可编辑副本」一条落地路径，没有可选项（§1.2）；
@@ -264,19 +270,30 @@ class MySharesService:
             self.db.scalars(
                 select(MarketSync)
                 .where(MarketSync.asset_id.in_([asset.id for asset in assets]))
-                .order_by(MarketSync.updated_at.desc())
+                # 投稿先后只看 `created_at`：`updated_at` 带 `onupdate`，同步重试 /
+                # 状态推进都会刷新它，用它排序会让「较早的投稿晚完成」压过更新的那版。
+                .order_by(MarketSync.created_at.desc(), MarketSync.id.desc())
             ).all()
         )
 
     @staticmethod
     def _latest_sync_per_asset(syncs: list[MarketSync]) -> dict[uuid.UUID, MarketSync]:
-        """一个条目可能投过多次（每次新版本一行），列表只展示最近一次。"""
+        """一个条目可能投过多次（每次新版本一行），列表只展示最近一次。
+
+        「最近」= 最后一次**发起**投稿，所以排序键是 `created_at`（不可变），
+        不是 `updated_at`。`updated_at` 会在派发、重试、状态回写时被刷新：
+        第 1 版投稿先发、第 2 版后发，但第 1 版的同步行最后才落定，按
+        `updated_at` 取就会把第 1 版当成最新——列表于是显示旧的 `release_id` /
+        `version`，与市场版本记录对不上。
+
+        平局按 `id` 决胜，保证同一批数据无论传入顺序如何都取到同一行。
+        """
 
         latest: dict[uuid.UUID, MarketSync] = {}
         for sync in syncs:
             current = latest.get(sync.asset_id)
-            if current is None or (sync.updated_at or sync.created_at) > (
-                    current.updated_at or current.created_at
+            if current is None or (sync.created_at, sync.id) > (
+                    current.created_at, current.id
             ):
                 latest[sync.asset_id] = sync
         return latest
@@ -363,6 +380,15 @@ class MySharesService:
         `status` 取最新一次投稿的审核状态（列表要的是这个，不是资源整体状态）；
         缺记录或状态不合法时整行降 `unknown`，四个上架字段一并置空——
         不能拿半份数据画按钮，否则会出现「状态未知但能点下架」。
+
+        **字段名的读取顺序是硬约束**：市场 §6.4 批量状态接口返回的是
+        `review_status`（`market_publication_service._resource_status_item`），
+        `HttpMarketGateway.publication_status` 又原样透传 JSON，所以这里必须先认它。
+        只读 `latest_publication_status` / `status` 会让每条投稿都静默降成
+        `unknown`——而同一条记录的 `listing_status` 正常，症状是「上架状态对、
+        审核状态却未知」。后两个名字留作早期实现的兜底，顺序与
+        `external_catalog_service.publication_status` 保持一致，两个入口不能给出
+        不同的审核状态。
         """
 
         folded: dict[str, dict[str, Any]] = {}
@@ -372,8 +398,10 @@ class MySharesService:
             if not key:
                 continue
             # 列表要的是「最新一次投稿」的状态，不是资源整体上下架状态
-            status = _record_get(record, "latest_publication_status") or _record_get(
-                record, "status"
+            status = (
+                _record_get(record, "review_status")
+                or _record_get(record, "latest_publication_status")
+                or _record_get(record, "status")
             )
             if status not in _MARKET_STATUSES:
                 status = UNKNOWN
@@ -418,6 +446,9 @@ class MySharesService:
             "share_status": "shared",
             "version": release.version_name,
             "version_number": release.version,
+            # 资源中心行给钉住版本的 id，与市场行同名字段对齐：前端不必为一个
+            # 字段写两套取值路径，只是资源中心没有对应的版本记录接口。
+            "release_id": str(release.id),
             "editable": False,
             "shared_at": to_timestamp_ms(asset.updated_at),
             "asset_id": str(asset.id),

@@ -67,6 +67,33 @@ def _field(status: Any, name: str) -> Any:
     return getattr(status, name, None)
 
 
+def _review_status_of(status: Any) -> Any:
+    """最新一次申请的审核状态：契约 §6.4 的正式名是 `review_status`。
+
+    市场侧 `market_publication_service._resource_status_item` 只产出
+    `review_status`；`latest_publication_status` 是早期实现的名字，没有任何
+    上游会返回它，只作兜底。读取顺序必须与 `my_shares_service._market_rows`
+    一致——两个入口给出不同的审核状态，前端就会一边显示「审核中」另一边显示
+    「可投稿」。
+
+    走 `_field` 而非属性访问：`HttpMarketGateway.publication_status` 直接
+    透传 JSON，拿到的是 dict，`status.review_status` 会 AttributeError。
+
+    判真值而不是 `is not None`：上游给了空串时应当继续兜底，若把 `""` 当状态
+    返回，调用方会拿它去比 `_LATEST_PUBLICATION_STATUSES` 并抛
+    `INVALID_UPSTREAM_STATUS` —— 一个缺字段的旧网关就这样把降级变成 500。
+
+    这里**不**回落到摘要枚举 `status`（`published` / `unlisted` / `draft`）：
+    那就不是审核状态了，而且会被同一份枚举校验拒成 500。`status` 的归宿是
+    `_listing_status_of`，按 `_STATUS_TO_LISTING` 推上架状态。
+    """
+
+    review_status = _field(status, "review_status")
+    if review_status:
+        return review_status
+    return _field(status, "latest_publication_status") or None
+
+
 def _listing_status_of(status: Any) -> str | None:
     """精确上架状态：市场直接给就用，只给摘要枚举时按固定映射推导。
 
@@ -90,7 +117,7 @@ def _request_type_of(status: Any) -> str | None:
         request_type = "first_publish"
     if request_type in ("first_publish", "version_update"):
         return request_type
-    if not _field(status, "latest_publication_status"):
+    if not _review_status_of(status):
         return None
     # 兜底推导：资源已经有在架版本 → 这次是新版本；否则是首次上架。
     return "version_update" if _field(status, "current_version") else "first_publish"
@@ -300,11 +327,17 @@ class ExternalCatalogService:
                 block_reason=block_reason,  # type: ignore[arg-type]
             )
         status = statuses[0]
+        # 这一整段都用 `_field` 读：网关结果可能是 dataclass（企业侧替身）也可能
+        # 是 dict（`HttpMarketGateway.publication_status` 透传 JSON），直接点属性
+        # 在 dict 上就是 AttributeError——状态查询会 500 而不是降级。
+        review_status = _review_status_of(status)
+        resource_id_upstream = _field(status, "resource_id")
+        updated_at = _field(status, "updated_at") or 0
         latest = None
-        if status.latest_publication_status is not None:
+        if review_status is not None:
             if (
-                not isinstance(status.latest_publication_status, str)
-                or status.latest_publication_status not in _LATEST_PUBLICATION_STATUSES
+                not isinstance(review_status, str)
+                or review_status not in _LATEST_PUBLICATION_STATUSES
             ):
                 raise ExternalCatalogError(
                     BizCode.EXTERNAL_CATALOG_INVALID,
@@ -312,10 +345,10 @@ class ExternalCatalogService:
                     data={"reason": "INVALID_UPSTREAM_STATUS"},
                 )
             latest = LatestPublication(
-                id=status.resource_id or "",
-                version=status.latest_version or "",
-                status=status.latest_publication_status,  # type: ignore[arg-type]
-                submitted_at=status.updated_at or 0,
+                id=resource_id_upstream or "",
+                version=_field(status, "latest_version") or "",
+                status=review_status,  # type: ignore[arg-type]
+                submitted_at=updated_at,
                 reviewed_at=None,
                 review_note=None,
                 reject_reason=None,
@@ -324,20 +357,20 @@ class ExternalCatalogService:
                 # 首次投稿（资源尚无 current_version）按 `new_listing`。
                 request_type=_request_type_of(status),
             )
-            if status.latest_publication_status == "pending":
+            if review_status == "pending":
                 block_reason = "PENDING_REVIEW"
         resource = None
-        if status.resource_id:
+        if resource_id_upstream:
             listing_status = _listing_status_of(status)
             resource = PublicationResourceState(
-                id=status.resource_id,
+                id=resource_id_upstream,
                 listing_status=listing_status,
-                delist_actor=getattr(status, "delist_actor", None),
-                delisted_at=getattr(status, "delisted_at", None),
-                delist_reason=getattr(status, "delist_reason", None),
-                current_version=status.current_version,
+                delist_actor=_field(status, "delist_actor"),
+                delisted_at=_field(status, "delisted_at"),
+                delist_reason=_field(status, "delist_reason"),
+                current_version=_field(status, "current_version"),
                 install_count=0,
-                updated_at=status.updated_at or 0,
+                updated_at=updated_at,
             )
         return PublicationStatusResponse(
             resource_type=resource_type,

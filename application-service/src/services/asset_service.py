@@ -17,6 +17,7 @@ change what consumers see.
 """
 from __future__ import annotations
 
+import asyncio
 import copy
 import logging
 import uuid
@@ -1015,6 +1016,10 @@ class AssetService:
         剔除（它只指向源租户的某个工作流，目标租户没有可填的落点）。这里不 import
         市场包（开源版没有它），所以规则写在两边——但它只是分类，不是准入判定，
         漂移的后果是展示分组不同，不会让提交行为不一致。
+
+        随包/占位的条目额外带 `methods`（「所需方法」）：目标企业拿到占位行后要知道
+        该工具**被用到了哪些方法**才配得回来。选中具体方法时只列选中的那几个；整工具
+        选择时列全量——否则确认页只写一个工具名，用户装完不知道该补哪些 operation。
         """
 
         ids = {ref["id"] for ref in tool_refs if ref["id"] is not None}
@@ -1041,6 +1046,53 @@ class AssetService:
                     )
                 ).all()
             }
+
+        # 每个工具「被用到了哪些方法」：选中具体 operation 的只算那几个，整工具选择
+        # 的标记为 whole 并展开全量。确认页因此能写出「这个占位行要补哪些方法」。
+        picked: dict[uuid.UUID, list[str]] = {}
+        whole: set[uuid.UUID] = set()
+        for ref in tool_refs:
+            if ref["id"] is None:
+                continue
+            operation = ref["operation"]
+            if operation:
+                ops = picked.setdefault(ref["id"], [])
+                if str(operation) not in ops:
+                    ops.append(str(operation))
+            else:
+                whole.add(ref["id"])
+        # 只给 custom / mcp 取方法树。workflow 的方法树要构造
+        # `WorkflowAsTool(db=self.db)` 并读一次 `workflow_config`（见
+        # `ToolService._get_workflow_tool_methods`），而这里的 Session 属于调用方；
+        # `_run_async` 在已有运行中事件循环时会把协程丢到私有线程执行，跨线程复用
+        # Session 会抛 `InvalidRequestError`，而且会被外层 except 吞成「退回原始
+        # 标识」，症状极隐蔽。workflow 的展示名就是工具名本身，本地就取得到。
+        labels_by_tool = self._preview_tool_method_labels(
+            {
+                row[0] for row in rows
+                if row[2] in (ToolType.CUSTOM, ToolType.MCP)
+            },
+            tenant_id,
+        )
+
+        def method_labels(tool_id: uuid.UUID) -> list[str]:
+            labels, by_operation = labels_by_tool.get(tool_id, ([], {}))
+            if tool_id in whole and labels:
+                # 整工具选择 = 需要该工具的全部方法。同一工具若又被按 operation
+                # 选中（`add_ref` 的去重键含 method，两条都会保留），全量已经覆盖
+                # 那些方法，不再并一次。
+                return list(labels)
+            # 没有方法树时不能直接返回空：同一工具可能既被整选、又被按 operation
+            # 选中，此时 `[]` 会把用户明确选中的方法一起丢掉。`labels` 为空的三种
+            # 来源 —— 只有 `schema_url` 的 custom（预览不拉远端）、被排除在外的
+            # workflow、以及调用方处在事件循环里时预览主动退化（见
+            # `_preview_tool_method_labels`）。前两种退回 operation_key 原文即可。
+            resolved: list[str] = []
+            for operation in picked.get(tool_id, []):
+                label = by_operation.get(operation) or operation
+                if label not in resolved:
+                    resolved.append(label)
+            return resolved
 
         builtin_tools: list[dict[str, Any]] = []
         dependencies: list[dict[str, Any]] = []
@@ -1083,8 +1135,105 @@ class AssetService:
                 "kind": kind,
                 "name": name,
                 "disposition": disposition,
+                "methods": method_labels(row[0]),
             })
         return builtin_tools, dependencies
+
+    def _preview_tool_method_labels(
+            self, tool_ids: set[uuid.UUID], tenant_id: uuid.UUID
+    ) -> dict[uuid.UUID, tuple[list[str], dict[str, str]]]:
+        """每个工具的「方法展示名」：``(全部方法, {operation 键: 展示名})``。
+
+        展示名与工具列表里看到的一致：自定义工具用 `METHOD:path`（截图里的
+        `GET:/example/t-http`），MCP 用远端方法名，工作流工具只有工具名本身。
+        `operation` 存在快照里的是 operation_key（`add_ref` 的第四个参数），所以
+        选具体方法时按 operation_key 反查展示名；查不到就退回原值，不让预览因为
+        方法树解析失败而崩掉——那只是「少了个更友好的名字」。
+
+        走 `ToolService.get_tool_methods_batch`，与共享校验共用同一份方法树口径。
+        但只读展示有三个限制，与共享校验（真要在安装后能执行）不同：
+
+        1. MCP 传 `read_only=True`，不会因为缓存为空去连远端；
+        2. `allow_remote_schema=False`，只用已存的 `schema_content`。只有
+           `schema_url` 的自定义工具会被跳过——`parse_from_url` 是同步
+           requests、超时 30 秒，且 schema_url 往往是第三方主机，预览会直接
+           卡住并超时，「预览不做外部请求」的约定也就破了。
+        3. 调用方只传 custom / mcp 的 id（workflow 见 `_preview_tools`）；
+        4. 只在**没有**运行中事件循环时执行：`_run_async` 遇到已有 loop 会另起
+           一个线程跑协程，而 `ToolService` 用的是调用方的 Session——SQLAlchemy
+           的 Session 不是线程安全的，跨线程查询抛 `InvalidRequestError`，还会
+           被下面的 except 吞成「没有方法树」。预览是 GET 的展示装饰，宁可不给
+           展示名，也不换线程。
+
+        跳过之后该工具没有方法树，`method_labels()` 自动退回快照里的
+        operation_key；牺牲一个更友好的名字，换预览的确定性时延。
+        """
+
+        tool_ids = {tool_id for tool_id in tool_ids if tool_id is not None}
+        if not tool_ids:
+            return {}
+
+        # 见上面第 4 条：有事件循环就直接退化。抛异常而不是继续，是因为继续的
+        # 代价是一个可能永远查不出来的跨线程 Session 错误。
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            pass
+        else:
+            logger.debug(
+                "共享预览：调用方已有事件循环，跳过方法树解析（不跨线程复用 Session）",
+                extra={"tool_count": len(tool_ids)},
+            )
+            return {}
+
+        try:
+            # 两个 import 都放在 try 内：`bundle_install_service` 会拉整条工作流/
+            # 模型栈，在裁掉那些包的部署形态里导入就会失败——预览是只读装饰，
+            # 不能因为「拿不到更友好的方法名」而整个 500。
+            from .bundle_install_service import _run_async
+            from .tool_service import ToolService
+
+            items, _missing = _run_async(
+                lambda: ToolService(self.db).get_tool_methods_batch(
+                    [str(tool_id) for tool_id in tool_ids],
+                    tenant_id,
+                    allow_remote_schema=False,
+                )
+            )
+        except Exception as exc:  # noqa: BLE001 - 预览不因方法树失败而整体 5xx
+            logger.warning(
+                "共享预览：工具方法树读取失败，所需方法退回原始标识",
+                extra={"tool_ids": [str(tool_id) for tool_id in tool_ids],
+                       "error": str(exc)},
+            )
+            return {}
+
+        labels: dict[uuid.UUID, tuple[list[str], dict[str, str]]] = {}
+        for item in items:
+            try:
+                tool_id = uuid.UUID(str(item["tool_id"]))
+            except (KeyError, ValueError):
+                continue
+            all_labels: list[str] = []
+            by_operation: dict[str, str] = {}
+            for method in item.get("methods") or []:
+                verb = str(method.get("method") or "").strip()
+                path = str(method.get("path") or "").strip()
+                operation_key = method.get("operation_key")
+                if verb and path:
+                    label = f"{verb}:{path}"
+                else:
+                    label = str(
+                        operation_key or method.get("name") or method.get("method_id") or ""
+                    ).strip()
+                if not label:
+                    continue
+                if label not in all_labels:
+                    all_labels.append(label)
+                if operation_key is not None:
+                    by_operation[str(operation_key)] = label
+            labels[tool_id] = (all_labels, by_operation)
+        return labels
 
     def _preview_skills(
             self, skill_refs: list[dict[str, Any]], tenant_id: uuid.UUID

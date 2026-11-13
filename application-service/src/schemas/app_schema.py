@@ -4,7 +4,7 @@ from typing import Optional, Any, List, Dict, Union, Literal
 from enum import Enum, StrEnum
 from urllib.parse import urlparse
 
-from pydantic import BaseModel, Field, ConfigDict, field_serializer, field_validator, model_serializer, model_validator
+from pydantic import BaseModel, Field, ConfigDict, computed_field, field_serializer, field_validator, model_serializer, model_validator
 
 from ..utils.datetime_utils import to_timestamp_ms
 from .rerank_schema import RerankMode, RerankWeights
@@ -493,8 +493,35 @@ class App(BaseModel):
     # external.listing_status / delist_actor（契约 v0.10 已删除 external.status）。
     origin: str = "local"
     external: Optional[dict] = None
+    # 「这一行是怎么来的」——与 `origin`（副本自身从哪里来）不同，这里描述
+    # 调用方当前看到它的途径，用来区分资源中心与社区市场：
+    #   local             本空间自建
+    #   resource_center   从资源中心装进/共享进本空间（含只读引用与旧的直接共享）
+    #   community_market  从社区市场安装的本地副本（copy）
+    # 只读引用访问到的源应用即使自己是从市场装的（`origin=external`），
+    # 对本空间也仍然是 `resource_center`——所以必须先判 is_shared 再看 origin。
     created_at: datetime.datetime
     updated_at: datetime.datetime
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def source(self) -> str:
+        """区分资源中心与社区市场：`local` / `resource_center` / `community_market`。
+
+        派生而不是独立赋值，因为 `PUT /apps/{id}`、复制应用、导入工作流这些
+        出口直接用 `App.model_validate(orm_app)` 构造，手工赋值只覆盖得了列表
+        那条路，市场装来的应用在那些出口会退回默认值 `local`。
+
+        顺序不能反：只读引用看到的是**别的空间**的源应用，它自己的 `origin`
+        可能是 `external`（别人从市场装的），但对本空间而言来源是资源中心。
+        先判 `is_shared` 再看 `origin`，才不会把「资源中心里的市场应用」误报成
+        「我从市场装的」。legacy `app_shares` 与只读引用都归 `resource_center`：
+        前者是资源中心取代空间共享之前的老通道，对使用者同样是「从资源中心拿到」。
+        """
+
+        if self.is_shared:
+            return "resource_center"
+        return "community_market" if self.origin == "external" else "local"
 
     @field_serializer("created_at", when_used="json")
     def _serialize_created_at(self, dt: datetime.datetime):

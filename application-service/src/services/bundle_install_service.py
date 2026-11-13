@@ -282,6 +282,7 @@ class BundleInstallService:
             tenant_id: uuid.UUID,
             commit: bool = True,
             market_origin: dict[str, str] | None = None,
+            overrides: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Land one **tool / skill_package** bundle (no application involved).
 
@@ -334,17 +335,61 @@ class BundleInstallService:
             local_id = dep_map[entry["ref"]]
             local_name = self.db.get(ToolConfig, uuid.UUID(local_id)).name
         elif resource_type == "skill_package":
-            # 单独装的这一个技能/插件，`_origin` 指的就是它自己 → 能写全 source_ref
+            # 单独装的这一个技能/插件，`_origin` 指的就是它自己 → 能写全 source_ref。
+            # 插件是多成员容器，`call_name` 是**成员级**运行时标识（ADR-11）：从插件
+            # 这一层给一个值会让每个成员抢同一个名字，`_plan_import_members` 会直接判
+            # 「本次导入中重复」。所以插件只接受名称与描述：市场安装门面
+            # （`external_catalog_service._skill_overrides`）对插件根本不传这一项，这里
+            # 硬拒是给绕过门面的调用方的兜底，与资源中心同口径（那里也没有这层覆盖）。
+            is_plugin = payload.get("kind") == "plugin" or bool(dependencies.get("plugins"))
+            if is_plugin and (overrides or {}).get("call_name"):
+                raise BusinessException(
+                    "插件不支持自定义调用名称，请只填写名称与描述",
+                    BizCode.INVALID_PARAMETER,
+                    data={"reason": "PLUGIN_CALL_NAME_NOT_SUPPORTED"},
+                )
+            skill_dependencies = _skill_dependencies(payload, dependencies)
+            # 插件包的内容全在 `dependencies.skills[]` 里（成员一律带 plugin_ref）。
+            # 一条 skills 都没有的插件包没有任何可落地物：`_land_skills` 只遍历
+            # skills[]，分组为空、一行都不写，而 `_skill_result` 会按包内原名回查
+            # ——可能命中同租户同名的**旧插件**，把用户没装的东西当作
+            # `local_resource_id` 报成功（改过名则命中不到，`result=success` +
+            # id 为 null，卸载 / needs_config 全断）。`plugins[]` 只是插件的元数据，
+            # 不能当落地依据。
+            if is_plugin and not skill_dependencies.get("skills"):
+                raise BusinessException(
+                    f"插件「{payload.get('display_name') or payload.get('name')}」"
+                    "的安装包里没有任何成员",
+                    BizCode.EXTERNAL_CATALOG_INVALID,
+                    data={"reason": "INCOMPLETE_BUNDLE"},
+                )
+            # `strict=True`：顶层安装只有这一个资源，落地失败就该整单失败并把原始
+            # 错误码抛给前端（调用名称冲突是 DUPLICATE_NAME，用户改个名字重试），
+            # 而不是「result=partial + 一条 missing」——那样用户会以为已经装好了。
             self._land_skills(
-                _skill_dependencies(payload, dependencies),
+                skill_dependencies,
                 tenant_id, dep_map, missing,
                 own_market_ref=True,
+                overrides=overrides,
+                strict=True,
             )
             local_id, local_name = self._skill_result(
                 tenant_id=tenant_id,
-                kind=payload.get("kind"),
+                is_plugin=is_plugin,
                 name=payload.get("name"),
+                dependencies=skill_dependencies,
+                dep_map=dep_map,
             )
+            # 落地了却查不回本地行：响应里的 `local_resource_id` 是卸载、
+            # `needs_config`、共享校验的唯一凭证，带着 null 报成功比报错更糟。
+            # 工具侧同样有这个断言（`TOOL_LANDING_FAILED`），保持对称。
+            if local_id is None:
+                raise BusinessException(
+                    f"技能「{payload.get('display_name') or payload.get('name')}」"
+                    "落地后未能找到本地记录",
+                    BizCode.EXTERNAL_CATALOG_INVALID,
+                    data={"reason": "SKILL_LANDING_FAILED", "missing": missing},
+                )
         else:
             raise BusinessException(
                 f"该资源类型不支持单独安装: {resource_type}",
@@ -368,19 +413,37 @@ class BundleInstallService:
             self,
             *,
             tenant_id: uuid.UUID,
-            kind: str | None,
+            is_plugin: bool,
             name: str | None,
+            dependencies: dict[str, Any] | None = None,
+            dep_map: dict[str, str] | None = None,
     ) -> tuple[str | None, str | None]:
         """落地后的本地 id 与展示名。
 
         `dep_map` 的值是 `skills` 行 id（Agent 绑定用），而安装响应要的是技能包/
-        插件这一层，所以回包表按 `(tenant, name)` 取——落地上一步刚建好它，
-        同租户同 name 唯一（`uq_skill_pkg_tenant_name`），不会取错。
+        插件这一层：技能包按 `(tenant, name)` 回查（落地上一步刚建好它，同租户同
+        name 唯一，`uq_skill_pkg_tenant_name`）；插件必须走 `dep_map` —— 用户在安装
+        弹窗里改过 `display_name` 之后插件行的 `name` 已不是包内原名，按名字回查会
+        取不到，安装响应就会带着空的 `local_resource_id` 出去（卸载、needs_config
+        全部断掉）。
         """
 
         repo = SkillPackageRepository(self.db)
-        if kind == "plugin":
-            plugin = repo.get_plugin_by_name(tenant_id, str(name or ""))
+        if is_plugin:
+            plugin_id = next(
+                (
+                    (dep_map or {}).get(str(entry.get("ref")))
+                    for entry in (dependencies or {}).get("plugins") or []
+                    if (dep_map or {}).get(str(entry.get("ref")))
+                ),
+                None,
+            )
+            plugin = (
+                repo.get_plugin_by_id(uuid.UUID(plugin_id), tenant_id)
+                if plugin_id
+                # 兜底：老包或异常路径下 `dep_map` 没有插件引用时仍按包内原名回查。
+                else repo.get_plugin_by_name(tenant_id, str(name or ""))
+            )
             if plugin is None:
                 return None, None
             return str(plugin.id), plugin.name
@@ -477,6 +540,8 @@ class BundleInstallService:
             missing: list[dict[str, Any]],
             *,
             own_market_ref: bool = False,
+            overrides: dict[str, Any] | None = None,
+            strict: bool = False,
     ) -> None:
         """Each plugin lands as one multi-member zip; standalone skills land alone.
 
@@ -533,6 +598,13 @@ class BundleInstallService:
                 entries = self._enrich_skill_entries(entries, market_ref, missing)
                 if not entries:
                     continue
+            # 顶层的独立技能可以逐项改名/改描述/改调用名称；插件只到插件级
+            # （`meta` 留空，名称与描述走下面的 `plugin_name` / `plugin_description`）。
+            member_meta = (
+                _skill_meta_overrides(entries, overrides)
+                if overrides and not plugin_ref
+                else None
+            )
             try:
                 archive = self._build_skill_zip(
                     entries, nested=bool(plugin_ref), member_refs=member_refs
@@ -542,14 +614,22 @@ class BundleInstallService:
                     self.db,
                     tenant_id,
                     zip_bytes=archive,
-                    plugin_name=(plugin_row or {}).get("name"),
-                    plugin_description=((plugin_row or {}).get("payload") or {}).get("description"),
+                    meta=member_meta,
+                    plugin_name=(overrides or {}).get("display_name")
+                    or (plugin_row or {}).get("name"),
+                    plugin_description=(overrides or {}).get("description")
+                    or ((plugin_row or {}).get("payload") or {}).get("description"),
                     source_type=source_type,
                     source_ref=source_ref,
                     conflict_strategy="rename",
                     commit=False,
                 )
             except BusinessException as error:
+                if strict:
+                    # 不在这里 rollback：事务边界归调用方（`commit=False` 只
+                    # flush），外层 `sync_session` 异常退出时会统一回滚。自己
+                    # 提前 rollback 会把调用方在本次调用之前已经写好的行一起抹掉。
+                    raise
                 for entry in entries:
                     missing.append(_missing("skill", entry.get("name"), str(error)))
                 continue
@@ -563,6 +643,13 @@ class BundleInstallService:
                         member.get("skill_id") or member["package_id"]
                     )
                 else:
+                    if strict:
+                        raise BusinessException(
+                            f"技能「{entry.get('display_name') or entry.get('name')}」"
+                            f"安装失败：{member.get('skip_reason') or '名称冲突'}",
+                            BizCode.DUPLICATE_NAME,
+                            data={"reason": "SKILL_NAME_CONFLICT"},
+                        )
                     missing.append(
                         _missing("skill", entry.get("name"), member.get("skip_reason") or "跳过")
                     )
@@ -1568,6 +1655,45 @@ def _kb_ids(kr: Any) -> list[str]:
         for kb in (kr.get("knowledge_bases") or [])
         if isinstance(kb, dict) and kb.get("kb_id")
     ]
+
+
+def _skill_meta_overrides(
+        entries: list[dict[str, Any]],
+        overrides: dict[str, Any],
+) -> list[dict[str, Any]] | None:
+    """把「添加技能到企业」弹窗的三个可编辑项折成 `import_package(meta=...)`。
+
+    identifier 用 `SKILL.md` frontmatter 里的 name：独立技能的 zip 把 `SKILL.md`
+    放在根，`_split_members` 的 member key 正是它（`_root_prefix` 在这种情况下
+    不剥目录）。插件不在这里处理——多成员时目录会先被剥掉，identifier 会随包
+    布局变化，逐成员覆盖不稳定，插件只改插件级名称与描述。
+    """
+
+    if not entries:
+        return None
+    entry = entries[0]
+    payload = entry.get("payload") or {}
+    frontmatter = payload.get("frontmatter_raw") or {}
+    identifier = str(
+        frontmatter.get("name") or payload.get("call_name") or entry.get("name") or ""
+    ).strip()
+    if not identifier:
+        return None
+    # 三个覆盖项都先 strip 再判空：「  」是真值，直接写进去会变成空串覆盖。
+    # `import_package` 对「提供了 call_name 但为空」是硬报错
+    # （`skill_package_service` 的成员级校验），用户会为自己没填的字段挨一条
+    # 错误提示；空 `name` 同理会把技能名清空。全空 = 没改任何东西。
+    item: dict[str, Any] = {"identifier": identifier}
+    for key, field in (
+            ("display_name", "name"),
+            ("description", "description"),
+            ("call_name", "call_name"),
+    ):
+        value = str(overrides.get(key) or "").strip()
+        if value:
+            item[field] = value
+    # 只有 identifier 等于没改任何东西：不传 meta 才不会触发 identifier 校验
+    return [item] if len(item) > 1 else None
 
 
 def _slug(value: str) -> str:

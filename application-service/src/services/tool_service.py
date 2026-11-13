@@ -695,8 +695,16 @@ class ToolService:
             self,
             tool_ids: list[str],
             tenant_id: uuid.UUID,
+            allow_remote_schema: bool = True,
     ) -> tuple[list[dict[str, Any]], list[str]]:
-        """Build method trees for up to 100 tools with one query per table."""
+        """Build method trees for up to 100 tools with one query per table.
+
+        `allow_remote_schema=False` 用于只读展示场景（共享预览）：只有
+        `schema_url`、没有 `schema_content` 的自定义工具不会被拉取。
+        `parse_from_url` 是同步 `requests` 且超时 30 秒，在 `async def` 里会
+        直接阻塞事件循环——预览一次就能把请求挂住半分钟。这类工具因此拿不到
+        方法树，调用方自行退回到 operation_key 展示。
+        """
         seen: set[str] = set()
         parsed: list[tuple[str, uuid.UUID | None]] = []
         for raw in tool_ids:
@@ -763,7 +771,9 @@ class ToolService:
                     )
                 elif config.tool_type == ToolType.CUSTOM.value:
                     methods = await self._get_custom_tool_methods(
-                        config, custom_map.get(config.id)
+                        config,
+                        custom_map.get(config.id),
+                        allow_schema_url=allow_remote_schema,
                     )
                 elif config.tool_type == ToolType.MCP.value:
                     methods = await self._get_mcp_tool_methods(
@@ -1185,8 +1195,13 @@ class ToolService:
             self,
             config: ToolConfig,
             custom_config: CustomToolConfig | None = None,
+            allow_schema_url: bool = True,
     ) -> list[dict[str, Any]]:
-        """Get the methods of a custom tool."""
+        """Get the methods of a custom tool.
+
+        `allow_schema_url=False` 只解析已存的 `schema_content`，不访问
+        `schema_url`（外部 HTTP，见 `get_tool_methods_batch`）。
+        """
         custom_config = custom_config or self.custom_repo.find_by_tool_id(config.id)
         if not custom_config:
             return []
@@ -1200,7 +1215,7 @@ class ToolService:
                 success, schema, error = parser.parse_from_content(
                     custom_config.schema_content, "application/json"
                 )
-            elif custom_config.schema_url:
+            elif custom_config.schema_url and allow_schema_url:
                 success, schema, error = parser.parse_from_url(custom_config.schema_url)
             else:
                 return []
