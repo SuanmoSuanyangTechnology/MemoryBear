@@ -78,7 +78,7 @@ def _fetch_special_domains(db: Any, end_user_id: str) -> Tuple[Dict[str, Any], D
                 "field": r.field_key,
                 "name_cn": r.field_label or "",
                 "description": r.field_definition or "",
-                "format": r.value_format,
+                "format": r.value_format or "对象：内容",
                 "include_examples": inc_ex,
                 "exclude_examples": exc_ex,
             })
