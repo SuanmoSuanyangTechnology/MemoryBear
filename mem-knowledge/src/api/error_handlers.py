@@ -68,12 +68,36 @@ _KNOWLEDGE_CONFLICTS = {
 }
 
 
+# These causes have one server-side meaning even when raised from shared services.
+_INTERNAL_FAILURES = frozenset({
+    "KB_KNOWLEDGE_CREATOR_NOT_FOUND",
+    "KB_KNOWLEDGE_SHARE_REFERENCE_INCOMPLETE",
+    "KB_TASK_NAME_CONFIG_INVALID",
+    "KB_TASK_QUEUE_CONFIG_INVALID",
+    "KB_TASK_DISPATCH_CONFIG_INVALID",
+    "KB_VISION_MODEL_OUTPUT_EMPTY",
+})
+
+
 def _business_http_status(request: Request, error: KnowledgeError) -> int:
+    if not 400 <= error.status_code < 500:
+        return error.status_code
+    endpoint = request.scope.get("endpoint")
+    operation = getattr(endpoint, "__name__", "")
+    if error.http_status_override is not None:
+        if (
+            operation == "get_knowledge_graph_entity_types"
+            and getattr(endpoint, "__module__", "") == "src.api.routes.knowledge"
+            and error.http_status_override == 503
+        ):
+            # The gateway retries 503 on GET; this endpoint invokes a billable model.
+            return error.status_code
+        return error.http_status_override
+    if error.code in _INTERNAL_FAILURES:
+        return 500
     if error.status_code == 400:
-        endpoint = request.scope.get("endpoint")
         module = getattr(endpoint, "__module__", "")
         if module in {"src.api.routes.knowledge", "src.api.routes.document", "src.api.routes.file"}:
-            operation = endpoint.__name__
             if error.code == _RESOURCE_NOT_FOUND.get(operation):
                 return 404
             if error.code in _KNOWLEDGE_CONFLICTS.get(operation, ()):

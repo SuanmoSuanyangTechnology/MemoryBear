@@ -21,10 +21,13 @@ import os
 import re
 from dataclasses import dataclass
 
+import httpx
 from auth_sdk.schema import UserContext
 from error_core.knowledge_upload import is_versioned_upload
 from fastapi import HTTPException, Request
 from pydantic import ValidationError
+from redis.exceptions import ConnectionError as RedisConnectionError
+from redis.exceptions import TimeoutError as RedisTimeoutError
 from sqlalchemy.exc import OperationalError
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
@@ -197,6 +200,16 @@ class KbAuthMiddleware(BaseHTTPMiddleware):
                 transient = isinstance(exc, (ConnectionError, TimeoutError, OperationalError))
                 status = 503 if transient else 500
                 return _auth_error(request, status, "auth dependency failed", exception=exc)
+            if isinstance(exc, (
+                ConnectionError, TimeoutError, httpx.NetworkError, httpx.TimeoutException,
+                RedisConnectionError, RedisTimeoutError,
+            )) or (
+                isinstance(exc, httpx.HTTPStatusError)
+                and (exc.response.status_code == 429 or exc.response.status_code >= 500)
+            ):
+                return _auth_error(
+                    request, 503, "authentication service unavailable", exception=exc,
+                )
             return _auth_error(request, 401, "invalid token", exception=exc)
         if ctx is None:
             # 通道 2：老单体直连豁免（过渡态，NetworkPolicy 兜底受信来源）

@@ -50,7 +50,7 @@ def model_error(
     *,
     previous_status: int = 400,
 ) -> KnowledgeError:
-    # 4xx→5xx 尚未批准；保留各原调用分支的 HTTP，仍发布新的业务码和提示。
+    # 保留 gRPC 和其他非 HTTP 调用的传输状态；HTTP 由故障分类和出口决定。
     held_status = (
         previous_status
         if failure

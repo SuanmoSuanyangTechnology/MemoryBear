@@ -25,7 +25,7 @@ class TaskNotPublishedError(KnowledgeError):
     """The producer failed before send_task was called."""
 
     def __init__(self) -> None:
-        super().__init__(code="KB_TASK_DISPATCH_FAILED")
+        super().__init__(code="KB_TASK_DISPATCH_FAILED", http_status_override=503)
 
 
 class TaskDispatcher:
@@ -129,6 +129,7 @@ class TaskDispatcher:
             raise KnowledgeError.from_code(
                 "KB_TASK_DISPATCH_FAILED",
                 f"Failed to dispatch knowledge task: {name}",
+                http_status_override=503 if isinstance(exc, OperationalError) else 500,
             ) from exc
         task_id = getattr(result, "id", None)
         if not task_id:

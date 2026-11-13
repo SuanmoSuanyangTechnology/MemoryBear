@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Literal
 
 import httpx
 import requests
+from error_core.codes import BizCode
 from mem_storage import (
     StorageConfigError,
 )
@@ -31,6 +32,7 @@ from redbear_model.errors import is_provider_rate_limit_error
 
 from .errors import KnowledgeError
 from .integrations.model.errors import (
+    ModelInvokeConfigurationError,
     ModelInvokeFailedError,
     ModelInvokeProtocolError,
     ModelInvokeTimeoutError,
@@ -42,8 +44,10 @@ if TYPE_CHECKING:
     from .rag.wiki.config import WikiError
 
 
-def _with_cause(code: str, exc: BaseException) -> KnowledgeError:
-    mapped = KnowledgeError.from_code(code)
+def _with_cause(
+    code: str, exc: BaseException, *, http_status_override: int | None = None,
+) -> KnowledgeError:
+    mapped = KnowledgeError.from_code(code, http_status_override=http_status_override)
     mapped.__cause__ = exc
     return mapped
 
@@ -181,16 +185,65 @@ def _ark_embedding_errors() -> tuple[tuple[type[BaseException], ...], ...]:
     return (ArkAPITimeoutError,), (ArkAPIConnectionError,), (ArkAPIStatusError,)
 
 
-def _with_public_code(
+def _model_http_status(public: KnowledgeError, exc: BaseException) -> int | None:
+    if public.http_status_override is not None:
+        return public.http_status_override
+    for cause in _exception_chain(exc):
+        if isinstance(cause, ModelInvokeFailedError):
+            if _is_remote_rate_limited(cause) or cause.remote_code in {
+                BizCode.SERVICE_UNAVAILABLE, BizCode.SERVICE_UNAVAILABLE.name,
+            }:
+                return 503
+            if cause.remote_code in {
+                BizCode.INTERNAL_ERROR, BizCode.INTERNAL_ERROR.name,
+                BizCode.UPSTREAM_UNKNOWN, BizCode.UPSTREAM_UNKNOWN.name,
+            }:
+                return 500
+    if public.code.endswith("_PROCESSING_FAILED"):
+        # An explicit provider 4xx with an unknown cause does not prove an internal failure.
+        for cause in _exception_chain(exc):
+            if isinstance(cause, (
+                InvalidProviderResponseError,
+                ModelInvokeConfigurationError,
+                ModelInvokeProtocolError,
+            )):
+                return 500
+            status = getattr(cause, "status_code", None) or getattr(
+                getattr(cause, "response", None), "status_code", None
+            )
+            if isinstance(status, int) and 400 <= status < 500:
+                return None
+            if isinstance(cause, ModelInvokeFailedError) and status is None:
+                # Old SSE error frames may have neither an HTTP status nor a known code.
+                return None
+        return 500
+    if not public.code.endswith("_TEMPORARILY_UNAVAILABLE"):
+        return None
+    for cause in _exception_chain(exc):
+        if isinstance(cause, ChannelSwitchExhaustedError):
+            transient = cause.failures and all(item.retryable for item in cause.failures)
+            return 503 if transient else None
+        if isinstance(cause, NoAvailableChannelError):
+            return None
+        if isinstance(cause, ModelInvokeFailedError) and cause.remote_code in {
+            BizCode.NO_AVAILABLE_CHANNEL, BizCode.NO_AVAILABLE_CHANNEL.name,
+            BizCode.SPEEDBEAR_CHANNEL_MISSING, BizCode.SPEEDBEAR_CHANNEL_MISSING.name,
+        }:
+            return 503 if cause.retryable else None
+    return 503
+
+
+def _with_public_error(
     legacy: KnowledgeError,
-    response_code: int,
+    public: KnowledgeError,
     cause: BaseException,
 ) -> KnowledgeError:
     error = KnowledgeError.from_code(
         legacy.code,
         params=legacy.params,
         status_code=legacy.status_code,
-        response_code=response_code,
+        response_code=public.response_code,
+        http_status_override=_model_http_status(public, cause),
     )
     error.__cause__ = cause
     return error
@@ -206,7 +259,7 @@ def map_model_error(
     if model_role is None or isinstance(exc, KnowledgeError):
         return legacy
     public = _classify_model_error(exc, model_role=model_role, visibility_proven=visibility_proven)
-    return _with_public_code(legacy, public.response_code, exc)
+    return _with_public_error(legacy, public, exc)
 
 
 def map_text_embedding_error(exc: BaseException) -> KnowledgeError | None:
@@ -214,7 +267,7 @@ def map_text_embedding_error(exc: BaseException) -> KnowledgeError | None:
     if legacy is None or isinstance(exc, KnowledgeError):
         return legacy
     public = _classify_model_error(exc, model_role=ModelRole.EMBEDDING)
-    return _with_public_code(legacy, public.response_code, exc)
+    return _with_public_error(legacy, public, exc)
 
 
 def map_multimodal_error(
@@ -227,7 +280,7 @@ def map_multimodal_error(
         return legacy
     role = ModelRole.IMAGE_EMBEDDING if operation == "embedding" else ModelRole.IMAGE_RERANK
     public = _classify_model_error(exc, model_role=role)
-    return _with_public_code(legacy, public.response_code, exc)
+    return _with_public_error(legacy, public, exc)
 
 
 def map_storage_error(exc: BaseException) -> KnowledgeError:
@@ -235,14 +288,14 @@ def map_storage_error(exc: BaseException) -> KnowledgeError:
     if isinstance(exc, KnowledgeError):
         return exc
     if isinstance(exc, StorageConfigError):
-        return _with_cause("KB_STORAGE_CONFIG_INVALID", exc)
+        return _with_cause("KB_STORAGE_CONFIG_INVALID", exc, http_status_override=500)
     for cause in _exception_chain(exc):
         if isinstance(cause, FileNotFoundError):
-            return _with_cause("KB_STORAGE_OBJECT_MISSING", exc)
+            return _with_cause("KB_STORAGE_OBJECT_MISSING", exc, http_status_override=500)
         if isinstance(cause, (TimeoutError, httpx.TimeoutException, requests.Timeout)):
-            return _with_cause("KB_STORAGE_OPERATION_TIMEOUT", exc)
+            return _with_cause("KB_STORAGE_OPERATION_TIMEOUT", exc, http_status_override=503)
         if isinstance(cause, (ConnectionError, httpx.NetworkError, requests.ConnectionError)):
-            return _with_cause("KB_STORAGE_DEPENDENCY_UNAVAILABLE", exc)
+            return _with_cause("KB_STORAGE_DEPENDENCY_UNAVAILABLE", exc, http_status_override=503)
         response = getattr(cause, "response", None)
         status = getattr(cause, "status", None) or getattr(response, "status_code", None)
         provider_code = None
@@ -250,7 +303,7 @@ def map_storage_error(exc: BaseException) -> KnowledgeError:
             provider_code = response.get("Error", {}).get("Code")
             status = response.get("ResponseMetadata", {}).get("HTTPStatusCode")
         if provider_code in {"NoSuchKey", "NoSuchObject"}:
-            return _with_cause("KB_STORAGE_OBJECT_MISSING", exc)
+            return _with_cause("KB_STORAGE_OBJECT_MISSING", exc, http_status_override=500)
         if (
             isinstance(cause, PermissionError)
             or status in {401, 403}
@@ -262,21 +315,34 @@ def map_storage_error(exc: BaseException) -> KnowledgeError:
                 "NoSuchBucket",
             }
         ):
-            return _with_cause("KB_STORAGE_OPERATION_AUTH_OR_CONFIG_INVALID", exc)
+            return _with_cause(
+                "KB_STORAGE_OPERATION_AUTH_OR_CONFIG_INVALID", exc, http_status_override=500,
+            )
         if status == 429 or isinstance(status, int) and status >= 500:
-            return _with_cause("KB_STORAGE_DEPENDENCY_UNAVAILABLE", exc)
-    return _with_cause("KB_STORAGE_OPERATION_UNEXPECTED", exc)
+            return _with_cause("KB_STORAGE_DEPENDENCY_UNAVAILABLE", exc, http_status_override=503)
+    return _with_cause("KB_STORAGE_OPERATION_UNEXPECTED", exc, http_status_override=500)
 
 
 def map_database_error(exc: BaseException) -> KnowledgeError:
     from sqlalchemy.exc import DBAPIError, OperationalError
+    from sqlalchemy.exc import TimeoutError as PoolTimeoutError
 
     unavailable = isinstance(exc, OperationalError) or (
         isinstance(exc, DBAPIError) and exc.connection_invalidated
     )
+    original = getattr(exc, "orig", None)
+    sqlstate = getattr(original, "sqlstate", None) or getattr(original, "pgcode", None) or ""
+    transient = (
+        isinstance(exc, PoolTimeoutError)
+        or isinstance(original, (ConnectionError, TimeoutError))
+        or isinstance(exc, DBAPIError) and exc.connection_invalidated
+        or sqlstate.startswith("08")
+        or sqlstate in {"53300", "57P01", "57P02", "57P03"}
+    )
     return _with_cause(
         "KB_DATABASE_CONNECTION_UNAVAILABLE" if unavailable else "KB_DATABASE_OPERATION_FAILED",
         exc,
+        http_status_override=503 if transient else 500,
     )
 
 
@@ -370,7 +436,19 @@ def map_wiki_error(exc: WikiError, *, faq: bool = False) -> KnowledgeError:
             "WIKI_MODEL_REQUIRED": "KB_WIKI_MODEL_REQUIRED",
         }.get(exc.code, "KB_CONFLICT")
     )
-    error = KnowledgeError.from_code(legacy, response_code=ERROR_DEFINITIONS[code].response_code)
+    http_status = 500 if code in {
+        "KB_LLM_MODEL_PROCESSING_FAILED",
+        "KB_WIKI_EXECUTION_FAILED",
+        "KB_WIKI_UNMAPPED_ERROR",
+        "KB_FAQ_LOAD_FAILED",
+        "KB_FAQ_STORED_CONTENT_INVALID",
+        "KB_PRINCIPAL_REFERENCE_INVALID",
+    } else None
+    error = KnowledgeError.from_code(
+        legacy,
+        response_code=ERROR_DEFINITIONS[code].response_code,
+        http_status_override=http_status,
+    )
     error.__cause__ = exc
     return error
 

@@ -16,6 +16,7 @@ from ..api.dependencies import Principal
 from ..api.query_validation import parse_uuid_filter
 from ..api.schemas.document import Document as DocumentSchema
 from ..api.schemas.document import DocumentCreate, DocumentUpdate
+from ..error_mapping import map_storage_error
 from ..errors import KnowledgeError
 from ..models.owned import (
     FILE_ROLE_DERIVED_IMAGE,
@@ -302,7 +303,7 @@ async def delete_document_search_data(
         return 0
     refresh_result = await client.indices.refresh(index=index)
     if refresh_result.get("_shards", {}).get("failed", 0):
-        raise KnowledgeError.from_code("KB_SEARCH_UNAVAILABLE")
+        raise KnowledgeError.from_code("KB_SEARCH_UNAVAILABLE", http_status_override=500)
     result = await client.delete_by_query(
         index=index,
         query={"term": {"metadata.document_id": str(document_id)}},
@@ -314,6 +315,7 @@ async def delete_document_search_data(
     if result.get("timed_out") or failures or result.get("_shards", {}).get("failed", 0):
         raise KnowledgeError.from_code(
             "KB_SEARCH_UNAVAILABLE",
+            http_status_override=503 if result.get("timed_out") else 500,
         )
     deleted = int(result.get("deleted", 0))
     logger.info(
@@ -554,18 +556,24 @@ async def delete_document_resources(
             await guard.ensure_owned()
             await delete_search()
             await guard.ensure_owned()
-            failed = False
+            storage_failure: KnowledgeError | None = None
             for storage_key in snapshot.storage_keys:
                 try:
                     await storage.delete(storage_key)
-                except Exception:
-                    failed = True
+                except Exception as exc:
+                    mapped = map_storage_error(exc)
+                    if storage_failure is None or mapped.http_status_override == 500:
+                        storage_failure = mapped
                     logger.warning(
-                        "Failed to delete document storage object: key=%s",
-                        storage_key,
+                        "删除文档存储对象失败 document_id=%s key=%s "
+                        "error_type=%s stage=delete_storage",
+                        snapshot.document_id, storage_key, type(exc).__name__, exc_info=True,
                     )
-            if failed:
-                raise KnowledgeError.from_code("KB_STORAGE_UNAVAILABLE")
+            if storage_failure is not None:
+                raise KnowledgeError.from_code(
+                    "KB_STORAGE_UNAVAILABLE",
+                    http_status_override=storage_failure.http_status_override,
+                ) from storage_failure
             storage_cleaned = True
             # Retain the refreshed asset keys until storage cleanup succeeds,
             # while keeping ES mutations fenced until the database commit.
@@ -592,8 +600,13 @@ async def delete_document_resources(
                     snapshot.document_id,
                     type(recovery_exc).__name__,
                 )
-                raise KnowledgeError.from_code("KB_SEARCH_UNAVAILABLE") from recovery_exc
-        raise KnowledgeError.from_code("KB_SEARCH_UNAVAILABLE") from exc
+                raise KnowledgeError.from_code(
+                    "KB_SEARCH_UNAVAILABLE",
+                    http_status_override=503 if isinstance(
+                        recovery_exc, (TimeoutError, DocumentMutationLeaseLost)
+                    ) else 500,
+                ) from recovery_exc
+        raise KnowledgeError.from_code("KB_SEARCH_UNAVAILABLE", http_status_override=503) from exc
     finally:
         # Retain the normal short grace period after success or failure.
         try:

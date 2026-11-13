@@ -1487,6 +1487,7 @@ class KnowledgeRetrievalService:
             if score.input_index < 0 or score.input_index >= len(kept):
                 raise KnowledgeError.from_code(
                     "KB_MULTIMODAL_RERANK_RESPONSE_INVALID",
+                    http_status_override=500,
                 )
             unit = kept[score.input_index]
             scored_units.append(
