@@ -19,7 +19,6 @@ from ...models.owned import KnowledgeType, PermissionType
 from ...models.references import LoadBalanceStrategy, ModelType
 from ...rag.wiki.config import MAX_EXTRACT_PROMPT_LENGTH, MAX_LANGUAGE_LENGTH
 from ...utils.datetime_utils import to_timestamp_ms
-from .storage_fields import DatabaseInt, NonNullUpdate
 
 
 class UserSummary(BaseModel):
@@ -121,9 +120,6 @@ _LEGACY_WIKI_VALIDATOR = TypeAdapter(_LegacyWikiValidation)
 
 
 class KnowledgeCreate(KnowledgeBase):
-    doc_num: DatabaseInt | None = None
-    chunk_num: DatabaseInt | None = None
-
     @field_validator("parser_config")
     @classmethod
     def _validate_wiki_config(cls, value: dict | None) -> dict | None:
@@ -160,7 +156,7 @@ class KnowledgeCreate(KnowledgeBase):
 
 class KnowledgeUpdate(BaseModel):
     parent_id: uuid.UUID | None = Field(None)
-    name: NonNullUpdate[str]
+    name: str | None = Field(None)
     description: str | None = Field(None)
     avatar: str | None = Field(None)
     type: KnowledgeType | None = Field(None)
@@ -171,11 +167,11 @@ class KnowledgeUpdate(BaseModel):
     image2text_id: uuid.UUID | None = Field(None)
     audio2text_id: uuid.UUID | None = Field(None)
     video2text_id: uuid.UUID | None = Field(None)
-    doc_num: DatabaseInt | None = Field(None)
-    chunk_num: DatabaseInt | None = Field(None)
+    doc_num: int | None = Field(None)
+    chunk_num: int | None = Field(None)
     parser_id: str | None = Field(None)
     parser_config: dict | None = Field(None)
-    status: NonNullUpdate[DatabaseInt]
+    status: int | None = Field(None)
 
 
 class Knowledge(KnowledgeBase):

@@ -4,8 +4,10 @@ from uuid import UUID
 
 from sqlalchemy import JSON
 from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.exc import DBAPIError
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import ColumnProperty, InstrumentedAttribute
-from sqlalchemy.sql import ColumnElement
+from sqlalchemy.sql import Select
 
 from ..errors import KnowledgeError
 
@@ -27,19 +29,39 @@ def parse_uuid_filter(value: str | None, *, field: str) -> list[UUID] | None:
         ) from exc
 
 
-def list_order_clause(
-    model: type, value: str | None, *, desc: bool
-) -> ColumnElement | None:
+async def execute_list_page(
+    db: AsyncSession,
+    stmt: Select,
+    model: type,
+    *,
+    orderby: str | None,
+    desc: bool,
+):
     # Unknown names historically mean no explicit sort.
-    attribute = getattr(model, value, None) if value else None
-    if attribute is None:
-        return None
-    if (
-        not isinstance(attribute, InstrumentedAttribute)
-        or not isinstance(attribute.property, ColumnProperty)
-        or (isinstance(attribute.type, JSON) and not isinstance(attribute.type, JSONB))
-    ):
-        raise KnowledgeError.from_code(
-            "KB_HTTP_VALIDATION_ERROR", diagnostic="query.orderby: field cannot be sorted"
-        )
-    return attribute.desc() if desc else attribute.asc()
+    attribute = getattr(model, orderby, None) if orderby else None
+    if attribute is not None:
+        if not isinstance(attribute, InstrumentedAttribute) or not isinstance(
+            attribute.property, ColumnProperty
+        ):
+            raise KnowledgeError.from_code(
+                "KB_HTTP_VALIDATION_ERROR", diagnostic="query.orderby: field cannot be sorted"
+            )
+        stmt = stmt.order_by(attribute.desc() if desc else attribute.asc())
+
+    try:
+        return await db.execute(stmt)
+    except DBAPIError as exc:
+        # Some legacy databases use JSONB even when the ORM declares JSON.
+        # Only translate PostgreSQL's actual refusal to order plain JSON.
+        cause = exc.orig
+        if (
+            attribute is not None
+            and isinstance(attribute.type, JSON)
+            and not isinstance(attribute.type, JSONB)
+            and getattr(cause, "sqlstate", None) == "42883"
+            and "could not identify an ordering operator for type json" in str(cause)
+        ):
+            raise KnowledgeError.from_code(
+                "KB_HTTP_VALIDATION_ERROR", diagnostic="query.orderby: field cannot be sorted"
+            ) from exc
+        raise

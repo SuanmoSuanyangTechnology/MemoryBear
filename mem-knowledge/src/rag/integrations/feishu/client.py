@@ -96,16 +96,9 @@ class FeishuAPIClient:
             raise FeishuAPIError("Feishu folder request failed") from exc
         body = response.json()
         if body.get("code") != 0:
-            error_code = str(body.get("code"))
-            if (
-                page_token is None
-                and response.status_code in {200, 400, 404}
-                and error_code in _FOLDER_NOT_FOUND_CODES
-            ):
-                raise FeishuFolderNotFoundError(
-                    error_code, folder_token=folder_token, response=response
-                )
-            raise FeishuAPIError("Feishu API request failed", error_code, response=response)
+            raise FeishuAPIError(
+                "Feishu API request failed", str(body.get("code")), response=response
+            )
         data = body.get("data") or {}
         files = [
             FileInfo(
@@ -126,11 +119,25 @@ class FeishuAPIClient:
         self,
         folder_token: str,
         recursive: bool = True,
+        *,
+        validate_root_folder: bool = False,
     ) -> list[FileInfo]:
         result = []
         page_token = None
         while True:
-            files, page_token = await self.list_folder_files(folder_token, page_token)
+            try:
+                files, page_token = await self.list_folder_files(folder_token, page_token)
+            except FeishuAPIError as exc:
+                if (
+                    validate_root_folder
+                    and page_token is None
+                    and getattr(exc.response, "status_code", None) in {200, 400, 404}
+                    and exc.error_code in _FOLDER_NOT_FOUND_CODES
+                ):
+                    raise FeishuFolderNotFoundError(
+                        "Feishu folder not found", exc.error_code, response=exc.response
+                    ) from exc
+                raise
             result.extend(files)
             if not page_token:
                 break

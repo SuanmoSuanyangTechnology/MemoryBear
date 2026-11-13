@@ -37,6 +37,7 @@ from ..repositories.knowledge_share import (
 from ..repositories.reference import ReferenceRepository
 from ..utils.datetime_utils import to_timestamp_ms, utcnow_naive
 from .knowledge_model_validation import validate_requested_knowledge_models
+from .write_validation import validate_write_fields
 
 logger = logging.getLogger(__name__)
 
@@ -587,6 +588,7 @@ async def create_knowledge(
         await validate_requested_knowledge_models(
             db, {"llm_id": knowledge.llm_id}, principal.tenant_id
         )
+    validate_write_fields(knowledge.model_dump(), integers=("doc_num", "chunk_num"))
     return await knowledge_repository.create_knowledge_async(db, knowledge)
 
 
@@ -622,6 +624,7 @@ async def update_knowledge(
         update_data,
         principal,
     )
+    validate_knowledge_update_fields(plan)
     return await apply_knowledge_update(db, plan, principal)
 
 
@@ -701,6 +704,14 @@ async def prepare_knowledge_update(
         parser_config_update=(
             update_data.parser_config if "parser_config" in update_data.model_fields_set else None
         ),
+    )
+
+
+def validate_knowledge_update_fields(plan: KnowledgeUpdatePlan) -> None:
+    validate_write_fields(
+        plan.update_fields,
+        integers=("doc_num", "chunk_num", "status"),
+        non_nullable=("name", "status"),
     )
 
 

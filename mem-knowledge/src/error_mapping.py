@@ -302,9 +302,7 @@ def map_connector_error(exc: BaseException) -> KnowledgeError:
 _FEISHU_INVALID_CREDENTIAL_CODES = {"10003", "10015", "20002"}
 
 
-def map_connector_check_error(
-    exc: Exception, *, feishu_folder_token: str | None = None,
-) -> KnowledgeError:
+def map_connector_check_error(exc: Exception) -> KnowledgeError:
     """Only reclassify evidence that refers to inputs supplied by this caller."""
     from .rag.integrations.feishu.exceptions import FeishuAuthError, FeishuFolderNotFoundError
     from .rag.integrations.yuque.exceptions import YuqueAPIError, YuqueAuthError
@@ -320,7 +318,7 @@ def map_connector_check_error(
         and exc.error_code in _FEISHU_INVALID_CREDENTIAL_CODES
     ):
         code = "KB_CONNECTOR_CREDENTIAL_INVALID"
-    elif isinstance(exc, FeishuFolderNotFoundError) and exc.folder_token == feishu_folder_token:
+    elif isinstance(exc, FeishuFolderNotFoundError):
         code = "KB_CONNECTOR_SOURCE_INVALID"
     else:
         return KnowledgeError.from_code(map_connector_error(exc).code, status_code=500)

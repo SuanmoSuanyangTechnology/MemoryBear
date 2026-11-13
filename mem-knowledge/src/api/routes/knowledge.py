@@ -208,9 +208,11 @@ async def check_feishu_auth(
 ) -> SuccessEnvelope[None]:
     try:
         async with FeishuAPIClient(feishu_app_id, feishu_app_secret) as client:
-            files = await client.list_all_folder_files(feishu_folder_token, recursive=True)
+            files = await client.list_all_folder_files(
+                feishu_folder_token, recursive=True, validate_root_folder=True
+            )
     except Exception as exc:
-        raise map_connector_check_error(exc, feishu_folder_token=feishu_folder_token) from exc
+        raise map_connector_check_error(exc) from exc
     if not files:
         return render_error(request, KnowledgeError.from_code("KB_FEISHU_AUTH_INVALID"))
     return _success(request, msg="Successfully auth feishu info")
@@ -358,7 +360,11 @@ async def get_knowledge_chunk_policy(
     )
 
 
-@router.put("/{knowledge_id}", response_model=SuccessEnvelope[dict[str, Any]])
+@router.put(
+    "/{knowledge_id}",
+    response_model=SuccessEnvelope[dict[str, Any]],
+    responses=INPUT_422_RESPONSES,
+)
 async def update_knowledge(
     request: Request,
     knowledge_id: uuid.UUID,
@@ -377,6 +383,7 @@ async def update_knowledge(
     await validate_requested_knowledge_model_availability(
         update_data.model_dump(exclude_unset=True), principal, runtime.model_runtime
     )
+    knowledge_service.validate_knowledge_update_fields(plan)
     if plan.delete_vector_index:
         await (await runtime.elasticsearch.client()).indices.delete(
             index=collection_name_for_knowledge(knowledge_id),

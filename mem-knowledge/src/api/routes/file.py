@@ -331,7 +331,11 @@ async def batch_download_files(
     )
 
 
-@router.put("/{file_id}", response_model=SuccessEnvelope[dict[str, Any]])
+@router.put(
+    "/{file_id}",
+    response_model=SuccessEnvelope[dict[str, Any]],
+    responses=INPUT_422_RESPONSES,
+)
 async def update_file(
     request: Request,
     file_id: uuid.UUID,

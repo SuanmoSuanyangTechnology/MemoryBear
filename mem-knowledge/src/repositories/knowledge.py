@@ -9,7 +9,7 @@ from typing import Any
 from sqlalchemy import delete, func, null, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..api.query_validation import list_order_clause
+from ..api.query_validation import execute_list_page
 from ..api.schemas.knowledge import KnowledgeCreate
 from ..errors import KnowledgeError
 from ..models.owned import Document, Knowledge, KnowledgeMetadata, PermissionType
@@ -179,11 +179,10 @@ async def get_knowledges_paginated_async(
 
     total_result = await db.execute(select(func.count()).select_from(stmt.subquery()))
     total = total_result.scalar_one()
-    order = list_order_clause(Knowledge, orderby, desc=desc)
-    if order is not None:
-        stmt = stmt.order_by(order)
-
-    result = await db.execute(stmt.offset((page - 1) * pagesize).limit(pagesize))
+    result = await execute_list_page(
+        db, stmt.offset((page - 1) * pagesize).limit(pagesize), Knowledge,
+        orderby=orderby, desc=desc,
+    )
     return total, list(result.scalars().all())
 
 

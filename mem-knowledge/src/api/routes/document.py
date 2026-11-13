@@ -95,7 +95,11 @@ async def get_documents(
     )
 
 
-@router.post("/document", response_model=SuccessEnvelope[dict[str, Any]])
+@router.post(
+    "/document",
+    response_model=SuccessEnvelope[dict[str, Any]],
+    responses=INPUT_422_RESPONSES,
+)
 async def create_document(
     request: Request,
     create_data: DocumentCreate,
@@ -131,7 +135,11 @@ async def get_document(
     )
 
 
-@router.put("/{document_id}", response_model=SuccessEnvelope[dict[str, Any]])
+@router.put(
+    "/{document_id}",
+    response_model=SuccessEnvelope[dict[str, Any]],
+    responses=INPUT_422_RESPONSES,
+)
 async def update_document(
     request: Request,
     document_id: uuid.UUID,

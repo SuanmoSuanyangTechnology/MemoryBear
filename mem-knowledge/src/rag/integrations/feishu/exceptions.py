@@ -17,9 +17,7 @@ class FeishuAPIError(FeishuError):
 
 
 class FeishuFolderNotFoundError(FeishuAPIError):
-    def __init__(self, error_code: str, *, folder_token: str, response):
-        super().__init__("Feishu folder not found", error_code, response=response)
-        self.folder_token = folder_token
+    pass
 
 
 __all__ = ["FeishuAPIError", "FeishuAuthError", "FeishuError"]
