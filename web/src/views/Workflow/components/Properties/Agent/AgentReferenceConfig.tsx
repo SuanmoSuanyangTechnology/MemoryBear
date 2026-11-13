@@ -55,7 +55,7 @@ const AgentReferenceConfig: FC<AgentReferenceConfigProps> = ({
       >
         <CustomSelect
           url={getApplicationListUrl}
-          params={{ pagesize: 100, status: 'active', type: 'agent,multi_agent', orchestration_mode: 'supervisor_loop' }}
+          params={{ pagesize: 100, status: 'active', type: 'agent,multi_agent', orchestration_mode: 'supervisor_loop', include_shared: false }}
           valueKey="id"
           labelKey="label"
           format={(items) => {

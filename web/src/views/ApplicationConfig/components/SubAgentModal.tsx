@@ -173,7 +173,7 @@ const SubAgentModal = forwardRef<SubAgentModalRef, SubAgentModalProps>(({
         >
           <CustomSelect
             url={getApplicationListUrl}
-            params={{ pagesize: 100, status: 'active', type: 'agent' }}
+            params={{ pagesize: 100, status: 'active', type: 'agent', include_shared: false }}
             valueKey="id"
             labelKey="name"
             hasAll={false}
