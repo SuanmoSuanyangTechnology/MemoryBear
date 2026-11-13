@@ -120,6 +120,8 @@ class BundleInstallService:
         # 两个入口都会在开头覆盖它，这里给个初值只是为了不依赖调用顺序。
         self._origin: dict[str, str] = {}
         self._submission_index: dict[str, dict[str, str]] = {}
+        # 本包的凭据剥离路径（§8.7）；落地 MCP 时据此判断是否要重新填凭据。
+        self._redacted_secrets: list[str] = []
         # 按市场引用补依赖内容的回调；社区构建不传 = 只认包内内容。
         self._dependency_fetcher = dependency_fetcher
         # 本次安装解析到的市场依赖，供安装响应的 `dependencies[]` 使用。
@@ -207,6 +209,7 @@ class BundleInstallService:
         dependencies = manifest.get("dependencies") or {}
         bindings = manifest.get("bindings") or []
         payload = manifest.get("payload") or {}
+        self._redacted_secrets = [str(path) for path in manifest.get("redacted_secrets") or []]
         # §8.2 两种应用包：`release_snapshot`（租户投稿）与 `app_dsl`（运营导入
         # YAML）。按内容判断而不是只看 `format`：`format` 是后加的键，运营侧当前
         # 产物还没有它，而它已经是 DSL 结构了。`app_dsl` 的类型在 DSL 里，不在
@@ -298,6 +301,7 @@ class BundleInstallService:
         resource_type = manifest.get("resource_type")
         payload = manifest.get("payload") or {}
         dependencies = manifest.get("dependencies") or {}
+        self._redacted_secrets = [str(path) for path in manifest.get("redacted_secrets") or []]
         dep_map: dict[str, str] = {}
         missing: list[dict[str, Any]] = []
 
@@ -320,6 +324,7 @@ class BundleInstallService:
             self._land_tools(
                 {"tools": [entry], "skills": [], "plugins": []},
                 tenant_id, dep_map, missing,
+                standalone=True,
             )
             if not dep_map.get(entry["ref"]):
                 raise BusinessException(
@@ -617,8 +622,11 @@ class BundleInstallService:
             tenant_id: uuid.UUID,
             dep_map: dict[str, str],
             missing: list[dict[str, Any]],
+            *,
+            standalone: bool = False,
     ) -> None:
-        """`mcp` is rebuilt (credentials cleared); `custom` gets a placeholder row.
+        """`mcp` is rebuilt with its nested connection shape (secrets already redacted);
+        `custom` gets a placeholder row.
 
         `workflow` tools are dropped: they only point at a workflow in the source
         tenant, so no row is created and the reference is reported as missing.
@@ -628,6 +636,9 @@ class BundleInstallService:
             ref = str(entry.get("ref"))
             tool_type = str(entry.get("tool_type") or "")
             market_ref = _market_ref_of(entry, getattr(self, "_submission_index", None))
+            needs_reconfiguration = self._tool_needs_reconfiguration(
+                ref, dependencies, standalone=standalone
+            )
 
             if market_ref:
                 # 目标租户已有该市场资源就复用：版本不同也不自动升级（§3.4），
@@ -651,7 +662,9 @@ class BundleInstallService:
 
             if tool_type == ToolType.MCP.value:
                 landed_id = self._land_mcp(
-                    entry, tenant_id, missing, origin=market_ref or self._origin
+                    entry, tenant_id, missing,
+                    origin=market_ref or self._origin,
+                    needs_reconfiguration=needs_reconfiguration,
                 )
                 dep_map[ref] = landed_id
                 if market_ref:
@@ -687,12 +700,19 @@ class BundleInstallService:
             missing: list[dict[str, Any]],
             *,
             origin: dict[str, str] | None = None,
+            needs_reconfiguration: bool = True,
     ) -> str:
         payload = entry.get("payload") or {}
         server_url = payload.get("server_url")
         if not server_url:
             missing.append(_missing("tool", entry.get("name"), "缺少 server_url"))
             return ""
+
+        # 嵌套结构随包（headers / auth_type / auth_config），密钥值已在封包时剥离；
+        # 目标租户拿到的是一份「结构就绪、值待填」的配置。
+        connection_config = payload.get("connection_config")
+        if not isinstance(connection_config, dict):
+            connection_config = {}
 
         now = utcnow_naive()
         row = ToolConfig(
@@ -705,11 +725,15 @@ class BundleInstallService:
             icon=None,
             tool_type=ToolType.MCP.value,
             tenant_id=tenant_id,
-            # 凭据随包剥离 → 结构就绪但不可用，等用户补填
-            status=ToolStatus.UNCONFIGURED.value,
+            # 有凭据被剥离 → 结构就绪但不可用，等用户补填；无凭据则可直接用
+            status=(
+                ToolStatus.UNCONFIGURED.value
+                if needs_reconfiguration
+                else ToolStatus.AVAILABLE.value
+            ),
             config_data={
                 "server_url": server_url,
-                "connection_config": {},
+                "connection_config": dict(connection_config),
                 "available_tools": payload.get("available_tools") or [],
             },
             tags=[],
@@ -724,12 +748,43 @@ class BundleInstallService:
             MCPToolConfig(
                 id=row.id,
                 server_url=server_url,
-                connection_config={},
+                connection_config=dict(connection_config),
                 available_tools=payload.get("available_tools") or [],
             )
         )
         self.db.flush()
         return str(row.id)
+
+    def _tool_needs_reconfiguration(
+            self,
+            ref: str,
+            dependencies: dict[str, Any],
+            *,
+            standalone: bool,
+    ) -> bool:
+        """True when this tool's own payload lost credential keys at sealing.
+
+        Mirrors `external_catalog.adapters.tool._redacted_paths_for_tool`: a
+        standalone tool bundle prefixes paths with `payload.`, a dependency entry
+        uses its index under `dependencies.tools[]`.
+        """
+
+        if standalone:
+            prefixes = ["payload"]
+        else:
+            prefixes = [
+                f"dependencies.tools[{index}].payload"
+                for index, item in enumerate(dependencies.get("tools") or [])
+                if isinstance(item, dict) and str(item.get("ref")) == ref
+            ]
+        for path in self._redacted_secrets:
+            if not any(
+                path == prefix or path.startswith(f"{prefix}.") for prefix in prefixes
+            ):
+                continue
+            if "connection_config" in path or "auth_config" in path:
+                return True
+        return False
 
     def _land_placeholder(self, entry: dict[str, Any], tenant_id: uuid.UUID) -> str:
         """One `ToolConfig` row, no sub-table: "a tool of this type belongs here".
