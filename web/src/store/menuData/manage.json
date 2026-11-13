@@ -103,6 +103,21 @@
         "subs": []
       },
       {
+        "id": 29,
+        "parent": 2,
+        "icon": "rb:bg-[url('@/assets/images/menuNew/communityMarket.svg')]",
+        "active_icon": "rb:bg-[url('@/assets/images/menuNew/communityMarket_active.svg')]",
+        "code": "communityMarket",
+        "label": "社区市场",
+        "i18nKey": "menu.communityMarket",
+        "path": "/community-market",
+        "enable": true,
+        "display": true,
+        "level": 2,
+        "sort": 1,
+        "subs": []
+      },
+      {
         "id": 23,
         "parent": 2,
         "icon": "rb:bg-[url('@/assets/images/menuNew/pricing.svg')]",

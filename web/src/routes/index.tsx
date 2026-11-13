@@ -79,6 +79,7 @@ const componentMap: Record<string, LazyExoticComponent<ComponentType<object>>> =
   Package: lazy(() => import('@/views/Package')),
   ToolManagement: lazy(() => import('@/views/ToolManagement')),
   ResourceCenter: lazy(() => import('@/views/ResourceCenter')),
+  CommunityMarket: lazy(() => import('@/views/CommunityMarket')),
   SpaceConfig: lazy(() => import('@/views/SpaceConfig')),
   Ontology: lazy(() => import('@/views/Ontology')),
   Prompt: lazy(() => import('@/views/Prompt')),

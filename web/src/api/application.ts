@@ -7,6 +7,7 @@ import type {
   AnnotationSettingForm,
   AnnotationForm,
   ReleaseModalData,
+  SharePreviewData,
 } from '@/views/ApplicationConfig/types'
 import { handleSSE, type SSEMessage } from '@/utils/stream'
 import type { QueryParams, ReportMessageData } from '@/views/Conversation/types'
@@ -279,6 +280,10 @@ export const appImport = (formData: FormData) => {
 export const appSharing = (app_id: string, data: AppSharingForm) => {
   return request.post<{ community_market: { status: string; error?: string | null; retryable?: boolean } }>(`/apps/${app_id}/share`, data)
 }
+// Share preview
+export const getSharePreview = (app_id: string, release_id?: string) => {
+  return request.get<SharePreviewData>(`/apps/${app_id}/share/preview`, release_id ? { release_id } : undefined)
+}
 // Get my shared application records
 export const getMySharedOutListUrl = '/apps/my-shared-out'
 export const mySharedOutList = (data?: { page?: number; pagesize?: number; }) => {
@@ -392,4 +397,35 @@ export const updateWorkflowNodeCache = (app_id: string, node_id: string, data: R
 // Clear cache
 export const clearWorkflowCache = (app_id: string) => {
   return request.post(`/apps/${app_id}/workflow/cache/reset`)
+}
+// Community Market · Application and Operation Records
+export const appExternalCatalog = (data: {
+    /**
+     * Local resource ID.
+     */
+    resource_id: string;
+    /**
+     * Resource type.
+     */
+    resource_type: string;
+    [property: string]: any;
+}) => {
+  return request.get(`/external-catalog/publications`, data)
+}
+// Community Market · Withdraw Submission
+export const appPublicationWithdraw = (id: string) => {
+  return request.post(`/external-catalog/publications/${id}/withdraw`)
+}
+// Community Market · Delist
+export const appPublicationDelist = (market_resource_id: string, data?: { delist_reason?: string }) => {
+  return request.post(`/external-catalog/resources/${market_resource_id}/delist`, data)
+}
+// Community Market · Publisher Relist
+export const appPublicationRelist = (market_resource_id: string, data: { version: string; relist_reason?: string }) => {
+  return request.post(`/external-catalog/resources/${market_resource_id}/relist`, data)
+}
+// Community Market · Publisher Restorable Versions List
+export const resourcesVersionListUrl = (market_resource_id: string) => `/external-catalog/resources/${market_resource_id}/versions`
+export const resourcesVersionList = (market_resource_id: string, data: { version: string; relist_reason?: string }) => {
+  return request.get(resourcesVersionListUrl(market_resource_id), data)
 }

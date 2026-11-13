@@ -2,7 +2,6 @@ import { useRef, useState, useEffect } from 'react';
 import { Button, Flex, Tabs } from 'antd';
 import { EyeOutlined, PlusOutlined, UserOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
-import clsx from 'clsx';
 
 import { getAppAssetsUrl, getAppAssetsCategories } from '@/api/resourceCenter';
 import PageScrollList from '@/components/PageScrollList';
@@ -13,7 +12,7 @@ import type { AddToWorkspaceModalRef } from './components/AddToWorkspaceModal';
 import SearchInput from '@/components/SearchInput'
 import RbCard from '@/components/RbCard';
 import type { AppAssetItem, AppAssetsQuery, Categories } from './types'
-import { typeIcons } from '@/views/ApplicationManagement/constants';
+import AppTypeIcon from './components/AppTypeIcon';
 
 /** Tenant application catalog with category filtering and progressive loading. */
 const Applications = () => {
@@ -68,18 +67,8 @@ const Applications = () => {
         renderItem={(item) => (
           <RbCard
             isNeedTooltip={false}
-            avatarUrl={item.icon || typeIcons[item.source_app_type]}
-            avatarText={
-              item.icon || typeIcons[item.source_app_type]
-              ? undefined
-              : item.source_app_name.trim()[0]
-            }
-            avatarClassName={clsx({
-              'rb:bg-[#155EEF]': !(item.icon || typeIcons[item.source_app_type]) && item.source_app_type === 'agent',
-              'rb:bg-[#9C6FFF]!': !(item.icon || typeIcons[item.source_app_type]) && item.source_app_type === 'multi_agent',
-              'rb:bg-primary-600': !(item.icon || typeIcons[item.source_app_type]) && item.source_app_type.includes('workflow'),
-              'rb:bg-transparent!': item.icon || typeIcons[item.source_app_type]
-            })}
+            avatarText={<AppTypeIcon icon={item.icon} source_app_type={item.source_app_type} />}
+            avatarClassName="rb:bg-transparent!"
             title={
               <div className="rb:flex-1!">
                 <div className="rb:leading-5.5 rb:wrap-break-word rb:line-clamp-1">

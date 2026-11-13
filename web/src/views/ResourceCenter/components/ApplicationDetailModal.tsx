@@ -2,7 +2,6 @@ import { forwardRef, useImperativeHandle, useRef, useState } from 'react';
 import { App, Button, Flex, Spin } from 'antd';
 import { EyeOutlined, UserOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
-import clsx from 'clsx';
 
 import RbModal from '@/components/RbModal';
 import { getAppAssetDetail } from '@/api/resourceCenter';
@@ -13,7 +12,7 @@ import Tag from '@/components/Tag';
 import Empty from '@/components/Empty';
 import ToolIcon from '@/views/ToolManagement/components/ToolIcon'
 import SkillIcon from '@/views/Skills/components/SkillIcon';
-import { typeIcons } from '@/views/ApplicationManagement/constants';
+import AppTypeIcon from './AppTypeIcon';
 import RbMarkdown from '@/components/Markdown';
 
 export interface ApplicationDetailModalRef {
@@ -65,20 +64,10 @@ const ApplicationDetailModal = forwardRef<ApplicationDetailModalRef, Application
           item ? (
             <Flex vertical gap={8} className="rb:pr-6! rb:pl-2!">
               <Flex align="start" gap={16}>
-                <div className={clsx("rb:rounded-2xl rb:bg-primary-600 rb:p-3 rb:shrink-0", {
-                  'rb:bg-[#155EEF]': !(item.icon || typeIcons[item.source_app_type as string]) && item.source_app_type === 'agent',
-                  'rb:bg-[#9C6FFF]!': !(item.icon || typeIcons[item.source_app_type as string]) && item.source_app_type === 'multi_agent',
-                  'rb:bg-primary-600': !(item.icon || typeIcons[item.source_app_type as string]) && item.source_app_type?.includes('workflow'),
-                  'rb:bg-transparent!': (item.icon || typeIcons[item.source_app_type as string])
-                })}>
-                  {(item.icon || typeIcons[item.source_app_type as string]) ? (
-                    <img src={(item.icon || typeIcons[item.source_app_type as string])} alt="" className="rb:size-8" />
-                  ) : (
-                    <div className="rb:size-8 rb:flex rb:items-center rb:justify-center rb:text-white rb:text-[24px]">
-                      {item.source_app_name?.trim()[0]}
-                    </div>
-                  )}
-                </div>
+                <AppTypeIcon
+                  icon={item.icon}
+                  source_app_type={item.source_app_type as string}
+                />
                 <div className="rb:flex-1 rb:min-w-0">
                   <Flex align="center" gap={8} wrap="wrap">
                     <h2 className="rb:text-xl rb:font-semibold rb:leading-7">{item.source_app_name}</h2>
@@ -115,7 +104,7 @@ const ApplicationDetailModal = forwardRef<ApplicationDetailModalRef, Application
             <>
               <div className="rb:grid rb:gap-6 rb:border-t rb:border-gray-200 rb:pt-3 rb:grid-cols-[minmax(0,1fr)_240px]">
                 <section className="rb:min-w-0">
-                  {type === 'workflow' &&
+                  {(type === 'workflow' || type === 'pure_workflow') &&
                     <>
                       <WorkflowPreview payload={item.display_payload.workflow} />
                       <section className="rb:mt-4">

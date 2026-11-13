@@ -4,9 +4,13 @@ import { useNavigate } from 'react-router-dom';
 import { App, Flex, Space, Switch, Tag, Button } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 
-import type { Application, MySharedOutItem, ShareStatus } from './types';
-import { getMySharedOutListUrl, cancelShare, switchSharePermission } from '@/api/application'
+import type { Application, MySharedOutItem, ApplicationRecordModalRef, DelistModalRef, RelistModalRef } from './types';
+import { getMySharedOutListUrl, cancelShare, switchSharePermission, appPublicationWithdraw } from '@/api/application'
 import Table, { type TableRef } from '@/components/Table'
+import ApplicationRecordModal from './components/ApplicationRecordModal'
+import DelistModal from './components/DelistModal'
+import RelistModal from './components/RelistModal'
+import AppTypeIcon from '@/views/ResourceCenter/components/AppTypeIcon';
 
 export interface MySharingRef {
   refresh: () => void;
@@ -34,18 +38,35 @@ const statusLabelMap: Record<string, string> = {
   unknown: 'application.statusUnknown',
 };
 
+const listingStatusColorMap: Record<string, string> = {
+  listed: 'success',
+  not_listed: 'default',
+  pending_listing: 'warning',
+  delisted: 'error',
+};
+
+const listingStatusLabelMap: Record<string, string> = {
+  listed: 'application.listingStatus_listed',
+  not_listed: 'application.listingStatus_not_listed',
+  pending_listing: 'application.listingStatus_pending_listing',
+  delisted: 'application.listingStatus_delisted',
+};
+
 const MySharing = forwardRef<MySharingRef, { switchOntology: (item: Application) => void; }>((_props, ref) => {
   const { t } = useTranslation();
   const { modal, message } = App.useApp();
   const navigate = useNavigate();
   const tableRef = useRef<TableRef>(null)
+  const recordModalRef = useRef<ApplicationRecordModalRef>(null)
+  const delistModalRef = useRef<DelistModalRef>(null)
+  const relistModalRef = useRef<RelistModalRef>(null)
 
   useImperativeHandle(ref, () => ({ refresh: () => tableRef.current?.loadData() }))
 
   const handleCancelOne = (item: MySharedOutItem) => {
     if (!item.asset_id) return;
 
-modal.confirm({
+    modal.confirm({
       title: t('application.confirmCancelOneShareTitle', { app: item.app_name }),
       content: item.scope === 'community_market'
         ? t('application.confirmCancelOneShareContentMarket')
@@ -74,15 +95,30 @@ modal.confirm({
   const handleWithdraw = (item: MySharedOutItem) => {
     if (!item.pending_publication_id) return;
     modal.confirm({
-      title: t('application.confirmWithdrawDesc', { app: item.app_name }),
-      okText: t('common.confirm'),
-      cancelText: t('common.cancel'),
+      title: t('application.confirmWithdrawTitle', { app: item.app_name }),
+      content: t('application.confirmWithdrawContent'),
+      okText: t('application.withdrawApplication'),
+      cancelText: t('application.keepApplication'),
       onOk: () => {
-        // TODO: call withdraw API
-        tableRef.current?.loadData();
-        message.success(t('common.operateSuccess'))
+        appPublicationWithdraw(item.pending_publication_id as string)
+          .then(() => {
+            tableRef.current?.loadData();
+            message.success(t('common.operateSuccess'))
+          })
       }
     });
+  };
+
+  const handleDelist = (item: MySharedOutItem) => {
+    const pubId = item.market_resource_id;
+    if (!pubId) return;
+    delistModalRef.current?.handleOpen(pubId, item.app_name);
+  };
+
+  const handleRelist = (item: MySharedOutItem) => {
+    const marketResourceId = item.market_resource_id;
+    if (!marketResourceId) return;
+    relistModalRef.current?.handleOpen(item);
   };
 
   const handleEdit = (item: MySharedOutItem) => {
@@ -95,25 +131,19 @@ modal.confirm({
       dataIndex: 'app_name',
       key: 'app_name',
       width: 200,
-      render: (text: string, record: MySharedOutItem) => (
-        <Flex align="center" gap={12}>
-          {record.icon ? (
-            <img src={record.icon} alt="" className="rb:size-8 rb:rounded-lg rb:object-cover rb:shrink-0" />
-          ) : (
-            <Flex align="center" justify="center" className="rb:size-8 rb:rounded-lg rb:text-[12px] rb:text-[#ffffff] rb:shrink-0" style={{
-              backgroundColor: record.app_type === 'agent' ? '#3b82f6' : record.app_type === 'multi_agent' ? '#9C6FFF' : '#7c3aed'
-            }}>
-              {text.trim()[0]}
-            </Flex>
-          )}
-          <div>
-            <div className="rb:font-medium rb:cursor-pointer rb:hover:text-primary-600" onClick={() => handleEdit(record)}>
-              {text}
+      render: (text: string, record: MySharedOutItem) => {
+        return (
+          <Flex align="center" gap={12}>
+            <AppTypeIcon icon={record.icon} source_app_type={record.app_type} className="rb:size-8!" />
+            <div>
+              <div className="rb:font-medium rb:cursor-pointer rb:hover:text-primary-600" onClick={() => handleEdit(record)}>
+                {text}
+              </div>
+              <div className="rb:text-gray-500 rb:text-[12px] rb:mt-0.5">{t(`application.${record.app_type}`)}</div>
             </div>
-            <div className="rb:text-gray-500 rb:text-[12px] rb:mt-0.5">{t(`application.${record.app_type}`)}</div>
-          </div>
-        </Flex>
-      ),
+          </Flex>
+        );
+      },
     },
     {
       title: t('application.shareScope'),
@@ -129,17 +159,40 @@ modal.confirm({
       dataIndex: 'version',
       key: 'version',
       width: 120,
+      render: (version: string) => version || '-',
+    },
+    {
+      title: t('application.marketStatus'),
+      key: 'listing_status',
+      width: 120,
+      render: (_: unknown, record: MySharedOutItem) => {
+        const ls = record.listing_status;
+        if (!ls) return <span>-</span>;
+        return (
+          <Tag color={listingStatusColorMap[ls] || 'default'}>
+            {t(listingStatusLabelMap[ls] || 'application.listingStatus_not_listed')}
+          </Tag>
+        );
+      },
     },
     {
       title: t('application.shareStatus'),
-      dataIndex: 'share_status',
-      key: 'share_status',
-      width: 120,
-      render: (status: ShareStatus) => (
-        <Tag color={statusColorMap[status] || 'default'}>
-          {t(statusLabelMap[status] || 'application.statusUnknown')}
-        </Tag>
-      ),
+      key: 'latest_review',
+      width: 160,
+      render: (_: unknown, record: MySharedOutItem) => {
+        const reviewStatus = record.share_status;
+        const reviewVersion = record.review_version || record.version;
+        if (!reviewStatus || reviewStatus === 'shared' || reviewStatus === 'unknown') {
+          return <span>-</span>;
+        }
+        return (
+          <Space>
+            <Tag color={statusColorMap[reviewStatus] || 'default'}>
+              {[reviewVersion, t(statusLabelMap[reviewStatus] || 'application.statusUnknown')].join(' · ')}
+            </Tag>
+          </Space>
+        );
+      },
     },
     {
       title: t('application.editPermission'),
@@ -166,26 +219,33 @@ modal.confirm({
       title: t('common.operation'),
       key: 'operation',
       fixed: 'right',
-      render: (_: unknown, record: MySharedOutItem) => (
-        <Space>
-          <Button type="link" onClick={() => handleEdit(record)}>{t('application.releaseManage')}</Button>
-          {record.scope === 'resource_center'
-            ? (
-              <Button type="link" danger onClick={() => handleCancelOne(record)}>
-                {t('application.cancelShare')}
-              </Button>
-            )
-            : (
-              <>
-                <Button type="link" onClick={() => {}}>{t('application.viewRecord')}</Button>
-                {record.share_status === 'pending' && record.pending_publication_id && (
-                  <Button type="link" onClick={() => handleWithdraw(record)}>{t('application.withdraw')}</Button>
-                )}
-              </>
-            )
-          }
-        </Space>
-      ),
+      render: (_: unknown, record: MySharedOutItem) => {
+        return (
+          <Space>
+            {record.scope === 'resource_center'
+              ? (
+                <Button type="link" danger onClick={() => handleCancelOne(record)}>
+                  {t('application.cancelShare')}
+                </Button>
+              )
+              : (
+                <>
+                  <Button type="link" onClick={() => recordModalRef.current?.handleOpen(record.app_id)}>{t('application.viewRecord')}</Button>
+                  {record.share_status === 'pending' && record.pending_publication_id && (
+                    <Button type="link" onClick={() => handleWithdraw(record)}>{t('application.withdraw')}</Button>
+                  )}
+                </>
+              )
+            }
+            {record.can_delist && (
+              <Button type="link" danger onClick={() => handleDelist(record)}>{t('application.delist')}</Button>
+            )}
+            {record.can_relist && (
+              <Button type="link" onClick={() => handleRelist(record)}>{t('application.relist')}</Button>
+            )}
+          </Space>
+        )
+      },
     },
   ];
 
@@ -196,6 +256,17 @@ modal.confirm({
         apiUrl={getMySharedOutListUrl}
         columns={columns}
         rowKey="app_id"
+      />
+      <ApplicationRecordModal ref={recordModalRef} />
+      <DelistModal
+        ref={delistModalRef}
+        onRefresh={() => tableRef.current?.loadData()}
+        onSuccess={() => message.success(t('common.operateSuccess'))}
+      />
+      <RelistModal
+        ref={relistModalRef}
+        onRefresh={() => tableRef.current?.loadData()}
+        onSuccess={() => message.success(t('common.operateSuccess'))}
       />
     </div>
   )
