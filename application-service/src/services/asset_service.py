@@ -1077,12 +1077,16 @@ class AssetService:
 
         def method_labels(tool_id: uuid.UUID) -> list[str]:
             labels, by_operation = labels_by_tool.get(tool_id, ([], {}))
-            if tool_id in whole:
+            if tool_id in whole and labels:
                 # 整工具选择 = 需要该工具的全部方法。同一工具若又被按 operation
                 # 选中（`add_ref` 的去重键含 method，两条都会保留），全量已经覆盖
-                # 那些方法，不再并一次。`labels` 为空说明该工具没有方法树
-                # （只有 schema_url 的 custom，或被排除在外的 workflow）。
+                # 那些方法，不再并一次。
                 return list(labels)
+            # 没有方法树时不能直接返回空：同一工具可能既被整选、又被按 operation
+            # 选中，此时 `[]` 会把用户明确选中的方法一起丢掉。`labels` 为空的三种
+            # 来源 —— 只有 `schema_url` 的 custom（预览不拉远端）、被排除在外的
+            # workflow、以及调用方处在事件循环里时预览主动退化（见
+            # `_preview_tool_method_labels`）。前两种退回 operation_key 原文即可。
             resolved: list[str] = []
             for operation in picked.get(tool_id, []):
                 label = by_operation.get(operation) or operation
