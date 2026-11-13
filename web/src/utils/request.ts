@@ -108,16 +108,22 @@ interface RequestQueueItem {
 }
 let requests: RequestQueueItem[] = [];
 
+// Check if URL is a public API (matches /public/ path segment, not substrings like /publications)
+const isPublicApi = (url: string | undefined): boolean => {
+  if (!url) return false;
+  return url.includes('/public/') || url.endsWith('/public');
+};
+
 // Request interceptor
 service.interceptors.request.use(
   (config) => {
-    if (!config.headers.Authorization && !config.url?.includes('/public') && !config.url?.includes('/storage/files')) {
+    if (!config.headers.Authorization && !isPublicApi(config.url) && !config.url?.includes('/storage/files')) {
       const token = cookieUtils.get('authToken');
       const refresh_token = cookieUtils.get('refreshToken');
       if (token) {
         config.headers.Authorization = `Bearer ${token}`;
       } else if (refresh_token) {
-        if (config.url === refreshTokenUrl || config.url === loginUrl || config.url === logoutUrl || config.url?.includes('/public')) {
+        if (config.url === refreshTokenUrl || config.url === loginUrl || config.url === logoutUrl || isPublicApi(config.url)) {
           return config;
         }
         if (isRefreshing) {
@@ -152,7 +158,7 @@ service.interceptors.request.use(
           isRefreshing = false;
         });
       } else {
-        if (config.url === refreshTokenUrl || config.url === loginUrl || config.url === logoutUrl || config.url?.includes('/public')) {
+        if (config.url === refreshTokenUrl || config.url === loginUrl || config.url === logoutUrl || isPublicApi(config.url)) {
           return config;
         }
         handleLogout();
@@ -224,7 +230,7 @@ service.interceptors.response.use(
       case 0:
         return data !== undefined ? data : responseData;
       case 2001:
-        if (response.config?.url?.includes('/public')) {
+        if (isPublicApi(response.config?.url)) {
           if (responseData.msg) {
             message.warning(responseData.msg);
           }
@@ -286,7 +292,7 @@ service.interceptors.response.use(
     }
     const status = error?.response ? error.response.status : error;
     const errorCode = error.response?.data?.code;
-    const isPublicApi = error.config?.url?.includes('/public');
+    const isPublic = isPublicApi(error.config?.url);
     switch (status) {
       case 401:
         if (error.config?.url === refreshTokenUrl) {
@@ -298,7 +304,7 @@ service.interceptors.response.use(
           return Promise.reject(error);
         }
         if (errorCode === 2001) {
-          if (isPublicApi) {
+          if (isPublic) {
             message.warning(error.response?.data?.msg || i18n.t('common.loginRequired'));
             return Promise.reject(error);
           }
@@ -308,7 +314,7 @@ service.interceptors.response.use(
           return handle401Error(error.config);
         }
         if (errorCode === 2004) {
-          if (isPublicApi) {
+          if (isPublic) {
             message.warning(error.response?.data?.msg || i18n.t('common.loginExpired'));
             return Promise.reject(error);
           }
@@ -316,14 +322,14 @@ service.interceptors.response.use(
           return Promise.reject(error);
         }
         if (errorCode === 4009) {
-          if (isPublicApi) {
+          if (isPublic) {
             message.warning(error.response?.data?.msg || i18n.t('common.permissionDenied'));
             return Promise.reject(error);
           }
           handleLogout(error.response?.data?.msg || i18n.t('common.permissionDenied'));
           return Promise.reject(error);
         }
-        if (isPublicApi) {
+        if (isPublic) {
           message.warning(error.response?.data?.msg || i18n.t('common.loginRequired'));
           return Promise.reject(error);
         }
@@ -380,7 +386,7 @@ const handle401Error = async (config: AxiosRequestConfig): Promise<unknown> => {
     window.location.href = `/#/login`;
     return Promise.reject(new Error(i18n.t('common.logoutApiCannotRefreshToken')));
   }
-  if (config.url?.includes('/public')) {
+  if (isPublicApi(config.url)) {
     return Promise.reject(new Error(i18n.t('common.publicApiCannotRefreshToken')));
   }
 

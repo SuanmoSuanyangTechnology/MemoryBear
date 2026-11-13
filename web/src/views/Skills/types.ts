@@ -176,6 +176,8 @@ export interface Skill extends LegacySkill {
    * Update time (millisecond timestamp)
    */
   updated_at?: number;
+
+  origin: 'local' | 'external';
 }
 
 

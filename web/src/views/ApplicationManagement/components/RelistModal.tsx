@@ -21,7 +21,7 @@ const RelistModal = forwardRef<RelistModalRef, { onRefresh: () => void; onSucces
   const { t } = useTranslation();
   const [visible, setVisible] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [form] = Form.useForm<{ version: string; relist_reason?: string }>();
+  const [form] = Form.useForm<{ version: string; relist_note?: string }>();
   const [appName, setAppName] = useState('');
   const [marketResourceId, setMarketResourceId] = useState('');
 
@@ -45,7 +45,7 @@ const RelistModal = forwardRef<RelistModalRef, { onRefresh: () => void; onSucces
       setLoading(true);
       appPublicationRelist(marketResourceId, {
         version: values.version,
-        relist_reason: values.relist_reason || undefined,
+        relist_note: values.relist_note || undefined,
       })
         .then(() => {
           props.onRefresh();
@@ -101,7 +101,7 @@ const RelistModal = forwardRef<RelistModalRef, { onRefresh: () => void; onSucces
           />
         </Form.Item>
         <Form.Item
-          name="relist_reason"
+          name="relist_note"
           label={t('application.relistReason')}
         >
           <TextArea

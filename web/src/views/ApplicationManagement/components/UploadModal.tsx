@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-28 14:08:14 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-20 16:52:32
+ * @Last Modified time: 2026-11-13 14:08:46
  */
 /**
  * UploadModal Component
@@ -226,7 +226,7 @@ const UploadModal = forwardRef<UploadModalRef, UploadModalProps>(({
               isCanDrag={true}
               fileSize={100}
               maxCount={1}
-              fileType={['yml']}
+              fileType={['yml', 'yaml']}
             />
           </Form.Item>
         </Form>
