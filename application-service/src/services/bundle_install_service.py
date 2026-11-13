@@ -344,6 +344,20 @@ class BundleInstallService:
                     data={"reason": "PLUGIN_CALL_NAME_NOT_SUPPORTED"},
                 )
             skill_dependencies = _skill_dependencies(payload, dependencies)
+            # 插件包的内容全在 `dependencies.skills[]` 里（成员一律带 plugin_ref）。
+            # 一条 skills 都没有的插件包没有任何可落地物：`_land_skills` 只遍历
+            # skills[]，分组为空、一行都不写，而 `_skill_result` 会按包内原名回查
+            # ——可能命中同租户同名的**旧插件**，把用户没装的东西当作
+            # `local_resource_id` 报成功（改过名则命中不到，`result=success` +
+            # id 为 null，卸载 / needs_config 全断）。`plugins[]` 只是插件的元数据，
+            # 不能当落地依据。
+            if is_plugin and not skill_dependencies.get("skills"):
+                raise BusinessException(
+                    f"插件「{payload.get('display_name') or payload.get('name')}」"
+                    "的安装包里没有任何成员",
+                    BizCode.EXTERNAL_CATALOG_INVALID,
+                    data={"reason": "INCOMPLETE_BUNDLE"},
+                )
             # `strict=True`：顶层安装只有这一个资源，落地失败就该整单失败并把原始
             # 错误码抛给前端（调用名称冲突是 DUPLICATE_NAME，用户改个名字重试），
             # 而不是「result=partial + 一条 missing」——那样用户会以为已经装好了。
@@ -361,6 +375,16 @@ class BundleInstallService:
                 dependencies=skill_dependencies,
                 dep_map=dep_map,
             )
+            # 落地了却查不回本地行：响应里的 `local_resource_id` 是卸载、
+            # `needs_config`、共享校验的唯一凭证，带着 null 报成功比报错更糟。
+            # 工具侧同样有这个断言（`TOOL_LANDING_FAILED`），保持对称。
+            if local_id is None:
+                raise BusinessException(
+                    f"技能「{payload.get('display_name') or payload.get('name')}」"
+                    "落地后未能找到本地记录",
+                    BizCode.EXTERNAL_CATALOG_INVALID,
+                    data={"reason": "SKILL_LANDING_FAILED", "missing": missing},
+                )
         else:
             raise BusinessException(
                 f"该资源类型不支持单独安装: {resource_type}",
@@ -597,6 +621,9 @@ class BundleInstallService:
                 )
             except BusinessException as error:
                 if strict:
+                    # 不在这里 rollback：事务边界归调用方（`commit=False` 只
+                    # flush），外层 `sync_session` 异常退出时会统一回滚。自己
+                    # 提前 rollback 会把调用方在本次调用之前已经写好的行一起抹掉。
                     raise
                 for entry in entries:
                     missing.append(_missing("skill", entry.get("name"), str(error)))

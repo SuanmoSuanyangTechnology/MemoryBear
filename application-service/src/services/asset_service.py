@@ -17,6 +17,7 @@ change what consumers see.
 """
 from __future__ import annotations
 
+import asyncio
 import copy
 import logging
 import uuid
@@ -1153,10 +1154,12 @@ class AssetService:
            `schema_url` 的自定义工具会被跳过——`parse_from_url` 是同步
            requests、超时 30 秒，且 schema_url 往往是第三方主机，预览会直接
            卡住并超时，「预览不做外部请求」的约定也就破了。
-        3. 调用方只传 custom / mcp 的 id：workflow 的方法树要构造
-           `WorkflowAsTool(db=session)` 并读一次 `workflow_config`，而这里的
-           Session 属于调用方，`_run_async` 在已有事件循环时会换线程执行，
-           跨线程复用 Session 会抛 `InvalidRequestError`（详见 `_preview_tools`）。
+        3. 调用方只传 custom / mcp 的 id（workflow 见 `_preview_tools`）；
+        4. 只在**没有**运行中事件循环时执行：`_run_async` 遇到已有 loop 会另起
+           一个线程跑协程，而 `ToolService` 用的是调用方的 Session——SQLAlchemy
+           的 Session 不是线程安全的，跨线程查询抛 `InvalidRequestError`，还会
+           被下面的 except 吞成「没有方法树」。预览是 GET 的展示装饰，宁可不给
+           展示名，也不换线程。
 
         跳过之后该工具没有方法树，`method_labels()` 自动退回快照里的
         operation_key；牺牲一个更友好的名字，换预览的确定性时延。
@@ -1164,6 +1167,19 @@ class AssetService:
 
         tool_ids = {tool_id for tool_id in tool_ids if tool_id is not None}
         if not tool_ids:
+            return {}
+
+        # 见上面第 4 条：有事件循环就直接退化。抛异常而不是继续，是因为继续的
+        # 代价是一个可能永远查不出来的跨线程 Session 错误。
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            pass
+        else:
+            logger.debug(
+                "共享预览：调用方已有事件循环，跳过方法树解析（不跨线程复用 Session）",
+                extra={"tool_count": len(tool_ids)},
+            )
             return {}
 
         try:
